@@ -120,3 +120,67 @@ Date: 2026-08-14
 - Post-deployment gate remains distinct: scan and approve the production QR from a phone, then confirm the automatic APK redirect.
 
 final result: passed
+
+---
+
+# Subscription selector — Plan-first
+
+Date: 2026-08-14
+
+## Approved source and implementation
+
+- Approved desktop source: `https://p.superdesign.dev/draft/78d213d8-b42e-4d1f-a4f5-ef61d9b11267`
+- Approved mobile source: `https://p.superdesign.dev/draft/c04b1183-a727-4fe7-b83b-a7223cf29ea1`
+- Desktop reference, 1440 × 900: `C:\Users\AdrienHernandez\AppData\Local\Temp\norva-plans-plan-first-desktop-1440x900.png`
+- Mobile reference, 390 × 844: `C:\Users\AdrienHernandez\AppData\Local\Temp\norva-plans-plan-first-mobile-390x844.png`
+- Compact mobile reference, 375 × 667: `C:\Users\AdrienHernandez\AppData\Local\Temp\norva-plans-plan-first-mobile-375x667.png`
+- Landscape reference, 844 × 390: `C:\Users\AdrienHernandez\AppData\Local\Temp\norva-plans-plan-first-mobile-landscape-844x390.png`
+- Desktop implementation: `C:\Users\AdrienHernandez\AppData\Local\Temp\norva-plan-first-implementation-desktop-1440x900.png`
+- Mobile implementation: `C:\Users\AdrienHernandez\AppData\Local\Temp\norva-plan-first-implementation-mobile-390x844.png`
+- Compact mobile implementation: `C:\Users\AdrienHernandez\AppData\Local\Temp\norva-plan-first-implementation-mobile-375x667.png`
+- Landscape implementation: `C:\Users\AdrienHernandez\AppData\Local\Temp\norva-plan-first-implementation-mobile-landscape-844x390.png`
+- 130% mobile text-scale equivalent: `C:\Users\AdrienHernandez\AppData\Local\Temp\norva-plan-first-implementation-mobile-font-scale-1.3.png`
+- Combined desktop comparison: `C:\Users\AdrienHernandez\AppData\Local\Temp\norva-plan-first-qa-comparison-desktop.png`
+- Combined mobile comparison: `C:\Users\AdrienHernandez\AppData\Local\Temp\norva-plan-first-qa-comparison-mobile.png`
+- Combined landscape comparison: `C:\Users\AdrienHernandez\AppData\Local\Temp\norva-plan-first-qa-comparison-landscape.png`
+- Comparison document: `C:\Users\AdrienHernandez\AppData\Local\Temp\norva-plan-first-qa-comparison.html`
+- Final multi-screen asset: `public/assets/landing/norva-every-screen-premium.webp` (`1586 × 992`, 36,680 bytes).
+
+## Fidelity and responsive checks
+
+- Desktop reproduces the centered plan-first hierarchy, annual/monthly selector, two equal plan choices, one shared-benefit band and one explicit continuation action.
+- Portrait phone keeps the short title, equal billing options, full-card radio choices and a safe-area-aware fixed action rail.
+- Compact phone reduces non-decision copy while preserving both plan choices, their prices and a 50 px continuation target.
+- Landscape uses the approved split composition, wraps `Choose your plan.` on two lines, keeps both plans visible together and fixes the action inside the lower safe zone.
+- No horizontal overflow was measured at 1440 × 900, 390 × 844, 375 × 667, 844 × 390 or the 130% text-scale equivalent.
+- Existing Norva assets, Outfit/Inter typography, spacing rhythm, radii and semantic commerce tokens are reused; no placeholder icon set was introduced.
+
+## Interaction, accessibility and payment invariants
+
+- The whole card is a native radio label inside an explicit radiogroup; pointer selection and Left/Right arrow selection were exercised.
+- Selecting Family updates the summary and shared CTA to `Continue with Norva Family`; ArrowLeft returns selection and focus to Norva.
+- Monthly and Annual controls update the displayed period and keep accurate `aria-pressed` state.
+- The visible continuation control delegates to the existing authenticated plan button. The new presentation adapter contains no price constants and does not become payment authority.
+- Loading, disabled, active and current-plan button states continue to come from the existing commerce flow; provider messages remain sanitized.
+- Touch targets are at least 44 CSS px, focus remains visible, reduced motion and forced-colors adaptations are present, and the fixed mobile rail includes the bottom safe-area inset.
+
+## Architecture and verification
+
+- `public/js/plan-selection-ui.js` is a presentation adapter; entitlement, authenticated catalogue pricing, promotions, analytics and checkout routing remain owned by the existing subscription orchestrator.
+- Targeted subscription/commerce/mobile/accessibility/sanitization suite: 29 passed, 0 failed.
+- Final visual/commerce/ecosystem regression subset: 16 passed, 0 failed.
+- Full repository suite: 1653 tests, 1652 passed, 0 failed, 1 skipped.
+- `node --check public/js/plan-selection-ui.js`: passed.
+- Android WebView routing contract for canonical `/subscribe`: passed.
+- The existing Android emulator could not be opened on the local preview because policy blocked the external `adb am start` URL command. No APK was installed, rebuilt or modified; browser QA at the exact phone viewports and 130% equivalent is complete, while installed-APK runtime replay remains a separate gate.
+
+## Correction history
+
+- Moved product proof below the plan decision so the plans and continuation action appear first.
+- Preserved the real pricing and checkout rails behind a single shared CTA instead of duplicating purchase logic.
+- Matched the approved compact and landscape compositions, including the two-line landscape title and fixed safe action rail.
+- Replaced the rejected nested device illustration with a premium full-frame TV, phone and tablet render, optimized from 1,358,471-byte PNG to a 36,680-byte WebP.
+- Removed the inherited 190 px height cap. The image and slot now share the intended 8:5 ratio: 417 × 260.625 desktop, 358 × 223.75 at 390 px, 342 × 213.75 compact, and 360 × 225 landscape; no device crop remains.
+- Re-ran same-viewport reference/implementation comparisons after the responsive corrections.
+
+final result: passed

@@ -243,7 +243,7 @@
       *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
     }
   </style>
-  <link rel="stylesheet" href="/css/commerce.css?v=1">
+  <link rel="stylesheet" href="/css/commerce.css?v=2">
   <script src="/js/marketing-config.js?v=1"></script>
   <script defer src="/js/marketing.js?v=2"></script>
   <script defer src="/js/consent-banner.js?v=1"></script>
@@ -265,34 +265,23 @@
     }
   </script>
   <header class="site-header">
-    <a class="brand" href="/" aria-label="Norva home"><img src="/favicon.png" alt=""><span>Norva</span></a>
+    <a class="brand" href="/" aria-label="Norva home"><img src="/img/norva-app-icon-96.png?v=1" alt=""><span>Norva</span></a>
     <span class="secure-context">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 3v5c0 4.6-2.8 8.1-7 10-4.2-1.9-7-5.4-7-10V6l7-3z"></path><path d="M9.5 12l1.7 1.7 3.5-3.7"></path></svg>
-      <span>Secure subscription</span>
+      <span class="secure-copy"><span class="secure-short">Secure</span><span class="secure-long"> Checkout</span></span>
     </span>
   </header>
 
   <main class="wrap commerce-main" id="main-content">
     <section class="subscribe-layout" aria-labelledby="page-title">
       <header class="intro">
-        <p class="eyebrow" id="page-eyebrow">One account. Every Norva screen.</p>
-        <h1 id="page-title">Bring your catalog with you.</h1>
-        <p class="lead">Every plan unlocks all of Norva. Choose the number of personal profiles your household needs; eligible new customers see their exact free-trial and renewal terms before payment.</p>
+        <p class="eyebrow" id="page-eyebrow">Norva membership</p>
+        <h1 id="page-title"><span class="title-standard">Choose your Norva plan.</span><span class="title-landscape">Choose your plan.</span></h1>
+        <p class="lead"><span class="lead-desktop">Every plan includes the complete Norva experience. Just choose the number of profiles your home needs.</span><span class="lead-mobile">Every feature is included. Choose how many personal profiles your home needs.</span></p>
       </header>
 
-      <figure class="product-proof">
-        <img src="/assets/landing/norva-multi-device.svg" alt="Norva running on a TV, laptop, tablet and phone">
-        <figcaption class="proof-caption">
-          <span><strong>One subscription. Your catalog connected across Web, Android mobile (phone and tablet), and Android TV.</strong> Profiles, favorites and playback progress stay in sync on compatible devices.</span>
-          <span class="platforms">Web · Mobile · TV</span>
-        </figcaption>
-      </figure>
-
       <section class="purchase-panel" id="plans" aria-labelledby="choose-plan-title">
-        <header class="purchase-header">
-          <div><h2 id="choose-plan-title">Choose your plan</h2><p>Every feature is included. Only the number of profiles changes.</p></div>
-          <span class="trial-pill">Eligible users · 7 days free</span>
-        </header>
+        <h2 class="sr-only" id="choose-plan-title">Choose your subscription plan</h2>
 
         <div class="tv-purchase-path" id="tv-purchase-path" role="note" hidden>
           <strong>Choose your plan on your phone or computer</strong>
@@ -312,46 +301,106 @@
         </div>
         <p class="sr-only" id="promo-status" role="status" aria-live="polite"></p>
 
-        <div class="grid">
+        <div class="grid" role="radiogroup" aria-label="Subscription plan">
           <article class="card"
             data-plan="plus"
+            data-plan-name="Norva"
+            data-profiles="2"
             data-product="norva_plus"
             data-package-monthly="$rc_monthly" data-package-annual="$rc_annual"
             data-monthly="4.99" data-annual="41.99" data-annual-note="That's about $3.50/mo, billed yearly.">
-            <h2>Norva</h2>
-            <p class="tag">Everything Norva does — for you and a plus-one.</p>
-            <div class="price"><span class="cur">$</span><span class="amount">4.99</span><span class="per">/mo</span></div>
-            <small class="price-note"></small>
-            <ul>
+            <input class="plan-choice-input sr-only" type="radio" name="subscription-plan" id="plan-plus" value="plus" checked>
+            <label class="plan-choice-surface" for="plan-plus">
+              <span class="plan-choice-head">
+                <span>
+                  <strong class="plan-name">Norva</strong>
+                  <span class="tag"><span class="tag-desktop">Ideal for individual users or a plus-one.</span><span class="tag-mobile">For you and a plus-one.</span></span>
+                </span>
+                <span class="plan-radio" aria-hidden="true"></span>
+              </span>
+              <span class="plan-choice-foot">
+                <span class="profile-count"><span class="profile-count-icon" aria-hidden="true"><img src="/img/icons/norva-account.svg" alt=""><img src="/img/icons/norva-account.svg" alt=""></span><span class="profile-desktop">Up to 2 Profiles</span><span class="profile-mobile">2 profiles</span></span>
+                <span class="plan-price-block">
+                  <span class="price"><span class="cur">$</span><span class="amount">4.99</span><span class="per">/mo</span></span>
+                  <small class="price-note"></small>
+                </span>
+              </span>
+            </label>
+            <ul class="plan-source-details" hidden>
               <li>Up to 2 profiles</li>
               <li>Sync across Web, Android mobile (phone and tablet), and Android TV</li>
               <li>Offline downloads (Android app)</li>
               <li>Every Norva feature included</li>
             </ul>
-            <button class="btn buy" type="button">Start 7-day free trial</button>
+            <button class="btn buy plan-source-buy" type="button" tabindex="-1" aria-hidden="true">Start 7-day free trial</button>
           </article>
 
-          <article class="card featured"
+          <article class="card"
             data-plan="family"
+            data-plan-name="Norva Family"
+            data-profiles="5"
             data-product="norva_family"
             data-package-monthly="family_monthly" data-package-annual="family_annual"
             data-monthly="8.99" data-annual="74.99" data-annual-note="That's about $6.25/mo, billed yearly.">
-            <span class="badge">Best for households</span>
-            <h2>Norva Family</h2>
-            <p class="tag">The full Norva experience for the whole home.</p>
-            <div class="price"><span class="cur">$</span><span class="amount">8.99</span><span class="per">/mo</span></div>
-            <small class="price-note"></small>
-            <ul>
+            <span class="sr-only">Best for households</span>
+            <input class="plan-choice-input sr-only" type="radio" name="subscription-plan" id="plan-family" value="family">
+            <label class="plan-choice-surface" for="plan-family">
+              <span class="plan-choice-head">
+                <span>
+                  <strong class="plan-name">Norva Family</strong>
+                  <span class="tag"><span class="tag-desktop">The full experience for the entire household.</span><span class="tag-mobile">For the whole household.</span></span>
+                </span>
+                <span class="plan-radio" aria-hidden="true"></span>
+              </span>
+              <span class="plan-choice-foot">
+                <span class="profile-count"><span class="profile-count-icon" aria-hidden="true"><img src="/img/icons/norva-account.svg" alt=""><img src="/img/icons/norva-account.svg" alt=""></span><span class="profile-desktop">Up to 5 Profiles</span><span class="profile-mobile">5 profiles</span></span>
+                <span class="plan-price-block">
+                  <span class="price"><span class="cur">$</span><span class="amount">8.99</span><span class="per">/mo</span></span>
+                  <small class="price-note"></small>
+                </span>
+              </span>
+            </label>
+            <ul class="plan-source-details" hidden>
               <li>Up to 5 profiles</li>
               <li>Sync across Web, Android mobile (phone and tablet), and Android TV</li>
               <li>Offline downloads (Android app)</li>
               <li>Every Norva feature included</li>
             </ul>
-            <button class="btn buy" type="button">Start 7-day free trial</button>
+            <button class="btn buy plan-source-buy" type="button" tabindex="-1" aria-hidden="true">Start 7-day free trial</button>
           </article>
         </div>
 
-        <p class="compare">Both plans include <b>every Norva feature</b>. The only difference is profiles: <b>Norva</b> gives 2 and <b>Norva Family</b> gives 5, so everyone keeps their own favorites and Continue Watching.</p>
+        <section class="shared-benefits" aria-labelledby="included-title">
+          <h2 id="included-title">Included in every plan</h2>
+          <ul>
+            <li>Web, Phone &amp; TV</li>
+            <li>Synced Progress</li>
+            <li>Offline Downloads</li>
+          </ul>
+        </section>
+
+        <p class="compare sr-only">Both plans include <b>every Norva feature</b>. The only difference is profiles: <b>Norva</b> gives 2 and <b>Norva Family</b> gives 5, so everyone keeps their own favorites and Continue Watching.</p>
+
+        <aside class="plan-decision" aria-label="Selected plan and continuation">
+          <div class="decision-summary" aria-live="polite">
+            <span>
+              <span class="decision-label">Selected plan</span>
+              <strong id="selected-plan">Norva · 2 profiles</strong>
+            </span>
+            <strong class="selected-price"><span id="selected-currency">$</span><span id="selected-amount">41.99</span><span id="selected-period">/yr</span></strong>
+          </div>
+          <button class="btn decision-cta" id="continue-plan" type="button">Continue with Norva</button>
+          <p id="decision-helper">Sign in to check your 7-day trial eligibility before payment.</p>
+        </aside>
+
+        <figure class="product-proof">
+          <img src="/assets/landing/norva-every-screen-premium.webp?v=1" alt="Norva streaming artwork displayed across a TV, phone and tablet" width="1586" height="992" loading="lazy">
+          <figcaption class="proof-caption">
+            <strong>One subscription, every screen.</strong>
+            <span>Web, Android mobile (phone and tablet), and Android TV stay in sync with the same profiles, favorites and playback progress.</span>
+            <span class="platforms">Web · Mobile · Android TV</span>
+          </figcaption>
+        </figure>
 
         <div class="pay-marks" id="pay-marks" aria-label="Accepted payment methods">
           <span class="pm-lbl">Secure card payment</span>
@@ -393,6 +442,7 @@
   <script src="/js/promo-ui.js?v=1"></script>
   <script src="/js/billing-config.js?v=8"></script>
   <script src="/js/billing.js?v=17"></script>
+  <script src="/js/plan-selection-ui.js?v=1"></script>
   <script>
     (function () {
       const params = new URLSearchParams(window.location.search);
@@ -431,6 +481,9 @@
       let entitlementResolved = false;
       let webPricesReady = !webPricesRequired;
       let webPricesError = '';
+      const planSelection = window.NorvaPlanSelectionUi
+        ? window.NorvaPlanSelectionUi.init({ rootSelector: '#plans', defaultPlan: 'plus' })
+        : null;
 
       if (nativeOffersRequired) document.documentElement.classList.add('native-prices-pending');
       if (!webPricesRequired) document.documentElement.classList.remove('prices-pending');
@@ -617,6 +670,7 @@
               : (nativeOffersRequired ? 'Subscribe with Google Play' : 'Subscribe');
           }
         });
+        if (planSelection) planSelection.sync();
       }
 
       // Rewrites the static copy once when the trial stops applying to this account.
@@ -626,6 +680,8 @@
         noTrialCopyDone = true;
         const lead = document.querySelector('.lead');
         if (lead) lead.textContent = 'Every plan unlocks all of Norva. Plans differ only by how many profiles your household gets.';
+        const decisionHelper = document.getElementById('decision-helper');
+        if (decisionHelper) decisionHelper.textContent = 'Your exact price and renewal terms are shown before you confirm.';
         const note = document.querySelector('.note');
         if (note) note.innerHTML = 'Norva is a media player; no content or TV subscription is included. ' +
           'Your TV content stays provided by your own TV service.<br>' +
@@ -643,7 +699,7 @@
         // widget (Revolut) — the card hasn't been entered and the trial hasn't started yet.
         // Do NOT flash a false "trial started" confirmation before the page moves on.
         if (rs === 'redirect') return;
-        ['.grid', '.toggle', '.row'].forEach(function (sel) {
+        ['.grid', '.toggle', '.shared-benefits', '.plan-decision', '.row'].forEach(function (sel) {
           const el = document.querySelector(sel);
           if (el) el.style.display = 'none';
         });
@@ -696,6 +752,9 @@
       }, { other: 'Limited Offer' });
       let livePromos = null; // { plan: { period: { base_cents, event } } } when a promo is live
       let liveCampaignBg = null; // uploaded campaign background URL (overrides the event theme)
+      const defaultPageTitleHtml = document.getElementById('page-title')
+        ? document.getElementById('page-title').innerHTML
+        : 'Choose your Norva plan.';
       let countdownTimer = 0;
 
       // Visual identity per event: badge colors + a tinted card background, so a
@@ -768,6 +827,19 @@
         return removed;
       }
 
+      function setPriceNote(note, value) {
+        const full = String(value || '');
+        const prefix = "That's about ";
+        if (!full.startsWith(prefix)) {
+          note.textContent = full;
+          return;
+        }
+        const prefixEl = document.createElement('span');
+        prefixEl.className = 'annual-note-prefix';
+        prefixEl.textContent = prefix;
+        note.replaceChildren(prefixEl, document.createTextNode(full.slice(prefix.length)));
+      }
+
       function applyPeriod(next) {
         pruneExpiredPromos(Date.now());
         period = next;
@@ -807,7 +879,7 @@
               ? 'Current price unavailable. Reload to try again.'
               : 'Loading current price…';
           } else {
-            note.textContent = annual ? (card.dataset.annualNote || '') : '';
+            setPriceNote(note, annual ? (card.dataset.annualNote || '') : '');
           }
           // Active promo on this plan+period → event badge + struck-through base
           // price next to the (already promo) displayed price.
@@ -1035,6 +1107,7 @@
         }
         const original = button.textContent;
         button.disabled = true;
+        button.setAttribute('aria-busy', 'true');
         button.textContent = 'Opening checkout…';
         try {
           if (nativeOffersRequired && window.NorvaMarketing && typeof window.NorvaMarketing.track === 'function') {
@@ -1067,6 +1140,7 @@
             setStatus('Something went wrong starting the purchase. Try again.', true);
           }
           button.disabled = false;
+          button.removeAttribute('aria-busy');
           button.textContent = original;
         }
       }
@@ -1163,6 +1237,9 @@
           // read as such instead of inviting a re-purchase.
           hasLivePlan = true;
           currentPlan = String(dec.planCode || (dec.projection || {}).plan_code || '') || null;
+          if (planSelection && (currentPlan === 'plus' || currentPlan === 'family')) {
+            planSelection.select(currentPlan);
+          }
           applyNoTrialCopy();
           refreshCtas();
           maybeShowAssurance();
@@ -1244,8 +1321,8 @@
       if (wantedPlan === 'plus' || wantedPlan === 'family') {
         const chosen = document.querySelector('.card[data-plan="' + wantedPlan + '"]');
         if (chosen) {
-          chosen.classList.add('preselected');
-          try { chosen.scrollIntoView({ block: 'nearest' }); } catch (_) {}
+          if (planSelection) planSelection.select(wantedPlan);
+          else chosen.classList.add('preselected');
         }
       }
       // Live price table (single source billing_prices, via GET norva-revolut/prices).
@@ -1422,8 +1499,8 @@
         if (!selection) {
           if (box) box.hidden = true;
           if (backdrop) backdrop.style.removeProperty('--campaign-image');
-          if (eyebrow) eyebrow.textContent = 'One account. Every Norva screen.';
-          if (title) title.textContent = 'Bring your catalog with you.';
+          if (eyebrow) eyebrow.textContent = 'Norva membership';
+          if (title) title.innerHTML = defaultPageTitleHtml;
           return;
         }
 

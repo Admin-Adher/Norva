@@ -1223,7 +1223,9 @@ public class MainActivity extends Activity {
         if (!isTrustedCloudUrl(value)) return false;
         try {
             String path = Uri.parse(value).getPath();
-            return "/subscribe.html".equals(path) || "/subscription.html".equals(path);
+            return "/subscribe".equals(path)
+                    || "/subscribe.html".equals(path)
+                    || "/subscription.html".equals(path);
         } catch (Exception ignored) {
             return false;
         }

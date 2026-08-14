@@ -28,6 +28,10 @@
   --commerce-motion-fast: 160ms;
   --commerce-motion-standard: 220ms;
   --commerce-ease: cubic-bezier(0.16, 1, 0.3, 1);
+  --commerce-selection-surface: #12121a;
+  --commerce-selection-surface-strong: #1a1a25;
+  --commerce-selection-border: #27272a;
+  --commerce-selection-accent: #3b82f6;
 }
 
 html {
@@ -1578,5 +1582,980 @@ html.tv .commerce-subscribe .subscribe-layout {
   .commerce-page .summary-panel,
   .commerce-page .payment-panel {
     border: 1px solid CanvasText;
+  }
+}
+
+/* Plan-first subscription selector */
+body.commerce-subscribe {
+  padding: 0;
+  background:
+    linear-gradient(90deg, rgba(59, 130, 246, 0.07), transparent 30%),
+    var(--commerce-bg);
+}
+
+html:has(body.commerce-subscribe) {
+  scrollbar-width: none;
+}
+
+html:has(body.commerce-subscribe)::-webkit-scrollbar {
+  width: 0;
+}
+
+html:not(.tv) body.commerce-subscribe {
+  padding: 0;
+}
+
+.commerce-subscribe .ambient-rail {
+  opacity: 0.34;
+}
+
+.commerce-subscribe .site-header {
+  width: min(1152px, calc(100% - 48px));
+}
+
+.commerce-subscribe .secure-context {
+  padding-inline: 17px;
+}
+
+.commerce-subscribe .commerce-main {
+  width: min(912px, calc(100% - 48px));
+  padding: 67px 0 var(--commerce-space-6);
+}
+
+.commerce-subscribe .subscribe-layout {
+  display: block;
+  max-width: 960px;
+  margin-inline: auto;
+}
+
+.commerce-subscribe .intro {
+  max-width: 680px;
+  margin: 0 auto 44px;
+  padding: 0;
+  text-align: center;
+}
+
+.commerce-subscribe .intro .eyebrow,
+.commerce-subscribe .lead-mobile,
+.commerce-subscribe .tag-mobile,
+.commerce-subscribe .profile-mobile,
+.commerce-subscribe .title-landscape {
+  display: none;
+}
+
+.commerce-subscribe .intro h1 {
+  font-size: clamp(38px, 4vw, 44px);
+  line-height: 1.02;
+}
+
+.commerce-subscribe .intro .lead {
+  max-width: 590px;
+  margin: 18px auto 0;
+  font-size: 18px;
+  line-height: 1.55;
+}
+
+.commerce-subscribe .purchase-panel {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.commerce-subscribe .purchase-panel > #already-sub.show,
+.commerce-subscribe .purchase-panel > #status.show {
+  max-width: 720px;
+  margin-inline: auto;
+}
+
+.commerce-subscribe .toggle,
+html:not(.tv) body.commerce-subscribe .toggle {
+  width: min(100%, 266px);
+  min-height: 54px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
+  flex-wrap: nowrap;
+  margin: 0 auto 40px;
+  padding: 4px;
+  border-color: var(--commerce-selection-border);
+  background: rgba(18, 18, 26, 0.88);
+}
+
+.commerce-subscribe .toggle button {
+  min-height: 44px;
+  min-width: 0;
+  justify-content: center;
+  gap: 5px;
+  padding: 0 10px;
+  border-radius: 8px;
+  color: var(--commerce-text-muted);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.commerce-subscribe .toggle button.active {
+  background: var(--commerce-selection-surface-strong);
+  color: var(--commerce-text);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+.commerce-subscribe .save {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: #60a5fa;
+  font-size: 9px;
+}
+
+.commerce-subscribe .grid,
+html:not(.tv) body.commerce-subscribe .grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--commerce-space-3);
+  margin: 0;
+}
+
+body.commerce-subscribe .card {
+  position: relative;
+  min-width: 0;
+  display: block;
+  padding: 0;
+  border: 1px solid var(--commerce-selection-border);
+  border-radius: var(--commerce-radius-lg);
+  background: rgba(18, 18, 26, 0.82);
+  box-shadow: none;
+  overflow: visible;
+  transition:
+    border-color var(--commerce-motion-fast) var(--commerce-ease),
+    background-color var(--commerce-motion-fast) var(--commerce-ease),
+    box-shadow var(--commerce-motion-fast) var(--commerce-ease);
+}
+
+.commerce-subscribe .card:hover {
+  border-color: var(--commerce-border-strong);
+  background: rgba(26, 26, 37, 0.92);
+}
+
+.commerce-subscribe .card.selected,
+.commerce-subscribe .card.preselected {
+  border-color: var(--commerce-selection-accent);
+  background: var(--commerce-selection-surface-strong);
+  box-shadow: none;
+}
+
+.commerce-subscribe .card.current:not(.selected) {
+  border-color: rgba(94, 224, 183, 0.62);
+}
+
+.commerce-subscribe .card:has(.plan-choice-input:focus-visible) {
+  outline: 3px solid var(--commerce-focus);
+  outline-offset: 3px;
+}
+
+.commerce-subscribe .plan-choice-surface {
+  min-height: 232px;
+  display: flex;
+  flex-direction: column;
+  padding: var(--commerce-space-4);
+  border-radius: inherit;
+  color: var(--commerce-text);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.commerce-subscribe .plan-choice-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--commerce-space-4);
+}
+
+.commerce-subscribe .plan-name {
+  display: block;
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1.25;
+}
+
+.commerce-subscribe .card .tag {
+  display: block;
+  min-height: 0;
+  margin: 7px 0 0;
+  color: var(--commerce-text-secondary);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.commerce-subscribe .plan-radio {
+  width: 24px;
+  height: 24px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border: 2px solid var(--commerce-selection-border);
+  border-radius: 50%;
+}
+
+.commerce-subscribe .card.selected .plan-radio {
+  border-color: var(--commerce-selection-accent);
+}
+
+.commerce-subscribe .card.selected .plan-radio::after {
+  content: "";
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--commerce-selection-accent);
+}
+
+.commerce-subscribe .plan-choice-foot {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  margin-top: 22px;
+}
+
+.commerce-subscribe .profile-count {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 4px 9px;
+  border-radius: var(--commerce-radius-sm);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--commerce-text-secondary);
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.commerce-subscribe .profile-count-icon {
+  position: relative;
+  width: 20px;
+  height: 18px;
+  flex: 0 0 auto;
+  display: none;
+}
+
+.commerce-subscribe .profile-count-icon img {
+  position: absolute;
+  width: 13px;
+  height: 13px;
+}
+
+.commerce-subscribe .profile-count-icon img:first-child {
+  inset: 0 auto auto 0;
+}
+
+.commerce-subscribe .profile-count-icon img:last-child {
+  inset: auto 0 0 auto;
+}
+
+.commerce-subscribe .card.selected .profile-count,
+.commerce-subscribe .card.preselected .profile-count {
+  background-color: rgba(59, 130, 246, 0.13);
+  color: #60a5fa;
+}
+
+.commerce-subscribe .plan-price-block {
+  width: 100%;
+  margin-top: auto;
+}
+
+.commerce-subscribe .price {
+  display: flex;
+  align-items: baseline;
+  min-height: 40px;
+  margin: 0;
+  font-family: Outfit, Inter, ui-sans-serif, system-ui, sans-serif;
+  font-size: 34px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.commerce-subscribe .price .cur {
+  margin-right: 2px;
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.commerce-subscribe .price .per {
+  margin-left: 5px;
+  color: var(--commerce-text-secondary);
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.commerce-subscribe .price-note {
+  min-height: 18px;
+  display: block;
+  margin: 5px 0 0;
+  color: var(--commerce-text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+html:not(.tv) body.commerce-subscribe .price-note {
+  min-height: 18px;
+  margin: 5px 0 0;
+  font-size: 12px;
+}
+
+.commerce-subscribe .plan-source-buy {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  min-height: 0 !important;
+  margin: -1px !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
+.commerce-subscribe .shared-benefits {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--commerce-space-5);
+  margin-top: 32px;
+  padding: 17px 0;
+  border-block: 1px solid var(--commerce-selection-border);
+}
+
+.commerce-subscribe .shared-benefits h2 {
+  margin: 0;
+  color: var(--commerce-text-muted);
+  font-size: 11px;
+  font-weight: 850;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.commerce-subscribe .shared-benefits ul {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 34px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.commerce-subscribe .shared-benefits li {
+  color: var(--commerce-text);
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.commerce-subscribe .shared-benefits li::before {
+  content: "✓";
+  margin-right: 10px;
+  color: var(--commerce-success);
+  font-weight: 900;
+}
+
+.commerce-subscribe .plan-decision {
+  max-width: 440px;
+  margin: 40px auto 0;
+  text-align: center;
+}
+
+.commerce-subscribe .decision-summary {
+  display: none;
+}
+
+body.commerce-subscribe .decision-cta {
+  width: 320px;
+  max-width: 100%;
+  min-height: 52px;
+  margin-inline: auto;
+  border-color: rgba(255, 255, 255, 0.08);
+  background: var(--commerce-selection-accent);
+  box-shadow: none;
+}
+
+.commerce-subscribe .decision-cta:hover:not(:disabled) {
+  background: #60a5fa;
+  box-shadow: 0 16px 34px rgba(59, 130, 246, 0.24);
+}
+
+.commerce-subscribe .plan-decision > p {
+  margin: 14px 0 0;
+  color: var(--commerce-text-secondary);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+html.tv-purchase-only .commerce-subscribe .plan-decision {
+  display: none;
+}
+
+.commerce-subscribe .product-proof {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(360px, 0.95fr);
+  align-items: center;
+  gap: 56px;
+  margin: 80px 0 0;
+  padding: 64px 0 0;
+  border: 0;
+  border-top: 1px solid var(--commerce-selection-border);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.commerce-subscribe .product-proof img {
+  order: 2;
+  width: 100%;
+  height: auto;
+  max-height: none;
+  aspect-ratio: 8 / 5;
+  padding: 0;
+  border: 1px solid var(--commerce-selection-border);
+  border-radius: var(--commerce-radius-lg);
+  background: rgba(18, 18, 26, 0.76);
+  object-fit: cover;
+  object-position: center;
+}
+
+.commerce-subscribe .proof-caption {
+  order: 1;
+  display: block;
+  color: var(--commerce-text-secondary);
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+.commerce-subscribe .proof-caption strong {
+  display: block;
+  margin-bottom: 14px;
+  color: var(--commerce-text);
+  font-size: 18px;
+}
+
+.commerce-subscribe .platforms {
+  display: block;
+  margin-top: 20px;
+  color: var(--commerce-text);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+.commerce-subscribe .pay-marks,
+.commerce-subscribe .assurance,
+.commerce-subscribe .row {
+  max-width: 680px;
+  margin-inline: auto;
+}
+
+.commerce-subscribe .pay-marks.show,
+.commerce-subscribe .assurance.show {
+  margin-top: var(--commerce-space-4);
+}
+
+.commerce-subscribe .row {
+  justify-content: center;
+  margin-top: var(--commerce-space-4);
+}
+
+.commerce-subscribe .note,
+.commerce-checkout .page-footer {
+  max-width: 780px;
+  margin: var(--commerce-space-4) auto 0;
+  color: var(--commerce-text-muted);
+  font-size: 12px;
+  line-height: 1.65;
+  text-align: center;
+}
+
+.commerce-subscribe .confirm,
+.commerce-checkout .success {
+  padding: var(--commerce-space-5) var(--commerce-space-4);
+  border: 1px solid var(--commerce-border);
+  border-radius: var(--commerce-radius-lg);
+  background: var(--commerce-surface);
+  box-shadow: var(--commerce-shadow);
+}
+
+@media (max-width: 720px) {
+  .commerce-subscribe .annual-note-prefix {
+    display: none;
+  }
+
+  .commerce-subscribe .site-header {
+    width: min(100% - 32px, var(--commerce-content));
+  }
+
+  .commerce-subscribe .secure-context {
+    width: auto;
+    min-height: 44px;
+    padding-inline: 18px;
+    border-radius: var(--commerce-radius-md);
+    background: var(--commerce-selection-surface);
+  }
+
+  .commerce-subscribe .secure-context .secure-copy,
+  .commerce-subscribe .secure-context .secure-short {
+    display: inline;
+  }
+
+  .commerce-subscribe .secure-context .secure-long {
+    display: none;
+  }
+
+  .commerce-subscribe .commerce-main {
+    width: min(100% - 32px, 960px);
+    padding: 24px 0 calc(164px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .commerce-subscribe .site-header {
+    min-height: 64px;
+  }
+
+  .commerce-subscribe .intro {
+    margin-bottom: 20px;
+    text-align: left;
+  }
+
+  .commerce-subscribe .intro .eyebrow,
+  .commerce-subscribe .lead-mobile,
+  .commerce-subscribe .tag-mobile,
+  .commerce-subscribe .profile-mobile,
+  .commerce-subscribe .title-landscape {
+    display: inline;
+  }
+
+  .commerce-subscribe .lead-desktop,
+  .commerce-subscribe .tag-desktop,
+  .commerce-subscribe .profile-desktop,
+  .commerce-subscribe .title-standard {
+    display: none;
+  }
+
+  .commerce-subscribe .intro .eyebrow {
+    display: block;
+    margin-bottom: 10px;
+    color: #60a5fa;
+  }
+
+  .commerce-subscribe .intro h1 {
+    font-size: 32px;
+  }
+
+  .commerce-subscribe .intro .lead {
+    margin-top: 12px;
+    font-size: 14px;
+    line-height: 1.7;
+  }
+
+  .commerce-subscribe .toggle,
+  html:not(.tv) body.commerce-subscribe .toggle {
+    width: 100%;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    margin-bottom: 16px;
+  }
+
+  .commerce-subscribe .grid,
+  html:not(.tv) body.commerce-subscribe .grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .commerce-subscribe .plan-choice-surface {
+    min-height: 150px;
+    padding: 12px 16px;
+  }
+
+  .commerce-subscribe .card.selected,
+  .commerce-subscribe .card.preselected {
+    box-shadow: inset 3px 0 0 var(--commerce-selection-accent);
+  }
+
+  .commerce-subscribe .plan-name {
+    font-size: 17px;
+  }
+
+  .commerce-subscribe .plan-choice-foot {
+    flex-direction: row;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: var(--commerce-space-3);
+    margin-top: 16px;
+  }
+
+  .commerce-subscribe .profile-count,
+  .commerce-subscribe .card.selected .profile-count,
+  .commerce-subscribe .card.preselected .profile-count {
+    min-height: 24px;
+    gap: 5px;
+    padding: 0;
+    background-color: transparent;
+    color: var(--commerce-text);
+  }
+
+  .commerce-subscribe .profile-count-icon {
+    display: inline-block;
+  }
+
+  .commerce-subscribe .plan-price-block {
+    width: auto;
+    margin-top: 0;
+    text-align: right;
+  }
+
+  .commerce-subscribe .price {
+    justify-content: flex-end;
+    font-size: 30px;
+  }
+
+  .commerce-subscribe .price-note {
+    text-align: right;
+  }
+
+  .commerce-subscribe .shared-benefits {
+    display: block;
+    margin-top: 24px;
+    padding: 20px 0;
+  }
+
+  .commerce-subscribe .shared-benefits h2 {
+    color: var(--commerce-text);
+    font-size: 14px;
+    letter-spacing: 0;
+    text-transform: none;
+  }
+
+  .commerce-subscribe .shared-benefits ul {
+    display: grid;
+    justify-content: stretch;
+    gap: 12px;
+    margin-top: 16px;
+  }
+
+  .commerce-subscribe .shared-benefits li {
+    color: var(--commerce-text-secondary);
+    font-size: 14px;
+    white-space: normal;
+  }
+
+  .commerce-subscribe .plan-decision {
+    position: fixed;
+    z-index: 50;
+    inset: auto 0 0;
+    max-width: none;
+    margin: 0;
+    padding: 15px 16px max(12px, env(safe-area-inset-bottom, 0px));
+    border-top: 1px solid var(--commerce-border-strong);
+    background: rgba(8, 11, 18, 0.96);
+    box-shadow: 0 -16px 42px rgba(0, 0, 0, 0.45);
+    -webkit-backdrop-filter: blur(18px);
+    backdrop-filter: blur(18px);
+  }
+
+  .commerce-subscribe .decision-summary {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: var(--commerce-space-3);
+    margin-bottom: 8px;
+    text-align: left;
+  }
+
+  .commerce-subscribe .decision-label {
+    display: block;
+    color: var(--commerce-text-secondary);
+    font-size: 12px;
+    font-weight: 500;
+  }
+
+  .commerce-subscribe #selected-plan {
+    display: block;
+    margin-top: 2px;
+    font-size: 14px;
+  }
+
+  .commerce-subscribe .selected-price {
+    display: flex;
+    align-items: baseline;
+    font-family: Outfit, Inter, ui-sans-serif, system-ui, sans-serif;
+    font-size: 22px;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  .commerce-subscribe #selected-period {
+    margin-left: 4px;
+    color: var(--commerce-text-secondary);
+    font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+    font-size: 11px;
+  }
+
+  body.commerce-subscribe .decision-cta {
+    width: 100%;
+    min-height: 50px;
+  }
+
+  .commerce-subscribe .plan-decision > p {
+    margin-top: 8px;
+    font-size: 11px;
+    line-height: 1.45;
+  }
+
+  .commerce-subscribe .product-proof {
+    grid-template-columns: 1fr;
+    gap: var(--commerce-space-4);
+    margin-top: 48px;
+    padding-top: 40px;
+  }
+
+  .commerce-subscribe .product-proof img,
+  .commerce-subscribe .proof-caption {
+    order: initial;
+  }
+
+  .commerce-subscribe .product-proof img {
+    padding: 0;
+  }
+
+  .commerce-subscribe .proof-caption {
+    text-align: left;
+  }
+}
+
+@media (max-width: 420px) and (max-height: 720px) {
+  .commerce-subscribe .commerce-main {
+    padding-top: 24px;
+    padding-bottom: calc(108px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .commerce-subscribe .intro {
+    margin-bottom: 25px;
+  }
+
+  .commerce-subscribe .intro h1 {
+    font-size: 30px;
+  }
+
+  .commerce-subscribe .intro .lead {
+    line-height: 1.55;
+  }
+
+  .commerce-subscribe .plan-choice-surface {
+    min-height: 108px;
+    padding: 12px;
+  }
+
+  .commerce-subscribe .card .tag {
+    display: none;
+  }
+
+  .commerce-subscribe .plan-choice-foot {
+    margin-top: 12px;
+  }
+
+  .commerce-subscribe .price {
+    min-height: 30px;
+  }
+
+  .commerce-subscribe .decision-summary {
+    display: none;
+  }
+
+  .commerce-subscribe .plan-decision {
+    padding-top: 10px;
+  }
+}
+
+@media (orientation: landscape) and (max-height: 500px) and (max-width: 960px) {
+  .commerce-subscribe .annual-note-prefix {
+    display: none;
+  }
+
+  .commerce-subscribe .site-header {
+    width: calc(100% - 32px);
+    min-height: 56px;
+  }
+
+  .commerce-subscribe .secure-context {
+    width: auto;
+    min-height: 44px;
+    padding-inline: 18px;
+    border-radius: var(--commerce-radius-md);
+    background: var(--commerce-selection-surface);
+  }
+
+  .commerce-subscribe .secure-context .secure-copy,
+  .commerce-subscribe .secure-context .secure-short {
+    display: inline;
+  }
+
+  .commerce-subscribe .secure-context .secure-long {
+    display: none;
+  }
+
+  .commerce-subscribe .commerce-main {
+    width: calc(100% - 32px);
+    padding: 16px 0 calc(98px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .commerce-subscribe .subscribe-layout {
+    display: grid;
+    grid-template-columns: 220px minmax(0, 1fr);
+    grid-template-areas: "intro purchase";
+    align-items: start;
+    gap: 24px;
+  }
+
+  .commerce-subscribe .intro {
+    margin: 0;
+    text-align: left;
+  }
+
+  .commerce-subscribe .intro .eyebrow {
+    display: block;
+    margin-bottom: 10px;
+    color: #60a5fa;
+  }
+
+  .commerce-subscribe .title-standard,
+  .commerce-subscribe .lead-desktop,
+  .commerce-subscribe .profile-desktop {
+    display: none;
+  }
+
+  .commerce-subscribe .title-landscape,
+  .commerce-subscribe .lead-mobile,
+  .commerce-subscribe .profile-mobile {
+    display: inline;
+  }
+
+  .commerce-subscribe .intro h1 {
+    max-width: 170px;
+    font-size: 28px;
+  }
+
+  .commerce-subscribe .intro .lead {
+    margin-top: 12px;
+    font-size: 13px;
+    line-height: 1.55;
+  }
+
+  .commerce-subscribe .toggle,
+  html:not(.tv) body.commerce-subscribe .toggle {
+    width: 100%;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    margin-bottom: 12px;
+  }
+
+  .commerce-subscribe .grid,
+  html:not(.tv) body.commerce-subscribe .grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  .commerce-subscribe .plan-choice-surface {
+    min-height: 114px;
+    padding: 12px;
+  }
+
+  .commerce-subscribe .card .tag {
+    display: none;
+  }
+
+  .commerce-subscribe .plan-choice-foot {
+    flex-direction: row;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 12px;
+  }
+
+  .commerce-subscribe .profile-count,
+  .commerce-subscribe .card.selected .profile-count,
+  .commerce-subscribe .card.preselected .profile-count {
+    min-height: 24px;
+    gap: 5px;
+    padding: 0;
+    background-color: transparent;
+    color: var(--commerce-text);
+  }
+
+  .commerce-subscribe .profile-count-icon {
+    display: inline-block;
+  }
+
+  .commerce-subscribe .plan-price-block {
+    width: auto;
+    margin-top: 0;
+    text-align: right;
+  }
+
+  .commerce-subscribe .price {
+    min-height: 30px;
+    justify-content: flex-end;
+    font-size: 30px;
+  }
+
+  .commerce-subscribe .price-note {
+    text-align: right;
+  }
+
+  .commerce-subscribe .plan-decision {
+    position: fixed;
+    z-index: 50;
+    inset: auto 0 0;
+    max-width: none;
+    margin: 0;
+    padding: 10px 16px max(12px, env(safe-area-inset-bottom, 0px));
+    border-top: 1px solid var(--commerce-border-strong);
+    background: rgba(8, 11, 18, 0.96);
+    box-shadow: 0 -16px 42px rgba(0, 0, 0, 0.45);
+  }
+
+  body.commerce-subscribe .decision-cta {
+    width: 100%;
+    min-height: 50px;
+  }
+
+  .commerce-subscribe .plan-decision > p {
+    margin-top: 8px;
+    font-size: 11px;
+    line-height: 1.45;
+  }
+
+  .commerce-subscribe .shared-benefits,
+  .commerce-subscribe .product-proof,
+  .commerce-subscribe .pay-marks,
+  .commerce-subscribe .assurance,
+  .commerce-subscribe .row {
+    grid-column: 1 / -1;
+  }
+
+  .commerce-subscribe .decision-summary {
+    display: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .commerce-subscribe .card,
+  .commerce-subscribe .toggle,
+  .commerce-subscribe .product-proof img,
+  .commerce-subscribe .plan-decision {
+    border: 1px solid CanvasText;
+  }
+
+  .commerce-subscribe .card.selected .plan-radio::after,
+  .commerce-subscribe .shared-benefits li::before {
+    color: CanvasText;
+    background: CanvasText;
   }
 }

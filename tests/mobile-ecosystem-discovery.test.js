@@ -103,13 +103,13 @@ test('Android notification permission is requested only from the contextual Home
 });
 
 test('transaction and win-back surfaces show the multi-device proof and name tablets', () => {
-  for (const file of [
-    'public/paywall.html',
-    'public/subscribe.html',
-    'public/checkout-revolut.html',
+  for (const [file, proofAsset] of [
+    ['public/paywall.html', /\/assets\/landing\/norva-multi-device\.svg/],
+    ['public/subscribe.html', /\/assets\/landing\/norva-every-screen-premium\.webp\?v=1/],
+    ['public/checkout-revolut.html', /\/assets\/landing\/norva-multi-device\.svg/],
   ]) {
     const source = read(file);
-    assert.match(source, /\/assets\/landing\/norva-multi-device\.svg/, file);
+    assert.match(source, proofAsset, file);
     assert.match(source, /Android mobile \(phone and tablet\)[\s\S]{0,60}Android TV/i, file);
   }
 
