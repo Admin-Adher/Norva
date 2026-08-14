@@ -669,6 +669,9 @@ test('a terminal cloud media failure releases its lane without invoking any fall
   page.isPlaybackSupersededError = () => false;
   page.isProviderBusyError = () => false;
   page.isCloudPlaybackMode = () => true;
+  page.currentPlaybackMode = 'direct';
+  page.content = { sourceId: 'source-1', id: 'movie-1', type: 'movie', containerExtension: 'mp4' };
+  page.isFormatPlaybackError = (message) => /Format error/i.test(message);
   page.isStalePlaybackAttempt = () => false;
   page.releasePlaybackPipelineForRetry = async () => { page.releaseCount = (page.releaseCount || 0) + 1; };
   page.showPlaybackError = (message, options) => { page.shown = { message, options }; };
@@ -681,6 +684,8 @@ test('a terminal cloud media failure releases its lane without invoking any fall
   assert.strictEqual(page.releaseCount, 1);
   assert.strictEqual(page.shown.message, 'MEDIA_ELEMENT_ERROR: Format error');
   assert.strictEqual(page.shown.options.immediate, true);
+  assert.strictEqual(page._preferredExplicitCloudMode, 'transcode',
+    'an incompatible optimistic relay must offer one explicit server-conversion action');
 });
 
 test('the visible server-conversion action starts one fresh cloud session and no fallback cascade', async () => {

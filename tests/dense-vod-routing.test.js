@@ -499,8 +499,8 @@ test('dense but browser-safe MP4 keeps the normal relay path', async () => {
     assert.strictEqual(calls[0].playbackHint.audioStreamIndex, 8);
 });
 
-test('unknown-codec MP4-family VOD opens one engine lane and never pre-opens Gateway', async () => {
-    for (const container of ['mp4', 'm4v', 'mov']) {
+test('unknown-codec MP4/M4V optimistically opens one relay lane and never pre-opens Gateway', async () => {
+    for (const container of ['mp4', 'm4v']) {
         const { API, calls } = loadCloudApi();
         const result = await API.proxy.xtream.getStreamUrl(
             '00000000-0000-4000-8000-000000000001',
@@ -510,16 +510,32 @@ test('unknown-codec MP4-family VOD opens one engine lane and never pre-opens Gat
             {}
         );
 
-        assert.strictEqual(result.mode, 'engine', `${container} must use the bounded browser engine`);
+        assert.strictEqual(result.mode, 'relay', `${container} must let the browser try its native fast path`);
         assert.strictEqual(calls.length, 1, `${container} must open exactly one upstream lane`);
         assert.strictEqual(calls[0].mode, 'relay');
-        assert.strictEqual(calls[0].requiresTranscode, undefined);
-        assert.strictEqual(calls[0].enginePipe, true);
+        assert.strictEqual(calls[0].requiresTranscode, false);
+        assert.strictEqual(calls[0].enginePipe, undefined);
         assert.strictEqual(calls[0].playbackHint.gatewayMode, 'remux');
     }
 });
 
-test('an engine-lane HTTP 458 is terminal and never opens a Gateway session', async () => {
+test('unknown-codec MOV remains on the bounded engine because it is not browser-safe', async () => {
+    const { API, calls } = loadCloudApi();
+    const result = await API.proxy.xtream.getStreamUrl(
+        '00000000-0000-4000-8000-000000000001',
+        'unknown-mov',
+        'movie',
+        'mov',
+        {}
+    );
+
+    assert.strictEqual(result.mode, 'engine');
+    assert.strictEqual(calls.length, 1);
+    assert.strictEqual(calls[0].mode, 'relay');
+    assert.strictEqual(calls[0].enginePipe, true);
+});
+
+test('an optimistic relay HTTP 458 is terminal and never opens a Gateway session', async () => {
     const providerBusy = Object.assign(new Error('provider busy'), {
         status: 458,
         code: 'PROVIDER_BUSY'
@@ -539,7 +555,7 @@ test('an engine-lane HTTP 458 is terminal and never opens a Gateway session', as
 
     assert.strictEqual(calls.length, 1);
     assert.strictEqual(calls[0].mode, 'relay');
-    assert.strictEqual(calls[0].enginePipe, true);
+    assert.strictEqual(calls[0].enginePipe, undefined);
 });
 
 test('explicit conversion of an unknown-codec MP4 opens exactly one Gateway lane', async () => {

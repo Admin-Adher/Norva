@@ -1714,21 +1714,15 @@ const CloudAdapter = (() => {
                 // client-side for an instant Resume, and nothing depends on a
                 // transcode gateway. Anything that needs decoding help (mkv/HEVC/AC3
                 // or live) still takes the gateway/transcode path.
-                // "Not proven unsafe" is NOT "safe": an mp4/mov/m4v with an UNKNOWN video codec
-                // (series episodes arrive from norva-series-info without the codec_profile that
-                // norva-catalog attaches to movies) defaults through here and DEAD-ENDS on the
-                // native <video> element when it's actually HEVC. When the codec is unknown and the
-                // container is engine-demuxable, prefer one bounded in-browser engine lane (plays
-                // H.264 AND HEVC) over gambling on native or paying the Gateway probe/HLS startup.
-                // If that lane proves incompatible, the player may offer server conversion as a
-                // fresh explicit user action; it must never open a second lane automatically.
-                // Known-H.264 keeps the fast native/relay path; nativePlayer (hardware HEVC) is
-                // handled earlier in the mode ternary and is unaffected.
-                const videoCodecKnown = Boolean(normalizeCodecToken(playbackHint.videoCodec));
+                // MP4/M4V are natively streamable containers. When their exact codec is not yet
+                // catalogued, try one optimistic Relay lane first: compatible H.264/AAC starts
+                // immediately and an actual browser codec rejection is authoritative. The visible
+                // error action may then create one fresh Gateway conversion session, but no hidden
+                // automatic cascade is allowed. Containers already known to be unsafe (MOV/MKV/
+                // AVI/...) still take the bounded Engine/Gateway path below.
                 const browserSafeVod = isVodPlayback
                     && !needsGateway
-                    && !shouldVodUseGatewayTranscode(container, playbackHint)
-                    && (videoCodecKnown || !engineCanPlayContainer(container));
+                    && !shouldVodUseGatewayTranscode(container, playbackHint);
                 // Browser VOD that needs container/codec help (mkv/avi, HEVC,
                 // AC-3/DTS/TrueHD audio, …): play it with the in-browser engine
                 // (NorvaEngine remuxes the container + transcodes the audio to

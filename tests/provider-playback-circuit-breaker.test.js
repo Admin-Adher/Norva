@@ -396,7 +396,7 @@ test('web VOD creates one cloud session and never cascades gateway, relay, or di
   const terminalFailure = section(
     watch,
     'async handlePlaybackFailure(message)',
-    'isFormatPlaybackError(message)',
+    '\n    isFormatPlaybackError(message)',
   );
   const engineFallback = section(
     watch,
@@ -421,11 +421,11 @@ test('web VOD creates one cloud session and never cascades gateway, relay, or di
     /this\.isCloudPlaybackMode\(\)[\s\S]{0,180}hasOpenedCloudPlaybackLaneForAttempt\(playbackAttemptId\)[\s\S]{0,80}return false/,
     'an engine session already opened in the cloud must never resolve a second Gateway session automatically',
   );
-  assert.match(
-    terminalFailure,
-    /cloudLaneConsumed[\s\S]{0,420}releasePlaybackPipelineForRetry\(\)[\s\S]{0,260}showPlaybackError\(message, \{ immediate: true \}\)/,
-    'a failed cloud lane must be released and surfaced as a terminal state before any fallback resolver runs',
-  );
+  const cloudLaneGuard = terminalFailure.indexOf('const cloudLaneConsumed');
+  const terminalRelease = terminalFailure.indexOf('await this.releasePlaybackPipelineForRetry()', cloudLaneGuard);
+  const terminalSurface = terminalFailure.indexOf('this.showPlaybackError(message, { immediate: true })', terminalRelease);
+  assert.ok(cloudLaneGuard >= 0 && terminalRelease > cloudLaneGuard && terminalSurface > terminalRelease,
+    'a failed cloud lane must be released and surfaced as a terminal state before any fallback resolver runs');
   assert.match(explicitRetry, /const playbackAttemptId\s*=\s*this\.beginPlaybackAttempt\(\)/);
   assert.match(explicitRetry, /explicitServerConversion[\s\S]*_preferredExplicitCloudMode\s*===\s*['"]transcode['"]/);
   assert.match(explicitRetry, /explicitServerConversion[\s\S]{0,300}mode:\s*['"]transcode['"]/,

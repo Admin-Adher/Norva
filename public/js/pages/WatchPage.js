@@ -5962,6 +5962,15 @@ class WatchPage {
                 if (!cloudLaneConsumed) {
                     console.warn('[WatchPage] Cloud failure had no session marker; refusing an automatic fallback.');
                 }
+                // An optimistic MP4/M4V Relay can reveal an unsupported codec only
+                // after the media element sees the bytes. Tear down that exact lane
+                // first, then offer one explicit server-conversion action. The click
+                // starts a new attempt; this branch never creates a second session.
+                if (this.isFormatPlaybackError(message)
+                    && this.currentPlaybackMode === 'direct'
+                    && (this.content?.type === 'movie' || this.content?.type === 'series')) {
+                    this._preferredExplicitCloudMode = 'transcode';
+                }
                 await this.releasePlaybackPipelineForRetry();
                 if (!this.isStalePlaybackAttempt(playbackAttemptId)) {
                     this.showPlaybackError(message, { immediate: true });
@@ -6390,8 +6399,16 @@ class WatchPage {
             };
             const result = await API.proxy.xtream.getStreamUrl(
                 this.content.sourceId, this.content.id, itemType, container, playbackHint);
-            if (!result?.url) throw new Error('No stream URL from retry');
-            this.content.cloudPlaybackSessionId = result.sessionId || null;
+            const resultSessionId = this.playbackMetadataFromResult(result).sessionId;
+            if (this.isStalePlaybackAttempt(playbackAttemptId)) {
+                await this.cleanupStaleCloudPlaybackSession(resultSessionId);
+                return;
+            }
+            if (!result?.url) {
+                await this.cleanupStaleCloudPlaybackSession(resultSessionId);
+                throw new Error('No stream URL from retry');
+            }
+            this.content.cloudPlaybackSessionId = resultSessionId || null;
             await this.loadVideo(result.url, this.playbackMetadataFromResult(result, {
                 playbackAttemptId,
                 ...activeAudioOptions,
@@ -10637,6 +10654,11 @@ class WatchPage {
         if (this._goingBack) return;
         this._goingBack = true;
 
+        // Invalidate a resolver that is still waiting for the Edge/Gateway. Its
+        // response may already own a provider session even though stop() cannot
+        // know its id yet; the late-result guard will expire it exactly.
+        this.beginPlaybackAttempt();
+
         // Capture the position synchronously (cheap, local state) so nothing is lost.
         this.trackPlaybackPosition({ force: true });
         this.saveResumeSnapshotThrottled(true);
@@ -10672,6 +10694,10 @@ class WatchPage {
         // otherwise the hidden <video> keeps decoding/playing in the background
         // and continues holding the provider's single connection slot.
         if (this._goingBack) return;
+        // Route changes must stale an unresolved playback before tearing down
+        // the sessions that are already known locally. Otherwise a late Gateway
+        // result can register and play after the Watch page has disappeared.
+        this.beginPlaybackAttempt();
         this.trackPlaybackPosition({ force: true });
         this.saveResumeSnapshotThrottled(true);
         Promise.resolve(this.saveProgress({ force: true })).catch(() => {});

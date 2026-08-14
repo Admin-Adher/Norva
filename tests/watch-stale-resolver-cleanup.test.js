@@ -52,6 +52,71 @@ test('a playback session resolved after Back is expired before the stale result 
         'cleanup must happen before any stale result is discarded');
 });
 
+test('Back invalidates an in-flight playback resolver before teardown starts', () => {
+    const WatchPage = loadWatchPage({});
+    const page = Object.create(WatchPage.prototype);
+    page._playbackAttemptId = 7;
+    page._cloudPlaybackLaneAttemptId = 7;
+    page._goingBack = false;
+    page.trackPlaybackPosition = () => {};
+    page.saveResumeSnapshotThrottled = () => {};
+    page.saveProgress = () => Promise.resolve();
+    page.clearResumeSnapshot = () => {};
+    page.cancelNextEpisode = () => {};
+    page.stop = () => {
+        assert.strictEqual(page._playbackAttemptId, 8,
+            'a late resolver must already be stale when teardown starts');
+        assert.strictEqual(page._cloudPlaybackLaneAttemptId, null);
+        return Promise.resolve();
+    };
+    page.app = { navigateTo: () => {} };
+    page.returnPage = 'movies';
+
+    page.goBack();
+
+    assert.strictEqual(page._playbackAttemptId, 8);
+});
+
+test('route hide invalidates an in-flight playback resolver before teardown starts', () => {
+    const WatchPage = loadWatchPage({});
+    const page = Object.create(WatchPage.prototype);
+    page._playbackAttemptId = 11;
+    page._cloudPlaybackLaneAttemptId = 11;
+    page._goingBack = false;
+    page.trackPlaybackPosition = () => {};
+    page.saveResumeSnapshotThrottled = () => {};
+    page.saveProgress = () => Promise.resolve();
+    page.clearResumeSnapshot = () => {};
+    page.cancelNextEpisode = () => {};
+    page.stop = () => {
+        assert.strictEqual(page._playbackAttemptId, 12,
+            'route navigation must stale a resolver before releasing known sessions');
+        assert.strictEqual(page._cloudPlaybackLaneAttemptId, null);
+        return Promise.resolve();
+    };
+
+    page.hide();
+
+    assert.strictEqual(page._playbackAttemptId, 12);
+});
+
+test('an explicit conversion resolved after Back expires its exact late session', () => {
+    const retry = methodBody('async retryPlaybackInPlace(positionOverride = null)', '\n    clearPlaybackErrorRefreshTimer()');
+    const resolve = retry.indexOf('const result = await API.proxy.xtream.getStreamUrl');
+    const session = retry.indexOf('const resultSessionId = this.playbackMetadataFromResult(result).sessionId', resolve);
+    const stale = retry.indexOf('if (this.isStalePlaybackAttempt(playbackAttemptId))', session);
+    const cleanup = retry.indexOf('await this.cleanupStaleCloudPlaybackSession(resultSessionId)', stale);
+    const register = retry.indexOf('this.content.cloudPlaybackSessionId = resultSessionId || null', cleanup);
+    const load = retry.indexOf('await this.loadVideo(', register);
+
+    assert.ok(resolve >= 0, 'the explicit conversion resolver must remain present');
+    assert.ok(session > resolve, 'the late server-owned session id must be extracted immediately');
+    assert.ok(stale > session, 'Back/navigation staleness must be checked after the id is known');
+    assert.ok(cleanup > stale, 'the exact late session must be expired before returning');
+    assert.ok(register > cleanup, 'a stale session must never become the active page session');
+    assert.ok(load > register, 'media loading must only begin after the stale guard');
+});
+
 test('a resolved response without a media URL also expires its server-owned session', () => {
     const play = methodBody('async play(content, streamUrl, playback = {})', '\n    async ');
     const missingUrl = play.indexOf('if (!resolved || !resolved.url)');

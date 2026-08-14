@@ -30,6 +30,7 @@ test('leaving Watch outside goBack saves progress and stops background playback'
     _goingBack: false,
     _suspendResumeSnapshotSave: false,
     cancelNextEpisode() { calls.push('cancel'); },
+    beginPlaybackAttempt() { calls.push('invalidate'); },
     trackPlaybackPosition(options) { calls.push(['track', options]); },
     saveResumeSnapshotThrottled(force) { calls.push(['snapshot', force]); },
     saveProgress(options) { calls.push(['save', options]); return Promise.resolve(); },
@@ -41,6 +42,8 @@ test('leaving Watch outside goBack saves progress and stops background playback'
   await Promise.resolve();
 
   assert.equal(calls.filter((call) => call === 'stop').length, 1);
+  assert.ok(calls.indexOf('invalidate') < calls.indexOf('stop'),
+    'route exit must invalidate a pending resolver before teardown');
   assert.deepEqual(calls.find((call) => Array.isArray(call) && call[0] === 'save'), ['save', { force: true }]);
   assert.equal(page._suspendResumeSnapshotSave, false);
 });
