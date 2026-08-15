@@ -14,9 +14,10 @@ const {
 } = require('./providerFailure');
 const {
     parseProviderProxyUrls,
+    parseProviderProxySlotOverrides,
     providerAccountAffinityKey,
     providerAccountAffinityKeyFromCredentials,
-    stableProxySlotIndex,
+    proxySlotIndexForAccount,
 } = require('./providerProxyPool');
 
 const app = express();
@@ -29,6 +30,9 @@ const app = express();
 //   PROVIDER_PROXY_URLS  comma/space/newline-separated list of proxy URLs
 //                        (e.g. http://user:pass@host:port). Used as a POOL.
 //   PROVIDER_PROXY_URL   single URL (back-compat fallback when the plural is absent).
+//   PROVIDER_PROXY_SLOT_OVERRIDES  optional service-only JSON map whose keys are
+//                        sha256(provider-account) and whose values are slots 1..5.
+//                        Used only for bounded operator A/B and emergency egress repair.
 //
 // Each provider ACCOUNT is pinned to ONE pool IP (sticky by the canonical provider
 // host+username identity). The Norva user id is deliberately never part of proxy affinity:
@@ -40,6 +44,10 @@ const app = express();
 // Secrets live in env only — never commit them.
 const providerProxyUrls = parseProviderProxyUrls(
     process.env.PROVIDER_PROXY_URLS || process.env.PROVIDER_PROXY_URL || '',
+);
+const providerProxySlotOverrides = parseProviderProxySlotOverrides(
+    process.env.PROVIDER_PROXY_SLOT_OVERRIDES || '',
+    providerProxyUrls.length,
 );
 let providerProxyAgents = [];
 if (providerProxyUrls.length) {
@@ -60,7 +68,7 @@ if (providerProxyUrls.length) {
 // FNV-1a hash → stable index into the pool for a given key (same key → same IP).
 function poolIndexForKey(key) {
     if (providerProxyAgents.length <= 1) return 0;
-    return stableProxySlotIndex(key, providerProxyAgents.length);
+    return proxySlotIndexForAccount(key, providerProxyAgents.length, providerProxySlotOverrides);
 }
 // Per-account sticky key from a provider stream URL: host + the username path segment
 // (Xtream: /movie|series|live/USER/PASS/ID.ext → USER), falling back to the host.
@@ -518,7 +526,7 @@ const EXACT_MATROSKA_H264_HLS_TARGET_SECONDS = 2;
 const EXACT_MATROSKA_H264_MAX_WIDTH = 1920;
 const EXACT_MATROSKA_H264_MAX_HEIGHT = 1080;
 const EXACT_MATROSKA_H264_MAX_PIXELS = EXACT_MATROSKA_H264_MAX_WIDTH * EXACT_MATROSKA_H264_MAX_HEIGHT;
-const GATEWAY_VERSION = 84;
+const GATEWAY_VERSION = 85;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -719,6 +727,8 @@ app.get('/health', (req, res) => {
         providerProxyPool: providerProxyAgents.length,
         providerProxyAffinityProtocol: 1,
         providerProxyAffinityKey: 'provider-account',
+        providerProxySlotOverrideProtocol: 1,
+        providerProxySlotOverrideConfigured: providerProxySlotOverrides.size > 0,
         transcribeQueueDepth: transcribeQueue.length,
         transcribeBusy,
         ocrQueueDepth: ocrQueue.length,
