@@ -461,7 +461,7 @@ function loadCloudApi({ native = false, createSessionError = null } = {}) {
     return { API: window.API, calls };
 }
 
-test('dense browser VOD uses Gateway remux with audio transcode and selected track', async () => {
+test('dense browser VOD without exact codecs uses one full Gateway conversion lane', async () => {
     const { API, calls } = loadCloudApi();
     const playbackHint = loadMediaUtils().playbackHintFromItem({
         container_extension: 'mkv',
@@ -484,7 +484,7 @@ test('dense browser VOD uses Gateway remux with audio transcode and selected tra
     assert.strictEqual(calls.length, 1);
     assert.strictEqual(calls[0].mode, 'transcode');
     assert.strictEqual(calls[0].requiresTranscode, true);
-    assert.strictEqual(calls[0].playbackHint.gatewayMode, 'remux');
+    assert.strictEqual(calls[0].playbackHint.gatewayMode, 'transcode');
     assert.strictEqual(calls[0].playbackHint.audioMode, 'transcode');
     assert.strictEqual(calls[0].playbackHint.audioTrackCount, 23);
     assert.strictEqual(calls[0].playbackHint.subtitleTrackCount, 34);
@@ -492,7 +492,7 @@ test('dense browser VOD uses Gateway remux with audio transcode and selected tra
     assert.strictEqual(calls[0].playbackHint.audioStreamIndex, 8);
 });
 
-test('ordinary unknown MKV keeps one bounded Engine lane until exact codecs are known', async () => {
+test('ordinary unknown MKV opens one bounded Gateway conversion lane', async () => {
     const { API, calls } = loadCloudApi();
     const result = await API.proxy.xtream.getStreamUrl(
         '00000000-0000-4000-8000-000000000001',
@@ -506,12 +506,85 @@ test('ordinary unknown MKV keeps one bounded Engine lane until exact codecs are 
         }
     );
 
-    assert.strictEqual(result.mode, 'engine');
+    assert.strictEqual(result.mode, 'transcode');
     assert.strictEqual(calls.length, 1);
-    assert.strictEqual(calls[0].mode, 'relay');
-    assert.strictEqual(calls[0].requiresTranscode, undefined);
-    assert.strictEqual(calls[0].enginePipe, true);
+    assert.strictEqual(calls[0].mode, 'transcode');
+    assert.strictEqual(calls[0].requiresTranscode, true);
+    assert.strictEqual(calls[0].enginePipe, undefined);
+    assert.strictEqual(calls[0].playbackHint.gatewayMode, 'transcode');
+    assert.strictEqual(calls[0].playbackHint.audioMode, 'transcode');
     assert.strictEqual(calls[0].playbackHint.audioStreamIndex, 3);
+});
+
+test('absent or partial MKV codec facts always stay on one full Gateway lane', async () => {
+    const cases = [
+        ['absent', {}],
+        ['video-only', { videoCodec: 'h264' }],
+        ['audio-only', { audioCodec: 'aac', audioChannels: 2 }]
+    ];
+
+    for (const [label, playbackHint] of cases) {
+        const { API, calls } = loadCloudApi();
+        const result = await API.proxy.xtream.getStreamUrl(
+            '00000000-0000-4000-8000-000000000001',
+            `partial-${label}`,
+            'movie',
+            'mkv',
+            playbackHint
+        );
+
+        assert.strictEqual(result.mode, 'transcode', label);
+        assert.strictEqual(calls.length, 1, label);
+        assert.strictEqual(calls[0].mode, 'transcode', label);
+        assert.strictEqual(calls[0].requiresTranscode, true, label);
+        assert.strictEqual(calls[0].enginePipe, undefined, label);
+        assert.strictEqual(calls[0].playbackHint.gatewayMode, 'transcode', label);
+        assert.strictEqual(calls[0].playbackHint.audioMode, 'transcode', label);
+    }
+});
+
+test('an explicit Engine preference cannot reopen a RAW lane for unknown MKV', async () => {
+    const { API, calls } = loadCloudApi();
+    const result = await API.proxy.xtream.getStreamUrl(
+        '00000000-0000-4000-8000-000000000001',
+        'forced-engine-unknown-mkv',
+        'movie',
+        'mkv',
+        { mode: 'engine', gatewayMode: 'remux' }
+    );
+
+    assert.strictEqual(result.mode, 'transcode');
+    assert.strictEqual(calls.length, 1);
+    assert.strictEqual(calls[0].mode, 'transcode');
+    assert.strictEqual(calls[0].requiresTranscode, true);
+    assert.strictEqual(calls[0].enginePipe, undefined);
+    assert.strictEqual(calls[0].playbackHint.gatewayMode, 'transcode');
+    assert.strictEqual(calls[0].playbackHint.audioMode, 'transcode');
+});
+
+test('unknown MKV provider busy is terminal and never opens a second lane', async () => {
+    const providerBusy = Object.assign(new Error('provider busy'), {
+        status: 458,
+        code: 'PROVIDER_BUSY'
+    });
+    const { API, calls } = loadCloudApi({ createSessionError: providerBusy });
+
+    await assert.rejects(
+        API.proxy.xtream.getStreamUrl(
+            '00000000-0000-4000-8000-000000000001',
+            'busy-unknown-mkv',
+            'movie',
+            'mkv',
+            {}
+        ),
+        (error) => error === providerBusy
+    );
+
+    assert.strictEqual(calls.length, 1);
+    assert.strictEqual(calls[0].mode, 'transcode');
+    assert.strictEqual(calls[0].requiresTranscode, true);
+    assert.strictEqual(calls[0].enginePipe, undefined);
+    assert.strictEqual(calls[0].playbackHint.gatewayMode, 'transcode');
 });
 
 test('a fresh probe replaces stale exact track maps even when the new maps are empty', () => {
@@ -703,18 +776,14 @@ test('explicit conversion of an unknown-codec MP4 opens exactly one Gateway lane
     assert.strictEqual(calls[0].enginePipe, undefined);
 });
 
-test('dense VOD remains direct on a native player', async () => {
+test('unknown MKV remains direct on a native player', async () => {
     const { API, calls } = loadCloudApi({ native: true });
     const result = await API.proxy.xtream.getStreamUrl(
         '00000000-0000-4000-8000-000000000001',
         '2045146',
         'movie',
         'mkv',
-        {
-            audioTrackCount: 23,
-            subtitleTrackCount: 34,
-            audioStreamIndex: 8
-        }
+        { audioStreamIndex: 8 }
     );
 
     assert.strictEqual(result.mode, 'direct');
