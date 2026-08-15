@@ -1363,6 +1363,8 @@ const MediaUtils = (() => {
             data.codecProfile,
             data.codec_profile,
             item.playbackHint?.codecProfile,
+            item.playbackHint?.codec_profile,
+            item.playback_hint?.codecProfile,
             item.playback_hint?.codec_profile
         );
         const hint = compactRecord({

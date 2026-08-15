@@ -705,29 +705,36 @@ test('a selected grouped MKV keeps its exact codec profile and opens one Gateway
     assert.strictEqual(calls[0].playbackHint.audioMode, 'transcode');
 });
 
-test('playback hint skips empty aliases before a nested camel-case exact profile', () => {
+test('playback hint skips empty aliases before every nested exact-profile casing', () => {
     const exactProfile = {
         videoCodec: 'h264',
         audioCodec: 'ac3',
         audioChannels: 6,
         durationSeconds: 6600,
     };
-    const playbackHint = loadMediaUtils().playbackHintFromItem({
-        codecProfile: {},
-        codec_profile: {},
-        defaultVariant: { codecProfile: {}, codec_profile: {} },
-        data: { codecProfile: {}, codec_profile: {} },
-        playbackHint: { codecProfile: exactProfile },
-    }, { container: 'mkv', streamType: 'movie' });
+    for (const nested of [
+        { playbackHint: { codecProfile: exactProfile } },
+        { playbackHint: { codec_profile: exactProfile } },
+        { playback_hint: { codecProfile: exactProfile } },
+        { playback_hint: { codec_profile: exactProfile } },
+    ]) {
+        const playbackHint = loadMediaUtils().playbackHintFromItem({
+            codecProfile: {},
+            codec_profile: {},
+            defaultVariant: { codecProfile: {}, codec_profile: {} },
+            data: { codecProfile: {}, codec_profile: {} },
+            ...nested,
+        }, { container: 'mkv', streamType: 'movie' });
 
-    assert.strictEqual(playbackHint.videoCodec, 'h264');
-    assert.strictEqual(playbackHint.audioCodec, 'ac3');
-    assert.strictEqual(playbackHint.audioChannels, 6);
-    assert.strictEqual(playbackHint.durationSeconds, 6600);
+        assert.strictEqual(playbackHint.videoCodec, 'h264');
+        assert.strictEqual(playbackHint.audioCodec, 'ac3');
+        assert.strictEqual(playbackHint.audioChannels, 6);
+        assert.strictEqual(playbackHint.durationSeconds, 6600);
+    }
 });
 
 test('the app shell cache-busts the exact-profile resolver', () => {
-    assert.match(read('public/app.html'), /\/js\/utils\/mediaUtils\.js\?v=17/);
+    assert.match(read('public/app.html'), /\/js\/utils\/mediaUtils\.js\?v=18/);
 });
 
 test('MKV provider busy is terminal and never opens an engine or second Gateway lane', async () => {
