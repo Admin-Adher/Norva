@@ -224,6 +224,52 @@ test('gateway: raw-pump ledger wired at /raw, /sessions and DELETE /raw-pumps', 
   assert.ok(src.includes("p.ownerHash === ownerKey && (globalCleanup || p.sid === sid)"), 'kill-switch must spare sibling sessions');
 });
 
+test('gateway: /raw waits for the provider slot after abort and allows one 458 handoff retry', () => {
+  const src = read('services/media-gateway/src/index.js');
+  const routeStart = src.indexOf("app.get('/raw/:token'");
+  const routeEnd = src.indexOf('// Tee the leading bytes', routeStart);
+  assert.notStrictEqual(routeStart, -1, '/raw route missing');
+  assert.notStrictEqual(routeEnd, -1, '/raw route end missing');
+  const route = src.slice(routeStart, routeEnd);
+
+  assert.ok(route.includes('abortedForHandoff'), '/raw must count aborted pumps/extractions');
+  assert.ok(
+    /if \(abortedForHandoff > 0 && PROVIDER_SLOT_RELEASE_DELAY_MS > 0\)/.test(route),
+    '/raw must wait PROVIDER_SLOT_RELEASE_DELAY_MS only after aborting a holder',
+  );
+  assert.ok(
+    /waitForRawBackoff\(PROVIDER_SLOT_RELEASE_DELAY_MS/.test(route),
+    '/raw must settle through waitForRawBackoff after abort',
+  );
+  assert.ok(
+    route.includes('abortedForHandoff += preemptAccountExtractions'),
+    'background extractions count toward the provider wait',
+  );
+  assert.ok(
+    /preemptAccountBackgroundWhispers\(pumpProxyKey, rawPlaybackReason\)/.test(route)
+      && !/abortedForHandoff \+= preemptAccountBackgroundWhispers/.test(route),
+    'background whisper CPU preemption must not count toward the provider wait',
+  );
+  assert.ok(route.includes('let rawHandoffRetryUsed = false'), 'handoff retry flag missing');
+  assert.equal(
+    (route.match(/rawHandoffRetryUsed = true/g) || []).length,
+    1,
+    'a 458 after abort has exactly one handoff retry',
+  );
+  assert.ok(
+    /upstream\.status === 458[\s\S]{0,180}rawHandoffRetryUsed = true/.test(route)
+      || /!rawHandoffRetryUsed[\s\S]{0,180}abortedForHandoff > 0[\s\S]{0,180}458/.test(route),
+    '458 handoff retry must be gated on aborted holders',
+  );
+  assert.ok(
+    route.includes('const retryable = shouldRetryProviderStatus(upstream.status)'),
+    'general retry ladder still uses shouldRetryProviderStatus',
+  );
+  const retryIdx = route.indexOf('const retryable = shouldRetryProviderStatus(upstream.status)');
+  const retryBlock = route.slice(retryIdx, retryIdx + 350);
+  assert.ok(!retryBlock.includes('458'), 'shouldRetryProviderStatus remains 5xx-only; 458 is not generally retryable');
+});
+
 test('gateway: same-session concurrent range reads are spared (keepSid)', () => {
   const src = read('services/media-gateway/src/index.js');
   assert.ok(src.includes('if (keepSid && pump.sid && pump.sid === keepSid) continue;'),

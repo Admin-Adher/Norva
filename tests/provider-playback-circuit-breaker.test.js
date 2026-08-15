@@ -46,6 +46,46 @@ test('Edge and gateway derive the same provider identity for prefixed Xtream URL
   }
 });
 
+test('shouldOpenCircuitForProviderBusy is false within 8s of lastSelfReleaseAt', async () => {
+  const policyPath = path.join(
+    root,
+    'supabase/functions/_shared/provider-playback-circuit-policy.mjs',
+  );
+  const policy = await import(`${pathToFileURL(policyPath).href}?handoff=${Date.now()}`);
+  const nowMs = Date.parse('2026-08-13T10:00:00.000Z');
+
+  assert.equal(policy.PROVIDER_HANDOFF_CIRCUIT_GRACE_MS, 8_000);
+  assert.equal(
+    policy.shouldOpenCircuitForProviderBusy({
+      nowMs,
+      lastSelfReleaseAt: new Date(nowMs - 1_000).toISOString(),
+    }),
+    false,
+  );
+  assert.equal(
+    policy.shouldOpenCircuitForProviderBusy({
+      nowMs,
+      lastSelfReleaseAt: nowMs - 7_999,
+    }),
+    false,
+  );
+  assert.equal(
+    policy.shouldOpenCircuitForProviderBusy({
+      nowMs,
+      lastSelfReleaseAt: new Date(nowMs - 8_000).toISOString(),
+    }),
+    true,
+  );
+  assert.equal(
+    policy.shouldOpenCircuitForProviderBusy({ nowMs, lastSelfReleaseAt: null }),
+    true,
+  );
+  assert.equal(
+    policy.shouldOpenCircuitForProviderBusy({ nowMs, lastSelfReleaseAt: 'not-a-date' }),
+    true,
+  );
+});
+
 test('first HTTP 458 opens an account circuit immediately and repeated failures back off', async () => {
   const policyPath = path.join(
     root,
@@ -218,8 +258,13 @@ test('client busy reports open a fixed circuit once while only a server-observed
   assert.match(migration, /if not p_escalate then[\s\S]*interval '120 seconds'[\s\S]*return query/i);
   assert.match(migration, /if found and v_previous\.blocked_until > v_now then[\s\S]*return query/i);
   assert.match(migration, /else[\s\S]*least\(16, v_previous\.failure_count \+ 1\)/i);
+  assert.match(report, /shouldOpenCircuitForProviderBusy/);
   assert.match(report, /openProviderPlaybackCircuit\(providerAccountHash, db, false\)/);
+  assert.match(report, /latestProviderSelfReleaseAt\(providerAccountHash, db, id\)/);
+  assert.match(report, /circuitSkipped/);
   assert.match(gateway, /openProviderPlaybackCircuit\(providerAccountHash, db, true\)/);
+  assert.match(gateway, /shouldOpenCircuitForProviderBusy/);
+  assert.match(gateway, /PROVIDER_SLOT_RELEASE_DELAY_MS/);
   assert.ok(
     gateway.indexOf('openProviderPlaybackCircuit(providerAccountHash, db, true)')
       < gateway.indexOf('throw new HttpError'),
@@ -231,12 +276,24 @@ test('client busy reports open a fixed circuit once while only a server-observed
 test('one playback intention makes only one Gateway creation request', () => {
   const edge = read('supabase/functions/norva-playback/index.ts');
   const gateway = section(edge, 'async function createGatewaySession(', 'async function requestGatewaySession(');
+  const requests = [...gateway.matchAll(/requestGatewaySession\(/g)];
 
   assert.equal(
-    (gateway.match(/requestGatewaySession\(/g) || []).length,
-    1,
-    'a generic 5xx must not open a second provider-backed Gateway session',
+    requests.length,
+    2,
+    'one initial create plus one optional 458-handoff retry',
   );
+  const busyBranch = gateway.indexOf('isProviderBusyFailure');
+  assert.ok(busyBranch >= 0, 'handoff retry is gated on provider busy');
+  assert.ok(
+    requests[0].index < busyBranch,
+    'the first requestGatewaySession call is the initial create',
+  );
+  assert.ok(
+    requests[1].index > busyBranch,
+    'the second requestGatewaySession call must be inside the 458-handoff retry',
+  );
+  assert.match(gateway, /shouldOpenCircuitForProviderBusy/);
   assert.doesNotMatch(edge, /shouldRetryGatewayWithAudioTranscode|audioFallbackReason:\s*"copy_start_failed"/);
 });
 

@@ -1533,6 +1533,21 @@ class SourceManager {
         }
     }
 
+    async releasePlaybackForSourceChange() {
+        try {
+            const watch = window.app?.pages?.watch || window.app?.watchPage;
+            if (watch && typeof watch.stop === 'function') {
+                await watch.stop();
+            }
+        } catch (_) {}
+        try {
+            const live = window.app?.pages?.live;
+            if (live && typeof live.stop === 'function') {
+                await live.stop();
+            }
+        } catch (_) {}
+    }
+
     /**
      * Update existing source
      */
@@ -1554,6 +1569,7 @@ class SourceManager {
                 if (password) data.password = password;
             }
 
+            await this.releasePlaybackForSourceChange();
             await API.sources.update(id, data);
             document.getElementById('modal').classList.remove('active');
             await this.loadSources();
@@ -1588,6 +1604,7 @@ class SourceManager {
         if (!ok) return;
 
         try {
+            await this.releasePlaybackForSourceChange();
             await API.sources.delete(id);
             await this.loadSources();
             this.notifySourceHealthChanged();
@@ -1607,6 +1624,7 @@ class SourceManager {
      */
     async toggleSource(id) {
         try {
+            await this.releasePlaybackForSourceChange();
             await API.sources.toggle(id);
             await this.loadSources();
             this.notifySourceHealthChanged();

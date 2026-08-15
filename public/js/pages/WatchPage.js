@@ -1456,6 +1456,7 @@ class WatchPage {
             } finally {
                 this._suspendResumeSnapshotSave = false;
             }
+            await this.waitForProviderSlotRelease(2500);
         }
         // A different title starts with the resolver's normal single-lane choice.
         // A browser-engine failure may offer an explicit server conversion later,
@@ -4844,6 +4845,8 @@ class WatchPage {
     }
 
     stop({ enqueueStoryboard = true } = {}) {
+        if (this._stopPromise) return this._stopPromise;
+
         this.cancelFirstFrameTelemetryObserver();
         this.cancelDeferredEngineTrackEnrichment();
         // Only a genuine exit after a rendered frame may warm the storyboard cache.
@@ -4913,7 +4916,11 @@ class WatchPage {
         this.updateDurationState();
 
         // Resolves once the previous transcode session has fully torn down.
-        return sessionTeardown;
+        const p = sessionTeardown.finally(() => {
+            if (this._stopPromise === p) this._stopPromise = null;
+        });
+        this._stopPromise = p;
+        return this._stopPromise;
     }
 
     // === Playback Controls ===

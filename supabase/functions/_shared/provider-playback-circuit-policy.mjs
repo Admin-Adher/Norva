@@ -1,6 +1,7 @@
 export const PROVIDER_BUSY_STATUS = 458;
 export const PROVIDER_CIRCUIT_BASE_COOLDOWN_MS = 2 * 60 * 1000;
 export const PROVIDER_CIRCUIT_MAX_COOLDOWN_MS = 15 * 60 * 1000;
+export const PROVIDER_HANDOFF_CIRCUIT_GRACE_MS = 8_000;
 
 function finiteEpoch(value) {
   if (typeof value === 'number') return Number.isFinite(value) ? value : null;
@@ -80,6 +81,25 @@ export function isProviderBusyFailure(value = {}) {
     || code === 'PROVIDER_ACCOUNT_BUSY'
     || code === 'BLOCK_HTTP_458'
     || code === 'PROBE_HTTP_458';
+}
+
+/**
+ * A 458 immediately after we released or superseded our own session is a
+ * mono-compte title handoff, not a second device. Skip opening the account
+ * circuit while that self-release is still inside the grace window.
+ *
+ * @param {{ nowMs?: number, lastSelfReleaseAt?: string | number | null, graceMs?: number }} [options]
+ */
+export function shouldOpenCircuitForProviderBusy({
+  nowMs = Date.now(),
+  lastSelfReleaseAt = null,
+  graceMs = PROVIDER_HANDOFF_CIRCUIT_GRACE_MS,
+} = {}) {
+  const releasedAt = finiteEpoch(lastSelfReleaseAt);
+  if (releasedAt === null) return true;
+  const safeNow = Number.isFinite(nowMs) ? nowMs : Date.now();
+  const safeGrace = Number.isFinite(graceMs) ? Math.max(0, graceMs) : PROVIDER_HANDOFF_CIRCUIT_GRACE_MS;
+  return (safeNow - releasedAt) >= safeGrace;
 }
 
 /**

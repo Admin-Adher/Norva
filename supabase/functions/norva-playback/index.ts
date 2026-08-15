@@ -15,7 +15,9 @@ import {
   createProviderProbeTickGuard,
   decideProviderCircuit,
   isProviderBusyFailure,
+  PROVIDER_HANDOFF_CIRCUIT_GRACE_MS,
   providerProbeTerminalCode,
+  shouldOpenCircuitForProviderBusy,
 } from "../_shared/provider-playback-circuit-policy.mjs";
 import { sealRelayCoordinatorRoute } from "../_shared/relay-coordinator-route.mjs";
 import { renderSubtitleReadyEmail } from "../_shared/subtitle-ready-email.ts";
@@ -167,6 +169,7 @@ Deno.serve(async (req) => {
         providerCircuitProtocol: 1,
         exactFileCodecProfileProtocol: 1,
         relayTakeoverProtocol: 1,
+        handoffCircuitGraceMs: PROVIDER_HANDOFF_CIRCUIT_GRACE_MS,
         engineTrackProbeBlocking: false,
         lidBenchmarkProtocol: 2,
         lidDetectOnlyProtocol: 1,
@@ -417,6 +420,31 @@ async function assertProviderCircuitClosed(
   });
 }
 
+async function latestProviderSelfReleaseAt(
+  providerAccountHash: string,
+  db: SupabaseClient,
+  excludeSessionId: string | null = null,
+): Promise<string | null> {
+  let query = db
+    .from("cloud_playback_sessions")
+    .select("superseded_at, updated_at, expires_at")
+    .eq("provider_account_hash", providerAccountHash)
+    .or("superseded_at.not.is.null,status.in.(expired,failed)")
+    .order("updated_at", { ascending: false })
+    .limit(1);
+  if (excludeSessionId) query = query.neq("id", excludeSessionId);
+  const { data, error } = await query.maybeSingle();
+  if (error) {
+    console.warn(
+      "[norva-playback] unable to load latest provider self-release",
+      error.message,
+    );
+    return null;
+  }
+  const row = recordOrEmpty(data);
+  return stringOrNull(row.superseded_at) || stringOrNull(row.updated_at) || stringOrNull(row.expires_at);
+}
+
 async function openProviderPlaybackCircuit(
   providerAccountHash: string,
   db: SupabaseClient,
@@ -547,15 +575,23 @@ async function reportProviderPlaybackFailure(
   if (updateError) throwDb(updateError, "Unable to record provider playback failure");
   if (!updated) return { ok: true, duplicate: true, code: networkCause };
 
-  const circuit = providerBusy
-    ? await openProviderPlaybackCircuit(providerAccountHash, db, false)
-    : null;
+  let circuit = null;
+  let circuitSkipped = false;
+  if (providerBusy) {
+    const lastSelfReleaseAt = await latestProviderSelfReleaseAt(providerAccountHash, db, id);
+    if (shouldOpenCircuitForProviderBusy({ lastSelfReleaseAt })) {
+      circuit = await openProviderPlaybackCircuit(providerAccountHash, db, false);
+    } else {
+      circuitSkipped = true;
+    }
+  }
   const cleanup = await expirePlaybackSession(id, userId, db).catch(() => null);
   return {
     ok: true,
     code: networkCause,
     upstreamStatus,
     circuit,
+    ...(circuitSkipped ? { circuitSkipped: true } : {}),
     transportReleased: Boolean(cleanup),
   };
 }
@@ -1097,6 +1133,7 @@ async function createPlaybackSession(
       mode,
       userAgent,
       requestedPlaybackHint,
+      releasedSuperseded,
     );
     await commitEdgeSessionCoordinator(edgeCoordination, {
       playbackSessionId: session.id,
@@ -2359,6 +2396,7 @@ async function createGatewaySession(
   mode: "direct" | "relay" | "transcode",
   userAgent: string | null = null,
   playbackHint: JsonRecord = {},
+  releasedSuperseded = 0,
 ) {
   const gatewayMode = gatewayModeForPlayback(mode, playbackHint);
   const gatewayHints = gatewayPlaybackHints(playbackHint);
@@ -2407,7 +2445,7 @@ async function createGatewaySession(
     ...gatewayHints,
     ...(userAgent ? { userAgent } : {}),
   };
-  const { response, body: gatewayBody } = await requestGatewaySession(
+  let { response, body: gatewayBody } = await requestGatewaySession(
     runtimeConfig.mediaGatewayUrl,
     runtimeConfig.mediaGatewayToken,
     baseGatewayBody,
@@ -2421,11 +2459,27 @@ async function createGatewaySession(
       code: gatewayFailureCode,
       upstreamStatus: response.status,
     })) {
-      // This is the only escalating signal: norva-playback itself observed the
-      // gateway's HTTP 458. Open the circuit before preserving that exact error.
-      await openProviderPlaybackCircuit(providerAccountHash, db, true);
+      const lastSelfReleaseAt = releasedSuperseded > 0
+        ? new Date().toISOString()
+        : await latestProviderSelfReleaseAt(providerAccountHash, db);
+      if (!shouldOpenCircuitForProviderBusy({ lastSelfReleaseAt })) {
+        await sleep(PROVIDER_SLOT_RELEASE_DELAY_MS);
+        const retry = await requestGatewaySession(
+          runtimeConfig.mediaGatewayUrl,
+          runtimeConfig.mediaGatewayToken,
+          baseGatewayBody,
+        );
+        response = retry.response;
+        gatewayBody = retry.body;
+      } else {
+        // This is the only escalating signal: norva-playback itself observed the
+        // gateway's HTTP 458. Open the circuit before preserving that exact error.
+        await openProviderPlaybackCircuit(providerAccountHash, db, true);
+      }
     }
-    throw new HttpError(response.status, "Media gateway refused the session", gatewayBody);
+    if (!response.ok) {
+      throw new HttpError(response.status, "Media gateway refused the session", gatewayBody);
+    }
   }
   const startupMs = Math.max(1, Math.round(performance.now() - startupStartedAt));
   const audioMode = stringOrNull(gatewayBody.audioMode ?? gatewayBody.audio_mode);
