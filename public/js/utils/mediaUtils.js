@@ -1290,7 +1290,7 @@ const MediaUtils = (() => {
     // unions deliberately contain tracks from sibling versions and would make
     // an ordinary file look artificially dense. Count unique, valid stream
     // indexes so duplicate/partial catalog rows cannot force the costly path.
-    function exactFileTrackCount(item, variant, data, kind) {
+    function exactFileTrackCount(item, variant, data, codec, kind) {
         const isAudio = kind === 'audio';
         const arrayKeys = isAudio
             ? ['audioTracks', 'audio_tracks']
@@ -1313,6 +1313,24 @@ const MediaUtils = (() => {
                     .filter(index => Number.isInteger(index) && index >= 0)
             );
             return indexes.size;
+        }
+
+        // The exact-file catalogue overlay can carry authoritative track maps
+        // inside codec_profile without duplicating them as scoped top-level
+        // arrays. Because `codec` was selected from that exact variant only,
+        // these nested maps are safe density evidence even without a scope tag.
+        if (codec && typeof codec === 'object') {
+            const tracks = arrayKeys
+                .map(key => codec[key])
+                .find(value => Array.isArray(value));
+            if (tracks) {
+                const indexes = new Set(
+                    tracks
+                        .map(track => Number(track?.index ?? track?.streamIndex ?? track?.stream_index))
+                        .filter(index => Number.isInteger(index) && index >= 0)
+                );
+                return indexes.size;
+            }
         }
         return undefined;
     }
@@ -1367,19 +1385,28 @@ const MediaUtils = (() => {
             item.playback_hint?.codecProfile,
             item.playback_hint?.codec_profile
         );
+        const exactVideoCodec = firstValue(codec.videoCodec, codec.video_codec, codec.video);
+        const exactAudioCodec = firstValue(codec.audioCodec, codec.audio_codec, codec.audio);
+        const hasExactAvPair = Boolean(exactVideoCodec && exactAudioCodec);
         const hint = compactRecord({
             ...base,
             streamType,
             itemType: streamType,
             audioSeriesId,
             container: base.container || item.container_extension || item.containerExtension || data.containerExtension || variant.container_extension || variant.containerExtension,
-            audioCodec: firstValue(item.audioCodec, item.audio_codec, codec.audioCodec, codec.audio_codec, codec.audio),
-            audioProfile: firstValue(item.audioProfile, item.audio_profile, codec.audioProfile, codec.audio_profile),
-            audioChannels: firstValue(item.audioChannels, item.audio_channels, codec.audioChannels, codec.audio_channels, codec.channels),
-            audioMode: firstValue(item.audioMode, item.audio_mode, codec.audioMode, codec.audio_mode),
-            videoCodec: firstValue(item.videoCodec, item.video_codec, codec.videoCodec, codec.video_codec, codec.video),
-            audioTrackCount: exactFileTrackCount(item, variant, data, 'audio'),
-            subtitleTrackCount: exactFileTrackCount(item, variant, data, 'subtitle'),
+            // Exact-file facts win over flat title/item annotations, which can
+            // be inherited or stale when several variants share one card.
+            audioCodec: firstValue(exactAudioCodec, item.audioCodec, item.audio_codec),
+            audioProfile: firstValue(codec.audioProfile, codec.audio_profile, item.audioProfile, item.audio_profile),
+            audioChannels: firstValue(codec.audioChannels, codec.audio_channels, codec.channels, item.audioChannels, item.audio_channels),
+            audioMode: firstValue(codec.audioMode, codec.audio_mode, item.audioMode, item.audio_mode),
+            videoCodec: firstValue(exactVideoCodec, item.videoCodec, item.video_codec),
+            // Only the exact-file codec profile is authoritative here. Flat
+            // title/item bitrate annotations have no guaranteed provenance or
+            // unit and must never opt a file into the Engine range lane.
+            bitRate: hasExactAvPair ? firstValue(codec.bitRate, codec.bit_rate, codec.bitrate) : undefined,
+            audioTrackCount: exactFileTrackCount(item, variant, data, codec, 'audio'),
+            subtitleTrackCount: exactFileTrackCount(item, variant, data, codec, 'subtitle'),
             durationSeconds: playbackDurationSeconds(item, variant, data, codec, base)
         });
 

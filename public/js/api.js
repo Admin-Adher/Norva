@@ -1169,6 +1169,15 @@ const CloudAdapter = (() => {
         return Math.floor(parsed);
     }
 
+    function positiveIntegerPlaybackHint(value) {
+        if (value === null || value === undefined || value === '') return undefined;
+        const normalized = typeof value === 'number' ? String(value) : String(value).trim();
+        if (!/^\d+$/.test(normalized)) return undefined;
+        const parsed = Number(normalized);
+        if (!Number.isSafeInteger(parsed) || parsed <= 0) return undefined;
+        return parsed;
+    }
+
     function playbackHintFromQuery(query, container, type = '') {
         const seekOffset = numericPlaybackHint(
             query.get('seekOffset') ??
@@ -1201,6 +1210,9 @@ const CloudAdapter = (() => {
             audioTrackCount: numericPlaybackHint(query.get('audioTrackCount') ?? query.get('audio_track_count')),
             subtitleTrackCount: numericPlaybackHint(query.get('subtitleTrackCount') ?? query.get('subtitle_track_count')),
             durationSeconds: numericPlaybackHint(query.get('durationSeconds') ?? query.get('duration_seconds')),
+            bitRate: positiveIntegerPlaybackHint(
+                query.get('bitRate') ?? query.get('bit_rate') ?? query.get('bitrate')
+            ),
             audioMode: query.get('audioMode'),
             videoCodec: query.get('videoCodec'),
             clientAudioPassthrough: query.get('clientAudioPassthrough') === '1' ? true : undefined
@@ -1266,6 +1278,30 @@ const CloudAdapter = (() => {
             || profile.audio
             || audioTracks.find((track) => track && track.codec)?.codec;
         return Boolean(normalizeCodecToken(videoCodec) && normalizeCodecToken(audioCodec));
+    }
+
+    const MAX_ENGINE_MKV_BIT_RATE_BPS = 3_200_000;
+
+    function hasKnownH264VodCodecHint(playbackHint) {
+        const hint = playbackHint && typeof playbackHint === 'object' ? playbackHint : {};
+        const profile = hint.codecProfile && typeof hint.codecProfile === 'object'
+            ? hint.codecProfile
+            : (hint.codec_profile && typeof hint.codec_profile === 'object' ? hint.codec_profile : {});
+        const codec = String(
+            hint.videoCodec || hint.video_codec || profile.videoCodec || profile.video_codec || profile.video || ''
+        ).toLowerCase().replace(/[^a-z0-9]+/g, '');
+        return codec.includes('h264') || codec.startsWith('avc1') || codec === 'avc';
+    }
+
+    function knownVodBitRate(playbackHint) {
+        const hint = playbackHint && typeof playbackHint === 'object' ? playbackHint : {};
+        const profile = hint.codecProfile && typeof hint.codecProfile === 'object'
+            ? hint.codecProfile
+            : (hint.codec_profile && typeof hint.codec_profile === 'object' ? hint.codec_profile : {});
+        return positiveIntegerPlaybackHint(
+            hint.bitRate ?? hint.bit_rate ?? hint.bitrate
+                ?? profile.bitRate ?? profile.bit_rate ?? profile.bitrate
+        );
     }
 
     function normalizeCodecToken(value) {
@@ -1733,16 +1769,20 @@ const CloudAdapter = (() => {
                     && !nativePlayer
                     && shouldDenseVodUseGateway(container, playbackHint);
                 // Matroska is never browser-native. Once the exact file has a
-                // complete A/V profile, open one Gateway lane: FFmpeg can copy
-                // proven H.264/AAC streams and encode only unsafe codecs. An
-                // unknown MKV stays on the bounded in-browser engine; discovering
-                // codecs synchronously in Gateway can otherwise add tens of
-                // seconds to the click path. The background exact-file backfill
-                // upgrades those files without competing with an active viewer.
+                // complete A/V profile, keep it on one Gateway lane by default.
+                // The sole conservative exception is a proven H.264/AVC MKV whose
+                // total bitrate is known and at most 3.2 Mbps: one bounded Engine
+                // Range lane avoids making a low-rate input compete with server-side
+                // HLS startup. Unknown/invalid/high bitrates and unsafe video stay
+                // on Gateway. An unknown-codec MKV keeps the established bounded
+                // Engine discovery path.
                 const profiledMkv = isVodPlayback
                     && !nativePlayer
                     && isMatroskaContainer(container)
                     && hasReliableVodCodecHint(playbackHint);
+                const lowBitrateH264Mkv = profiledMkv
+                    && hasKnownH264VodCodecHint(playbackHint)
+                    && knownVodBitRate(playbackHint) <= MAX_ENGINE_MKV_BIT_RATE_BPS;
                 // Browser-safe film/series (mp4 + H.264/AAC): the browser plays it
                 // directly, so serve it through the RELAY (pass-through, no transcode
                 // server) rather than the cloud gateway. The browser then seeks
@@ -1768,7 +1808,7 @@ const CloudAdapter = (() => {
                 const engineVod = isVodPlayback
                     && !nativePlayer
                     && !denseTrackVod
-                    && !profiledMkv
+                    && (!profiledMkv || lowBitrateH264Mkv)
                     && !browserSafeVod
                     && engineCanPlayContainer(container)
                     && typeof window !== 'undefined'
@@ -1781,7 +1821,7 @@ const CloudAdapter = (() => {
                             : engineVod
                                 ? 'engine'
                                 : (((isVodPlayback || needsGateway) && preferredMode !== 'direct') ? 'transcode' : preferredMode));
-                if (profiledMkv) {
+                if (profiledMkv && mode !== 'engine') {
                     // `mode=transcode` selects the Gateway transport; `remux`
                     // lets the Gateway decide per exact stream whether to copy
                     // or encode. Unknown/unsafe audio is normalized to AAC, while
@@ -1802,7 +1842,9 @@ const CloudAdapter = (() => {
                     // left untouched so an explicit user selection survives.
                     playbackHint.gatewayMode = 'remux';
                     playbackHint.audioMode = 'transcode';
-                } else if ((type === 'series' || type === 'movie') && !playbackHint.gatewayMode) {
+                } else if (mode !== 'engine'
+                    && (type === 'series' || type === 'movie')
+                    && !playbackHint.gatewayMode) {
                     const needsFullGatewayTranscode = shouldVodUseGatewayTranscode(container, playbackHint);
                     // VOD only uses remux when the container, video and audio
                     // are browser-safe. MKV + AC3/5.1 can decode poorly after

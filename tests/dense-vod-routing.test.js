@@ -68,11 +68,13 @@ test('playback hint carries the compact codec facts already known for the exact 
     const MediaUtils = loadMediaUtils();
     const hint = MediaUtils.playbackHintFromItem({
         container_extension: 'mkv',
+        bit_rate: 9000000,
         codecProfile: {
             videoCodec: 'h264',
             audioCodec: 'eac3',
             audioProfile: 'E-AC-3',
             audioChannels: 6,
+            bitRate: 3200000,
             durationSeconds: 9333
         }
     });
@@ -83,6 +85,7 @@ test('playback hint carries the compact codec facts already known for the exact 
             audioCodec: hint.audioCodec,
             audioProfile: hint.audioProfile,
             audioChannels: hint.audioChannels,
+            bitRate: hint.bitRate,
             durationSeconds: hint.durationSeconds
         },
         {
@@ -90,6 +93,7 @@ test('playback hint carries the compact codec facts already known for the exact 
             audioCodec: 'eac3',
             audioProfile: 'E-AC-3',
             audioChannels: 6,
+            bitRate: 3200000,
             durationSeconds: 9333
         }
     );
@@ -490,6 +494,12 @@ test('dense browser VOD uses Gateway remux with audio transcode and selected tra
     const playbackHint = loadMediaUtils().playbackHintFromItem({
         container_extension: 'mkv',
         tmdb: { runtime: 156 },
+        codec_profile: {
+            videoCodec: 'h264',
+            audioCodec: 'eac3',
+            audioChannels: 6,
+            bitRate: 3000000,
+        },
         audio_tracks_scope: 'file',
         audio_tracks: indexedTracks(23, 1),
         subtitle_tracks_scope: 'file',
@@ -514,6 +524,40 @@ test('dense browser VOD uses Gateway remux with audio transcode and selected tra
     assert.strictEqual(calls[0].playbackHint.subtitleTrackCount, 34);
     assert.strictEqual(calls[0].playbackHint.durationSeconds, 9360);
     assert.strictEqual(calls[0].playbackHint.audioStreamIndex, 8);
+});
+
+test('dense track maps nested only in the exact codec profile still force Gateway', async () => {
+    const { API, calls } = loadCloudApi();
+    const playbackHint = loadMediaUtils().playbackHintFromItem({
+        container_extension: 'mkv',
+        codec_profile: {
+            videoCodec: 'h264',
+            audioCodec: 'aac',
+            audioProfile: 'LC',
+            audioChannels: 2,
+            bitRate: 3000000,
+            audioTracks: indexedTracks(23, 1),
+            subtitles: indexedTracks(34, 100),
+        },
+    });
+
+    assert.strictEqual(playbackHint.audioTrackCount, 23);
+    assert.strictEqual(playbackHint.subtitleTrackCount, 34);
+
+    const result = await API.proxy.xtream.getStreamUrl(
+        '00000000-0000-4000-8000-000000000001',
+        'nested-dense-profile',
+        'movie',
+        'mkv',
+        playbackHint
+    );
+
+    assert.strictEqual(result.mode, 'transcode');
+    assert.strictEqual(calls.length, 1);
+    assert.strictEqual(calls[0].mode, 'transcode');
+    assert.strictEqual(calls[0].enginePipe, undefined);
+    assert.strictEqual(calls[0].playbackHint.gatewayMode, 'remux');
+    assert.strictEqual(calls[0].playbackHint.audioMode, undefined);
 });
 
 test('ordinary unknown MKV keeps one bounded Engine lane until exact codecs are known', async () => {
@@ -578,7 +622,7 @@ test('a fresh probe replaces stale exact track maps even when the new maps are e
     );
 });
 
-test('known H264 AAC MKV keeps video and audio on the fast Gateway copy path', async () => {
+test('known low-bitrate H264 AAC MKV uses one bounded Engine range lane', async () => {
     const { API, calls } = loadCloudApi();
     const playbackHint = loadMediaUtils().playbackHintFromItem({
         container_extension: 'mkv',
@@ -587,6 +631,7 @@ test('known H264 AAC MKV keeps video and audio on the fast Gateway copy path', a
             audioCodec: 'aac',
             audioProfile: 'LC',
             audioChannels: 2,
+            bitRate: 3100000,
         },
     });
     const result = await API.proxy.xtream.getStreamUrl(
@@ -597,11 +642,271 @@ test('known H264 AAC MKV keeps video and audio on the fast Gateway copy path', a
         playbackHint
     );
 
+    assert.strictEqual(result.mode, 'engine');
+    assert.strictEqual(calls.length, 1);
+    assert.strictEqual(calls[0].mode, 'relay');
+    assert.strictEqual(calls[0].enginePipe, true);
+    assert.strictEqual(calls[0].requiresTranscode, undefined);
+    assert.strictEqual(calls[0].playbackHint.bitRate, 3100000);
+    assert.strictEqual(calls[0].playbackHint.gatewayMode, undefined);
+    assert.strictEqual(calls[0].playbackHint.audioMode, undefined);
+});
+
+test('the 3.2 Mbps boundary accepts exact H264 and AVC aliases on one Engine lane', async () => {
+    const cases = [
+        { videoCodec: 'h264', bitRateHint: { bitRate: 3200000 } },
+        { videoCodec: 'H.264', bitRateHint: { bit_rate: '3200000' } },
+        { videoCodec: 'avc', bitRateHint: { bitrate: 3200000 } },
+        { videoCodec: 'avc1.640028', bitRateHint: { bitRate: 3200000 } },
+    ];
+    for (const { videoCodec, bitRateHint } of cases) {
+        const { API, calls } = loadCloudApi();
+        const playbackHint = loadMediaUtils().playbackHintFromItem({
+            container_extension: 'mkv',
+            codec_profile: {
+                videoCodec,
+                audioCodec: 'aac',
+                audioProfile: 'LC',
+                audioChannels: 2,
+                ...bitRateHint,
+            },
+        });
+
+        const result = await API.proxy.xtream.getStreamUrl(
+            '00000000-0000-4000-8000-000000000001',
+            `boundary-${videoCodec}`,
+            'movie',
+            'mkv',
+            playbackHint
+        );
+
+        assert.strictEqual(result.mode, 'engine', `${videoCodec} must be accepted at the inclusive boundary`);
+        assert.strictEqual(calls.length, 1);
+        assert.strictEqual(calls[0].mode, 'relay');
+        assert.strictEqual(calls[0].enginePipe, true);
+        assert.strictEqual(calls[0].playbackHint.bitRate, 3200000);
+    }
+});
+
+test('the routing query normalizes bitRate, bit_rate, and bitrate aliases', async () => {
+    for (const alias of ['bitRate', 'bit_rate', 'bitrate']) {
+        const { API, calls } = loadCloudApi();
+        const result = await API.proxy.xtream.getStreamUrl(
+            '00000000-0000-4000-8000-000000000001',
+            `query-alias-${alias}`,
+            'movie',
+            'mkv',
+            {
+                videoCodec: 'h264',
+                audioCodec: 'aac',
+                audioChannels: 2,
+                [alias]: 3200000,
+            }
+        );
+
+        assert.strictEqual(result.mode, 'engine', `${alias} must select Engine at the boundary`);
+        assert.strictEqual(calls.length, 1);
+        assert.strictEqual(calls[0].mode, 'relay');
+        assert.strictEqual(calls[0].enginePipe, true);
+        assert.strictEqual(calls[0].playbackHint.bitRate, 3200000);
+    }
+});
+
+test('high, missing, and invalid H264 MKV bitrates remain on one Gateway lane', async () => {
+    const rejectedBitRates = [
+        { label: 'above-boundary-camel', bitRateHint: { bitRate: 3200001 } },
+        { label: 'above-boundary-snake', bitRateHint: { bit_rate: 3200001 } },
+        { label: 'above-boundary-flat', bitRateHint: { bitrate: 3200001 } },
+        { label: 'missing', bitRateHint: {} },
+        { label: 'zero', bitRateHint: { bitRate: 0 } },
+        { label: 'negative', bitRateHint: { bitRate: -1 } },
+        { label: 'mixed-unit-string', bitRateHint: { bitRate: '3200000bps' } },
+        { label: 'not-a-number', bitRateHint: { bitRate: 'not-a-number' } },
+    ];
+
+    for (const { label, bitRateHint } of rejectedBitRates) {
+        const { API, calls } = loadCloudApi();
+        const playbackHint = loadMediaUtils().playbackHintFromItem({
+            container_extension: 'mkv',
+            codec_profile: {
+                videoCodec: 'h264',
+                audioCodec: 'aac',
+                audioProfile: 'LC',
+                audioChannels: 2,
+                ...bitRateHint,
+            },
+        });
+
+        const result = await API.proxy.xtream.getStreamUrl(
+            '00000000-0000-4000-8000-000000000001',
+            `rejected-${label}`,
+            'movie',
+            'mkv',
+            playbackHint
+        );
+
+        assert.strictEqual(result.mode, 'transcode', `${label} must stay on Gateway`);
+        assert.strictEqual(calls.length, 1);
+        assert.strictEqual(calls[0].mode, 'transcode');
+        assert.strictEqual(calls[0].requiresTranscode, true);
+        assert.strictEqual(calls[0].enginePipe, undefined);
+        assert.strictEqual(calls[0].playbackHint.gatewayMode, 'remux');
+    }
+});
+
+test('a low flat item bitrate never substitutes for a missing exact-profile bitrate', async () => {
+    const { API, calls } = loadCloudApi();
+    const playbackHint = loadMediaUtils().playbackHintFromItem({
+        container_extension: 'mkv',
+        bit_rate: 2500,
+        codec_profile: {
+            videoCodec: 'h264',
+            audioCodec: 'aac',
+            audioProfile: 'LC',
+            audioChannels: 2,
+        },
+    });
+
+    assert.strictEqual(playbackHint.bitRate, undefined);
+    const result = await API.proxy.xtream.getStreamUrl(
+        '00000000-0000-4000-8000-000000000001',
+        'ambiguous-flat-bitrate',
+        'movie',
+        'mkv',
+        playbackHint
+    );
+
     assert.strictEqual(result.mode, 'transcode');
     assert.strictEqual(calls.length, 1);
     assert.strictEqual(calls[0].mode, 'transcode');
+    assert.strictEqual(calls[0].requiresTranscode, true);
+    assert.strictEqual(calls[0].enginePipe, undefined);
     assert.strictEqual(calls[0].playbackHint.gatewayMode, 'remux');
-    assert.strictEqual(calls[0].playbackHint.audioMode, undefined);
+});
+
+test('known low-bitrate HEVC MKV remains on the single Gateway conversion lane', async () => {
+    const { API, calls } = loadCloudApi();
+    const playbackHint = loadMediaUtils().playbackHintFromItem({
+        container_extension: 'mkv',
+        codec_profile: {
+            videoCodec: 'hevc',
+            audioCodec: 'eac3',
+            audioChannels: 6,
+            bitRate: 2500000,
+        },
+    });
+
+    const result = await API.proxy.xtream.getStreamUrl(
+        '00000000-0000-4000-8000-000000000001',
+        'known-hevc-mkv',
+        'movie',
+        'mkv',
+        playbackHint
+    );
+
+    assert.strictEqual(result.mode, 'transcode');
+    assert.strictEqual(calls.length, 1);
+    assert.strictEqual(calls[0].mode, 'transcode');
+    assert.strictEqual(calls[0].requiresTranscode, true);
+    assert.strictEqual(calls[0].enginePipe, undefined);
+    assert.strictEqual(calls[0].playbackHint.gatewayMode, 'remux');
+    assert.strictEqual(calls[0].playbackHint.audioMode, 'transcode');
+});
+
+test('exact-file codecs override conflicting flat item annotations before routing', async () => {
+    const { API, calls } = loadCloudApi();
+    const playbackHint = loadMediaUtils().playbackHintFromItem({
+        container_extension: 'mkv',
+        videoCodec: 'h264',
+        audioCodec: 'aac',
+        audioProfile: 'LC',
+        audioChannels: 2,
+        codec_profile: {
+            videoCodec: 'hevc',
+            audioCodec: 'eac3',
+            audioProfile: 'E-AC-3',
+            audioChannels: 6,
+            bitRate: 2500000,
+        },
+    });
+
+    assert.strictEqual(playbackHint.videoCodec, 'hevc');
+    assert.strictEqual(playbackHint.audioCodec, 'eac3');
+    assert.strictEqual(playbackHint.audioProfile, 'E-AC-3');
+    assert.strictEqual(playbackHint.audioChannels, 6);
+
+    const result = await API.proxy.xtream.getStreamUrl(
+        '00000000-0000-4000-8000-000000000001',
+        'exact-hevc-conflicts-with-flat-h264',
+        'movie',
+        'mkv',
+        playbackHint
+    );
+
+    assert.strictEqual(result.mode, 'transcode');
+    assert.strictEqual(calls.length, 1);
+    assert.strictEqual(calls[0].mode, 'transcode');
+    assert.strictEqual(calls[0].requiresTranscode, true);
+    assert.strictEqual(calls[0].enginePipe, undefined);
+    assert.strictEqual(calls[0].playbackHint.videoCodec, 'hevc');
+    assert.strictEqual(calls[0].playbackHint.audioCodec, 'eac3');
+});
+
+test('a partial exact profile cannot combine with flat codecs to opt into Engine', async () => {
+    const { API, calls } = loadCloudApi();
+    const playbackHint = loadMediaUtils().playbackHintFromItem({
+        container_extension: 'mkv',
+        videoCodec: 'h264',
+        codec_profile: {
+            audioCodec: 'aac',
+            bitRate: 2500000,
+        },
+    });
+
+    assert.strictEqual(playbackHint.videoCodec, 'h264');
+    assert.strictEqual(playbackHint.audioCodec, 'aac');
+    assert.strictEqual(playbackHint.bitRate, undefined);
+
+    const result = await API.proxy.xtream.getStreamUrl(
+        '00000000-0000-4000-8000-000000000001',
+        'partial-profile-flat-codec',
+        'movie',
+        'mkv',
+        playbackHint
+    );
+
+    assert.strictEqual(result.mode, 'transcode');
+    assert.strictEqual(calls.length, 1);
+    assert.strictEqual(calls[0].mode, 'transcode');
+    assert.strictEqual(calls[0].enginePipe, undefined);
+    assert.strictEqual(calls[0].playbackHint.gatewayMode, 'remux');
+});
+
+test('only the combined dense threshold excludes low-bitrate H264 MKV from Engine', async () => {
+    for (const counts of [
+        { audioTrackCount: 19, subtitleTrackCount: 30 },
+        { audioTrackCount: 20, subtitleTrackCount: 29 },
+    ]) {
+        const { API, calls } = loadCloudApi();
+        const result = await API.proxy.xtream.getStreamUrl(
+            '00000000-0000-4000-8000-000000000001',
+            `non-dense-${counts.audioTrackCount}-${counts.subtitleTrackCount}`,
+            'movie',
+            'mkv',
+            {
+                ...counts,
+                videoCodec: 'h264',
+                audioCodec: 'aac',
+                audioChannels: 2,
+                bitRate: 3000000,
+            }
+        );
+
+        assert.strictEqual(result.mode, 'engine');
+        assert.strictEqual(calls.length, 1);
+        assert.strictEqual(calls[0].mode, 'relay');
+        assert.strictEqual(calls[0].enginePipe, true);
+    }
 });
 
 test('a selected grouped MKV keeps its exact codec profile and opens one Gateway remux lane', async () => {
@@ -701,6 +1006,7 @@ test('a selected grouped MKV keeps its exact codec profile and opens one Gateway
     assert.strictEqual(calls[0].enginePipe, undefined, 'the known profile must not open the Engine lane');
     assert.strictEqual(calls[0].playbackHint.videoCodec, 'h264');
     assert.strictEqual(calls[0].playbackHint.audioCodec, 'ac3');
+    assert.strictEqual(calls[0].playbackHint.bitRate, 8500000);
     assert.strictEqual(calls[0].playbackHint.gatewayMode, 'remux');
     assert.strictEqual(calls[0].playbackHint.audioMode, 'transcode');
 });
@@ -733,11 +1039,12 @@ test('playback hint skips empty aliases before every nested exact-profile casing
     }
 });
 
-test('the app shell cache-busts the exact-profile resolver', () => {
-    assert.match(read('public/app.html'), /\/js\/utils\/mediaUtils\.js\?v=18/);
+test('the app shell cache-busts the bitrate-aware MKV router and exact-profile resolver', () => {
+    assert.match(read('public/app.html'), /\/js\/api\.js\?v=84/);
+    assert.match(read('public/app.html'), /\/js\/utils\/mediaUtils\.js\?v=19/);
 });
 
-test('MKV provider busy is terminal and never opens an engine or second Gateway lane', async () => {
+test('low-bitrate Engine MKV provider busy is terminal and never opens a second lane', async () => {
     const providerBusy = Object.assign(new Error('provider busy'), {
         status: 458,
         code: 'PROVIDER_BUSY'
@@ -750,14 +1057,62 @@ test('MKV provider busy is terminal and never opens an engine or second Gateway 
             'busy-mkv',
             'movie',
             'mkv',
-            { videoCodec: 'h264', audioCodec: 'aac', audioChannels: 2 }
+            { videoCodec: 'h264', audioCodec: 'aac', audioChannels: 2, bitRate: 3000000 }
         ),
         (error) => error === providerBusy
     );
 
     assert.strictEqual(calls.length, 1);
+    assert.strictEqual(calls[0].mode, 'relay');
+    assert.strictEqual(calls[0].enginePipe, true);
+    assert.strictEqual(calls[0].requiresTranscode, undefined);
+    assert.strictEqual(calls[0].playbackHint.gatewayMode, undefined);
+});
+
+test('explicit transcode keeps a low-bitrate H264 MKV on one Gateway lane', async () => {
+    const { API, calls } = loadCloudApi();
+    const result = await API.proxy.xtream.getStreamUrl(
+        '00000000-0000-4000-8000-000000000001',
+        'explicit-transcode-mkv',
+        'movie',
+        'mkv',
+        {
+            mode: 'transcode',
+            videoCodec: 'h264',
+            audioCodec: 'aac',
+            audioChannels: 2,
+            bitRate: 3000000,
+        }
+    );
+
+    assert.strictEqual(result.mode, 'transcode');
+    assert.strictEqual(calls.length, 1);
     assert.strictEqual(calls[0].mode, 'transcode');
+    assert.strictEqual(calls[0].requiresTranscode, true);
+    assert.strictEqual(calls[0].enginePipe, undefined);
     assert.strictEqual(calls[0].playbackHint.gatewayMode, 'remux');
+});
+
+test('live MKV never enters the low-bitrate VOD Engine route', async () => {
+    const { API, calls } = loadCloudApi();
+    const result = await API.proxy.xtream.getStreamUrl(
+        '00000000-0000-4000-8000-000000000001',
+        'live-mkv',
+        'live',
+        'mkv',
+        {
+            videoCodec: 'h264',
+            audioCodec: 'aac',
+            audioChannels: 2,
+            bitRate: 3000000,
+        }
+    );
+
+    assert.strictEqual(result.mode, 'transcode');
+    assert.strictEqual(calls.length, 1);
+    assert.strictEqual(calls[0].mode, 'transcode');
+    assert.strictEqual(calls[0].requiresTranscode, true);
+    assert.strictEqual(calls[0].enginePipe, undefined);
 });
 
 test('dense but browser-safe MP4 keeps the normal relay path', async () => {

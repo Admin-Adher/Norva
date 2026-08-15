@@ -75,6 +75,6 @@ test('catalog rollout proves the exact-file codec protocol on every Edge replica
   assert.match(deploy, /EXPECTED_FLAT_CODEC_PROFILE_PROTOCOL=1/);
   assert.match(deploy, /function_health_in_service "\$service" norva-catalog/);
   assert.match(deploy, /norva-catalog source digest mismatch/);
-  assert.match(app, /\/js\/api\.js\?v=83/);
+  assert.match(app, /\/js\/api\.js\?v=84/);
   assert.match(app, /\/js\/pages\/WatchPage\.js\?v=135/);
 });
