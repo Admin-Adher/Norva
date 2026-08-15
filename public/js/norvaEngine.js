@@ -65,13 +65,15 @@
   const STARTUP_PLAYABLE_AHEAD_SEC = 0.5;      // accepted keyframe range must include decodable media after it
   const STARTUP_NUDGE_INSIDE_SEC = 0.05;       // move just inside the first future decodable range
   const FETCH_TIMEOUT_MS = 60000;              // steady-state timeout; startup is clamped below
-  // Header-only Matroska open intentionally skips find_stream_info. On a resume,
-  // movenc's keyframe-only policy can otherwise retain the whole first long GOP
-  // before emitting the first moof (the Bêtes fixture needed >3 MiB and hit the
-  // global startup deadline). Keep keyframe cuts, but add a bounded duration cut
-  // for this validated fast-open cohort so the first decodable fragment flushes
-  // after at most two seconds of media. Legacy/full-scan paths stay unchanged.
-  const FAST_OPEN_FRAGMENT_DURATION_US = 2 * 1000 * 1000;
+  const DEFAULT_PUMP_READ_BATCH_BYTES = 512 * 1024;
+  const H264_MKV_PUMP_READ_BATCH_BYTES = 256 * 1024;
+  // A resumed H264 Matroska can land just before a long GOP. On that exact
+  // source shape (full-scan or validated header-only fast-open),
+  // movenc's keyframe-only policy can otherwise retain the whole first long GOP.
+  // Project's resume at 63 s exposed that behavior; fresh playback at 0 remained
+  // healthy. Keep keyframe cuts while forcing a decodable fragment out after at
+  // most two seconds of media.
+  const MKV_FRAGMENT_DURATION_US = 2 * 1000 * 1000;
 
   const AAC_SAMPLE_RATE = 48000;
   const AAC_CHANNEL_LAYOUT = 3; // stereo
@@ -211,9 +213,9 @@
     return /(?:^|[^A-Z0-9])(?:BLOCK|PROBE)_HTTP_458(?:$|[^0-9])|(?:^|[^0-9])HTTP[ _]?458(?:$|[^0-9])|PROVIDER_(?:ACCOUNT_)?BUSY|max connections?/i.test(text);
   }
 
-  // A startup HTTP 458 is reported inside the Engine before its exact Error is
-  // handed back to WatchPage.load(). Keep report ownership on that Error so the
-  // outer terminal UI/circuit path does not persist the same failure twice.
+  // An authoritative startup failure is reported inside the Engine before its
+  // exact Error is handed back to WatchPage.load(). Keep report ownership on that
+  // Error so the outer terminal UI/circuit path does not persist it twice.
   // These non-enumerable fields never enter provider diagnostics or telemetry.
   function markPlaybackFailureReported(error, stage) {
     if (!error || (typeof error !== 'object' && typeof error !== 'function')) return false;
@@ -392,7 +394,7 @@
     av1: ['av01.0.08M.08'],
   };
 
-  const ENGINE_VERSION = 53;
+  const ENGINE_VERSION = 54;
 
   class NorvaEngine {
     constructor(videoEl, opts = {}) {
@@ -451,6 +453,12 @@
       this.ended = false;
       this.destroyed = false;
       this._pumpRunning = false;
+      this._pumpReadBatchBytes = DEFAULT_PUMP_READ_BATCH_BYTES;
+      // H264-MKV startup/reseek uses one smaller transactional demux batch so
+      // the first closed fragment is committed promptly. The mux generation
+      // owning that temporary cap is recorded here; the first accepted media
+      // callback restores the normal steady-state batch before the next read.
+      this._boundedPumpBatchGeneration = null;
       this._stopRequested = false;
       this._fatalSignaled = false;
       // First provider-busy cause that closed this engine's Range circuit. This
@@ -472,6 +480,10 @@
       this.copyAudio = false;
       this._lastReadError = null; // precise reason a byte-range fetch failed
       this._raCache = [];         // read-ahead windows (filled before _openInput)
+      // The LRU can evict byte zero after demux probing. Once the EBML magic has
+      // positively identified this engine's one source, retain that identity for
+      // every mux reinitialisation/seek rather than re-reading an evictable cache.
+      this._sourceIsMatroska = false;
       this.timings = {};          // per-stage startup timings (ms)
       this._fetchCount = 0; this._fetchBytes = 0; this._fetchMs = 0;
       this._fetchAttemptCount = 0;
@@ -548,7 +560,7 @@
       // rejected append can be explained instead of just observed. Pure accounting,
       // no effect on playback. Surfaced via engineSnapshot().
       this._dropWrites = false;       // when true, legacy muxer trailer bytes are discarded
-      this._muxSkipTrailer = false;   // true only after fast-open skip_trailer is accepted
+      this._muxSkipTrailer = false;   // true only after bounded H264-MKV skip_trailer is accepted
       this._diag = {
         mime: null, videoCodecString: null, videoCands: null, audioTag: null,
         vName: null, aName: null, copyAudio: null, durationSec: null,
@@ -1076,7 +1088,10 @@
       this._stopRequested = true;
       this._clearStartupDeadlineTimer();
       try { this._ac.abort(); } catch (_) {}
-      try { this.report({ stage: 'startup:' + stage, message: error.message }); } catch (_) {}
+      try {
+        this.report({ stage: 'startup:' + stage, message: error.message });
+        markPlaybackFailureReported(error, 'startup:' + stage);
+      } catch (_) {}
       const routedToLoad = this._settleStartupOutcome(error);
       if (!routedToLoad && !this._fatalSignaled) {
         this._fatalSignaled = true;
@@ -1443,7 +1458,7 @@
       // Header-only decode/transcode was fixture-validated end-to-end for AC-3,
       // which legitimately has no CodecPrivate bytes. AAC can carry an implicit
       // SBR/PS sync extension beyond its base AudioSpecificConfig, so keep AAC,
-      // E-AC-3 and every other codec on find_stream_info in the v47 cohort.
+      // E-AC-3 and every other codec on find_stream_info in this cohort.
       if (audioName !== 'ac3') {
         return { ok: false, reason: 'audio-codec-unvalidated' };
       }
@@ -1562,11 +1577,14 @@
     }
 
     _sourceLooksLikeMatroska() {
+      if (this._sourceIsMatroska === true) return true;
       try {
         const w = this._raCache && this._raCache.find((x) => x.start === 0);
         const b = w && w.buf;
-        return !!b && b.length >= 4
+        const isMatroska = !!b && b.length >= 4
           && b[0] === 0x1a && b[1] === 0x45 && b[2] === 0xdf && b[3] === 0xa3;
+        if (isMatroska) this._sourceIsMatroska = true;
+        return isMatroska;
       } catch (_) { return false; }
     }
 
@@ -1580,6 +1598,7 @@
         if (!this._diag || this._diag.sourceHead) return;
         const w = this._raCache && this._raCache.find((x) => x.start === 0);
         if (!w || !w.buf || !w.buf.length) return;
+        this._sourceLooksLikeMatroska();
         const head = w.buf.subarray(0, Math.min(n, w.buf.length));
         let hex = '', ascii = '';
         for (let i = 0; i < head.length; i++) {
@@ -2212,7 +2231,12 @@
       if (this.timings) {
         delete this.timings.muxSkipTrailer;
         delete this.timings.muxFragmentDurationUs;
+        delete this.timings.muxFlushPackets;
+        delete this.timings.muxPumpReadBatchBytes;
+        delete this.timings.muxSteadyPumpReadBatchBytes;
       }
+      this._pumpReadBatchBytes = DEFAULT_PUMP_READ_BATCH_BYTES;
+      this._boundedPumpBatchGeneration = null;
       // _initMuxer also runs after a seek. Clear any packet retained by the old
       // generation before creating or writing the replacement muxer.
       this._discardPendingVideoPacket();
@@ -2271,7 +2295,7 @@
           return;
         }
         // Legacy MP4 trailers contain mfra/mfro file-seeking metadata, which is not
-        // an MSE media segment and must be dropped. A validated fast-open mux uses
+        // an MSE media segment and must be dropped. A bounded H264-MKV mux uses
         // skip_trailer instead; its av_write_trailer callbacks close the final media
         // fragment and deliberately keep _dropWrites false.
         if (this._dropWrites) { d.trailerBytesDropped = (d.trailerBytesDropped || 0) + chunk.length; return; }
@@ -2327,12 +2351,14 @@
           if (pos + chunk.length > d.writeHighWater) d.writeHighWater = pos + chunk.length;
         } catch (_) {}
         expectedWritePos += chunk.length;
+        let firstMediaWrite = false;
         try {
           if (this._diagHeaderPhase) {
             d.initBytes += chunk.length;
             const boxes = mp4Boxes(chunk);
             d.initBoxes = d.initBoxes ? d.initBoxes + ' + ' + boxes : boxes;
           } else if (d.firstMediaBoxes == null) {
+            firstMediaWrite = true;
             d.firstMediaBytes = chunk.length;
             d.firstMediaBoxes = mp4Boxes(chunk);
             // Hex of this same chunk's first 16 bytes — compare against boxHex[1]
@@ -2351,6 +2377,15 @@
         // recovery an exact source timestamp before any corrupt bytes reach MSE.
         if (d.boxBad && this._rejectInvalidMuxStructure(chunk)) return;
         this.queue.push(chunk); this._drain();
+        if (firstMediaWrite && this._boundedPumpBatchGeneration === muxGeneration) {
+          // A checked ff_write_multi call has already resolved before staged
+          // callbacks reach this committer, so the first media bytes are now
+          // transactionally accepted. The smaller read batch has done its one
+          // startup/reseek job; avoid doubling worker RPCs during steady play.
+          this._pumpReadBatchBytes = DEFAULT_PUMP_READ_BATCH_BYTES;
+          this._boundedPumpBatchGeneration = null;
+          this.timings.muxSteadyPumpReadBatchBytes = DEFAULT_PUMP_READ_BATCH_BYTES;
+        }
       };
       this._commitMuxWrite = commitMuxWrite;
       lib.onwrite = (name, pos, data) => {
@@ -2381,7 +2416,9 @@
         await lib.AVCodecParameters_codec_tag_s(vcp, tag);
       }
       const fastOpenMux = this.timings && this.timings.demuxFastOpen === true;
-      const movflags = fastOpenMux
+      const boundedH264MkvMux = this.vName === 'h264'
+        && (fastOpenMux || this._sourceLooksLikeMatroska());
+      const movflags = boundedH264MkvMux
         ? 'frag_keyframe+empty_moov+default_base_moof+skip_trailer'
         : 'frag_keyframe+empty_moov+default_base_moof';
       const movflagsResult = await lib.av_opt_set(
@@ -2390,7 +2427,7 @@
         movflags,
         lib.AV_OPT_SEARCH_CHILDREN,
       );
-      if (fastOpenMux && (!Number.isInteger(movflagsResult) || movflagsResult < 0)) {
+      if (boundedH264MkvMux && (!Number.isInteger(movflagsResult) || movflagsResult < 0)) {
         const movflagsError = new Error(
           'MUX_MOVFLAGS_CONFIG_FAILED:' + String(movflagsResult),
         );
@@ -2398,11 +2435,11 @@
         movflagsError.libavResult = movflagsResult;
         throw movflagsError;
       }
-      if (fastOpenMux) {
+      if (boundedH264MkvMux) {
         const fragmentDurationResult = await lib.av_opt_set(
           this.oc,
           'frag_duration',
-          String(FAST_OPEN_FRAGMENT_DURATION_US),
+          String(MKV_FRAGMENT_DURATION_US),
           lib.AV_OPT_SEARCH_CHILDREN,
         );
         if (!Number.isInteger(fragmentDurationResult) || fragmentDurationResult < 0) {
@@ -2413,9 +2450,47 @@
           fragmentDurationError.libavResult = fragmentDurationResult;
           throw fragmentDurationError;
         }
+        // frag_duration closes the fragment inside movenc, but AVIO can retain
+        // that complete moov/moof/mdat until its 256 KiB buffer fills. Force a
+        // callback at the packet boundary so low-bitrate resumes cannot time out
+        // with only ftyp appended.
+        const flushPacketsFlag = Number(lib.AVFMT_FLAG_FLUSH_PACKETS);
+        const muxFlags = await lib.AVFormatContext_flags(this.oc);
+        if (!Number.isInteger(flushPacketsFlag) || flushPacketsFlag <= 0
+            || !Number.isInteger(muxFlags)) {
+          const flushPacketsError = new Error(
+            'MUX_FLUSH_PACKETS_CONFIG_FAILED:' + String(muxFlags),
+          );
+          flushPacketsError.code = 'MUX_FLUSH_PACKETS_CONFIG_FAILED';
+          flushPacketsError.libavResult = muxFlags;
+          throw flushPacketsError;
+        }
+        await lib.AVFormatContext_flags_s(this.oc, muxFlags | flushPacketsFlag);
+        const appliedMuxFlags = await lib.AVFormatContext_flags(this.oc);
+        if (!Number.isInteger(appliedMuxFlags)
+            || (appliedMuxFlags & flushPacketsFlag) !== flushPacketsFlag) {
+          const flushPacketsError = new Error(
+            'MUX_FLUSH_PACKETS_CONFIG_FAILED:' + String(appliedMuxFlags),
+          );
+          flushPacketsError.code = 'MUX_FLUSH_PACKETS_CONFIG_FAILED';
+          flushPacketsError.libavResult = appliedMuxFlags;
+          throw flushPacketsError;
+        }
+        this.timings.muxFragmentDurationUs = MKV_FRAGMENT_DURATION_US;
+        this.timings.muxFlushPackets = true;
+        // onwrite callbacks stay transactional until ff_write_multi returns. A
+        // 512 KiB compressed-packet batch can therefore hold a closed 2 s
+        // fragment for more than five seconds on a low-bitrate source. Arm a
+        // smaller H264-MKV batch for the first media transaction only; its commit
+        // restores 512 KiB before the next read. Range windows and their single
+        // FIFO lane remain unchanged.
+        this._pumpReadBatchBytes = H264_MKV_PUMP_READ_BATCH_BYTES;
+        this._boundedPumpBatchGeneration = muxGeneration;
+        this.timings.muxPumpReadBatchBytes = H264_MKV_PUMP_READ_BATCH_BYTES;
+      }
+      if (boundedH264MkvMux) {
         this._muxSkipTrailer = true;
         this.timings.muxSkipTrailer = true;
-        this.timings.muxFragmentDurationUs = FAST_OPEN_FRAGMENT_DURATION_US;
       }
       await lib.avformat_write_header(this.oc, 0);
       // Header (ftyp+moov init segment) flushed; subsequent onwrite chunks are media.
@@ -2807,8 +2882,13 @@
             this._stopRequested = true;
             this._clearStartupDeadlineTimer();
             try { this._ac.abort(); } catch (_) {}
-            markPlaybackFailureReported(e, 'pump:startup');
-            this.report({ stage: 'pump:startup', message: errStr(e) });
+            try {
+              this.report({ stage: 'pump:startup', message: errStr(e) });
+              // Ownership is valid only when the telemetry callback returned.
+              // If it throws synchronously, the load catch must retain its one
+              // fallback reporting attempt instead of being silenced by a lie.
+              markPlaybackFailureReported(e, 'pump:startup');
+            } catch (_) {}
           }
           // A real Range 458 may already have settled startup centrally before
           // libav returns its delayed AVERROR. It remains load-owned even when
@@ -2849,7 +2929,9 @@
         this._assertStartupDeadline('pump');
         if (this._bufferedAhead() > BUFFER_AHEAD_MAX) { await this._waitForDrain(); continue; }
         let packets;
-        [res, packets] = await lib.ff_read_frame_multi(this.fmtCtx, this.pkt, { limit: 512 * 1024 });
+        [res, packets] = await lib.ff_read_frame_multi(this.fmtCtx, this.pkt, {
+          limit: this._pumpReadBatchBytes,
+        });
         // Block-reader callbacks cannot throw through libav's worker boundary:
         // they save the exact cause in _lastReadError and ff_read_frame_multi
         // returns a negative AVERROR. Restore the first 458 before the stop flag

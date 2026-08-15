@@ -678,25 +678,45 @@ test('seek, mux reinitialisation, and destroy discard lookahead before teardown 
     }
 });
 
-test('fast-open MKV caps the first fMP4 fragment at two seconds without weakening keyframe fragmentation', async () => {
+test('H264 MKV caps the first fMP4 fragment without broadening other codec/container paths', async () => {
     const NorvaEngine = loadEngineClass();
 
-    const initialise = (fastOpen, initialFragDurationResult = 0) => {
+    const initialise = (fastOpen, initialFragDurationResult = 0, matroska = false, videoCodec = 'h264') => {
         const { engine } = makeEngine(NorvaEngine);
         engine.vS = null;
         engine.aS = null;
+        engine.vName = videoCodec;
         engine.timings = { demuxFastOpen: fastOpen };
+        engine._raCache = matroska ? [{
+            start: 0,
+            buf: Uint8Array.from([0x1a, 0x45, 0xdf, 0xa3]),
+        }] : [];
         const calls = [];
         let movflagsResult = 0;
         let fragDurationResult = initialFragDurationResult;
+        let muxFlags = 0;
+        let applyFlushPackets = true;
         engine.lib = {
             AV_OPT_SEARCH_CHILDREN: 1,
+            AVFMT_FLAG_FLUSH_PACKETS: 512,
             unlink: async () => {},
             mkstreamwriterdev: async () => {},
-            ff_init_muxer: async () => [303, null, null, []],
+            ff_init_muxer: async () => {
+                muxFlags = 0;
+                return [303, null, null, []];
+            },
             av_opt_set: async (...args) => {
                 calls.push(['av_opt_set', ...args]);
-                return args[1] === 'frag_duration' ? fragDurationResult : movflagsResult;
+                if (args[1] === 'frag_duration') return fragDurationResult;
+                return movflagsResult;
+            },
+            AVFormatContext_flags: async (...args) => {
+                calls.push(['AVFormatContext_flags', ...args]);
+                return muxFlags;
+            },
+            AVFormatContext_flags_s: async (...args) => {
+                calls.push(['AVFormatContext_flags_s', ...args]);
+                if (applyFlushPackets) muxFlags = args[1];
             },
             avformat_write_header: async (...args) => { calls.push(['avformat_write_header', ...args]); },
             av_packet_alloc: async () => 404,
@@ -708,6 +728,7 @@ test('fast-open MKV caps the first fMP4 fragment at two seconds without weakenin
             init: () => engine._initMuxer(),
             setMovflagsResult: (result) => { movflagsResult = result; },
             setFragDurationResult: (result) => { fragDurationResult = result; },
+            setFlushPacketsApplied: (value) => { applyFlushPackets = value; },
         };
     };
 
@@ -716,10 +737,17 @@ test('fast-open MKV caps the first fMP4 fragment at two seconds without weakenin
     assert.deepStrictEqual(fast.calls, [
         ['av_opt_set', 303, 'movflags', 'frag_keyframe+empty_moov+default_base_moof+skip_trailer', 1],
         ['av_opt_set', 303, 'frag_duration', '2000000', 1],
+        ['AVFormatContext_flags', 303],
+        ['AVFormatContext_flags_s', 303, 512],
+        ['AVFormatContext_flags', 303],
         ['avformat_write_header', 303, 0],
     ]);
     assert.strictEqual(fast.engine.timings.muxSkipTrailer, true);
     assert.strictEqual(fast.engine.timings.muxFragmentDurationUs, 2_000_000);
+    assert.strictEqual(fast.engine.timings.muxFlushPackets, true);
+    assert.strictEqual(fast.engine._pumpReadBatchBytes, 256 * 1024);
+    assert.strictEqual(fast.engine.timings.muxPumpReadBatchBytes, 256 * 1024);
+    assert.strictEqual(fast.engine._boundedPumpBatchGeneration, fast.engine._muxGeneration);
 
     fast.calls.length = 0;
     fast.setMovflagsResult(-12);
@@ -736,6 +764,11 @@ test('fast-open MKV caps the first fMP4 fragment at two seconds without weakenin
         'a rejected reinitialisation must clear the prior skip_trailer marker');
     assert.strictEqual(fast.engine.timings.muxFragmentDurationUs, undefined,
         'a rejected reinitialisation must clear the prior fragment-duration marker');
+    assert.strictEqual(fast.engine.timings.muxFlushPackets, undefined,
+        'a rejected reinitialisation must clear the prior AVIO flush marker');
+    assert.strictEqual(fast.engine.timings.muxPumpReadBatchBytes, undefined);
+    assert.strictEqual(fast.engine._pumpReadBatchBytes, 512 * 1024);
+    assert.strictEqual(fast.engine._boundedPumpBatchGeneration, null);
     assert.strictEqual(fast.engine._muxSkipTrailer, false);
 
     fast.calls.length = 0;
@@ -755,41 +788,160 @@ test('fast-open MKV caps the first fMP4 fragment at two seconds without weakenin
         'a rejected duration cap must not advertise a usable skip_trailer mux');
     assert.strictEqual(fast.engine.timings.muxFragmentDurationUs, undefined,
         'a rejected reinitialisation must invalidate the duration cap reported by the prior muxer');
+    assert.strictEqual(fast.engine.timings.muxFlushPackets, undefined);
+    assert.strictEqual(fast.engine.timings.muxPumpReadBatchBytes, undefined);
+    assert.strictEqual(fast.engine._pumpReadBatchBytes, 512 * 1024);
+    assert.strictEqual(fast.engine._boundedPumpBatchGeneration, null);
     assert.strictEqual(fast.engine._muxSkipTrailer, false);
 
-    const legacy = initialise(false);
-    await legacy.init();
-    assert.deepStrictEqual(legacy.calls, [
+    fast.calls.length = 0;
+    fast.setFragDurationResult(0);
+    fast.setFlushPacketsApplied(false);
+    await assert.rejects(
+        fast.init,
+        (error) => error?.code === 'MUX_FLUSH_PACKETS_CONFIG_FAILED'
+            && error?.libavResult === 0
+            && /MUX_FLUSH_PACKETS_CONFIG_FAILED:0/.test(error.message),
+    );
+    assert.deepStrictEqual(fast.calls, [
+        ['av_opt_set', 303, 'movflags', 'frag_keyframe+empty_moov+default_base_moof+skip_trailer', 1],
+        ['av_opt_set', 303, 'frag_duration', '2000000', 1],
+        ['AVFormatContext_flags', 303],
+        ['AVFormatContext_flags_s', 303, 512],
+        ['AVFormatContext_flags', 303],
+    ], 'a no-op AVIO flush setter must fail read-back before header output can be retained');
+    assert.strictEqual(fast.engine.timings.muxSkipTrailer, undefined);
+    assert.strictEqual(fast.engine.timings.muxFragmentDurationUs, undefined);
+    assert.strictEqual(fast.engine.timings.muxFlushPackets, undefined);
+    assert.strictEqual(fast.engine.timings.muxPumpReadBatchBytes, undefined);
+    assert.strictEqual(fast.engine._pumpReadBatchBytes, 512 * 1024);
+    assert.strictEqual(fast.engine._boundedPumpBatchGeneration, null);
+    assert.strictEqual(fast.engine._muxSkipTrailer, false);
+
+    const legacyMkv = initialise(false, 0, true);
+    await legacyMkv.init();
+    assert.deepStrictEqual(legacyMkv.calls, [
+        ['av_opt_set', 303, 'movflags', 'frag_keyframe+empty_moov+default_base_moof+skip_trailer', 1],
+        ['av_opt_set', 303, 'frag_duration', '2000000', 1],
+        ['AVFormatContext_flags', 303],
+        ['AVFormatContext_flags_s', 303, 512],
+        ['AVFormatContext_flags', 303],
+        ['avformat_write_header', 303, 0],
+    ], 'full-scan Matroska must not retain an unbounded first GOP');
+    assert.strictEqual(legacyMkv.engine.timings.muxSkipTrailer, true,
+        'the bounded fallback must commit its final media fragment transactionally at EOF');
+    assert.strictEqual(legacyMkv.engine.timings.muxFragmentDurationUs, 2_000_000);
+    assert.strictEqual(legacyMkv.engine.timings.muxFlushPackets, true);
+    assert.strictEqual(legacyMkv.engine._pumpReadBatchBytes, 256 * 1024);
+    assert.strictEqual(legacyMkv.engine.timings.muxPumpReadBatchBytes, 256 * 1024);
+    assert.strictEqual(legacyMkv.engine._boundedPumpBatchGeneration, legacyMkv.engine._muxGeneration);
+
+    const priorMkvCommit = legacyMkv.engine._commitMuxWrite;
+    legacyMkv.engine._commitMuxWrite(
+        'output',
+        0,
+        Uint8Array.from([0, 0, 0, 8, 0x6d, 0x6f, 0x6f, 0x66]),
+    );
+    assert.strictEqual(legacyMkv.engine._pumpReadBatchBytes, 512 * 1024,
+        'the first accepted media callback must restore the steady-state worker batch');
+    assert.strictEqual(legacyMkv.engine._boundedPumpBatchGeneration, null);
+    assert.strictEqual(legacyMkv.engine.timings.muxSteadyPumpReadBatchBytes, 512 * 1024);
+
+    legacyMkv.calls.length = 0;
+    legacyMkv.engine._raCache = [1, 2, 3, 4].map((start) => ({
+        start: start * 2_000_000,
+        buf: Uint8Array.from([0, 0, 0, start]),
+    }));
+    await legacyMkv.init();
+    assert.deepStrictEqual(legacyMkv.calls, [
+        ['av_opt_set', 303, 'movflags', 'frag_keyframe+empty_moov+default_base_moof+skip_trailer', 1],
+        ['av_opt_set', 303, 'frag_duration', '2000000', 1],
+        ['AVFormatContext_flags', 303],
+        ['AVFormatContext_flags_s', 303, 512],
+        ['AVFormatContext_flags', 303],
+        ['avformat_write_header', 303, 0],
+    ], 'a seek/re-init must retain the positively identified MKV contract after head-cache eviction');
+    assert.strictEqual(legacyMkv.engine._sourceIsMatroska, true);
+    assert.strictEqual(legacyMkv.engine.timings.muxSkipTrailer, true);
+    assert.strictEqual(legacyMkv.engine.timings.muxFragmentDurationUs, 2_000_000);
+    assert.strictEqual(legacyMkv.engine.timings.muxFlushPackets, true);
+    assert.strictEqual(legacyMkv.engine._pumpReadBatchBytes, 256 * 1024);
+    assert.strictEqual(legacyMkv.engine.timings.muxPumpReadBatchBytes, 256 * 1024);
+    assert.strictEqual(legacyMkv.engine.timings.muxSteadyPumpReadBatchBytes, undefined,
+        'each mux generation must re-arm the bounded first-media batch');
+    assert.strictEqual(legacyMkv.engine._boundedPumpBatchGeneration, legacyMkv.engine._muxGeneration);
+    priorMkvCommit(
+        'output',
+        8,
+        Uint8Array.from([0, 0, 0, 8, 0x6d, 0x6f, 0x6f, 0x66]),
+    );
+    assert.strictEqual(legacyMkv.engine._pumpReadBatchBytes, 256 * 1024,
+        'an obsolete mux callback must not restore the active generation to steady-state');
+    assert.strictEqual(legacyMkv.engine._boundedPumpBatchGeneration, legacyMkv.engine._muxGeneration);
+
+    const legacyHevcMkv = initialise(false, 0, true, 'hevc');
+    await legacyHevcMkv.init();
+    assert.deepStrictEqual(legacyHevcMkv.calls, [
         ['av_opt_set', 303, 'movflags', 'frag_keyframe+empty_moov+default_base_moof', 1],
         ['avformat_write_header', 303, 0],
-    ], 'legacy/full-scan playback must retain its established mux fragmentation');
-    assert.strictEqual(legacy.engine.timings.muxSkipTrailer, undefined);
-    assert.strictEqual(legacy.engine.timings.muxFragmentDurationUs, undefined);
+    ], 'HEVC Matroska remains outside the exact H264 release fix');
+    assert.strictEqual(legacyHevcMkv.engine.timings.muxSkipTrailer, undefined);
+    assert.strictEqual(legacyHevcMkv.engine.timings.muxFragmentDurationUs, undefined);
+    assert.strictEqual(legacyHevcMkv.engine.timings.muxFlushPackets, undefined);
+    assert.strictEqual(legacyHevcMkv.engine.timings.muxPumpReadBatchBytes, undefined);
+    assert.strictEqual(legacyHevcMkv.engine._pumpReadBatchBytes, 512 * 1024);
+    assert.strictEqual(legacyHevcMkv.engine._boundedPumpBatchGeneration, null);
+
+    const legacyOther = initialise(false);
+    await legacyOther.init();
+    assert.deepStrictEqual(legacyOther.calls, [
+        ['av_opt_set', 303, 'movflags', 'frag_keyframe+empty_moov+default_base_moof', 1],
+        ['avformat_write_header', 303, 0],
+    ], 'non-Matroska legacy playback retains its established mux fragmentation');
+    assert.strictEqual(legacyOther.engine.timings.muxSkipTrailer, undefined);
+    assert.strictEqual(legacyOther.engine.timings.muxFragmentDurationUs, undefined);
+    assert.strictEqual(legacyOther.engine.timings.muxFlushPackets, undefined);
+    assert.strictEqual(legacyOther.engine.timings.muxPumpReadBatchBytes, undefined);
+    assert.strictEqual(legacyOther.engine._pumpReadBatchBytes, 512 * 1024);
+    assert.strictEqual(legacyOther.engine._boundedPumpBatchGeneration, null);
 });
 
-test('fast-open EOF preserves the final media callback while legacy drops trailer metadata', async () => {
+test('bounded H264 MKV EOF preserves the final media callback while other paths retain legacy trailer drop', async () => {
     const NorvaEngine = loadEngineClass();
     const trailerBytes = Uint8Array.from([0, 0, 0, 8, 0x66, 0x72, 0x65, 0x65]);
 
-    const initialise = async (fastOpen, trailerResult = 0, emitTrailer = true, trailer = {}) => {
+    const initialise = async (fastOpen, trailerResult = 0, emitTrailer = true, trailer = {}, matroska = false) => {
         const { engine, reports, fatals } = makeEngine(NorvaEngine);
         engine.vS = null;
         engine.aS = null;
+        engine.vName = 'h264';
         engine.timings = { demuxFastOpen: fastOpen };
+        engine._raCache = matroska ? [{
+            start: 0,
+            buf: Uint8Array.from([0x1a, 0x45, 0xdf, 0xa3]),
+        }] : [];
+        let muxFlags = 0;
         let drains = 0;
+        const readLimits = [];
         engine._bufferedAhead = () => 0;
         engine._drain = () => { drains += 1; };
         engine.lib = {
             AV_OPT_SEARCH_CHILDREN: 1,
+            AVFMT_FLAG_FLUSH_PACKETS: 512,
             AVERROR_EOF: -541478725,
             EAGAIN: 11,
             unlink: async () => {},
             mkstreamwriterdev: async () => {},
             ff_init_muxer: async () => [303, null, null, []],
             av_opt_set: async () => 0,
+            AVFormatContext_flags: async () => muxFlags,
+            AVFormatContext_flags_s: async (_ctx, flags) => { muxFlags = flags; },
             avformat_write_header: async () => {},
             av_packet_alloc: async () => 404,
-            ff_read_frame_multi: async () => [-541478725, {}],
+            ff_read_frame_multi: async (_fmtCtx, _pkt, options) => {
+                readLimits.push(options?.limit);
+                return [-541478725, {}];
+            },
             av_write_trailer: async () => {
                 if (emitTrailer) {
                     engine.lib.onwrite(
@@ -804,7 +956,7 @@ test('fast-open EOF preserves the final media callback while legacy drops traile
             },
         };
         await engine._initMuxer();
-        return { engine, reports, fatals, drains: () => drains };
+        return { engine, reports, fatals, drains: () => drains, readLimits };
     };
 
     const fast = await initialise(true);
@@ -815,6 +967,18 @@ test('fast-open EOF preserves the final media callback while legacy drops traile
         'skip_trailer finalises the last fast-open fragment through the normal onwrite path');
     assert.deepStrictEqual(Array.from(fast.engine.queue[0]), Array.from(trailerBytes));
     assert.strictEqual(fast.engine._diag.trailerBytesDropped, 0);
+    assert.deepStrictEqual(fast.readLimits, [256 * 1024],
+        'the production pump must use the bounded H264 MKV transaction size');
+
+    const fallback = await initialise(false, 0, true, {}, true);
+    await fallback.engine._pump();
+    assert.strictEqual(fallback.engine.ended, true);
+    assert.strictEqual(fallback.engine._dropWrites, false);
+    assert.strictEqual(fallback.engine.queue.length, 1,
+        'a bounded full-scan MKV must commit its final fragment through the checked trailer path');
+    assert.deepStrictEqual(Array.from(fallback.engine.queue[0]), Array.from(trailerBytes));
+    assert.strictEqual(fallback.engine._diag.trailerBytesDropped, 0);
+    assert.deepStrictEqual(fallback.readLimits, [256 * 1024]);
 
     const legacy = await initialise(false);
     await legacy.engine._pump();
@@ -823,6 +987,8 @@ test('fast-open EOF preserves the final media callback while legacy drops traile
     assert.strictEqual(legacy.engine.queue.length, 0,
         'legacy trailer metadata must retain the established drop behavior');
     assert.strictEqual(legacy.engine._diag.trailerBytesDropped, trailerBytes.length);
+    assert.deepStrictEqual(legacy.readLimits, [512 * 1024],
+        'non-Matroska playback retains the established pump batch size');
 
     const positive = await initialise(true, 1516, false);
     await positive.engine._pump();

@@ -465,12 +465,12 @@ test('AAC-LC, including an implicit SBR sync extension, always stays on stream-i
         await engine._openInput();
 
         assert.strictEqual(lib.calls.filter(([name]) => name === 'avformat_find_stream_info').length, 1,
-            `${fixture.name} must not enter the v47 fast cohort`);
+            `${fixture.name} must not enter the fast cohort`);
         assert.strictEqual(engine.timings.demuxFastOpen, false);
     }
 });
 
-test('a non-selected AAC track excludes a mixed AC-3/AAC file from the v47 fast cohort', async () => {
+test('a non-selected AAC track excludes a mixed AC-3/AAC file from the fast cohort', async () => {
     const lib = makeLib({ actualAudio: 'ac3', secondAudio: 'aac', includeSecondAudio: true });
     const engine = makeEngine(exactH264MkvProfile({
         audioCodec: 'ac3',
@@ -512,6 +512,6 @@ test('WatchPage forwards the exact codec profile and cache-busts both changed ru
     assert.match(watch, /new window\.NorvaEngine\(this\.video, \{[^}]*codecProfile/s);
     assert.match(watch, /codecProfile: codecProfile \|\| this\._diagCodecProfile \|\| null/);
     assert.match(watch, /await this\.playWithEngine\(url, \{[^}]*codecProfile: options\.codecProfile/s);
-    assert.match(app, /\/js\/norvaEngine\.js\?v=55/);
-    assert.match(app, /\/js\/pages\/WatchPage\.js\?v=137/);
+    assert.match(app, /\/js\/norvaEngine\.js\?v=56/);
+    assert.match(app, /\/js\/pages\/WatchPage\.js\?v=138/);
 });

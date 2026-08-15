@@ -77,9 +77,9 @@ function deferred() {
 test('startup budget ships with report ownership and cache-busted engine/Watch assets', () => {
     const source = fs.readFileSync(path.join(ROOT, 'public', 'js', 'norvaEngine.js'), 'utf8');
     const app = fs.readFileSync(path.join(ROOT, 'public', 'app.html'), 'utf8');
-    assert.match(source, /const ENGINE_VERSION = 53;/);
-    assert.match(app, /\/js\/norvaEngine\.js\?v=55/);
-    assert.match(app, /\/js\/pages\/WatchPage\.js\?v=137/);
+    assert.match(source, /const ENGINE_VERSION = 54;/);
+    assert.match(app, /\/js\/norvaEngine\.js\?v=56/);
+    assert.match(app, /\/js\/pages\/WatchPage\.js\?v=138/);
 });
 
 test('load arms cue indexing after playable startup instead of a wall-clock timer', () => {
@@ -1694,13 +1694,20 @@ test('an expired append rejects startup for the load catch instead of runtime re
     };
 
     engine._drain();
-    await assert.rejects(outcome, (error) => error?.code === 'ENGINE_STARTUP_TIMEOUT');
+    let timeoutError = null;
+    await assert.rejects(outcome, (error) => {
+        timeoutError = error;
+        return error?.code === 'ENGINE_STARTUP_TIMEOUT';
+    });
 
     assert.strictEqual(appendCalls, 0, 'late startup bytes must not be appended after the deadline');
     assert.strictEqual(engine._stopRequested, true);
     assert.strictEqual(engine._fatalSignaled, false);
     assert.strictEqual(reports.length, 1);
     assert.strictEqual(reports[0].stage, 'startup:append');
+    assert.strictEqual(timeoutError?._norvaPlaybackFailureReported, true,
+        'the timeout Error must carry ownership of its already-persisted engine report');
+    assert.strictEqual(timeoutError?._norvaPlaybackFailureReportStage, 'startup:append');
     assert.strictEqual(fatals.length, 0, 'runtime onFatal would reopen the engine during startup');
 });
 
@@ -1718,11 +1725,42 @@ test('the independent watchdog rejects a hung worker at the absolute startup dea
     engine._armStartupDeadline();
 
     const hungWorker = engine._withStartupDeadline(new Promise(() => {}), 'hung-worker');
-    await assert.rejects(hungWorker,
-        (error) => error?.code === 'ENGINE_STARTUP_TIMEOUT' && /:global:/.test(error.message));
+    let timeoutError = null;
+    await assert.rejects(hungWorker, (error) => {
+        timeoutError = error;
+        return error?.code === 'ENGINE_STARTUP_TIMEOUT' && /:global:/.test(error.message);
+    });
     assert.strictEqual(engine._stopRequested, true);
     assert.strictEqual(reports[0].stage, 'startup:global');
+    assert.strictEqual(timeoutError?._norvaPlaybackFailureReported, true,
+        'the watchdog rejection must retain ownership of its startup report');
+    assert.strictEqual(timeoutError?._norvaPlaybackFailureReportStage, 'startup:global');
     assert.strictEqual(fatals.length, 0);
+});
+
+test('a throwing startup report callback leaves timeout ownership to the outer load catch', async () => {
+    const NorvaEngine = loadEngineClass();
+    let reportAttempts = 0;
+    const engine = new NorvaEngine({}, {
+        report: () => {
+            reportAttempts += 1;
+            throw new Error('telemetry callback failed');
+        },
+    });
+    engine._startupActive = true;
+    const outcome = engine._createStartupOutcome();
+
+    engine._signalStartupTimeout('global');
+    let timeoutError = null;
+    await assert.rejects(outcome, (error) => {
+        timeoutError = error;
+        return error?.code === 'ENGINE_STARTUP_TIMEOUT';
+    });
+
+    assert.strictEqual(reportAttempts, 1);
+    assert.notStrictEqual(timeoutError?._norvaPlaybackFailureReported, true,
+        'ownership must not suppress WatchPage fallback when the engine callback did not return');
+    assert.strictEqual(timeoutError?._norvaPlaybackFailureReportStage, undefined);
 });
 
 test('a first pump 458 rejects load startup and never enters runtime onFatal', async () => {
@@ -1756,6 +1794,41 @@ test('a first pump 458 rejects load startup and never enters runtime onFatal', a
     assert.strictEqual(terminalError._norvaPlaybackFailureReported, true,
         'direct startup pump failures must transfer report ownership to the load catch');
     assert.strictEqual(terminalError._norvaPlaybackFailureReportStage, 'pump:startup');
+});
+
+test('a throwing pump-startup report callback leaves ownership to the load catch', async () => {
+    const NorvaEngine = loadEngineClass();
+    let reportAttempts = 0;
+    const fatals = [];
+    const timeoutError = new Error('ENGINE_STARTUP_TIMEOUT:15000:pump');
+    timeoutError.code = 'ENGINE_STARTUP_TIMEOUT';
+    const engine = new NorvaEngine({}, {
+        report: () => {
+            reportAttempts += 1;
+            throw new Error('telemetry callback failed');
+        },
+        onFatal: (error) => fatals.push(error),
+    });
+    engine._startupActive = true;
+    engine._startupDeadlineAt = performance.now() + 15_000;
+    const outcome = engine._createStartupOutcome();
+    engine.lib = {
+        ff_read_frame_multi: async () => { throw timeoutError; },
+    };
+    engine.fmtCtx = 1;
+    engine.pkt = 2;
+    engine._bufferedAhead = () => 0;
+
+    engine._startPump();
+    await assert.rejects(outcome, (error) => error === timeoutError);
+    await Promise.resolve();
+
+    assert.strictEqual(reportAttempts, 1);
+    assert.strictEqual(timeoutError._norvaPlaybackFailureReported, undefined,
+        'a throwing callback must not claim a report that the load catch still owns');
+    assert.strictEqual(timeoutError._norvaPlaybackFailureReportStage, undefined);
+    assert.strictEqual(engine._stopRequested, true);
+    assert.strictEqual(fatals.length, 0);
 });
 
 test('a post-startup pump 458 signals one terminal fatal and never retries', async () => {

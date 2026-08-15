@@ -149,6 +149,249 @@ test('startup provider busy keeps one persisted engine failure across Engine rep
     }
 });
 
+test('startup timeout owns one failure, releases one cloud lane, and offers explicit conversion', async () => {
+  for (const engineReportSucceeded of [true, false]) {
+    for (const mediaActive of [false, true]) {
+        const calls = {
+            playbackErrors: 0,
+            releases: 0,
+            spinnerHidden: 0,
+            engineLoads: 0,
+            engineDestroys: 0,
+            gateway: 0,
+            videoPauses: 0,
+            videoLoads: 0,
+            videoSrcRemovals: 0,
+            transcodeStops: 0,
+            cloudStops: 0,
+            teardownMediaErrors: 0,
+        };
+        const terminalError = new Error('ENGINE_STARTUP_TIMEOUT:global:15000');
+        terminalError.code = 'ENGINE_STARTUP_TIMEOUT';
+        if (engineReportSucceeded) {
+            Object.defineProperties(terminalError, {
+                _norvaPlaybackFailureReported: { value: true, configurable: true },
+                _norvaPlaybackFailureReportStage: { value: 'startup:global', configurable: true },
+            });
+        }
+
+        let createdOptions = null;
+        class FakeNorvaEngine {
+            constructor(_video, options) {
+                createdOptions = options;
+                this.vName = 'h264';
+                this.aName = 'aac';
+            }
+            async load() {
+                calls.engineLoads += 1;
+                if (engineReportSucceeded) {
+                    createdOptions.report({ stage: 'startup:global', message: terminalError.message });
+                }
+                throw terminalError;
+            }
+            destroy() { calls.engineDestroys += 1; }
+            engineSnapshot() { return null; }
+        }
+
+        const dom = makeErrorDom();
+        const WatchPage = loadWatchPage({
+            window: { NorvaEngine: FakeNorvaEngine },
+            document: dom.document,
+            setTimeout: () => 1,
+        });
+        const page = Object.create(WatchPage.prototype);
+        page.video = {
+            currentTime: 63,
+            readyState: 2,
+            paused: false,
+            src: 'blob:engine-media',
+            pause() { calls.videoPauses += 1; this.paused = true; },
+            removeAttribute(name) {
+                if (name === 'src') {
+                    calls.videoSrcRemovals += 1;
+                    delete this.src;
+                }
+            },
+            load() {
+                calls.videoLoads += 1;
+                this.readyState = 0;
+            },
+        };
+        page.hls = null;
+        page.norvaEngine = null;
+        page._playbackAttemptId = 92;
+        page._handlingPlaybackFailure = false;
+        page._diagCodecProfile = null;
+        page._preferredExplicitCloudMode = null;
+        page.currentStreamInfo = { video: 'h264' };
+        page.containerExtension = 'mkv';
+        page.currentCloudPlaybackSessionId = 'session-redacted';
+        page.content = { type: 'movie', sourceId: 'source-redacted', id: 'title-redacted' };
+        page._inbandSubsEnabled = () => false;
+        page.updateTranscodeStatus = () => {};
+        page.isProviderBusyError = () => false;
+        page.isConnectionLimitError = () => false;
+        page.isPlaybackSupersededError = () => false;
+        page.isStalePlaybackAttempt = () => false;
+        page.isCloudPlaybackMode = () => true;
+        page.hasOpenedCloudPlaybackLaneForAttempt = () => true;
+        page.hasCurrentMedia = () => mediaActive;
+        page.sanitizePlaybackMessage = (value) => String(value || '');
+        page.getFriendlyPlaybackError = (value) => value;
+        page.cloudTranscodeRecoveryCopy = () => ({
+            title: 'Server conversion required',
+            message: 'The first lane was released.',
+            hint: 'Start one new lane explicitly.',
+            retry: 'Convert and play',
+        });
+        page.escapeHtml = (value) => String(value || '');
+        page.clearDeferredPlaybackError = () => {};
+        page.clearPlaybackErrorRefreshTimer = () => {};
+        page.shouldDeferPlaybackError = () => false;
+        page.hidePlaybackError = () => {};
+        page.hideLoading = () => { calls.spinnerHidden += 1; };
+        page.markPlaybackUsable = () => {};
+        page.sendPlaybackEvent = (type) => {
+            if (type === 'playback_error') calls.playbackErrors += 1;
+        };
+        page.stopTranscodeSession = async () => { calls.transcodeStops += 1; };
+        page.stopCloudPlaybackSessions = async () => { calls.cloudStops += 1; };
+        const releasePlaybackPipelineForRetry = page.releasePlaybackPipelineForRetry.bind(page);
+        page.releasePlaybackPipelineForRetry = async () => {
+            calls.releases += 1;
+            return releasePlaybackPipelineForRetry();
+        };
+        page.fallbackEngineToTranscode = async () => { calls.gateway += 1; return true; };
+        page.destroyEngine = () => {
+            const engine = page.norvaEngine;
+            page.norvaEngine = null;
+            if (engine) engine.destroy();
+        };
+
+        await page.playWithEngine('https://media.invalid/project-resume.mkv', {
+            startTime: 63,
+            playbackAttemptId: 92,
+        });
+
+        const label = `${engineReportSucceeded ? 'engine-owned' : 'outer-fallback'}/`
+            + (mediaActive ? 'partial-media' : 'empty-media');
+        assert.strictEqual(calls.engineLoads, 1, `${label}: no engine retry`);
+        assert.strictEqual(calls.playbackErrors, 1, `${label}: one persisted playback_error`);
+        assert.strictEqual(calls.releases, 1, `${label}: one terminal cloud-lane release`);
+        assert.strictEqual(calls.engineDestroys, 1, `${label}: one engine cleanup`);
+        assert.strictEqual(calls.gateway, 0, `${label}: no automatic second lane`);
+        assert.strictEqual(calls.videoPauses, 1, `${label}: media element paused once`);
+        assert.strictEqual(calls.videoSrcRemovals, 1, `${label}: media source removed once`);
+        assert.strictEqual(calls.videoLoads, 1, `${label}: media element reset once`);
+        assert.strictEqual(page.video.src, undefined, `${label}: no stale media URL remains`);
+        assert.strictEqual(page.video.readyState, 0, `${label}: media element is empty after release`);
+        assert.strictEqual(page.video.paused, true, `${label}: media element remains paused`);
+        assert.strictEqual(page.video.currentTime, 63,
+            `${label}: a residual currentTime is harmless once src and readyState are cleared`);
+        assert.strictEqual(calls.transcodeStops, 1, `${label}: transcode cleanup runs once`);
+        assert.strictEqual(calls.cloudStops, 1, `${label}: cloud-session cleanup runs once`);
+        assert.strictEqual(calls.spinnerHidden, 1, `${label}: terminal UI stops the spinner`);
+        assert.strictEqual(dom.errorEl.classList.contains('hidden'), false,
+            `${label}: timeout UI remains visible even if a partial buffer exists`);
+        assert.match(dom.errorEl.innerHTML, /Convert and play/,
+            `${label}: recovery must require an explicit server-conversion action`);
+        page.handleEngineRuntimeFailure = async () => { calls.teardownMediaErrors += 1; };
+        page.video.error = { code: 3, message: 'late teardown decode error' };
+        page.onError({});
+        await Promise.resolve();
+        assert.strictEqual(calls.teardownMediaErrors, 0,
+            `${label}: a source-less teardown MediaError must not reopen recovery or telemetry`);
+    }
+  }
+});
+
+test('local startup timeout keeps one report and hands the exact resume point to one gateway fallback', async () => {
+    for (const engineReportSucceeded of [true, false]) {
+        const calls = {
+            playbackErrors: 0,
+            engineLoads: 0,
+            engineDestroys: 0,
+            gateway: 0,
+            terminalHandles: 0,
+        };
+        const timeoutError = new Error('ENGINE_STARTUP_TIMEOUT:global:15000');
+        timeoutError.code = 'ENGINE_STARTUP_TIMEOUT';
+        if (engineReportSucceeded) {
+            Object.defineProperties(timeoutError, {
+                _norvaPlaybackFailureReported: { value: true, configurable: true },
+                _norvaPlaybackFailureReportStage: { value: 'startup:global', configurable: true },
+            });
+        }
+
+        let createdOptions = null;
+        class FakeNorvaEngine {
+            constructor(_video, options) {
+                createdOptions = options;
+                this.vName = 'h264';
+                this.aName = 'aac';
+            }
+            async load() {
+                calls.engineLoads += 1;
+                if (engineReportSucceeded) {
+                    createdOptions.report({ stage: 'startup:global', message: timeoutError.message });
+                }
+                throw timeoutError;
+            }
+            destroy() { calls.engineDestroys += 1; }
+            engineSnapshot() { return null; }
+        }
+
+        const dom = makeErrorDom();
+        const WatchPage = loadWatchPage({
+            window: { NorvaEngine: FakeNorvaEngine },
+            document: dom.document,
+        });
+        const page = Object.create(WatchPage.prototype);
+        page.video = {};
+        page.hls = null;
+        page.norvaEngine = null;
+        page._playbackAttemptId = 93;
+        page._diagCodecProfile = null;
+        page.currentStreamInfo = { video: 'h264' };
+        page.containerExtension = 'mkv';
+        page._inbandSubsEnabled = () => false;
+        page.updateTranscodeStatus = () => {};
+        page.isProviderBusyError = () => false;
+        page.isConnectionLimitError = () => false;
+        page.isPlaybackSupersededError = () => false;
+        page.isStalePlaybackAttempt = () => false;
+        page.isCloudPlaybackMode = () => false;
+        page.sendPlaybackEvent = (type) => {
+            if (type === 'playback_error') calls.playbackErrors += 1;
+        };
+        page.destroyEngine = () => {
+            const engine = page.norvaEngine;
+            page.norvaEngine = null;
+            if (engine) engine.destroy();
+        };
+        page.fallbackEngineToTranscode = async (attemptId, startTime) => {
+            calls.gateway += 1;
+            assert.strictEqual(attemptId, 93);
+            assert.strictEqual(startTime, 63);
+            return true;
+        };
+        page.handlePlaybackFailure = async () => { calls.terminalHandles += 1; };
+
+        await page.playWithEngine('https://media.invalid/local-project-resume.mkv', {
+            startTime: 63,
+            playbackAttemptId: 93,
+        });
+
+        const label = engineReportSucceeded ? 'engine-owned' : 'outer-fallback';
+        assert.strictEqual(calls.playbackErrors, 1, `${label}: exactly one report persists`);
+        assert.strictEqual(calls.engineLoads, 1, `${label}: engine is not retried`);
+        assert.strictEqual(calls.engineDestroys, 1, `${label}: failed engine is destroyed once`);
+        assert.strictEqual(calls.gateway, 1, `${label}: one local gateway fallback receives resume=63`);
+        assert.strictEqual(calls.terminalHandles, 0,
+            `${label}: a successful local fallback must not surface a competing terminal path`);
+    }
+});
+
 test('a post-startup engine 458 stops playback and surfaces one terminal error without retry or gateway', async () => {
     const dom = makeErrorDom();
     const WatchPage = loadWatchPage({ document: dom.document, setTimeout: () => 1 });

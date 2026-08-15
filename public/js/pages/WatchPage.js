@@ -3716,6 +3716,30 @@ class WatchPage {
                     await this.handlePlaybackFailure(msg);
                     return;
                 }
+                // The engine watchdog already persisted its authoritative startup
+                // failure before rejecting load(). Keep that one report, tear down
+                // the consumed cloud lane, and require an explicit conversion click
+                // instead of automatically opening another provider connection.
+                if (e?.code === 'ENGINE_STARTUP_TIMEOUT' || /ENGINE_STARTUP_TIMEOUT/i.test(msg)) {
+                    const engineAlreadyReported = e?._norvaPlaybackFailureReported === true
+                        && /^startup:/.test(String(e?._norvaPlaybackFailureReportStage || ''));
+                    if (!engineAlreadyReported) {
+                        this.reportEngineFailure({ stage: 'load', message: msg });
+                    }
+                    this.destroyEngine();
+                    if (this.isCloudPlaybackMode()) {
+                        if (this.content?.type === 'movie' || this.content?.type === 'series') {
+                            this._preferredExplicitCloudMode = 'transcode';
+                        }
+                    } else if (await this.fallbackEngineToTranscode(playbackAttemptId, startTime)) {
+                        return;
+                    }
+                    await this.handlePlaybackFailure(msg, {
+                        forceTerminal: true,
+                        failureAlreadyReported: true,
+                    });
+                    return;
+                }
                 // Read the source-head verdict before tearing the engine down: a real-media demux
                 // failure is worth a gateway-transcode retry; a provider error page is not.
                 let sourceHead = null;
@@ -5878,6 +5902,12 @@ class WatchPage {
     onError(e) {
         const videoAttemptId = Number.parseInt(this.video?.dataset?.playbackAttemptId || '', 10);
         if (Number.isFinite(videoAttemptId) && this.isStalePlaybackAttempt(videoAttemptId)) return;
+        // removeAttribute('src') + load() can dispatch a late MediaError while a
+        // terminal engine cleanup is releasing its one lane. The source-less
+        // suppression window already protects other playback modes; apply it
+        // before engine recovery too so teardown cannot reopen a retry/report.
+        if (!(this.video?.currentSrc || this.video?.src)
+            && Date.now() < this._suppressMediaErrorsUntil) return;
 
         // The browser can surface the same remux failure either through MediaError
         // or the engine's explicit continuity guard. Both paths share one bounded
@@ -5940,6 +5970,9 @@ class WatchPage {
         const options = arguments[1] && typeof arguments[1] === 'object' ? arguments[1] : {};
         const forceProviderBusyTerminal = options.forceTerminal === true
             && this.isProviderBusyError(message);
+        const forceStartupTimeoutTerminal = options.forceTerminal === true
+            && /ENGINE_STARTUP_TIMEOUT/i.test(String(message || ''));
+        const forceTerminalFailure = forceProviderBusyTerminal || forceStartupTimeoutTerminal;
         const failureAlreadyReported = options.failureAlreadyReported === true;
         const playbackAttemptId = this._playbackAttemptId;
         if (this._handlingPlaybackFailure) {
@@ -5947,7 +5980,7 @@ class WatchPage {
             return;
         }
 
-        if (this.hasCurrentMedia() && !forceProviderBusyTerminal) {
+        if (this.hasCurrentMedia() && !forceTerminalFailure) {
             console.warn('[WatchPage] Ignoring stale playback failure because media is active:', message);
             this.hidePlaybackError();
             this.hideLoading();
@@ -5997,7 +6030,11 @@ class WatchPage {
                 }
                 await this.releasePlaybackPipelineForRetry();
                 if (!this.isStalePlaybackAttempt(playbackAttemptId)) {
-                    this.showPlaybackError(message, { immediate: true });
+                    if (forceTerminalFailure) {
+                        this.showPlaybackError(message, { immediate: true, forceTerminal: true });
+                    } else {
+                        this.showPlaybackError(message, { immediate: true });
+                    }
                 }
                 return;
             }
@@ -6012,7 +6049,11 @@ class WatchPage {
             }
             await this.releasePlaybackPipelineForRetry();
             if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
-            this.showPlaybackError(message);
+            if (forceTerminalFailure) {
+                this.showPlaybackError(message, { forceTerminal: true });
+            } else {
+                this.showPlaybackError(message);
+            }
         } finally {
             this._handlingPlaybackFailure = false;
         }
@@ -6240,7 +6281,10 @@ class WatchPage {
     showPlaybackError(message, options = {}) {
         const forceProviderBusyTerminal = options.forceTerminal === true
             && this.isProviderBusyError(message);
-        if (this.hasCurrentMedia() && !forceProviderBusyTerminal) {
+        const forceStartupTimeoutTerminal = options.forceTerminal === true
+            && /ENGINE_STARTUP_TIMEOUT/i.test(String(message || ''));
+        const forceTerminalFailure = forceProviderBusyTerminal || forceStartupTimeoutTerminal;
+        if (this.hasCurrentMedia() && !forceTerminalFailure) {
             console.warn('[WatchPage] Suppressing stale playback error because media is already playing:', message);
             this.hidePlaybackError();
             return;
