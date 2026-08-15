@@ -1268,17 +1268,6 @@ const CloudAdapter = (() => {
         return Boolean(normalizeCodecToken(videoCodec) && normalizeCodecToken(audioCodec));
     }
 
-    function hasKnownH264VodCodecHint(playbackHint) {
-        const hint = playbackHint && typeof playbackHint === 'object' ? playbackHint : {};
-        const profile = hint.codecProfile && typeof hint.codecProfile === 'object'
-            ? hint.codecProfile
-            : (hint.codec_profile && typeof hint.codec_profile === 'object' ? hint.codec_profile : {});
-        const codec = normalizeCodecToken(
-            hint.videoCodec || hint.video_codec || profile.videoCodec || profile.video_codec || profile.video
-        );
-        return codec.includes('h264') || codec.includes('avc1') || codec === 'avc';
-    }
-
     function normalizeCodecToken(value) {
         return String(value || '').toLowerCase().replace(/[^a-z0-9.]+/g, '');
     }
@@ -1754,15 +1743,6 @@ const CloudAdapter = (() => {
                     && !nativePlayer
                     && isMatroskaContainer(container)
                     && hasReliableVodCodecHint(playbackHint);
-                // A proven H.264 MKV does not need server-side video encoding.
-                // Keep its one authenticated playback intention on the existing
-                // bounded Range/Engine transport: the browser copies H.264 and
-                // only normalizes unsafe audio. This also avoids making a slow
-                // provider's input rate compete with a needless x264 pipeline.
-                // HEVC/unknown video and the established pathological dense-track
-                // boundary remain on the single Gateway conversion lane.
-                const profiledH264Mkv = profiledMkv
-                    && hasKnownH264VodCodecHint(playbackHint);
                 // Browser-safe film/series (mp4 + H.264/AAC): the browser plays it
                 // directly, so serve it through the RELAY (pass-through, no transcode
                 // server) rather than the cloud gateway. The browser then seeks
@@ -1788,7 +1768,7 @@ const CloudAdapter = (() => {
                 const engineVod = isVodPlayback
                     && !nativePlayer
                     && !denseTrackVod
-                    && (!profiledMkv || profiledH264Mkv)
+                    && !profiledMkv
                     && !browserSafeVod
                     && engineCanPlayContainer(container)
                     && typeof window !== 'undefined'
@@ -1801,7 +1781,7 @@ const CloudAdapter = (() => {
                             : engineVod
                                 ? 'engine'
                                 : (((isVodPlayback || needsGateway) && preferredMode !== 'direct') ? 'transcode' : preferredMode));
-                if (profiledMkv && !profiledH264Mkv) {
+                if (profiledMkv) {
                     // `mode=transcode` selects the Gateway transport; `remux`
                     // lets the Gateway decide per exact stream whether to copy
                     // or encode. Unknown/unsafe audio is normalized to AAC, while
@@ -1822,9 +1802,7 @@ const CloudAdapter = (() => {
                     // left untouched so an explicit user selection survives.
                     playbackHint.gatewayMode = 'remux';
                     playbackHint.audioMode = 'transcode';
-                } else if (mode !== 'engine'
-                    && (type === 'series' || type === 'movie')
-                    && !playbackHint.gatewayMode) {
+                } else if ((type === 'series' || type === 'movie') && !playbackHint.gatewayMode) {
                     const needsFullGatewayTranscode = shouldVodUseGatewayTranscode(container, playbackHint);
                     // VOD only uses remux when the container, video and audio
                     // are browser-safe. MKV + AC3/5.1 can decode poorly after
