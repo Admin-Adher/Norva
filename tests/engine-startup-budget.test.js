@@ -47,12 +47,24 @@ function makeBareEngine(NorvaEngine) {
     engine._startupActive = true;
     engine._startupDeadlineAt = performance.now() + 15_000;
     engine.timings = {};
+    engine.log = () => {};
     return engine;
 }
 
-test('startup budget ships as engine telemetry revision 50', () => {
+test('startup budget ships as engine telemetry revision 51', () => {
     const source = fs.readFileSync(path.join(ROOT, 'public', 'js', 'norvaEngine.js'), 'utf8');
-    assert.match(source, /const ENGINE_VERSION = 50;/);
+    assert.match(source, /const ENGINE_VERSION = 51;/);
+});
+
+test('load arms cue indexing after playable startup instead of a wall-clock timer', () => {
+    const source = fs.readFileSync(path.join(ROOT, 'public', 'js', 'norvaEngine.js'), 'utf8');
+    const start = source.indexOf('async load(url');
+    const end = source.indexOf('_startupTimeoutError(stage)', start);
+    const load = source.slice(start, end);
+    assert.match(load, /await this\._withStartupDeadline\(this\._startupOutcomePromise, 'first-usable-append'\);[\s\S]*this\._armCueIndexAfterFirstFrame\(\)/);
+    assert.doesNotMatch(load, /setTimeout\([\s\S]*_buildCueIndex/);
+    assert.match(load.slice(0, load.indexOf('const factoryP')), /this\._nudgeDone = false;/,
+        'every load, including a fresh start, must allow one startup playhead correction');
 });
 
 test('startup prefetch uses 512 KiB and later startup windows never exceed 1 MiB', async () => {
@@ -194,6 +206,461 @@ test('appendBuffer alone does not end startup; updateend needs a real buffered r
         JSON.parse(JSON.stringify(engine.timings.startupFetchWindows)),
         [{ start: 0, requestedBytes: 512 * KIB, bytes: 512 * KIB, ms: 30, outcome: 'ok' }],
     );
+});
+
+test('a buffered fragment before the resume playhead does not settle startup', () => {
+    const NorvaEngine = loadEngineClass();
+    const video = { currentTime: 132 };
+    const engine = new NorvaEngine(video, {});
+    const ranges = [[127.885, 129.95]];
+
+    engine.loadStartedAt = performance.now() - 250;
+    engine._startupActive = true;
+    engine._startupDeadlineAt = performance.now() + 15_000;
+    engine._startupTargetTime = 132;
+    engine.timings = { startupTargetTime: 132 };
+    engine._createStartupOutcome();
+    engine.sb = {
+        buffered: {
+            get length() { return ranges.length; },
+            start(index) { return ranges[index][0]; },
+            end(index) { return ranges[index][1]; },
+        },
+    };
+
+    assert.strictEqual(engine._markStartupUsableFromBuffer(), false);
+    assert.strictEqual(engine._startupActive, true);
+    assert.ok(Number.isFinite(engine.timings.firstBufferedAppendMs),
+        'the first accepted media range must be timed independently');
+    assert.strictEqual(engine.timings.firstBufferedRangeStart, 127.885);
+    assert.strictEqual(engine.timings.firstBufferedRangeEnd, 129.95);
+    assert.strictEqual(engine.timings.firstUsableAppendMs, undefined,
+        'a range behind the playhead must never claim playable startup');
+
+    ranges[0][1] = 132.6;
+    assert.strictEqual(engine._markStartupUsableFromBuffer(), true);
+    assert.strictEqual(engine._startupActive, false);
+    assert.ok(Number.isFinite(engine.timings.firstUsableAppendMs));
+    assert.strictEqual(engine.timings.playableTargetTime, 132);
+    assert.strictEqual(engine.timings.playableRangeStart, 127.885);
+    assert.strictEqual(engine.timings.playableRangeEnd, 132.6);
+    assert.ok(engine.timings.playableBufferedAhead >= 0.5);
+});
+
+test('a pre-target range keeps startup reads capped at 1 MiB', async () => {
+    const NorvaEngine = loadEngineClass();
+    const engine = makeBareEngine(NorvaEngine);
+    const requested = [];
+
+    engine.video = { currentTime: 132 };
+    engine._startupTargetTime = 132;
+    engine.sb = {
+        buffered: {
+            length: 1,
+            start: () => 127.885,
+            end: () => 129.95,
+        },
+    };
+    engine._createStartupOutcome();
+    engine._cacheWindow = async (start, len) => {
+        requested.push({ start, len });
+        return { start, end: start + len, buf: new Uint8Array(len) };
+    };
+
+    assert.strictEqual(engine._markStartupUsableFromBuffer(), false);
+    await engine._readRange(8 * MIB, 64 * KIB);
+    assert.deepStrictEqual(requested[0], { start: 8 * MIB, len: MIB });
+    assert.strictEqual(engine._startupActive, true);
+});
+
+test('startup nudge retargets an approximate seek that landed after the requested playhead', () => {
+    const NorvaEngine = loadEngineClass();
+    const video = { currentTime: 132 };
+    const engine = new NorvaEngine(video, {});
+
+    engine.loadStartedAt = performance.now() - 300;
+    engine._startupActive = true;
+    engine._startupDeadlineAt = performance.now() + 15_000;
+    engine._startupTargetTime = 132;
+    engine.timings = { startupTargetTime: 132 };
+    engine._createStartupOutcome();
+    engine._nudgeDone = false;
+    engine.sb = {
+        updating: false,
+        timestampOffset: 134,
+        buffered: {
+            length: 1,
+            start: () => 134,
+            end: () => 136,
+        },
+    };
+
+    engine._drain();
+
+    assert.strictEqual(video.currentTime, 134.05);
+    assert.strictEqual(engine._startupTargetTime, 134.05,
+        'the playable target must follow the engine nudge, not wait forever on the old gap');
+    assert.strictEqual(engine._startupActive, false);
+    assert.strictEqual(engine.timings.playableTargetTime, 134.05);
+});
+
+test('startup nudge closes a sub-half-second resume gap in the same drain', () => {
+    const NorvaEngine = loadEngineClass();
+    const video = { currentTime: 132 };
+    const engine = new NorvaEngine(video, {});
+
+    engine.loadStartedAt = performance.now() - 300;
+    engine._startupActive = true;
+    engine._startupDeadlineAt = performance.now() + 15_000;
+    engine._startupTargetTime = 132;
+    engine.timings = { startupTargetTime: 132 };
+    engine._createStartupOutcome();
+    engine._nudgeDone = false;
+    engine.sb = {
+        updating: false,
+        buffered: {
+            length: 1,
+            start: () => 132.2,
+            end: () => 134,
+        },
+    };
+
+    engine._drain();
+
+    assert.strictEqual(video.currentTime, 132.25);
+    assert.strictEqual(engine._startupTargetTime, 132.25);
+    assert.strictEqual(engine._startupActive, false,
+        'retargeted coverage must be re-evaluated without a second updateend');
+    assert.strictEqual(engine.timings.playableTargetTime, 132.25);
+});
+
+test('fresh startup nudges onto a small positive first-range offset', () => {
+    const NorvaEngine = loadEngineClass();
+    const video = { currentTime: 0 };
+    const engine = new NorvaEngine(video, {});
+
+    engine.loadStartedAt = performance.now() - 100;
+    engine._startupActive = true;
+    engine._startupDeadlineAt = performance.now() + 15_000;
+    engine._startupTargetTime = 0;
+    engine.timings = { startupTargetTime: 0 };
+    engine._createStartupOutcome();
+    engine._nudgeDone = false;
+    engine.sb = {
+        updating: false,
+        buffered: {
+            length: 1,
+            start: () => 0.1,
+            end: () => 2,
+        },
+    };
+
+    engine._drain();
+
+    assert.ok(Math.abs(video.currentTime - 0.15) < 1e-9);
+    assert.ok(Math.abs(engine._startupTargetTime - 0.15) < 1e-9);
+    assert.strictEqual(engine._startupActive, false);
+});
+
+test('startup nudge selects the first future playable range, not buffered range zero', () => {
+    const NorvaEngine = loadEngineClass();
+    const video = { currentTime: 132 };
+    const engine = new NorvaEngine(video, {});
+    const ranges = [[127, 130], [134, 136]];
+
+    engine.loadStartedAt = performance.now() - 300;
+    engine._startupActive = true;
+    engine._startupDeadlineAt = performance.now() + 15_000;
+    engine._startupTargetTime = 132;
+    engine.timings = { startupTargetTime: 132 };
+    engine._createStartupOutcome();
+    engine._nudgeDone = false;
+    engine.sb = {
+        updating: false,
+        buffered: {
+            get length() { return ranges.length; },
+            start(index) { return ranges[index][0]; },
+            end(index) { return ranges[index][1]; },
+        },
+    };
+
+    engine._drain();
+
+    assert.strictEqual(video.currentTime, 134.05);
+    assert.strictEqual(engine._startupTargetTime, 134.05);
+    assert.strictEqual(engine._startupActive, false,
+        'the future range must settle startup in this drain without another append');
+    assert.strictEqual(engine.timings.playableRangeStart, 134);
+});
+
+test('a short containing range cannot mask a later playable startup range', () => {
+    const NorvaEngine = loadEngineClass();
+    const video = { currentTime: 132 };
+    const engine = new NorvaEngine(video, {});
+    const ranges = [[131, 132.2], [134, 136]];
+
+    engine.loadStartedAt = performance.now() - 300;
+    engine._startupActive = true;
+    engine._startupDeadlineAt = performance.now() + 15_000;
+    engine._startupTargetTime = 132;
+    engine.timings = { startupTargetTime: 132 };
+    engine._createStartupOutcome();
+    engine._nudgeDone = false;
+    engine.sb = {
+        updating: false,
+        buffered: {
+            get length() { return ranges.length; },
+            start(index) { return ranges[index][0]; },
+            end(index) { return ranges[index][1]; },
+        },
+    };
+
+    engine._drain();
+
+    assert.strictEqual(video.currentTime, 134.05,
+        'the future decodable range must win over 0.2 seconds stranded at the old target');
+    assert.strictEqual(engine._startupTargetTime, 134.05);
+    assert.strictEqual(engine._startupActive, false);
+    assert.strictEqual(engine.timings.playableRangeStart, 134);
+});
+
+test('cue indexing waits after the first frame until playback has 20 seconds buffered', async () => {
+    const NorvaEngine = loadEngineClass();
+    let frameCallback = null;
+    let builds = 0;
+    let bufferedAhead = 0.5;
+    const video = {
+        currentTime: 0,
+        requestVideoFrameCallback(callback) { frameCallback = callback; return 15; },
+        cancelVideoFrameCallback() {},
+    };
+    const engine = new NorvaEngine(video, {});
+    engine.loadStartedAt = performance.now() - 100;
+    engine._bufferedAhead = () => bufferedAhead;
+    engine._buildCueIndex = async () => { builds += 1; };
+
+    engine._armCueIndexAfterFirstFrame();
+    frameCallback(performance.now(), { presentedFrames: 1, mediaTime: 0.1 });
+    await Promise.resolve();
+
+    assert.strictEqual(builds, 0,
+        'a 4 MiB cue read must not take the Range lane while only startup margin remains');
+    assert.strictEqual(engine.timings.cueIndexTrigger, 'video-frame-callback');
+    assert.strictEqual(engine.timings.cueIndexStartedMs, undefined);
+
+    bufferedAhead = 20;
+    engine._handleTimeUpdate();
+    await Promise.resolve();
+    assert.strictEqual(builds, 1);
+    assert.strictEqual(engine.timings.cueIndexBufferedAhead, 20);
+
+    engine._handleTimeUpdate();
+    await Promise.resolve();
+    assert.strictEqual(builds, 1, 'buffer rechecks must remain single-flight');
+});
+
+test('cue index waits for the local video-frame callback and starts only once', async () => {
+    const NorvaEngine = loadEngineClass();
+    let frameCallback = null;
+    let builds = 0;
+    const video = {
+        currentTime: 0,
+        requestVideoFrameCallback(callback) { frameCallback = callback; return 17; },
+        cancelVideoFrameCallback() {},
+    };
+    const engine = new NorvaEngine(video, {});
+    engine.loadStartedAt = performance.now() - 100;
+    engine._bufferedAhead = () => 20;
+    engine._buildCueIndex = async () => { builds += 1; };
+
+    assert.strictEqual(engine._armCueIndexAfterFirstFrame(), true);
+    assert.strictEqual(builds, 0, 'cue parsing must not compete with startup media reads');
+
+    frameCallback(performance.now(), { presentedFrames: 1, mediaTime: 132 });
+    await Promise.resolve();
+    assert.strictEqual(builds, 1);
+    assert.strictEqual(engine.timings.cueIndexTrigger, 'video-frame-callback');
+
+    assert.strictEqual(engine._armCueIndexAfterFirstFrame(), false);
+    frameCallback(performance.now(), { presentedFrames: 2, mediaTime: 132.04 });
+    await Promise.resolve();
+    assert.strictEqual(builds, 1, 'frame callbacks and re-arming must remain single-flight');
+});
+
+test('cue index has a strict playing fallback when video-frame callbacks are unavailable', async () => {
+    const NorvaEngine = loadEngineClass();
+    const listeners = new Map();
+    let builds = 0;
+    const video = {
+        currentTime: 0,
+        paused: false,
+        readyState: 2,
+        videoWidth: 1920,
+        videoHeight: 1080,
+        addEventListener(name, callback) { listeners.set(name, callback); },
+        removeEventListener(name, callback) {
+            if (listeners.get(name) === callback) listeners.delete(name);
+        },
+    };
+    const engine = new NorvaEngine(video, {});
+    engine._bufferedAhead = () => 20;
+    engine._buildCueIndex = async () => { builds += 1; };
+
+    assert.strictEqual(engine._armCueIndexAfterFirstFrame(), true);
+    assert.strictEqual(builds, 0);
+    listeners.get('playing')();
+    await Promise.resolve();
+    assert.strictEqual(builds, 1);
+    assert.strictEqual(engine.timings.cueIndexTrigger, 'playing-ready-state');
+    assert.strictEqual(listeners.has('playing'), false);
+});
+
+test('cue index falls back to strict playing evidence when frame callback registration throws', async () => {
+    const NorvaEngine = loadEngineClass();
+    const listeners = new Map();
+    let builds = 0;
+    const video = {
+        currentTime: 0,
+        paused: false,
+        readyState: 2,
+        videoWidth: 1280,
+        videoHeight: 720,
+        requestVideoFrameCallback() { throw new Error('rVFC unavailable'); },
+        addEventListener(name, callback) { listeners.set(name, callback); },
+        removeEventListener(name, callback) {
+            if (listeners.get(name) === callback) listeners.delete(name);
+        },
+    };
+    const engine = new NorvaEngine(video, {});
+    engine._bufferedAhead = () => 20;
+    engine._buildCueIndex = async () => { builds += 1; };
+
+    assert.strictEqual(engine._armCueIndexAfterFirstFrame(), true);
+    listeners.get('playing')();
+    await Promise.resolve();
+    assert.strictEqual(builds, 1);
+    assert.strictEqual(engine.timings.cueIndexTrigger, 'playing-ready-state');
+});
+
+test('a first HTTP 458 from post-frame cue indexing remains terminal', async () => {
+    const NorvaEngine = loadEngineClass();
+    const reports = [];
+    const fatals = [];
+    let frameCallback = null;
+    const video = {
+        currentTime: 0,
+        requestVideoFrameCallback(callback) { frameCallback = callback; return 31; },
+        cancelVideoFrameCallback() {},
+    };
+    const engine = new NorvaEngine(video, {
+        report: (event) => reports.push(event),
+        onFatal: (error) => fatals.push(error),
+    });
+    const busy = new Error('BLOCK_HTTP_458');
+    engine._bufferedAhead = () => 20;
+    engine._buildCueIndex = async () => { throw busy; };
+
+    engine._armCueIndexAfterFirstFrame();
+    frameCallback(performance.now(), { presentedFrames: 1 });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    assert.strictEqual(engine._stopRequested, true);
+    assert.strictEqual(engine._fatalSignaled, true);
+    assert.strictEqual(fatals.length, 1);
+    assert.strictEqual(fatals[0], busy);
+    assert.strictEqual(reports.length, 1);
+    assert.strictEqual(reports[0].stage, 'cue-index:provider-busy');
+});
+
+test('destroy cancels the pending cue-index frame observer', async () => {
+    const NorvaEngine = loadEngineClass();
+    let frameCallback = null;
+    let cancelled = null;
+    let builds = 0;
+    const video = {
+        currentTime: 0,
+        requestVideoFrameCallback(callback) { frameCallback = callback; return 23; },
+        cancelVideoFrameCallback(id) { cancelled = id; },
+    };
+    const engine = new NorvaEngine(video, {});
+    engine._buildCueIndex = async () => { builds += 1; };
+
+    engine._armCueIndexAfterFirstFrame();
+    engine.destroy();
+    assert.strictEqual(cancelled, 23);
+
+    frameCallback(performance.now(), { presentedFrames: 1 });
+    await Promise.resolve();
+    assert.strictEqual(builds, 0);
+});
+
+test('destroy after the first frame prevents a deferred cue build at the healthy-buffer threshold', async () => {
+    const NorvaEngine = loadEngineClass();
+    let frameCallback = null;
+    let builds = 0;
+    let bufferedAhead = 0.5;
+    const video = {
+        currentTime: 0,
+        removeEventListener() {},
+        requestVideoFrameCallback(callback) { frameCallback = callback; return 29; },
+        cancelVideoFrameCallback() {},
+    };
+    const engine = new NorvaEngine(video, {});
+    engine._bufferedAhead = () => bufferedAhead;
+    engine._buildCueIndex = async () => { builds += 1; };
+
+    engine._armCueIndexAfterFirstFrame();
+    frameCallback(performance.now(), { presentedFrames: 1 });
+    await Promise.resolve();
+    assert.strictEqual(builds, 0);
+
+    engine.destroy();
+    bufferedAhead = 20;
+    engine._handleTimeUpdate();
+    await Promise.resolve();
+    assert.strictEqual(builds, 0);
+});
+
+test('SourceBuffer updateend and timeupdate both recheck the deferred cue health gate', () => {
+    const source = fs.readFileSync(path.join(ROOT, 'public', 'js', 'norvaEngine.js'), 'utf8');
+    const attachStart = source.indexOf('async _attachMediaSource()');
+    const attachEnd = source.indexOf('// ---- audio transcode', attachStart);
+    const attach = source.slice(attachStart, attachEnd);
+    assert.match(attach, /addEventListener\('updateend',[\s\S]*this\._drain\(\);[\s\S]*this\._maybeStartCueIndexBuild\(\)/);
+
+    const timeUpdateStart = source.indexOf('_handleTimeUpdate()');
+    const timeUpdateEnd = source.indexOf('_handleSeeking()', timeUpdateStart);
+    assert.match(source.slice(timeUpdateStart, timeUpdateEnd), /this\._maybeStartCueIndexBuild\(\)/);
+});
+
+test('range requests stay serialized when background cue work meets the media pump', async () => {
+    let active = 0;
+    let maxActive = 0;
+    const NorvaEngine = loadEngineClass(async (_url, options) => {
+        active += 1;
+        maxActive = Math.max(maxActive, active);
+        await new Promise((resolve) => setTimeout(resolve, 15));
+        active -= 1;
+        const match = /bytes=(\d+)-(\d+)/.exec(options.headers.Range);
+        const start = Number(match[1]);
+        const end = Number(match[2]);
+        return {
+            status: 206,
+            ok: true,
+            headers: { get: (name) => name.toLowerCase() === 'content-range' ? `bytes ${start}-${end}/64` : null },
+            arrayBuffer: async () => new Uint8Array(end - start + 1).buffer,
+        };
+    });
+    const engine = makeBareEngine(NorvaEngine);
+    engine._startupActive = false;
+
+    await Promise.all([
+        engine._fetchRange(0, 8),
+        engine._fetchRange(8, 16),
+    ]);
+
+    assert.strictEqual(maxActive, 1, 'one engine must never own two concurrent raw Range pumps');
+    assert.strictEqual(engine.timings.maxConcurrentRangeFetches, 1);
 });
 
 test('an expired append rejects startup for the load catch instead of runtime retry', async () => {

@@ -512,6 +512,6 @@ test('WatchPage forwards the exact codec profile and cache-busts both changed ru
     assert.match(watch, /new window\.NorvaEngine\(this\.video, \{[^}]*codecProfile/s);
     assert.match(watch, /codecProfile: codecProfile \|\| this\._diagCodecProfile \|\| null/);
     assert.match(watch, /await this\.playWithEngine\(url, \{[^}]*codecProfile: options\.codecProfile/s);
-    assert.match(app, /\/js\/norvaEngine\.js\?v=52/);
+    assert.match(app, /\/js\/norvaEngine\.js\?v=53/);
     assert.match(app, /\/js\/pages\/WatchPage\.js\?v=136/);
 });

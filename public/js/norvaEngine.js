@@ -61,7 +61,9 @@
   const RA_STARTUP_WINDOW_MAX = 1024 * 1024;  // cap ranges until the first usable media append
   const RA_SEEK_WINDOW = 2 * 1024 * 1024;     // preserve established cue/seek coverage after startup
   const RA_WINDOWS = 4;                        // windows kept (header + cues + playhead)
-  const STARTUP_DEADLINE_MS = 15000;           // engine budget through first usable media append
+  const STARTUP_DEADLINE_MS = 15000;           // engine budget until media covers the requested playhead
+  const STARTUP_PLAYABLE_AHEAD_SEC = 0.5;      // accepted keyframe range must include decodable media after it
+  const STARTUP_NUDGE_INSIDE_SEC = 0.05;       // move just inside the first future decodable range
   const FETCH_TIMEOUT_MS = 60000;              // steady-state timeout; startup is clamped below
   // Header-only Matroska open intentionally skips find_stream_info. On a resume,
   // movenc's keyframe-only policy can otherwise retain the whole first long GOP
@@ -365,7 +367,7 @@
     av1: ['av01.0.08M.08'],
   };
 
-  const ENGINE_VERSION = 50;
+  const ENGINE_VERSION = 51;
 
   class NorvaEngine {
     constructor(videoEl, opts = {}) {
@@ -413,7 +415,7 @@
       this._subCues = new Map();   // streamIndex -> [{ startSrc, endSrc, text }] in SOURCE seconds
       this._subTextDecoder = null;
       this._skipSeekTo = null;    // suppress the self-induced seeking event on resume
-      this._nudgeDone = true;     // one-shot: nudge the playhead onto the first buffered byte after a seek/resume (set false on seek/resume)
+      this._nudgeDone = true;     // one-shot: nudge the playhead onto the first playable range after load/seek/resume
       this.lib = null;
       this.url = null;
       this.size = 0;
@@ -446,12 +448,25 @@
       this._fetchWindows = [];    // bounded range timings; never contains the media URL
       this._startupFetchWindows = [];
       this._startupActive = false;
+      this._startupTargetTime = 0;
       this._startupDeadlineAt = 0;
       this._startupDeadlineTimer = null;
       this._startupOutcomePromise = null;
       this._startupOutcomeResolve = null;
       this._startupOutcomeReject = null;
       this._startupOutcomeSettled = true;
+      // Every HTTP Range for one engine shares one FIFO lane. Background cue
+      // parsing can begin only after a rendered frame plus healthy buffer, and
+      // must never overlap the media pump on a single-connection provider.
+      this._rangeLaneTail = Promise.resolve();
+      this._rangeFetchActive = 0;
+      // Cue indexing is armed only once startup media covers the playhead. The
+      // actual read waits for compositor evidence (rVFC, or a strict `playing`
+      // fallback) plus 20 s buffered, and is cancelled on destroy/replacement.
+      this._cueIndexFrameCallbackId = null;
+      this._cueIndexPlayingHandler = null;
+      this._cueIndexFrameObserved = false;
+      this._cueIndexBuildStarted = false;
       this.decCtx = null; this.decPkt = null; this.decFrame = null;
       this.encCtx = null; this.encFrame = null; this.encPkt = null; this.frameSize = 0; this.encCodecpar = null;
       // Audio transcode output is clocked from one exact 48 kHz sample counter.
@@ -533,6 +548,10 @@
       const t0 = performance.now();
       this.loadStartedAt = t0;
       this._startupActive = true;
+      this._startupTargetTime = Number.isFinite(Number(startTime)) && Number(startTime) > 0
+        ? Number(startTime)
+        : 0;
+      this._nudgeDone = false;
       this._startupDeadlineAt = t0 + STARTUP_DEADLINE_MS;
       this._startupFetchWindows = [];
       this._fetchWindows = [];
@@ -540,6 +559,8 @@
       this._fetchAttemptCount = 0;
       this.timings = {
         startupDeadlineMs: STARTUP_DEADLINE_MS,
+        startupTargetTime: this._startupTargetTime,
+        startupPlayableAheadSec: STARTUP_PLAYABLE_AHEAD_SEC,
         initialWindowKB: Math.round(RA_INITIAL_WINDOW / 1024),
         startupWindowMaxKB: Math.round(RA_STARTUP_WINDOW_MAX / 1024),
       };
@@ -631,9 +652,10 @@
       this.video.addEventListener('timeupdate', this._onTimeUpdate);
       this._startPump();
       await this._withStartupDeadline(this._startupOutcomePromise, 'first-usable-append');
-      // Build the cue index in the background (enables prefetch-on-scrub). Delayed
-      // so it never competes with the first frame's fetches on the single-slot link.
-      setTimeout(() => { if (!this.destroyed) this._buildCueIndex(); }, 2500);
+      // Cue parsing is useful only after playback is visible. Arm before load()
+      // returns (WatchPage calls play() immediately afterwards), then wait for a
+      // compositor frame; its Range reads share the media pump's FIFO lane.
+      this._armCueIndexAfterFirstFrame();
     }
 
     _startupTimeoutError(stage) {
@@ -705,19 +727,53 @@
       }, Math.max(1, Math.ceil(remaining)));
     }
 
+    _bufferStateForTarget(target) {
+      let firstRange = null;
+      let playableRange = null;
+      let nextPlayableRange = null;
+      for (let i = 0; i < this.sb.buffered.length; i++) {
+        const start = this.sb.buffered.start(i);
+        const end = this.sb.buffered.end(i);
+        if (!(end > start)) continue;
+        const range = { start, end };
+        if (!firstRange) firstRange = range;
+        if (!playableRange && start <= target && end > target + STARTUP_PLAYABLE_AHEAD_SEC) {
+          playableRange = range;
+        }
+        if (!nextPlayableRange && start > target
+            && end > start + STARTUP_NUDGE_INSIDE_SEC + STARTUP_PLAYABLE_AHEAD_SEC) {
+          nextPlayableRange = range;
+        }
+      }
+      return { firstRange, playableRange, nextPlayableRange };
+    }
+
     _markStartupUsableFromBuffer() {
       if (!this._startupActive || this._stopRequested || this._startupOutcomeSettled || !this.sb) return false;
-      let usable = false;
+      const target = Number.isFinite(this._startupTargetTime)
+        ? this._startupTargetTime
+        : Math.max(0, Number(this.video && this.video.currentTime) || 0);
+      let firstRange = null;
+      let playableRange = null;
       try {
-        for (let i = 0; i < this.sb.buffered.length; i++) {
-          if (this.sb.buffered.end(i) > this.sb.buffered.start(i)) { usable = true; break; }
-        }
+        ({ firstRange, playableRange } = this._bufferStateForTarget(target));
       } catch (_) { return false; }
-      if (!usable) return false;
 
-      const usableMs = Number.isFinite(this.loadStartedAt)
+      const elapsedMs = Number.isFinite(this.loadStartedAt)
         ? Math.max(0, Math.round(performance.now() - this.loadStartedAt))
         : null;
+      // Preserve proof that MSE accepted media even when it is still behind the
+      // resume target. This marker is diagnostic only and never settles startup.
+      if (firstRange && !Number.isFinite(this.timings.firstBufferedAppendMs)) {
+        this.timings.firstBufferedAppendMs = elapsedMs;
+        this.timings.firstBufferedRangeStart = firstRange.start;
+        this.timings.firstBufferedRangeEnd = firstRange.end;
+        this.timings.firstBufferedAppendFetches = this._fetchAttemptCount;
+        this.timings.firstBufferedAppendFetchKB = Math.round(this._fetchBytes / 1024);
+      }
+      if (!playableRange) return false;
+
+      const usableMs = elapsedMs;
       this.timings.firstUsableAppendMs = usableMs;
       // Retain the firstMediaAppend name for existing telemetry consumers; this
       // timestamp now means the append completed and produced a real time range.
@@ -725,6 +781,13 @@
       this.timings.firstMediaAppendFetches = this._fetchAttemptCount;
       this.timings.firstMediaAppendSuccessfulFetches = this._fetchCount;
       this.timings.firstMediaAppendFetchKB = Math.round(this._fetchBytes / 1024);
+      this.timings.playableTargetTime = target;
+      this.timings.playableRangeStart = playableRange.start;
+      this.timings.playableRangeEnd = playableRange.end;
+      this.timings.playableBufferedAhead = playableRange.end - target;
+      this.timings.playableVideoReadyState = Number.isFinite(Number(this.video && this.video.readyState))
+        ? Number(this.video.readyState)
+        : null;
       this.timings.startupFetchWindows = Array.isArray(this._startupFetchWindows)
         ? this._startupFetchWindows.slice()
         : [];
@@ -737,6 +800,97 @@
         fetches: this.timings.firstMediaAppendFetches,
         fetchKB: this.timings.firstMediaAppendFetchKB,
       }));
+      return true;
+    }
+
+    _clearCueIndexFrameObserver() {
+      const video = this.video;
+      if (this._cueIndexFrameCallbackId !== null
+          && this._cueIndexFrameCallbackId !== undefined
+          && typeof video?.cancelVideoFrameCallback === 'function') {
+        try { video.cancelVideoFrameCallback(this._cueIndexFrameCallbackId); } catch (_) {}
+      }
+      this._cueIndexFrameCallbackId = null;
+      if (this._cueIndexPlayingHandler && typeof video?.removeEventListener === 'function') {
+        try { video.removeEventListener('playing', this._cueIndexPlayingHandler); } catch (_) {}
+      }
+      this._cueIndexPlayingHandler = null;
+    }
+
+    _startCueIndexAfterFirstFrame(evidence) {
+      if (this.destroyed || this._cueIndexBuildStarted || this._cueIndexFrameObserved) return false;
+      this._clearCueIndexFrameObserver();
+      this._cueIndexFrameObserved = true;
+      if (!this.timings || typeof this.timings !== 'object') this.timings = {};
+      this.timings.cueIndexTrigger = evidence;
+      this.timings.cueIndexFrameMs = Number.isFinite(this.loadStartedAt)
+        ? Math.max(0, Math.round(performance.now() - this.loadStartedAt))
+        : null;
+      this._maybeStartCueIndexBuild();
+      return true;
+    }
+
+    _maybeStartCueIndexBuild() {
+      if (this.destroyed || this._cueIndexBuildStarted || !this._cueIndexFrameObserved) return false;
+      const bufferedAhead = this._bufferedAhead();
+      if (!(bufferedAhead >= BUFFER_AHEAD_MIN)) return false;
+      this._cueIndexBuildStarted = true;
+      if (!this.timings || typeof this.timings !== 'object') this.timings = {};
+      this.timings.cueIndexStartedMs = Number.isFinite(this.loadStartedAt)
+        ? Math.max(0, Math.round(performance.now() - this.loadStartedAt))
+        : null;
+      this.timings.cueIndexBufferedAhead = bufferedAhead;
+      Promise.resolve().then(() => {
+        if (!this.destroyed) return this._buildCueIndex();
+        return null;
+      }).catch((error) => { this._handleCueIndexFailure(error); });
+      return true;
+    }
+
+    _handleCueIndexFailure(error) {
+      if (this.destroyed || !isProviderBusyError(error)) return false;
+      if (this._fatalSignaled) return true;
+      this._fatalSignaled = true;
+      this._stopRequested = true;
+      if (this._gate) { this._gate(); this._gate = null; }
+      try { this._ac.abort(); } catch (_) {}
+      try { this.report({ stage: 'cue-index:provider-busy', message: errStr(error) }); } catch (_) {}
+      try { this.onFatal(error); } catch (_) {}
+      return true;
+    }
+
+    _armCueIndexAfterFirstFrame() {
+      if (this.destroyed || this._cueIndexBuildStarted
+          || this._cueIndexFrameObserved
+          || this._cueIndexFrameCallbackId !== null || this._cueIndexPlayingHandler) return false;
+      const video = this.video;
+      if (!video) return false;
+
+      if (typeof video.requestVideoFrameCallback === 'function') {
+        try {
+          this._cueIndexFrameCallbackId = video.requestVideoFrameCallback(() => {
+            this._cueIndexFrameCallbackId = null;
+            this._startCueIndexAfterFirstFrame('video-frame-callback');
+          });
+          return true;
+        } catch (_) {
+          this._cueIndexFrameCallbackId = null;
+        }
+      }
+
+      if (typeof video.addEventListener !== 'function') return false;
+      const onPlaying = () => {
+        if (this.destroyed || this._cueIndexBuildStarted || this._cueIndexFrameObserved) {
+          this._clearCueIndexFrameObserver();
+          return;
+        }
+        // This is the same conservative fallback used by WatchPage: `playing`
+        // plus current decoded data and real dimensions, never metadata alone.
+        if (video.paused || video.readyState < 2 || video.videoWidth <= 0 || video.videoHeight <= 0) return;
+        this._startCueIndexAfterFirstFrame('playing-ready-state');
+      };
+      this._cueIndexPlayingHandler = onPlaying;
+      video.addEventListener('playing', onPlaying);
       return true;
     }
 
@@ -923,6 +1077,7 @@
       // A retained lookahead packet belongs to this mux generation only. Abort
       // paths must drop it, never estimate/write it into a replacement muxer.
       this._discardPendingVideoPacket();
+      this._clearCueIndexFrameObserver();
       this.destroyed = true;
       this._stopRequested = true;
       this._clearStartupDeadlineTimer();
@@ -1389,7 +1544,12 @@
         const cues = await this._readRange(dataStart, dataLen);
         const index = this._parseCuePoints(cues, segStart, scaleNs || 1e6);
         if (index && index.length) { index.sort((a, b) => a.t - b.t); this._cueIndex = index; this.log('cue index: ' + index.length + ' points'); }
-      } catch (_) { this._cueIndex = null; }
+      } catch (error) {
+        this._cueIndex = null;
+        // Optional cue parsing may ignore malformed EBML, but an authoritative
+        // provider 458 from any Range remains terminal for this playback intent.
+        if (isProviderBusyError(error)) throw error;
+      }
     }
 
     // Walk top-level EBML (EBML header, then Segment); return Segment data start.
@@ -1491,8 +1651,39 @@
       return out;
     }
 
+    async _withRangeLane(work) {
+      const previous = this._rangeLaneTail || Promise.resolve();
+      let release;
+      const ticket = new Promise((resolve) => { release = resolve; });
+      this._rangeLaneTail = previous.then(() => ticket, () => ticket);
+      try { await previous; } catch (_) {}
+      if (this.destroyed || (this._ac && this._ac.signal && this._ac.signal.aborted)) {
+        release();
+        const error = new Error('ENGINE_RANGE_ABORTED');
+        error.code = 'ENGINE_RANGE_ABORTED';
+        throw error;
+      }
+      this._rangeFetchActive = (this._rangeFetchActive || 0) + 1;
+      if (!this.timings || typeof this.timings !== 'object') this.timings = {};
+      this.timings.maxConcurrentRangeFetches = Math.max(
+        Number(this.timings.maxConcurrentRangeFetches) || 0,
+        this._rangeFetchActive,
+      );
+      try {
+        return await work();
+      } finally {
+        this._rangeFetchActive = Math.max(0, (this._rangeFetchActive || 1) - 1);
+        release();
+      }
+    }
+
     // Fetch [start, end) (exclusive) as one ranged request, bounded by a timeout.
+    // All calls share the engine's FIFO lane, including post-frame cue indexing.
     async _fetchRange(start, end) {
+      return await this._withRangeLane(() => this._fetchRangeUnlocked(start, end));
+    }
+
+    async _fetchRangeUnlocked(start, end) {
       this._assertStartupDeadline('fetch');
       const ac = new AbortController();
       const onAbort = () => { try { ac.abort(); } catch (_) {} };
@@ -1831,6 +2022,10 @@
         // buffered time range; init-only/partial fragments cannot disarm it.
         this._markStartupUsableFromBuffer();
         this._drain();
+        // A rendered frame alone is not enough headroom for the optional 4 MiB
+        // Cues read. Recheck after every accepted media append and give the
+        // playback pump exclusive Range priority until 20 s are buffered.
+        this._maybeStartCueIndexBuild();
       });
       this.sb.addEventListener('error', () => {
         this._diag.sbErrorEvents++;
@@ -3152,13 +3347,31 @@
       // very nudge that unsticks it. Setting currentTime here just retargets that pending seek.
       if (!this._nudgeDone && this.video && sb.buffered.length) {
         try {
-          const bs = sb.buffered.start(0);
-          if (this.video.currentTime < bs - 0.5) {
-            this._skipSeekTo = bs + 0.05;
-            this.log('nudge playhead ' + this.video.currentTime.toFixed(2) + ' → ' + (bs + 0.05).toFixed(2) + ' (seek landed past target)');
-            this.video.currentTime = bs + 0.05;
+          const target = this._startupActive && Number.isFinite(this._startupTargetTime)
+            ? this._startupTargetTime
+            : Number(this.video.currentTime);
+          const { playableRange, nextPlayableRange } = this._bufferStateForTarget(target);
+          if (playableRange) {
+            // The target already has the same 0.5 s decodable margin required by
+            // startup, so this one-shot no longer needs to seek a future range.
+            this._nudgeDone = true;
+          } else if (nextPlayableRange) {
+            const previousTarget = this._startupTargetTime;
+            const nudgedTarget = nextPlayableRange.start + STARTUP_NUDGE_INSIDE_SEC;
+            this._skipSeekTo = nudgedTarget;
+            this.log('nudge playhead ' + this.video.currentTime.toFixed(2) + ' → ' + nudgedTarget.toFixed(2) + ' (seek landed past target)');
+            this.video.currentTime = nudgedTarget;
+            if (this._startupActive) {
+              this._startupTargetTime = nudgedTarget;
+              this.timings.startupNudgeFrom = Number.isFinite(previousTarget) ? previousTarget : null;
+              this.timings.startupNudgedTargetTime = nudgedTarget;
+            }
+            this._nudgeDone = true;
           }
-          this._nudgeDone = true;
+          // updateend checks coverage before _drain(). If this range landed after
+          // the requested target, the nudge above makes it playable right now;
+          // re-evaluate without waiting for another append/updateend.
+          if (this._startupActive) this._markStartupUsableFromBuffer();
         } catch (_) { /* retry on the next drain */ }
       }
       // Apply the seek/resume placement offset before appending media (only when
@@ -3393,7 +3606,9 @@
     _isBuffered(t) {
       try {
         const sb = this.sb;
-        for (let i = 0; i < sb.buffered.length; i++) if (sb.buffered.start(i) <= t && sb.buffered.end(i) > t + 0.5) return true;
+        for (let i = 0; i < sb.buffered.length; i++) {
+          if (sb.buffered.start(i) <= t && sb.buffered.end(i) > t + STARTUP_PLAYABLE_AHEAD_SEC) return true;
+        }
       } catch (_) {}
       return false;
     }
@@ -3415,6 +3630,7 @@
 
     _handleTimeUpdate() {
       if (this._gate && this._bufferedAhead() < BUFFER_AHEAD_MIN) { const g = this._gate; this._gate = null; g(); }
+      this._maybeStartCueIndexBuild();
     }
 
     _handleSeeking() {
