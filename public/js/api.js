@@ -1729,20 +1729,20 @@ const CloudAdapter = (() => {
                 // makes the TV behave like TiviMate.
                 const nativePlayer = typeof window !== 'undefined'
                     && (window.NodeCastNative || window.NorvaTVCloud);
+                const browserMkv = isVodPlayback
+                    && !nativePlayer
+                    && isMatroskaContainer(container);
                 const denseTrackVod = isVodPlayback
                     && !nativePlayer
                     && shouldDenseVodUseGateway(container, playbackHint);
                 // Matroska is never browser-native. Once the exact file has a
-                // complete A/V profile, open one Gateway lane: FFmpeg can copy
-                // proven H.264/AAC streams and encode only unsafe codecs. An
-                // unknown MKV stays on the bounded in-browser engine; discovering
-                // codecs synchronously in Gateway can otherwise add tens of
-                // seconds to the click path. The background exact-file backfill
-                // upgrades those files without competing with an active viewer.
-                const profiledMkv = isVodPlayback
-                    && !nativePlayer
-                    && isMatroskaContainer(container)
-                    && hasReliableVodCodecHint(playbackHint);
+                // complete A/V profile, one Gateway lane can copy proven-safe
+                // streams and encode only unsafe codecs. An unknown MKV also stays
+                // on that single Gateway lane: the bounded probe selects the safe
+                // conversion plan before playback instead of letting a browser
+                // Range pipeline discover too late that it cannot sustain realtime.
+                const profiledMkv = browserMkv && hasReliableVodCodecHint(playbackHint);
+                const unprofiledMkv = browserMkv && !profiledMkv;
                 // Browser-safe film/series (mp4 + H.264/AAC): the browser plays it
                 // directly, so serve it through the RELAY (pass-through, no transcode
                 // server) rather than the cloud gateway. The browser then seeks
@@ -1753,12 +1753,12 @@ const CloudAdapter = (() => {
                 // catalogued, try one optimistic Relay lane first: compatible H.264/AAC starts
                 // immediately and an actual browser codec rejection is authoritative. The visible
                 // error action may then create one fresh Gateway conversion session, but no hidden
-                // automatic cascade is allowed. Containers already known to be unsafe (MOV/MKV/
-                // AVI/...) still take the bounded Engine/Gateway path below.
+                // automatic cascade is allowed. MKV takes its single Gateway lane; other unsafe
+                // containers (MOV/AVI/...) keep the bounded Engine/Gateway path below.
                 const browserSafeVod = isVodPlayback
                     && !needsGateway
                     && !shouldVodUseGatewayTranscode(container, playbackHint);
-                // Browser VOD that needs container/codec help (mkv/avi, HEVC,
+                // Browser VOD that needs container/codec help (avi/mov, HEVC,
                 // AC-3/DTS/TrueHD audio, …): play it with the in-browser engine
                 // (NorvaEngine remuxes the container + transcodes the audio to
                 // AAC client-side and feeds MediaSource). No transcode server, no
@@ -1770,10 +1770,16 @@ const CloudAdapter = (() => {
                     && !denseTrackVod
                     && !profiledMkv
                     && !browserSafeVod
+                    && !browserMkv
                     && engineCanPlayContainer(container)
                     && typeof window !== 'undefined'
                     && Boolean(window.NorvaEngine);
-                const mode = forcedMode
+                // A browser can never consume Matroska directly. Keep stale or
+                // caller-supplied engine/relay/direct preferences from reopening a
+                // RAW lane for MKV: every browser MKV has exactly one Gateway lane.
+                const mode = browserMkv
+                    ? 'transcode'
+                    : forcedMode
                     || (nativePlayer
                         ? 'direct'
                         : browserSafeVod
@@ -1781,7 +1787,13 @@ const CloudAdapter = (() => {
                             : engineVod
                                 ? 'engine'
                                 : (((isVodPlayback || needsGateway) && preferredMode !== 'direct') ? 'transcode' : preferredMode));
-                if (profiledMkv) {
+                if (unprofiledMkv) {
+                    // No exact A/V profile means copying H.264 after the startup
+                    // probe is still unsafe (long GOPs can starve the HLS buffer).
+                    // The one proven-smooth path is a full H.264/AAC conversion.
+                    playbackHint.gatewayMode = 'transcode';
+                    playbackHint.audioMode = 'transcode';
+                } else if (profiledMkv) {
                     // `mode=transcode` selects the Gateway transport; `remux`
                     // lets the Gateway decide per exact stream whether to copy
                     // or encode. Unknown/unsafe audio is normalized to AAC, while

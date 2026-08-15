@@ -70,13 +70,19 @@ test('edge reportProviderPlaybackFailure and createGatewaySession consult the he
 
 test('WatchPage play() awaits stop then waitForProviderSlotRelease(2500) when replacingActiveWatch', () => {
   const play = section(watchSrc, 'async play(content, streamUrl, playback = {}) {', '\n    async ');
+  const attempt = play.indexOf('const playbackAttemptId = this.beginPlaybackAttempt()');
   const replacing = play.indexOf('const replacingActiveWatch');
   const stopCall = play.indexOf('await this.stop()');
   const slotWait = play.indexOf('await this.waitForProviderSlotRelease(2500)');
   const assignContent = play.indexOf('this.content = content');
   const resolver = play.indexOf('resolved = await streamUrlResolver()');
+  const staleAfterWait = play.indexOf('if (this.isStalePlaybackAttempt(playbackAttemptId)) return;', slotWait);
 
+  assert.ok(attempt >= 0 && attempt < replacing,
+    'the playback intention must be reserved before teardown can yield');
   assert.ok(replacing >= 0, 'replacingActiveWatch missing');
+  assert.ok(play.includes('Boolean(streamUrlResolver)'),
+    'relaunching the same identity with a new resolver must still replace its old session');
   assert.ok(play.includes("String(this.content.sourceId ?? '') !== String(content?.sourceId ?? '')"),
     'sourceId change must count as a replacement (IPTV account switch)');
   assert.ok(play.includes("String(this.content.id ?? '') !== String(content?.id ?? '')"),
@@ -84,6 +90,8 @@ test('WatchPage play() awaits stop then waitForProviderSlotRelease(2500) when re
   assert.ok(stopCall > replacing, 'replacement must await stop()');
   assert.ok(slotWait > stopCall, 'replacement must wait for the provider slot after stop()');
   assert.ok(assignContent > slotWait, 'incoming identity is assigned only after the previous slot is released');
+  assert.ok(staleAfterWait > slotWait && staleAfterWait < assignContent,
+    'a newer click or Back must cancel the old handoff after its cooldown');
   assert.ok(resolver > slotWait, 'the next session resolver must run after the slot-release wait');
 
   const firstPlayWait = play.indexOf('waitForProviderSlotRelease(2500)');

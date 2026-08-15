@@ -1433,11 +1433,18 @@ class WatchPage {
         // local until the incoming content identity is assigned so play_requested
         // can never be attributed to the outgoing title during an episode handoff.
         const playbackRequestedAt = Date.now();
+        // Reserve this user intention before any progress save, teardown or slot
+        // cooldown can yield. A later click/Back can now stale this invocation
+        // instead of letting it resume and declare itself newest after the wait.
+        const playbackAttemptId = this.beginPlaybackAttempt();
+        const streamUrlResolver = typeof streamUrl === 'function' ? streamUrl : null;
         this.cancelFirstFrameTelemetryObserver();
         this.cancelDeferredEngineTrackEnrichment();
         const replacingActiveWatch = this.app?.currentPage === 'watch'
             && this.content
             && (
+                Boolean(streamUrlResolver)
+                ||
                 String(this.content.sourceId ?? '') !== String(content?.sourceId ?? '')
                 || String(this.content.id ?? '') !== String(content?.id ?? '')
                 || Number(this.currentSeason || 0) !== Number(content?.currentSeason || 0)
@@ -1450,19 +1457,21 @@ class WatchPage {
             this.trackPlaybackPosition({ force: true });
             this.saveResumeSnapshotThrottled(true);
             await Promise.resolve(this.saveProgress({ force: true })).catch(() => {});
+            if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
             this._suspendResumeSnapshotSave = true;
             try {
                 await this.stop();
             } finally {
                 this._suspendResumeSnapshotSave = false;
             }
+            if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
             await this.waitForProviderSlotRelease(2500);
+            if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
         }
         // A different title starts with the resolver's normal single-lane choice.
         // A browser-engine failure may offer an explicit server conversion later,
         // but that preference must never leak to the next title.
         this._preferredExplicitCloudMode = null;
-        const playbackAttemptId = this.beginPlaybackAttempt();
         // Fresh user-initiated playback → reset the engine mid-stream retry budget (the
         // automatic engine retries in onError don't go through play(), so they don't reset it).
         this._engineMidRetries = 0;
@@ -1470,7 +1479,6 @@ class WatchPage {
         // `streamUrl` may be an async resolver: we render the player shell +
         // loading animation first, then await it. Resolve it later (after the
         // shell is on screen) so the metadata below uses what we have upfront.
-        const streamUrlResolver = typeof streamUrl === 'function' ? streamUrl : null;
         let playbackMetadata = this.playbackMetadataFromResult(playback);
         this._resumePlaybackMetadata = playbackMetadata;
         let cloudPlaybackSessionId = playbackMetadata.sessionId
@@ -1519,6 +1527,7 @@ class WatchPage {
         let serverAnswered = false;
         if (!explicitSeekTarget && content?.id && content?.sourceId) {
             const server = await this._fetchServerResumeInfo(content);
+            if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
             if (server.answered) {
                 serverAnswered = true;
                 if (server.position !== requestedResumeTime) {
@@ -1649,6 +1658,7 @@ class WatchPage {
         // stream resolver so the old slot is released first, but no longer blocks
         // the shell from showing.
         await this.app?.player?.stop?.();
+        if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
 
         if (streamUrlResolver) {
             let resolved;
@@ -2583,7 +2593,7 @@ class WatchPage {
                 currentSrcType: this.video?.currentSrc ? (this.isGatewayPlaybackUrl(this.video.currentSrc) ? 'gateway' : 'direct') : null,
                 // Codec-mix telemetry (the 3rd sizing unknown, docs §9.8/§10): the
                 // container extension is a reliable codec-path proxy (mp4->relay,
-                // mkv/ts->engine, avi/...->transcode); videoCodec when the profile is known.
+                // mkv/ts->gateway, avi/...->engine); videoCodec when the profile is known.
                 container: this.containerExtension || this.content?.containerExtension || null,
                 videoCodec: (this.content?.codecProfile || this.content?.defaultVariant?.codecProfile || this.content?.data?.codecProfile)?.videoCodec
                     || this.content?.videoCodec || null,
@@ -4316,7 +4326,7 @@ class WatchPage {
         // Show loading spinner
         this.showLoading();
 
-        // In-browser engine path (mkv/HEVC/AC-3/DTS/…): NorvaEngine owns the
+        // In-browser engine path (MOV/HEVC/AC-3/DTS/…): NorvaEngine owns the
         // MediaSource — it reads the raw file by byte-range, remuxes the
         // container and transcodes non-browser audio to AAC client-side. No
         // gateway/transcode server. Resume seeks straight to the saved offset.
@@ -10019,43 +10029,52 @@ class WatchPage {
             </div>
         `).join('');
 
+        const moviesById = new Map(
+            movies.map(movie => [String(movie.stream_id), movie])
+        );
+
         // Click handlers
         this.recommendedGrid.querySelectorAll('.watch-recommended-card').forEach(card => {
-            card.addEventListener('click', () => this.playRecommendedMovie(card.dataset.id, parseInt(card.dataset.source)));
+            const movie = moviesById.get(String(card.dataset.id));
+            if (!movie) return;
+            card.addEventListener('click', () => this.playRecommendedMovie(movie, sourceId));
         });
     }
 
-    async playRecommendedMovie(streamId, sourceId) {
+    async playRecommendedMovie(movie, sourceId) {
         try {
-            // Fetch movie details
-            const movies = await API.proxy.xtream.vodStreams(sourceId);
-            const movie = movies?.find(m => m.stream_id == streamId);
-
             if (!movie) return;
 
+            const streamId = movie.stream_id;
             const container = movie.container_extension || 'mp4';
-            const result = await API.proxy.xtream.getStreamUrl(
+            const playbackHint = MediaUtils.playbackHintFromItem
+                ? MediaUtils.playbackHintFromItem(movie, { container, streamType: 'movie' })
+                : { container, streamType: 'movie' };
+            const content = {
+                type: 'movie',
+                id: movie.stream_id,
+                title: movie.name,
+                poster: MediaUtils.safeImageUrl(movie.stream_icon || movie.cover),
+                description: movie.plot || '',
+                year: movie.year,
+                rating: movie.rating,
                 sourceId,
-                streamId,
-                'movie',
-                container,
-                MediaUtils.playbackHintFromItem ? MediaUtils.playbackHintFromItem(movie, { container, streamType: 'movie' }) : { container, streamType: 'movie' }
-            );
+                categoryId: movie.category_id,
+                containerExtension: container
+            };
 
-            if (result?.url) {
-                this.play({
-                    type: 'movie',
-                    id: movie.stream_id,
-                    title: movie.name,
-                    poster: MediaUtils.safeImageUrl(movie.stream_icon || movie.cover),
-                    description: movie.plot || '',
-                    year: movie.year,
-                    rating: movie.rating,
-                    sourceId: sourceId,
-                    categoryId: movie.category_id,
-                    cloudPlaybackSessionId: result.sessionId
-                }, result.url, result);
-            }
+            // Let play() expire the outgoing mono-account session before this
+            // resolver claims the provider slot for the recommended title.
+            await this.play(content, async () => {
+                const result = await API.proxy.xtream.getStreamUrl(
+                    sourceId,
+                    streamId,
+                    'movie',
+                    container,
+                    playbackHint
+                );
+                return result;
+            });
         } catch (e) {
             console.error('Error playing recommended movie:', e);
         }
@@ -10139,53 +10158,55 @@ class WatchPage {
         };
 
         try {
-            await this.releasePlaybackPipelineForRetry();
+            const outgoingContent = this.content || {};
+            const sourceId = outgoingContent.sourceId;
+            const seriesId = outgoingContent.seriesId || outgoingContent.series_id;
+            const seriesInfo = this.seriesInfo;
             const playbackPreferences = this.getPlaybackPreferences();
             const playbackHint = MediaUtils.playbackHintFromItem
                 ? MediaUtils.playbackHintFromItem(episode, {
                     container,
                     streamType: 'series',
-                    audioSeriesId: this.content.seriesId || this.content.series_id
+                    audioSeriesId: seriesId
                 })
                 : {
                     container,
                     streamType: 'series',
-                    audioSeriesId: this.content.seriesId || this.content.series_id
+                    audioSeriesId: seriesId
                 };
             const audioStreamIndex = Number(playbackPreferences?.audio?.streamIndex ?? playbackPreferences?.audio?.stream_index);
             if (Number.isInteger(audioStreamIndex)) {
                 playbackHint.audioStreamIndex = audioStreamIndex;
             }
-            const result = await API.proxy.xtream.getStreamUrl(
-                this.content.sourceId,
-                episodeId,
-                'series',
-                container,
-                playbackHint
-            );
+            const episodeTitle = episodeEl.querySelector('.watch-episode-title')?.textContent || `Episode ${episodeNum}`;
+            const content = {
+                type: 'series',
+                id: episodeId,
+                title: outgoingContent.title,
+                subtitle: `S${seasonNum} E${episodeNum} - ${episodeTitle}`,
+                poster: outgoingContent.poster,
+                description: outgoingContent.description,
+                year: outgoingContent.year,
+                rating: outgoingContent.rating,
+                sourceId,
+                seriesId,
+                seriesInfo,
+                currentSeason: seasonNum,
+                currentEpisode: episodeNum,
+                containerExtension: container,
+                playbackPreferences
+            };
 
-            if (result?.url) {
-                const episodeTitle = episodeEl.querySelector('.watch-episode-title')?.textContent || `Episode ${episodeNum}`;
-
-                this.play({
-                    type: 'series',
-                    id: episodeId,
-                    title: this.content.title,
-                    subtitle: `S${seasonNum} E${episodeNum} - ${episodeTitle}`,
-                    poster: this.content.poster,
-                    description: this.content.description,
-                    year: this.content.year,
-                    rating: this.content.rating,
-                    sourceId: this.content.sourceId,
-                    seriesId: this.content.seriesId,
-                    seriesInfo: this.seriesInfo,
-                    currentSeason: seasonNum,
-                    currentEpisode: episodeNum,
-                    containerExtension: container,
-                    playbackPreferences,
-                    cloudPlaybackSessionId: result.sessionId
-                }, result.url, result);
-            }
+            await this.play(content, async () => {
+                const result = await API.proxy.xtream.getStreamUrl(
+                    sourceId,
+                    episodeId,
+                    'series',
+                    container,
+                    playbackHint
+                );
+                return result;
+            });
         } catch (e) {
             console.error('Error playing episode:', e);
         }
@@ -10499,53 +10520,55 @@ class WatchPage {
     async playEpisode(ep) {
         if (!ep) return;
         try {
+            const outgoingContent = this.content || {};
+            const sourceId = outgoingContent.sourceId;
+            const seriesId = outgoingContent.seriesId || outgoingContent.series_id;
+            const seriesInfo = this.seriesInfo;
             const container = ep.container_extension || 'mp4';
             const playbackPreferences = this.getPlaybackPreferences();
             const playbackHint = MediaUtils.playbackHintFromItem
                 ? MediaUtils.playbackHintFromItem(ep, {
                     container,
                     streamType: 'series',
-                    audioSeriesId: this.content.seriesId || this.content.series_id
+                    audioSeriesId: seriesId
                 })
                 : {
                     container,
                     streamType: 'series',
-                    audioSeriesId: this.content.seriesId || this.content.series_id
+                    audioSeriesId: seriesId
                 };
             const audioStreamIndex = Number(playbackPreferences?.audio?.streamIndex ?? playbackPreferences?.audio?.stream_index);
             if (Number.isInteger(audioStreamIndex)) {
                 playbackHint.audioStreamIndex = audioStreamIndex;
             }
-            const result = await API.proxy.xtream.getStreamUrl(
-                this.content.sourceId,
-                ep.id,
-                'series',
-                container,
-                playbackHint
-            );
+            const content = {
+                type: 'series',
+                id: ep.id,
+                title: outgoingContent.title,
+                subtitle: `S${ep.seasonNum} E${ep.episode_num} - ${ep.title || `Episode ${ep.episode_num}`}`,
+                poster: outgoingContent.poster,
+                description: outgoingContent.description,
+                year: outgoingContent.year,
+                rating: outgoingContent.rating,
+                sourceId,
+                seriesId,
+                seriesInfo,
+                currentSeason: ep.seasonNum,
+                currentEpisode: ep.episode_num,
+                containerExtension: container,
+                playbackPreferences
+            };
 
-            if (result?.url) {
-                this.play({
-                    type: 'series',
-                    id: ep.id,
-                    title: this.content.title,
-                    subtitle: `S${ep.seasonNum} E${ep.episode_num} - ${ep.title || `Episode ${ep.episode_num}`}`,
-                    poster: this.content.poster,
-                    description: this.content.description,
-                    year: this.content.year,
-                    rating: this.content.rating,
-                    sourceId: this.content.sourceId,
-                    seriesId: this.content.seriesId,
-                    seriesInfo: this.seriesInfo,
-                    currentSeason: ep.seasonNum,
-                    currentEpisode: ep.episode_num,
-                    containerExtension: container,
-                    playbackPreferences,
-                    cloudPlaybackSessionId: result.sessionId
-                }, result.url, result);
-            } else {
-                this.showPlaybackError('This episode could not be started. Please try again.', { immediate: true });
-            }
+            await this.play(content, async () => {
+                const result = await API.proxy.xtream.getStreamUrl(
+                    sourceId,
+                    ep.id,
+                    'series',
+                    container,
+                    playbackHint
+                );
+                return result;
+            });
         } catch (e) {
             console.error('Error playing episode:', e);
             this.showPlaybackError('This episode could not be started. Please try again.', { immediate: true });
