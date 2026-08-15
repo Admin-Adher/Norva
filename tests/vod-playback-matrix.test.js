@@ -657,6 +657,97 @@ test('a cloud engine lane cannot open a second Gateway session in the same playb
   assert.strictEqual(calls.length, 0, 'one user intention must never mint a second cloud session');
 });
 
+test('a resume timestamp and a prior attempt frame never prove a newly attached blob is usable', () => {
+  const context = { window: {}, console, setTimeout, clearTimeout };
+  vm.runInNewContext(watchSrc, context, { filename: 'WatchPage.js' });
+  const page = Object.create(context.window.WatchPage.prototype);
+  page._firstFrameReported = false;
+  page.video = {
+    currentTime: 72,
+    readyState: 0,
+    duration: Number.NaN,
+    paused: true,
+    ended: false,
+    error: null,
+    currentSrc: 'blob:https://norva.invalid/stale-engine',
+    src: '',
+  };
+
+  assert.strictEqual(page.hasCurrentMedia(), false,
+    'currentTime restored before a decoded frame is not evidence of playable media');
+
+  page._firstFrameReported = true;
+  assert.strictEqual(page.hasCurrentMedia(), false,
+    'exactly-once first-frame telemetry survives engine reopen and must not validate the new blob');
+
+  page.video.readyState = 1;
+  assert.strictEqual(page.hasCurrentMedia(), false,
+    'paused metadata without a valid duration is not decoded media');
+
+  page.video.readyState = 2;
+  page.video.duration = Infinity;
+  assert.strictEqual(page.hasCurrentMedia(), true,
+    'paused live media with current decoded data remains healthy');
+
+  page.video.readyState = 1;
+  page.video.paused = false;
+  assert.strictEqual(page.hasCurrentMedia(), false,
+    'a live play request with metadata but no current data cannot mask a terminal failure');
+
+  page.video.duration = 5400;
+  assert.strictEqual(page.hasCurrentMedia(), false,
+    'a VOD play request with metadata but no current data cannot mask a terminal failure');
+});
+
+test('a stale resume blob releases one cloud lane and surfaces the error without opening another session', async () => {
+  const resolverCalls = [];
+  const context = { window: {}, console, setTimeout, clearTimeout };
+  vm.runInNewContext(watchSrc, context, { filename: 'WatchPage.js' });
+  const page = Object.create(context.window.WatchPage.prototype);
+  page.video = {
+    currentTime: 72,
+    readyState: 0,
+    duration: Number.NaN,
+    paused: true,
+    ended: false,
+    error: null,
+    currentSrc: 'blob:https://norva.invalid/stale-engine',
+    src: '',
+  };
+  page._firstFrameReported = true;
+  page._playbackAttemptId = 4;
+  page._cloudPlaybackLaneAttemptId = 4;
+  page._handlingPlaybackFailure = false;
+  page.sendPlaybackEvent = () => {};
+  page.isPlaybackSupersededError = () => false;
+  page.isProviderBusyError = () => false;
+  page.isCloudPlaybackMode = () => true;
+  page.currentPlaybackMode = 'engine';
+  page.content = { sourceId: 'source-1', id: 'movie-1', type: 'movie', containerExtension: 'mkv' };
+  page.isFormatPlaybackError = () => false;
+  page.isStalePlaybackAttempt = () => false;
+  page.hasOpenedCloudPlaybackLaneForAttempt = () => true;
+  page.releasePlaybackPipelineForRetry = async () => { page.releaseCount = (page.releaseCount || 0) + 1; };
+  page.hidePlaybackError = () => {};
+  page.hideLoading = () => { page.spinnerVisible = false; };
+  page.spinnerVisible = true;
+  page.showPlaybackError = (message, options) => {
+    page.spinnerVisible = false;
+    page.shown = { message, options };
+  };
+  page.retryWithCloudGatewayTranscode = async (...args) => { resolverCalls.push(['gateway', args]); return false; };
+  page.retryWithCloudRelay = async (...args) => { resolverCalls.push(['relay', args]); return false; };
+  page.retryWithFullVideoTranscode = async (...args) => { resolverCalls.push(['encode', args]); return false; };
+
+  await page.handlePlaybackFailure('ENGINE_STARTUP_TIMEOUT:global:15000');
+
+  assert.strictEqual(page.releaseCount, 1);
+  assert.strictEqual(page.shown.message, 'ENGINE_STARTUP_TIMEOUT:global:15000');
+  assert.strictEqual(page.shown.options.immediate, true);
+  assert.strictEqual(page.spinnerVisible, false);
+  assert.deepStrictEqual(resolverCalls, [], 'the terminal cloud handler must not resolve a second lane');
+});
+
 test('a terminal cloud media failure releases its lane without invoking any fallback resolver', async () => {
   const context = { window: {}, console, setTimeout, clearTimeout };
   vm.runInNewContext(watchSrc, context, { filename: 'WatchPage.js' });

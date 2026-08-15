@@ -32,6 +32,7 @@
   // Audio codecs the browser decodes natively inside fMP4 → copy (no transcode).
   const AUDIO_COPY = new Set(['aac', 'opus', 'flac']);
   const AUDIO_MIME = { aac: 'mp4a.40.2', opus: 'opus', flac: 'flac' };
+  const EXACT_CODEC_PROBE_SOURCES = new Set(['gatewayprobe', 'exactfileprobe', 'exactfilecodecprobe']);
   // Subtitle codecs whose packet payload IS text (so we can turn demuxed packets into
   // cues with no decoder and no provider connection). Image subs (pgs/dvdsub/dvb) need
   // OCR and are excluded here.
@@ -76,6 +77,84 @@
   const to64 = (lo, hi) => hi * 4294967296 + (lo >>> 0);
   const from64 = (v) => { const hi = Math.floor(v / 4294967296); return [(v - hi * 4294967296) >>> 0, hi]; };
   const hex2 = (n) => n.toString(16).padStart(2, '0');
+
+  const profileValue = (profile, ...keys) => {
+    for (const key of keys) {
+      const value = profile && profile[key];
+      if (value !== undefined && value !== null && value !== '') return value;
+    }
+    return null;
+  };
+
+  const codecToken = (value) => String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+
+  function codecFamily(value) {
+    const token = codecToken(value);
+    if (token === 'h264' || token === 'avc' || token.startsWith('avc1')) return 'h264';
+    if (token === 'aac' || token.startsWith('mp4a402')) return 'aac';
+    if (token === 'eac3' || token === 'ec3') return 'eac3';
+    if (token === 'ac3') return 'ac3';
+    if (token.includes('truehd')) return 'truehd';
+    return token;
+  }
+
+  // Catalog metadata is only an eligibility/duration hint. A profile must carry
+  // the exact-file provenance contract before it may skip stream scanning; it is
+  // never copied into libav's codec parameters.
+  function exactH264MatroskaProfile(profile) {
+    if (!profile || typeof profile !== 'object' || Array.isArray(profile)) return null;
+    const container = String(profileValue(profile, 'container', 'containerName', 'container_name') || '').toLowerCase();
+    const videoCodec = profileValue(profile, 'videoCodec', 'video_codec', 'video');
+    const audioCodec = profileValue(profile, 'audioCodec', 'audio_codec', 'audio');
+    const audioTracks = profileValue(profile, 'audioTracks', 'audio_tracks');
+    const subtitles = profileValue(profile, 'subtitles', 'subtitleTracks', 'subtitle_tracks');
+    const probeSource = String(profileValue(profile, 'probeSource', 'probe_source') || '').trim();
+    const probedAt = String(profileValue(profile, 'probedAt', 'probed_at') || '').trim();
+    const width = Number(profileValue(profile, 'videoWidth', 'video_width', 'width'));
+    const height = Number(profileValue(profile, 'videoHeight', 'video_height', 'height'));
+    if (!(container.includes('matroska') || container === 'mkv' || container === 'webm')) return null;
+    if (codecFamily(videoCodec) !== 'h264' || !codecFamily(audioCodec)) return null;
+    if (!Array.isArray(audioTracks) || !audioTracks.length || !Array.isArray(subtitles)) return null;
+    if (!EXACT_CODEC_PROBE_SOURCES.has(codecToken(probeSource))
+      || !probedAt || !Number.isFinite(Date.parse(probedAt))) return null;
+    if (!(width > 0) || !(height > 0)) return null;
+    const durationSeconds = Number(profileValue(profile, 'durationSeconds', 'duration_seconds', 'duration'));
+    if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) return null;
+    return {
+      raw: profile,
+      videoCodec: codecFamily(videoCodec),
+      audioCodec: codecFamily(audioCodec),
+      audioTracks,
+      subtitles,
+      durationSeconds,
+    };
+  }
+
+  function validAvcC(value) {
+    const data = value && ArrayBuffer.isView(value)
+      ? new Uint8Array(value.buffer, value.byteOffset, value.byteLength)
+      : null;
+    if (!data || data.length < 11 || data[0] !== 1) return false;
+    let pos = 5;
+    const spsCount = data[pos++] & 0x1f;
+    if (spsCount < 1) return false;
+    for (let i = 0; i < spsCount; i++) {
+      if (pos + 2 > data.length) return false;
+      const len = (data[pos] << 8) | data[pos + 1]; pos += 2;
+      if (len < 1 || pos + len > data.length || (data[pos] & 0x1f) !== 7) return false;
+      pos += len;
+    }
+    if (pos >= data.length) return false;
+    const ppsCount = data[pos++];
+    if (ppsCount < 1) return false;
+    for (let i = 0; i < ppsCount; i++) {
+      if (pos + 2 > data.length) return false;
+      const len = (data[pos] << 8) | data[pos + 1]; pos += 2;
+      if (len < 1 || pos + len > data.length || (data[pos] & 0x1f) !== 8) return false;
+      pos += len;
+    }
+    return pos <= data.length;
+  }
 
   // ---- minimal EBML/Matroska reader (builds a time→byte cue index so we can
   //      prefetch the bytes for a seek target while the user is still scrubbing).
@@ -279,7 +358,7 @@
     av1: ['av01.0.08M.08'],
   };
 
-  const ENGINE_VERSION = 46;
+  const ENGINE_VERSION = 47;
 
   class NorvaEngine {
     constructor(videoEl, opts = {}) {
@@ -289,6 +368,7 @@
       this.onReady = typeof opts.onReady === 'function' ? opts.onReady : () => {};
       this.onSeek = typeof opts.onSeek === 'function' ? opts.onSeek : () => {};
       this.onFatal = typeof opts.onFatal === 'function' ? opts.onFatal : () => {};
+      this._exactFastOpenProfile = exactH264MatroskaProfile(opts.codecProfile);
       // libav log verbosity. Default ERROR: libav's INFO default floods the
       // console AND costs real CPU — FFmpeg formats + writes every line through
       // the Emscripten TTY once per block, and the matroska demuxer logs a
@@ -910,8 +990,165 @@
       return size;
     }
 
+    async _readDemuxStreams(fmtCtx) {
+      const lib = this.lib;
+      const count = Number(await lib.AVFormatContext_nb_streams(fmtCtx));
+      if (!Number.isInteger(count) || count < 1 || count > 256) {
+        throw new Error('DEMUX_STREAM_COUNT:' + String(count));
+      }
+      const streams = [];
+      for (let index = 0; index < count; index++) {
+        const ptr = await lib.AVFormatContext_streams_a(fmtCtx, index);
+        const codecpar = await lib.AVStream_codecpar(ptr);
+        const codecType = await lib.AVCodecParameters_codec_type(codecpar);
+        const codecId = await lib.AVCodecParameters_codec_id(codecpar);
+        const timeBaseNum = await lib.AVStream_time_base_num(ptr);
+        const timeBaseDen = await lib.AVStream_time_base_den(ptr);
+        const durationLo = await lib.AVStream_duration(ptr);
+        const durationHi = await lib.AVStream_durationhi(ptr);
+        const durationTimeBase = Number(durationLo) + Number(durationHi) * 4294967296;
+        streams.push({
+          ptr,
+          index,
+          codecpar,
+          codec_type: codecType,
+          codec_id: codecId,
+          time_base_num: timeBaseNum,
+          time_base_den: timeBaseDen,
+          duration_time_base: durationTimeBase,
+          duration: durationTimeBase * timeBaseNum / timeBaseDen,
+        });
+      }
+      return streams;
+    }
+
+    _profileAudioCodecForIndex(index) {
+      const profile = this._exactFastOpenProfile;
+      if (!profile) return null;
+      if (Number.isInteger(index)) {
+        const track = profile.audioTracks.find((item) =>
+          Number(item && (item.index ?? item.streamIndex ?? item.stream_index)) === index);
+        if (!track) return null;
+        return codecFamily(profileValue(track, 'codec', 'codecName', 'codec_name')) || null;
+      }
+      return profile.audioCodec;
+    }
+
+    async _validateExactFastOpenHeader(streams) {
+      const profile = this._exactFastOpenProfile;
+      if (!profile) return { ok: false, reason: 'profile-ineligible' };
+      const lib = this.lib;
+      const video = streams.find((stream) => stream.codec_type === 0) || null;
+      if (!video || !(video.time_base_num > 0) || !(video.time_base_den > 0) || !video.codec_id) {
+        return { ok: false, reason: 'video-descriptor-incomplete' };
+      }
+      const videoName = codecFamily(await lib.avcodec_get_name(video.codec_id));
+      if (videoName !== 'h264' || videoName !== profile.videoCodec) {
+        return { ok: false, reason: 'video-codec-mismatch' };
+      }
+      const videoCodecpar = await lib.ff_copyout_codecpar(video.codecpar);
+      const expectedWidth = Number(profileValue(profile.raw, 'videoWidth', 'video_width', 'width'));
+      const expectedHeight = Number(profileValue(profile.raw, 'videoHeight', 'video_height', 'height'));
+      if (!(videoCodecpar.width > 0) || !(videoCodecpar.height > 0)
+        || videoCodecpar.width !== expectedWidth || videoCodecpar.height !== expectedHeight) {
+        return { ok: false, reason: 'video-dimensions-mismatch' };
+      }
+      if (!validAvcC(videoCodecpar.extradata)) {
+        return { ok: false, reason: 'video-avcc-invalid' };
+      }
+
+      const audios = streams.filter((stream) => stream.codec_type === 1);
+      const runtimeAudioIndices = new Set(audios.map((stream) => stream.index));
+      if (audios.length !== profile.audioTracks.length
+        || runtimeAudioIndices.size !== audios.length
+        || audios.some((stream) => !Number.isInteger(stream.index))) {
+        return { ok: false, reason: 'audio-track-map-mismatch' };
+      }
+      const profileAudioIndices = new Set();
+      for (const profileTrack of profile.audioTracks) {
+        const index = Number(profileTrack && (profileTrack.index
+          ?? profileTrack.streamIndex ?? profileTrack.stream_index));
+        const expectedCodec = codecFamily(profileValue(profileTrack, 'codec', 'codecName', 'codec_name'));
+        const runtimeTrack = Number.isInteger(index)
+          ? audios.find((stream) => stream.index === index)
+          : null;
+        const runtimeCodec = runtimeTrack && runtimeTrack.codec_id
+          ? codecFamily(await lib.avcodec_get_name(runtimeTrack.codec_id))
+          : null;
+        if (!runtimeTrack || profileAudioIndices.has(index) || !expectedCodec
+          || runtimeCodec !== expectedCodec) {
+          return { ok: false, reason: 'audio-track-map-mismatch' };
+        }
+        if (runtimeCodec !== 'ac3') {
+          return { ok: false, reason: 'audio-codec-unvalidated' };
+        }
+        profileAudioIndices.add(index);
+      }
+      const subtitles = streams.filter((stream) => stream.codec_type === 3);
+      const runtimeSubtitleIndices = new Set(subtitles.map((stream) => stream.index));
+      if (subtitles.length !== profile.subtitles.length
+        || runtimeSubtitleIndices.size !== subtitles.length
+        || subtitles.some((stream) => !Number.isInteger(stream.index))) {
+        return { ok: false, reason: 'subtitle-track-map-mismatch' };
+      }
+      const profileSubtitleIndices = new Set();
+      for (const profileTrack of profile.subtitles) {
+        const index = Number(profileTrack && (profileTrack.index
+          ?? profileTrack.streamIndex ?? profileTrack.stream_index));
+        const expectedCodec = codecFamily(profileValue(profileTrack, 'codec', 'codecName', 'codec_name'));
+        const runtimeTrack = Number.isInteger(index)
+          ? subtitles.find((stream) => stream.index === index)
+          : null;
+        if (!runtimeTrack || profileSubtitleIndices.has(index) || !runtimeTrack.codec_id || !expectedCodec
+          || !(runtimeTrack.time_base_num > 0) || !(runtimeTrack.time_base_den > 0)
+          || codecFamily(await lib.avcodec_get_name(runtimeTrack.codec_id)) !== expectedCodec) {
+          return { ok: false, reason: 'subtitle-track-map-mismatch' };
+        }
+        profileSubtitleIndices.add(index);
+      }
+      const selectedAudio = (this._wantAudioIndex != null
+        ? audios.find((stream) => stream.index === this._wantAudioIndex)
+        : null) || audios[0] || null;
+      if (!selectedAudio || !(selectedAudio.time_base_num > 0) || !(selectedAudio.time_base_den > 0) || !selectedAudio.codec_id) {
+        return { ok: false, reason: 'audio-descriptor-incomplete' };
+      }
+      if (this._wantAudioIndex != null && selectedAudio.index !== this._wantAudioIndex) {
+        return { ok: false, reason: 'selected-audio-missing' };
+      }
+      const audioName = codecFamily(await lib.avcodec_get_name(selectedAudio.codec_id));
+      const expectedAudio = this._profileAudioCodecForIndex(selectedAudio.index);
+      if (!expectedAudio || audioName !== expectedAudio) {
+        return { ok: false, reason: 'audio-codec-mismatch' };
+      }
+      const audioCodecpar = await lib.ff_copyout_codecpar(selectedAudio.codecpar);
+      const channels = Number(audioCodecpar.channels);
+      const sampleRate = Number(audioCodecpar.sample_rate);
+      if (!(channels > 0) || !(sampleRate > 0)) {
+        return { ok: false, reason: 'audio-shape-incomplete' };
+      }
+      const profileTrack = profile.audioTracks.find((item) =>
+        Number(item && (item.index ?? item.streamIndex ?? item.stream_index)) === selectedAudio.index)
+        || profile.audioTracks[0];
+      const expectedChannels = Number(profileValue(profileTrack, 'channels', 'audioChannels', 'audio_channels')
+        || profileValue(profile.raw, 'audioChannels', 'audio_channels', 'channels'));
+      const expectedSampleRate = Number(profileValue(profileTrack, 'sampleRate', 'sample_rate')
+        || profileValue(profile.raw, 'audioSampleRate', 'audio_sample_rate', 'sample_rate'));
+      if ((expectedChannels > 0 && channels !== expectedChannels)
+        || (expectedSampleRate > 0 && sampleRate !== expectedSampleRate)) {
+        return { ok: false, reason: 'audio-shape-mismatch' };
+      }
+      // Header-only decode/transcode was fixture-validated end-to-end for AC-3,
+      // which legitimately has no CodecPrivate bytes. AAC can carry an implicit
+      // SBR/PS sync extension beyond its base AudioSpecificConfig, so keep AAC,
+      // E-AC-3 and every other codec on find_stream_info in the v47 cohort.
+      if (audioName !== 'ac3') {
+        return { ok: false, reason: 'audio-codec-unvalidated' };
+      }
+      return { ok: true, reason: 'header-codecpars-complete' };
+    }
+
     async _openInput() {
-      const lib = this.lib, url = this.url, size = this.size;
+      const lib = this.lib, size = this.size;
       await lib.mkblockreaderdev('input', size);
       // _raCache was primed by _prefetchStart in parallel with the wasm load.
       lib.onblockread = async (name, pos, len) => {
@@ -935,8 +1172,56 @@
       // we copy but the browser can't decode) fails the SourceBuffer append later, and the player's
       // existing fallback re-routes it to the gateway transcode.
       let fmtCtx, streams;
+      let profileValidated = false;
       try {
-        [fmtCtx, streams] = await lib.ff_init_demuxer_file('input');
+        let verdict = { ok: false, reason: 'profile-ineligible' };
+        let streamInfoFallback = false;
+        if (!this._exactFastOpenProfile) {
+          // Preserve the compact, worker-local helper for every legacy/partial
+          // profile. It performs one open + find_stream_info on one context.
+          [fmtCtx, streams] = await lib.ff_init_demuxer_file('input');
+        } else {
+          // Keep libav's byte-level autodetection authoritative. The external
+          // profile gates the scan skip only; it must never force a demuxer on a
+          // stale/mislabeled file.
+          fmtCtx = await lib.avformat_open_input_js('input', null, null);
+          if (!fmtCtx) throw new Error('Could not open source file');
+          if (!this._sourceLooksLikeMatroska()) {
+            verdict = { ok: false, reason: 'source-not-ebml' };
+          } else {
+            try {
+              streams = await this._readDemuxStreams(fmtCtx);
+              verdict = await this._validateExactFastOpenHeader(streams);
+            } catch (headerError) {
+              if (this._lastReadError) throw headerError;
+              verdict = { ok: false, reason: 'header-descriptors-incomplete' };
+            }
+          }
+          profileValidated = verdict.ok;
+          if (!verdict.ok) {
+            // The context is already open on the one block-reader. Enrich it in
+            // place: never call ff_init_demuxer_file here, which would reopen the
+            // input and risk a second provider connection/session.
+            const streamInfoResult = await lib.avformat_find_stream_info(fmtCtx, 0);
+            if (this._lastReadError) throw this._lastReadError;
+            if (Number(streamInfoResult) < 0) {
+              throw new Error('STREAM_INFO_FAILED:' + String(streamInfoResult));
+            }
+            streams = await this._readDemuxStreams(fmtCtx);
+            streamInfoFallback = true;
+          }
+        }
+        this.timings.demuxFastOpenEligible = !!this._exactFastOpenProfile;
+        this.timings.demuxFastOpen = !!verdict.ok;
+        this.timings.demuxStreamInfoFallback = streamInfoFallback;
+        this.timings.demuxFastOpenReason = verdict.reason;
+        if (this._diag) {
+          this._diag.demuxOpen = {
+            fast: !!verdict.ok,
+            streamInfoFallback,
+            reason: verdict.reason,
+          };
+        }
       } catch (e) {
         // A real read error (RANGE_UNSUPPORTED / BLOCK_HTTP_xxx) wins — surface it verbatim.
         if (this._lastReadError) throw new Error(String(this._lastReadError.message || this._lastReadError));
@@ -952,8 +1237,11 @@
       this.fmtCtx = fmtCtx; this._streams = streams;
       try {
         const durUs = to64(await lib.AVFormatContext_duration(fmtCtx), await lib.AVFormatContext_durationhi(fmtCtx));
-        this.durationSec = durUs > 0 ? durUs / 1e6 : 0;
-      } catch (_) { this.durationSec = 0; }
+        this.durationSec = durUs > 0 ? durUs / 1e6
+          : (profileValidated ? this._exactFastOpenProfile.durationSeconds : 0);
+      } catch (_) {
+        this.durationSec = profileValidated ? this._exactFastOpenProfile.durationSeconds : 0;
+      }
     }
 
     // MPEG-TS detector: a 188-byte transport stream repeats the 0x47 sync byte every 188 bytes; a
@@ -967,6 +1255,15 @@
         if (b[0] === 0x47 && b[188] === 0x47) return true;                       // 188-byte TS
         if (b.length >= 197 && b[4] === 0x47 && b[196] === 0x47) return true;    // 192-byte M2TS
         return false;
+      } catch (_) { return false; }
+    }
+
+    _sourceLooksLikeMatroska() {
+      try {
+        const w = this._raCache && this._raCache.find((x) => x.start === 0);
+        const b = w && w.buf;
+        return !!b && b.length >= 4
+          && b[0] === 0x1a && b[1] === 0x45 && b[2] === 0xdf && b[3] === 0xa3;
       } catch (_) { return false; }
     }
 

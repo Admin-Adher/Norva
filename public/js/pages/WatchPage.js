@@ -3582,7 +3582,7 @@ class WatchPage {
     // feeding a MediaSource. No transcode server, no Railway. User policy is
     // Runtime failures are recovered at the exact playback position; the gateway
     // remains a bounded last resort for genuinely unsupported media.
-    async playWithEngine(url, { startTime = 0, playbackAttemptId, audioStreamIndex = null } = {}) {
+    async playWithEngine(url, { startTime = 0, playbackAttemptId, audioStreamIndex = null, codecProfile = null } = {}) {
         this.destroyEngine();
         // An hls instance left over from a prior transcode attempt stays ATTACHED to this same
         // <video> — its internal recovery machinery keeps churning against the replaced media and
@@ -3607,6 +3607,10 @@ class WatchPage {
             // trace switch: localStorage.norva_trace = '1' (see NorvaTrace, cloudApi.js).
             const engineTrace = Boolean(window.NorvaTrace?.enabled);
             const engine = this.norvaEngine = new window.NorvaEngine(this.video, {
+                // Exact-file catalog metadata only gates NorvaEngine's Matroska
+                // header fast-open and supplies a missing duration. Runtime
+                // codec parameters always come from libav's opened input.
+                codecProfile: codecProfile || this._diagCodecProfile || null,
                 // Arm in-band subtitle capture before the demux pump starts (flag-gated) so cues
                 // are buffered from the first packet — eliminates the gap-before-visible delay.
                 inbandSubtitles: this._inbandSubsEnabled(),
@@ -4350,7 +4354,8 @@ class WatchPage {
             await this.playWithEngine(url, {
                 startTime: Number(options.startTime ?? options.seekOffset ?? this.resumeTime ?? 0) || 0,
                 playbackAttemptId,
-                audioStreamIndex: preferredAudioIndex
+                audioStreamIndex: preferredAudioIndex,
+                codecProfile: options.codecProfile || null
             });
             // Subtitles: the SERVER probed them (same relay header-parse as audio) and
             // returned them in the payload — known at LOAD, so the CC menu lists them and
@@ -6496,11 +6501,9 @@ class WatchPage {
         const video = this.video;
         if (!video) return false;
         if (video.error) return false;
-        const hasMetadata = video.readyState >= 1
-            && Number.isFinite(video.duration)
-            && video.duration > 0;
-        const hasMedia = video.readyState >= 2 || video.currentTime > 0 || (hasMetadata && !video.paused);
-        return hasMedia && !video.ended && Boolean(video.currentSrc || video.src);
+        return video.readyState >= 2
+            && !video.ended
+            && Boolean(video.currentSrc || video.src);
     }
 
     markPlaybackUsable(options = {}) {
