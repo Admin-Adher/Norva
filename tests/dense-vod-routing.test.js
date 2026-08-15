@@ -461,6 +461,30 @@ function loadCloudApi({ native = false, createSessionError = null } = {}) {
     return { API: window.API, calls };
 }
 
+function loadMovieLaunchClasses({ API, MediaUtils }) {
+    const document = {
+        documentElement: { classList: { contains: () => false } },
+        getElementById: () => null,
+    };
+    const context = {
+        window: {},
+        document,
+        API,
+        MediaUtils,
+        Icons: { play: '' },
+        console,
+        setTimeout,
+        clearTimeout,
+    };
+    vm.createContext(context);
+    vm.runInContext(read('public/js/pages/HomePage.js'), context, { filename: 'HomePage.js' });
+    vm.runInContext(read('public/js/pages/MoviesPage.js'), context, { filename: 'MoviesPage.js' });
+    return {
+        HomePage: context.window.HomePage,
+        MoviesPage: context.window.MoviesPage,
+    };
+}
+
 test('dense browser VOD uses Gateway remux with audio transcode and selected track', async () => {
     const { API, calls } = loadCloudApi();
     const playbackHint = loadMediaUtils().playbackHintFromItem({
@@ -578,6 +602,132 @@ test('known H264 AAC MKV keeps video and audio on the fast Gateway copy path', a
     assert.strictEqual(calls[0].mode, 'transcode');
     assert.strictEqual(calls[0].playbackHint.gatewayMode, 'remux');
     assert.strictEqual(calls[0].playbackHint.audioMode, undefined);
+});
+
+test('a selected grouped MKV keeps its exact codec profile and opens one Gateway remux lane', async () => {
+    const MediaUtils = loadMediaUtils();
+    const { API, calls } = loadCloudApi();
+    const { HomePage, MoviesPage } = loadMovieLaunchClasses({ API, MediaUtils });
+    const sourceId = '00000000-0000-4000-8000-000000000365';
+    const exactProfile = {
+        audioChannelLayout: '5.1(side)',
+        audioChannels: 6,
+        audioCodec: 'ac3',
+        audioSampleRate: 48000,
+        audioTracks: [
+            { index: 1, codec: 'ac3', language: 'en', channels: 6, default: true },
+            { index: 2, codec: 'ac3', language: 'fr', channels: 6 },
+        ],
+        bitRate: 8500000,
+        container: 'matroska,webm',
+        durationSeconds: 6600,
+        probedAt: '2026-08-14T20:00:00.000Z',
+        probeMs: 140,
+        probeSource: 'gateway_probe',
+        subtitles: [{ index: 3, codec: 'subrip', language: 'fr' }],
+        videoCodec: 'h264',
+        videoHeight: 1080,
+        videoPixelFormat: 'yuv420p',
+        videoProfile: 'High',
+        videoWidth: 1920,
+    };
+    assert.strictEqual(Object.keys(exactProfile).length, 17, 'fixture mirrors the complete catalog profile');
+    const catalogTitle = {
+        item_type: 'movie',
+        title: 'Le professionnel',
+        name: 'Le professionnel',
+        sourceId,
+        source_id: sourceId,
+        // A grouped title/default wrapper may carry the camel-case alias before
+        // the selected exact variant overlays its authoritative DB-shaped alias.
+        codecProfile: {},
+        variants: [
+            {
+                source_id: sourceId,
+                external_id: 'le-professionnel-default',
+                raw_title: 'Le professionnel FHD 1994',
+                container_extension: 'mkv',
+                codec_profile: {},
+            },
+            {
+                source_id: sourceId,
+                external_id: 'leon-multi-fhd-1994',
+                raw_title: 'Léon (MULTI) FHD 1994',
+                container_extension: 'mkv',
+                codec_profile: exactProfile,
+                audio_tracks_scope: 'file',
+                audio_tracks: exactProfile.audioTracks,
+                subtitle_tracks_scope: 'file',
+                subtitle_tracks: exactProfile.subtitles,
+            },
+        ],
+    };
+
+    const home = Object.create(HomePage.prototype);
+    const group = home.buildHomeMediaGroup(catalogTitle, 'movie');
+    const selected = group.items.find((item) => item.stream_id === 'leon-multi-fhd-1994');
+    assert.ok(selected, 'the UI group must retain the selected exact variant');
+    assert.strictEqual(selected.codecProfile && Object.keys(selected.codecProfile).length, 0);
+    assert.strictEqual(selected.codec_profile.videoCodec, 'h264');
+
+    let resolvedPlayback = null;
+    const movies = Object.create(MoviesPage.prototype);
+    movies.currentMovie = selected;
+    movies.currentMovieVersions = group.items;
+    movies.getMovieWatchState = () => ({ status: 'unwatched', resumeTime: 0, data: {} });
+    movies.getSourceName = () => 'KING365';
+    movies.getMovieDisplayTitle = () => 'Le professionnel';
+    movies.getItemYear = () => 1994;
+    movies.prepareForPlaybackSession = async () => {};
+    movies.app = {
+        player: { stop: async () => {} },
+        pages: {
+            watch: {
+                releasePlaybackPipelineForRetry: async () => {},
+                play: async (_content, resolver) => {
+                    resolvedPlayback = await resolver();
+                },
+            },
+        },
+    };
+
+    await movies.playPrimaryMovie();
+
+    assert.ok(resolvedPlayback?.url, 'the selected variant must resolve a playable URL');
+    assert.strictEqual(calls.length, 1, 'one click must create exactly one cloud session');
+    assert.strictEqual(calls[0].itemId, 'leon-multi-fhd-1994');
+    assert.strictEqual(calls[0].mode, 'transcode', 'the known MKV must select the Gateway transport');
+    assert.strictEqual(calls[0].requiresTranscode, true);
+    assert.strictEqual(calls[0].enginePipe, undefined, 'the known profile must not open the Engine lane');
+    assert.strictEqual(calls[0].playbackHint.videoCodec, 'h264');
+    assert.strictEqual(calls[0].playbackHint.audioCodec, 'ac3');
+    assert.strictEqual(calls[0].playbackHint.gatewayMode, 'remux');
+    assert.strictEqual(calls[0].playbackHint.audioMode, 'transcode');
+});
+
+test('playback hint skips empty aliases before a nested camel-case exact profile', () => {
+    const exactProfile = {
+        videoCodec: 'h264',
+        audioCodec: 'ac3',
+        audioChannels: 6,
+        durationSeconds: 6600,
+    };
+    const playbackHint = loadMediaUtils().playbackHintFromItem({
+        codecProfile: {},
+        codec_profile: {},
+        defaultVariant: { codecProfile: {}, codec_profile: {} },
+        data: { codecProfile: {}, codec_profile: {} },
+        playbackHint: { codecProfile: exactProfile },
+    }, { container: 'mkv', streamType: 'movie' });
+
+    assert.strictEqual(playbackHint.videoCodec, 'h264');
+    assert.strictEqual(playbackHint.audioCodec, 'ac3');
+    assert.strictEqual(playbackHint.audioChannels, 6);
+    assert.strictEqual(playbackHint.durationSeconds, 6600);
+});
+
+test('the app shell cache-busts the exact-profile resolver', () => {
+    assert.match(read('public/app.html'), /\/js\/utils\/mediaUtils\.js\?v=17/);
 });
 
 test('MKV provider busy is terminal and never opens an engine or second Gateway lane', async () => {

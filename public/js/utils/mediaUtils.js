@@ -1355,7 +1355,7 @@ const MediaUtils = (() => {
                 variant.parentExternalId, variant.parent_external_id
             )
             : undefined;
-        const codec = firstRecord(
+        const codec = firstNonEmptyRecord(
             item.codecProfile,
             item.codec_profile,
             variant.codecProfile,
@@ -1412,6 +1412,15 @@ const MediaUtils = (() => {
 
     function firstRecord(...values) {
         return values.find(value => value && typeof value === 'object' && !Array.isArray(value)) || {};
+    }
+
+    function firstNonEmptyRecord(...values) {
+        return values.find(value =>
+            value &&
+            typeof value === 'object' &&
+            !Array.isArray(value) &&
+            Object.keys(value).length > 0
+        ) || {};
     }
 
     function firstValue(...values) {
