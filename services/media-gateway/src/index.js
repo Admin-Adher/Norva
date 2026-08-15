@@ -133,6 +133,7 @@ function preemptAccountExtractions(proxyKey, reason) {
     if (!set || !set.size) return 0;
     let n = 0;
     for (const entry of [...set]) {
+        if (entry.preempted) continue;
         entry.preempted = true;
         try { entry.child.kill('SIGKILL'); } catch (_) { /* already gone */ }
         n += 1;
@@ -526,7 +527,7 @@ const EXACT_MATROSKA_H264_HLS_TARGET_SECONDS = 2;
 const EXACT_MATROSKA_H264_MAX_WIDTH = 1920;
 const EXACT_MATROSKA_H264_MAX_HEIGHT = 1080;
 const EXACT_MATROSKA_H264_MAX_PIXELS = EXACT_MATROSKA_H264_MAX_WIDTH * EXACT_MATROSKA_H264_MAX_HEIGHT;
-const GATEWAY_VERSION = 85;
+const GATEWAY_VERSION = 86;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -1293,13 +1294,15 @@ app.get('/raw/:token', async (req, res) => {
         proxyKey: pumpProxyKey,
         ownerHash: claims.uid ? sha256Hex(claims.uid) : null,
     });
-    abortRawPumps((p) => p !== pump && p.proxyKey === pumpProxyKey, claims.sid || null,
+    let abortedForHandoff = abortRawPumps((p) => p !== pump && p.proxyKey === pumpProxyKey, claims.sid || null,
         `superseded by playback ${String(claims.sid || 'unknown').slice(0, 8)}`);
     // Same rule as the transcode lane: a viewer's byte-pump outranks any background extraction
     // or CPU inference for this account (the job re-queues as deferred and resumes after the
     // viewing). Viewer-origin subtitle inference is intentionally not in the background ledger.
     const rawPlaybackReason = `raw playback ${String(claims.sid || 'unknown').slice(0, 8)}`;
-    preemptAccountExtractions(pumpProxyKey, rawPlaybackReason);
+    abortedForHandoff += preemptAccountExtractions(pumpProxyKey, rawPlaybackReason);
+    // CPU preemption does not hold a provider connection and must not trigger the provider
+    // slot-release delay below.
     preemptAccountBackgroundWhispers(pumpProxyKey, rawPlaybackReason);
     res.on('close', () => {
         ac.abort();
@@ -1318,12 +1321,15 @@ app.get('/raw/:token', async (req, res) => {
     // Retry only transient network/server failures and empty responses. Every 4xx,
     // especially the provider's single-account 458, is terminal on its first response
     // so the playback edge can open the account circuit without creating a request
-    // cascade. All attempts still consume the same hard wall-clock deadline.
-    const maxAttempts = 1 + RAW_PROVIDER_RETRY_LIMIT + RAW_NO_DATA_RETRY_LIMIT;
+    // cascade. Exception: one handoff retry after we ourselves aborted the previous
+    // holder. All attempts still consume the same hard wall-clock deadline.
+    const maxAttempts = 1 + RAW_PROVIDER_RETRY_LIMIT + RAW_NO_DATA_RETRY_LIMIT
+        + (abortedForHandoff > 0 ? 1 : 0);
     let upstream = null;
     let sniffedBody = null; // { chunk, reader } validated before response headers are committed
     let noDataAttempts = 0;
     let providerRetryAttempts = 0;
+    let rawHandoffRetryUsed = false;
     const waitForRetry = async (attempt, upstreamStatus = null) => {
         const delayMs = RAW_PROVIDER_RETRY_DELAYS_MS[attempt - 1] || 4000;
         const outcome = await waitForRawBackoff(delayMs, startupDeadlineAt, ac.signal);
@@ -1335,6 +1341,14 @@ app.get('/raw/:token', async (req, res) => {
         sendRawStartupTimeout(res, upstreamStatus);
         return false;
     };
+    if (abortedForHandoff > 0 && PROVIDER_SLOT_RELEASE_DELAY_MS > 0) {
+        console.log(`[media-gateway] waiting ${PROVIDER_SLOT_RELEASE_DELAY_MS}ms for provider slot release after aborting ${abortedForHandoff} raw holder(s)`);
+        const outcome = await waitForRawBackoff(PROVIDER_SLOT_RELEASE_DELAY_MS, startupDeadlineAt, ac.signal);
+        if (outcome === 'aborted' || ac.signal.aborted) {
+            try { res.end(); } catch (_) {}
+            return;
+        }
+    }
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
         if (rawStartupRemainingMs(startupDeadlineAt) <= 0) {
             sendRawStartupTimeout(res, upstream && upstream.status);
@@ -1395,6 +1409,25 @@ app.get('/raw/:token', async (req, res) => {
                 code: failure.code,
                 networkCause: 'proxy_auth',
             });
+        }
+        if (
+            !rawHandoffRetryUsed
+            && abortedForHandoff > 0
+            && (
+                upstream.status === 458
+                || classifyProviderResponseFailure(upstream.status, {}).code === 'PROVIDER_BUSY'
+            )
+        ) {
+            rawHandoffRetryUsed = true;
+            const waitMs = PROVIDER_SLOT_RELEASE_DELAY_MS || 2500;
+            abandonRawAttempt(attemptGuard, upstream.body, 'raw_handoff_slot_busy');
+            console.warn(`[media-gateway] /raw provider 458 after aborting ${abortedForHandoff} holder(s); waiting ${waitMs}ms for slot release before one handoff retry`);
+            const outcome = await waitForRawBackoff(waitMs, startupDeadlineAt, ac.signal);
+            if (outcome === 'aborted' || ac.signal.aborted) {
+                try { res.end(); } catch (_) {}
+                return;
+            }
+            continue;
         }
         const retryable = shouldRetryProviderStatus(upstream.status);
         if (retryable && providerRetryAttempts < RAW_PROVIDER_RETRY_LIMIT && attempt < maxAttempts) {
