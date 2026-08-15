@@ -1,6 +1,9 @@
 'use strict';
 
+const crypto = require('crypto');
+
 const STATIC_PROXY_SLOT_COUNT = 5;
+const MAX_PROXY_SLOT_OVERRIDES = 64;
 
 function decodedProviderUsername(value) {
     const raw = String(value || '').trim();
@@ -69,6 +72,61 @@ function stableProxySlotIndex(accountKey, slotCount) {
     return (hash >>> 0) % count;
 }
 
+function providerAccountOverrideHash(accountKey) {
+    return crypto.createHash('sha256').update(String(accountKey || '')).digest('hex');
+}
+
+function parseProviderProxySlotOverrides(value, slotCount) {
+    const raw = String(value || '').trim();
+    if (!raw) return new Map();
+    if (Number(slotCount) !== STATIC_PROXY_SLOT_COUNT) {
+        throw new Error('PROVIDER_PROXY_SLOT_OVERRIDES requires the complete five-slot proxy pool');
+    }
+    if (raw.length > 16_384) {
+        throw new Error('PROVIDER_PROXY_SLOT_OVERRIDES is invalid');
+    }
+
+    let parsed;
+    try { parsed = JSON.parse(raw); } catch (_) {
+        throw new Error('PROVIDER_PROXY_SLOT_OVERRIDES is invalid');
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new Error('PROVIDER_PROXY_SLOT_OVERRIDES is invalid');
+    }
+
+    const entries = Object.entries(parsed);
+    if (entries.length > MAX_PROXY_SLOT_OVERRIDES) {
+        throw new Error('PROVIDER_PROXY_SLOT_OVERRIDES is invalid');
+    }
+    const overrides = new Map();
+    for (const [rawHash, rawSlot] of entries) {
+        const accountHash = String(rawHash || '').toLowerCase();
+        const slotNumber = rawSlot;
+        if (!/^[0-9a-f]{64}$/.test(accountHash)
+            || typeof slotNumber !== 'number'
+            || !Number.isInteger(slotNumber)
+            || slotNumber < 1
+            || slotNumber > STATIC_PROXY_SLOT_COUNT
+            || overrides.has(accountHash)) {
+            throw new Error('PROVIDER_PROXY_SLOT_OVERRIDES is invalid');
+        }
+        overrides.set(accountHash, slotNumber - 1);
+    }
+    return overrides;
+}
+
+function proxySlotIndexForAccount(accountKey, slotCount, overrides = new Map()) {
+    const accountHash = providerAccountOverrideHash(accountKey);
+    if (overrides && overrides.has(accountHash)) {
+        const overriddenSlot = overrides.get(accountHash);
+        if (!Number.isInteger(overriddenSlot) || overriddenSlot < 0 || overriddenSlot >= Number(slotCount)) {
+            throw new Error('PROVIDER_PROXY_SLOT_OVERRIDES is invalid');
+        }
+        return overriddenSlot;
+    }
+    return stableProxySlotIndex(accountKey, slotCount);
+}
+
 function normalizeProxyUrl(candidate) {
     if (/^https?:\/\//i.test(candidate)) {
         let parsed;
@@ -118,9 +176,13 @@ function parseProviderProxyUrls(value) {
 }
 
 module.exports = {
+    MAX_PROXY_SLOT_OVERRIDES,
     STATIC_PROXY_SLOT_COUNT,
     parseProviderProxyUrls,
+    parseProviderProxySlotOverrides,
     providerAccountAffinityKey,
     providerAccountAffinityKeyFromCredentials,
+    providerAccountOverrideHash,
+    proxySlotIndexForAccount,
     stableProxySlotIndex,
 };

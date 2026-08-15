@@ -126,6 +126,63 @@ test('five-slot assignment is deterministic, non-rotating, and distributes accou
   assert.deepEqual([...seen].sort(), [0, 1, 2, 3, 4]);
 });
 
+test('service-only slot overrides target one hashed provider account and leave every other account sticky', () => {
+  const targetKey = 'panel.example/airysat-account';
+  const otherKey = 'panel.example/other-account';
+  const targetHash = proxyPool.providerAccountOverrideHash(targetKey);
+  const overrides = proxyPool.parseProviderProxySlotOverrides(
+    JSON.stringify({ [targetHash]: 4 }),
+    proxyPool.STATIC_PROXY_SLOT_COUNT,
+  );
+
+  assert.match(targetHash, /^[0-9a-f]{64}$/);
+  assert.equal(overrides.size, 1);
+  assert.equal(proxyPool.proxySlotIndexForAccount(targetKey, 5, overrides), 3);
+  assert.equal(
+    proxyPool.proxySlotIndexForAccount(otherKey, 5, overrides),
+    proxyPool.stableProxySlotIndex(otherKey, 5),
+  );
+  assert.equal(
+    proxyPool.proxySlotIndexForAccount(targetKey, 5, new Map()),
+    proxyPool.stableProxySlotIndex(targetKey, 5),
+    'removing the env override must restore the original deterministic slot',
+  );
+});
+
+test('slot override configuration is bounded and fails closed without leaking entries', () => {
+  const validHash = 'a'.repeat(64);
+  for (const invalid of [
+    '{',
+    '[]',
+    JSON.stringify({ raw_provider_username: 2 }),
+    JSON.stringify({ [validHash]: 0 }),
+    JSON.stringify({ [validHash]: 6 }),
+    JSON.stringify({ [validHash]: 1.5 }),
+    JSON.stringify({ [validHash]: '2' }),
+  ]) {
+    assert.throws(
+      () => proxyPool.parseProviderProxySlotOverrides(invalid, 5),
+      (error) => {
+        assert.match(String(error?.message || ''), /PROVIDER_PROXY_SLOT_OVERRIDES is invalid/);
+        assert.doesNotMatch(String(error?.message || ''), /raw_provider_username|a{16}/);
+        return true;
+      },
+    );
+  }
+  assert.throws(
+    () => proxyPool.parseProviderProxySlotOverrides(JSON.stringify({ [validHash]: 2 }), 1),
+    /requires the complete five-slot proxy pool/,
+  );
+
+  const tooMany = Object.fromEntries(
+    Array.from({ length: 65 }, (_, index) => [index.toString(16).padStart(64, '0'), 1]),
+  );
+  assert.throws(
+    () => proxyPool.parseProviderProxySlotOverrides(JSON.stringify(tooMany), 5),
+    /PROVIDER_PROXY_SLOT_OVERRIDES is invalid/,
+  );
+});
+
 test('proxy authentication failures stay distinct from provider slot-busy HTTP 458', () => {
   const undiciProxy407 = new TypeError('fetch failed', {
     cause: Object.assign(
@@ -198,6 +255,16 @@ test('gateway uses the canonical provider key on every provider network lane', (
     /dispatcher: pickProxyAgent\(proxyKeyFromUrl\(url\)\) \|\| undefined/,
     'metadata must use the provider-account key',
   );
+  assert.match(
+    gateway,
+    /function pickProxyAgent\(key\) \{[\s\S]{0,120}poolIndexForKey\(key\)/,
+    'HTTP lanes must resolve their operator override through the shared sticky slot selector',
+  );
+  assert.match(
+    gateway,
+    /function proxyEnvFor\(key\) \{[\s\S]{0,160}poolIndexForKey\(key\)/,
+    'FFmpeg and FFprobe lanes must resolve the same targeted slot as HTTP',
+  );
 });
 
 test('account activity reports the exact canonical affinity key without a second decode', () => {
@@ -215,9 +282,19 @@ test('gateway fails proxy 407 safely before provider 458 handling', () => {
   assert.match(gateway, /upstream\.status === 407 && providerProxyAgents\.length/);
 });
 
-test('gateway v82 advertises the provider-account affinity protocol without secrets', () => {
-  assert.match(gateway, /const GATEWAY_VERSION = 84;/);
+test('gateway advertises targeted operator override support without identities or secrets', () => {
+  assert.match(gateway, /const GATEWAY_VERSION = 85;/);
   assert.match(gateway, /providerProxyAffinityProtocol:\s*1/);
   assert.match(gateway, /providerProxyAffinityKey:\s*'provider-account'/);
+  assert.match(gateway, /providerProxySlotOverrideProtocol:\s*1/);
+  assert.match(gateway, /providerProxySlotOverrideConfigured:\s*providerProxySlotOverrides\.size > 0/);
+  assert.match(gateway, /process\.env\.PROVIDER_PROXY_SLOT_OVERRIDES/);
+  assert.match(
+    gateway,
+    /return proxySlotIndexForAccount\(key, providerProxyAgents\.length, providerProxySlotOverrides\);/,
+  );
+  assert.doesNotMatch(gateway, /req\.(body|query|params)[\s\S]{0,120}PROVIDER_PROXY_SLOT_OVERRIDES/);
+  assert.doesNotMatch(gateway, /console\.(log|warn|error)\([^\n]*providerProxySlotOverrides/);
+  assert.doesNotMatch(gateway, /providerProxySlotOverrides[\s\S]{0,100}res\.json/);
   assert.doesNotMatch(gateway, /providerProxyUrls[\s\S]{0,100}res\.json/);
 });
