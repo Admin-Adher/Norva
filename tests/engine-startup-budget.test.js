@@ -50,9 +50,9 @@ function makeBareEngine(NorvaEngine) {
     return engine;
 }
 
-test('startup budget ships as engine telemetry revision 49', () => {
+test('startup budget ships as engine telemetry revision 50', () => {
     const source = fs.readFileSync(path.join(ROOT, 'public', 'js', 'norvaEngine.js'), 'utf8');
-    assert.match(source, /const ENGINE_VERSION = 49;/);
+    assert.match(source, /const ENGINE_VERSION = 50;/);
 });
 
 test('startup prefetch uses 512 KiB and later startup windows never exceed 1 MiB', async () => {

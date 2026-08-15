@@ -30,7 +30,7 @@ function loadEngineClass() {
     return sandbox.window.NorvaEngine;
 }
 
-function makePumpEngine(readResult, { exposeEofConstant = true } = {}) {
+function makePumpEngine(readResult, { exposeEofConstant = true, trailerResult } = {}) {
     const NorvaEngine = loadEngineClass();
     const reports = [];
     const fatals = [];
@@ -49,7 +49,7 @@ function makePumpEngine(readResult, { exposeEofConstant = true } = {}) {
         EAGAIN: 11,
         ...(exposeEofConstant ? { AVERROR_EOF } : {}),
         ff_read_frame_multi: async () => [readResult, {}],
-        av_write_trailer: async () => { trailers += 1; },
+        av_write_trailer: async () => { trailers += 1; return trailerResult; },
     };
     return {
         engine,
@@ -94,4 +94,26 @@ test('the known FFmpeg EOF remains a clean end when legacy glue omits AVERROR_EO
     assert.strictEqual(state.drainCount(), 1);
     assert.deepStrictEqual(state.reports, []);
     assert.deepStrictEqual(state.fatals, []);
+});
+
+test('a rejected fast-open trailer is fatal without ending or draining MediaSource', async () => {
+    const state = makePumpEngine(AVERROR_EOF, { trailerResult: -5 });
+    state.engine._muxSkipTrailer = true;
+    state.engine.timings = { muxSkipTrailer: true };
+
+    state.engine._startPump();
+    for (let i = 0; i < 10 && state.engine._pumpRunning; i++) {
+        await new Promise((resolve) => setImmediate(resolve));
+    }
+
+    assert.strictEqual(state.engine._pumpRunning, false);
+    assert.strictEqual(state.engine.ended, false);
+    assert.strictEqual(state.drainCount(), 0);
+    assert.strictEqual(state.engine._stopRequested, true);
+    assert.strictEqual(state.engine._fatalSignaled, true);
+    assert.strictEqual(state.fatals.length, 1);
+    assert.strictEqual(state.fatals[0].code, 'MUX_TRAILER_WRITE_FAILED');
+    assert.strictEqual(state.fatals[0].libavResult, -5);
+    assert.strictEqual(state.reports.length, 1);
+    assert.strictEqual(state.reports[0].stage, 'mux:trailer-write');
 });

@@ -687,6 +687,7 @@ test('fast-open MKV caps the first fMP4 fragment at two seconds without weakenin
         engine.aS = null;
         engine.timings = { demuxFastOpen: fastOpen };
         const calls = [];
+        let movflagsResult = 0;
         let fragDurationResult = initialFragDurationResult;
         engine.lib = {
             AV_OPT_SEARCH_CHILDREN: 1,
@@ -695,7 +696,7 @@ test('fast-open MKV caps the first fMP4 fragment at two seconds without weakenin
             ff_init_muxer: async () => [303, null, null, []],
             av_opt_set: async (...args) => {
                 calls.push(['av_opt_set', ...args]);
-                return args[1] === 'frag_duration' ? fragDurationResult : 0;
+                return args[1] === 'frag_duration' ? fragDurationResult : movflagsResult;
             },
             avformat_write_header: async (...args) => { calls.push(['avformat_write_header', ...args]); },
             av_packet_alloc: async () => 404,
@@ -705,6 +706,7 @@ test('fast-open MKV caps the first fMP4 fragment at two seconds without weakenin
             engine,
             calls,
             init: () => engine._initMuxer(),
+            setMovflagsResult: (result) => { movflagsResult = result; },
             setFragDurationResult: (result) => { fragDurationResult = result; },
         };
     };
@@ -712,13 +714,32 @@ test('fast-open MKV caps the first fMP4 fragment at two seconds without weakenin
     const fast = initialise(true, 0);
     await fast.init();
     assert.deepStrictEqual(fast.calls, [
-        ['av_opt_set', 303, 'movflags', 'frag_keyframe+empty_moov+default_base_moof', 1],
+        ['av_opt_set', 303, 'movflags', 'frag_keyframe+empty_moov+default_base_moof+skip_trailer', 1],
         ['av_opt_set', 303, 'frag_duration', '2000000', 1],
         ['avformat_write_header', 303, 0],
     ]);
+    assert.strictEqual(fast.engine.timings.muxSkipTrailer, true);
     assert.strictEqual(fast.engine.timings.muxFragmentDurationUs, 2_000_000);
 
     fast.calls.length = 0;
+    fast.setMovflagsResult(-12);
+    await assert.rejects(
+        fast.init,
+        (error) => error?.code === 'MUX_MOVFLAGS_CONFIG_FAILED'
+            && error?.libavResult === -12
+            && /MUX_MOVFLAGS_CONFIG_FAILED:-12/.test(error.message),
+    );
+    assert.deepStrictEqual(fast.calls, [
+        ['av_opt_set', 303, 'movflags', 'frag_keyframe+empty_moov+default_base_moof+skip_trailer', 1],
+    ], 'rejected fast-open movflags must stop before frag_duration and write_header');
+    assert.strictEqual(fast.engine.timings.muxSkipTrailer, undefined,
+        'a rejected reinitialisation must clear the prior skip_trailer marker');
+    assert.strictEqual(fast.engine.timings.muxFragmentDurationUs, undefined,
+        'a rejected reinitialisation must clear the prior fragment-duration marker');
+    assert.strictEqual(fast.engine._muxSkipTrailer, false);
+
+    fast.calls.length = 0;
+    fast.setMovflagsResult(0);
     fast.setFragDurationResult(-28);
     await assert.rejects(
         fast.init,
@@ -727,11 +748,14 @@ test('fast-open MKV caps the first fMP4 fragment at two seconds without weakenin
             && /MUX_FRAGMENT_DURATION_CONFIG_FAILED:-28/.test(error.message),
     );
     assert.deepStrictEqual(fast.calls, [
-        ['av_opt_set', 303, 'movflags', 'frag_keyframe+empty_moov+default_base_moof', 1],
+        ['av_opt_set', 303, 'movflags', 'frag_keyframe+empty_moov+default_base_moof+skip_trailer', 1],
         ['av_opt_set', 303, 'frag_duration', '2000000', 1],
     ], 'a rejected duration cap must fail before write_header can start an unbounded fast-open mux');
+    assert.strictEqual(fast.engine.timings.muxSkipTrailer, undefined,
+        'a rejected duration cap must not advertise a usable skip_trailer mux');
     assert.strictEqual(fast.engine.timings.muxFragmentDurationUs, undefined,
         'a rejected reinitialisation must invalidate the duration cap reported by the prior muxer');
+    assert.strictEqual(fast.engine._muxSkipTrailer, false);
 
     const legacy = initialise(false);
     await legacy.init();
@@ -739,7 +763,131 @@ test('fast-open MKV caps the first fMP4 fragment at two seconds without weakenin
         ['av_opt_set', 303, 'movflags', 'frag_keyframe+empty_moov+default_base_moof', 1],
         ['avformat_write_header', 303, 0],
     ], 'legacy/full-scan playback must retain its established mux fragmentation');
+    assert.strictEqual(legacy.engine.timings.muxSkipTrailer, undefined);
     assert.strictEqual(legacy.engine.timings.muxFragmentDurationUs, undefined);
+});
+
+test('fast-open EOF preserves the final media callback while legacy drops trailer metadata', async () => {
+    const NorvaEngine = loadEngineClass();
+    const trailerBytes = Uint8Array.from([0, 0, 0, 8, 0x66, 0x72, 0x65, 0x65]);
+
+    const initialise = async (fastOpen, trailerResult = 0, emitTrailer = true, trailer = {}) => {
+        const { engine, reports, fatals } = makeEngine(NorvaEngine);
+        engine.vS = null;
+        engine.aS = null;
+        engine.timings = { demuxFastOpen: fastOpen };
+        let drains = 0;
+        engine._bufferedAhead = () => 0;
+        engine._drain = () => { drains += 1; };
+        engine.lib = {
+            AV_OPT_SEARCH_CHILDREN: 1,
+            AVERROR_EOF: -541478725,
+            EAGAIN: 11,
+            unlink: async () => {},
+            mkstreamwriterdev: async () => {},
+            ff_init_muxer: async () => [303, null, null, []],
+            av_opt_set: async () => 0,
+            avformat_write_header: async () => {},
+            av_packet_alloc: async () => 404,
+            ff_read_frame_multi: async () => [-541478725, {}],
+            av_write_trailer: async () => {
+                if (emitTrailer) {
+                    engine.lib.onwrite(
+                        'output',
+                        trailer.pos ?? 0,
+                        trailer.bytes || trailerBytes,
+                    );
+                }
+                if (trailer.bumpGeneration) engine._muxGeneration += 1;
+                if (trailer.error) throw trailer.error;
+                return trailerResult;
+            },
+        };
+        await engine._initMuxer();
+        return { engine, reports, fatals, drains: () => drains };
+    };
+
+    const fast = await initialise(true);
+    await fast.engine._pump();
+    assert.strictEqual(fast.engine.ended, true);
+    assert.strictEqual(fast.engine._dropWrites, false);
+    assert.strictEqual(fast.engine.queue.length, 1,
+        'skip_trailer finalises the last fast-open fragment through the normal onwrite path');
+    assert.deepStrictEqual(Array.from(fast.engine.queue[0]), Array.from(trailerBytes));
+    assert.strictEqual(fast.engine._diag.trailerBytesDropped, 0);
+
+    const legacy = await initialise(false);
+    await legacy.engine._pump();
+    assert.strictEqual(legacy.engine.ended, true);
+    assert.strictEqual(legacy.engine._dropWrites, false);
+    assert.strictEqual(legacy.engine.queue.length, 0,
+        'legacy trailer metadata must retain the established drop behavior');
+    assert.strictEqual(legacy.engine._diag.trailerBytesDropped, trailerBytes.length);
+
+    const positive = await initialise(true, 1516, false);
+    await positive.engine._pump();
+    assert.strictEqual(positive.engine.ended, true,
+        'every non-negative integer trailer result is successful');
+
+    for (const rejectedResult of [-5, null]) {
+        const rejected = await initialise(true, rejectedResult, true);
+        await assert.rejects(
+            () => rejected.engine._pump(),
+            (error) => error?.code === 'MUX_TRAILER_WRITE_FAILED'
+                && error?.libavResult === rejectedResult
+                && new RegExp(`MUX_TRAILER_WRITE_FAILED:${String(rejectedResult)}`).test(error.message),
+        );
+        assert.strictEqual(rejected.engine.ended, false,
+            'a rejected fast-open trailer must not mark the MediaSource as ended');
+        assert.strictEqual(rejected.drains(), 0,
+            'a rejected fast-open trailer must not drain into endOfStream');
+        assert.strictEqual(rejected.engine.queue.length, 0,
+            'callbacks emitted before a rejected trailer result must stay transactional');
+        assert.strictEqual(rejected.engine._diag.muxRejectedBytes, trailerBytes.length);
+        await Promise.resolve();
+        assert.strictEqual(rejected.fatals.length, 1);
+        assert.strictEqual(rejected.fatals[0].code, 'MUX_TRAILER_WRITE_FAILED');
+        assert.strictEqual(rejected.engine._dropWrites, false);
+    }
+
+    const thrown = await initialise(true, 0, true, { error: new Error('trailer worker failed') });
+    await assert.rejects(
+        () => thrown.engine._pump(),
+        (error) => error?.code === 'MUX_TRAILER_WRITE_FAILED'
+            && error?.libavResult === null
+            && /MUX_TRAILER_WRITE_FAILED:exception:trailer worker failed/.test(error.message),
+    );
+    await Promise.resolve();
+    assert.strictEqual(thrown.engine.queue.length, 0);
+    assert.strictEqual(thrown.engine.ended, false);
+    assert.strictEqual(thrown.drains(), 0);
+    assert.strictEqual(thrown.fatals.length, 1);
+
+    const stale = await initialise(true, 0, true, { bumpGeneration: true });
+    await stale.engine._pump();
+    assert.strictEqual(stale.engine.queue.length, 0);
+    assert.strictEqual(stale.engine.ended, false);
+    assert.strictEqual(stale.drains(), 0);
+    assert.strictEqual(stale.engine._diag.staleMuxBytesDropped, trailerBytes.length);
+
+    const discontinuous = await initialise(true, 0, true, { pos: 1 });
+    await discontinuous.engine._pump();
+    await Promise.resolve();
+    assert.strictEqual(discontinuous.engine.queue.length, 0);
+    assert.strictEqual(discontinuous.engine.ended, false);
+    assert.strictEqual(discontinuous.drains(), 0);
+    assert.strictEqual(discontinuous.fatals.length, 1);
+    assert.match(discontinuous.fatals[0].message, /MUX_WRITE_DISCONTINUITY/);
+
+    const invalidBox = Uint8Array.from([0, 0, 0, 4, 0x62, 0x61, 0x64, 0x21]);
+    const invalid = await initialise(true, 0, true, { bytes: invalidBox });
+    await invalid.engine._pump();
+    await Promise.resolve();
+    assert.strictEqual(invalid.engine.queue.length, 0);
+    assert.strictEqual(invalid.engine.ended, false);
+    assert.strictEqual(invalid.drains(), 0);
+    assert.strictEqual(invalid.fatals.length, 1);
+    assert.match(invalid.fatals[0].message, /MUX_STRUCTURE_INVALID/);
 });
 
 test('a successful batch uses one worker RPC and commits staged bytes only afterwards', async () => {

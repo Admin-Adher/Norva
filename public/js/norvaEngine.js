@@ -365,7 +365,7 @@
     av1: ['av01.0.08M.08'],
   };
 
-  const ENGINE_VERSION = 49;
+  const ENGINE_VERSION = 50;
 
   class NorvaEngine {
     constructor(videoEl, opts = {}) {
@@ -502,7 +502,8 @@
       // running record of the exact bytes/boxes/codec decisions that fed MSE, so a
       // rejected append can be explained instead of just observed. Pure accounting,
       // no effect on playback. Surfaced via engineSnapshot().
-      this._dropWrites = false;       // when true, muxer onwrite bytes are discarded (trailer)
+      this._dropWrites = false;       // when true, legacy muxer trailer bytes are discarded
+      this._muxSkipTrailer = false;   // true only after fast-open skip_trailer is accepted
       this._diag = {
         mime: null, videoCodecString: null, videoCands: null, audioTag: null,
         vName: null, aName: null, copyAudio: null, durationSec: null,
@@ -518,6 +519,7 @@
         trailerBytesDropped: 0,
         writeDiscontinuities: 0, firstWriteDiscontinuity: null,
         muxPacketWriteErrors: 0, firstMuxPacketWriteError: null,
+        muxTrailerWriteErrors: 0, firstMuxTrailerWriteError: null,
         muxStructureErrors: 0, firstMuxStructureError: null,
         muxRejectedBytes: 0,
         staleMuxBytesDropped: 0, firstStaleMuxDrop: null,
@@ -1861,7 +1863,11 @@
     }
 
     async _initMuxer() {
-      if (this.timings) delete this.timings.muxFragmentDurationUs;
+      this._muxSkipTrailer = false;
+      if (this.timings) {
+        delete this.timings.muxSkipTrailer;
+        delete this.timings.muxFragmentDurationUs;
+      }
       // _initMuxer also runs after a seek. Clear any packet retained by the old
       // generation before creating or writing the replacement muxer.
       this._discardPendingVideoPacket();
@@ -1919,10 +1925,10 @@
           }
           return;
         }
-        // The MP4 trailer (mfra/mfro, written by av_write_trailer) is file-seeking
-        // metadata, NOT a media segment. Appending it to the SourceBuffer makes
-        // Chromium's parser fail (CHUNK_DEMUXER_ERROR_APPEND_FAILED). It must never
-        // be enqueued — endOfStream() finalises the buffer instead.
+        // Legacy MP4 trailers contain mfra/mfro file-seeking metadata, which is not
+        // an MSE media segment and must be dropped. A validated fast-open mux uses
+        // skip_trailer instead; its av_write_trailer callbacks close the final media
+        // fragment and deliberately keep _dropWrites false.
         if (this._dropWrites) { d.trailerBytesDropped = (d.trailerBytesDropped || 0) + chunk.length; return; }
         // Once continuity is lost, every later callback belongs to the invalid
         // mux sequence. Drop it wholesale while the player tears this engine down.
@@ -2029,8 +2035,25 @@
         const vcp = await lib.AVStream_codecpar(muxRet[3][0]);
         await lib.AVCodecParameters_codec_tag_s(vcp, tag);
       }
-      await lib.av_opt_set(this.oc, 'movflags', 'frag_keyframe+empty_moov+default_base_moof', lib.AV_OPT_SEARCH_CHILDREN);
-      if (this.timings && this.timings.demuxFastOpen === true) {
+      const fastOpenMux = this.timings && this.timings.demuxFastOpen === true;
+      const movflags = fastOpenMux
+        ? 'frag_keyframe+empty_moov+default_base_moof+skip_trailer'
+        : 'frag_keyframe+empty_moov+default_base_moof';
+      const movflagsResult = await lib.av_opt_set(
+        this.oc,
+        'movflags',
+        movflags,
+        lib.AV_OPT_SEARCH_CHILDREN,
+      );
+      if (fastOpenMux && (!Number.isInteger(movflagsResult) || movflagsResult < 0)) {
+        const movflagsError = new Error(
+          'MUX_MOVFLAGS_CONFIG_FAILED:' + String(movflagsResult),
+        );
+        movflagsError.code = 'MUX_MOVFLAGS_CONFIG_FAILED';
+        movflagsError.libavResult = movflagsResult;
+        throw movflagsError;
+      }
+      if (fastOpenMux) {
         const fragmentDurationResult = await lib.av_opt_set(
           this.oc,
           'frag_duration',
@@ -2045,6 +2068,8 @@
           fragmentDurationError.libavResult = fragmentDurationResult;
           throw fragmentDurationError;
         }
+        this._muxSkipTrailer = true;
+        this.timings.muxSkipTrailer = true;
         this.timings.muxFragmentDurationUs = FAST_OPEN_FRAGMENT_DURATION_US;
       }
       await lib.avformat_write_header(this.oc, 0);
@@ -2110,6 +2135,119 @@
       } finally {
         if (this._muxWriteStage === stage) this._muxWriteStage = null;
       }
+    }
+
+    async _writeTrailerChecked() {
+      if (this._muxSkipTrailer !== true) {
+        this._dropWrites = true;
+        try {
+          await this.lib.av_write_trailer(this.oc);
+        } finally {
+          this._dropWrites = false;
+        }
+        return true;
+      }
+
+      const generation = this._muxGeneration;
+      const commit = this._commitMuxWrite;
+      const stage = { generation, writes: [] };
+      this._dropWrites = false;
+      this._muxWriteStage = stage;
+      try {
+        let trailerResult;
+        try {
+          trailerResult = await this.lib.av_write_trailer(this.oc);
+        } catch (cause) {
+          if (this._muxWriteStage === stage) this._muxWriteStage = null;
+          if (this.destroyed || this._stopRequested || this._muxGeneration !== generation ||
+              commit !== this._commitMuxWrite) {
+            this._dropMuxStage(stage, 'trailer-stale-reject');
+            return false;
+          }
+          throw this._rejectMuxTrailerWrite(stage, cause, null);
+        }
+
+        if (this._muxWriteStage === stage) this._muxWriteStage = null;
+        if (this.destroyed || this._stopRequested || this._muxGeneration !== generation ||
+            commit !== this._commitMuxWrite) {
+          this._dropMuxStage(stage, 'trailer-stale-success');
+          return false;
+        }
+        if (!Number.isInteger(trailerResult) || trailerResult < 0) {
+          throw this._rejectMuxTrailerWrite(stage, null, trailerResult);
+        }
+        if (typeof commit !== 'function') {
+          throw this._rejectMuxTrailerWrite(
+            stage,
+            new Error('MUX_WRITE_COMMITTER_MISSING'),
+            null,
+          );
+        }
+
+        for (let i = 0; i < stage.writes.length; i++) {
+          if (this.destroyed || this._stopRequested || this._muxGeneration !== generation ||
+              commit !== this._commitMuxWrite) {
+            const remaining = stage.writes.slice(i);
+            if (remaining.length) {
+              this._dropMuxStage({ generation, writes: remaining }, 'trailer-commit-stopped');
+            }
+            return false;
+          }
+          const write = stage.writes[i];
+          commit(write.name, write.pos, write.chunk);
+          if (this.destroyed || this._stopRequested || this._fatalSignaled ||
+              this._muxGeneration !== generation || commit !== this._commitMuxWrite) {
+            const remaining = stage.writes.slice(i + 1);
+            if (remaining.length) {
+              this._dropMuxStage({ generation, writes: remaining }, 'trailer-commit-rejected');
+            }
+            return false;
+          }
+        }
+        return true;
+      } finally {
+        if (this._muxWriteStage === stage) this._muxWriteStage = null;
+        this._dropWrites = false;
+      }
+    }
+
+    _rejectMuxTrailerWrite(stage, cause, result) {
+      const d = this._diag;
+      const writes = stage && Array.isArray(stage.writes) ? stage.writes : [];
+      let rejectedBytes = 0;
+      for (const write of writes) rejectedBytes += write && write.chunk ? write.chunk.length : 0;
+      const detail = cause ? String(cause.message || cause).slice(0, 240) : null;
+      const message = cause
+        ? `MUX_TRAILER_WRITE_FAILED:exception:${detail}`
+        : `MUX_TRAILER_WRITE_FAILED:${String(result)}`;
+      const error = new Error(message);
+      error.code = 'MUX_TRAILER_WRITE_FAILED';
+      error.libavResult = cause ? null : result;
+
+      d.muxTrailerWriteErrors = (d.muxTrailerWriteErrors || 0) + 1;
+      d.muxRejectedBytes = (d.muxRejectedBytes || 0) + rejectedBytes;
+      if (!d.firstMuxTrailerWriteError) {
+        d.firstMuxTrailerWriteError = {
+          ret: Number.isInteger(result) ? result : null,
+          stagedChunks: writes.length,
+          stagedBytes: rejectedBytes,
+          stagedBoxes: writes.slice(0, 6).map((write) => mp4Boxes(write.chunk)),
+          detail,
+        };
+      }
+
+      this._stopRequested = true;
+      if (this._gate) { this._gate(); this._gate = null; }
+      if (!this._fatalSignaled) {
+        this._fatalSignaled = true;
+        try { this.report({ stage: 'mux:trailer-write', message: error.message }); } catch (_) {}
+        queueMicrotask(() => {
+          if (!this.destroyed) {
+            try { this.onFatal(error); } catch (_) {}
+          }
+        });
+      }
+      return error;
     }
 
     _dropMuxStage(stage, reason) {
@@ -2294,6 +2432,7 @@
         const code = e && typeof e.code === 'string' ? e.code : '';
         const isAudioTimelineFailure = code.startsWith('AUDIO_');
         const isStartupTimeout = code === 'ENGINE_STARTUP_TIMEOUT';
+        const isMuxTrailerFailure = code === 'MUX_TRAILER_WRITE_FAILED';
         const isProviderBusy = isProviderBusyError(e);
         // Before the first usable SourceBuffer range, load() is still waiting on
         // the startup outcome. Reject that promise with the ORIGINAL error so its
@@ -2306,7 +2445,8 @@
           this.report({ stage: 'pump:startup', message: errStr(e) });
           return;
         }
-        if ((isProviderBusy || isAudioTimelineFailure || isStartupTimeout) && this._fatalSignaled) return;
+        if ((isProviderBusy || isAudioTimelineFailure || isStartupTimeout || isMuxTrailerFailure)
+            && this._fatalSignaled) return;
         this.report({ stage: isProviderBusy ? 'pump:provider-busy' : 'pump', message: errStr(e) });
         // A typed audio-clock failure cannot recover inside the same mux
         // generation. Escalate once so WatchPage can use its bounded engine ->
@@ -2314,7 +2454,7 @@
         // A provider 458 is different: after startup it remains terminal and must
         // reach WatchPage once, where it opens the account circuit instead of the
         // engine/Gateway recovery ladder.
-        if (isProviderBusy || isAudioTimelineFailure || isStartupTimeout) {
+        if (isProviderBusy || isAudioTimelineFailure || isStartupTimeout || isMuxTrailerFailure) {
           this._fatalSignaled = true;
           this._stopRequested = true;
           if (this._gate) { this._gate(); this._gate = null; }
@@ -2456,12 +2596,10 @@
         this._releaseVideoDtsProbeAudio(tailAudio, true);
         if (tailAudio.length && !(await this._writePacketsChecked(tailAudio))) return;
       }
-      // Drop the trailer's bytes (mfra/mfro): they are file-seeking metadata, NOT a
-      // valid MSE media segment. Appending them is what produced
-      // CHUNK_DEMUXER_ERROR_APPEND_FAILED on an early/partial read. endOfStream()
-      // below finalises the buffer cleanly without them.
-      this._dropWrites = true;
-      try { await lib.av_write_trailer(this.oc); } finally { this._dropWrites = false; }
+      // With validated skip_trailer, av_write_trailer flushes the final media
+      // fragment and emits no mfra, so its callbacks must reach MSE. Legacy muxes
+      // retain their established mfra/mfro drop behavior.
+      if (!(await this._writeTrailerChecked())) return;
       this.ended = true; this._drain();
       this.log('stream ended (' + this._diag.pumpExitReason + ')');
     }
@@ -3180,6 +3318,8 @@
         firstWriteDiscontinuity: d.firstWriteDiscontinuity,
         muxPacketWriteErrors: d.muxPacketWriteErrors || 0,
         firstMuxPacketWriteError: d.firstMuxPacketWriteError || null,
+        muxTrailerWriteErrors: d.muxTrailerWriteErrors || 0,
+        firstMuxTrailerWriteError: d.firstMuxTrailerWriteError || null,
         videoDtsMode: d.videoDtsMode || this._videoDtsMode || null,
         sourceVideoDtsProbePackets: d.sourceVideoDtsProbePackets || 0,
         sourceVideoDtsRejectedReason: d.sourceVideoDtsRejectedReason || null,
