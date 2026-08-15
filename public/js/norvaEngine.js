@@ -63,6 +63,13 @@
   const RA_WINDOWS = 4;                        // windows kept (header + cues + playhead)
   const STARTUP_DEADLINE_MS = 15000;           // engine budget through first usable media append
   const FETCH_TIMEOUT_MS = 60000;              // steady-state timeout; startup is clamped below
+  // Header-only Matroska open intentionally skips find_stream_info. On a resume,
+  // movenc's keyframe-only policy can otherwise retain the whole first long GOP
+  // before emitting the first moof (the Bêtes fixture needed >3 MiB and hit the
+  // global startup deadline). Keep keyframe cuts, but add a bounded duration cut
+  // for this validated fast-open cohort so the first decodable fragment flushes
+  // after at most two seconds of media. Legacy/full-scan paths stay unchanged.
+  const FAST_OPEN_FRAGMENT_DURATION_US = 2 * 1000 * 1000;
 
   const AAC_SAMPLE_RATE = 48000;
   const AAC_CHANNEL_LAYOUT = 3; // stereo
@@ -358,7 +365,7 @@
     av1: ['av01.0.08M.08'],
   };
 
-  const ENGINE_VERSION = 47;
+  const ENGINE_VERSION = 48;
 
   class NorvaEngine {
     constructor(videoEl, opts = {}) {
@@ -2022,6 +2029,15 @@
         await lib.AVCodecParameters_codec_tag_s(vcp, tag);
       }
       await lib.av_opt_set(this.oc, 'movflags', 'frag_keyframe+empty_moov+default_base_moof', lib.AV_OPT_SEARCH_CHILDREN);
+      if (this.timings && this.timings.demuxFastOpen === true) {
+        await lib.av_opt_set(
+          this.oc,
+          'frag_duration',
+          String(FAST_OPEN_FRAGMENT_DURATION_US),
+          lib.AV_OPT_SEARCH_CHILDREN,
+        );
+        this.timings.muxFragmentDurationUs = FAST_OPEN_FRAGMENT_DURATION_US;
+      }
       await lib.avformat_write_header(this.oc, 0);
       // Header (ftyp+moov init segment) flushed; subsequent onwrite chunks are media.
       this._diagHeaderPhase = false;

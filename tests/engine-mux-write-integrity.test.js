@@ -678,6 +678,45 @@ test('seek, mux reinitialisation, and destroy discard lookahead before teardown 
     }
 });
 
+test('fast-open MKV caps the first fMP4 fragment at two seconds without weakening keyframe fragmentation', async () => {
+    const NorvaEngine = loadEngineClass();
+
+    const initialise = async (fastOpen) => {
+        const { engine } = makeEngine(NorvaEngine);
+        engine.vS = null;
+        engine.aS = null;
+        engine.timings = { demuxFastOpen: fastOpen };
+        const calls = [];
+        engine.lib = {
+            AV_OPT_SEARCH_CHILDREN: 1,
+            unlink: async () => {},
+            mkstreamwriterdev: async () => {},
+            ff_init_muxer: async () => [303, null, null, []],
+            av_opt_set: async (...args) => { calls.push(['av_opt_set', ...args]); },
+            avformat_write_header: async (...args) => { calls.push(['avformat_write_header', ...args]); },
+            av_packet_alloc: async () => 404,
+        };
+
+        await engine._initMuxer();
+        return { engine, calls };
+    };
+
+    const fast = await initialise(true);
+    assert.deepStrictEqual(fast.calls, [
+        ['av_opt_set', 303, 'movflags', 'frag_keyframe+empty_moov+default_base_moof', 1],
+        ['av_opt_set', 303, 'frag_duration', '2000000', 1],
+        ['avformat_write_header', 303, 0],
+    ]);
+    assert.strictEqual(fast.engine.timings.muxFragmentDurationUs, 2_000_000);
+
+    const legacy = await initialise(false);
+    assert.deepStrictEqual(legacy.calls, [
+        ['av_opt_set', 303, 'movflags', 'frag_keyframe+empty_moov+default_base_moof', 1],
+        ['avformat_write_header', 303, 0],
+    ], 'legacy/full-scan playback must retain its established mux fragmentation');
+    assert.strictEqual(legacy.engine.timings.muxFragmentDurationUs, undefined);
+});
+
 test('a successful batch uses one worker RPC and commits staged bytes only afterwards', async () => {
     const NorvaEngine = loadEngineClass();
     const { engine, reports, fatals } = makeEngine(NorvaEngine);
