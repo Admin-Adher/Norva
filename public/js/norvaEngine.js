@@ -365,7 +365,7 @@
     av1: ['av01.0.08M.08'],
   };
 
-  const ENGINE_VERSION = 48;
+  const ENGINE_VERSION = 49;
 
   class NorvaEngine {
     constructor(videoEl, opts = {}) {
@@ -2030,12 +2030,20 @@
       }
       await lib.av_opt_set(this.oc, 'movflags', 'frag_keyframe+empty_moov+default_base_moof', lib.AV_OPT_SEARCH_CHILDREN);
       if (this.timings && this.timings.demuxFastOpen === true) {
-        await lib.av_opt_set(
+        const fragmentDurationResult = await lib.av_opt_set(
           this.oc,
           'frag_duration',
           String(FAST_OPEN_FRAGMENT_DURATION_US),
           lib.AV_OPT_SEARCH_CHILDREN,
         );
+        if (!Number.isInteger(fragmentDurationResult) || fragmentDurationResult < 0) {
+          const fragmentDurationError = new Error(
+            'MUX_FRAGMENT_DURATION_CONFIG_FAILED:' + String(fragmentDurationResult),
+          );
+          fragmentDurationError.code = 'MUX_FRAGMENT_DURATION_CONFIG_FAILED';
+          fragmentDurationError.libavResult = fragmentDurationResult;
+          throw fragmentDurationError;
+        }
         this.timings.muxFragmentDurationUs = FAST_OPEN_FRAGMENT_DURATION_US;
       }
       await lib.avformat_write_header(this.oc, 0);

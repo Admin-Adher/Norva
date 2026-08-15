@@ -681,7 +681,7 @@ test('seek, mux reinitialisation, and destroy discard lookahead before teardown 
 test('fast-open MKV caps the first fMP4 fragment at two seconds without weakening keyframe fragmentation', async () => {
     const NorvaEngine = loadEngineClass();
 
-    const initialise = async (fastOpen) => {
+    const initialise = (fastOpen, fragDurationResult = 0) => {
         const { engine } = makeEngine(NorvaEngine);
         engine.vS = null;
         engine.aS = null;
@@ -692,16 +692,19 @@ test('fast-open MKV caps the first fMP4 fragment at two seconds without weakenin
             unlink: async () => {},
             mkstreamwriterdev: async () => {},
             ff_init_muxer: async () => [303, null, null, []],
-            av_opt_set: async (...args) => { calls.push(['av_opt_set', ...args]); },
+            av_opt_set: async (...args) => {
+                calls.push(['av_opt_set', ...args]);
+                return args[1] === 'frag_duration' ? fragDurationResult : 0;
+            },
             avformat_write_header: async (...args) => { calls.push(['avformat_write_header', ...args]); },
             av_packet_alloc: async () => 404,
         };
 
-        await engine._initMuxer();
-        return { engine, calls };
+        return { engine, calls, init: () => engine._initMuxer() };
     };
 
-    const fast = await initialise(true);
+    const fast = initialise(true, 0);
+    await fast.init();
     assert.deepStrictEqual(fast.calls, [
         ['av_opt_set', 303, 'movflags', 'frag_keyframe+empty_moov+default_base_moof', 1],
         ['av_opt_set', 303, 'frag_duration', '2000000', 1],
@@ -709,7 +712,22 @@ test('fast-open MKV caps the first fMP4 fragment at two seconds without weakenin
     ]);
     assert.strictEqual(fast.engine.timings.muxFragmentDurationUs, 2_000_000);
 
-    const legacy = await initialise(false);
+    const rejected = initialise(true, -22);
+    await assert.rejects(
+        rejected.init,
+        (error) => error?.code === 'MUX_FRAGMENT_DURATION_CONFIG_FAILED'
+            && error?.libavResult === -22
+            && /MUX_FRAGMENT_DURATION_CONFIG_FAILED:-22/.test(error.message),
+    );
+    assert.deepStrictEqual(rejected.calls, [
+        ['av_opt_set', 303, 'movflags', 'frag_keyframe+empty_moov+default_base_moof', 1],
+        ['av_opt_set', 303, 'frag_duration', '2000000', 1],
+    ], 'a rejected duration cap must fail before write_header can start an unbounded fast-open mux');
+    assert.strictEqual(rejected.engine.timings.muxFragmentDurationUs, undefined,
+        'telemetry must never claim a duration cap that the muxer rejected');
+
+    const legacy = initialise(false);
+    await legacy.init();
     assert.deepStrictEqual(legacy.calls, [
         ['av_opt_set', 303, 'movflags', 'frag_keyframe+empty_moov+default_base_moof', 1],
         ['avformat_write_header', 303, 0],
