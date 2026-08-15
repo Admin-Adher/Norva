@@ -211,6 +211,31 @@
     return /(?:^|[^A-Z0-9])(?:BLOCK|PROBE)_HTTP_458(?:$|[^0-9])|(?:^|[^0-9])HTTP[ _]?458(?:$|[^0-9])|PROVIDER_(?:ACCOUNT_)?BUSY|max connections?/i.test(text);
   }
 
+  // A startup HTTP 458 is reported inside the Engine before its exact Error is
+  // handed back to WatchPage.load(). Keep report ownership on that Error so the
+  // outer terminal UI/circuit path does not persist the same failure twice.
+  // These non-enumerable fields never enter provider diagnostics or telemetry.
+  function markPlaybackFailureReported(error, stage) {
+    if (!error || (typeof error !== 'object' && typeof error !== 'function')) return false;
+    try {
+      Object.defineProperties(error, {
+        _norvaPlaybackFailureReported: {
+          value: true, configurable: true, writable: true, enumerable: false,
+        },
+        _norvaPlaybackFailureReportStage: {
+          value: String(stage || ''), configurable: true, writable: true, enumerable: false,
+        },
+      });
+      return true;
+    } catch (_) {
+      try {
+        error._norvaPlaybackFailureReported = true;
+        error._norvaPlaybackFailureReportStage = String(stage || '');
+        return error._norvaPlaybackFailureReported === true;
+      } catch (_) { return false; }
+    }
+  }
+
   // Walk the top-level ISO-BMFF/fMP4 boxes in a chunk so a rejected append can be
   // described by what it actually contained (ftyp/moov = init segment;
   // styp/moof/mdat = media fragment). Returns e.g. "ftyp(28) moov(1037)" or, on a
@@ -367,7 +392,7 @@
     av1: ['av01.0.08M.08'],
   };
 
-  const ENGINE_VERSION = 51;
+  const ENGINE_VERSION = 53;
 
   class NorvaEngine {
     constructor(videoEl, opts = {}) {
@@ -428,6 +453,11 @@
       this._pumpRunning = false;
       this._stopRequested = false;
       this._fatalSignaled = false;
+      // First provider-busy cause that closed this engine's Range circuit. This
+      // is instance-local ownership evidence: queued pump/demux reads may fail
+      // with ENGINE_RANGE_ABORTED after the active 458, but destroy/timeouts and
+      // unrelated AbortSignals must remain independently diagnostic.
+      this._providerBusyTerminalError = null;
       // Mux batches are transactional: movenc can emit a partial moof before a
       // packet write reports an error. Hold all onwrite chunks until the worker
       // batch succeeds so malformed tails never reach MSE.
@@ -670,6 +700,7 @@
     }
 
     _assertStartupDeadline(stage) {
+      if (this._providerBusyTerminalError) throw this._providerBusyTerminalError;
       if (this._startupRemainingMs() > 0) return;
       throw this._startupTimeoutError(stage);
     }
@@ -700,16 +731,40 @@
     }
 
     async _withStartupDeadline(work, stage) {
+      if (this._providerBusyTerminalError) {
+        // Callers pass an already-started Promise. Attach a sink before the
+        // marker-first throw so a later generic rejection cannot escape as an
+        // unhandled promise after the authoritative 458 has won.
+        Promise.resolve(work).catch(() => {});
+        throw this._providerBusyTerminalError;
+      }
       this._assertStartupDeadline(stage);
-      if (!this._startupActive || !this._startupOutcomePromise) return await work;
-      // The independently armed watchdog rejects _startupOutcomePromise at the
-      // absolute deadline. Racing every worker/network await against that one
-      // promise makes the 15 s budget truly global, even if an RPC never settles.
-      const watchdog = this._startupOutcomePromise.then(
-        () => new Promise(() => {}),
-        (error) => Promise.reject(error),
-      );
-      return await Promise.race([Promise.resolve(work), watchdog]);
+      try {
+        let result;
+        if (!this._startupActive || !this._startupOutcomePromise) {
+          result = await work;
+        } else {
+          // The independently armed watchdog rejects _startupOutcomePromise at
+          // the absolute deadline. Racing every worker/network await against
+          // that one promise makes the 15 s budget truly global, even if an RPC
+          // never settles.
+          const watchdog = this._startupOutcomePromise.then(
+            () => new Promise(() => {}),
+            (error) => Promise.reject(error),
+          );
+          result = await Promise.race([Promise.resolve(work), watchdog]);
+        }
+        // Some libav setup helpers intentionally swallow AVERRORs (for example
+        // optional TS extradata probes). A Range 458 was recorded before its
+        // ticket was released, so it must outrank a stage that later resolves.
+        if (this._providerBusyTerminalError) throw this._providerBusyTerminalError;
+        return result;
+      } catch (error) {
+        // Likewise, never let a later generic worker/setup error replace the
+        // first authoritative provider-busy cause.
+        if (this._providerBusyTerminalError) throw this._providerBusyTerminalError;
+        throw error;
+      }
     }
 
     _clearStartupDeadlineTimer() {
@@ -848,15 +903,72 @@
     }
 
     _handleCueIndexFailure(error) {
+      return this._handleProviderBusyFailure(error, 'cue-index:provider-busy');
+    }
+
+    _recordProviderBusyTerminal(error) {
+      if (!isProviderBusyError(error)) return false;
+      if (!this._providerBusyTerminalError) this._providerBusyTerminalError = error;
+      // The Range lane sees HTTP 458 before libav can reduce a block-reader
+      // failure to a generic AVERROR. During load, settle the single startup
+      // outcome here, before releasing the FIFO ticket or letting the watchdog
+      // replace the authoritative cause with a timeout.
+      if (this._startupActive && this._startupOutcomePromise && !this._startupOutcomeSettled) {
+        const terminalError = this._providerBusyTerminalError;
+        this._stopRequested = true;
+        this._clearStartupDeadlineTimer();
+        if (this._gate) { this._gate(); this._gate = null; }
+        try { this._ac.abort(); } catch (_) {}
+        if (this._settleStartupOutcome(terminalError)) {
+          try {
+            markPlaybackFailureReported(terminalError, 'startup:provider-busy');
+            this.report({ stage: 'startup:provider-busy', message: errStr(terminalError) });
+          } catch (_) {}
+        }
+      }
+      return true;
+    }
+
+    _handleProviderBusyFailure(error, stage) {
       if (this.destroyed || !isProviderBusyError(error)) return false;
+      this._recordProviderBusyTerminal(error);
       if (this._fatalSignaled) return true;
       this._fatalSignaled = true;
       this._stopRequested = true;
       if (this._gate) { this._gate(); this._gate = null; }
       try { this._ac.abort(); } catch (_) {}
-      try { this.report({ stage: 'cue-index:provider-busy', message: errStr(error) }); } catch (_) {}
+      try { this.report({ stage, message: errStr(error) }); } catch (_) {}
       try { this.onFatal(error); } catch (_) {}
       return true;
+    }
+
+    _providerBusyBlockReadError() {
+      if (!this._recordProviderBusyTerminal(this._lastReadError)) return null;
+      return this._providerBusyTerminalError;
+    }
+
+    _isDerivedProviderBusyRangeAbort(error) {
+      if (!this._providerBusyTerminalError
+        || !this._stopRequested
+        || !(this._ac && this._ac.signal && this._ac.signal.aborted)
+        || isProviderBusyError(error)) return false;
+      const code = error && typeof error.code === 'string' ? error.code : '';
+      const lastReadCode = this._lastReadError && typeof this._lastReadError.code === 'string'
+        ? this._lastReadError.code
+        : '';
+      return code === 'ENGINE_RANGE_ABORTED' || lastReadCode === 'ENGINE_RANGE_ABORTED';
+    }
+
+    _isPlaybackTerminal() {
+      const masterAborted = !!(this._ac && this._ac.signal && this._ac.signal.aborted);
+      return !!(this.destroyed
+        || this._fatalSignaled
+        || this._providerBusyTerminalError
+        || (masterAborted && this._stopRequested));
+    }
+
+    _shouldStopOutput() {
+      return !!(this._stopRequested || this._isPlaybackTerminal());
     }
 
     _armCueIndexAfterFirstFrame() {
@@ -947,6 +1059,19 @@
     }
 
     _signalStartupTimeout(stage) {
+      const providerBusyError = this._providerBusyTerminalError;
+      if (providerBusyError) {
+        this._stopRequested = true;
+        this._clearStartupDeadlineTimer();
+        try { this._ac.abort(); } catch (_) {}
+        if (this._settleStartupOutcome(providerBusyError)) {
+          try {
+            markPlaybackFailureReported(providerBusyError, 'startup:provider-busy');
+            this.report({ stage: 'startup:provider-busy', message: errStr(providerBusyError) });
+          } catch (_) {}
+        }
+        return providerBusyError;
+      }
       const error = this._startupTimeoutError(stage);
       this._stopRequested = true;
       this._clearStartupDeadlineTimer();
@@ -995,16 +1120,21 @@
       let step = 'stopPump';
       try {
         await this._stopPump();
+        if (this._isPlaybackTerminal()) return;
         step = 'reset'; await this._resetForSeek();
+        if (this._isPlaybackTerminal()) return;
         this._smallNextRead = true;        // reach the first frame faster on a cold seek
         step = 'demux'; await this._seekDemuxer(t);
+        if (this._isPlaybackTerminal()) return;
         step = 'clearSB'; await this._clearSourceBuffer();
+        if (this._isPlaybackTerminal()) return;
         // The fresh muxer re-bases its output timeline to 0. Anchor the SourceBuffer
         // to the cue time as a fallback, then _setVideoDts refines it to the real
         // keyframe PTS so the seek lands exactly on target (not at 0 → spinner).
         this._tsAnchor = this._cueTimeForTime(t); if (this._tsAnchor == null) this._tsAnchor = t;
         this._firstVpktPending = true; this._nudgeDone = false;
         step = 'initMuxer'; await this._initMuxer();   // fresh init segment → onwrite
+        if (this._isPlaybackTerminal()) return;
         this._startPump();
         this.seekTimings = {
           warm, setupMs: Math.round(performance.now() - st0),
@@ -1013,7 +1143,11 @@
         this.log('seek ' + JSON.stringify(this.seekTimings));
         try { this.onSeek(this.seekTimings); } catch (_) {}
       } catch (e) {
-        this.report({ stage: 'seek:' + step, message: errStr(e) });
+        if (isProviderBusyError(e)) {
+          this._handleProviderBusyFailure(e, 'seek:provider-busy');
+        } else if (!this._isPlaybackTerminal() && !this._isDerivedProviderBusyRangeAbort(e)) {
+          this.report({ stage: 'seek:' + step, message: errStr(e) });
+        }
       } finally {
         this._seeking = false;
       }
@@ -1031,7 +1165,12 @@
       try {
         await this._cacheWindow(off, Math.min(RA_SEEK_WINDOW, this.size - off));
         this.log(`prefetch t=${t.toFixed(0)}s off=${off}`);
-      } catch (_) { /* a real seek will fetch it */ } finally { this._prefetching = false; }
+      } catch (error) {
+        // Malformed/temporary prefetch failures remain best-effort. A provider
+        // 458 is authoritative for the whole playback intent and must not be
+        // swallowed after the Range lane has already been stopped.
+        this._handleProviderBusyFailure(error, 'prefetch:provider-busy');
+      } finally { this._prefetching = false; }
     }
 
     // Largest cue offset whose timestamp is ≤ t (the cluster the demuxer will seek to).
@@ -1671,6 +1810,17 @@
       );
       try {
         return await work();
+      } catch (error) {
+        if (isProviderBusyError(error)) {
+          // Close the engine-wide Range circuit BEFORE releasing this FIFO
+          // ticket. Otherwise a queued cue/media read can enter fetch during
+          // the microtask gap before its outer caller handles the active 458.
+          this._recordProviderBusyTerminal(error);
+          this._stopRequested = true;
+          if (this._gate) { this._gate(); this._gate = null; }
+          try { this._ac.abort(); } catch (_) {}
+        }
+        throw error;
       } finally {
         this._rangeFetchActive = Math.max(0, (this._rangeFetchActive || 1) - 1);
         release();
@@ -2333,6 +2483,7 @@
     }
 
     async _writeTrailerChecked() {
+      if (this._shouldStopOutput()) return false;
       if (this._muxSkipTrailer !== true) {
         this._dropWrites = true;
         try {
@@ -2340,7 +2491,7 @@
         } finally {
           this._dropWrites = false;
         }
-        return true;
+        return !this._shouldStopOutput();
       }
 
       const generation = this._muxGeneration;
@@ -2354,7 +2505,7 @@
           trailerResult = await this.lib.av_write_trailer(this.oc);
         } catch (cause) {
           if (this._muxWriteStage === stage) this._muxWriteStage = null;
-          if (this.destroyed || this._stopRequested || this._muxGeneration !== generation ||
+          if (this._shouldStopOutput() || this._muxGeneration !== generation ||
               commit !== this._commitMuxWrite) {
             this._dropMuxStage(stage, 'trailer-stale-reject');
             return false;
@@ -2363,7 +2514,7 @@
         }
 
         if (this._muxWriteStage === stage) this._muxWriteStage = null;
-        if (this.destroyed || this._stopRequested || this._muxGeneration !== generation ||
+        if (this._shouldStopOutput() || this._muxGeneration !== generation ||
             commit !== this._commitMuxWrite) {
           this._dropMuxStage(stage, 'trailer-stale-success');
           return false;
@@ -2380,7 +2531,7 @@
         }
 
         for (let i = 0; i < stage.writes.length; i++) {
-          if (this.destroyed || this._stopRequested || this._muxGeneration !== generation ||
+          if (this._shouldStopOutput() || this._muxGeneration !== generation ||
               commit !== this._commitMuxWrite) {
             const remaining = stage.writes.slice(i);
             if (remaining.length) {
@@ -2390,7 +2541,7 @@
           }
           const write = stage.writes[i];
           commit(write.name, write.pos, write.chunk);
-          if (this.destroyed || this._stopRequested || this._fatalSignaled ||
+          if (this._shouldStopOutput() ||
               this._muxGeneration !== generation || commit !== this._commitMuxWrite) {
             const remaining = stage.writes.slice(i + 1);
             if (remaining.length) {
@@ -2399,7 +2550,7 @@
             return false;
           }
         }
-        return true;
+        return !this._shouldStopOutput();
       } finally {
         if (this._muxWriteStage === stage) this._muxWriteStage = null;
         this._dropWrites = false;
@@ -2547,6 +2698,8 @@
       const ts = Math.max(0, Math.round(t * tb) + epoch);
       const [lo, hi] = from64(ts);
       const ret = await lib.avformat_seek_file_approx(this.fmtCtx, s.index, lo, hi, 0);
+      const providerBusyReadError = this._providerBusyBlockReadError();
+      if (providerBusyReadError) throw providerBusyReadError;
       if (typeof ret === 'number' && ret < 0) {
         // Timestamp seek REJECTED — libav bindings return negative AVERROR codes, they
         // don't throw, and this one was historically discarded: on an MKV without usable
@@ -2575,6 +2728,8 @@
       }
       const [lo, hi] = from64(off);
       const ret = await lib.avformat_seek_file_approx(this.fmtCtx, -1, lo, hi, lib.AVSEEK_FLAG_BYTE);
+      const providerBusyReadError = this._providerBusyBlockReadError();
+      if (providerBusyReadError) throw providerBusyReadError;
       if (typeof ret === 'number' && ret < 0) throw new Error(`byte seek failed (${ret})`);
       this.log(`seek demuxer (byte fallback) → ${t.toFixed(1)}s off=${off}`);
     }
@@ -2620,7 +2775,14 @@
 
     // ---- the pump (demand-driven remux) ------------------------------------
     _startPump() {
-      if (this._pumpRunning || this._fatalSignaled) return;
+      if (this._pumpRunning || this._isPlaybackTerminal()) return;
+      if (this._ac && this._ac.signal && this._ac.signal.aborted) {
+        // Do not reopen a closed master signal. A bare AbortSignal without an
+        // owner remains diagnostic, while terminal/destroy/provider states were
+        // returned above without duplicating their report.
+        try { this.report({ stage: 'pump', message: 'ENGINE_RANGE_ABORTED' }); } catch (_) {}
+        return;
+      }
       this._pumpRunning = true; this._stopRequested = false; this.ended = false;
       this._pump().catch((e) => {
         if (this.destroyed) return;
@@ -2629,16 +2791,29 @@
         const isStartupTimeout = code === 'ENGINE_STARTUP_TIMEOUT';
         const isMuxTrailerFailure = code === 'MUX_TRAILER_WRITE_FAILED';
         const isProviderBusy = isProviderBusyError(e);
+        if (isProviderBusy && !this._startupActive) this._recordProviderBusyTerminal(e);
+        // A different active Range already tripped the engine circuit before
+        // releasing the FIFO ticket. Its outer cue/prefetch/startup path owns
+        // the terminal report; this queued pump abort is only the follower.
+        // Keep unexpected aborts diagnostic when no stop/fatal owner exists.
+        if (this._isDerivedProviderBusyRangeAbort(e)) return;
         // Before the first usable SourceBuffer range, load() is still waiting on
         // the startup outcome. Reject that promise with the ORIGINAL error so its
         // existing catch can make HTTP 458 terminal. Routing a startup 458 through
         // runtime onFatal would incorrectly reopen the engine once.
-        if (this._startupActive && this._settleStartupOutcome(e)) {
-          this._stopRequested = true;
-          this._clearStartupDeadlineTimer();
-          try { this._ac.abort(); } catch (_) {}
-          this.report({ stage: 'pump:startup', message: errStr(e) });
-          return;
+        if (this._startupActive) {
+          const routedToLoad = this._settleStartupOutcome(e);
+          if (routedToLoad) {
+            this._stopRequested = true;
+            this._clearStartupDeadlineTimer();
+            try { this._ac.abort(); } catch (_) {}
+            markPlaybackFailureReported(e, 'pump:startup');
+            this.report({ stage: 'pump:startup', message: errStr(e) });
+          }
+          // A real Range 458 may already have settled startup centrally before
+          // libav returns its delayed AVERROR. It remains load-owned even when
+          // _settleStartupOutcome() is now false; never fall into runtime fatal.
+          if (routedToLoad || isProviderBusy) return;
         }
         if ((isProviderBusy || isAudioTimelineFailure || isStartupTimeout || isMuxTrailerFailure)
             && this._fatalSignaled) return;
@@ -2675,6 +2850,12 @@
         if (this._bufferedAhead() > BUFFER_AHEAD_MAX) { await this._waitForDrain(); continue; }
         let packets;
         [res, packets] = await lib.ff_read_frame_multi(this.fmtCtx, this.pkt, { limit: 512 * 1024 });
+        // Block-reader callbacks cannot throw through libav's worker boundary:
+        // they save the exact cause in _lastReadError and ff_read_frame_multi
+        // returns a negative AVERROR. Restore the first 458 before the stop flag
+        // can make the loop return silently.
+        const providerBusyReadError = this._providerBusyBlockReadError();
+        if (providerBusyReadError) throw providerBusyReadError;
         const writeList = [];
         // Process the video stream FIRST in each batch, so its keyframe gate anchors vBase before any
         // audio in the same batch is evaluated (keeps fresh-start audio while letting a mid-GOP resume
@@ -2750,9 +2931,14 @@
           await this._seekDemuxerByBytes(this._lastSeekT);
           return await this._pump();
         } catch (e) {
+          if (isProviderBusyError(e)) throw e;
+          if (this._isDerivedProviderBusyRangeAbort(e)) return;
           this.report({ stage: 'seek:no-packets', message: errStr(e) });
         }
       }
+      // The no-packets byte fallback awaited another Range lane. Re-check
+      // teardown/terminal state before flushing a trailer or marking MSE ended.
+      if (this._shouldStopOutput()) return;
       this._diag.pumpExitReason = this._stopRequested ? 'stop' : (isEof ? 'eof' : 'readerr');
       this._diag.pumpExitRes = res;
       this._diag.lastReadError = this._lastReadError ? errStr(this._lastReadError).slice(0, 200) : null;
@@ -2780,21 +2966,30 @@
         return;
       }
       // EOF: flush audio + trailer + endOfStream
+      if (this._shouldStopOutput()) return;
       const tailVideo = this._flushVideoPacketsAtEof();
       this._releaseVideoDtsProbeAudio(tailVideo, true);
+      if (this._shouldStopOutput()) return;
       if (tailVideo.length && !(await this._writePacketsChecked(tailVideo))) return;
+      if (this._shouldStopOutput()) return;
       if (this.aS && !this.copyAudio) {
         const fr = await lib.ff_decode_multi(this.decCtx, this.decPkt, this.decFrame, [], true);
+        if (this._shouldStopOutput()) return;
         const enc = await this._encodeAudio(fr, true);
+        if (this._shouldStopOutput()) return;
         const tailAudio = [];
         for (const packet of enc) this._stageAudioForVideoDtsProbe(packet, tailAudio);
         this._releaseVideoDtsProbeAudio(tailAudio, true);
+        if (this._shouldStopOutput()) return;
         if (tailAudio.length && !(await this._writePacketsChecked(tailAudio))) return;
+        if (this._shouldStopOutput()) return;
       }
       // With validated skip_trailer, av_write_trailer flushes the final media
       // fragment and emits no mfra, so its callbacks must reach MSE. Legacy muxes
       // retain their established mfra/mfro drop behavior.
+      if (this._shouldStopOutput()) return;
       if (!(await this._writeTrailerChecked())) return;
+      if (this._shouldStopOutput()) return;
       this.ended = true; this._drain();
       this.log('stream ended (' + this._diag.pumpExitReason + ')');
     }
@@ -3334,7 +3529,10 @@
 
     // ---- MSE buffer plumbing ----------------------------------------------
     _drain() {
-      if (this.destroyed) return; // a late updateend after destroy must not append to a dead pipe
+      // Late updateend callbacks can race teardown, a fatal mux error, or an
+      // authoritative 458. None may append queued bytes or signal EOS after the
+      // playback circuit has closed.
+      if (this._shouldStopOutput()) return;
       const sb = this.sb;
       if (!sb || sb.updating) return;
       // Resume/seek lands on the nearest keyframe, which an APPROXIMATE seek can place AFTER the

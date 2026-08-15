@@ -3689,12 +3689,19 @@ class WatchPage {
                 // the real condition instead. The error UI suppresses auto-refresh;
                 // only a deliberate viewer retry may create a new server-owned session.
                 if (isSlotBusy(msg)) {
-                    this.reportEngineFailure({ stage: 'load', message: msg });
-                    await this.reportProviderPlaybackFailure(msg);
+                    const engineAlreadyReported = e?._norvaPlaybackFailureReported === true
+                        && (e?._norvaPlaybackFailureReportStage === 'startup:provider-busy'
+                            || e?._norvaPlaybackFailureReportStage === 'pump:startup');
+                    if (!engineAlreadyReported) {
+                        this.reportEngineFailure({ stage: 'load', message: msg });
+                    }
                     this.destroyEngine();
                     // The shared terminal handler expires the exact session before
                     // rendering the provider-conflict state.
-                    await this.handlePlaybackFailure(msg);
+                    await this.handlePlaybackFailure(msg, {
+                        forceTerminal: true,
+                        failureAlreadyReported: true,
+                    });
                     return;
                 }
                 // Provider auth/rate-limit blocks (401/403/429) are not container failures.
@@ -3880,7 +3887,10 @@ class WatchPage {
             // engine or mint a Gateway session for the same playback intention.
             if (this.isProviderBusyError(reason)) {
                 this.destroyEngine();
-                await this.handlePlaybackFailure(reason, { forceTerminal: true });
+                await this.handlePlaybackFailure(reason, {
+                    forceTerminal: true,
+                    failureAlreadyReported: options.alreadyReported === true,
+                });
                 return true;
             }
 
@@ -5930,6 +5940,7 @@ class WatchPage {
         const options = arguments[1] && typeof arguments[1] === 'object' ? arguments[1] : {};
         const forceProviderBusyTerminal = options.forceTerminal === true
             && this.isProviderBusyError(message);
+        const failureAlreadyReported = options.failureAlreadyReported === true;
         const playbackAttemptId = this._playbackAttemptId;
         if (this._handlingPlaybackFailure) {
             console.warn('[WatchPage] Ignoring duplicate playback failure while retry is already running:', message);
@@ -5946,7 +5957,9 @@ class WatchPage {
         this._handlingPlaybackFailure = true;
         try {
             this._lastFailureMsg = message;
-            this.sendPlaybackEvent('playback_error', { errorMessage: message || 'Playback failed.' });
+            if (!failureAlreadyReported) {
+                this.sendPlaybackEvent('playback_error', { errorMessage: message || 'Playback failed.' });
+            }
             if (this.isPlaybackSupersededError(message)) {
                 await this.handlePlaybackSuperseded(this.currentCloudPlaybackSessionId);
                 return;
@@ -5955,7 +5968,10 @@ class WatchPage {
                 await this.reportProviderPlaybackFailure(message);
                 await this.releasePlaybackPipelineForRetry();
                 if (!this.isStalePlaybackAttempt(playbackAttemptId)) {
-                    this.showPlaybackError(message, { immediate: true });
+                    this.showPlaybackError(message, {
+                        immediate: true,
+                        forceTerminal: forceProviderBusyTerminal,
+                    });
                 }
                 return;
             }
@@ -6222,7 +6238,9 @@ class WatchPage {
     }
 
     showPlaybackError(message, options = {}) {
-        if (this.hasCurrentMedia()) {
+        const forceProviderBusyTerminal = options.forceTerminal === true
+            && this.isProviderBusyError(message);
+        if (this.hasCurrentMedia() && !forceProviderBusyTerminal) {
             console.warn('[WatchPage] Suppressing stale playback error because media is already playing:', message);
             this.hidePlaybackError();
             return;

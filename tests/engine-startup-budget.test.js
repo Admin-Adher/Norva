@@ -51,9 +51,35 @@ function makeBareEngine(NorvaEngine) {
     return engine;
 }
 
-test('startup budget ships as engine telemetry revision 51', () => {
+function rangeResponse(options, total = 64) {
+    const match = /bytes=(\d+)-(\d+)/.exec(options.headers.Range);
+    const start = Number(match[1]);
+    const end = Number(match[2]);
+    return {
+        status: 206,
+        ok: true,
+        headers: { get: (name) => name.toLowerCase() === 'content-range' ? `bytes ${start}-${end}/${total}` : null },
+        arrayBuffer: async () => new Uint8Array(end - start + 1).buffer,
+    };
+}
+
+function providerBusyResponse() {
+    return { status: 458, ok: false, headers: { get: () => null } };
+}
+
+function deferred() {
+    let resolve;
+    let reject;
+    const promise = new Promise((res, rej) => { resolve = res; reject = rej; });
+    return { promise, resolve, reject };
+}
+
+test('startup budget ships with report ownership and cache-busted engine/Watch assets', () => {
     const source = fs.readFileSync(path.join(ROOT, 'public', 'js', 'norvaEngine.js'), 'utf8');
-    assert.match(source, /const ENGINE_VERSION = 51;/);
+    const app = fs.readFileSync(path.join(ROOT, 'public', 'app.html'), 'utf8');
+    assert.match(source, /const ENGINE_VERSION = 53;/);
+    assert.match(app, /\/js\/norvaEngine\.js\?v=55/);
+    assert.match(app, /\/js\/pages\/WatchPage\.js\?v=137/);
 });
 
 test('load arms cue indexing after playable startup instead of a wall-clock timer', () => {
@@ -155,6 +181,9 @@ test('HTTP 458 remains terminal during the startup budget', async () => {
     assert.strictEqual(calls, 1, 'the deadline/retry policy must never soften a provider 458');
     assert.strictEqual(engine.timings.fetchAttempts, 1);
     assert.strictEqual(engine.timings.startupFetchWindows[0].outcome, 'http_458');
+    assert.strictEqual(engine._stopRequested, true);
+    assert.strictEqual(engine._ac.signal.aborted, true,
+        'the active 458 must close the engine Range lane before any queued startup read can run');
 });
 
 test('appendBuffer alone does not end startup; updateend needs a real buffered range', () => {
@@ -663,6 +692,986 @@ test('range requests stay serialized when background cue work meets the media pu
     assert.strictEqual(engine.timings.maxConcurrentRangeFetches, 1);
 });
 
+test('an active cue-index 458 aborts a queued pump with one terminal report', async () => {
+    let calls = 0;
+    let releaseFirst;
+    let markFirstStarted;
+    const firstStarted = new Promise((resolve) => { markFirstStarted = resolve; });
+    const NorvaEngine = loadEngineClass(async (_url, options) => {
+        calls += 1;
+        if (calls === 1) {
+            markFirstStarted();
+            await new Promise((resolve) => { releaseFirst = resolve; });
+            return providerBusyResponse();
+        }
+        return rangeResponse(options);
+    });
+    const reports = [];
+    const fatals = [];
+    const engine = new NorvaEngine({ currentTime: 0 }, {
+        report: (event) => reports.push(event),
+        onFatal: (error) => fatals.push(error),
+    });
+    engine.url = 'https://media.invalid/cue-active-458.mkv';
+    engine.size = 64;
+    engine._startupActive = false;
+    engine._bufferedAhead = () => 20;
+
+    engine._startCueIndexAfterFirstFrame('video-frame-callback');
+    await firstStarted;
+    engine._pump = () => engine._fetchRange(8, 16);
+    engine._startPump();
+    releaseFirst();
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    assert.strictEqual(calls, 1, 'the queued media read must observe abort before entering fetch');
+    assert.strictEqual(engine._pumpRunning, false);
+    assert.strictEqual(engine.timings.maxConcurrentRangeFetches, 1);
+    assert.strictEqual(engine._ac.signal.aborted, true);
+    assert.strictEqual(engine._fatalSignaled, true);
+    assert.match(engine._providerBusyTerminalError?.message || '', /BLOCK_HTTP_458/);
+    assert.strictEqual(reports.length, 1);
+    assert.strictEqual(reports[0].stage, 'cue-index:provider-busy');
+    assert.strictEqual(fatals.length, 1, 'cue and aborted media paths must share one terminal callback');
+    assert.match(fatals[0].message, /BLOCK_HTTP_458/);
+});
+
+test('a scrub prefetch 458 aborts a queued pump with one terminal report', async () => {
+    let calls = 0;
+    let releaseFirst;
+    let markFirstStarted;
+    const firstStarted = new Promise((resolve) => { markFirstStarted = resolve; });
+    const NorvaEngine = loadEngineClass(async (_url, options) => {
+        calls += 1;
+        if (calls === 1) {
+            markFirstStarted();
+            await new Promise((resolve) => { releaseFirst = resolve; });
+            return providerBusyResponse();
+        }
+        return rangeResponse(options);
+    });
+    const reports = [];
+    const fatals = [];
+    const engine = new NorvaEngine({ currentTime: 0 }, {
+        report: (event) => reports.push(event),
+        onFatal: (error) => fatals.push(error),
+    });
+    engine.url = 'https://media.invalid/prefetch-active-458.mkv';
+    engine.size = 64;
+    engine._startupActive = false;
+    engine._cueIndex = [{ t: 10, off: 0 }];
+
+    const prefetch = engine.prefetchAt(10);
+    await firstStarted;
+    engine._pump = () => engine._fetchRange(8, 16);
+    engine._startPump();
+    releaseFirst();
+
+    await prefetch;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    assert.strictEqual(calls, 1);
+    assert.strictEqual(engine._pumpRunning, false);
+    assert.strictEqual(engine._fatalSignaled, true);
+    assert.match(engine._providerBusyTerminalError?.message || '', /BLOCK_HTTP_458/);
+    assert.strictEqual(reports.length, 1);
+    assert.strictEqual(reports[0].stage, 'prefetch:provider-busy');
+    assert.strictEqual(fatals.length, 1);
+    assert.match(fatals[0].message, /BLOCK_HTTP_458/);
+});
+
+test('a scrub prefetch 458 aborts a queued demux seek with one terminal report', async () => {
+    let calls = 0;
+    let releaseFirst;
+    let markFirstStarted;
+    const firstStarted = new Promise((resolve) => { markFirstStarted = resolve; });
+    const NorvaEngine = loadEngineClass(async (_url, options) => {
+        calls += 1;
+        if (calls === 1) {
+            markFirstStarted();
+            await new Promise((resolve) => { releaseFirst = resolve; });
+            return providerBusyResponse();
+        }
+        return rangeResponse(options);
+    });
+    const reports = [];
+    const fatals = [];
+    const engine = new NorvaEngine({ currentTime: 0 }, {
+        report: (event) => reports.push(event),
+        onFatal: (error) => fatals.push(error),
+    });
+    engine.url = 'https://media.invalid/prefetch-seek-active-458.mkv';
+    engine.size = 64;
+    engine.durationSec = 100;
+    engine._startupActive = false;
+    engine._cueIndex = [{ t: 10, off: 0 }];
+    engine.oc = {};
+    engine.fmtCtx = 1;
+    engine.vS = { time_base_num: 1, time_base_den: 1000, index: 0 };
+    engine.aS = null;
+    engine._isBuffered = () => false;
+    engine._stopPump = async () => {};
+    engine._resetForSeek = async () => {};
+    engine._clearSourceBuffer = async () => {};
+    engine._initMuxer = async () => {};
+    engine.lib = {
+        AVSEEK_FLAG_BYTE: 2,
+        avformat_seek_file_approx: async () => {
+            try {
+                await engine._readRange(8, 8);
+                return 0;
+            } catch (error) {
+                // Mirrors the block-reader contract: libav sees a negative
+                // AVERROR while the engine retains the authoritative cause.
+                engine._lastReadError = error;
+                return -5;
+            }
+        },
+    };
+
+    const prefetch = engine.prefetchAt(10);
+    await firstStarted;
+    const seek = engine.seek(10);
+    releaseFirst();
+
+    await Promise.all([prefetch, seek]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    assert.strictEqual(calls, 1, 'the queued demux read must abort before opening another Range');
+    assert.ok(engine._lastReadError == null || engine._lastReadError.code === 'ENGINE_RANGE_ABORTED',
+        'the post-await terminal guard may skip demux entirely; otherwise its queued read must abort');
+    assert.strictEqual(engine._fatalSignaled, true);
+    assert.match(engine._providerBusyTerminalError?.message || '', /BLOCK_HTTP_458/);
+    assert.strictEqual(reports.length, 1,
+        'the derived byte-seek AVERROR must not become a second playback_error');
+    assert.strictEqual(reports[0].stage, 'prefetch:provider-busy');
+    assert.strictEqual(fatals.length, 1);
+    assert.match(fatals[0].message, /BLOCK_HTTP_458/);
+});
+
+for (const blockedPhase of ['reset', 'clear-source-buffer', 'init-muxer']) {
+    test(`a prefetch 458 stops seek after its awaited ${blockedPhase} phase`, async () => {
+        let calls = 0;
+        let releaseFirst;
+        let markFirstStarted;
+        const firstStarted = new Promise((resolve) => { markFirstStarted = resolve; });
+        const phaseStarted = deferred();
+        const releasePhase = deferred();
+        const NorvaEngine = loadEngineClass(async (_url, options) => {
+            calls += 1;
+            if (calls === 1) {
+                markFirstStarted();
+                await new Promise((resolve) => { releaseFirst = resolve; });
+                return providerBusyResponse();
+            }
+            return rangeResponse(options);
+        });
+        const reports = [];
+        const fatals = [];
+        let demuxCalls = 0;
+        let clearCalls = 0;
+        let initCalls = 0;
+        let pumpStarts = 0;
+        let seekCallbacks = 0;
+        const engine = new NorvaEngine({ currentTime: 0 }, {
+            report: (event) => reports.push(event),
+            onFatal: (error) => fatals.push(error),
+            onSeek: () => { seekCallbacks += 1; },
+        });
+        engine.url = `https://media.invalid/seek-${blockedPhase}-458.mkv`;
+        engine.size = 64;
+        engine.durationSec = 100;
+        engine._startupActive = false;
+        engine._cueIndex = [{ t: 10, off: 0 }];
+        engine.oc = {};
+        engine.fmtCtx = 1;
+        engine.vS = { time_base_num: 1, time_base_den: 1000, index: 0 };
+        engine.aS = null;
+        engine._isBuffered = () => false;
+        engine._resetForSeek = async () => {
+            if (blockedPhase !== 'reset') return;
+            phaseStarted.resolve();
+            await releasePhase.promise;
+            throw new Error('LIB_TERMINATED');
+        };
+        engine._seekDemuxer = async () => { demuxCalls += 1; };
+        engine._clearSourceBuffer = async () => {
+            clearCalls += 1;
+            if (blockedPhase !== 'clear-source-buffer') return;
+            phaseStarted.resolve();
+            await releasePhase.promise;
+        };
+        engine._initMuxer = async () => {
+            initCalls += 1;
+            if (blockedPhase !== 'init-muxer') return;
+            phaseStarted.resolve();
+            await releasePhase.promise;
+        };
+        engine._startPump = () => { pumpStarts += 1; };
+        engine.lib = {};
+
+        const prefetch = engine.prefetchAt(10);
+        await firstStarted;
+        const seek = engine.seek(10);
+        await phaseStarted.promise;
+        releaseFirst();
+        await prefetch;
+        releasePhase.resolve();
+        await seek;
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        assert.strictEqual(calls, 1);
+        assert.strictEqual(reports.length, 1);
+        assert.strictEqual(reports[0].stage, 'prefetch:provider-busy');
+        assert.strictEqual(fatals.length, 1);
+        if (blockedPhase === 'reset') {
+            assert.strictEqual(demuxCalls, 0, 'a generic reset rejection after 458 must not reach demux');
+        }
+        if (blockedPhase === 'clear-source-buffer') {
+            assert.strictEqual(initCalls, 0, 'a 458 during SourceBuffer clear must not initialize a muxer');
+        }
+        assert.strictEqual(pumpStarts, 0, 'a terminal seek must never clear stop by restarting the pump');
+        assert.strictEqual(seekCallbacks, 0, 'a terminal seek must not publish misleading success telemetry');
+    });
+}
+
+test('startPump cannot re-arm an engine whose provider-busy Range circuit is closed', async () => {
+    const NorvaEngine = loadEngineClass();
+    const engine = new NorvaEngine({ currentTime: 0 }, {});
+    const busy = new Error('BLOCK_HTTP_458');
+    let pumpCalls = 0;
+    engine._startupActive = false;
+    engine._recordProviderBusyTerminal(busy);
+    engine._stopRequested = true;
+    engine._ac.abort();
+    engine._pump = async () => { pumpCalls += 1; };
+
+    engine._startPump();
+    await Promise.resolve();
+
+    assert.strictEqual(pumpCalls, 0);
+    assert.strictEqual(engine._pumpRunning, false);
+    assert.strictEqual(engine._stopRequested, true,
+        'startPump must not clear the stop flag after a terminal provider circuit');
+});
+
+test('an active demux seek 458 is restored from block-reader AVERROR and terminal once', async () => {
+    let calls = 0;
+    let seekCalls = 0;
+    const NorvaEngine = loadEngineClass(async () => {
+        calls += 1;
+        return providerBusyResponse();
+    });
+    const reports = [];
+    const fatals = [];
+    const engine = new NorvaEngine({ currentTime: 0 }, {
+        report: (event) => reports.push(event),
+        onFatal: (error) => fatals.push(error),
+    });
+    engine.url = 'https://media.invalid/active-seek-458.mkv';
+    engine.size = 64;
+    engine.durationSec = 100;
+    engine._startupActive = false;
+    engine._cueIndex = [{ t: 10, off: 0 }];
+    engine.oc = {};
+    engine.fmtCtx = 1;
+    engine.vS = { time_base_num: 1, time_base_den: 1000, index: 0 };
+    engine.aS = null;
+    engine._isBuffered = () => false;
+    engine._stopPump = async () => {};
+    engine._resetForSeek = async () => {};
+    engine._clearSourceBuffer = async () => {};
+    engine._initMuxer = async () => {};
+    engine.lib = {
+        AVSEEK_FLAG_BYTE: 2,
+        avformat_seek_file_approx: async () => {
+            seekCalls += 1;
+            try {
+                await engine._readRange(0, 8);
+                return 0;
+            } catch (error) {
+                engine._lastReadError = error;
+                return -5;
+            }
+        },
+    };
+
+    await engine.seek(10);
+
+    assert.strictEqual(calls, 1);
+    assert.strictEqual(seekCalls, 1, 'provider busy must not be reclassified into a byte fallback');
+    assert.strictEqual(reports.length, 1);
+    assert.strictEqual(reports[0].stage, 'seek:provider-busy');
+    assert.strictEqual(fatals.length, 1);
+    assert.match(fatals[0].message, /BLOCK_HTTP_458/);
+    assert.strictEqual(engine._providerBusyTerminalError, fatals[0]);
+});
+
+test('a resume demux seek propagates the original block-reader 458 before fallback', async () => {
+    let calls = 0;
+    let seekCalls = 0;
+    const NorvaEngine = loadEngineClass(async () => {
+        calls += 1;
+        return providerBusyResponse();
+    });
+    const engine = new NorvaEngine({ currentTime: 0 }, {});
+    engine.url = 'https://media.invalid/resume-seek-458.mkv';
+    engine.size = 64;
+    engine.durationSec = 100;
+    engine._startupActive = false;
+    engine._cueIndex = [{ t: 10, off: 0 }];
+    engine.fmtCtx = 1;
+    engine.vS = { time_base_num: 1, time_base_den: 1000, index: 0 };
+    engine.aS = null;
+    engine.lib = {
+        AVSEEK_FLAG_BYTE: 2,
+        avformat_seek_file_approx: async () => {
+            seekCalls += 1;
+            try {
+                await engine._readRange(0, 8);
+                return 0;
+            } catch (error) {
+                engine._lastReadError = error;
+                return -5;
+            }
+        },
+    };
+
+    await assert.rejects(engine._seekDemuxer(10), /BLOCK_HTTP_458/);
+
+    assert.strictEqual(calls, 1);
+    assert.strictEqual(seekCalls, 1);
+    assert.match(engine._providerBusyTerminalError?.message || '', /BLOCK_HTTP_458/);
+});
+
+test('an unexpected demux Range abort remains diagnostic without provider-busy ownership', async () => {
+    const NorvaEngine = loadEngineClass();
+    const reports = [];
+    const engine = new NorvaEngine({ currentTime: 0 }, {
+        report: (event) => reports.push(event),
+    });
+    const aborted = new Error('ENGINE_RANGE_ABORTED');
+    aborted.code = 'ENGINE_RANGE_ABORTED';
+    engine.size = 64;
+    engine.durationSec = 100;
+    engine._startupActive = false;
+    engine.oc = {};
+    engine.fmtCtx = 1;
+    engine.vS = { time_base_num: 1, time_base_den: 1000, index: 0 };
+    engine.aS = null;
+    engine._isBuffered = () => false;
+    engine._stopPump = async () => {};
+    engine._resetForSeek = async () => {};
+    engine._clearSourceBuffer = async () => {};
+    engine._initMuxer = async () => {};
+    engine._ac.abort();
+    engine.lib = {
+        AVSEEK_FLAG_BYTE: 2,
+        avformat_seek_file_approx: async () => {
+            engine._lastReadError = aborted;
+            return -5;
+        },
+    };
+
+    await engine.seek(10);
+
+    assert.strictEqual(engine._stopRequested, false);
+    assert.strictEqual(engine._fatalSignaled, false);
+    assert.strictEqual(engine._providerBusyTerminalError, null);
+    assert.strictEqual(reports.length, 1);
+    assert.strictEqual(reports[0].stage, 'seek:demux');
+    assert.match(reports[0].message, /byte seek failed \(-5\)/);
+});
+
+test('a pump 458 aborts its queued Range and reports one original terminal cause', async () => {
+    let calls = 0;
+    let releaseFirst;
+    let markFirstStarted;
+    const firstStarted = new Promise((resolve) => { markFirstStarted = resolve; });
+    const NorvaEngine = loadEngineClass(async (_url, options) => {
+        calls += 1;
+        if (calls === 1) {
+            markFirstStarted();
+            await new Promise((resolve) => { releaseFirst = resolve; });
+            return providerBusyResponse();
+        }
+        return rangeResponse(options);
+    });
+    const reports = [];
+    const fatals = [];
+    const engine = new NorvaEngine({ currentTime: 0 }, {
+        report: (event) => reports.push(event),
+        onFatal: (error) => fatals.push(error),
+    });
+    engine.url = 'https://media.invalid/pump-active-458.mkv';
+    engine.size = 64;
+    engine._startupActive = false;
+    engine._pump = () => engine._fetchRange(0, 64);
+
+    engine._startPump();
+    await firstStarted;
+    const queuedCue = engine._fetchRange(8, 16);
+    releaseFirst();
+
+    await assert.rejects(queuedCue, (error) => error?.code === 'ENGINE_RANGE_ABORTED');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    assert.strictEqual(calls, 1);
+    assert.strictEqual(engine._fatalSignaled, true);
+    assert.match(engine._providerBusyTerminalError?.message || '', /BLOCK_HTTP_458/);
+    assert.strictEqual(reports.length, 1);
+    assert.strictEqual(reports[0].stage, 'pump:provider-busy');
+    assert.strictEqual(fatals.length, 1);
+    assert.match(fatals[0].message, /BLOCK_HTTP_458/);
+});
+
+test('a runtime pump restores block-reader 458 from AVERROR before the stop early-return', async () => {
+    let calls = 0;
+    let releaseFirst;
+    let markFirstStarted;
+    const firstStarted = new Promise((resolve) => { markFirstStarted = resolve; });
+    const NorvaEngine = loadEngineClass(async (_url, options) => {
+        calls += 1;
+        if (calls === 1) {
+            markFirstStarted();
+            await new Promise((resolve) => { releaseFirst = resolve; });
+            return providerBusyResponse();
+        }
+        return rangeResponse(options);
+    });
+    const reports = [];
+    const fatals = [];
+    const engine = new NorvaEngine({ currentTime: 0 }, {
+        report: (event) => reports.push(event),
+        onFatal: (error) => fatals.push(error),
+    });
+    engine.url = 'https://media.invalid/runtime-block-reader-458.mkv';
+    engine.size = 64;
+    engine._startupActive = false;
+    engine.fmtCtx = 1;
+    engine.pkt = 2;
+    engine._bufferedAhead = () => 0;
+    engine.lib = {
+        EAGAIN: 6,
+        ff_read_frame_multi: async () => {
+            try {
+                await engine._readRange(0, 8);
+                return [0, {}];
+            } catch (error) {
+                engine._lastReadError = error;
+                return [-5, {}];
+            }
+        },
+    };
+
+    engine._startPump();
+    await firstStarted;
+    const queued = engine._fetchRange(8, 16);
+    releaseFirst();
+
+    await assert.rejects(queued, (error) => error?.code === 'ENGINE_RANGE_ABORTED');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    assert.strictEqual(calls, 1);
+    assert.strictEqual(engine._pumpRunning, false);
+    assert.strictEqual(reports.length, 1);
+    assert.strictEqual(reports[0].stage, 'pump:provider-busy');
+    assert.strictEqual(fatals.length, 1);
+    assert.match(fatals[0].message, /BLOCK_HTTP_458/);
+    assert.strictEqual(engine._providerBusyTerminalError, fatals[0]);
+});
+
+test('a startup pump rejects its outcome with block-reader 458 before the watchdog', async () => {
+    let calls = 0;
+    let releaseFirst;
+    let markFirstStarted;
+    const workerSawReadError = deferred();
+    const releaseWorker = deferred();
+    const firstStarted = new Promise((resolve) => { markFirstStarted = resolve; });
+    const NorvaEngine = loadEngineClass(async (_url, options) => {
+        calls += 1;
+        if (calls === 1) {
+            markFirstStarted();
+            await new Promise((resolve) => { releaseFirst = resolve; });
+            return providerBusyResponse();
+        }
+        return rangeResponse(options);
+    });
+    const reports = [];
+    const fatals = [];
+    const engine = new NorvaEngine({ currentTime: 0 }, {
+        report: (event) => reports.push(event),
+        onFatal: (error) => fatals.push(error),
+    });
+    engine.url = 'https://media.invalid/startup-block-reader-458.mkv';
+    engine.size = 64;
+    engine._startupActive = true;
+    engine._startupDeadlineAt = performance.now() + 25;
+    engine.fmtCtx = 1;
+    engine.pkt = 2;
+    engine._bufferedAhead = () => 0;
+    const outcome = engine._createStartupOutcome();
+    engine._armStartupDeadline();
+    engine.lib = {
+        EAGAIN: 6,
+        ff_read_frame_multi: async () => {
+            try {
+                await engine._readRange(0, 8);
+                return [0, {}];
+            } catch (error) {
+                engine._lastReadError = error;
+                workerSawReadError.resolve();
+                await releaseWorker.promise;
+                return [-5, {}];
+            }
+        },
+    };
+
+    engine._startPump();
+    await firstStarted;
+    const queued = engine._fetchRange(8, 16);
+    releaseFirst();
+
+    await assert.rejects(queued, (error) => error?.code === 'ENGINE_RANGE_ABORTED');
+    await workerSawReadError.promise;
+    const outcomeResult = await Promise.race([
+        outcome.then(
+            () => ({ state: 'resolved' }),
+            (error) => ({ state: 'rejected', error }),
+        ),
+        new Promise((resolve) => setTimeout(() => resolve({ state: 'watchdog-wait' }), 40)),
+    ]);
+
+    assert.strictEqual(outcomeResult.state, 'rejected',
+        'the first marker must settle startup before either worker AVERROR or watchdog');
+    assert.match(outcomeResult.error?.message || '', /BLOCK_HTTP_458/);
+    await new Promise((resolve) => setTimeout(resolve, 35));
+    assert.strictEqual(calls, 1);
+    assert.strictEqual(reports.length, 1);
+    assert.strictEqual(reports[0].stage, 'startup:provider-busy');
+    assert.strictEqual(fatals.length, 0, 'load owns startup failures; runtime onFatal must stay unused');
+    assert.match(engine._providerBusyTerminalError?.message || '', /BLOCK_HTTP_458/);
+    assert.strictEqual(engine._providerBusyTerminalError?._norvaPlaybackFailureReported, true,
+        'the exact startup error must carry the persisted-report ownership into WatchPage.load');
+    assert.strictEqual(engine._providerBusyTerminalError?._norvaPlaybackFailureReportStage,
+        'startup:provider-busy');
+
+    releaseWorker.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.strictEqual(reports.length, 1,
+        'the delayed pump AVERROR must not report after central startup settlement');
+    assert.strictEqual(fatals.length, 0);
+});
+
+test('a startup stage cannot swallow or replace a block-reader 458', async () => {
+    let calls = 0;
+    const NorvaEngine = loadEngineClass(async () => {
+        calls += 1;
+        return providerBusyResponse();
+    });
+    const engine = new NorvaEngine({ currentTime: 0 }, {});
+    engine.url = 'https://media.invalid/ts-extradata-stage-458.ts';
+    engine.size = 64;
+    engine._startupActive = true;
+    engine._startupDeadlineAt = performance.now() + 15_000;
+    engine._createStartupOutcome();
+
+    const swallowedStage = (async () => {
+        try {
+            await engine._readRange(0, 8);
+        } catch (error) {
+            // Mirrors best-effort TS extradata probes that intentionally finish
+            // after libav turns an onblockread failure into an AVERROR.
+            engine._lastReadError = error;
+        }
+        return 'stage-resolved';
+    })();
+
+    await assert.rejects(
+        engine._withStartupDeadline(swallowedStage, 'video-extradata'),
+        /BLOCK_HTTP_458/,
+    );
+    await assert.rejects(
+        engine._withStartupDeadline(Promise.reject(new Error('generic setup failure')), 'mime-select'),
+        /BLOCK_HTTP_458/,
+        'the first provider-busy cause must also outrank a later generic stage rejection',
+    );
+    engine._startupDeadlineAt = performance.now() - 1;
+    await assert.rejects(
+        engine._withStartupDeadline(Promise.resolve('late stage'), 'expired-stage'),
+        /BLOCK_HTTP_458/,
+        'provider busy must win even when the deadline assertion is already due',
+    );
+
+    assert.strictEqual(calls, 1);
+    assert.match(engine._providerBusyTerminalError?.message || '', /BLOCK_HTTP_458/);
+});
+
+test('a provider-busy follower abort cannot finalize the pump EOF fallback', async () => {
+    let calls = 0;
+    let releaseFirst;
+    let markFirstStarted;
+    let trailerCalls = 0;
+    let drains = 0;
+    const firstStarted = new Promise((resolve) => { markFirstStarted = resolve; });
+    const NorvaEngine = loadEngineClass(async (_url, options) => {
+        calls += 1;
+        if (calls === 1) {
+            markFirstStarted();
+            await new Promise((resolve) => { releaseFirst = resolve; });
+            return providerBusyResponse();
+        }
+        return rangeResponse(options);
+    });
+    const reports = [];
+    const fatals = [];
+    const engine = new NorvaEngine({ currentTime: 0 }, {
+        report: (event) => reports.push(event),
+        onFatal: (error) => fatals.push(error),
+    });
+    engine.url = 'https://media.invalid/eof-follower-abort.mkv';
+    engine.size = 64;
+    engine.durationSec = 100;
+    engine._startupActive = false;
+    engine._cueIndex = [{ t: 10, off: 0 }];
+    engine.fmtCtx = 1;
+    engine.pkt = 2;
+    engine.vS = { time_base_num: 1, time_base_den: 1000, index: 0 };
+    engine.vBase = null;
+    engine.aS = null;
+    engine._lastSeekT = 10;
+    engine._byteSeekRetried = false;
+    engine._bufferedAhead = () => 0;
+    engine._writeTrailerChecked = async () => { trailerCalls += 1; return true; };
+    engine._flushVideoPacketsAtEof = () => [];
+    engine._drain = () => { drains += 1; };
+    engine.lib = {
+        EAGAIN: 6,
+        AVERROR_EOF: -541478725,
+        AVSEEK_FLAG_BYTE: 2,
+        ff_read_frame_multi: async () => [-541478725, {}],
+        avformat_seek_file_approx: async () => {
+            try {
+                await engine._readRange(8, 8);
+                return 0;
+            } catch (error) {
+                engine._lastReadError = error;
+                return -5;
+            }
+        },
+    };
+
+    const prefetch = engine.prefetchAt(10);
+    await firstStarted;
+    engine._startPump();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    releaseFirst();
+
+    await prefetch;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    assert.strictEqual(calls, 1);
+    assert.strictEqual(reports.length, 1);
+    assert.strictEqual(reports[0].stage, 'prefetch:provider-busy');
+    assert.strictEqual(fatals.length, 1);
+    assert.strictEqual(trailerCalls, 0, 'a terminal follower abort must never write a trailer');
+    assert.strictEqual(drains, 0, 'a terminal follower abort must never drain or signal EOS');
+    assert.strictEqual(engine.ended, false);
+});
+
+for (const fastTrailer of [false, true]) {
+    test(`a provider 458 during ${fastTrailer ? 'fast' : 'legacy'} trailer cannot end MediaSource`, async () => {
+        let calls = 0;
+        let releaseFirst;
+        let markFirstStarted;
+        let eosCalls = 0;
+        const firstStarted = new Promise((resolve) => { markFirstStarted = resolve; });
+        const trailerStarted = deferred();
+        const releaseTrailer = deferred();
+        const NorvaEngine = loadEngineClass(async (_url, options) => {
+            calls += 1;
+            if (calls === 1) {
+                markFirstStarted();
+                await new Promise((resolve) => { releaseFirst = resolve; });
+                return providerBusyResponse();
+            }
+            return rangeResponse(options);
+        });
+        const reports = [];
+        const fatals = [];
+        const engine = new NorvaEngine({ currentTime: 0 }, {
+            report: (event) => reports.push(event),
+            onFatal: (error) => fatals.push(error),
+        });
+        engine.url = `https://media.invalid/${fastTrailer ? 'fast' : 'legacy'}-trailer-458.mkv`;
+        engine.size = 64;
+        engine._startupActive = false;
+        engine._cueIndex = [{ t: 10, off: 0 }];
+        engine.fmtCtx = 1;
+        engine.pkt = 2;
+        engine.oc = 3;
+        engine.vS = null;
+        engine.aS = null;
+        engine._bufferedAhead = () => 0;
+        engine._muxSkipTrailer = fastTrailer;
+        engine._commitMuxWrite = () => {};
+        engine.sb = {
+            updating: false,
+            buffered: { length: 0 },
+            appendBuffer() { throw new Error('no append expected'); },
+        };
+        engine.ms = {
+            readyState: 'open',
+            endOfStream() { eosCalls += 1; },
+        };
+        engine.lib = {
+            EAGAIN: 6,
+            AVERROR_EOF: -541478725,
+            ff_read_frame_multi: async () => [-541478725, {}],
+            av_write_trailer: async () => {
+                trailerStarted.resolve();
+                await releaseTrailer.promise;
+                return 0;
+            },
+        };
+
+        const prefetch = engine.prefetchAt(10);
+        await firstStarted;
+        engine._startPump();
+        await trailerStarted.promise;
+        releaseFirst();
+        await prefetch;
+        releaseTrailer.resolve();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        assert.strictEqual(calls, 1);
+        assert.strictEqual(reports.length, 1);
+        assert.strictEqual(reports[0].stage, 'prefetch:provider-busy');
+        assert.strictEqual(fatals.length, 1);
+        assert.strictEqual(engine.ended, false);
+        assert.strictEqual(eosCalls, 0);
+    });
+}
+
+for (const eofPhase of ['audio-decode', 'audio-encode']) {
+    test(`a provider 458 during EOF ${eofPhase} prevents every later output phase`, async () => {
+        let calls = 0;
+        let releaseFirst;
+        let markFirstStarted;
+        let encodeCalls = 0;
+        let trailerCalls = 0;
+        const firstStarted = new Promise((resolve) => { markFirstStarted = resolve; });
+        const phaseStarted = deferred();
+        const releasePhase = deferred();
+        const NorvaEngine = loadEngineClass(async (_url, options) => {
+            calls += 1;
+            if (calls === 1) {
+                markFirstStarted();
+                await new Promise((resolve) => { releaseFirst = resolve; });
+                return providerBusyResponse();
+            }
+            return rangeResponse(options);
+        });
+        const reports = [];
+        const fatals = [];
+        const engine = new NorvaEngine({ currentTime: 0 }, {
+            report: (event) => reports.push(event),
+            onFatal: (error) => fatals.push(error),
+        });
+        engine.url = `https://media.invalid/eof-${eofPhase}-458.mkv`;
+        engine.size = 64;
+        engine._startupActive = false;
+        engine._cueIndex = [{ t: 10, off: 0 }];
+        engine.fmtCtx = 1;
+        engine.pkt = 2;
+        engine.oc = 3;
+        engine.vS = null;
+        engine.aS = {};
+        engine.copyAudio = false;
+        engine._bufferedAhead = () => 0;
+        engine._encodeAudio = async () => {
+            encodeCalls += 1;
+            if (eofPhase === 'audio-encode') {
+                phaseStarted.resolve();
+                await releasePhase.promise;
+            }
+            return [];
+        };
+        engine.lib = {
+            EAGAIN: 6,
+            AVERROR_EOF: -541478725,
+            ff_read_frame_multi: async () => [-541478725, {}],
+            ff_decode_multi: async () => {
+                if (eofPhase === 'audio-decode') {
+                    phaseStarted.resolve();
+                    await releasePhase.promise;
+                }
+                return [];
+            },
+            av_write_trailer: async () => { trailerCalls += 1; return 0; },
+        };
+
+        const prefetch = engine.prefetchAt(10);
+        await firstStarted;
+        engine._startPump();
+        await phaseStarted.promise;
+        releaseFirst();
+        await prefetch;
+        releasePhase.resolve();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        assert.strictEqual(calls, 1);
+        assert.strictEqual(reports.length, 1);
+        assert.strictEqual(fatals.length, 1);
+        if (eofPhase === 'audio-decode') {
+            assert.strictEqual(encodeCalls, 0, 'terminal state after decode must skip encode');
+        }
+        assert.strictEqual(trailerCalls, 0);
+        assert.strictEqual(engine.ended, false);
+    });
+}
+
+test('drain cannot append or signal EOS after stop, fatal, or provider-busy terminal state', () => {
+    const NorvaEngine = loadEngineClass();
+    for (const terminalState of ['stop', 'fatal', 'provider-busy']) {
+        let appends = 0;
+        let eosCalls = 0;
+        const appendEngine = new NorvaEngine({ currentTime: 0 }, {});
+        appendEngine.sb = {
+            updating: false,
+            buffered: { length: 0 },
+            appendBuffer() { appends += 1; },
+        };
+        appendEngine.ms = { readyState: 'open', endOfStream() { eosCalls += 1; } };
+        appendEngine.queue = [new Uint8Array([1, 2, 3])];
+        const eosEngine = new NorvaEngine({ currentTime: 0 }, {});
+        eosEngine.sb = {
+            updating: false,
+            buffered: { length: 0 },
+            appendBuffer() { appends += 1; },
+        };
+        eosEngine.ms = { readyState: 'open', endOfStream() { eosCalls += 1; } };
+        eosEngine.ended = true;
+        for (const engine of [appendEngine, eosEngine]) {
+            if (terminalState === 'stop') engine._stopRequested = true;
+            if (terminalState === 'fatal') engine._fatalSignaled = true;
+            if (terminalState === 'provider-busy') {
+                engine._providerBusyTerminalError = new Error('BLOCK_HTTP_458');
+            }
+            engine._drain();
+        }
+
+        assert.strictEqual(appends, 0, `${terminalState} must block appendBuffer`);
+        assert.strictEqual(eosCalls, 0, `${terminalState} must block endOfStream`);
+        assert.strictEqual(appendEngine.queue.length, 1,
+            `${terminalState} must leave terminal queue disposal to teardown`);
+    }
+});
+
+test('an unexpected pump Range abort remains diagnostic without an armed terminal stop', async () => {
+    const NorvaEngine = loadEngineClass();
+    const reports = [];
+    const fatals = [];
+    const engine = new NorvaEngine({ currentTime: 0 }, {
+        report: (event) => reports.push(event),
+        onFatal: (error) => fatals.push(error),
+    });
+    const aborted = new Error('ENGINE_RANGE_ABORTED');
+    aborted.code = 'ENGINE_RANGE_ABORTED';
+    engine._startupActive = false;
+    engine._ac.abort();
+    engine._pump = async () => { throw aborted; };
+
+    engine._startPump();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    assert.strictEqual(engine._stopRequested, false,
+        'an AbortSignal alone is not proof that another terminal path owns reporting');
+    assert.strictEqual(engine._fatalSignaled, false);
+    assert.strictEqual(engine._providerBusyTerminalError, null);
+    assert.strictEqual(reports.length, 1);
+    assert.strictEqual(reports[0].stage, 'pump');
+    assert.match(reports[0].message, /ENGINE_RANGE_ABORTED/);
+    assert.strictEqual(fatals.length, 0);
+});
+
+test('a transient non-458 Range failure releases FIFO without globally aborting the engine', async () => {
+    let calls = 0;
+    let releaseFirst;
+    let markFirstStarted;
+    const firstStarted = new Promise((resolve) => { markFirstStarted = resolve; });
+    const NorvaEngine = loadEngineClass(async (_url, options) => {
+        calls += 1;
+        if (calls === 1) {
+            markFirstStarted();
+            await new Promise((resolve) => { releaseFirst = resolve; });
+            return { status: 503, ok: false, headers: { get: () => null } };
+        }
+        return rangeResponse(options);
+    });
+    const engine = new NorvaEngine({ currentTime: 0 }, {});
+    engine.url = 'https://media.invalid/transient-503.mkv';
+    engine.size = 64;
+    engine._startupActive = false;
+
+    const failed = engine._fetchRange(0, 8);
+    await firstStarted;
+    const queued = engine._fetchRange(8, 16);
+    releaseFirst();
+
+    await assert.rejects(failed, /BLOCK_HTTP_503/);
+    const bytes = await queued;
+
+    assert.strictEqual(bytes.length, 8);
+    assert.strictEqual(calls, 2);
+    assert.strictEqual(engine._ac.signal.aborted, false);
+    assert.strictEqual(engine._stopRequested, false);
+    assert.strictEqual(engine._providerBusyTerminalError, null);
+});
+
+test('a provider 458 abort is isolated to one engine instance', async () => {
+    let callsA = 0;
+    let callsB = 0;
+    const NorvaEngine = loadEngineClass(async (url, options) => {
+        if (url.includes('engine-a')) {
+            callsA += 1;
+            return providerBusyResponse();
+        }
+        callsB += 1;
+        return rangeResponse(options);
+    });
+    const engineA = new NorvaEngine({ currentTime: 0 }, {});
+    const engineB = new NorvaEngine({ currentTime: 0 }, {});
+    engineA.url = 'https://media.invalid/engine-a.mkv';
+    engineB.url = 'https://media.invalid/engine-b.mkv';
+    engineA.size = engineB.size = 64;
+    engineA._startupActive = engineB._startupActive = false;
+
+    const [resultA, resultB] = await Promise.allSettled([
+        engineA._fetchRange(0, 8),
+        engineB._fetchRange(0, 8),
+    ]);
+
+    assert.strictEqual(resultA.status, 'rejected');
+    assert.match(resultA.reason.message, /BLOCK_HTTP_458/);
+    assert.strictEqual(resultB.status, 'fulfilled');
+    assert.strictEqual(resultB.value.length, 8);
+    assert.strictEqual(callsA, 1);
+    assert.strictEqual(callsB, 1);
+    assert.strictEqual(engineA._ac.signal.aborted, true);
+    assert.strictEqual(engineB._ac.signal.aborted, false);
+    assert.match(engineA._providerBusyTerminalError?.message || '', /BLOCK_HTTP_458/);
+    assert.strictEqual(engineB._providerBusyTerminalError, null);
+});
+
 test('an expired append rejects startup for the load catch instead of runtime retry', async () => {
     const NorvaEngine = loadEngineClass();
     const reports = [];
@@ -727,8 +1736,9 @@ test('a first pump 458 rejects load startup and never enters runtime onFatal', a
     engine._startupActive = true;
     engine._startupDeadlineAt = performance.now() + 15_000;
     const outcome = engine._createStartupOutcome();
+    const terminalError = new Error('BLOCK_HTTP_458');
     engine.lib = {
-        ff_read_frame_multi: async () => { throw new Error('BLOCK_HTTP_458'); },
+        ff_read_frame_multi: async () => { throw terminalError; },
     };
     engine.fmtCtx = 1;
     engine.pkt = 2;
@@ -743,6 +1753,9 @@ test('a first pump 458 rejects load startup and never enters runtime onFatal', a
     assert.strictEqual(reports.length, 1);
     assert.strictEqual(reports[0].stage, 'pump:startup');
     assert.match(reports[0].message, /BLOCK_HTTP_458/);
+    assert.strictEqual(terminalError._norvaPlaybackFailureReported, true,
+        'direct startup pump failures must transfer report ownership to the load catch');
+    assert.strictEqual(terminalError._norvaPlaybackFailureReportStage, 'pump:startup');
 });
 
 test('a post-startup pump 458 signals one terminal fatal and never retries', async () => {

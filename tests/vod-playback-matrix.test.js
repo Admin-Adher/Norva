@@ -835,7 +835,10 @@ test('provider busy exits the engine before any gateway fallback or delayed retr
     body.indexOf('// Slot still busy'));
   const providerBusy = body.slice(body.indexOf('if (isSlotBusy(msg))'),
     body.indexOf('// Provider auth/rate-limit blocks'));
-  assert.ok(providerBusy.includes('await this.reportProviderPlaybackFailure(msg);'));
+  assert.ok(!providerBusy.includes('await this.reportProviderPlaybackFailure(msg);'),
+    'the shared terminal handler must own the provider circuit exactly once');
+  assert.ok(providerBusy.includes('forceTerminal: true'));
+  assert.ok(providerBusy.includes('failureAlreadyReported: true'));
   assert.ok(providerBusy.includes('this.destroyEngine();'));
   assert.ok(providerBusy.includes('return;'));
   assert.ok(!providerBusy.includes('continue;'));
