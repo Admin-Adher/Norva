@@ -490,6 +490,11 @@ test('dense browser VOD uses Gateway remux with audio transcode and selected tra
     const playbackHint = loadMediaUtils().playbackHintFromItem({
         container_extension: 'mkv',
         tmdb: { runtime: 156 },
+        codec_profile: {
+            videoCodec: 'h264',
+            audioCodec: 'eac3',
+            audioChannels: 6,
+        },
         audio_tracks_scope: 'file',
         audio_tracks: indexedTracks(23, 1),
         subtitle_tracks_scope: 'file',
@@ -578,7 +583,7 @@ test('a fresh probe replaces stale exact track maps even when the new maps are e
     );
 });
 
-test('known H264 AAC MKV keeps video and audio on the fast Gateway copy path', async () => {
+test('known H264 AAC MKV uses one bounded Engine range lane', async () => {
     const { API, calls } = loadCloudApi();
     const playbackHint = loadMediaUtils().playbackHintFromItem({
         container_extension: 'mkv',
@@ -597,14 +602,44 @@ test('known H264 AAC MKV keeps video and audio on the fast Gateway copy path', a
         playbackHint
     );
 
-    assert.strictEqual(result.mode, 'transcode');
+    assert.strictEqual(result.mode, 'engine');
     assert.strictEqual(calls.length, 1);
-    assert.strictEqual(calls[0].mode, 'transcode');
-    assert.strictEqual(calls[0].playbackHint.gatewayMode, 'remux');
+    assert.strictEqual(calls[0].mode, 'relay');
+    assert.strictEqual(calls[0].enginePipe, true);
+    assert.strictEqual(calls[0].requiresTranscode, undefined);
+    assert.strictEqual(calls[0].playbackHint.gatewayMode, undefined);
     assert.strictEqual(calls[0].playbackHint.audioMode, undefined);
 });
 
-test('a selected grouped MKV keeps its exact codec profile and opens one Gateway remux lane', async () => {
+test('known HEVC MKV remains on the single Gateway conversion lane', async () => {
+    const { API, calls } = loadCloudApi();
+    const playbackHint = loadMediaUtils().playbackHintFromItem({
+        container_extension: 'mkv',
+        codec_profile: {
+            videoCodec: 'hevc',
+            audioCodec: 'eac3',
+            audioChannels: 6,
+        },
+    });
+
+    const result = await API.proxy.xtream.getStreamUrl(
+        '00000000-0000-4000-8000-000000000001',
+        'known-hevc-mkv',
+        'movie',
+        'mkv',
+        playbackHint
+    );
+
+    assert.strictEqual(result.mode, 'transcode');
+    assert.strictEqual(calls.length, 1);
+    assert.strictEqual(calls[0].mode, 'transcode');
+    assert.strictEqual(calls[0].requiresTranscode, true);
+    assert.strictEqual(calls[0].enginePipe, undefined);
+    assert.strictEqual(calls[0].playbackHint.gatewayMode, 'remux');
+    assert.strictEqual(calls[0].playbackHint.audioMode, 'transcode');
+});
+
+test('a selected grouped H264 MKV keeps its exact codec profile and opens one Engine range lane', async () => {
     const MediaUtils = loadMediaUtils();
     const { API, calls } = loadCloudApi();
     const { HomePage, MoviesPage } = loadMovieLaunchClasses({ API, MediaUtils });
@@ -696,13 +731,13 @@ test('a selected grouped MKV keeps its exact codec profile and opens one Gateway
     assert.ok(resolvedPlayback?.url, 'the selected variant must resolve a playable URL');
     assert.strictEqual(calls.length, 1, 'one click must create exactly one cloud session');
     assert.strictEqual(calls[0].itemId, 'leon-multi-fhd-1994');
-    assert.strictEqual(calls[0].mode, 'transcode', 'the known MKV must select the Gateway transport');
-    assert.strictEqual(calls[0].requiresTranscode, true);
-    assert.strictEqual(calls[0].enginePipe, undefined, 'the known profile must not open the Engine lane');
+    assert.strictEqual(calls[0].mode, 'relay', 'the exact H264 MKV must select the range transport');
+    assert.strictEqual(calls[0].requiresTranscode, undefined);
+    assert.strictEqual(calls[0].enginePipe, true, 'the exact H264 profile must keep video copy client-side');
     assert.strictEqual(calls[0].playbackHint.videoCodec, 'h264');
     assert.strictEqual(calls[0].playbackHint.audioCodec, 'ac3');
-    assert.strictEqual(calls[0].playbackHint.gatewayMode, 'remux');
-    assert.strictEqual(calls[0].playbackHint.audioMode, 'transcode');
+    assert.strictEqual(calls[0].playbackHint.gatewayMode, undefined);
+    assert.strictEqual(calls[0].playbackHint.audioMode, undefined);
 });
 
 test('playback hint skips empty aliases before every nested exact-profile casing', () => {
@@ -737,7 +772,7 @@ test('the app shell cache-busts the exact-profile resolver', () => {
     assert.match(read('public/app.html'), /\/js\/utils\/mediaUtils\.js\?v=18/);
 });
 
-test('MKV provider busy is terminal and never opens an engine or second Gateway lane', async () => {
+test('Engine MKV provider busy is terminal and never opens a second lane', async () => {
     const providerBusy = Object.assign(new Error('provider busy'), {
         status: 458,
         code: 'PROVIDER_BUSY'
@@ -756,8 +791,10 @@ test('MKV provider busy is terminal and never opens an engine or second Gateway 
     );
 
     assert.strictEqual(calls.length, 1);
-    assert.strictEqual(calls[0].mode, 'transcode');
-    assert.strictEqual(calls[0].playbackHint.gatewayMode, 'remux');
+    assert.strictEqual(calls[0].mode, 'relay');
+    assert.strictEqual(calls[0].enginePipe, true);
+    assert.strictEqual(calls[0].requiresTranscode, undefined);
+    assert.strictEqual(calls[0].playbackHint.gatewayMode, undefined);
 });
 
 test('dense but browser-safe MP4 keeps the normal relay path', async () => {
