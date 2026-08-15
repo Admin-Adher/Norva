@@ -244,6 +244,48 @@ function compactPlaybackHint(value = {}) {
     return Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined && entry !== null && entry !== ''));
 }
 
+function _firstNonEmptyPlaybackRecord(...values) {
+    return values.find(value =>
+        value &&
+        typeof value === 'object' &&
+        !Array.isArray(value) &&
+        Object.keys(value).length > 0
+    ) || null;
+}
+
+function _codecProfileFromPlaybackResult(result) {
+    const root = result && typeof result === 'object' && !Array.isArray(result) ? result : {};
+    const playback = root.playback && typeof root.playback === 'object' && !Array.isArray(root.playback)
+        ? root.playback
+        : {};
+    const wrappers = [
+        playback.gatewaySession,
+        playback.gateway_session,
+        root.gatewaySession,
+        root.gateway_session,
+        root.session,
+        playback.session,
+        root.playbackSession,
+        root.playback_session,
+        playback.playbackSession,
+        playback.playback_session,
+    ].map(value => value && typeof value === 'object' && !Array.isArray(value) ? value : {});
+    return _firstNonEmptyPlaybackRecord(
+        root.codecProfile,
+        root.codec_profile,
+        playback.codecProfile,
+        playback.codec_profile,
+        ...wrappers.flatMap(wrapper => [wrapper.codecProfile, wrapper.codec_profile])
+    );
+}
+
+function _attachPlaybackCodecProfile(result, clientCodecProfile) {
+    if (!result || typeof result !== 'object' || Array.isArray(result)) return result;
+    const codecProfile = _codecProfileFromPlaybackResult(result)
+        || _firstNonEmptyPlaybackRecord(clientCodecProfile);
+    return codecProfile ? { ...result, codecProfile } : result;
+}
+
 const CloudAdapter = (() => {
     const SOURCE_ALIAS_KEY = 'norva-cloud-source-aliases';
     const PAGE_CACHE_TTL_MS = 120000;
@@ -2705,13 +2747,15 @@ const API = {
                     throw err;
                 }
             },
-            getStreamUrl: (sourceId, streamId, type = 'live', container = defaultProviderContainerForType(type), options = {}) => {
+            getStreamUrl: async (sourceId, streamId, type = 'live', container = defaultProviderContainerForType(type), options = {}) => {
+                const clientCodecProfile = _firstNonEmptyPlaybackRecord(options?._clientCodecProfile);
                 const params = new URLSearchParams({ container });
                 Object.entries(compactPlaybackHint(options)).forEach(([key, value]) => {
-                    if (key === 'container') return;
+                    if (key === 'container' || key === '_clientCodecProfile') return;
                     params.set(key, value === true ? '1' : String(value));
                 });
-                return API.request('GET', `/proxy/xtream/${sourceId}/stream/${streamId}/${type}?${params.toString()}`);
+                const result = await API.request('GET', `/proxy/xtream/${sourceId}/stream/${streamId}/${type}?${params.toString()}`);
+                return _attachPlaybackCodecProfile(result, clientCodecProfile);
             }
         },
 

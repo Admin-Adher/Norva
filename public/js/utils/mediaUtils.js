@@ -1356,6 +1356,86 @@ const MediaUtils = (() => {
             : undefined;
     }
 
+    function playbackVariantIdentity(record = {}) {
+        if (!record || typeof record !== 'object' || Array.isArray(record)) return '';
+        return String(firstValue(
+            record.stream_id,
+            record.streamId,
+            record.external_id,
+            record.externalId,
+            record.item_id,
+            record.itemId,
+            record.id
+        ) || '').trim();
+    }
+
+    function playbackVariantSourceIdentity(record = {}) {
+        if (!record || typeof record !== 'object' || Array.isArray(record)) return '';
+        return String(firstValue(
+            record.source_id,
+            record.sourceId,
+            record.cloud_source_id,
+            record.cloudSourceId
+        ) || '').trim();
+    }
+
+    function samePlaybackVariant(selected, candidate) {
+        const selectedId = playbackVariantIdentity(selected);
+        const candidateId = playbackVariantIdentity(candidate);
+        if (!selectedId || !candidateId || selectedId !== candidateId) return false;
+        const selectedSource = playbackVariantSourceIdentity(selected);
+        const candidateSource = playbackVariantSourceIdentity(candidate);
+        return Boolean(selectedSource) && Boolean(candidateSource) && selectedSource === candidateSource;
+    }
+
+    function codecProfileFromExactRecord(record = {}) {
+        if (!record || typeof record !== 'object' || Array.isArray(record)) return {};
+        return firstNonEmptyRecord(
+            record.codecProfile,
+            record.codec_profile,
+            record.playbackHint?.codecProfile,
+            record.playbackHint?.codec_profile,
+            record.playback_hint?.codecProfile,
+            record.playback_hint?.codec_profile
+        );
+    }
+
+    // Keep the complete profile on the client only. A grouped card can carry a
+    // title-level profile and several sibling variants, so accept a nested
+    // profile only when its file identity matches the item the user selected.
+    // Direct profiles are accepted only for an ungrouped, identified file row.
+    function selectedExactCodecProfile(item = {}) {
+        const selectedId = playbackVariantIdentity(item);
+        if (!selectedId) return {};
+        const variants = [
+            item.variant,
+            item.defaultVariant,
+            item.default_variant,
+            ...(Array.isArray(item.variants) ? item.variants : []),
+            ...(Array.isArray(item.exposedVariants) ? item.exposedVariants : []),
+            ...(Array.isArray(item.exposed_variants) ? item.exposed_variants : []),
+        ].filter(record => record && typeof record === 'object' && !Array.isArray(record));
+        const exactVariantProfile = firstNonEmptyRecord(
+            ...variants
+                .filter(candidate => samePlaybackVariant(item, candidate))
+                .map(codecProfileFromExactRecord)
+        );
+        if (Object.keys(exactVariantProfile).length) return exactVariantProfile;
+
+        // Presence of variant records makes this a grouped wrapper. If none of
+        // them matched the selected identity, fail closed instead of borrowing a
+        // profile from the group or its default sibling.
+        if (variants.length) return {};
+        const data = item.data && typeof item.data === 'object' && !Array.isArray(item.data)
+            ? item.data
+            : null;
+        if (data && samePlaybackVariant(item, data)) {
+            const dataProfile = codecProfileFromExactRecord(data);
+            if (Object.keys(dataProfile).length) return dataProfile;
+        }
+        return codecProfileFromExactRecord(item);
+    }
+
     function playbackHintFromItem(item = {}, base = {}) {
         const variant = item.defaultVariant || item.default_variant || item.variant || {};
         const data = item.data || {};
@@ -1388,8 +1468,14 @@ const MediaUtils = (() => {
         const exactVideoCodec = firstValue(codec.videoCodec, codec.video_codec, codec.video);
         const exactAudioCodec = firstValue(codec.audioCodec, codec.audio_codec, codec.audio);
         const hasExactAvPair = Boolean(exactVideoCodec && exactAudioCodec);
+        const clientCodecProfile = selectedExactCodecProfile(item);
         const hint = compactRecord({
             ...base,
+            // Stripped by API.getStreamUrl before URL construction. The server
+            // receives only the compact scalar facts below; the complete exact
+            // profile is reattached to the successful client response so the
+            // WatchPage can gate NorvaEngine fast-open without another request.
+            _clientCodecProfile: Object.keys(clientCodecProfile).length ? clientCodecProfile : undefined,
             streamType,
             itemType: streamType,
             audioSeriesId,

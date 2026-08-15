@@ -20,6 +20,29 @@ function loadMediaUtils() {
     return window.MediaUtils;
 }
 
+function loadNorvaEngine() {
+    const window = {};
+    const sandbox = {
+        window,
+        self: window,
+        document: { createElement: () => ({}) },
+        navigator: { userAgent: 'node-test' },
+        performance,
+        console,
+        URL,
+        fetch,
+        AbortController,
+        setTimeout,
+        clearTimeout,
+        queueMicrotask,
+        TextDecoder,
+        crypto: globalThis.crypto,
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(read('public/js/norvaEngine.js'), sandbox, { filename: 'norvaEngine.js' });
+    return window.NorvaEngine;
+}
+
 test('playback hint carries only unique exact-file track counts', () => {
     const MediaUtils = loadMediaUtils();
     const hint = MediaUtils.playbackHintFromItem({
@@ -391,7 +414,7 @@ function memoryStorage(seed = {}) {
     };
 }
 
-function loadCloudApi({ native = false, createSessionError = null } = {}) {
+function loadCloudApi({ native = false, createSessionError = null, createSessionPayload = null } = {}) {
     const calls = [];
     const localStorage = memoryStorage({
         'norva-cloud-session': JSON.stringify({
@@ -408,11 +431,14 @@ function loadCloudApi({ native = false, createSessionError = null } = {}) {
             : request.mode === 'direct'
                 ? 'https://provider.test/movie.mkv'
                 : 'https://gateway.test/raw/test';
-        return {
+        const defaultPayload = {
             session: { id: `session-${calls.length}` },
             playback: { url },
             url
         };
+        return typeof createSessionPayload === 'function'
+            ? createSessionPayload(request, defaultPayload)
+            : (createSessionPayload || defaultPayload);
     };
     const NorvaCloud = {
         playback: { createSession },
@@ -1039,9 +1065,260 @@ test('playback hint skips empty aliases before every nested exact-profile casing
     }
 });
 
+test('the selected exact variant profile reaches NorvaEngine through a client-only response channel', async () => {
+    const MediaUtils = loadMediaUtils();
+    const NorvaEngine = loadNorvaEngine();
+    const sourceId = '00000000-0000-4000-8000-000000000365';
+    const selectedId = 'betes-de-flic-fhd';
+    const exactProfile = {
+        videoCodec: 'h264',
+        videoWidth: 1920,
+        videoHeight: 1080,
+        audioCodec: 'ac3',
+        audioChannels: 2,
+        audioSampleRate: 48000,
+        audioTracks: [{ index: 1, codec: 'ac3', channels: 2, default: true }],
+        subtitles: [],
+        container: 'matroska,webm',
+        durationSeconds: 5342.304,
+        bitRate: 2_561_086,
+        probeSource: 'gateway_probe',
+        probedAt: '2026-08-15T04:42:00.000Z',
+    };
+    const siblingProfile = {
+        ...exactProfile,
+        videoCodec: 'hevc',
+        bitRate: 8_500_000,
+    };
+    const selected = {
+        sourceId,
+        stream_id: selectedId,
+        container_extension: 'mkv',
+        // The selected row overlays the DB-shaped alias. The grouped camel-case
+        // alias and default variant are deliberately not authoritative here.
+        codecProfile: {},
+        codec_profile: exactProfile,
+        defaultVariant: {
+            sourceId,
+            stream_id: 'sibling-default',
+            codecProfile: siblingProfile,
+        },
+        variants: [
+            { sourceId, stream_id: 'sibling-default', codecProfile: siblingProfile },
+            { sourceId, stream_id: selectedId, codec_profile: exactProfile },
+        ],
+    };
+    const hint = MediaUtils.playbackHintFromItem(selected, { container: 'mkv', streamType: 'movie' });
+    const { API, calls } = loadCloudApi({
+        createSessionPayload: {
+            session: { id: 'session-selected' },
+            playback: { url: 'https://gateway.test/raw/selected', codecProfile: {} },
+            codecProfile: {},
+            url: 'https://gateway.test/raw/selected',
+        },
+    });
+
+    const result = await API.proxy.xtream.getStreamUrl(sourceId, selectedId, 'movie', 'mkv', hint);
+    const engine = new NorvaEngine({}, { codecProfile: result.codecProfile });
+
+    assert.strictEqual(hint._clientCodecProfile, exactProfile,
+        'the client channel must retain only the identity-matched selected variant');
+    assert.strictEqual(result.codecProfile, exactProfile,
+        'empty response aliases must not mask the selected exact catalog profile');
+    assert.ok(engine._exactFastOpenProfile, 'the realistic exact profile must make fast-open eligible');
+    assert.strictEqual(engine._exactFastOpenProfile.raw, exactProfile);
+    assert.strictEqual(calls.length, 1, 'profile wiring must not create another playback lane');
+    assert.strictEqual(calls[0].itemId, selectedId);
+    assert.strictEqual(calls[0].playbackHint._clientCodecProfile, undefined,
+        'the client-only profile must never enter the server playback hint');
+    assert.strictEqual(calls[0].playbackHint.codecProfile, undefined);
+
+    const siblingOnlyHint = MediaUtils.playbackHintFromItem({
+        sourceId,
+        stream_id: 'selected-without-profile',
+        container_extension: 'mkv',
+        codecProfile: siblingProfile,
+        defaultVariant: {
+            sourceId,
+            stream_id: 'sibling-default',
+            codecProfile: siblingProfile,
+        },
+        variants: [{ sourceId, stream_id: 'sibling-default', codecProfile: siblingProfile }],
+        data: {
+            sourceId,
+            stream_id: 'selected-without-profile',
+            codecProfile: siblingProfile,
+        },
+    }, { container: 'mkv', streamType: 'movie' });
+    assert.strictEqual(siblingOnlyHint._clientCodecProfile, undefined,
+        'neither a sibling nor grouped data may populate the client profile channel');
+
+    const sourceLessNestedHint = MediaUtils.playbackHintFromItem({
+        stream_id: 'source-less-selected',
+        defaultVariant: {
+            stream_id: 'source-less-selected',
+            codecProfile: exactProfile,
+        },
+    }, { container: 'mkv', streamType: 'movie' });
+    assert.strictEqual(sourceLessNestedHint._clientCodecProfile, undefined,
+        'a nested/group match without both source identities is not exact-file evidence');
+
+    const sourceLessDirectHint = MediaUtils.playbackHintFromItem({
+        stream_id: 'source-less-direct',
+        codecProfile: exactProfile,
+    }, { container: 'mkv', streamType: 'movie' });
+    assert.strictEqual(sourceLessDirectHint._clientCodecProfile, exactProfile,
+        'an ungrouped selected file may still carry its profile directly');
+});
+
+test('a useful server profile outranks the selected client profile and keeps the runtime gate authoritative', async () => {
+    const MediaUtils = loadMediaUtils();
+    const NorvaEngine = loadNorvaEngine();
+    const selectedProfile = {
+        videoCodec: 'h264', videoWidth: 1920, videoHeight: 1080,
+        audioCodec: 'ac3', audioChannels: 2, audioSampleRate: 48000,
+        audioTracks: [{ index: 1, codec: 'ac3', channels: 2 }], subtitles: [],
+        container: 'matroska,webm', durationSeconds: 5400, bitRate: 2_500_000,
+        probeSource: 'gateway_probe', probedAt: '2026-08-15T04:42:00.000Z',
+    };
+    const serverProfile = {
+        ...selectedProfile,
+        videoCodec: 'hevc',
+        probeSource: 'exact_file_probe',
+        probedAt: '2026-08-15T05:10:00.000Z',
+    };
+    const hint = MediaUtils.playbackHintFromItem({
+        sourceId: 'source-1',
+        stream_id: 'selected-1',
+        container_extension: 'mkv',
+        codec_profile: selectedProfile,
+    }, { container: 'mkv', streamType: 'movie' });
+    const { API } = loadCloudApi({
+        createSessionPayload: {
+            session: { id: 'session-server-profile' },
+            playback: { url: 'https://gateway.test/raw/server', codecProfile: serverProfile },
+            codecProfile: {},
+            url: 'https://gateway.test/raw/server',
+        },
+    });
+
+    const result = await API.proxy.xtream.getStreamUrl('source-1', 'selected-1', 'movie', 'mkv', hint);
+    const engine = new NorvaEngine({}, { codecProfile: result.codecProfile });
+
+    assert.strictEqual(result.codecProfile, serverProfile,
+        'a non-empty server profile must win even when an empty root alias precedes it');
+    assert.strictEqual(engine._exactFastOpenProfile, null,
+        'the Engine must reject the server-observed HEVC mismatch instead of trusting the client');
+});
+
+test('empty gateway and session wrappers cannot mask useful server profile aliases', async () => {
+    const MediaUtils = loadMediaUtils();
+    const clientProfile = {
+        videoCodec: 'h264', videoWidth: 1920, videoHeight: 1080,
+        audioCodec: 'ac3', audioTracks: [{ index: 1, codec: 'ac3' }], subtitles: [],
+        container: 'matroska,webm', durationSeconds: 5400,
+        probeSource: 'gateway_probe', probedAt: '2026-08-15T04:42:00.000Z',
+    };
+    const gatewayProfile = { ...clientProfile, videoCodec: 'hevc', probedAt: '2026-08-15T05:20:00.000Z' };
+    const sessionProfile = { ...clientProfile, audioCodec: 'eac3', probedAt: '2026-08-15T05:30:00.000Z' };
+    const hint = MediaUtils.playbackHintFromItem({
+        sourceId: 'source-wrapper',
+        stream_id: 'selected-wrapper',
+        codecProfile: clientProfile,
+    }, { container: 'mkv', streamType: 'movie' });
+
+    for (const [payload, expected] of [
+        [{
+            url: 'https://gateway.test/raw/wrapper-gateway',
+            playback: {
+                url: 'https://gateway.test/raw/wrapper-gateway',
+                gatewaySession: {},
+                gateway_session: { codec_profile: gatewayProfile },
+            },
+            gatewaySession: {},
+        }, gatewayProfile],
+        [{
+            url: 'https://gateway.test/raw/wrapper-session',
+            session: {},
+            playback: {
+                url: 'https://gateway.test/raw/wrapper-session',
+                session: { codecProfile: sessionProfile },
+            },
+        }, sessionProfile],
+    ]) {
+        const { API } = loadCloudApi();
+        API.request = async () => payload;
+        const result = await API.proxy.xtream.getStreamUrl(
+            'source-wrapper', 'selected-wrapper', 'movie', 'mkv', hint
+        );
+        assert.strictEqual(result.codecProfile, expected);
+    }
+});
+
+test('partial or untrusted selected profiles stay ineligible for Engine fast-open', async () => {
+    const MediaUtils = loadMediaUtils();
+    const NorvaEngine = loadNorvaEngine();
+    const profiles = [
+        { videoCodec: 'h264', audioCodec: 'ac3', container: 'matroska,webm' },
+        {
+            videoCodec: 'h264', videoWidth: 1920, videoHeight: 1080,
+            audioCodec: 'ac3', audioTracks: [{ index: 1, codec: 'ac3' }], subtitles: [],
+            container: 'matroska,webm', durationSeconds: 5400,
+            probeSource: 'request_flat', probedAt: '2026-08-15T04:42:00.000Z',
+        },
+    ];
+
+    for (const [index, profile] of profiles.entries()) {
+        const itemId = `unsafe-${index}`;
+        const hint = MediaUtils.playbackHintFromItem({
+            sourceId: 'source-unsafe',
+            stream_id: itemId,
+            container_extension: 'mkv',
+            codec_profile: profile,
+        }, { container: 'mkv', streamType: 'movie' });
+        const { API } = loadCloudApi();
+        const result = await API.proxy.xtream.getStreamUrl('source-unsafe', itemId, 'movie', 'mkv', hint);
+        const engine = new NorvaEngine({}, { codecProfile: result.codecProfile });
+
+        assert.strictEqual(result.codecProfile, profile,
+            `selected profile ${index} must reach the runtime gate without being upgraded or merged`);
+        assert.strictEqual(engine._exactFastOpenProfile, null,
+            `unsafe profile ${index} must retain the legacy stream-info path`);
+    }
+});
+
+test('the full exact profile never enters the stream request URL', async () => {
+    const MediaUtils = loadMediaUtils();
+    const { API } = loadCloudApi();
+    const exactProfile = {
+        videoCodec: 'h264', videoWidth: 1920, videoHeight: 1080,
+        audioCodec: 'ac3', audioChannels: 2, audioSampleRate: 48000,
+        audioTracks: [{ index: 1, codec: 'ac3' }], subtitles: [],
+        container: 'matroska,webm', durationSeconds: 5400, bitRate: 2_500_000,
+        probeSource: 'gateway_probe', probedAt: '2026-08-15T04:42:00.000Z',
+    };
+    const hint = MediaUtils.playbackHintFromItem({
+        sourceId: 'source-url',
+        stream_id: 'selected-url',
+        container_extension: 'mkv',
+        codec_profile: exactProfile,
+    }, { container: 'mkv', streamType: 'movie' });
+    let endpoint = '';
+    API.request = async (_method, requestedEndpoint) => {
+        endpoint = requestedEndpoint;
+        return { url: 'https://gateway.test/raw/url', playback: { url: 'https://gateway.test/raw/url' } };
+    };
+
+    const result = await API.proxy.xtream.getStreamUrl('source-url', 'selected-url', 'movie', 'mkv', hint);
+
+    assert.strictEqual(result.codecProfile, exactProfile);
+    assert.doesNotMatch(endpoint, /_clientCodecProfile|codecProfile|codec_profile|audioTracks|subtitles|%5Bobject|\[object/i);
+    assert.ok(endpoint.length < 800, 'only compact scalar routing facts belong in the URL');
+});
+
 test('the app shell cache-busts the bitrate-aware MKV router and exact-profile resolver', () => {
-    assert.match(read('public/app.html'), /\/js\/api\.js\?v=84/);
-    assert.match(read('public/app.html'), /\/js\/utils\/mediaUtils\.js\?v=19/);
+    assert.match(read('public/app.html'), /\/js\/api\.js\?v=85/);
+    assert.match(read('public/app.html'), /\/js\/utils\/mediaUtils\.js\?v=20/);
 });
 
 test('low-bitrate Engine MKV provider busy is terminal and never opens a second lane', async () => {
@@ -1049,7 +1326,20 @@ test('low-bitrate Engine MKV provider busy is terminal and never opens a second 
         status: 458,
         code: 'PROVIDER_BUSY'
     });
+    const MediaUtils = loadMediaUtils();
     const { API, calls } = loadCloudApi({ createSessionError: providerBusy });
+    const playbackHint = MediaUtils.playbackHintFromItem({
+        sourceId: '00000000-0000-4000-8000-000000000001',
+        stream_id: 'busy-mkv',
+        container_extension: 'mkv',
+        codecProfile: {
+            videoCodec: 'h264', videoWidth: 1920, videoHeight: 1080,
+            audioCodec: 'aac', audioChannels: 2, audioSampleRate: 48000,
+            audioTracks: [{ index: 1, codec: 'aac', channels: 2 }], subtitles: [],
+            container: 'matroska,webm', durationSeconds: 5400, bitRate: 3_000_000,
+            probeSource: 'gateway_probe', probedAt: '2026-08-15T04:42:00.000Z',
+        },
+    }, { container: 'mkv', streamType: 'movie' });
 
     await assert.rejects(
         API.proxy.xtream.getStreamUrl(
@@ -1057,7 +1347,7 @@ test('low-bitrate Engine MKV provider busy is terminal and never opens a second 
             'busy-mkv',
             'movie',
             'mkv',
-            { videoCodec: 'h264', audioCodec: 'aac', audioChannels: 2, bitRate: 3000000 }
+            playbackHint
         ),
         (error) => error === providerBusy
     );
@@ -1067,6 +1357,7 @@ test('low-bitrate Engine MKV provider busy is terminal and never opens a second 
     assert.strictEqual(calls[0].enginePipe, true);
     assert.strictEqual(calls[0].requiresTranscode, undefined);
     assert.strictEqual(calls[0].playbackHint.gatewayMode, undefined);
+    assert.strictEqual(calls[0].playbackHint._clientCodecProfile, undefined);
 });
 
 test('explicit transcode keeps a low-bitrate H264 MKV on one Gateway lane', async () => {
