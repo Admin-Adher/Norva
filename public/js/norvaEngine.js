@@ -1861,6 +1861,7 @@
     }
 
     async _initMuxer() {
+      if (this.timings) delete this.timings.muxFragmentDurationUs;
       // _initMuxer also runs after a seek. Clear any packet retained by the old
       // generation before creating or writing the replacement muxer.
       this._discardPendingVideoPacket();
