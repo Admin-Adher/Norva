@@ -4584,7 +4584,10 @@ class WatchPage {
             this.streamStartOffset = startOffset;
             this.trackPlaybackPosition({ position: startOffset, force: true });
             this.attachProbeSubtitles(url, (probeInfo || this.currentStreamInfo)?.subtitles, startOffset);
-            this.playHls(finalUrl, { playbackAttemptId });
+            this.playHls(finalUrl, {
+                playbackAttemptId,
+                autoplay: options.autoplay !== false
+            });
             const requestedOffset = Number(
                 options.requestedSeekOffset ??
                 options.requested_seek_offset ??
@@ -4616,6 +4619,56 @@ class WatchPage {
         }
 
         this.setVolumeFromStorage();
+    }
+
+    gatewayBufferedAheadSeconds() {
+        const video = this.video;
+        if (!video) return 0;
+        try {
+            // TimeRanges is live: appends/evictions can change it between two
+            // getters. Capture one object and fail closed if an index disappears.
+            const ranges = video.buffered;
+            const length = Number(ranges?.length) || 0;
+            if (!length) return 0;
+            const position = Math.max(0, Number(video.currentTime) || 0);
+            let furthestEnd = position;
+            for (let index = 0; index < length; index += 1) {
+                const start = Number(ranges.start(index));
+                const end = Number(ranges.end(index));
+                if (!Number.isFinite(start) || !Number.isFinite(end)) continue;
+                if (start <= position + 0.25 && end > furthestEnd) furthestEnd = end;
+            }
+            return Math.max(0, furthestEnd - position);
+        } catch (_) {
+            return 0;
+        }
+    }
+
+    async waitForGatewayStartupBuffer(playbackAttemptId, hls, options = {}) {
+        const minimumSeconds = Math.max(1, Number(options.minimumSeconds) || 24);
+        const timeoutMs = Math.max(1000, Number(options.timeoutMs) || 45000);
+        const deadline = Date.now() + timeoutMs;
+        while (Date.now() < deadline) {
+            if (this.isStalePlaybackAttempt(playbackAttemptId) || this.hls !== hls) return false;
+            const bufferedAhead = this.gatewayBufferedAheadSeconds();
+            if (bufferedAhead >= minimumSeconds) return true;
+
+            // A genuinely complete short item cannot reach the normal movie
+            // threshold. Admit it only after virtually all declared media is
+            // already resident in the browser buffer.
+            const levels = Array.isArray(hls?.levels) ? hls.levels : [];
+            const currentLevel = Number.isInteger(hls?.currentLevel) && hls.currentLevel >= 0
+                ? hls.currentLevel
+                : 0;
+            const details = levels[currentLevel]?.details || levels[0]?.details || null;
+            const totalDuration = Number(details?.totalduration);
+            if (details?.live === false && Number.isFinite(totalDuration) && totalDuration > 0) {
+                const completeTarget = Math.max(1, Math.min(minimumSeconds, totalDuration) - 0.5);
+                if (bufferedAhead >= completeTarget) return true;
+            }
+            await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        return false;
     }
 
     /**
@@ -4671,6 +4724,18 @@ class WatchPage {
             ...((isTranscodeSession || isGatewaySession) ? { startPosition: 0 } : {})
         });
 
+        const activeHls = this.hls;
+        let gatewayStartupBufferReady = !isGatewaySession;
+        const resumeAfterHlsRecovery = () => {
+            setTimeout(() => {
+                if (this.isStalePlaybackAttempt(playbackAttemptId) || this.hls !== activeHls) return;
+                if (autoplay && gatewayStartupBufferReady) {
+                    this.video?.play().catch(() => { });
+                }
+                this._reattachAiTrackIfActive();
+            }, 500);
+        };
+
         this.hls.loadSource(url);
         this.hls.attachMedia(this.video);
 
@@ -4708,10 +4773,35 @@ class WatchPage {
             console.log('[WatchPage] Subtitle track switched:', data);
         });
 
-        this.hls.on(Hls.Events.MANIFEST_PARSED, () => {
-            if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
+        let autoplayGateRunning = false;
+        this.hls.on(Hls.Events.MANIFEST_PARSED, async () => {
+            if (this.isStalePlaybackAttempt(playbackAttemptId) || this.hls !== activeHls) return;
             if (!autoplay) return;
+            if (autoplayGateRunning) return;
+            autoplayGateRunning = true;
 
+            if (isGatewaySession) {
+                let bufferReady = false;
+                try {
+                    bufferReady = await this.waitForGatewayStartupBuffer(
+                        playbackAttemptId,
+                        activeHls,
+                    );
+                } catch (error) {
+                    console.warn('[WatchPage] Gateway startup buffer inspection failed:', error?.message || error);
+                }
+                if (!bufferReady) {
+                    if (this.isStalePlaybackAttempt(playbackAttemptId) || this.hls !== activeHls) return;
+                    await this.releasePlaybackPipelineForRetry().catch(() => {});
+                    if (!this.isStalePlaybackAttempt(playbackAttemptId)) {
+                        this.showPlaybackError('Playback buffer could not be prepared. Please try again.', { immediate: true });
+                    }
+                    return;
+                }
+                gatewayStartupBufferReady = true;
+            }
+
+            if (this.isStalePlaybackAttempt(playbackAttemptId) || this.hls !== activeHls) return;
             this.video.play().catch(e => this.handleAutoplayError(e));
         });
 
@@ -4749,7 +4839,7 @@ class WatchPage {
                             this.hls.recoverMediaError();
                             // recoverMediaError re-attaches the media element and
                             // leaves it paused — resume playback explicitly
-                            setTimeout(() => { this.video?.play().catch(() => { }); this._reattachAiTrackIfActive(); }, 500);
+                            resumeAfterHlsRecovery();
                         } catch (e) { /* destroyed */ }
                     }
                     return;
@@ -4766,7 +4856,7 @@ class WatchPage {
                     console.warn(`[WatchPage] Recovering media error (attempt ${this._mediaRecoveries}/${maxMediaRecoveries})`);
                     if (this._mediaRecoveries === 2) this.hls.swapAudioCodec();
                     this.hls.recoverMediaError();
-                    setTimeout(() => { this.video?.play().catch(() => { }); this._reattachAiTrackIfActive(); }, 500);
+                    resumeAfterHlsRecovery();
                     return;
                 }
             } else if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
@@ -5337,6 +5427,7 @@ class WatchPage {
             sourceTimestamps: measuredSeek.sourceTimestamps,
             playbackAttemptId: this._playbackAttemptId,
             cloudPlaybackSessionId: result.sessionId || null,
+            autoplay,
             playbackPreferences,
             ...activeAudioOptions,
         }));
@@ -5347,11 +5438,7 @@ class WatchPage {
             playbackAttemptId: this._playbackAttemptId,
             requestId
         };
-        if (autoplay) {
-            this.video?.play?.().catch(e => {
-                if (e.name !== 'AbortError') console.error('[WatchPage] Gateway seek play error:', e);
-            });
-        } else {
+        if (!autoplay) {
             this.video?.pause?.();
         }
 
