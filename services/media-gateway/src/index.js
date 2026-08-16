@@ -86,9 +86,132 @@ function providerAccountKeyFromCredentials(serverUrl, username) {
 // start aborts them all, and the relay's session coordinator can evict them
 // cross-device via DELETE /raw-pumps (keyed by sha256(userId) — no credentials).
 const rawPumps = new Set(); // { ac, sid, proxyKey, ownerHash }
+// A transcode request performs asynchronous teardown and codec probing before it can
+// register its session. Reserve viewer priority across that whole window so a
+// service/pregen job cannot win the spawn race and consume the single replica's CPU.
+const viewerStartupReservations = new Set();
+function reserveViewerStartup() {
+    const token = Symbol('viewer-startup');
+    viewerStartupReservations.add(token);
+    return token;
+}
+function releaseViewerStartup(token) {
+    if (token) viewerStartupReservations.delete(token);
+    wakePlaybackBlockedQueues();
+}
 
 function sha256Hex(value) {
     return crypto.createHash('sha256').update(String(value || '')).digest('hex');
+}
+const activeViewerSubtitleOperations = new Set(); // provider-account keys
+const activeViewerSubtitlePrincipals = new Set(); // hashed uid (one active operation across sources)
+const queuedViewerSubtitlePrincipals = new Set(); // hashed uid (one bounded waiter per subscriber)
+const viewerSubtitleWaitQueue = []; // FIFO waiters; oldest eligible principal wins
+const viewerSubtitleRateWindows = new Map(); // hashed uid -> recent admitted request timestamps
+function viewerSubtitlePrincipalKey(claims) {
+    // Current playback capabilities always carry uid. Collapse legacy/malformed
+    // signed capabilities into one conservative bucket instead of letting a
+    // missing uid create unlimited per-source principals.
+    return sha256Hex(`viewer-subtitle|${String(claims?.uid || 'legacy')}`);
+}
+function createViewerSubtitleOperation(proxyKey, principalKey) {
+    activeViewerSubtitleOperations.add(proxyKey);
+    activeViewerSubtitlePrincipals.add(principalKey);
+    let released = false;
+    return {
+        ok: true,
+        proxyKey,
+        principalKey,
+        release() {
+            if (released) return;
+            released = true;
+            activeViewerSubtitleOperations.delete(proxyKey);
+            activeViewerSubtitlePrincipals.delete(principalKey);
+            drainViewerSubtitleWaitQueue();
+        },
+    };
+}
+function viewerSubtitleSlotAvailable(proxyKey, principalKey) {
+    return (
+        activeViewerSubtitleOperations.size < MAX_ACTIVE_VIEWER_SUBTITLE_OPERATIONS
+        && !activeViewerSubtitleOperations.has(proxyKey)
+        && !activeViewerSubtitlePrincipals.has(principalKey)
+    );
+}
+function drainViewerSubtitleWaitQueue() {
+    while (
+        viewerSubtitleWaitQueue.length
+        && activeViewerSubtitleOperations.size < MAX_ACTIVE_VIEWER_SUBTITLE_OPERATIONS
+    ) {
+        const index = viewerSubtitleWaitQueue.findIndex((waiter) =>
+            viewerSubtitleSlotAvailable(waiter.proxyKey, waiter.principalKey));
+        if (index < 0) return;
+        const waiter = viewerSubtitleWaitQueue[index];
+        waiter.finish(createViewerSubtitleOperation(waiter.proxyKey, waiter.principalKey));
+    }
+}
+async function reserveViewerSubtitleOperation(claims, response) {
+    const proxyKey = proxyKeyFromUrl(claims?.url || '');
+    if (!proxyKey) return { ok: false, reason: 'invalid_source' };
+    const principalKey = viewerSubtitlePrincipalKey(claims);
+    const now = Date.now();
+    const cutoff = now - 60_000;
+    if (viewerSubtitleRateWindows.size > 1_000) {
+        for (const [key, timestamps] of viewerSubtitleRateWindows) {
+            const fresh = timestamps.filter((value) => value >= cutoff);
+            if (fresh.length) viewerSubtitleRateWindows.set(key, fresh);
+            else viewerSubtitleRateWindows.delete(key);
+        }
+    }
+    const timestamps = (viewerSubtitleRateWindows.get(principalKey) || [])
+        .filter((value) => value >= cutoff);
+    if (timestamps.length >= MAX_VIEWER_SUBTITLE_REQUESTS_PER_MINUTE) {
+        viewerSubtitleRateWindows.set(principalKey, timestamps);
+        return { ok: false, reason: 'rate_limited' };
+    }
+    if (activeViewerSubtitlePrincipals.has(principalKey) || queuedViewerSubtitlePrincipals.has(principalKey)) {
+        return { ok: false, reason: 'busy' };
+    }
+    timestamps.push(now);
+    viewerSubtitleRateWindows.set(principalKey, timestamps);
+    if (!viewerSubtitleWaitQueue.length && viewerSubtitleSlotAvailable(proxyKey, principalKey)) {
+        return createViewerSubtitleOperation(proxyKey, principalKey);
+    }
+    if (viewerSubtitleWaitQueue.length >= MAX_PENDING_VIEWER_SUBTITLE_OPERATIONS) {
+        return { ok: false, reason: 'busy' };
+    }
+    return await new Promise((resolve) => {
+        let settled = false;
+        const waiter = {
+            proxyKey,
+            principalKey,
+            timer: null,
+            onClose: null,
+            finish(result) {
+                if (settled) return;
+                settled = true;
+                if (waiter.timer) clearTimeout(waiter.timer);
+                if (waiter.onClose) response?.removeListener?.('close', waiter.onClose);
+                const index = viewerSubtitleWaitQueue.indexOf(waiter);
+                if (index >= 0) viewerSubtitleWaitQueue.splice(index, 1);
+                queuedViewerSubtitlePrincipals.delete(principalKey);
+                resolve(result);
+            },
+        };
+        waiter.onClose = () => {
+            if (!response?.writableEnded) waiter.finish({ ok: false, reason: 'client_closed' });
+        };
+        waiter.timer = setTimeout(
+            () => waiter.finish({ ok: false, reason: 'busy' }),
+            VIEWER_SUBTITLE_QUEUE_WAIT_MS,
+        );
+        queuedViewerSubtitlePrincipals.add(principalKey);
+        viewerSubtitleWaitQueue.push(waiter);
+        response?.once?.('close', waiter.onClose);
+        // Capacity may have become available between the earlier check and the
+        // enqueue. Drain after registration to close that lost-wake window.
+        drainViewerSubtitleWaitQueue();
+    });
 }
 function registerRawPump(entry) {
     rawPumps.add(entry);
@@ -96,6 +219,7 @@ function registerRawPump(entry) {
 }
 function releaseRawPump(entry) {
     rawPumps.delete(entry);
+    wakePlaybackBlockedQueues();
 }
 // Abort pumps matching `filter`, sparing `keepSid` (legitimate concurrent range
 // reads within the SAME playback session must survive).
@@ -118,14 +242,29 @@ function abortRawPumps(filter, keepSid, reason) {
 // account preempts them: the viewer outranks any background job, and on a single-slot panel the
 // two connections otherwise fight for minutes (the viewer eats 458s while the extraction reads
 // the whole film). Preempted jobs re-queue as 'deferred' — they resume once the viewer stops.
-const accountExtractions = new Map(); // proxyKey -> Set<{ child, preempted, reportActivity }>
-function registerAccountExtraction(proxyKey, child, reportActivity = true) {
-    const entry = { child, preempted: false, reportActivity };
+const accountExtractions = new Map(); // proxyKey -> Set<{ child, preempted, reportActivity, globalPreemptible }>
+function preemptExtractionEntry(entry) {
+    if (!entry || entry.preempted) return 0;
+    entry.preempted = true;
+    try { entry.child.kill('SIGKILL'); } catch (_) { /* already gone */ }
+    return 1;
+}
+function registerAccountExtraction(proxyKey, child, reportActivity = true, globalPreemptible = true) {
+    const entry = { child, preempted: false, reportActivity, globalPreemptible: globalPreemptible !== false };
     if (!proxyKey) return entry;
     let set = accountExtractions.get(proxyKey);
     if (!set) { set = new Set(); accountExtractions.set(proxyKey, set); }
     set.add(entry);
     entry.release = () => { set.delete(entry); if (!set.size) accountExtractions.delete(proxyKey); };
+    // The queue may have selected this job immediately before a viewer reserved
+    // startup. Registration is the last synchronous boundary before provider I/O;
+    // close that ordering without affecting explicit viewer-origin jobs.
+    if (entry.globalPreemptible && viewerPlaybackActiveLocally()) {
+        if (preemptExtractionEntry(entry)) {
+            viewerQosStats.globalExtractionPreemptions += 1;
+            console.log('[media-gateway] preempted background extraction — viewer playback won spawn race');
+        }
+    }
     return entry;
 }
 function preemptAccountExtractions(proxyKey, reason) {
@@ -133,12 +272,21 @@ function preemptAccountExtractions(proxyKey, reason) {
     if (!set || !set.size) return 0;
     let n = 0;
     for (const entry of [...set]) {
-        if (entry.preempted) continue;
-        entry.preempted = true;
-        try { entry.child.kill('SIGKILL'); } catch (_) { /* already gone */ }
-        n += 1;
+        n += preemptExtractionEntry(entry);
     }
     if (n) console.log(`[media-gateway] preempted ${n} background extraction(s) — ${reason}`);
+    return n;
+}
+function preemptBackgroundExtractionsGlobally(exceptProxyKey, reason) {
+    let n = 0;
+    for (const [proxyKey, set] of accountExtractions) {
+        if (exceptProxyKey && proxyKey === exceptProxyKey) continue;
+        for (const entry of [...set]) {
+            if (entry.globalPreemptible === false) continue;
+            n += preemptExtractionEntry(entry);
+        }
+    }
+    if (n) console.log(`[media-gateway] preempted ${n} global background extraction(s) — ${reason}`);
     return n;
 }
 
@@ -177,6 +325,72 @@ function preemptAccountBackgroundWhispers(proxyKey, reason) {
     }
     return n;
 }
+function preemptBackgroundWhispersGlobally(exceptProxyKey, reason) {
+    let n = 0;
+    for (const [proxyKey, set] of accountBackgroundWhispers) {
+        if (exceptProxyKey && proxyKey === exceptProxyKey) continue;
+        for (const entry of [...set]) {
+            if (entry.preempted) continue;
+            entry.preempted = true;
+            try { entry.child.kill('SIGKILL'); } catch (_) { /* already gone */ }
+            n += 1;
+        }
+    }
+    if (n) {
+        backgroundWhisperPreemptions += n;
+        console.log(`[media-gateway] preempted ${n} global background whisper inference(s) — ${reason}`);
+    }
+    return n;
+}
+const viewerQosStats = {
+    globalExtractionPreemptions: 0,
+    globalWhisperPreemptions: 0,
+    globalCpuPreemptions: 0,
+};
+const backgroundCpuProcesses = new Set(); // service/pregen OCR subprocesses
+function killBackgroundProcessTree(child) {
+    if (!child) return;
+    if (process.platform !== 'win32' && Number.isInteger(child.pid) && child.pid > 0) {
+        try {
+            process.kill(-child.pid, 'SIGKILL');
+            return;
+        } catch (_) { /* fall back to the direct child */ }
+    }
+    try { child.kill('SIGKILL'); } catch (_) { /* already gone */ }
+}
+function preemptBackgroundCpuEntry(entry) {
+    if (!entry || entry.preempted || entry.globalPreemptible === false) return 0;
+    entry.preempted = true;
+    killBackgroundProcessTree(entry.child);
+    return 1;
+}
+function registerBackgroundCpuProcess(child, globalPreemptible = true) {
+    const entry = { child, preempted: false, globalPreemptible: globalPreemptible !== false };
+    if (!child || entry.globalPreemptible === false) return entry;
+    backgroundCpuProcesses.add(entry);
+    entry.release = () => backgroundCpuProcesses.delete(entry);
+    if (viewerPlaybackActiveLocally()) {
+        if (preemptBackgroundCpuEntry(entry)) viewerQosStats.globalCpuPreemptions += 1;
+    } else {
+        lowerBackgroundProcessPriority(child);
+    }
+    return entry;
+}
+function preemptBackgroundCpuGlobally(reason) {
+    let n = 0;
+    for (const entry of [...backgroundCpuProcesses]) n += preemptBackgroundCpuEntry(entry);
+    if (n) console.log(`[media-gateway] preempted ${n} global background CPU process(es) — ${reason}`);
+    return n;
+}
+function preemptBackgroundWorkGlobally(exceptProxyKey, reason) {
+    const extractions = preemptBackgroundExtractionsGlobally(exceptProxyKey, reason);
+    const whispers = preemptBackgroundWhispersGlobally(exceptProxyKey, reason);
+    const cpu = preemptBackgroundCpuGlobally(reason);
+    viewerQosStats.globalExtractionPreemptions += extractions;
+    viewerQosStats.globalWhisperPreemptions += whispers;
+    viewerQosStats.globalCpuPreemptions += cpu;
+    return { extractions, whispers, cpu };
+}
 function backgroundWhisperCount() {
     let count = 0;
     for (const set of accountBackgroundWhispers.values()) count += set.size;
@@ -198,8 +412,9 @@ function registerPreemptibleBackgroundWhisper(proxyKey, child) {
     // Register first, then re-check synchronously. This closes both orderings around spawn:
     // playback may already have preempted before it could see this child, or it may start later
     // and find the child in the registry during its normal preemption pass.
-    if (proxyKey && accountKeyBusyLocally(proxyKey)) {
-        preemptAccountBackgroundWhispers(proxyKey, 'viewer playback won whisper spawn race');
+    if (proxyKey && viewerPlaybackActiveLocally()) {
+        const preempted = preemptAccountBackgroundWhispers(proxyKey, 'viewer playback won whisper spawn race');
+        viewerQosStats.globalWhisperPreemptions += preempted;
         return registration;
     }
     lowerBackgroundProcessPriority(child);
@@ -218,6 +433,11 @@ function accountKeyBusyLocally(key) {
 }
 function accountSlotBusyLocally(url) {
     return accountKeyBusyLocally(proxyKeyFromUrl(url || ''));
+}
+function viewerPlaybackActiveLocally() {
+    return viewerStartupReservations.size > 0
+        || rawPumps.size > 0
+        || Array.from(sessions.values()).some((session) => isSessionBlockingProviderSlot(session));
 }
 
 function pickProxyAgent(key) {
@@ -319,6 +539,12 @@ const WHISPER_DETECT_ONLY_MIN_PROBABILITY = Math.min(
 );
 const LID_DETECT_ONLY_SCOPE = 'lid-production-detect-only';
 const LID_SHADOW_SCOPE = 'lid-shadow';
+const LID_LEGACY_FULL_SCOPE = 'lid-legacy-full';
+const LID_ROUTE_SCOPES = new Set([
+    LID_DETECT_ONLY_SCOPE,
+    LID_SHADOW_SCOPE,
+    LID_LEGACY_FULL_SCOPE,
+]);
 const LID_CASCADE_WAV_SCOPES = new Set([
     'lid-cascade-shadow-v1',
     'lid-cascade-untagged-canary-v1',
@@ -498,9 +724,15 @@ const KNOWN_VOD_INPUT_PROBE_SIZE_BYTES = clampInt(process.env.KNOWN_VOD_INPUT_PR
 // browser. In particular, a short leading fragment (~100 ms) can produce an
 // invalid/near-zero HLS target duration and leave hls.js at readyState=1. Do
 // not advertise a session until the playlist references a finalized segment
-// with a small but meaningful startup buffer.
-const MIN_HLS_STARTUP_BUFFER_SECONDS = clampInt(process.env.MIN_HLS_STARTUP_BUFFER_SECONDS, 2, 1, 10);
+// with enough finalized media to absorb the provider reconnect windows observed
+// in production. With the normal 4 s target this requires three full segments.
+const MIN_HLS_STARTUP_BUFFER_SECONDS = clampInt(process.env.MIN_HLS_STARTUP_BUFFER_SECONDS, 10, 1, 30);
+const MIN_HLS_STARTUP_SEGMENTS = clampInt(process.env.MIN_HLS_STARTUP_SEGMENTS, 3, 1, 10);
 const MAX_SUBTITLE_TRACKS = clampInt(process.env.MAX_SUBTITLE_TRACKS, 32, 1, 64);
+const MAX_ACTIVE_VIEWER_SUBTITLE_OPERATIONS = clampInt(process.env.MAX_ACTIVE_VIEWER_SUBTITLE_OPERATIONS, 1, 1, 4);
+const MAX_VIEWER_SUBTITLE_REQUESTS_PER_MINUTE = clampInt(process.env.MAX_VIEWER_SUBTITLE_REQUESTS_PER_MINUTE, 30, 1, 120);
+const MAX_PENDING_VIEWER_SUBTITLE_OPERATIONS = clampInt(process.env.MAX_PENDING_VIEWER_SUBTITLE_OPERATIONS, 8, 1, 32);
+const VIEWER_SUBTITLE_QUEUE_WAIT_MS = clampInt(process.env.VIEWER_SUBTITLE_QUEUE_WAIT_MS, 75_000, 5_000, 180_000);
 const PROVIDER_SLOT_RELEASE_DELAY_MS = clampInt(process.env.PROVIDER_SLOT_RELEASE_DELAY_MS, 2_500, 0, 15_000);
 const STOP_CONFLICTING_SOURCE_SESSIONS = (process.env.STOP_CONFLICTING_SOURCE_SESSIONS || 'true') !== 'false';
 const STOP_CONFLICTING_OWNER_SESSIONS = (process.env.STOP_CONFLICTING_OWNER_SESSIONS || 'true') !== 'false';
@@ -527,7 +759,7 @@ const EXACT_MATROSKA_H264_HLS_TARGET_SECONDS = 2;
 const EXACT_MATROSKA_H264_MAX_WIDTH = 1920;
 const EXACT_MATROSKA_H264_MAX_HEIGHT = 1080;
 const EXACT_MATROSKA_H264_MAX_PIXELS = EXACT_MATROSKA_H264_MAX_WIDTH * EXACT_MATROSKA_H264_MAX_HEIGHT;
-const GATEWAY_VERSION = 86;
+const GATEWAY_VERSION = 87;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -633,7 +865,13 @@ app.get('/health', (req, res) => {
         exactMatroskaH264MaxHeight: EXACT_MATROSKA_H264_MAX_HEIGHT,
         exactMatroskaH264MaxPixels: EXACT_MATROSKA_H264_MAX_PIXELS,
         minHlsStartupBufferSeconds: MIN_HLS_STARTUP_BUFFER_SECONDS,
+        minHlsStartupSegments: MIN_HLS_STARTUP_SEGMENTS,
         maxSubtitleTracks: MAX_SUBTITLE_TRACKS,
+        activeViewerSubtitleOperations: activeViewerSubtitleOperations.size,
+        maxActiveViewerSubtitleOperations: MAX_ACTIVE_VIEWER_SUBTITLE_OPERATIONS,
+        pendingViewerSubtitleOperations: viewerSubtitleWaitQueue.length,
+        maxPendingViewerSubtitleOperations: MAX_PENDING_VIEWER_SUBTITLE_OPERATIONS,
+        viewerSubtitleQueueWaitMs: VIEWER_SUBTITLE_QUEUE_WAIT_MS,
         probeStats,
         rawStreamHealth: {
             ...rawStreamStats,
@@ -737,6 +975,10 @@ app.get('/health', (req, res) => {
         translateQueueDepth: translateQueue.length,
         translateBusy,
         rawPumpCount: rawPumps.size,
+        viewerStartupReservations: viewerStartupReservations.size,
+        viewerPlaybackActiveLocally: viewerPlaybackActiveLocally(),
+        viewerQosStats: { ...viewerQosStats },
+        backgroundCpuProcessCount: backgroundCpuProcesses.size,
         whisperInferenceActive,
         backgroundWhisperInferenceActive: backgroundWhisperCount(),
         backgroundWhisperPreemptions,
@@ -1304,6 +1546,11 @@ app.get('/raw/:token', async (req, res) => {
     // CPU preemption does not hold a provider connection and must not trigger the provider
     // slot-release delay below.
     preemptAccountBackgroundWhispers(pumpProxyKey, rawPlaybackReason);
+    // This replica has one vCPU: service/pregen work from OTHER accounts can
+    // still starve the viewer even though it does not hold this provider slot.
+    // Keep explicit viewer-origin jobs, but preempt every registered background
+    // extraction/inference and let its queue re-run it after playback.
+    preemptBackgroundWorkGlobally(pumpProxyKey, rawPlaybackReason);
     res.on('close', () => {
         ac.abort();
         if (activeAttemptGuard) activeAttemptGuard.dispose();
@@ -1651,6 +1898,12 @@ app.get('/subtitle/:token', async (req, res) => {
 
     // Enumeration: ffprobe the container, return its subtitle tracks (index, lang, codec).
     if (req.query.index === undefined) {
+        const operation = await reserveViewerSubtitleOperation(claims, res);
+        if (!operation.ok) {
+            if (operation.reason === 'client_closed' || res.destroyed) return;
+            res.setHeader('Retry-After', operation.reason === 'rate_limited' ? '60' : '2');
+            return res.status(429).json({ error: 'Subtitle service is busy' });
+        }
         try {
             const profile = await probeCodecProfile(claims.url, ua);
             res.setHeader('Cache-Control', 'private, max-age=3600');
@@ -1662,6 +1915,8 @@ app.get('/subtitle/:token', async (req, res) => {
             });
         } catch (err) {
             return res.status(502).json({ error: 'Subtitle probe failed', details: String((err && err.message) || err) });
+        } finally {
+            operation.release();
         }
     }
 
@@ -1674,6 +1929,12 @@ app.get('/subtitle/:token', async (req, res) => {
     const hasStart = Number.isFinite(startOffset) && startOffset > 0;
     const windowDur = Math.min(Math.max(Number.parseFloat(req.query.dur) || 300, 1), 900);
     const outputPath = path.join(os.tmpdir(), `norva-sub-${Date.now()}-${crypto.randomUUID()}.vtt`);
+    const operation = await reserveViewerSubtitleOperation(claims, res);
+    if (!operation.ok) {
+        if (operation.reason === 'client_closed' || res.destroyed) return;
+        res.setHeader('Retry-After', operation.reason === 'rate_limited' ? '60' : '2');
+        return res.status(429).json({ error: 'Subtitle service is busy' });
+    }
 
     const args = [
         '-y', '-hide_banner', '-loglevel', 'error', '-nostdin',
@@ -1689,15 +1950,21 @@ app.get('/subtitle/:token', async (req, res) => {
 
     let child;
     try { child = spawn(FFMPEG_PATH, args, { stdio: ['ignore', 'ignore', 'pipe'], env: proxyEnvFor(proxyKeyFromUrl(claims.url)) }); }
-    catch (_) { return res.status(500).json({ error: 'Subtitle extraction failed' }); }
+    catch (_) { operation.release(); return res.status(500).json({ error: 'Subtitle extraction failed' }); }
+    const extractionRegistration = registerAccountExtraction(operation.proxyKey, child, true, false);
+    const releaseOperation = () => {
+        extractionRegistration.release?.();
+        operation.release();
+    };
     let stderr = '';
     let clientClosed = false;
     const timer = setTimeout(() => { try { child.kill('SIGKILL'); } catch (_) {} }, 30_000);
     child.stderr.on('data', (d) => { stderr += d.toString(); });
     res.on('close', () => { if (!res.writableEnded) { clientClosed = true; try { child.kill('SIGKILL'); } catch (_) {} } });
-    child.on('error', () => { clearTimeout(timer); if (!res.headersSent) res.status(500).end(); });
+    child.on('error', () => { clearTimeout(timer); releaseOperation(); if (!res.headersSent) res.status(500).end(); });
     child.on('close', async (code) => {
         clearTimeout(timer);
+        releaseOperation();
         if (clientClosed) { fsp.unlink(outputPath).catch(() => {}); return; }
         if (code !== 0) {
             console.warn(`[media-gateway] /subtitle ffmpeg exit ${code}: ${stderr.slice(-300)}`);
@@ -1767,6 +2034,9 @@ app.get('/detect-language/:token', async (req, res) => {
     const claims = verifyRawToken(req.params.token, GATEWAY_TOKEN);
     if (!claims) return res.status(401).json({ error: 'Invalid byte-pipe token' });
     if (Number(claims.exp) * 1000 < Date.now()) return res.status(401).json({ error: 'Byte-pipe token expired' });
+    if (!LID_ROUTE_SCOPES.has(String(claims.scope || ''))) {
+        return res.status(403).json({ error: 'Byte-pipe token is not authorized for language detection' });
+    }
     if (!WHISPER_BIN || !WHISPER_MODEL) return res.status(503).json({ error: 'Language detection not configured' });
     if (rejectWhileLidBenchmarkRuns(res)) return;
     const ua = claims.ua || FFMPEG_USER_AGENT;
@@ -2621,6 +2891,9 @@ app.get('/transcribe/:token', async (req, res) => {
     const claims = verifyRawToken(req.params.token, GATEWAY_TOKEN);
     if (!claims) return res.status(401).json({ error: 'Invalid byte-pipe token' });
     if (Number(claims.exp) * 1000 < Date.now()) return res.status(401).json({ error: 'Byte-pipe token expired' });
+    if (!bytePipeAllowsPurpose(claims, 'transcribe-bench')) {
+        return res.status(403).json({ error: 'Byte-pipe token is not authorized for transcription' });
+    }
     if (!WHISPER_BIN || !WHISPER_MODEL) return res.status(503).json({ error: 'Transcription not configured' });
     if (rejectWhileLidBenchmarkRuns(res)) return;
     const ua = claims.ua || FFMPEG_USER_AGENT;
@@ -2635,7 +2908,18 @@ app.get('/transcribe/:token', async (req, res) => {
     try {
         const e0 = Date.now();
         const ex = await withAccountJobLock(accountJobKey(claims.uid, claims.url), () =>
-            extractAudioWav(claims.url, ua, trackIndex, startOffset, dur, AUDIO_EXTRACT_TIMEOUT_MS, claims.uid));
+            extractAudioWav(
+                claims.url,
+                ua,
+                trackIndex,
+                startOffset,
+                dur,
+                AUDIO_EXTRACT_TIMEOUT_MS,
+                claims.uid,
+                true,
+                null,
+                false,
+            ));
         const extractMs = Date.now() - e0;
         if (!ex.ok) return res.status(502).json({ error: 'Audio extraction failed', details: ex.error });
         wavPath = ex.path;
@@ -2668,6 +2952,9 @@ app.post('/transcribe-async/:token', (req, res) => {
     const claims = verifyRawToken(req.params.token, GATEWAY_TOKEN);
     if (!claims) return res.status(401).json({ error: 'Invalid byte-pipe token' });
     if (Number(claims.exp) * 1000 < Date.now()) return res.status(401).json({ error: 'Byte-pipe token expired' });
+    if (!bytePipeAllowsPurpose(claims, 'transcribe-job')) {
+        return res.status(403).json({ error: 'Byte-pipe token is not authorized for transcription jobs' });
+    }
     if (!WHISPER_BIN || !WHISPER_MODEL) return res.status(503).json({ error: 'Transcription not configured' });
     if (rejectWhileLidBenchmarkRuns(res)) return;
     const index = Number.parseInt(req.query.index, 10);
@@ -2698,6 +2985,9 @@ app.post('/ocr-async/:token', (req, res) => {
     const claims = verifyRawToken(req.params.token, GATEWAY_TOKEN);
     if (!claims) return res.status(401).json({ error: 'Invalid byte-pipe token' });
     if (Number(claims.exp) * 1000 < Date.now()) return res.status(401).json({ error: 'Byte-pipe token expired' });
+    if (!bytePipeAllowsPurpose(claims, 'ocr-job')) {
+        return res.status(403).json({ error: 'Byte-pipe token is not authorized for OCR jobs' });
+    }
     if (!OCR_ENABLED) return res.status(503).json({ error: 'OCR not configured' });
     if (rejectWhileLidBenchmarkRuns(res)) return;
     const index = Number.parseInt(req.query.index, 10);
@@ -2711,8 +3001,10 @@ app.post('/ocr-async/:token', (req, res) => {
     // fmt selects the pipeline: 'pgs' (.sup parser) vs 'vobsub'/'dvb' (ffmpeg sub2video → frames).
     const fmt = ['pgs', 'vobsub', 'dvb'].includes(String(req.query.fmt || '')) ? String(req.query.fmt) : 'pgs';
     const ua = claims.ua || FFMPEG_USER_AGENT;
-    // OCR is viewer-triggered by nature — same priority classes for symmetry.
-    const prio = JOB_PRIORITY[String(req.query.origin || '')] ?? 0;
+    // Backward-compatible rollout: legacy Edge builds omitted OCR origin and
+    // those requests were viewer-facing. New Edge builds always send an
+    // explicit viewer/service/pregen class, so background work remains gated.
+    const prio = JOB_PRIORITY[String(req.query.origin || '')] ?? JOB_PRIORITY.viewer;
     const job = { url: claims.url, ua, index, jobId, callbackUrl, lang, fmt, uid: claims.uid, prio };
     const ok = enqueueOcr(job);
     if (!ok) return res.status(429).json({ error: 'OCR queue full' });
@@ -2727,6 +3019,9 @@ app.post('/storyboard-async/:token', (req, res) => {
     const claims = verifyRawToken(req.params.token, GATEWAY_TOKEN);
     if (!claims) return res.status(401).json({ error: 'Invalid byte-pipe token' });
     if (Number(claims.exp) * 1000 < Date.now()) return res.status(401).json({ error: 'Byte-pipe token expired' });
+    if (!bytePipeAllowsPurpose(claims, 'storyboard-job')) {
+        return res.status(403).json({ error: 'Byte-pipe token is not authorized for storyboard jobs' });
+    }
     if (rejectWhileLidBenchmarkRuns(res)) return;
     const jobId = String(req.query.jobId || '');
     const callbackUrl = String(req.query.callback || '');
@@ -2911,8 +3206,12 @@ function extractAudioWav(
     proxyKey = '',
     reportActivity = true,
     abortSignal = null,
+    globalPreemptible = true,
 ) {
     return new Promise((resolve) => {
+        if (globalPreemptible && viewerPlaybackActiveLocally()) {
+            return resolve({ ok: false, preempted: true, error: 'preempted by viewer playback before extraction spawn' });
+        }
         const outputPath = path.join(os.tmpdir(), `norva-audio-${Date.now()}-${crypto.randomUUID()}.wav`);
         const args = [
             '-y', '-hide_banner', '-loglevel', 'error', '-nostdin',
@@ -2937,7 +3236,12 @@ function extractAudioWav(
         let child;
         try { child = spawn(FFMPEG_PATH, args, { stdio: ['ignore', 'ignore', 'pipe'], env: proxyEnvFor(proxyKeyFromUrl(url)) }); }
         catch (e) { return resolve({ ok: false, error: 'spawn failed: ' + String((e && e.message) || e) }); }
-        const reg = registerAccountExtraction(proxyKeyFromUrl(url), child, reportActivity);
+        const reg = registerAccountExtraction(
+            proxyKeyFromUrl(url),
+            child,
+            reportActivity,
+            globalPreemptible,
+        );
         let stderr = '';
         let timedOut = false;
         let aborted = false;
@@ -3006,7 +3310,7 @@ const CHUNK_WHISPER_TIMEOUT_MS = clampInt(process.env.CHUNK_WHISPER_TIMEOUT_MS, 
 // dir/chunk-%04d.wav pieces of chunkSec each (-reset_timestamps 1 → every chunk starts at 0;
 // audio-only segmentation is sample-accurate, so chunk N covers exactly [N*chunkSec, …)).
 // Resolves { ok, error } when ffmpeg exits; chunk files appear in `dir` as they complete.
-function extractAudioWavChunks(url, ua, trackIndex, timeoutMs, proxyKey, chunkSec, dir) {
+function extractAudioWavChunks(url, ua, trackIndex, timeoutMs, proxyKey, chunkSec, dir, globalPreemptible = true) {
     return new Promise((resolve) => {
         const args = [
             '-y', '-hide_banner', '-loglevel', 'error', '-nostdin',
@@ -3025,7 +3329,7 @@ function extractAudioWavChunks(url, ua, trackIndex, timeoutMs, proxyKey, chunkSe
         let child;
         try { child = spawn(FFMPEG_PATH, args, { stdio: ['ignore', 'ignore', 'pipe'], env: proxyEnvFor(proxyKeyFromUrl(url)) }); }
         catch (e) { return resolve({ ok: false, error: 'spawn failed: ' + String((e && e.message) || e) }); }
-        const reg = registerAccountExtraction(proxyKeyFromUrl(url), child);
+        const reg = registerAccountExtraction(proxyKeyFromUrl(url), child, true, globalPreemptible);
         let stderr = '';
         let timedOut = false;
         const timer = setTimeout(() => { timedOut = true; try { child.kill('SIGKILL'); } catch (_) {} }, timeoutMs);
@@ -3079,7 +3383,7 @@ async function runProductionWhisperDetectOnly(wavPath, mode, options = {}) {
     else lidDetectOnlyStats.shadowAttempts++;
     const backgroundKey = String(options.backgroundKey || '');
     const preemptibleBackground = options.preemptibleBackground === true && Boolean(backgroundKey);
-    if (preemptibleBackground && accountKeyBusyLocally(backgroundKey)) {
+    if (preemptibleBackground && viewerPlaybackActiveLocally()) {
         return {
             ok: false,
             lang: null,
@@ -3145,7 +3449,7 @@ function runWhisperDetect(wavPath, options = {}) {
     return new Promise((resolve) => {
         const backgroundKey = String(options.backgroundKey || '');
         const preemptibleBackground = options.preemptibleBackground === true && Boolean(backgroundKey);
-        if (preemptibleBackground && accountKeyBusyLocally(backgroundKey)) {
+        if (preemptibleBackground && viewerPlaybackActiveLocally()) {
             return resolve({
                 text: '', lang: null, prob: 0, preempted: true,
                 error: 'whisper preempted by viewer playback on this account',
@@ -3287,7 +3591,7 @@ function runWhisperVtt(wavPath, forceLang, timeoutMs = WHISPER_TRANSCRIBE_TIMEOU
         const preemptibleBackground = options.preemptibleBackground === true && Boolean(backgroundKey);
         // Close the extraction→inference race: playback may have started after the job's WAV was
         // produced but before whisper.cpp was spawned.
-        if (preemptibleBackground && accountKeyBusyLocally(backgroundKey)) {
+        if (preemptibleBackground && viewerPlaybackActiveLocally()) {
             return resolve({
                 vtt: '', lang: null, prob: 0, ms: 0, preempted: true,
                 failReason: 'whisper preempted by viewer playback on this account',
@@ -3405,6 +3709,7 @@ async function withAccountJobLock(key, fn) {
 // account lock and the edge-side tick skip still bound the damage).
 const JOB_GATE_POLL_MS = clampInt(process.env.JOB_GATE_POLL_MS, 60_000, 5_000, 600_000);
 const JOB_GATE_MAX_DEFERRALS = clampInt(process.env.JOB_GATE_MAX_DEFERRALS, 240, 1, 2000);
+const JOB_DEFER_HEARTBEAT_MIN_INTERVAL_MS = 60_000;
 async function shouldDeferJob(job) {
     try {
         const gateUrl = String(job.callbackUrl || '').replace(/\/[^/]*$/, '/pregen-gate');
@@ -3426,6 +3731,9 @@ async function shouldDeferJob(job) {
 // WITHIN a class (append after the last same-class job), so same-priority jobs stay FIFO.
 const JOB_PRIORITY = { viewer: 0, service: 1, pregen: 2 };
 function jobPrio(job) { return Number.isInteger(job?.prio) ? job.prio : 1; }
+function backgroundJobBlockedByViewer(job) {
+    return jobPrio(job) !== JOB_PRIORITY.viewer && viewerPlaybackActiveLocally();
+}
 function whisperOptionsForJob(job) {
     if (jobPrio(job) === JOB_PRIORITY.viewer) return {};
     return {
@@ -3477,6 +3785,11 @@ function transcribeCoolingDown(job) {
 // single-slot account) is no longer reaped at 2h or re-claimed at 90min mid-flight, and the
 // player can show honest progress instead of an opaque "processing". Fire-and-forget.
 function postJobHeartbeat(job, stage) {
+    if (stage === 'deferred') {
+        const now = Date.now();
+        if (now - Number(job?.lastDeferredHeartbeatAt || 0) < JOB_DEFER_HEARTBEAT_MIN_INTERVAL_MS) return;
+        job.lastDeferredHeartbeatAt = now;
+    }
     try {
         fetch(job.callbackUrl, {
             method: 'POST',
@@ -3508,11 +3821,45 @@ async function nextRunnableJob(queue, kind) {
     let picked = null;
     while (queue.length) {
         const job = queue.shift();
+        // Service/pregen enrichment is globally background work on this one-vCPU
+        // replica. A viewer-origin request keeps its interactive priority, but
+        // every other job waits while any local playback is starting or active.
+        const backgroundBlockedByViewer = backgroundJobBlockedByViewer(job);
+        if (backgroundBlockedByViewer) {
+            // Active viewing is not a provider/job failure and must not consume
+            // the bounded edge-gate deferral budget, even during a long film.
+            postJobHeartbeat(job, 'deferred');
+            deferred.push(job);
+            continue;
+        }
         // Local slot check FIRST: this box knows instantly when a viewer session or raw pump
         // holds the job's provider account — no round-trip, and it sees what the edge gate
         // can't (a paused viewer whose transcode ffmpeg still runs). Then the edge gate for
         // relay-side signals (live sessions on other lanes, enrichment ticks).
-        if (!accountSlotBusyLocally(job.url) && !storyboardCoolingDown(job) && !transcribeCoolingDown(job) && !(await shouldDeferJob(job))) { job.gateDeferrals = 0; picked = job; break; }
+        const localViewerSlotBusy = accountSlotBusyLocally(job.url);
+        if (localViewerSlotBusy) {
+            // Same-account viewer auxiliary work cannot coexist with a
+            // single-slot playback, but that viewing time is not a job failure.
+            postJobHeartbeat(job, 'deferred');
+            deferred.push(job);
+            continue;
+        }
+        const locallyDeferred = storyboardCoolingDown(job)
+            || transcribeCoolingDown(job);
+        const edgeDeferred = locallyDeferred ? false : await shouldDeferJob(job);
+        // shouldDeferJob may wait up to 10 s. Re-check the global reservation
+        // after that await before granting the job a provider/CPU slot.
+        const viewerWonGateRace = backgroundJobBlockedByViewer(job);
+        if (!locallyDeferred && !edgeDeferred && !viewerWonGateRace) {
+            job.gateDeferrals = 0;
+            picked = job;
+            break;
+        }
+        if (viewerWonGateRace) {
+            postJobHeartbeat(job, 'deferred');
+            deferred.push(job);
+            continue;
+        }
         job.gateDeferrals = (job.gateDeferrals || 0) + 1;
         if (job.gateDeferrals > JOB_GATE_MAX_DEFERRALS) {
             console.warn(`[media-gateway] ${kind} job ${job.jobId} deferred too long — failing back to the edge`);
@@ -3533,12 +3880,44 @@ async function nextRunnableJob(queue, kind) {
 // whisper from starving the stream-proxying duties of this same instance.
 const transcribeQueue = [];
 let transcribeBusy = false;
+function createQueueWakeState() { return { waiter: null, version: 0 }; }
+function wakeQueueDrain(state) {
+    if (!state) return;
+    state.version = Number(state.version || 0) + 1;
+    const waiter = state?.waiter;
+    if (typeof waiter === 'function') waiter();
+}
+function waitForQueueWake(state, timeoutMs, observedVersion = Number(state?.version || 0)) {
+    return new Promise((resolve) => {
+        if (Number(state?.version || 0) !== observedVersion) {
+            resolve();
+            return;
+        }
+        let settled = false;
+        let timer = null;
+        const finish = () => {
+            if (settled) return;
+            settled = true;
+            if (timer) clearTimeout(timer);
+            if (state.waiter === finish) state.waiter = null;
+            resolve();
+        };
+        state.waiter = finish;
+        timer = setTimeout(finish, timeoutMs);
+    });
+}
+const transcribeWakeState = createQueueWakeState();
+function wakePlaybackBlockedQueues() {
+    wakeQueueDrain(transcribeWakeState);
+    wakeQueueDrain(ocrWakeState);
+}
 const MAX_TRANSCRIBE_QUEUE = clampInt(process.env.MAX_TRANSCRIBE_QUEUE, 50, 1, 500);
 
 function enqueueTranscribe(job) {
     if (transcribeQueue.length >= MAX_TRANSCRIBE_QUEUE) return false;
     insertByPriority(transcribeQueue, job); // viewer clicks jump ahead of the nightly pregen batch
     postJobHeartbeat(job, 'queued');
+    wakeQueueDrain(transcribeWakeState);
     queueMicrotask(drainTranscribeQueue);
     return true;
 }
@@ -3547,8 +3926,16 @@ async function drainTranscribeQueue() {
     transcribeBusy = true;
     try {
         while (transcribeQueue.length) {
+            const wakeVersion = transcribeWakeState.version;
             const job = await nextRunnableJob(transcribeQueue, 'transcribe');
-            if (!job) { await sleep(JOB_GATE_POLL_MS); continue; }
+            if (!job) {
+                await waitForQueueWake(
+                    transcribeWakeState,
+                    JOB_GATE_POLL_MS,
+                    wakeVersion,
+                );
+                continue;
+            }
             await runTranscribeJob(job).catch((e) => console.warn('[media-gateway] transcribe job error', String((e && e.message) || e)));
         }
     } finally { transcribeBusy = false; }
@@ -3569,7 +3956,20 @@ async function runTranscribeJob(job) {
             for (let attempt = 0; attempt <= AUDIO_EXTRACT_RETRIES; attempt++) {
                 // Account lock per ATTEMPT: the 30/60s backoff sleeps must not hold the slot.
                 ex = await withAccountJobLock(accountJobKey(uid, url), () =>
-                    extractAudioWav(url, ua, index, start, dur, AUDIO_EXTRACT_TIMEOUT_MS, uid));
+                    backgroundJobBlockedByViewer(job)
+                        ? { ok: false, preempted: true, error: 'preempted by viewer playback before extraction' }
+                        : extractAudioWav(
+                        url,
+                        ua,
+                        index,
+                        start,
+                        dur,
+                        AUDIO_EXTRACT_TIMEOUT_MS,
+                        uid,
+                        true,
+                        null,
+                        jobPrio(job) !== JOB_PRIORITY.viewer,
+                    ));
                 if (ex.ok) break;
                 if (ex.preempted) break; // a viewer took the slot — re-queue, don't hammer beside them
                 if (/\b(401|403)\b|Unauthorized|Forbidden/i.test(ex.error || '')) break; // abuse/auth block — do not hammer
@@ -3634,7 +4034,17 @@ const STORYBOARD_TILE_WIDTH = 212;
 const STORYBOARD_MAX_TILES = 200;
 const STORYBOARD_COLS = 10;
 
-function extractStoryboardSprite(url, ua, intervalSec, cols, rows, outputPath, timeoutMs, proxyKey = '') {
+function extractStoryboardSprite(
+    url,
+    ua,
+    intervalSec,
+    cols,
+    rows,
+    outputPath,
+    timeoutMs,
+    proxyKey = '',
+    globalPreemptible = true,
+) {
     return new Promise((resolve) => {
         const args = [
             '-y', '-hide_banner', '-loglevel', 'error', '-nostdin',
@@ -3655,7 +4065,7 @@ function extractStoryboardSprite(url, ua, intervalSec, cols, rows, outputPath, t
         let child;
         try { child = spawn(FFMPEG_PATH, args, { stdio: ['ignore', 'ignore', 'pipe'], env: proxyEnvFor(proxyKeyFromUrl(url)) }); }
         catch (e) { return resolve({ ok: false, error: 'spawn failed: ' + String((e && e.message) || e) }); }
-        const reg = registerAccountExtraction(proxyKeyFromUrl(url), child);
+        const reg = registerAccountExtraction(proxyKeyFromUrl(url), child, true, globalPreemptible);
         let stderr = '';
         let timedOut = false;
         const timer = setTimeout(() => { timedOut = true; try { child.kill('SIGKILL'); } catch (_) {} }, timeoutMs);
@@ -3698,8 +4108,20 @@ async function runStoryboardJob(job) {
         // floored at 15 min for shorts and capped at 75 min for slow panels.
         const timeoutMs = Math.min(75 * 60_000, Math.max(15 * 60_000, Math.round(dur * 600)));
         const r = await withAccountJobLock(accountJobKey(uid, url), () =>
-            extractStoryboardSprite(url, ua, intervalSec, STORYBOARD_COLS, rows, outputPath, timeoutMs, uid));
-        markStoryboardRun(url); // start the per-provider cooldown (this provider was just read)
+            backgroundJobBlockedByViewer(job)
+                ? { ok: false, preempted: true, error: 'preempted by viewer playback before storyboard extraction' }
+                : extractStoryboardSprite(
+                url,
+                ua,
+                intervalSec,
+                STORYBOARD_COLS,
+                rows,
+                outputPath,
+                timeoutMs,
+                uid,
+                jobPrio(job) !== JOB_PRIORITY.viewer,
+            ));
+        if (!r.preempted) markStoryboardRun(url); // only a real provider read starts the cooldown
         if (r.preempted) {
             payload = { requeue: true };
         } else if (!r.ok) {
@@ -3757,7 +4179,20 @@ async function runChunkedTranscription(job) {
         const extractionDone = withAccountJobLock(accountJobKey(uid, url), async () => {
             let ex = { ok: false, error: 'not attempted' };
             for (let attempt = 0; attempt <= AUDIO_EXTRACT_RETRIES; attempt++) {
-                ex = await extractAudioWavChunks(url, ua, index, AUDIO_EXTRACT_TIMEOUT_MS, uid, TRANSCRIBE_CHUNK_SEC, dir);
+                if (backgroundJobBlockedByViewer(job)) {
+                    ex = { ok: false, preempted: true, error: 'preempted by viewer playback before chunk extraction' };
+                    break;
+                }
+                ex = await extractAudioWavChunks(
+                    url,
+                    ua,
+                    index,
+                    AUDIO_EXTRACT_TIMEOUT_MS,
+                    uid,
+                    TRANSCRIBE_CHUNK_SEC,
+                    dir,
+                    jobPrio(job) !== JOB_PRIORITY.viewer,
+                );
                 if (ex.ok) break;
                 if (ex.preempted) break; // a viewer took the slot — the whole job re-queues
                 if (/\b(401|403)\b|Unauthorized|Forbidden/i.test(ex.error || '')) break; // abuse/auth block
@@ -3945,10 +4380,12 @@ async function runTranslateJob(job) {
 // A gateway restart loses in-flight jobs → the edge reaper re-enqueues rows stuck in 'processing'.
 const ocrQueue = [];
 let ocrBusy = false;
+const ocrWakeState = createQueueWakeState();
 function enqueueOcr(job) {
     if (ocrQueue.length >= MAX_OCR_QUEUE) return false;
     insertByPriority(ocrQueue, job);
     postJobHeartbeat(job, 'queued');
+    wakeQueueDrain(ocrWakeState);
     queueMicrotask(drainOcrQueue);
     return true;
 }
@@ -3957,8 +4394,16 @@ async function drainOcrQueue() {
     ocrBusy = true;
     try {
         while (ocrQueue.length) {
+            const wakeVersion = ocrWakeState.version;
             const job = await nextRunnableJob(ocrQueue, 'ocr');
-            if (!job) { await sleep(JOB_GATE_POLL_MS); continue; }
+            if (!job) {
+                await waitForQueueWake(
+                    ocrWakeState,
+                    JOB_GATE_POLL_MS,
+                    wakeVersion,
+                );
+                continue;
+            }
             await runOcrJob(job).catch((e) => console.warn('[media-gateway] ocr job error', String((e && e.message) || e)));
         }
     } finally { ocrBusy = false; }
@@ -3971,7 +4416,14 @@ async function drainOcrQueue() {
 // surface WHY extraction failed (the audio path's opaque "failed" cost real debugging time). Subtitle
 // streams are sparse across the file, so `-c:s copy` must demux the whole input — index is the
 // absolute ffprobe stream index from the probe.
-function extractSubtitleSup(url, ua, trackIndex, timeoutMs = SUP_EXTRACT_TIMEOUT_MS, proxyKey = '') {
+function extractSubtitleSup(
+    url,
+    ua,
+    trackIndex,
+    timeoutMs = SUP_EXTRACT_TIMEOUT_MS,
+    proxyKey = '',
+    globalPreemptible = true,
+) {
     return new Promise((resolve) => {
         const outputPath = path.join(os.tmpdir(), `norva-sub-${Date.now()}-${crypto.randomUUID()}.sup`);
         const args = [
@@ -3986,12 +4438,24 @@ function extractSubtitleSup(url, ua, trackIndex, timeoutMs = SUP_EXTRACT_TIMEOUT
         let child;
         try { child = spawn(FFMPEG_PATH, args, { stdio: ['ignore', 'ignore', 'pipe'], env: proxyEnvFor(proxyKeyFromUrl(url)) }); }
         catch (e) { return resolve({ ok: false, error: 'spawn failed: ' + String((e && e.message) || e) }); }
+        const reg = registerAccountExtraction(proxyKeyFromUrl(url), child, true, globalPreemptible);
         let stderr = '';
         const timer = setTimeout(() => { try { child.kill('SIGKILL'); } catch (_) {} }, timeoutMs);
         child.stderr.on('data', (d) => { stderr += d.toString(); });
-        child.on('error', (e) => { clearTimeout(timer); resolve({ ok: false, error: String((e && e.message) || e) }); });
+        child.on('error', (e) => {
+            clearTimeout(timer);
+            reg.release?.();
+            resolve(reg.preempted
+                ? { ok: false, preempted: true, error: 'preempted by viewer playback' }
+                : { ok: false, error: String((e && e.message) || e) });
+        });
         child.on('close', async (code) => {
             clearTimeout(timer);
+            reg.release?.();
+            if (reg.preempted) {
+                fsp.unlink(outputPath).catch(() => {});
+                return resolve({ ok: false, preempted: true, error: 'preempted by viewer playback' });
+            }
             if (code !== 0) {
                 console.warn(`[media-gateway] sup-extract ffmpeg exit ${code}: ${redactCreds(stderr.slice(-300))}`);
                 fsp.unlink(outputPath).catch(() => {});
@@ -4009,19 +4473,34 @@ function extractSubtitleSup(url, ua, trackIndex, timeoutMs = SUP_EXTRACT_TIMEOUT
 
 // Run ocr_pgs.py on a .sup: pipe { sup, lang } in on stdin, read the WebVTT from stdout.
 // Resolves { ok, vtt } or { ok:false, error } (the script emits a JSON error on stderr + exit code).
-function runOcrPython(supPath, lang) {
+function runOcrPython(supPath, lang, globalPreemptible = true) {
     return new Promise((resolve) => {
         let child;
         try {
-            child = spawn(OCR_PYTHON_BIN, [OCR_SCRIPT], { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env } });
+            child = spawn(OCR_PYTHON_BIN, [OCR_SCRIPT], {
+                stdio: ['pipe', 'pipe', 'pipe'],
+                env: { ...process.env },
+                detached: process.platform !== 'win32',
+            });
         } catch (e) { return resolve({ ok: false, error: 'spawn failed: ' + String((e && e.message) || e) }); }
+        const registration = registerBackgroundCpuProcess(child, globalPreemptible);
         let out = '', err = '';
-        const timer = setTimeout(() => { try { child.kill('SIGKILL'); } catch (_) {} }, OCR_TIMEOUT_MS);
+        const timer = setTimeout(() => killBackgroundProcessTree(child), OCR_TIMEOUT_MS);
         child.stdout.on('data', (d) => { out += d.toString(); });
         child.stderr.on('data', (d) => { err += d.toString(); });
-        child.on('error', (e) => { clearTimeout(timer); resolve({ ok: false, error: String((e && e.message) || e) }); });
+        child.on('error', (e) => {
+            clearTimeout(timer);
+            registration.release?.();
+            resolve(registration.preempted
+                ? { ok: false, preempted: true, error: 'preempted by viewer playback' }
+                : { ok: false, error: String((e && e.message) || e) });
+        });
         child.on('close', (code) => {
             clearTimeout(timer);
+            registration.release?.();
+            if (registration.preempted) {
+                return resolve({ ok: false, preempted: true, error: 'preempted by viewer playback' });
+            }
             if (code === 0 && out.trim()) return resolve({ ok: true, vtt: out });
             let msg = `ocr exit ${code}`;
             try { const j = JSON.parse((err.trim().split('\n').pop() || '')); if (j && j.error) msg = j.error; } catch (_) {}
@@ -4034,7 +4513,14 @@ function runOcrPython(supPath, lang) {
 // VOBSUB/DVB: render the image-sub track to timed PNGs with ffmpeg's sub2video filter (decodes the
 // bitmap stream; showinfo logs each frame's PTS) into a temp dir + showinfo.log. Resolves
 // { ok:true, dir } or { ok:false, error } (the ffmpeg error tail). One ffmpeg pass over the URL.
-function extractSubtitleFrames(url, ua, trackIndex, timeoutMs = SUP_EXTRACT_TIMEOUT_MS, proxyKey = '') {
+function extractSubtitleFrames(
+    url,
+    ua,
+    trackIndex,
+    timeoutMs = SUP_EXTRACT_TIMEOUT_MS,
+    proxyKey = '',
+    globalPreemptible = true,
+) {
     return new Promise((resolve) => {
         const dir = path.join(os.tmpdir(), `norva-imgsub-${Date.now()}-${crypto.randomUUID()}`);
         try { fs.mkdirSync(dir, { recursive: true }); } catch (e) { return resolve({ ok: false, error: 'mkdir failed: ' + String((e && e.message) || e) }); }
@@ -4051,13 +4537,24 @@ function extractSubtitleFrames(url, ua, trackIndex, timeoutMs = SUP_EXTRACT_TIME
         let child;
         try { child = spawn(FFMPEG_PATH, args, { stdio: ['ignore', 'ignore', 'pipe'], env: proxyEnvFor(proxyKeyFromUrl(url)) }); }
         catch (e) { return resolve({ ok: false, error: 'spawn failed: ' + String((e && e.message) || e) }); }
+        const reg = registerAccountExtraction(proxyKeyFromUrl(url), child, true, globalPreemptible);
         let stderr = '';
         const timer = setTimeout(() => { try { child.kill('SIGKILL'); } catch (_) {} }, timeoutMs);
         // showinfo is verbose (one line/frame) — keep the tail bounded but enough for a long film.
         child.stderr.on('data', (d) => { stderr += d.toString(); if (stderr.length > 24_000_000) stderr = stderr.slice(-16_000_000); });
-        child.on('error', (e) => { clearTimeout(timer); resolve({ ok: false, error: String((e && e.message) || e), dir }); });
+        child.on('error', (e) => {
+            clearTimeout(timer);
+            reg.release?.();
+            resolve(reg.preempted
+                ? { ok: false, preempted: true, error: 'preempted by viewer playback', dir }
+                : { ok: false, error: String((e && e.message) || e), dir });
+        });
         child.on('close', async (code) => {
             clearTimeout(timer);
+            reg.release?.();
+            if (reg.preempted) {
+                return resolve({ ok: false, preempted: true, error: 'preempted by viewer playback', dir });
+            }
             try { await fsp.writeFile(path.join(dir, 'showinfo.log'), stderr); } catch (_) { /* python falls back to file order */ }
             let nframes = 0;
             try { nframes = (await fsp.readdir(dir)).filter((f) => f.endsWith('.png')).length; } catch (_) { nframes = 0; }
@@ -4073,19 +4570,35 @@ function extractSubtitleFrames(url, ua, trackIndex, timeoutMs = SUP_EXTRACT_TIME
 }
 
 // Run ocr_imgsub.py on a rendered frame dir: pipe { dir, lang } in, read the WebVTT from stdout.
-function runOcrImgsubPython(frameDir, lang) {
+function runOcrImgsubPython(frameDir, lang, globalPreemptible = true) {
     return new Promise((resolve) => {
         let child;
         try {
-            child = spawn(OCR_PYTHON_BIN, [OCR_SCRIPT_IMGSUB], { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env }, cwd: __dirname });
+            child = spawn(OCR_PYTHON_BIN, [OCR_SCRIPT_IMGSUB], {
+                stdio: ['pipe', 'pipe', 'pipe'],
+                env: { ...process.env },
+                cwd: __dirname,
+                detached: process.platform !== 'win32',
+            });
         } catch (e) { return resolve({ ok: false, error: 'spawn failed: ' + String((e && e.message) || e) }); }
+        const registration = registerBackgroundCpuProcess(child, globalPreemptible);
         let out = '', err = '';
-        const timer = setTimeout(() => { try { child.kill('SIGKILL'); } catch (_) {} }, OCR_TIMEOUT_MS);
+        const timer = setTimeout(() => killBackgroundProcessTree(child), OCR_TIMEOUT_MS);
         child.stdout.on('data', (d) => { out += d.toString(); });
         child.stderr.on('data', (d) => { err += d.toString(); });
-        child.on('error', (e) => { clearTimeout(timer); resolve({ ok: false, error: String((e && e.message) || e) }); });
+        child.on('error', (e) => {
+            clearTimeout(timer);
+            registration.release?.();
+            resolve(registration.preempted
+                ? { ok: false, preempted: true, error: 'preempted by viewer playback' }
+                : { ok: false, error: String((e && e.message) || e) });
+        });
         child.on('close', (code) => {
             clearTimeout(timer);
+            registration.release?.();
+            if (registration.preempted) {
+                return resolve({ ok: false, preempted: true, error: 'preempted by viewer playback' });
+            }
             if (code === 0 && out.trim()) return resolve({ ok: true, vtt: out });
             let msg = `ocr exit ${code}`;
             try { const j = JSON.parse((err.trim().split('\n').pop() || '')); if (j && j.error) msg = j.error; } catch (_) {}
@@ -4106,6 +4619,7 @@ const OCR_EXTRACT_BACKOFF_MS = clampInt(process.env.OCR_EXTRACT_BACKOFF_MS, 30_0
 async function runOcrJob(job) {
     const { url, ua, index, jobId, callbackUrl, lang, fmt = 'pgs', uid = '' } = job;
     const useFrames = fmt === 'vobsub' || fmt === 'dvb';  // sub2video path; else PGS .sup parser
+    const globalPreemptible = jobPrio(job) !== JOB_PRIORITY.viewer;
     let supPath = null, frameDir = null, payload;
     try {
         postJobHeartbeat(job, 'extracting');
@@ -4114,31 +4628,53 @@ async function runOcrJob(job) {
             // Account lock per ATTEMPT (not around the loop): the 30/60 s backoff sleeps must not
             // hold the account's slot — another lane may legitimately use it between our tries.
             ex = await withAccountJobLock(accountJobKey(uid, url), () =>
-                useFrames ? extractSubtitleFrames(url, ua, index, SUP_EXTRACT_TIMEOUT_MS, uid) : extractSubtitleSup(url, ua, index, SUP_EXTRACT_TIMEOUT_MS, uid));
+                backgroundJobBlockedByViewer(job)
+                    ? { ok: false, preempted: true, error: 'preempted by viewer playback before OCR extraction' }
+                    : (useFrames
+                        ? extractSubtitleFrames(url, ua, index, SUP_EXTRACT_TIMEOUT_MS, uid, globalPreemptible)
+                        : extractSubtitleSup(url, ua, index, SUP_EXTRACT_TIMEOUT_MS, uid, globalPreemptible)));
             if (ex.ok) break;
             if (ex.dir) { fsp.rm(ex.dir, { recursive: true, force: true }).catch(() => {}); ex.dir = null; } // drop partial dir
+            if (ex.preempted) break;
             if (/\b(401|403)\b|Unauthorized|Forbidden/i.test(ex.error || '')) break; // abuse/auth block — do not hammer
             if (attempt < OCR_EXTRACT_RETRIES) await sleep(OCR_EXTRACT_BACKOFF_MS * (attempt + 1)); // 30s, 60s — spaced, not a burst
         }
         // OCR demuxes the whole input too (`-c:s copy` walks the file) — same per-provider
         // cooldown as a transcription once the attempts are done.
-        markTranscribeRun(url);
-        if (!ex.ok) {
+        if (!ex.preempted) markTranscribeRun(url);
+        if (ex.preempted) {
+            payload = { requeue: true };
+        } else if (!ex.ok) {
             payload = { jobId, ok: false, error: ('Subtitle extraction failed: ' + ex.error).slice(0, 300) };
         } else {
             let r;
-            if (useFrames) { frameDir = ex.dir; r = await runOcrImgsubPython(frameDir, lang || OCR_LANGS); }
-            else { supPath = ex.path; r = await runOcrPython(supPath, lang || OCR_LANGS); }
-            const segments = r.ok ? (r.vtt.match(/-->/g) || []).length : 0;
-            payload = (r.ok && segments > 0)
-                ? { jobId, ok: true, vtt: r.vtt, segments, sourceLang: null }
-                : { jobId, ok: false, error: String(r.error || 'OCR produced no cues').slice(0, 300) };
+            if (useFrames) {
+                frameDir = ex.dir;
+                r = await runOcrImgsubPython(frameDir, lang || OCR_LANGS, globalPreemptible);
+            } else {
+                supPath = ex.path;
+                r = await runOcrPython(supPath, lang || OCR_LANGS, globalPreemptible);
+            }
+            if (r.preempted) {
+                payload = { requeue: true };
+            } else {
+                const segments = r.ok ? (r.vtt.match(/-->/g) || []).length : 0;
+                payload = (r.ok && segments > 0)
+                    ? { jobId, ok: true, vtt: r.vtt, segments, sourceLang: null }
+                    : { jobId, ok: false, error: String(r.error || 'OCR produced no cues').slice(0, 300) };
+            }
         }
     } catch (e) {
         payload = { jobId, ok: false, error: String((e && e.message) || e).slice(0, 300) };
     } finally {
         if (supPath) fsp.unlink(supPath).catch(() => {});
         if (frameDir) fsp.rm(frameDir, { recursive: true, force: true }).catch(() => {});
+    }
+    if (payload?.requeue) {
+        console.log(`[media-gateway] ocr job ${jobId} preempted by viewer — re-queued`);
+        postJobHeartbeat(job, 'deferred');
+        insertByPriority(ocrQueue, job);
+        return;
     }
     try {
         await fetch(callbackUrl, {
@@ -4219,6 +4755,9 @@ function detectLanguageFromText(raw) {
 app.post('/sessions', requireGatewayAuth, async (req, res) => {
     const sessionCreateStartedAt = Date.now();
     sessionStartupStats.attempts += 1;
+    let viewerStartupReservation = null;
+    let createdSession = null;
+    let pendingOutputDir = null;
     try {
         const {
             sourceUrl,
@@ -4246,8 +4785,27 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
         }
 
         const normalizedOwnerKey = normalizeSessionKey(ownerKey);
+        const playbackProxyKey = proxyKeyFromUrl(sourceUrl);
+        viewerStartupReservation = reserveViewerStartup();
         const cleanupStartedAt = Date.now();
         let stoppedConflictingSessions = 0;
+        // Stale engine byte-pipes on the same account hold the same provider slot as
+        // the transcode about to start (the engine just failed over here) — abort them
+        // like any other conflicting session so ffmpeg doesn't open against a 458.
+        stoppedConflictingSessions += abortRawPumps(
+            (p) => p.proxyKey === playbackProxyKey, null, 'transcode session start');
+        // A background extraction (whisper/storyboard) mid-film on this account would fight the
+        // viewer for the single slot for MINUTES. Its already-produced WAV must not leave a
+        // service/pregen Whisper process fighting the viewer for CPU either.
+        stoppedConflictingSessions += preemptAccountExtractions(playbackProxyKey, 'transcode session start');
+        // CPU preemption does not hold a provider connection and must not trigger the provider
+        // slot-release delay below.
+        preemptAccountBackgroundWhispers(playbackProxyKey, 'transcode session start');
+        const globalBackgroundPreemptions = preemptBackgroundWorkGlobally(
+            playbackProxyKey,
+            'transcode session start',
+        );
+
         if (STOP_CONFLICTING_OWNER_SESSIONS && normalizedOwnerKey) {
             stoppedConflictingSessions += await stopConflictingOwnerSessions(normalizedOwnerKey);
         }
@@ -4255,20 +4813,6 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
         if (STOP_CONFLICTING_SOURCE_SESSIONS) {
             stoppedConflictingSessions += await stopConflictingSourceSessions(sourceUrl);
         }
-
-        // Stale engine byte-pipes on the same account hold the same provider slot as
-        // the transcode about to start (the engine just failed over here) — abort them
-        // like any other conflicting session so ffmpeg doesn't open against a 458.
-        stoppedConflictingSessions += abortRawPumps(
-            (p) => p.proxyKey === proxyKeyFromUrl(sourceUrl), null, 'transcode session start');
-        // A background extraction (whisper/storyboard) mid-film on this account would fight the
-        // viewer for the single slot for MINUTES. Its already-produced WAV must not leave a
-        // service/pregen Whisper process fighting the viewer for CPU either.
-        const playbackProxyKey = proxyKeyFromUrl(sourceUrl);
-        stoppedConflictingSessions += preemptAccountExtractions(playbackProxyKey, 'transcode session start');
-        // CPU preemption does not hold a provider connection and must not trigger the provider
-        // slot-release delay below.
-        preemptAccountBackgroundWhispers(playbackProxyKey, 'transcode session start');
 
         let slotReleaseWaitMs = 0;
         if (stoppedConflictingSessions > 0 && PROVIDER_SLOT_RELEASE_DELAY_MS > 0) {
@@ -4281,6 +4825,7 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
         const id = crypto.randomUUID();
         const accessToken = randomToken();
         const outputDir = resolveSessionDir(id);
+        pendingOutputDir = outputDir;
         await fsp.mkdir(outputDir, { recursive: true });
         const sourceKey = sourceSessionKey(sourceUrl);
 
@@ -4382,16 +4927,21 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
                 cleanupMs,
                 slotReleaseWaitMs,
                 stoppedConflictingSessions,
+                globalBackgroundExtractionPreemptions: globalBackgroundPreemptions.extractions,
+                globalBackgroundWhisperPreemptions: globalBackgroundPreemptions.whispers,
+                globalBackgroundCpuPreemptions: globalBackgroundPreemptions.cpu,
                 codecProfileMs,
                 codecProfileProbeRan,
                 ffmpegReadyMs: null,
                 playlistSegmentCount: 0,
                 playlistBufferSeconds: 0,
                 firstSegmentBytes: 0,
+                playlistSegmentBytes: 0,
                 startOffsetProbeMs: null,
                 totalMs: null
             }
         };
+        createdSession = session;
 
         session.videoMode = (
             forceExactMatroskaH264Reencode ||
@@ -4475,7 +5025,14 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
         });
     } catch (err) {
         console.error('[media-gateway] create session failed:', err);
-        res.status(500).json({ error: 'Failed to create media session' });
+        if (createdSession) {
+            await stopSession(createdSession).catch(() => {});
+        } else if (pendingOutputDir) {
+            await removeSessionDir(pendingOutputDir).catch(() => {});
+        }
+        if (!res.headersSent) res.status(500).json({ error: 'Failed to create media session' });
+    } finally {
+        releaseViewerStartup(viewerStartupReservation);
     }
 });
 
@@ -4516,7 +5073,10 @@ app.get('/sessions/:id/playlist.m3u8', requirePlaybackToken, async (req, res) =>
     if (!session) return res.status(404).send('Session not found');
 
     try {
-        await waitForPlaylist(session, PLAYLIST_REQUEST_TIMEOUT_MS);
+        if (session.lastError) throw new Error(session.lastError);
+        if (session.status === 'starting') {
+            await waitForPlaylist(session, PLAYLIST_REQUEST_TIMEOUT_MS);
+        }
         res.setHeader('Content-Type', 'application/vnd.apple.mpegurl; charset=utf-8');
         res.setHeader('Cache-Control', 'no-store');
         const playlist = await fsp.readFile(session.playlistPath, 'utf8');
@@ -4754,6 +5314,7 @@ function startFfmpeg(session) {
         session.status = 'failed';
         session.lastError = err.message;
         console.error(`[ffmpeg:${session.id}] failed to start:`, err.message);
+        wakePlaybackBlockedQueues();
     });
 
     child.on('exit', (code, signal) => {
@@ -4764,6 +5325,7 @@ function startFfmpeg(session) {
         } else if (session.status !== 'failed') {
             session.status = 'ended';
         }
+        wakePlaybackBlockedQueues();
     });
 
     waitForPlaylist(session, STARTUP_TIMEOUT_MS)
@@ -5410,7 +5972,7 @@ function runFfprobe(args, timeoutMs, sourceUrl, options = {}) {
         // probeCodecProfile may await a local-header probe first; without this atomic
         // check, a viewer can start in the meantime or two background requests can both
         // pass the HTTP guard and open provider connections.
-        if (backgroundKey && accountSlotBusyLocally(sourceUrl)) {
+        if (backgroundKey && viewerPlaybackActiveLocally()) {
             reject(backgroundProbeError(
                 409,
                 'account_busy',
@@ -5629,11 +6191,17 @@ function inspectHlsStartupPlaylist(playlist) {
     let durationSeconds = 0;
     let segmentCount = 0;
     let firstSegment = null;
+    const segmentFiles = [];
     let pendingDuration = null;
+    let completePlaylist = false;
 
     for (const rawLine of lines) {
         const line = rawLine.trim();
         if (!line) continue;
+        if (line === '#EXT-X-ENDLIST') {
+            completePlaylist = true;
+            continue;
+        }
         if (line.startsWith('#EXTINF:')) {
             const duration = Number.parseFloat(line.slice('#EXTINF:'.length).split(',')[0]);
             pendingDuration = Number.isFinite(duration) && duration >= 0 ? duration : 0;
@@ -5646,22 +6214,28 @@ function inspectHlsStartupPlaylist(playlist) {
             continue;
         }
         if (!firstSegment) firstSegment = segment;
+        segmentFiles.push(segment);
         segmentCount += 1;
         durationSeconds += pendingDuration;
         pendingDuration = null;
     }
 
-    durationSeconds = Number(durationSeconds.toFixed(3));
+    const measuredDurationSeconds = durationSeconds;
+    durationSeconds = Number(measuredDurationSeconds.toFixed(3));
     if (!segmentCount || !firstSegment) {
-        return { ready: false, reason: 'no_segments', segmentCount: 0, durationSeconds: 0, firstSegment: null };
+        return { ready: false, reason: 'no_segments', segmentCount: 0, durationSeconds: 0, firstSegment: null, segmentFiles: [] };
     }
-    if (durationSeconds < MIN_HLS_STARTUP_BUFFER_SECONDS) {
-        return { ready: false, reason: 'insufficient_duration', segmentCount, durationSeconds, firstSegment };
+    if (!completePlaylist && segmentCount < MIN_HLS_STARTUP_SEGMENTS) {
+        return { ready: false, reason: 'insufficient_segments', segmentCount, durationSeconds, firstSegment, segmentFiles };
     }
-    return { ready: true, reason: 'ready', segmentCount, durationSeconds, firstSegment };
+    if (!completePlaylist && measuredDurationSeconds < MIN_HLS_STARTUP_BUFFER_SECONDS) {
+        return { ready: false, reason: 'insufficient_duration', segmentCount, durationSeconds, firstSegment, segmentFiles };
+    }
+    return { ready: true, reason: 'ready', segmentCount, durationSeconds, firstSegment, segmentFiles };
 }
 
 async function waitForPlaylist(session, timeoutMs) {
+    if (session.status === 'ready') return;
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
         if (session.lastError) throw new Error(session.lastError);
@@ -5670,14 +6244,17 @@ async function waitForPlaylist(session, timeoutMs) {
                 const playlist = await fsp.readFile(session.playlistPath, 'utf8');
                 const inspection = inspectHlsStartupPlaylist(playlist);
                 if (inspection.ready) {
-                    const segmentPath = path.resolve(session.outputDir, inspection.firstSegment);
-                    if (isWithin(session.outputDir, segmentPath)) {
-                        const stat = await fsp.stat(segmentPath);
-                        if (stat.isFile() && stat.size > 0) {
+                    const segmentPaths = inspection.segmentFiles.map((segment) =>
+                        path.resolve(session.outputDir, segment));
+                    if (segmentPaths.length > 0 && segmentPaths.every((segmentPath) =>
+                        isWithin(session.outputDir, segmentPath))) {
+                        const stats = await Promise.all(segmentPaths.map((segmentPath) => fsp.stat(segmentPath)));
+                        if (stats.every((stat) => stat.isFile() && stat.size > 0)) {
                             session.startupTimings = session.startupTimings || {};
                             session.startupTimings.playlistSegmentCount = inspection.segmentCount;
                             session.startupTimings.playlistBufferSeconds = inspection.durationSeconds;
-                            session.startupTimings.firstSegmentBytes = stat.size;
+                            session.startupTimings.firstSegmentBytes = stats[0].size;
+                            session.startupTimings.playlistSegmentBytes = stats.reduce((sum, stat) => sum + stat.size, 0);
                             return;
                         }
                     }
@@ -5702,6 +6279,7 @@ async function stopSession(session) {
         await stopChildProcess(child);
         session.status = 'ended';
         sessions.delete(session.id);
+        wakePlaybackBlockedQueues();
         await removeSessionDir(session.outputDir);
     })();
 
@@ -5950,6 +6528,15 @@ function verifyRawToken(token, secret) {
     }
 }
 
+// `sid` is part of the HMAC-signed byte-pipe payload. Treat the fixed internal
+// job identifiers as capabilities: a browser-visible playback /raw token has a
+// per-session sid and therefore cannot be replayed against heavy worker routes
+// or use their unsigned query parameters (origin, callback, jobId) to claim
+// viewer priority and consume the replica's provider/CPU queues.
+function bytePipeAllowsPurpose(claims, expectedPurpose) {
+    return Boolean(claims && String(claims.sid || '') === String(expectedPurpose || ''));
+}
+
 function isHttpUrl(value) {
     try {
         const url = new URL(value);
@@ -5984,7 +6571,7 @@ function xtreamPlayerApiUrl({ serverUrl, username, password, action, streamId, l
 async function fetchProviderJson(url, userAgent, timeoutMs = XTREAM_REQUEST_TIMEOUT_MS, options = {}) {
     const controller = new AbortController();
     const backgroundKey = String(options.backgroundAccountKey || '');
-    if (backgroundKey && accountKeyBusyLocally(backgroundKey)) {
+    if (backgroundKey && viewerPlaybackActiveLocally()) {
         throw backgroundProbeError(409, 'account_busy', 'Account busy (active playback)');
     }
     if (backgroundKey && accountExtractions.get(backgroundKey)?.size) {

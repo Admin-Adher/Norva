@@ -334,9 +334,12 @@ test('Edge rollout is signed, dynamically reversible and keeps fast evidence sco
     policy,
     /untaggedScope: enabled[\s\S]*primary \? "lid-production-detect-only"[\s\S]*shadow \? "lid-shadow"/,
   );
-  // Primary is deliberately absent from taggedScope: mistag correction remains
-  // on full transcription. Shadow may compare, but its returned verdict is full.
-  assert.ok(policy.includes('taggedScope: enabled && shadow && !conflict ? "lid-shadow" : null'));
+  // Primary is deliberately absent from tagged detect-only: mistag correction remains
+  // on full transcription. Every historical path still carries an explicit signed scope,
+  // so a browser playback token cannot be replayed against /detect-language.
+  assert.ok(policy.includes('untaggedScope: "lid-legacy-full"'));
+  assert.ok(policy.includes('taggedScope: "lid-legacy-full"'));
+  assert.ok(policy.includes('taggedScope: enabled && !conflict ? (shadow ? "lid-shadow" : "lid-legacy-full") : null'));
   assert.ok(detector.includes('lidPolicy.untaggedScope'));
   assert.ok(verifier.includes('lidPolicy.taggedScope'));
   assert.ok(detector.includes('if (!lidPolicy.enabled) return'));

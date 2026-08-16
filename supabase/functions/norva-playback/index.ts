@@ -3037,8 +3037,8 @@ async function getLidDetectionPolicy(db: SupabaseClient): Promise<LidDetectionPo
   let value: LidDetectionPolicy = {
     enabled: true,
     mode: "off",
-    untaggedScope: null,
-    taggedScope: null,
+    untaggedScope: "lid-legacy-full",
+    taggedScope: "lid-legacy-full",
     cascadeMode: "off",
     cascadeScope: null,
     cascadePolicyVersion: null,
@@ -3084,11 +3084,11 @@ async function getLidDetectionPolicy(db: SupabaseClient): Promise<LidDetectionPo
       // Detect-only writes are restricted to previously untagged streams. A wrong tagged
       // correction can contaminate global union facets and is materially harder to roll back.
       untaggedScope: enabled && !conflict
-        ? (primary ? "lid-production-detect-only" : (shadow ? "lid-shadow" : null))
+        ? (primary ? "lid-production-detect-only" : (shadow ? "lid-shadow" : "lid-legacy-full"))
         : null,
       // Shadow always returns the historical full-transcript verdict. Primary mode keeps
       // tagged verification entirely on that historical path.
-      taggedScope: enabled && shadow && !conflict ? "lid-shadow" : null,
+      taggedScope: enabled && !conflict ? (shadow ? "lid-shadow" : "lid-legacy-full") : null,
       cascadeMode: !enabled
         ? "off"
         : (
@@ -4946,7 +4946,7 @@ async function ocrEnqueue(
   const cbUrl = `${PUBLIC_ORIGIN}/functions/v1/norva-playback/transcribe-callback`;
   const tessLang = TESS_LANG_MAP[lang] || "";
   const fmt = ["pgs", "vobsub", "dvb"].includes(stringOr(opts.fmt, "")) ? stringOr(opts.fmt, "") : "pgs";
-  const asyncUrl = `${pipe.url.replace("/raw/", "/ocr-async/")}?index=${idx}&jobId=${jobId}&callback=${encodeURIComponent(cbUrl)}&fmt=${fmt}${tessLang ? `&lang=${tessLang}` : ""}`;
+  const asyncUrl = `${pipe.url.replace("/raw/", "/ocr-async/")}?index=${idx}&jobId=${jobId}&callback=${encodeURIComponent(cbUrl)}&fmt=${fmt}&origin=${encodeURIComponent(origin)}${tessLang ? `&lang=${tessLang}` : ""}`;
   let gwStatus = 0, gwBody: JsonRecord | null = null;
   try {
     const gw = await fetch(asyncUrl, { method: "POST", signal: AbortSignal.timeout(20000) });

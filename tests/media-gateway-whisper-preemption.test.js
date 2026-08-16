@@ -98,6 +98,10 @@ function makeHarness({ viewerBusy = false, viewerBusyChecks = null, setPriorityT
   const children = [];
   const priorityCalls = [];
   const busyChecks = Array.isArray(viewerBusyChecks) ? [...viewerBusyChecks] : null;
+  const nextViewerBusy = () => {
+    if (busyChecks?.length) return busyChecks.shift();
+    return viewerBusy;
+  };
   const context = {
     Map,
     Set,
@@ -117,8 +121,10 @@ function makeHarness({ viewerBusy = false, viewerBusyChecks = null, setPriorityT
       primaryAttempts: 0, shadowAttempts: 0, totalFastMs: 0, failures: 0, timeouts: 0,
     },
     accountKeyBusyLocally() {
-      if (busyChecks?.length) return busyChecks.shift();
-      return viewerBusy;
+      return nextViewerBusy();
+    },
+    viewerPlaybackActiveLocally() {
+      return nextViewerBusy();
     },
     cleanVtt(value) {
       return String(value || '');
@@ -173,6 +179,7 @@ function makeHarness({ viewerBusy = false, viewerBusyChecks = null, setPriorityT
         accountBackgroundWhispers,
         backgroundWhisperCount,
         preemptAccountBackgroundWhispers,
+        preemptBackgroundWhispersGlobally,
         runProductionWhisperDetectOnly,
         runWhisperDetect,
         runWhisperVtt,
@@ -206,6 +213,33 @@ test('same-account raw playback kills and releases service/pregen Whisper', asyn
   assert.deepEqual(harness.children[0].killSignals, ['SIGKILL']);
   assert.equal(harness.preemptAccountBackgroundWhispers(providerKey, 'parallel range'), 0);
   assert.deepEqual(harness.children[0].killSignals, ['SIGKILL']);
+  harness.children[0].emit('close', null);
+
+  const result = await pending;
+  assert.equal(result.preempted, true);
+  assert.match(result.failReason, /preempted by viewer/i);
+  assert.equal(harness.backgroundWhisperCount(), 0);
+  assert.equal(harness.active(), 0);
+});
+
+test('viewer playback globally preempts background Whisper on another account exactly once', async () => {
+  const harness = makeHarness();
+  const pending = harness.runWhisperVtt(
+    '/tmp/chunk.wav',
+    '',
+    60_000,
+    harness.whisperOptionsForJob({ url: providerUrl, prio: 2 }),
+  );
+
+  assert.equal(
+    harness.preemptBackgroundWhispersGlobally('provider.test/bob', 'viewer playback'),
+    1,
+  );
+  assert.deepEqual(harness.children[0].killSignals, ['SIGKILL']);
+  assert.equal(
+    harness.preemptBackgroundWhispersGlobally('provider.test/bob', 'parallel range'),
+    0,
+  );
   harness.children[0].emit('close', null);
 
   const result = await pending;

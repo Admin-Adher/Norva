@@ -3,6 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const vm = require('node:vm');
 
@@ -104,33 +105,111 @@ test('a partial request profile is completed once before FFmpeg chooses copy or 
     );
 });
 
-test('Gateway readiness rejects a header-only or one-frame HLS playlist', () => {
+test('Gateway readiness requires ten seconds and three finalized HLS segments', () => {
     const inspectHlsStartupPlaylist = loadGatewayFunction(
         'inspectHlsStartupPlaylist',
         'waitForPlaylist',
-        { path, MIN_HLS_STARTUP_BUFFER_SECONDS: 2 },
+        { path, MIN_HLS_STARTUP_BUFFER_SECONDS: 10, MIN_HLS_STARTUP_SEGMENTS: 3 },
     );
 
     assert.deepStrictEqual(
         plain(inspectHlsStartupPlaylist('#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:0\n')),
-        { ready: false, reason: 'no_segments', segmentCount: 0, durationSeconds: 0, firstSegment: null },
+        { ready: false, reason: 'no_segments', segmentCount: 0, durationSeconds: 0, firstSegment: null, segmentFiles: [] },
     );
     assert.deepStrictEqual(
         plain(inspectHlsStartupPlaylist('#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXTINF:0.100000,\nsegment-00000.ts\n')),
-        { ready: false, reason: 'insufficient_duration', segmentCount: 1, durationSeconds: 0.1, firstSegment: 'segment-00000.ts' },
-    );
-    assert.deepStrictEqual(
-        plain(inspectHlsStartupPlaylist('#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXTINF:4.004000,\nsegment-00000.ts\n')),
-        { ready: true, reason: 'ready', segmentCount: 1, durationSeconds: 4.004, firstSegment: 'segment-00000.ts' },
+        {
+            ready: false,
+            reason: 'insufficient_segments',
+            segmentCount: 1,
+            durationSeconds: 0.1,
+            firstSegment: 'segment-00000.ts',
+            segmentFiles: ['segment-00000.ts'],
+        },
     );
 
+    const playlist = (durations, endList = false) => [
+        '#EXTM3U',
+        '#EXT-X-TARGETDURATION:4',
+        ...durations.flatMap((duration, index) => [
+            `#EXTINF:${duration.toFixed(6)},`,
+            `segment-${String(index).padStart(5, '0')}.ts`,
+        ]),
+        ...(endList ? ['#EXT-X-ENDLIST'] : []),
+        '',
+    ].join('\n');
+
+    assert.equal(inspectHlsStartupPlaylist(playlist([3.333, 3.333, 3.333])).reason, 'insufficient_duration');
+    assert.equal(inspectHlsStartupPlaylist(playlist([3.33334, 3.33334, 3.33334])).ready, true,
+        'comparison uses the unrounded duration at the exact ten-second boundary');
+    assert.equal(inspectHlsStartupPlaylist(playlist([4.004, 4.004, 4.004])).ready, true,
+        'the normal 4 s plan exposes three finalized segments (~12 s)');
+    assert.equal(inspectHlsStartupPlaylist(playlist([2, 2, 2, 2, 2])).ready, true,
+        'the exact-Matroska 2 s plan exposes five finalized segments');
+    assert.equal(inspectHlsStartupPlaylist(playlist([4], true)).ready, true,
+        'a genuinely complete short VOD is not forced to time out');
+
     const source = readGateway();
+    assert.match(source, /MIN_HLS_STARTUP_BUFFER_SECONDS\s*=\s*clampInt\([^,]+,\s*10,\s*1,\s*30\)/);
+    assert.match(source, /MIN_HLS_STARTUP_SEGMENTS\s*=\s*clampInt\([^,]+,\s*3,\s*1,\s*10\)/);
     assert.match(
         source,
-        /waitForPlaylist[\s\S]*inspectHlsStartupPlaylist[\s\S]*stat[\s\S]*size\s*>\s*0/,
-        'startup must wait for the finalized referenced segment to be non-empty',
+        /waitForPlaylist[\s\S]*inspection\.segmentFiles[\s\S]*Promise\.all[\s\S]*stats\.every[\s\S]*size\s*>\s*0/,
+        'startup must wait for every referenced buffered segment to exist and be non-empty',
     );
     assert.match(source, /startupTimings[\s\S]*playlistBufferSeconds/);
+});
+
+test('Gateway readiness materializes every segment in the ten-second buffer', async () => {
+    const source = readGateway();
+    const start = source.indexOf('function inspectHlsStartupPlaylist(');
+    const end = source.indexOf('\nasync function stopSession(', start);
+    assert.ok(start >= 0 && end > start);
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'norva-hls-ready-'));
+    const isWithin = (root, candidate) => {
+        const relative = path.relative(path.resolve(root), path.resolve(candidate));
+        return relative !== '' && !relative.startsWith('..') && !path.isAbsolute(relative);
+    };
+    const harness = vm.runInNewContext(
+        `(() => { ${source.slice(start, end)}; return { inspectHlsStartupPlaylist, waitForPlaylist }; })()`,
+        {
+            path,
+            fs,
+            fsp: fs.promises,
+            sleep: async () => {},
+            isWithin,
+            MIN_HLS_STARTUP_BUFFER_SECONDS: 10,
+            MIN_HLS_STARTUP_SEGMENTS: 3,
+        },
+    );
+    const playlistPath = path.join(dir, 'playlist.m3u8');
+    fs.writeFileSync(playlistPath, [
+        '#EXTM3U',
+        '#EXT-X-TARGETDURATION:4',
+        '#EXTINF:4.000000,', 'segment-00000.ts',
+        '#EXTINF:4.000000,', 'segment-00001.ts',
+        '#EXTINF:4.000000,', 'segment-00002.ts',
+        '',
+    ].join('\n'));
+    fs.writeFileSync(path.join(dir, 'segment-00000.ts'), Buffer.alloc(11));
+    fs.writeFileSync(path.join(dir, 'segment-00001.ts'), Buffer.alloc(13));
+    const session = { outputDir: dir, playlistPath, startupTimings: {} };
+
+    try {
+        await assert.rejects(harness.waitForPlaylist(session, 15), /Playlist timeout/,
+            'an absent final segment cannot be advertised');
+        fs.writeFileSync(path.join(dir, 'segment-00002.ts'), Buffer.alloc(0));
+        await assert.rejects(harness.waitForPlaylist(session, 15), /Playlist timeout/,
+            'an empty final segment cannot be advertised');
+        fs.writeFileSync(path.join(dir, 'segment-00002.ts'), Buffer.alloc(17));
+        await harness.waitForPlaylist(session, 100);
+        assert.equal(session.startupTimings.playlistSegmentCount, 3);
+        assert.equal(session.startupTimings.playlistBufferSeconds, 12);
+        assert.equal(session.startupTimings.firstSegmentBytes, 11);
+        assert.equal(session.startupTimings.playlistSegmentBytes, 41);
+    } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
 });
 
 test('Gateway MPEG-TS HLS copies only AAC-LC stereo and transcodes MP3-family audio', () => {
@@ -285,7 +364,7 @@ test('an exact finite Matroska H264 profile selects the 2s keyframe encode plan 
 test('exact Matroska H264 uses independent 2s HLS segments with forced keyframes and no split-by-time', () => {
     const source = readGateway();
 
-    assert.match(source, /const GATEWAY_VERSION = 86;/);
+    assert.match(source, /const GATEWAY_VERSION = 87;/);
     assert.match(source, /exactMatroskaH264ReencodeProtocol:\s*1/);
     assert.match(source, /exactMatroskaH264HlsTargetSeconds:\s*EXACT_MATROSKA_H264_HLS_TARGET_SECONDS/);
     assert.match(source, /exactMatroskaH264MaxPixels:\s*EXACT_MATROSKA_H264_MAX_PIXELS/);

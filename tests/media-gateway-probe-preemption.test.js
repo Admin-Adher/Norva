@@ -23,7 +23,7 @@ function sourceBetween(startMarker, endMarker) {
 }
 
 const registrationSource = sourceBetween(
-  'function registerAccountExtraction',
+  'function preemptExtractionEntry',
   '// True while THIS box holds',
 );
 const probeRoute = sourceBetween(
@@ -53,10 +53,14 @@ class FakeChild extends EventEmitter {
   }
 }
 
-function makeHarness() {
+function makeHarness({ globalViewerBusyChecks = null } = {}) {
   const children = [];
   const spawnCalls = [];
   let viewerBusy = false;
+  let globalViewerBusy = false;
+  const globalBusyChecks = Array.isArray(globalViewerBusyChecks)
+    ? [...globalViewerBusyChecks]
+    : null;
   const context = {
     Error,
     JSON,
@@ -83,6 +87,10 @@ function makeHarness() {
     accountSlotBusyLocally() {
       return viewerBusy;
     },
+    viewerPlaybackActiveLocally() {
+      if (globalBusyChecks?.length) return globalBusyChecks.shift();
+      return globalViewerBusy;
+    },
     spawn(command, args, options) {
       const child = new FakeChild();
       children.push(child);
@@ -97,7 +105,10 @@ function makeHarness() {
       ${runnerSource}
       return {
         accountExtractions,
+        registerAccountExtraction,
         preemptAccountExtractions,
+        preemptBackgroundExtractionsGlobally,
+        viewerQosStats,
         runFfprobe,
       };
     })()`,
@@ -109,6 +120,7 @@ function makeHarness() {
     spawnCalls,
     setViewerBusy(value) {
       viewerBusy = Boolean(value);
+      globalViewerBusy = Boolean(value);
     },
   };
 }
@@ -233,6 +245,23 @@ test('the spawn boundary prevents concurrent background probes for one account',
   harness.children[0].stdout.emit('data', Buffer.from('{}'));
   harness.children[0].emit('exit', 0, null);
   await first;
+});
+
+test('a global viewer winning the spawn race preempts and types a background probe', async () => {
+  const harness = makeHarness({ globalViewerBusyChecks: [false, true] });
+  const pending = harness.runFfprobe([], 1_000, providerUrl, { background: true });
+
+  assert.equal(harness.children.length, 1);
+  assert.deepEqual(harness.children[0].killSignals, ['SIGKILL']);
+  assert.equal(harness.viewerQosStats.globalExtractionPreemptions, 1);
+  harness.children[0].emit('exit', null, 'SIGKILL');
+
+  await assert.rejects(pending, (error) => {
+    assert.equal(error.status, 409);
+    assert.equal(error.code, 'viewer_preempted');
+    return true;
+  });
+  assert.equal(harness.accountExtractions.size, 0);
 });
 
 test('ordinary ffprobes keep their original unregistered behavior', async () => {

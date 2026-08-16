@@ -21,7 +21,7 @@ function section(startMarker, endMarker) {
 }
 
 test('gateway health revision identifies the combined production handoff build', () => {
-  assert.match(source, /const GATEWAY_VERSION = 86;/);
+  assert.match(source, /const GATEWAY_VERSION = 87;/);
 });
 
 test('/raw waits for released provider holders before opening the replacement stream', () => {
@@ -40,7 +40,7 @@ test('/raw waits for released provider holders before opening the replacement st
 
 test('a provider extraction grants handoff eligibility exactly once while cleanup is pending', () => {
   const helper = section(
-    'function preemptAccountExtractions(proxyKey, reason)',
+    'function preemptExtractionEntry(entry)',
     '// Provider extraction and Whisper inference',
   );
   let killCount = 0;
@@ -63,6 +63,37 @@ test('a provider extraction grants handoff eligibility exactly once while cleanu
   assert.equal(killCount, 1);
 });
 
+test('global viewer QoS preempts only background-classified extractions outside its account', () => {
+  const helper = section(
+    'function preemptExtractionEntry(entry)',
+    '// Provider extraction and Whisper inference',
+  );
+  const background = { preempted: false, globalPreemptible: true, child: { killSignals: [], kill(signal) { this.killSignals.push(signal); } } };
+  const viewer = { preempted: false, globalPreemptible: false, child: { killSignals: [], kill(signal) { this.killSignals.push(signal); } } };
+  const sameAccount = { preempted: false, globalPreemptible: true, child: { killSignals: [], kill(signal) { this.killSignals.push(signal); } } };
+  const context = {
+    accountExtractions: new Map([
+      ['provider/background', new Set([background, viewer])],
+      ['provider/current-viewer', new Set([sameAccount])],
+    ]),
+    console: { log() {} },
+    results: null,
+  };
+
+  vm.runInNewContext(
+    `${helper}\nresults = [\n`
+      + `  preemptBackgroundExtractionsGlobally('provider/current-viewer', 'viewer start'),\n`
+      + `  preemptBackgroundExtractionsGlobally('provider/current-viewer', 'parallel range'),\n`
+      + `];`,
+    context,
+  );
+
+  assert.deepEqual(Array.from(context.results), [1, 0]);
+  assert.deepEqual(background.child.killSignals, ['SIGKILL']);
+  assert.deepEqual(viewer.child.killSignals, []);
+  assert.deepEqual(sameAccount.child.killSignals, []);
+});
+
 test('/raw permits one self-handoff 458 retry without making 458 generally retryable', () => {
   const route = section("app.get('/raw/:token'", '// Tee the leading bytes');
 
@@ -75,6 +106,12 @@ test('/raw permits one self-handoff 458 retry without making 458 generally retry
   assert.match(route, /!rawHandoffRetryUsed[\s\S]{0,180}abortedForHandoff > 0/);
   assert.match(route, /upstream\.status === 458/);
   assert.match(route, /abandonRawAttempt\(attemptGuard, upstream\.body, 'raw_handoff_slot_busy'\)/);
+  assert.match(route, /preemptBackgroundWorkGlobally\(pumpProxyKey, rawPlaybackReason\)/);
+  assert.doesNotMatch(
+    route,
+    /abortedForHandoff\s*\+=\s*preemptBackgroundWorkGlobally/,
+    'cross-account QoS preemption must not earn a provider-slot 458 retry',
+  );
 
   const genericRetry = route.indexOf('const retryable = shouldRetryProviderStatus(upstream.status)');
   assert.ok(genericRetry > route.indexOf('rawHandoffRetryUsed = true'));
