@@ -569,6 +569,39 @@ test('an exact unknown mono track clears every stale language display field', ()
   assert.strictEqual(page.getProbeAudioTracks()[0].active, true);
 });
 
+test('the exact audio menu preserves duplicate-language and untagged file tracks', () => {
+  const context = { window: {}, console, setTimeout, clearTimeout };
+  vm.runInNewContext(watchSrc, context, { filename: 'WatchPage.js' });
+  const page = Object.create(context.window.WatchPage.prototype);
+  page.content = {};
+  page.pendingPlaybackPreferences = null;
+  page.currentPlaybackMode = 'gateway-session';
+  page.audioLanguageValidationStatus = 'verified';
+  page.audioTracks = [];
+  page.currentStreamInfo = { audioTracks: [] };
+  page.selectedAudioStreamIndex = null;
+  page.selectedAudioTrackUserChoice = false;
+  page.directAudioStreamIndex = null;
+  page.updateAudioTracks = () => {};
+
+  page.applyCloudMultiAudioTracks({
+    audioDefaultLanguage: 'fre',
+    audioTracks: [
+      { index: 1, language: 'fre', codec: 'aac', channels: 2, default: true },
+      { index: 2, language: 'fre', codec: 'eac3', channels: 6 },
+      { index: 3, language: null, codec: 'aac', channels: 2 }
+    ]
+  });
+
+  assert.deepStrictEqual(Array.from(page.audioTracks, (track) => track.index), [1, 2, 3]);
+  assert.deepStrictEqual(Array.from(page.audioTracks, (track) => track.language), ['fr', 'fr', null]);
+  assert.strictEqual(page.audioTracks[0].default, true);
+  assert.strictEqual(page.audioTracks[1].codec, 'eac3');
+  assert.strictEqual(page.audioTracks[1].channels, 6);
+  assert.strictEqual(page.audioTracks[2].codec, 'aac');
+  assert.strictEqual(page.getProbeAudioTracks().length, 3);
+});
+
 test('an exact probe language is visible while Whisper proof remains a separate status', () => {
   const context = { window: {}, console, setTimeout, clearTimeout };
   vm.runInNewContext(watchSrc, context, { filename: 'WatchPage.js' });

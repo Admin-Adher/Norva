@@ -109,6 +109,18 @@ const PLAYBACK_EVENT_TYPES = new Set([
 ]);
 const PLAYBACK_SESSION_UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const LANGUAGE_VALIDATION_PROTOCOL = 2;
+const LANGUAGE_VALIDATION_METHOD = "whisper-strict-consensus-v4";
+const LANGUAGE_VALIDATION_SCOPE = "lid-legacy-full";
+const LANGUAGE_VALIDATION_RETRY_SECONDS = 24 * 60 * 60;
+const LANGUAGE_VALIDATION_LEASE_SECONDS = 900;
+const LANGUAGE_VALIDATION_FETCH_TIMEOUT_MS = 180_000;
+const LANGUAGE_VALIDATION_JOB_LEASE_SECONDS = 300;
+const LANGUAGE_VALIDATION_POLL_SECONDS = 3;
+const LANGUAGE_VALIDATION_MIN_SAMPLES = 4;
+const LANGUAGE_VALIDATION_MIN_PROBABILITY = 0.95;
+const LANGUAGE_VALIDATION_MIN_WORDS = 12;
+const LANGUAGE_VALIDATION_MIN_UNIQUE_WORDS = 8;
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SUPABASE_SERVICE_KEY =
@@ -148,6 +160,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
 
 let runtimeConfigCache: { value: RuntimeConfig; expiresAt: number } | null = null;
 let lidDetectionPolicyCache: { value: LidDetectionPolicy; expiresAt: number } | null = null;
+const languageValidationTasks = new Map<string, Promise<void>>();
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -168,6 +181,10 @@ Deno.serve(async (req) => {
         nativeHeartbeatProtocol: 1,
         providerCircuitProtocol: 1,
         exactFileCodecProfileProtocol: 1,
+        languageValidationProtocol: LANGUAGE_VALIDATION_PROTOCOL,
+        languageValidationGatewayMethod: "POST",
+        languageValidationHeaderCapability: true,
+        languageValidationServiceAuthRequired: true,
         relayTakeoverProtocol: 1,
         handoffCircuitGraceMs: PROVIDER_HANDOFF_CIRCUIT_GRACE_MS,
         engineTrackProbeBlocking: false,
@@ -206,6 +223,27 @@ Deno.serve(async (req) => {
     ) {
       const identity = await requireIdentity(req, supabase);
       return json(req, await createPlaybackSession(req, identity.userId, supabase, identity.deviceId ?? null), 201);
+    }
+    if (
+      req.method === "POST" &&
+      segments[0] === "playback" &&
+      segments[1] === "language-validation" &&
+      !segments[2]
+    ) {
+      const identity = await requireIdentity(req, supabase);
+      const result = await startPlaybackLanguageValidation(req, identity.userId, supabase);
+      return json(req, result.body, result.status);
+    }
+    if (
+      req.method === "GET" &&
+      segments[0] === "playback" &&
+      segments[1] === "language-validation" &&
+      segments[2] &&
+      !segments[3]
+    ) {
+      const identity = await requireIdentity(req, supabase);
+      const result = await getPlaybackLanguageValidation(segments[2], identity.userId, supabase);
+      return json(req, result.body, result.status);
     }
     if (req.method === "POST" && segments[0] === "playback" && segments[1] === "events") {
       const identity = await requireIdentity(req, supabase);
@@ -1189,6 +1227,8 @@ async function createPlaybackSession(
       ...gateway.session,
       audioStreamIndex: gateway.audioStreamIndex ?? null,
       audio_stream_index: gateway.audioStreamIndex ?? null,
+      requestedAudioStreamIndex: gateway.requestedAudioStreamIndex ?? null,
+      requested_audio_stream_index: gateway.requestedAudioStreamIndex ?? null,
       requestedSeekOffset: gateway.requestedSeekOffset ?? 0,
       requested_seek_offset: gateway.requestedSeekOffset ?? 0,
       actualStartOffset: gateway.actualStartOffset ?? 0,
@@ -1197,6 +1237,10 @@ async function createPlaybackSession(
       local_seek_target: gateway.localSeekTarget ?? 0,
       sourceTimestamps: gateway.sourceTimestamps === true,
       source_timestamps: gateway.sourceTimestamps === true,
+      audioRenditions: gateway.audioRenditions ?? null,
+      audio_renditions: gateway.audioRenditions ?? null,
+      multiAudioHls: gateway.multiAudioHls ?? null,
+      multi_audio_hls: gateway.multiAudioHls ?? null,
     }
     : gateway.session;
   return {
@@ -1211,6 +1255,8 @@ async function createPlaybackSession(
       audioMode: gateway.audioMode ?? null,
       audioStreamIndex: gateway.audioStreamIndex ?? null,
       audio_stream_index: gateway.audioStreamIndex ?? null,
+      requestedAudioStreamIndex: gateway.requestedAudioStreamIndex ?? null,
+      requested_audio_stream_index: gateway.requestedAudioStreamIndex ?? null,
       requestedSeekOffset: gateway.requestedSeekOffset ?? 0,
       requested_seek_offset: gateway.requestedSeekOffset ?? 0,
       actualStartOffset: gateway.actualStartOffset ?? 0,
@@ -1219,10 +1265,1224 @@ async function createPlaybackSession(
       local_seek_target: gateway.localSeekTarget ?? 0,
       sourceTimestamps: gateway.sourceTimestamps === true,
       source_timestamps: gateway.sourceTimestamps === true,
+      audioRenditions: gateway.audioRenditions ?? null,
+      audio_renditions: gateway.audioRenditions ?? null,
+      multiAudioHls: gateway.multiAudioHls ?? null,
+      multi_audio_hls: gateway.multiAudioHls ?? null,
       codecProfile: hasUsefulCodecProfile(responseCodecProfile) ? responseCodecProfile : null,
       transportExpiresAt: gatewayTransportExpiresAt,
       sessionExpiresAt: expiresAt,
     },
+  };
+}
+
+type StrictLanguageValidationEvidence = {
+  index: number;
+  language: string;
+  method: typeof LANGUAGE_VALIDATION_METHOD;
+  consensus: number;
+  sampleCount: number;
+  rejectedSpeechSampleCount: 0;
+  minSampleProbability: number;
+  minSampleWordCount: number;
+  minSampleUniqueWordCount: number;
+};
+
+// User-triggered, exact-file strict LID. The caller supplies only owned catalogue
+// coordinates plus the stream-index inventory it just rendered. Provider credentials,
+// the raw token and the provider URL remain server-only. V1 deliberately accepts movies
+// only; an episode needs the separate canonical episode-registry proof.
+async function startPlaybackLanguageValidation(
+  req: Request,
+  userId: string,
+  db: SupabaseClient,
+) {
+  const body = await readJson(req);
+  const allowedFields = new Set(["sourceId", "itemType", "itemId", "expectedAudioIndices"]);
+  const unexpectedFields = Object.keys(body).filter((key) => !allowedFields.has(key));
+  if (unexpectedFields.length) {
+    throw new HttpError(400, "Unexpected language-validation fields", {
+      code: "LANGUAGE_VALIDATION_BODY_INVALID",
+      fields: unexpectedFields.slice(0, 8),
+    });
+  }
+
+  const sourceId = stringOr(body.sourceId, "");
+  const itemType = stringOr(body.itemType, "");
+  const itemId = stringOr(body.itemId, "");
+  if (!sourceId || !itemType || !itemId) {
+    throw new HttpError(400, "sourceId, itemType and itemId are required");
+  }
+  if (itemType !== "movie") {
+    throw new HttpError(400, "Language validation currently supports movie VOD only", {
+      code: "LANGUAGE_VALIDATION_MOVIE_ONLY",
+    });
+  }
+  const expectedAudioIndices = exactLanguageValidationIndices(body.expectedAudioIndices);
+
+  await assertOwnedSource(sourceId, userId, db);
+  await requireLanguageValidationEntitlement(userId, db);
+
+  const exactProfile = await loadExactLanguageValidationProfile(
+    db,
+    userId,
+    sourceId,
+    itemId,
+  );
+  const exactAudioIndices = exactProfile.audioTracks
+    .map((track) => Number(track.index))
+    .sort((left, right) => left - right);
+  if (!sameIntegerSet(expectedAudioIndices, exactAudioIndices)) {
+    throw new HttpError(409, "Audio stream inventory changed", {
+      code: "AUDIO_INDEX_MAP_MISMATCH",
+      expectedAudioIndices,
+      exactAudioIndices,
+    });
+  }
+
+  // A verified provider identity is both the exact-file cache namespace and the
+  // distributed provider lease. A source-scoped fallback would let two tenants
+  // sharing one panel validate concurrently, so this security-sensitive route
+  // fails closed until the server-written identity link exists.
+  const identityKey = await loadLanguageValidationIdentity(db, userId, sourceId);
+  let cache = await loadLanguageValidationCache(db, identityKey, itemId);
+  if (!cache || !cache.audio_probed_at) {
+    // The v90 finite-MKV lane already proved this exact file's Info + Tracks
+    // structure before returning 201. Seed only that server-observed inventory;
+    // this opens no provider connection and never treats container language tags
+    // as speech verification.
+    const seeded = await shareFileTracks(
+      db,
+      identityKey,
+      "movie",
+      itemId,
+      exactProfile.audioTracks,
+      exactProfile.subtitleTracks,
+      true,
+      true,
+    );
+    if (!seeded) {
+      throw new HttpError(500, "Unable to cache the exact audio inventory", {
+        code: "LANGUAGE_VALIDATION_CACHE_SEED_FAILED",
+      });
+    }
+    cache = await loadLanguageValidationCache(db, identityKey, itemId);
+  }
+  if (!cache || !cache.audio_probed_at) {
+    throw new HttpError(409, "Exact audio inventory is not cached yet", {
+      code: "LANGUAGE_VALIDATION_CACHE_REQUIRED",
+    });
+  }
+  let cachedAudioTracks = exactCachedAudioTracks(cache.audio_tracks, exactAudioIndices);
+  if (!cachedAudioTracks) {
+    const cacheStatus = stringOr(recordOrEmpty(cache.audio_lang_verification).status, "");
+    if (
+      cacheStatus === "validating" &&
+      await hasActiveLanguageValidationJob(db, identityKey, itemId)
+    ) {
+      throw new HttpError(409, "Cached audio inventory is being validated", {
+        code: "LANGUAGE_VALIDATION_CACHE_BUSY",
+      });
+    }
+    // A newly completed gateway-inband profile is the exact same server-side
+    // evidence used for the initial seed. It can safely repair a stale,
+    // non-active cache map without opening another provider connection.
+    await shareFileTracks(
+      db,
+      identityKey,
+      "movie",
+      itemId,
+      exactProfile.audioTracks,
+      exactProfile.subtitleTracks,
+      true,
+      true,
+    );
+    cache = await loadLanguageValidationCache(db, identityKey, itemId);
+    cachedAudioTracks = cache
+      ? exactCachedAudioTracks(cache.audio_tracks, exactAudioIndices)
+      : null;
+    if (!cache || !cachedAudioTracks) {
+      throw new HttpError(409, "Cached audio inventory does not match the exact codec profile", {
+        code: "LANGUAGE_VALIDATION_CACHE_MISMATCH",
+      });
+    }
+  }
+  const profileFingerprint = await languageValidationProfileFingerprint(
+    exactProfile.profile,
+    exactProfile.audioTracks,
+    exactProfile.fileSizeBytes,
+  );
+
+  const cachedStrict = cachedStrictLanguageValidation(cache, exactAudioIndices, {
+    profileFingerprint,
+    profileProbedAt: exactProfile.profileProbedAt,
+    fileSizeBytes: exactProfile.fileSizeBytes,
+  });
+  if (cachedStrict) {
+    return {
+      status: 200,
+      body: languageValidationResponse({
+        itemId,
+        audioTracks: cachedStrict,
+        verifiedAt: stringOrNull(cache.audio_lang_verified_at),
+        cached: true,
+      }),
+    };
+  }
+
+  const retryAt = stringOrNull(cache.audio_lang_retry_at);
+  const retryAtMs = retryAt ? Date.parse(retryAt) : Number.NaN;
+  if (Number.isFinite(retryAtMs) && retryAtMs > Date.now()) {
+    return {
+      status: 429,
+      body: languageValidationRejectedResponse({
+        itemId,
+        errorCode: "LANGUAGE_VALIDATION_RETRY_LATER",
+        retryAt,
+        retryAfterSeconds: Math.max(1, Math.ceil((retryAtMs - Date.now()) / 1000)),
+      }),
+    };
+  }
+
+  const waitUntil = requireLanguageValidationWaitUntil();
+  const { data: started, error: startError } = await db.rpc(
+    "start_catalog_file_audio_validation_job",
+    {
+      p_requested_by: userId,
+      p_source_id: sourceId,
+      p_variant_id: exactProfile.variantId,
+      p_identity_key: identityKey,
+      p_external_id: itemId,
+      p_expected_audio_indices: exactAudioIndices,
+      p_profile_fingerprint: profileFingerprint,
+      p_profile_probed_at: exactProfile.profileProbedAt,
+      p_file_size_bytes: exactProfile.fileSizeBytes,
+      p_cached_audio_tracks: cachedAudioTracks,
+    },
+  );
+  if (startError) throwDb(startError, "Unable to start strict language validation");
+  const startRecord = recordOrEmpty(started);
+  if (startRecord.limited === true) {
+    return {
+      status: 429,
+      body: languageValidationRejectedResponse({
+        itemId,
+        errorCode: stringOr(startRecord.code, "LANGUAGE_VALIDATION_RATE_LIMITED"),
+        retryAt: stringOrNull(startRecord.retryAt),
+        retryAfterSeconds: boundedNullableInt(startRecord.retryAfterSeconds, 1, 86_400) ?? 30,
+      }),
+    };
+  }
+  if (startRecord.busy === true) {
+    throw new HttpError(409, "Provider file language validation is already running", {
+      code: "LANGUAGE_VALIDATION_JOB_BUSY",
+    });
+  }
+  const jobId = stringOr(startRecord.jobId, "");
+  if (!PLAYBACK_SESSION_UUID_PATTERN.test(jobId)) {
+    throw new HttpError(500, "Language validation job was not created");
+  }
+  if (languageValidationJobScheduleDue(startRecord)) {
+    scheduleLanguageValidationJob(waitUntil, db, jobId);
+  }
+  return {
+    status: 202,
+    body: languageValidationPendingResponse({
+      jobId,
+      itemId,
+      state: stringOr(startRecord.state, "queued"),
+      retryAt: stringOrNull(startRecord.retryAt),
+    }),
+  };
+}
+function exactLanguageValidationIndices(value: unknown): number[] {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 32) {
+    throw new HttpError(400, "expectedAudioIndices must contain 1 to 32 stream indices");
+  }
+  const indices = value.map((entry) => {
+    if (!Number.isInteger(entry) || Number(entry) < 0 || Number(entry) > 128) {
+      throw new HttpError(400, "expectedAudioIndices contains an invalid stream index");
+    }
+    return Number(entry);
+  });
+  if (new Set(indices).size !== indices.length) {
+    throw new HttpError(400, "expectedAudioIndices must not contain duplicates");
+  }
+  return indices;
+}
+
+function sameIntegerSet(left: number[], right: number[]) {
+  if (left.length !== right.length) return false;
+  const a = [...left].sort((x, y) => x - y);
+  const b = [...right].sort((x, y) => x - y);
+  return a.every((value, index) => value === b[index]);
+}
+
+type LanguageValidationWaitUntil = (task: Promise<unknown>) => void;
+
+async function getPlaybackLanguageValidation(
+  jobId: string,
+  userId: string,
+  db: SupabaseClient,
+) {
+  if (!PLAYBACK_SESSION_UUID_PATTERN.test(jobId)) {
+    throw new HttpError(400, "Invalid language validation job id");
+  }
+  const { data, error } = await db
+    .from("catalog_file_audio_validation_jobs")
+    .select(
+      "id,requested_by,source_id,identity_key,item_type,external_id,state,next_track_position,expected_audio_indices,profile_fingerprint,profile_probed_at,file_size_bytes,queue_expires_at,lease_expires_at,retry_at,error_code,verified_at",
+    )
+    .eq("id", jobId)
+    .eq("requested_by", userId)
+    .maybeSingle();
+  if (error) throwDb(error, "Unable to load language validation job");
+  const job = data as JsonRecord | null;
+  if (!job) throw new HttpError(404, "Language validation job not found");
+  const sourceId = stringOr(job.source_id, "");
+  try {
+    await assertOwnedSource(sourceId, userId, db);
+    await requireLanguageValidationEntitlement(userId, db);
+  } catch (error) {
+    if (languageValidationAccessWasRevoked(error)) {
+      await cancelLanguageValidationJob(db, jobId, userId, "LANGUAGE_VALIDATION_ACCESS_REVOKED");
+    }
+    throw error;
+  }
+
+  const expectedAudioIndices = exactLanguageValidationIndices(job.expected_audio_indices);
+  const itemId = stringOr(job.external_id, "");
+  const state = stringOr(job.state, "failed");
+  if (state === "verified") {
+    const cache = await loadLanguageValidationCache(
+      db,
+      stringOr(job.identity_key, ""),
+      itemId,
+    );
+    const cachedStrict = cache
+      ? cachedStrictLanguageValidation(cache, expectedAudioIndices, {
+        profileFingerprint: stringOr(job.profile_fingerprint, ""),
+        profileProbedAt: stringOr(job.profile_probed_at, ""),
+        fileSizeBytes: exactPositiveSafeInteger(job.file_size_bytes) ?? 0,
+      })
+      : null;
+    if (!cachedStrict) {
+      throw new HttpError(409, "Verified language job has no exact canonical certificate", {
+        code: "LANGUAGE_VALIDATION_FINALIZE_MISMATCH",
+      });
+    }
+    return {
+      status: 200,
+      body: languageValidationResponse({
+        itemId,
+        audioTracks: cachedStrict,
+        verifiedAt: stringOrNull(job.verified_at ?? cache?.audio_lang_verified_at),
+        cached: false,
+      }),
+    };
+  }
+  if (state === "failed" || state === "expired" || state === "cancelled") {
+    return {
+      status: 200,
+      body: languageValidationFailedResponse({
+        jobId,
+        itemId,
+        errorCode: stringOr(job.error_code, "LANGUAGE_VALIDATION_FAILED"),
+        retryAt: stringOrNull(job.retry_at),
+      }),
+    };
+  }
+
+  const retryAt = stringOrNull(job.retry_at);
+  if (languageValidationJobScheduleDue(job)) {
+    const waitUntil = requireLanguageValidationWaitUntil();
+    scheduleLanguageValidationJob(waitUntil, db, jobId);
+  }
+  return {
+    status: 202,
+    body: languageValidationPendingResponse({
+      jobId,
+      itemId,
+      state,
+      retryAt,
+      completedTracks: boundedNullableInt(job.next_track_position, 0, 32) ?? 0,
+      trackCount: expectedAudioIndices.length,
+    }),
+  };
+}
+
+function requireLanguageValidationWaitUntil(): LanguageValidationWaitUntil {
+  const edgeRuntime = (
+    globalThis as { EdgeRuntime?: { waitUntil?: LanguageValidationWaitUntil } }
+  ).EdgeRuntime;
+  if (!edgeRuntime || typeof edgeRuntime.waitUntil !== "function") {
+    throw new HttpError(503, "Durable language validation background work is unavailable", {
+      code: "LANGUAGE_VALIDATION_BACKGROUND_UNAVAILABLE",
+    });
+  }
+  return edgeRuntime.waitUntil.bind(edgeRuntime);
+}
+
+function scheduleLanguageValidationJob(
+  waitUntil: LanguageValidationWaitUntil,
+  db: SupabaseClient,
+  jobId: string,
+) {
+  const existing = languageValidationTasks.get(jobId);
+  if (existing) return false;
+  let task: Promise<void>;
+  task = Promise.resolve()
+    .then(() => processOneLanguageValidationTrack(db, jobId))
+    .catch(() => {
+      // The durable job lease is the recovery signal. Never log the exception:
+      // provider failures can carry a URL, capability or upstream response text.
+      console.warn("[norva-playback] durable language validation task deferred");
+    })
+    .finally(() => {
+      if (languageValidationTasks.get(jobId) === task) languageValidationTasks.delete(jobId);
+    });
+  languageValidationTasks.set(jobId, task);
+  try {
+    waitUntil(task);
+  } catch (_) {
+    if (languageValidationTasks.get(jobId) === task) languageValidationTasks.delete(jobId);
+    throw new HttpError(503, "Durable language validation background work is unavailable", {
+      code: "LANGUAGE_VALIDATION_BACKGROUND_UNAVAILABLE",
+    });
+  }
+  return true;
+}
+
+function languageValidationJobScheduleDue(job: JsonRecord, nowMs = Date.now()) {
+  const state = stringOr(job.state, "");
+  if (state === "queued") return true;
+  if (state === "retry_wait") {
+    const retryAtMs = Date.parse(stringOr(job.retryAt ?? job.retry_at, ""));
+    return !Number.isFinite(retryAtMs) || retryAtMs <= nowMs;
+  }
+  if (state === "running" || state === "finalizing") {
+    const leaseExpiresAtMs = Date.parse(
+      stringOr(job.leaseExpiresAt ?? job.lease_expires_at, ""),
+    );
+    return Number.isFinite(leaseExpiresAtMs) && leaseExpiresAtMs <= nowMs;
+  }
+  return false;
+}
+
+async function languageValidationProfileFingerprint(
+  profile: JsonRecord,
+  audioTracks: JsonRecord[],
+  fileSizeBytes: number,
+) {
+  const stableTracks = audioTracks
+    .map((track) => ({
+      index: Number(track.index),
+      codec: normalizeCodecToken(track.codec),
+      channels: boundedNullableInt(track.channels, 0, 16),
+      default: track.default === true,
+    }))
+    .sort((left, right) => left.index - right.index);
+  return await sha256Hex(JSON.stringify({
+    protocol: LANGUAGE_VALIDATION_PROTOCOL,
+    metadataComplete: profile.metadataComplete === true,
+    probeSource: normalizeCodecToken(profile.probeSource),
+    probedAt: stringOr(profile.probedAt, ""),
+    container: normalizeCodecToken(profile.container),
+    durationSeconds: Number(profile.durationSeconds),
+    fileSizeBytes,
+    audioTracks: stableTracks,
+  }));
+}
+
+async function revalidateLanguageValidationClaim(
+  db: SupabaseClient,
+  claim: JsonRecord,
+) {
+  const userId = stringOr(claim.requestedBy, "");
+  const sourceId = stringOr(claim.sourceId, "");
+  const itemId = stringOr(claim.itemId, "");
+  const variantId = stringOr(claim.variantId, "");
+  const identityKey = stringOr(claim.identityKey, "");
+  const expectedAudioIndices = exactLanguageValidationIndices(claim.expectedAudioIndices)
+    .sort((left, right) => left - right);
+  const expectedFileSizeBytes = exactPositiveSafeInteger(claim.fileSizeBytes);
+  if (!userId || !sourceId || !itemId || !variantId || !identityKey || !expectedFileSizeBytes) {
+    throw new HttpError(409, "Language validation job coordinates are invalid", {
+      code: "LANGUAGE_VALIDATION_JOB_INVALID",
+    });
+  }
+  try {
+    await assertOwnedSource(sourceId, userId, db);
+    await requireLanguageValidationEntitlement(userId, db);
+  } catch (error) {
+    if (languageValidationAccessWasRevoked(error)) {
+      throw new HttpError(409, "Language validation access was revoked", {
+        code: "LANGUAGE_VALIDATION_ACCESS_REVOKED",
+      });
+    }
+    throw error;
+  }
+  const exactProfile = await loadExactLanguageValidationProfile(db, userId, sourceId, itemId);
+  const exactAudioIndices = exactProfile.audioTracks
+    .map((track) => Number(track.index))
+    .sort((left, right) => left - right);
+  const fingerprint = await languageValidationProfileFingerprint(
+    exactProfile.profile,
+    exactProfile.audioTracks,
+    exactProfile.fileSizeBytes,
+  );
+  if (
+    exactProfile.variantId !== variantId ||
+    !sameIntegerSet(exactAudioIndices, expectedAudioIndices) ||
+    exactProfile.fileSizeBytes !== expectedFileSizeBytes ||
+    Date.parse(exactProfile.profileProbedAt) !== Date.parse(stringOr(claim.profileProbedAt, "")) ||
+    fingerprint !== stringOr(claim.profileFingerprint, "")
+  ) {
+    throw new HttpError(409, "Exact language validation profile changed", {
+      code: "LANGUAGE_VALIDATION_PROFILE_CHANGED",
+    });
+  }
+  const currentIdentityKey = await loadLanguageValidationIdentity(db, userId, sourceId);
+  if (currentIdentityKey !== identityKey) {
+    throw new HttpError(409, "Provider identity changed", {
+      code: "LANGUAGE_VALIDATION_IDENTITY_CHANGED",
+    });
+  }
+  const cache = await loadLanguageValidationCache(db, identityKey, itemId);
+  const cachedAudioTracks = cache
+    ? exactCachedAudioTracks(cache.audio_tracks, expectedAudioIndices)
+    : null;
+  if (!cachedAudioTracks) {
+    throw new HttpError(409, "Canonical audio inventory changed", {
+      code: "LANGUAGE_VALIDATION_CACHE_MISMATCH",
+    });
+  }
+  return {
+    userId,
+    sourceId,
+    itemId,
+    identityKey,
+    expectedAudioIndices,
+    exactProfile,
+    cachedAudioTracks,
+    fingerprint,
+  };
+}
+
+async function processOneLanguageValidationTrack(db: SupabaseClient, jobId: string) {
+  const leaseOwner = `language-validation-job:${crypto.randomUUID()}`;
+  const { data: claimed, error: claimError } = await db.rpc(
+    "claim_catalog_file_audio_validation_job",
+    {
+      p_job_id: jobId,
+      p_lease_owner: leaseOwner,
+      p_ttl_seconds: LANGUAGE_VALIDATION_JOB_LEASE_SECONDS,
+    },
+  );
+  if (claimError || !claimed) return;
+  const claim = recordOrEmpty(claimed);
+  let providerLeaseClaimed = false;
+  let providerLeaseOwner = "";
+  let identityKey = stringOr(claim.identityKey, "");
+  try {
+    const current = await revalidateLanguageValidationClaim(db, claim);
+    identityKey = current.identityKey;
+    const trackIndex = boundedNullableInt(claim.trackIndex, 0, 128);
+    if (trackIndex === null) {
+      await finalizeLanguageValidationJob(db, jobId, leaseOwner, claim, current);
+      return;
+    }
+    if (!current.expectedAudioIndices.includes(trackIndex)) {
+      throw new HttpError(409, "Language validation track cursor changed", {
+        code: "LANGUAGE_VALIDATION_CURSOR_MISMATCH",
+      });
+    }
+
+    const resolved = await resolvePlaybackTarget(
+      current.sourceId,
+      "movie",
+      current.itemId,
+      current.userId,
+      db,
+    );
+    const targetUrl = stringOr(resolved.targetUrl, "");
+    assertHttpUrl(targetUrl);
+    const providerAccountScope = "providerAccountScope" in resolved
+      ? stringOr(resolved.providerAccountScope, "")
+      : "";
+    const providerAccountHash = providerAccountScope
+      ? await sha256Hex(providerAccountScope)
+      : await providerAccountHashFromUrl(targetUrl);
+    const providerAccountKey = providerAccountKeyFromUrl(targetUrl);
+    if (!providerAccountKey) {
+      throw new HttpError(422, "Provider account could not be identified", {
+        code: "LANGUAGE_VALIDATION_PROVIDER_INVALID",
+      });
+    }
+    await assertProviderCircuitClosed(providerAccountHash, db);
+    await assertLanguageValidationIdle(
+      db,
+      current.userId,
+      providerAccountHash,
+      providerAccountKey,
+    );
+
+    providerLeaseOwner = `language-validation-track:${jobId}:${trackIndex}:${crypto.randomUUID()}`;
+    const { data: providerClaimed, error: providerClaimError } = await db.rpc(
+      "claim_provider_file_probe",
+      {
+        p_identity_key: current.identityKey,
+        p_lease_owner: providerLeaseOwner,
+        p_ttl_seconds: LANGUAGE_VALIDATION_LEASE_SECONDS,
+      },
+    );
+    if (providerClaimError) {
+      throw new HttpError(503, "Unable to claim provider language validation lease", {
+        code: "LANGUAGE_VALIDATION_PROVIDER_LEASE_ERROR",
+      });
+    }
+    if (providerClaimed !== true) {
+      await failLanguageValidationJob(db, {
+        jobId,
+        leaseOwner,
+        errorCode: "LANGUAGE_VALIDATION_PROVIDER_LEASE_BUSY",
+        retryAt: new Date(Date.now() + 30_000).toISOString(),
+      });
+      return;
+    }
+    providerLeaseClaimed = true;
+
+    // The provider lane and the exact-file profile are both checked again after
+    // the distributed lease closes the race, before minting the per-track token.
+    await assertProviderCircuitClosed(providerAccountHash, db);
+    await assertLanguageValidationIdle(
+      db,
+      current.userId,
+      providerAccountHash,
+      providerAccountKey,
+    );
+    const exactAfterLease = await revalidateLanguageValidationClaim(db, claim);
+    const pipeExpiresAt = new Date(
+      Date.now() + LANGUAGE_VALIDATION_LEASE_SECONDS * 1000,
+    ).toISOString();
+    const detectionAccess = await createBytePipeCapability(
+      providerLeaseOwner,
+      current.userId,
+      targetUrl,
+      pipeExpiresAt,
+      db,
+      null,
+      LANGUAGE_VALIDATION_SCOPE,
+      exactAfterLease.exactProfile.fileSizeBytes,
+    );
+    let response: Response;
+    try {
+      response = await fetch(
+        `${detectionAccess.gatewayUrl}/detect-language?index=${trackIndex}&strict=1&dur=30`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${detectionAccess.serviceToken}`,
+            "X-Norva-Byte-Pipe-Token": detectionAccess.capability,
+          },
+          signal: AbortSignal.timeout(LANGUAGE_VALIDATION_FETCH_TIMEOUT_MS),
+        },
+      );
+    } catch (error) {
+      await failLanguageValidationJob(db, {
+        jobId,
+        leaseOwner,
+        errorCode: error instanceof DOMException && error.name === "TimeoutError"
+          ? "LANGUAGE_VALIDATION_GATEWAY_TIMEOUT"
+          : "LANGUAGE_VALIDATION_GATEWAY_TRANSPORT",
+      });
+      return;
+    }
+    const payload = recordOrEmpty(await response.json().catch(() => ({})));
+    const gatewayCode = stringOr(payload.code ?? payload.errorCode ?? payload.error_code, "");
+    const upstreamStatus = extractProviderStatus(
+      payload,
+      sanitizeTelemetryText(textFromGatewayDetails(payload)),
+    );
+    if (isProviderBusyFailure({
+      code: gatewayCode,
+      upstreamStatus: upstreamStatus ?? response.status,
+    })) {
+      const circuit = await openProviderPlaybackCircuit(providerAccountHash, db, true);
+      await failLanguageValidationJob(db, {
+        jobId,
+        leaseOwner,
+        errorCode: "PROVIDER_ACCOUNT_BUSY",
+        terminal: true,
+        retryAt: circuit.blockedUntil,
+      });
+      return;
+    }
+    if (!response.ok) {
+      await failLanguageValidationJob(db, {
+        jobId,
+        leaseOwner,
+        errorCode: gatewayCode === "PROXY_AUTH_FAILED"
+          ? "PROXY_AUTH_FAILED"
+          : "LANGUAGE_VALIDATION_GATEWAY_ERROR",
+      });
+      return;
+    }
+    const accepted = strictLanguageValidationEvidence(payload, trackIndex);
+    if (!accepted) {
+      await failLanguageValidationJob(db, {
+        jobId,
+        leaseOwner,
+        errorCode: "LANGUAGE_VALIDATION_STRICT_CONSENSUS_PENDING",
+      });
+      return;
+    }
+    const { data: checkpoint, error: checkpointError } = await db.rpc(
+      "checkpoint_catalog_file_audio_validation_job",
+      {
+        p_job_id: jobId,
+        p_lease_owner: leaseOwner,
+        p_stream_index: trackIndex,
+        p_evidence: accepted,
+      },
+    );
+    if (checkpointError || !checkpoint) {
+      throw new HttpError(409, "Language validation checkpoint was not persisted", {
+        code: "LANGUAGE_VALIDATION_CHECKPOINT_FAILED",
+      });
+    }
+    if (recordOrEmpty(checkpoint).complete === true) {
+      const finalCurrent = await revalidateLanguageValidationClaim(db, claim);
+      await finalizeLanguageValidationJob(db, jobId, leaseOwner, claim, finalCurrent);
+    }
+  } catch (error) {
+    await failLanguageValidationJob(db, {
+      jobId,
+      leaseOwner,
+      errorCode: languageValidationTaskErrorCode(error),
+      terminal: languageValidationTaskErrorIsTerminal(error),
+      retryAt: languageValidationTaskRetryAt(error),
+    });
+  } finally {
+    if (providerLeaseClaimed && identityKey && providerLeaseOwner) {
+      await releaseProviderFileProbe(db, identityKey, providerLeaseOwner);
+    }
+  }
+}
+
+async function finalizeLanguageValidationJob(
+  db: SupabaseClient,
+  jobId: string,
+  leaseOwner: string,
+  claim: JsonRecord,
+  current: Awaited<ReturnType<typeof revalidateLanguageValidationClaim>>,
+) {
+  const { data, error } = await db.rpc("finalize_catalog_file_audio_validation_job", {
+    p_job_id: jobId,
+    p_lease_owner: leaseOwner,
+    p_profile_fingerprint: current.fingerprint,
+    p_profile_probed_at: current.exactProfile.profileProbedAt,
+    p_file_size_bytes: current.exactProfile.fileSizeBytes,
+    p_expected_audio_indices: current.expectedAudioIndices,
+  });
+  if (error || !data) {
+    throw new HttpError(409, "Strict language validation could not be finalized", {
+      code: "LANGUAGE_VALIDATION_FINALIZE_FAILED",
+    });
+  }
+  if (stringOr(claim.profileFingerprint, "") !== current.fingerprint) {
+    throw new HttpError(409, "Exact language validation profile changed", {
+      code: "LANGUAGE_VALIDATION_PROFILE_CHANGED",
+    });
+  }
+}
+
+async function failLanguageValidationJob(
+  db: SupabaseClient,
+  options: {
+    jobId: string;
+    leaseOwner: string;
+    errorCode: string;
+    terminal?: boolean;
+    retryAt?: string | null;
+  },
+) {
+  const retryAt = options.retryAt || new Date(
+    Date.now() + LANGUAGE_VALIDATION_RETRY_SECONDS * 1000,
+  ).toISOString();
+  try {
+    const { data, error } = await db.rpc("fail_catalog_file_audio_validation_job", {
+      p_job_id: options.jobId,
+      p_lease_owner: options.leaseOwner,
+      p_error_code: options.errorCode,
+      p_terminal: options.terminal === true,
+      p_retry_at: retryAt,
+    });
+    return !error && data === true;
+  } catch (_) {
+    return false;
+  }
+}
+
+async function cancelLanguageValidationJob(
+  db: SupabaseClient,
+  jobId: string,
+  userId: string,
+  errorCode: string,
+) {
+  try {
+    const { data, error } = await db.rpc("cancel_catalog_file_audio_validation_job", {
+      p_job_id: jobId,
+      p_requested_by: userId,
+      p_error_code: errorCode,
+    });
+    return !error && data === true;
+  } catch (_) {
+    return false;
+  }
+}
+
+function languageValidationAccessWasRevoked(error: unknown) {
+  return error instanceof HttpError && [401, 402, 403, 404].includes(error.status);
+}
+
+function languageValidationTaskErrorCode(error: unknown) {
+  const details = error instanceof HttpError ? recordOrEmpty(error.details) : {};
+  return stringOr(details.code, "LANGUAGE_VALIDATION_TASK_FAILED")
+    .toUpperCase()
+    .replace(/[^A-Z0-9_]+/g, "_")
+    .slice(0, 64);
+}
+
+function languageValidationTaskErrorIsTerminal(error: unknown) {
+  const code = languageValidationTaskErrorCode(error);
+  return new Set([
+    "LANGUAGE_VALIDATION_JOB_INVALID",
+    "LANGUAGE_VALIDATION_PROFILE_CHANGED",
+    "LANGUAGE_VALIDATION_IDENTITY_CHANGED",
+    "LANGUAGE_VALIDATION_CURSOR_MISMATCH",
+    "LANGUAGE_VALIDATION_CODEC_PROFILE_REQUIRED",
+    "LANGUAGE_VALIDATION_CODEC_AUDIO_INVALID",
+    "LANGUAGE_VALIDATION_IDENTITY_REQUIRED",
+    "LANGUAGE_VALIDATION_ACCESS_REVOKED",
+  ]).has(code);
+}
+
+function languageValidationTaskRetryAt(error: unknown) {
+  const code = languageValidationTaskErrorCode(error);
+  const details = error instanceof HttpError ? recordOrEmpty(error.details) : {};
+  const blockedUntil = stringOrNull(details.blockedUntil);
+  if (blockedUntil && Number.isFinite(Date.parse(blockedUntil))) return blockedUntil;
+  if (code === "LANGUAGE_VALIDATION_PLAYBACK_ACTIVE" || code === "PROVIDER_ACCOUNT_BUSY") {
+    return new Date(Date.now() + 15_000).toISOString();
+  }
+  if (languageValidationTaskErrorIsTerminal(error)) return new Date().toISOString();
+  return null;
+}
+
+function languageValidationPendingResponse(options: {
+  jobId: string;
+  itemId: string;
+  state: string;
+  retryAt?: string | null;
+  completedTracks?: number;
+  trackCount?: number;
+}) {
+  const retryAtMs = options.retryAt ? Date.parse(options.retryAt) : Number.NaN;
+  const retryAfter = Number.isFinite(retryAtMs) && retryAtMs > Date.now()
+    ? Math.max(1, Math.min(300, Math.ceil((retryAtMs - Date.now()) / 1000)))
+    : LANGUAGE_VALIDATION_POLL_SECONDS;
+  return compactRecord({
+    protocol: LANGUAGE_VALIDATION_PROTOCOL,
+    jobId: options.jobId,
+    itemType: "movie",
+    itemId: options.itemId,
+    status: "pending",
+    state: options.state,
+    retryAfter,
+    retryAfterSeconds: retryAfter,
+    retryAt: options.retryAt,
+    completedTracks: options.completedTracks,
+    trackCount: options.trackCount,
+  });
+}
+
+function languageValidationFailedResponse(options: {
+  jobId: string;
+  itemId: string;
+  errorCode: string;
+  retryAt: string | null;
+}) {
+  return compactRecord({
+    protocol: LANGUAGE_VALIDATION_PROTOCOL,
+    jobId: options.jobId,
+    itemType: "movie",
+    itemId: options.itemId,
+    status: "failed",
+    errorCode: options.errorCode.replace(/[^A-Z0-9_]+/gi, "_").slice(0, 64),
+    retryAt: options.retryAt,
+  });
+}
+
+function languageValidationRejectedResponse(options: {
+  itemId: string;
+  errorCode: string;
+  retryAt: string | null;
+  retryAfterSeconds: number;
+}) {
+  const retryAfter = Math.max(1, Math.min(86_400, Math.trunc(options.retryAfterSeconds)));
+  return compactRecord({
+    protocol: LANGUAGE_VALIDATION_PROTOCOL,
+    itemType: "movie",
+    itemId: options.itemId,
+    status: "failed",
+    errorCode: options.errorCode.toUpperCase().replace(/[^A-Z0-9_]+/g, "_").slice(0, 64),
+    retryAfter,
+    retryAfterSeconds: retryAfter,
+    retryAt: options.retryAt && Number.isFinite(Date.parse(options.retryAt))
+      ? options.retryAt
+      : null,
+  });
+}
+
+async function requireLanguageValidationEntitlement(userId: string, db: SupabaseClient) {
+  const decision = await getEntitlementDecision(db, userId);
+  if (!decision.allowed) throwEntitlementRequired("playback", decision);
+  const limit = limitNumber(decision.limits, "concurrent_streams", 0);
+  if (limit <= 0) {
+    throwEntitlementRequired("concurrent_streams", decision, { limit, current: 0 });
+  }
+}
+
+async function loadExactLanguageValidationProfile(
+  db: SupabaseClient,
+  userId: string,
+  sourceId: string,
+  itemId: string,
+) {
+  const { data, error } = await db
+    .from("cloud_title_variants")
+    .select("id,codec_profile")
+    .eq("user_id", userId)
+    .eq("source_id", sourceId)
+    .eq("item_type", "movie")
+    .eq("external_id", itemId)
+    .limit(2);
+  if (error) throwDb(error, "Unable to load the exact movie codec profile");
+  if (!Array.isArray(data) || data.length !== 1) {
+    throw new HttpError(404, "Exact movie variant not found");
+  }
+  const rawProfile = recordOrEmpty((data[0] as JsonRecord).codec_profile);
+  if (!hasExactGatewayInbandMkvProfile(rawProfile)) {
+    throw new HttpError(409, "Exact movie codec profile is incomplete", {
+      code: "LANGUAGE_VALIDATION_CODEC_PROFILE_REQUIRED",
+    });
+  }
+  const profile = normalizeCodecProfile(rawProfile);
+  const variantId = stringOr((data[0] as JsonRecord).id, "");
+  const fileSizeBytes = Number(profile.fileSizeBytes);
+  const profileProbedAt = stringOr(profile.probedAt, "");
+  const audioTracks = (Array.isArray(profile.audioTracks) ? profile.audioTracks : [])
+    .map((track) => recordOrEmpty(track));
+  const indices = audioTracks.map((track) => Number(track.index));
+  if (
+    !audioTracks.length ||
+    indices.some((index) => !Number.isInteger(index) || index < 0 || index > 128) ||
+    new Set(indices).size !== indices.length
+  ) {
+    throw new HttpError(409, "Exact movie audio inventory is invalid", {
+      code: "LANGUAGE_VALIDATION_CODEC_AUDIO_INVALID",
+    });
+  }
+  const subtitleTracks = (Array.isArray(profile.subtitles) ? profile.subtitles : [])
+    .map((track) => recordOrEmpty(track));
+  return { variantId, profile, profileProbedAt, fileSizeBytes, audioTracks, subtitleTracks };
+}
+
+function hasExactGatewayInbandMkvProfile(value: unknown) {
+  const raw = recordOrEmpty(value);
+  if (!hasReliableVodCodecProfile(raw)) return false;
+  const profile = normalizeCodecProfile(raw);
+  const container = normalizeCodecToken(profile.container);
+  const durationSeconds = Number(profile.durationSeconds);
+  const fileSizeBytes = Number(profile.fileSizeBytes);
+  return Boolean(
+    profile.metadataComplete === true &&
+    (container === "mkv" || container.includes("matroska")) &&
+    Number.isFinite(durationSeconds) &&
+    durationSeconds > 0 &&
+    Number.isSafeInteger(fileSizeBytes) &&
+    fileSizeBytes > 0 &&
+    normalizeCodecToken(profile.probeSource) === "gatewayinband" &&
+    Number.isFinite(Date.parse(stringOr(profile.probedAt, "")))
+  );
+}
+
+async function loadLanguageValidationIdentity(
+  db: SupabaseClient,
+  userId: string,
+  sourceId: string,
+) {
+  const { data, error } = await db
+    .from("catalog_source_provider_identities")
+    .select("identity_id")
+    .eq("user_id", userId)
+    .eq("source_id", sourceId)
+    .maybeSingle();
+  if (error) throwDb(error, "Unable to load the provider identity");
+  const identityKey = stringOr((data as JsonRecord | null)?.identity_id, "");
+  if (!identityKey) {
+    throw new HttpError(409, "Verified provider identity is required", {
+      code: "LANGUAGE_VALIDATION_IDENTITY_REQUIRED",
+    });
+  }
+  return identityKey;
+}
+
+async function loadLanguageValidationCache(
+  db: SupabaseClient,
+  identityKey: string,
+  itemId: string,
+) {
+  const { data, error } = await db
+    .from("catalog_file_tracks")
+    .select(
+      "audio_tracks,audio_probed_at,audio_lang_verified_at,audio_lang_retry_at,audio_lang_verification",
+    )
+    .eq("server_host", identityKey)
+    .eq("item_type", "movie")
+    .eq("external_id", itemId)
+    .maybeSingle();
+  if (error) throwDb(error, "Unable to load the exact audio cache");
+  return data as JsonRecord | null;
+}
+
+async function hasActiveLanguageValidationJob(
+  db: SupabaseClient,
+  identityKey: string,
+  itemId: string,
+) {
+  const { data, error } = await db
+    .from("catalog_file_audio_validation_jobs")
+    .select("id,state,queue_expires_at")
+    .eq("identity_key", identityKey)
+    .eq("item_type", "movie")
+    .eq("external_id", itemId)
+    .in("state", ["queued", "running", "retry_wait", "finalizing"])
+    .limit(1);
+  if (error) throwDb(error, "Unable to verify active language validation job");
+  const nowMs = Date.now();
+  return Boolean(data?.some((row) => {
+    const job = recordOrEmpty(row);
+    if (stringOr(job.state, "") !== "queued") return true;
+    const queueExpiresAtMs = Date.parse(stringOr(job.queue_expires_at, ""));
+    return !Number.isFinite(queueExpiresAtMs) || queueExpiresAtMs > nowMs;
+  }));
+}
+
+function exactCachedAudioTracks(value: unknown, expectedIndices: number[]): JsonRecord[] | null {
+  if (!Array.isArray(value)) return null;
+  const tracks = value.map((track) => recordOrEmpty(track));
+  const indices = tracks.map((track) => Number(track.index));
+  if (
+    indices.some((index) => !Number.isInteger(index)) ||
+    new Set(indices).size !== indices.length ||
+    !sameIntegerSet(indices, expectedIndices)
+  ) {
+    return null;
+  }
+  return tracks;
+}
+
+function cachedStrictLanguageValidation(
+  cache: JsonRecord,
+  expectedIndices: number[],
+  expectedProfile: {
+    profileFingerprint: string;
+    profileProbedAt: string;
+    fileSizeBytes: number;
+  },
+): StrictLanguageValidationEvidence[] | null {
+  if (!cache.audio_lang_verified_at) return null;
+  const provenance = recordOrEmpty(cache.audio_lang_verification);
+  if (
+    Number(provenance.protocol) !== LANGUAGE_VALIDATION_PROTOCOL ||
+    stringOr(provenance.status, "") !== "verified" ||
+    stringOr(provenance.method, "") !== LANGUAGE_VALIDATION_METHOD ||
+    provenance.allTracksVerified !== true ||
+    Number(provenance.trackCount) !== expectedIndices.length ||
+    Number(provenance.minConsensus) < LANGUAGE_VALIDATION_MIN_SAMPLES ||
+    stringOr(provenance.profileFingerprint, "") !== expectedProfile.profileFingerprint ||
+    Number(provenance.fileSizeBytes) !== expectedProfile.fileSizeBytes ||
+    Date.parse(stringOr(provenance.profileProbedAt, "")) !==
+      Date.parse(expectedProfile.profileProbedAt)
+  ) {
+    return null;
+  }
+  const cachedTracks = exactCachedAudioTracks(cache.audio_tracks, expectedIndices);
+  if (!cachedTracks) return null;
+  const provenanceTracks = Array.isArray(provenance.tracks)
+    ? (provenance.tracks as JsonRecord[])
+    : [];
+  const proofByIndex = new Map(
+    provenanceTracks.map((track) => [Number(track.index), recordOrEmpty(track)]),
+  );
+  const result: StrictLanguageValidationEvidence[] = [];
+  for (const track of cachedTracks) {
+    const index = Number(track.index);
+    const language = normalizeIsoLang(stringOrNull(track.lang ?? track.language));
+    const proof = proofByIndex.get(index);
+    if (!language || !proof) return null;
+    const proofLanguage = normalizeIsoLang(stringOrNull(proof.language));
+    const consensus = Number(proof.consensus);
+    const sampleCount = Number(proof.sampleCount);
+    const rejectedSpeechSampleCount = Number(proof.rejectedSpeechSampleCount);
+    const minSampleProbability = Number(proof.minSampleProbability);
+    const minSampleWordCount = Number(proof.minSampleWordCount);
+    const minSampleUniqueWordCount = Number(proof.minSampleUniqueWordCount);
+    if (
+      proofLanguage !== language ||
+      stringOr(proof.method, "") !== LANGUAGE_VALIDATION_METHOD ||
+      !Number.isInteger(sampleCount) ||
+      sampleCount < LANGUAGE_VALIDATION_MIN_SAMPLES ||
+      consensus < LANGUAGE_VALIDATION_MIN_SAMPLES ||
+      rejectedSpeechSampleCount !== 0 ||
+      minSampleProbability < LANGUAGE_VALIDATION_MIN_PROBABILITY ||
+      minSampleWordCount < LANGUAGE_VALIDATION_MIN_WORDS ||
+      minSampleUniqueWordCount < LANGUAGE_VALIDATION_MIN_UNIQUE_WORDS
+    ) {
+      return null;
+    }
+    result.push({
+      index,
+      language,
+      method: LANGUAGE_VALIDATION_METHOD,
+      consensus,
+      sampleCount,
+      rejectedSpeechSampleCount: 0,
+      minSampleProbability,
+      minSampleWordCount,
+      minSampleUniqueWordCount,
+    });
+  }
+  return result;
+}
+
+async function assertLanguageValidationIdle(
+  db: SupabaseClient,
+  userId: string,
+  providerAccountHash: string,
+  providerAccountKey: string,
+) {
+  const nowIso = new Date().toISOString();
+  const { data: userSessions, error: userSessionError } = await db
+    .from("cloud_playback_sessions")
+    .select("id")
+    .eq("user_id", userId)
+    .in("status", ["pending", "ready"])
+    .gt("expires_at", nowIso)
+    .limit(1);
+  if (userSessionError) throwDb(userSessionError, "Unable to verify active playback sessions");
+  if (userSessions?.length) {
+    throw new HttpError(409, "Playback must be stopped before language validation", {
+      code: "LANGUAGE_VALIDATION_PLAYBACK_ACTIVE",
+    });
+  }
+
+  const { data: providerSessions, error: providerSessionError } = await db
+    .from("cloud_playback_sessions")
+    .select("id")
+    .eq("provider_account_hash", providerAccountHash)
+    .in("status", ["pending", "ready"])
+    .gt("expires_at", nowIso)
+    .limit(1);
+  if (providerSessionError) {
+    throwDb(providerSessionError, "Unable to verify provider playback sessions");
+  }
+  if (providerSessions?.length) {
+    throw new HttpError(409, "Provider account is already in use", {
+      code: "PROVIDER_ACCOUNT_BUSY",
+    });
+  }
+
+  const { data: providerBusy, error: providerBusyError } = await db.rpc(
+    "provider_account_busy",
+    { p_key: providerAccountKey },
+  );
+  if (providerBusyError) throwDb(providerBusyError, "Unable to verify provider availability");
+  if (providerBusy === true) {
+    throw new HttpError(409, "Provider account is already in use", {
+      code: "PROVIDER_ACCOUNT_BUSY",
+    });
+  }
+}
+
+function strictLanguageValidationEvidence(
+  payload: JsonRecord,
+  index: number,
+): StrictLanguageValidationEvidence | null {
+  const language = normalizeIsoLang(stringOrNull(payload.language));
+  const samples = Array.isArray(payload.samples)
+    ? (payload.samples as JsonRecord[]).map((sample) => recordOrEmpty(sample))
+    : [];
+  const sampleCount = Number(payload.sampleCount);
+  const consensus = Number(payload.consensus);
+  const rejectedSpeechSampleCount = Number(payload.rejectedSpeechSampleCount);
+  const minSampleProbability = Number(payload.minSampleProbability);
+  const minSampleWordCount = Number(payload.minSampleWordCount);
+  const minSampleUniqueWordCount = Number(payload.minSampleUniqueWordCount);
+  const samplesValid = samples.length >= LANGUAGE_VALIDATION_MIN_SAMPLES && samples.every((sample) =>
+    normalizeIsoLang(stringOrNull(sample.language)) === language &&
+    Number(sample.probability) >= LANGUAGE_VALIDATION_MIN_PROBABILITY &&
+    Number(sample.wordCount) >= LANGUAGE_VALIDATION_MIN_WORDS &&
+    Number(sample.uniqueWordCount) >= LANGUAGE_VALIDATION_MIN_UNIQUE_WORDS
+  );
+  if (
+    payload.verified !== true ||
+    stringOr(payload.validationStatus, "") !== "verified" ||
+    stringOr(payload.method, "") !== LANGUAGE_VALIDATION_METHOD ||
+    !language ||
+    !Number.isInteger(sampleCount) ||
+    sampleCount < LANGUAGE_VALIDATION_MIN_SAMPLES ||
+    samples.length !== sampleCount ||
+    consensus < LANGUAGE_VALIDATION_MIN_SAMPLES ||
+    rejectedSpeechSampleCount !== 0 ||
+    minSampleProbability < LANGUAGE_VALIDATION_MIN_PROBABILITY ||
+    minSampleWordCount < LANGUAGE_VALIDATION_MIN_WORDS ||
+    minSampleUniqueWordCount < LANGUAGE_VALIDATION_MIN_UNIQUE_WORDS ||
+    !samplesValid
+  ) {
+    return null;
+  }
+  return {
+    index,
+    language,
+    method: LANGUAGE_VALIDATION_METHOD,
+    consensus,
+    sampleCount,
+    rejectedSpeechSampleCount: 0,
+    minSampleProbability,
+    minSampleWordCount,
+    minSampleUniqueWordCount,
+  };
+}
+
+function languageValidationResponse(options: {
+  itemId: string;
+  audioTracks: StrictLanguageValidationEvidence[];
+  verifiedAt: string | null;
+  cached: boolean;
+}) {
+  return {
+    protocol: LANGUAGE_VALIDATION_PROTOCOL,
+    itemType: "movie",
+    itemId: options.itemId,
+    status: "verified",
+    method: LANGUAGE_VALIDATION_METHOD,
+    cached: options.cached,
+    persisted: true,
+    verifiedAt: options.verifiedAt,
+    audioTracks: options.audioTracks,
   };
 }
 
@@ -2359,7 +3619,7 @@ async function createRelayAccess(
 // Signs the same token shape as the relay but with the shared gateway token, so
 // the gateway verifies it statelessly (HMAC), then proxies the raw bytes from an
 // IP the provider accepts. No transcode — the browser does that.
-async function createBytePipeAccess(
+async function createBytePipeCapability(
   playbackSessionId: string,
   userId: string,
   targetUrl: string,
@@ -2367,6 +3627,7 @@ async function createBytePipeAccess(
   _db: SupabaseClient,
   userAgent: string | null = null,
   scope: string | null = null,
+  fileSizeBytes: number | null = null,
 ) {
   const runtimeConfig = await getRuntimeConfig(_db);
   if (!runtimeConfig.mediaGatewayUrl || !runtimeConfig.mediaGatewayToken) {
@@ -2379,11 +3640,41 @@ async function createBytePipeAccess(
     url: targetUrl,
     ...(userAgent ? { ua: userAgent } : {}),
     ...(scope ? { scope } : {}),
+    ...(Number.isSafeInteger(fileSizeBytes) && Number(fileSizeBytes) > 0
+      ? { fileSizeBytes }
+      : {}),
     exp: Math.floor(new Date(expiresAt).getTime() / 1000),
   });
   const signature = await hmacBase64Url(runtimeConfig.mediaGatewayToken, payload);
-  const token = `${base64Url(encoder.encode(payload))}.${signature}`;
-  return { url: `${runtimeConfig.mediaGatewayUrl}/raw/${token}` };
+  const capability = `${base64Url(encoder.encode(payload))}.${signature}`;
+  return {
+    capability,
+    gatewayUrl: runtimeConfig.mediaGatewayUrl,
+    serviceToken: runtimeConfig.mediaGatewayToken,
+  };
+}
+
+async function createBytePipeAccess(
+  playbackSessionId: string,
+  userId: string,
+  targetUrl: string,
+  expiresAt: string,
+  db: SupabaseClient,
+  userAgent: string | null = null,
+  scope: string | null = null,
+  fileSizeBytes: number | null = null,
+) {
+  const access = await createBytePipeCapability(
+    playbackSessionId,
+    userId,
+    targetUrl,
+    expiresAt,
+    db,
+    userAgent,
+    scope,
+    fileSizeBytes,
+  );
+  return { url: `${access.gatewayUrl}/raw/${access.capability}` };
 }
 
 async function createGatewaySession(
@@ -2400,13 +3691,13 @@ async function createGatewaySession(
 ) {
   const gatewayMode = gatewayModeForPlayback(mode, playbackHint);
   const gatewayHints = gatewayPlaybackHints(playbackHint);
+  const requestedAudioStreamIndex = boundedNullableInt(
+    gatewayHints.audioStreamIndex ?? gatewayHints.audio_stream_index,
+    0,
+    1024,
+  );
   const runtimeConfig = await getRuntimeConfig(db);
   if (!runtimeConfig.mediaGatewayUrl || !runtimeConfig.mediaGatewayToken) {
-    const audioStreamIndex = boundedNullableInt(
-      playbackHint.audioStreamIndex ?? playbackHint.audio_stream_index,
-      0,
-      1024,
-    );
     const { data, error } = await db
       .from("cloud_gateway_sessions")
       .insert({
@@ -2424,11 +3715,14 @@ async function createGatewaySession(
       session: data,
       hlsUrl: null,
       startupMs: null,
-      audioStreamIndex,
+      audioStreamIndex: null,
+      requestedAudioStreamIndex,
       requestedSeekOffset: gatewayHints.seekOffset ?? 0,
       actualStartOffset: gatewayHints.seekOffset ?? 0,
       localSeekTarget: 0,
       sourceTimestamps: false,
+      audioRenditions: null,
+      multiAudioHls: null,
     };
   }
 
@@ -2488,12 +3782,34 @@ async function createGatewaySession(
   // from the browser/HLS default and avoid relabeling English as French.
   const audioStreamIndex = boundedNullableInt(
     gatewayBody.audioStreamIndex ??
-      gatewayBody.audio_stream_index ??
-      gatewayHints.audioStreamIndex ??
-      gatewayHints.audio_stream_index,
+      gatewayBody.audio_stream_index,
     0,
     1024,
   );
+  if (
+    requestedAudioStreamIndex !== null &&
+    audioStreamIndex !== requestedAudioStreamIndex
+  ) {
+    const externalSessionId = stringOrNull(gatewayBody.id);
+    if (externalSessionId) {
+      const cleanup = await fetch(
+        `${runtimeConfig.mediaGatewayUrl}/sessions/${encodeURIComponent(externalSessionId)}`,
+        {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${runtimeConfig.mediaGatewayToken}` },
+          signal: AbortSignal.timeout(8_000),
+        },
+      ).catch(() => null);
+      if (cleanup && !cleanup.ok && cleanup.status !== 404) {
+        console.warn("[norva-playback] mismatched audio gateway cleanup failed");
+      }
+    }
+    throw new HttpError(502, "Media gateway did not map the requested audio stream", {
+      code: "AUDIO_STREAM_MAP_MISMATCH",
+      requestedAudioStreamIndex,
+      actualAudioStreamIndex: audioStreamIndex,
+    });
+  }
   const requestedSeekOffset = boundedNullableNumber(
     gatewayBody.requestedSeekOffset ??
       gatewayBody.requested_seek_offset ??
@@ -2519,6 +3835,19 @@ async function createGatewaySession(
   ) ?? Math.max(0, requestedSeekOffset - actualStartOffset);
   const sourceTimestamps = gatewayBody.sourceTimestamps === true
     || gatewayBody.source_timestamps === true;
+  const normalizedAudioRenditions = normalizeGatewayAudioRenditions(
+    gatewayBody.audioRenditions,
+    audioStreamIndex,
+  );
+  const multiAudioHls = normalizeGatewayMultiAudioHls(
+    gatewayBody.multiAudioHls,
+    normalizedAudioRenditions,
+    audioStreamIndex,
+  );
+  // The two Gateway fields form one topology. Never expose a partial contract:
+  // hls.js indexes are safe only when the diagnostics bind the default absolute
+  // stream to the exact rendition array returned by this same Gateway response.
+  const audioRenditions = multiAudioHls ? normalizedAudioRenditions : null;
   const codecProfile = firstUsefulCodecProfile(gatewayBody.codecProfile, gatewayBody.codec_profile);
 
   const { data, error } = await db
@@ -2542,10 +3871,13 @@ async function createGatewaySession(
     startupMs,
     audioMode,
     audioStreamIndex,
+    requestedAudioStreamIndex,
     requestedSeekOffset,
     actualStartOffset,
     localSeekTarget,
     sourceTimestamps,
+    audioRenditions,
+    multiAudioHls,
     codecProfile,
   };
 }
@@ -2853,10 +4185,90 @@ function normalizeCodecProfile(profile: JsonRecord) {
     container: stringOrNull(profile.container),
     durationSeconds: boundedNullableNumber(profile.durationSeconds ?? profile.duration_seconds ?? profile.duration, 0, 24 * 60 * 60),
     bitRate: boundedNullableInt(profile.bitRate ?? profile.bit_rate, 0, 1_000_000_000),
+    fileSizeBytes: exactPositiveSafeInteger(
+      profile.fileSizeBytes ?? profile.file_size_bytes,
+    ),
     probeSource: stringOrNull(profile.probeSource ?? profile.probe_source),
     probeMs: boundedNullableInt(profile.probeMs ?? profile.probe_ms, 0, 120_000),
     probedAt: stringOrNull(profile.probedAt ?? profile.probed_at),
+    metadataComplete: profile.metadataComplete === true || profile.metadata_complete === true,
   });
+}
+
+function normalizeGatewayAudioRenditions(value: unknown, selectedStreamIndex: number | null) {
+  if (!Array.isArray(value) || value.length < 2 || value.length > 8) return null;
+  const normalized: JsonRecord[] = [];
+  const streamIndices = new Set<number>();
+  for (let position = 0; position < value.length; position += 1) {
+    const raw = recordOrEmpty(value[position]);
+    const hlsIndex = Number(raw.hlsIndex);
+    const streamIndex = Number(raw.streamIndex);
+    const language = typeof raw.language === "string" ? raw.language : "";
+    const title = typeof raw.title === "string" ? raw.title : "";
+    const sourceChannels = Number(raw.sourceChannels);
+    if (
+      !Number.isInteger(hlsIndex) || hlsIndex !== position ||
+      !Number.isInteger(streamIndex) || streamIndex < 0 || streamIndex > 1024 ||
+      streamIndices.has(streamIndex) ||
+      language.length < 2 || language.length > 32 ||
+      !/^[a-z]{2,3}(?:-[a-z0-9]{2,8})*$/.test(language) ||
+      title.length < 1 || title.length > 96 || title.trim() !== title ||
+      /[\u0000-\u001f\u007f]/.test(title) ||
+      !Number.isInteger(sourceChannels) || sourceChannels < 1 || sourceChannels > 64 ||
+      raw.outputChannels !== 2 || raw.codec !== "aac"
+    ) {
+      return null;
+    }
+    streamIndices.add(streamIndex);
+    normalized.push({
+      hlsIndex,
+      streamIndex,
+      language,
+      title,
+      sourceChannels,
+      outputChannels: 2,
+      codec: "aac",
+    });
+  }
+  if (selectedStreamIndex === null || !streamIndices.has(selectedStreamIndex)) return null;
+  return normalized;
+}
+
+function normalizeGatewayMultiAudioHls(
+  value: unknown,
+  renditions: JsonRecord[] | null,
+  selectedStreamIndex: number | null,
+) {
+  if (!renditions || renditions.length < 2 || renditions.length > 8) return null;
+  const raw = recordOrEmpty(value);
+  const defaultHlsIndex = Number(raw.defaultHlsIndex);
+  const defaultStreamIndex = Number(raw.defaultStreamIndex);
+  const defaultRendition = Number.isSafeInteger(defaultHlsIndex)
+    ? renditions[defaultHlsIndex]
+    : null;
+  if (
+    raw.protocol !== 1 || raw.enabled !== true || raw.reason !== "enabled" ||
+    raw.maxAudioRenditions !== 8 || raw.sourceTrackCount !== renditions.length ||
+    raw.masterPlaylist !== "playlist.m3u8" || raw.videoPlaylist !== "video.m3u8" ||
+    !Number.isSafeInteger(defaultHlsIndex) || defaultHlsIndex < 0 ||
+    defaultHlsIndex >= renditions.length ||
+    !Number.isSafeInteger(defaultStreamIndex) || defaultStreamIndex < 0 ||
+    defaultStreamIndex > 1024 || selectedStreamIndex !== defaultStreamIndex ||
+    !defaultRendition || defaultRendition.streamIndex !== defaultStreamIndex
+  ) {
+    return null;
+  }
+  return {
+    protocol: 1,
+    enabled: true,
+    reason: "enabled",
+    maxAudioRenditions: 8,
+    sourceTrackCount: renditions.length,
+    masterPlaylist: "playlist.m3u8",
+    videoPlaylist: "video.m3u8",
+    defaultHlsIndex,
+    defaultStreamIndex,
+  };
 }
 
 function normalizeCodecProfileTracks(value: unknown, kind: "audio" | "subtitle") {
@@ -9124,6 +10536,12 @@ function boundedNullableNumber(value: unknown, min: number, max: number) {
   const parsed = Number.parseFloat(String(value));
   if (!Number.isFinite(parsed)) return null;
   return Math.max(min, Math.min(max, parsed));
+}
+
+function exactPositiveSafeInteger(value: unknown) {
+  if (value === null || value === undefined || value === "") return null;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
 function recordOrEmpty(value: unknown): JsonRecord {

@@ -148,6 +148,19 @@ class WatchPage {
         this._ocrActiveStreamIndex = null;     // streamIndex of the OCR <track> currently showing
         this.selectedAudioStreamIndex = null;
         this.selectedAudioTrackUserChoice = false;
+        // Gateway multi-audio HLS uses hls.js-relative indexes, while every
+        // persisted/processing preference uses the source container's absolute
+        // stream index. Keep the signed Gateway map as the only bridge between
+        // those two index spaces; never infer it from labels or languages.
+        this._gatewayAudioRenditionStatus = 'absent';
+        this._gatewayAudioRenditions = [];
+        this._gatewayMultiAudioHls = null;
+        this._gatewayAudioRenditionAttemptId = null;
+        this._gatewayAudioRenditionRequired = false;
+        this._gatewayHlsAudioTracksReady = false;
+        this._pendingHlsAudioSwitch = null;
+        this._latestHlsAudioSwitch = null;
+        this._pendingGatewayAudioStreamIndex = null;
         this.pendingPlaybackPreferences = null;
         this._pendingAudioPreferenceApplied = false;
         this._pendingSubtitlePreferenceApplied = false;
@@ -175,6 +188,7 @@ class WatchPage {
         this._lastCommittedSeekAt = 0;
         this._audioSwitchPromise = null;
         this._audioSwitchRequestId = 0;
+        this._gatewayAudioSwitchMetrics = null;
         this.currentSessionId = null;
         this.activeSessionIds = new Set();
         this.currentCloudPlaybackSessionId = null;
@@ -635,6 +649,17 @@ class WatchPage {
         if (this.selectedAudioTrackUserChoice && selectedProbe) {
             return this.audioPreferenceFromProbeTrack(selectedProbe);
         }
+
+        const gatewayAudioContext = this._gatewayAudioRenditionRequired
+            || this.currentPlaybackMode === 'gateway-session';
+        if (gatewayAudioContext && this._gatewayAudioRenditionStatus === 'ready') {
+            const renditions = this.getValidatedGatewayAudioRenditions();
+            if (!renditions) return null;
+            const active = renditions.find((entry) => entry.hlsIndex === this.hls?.audioTrack
+                && entry.streamIndex === Number(this.directAudioStreamIndex));
+            return active ? this.audioPreferenceFromProbeTrack(active) : null;
+        }
+        if (gatewayAudioContext && this.isGatewayAudioRenditionFailClosed()) return null;
 
         if (this.hls && Number.isInteger(this.hls.audioTrack) && this.hls.audioTrack >= 0) {
             const track = this.hls.audioTracks?.[this.hls.audioTrack];
@@ -1367,6 +1392,24 @@ class WatchPage {
             nestedPlayback.source_timestamps ??
             false
         );
+        const audioRenditions = extra.audioRenditions
+            ?? extra.audio_renditions
+            ?? root.audioRenditions
+            ?? root.audio_renditions
+            ?? nestedPlayback.audioRenditions
+            ?? nestedPlayback.audio_renditions
+            ?? gatewaySession?.audioRenditions
+            ?? gatewaySession?.audio_renditions
+            ?? null;
+        const multiAudioHls = extra.multiAudioHls
+            ?? extra.multi_audio_hls
+            ?? root.multiAudioHls
+            ?? root.multi_audio_hls
+            ?? nestedPlayback.multiAudioHls
+            ?? nestedPlayback.multi_audio_hls
+            ?? gatewaySession?.multiAudioHls
+            ?? gatewaySession?.multi_audio_hls
+            ?? null;
 
         return {
             ...nestedPlayback,
@@ -1378,6 +1421,8 @@ class WatchPage {
                 || nestedPlayback.cloudPlaybackSessionId
                 || sessionId,
             gatewaySession,
+            audioRenditions,
+            multiAudioHls,
             codecProfile: extra.codecProfile
                 || extra.codec_profile
                 || root.codecProfile
@@ -1750,6 +1795,8 @@ class WatchPage {
             localSeekTarget: playbackMetadata.localSeekTarget ?? playbackMetadata.local_seek_target ?? null,
             sourceTimestamps: playbackMetadata.sourceTimestamps ?? playbackMetadata.source_timestamps ?? false,
             audioStreamIndex: playbackMetadata.audioStreamIndex ?? playbackMetadata.audio_stream_index ?? null,
+            audioRenditions: playbackMetadata.audioRenditions ?? playbackMetadata.audio_renditions ?? null,
+            multiAudioHls: playbackMetadata.multiAudioHls ?? playbackMetadata.multi_audio_hls ?? null,
             audioLanguageValidationStatus: playbackMetadata.audioLanguageValidationStatus ||
                 playbackMetadata.audio_language_validation_status ||
                 content.audioLanguageValidationStatus ||
@@ -2642,6 +2689,7 @@ class WatchPage {
     }
 
     resetTrackSelectionState() {
+        this.resetGatewayAudioRenditions();
         this.audioTracks = [];
         this.subtitleTracks = [];
         this.subtitleSourceUrl = null;
@@ -2965,6 +3013,7 @@ class WatchPage {
 
     async releasePlaybackPipelineForRetry() {
         try {
+            this.cancelPendingHlsAudioSwitch(false);
             clearTimeout(this._pendingLocalSeekTimer);
             this._pendingLocalSeekTimer = null;
             this._pendingLocalSeekTarget = null;
@@ -3609,6 +3658,7 @@ class WatchPage {
         // each cycle runs TimelineController._cleanTracks, which strips the cues off EVERY text
         // track while the engine plays fine (the 04/07 subtitle strobe: wipe → self-heal → wipe).
         if (this.hls) {
+            this.cancelPendingHlsAudioSwitch(false);
             try { this.hls.destroy(); } catch (_) { /* already gone */ }
             this.hls = null;
         }
@@ -4273,6 +4323,7 @@ class WatchPage {
             || options.source_timestamps === true;
         this._videoEncodeFallbackTried = false;
         this.cloudAudioInfo = null;
+        this.resetGatewayAudioRenditions();
         this.audioTracks = [];
         this.directAudioStreamIndex = null;
         this._relayAudioTracks = null;
@@ -4324,6 +4375,20 @@ class WatchPage {
         if (codecProfileInfo) {
             this.applyProbeInfo(codecProfileInfo);
         }
+        this.configureGatewayAudioRenditions(
+            options.audioRenditions ?? options.audio_renditions ?? options.gatewaySession?.audioRenditions
+                ?? options.gatewaySession?.audio_renditions ?? null,
+            options.multiAudioHls ?? options.multi_audio_hls ?? options.gatewaySession?.multiAudioHls
+                ?? options.gatewaySession?.multi_audio_hls ?? null,
+            codecProfileInfo?.audioTracks || options.audioTracks || options.audio_tracks || [],
+            {
+                required: this.isGatewayPlaybackUrl(url),
+                playbackAttemptId,
+                audioStreamIndex: playbackAudioStreamIndex,
+                verifiedTracks: this.getContentAudioTracks(),
+                audioLanguageValidationStatus: this.audioLanguageValidationStatus,
+            },
+        );
 
         // Enrich the audio menu with the provider's track metadata (language,
         // codec, channels, bitrate) for cloud relay playback — the same source the
@@ -4399,7 +4464,7 @@ class WatchPage {
 
         // Detect stream type
         const looksLikeHls = url.includes('.m3u8') || url.includes('m3u8');
-        const isGatewaySessionUrl = this.isGatewayPlaybackUrl(url);
+        const isGatewaySessionUrl = this._gatewayAudioRenditionRequired;
         const isRawTs = url.includes('.ts') && !url.includes('.m3u8');
         const isDirectVideo = url.includes('.mp4') || url.includes('.mkv') || url.includes('.avi');
         let probeInfo = null;
@@ -4595,7 +4660,8 @@ class WatchPage {
             this.attachProbeSubtitles(url, (probeInfo || this.currentStreamInfo)?.subtitles, startOffset);
             this.playHls(finalUrl, {
                 playbackAttemptId,
-                autoplay: options.autoplay !== false
+                autoplay: options.autoplay !== false,
+                audioSwitchRequestId: options.audioSwitchRequestId
             });
             const requestedOffset = Number(
                 options.requestedSeekOffset ??
@@ -4701,6 +4767,7 @@ class WatchPage {
         }
 
         if (this.hls) {
+            this.cancelPendingHlsAudioSwitch(false);
             this.hls.destroy();
         }
 
@@ -4760,14 +4827,51 @@ class WatchPage {
         });
 
         this.hls.on(Hls.Events.AUDIO_TRACKS_UPDATED, (event, data) => {
-            console.log('[WatchPage] Audio tracks updated:', data.audioTracks);
-            this.restorePendingAudioPreference();
+            if (this.isStalePlaybackAttempt(playbackAttemptId) || this.hls !== activeHls) return;
+            console.log('[WatchPage] Audio tracks updated:', data?.audioTracks);
+            this._gatewayHlsAudioTracksReady = true;
+            const gatewayContext = this._gatewayAudioRenditionRequired
+                || this.currentPlaybackMode === 'gateway-session';
+            const renditions = gatewayContext
+                ? this.getValidatedGatewayAudioRenditions(activeHls)
+                : null;
+            if (renditions) {
+                const desiredStreamIndex = Number.isSafeInteger(this._pendingGatewayAudioStreamIndex)
+                    ? this._pendingGatewayAudioStreamIndex
+                    : (this.selectedAudioTrackUserChoice ? Number(this.selectedAudioStreamIndex) : null);
+                const desired = Number.isSafeInteger(desiredStreamIndex)
+                    ? renditions.find((entry) => entry.streamIndex === desiredStreamIndex)
+                    : null;
+                if (desired && (activeHls.audioTrack !== desired.hlsIndex
+                    || Number(this.directAudioStreamIndex) !== desired.streamIndex)) {
+                    this.selectGatewayHlsAudioTrack(desired.hlsIndex, desired.streamIndex)
+                        .then(() => {
+                            if (this._pendingGatewayAudioStreamIndex === desired.streamIndex) {
+                                this._pendingGatewayAudioStreamIndex = null;
+                            }
+                        })
+                        .catch(() => {});
+                }
+            } else if (!gatewayContext
+                || (this._gatewayAudioRenditionStatus === 'absent'
+                    && Array.isArray(activeHls.audioTracks)
+                    && activeHls.audioTracks.length === 1)) {
+                this.restorePendingAudioPreference();
+            } else {
+                this.cancelPendingHlsAudioSwitch(false);
+            }
             this.updateAudioTracks();
         });
 
         this.hls.on(Hls.Events.AUDIO_TRACK_SWITCHED, (event, data) => {
             console.log('[WatchPage] Audio track switched:', data);
-            this.updateAudioTracks();
+            const gatewayContext = this._gatewayAudioRenditionRequired
+                || this.currentPlaybackMode === 'gateway-session';
+            if (gatewayContext) {
+                this.handleGatewayHlsAudioTrackSwitched(activeHls, playbackAttemptId, data);
+            } else if (!this.isStalePlaybackAttempt(playbackAttemptId) && this.hls === activeHls) {
+                this.updateAudioTracks();
+            }
         });
 
         // Listen for subtitle track updates
@@ -4785,7 +4889,9 @@ class WatchPage {
         let autoplayGateRunning = false;
         this.hls.on(Hls.Events.MANIFEST_PARSED, async () => {
             if (this.isStalePlaybackAttempt(playbackAttemptId) || this.hls !== activeHls) return;
-            if (!autoplay) return;
+            // A paused Gateway lane still fills the same proof buffer; it simply
+            // stops after the gate instead of starting the media element.
+            if (!autoplay && !isGatewaySession) return;
             if (autoplayGateRunning) return;
             autoplayGateRunning = true;
 
@@ -4796,7 +4902,7 @@ class WatchPage {
                         playbackAttemptId,
                         activeHls,
                         {
-                            // Gateway admission materializes 60 s in production,
+                            // Gateway admission materializes 56 s in production,
                             // but a 1-vCPU exact-MKV encode can continue at only
                             // ~0.25x realtime. Build 96 real buffered seconds in
                             // the browser so a two-minute viewing proof stays
@@ -4819,10 +4925,31 @@ class WatchPage {
                     return;
                 }
                 gatewayStartupBufferReady = true;
+                if (Number.isInteger(Number(options.audioSwitchRequestId))) {
+                    this.updateGatewayAudioSwitchMetrics(
+                        Number(options.audioSwitchRequestId),
+                        autoplay ? 'gateway_gate_ready' : 'ready_paused',
+                        {
+                            gateReadyAt: Date.now(),
+                            bufferedAheadSeconds: this.gatewayBufferedAheadSeconds(),
+                        },
+                    );
+                }
             }
 
             if (this.isStalePlaybackAttempt(playbackAttemptId) || this.hls !== activeHls) return;
-            this.video.play().catch(e => this.handleAutoplayError(e));
+            if (!autoplay) return;
+            this.video.play()
+                .then(() => {
+                    if (Number.isInteger(Number(options.audioSwitchRequestId))) {
+                        this.updateGatewayAudioSwitchMetrics(
+                            Number(options.audioSwitchRequestId),
+                            'playing',
+                            { playbackStartedAt: Date.now() },
+                        );
+                    }
+                })
+                .catch(e => this.handleAutoplayError(e));
         });
 
         this.hls.on(Hls.Events.ERROR, (event, data) => {
@@ -4967,6 +5094,7 @@ class WatchPage {
     stop({ enqueueStoryboard = true } = {}) {
         if (this._stopPromise) return this._stopPromise;
 
+        this.cancelPendingHlsAudioSwitch(false);
         this.cancelFirstFrameTelemetryObserver();
         this.cancelDeferredEngineTrackEnrichment();
         // Only a genuine exit after a rendered frame may warm the storyboard cache.
@@ -6925,9 +7053,374 @@ class WatchPage {
         return items;
     }
 
+    cancelPendingHlsAudioSwitch(result = false) {
+        const pending = this._pendingHlsAudioSwitch;
+        if (!pending) return false;
+
+        this._pendingHlsAudioSwitch = null;
+        clearTimeout(pending.timeoutId);
+        pending.resolve(Boolean(result));
+        return true;
+    }
+
+    resetGatewayAudioRenditions() {
+        this.cancelPendingHlsAudioSwitch(false);
+        this._gatewayAudioRenditionStatus = 'absent';
+        this._gatewayAudioRenditions = [];
+        this._gatewayMultiAudioHls = null;
+        this._gatewayAudioRenditionAttemptId = null;
+        this._gatewayAudioRenditionRequired = false;
+        this._gatewayHlsAudioTracksReady = false;
+        this._latestHlsAudioSwitch = null;
+        this._pendingGatewayAudioStreamIndex = null;
+    }
+
+    configureGatewayAudioRenditions(rawRenditions, rawMultiAudioHls, codecTracks = [], options = {}) {
+        this.resetGatewayAudioRenditions();
+        this._gatewayAudioRenditionRequired = options.required === true;
+        this._gatewayAudioRenditionAttemptId = options.playbackAttemptId ?? this._playbackAttemptId;
+
+        const declared = rawRenditions !== null && rawRenditions !== undefined
+            || rawMultiAudioHls !== null && rawMultiAudioHls !== undefined;
+        if (!declared) return false;
+
+        // A partially rolled-out or malformed multi-audio contract must never
+        // fall back to a relative HLS index or to a session-restarting probe row.
+        this._gatewayAudioRenditionStatus = 'invalid';
+        if (!Array.isArray(rawRenditions) || rawRenditions.length === 0
+            || !rawMultiAudioHls || typeof rawMultiAudioHls !== 'object') {
+            return false;
+        }
+
+        const codecByStreamIndex = new Map();
+        (Array.isArray(codecTracks) ? codecTracks : []).forEach((track) => {
+            const streamIndex = Number(track?.index ?? track?.streamIndex ?? track?.stream_index);
+            if (Number.isSafeInteger(streamIndex) && streamIndex >= 0 && !codecByStreamIndex.has(streamIndex)) {
+                codecByStreamIndex.set(streamIndex, track);
+            }
+        });
+        const verifiedLanguageByStreamIndex = new Map();
+        const exactLanguageVerified = String(options.audioLanguageValidationStatus || '').toLowerCase() === 'verified';
+        if (exactLanguageVerified) {
+            (Array.isArray(options.verifiedTracks) ? options.verifiedTracks : []).forEach((track) => {
+                const streamIndex = Number(track?.index ?? track?.streamIndex ?? track?.stream_index);
+                const language = this.normalizeTrackLanguage(track?.lang ?? track?.language);
+                if (Number.isSafeInteger(streamIndex) && streamIndex >= 0
+                    && language && language !== 'und' && !verifiedLanguageByStreamIndex.has(streamIndex)) {
+                    verifiedLanguageByStreamIndex.set(streamIndex, language);
+                }
+            });
+        }
+
+        const seenStreamIndexes = new Set();
+        const renditions = [];
+        for (let position = 0; position < rawRenditions.length; position += 1) {
+            const raw = rawRenditions[position];
+            const hlsIndex = Number(raw?.hlsIndex ?? raw?.hls_index);
+            const streamIndex = Number(raw?.streamIndex ?? raw?.stream_index);
+            const renditionCodec = String(raw?.codec || '').trim().toLowerCase();
+            const outputChannels = Number(raw?.outputChannels ?? raw?.output_channels);
+            if (!raw || typeof raw !== 'object'
+                || !Number.isSafeInteger(hlsIndex) || hlsIndex !== position
+                || !Number.isSafeInteger(streamIndex) || streamIndex < 0
+                || seenStreamIndexes.has(streamIndex)
+                || renditionCodec !== 'aac'
+                || outputChannels !== 2) {
+                return false;
+            }
+
+            seenStreamIndexes.add(streamIndex);
+            const codecTrack = codecByStreamIndex.get(streamIndex) || null;
+            const sourceChannels = Number(raw.sourceChannels ?? raw.source_channels ?? codecTrack?.channels);
+            const sourceCodec = String(codecTrack?.codec || '').trim().toLowerCase() || null;
+            const verifiedLanguage = verifiedLanguageByStreamIndex.get(streamIndex) || null;
+            renditions.push({
+                ...(codecTrack || {}),
+                index: streamIndex,
+                hlsIndex,
+                streamIndex,
+                // HLS LANGUAGE/NAME and the rendition title are provider tags,
+                // not speech verification. Only an exact-file verified catalogue
+                // row joined by absolute stream index may name the language.
+                language: verifiedLanguage,
+                renditionLanguage: this.normalizeTrackLanguage(raw.language),
+                renditionTitle: String(raw.title ?? '').trim() || null,
+                codec: sourceCodec,
+                channels: Number.isFinite(sourceChannels) && sourceChannels > 0 ? sourceChannels : null,
+                renditionCodec,
+                outputChannels,
+            });
+        }
+
+        const defaultHlsIndex = Number(
+            rawMultiAudioHls.defaultHlsIndex ?? rawMultiAudioHls.default_hls_index
+        );
+        const defaultStreamIndex = Number(
+            rawMultiAudioHls.defaultStreamIndex ?? rawMultiAudioHls.default_stream_index
+        );
+        const defaultRendition = renditions.find((entry) => entry.hlsIndex === defaultHlsIndex);
+        if (!Number.isSafeInteger(defaultHlsIndex) || defaultHlsIndex < 0
+            || !Number.isSafeInteger(defaultStreamIndex) || defaultStreamIndex < 0
+            || !defaultRendition || defaultRendition.streamIndex !== defaultStreamIndex) {
+            return false;
+        }
+
+        const actualStreamValue = options.audioStreamIndex;
+        if (actualStreamValue !== null && actualStreamValue !== undefined) {
+            const actualStreamIndex = Number(actualStreamValue);
+            if (!Number.isSafeInteger(actualStreamIndex) || actualStreamIndex !== defaultStreamIndex) {
+                return false;
+            }
+        }
+
+        renditions.forEach((entry) => {
+            entry.default = entry.streamIndex === defaultStreamIndex;
+        });
+        this._gatewayAudioRenditionStatus = 'ready';
+        this._gatewayAudioRenditions = renditions;
+        this._gatewayMultiAudioHls = { defaultHlsIndex, defaultStreamIndex };
+        this.audioTracks = renditions;
+        if (this.currentStreamInfo && typeof this.currentStreamInfo === 'object') {
+            this.currentStreamInfo = { ...this.currentStreamInfo, audioTracks: renditions };
+        }
+
+        const pendingStreamIndex = Number(
+            this.pendingPlaybackPreferences?.audio?.streamIndex
+                ?? this.pendingPlaybackPreferences?.audio?.stream_index
+        );
+        const selectedStreamIndex = Number(this.selectedAudioStreamIndex);
+        const exactPendingStreamIndex = Number.isSafeInteger(pendingStreamIndex)
+            && renditions.some((entry) => entry.streamIndex === pendingStreamIndex)
+            ? pendingStreamIndex
+            : (this.selectedAudioTrackUserChoice
+                && renditions.some((entry) => entry.streamIndex === selectedStreamIndex)
+                ? selectedStreamIndex
+                : null);
+        this._pendingGatewayAudioStreamIndex = exactPendingStreamIndex !== defaultStreamIndex
+            ? exactPendingStreamIndex
+            : null;
+        // The selected/direct fields always describe confirmed playback. A saved
+        // preference is only promoted after AUDIO_TRACK_SWITCHED proves it.
+        this.selectedAudioStreamIndex = defaultStreamIndex;
+        this.selectedAudioTrackUserChoice = false;
+        this.directAudioStreamIndex = defaultStreamIndex;
+        this.updateAudioTracks();
+        return true;
+    }
+
+    getValidatedGatewayAudioRenditions(activeHls = this.hls) {
+        if (this._gatewayAudioRenditionStatus !== 'ready'
+            || !activeHls || activeHls !== this.hls
+            || this._gatewayAudioRenditionAttemptId !== this._playbackAttemptId
+            || !this._gatewayHlsAudioTracksReady) {
+            return null;
+        }
+
+        const hlsTracks = activeHls.audioTracks;
+        const renditions = this._gatewayAudioRenditions;
+        if (!Array.isArray(hlsTracks) || !Array.isArray(renditions)
+            || hlsTracks.length !== renditions.length) {
+            return null;
+        }
+
+        for (let index = 0; index < renditions.length; index += 1) {
+            const rendition = renditions[index];
+            const hlsTrack = hlsTracks[index];
+            if (!hlsTrack || rendition.hlsIndex !== index) return null;
+            const advertisedId = Number(hlsTrack.id);
+            if (Number.isSafeInteger(advertisedId) && advertisedId !== rendition.hlsIndex) return null;
+        }
+        return renditions;
+    }
+
+    isGatewayAudioRenditionFailClosed() {
+        const isGatewayContext = this._gatewayAudioRenditionRequired
+            || this.currentPlaybackMode === 'gateway-session';
+        if (!isGatewayContext) return false;
+        if (this._gatewayAudioRenditionStatus === 'invalid') return true;
+        if (this._gatewayAudioRenditionStatus === 'ready') {
+            return !this.getValidatedGatewayAudioRenditions();
+        }
+
+        // Legacy Gateway mono-audio remains available only after hls.js has
+        // positively reported exactly one track. Zero/unknown or multiple tracks
+        // without an absolute map are intentionally non-selectable.
+        const hlsTracks = this.hls?.audioTracks;
+        return !this._gatewayHlsAudioTracksReady
+            || !Array.isArray(hlsTracks)
+            || hlsTracks.length !== 1;
+    }
+
+    getGatewayAudioRenditionLabel(track, index, allTracks) {
+        const buildBase = (candidate, fallbackIndex) => {
+            const parts = [];
+            const language = this.getLanguageDisplayName(candidate?.language);
+            parts.push(language || 'Unknown language');
+            const codec = candidate?.codec || candidate?.renditionCodec;
+            if (codec) parts.push(String(codec).toUpperCase());
+            const channels = Number(candidate?.channels ?? candidate?.outputChannels);
+            if (Number.isFinite(channels) && channels > 0) parts.push(`${channels}ch`);
+            return parts.length ? parts.join(' - ') : `Audio ${fallbackIndex + 1}`;
+        };
+
+        const tracks = Array.isArray(allTracks) ? allTracks : [];
+        const base = buildBase(track, index);
+        const bases = tracks.map((candidate, candidateIndex) => buildBase(candidate, candidateIndex));
+        const duplicateCount = bases.filter((candidate) => candidate === base).length;
+        if (duplicateCount <= 1) return base;
+        const occurrence = bases.slice(0, index + 1).filter((candidate) => candidate === base).length;
+        return `${base} - Track ${occurrence}`;
+    }
+
+    handleGatewayHlsAudioTrackSwitched(activeHls, playbackAttemptId, data = {}) {
+        const pending = this._pendingHlsAudioSwitch;
+        if (this.isStalePlaybackAttempt(playbackAttemptId) || this.hls !== activeHls) {
+            if (pending?.hls === activeHls) {
+                if (this._latestHlsAudioSwitch?.hls === activeHls) {
+                    this._latestHlsAudioSwitch.acceptEvents = false;
+                }
+                this.cancelPendingHlsAudioSwitch(false);
+            }
+            return false;
+        }
+
+        const renditions = this.getValidatedGatewayAudioRenditions(activeHls);
+        const hlsIndex = Number(data.id ?? data.audioTrack ?? data.index ?? activeHls.audioTrack);
+        const rendition = Number.isSafeInteger(hlsIndex)
+            ? renditions?.find((entry) => entry.hlsIndex === hlsIndex)
+            : null;
+        if (!rendition) {
+            if (pending?.hls === activeHls) {
+                if (this._latestHlsAudioSwitch?.hls === activeHls) {
+                    this._latestHlsAudioSwitch.acceptEvents = false;
+                }
+                this.cancelPendingHlsAudioSwitch(false);
+            }
+            this.updateAudioTracks();
+            return false;
+        }
+
+        if (pending) {
+            if (pending.hls !== activeHls
+                || pending.playbackAttemptId !== playbackAttemptId
+                || pending.hlsIndex !== hlsIndex
+                || pending.streamIndex !== rendition.streamIndex) {
+                return false;
+            }
+            this.directAudioStreamIndex = rendition.streamIndex;
+            this.selectedAudioStreamIndex = rendition.streamIndex;
+            this.selectedAudioTrackUserChoice = true;
+            if (this._pendingGatewayAudioStreamIndex === rendition.streamIndex) {
+                this._pendingGatewayAudioStreamIndex = null;
+            }
+            this.clearPendingPreference('audio');
+            this.setSelectedAudioPreference(rendition);
+            this.cancelPendingHlsAudioSwitch(true);
+            this.closeAudioMenu();
+        } else {
+            const latest = this._latestHlsAudioSwitch;
+            if (latest?.hls === activeHls && latest.playbackAttemptId === playbackAttemptId
+                && (!latest.acceptEvents || latest.hlsIndex !== hlsIndex
+                    || latest.streamIndex !== rendition.streamIndex)) {
+                return false;
+            }
+            this.directAudioStreamIndex = rendition.streamIndex;
+            if (!this.selectedAudioTrackUserChoice
+                || !renditions.some((entry) => entry.streamIndex === Number(this.selectedAudioStreamIndex))) {
+                this.selectedAudioStreamIndex = rendition.streamIndex;
+                this.selectedAudioTrackUserChoice = false;
+            }
+        }
+        this.updateAudioTracks();
+        return true;
+    }
+
+    selectGatewayHlsAudioTrack(hlsIndex, streamIndex) {
+        const activeHls = this.hls;
+        const playbackAttemptId = this._playbackAttemptId;
+        const renditions = this.getValidatedGatewayAudioRenditions(activeHls);
+        const rendition = renditions?.find((entry) => entry.hlsIndex === hlsIndex);
+        if (!rendition || rendition.streamIndex !== streamIndex) {
+            if (this._latestHlsAudioSwitch) this._latestHlsAudioSwitch.acceptEvents = false;
+            this.cancelPendingHlsAudioSwitch(false);
+            return Promise.resolve(false);
+        }
+
+        if (activeHls.audioTrack === hlsIndex
+            && Number(this.selectedAudioStreamIndex) === streamIndex
+            && Number(this.directAudioStreamIndex) === streamIndex) {
+            this.closeAudioMenu();
+            return Promise.resolve(true);
+        }
+
+        this.cancelPendingHlsAudioSwitch(false);
+        let resolveSwitch;
+        const switchPromise = new Promise((resolve) => { resolveSwitch = resolve; });
+        const timeoutId = setTimeout(() => {
+            if (this._pendingHlsAudioSwitch?.hls === activeHls
+                && this._pendingHlsAudioSwitch?.hlsIndex === hlsIndex) {
+                console.warn('[WatchPage] HLS audio switch was not confirmed; keeping the prior absolute track.');
+                if (this._latestHlsAudioSwitch?.hls === activeHls
+                    && this._latestHlsAudioSwitch?.hlsIndex === hlsIndex) {
+                    this._latestHlsAudioSwitch.acceptEvents = false;
+                }
+                this.cancelPendingHlsAudioSwitch(false);
+                this.updateAudioTracks();
+            }
+        }, 8000);
+        this._pendingHlsAudioSwitch = {
+            hls: activeHls,
+            playbackAttemptId,
+            hlsIndex,
+            streamIndex,
+            timeoutId,
+            resolve: resolveSwitch,
+        };
+        this._latestHlsAudioSwitch = {
+            hls: activeHls,
+            playbackAttemptId,
+            hlsIndex,
+            streamIndex,
+            acceptEvents: true,
+        };
+
+        try {
+            activeHls.audioTrack = hlsIndex;
+        } catch (error) {
+            console.warn('[WatchPage] Could not request the HLS audio track:', error?.message || error);
+            this._latestHlsAudioSwitch.acceptEvents = false;
+            this.cancelPendingHlsAudioSwitch(false);
+        }
+        return switchPromise;
+    }
+
     getHlsAudioTracks() {
         const tracks = this.hls?.audioTracks;
         if (!Array.isArray(tracks) || tracks.length <= 0) return [];
+
+        const isGatewayContext = this._gatewayAudioRenditionRequired
+            || this.currentPlaybackMode === 'gateway-session';
+        if (isGatewayContext) {
+            if (this._gatewayAudioRenditionStatus === 'ready') {
+                const renditions = this.getValidatedGatewayAudioRenditions();
+                if (!renditions) return [];
+                return renditions.map((track) => ({
+                    source: 'hls',
+                    index: track.hlsIndex,
+                    streamIndex: track.streamIndex,
+                    label: this.getGatewayAudioRenditionLabel(track, track.hlsIndex, renditions),
+                    language: track.language,
+                    codec: track.codec || track.renditionCodec || null,
+                    active: this.hls.audioTrack === track.hlsIndex
+                        && Number(this.directAudioStreamIndex) === track.streamIndex,
+                }));
+            }
+            if (this._gatewayAudioRenditionStatus === 'invalid'
+                || !this._gatewayHlsAudioTracksReady
+                || tracks.length !== 1) {
+                return [];
+            }
+        }
 
         return tracks.map((track, index) => ({
             source: 'hls',
@@ -7232,29 +7725,47 @@ class WatchPage {
             this.updateAudioTracks();
             return;
         }
-        // Direct play: build the switchable list from the relay probe (dedupe by lang).
-        const seen = new Set();
-        const usable = [];
-        for (const [idx, lang] of exactByIdx) {
-            if (!lang) continue;
-            if (seen.has(lang)) continue;
-            seen.add(lang);
-            usable.push({ index: idx, language: lang });
+        // Direct/Gateway play: materialize EVERY exact file track. Two tracks can
+        // legitimately share a language (commentary, stereo/5.1, descriptive
+        // audio), and an untagged track is still a real selectable stream. Hiding
+        // either would make the audio menu disagree with the exact ffprobe map.
+        const rawByIdx = new Map();
+        for (const track of raw) {
+            const index = Number(track?.index);
+            if (Number.isInteger(index) && !rawByIdx.has(index)) rawByIdx.set(index, track);
         }
+        const usable = Array.from(exactByIdx, ([index, language]) => ({
+            index,
+            language: language || null
+        }));
         if (!usable.length) {
             if (Array.isArray(this.audioTracks) && this.audioTracks.length) {
                 this.audioTracks = reconcileTrackList(this.audioTracks);
             }
             return;
         }
+        const declaredDefaultIndex = Number(
+            raw.find((track) => track?.default === true || track?.disposition?.default === 1)?.index
+        );
         const defLang = this.normalizeTrackLanguage(probe?.audioDefaultLanguage);
-        let defPos = usable.findIndex(t => t.language === defLang);
+        let defPos = Number.isInteger(declaredDefaultIndex)
+            ? usable.findIndex(t => t.index === declaredDefaultIndex)
+            : -1;
+        if (defPos < 0) defPos = usable.findIndex(t => t.language === defLang);
         if (defPos < 0) defPos = 0;
         this.audioTracks = usable.map((t, i) => {
             const existing = (Array.isArray(this.currentStreamInfo?.audioTracks)
                 ? this.currentStreamInfo.audioTracks
                 : []).find(track => Number(track?.index) === Number(t.index));
-            return { ...(existing || {}), index: t.index, language: t.language, lang: t.language, default: i === defPos };
+            const rawTrack = rawByIdx.get(t.index);
+            return {
+                ...technicalTrackMetadata(rawTrack),
+                ...(existing || {}),
+                index: t.index,
+                language: t.language,
+                lang: t.language,
+                default: i === defPos
+            };
         });
         if (!Number.isInteger(this.directAudioStreamIndex)) this.directAudioStreamIndex = usable[defPos].index;
         if (!this.selectedAudioTrackUserChoice && !Number.isInteger(this.selectedAudioStreamIndex)) {
@@ -7366,6 +7877,9 @@ class WatchPage {
     getVisibleAudioTracks() {
         const hlsTracks = this.getHlsAudioTracks();
         if (hlsTracks.length > 1) return hlsTracks;
+        if (this.isGatewayAudioRenditionFailClosed()) {
+            return [{ source: 'none', index: -1, label: 'Audio tracks unavailable', active: true }];
+        }
 
         const nativeTracks = this.getNativeAudioTracks();
         if (nativeTracks.length > 1) return nativeTracks;
@@ -7464,13 +7978,20 @@ class WatchPage {
         }
 
         if (source === 'hls' && this.hls && index >= 0) {
+            const gatewayContext = this._gatewayAudioRenditionRequired
+                || this.currentPlaybackMode === 'gateway-session';
+            if (gatewayContext) {
+                if (!Number.isSafeInteger(streamIndex) || streamIndex < 0) return false;
+                this._pendingGatewayAudioStreamIndex = null;
+                return this.selectGatewayHlsAudioTrack(index, streamIndex);
+            }
             this.hls.audioTrack = index;
             this.clearPendingPreference('audio');
             this.updateAudioTracks();
             this.closeAudioMenu();
             this.saveResumeSnapshotThrottled(true);
             this.saveProgress({ force: true });
-            return;
+            return true;
         }
 
         if (source === 'native') {
@@ -7702,6 +8223,7 @@ class WatchPage {
         const selected = this.getSelectedAudioTrack();
         if (!selected || !this.content?.sourceId || !this.content?.id) return false;
 
+        const switchStartedAt = Date.now();
         const targetPosition = Math.max(0, Math.floor(this.getPlaybackPosition()));
         const preRoll = this.getGatewaySeekPreRoll(targetPosition, 0);
         const sessionStart = Math.max(0, targetPosition - preRoll);
@@ -7714,6 +8236,21 @@ class WatchPage {
         });
         const playbackPreferences = this.setSelectedAudioPreference(selected);
         const audioLabel = this.getTrackLabel(selected, 'Selected audio', 'audio');
+        const requestedAudioStreamIndex = Number(audioOptions.audioStreamIndex ?? selected.index);
+        this._gatewayAudioSwitchMetrics = {
+            requestId,
+            requestedAudioStreamIndex: Number.isInteger(requestedAudioStreamIndex)
+                ? requestedAudioStreamIndex
+                : null,
+            actualAudioStreamIndex: null,
+            targetPosition,
+            autoplay,
+            sessionCreateAttempts: 0,
+            releaseBarrierCompleted: false,
+            status: 'releasing_previous_session',
+            startedAt: switchStartedAt,
+            elapsedMs: 0,
+        };
 
         console.log(`[WatchPage] Restarting Gateway with audio track ${selected.index}: ${audioLabel}`);
         this.hidePlaybackError();
@@ -7724,6 +8261,10 @@ class WatchPage {
 
         await this.releasePlaybackPipelineForRetry();
         if (this.isStaleAudioSwitch(requestId)) return false;
+        this.updateGatewayAudioSwitchMetrics(requestId, 'provider_cooldown', {
+            releaseBarrierCompleted: true,
+            releasedAt: Date.now(),
+        });
         await this.waitForProviderSlotRelease(300);
         if (this.isStaleAudioSwitch(requestId)) return false;
 
@@ -7738,50 +8279,85 @@ class WatchPage {
         };
 
         let result = null;
-        let retryLevel = 0;
         try {
+            this.updateGatewayAudioSwitchMetrics(requestId, 'creating_session', {
+                sessionCreateAttempts: 1,
+                sessionRequestedAt: Date.now(),
+            });
             result = await this.requestAudioSwitchGatewayUrl(itemType, container, playbackHint, requestId);
         } catch (error) {
             console.error('[WatchPage] Gateway audio switch failed:', error);
-            if (this.isRangeSeekFailure(error?.message || error?.details || '')) {
-                retryLevel = 1;
-                const widerPreRoll = this.getGatewaySeekPreRoll(targetPosition, 75);
-                const widerSessionStart = Math.max(0, targetPosition - widerPreRoll);
-                playbackHint.seekOffset = widerSessionStart;
-                playbackHint.startOffset = widerSessionStart;
-                playbackHint.resumeTime = widerSessionStart;
-                try {
-                    result = await this.requestAudioSwitchGatewayUrl(itemType, container, playbackHint, requestId);
-                } catch (retryError) {
-                    console.error('[WatchPage] Gateway audio switch seek retry failed:', retryError);
-                    await this.handlePlaybackFailure(retryError?.message || 'Failed to switch audio track.');
-                    return false;
-                }
-            } else {
-                await this.handlePlaybackFailure(error?.message || 'Failed to switch audio track.');
-                return false;
-            }
+            this.updateGatewayAudioSwitchMetrics(requestId, 'failed', {
+                failedAt: Date.now(),
+                failureCode: String(error?.code || error?.status || 'session_create_failed'),
+            });
+            await this.handlePlaybackFailure(error?.message || 'Failed to switch audio track.');
+            return false;
         }
 
+        const resultMetadata = this.playbackMetadataFromResult(result || {});
+        const resultSessionId = resultMetadata.sessionId || null;
         if (this.isStaleAudioSwitch(requestId)) {
-            await this.cleanupStaleCloudPlaybackSession(result?.sessionId);
+            await this.cleanupStaleCloudPlaybackSession(resultSessionId);
+            this.updateGatewayAudioSwitchMetrics(requestId, 'cancelled', {
+                cancelledAt: Date.now(),
+            });
             return false;
         }
 
         if (!result?.url) {
+            await this.cleanupStaleCloudPlaybackSession(resultSessionId);
+            this.updateGatewayAudioSwitchMetrics(requestId, 'failed', {
+                failedAt: Date.now(),
+                failureCode: 'missing_playback_url',
+            });
             await this.handlePlaybackFailure('Failed to switch audio track.');
             return false;
         }
 
-        this.content.cloudPlaybackSessionId = result.sessionId || null;
+        const rawActualAudioStreamIndex = resultMetadata.audioStreamIndex;
+        const actualAudioStreamIndex = rawActualAudioStreamIndex === null
+            || rawActualAudioStreamIndex === undefined
+            || rawActualAudioStreamIndex === ''
+            ? null
+            : Number(rawActualAudioStreamIndex);
+        if (
+            Number.isInteger(requestedAudioStreamIndex)
+            && (
+                !Number.isInteger(actualAudioStreamIndex)
+                || actualAudioStreamIndex !== requestedAudioStreamIndex
+            )
+        ) {
+            await this.cleanupStaleCloudPlaybackSession(resultSessionId);
+            this.updateGatewayAudioSwitchMetrics(requestId, 'failed', {
+                failedAt: Date.now(),
+                actualAudioStreamIndex,
+                failureCode: Number.isInteger(actualAudioStreamIndex)
+                    ? 'audio_map_mismatch'
+                    : 'audio_map_unverified',
+            });
+            await this.handlePlaybackFailure('The selected audio track could not be activated.');
+            return false;
+        }
+
+        const effectiveAudioStreamIndex = Number.isInteger(actualAudioStreamIndex)
+            ? actualAudioStreamIndex
+            : null;
+        this.updateGatewayAudioSwitchMetrics(requestId, 'attaching_gateway_lane', {
+            actualAudioStreamIndex: effectiveAudioStreamIndex,
+            sessionResolvedAt: Date.now(),
+        });
+        this.content.cloudPlaybackSessionId = resultSessionId;
         this.resumeTime = targetPosition;
         const effectiveSessionStart = Number(playbackHint.seekOffset) || sessionStart;
-        const resultMetadata = this.playbackMetadataFromResult(result);
         const measuredSeek = this.getMeasuredGatewaySeekPlan(
             resultMetadata,
             targetPosition,
             effectiveSessionStart
         );
+        this.updateGatewayAudioSwitchMetrics(requestId, 'waiting_gateway_gate', {
+            laneAttachedAt: Date.now(),
+        });
         await this.loadVideo(result.url, this.playbackMetadataFromResult(resultMetadata, {
             seekOffset: measuredSeek.actualStartOffset,
             startOffset: measuredSeek.actualStartOffset,
@@ -7790,78 +8366,59 @@ class WatchPage {
             localSeekTarget: measuredSeek.localSeekTarget,
             sourceTimestamps: measuredSeek.sourceTimestamps,
             playbackAttemptId: this._playbackAttemptId,
-            cloudPlaybackSessionId: result.sessionId || null,
+            cloudPlaybackSessionId: resultSessionId,
+            autoplay,
+            audioSwitchRequestId: requestId,
             playbackPreferences,
             ...audioOptions,
+            ...(Number.isInteger(effectiveAudioStreamIndex)
+                ? { audioStreamIndex: effectiveAudioStreamIndex }
+                : {}),
         }));
         this._gatewaySeekRetry = {
             target: targetPosition,
             preRoll: Math.max(0, targetPosition - effectiveSessionStart),
-            retryLevel,
+            retryLevel: 0,
             playbackAttemptId: this._playbackAttemptId,
             audioSwitchRequestId: requestId
         };
-        if (autoplay) {
-            this.video?.play?.().catch(e => {
-                if (e.name !== 'AbortError') console.error('[WatchPage] Gateway audio switch play error:', e);
-            });
-        } else {
-            this.video?.pause?.();
-        }
         this.setVolumeFromStorage();
         return true;
+    }
+
+    updateGatewayAudioSwitchMetrics(requestId, status, details = {}) {
+        const current = this._gatewayAudioSwitchMetrics;
+        if (!current || Number(current.requestId) !== Number(requestId)) return;
+        this._gatewayAudioSwitchMetrics = {
+            ...current,
+            ...details,
+            status,
+            elapsedMs: Math.max(0, Date.now() - Number(current.startedAt || Date.now())),
+        };
     }
 
     async waitForProviderSlotRelease(delay = 1400) {
         await new Promise(resolve => setTimeout(resolve, delay));
     }
 
-    getAudioSwitchRetryDelay(error) {
-        const message = [
-            error?.message,
-            error?.details,
-            error?.status,
-            error?.code
-        ].filter(Boolean).join(' ');
-
-        if (this.isConnectionLimitError(message)) return 2200;
-        if (/502|503|504|UPSTREAM_UNAVAILABLE|ECONNRESET|ETIMEDOUT|timeout|NetworkError|Failed to fetch/i.test(message)) {
-            return 1400;
-        }
-        return 900;
-    }
-
     async requestAudioSwitchGatewayUrl(itemType, container, playbackHint, requestId) {
-        let lastError = null;
-        for (let attempt = 0; attempt < 2; attempt += 1) {
-            if (this.isStaleAudioSwitch(requestId)) return null;
-            try {
-                return await API.proxy.xtream.getStreamUrl(
-                    this.content.sourceId,
-                    this.content.id,
-                    itemType,
-                    container,
-                    playbackHint
-                );
-            } catch (error) {
-                lastError = error;
-                if (this.isPlaybackSupersededError(error)) {
-                    await this.handlePlaybackSuperseded(this.currentCloudPlaybackSessionId);
-                    break;
-                }
-                if (this.isProviderBusyError(this.getErrorText(error))) {
-                    await this.reportProviderPlaybackFailure(error);
-                    break;
-                }
-                if (attempt === 0) {
-                    const retryDelay = this.getAudioSwitchRetryDelay(error);
-                    console.warn(`[WatchPage] Audio switch session failed, retrying after ${retryDelay}ms provider cooldown:`, error?.message || error);
-                    await this.waitForProviderSlotRelease(retryDelay);
-                    continue;
-                }
+        if (this.isStaleAudioSwitch(requestId)) return null;
+        try {
+            return await API.proxy.xtream.getStreamUrl(
+                this.content.sourceId,
+                this.content.id,
+                itemType,
+                container,
+                playbackHint
+            );
+        } catch (error) {
+            if (this.isPlaybackSupersededError(error)) {
+                await this.handlePlaybackSuperseded(this.currentCloudPlaybackSessionId);
+            } else if (this.isProviderBusyError(this.getErrorText(error))) {
+                await this.reportProviderPlaybackFailure(error);
             }
+            throw error;
         }
-        throw lastError || new Error('Failed to switch audio track.');
     }
 
     clearExternalSubtitleTracks({ keepAiPolling = false } = {}) {

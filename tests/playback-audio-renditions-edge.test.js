@@ -1,0 +1,153 @@
+'use strict';
+
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+
+const root = path.join(__dirname, '..');
+const source = fs.readFileSync(
+  path.join(root, 'supabase/functions/norva-playback/index.ts'),
+  'utf8',
+).replace(/\r\n?/g, '\n');
+
+function between(startMarker, endMarker) {
+  const start = source.indexOf(startMarker);
+  assert.notEqual(start, -1, `missing start marker: ${startMarker}`);
+  const end = source.indexOf(endMarker, start + startMarker.length);
+  assert.notEqual(end, -1, `missing end marker: ${endMarker}`);
+  return source.slice(start, end);
+}
+
+function loadNormalizer() {
+  let block = between(
+    'function normalizeGatewayAudioRenditions(',
+    '\nfunction normalizeCodecProfileTracks(',
+  );
+  block = block
+    .replace(
+      'function normalizeGatewayAudioRenditions(value: unknown, selectedStreamIndex: number | null)',
+      'function normalizeGatewayAudioRenditions(value, selectedStreamIndex)',
+    )
+    .replace('const normalized: JsonRecord[] = [];', 'const normalized = [];')
+    .replace('new Set<number>()', 'new Set()')
+    .replace(
+      /function normalizeGatewayMultiAudioHls\(\n  value: unknown,\n  renditions: JsonRecord\[\] \| null,\n  selectedStreamIndex: number \| null,\n\)/,
+      'function normalizeGatewayMultiAudioHls(\n  value,\n  renditions,\n  selectedStreamIndex,\n)',
+    );
+  const context = {
+    Number,
+    Set,
+    recordOrEmpty: (value) => value && typeof value === 'object' && !Array.isArray(value) ? value : {},
+  };
+  vm.runInNewContext(
+    `${block}; this.normalize = normalizeGatewayAudioRenditions; this.normalizeMetadata = normalizeGatewayMultiAudioHls;`,
+    context,
+  );
+  return context;
+}
+
+const valid = [
+  {
+    hlsIndex: 0,
+    streamIndex: 2,
+    language: 'eng',
+    title: 'English',
+    sourceChannels: 6,
+    outputChannels: 2,
+    codec: 'aac',
+  },
+  {
+    hlsIndex: 1,
+    streamIndex: 5,
+    language: 'fra',
+    title: 'Français',
+    sourceChannels: 2,
+    outputChannels: 2,
+    codec: 'aac',
+  },
+];
+
+const validMetadata = {
+  protocol: 1,
+  enabled: true,
+  reason: 'enabled',
+  maxAudioRenditions: 8,
+  sourceTrackCount: 2,
+  masterPlaylist: 'playlist.m3u8',
+  videoPlaylist: 'video.m3u8',
+  defaultHlsIndex: 1,
+  defaultStreamIndex: 5,
+};
+
+test('valid Gateway renditions round-trip exactly from absolute streams to playback metadata', () => {
+  const { normalize, normalizeMetadata } = loadNormalizer();
+  const normalized = JSON.parse(JSON.stringify(normalize(valid, 5)));
+  assert.deepEqual(normalized, valid);
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(normalizeMetadata(validMetadata, normalized, 5))),
+    validMetadata,
+  );
+
+  const gateway = between(
+    'async function createGatewaySession(',
+    '\nasync function requestGatewaySession(',
+  );
+  assert.match(gateway, /normalizeGatewayAudioRenditions\(\s*gatewayBody\.audioRenditions,\s*audioStreamIndex/);
+  assert.match(gateway, /normalizeGatewayMultiAudioHls\(\s*gatewayBody\.multiAudioHls,\s*normalizedAudioRenditions,\s*audioStreamIndex/);
+  assert.doesNotMatch(gateway, /gatewayHints\.(?:audioRenditions|multiAudioHls)|playbackHint\.(?:audioRenditions|multiAudioHls)/);
+  assert.match(gateway, /audioRenditions,[\s\S]*multiAudioHls,[\s\S]*codecProfile/);
+
+  const response = between(
+    'const gatewaySessionResponse =',
+    '\nasync function startPlaybackLanguageValidation(',
+  );
+  assert.match(response, /audioRenditions: gateway\.audioRenditions \?\? null/);
+  assert.match(response, /audio_renditions: gateway\.audioRenditions \?\? null/);
+  assert.ok((response.match(/audioRenditions: gateway\.audioRenditions \?\? null/g) || []).length >= 2);
+  assert.match(response, /multiAudioHls: gateway\.multiAudioHls \?\? null/);
+  assert.match(response, /multi_audio_hls: gateway\.multiAudioHls \?\? null/);
+  assert.ok((response.match(/multiAudioHls: gateway\.multiAudioHls \?\? null/g) || []).length >= 2);
+});
+
+test('the Edge drops the whole rendition map on any cardinality, index, label or codec mismatch', () => {
+  const { normalize } = loadNormalizer();
+  const variants = [
+    [valid.slice(0, 1), 2],
+    [[valid[0], { ...valid[1], hlsIndex: 2 }], 5],
+    [[valid[0], { ...valid[1], streamIndex: 2 }], 5],
+    [[valid[0], { ...valid[1], language: 'French' }], 5],
+    [[valid[0], { ...valid[1], title: `bad\u0000title` }], 5],
+    [[valid[0], { ...valid[1], title: 'x'.repeat(97) }], 5],
+    [[valid[0], { ...valid[1], sourceChannels: 65 }], 5],
+    [[valid[0], { ...valid[1], outputChannels: 6 }], 5],
+    [[valid[0], { ...valid[1], codec: 'mp3' }], 5],
+    [valid, 9],
+  ];
+  for (const [renditions, selected] of variants) {
+    assert.equal(normalize(renditions, selected), null);
+  }
+});
+
+test('the Edge drops the whole multi-audio topology on any diagnostics or default-stream mismatch', () => {
+  const { normalize, normalizeMetadata } = loadNormalizer();
+  const normalized = normalize(valid, 5);
+  assert.ok(normalized);
+  const variants = [
+    { ...validMetadata, protocol: 2 },
+    { ...validMetadata, enabled: false },
+    { ...validMetadata, reason: 'disabled' },
+    { ...validMetadata, maxAudioRenditions: 7 },
+    { ...validMetadata, sourceTrackCount: 3 },
+    { ...validMetadata, masterPlaylist: 'other.m3u8' },
+    { ...validMetadata, videoPlaylist: 'playlist.m3u8' },
+    { ...validMetadata, defaultHlsIndex: 0 },
+    { ...validMetadata, defaultStreamIndex: 2 },
+  ];
+  for (const metadata of variants) {
+    assert.equal(normalizeMetadata(metadata, normalized, 5), null);
+  }
+  assert.equal(normalizeMetadata(validMetadata, normalized, 2), null);
+  assert.equal(normalizeMetadata(validMetadata, null, 5), null);
+});
