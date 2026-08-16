@@ -13,6 +13,15 @@ const STRICT_LID_MIN_SCRIPT_DENSITY = 0.7;
 const STRICT_LID_DIVERSITY_SHINGLE_SIZE = 3;
 const STRICT_LID_MAX_SAMPLE_SHINGLE_SIMILARITY = 0.82;
 const STRICT_LID_MAX_DIVERSITY_CHARACTERS = 4096;
+const STRICT_LID_OBSERVABILITY_MAX_COUNT = 64;
+const STRICT_LID_BATCH_OUTCOMES = new Set([
+    'not-run',
+    'succeeded',
+    'failed',
+    'timed-out',
+    'aborted',
+    'preempted',
+]);
 const STRICT_LID_CJK_CHARACTER_RE = Object.freeze({
     // Japanese evidence deliberately includes kana and Han. The independent transcript
     // detector must still identify `ja`, so a Han-only Chinese transcript cannot be accepted
@@ -133,6 +142,96 @@ function strictTranscriptShingleSimilarity(left, right) {
     // Containment similarity catches a repeated boilerplate phrase with a small appended suffix;
     // ordinary separated dialogue windows retain independent shingles and remain far below 0.82.
     return smaller.size > 0 ? overlap / smaller.size : 0;
+}
+
+function strictLidBatchOutcome(batch) {
+    try {
+        if (!batch || typeof batch !== 'object') return 'not-run';
+        if (batch.preempted === true) return 'preempted';
+        if (batch.timedOut === true) return 'timed-out';
+        if (batch.aborted === true) return 'aborted';
+        return batch.ok === true ? 'succeeded' : 'failed';
+    } catch (_) {
+        return 'not-run';
+    }
+}
+
+function boundedStrictLidObservabilityCount(value) {
+    return typeof value === 'number'
+        && Number.isSafeInteger(value)
+        && value >= 0
+        && value <= STRICT_LID_OBSERVABILITY_MAX_COUNT
+        ? value
+        : 0;
+}
+
+function strictLidBatchFailureResponse(batch) {
+    if (strictLidBatchOutcome(batch) !== 'failed') return null;
+    return Object.freeze({
+        status: 502,
+        retryAfterSeconds: 30,
+        payload: Object.freeze({
+            error: 'Strict language inference batch failed',
+            code: 'strict_lid_batch_failed',
+            retryable: true,
+        }),
+    });
+}
+
+function strictLidPendingReason({
+    batchOutcome,
+    acceptedSampleCount,
+    acceptedLanguageCount,
+    rejectedConflictCount,
+    ignoredWeakCount,
+    repeatedCount,
+    missingDiversityCount,
+    insufficientSpeechSampleCount,
+}) {
+    if (batchOutcome === 'failed') return 'batch-failed';
+    if (rejectedConflictCount > 0) return 'rejected-conflict';
+    if (acceptedLanguageCount > 1) return 'language-conflict';
+    if (missingDiversityCount > 0) return 'missing-diversity';
+    if (repeatedCount > 0) return 'repeated-evidence';
+    if (insufficientSpeechSampleCount > 0) return 'insufficient-speech';
+    if (ignoredWeakCount > 0) return 'weak-speech';
+    if (acceptedSampleCount === 0) return 'no-accepted-samples';
+    return 'insufficient-consensus';
+}
+
+// Unverified strict-LID logs are intentionally a closed aggregate: accepting only bounded
+// counters and fixed enums prevents transcripts, source details, identifiers or model evidence
+// from reaching production logs even if a caller passes additional properties by mistake.
+function buildStrictLidUnverifiedObservability(input = {}) {
+    const source = input && typeof input === 'object' && !Array.isArray(input) ? input : {};
+    const read = (key) => {
+        try { return source[key]; } catch (_) { return undefined; }
+    };
+    const batchOutcome = read('batchOutcome');
+    const safeBatchOutcome = STRICT_LID_BATCH_OUTCOMES.has(batchOutcome)
+        ? batchOutcome
+        : 'not-run';
+    const counts = {
+        extractedWindowCount: boundedStrictLidObservabilityCount(read('extractedWindowCount')),
+        evaluatedWindowCount: boundedStrictLidObservabilityCount(read('evaluatedWindowCount')),
+        acceptedSampleCount: boundedStrictLidObservabilityCount(read('acceptedSampleCount')),
+        acceptedLanguageCount: boundedStrictLidObservabilityCount(read('acceptedLanguageCount')),
+        maxConsensus: boundedStrictLidObservabilityCount(read('maxConsensus')),
+        rejectedConflictCount: boundedStrictLidObservabilityCount(read('rejectedConflictCount')),
+        ignoredWeakCount: boundedStrictLidObservabilityCount(read('ignoredWeakCount')),
+        repeatedCount: boundedStrictLidObservabilityCount(read('repeatedCount')),
+        missingDiversityCount: boundedStrictLidObservabilityCount(read('missingDiversityCount')),
+        insufficientSpeechSampleCount: boundedStrictLidObservabilityCount(
+            read('insufficientSpeechSampleCount'),
+        ),
+    };
+    return Object.freeze({
+        event: 'strict_lid_unverified',
+        ...counts,
+        batchOutcome: safeBatchOutcome,
+        pendingReason: strictLidPendingReason({ ...counts, batchOutcome: safeBatchOutcome }),
+        verified: false,
+    });
 }
 
 function appendBounded(current, chunk) {
@@ -373,13 +472,17 @@ function resolveStrictLidConsensus(sampleResults, consensusNeeded = 4) {
     let ignoredWeakSpeechSampleCount = 0;
     let repeatedSpeechSampleCount = 0;
     let missingDiversitySampleCount = 0;
+    let insufficientSpeechSampleCount = 0;
+    let evaluatedSampleCount = 0;
     let bestAccepted = null;
     let best = null;
     for (const entry of sampleResults || []) {
+        evaluatedSampleCount++;
         const result = entry?.result || null;
         const disposition = String(entry?.disposition || 'insufficient');
         if (disposition === 'conflict') rejectedSpeechSampleCount++;
         if (disposition === 'weak') ignoredWeakSpeechSampleCount++;
+        if (disposition === 'insufficient') insufficientSpeechSampleCount++;
         if (result && (!best || Number(result.wordCount || 0) > Number(best.wordCount || 0))) {
             best = result;
         }
@@ -431,14 +534,19 @@ function resolveStrictLidConsensus(sampleResults, consensusNeeded = 4) {
         ignoredWeakSpeechSampleCount,
         repeatedSpeechSampleCount,
         missingDiversitySampleCount,
+        insufficientSpeechSampleCount,
+        evaluatedSampleCount,
     };
 }
 
 module.exports = {
     buildWhisperBatchArgs,
+    buildStrictLidUnverifiedObservability,
     cleanupStrictLidFiles,
     evaluateStrictTranscriptEvidence,
     parseWhisperBatchLid,
     resolveStrictLidConsensus,
     runWhisperBatchProcess,
+    strictLidBatchFailureResponse,
+    strictLidBatchOutcome,
 };
