@@ -2106,5 +2106,5 @@ test('FFmpeg MKV input uses pipe:0 only, keeps exact post-input resume, and tear
         'session handoff must close and await the provider socket before releasing the old FFmpeg',
     );
     assert.match(source, /boundedMkvInputPumpProtocol:\s*1/);
-    assert.match(source, /const GATEWAY_VERSION = 91;/);
+    assert.match(source, /const GATEWAY_VERSION = 92;/);
 });

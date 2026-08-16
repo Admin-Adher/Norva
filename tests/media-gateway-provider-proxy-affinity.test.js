@@ -298,7 +298,7 @@ test('gateway fails proxy 407 safely before provider 458 handling', () => {
 });
 
 test('gateway advertises targeted operator override support without identities or secrets', () => {
-  assert.match(gateway, /const GATEWAY_VERSION = 91;/);
+  assert.match(gateway, /const GATEWAY_VERSION = 92;/);
   assert.match(gateway, /providerProxyAffinityProtocol:\s*1/);
   assert.match(gateway, /providerProxyAffinityKey:\s*'provider-account'/);
   assert.match(gateway, /providerProxySlotOverrideProtocol:\s*1/);

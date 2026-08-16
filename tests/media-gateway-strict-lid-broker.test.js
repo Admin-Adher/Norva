@@ -461,6 +461,16 @@ test('strict LID rejects an invalid signed size before creating a server or prov
   assert.match(route, /detectLanguageRequestPolicy\(req, options\)[\s\S]*validateDetectLanguageCapability\(capabilityToken, policy\.requiredScope\)/);
   assert.match(gatewaySource, /strictLidLoopbackBrokerProtocol: 1/);
   assert.match(gatewaySource, /strictLidFileSizeClaim: 'fileSizeBytes'/);
+  assert.match(gatewaySource, /const GATEWAY_VERSION = 92/);
+  assert.match(gatewaySource, /strictLidProviderDrainProtocol: 1/);
+  assert.match(
+    route,
+    /const sendDetectionJson = async[\s\S]*await closeStrictBrokerForResponse\(\)[\s\S]*providerDrained: true[\s\S]*providerDrainProtocol: 1/,
+  );
+  assert.ok(
+    route.indexOf('await closeStrictBrokerForResponse()') < route.indexOf('return res.status(status).json(responsePayload)'),
+    'the strict broker must drain before any attested JSON response is emitted',
+  );
 });
 
 test('service-only header LID route authenticates before capability handling and preserves terminal statuses', async () => {
@@ -677,18 +687,24 @@ test('closing a strict LID broker aborts an active provider body and leaves no l
     sourceUrl,
     fileSizeBytes: 100,
     dispatcher: null,
-    releaseDelayMs: 0,
+    releaseDelayMs: 40,
     openTimeoutMs: 2000,
   });
   const localUrl = broker.inputUrl;
   const response = await fetch(localUrl, { headers: { Range: 'bytes=0-99' } });
   assert.equal(response.status, 206);
   await response.body.getReader().read();
+  const closeStartedAt = Date.now();
   await broker.close();
+  const closeElapsedMs = Date.now() - closeStartedAt;
   const closedDeadline = Date.now() + 500;
   while (!providerClosed && Date.now() < closedDeadline) {
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
   assert.equal(providerClosed, true);
+  assert.ok(
+    closeElapsedMs >= 30,
+    `broker close acknowledged before provider release grace (${closeElapsedMs}ms)`,
+  );
   await assert.rejects(fetch(localUrl, { headers: { Range: 'bytes=0-1' } }));
 });

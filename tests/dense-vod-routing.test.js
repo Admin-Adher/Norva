@@ -362,7 +362,7 @@ test('known-file FFmpeg fast path keeps a full-probe fallback for demux discover
     );
     const audioMapForSession = loadGatewayFunction(
         'audioMapForSession',
-        'selectedAudioTrackForSession',
+        'audioTracksForSession',
         {
             normalizeAudioStreamIndex,
             selectedAudioTrackForSession
@@ -410,7 +410,7 @@ test('known-file FFmpeg fast path keeps a full-probe fallback for demux discover
     );
     assert.match(
         source,
-        /requireKnownStreams \? '0:V:0' : '0:V:0\?'/,
+        /\(requireKnownStreams \|\| multiAudioPlan\) \? '0:V:0' : '0:V:0\?'/,
         'Gateway video maps must exclude attached pictures in both strict and optional modes'
     );
     assert.strictEqual(

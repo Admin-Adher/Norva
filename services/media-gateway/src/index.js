@@ -1005,7 +1005,7 @@ const EXACT_MATROSKA_H264_MAX_HEIGHT = 1080;
 const EXACT_MATROSKA_H264_MAX_PIXELS = EXACT_MATROSKA_H264_MAX_WIDTH * EXACT_MATROSKA_H264_MAX_HEIGHT;
 const MULTI_AUDIO_HLS_PROTOCOL = 1;
 const MAX_MULTI_AUDIO_RENDITIONS = 8;
-const GATEWAY_VERSION = 91;
+const GATEWAY_VERSION = 92;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -1165,6 +1165,7 @@ app.get('/health', (req, res) => {
         strictLidLoopbackBrokerProtocol: 1,
         strictLidFileSizeClaim: 'fileSizeBytes',
         strictLidHeaderCapabilityProtocol: 2,
+        strictLidProviderDrainProtocol: 1,
         strictLidCapabilityHeader: 'X-Norva-Byte-Pipe-Token',
         strictLidCapabilityMethod: 'POST',
         strictLidServiceAuthRequired: true,
@@ -2950,6 +2951,18 @@ async function createStrictLidBroker(options = {}) {
                 try { controller.abort(new Error('strict LID broker closed')); } catch (_) {}
                 await closeStrictLidBrokerAttempt(context, context.activeAttempt, 'broker_closed');
                 try { await context.queue; } catch (_) {}
+                // `closeStrictLidBrokerAttempt` records the provider panel's
+                // logical slot-release deadline. Do not attest a drained
+                // provider until both the socket and that grace period have
+                // completed; otherwise Edge may hand the mono-account lease
+                // to playback while the panel still counts the old request.
+                const releaseDelayRemaining = Math.max(
+                    0,
+                    Number(context.nextOpenAt || 0) - Date.now(),
+                );
+                if (releaseDelayRemaining > 0) {
+                    await new Promise((resolve) => setTimeout(resolve, releaseDelayRemaining));
+                }
                 const closed = new Promise((resolve) => {
                     try { server.close(() => resolve()); } catch (_) { resolve(); }
                 });
@@ -3061,6 +3074,27 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
     };
     res.once('close', onRequestClose);
     let strictBroker = null;
+    let strictBrokerDrained = false;
+    const closeStrictBrokerForResponse = async () => {
+        if (!strict || strictBrokerDrained) return;
+        if (strictBroker) await strictBroker.close();
+        // A missing broker means validation failed before any provider I/O;
+        // that state is also safe to hand off. Once a broker existed, close()
+        // above is the sole authority for socket + release-grace completion.
+        strictBrokerDrained = true;
+    };
+    const sendDetectionJson = async (status, payload) => {
+        await closeStrictBrokerForResponse();
+        if (res.writableEnded || res.destroyed) return;
+        const responsePayload = strict
+            ? {
+                ...payload,
+                providerDrained: true,
+                providerDrainProtocol: 1,
+            }
+            : payload;
+        return res.status(status).json(responsePayload);
+    };
     try {
         if (strict) {
             strictBroker = await createStrictLidBroker({
@@ -3325,7 +3359,7 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
                     // fifth/sixth accepted sample that disagrees must veto four earlier votes.
                     if (!strict && voteCount >= consensusNeeded) {
                         res.setHeader('Cache-Control', 'private, max-age=3600');
-                        return res.json(result);
+                        return sendDetectionJson(200, result);
                     }
                 }
                 if (!best || result.wordCount > best.wordCount) best = result;
@@ -3335,7 +3369,7 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
         if (strictBroker?.terminalError) {
             const terminal = strictBroker.terminalError;
             res.setHeader('Cache-Control', 'no-store');
-            return res.status(Number.isInteger(terminal.status) ? terminal.status : 502).json({
+            return sendDetectionJson(Number.isInteger(terminal.status) ? terminal.status : 502, {
                 error: terminal.message,
                 code: terminal.code,
                 ...(Number.isInteger(terminal.upstreamStatus) ? { upstreamStatus: terminal.upstreamStatus } : {}),
@@ -3348,13 +3382,13 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
             // persist an empty/pending sample as if Whisper had actually analysed it.
             res.setHeader('Cache-Control', 'no-store');
             res.setHeader('Retry-After', '30');
-            return res.status(409).json({
+            return sendDetectionJson(409, {
                 error: 'Language detection preempted by viewer playback',
                 code: 'viewer_preempted',
                 retryable: true,
             });
         }
-        if (extractions === 0) return res.status(502).json({ error: 'Audio extraction failed', details: lastExtractErr });
+        if (extractions === 0) return sendDetectionJson(502, { error: 'Audio extraction failed', details: lastExtractErr });
         if (
             strict &&
             bestStrictAccepted &&
@@ -3381,7 +3415,7 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
                 ),
             };
             res.setHeader('Cache-Control', 'private, max-age=3600');
-            return res.json(verified);
+            return sendDetectionJson(200, verified);
         }
         // No strict consensus is not a language result. It is a retryable pending state, so no
         // caller can accidentally surface `candidate` as if it had been validated.
@@ -3399,7 +3433,7 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
             };
         }
         res.setHeader('Cache-Control', 'private, max-age=3600');
-        return res.json(best || {
+        return sendDetectionJson(200, best || {
             language: null, candidate: null, confidence: 0, confident: false,
             verified: false, validationStatus: 'pending',
             method: strict ? 'whisper-strict-consensus-v4' : 'pending',
@@ -3409,7 +3443,15 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
     } catch (err) {
         if (res.writableEnded || res.destroyed) return;
         if (strict) {
-            return res.status(Number.isInteger(err?.status) ? err.status : 502).json({
+            if (!strictBrokerDrained && strictBroker) {
+                // A close failure must never be turned into a positive drain
+                // attestation. Edge will keep its crash-safe account lease.
+                return res.status(502).json({
+                    error: 'Language detection provider cleanup failed',
+                    code: 'strict_lid_drain_failed',
+                });
+            }
+            return sendDetectionJson(Number.isInteger(err?.status) ? err.status : 502, {
                 error: 'Language detection failed',
                 code: String(err?.code || 'strict_lid_failed'),
             });
@@ -3417,7 +3459,9 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
         return res.status(502).json({ error: 'Language detection failed', details: String((err && err.message) || err) });
     } finally {
         res.off('close', onRequestClose);
-        if (strictBroker) await strictBroker.close();
+        if (strictBroker && !strictBrokerDrained) {
+            try { await strictBroker.close(); } catch (_) { /* Edge retains the TTL lease */ }
+        }
     }
 }
 
@@ -7790,7 +7834,7 @@ function multiAudioProfileAssessment(session) {
     }
 
     // Every multi-audio graph is video-encoded to align its two-second HLS
-    // boundaries with every audio rendition. Keep the production v91 capacity
+    // boundaries with every audio rendition. Keep the production v92 capacity
     // ceiling fail-closed; an oversized or dimensionless source falls back to
     // the unchanged single-audio path instead of risking a stalled replica.
     if (

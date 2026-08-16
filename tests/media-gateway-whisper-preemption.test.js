@@ -413,7 +413,7 @@ test('catalogue LID preemption is retryable and cannot become writable language 
   );
   assert.match(
     lidRouteSource,
-    /if \(inferencePreempted\)[\s\S]*status\(409\)[\s\S]*code:\s*'viewer_preempted'[\s\S]*retryable:\s*true/,
+    /if \(inferencePreempted\)[\s\S]*sendDetectionJson\(409,[\s\S]*code:\s*'viewer_preempted'[\s\S]*retryable:\s*true/,
   );
 
   // Both Edge consumers leave their exact-file cursor untouched for a non-2xx gateway result.
