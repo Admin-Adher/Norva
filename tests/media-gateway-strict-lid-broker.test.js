@@ -768,7 +768,7 @@ test('strict LID rejects invalid exact signed coordinates before creating a serv
   assert.match(route, /detectLanguageRequestPolicy\(req, options\)[\s\S]*validateDetectLanguageCapability\(capabilityToken, policy\.requiredScope\)/);
   assert.match(gatewaySource, /strictLidLoopbackBrokerProtocol: 1/);
   assert.match(gatewaySource, /strictLidFileSizeClaim: 'fileSizeBytes'/);
-  assert.match(gatewaySource, /const GATEWAY_VERSION = 101/);
+  assert.match(gatewaySource, /const GATEWAY_VERSION = 102/);
   assert.match(gatewaySource, /strictLidProviderDrainProtocol: 1/);
   assert.match(gatewaySource, /strictLidWeakFallbackProtocol: 1/);
   assert.match(gatewaySource, /strictLidTimelineSamplingProtocol: 1/);
@@ -985,7 +985,7 @@ test('strict ffmpeg uses only loopback while provider identity remains in the ba
   assert.match(gatewaySource, /function redactStrictLidLoopback\(value\)[\s\S]+?\[strict-lid-loopback\]/);
 });
 
-test('v101 audio extraction survives 35 s and enforces the outer 45 s SIGKILL deadline', async () => {
+test('v102 keeps the v101 outer extraction invariant: survive 35 s and kill at 45 s', async () => {
   class TimeoutChild extends EventEmitter {
     constructor() {
       super();

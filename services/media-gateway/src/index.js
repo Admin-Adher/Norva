@@ -910,10 +910,10 @@ const STRICT_LID_REQUEST_BUDGET_MS = clampInt(
 // Strict extraction must leave a full inference window inside the existing work deadline.
 // A 20 s speech window is long enough for LID while the additional 25 s covers remote seek,
 // demux probing and WAV finalization. The per-window timer is further bounded by the remaining
-// extraction budget, so provider work can never consume Whisper's reserved minute.
+// extraction budget, so provider work can never consume Whisper's reserved 50 s window.
 const STRICT_LID_SAMPLE_DURATION_CAP_SECONDS = 20;
 const STRICT_LID_EXTRACTION_STARTUP_MARGIN_MS = 25_000;
-const STRICT_LID_WHISPER_RESERVE_MS = 60_000;
+const STRICT_LID_WHISPER_RESERVE_MS = 50_000;
 
 function strictLidSampleDurationSeconds(rawDuration, strict) {
     const parsed = Number.parseFloat(rawDuration);
@@ -1190,7 +1190,7 @@ const STRICT_LID_EXTRACTION_AGGREGATE_BUDGET_MS = Math.max(
 // The broker's provider-range deadline has two independent phases. Headers or a continuously
 // flowing body must not consume the "open" timer forever: the first byte has its own deadline,
 // then every non-empty chunk rearms a shorter inactivity deadline. The outer 45 s ffmpeg timer
-// and the 155 s aggregate extraction budget remain the authoritative total-work bounds.
+// and the 165 s aggregate extraction budget remain the authoritative total-work bounds.
 const STRICT_LID_BROKER_FIRST_BYTE_TIMEOUT_MS = clampInt(
     process.env.STRICT_LID_BROKER_FIRST_BYTE_TIMEOUT_MS,
     30_000,
@@ -1242,7 +1242,7 @@ const EXACT_MATROSKA_H264_MAX_HEIGHT = 1080;
 const EXACT_MATROSKA_H264_MAX_PIXELS = EXACT_MATROSKA_H264_MAX_WIDTH * EXACT_MATROSKA_H264_MAX_HEIGHT;
 const MULTI_AUDIO_HLS_PROTOCOL = 1;
 const MAX_MULTI_AUDIO_RENDITIONS = 8;
-const GATEWAY_VERSION = 101;
+const GATEWAY_VERSION = 102;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -1408,7 +1408,8 @@ app.get('/health', (req, res) => {
         strictLidActivityKindProtocol: 1,
         strictLidCjkEvidenceProtocol: 1,
         strictLidTranscriptDiversityProtocol: 1,
-        strictLidExtractionTimeoutProtocol: 2,
+        strictLidExtractionTimeoutProtocol: 3,
+        strictLidBudgetRebalanceProtocol: 1,
         strictLidBatchFailureProtocol: 1,
         strictLidTimelineSamplingProtocol: 1,
         strictLidRangeTimeoutProtocol: 2,
