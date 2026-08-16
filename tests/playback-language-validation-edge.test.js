@@ -10,6 +10,7 @@ const root = path.join(__dirname, '..');
 const read = (file) => fs.readFileSync(path.join(root, file), 'utf8').replace(/\r\n?/g, '\n');
 const playback = read('supabase/functions/norva-playback/index.ts');
 const migration = read('supabase/migrations/20260816105918_async_vod_language_validation_jobs.sql');
+const presenceMigration = read('supabase/migrations/20260816141150_provider_account_foreground_presence.sql');
 const edgeDeploy = read('ops/hetzner/scripts/04-deploy-edge-functions.sh');
 
 function between(source, startMarker, endMarker) {
@@ -50,6 +51,120 @@ test('POST starts quickly and GET polls one caller-owned durable job', () => {
   assert.match(poll, /assertOwnedSource\(sourceId, userId, db\)/);
   assert.match(poll, /requireLanguageValidationEntitlement\(userId, db\)/);
   assert.match(poll, /scheduleLanguageValidationJob\(waitUntil, db, jobId\)/);
+});
+
+test('foreground validation ignores presence intent but still blocks real provider activity', () => {
+  const idle = between(
+    playback,
+    'async function assertLanguageValidationIdle(',
+    '\nfunction strictLanguageValidationEvidence(',
+  );
+  const worker = between(
+    playback,
+    'async function processOneLanguageValidationTrack(',
+    '\nasync function finalizeLanguageValidationJob(',
+  );
+  const create = between(
+    playback,
+    'async function createPlaybackSession(',
+    '\nasync function getPlaybackSession(',
+  );
+
+  assert.match(idle, /from\("cloud_playback_sessions"\)[\s\S]*eq\("user_id", userId\)/);
+  assert.match(idle, /from\("cloud_playback_sessions"\)[\s\S]*eq\("provider_account_hash", providerAccountHash\)/);
+  assert.match(idle, /rpc\(\s*"provider_account_busy_for_foreground_validation"/);
+  assert.match(idle, /providerBusy !== false/);
+  assert.doesNotMatch(idle, /from\("provider_account_activity"\)/);
+  assert.doesNotMatch(idle, /rpc\(\s*"provider_account_busy"/);
+  assert.equal((worker.match(/await assertLanguageValidationIdle\(/g) || []).length, 2);
+  assert.ok(worker.indexOf('await assertLanguageValidationIdle(') < worker.indexOf('"claim_provider_file_probe"'));
+  assert.ok(worker.lastIndexOf('await assertLanguageValidationIdle(') > worker.indexOf('"claim_provider_file_probe"'));
+  assert.ok(
+    worker.indexOf('"claim_provider_account_language_validation"')
+      < worker.indexOf('"claim_provider_file_probe"'),
+  );
+  assert.match(worker, /release_provider_account_language_validation/);
+  assert.match(playback, /LANGUAGE_VALIDATION_ACCOUNT_LEASE_SECONDS = LANGUAGE_VALIDATION_LEASE_SECONDS/);
+  assert.match(
+    worker,
+    /providerAccountLeaseReleaseSafe = false[\s\S]*await fetch[\s\S]*await response\.text\(\)[\s\S]*JSON\.parse\(responseText\)[\s\S]*providerAccountLeaseReleaseSafe = strictLanguageProviderDrainAttested\(payload\)/,
+  );
+  assert.doesNotMatch(
+    worker.slice(worker.indexOf('await response.text()'), worker.indexOf('const payload = recordOrEmpty(responsePayload)')),
+    /providerAccountLeaseReleaseSafe = true/,
+    'transport EOF alone must not release the provider account lease',
+  );
+  assert.match(worker, /providerAccountLeaseClaimed[\s\S]*providerAccountLeaseReleaseSafe[\s\S]*release_provider_account_language_validation/);
+  assert.match(create, /claimError\.code[\s\S]*55P03[\s\S]*provider language validation in progress[\s\S]*LANGUAGE_VALIDATION_IN_PROGRESS/);
+  assert.match(playback, /version: 47[\s\S]*languageValidationPresenceIntentProtocol: 1[\s\S]*languageValidationPlaybackLeaseProtocol: 1/);
+  assert.match(edgeDeploy, /EXPECTED_PLAYBACK_VERSION=47/);
+  assert.match(edgeDeploy, /EXPECTED_LANGUAGE_VALIDATION_PRESENCE_INTENT_PROTOCOL=1/);
+  assert.match(edgeDeploy, /EXPECTED_LANGUAGE_VALIDATION_PLAYBACK_LEASE_PROTOCOL=1/);
+});
+
+test('provider account lease release requires the exact Gateway drain attestation', () => {
+  let helper = between(
+    playback,
+    'function strictLanguageProviderDrainAttested(',
+    '\nasync function processOneLanguageValidationTrack(',
+  );
+  helper = helper.replace('payload: JsonRecord', 'payload');
+  const context = { Number };
+  vm.runInNewContext(`${helper}; this.attested = strictLanguageProviderDrainAttested;`, context);
+  assert.equal(context.attested({ providerDrained: true, providerDrainProtocol: 1 }), true);
+  for (const payload of [
+    {},
+    { providerDrained: true },
+    { providerDrained: false, providerDrainProtocol: 1 },
+    { providerDrained: true, providerDrainProtocol: 0 },
+    { providerDrained: 'true', providerDrainProtocol: 1 },
+    { providerDrained: true, providerDrainProtocol: '1' },
+    { providerDrained: true, providerDrainProtocol: true },
+    { providerDrained: true, providerDrainProtocol: [1] },
+  ]) {
+    assert.equal(context.attested(payload), false);
+  }
+});
+
+test('presence intent cannot hide fresh provider activity and the foreground RPC is service-only', () => {
+  assert.match(
+    presenceMigration,
+    /create or replace function public\.provider_account_touch_by_user\(p_user uuid, p_kind text\)/i,
+  );
+  assert.match(
+    presenceMigration,
+    /insert into public\.provider_account_activity as activity[\s\S]*on conflict \(account_key\) do update[\s\S]*where excluded\.kind is distinct from 'presence'[\s\S]*activity\.kind = 'presence'[\s\S]*activity\.last_seen_at <= excluded\.last_seen_at - interval '5 minutes'/i,
+  );
+  assert.match(
+    presenceMigration,
+    /create or replace function public\.provider_account_busy_for_foreground_validation\(p_key text\)[\s\S]*last_seen_at > statement_timestamp\(\) - interval '5 minutes'[\s\S]*kind is distinct from 'presence'/i,
+  );
+  assert.match(
+    presenceMigration,
+    /revoke all on function public\.provider_account_busy_for_foreground_validation\(text\)[\s\S]*from public, anon, authenticated/i,
+  );
+  assert.match(
+    presenceMigration,
+    /grant execute on function public\.provider_account_busy_for_foreground_validation\(text\)[\s\S]*to service_role/i,
+  );
+  assert.match(
+    presenceMigration,
+    /create table if not exists public\.provider_account_language_validation_leases[\s\S]*enable row level security[\s\S]*revoke all on table[\s\S]*from public, anon, authenticated/i,
+  );
+  assert.match(
+    presenceMigration,
+    /create or replace function public\.claim_provider_account_language_validation[\s\S]*pg_advisory_xact_lock[\s\S]*'provider-session:' \|\| p_provider_account_hash[\s\S]*cloud_playback_sessions/i,
+  );
+  assert.match(
+    presenceMigration,
+    /create or replace function public\.claim_cloud_playback_session[\s\S]*pg_advisory_xact_lock[\s\S]*provider_account_language_validation_leases[\s\S]*errcode = '55P03'/i,
+  );
+  assert.equal(
+    (presenceMigration.match(/hashtextextended\('provider-session:' \|\| p_provider_account_hash, 0\)/g) || []).length,
+    3,
+  );
+  assert.match(presenceMigration, /notify pgrst, 'reload schema'/i);
+  assert.match(playback, /LANGUAGE_VALIDATION_PROVIDER_LEASE_ERROR[\s\S]*Date\.now\(\) \+ 30_000/);
 });
 
 test('exact gateway-inband MKV profile, signed size and index fingerprint fail closed', () => {
