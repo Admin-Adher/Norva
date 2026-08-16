@@ -972,7 +972,7 @@ const EXACT_MATROSKA_H264_HLS_TARGET_SECONDS = 2;
 const EXACT_MATROSKA_H264_MAX_WIDTH = 1920;
 const EXACT_MATROSKA_H264_MAX_HEIGHT = 1080;
 const EXACT_MATROSKA_H264_MAX_PIXELS = EXACT_MATROSKA_H264_MAX_WIDTH * EXACT_MATROSKA_H264_MAX_HEIGHT;
-const GATEWAY_VERSION = 88;
+const GATEWAY_VERSION = 89;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -5406,7 +5406,7 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             videoMode: videoModeForSession(session),
             videoModeReason: session.videoModeReason,
             hlsTargetSeconds: session.hlsTargetSeconds,
-            audioStreamIndex: session.audioStreamIndex,
+            audioStreamIndex: mappedAudioStreamIndexForSession(session),
             requestedSeekOffset: session.seekOffset || 0,
             actualStartOffset: session.actualStartOffset || 0,
             localSeekTarget: session.localSeekTarget || 0,
@@ -6351,7 +6351,9 @@ function startFfmpeg(session) {
         ...preInputSeek,
         '-i', pumpedMkvInput ? 'pipe:0' : session.sourceUrl,
         ...postInputSeek,
-        '-map', requireKnownStreams ? '0:v:0' : '0:v:0?',
+        // Uppercase V excludes attached pictures. A cover-art stream must
+        // never become the playable video lane or a second HLS video stream.
+        '-map', requireKnownStreams ? '0:V:0' : '0:V:0?',
         '-map', audioMap,
         '-max_muxing_queue_size', '1024'
     ];
@@ -6818,9 +6820,11 @@ function isKnownBrowserSafeVideo(codec) {
 function audioMapForSession(session, required = false) {
     const optionalSuffix = required ? '' : '?';
     const selectedTrack = selectedAudioTrackForSession(session);
-    const selectedIndex = nullableInt(selectedTrack?.index);
+    const selectedIndex = normalizeAudioStreamIndex(selectedTrack?.index);
     if (Number.isInteger(selectedIndex)) return `0:${selectedIndex}${optionalSuffix}`;
-    if (Number.isInteger(session.audioStreamIndex)) return `0:${session.audioStreamIndex}${optionalSuffix}`;
+    // An unproven absolute stream index can point at video, subtitles, or an
+    // attachment. Fall back by media type unless the exact-file profile
+    // proves that the requested index belongs to an audio track.
     return `0:a:0${optionalSuffix}`;
 }
 
@@ -6829,11 +6833,17 @@ function selectedAudioTrackForSession(session) {
         ? session.codecProfile.audioTracks
         : (Array.isArray(session.codecProfile?.audio_tracks) ? session.codecProfile.audio_tracks : []);
     if (!tracks.length) return null;
-    if (Number.isInteger(session.audioStreamIndex)) {
-        const selected = tracks.find((track) => nullableInt(track?.index) === session.audioStreamIndex);
+    const requestedIndex = normalizeAudioStreamIndex(session.audioStreamIndex);
+    if (Number.isInteger(requestedIndex)) {
+        const selected = tracks.find((track) => normalizeAudioStreamIndex(track?.index) === requestedIndex);
         if (selected) return selected;
     }
     return tracks.find((track) => track?.default === true) || tracks[0] || null;
+}
+
+function mappedAudioStreamIndexForSession(session) {
+    const selectedIndex = normalizeAudioStreamIndex(selectedAudioTrackForSession(session)?.index);
+    return Number.isInteger(selectedIndex) ? selectedIndex : null;
 }
 
 function isKnownBrowserSafeAudio(codec, profile) {
@@ -7623,7 +7633,7 @@ function serializeSession(req, session) {
         status: session.status,
         mode: session.mode,
         audioMode: audioModeForSession(session),
-        audioStreamIndex: session.audioStreamIndex,
+        audioStreamIndex: mappedAudioStreamIndexForSession(session),
         requestedSeekOffset: session.seekOffset || 0,
         actualStartOffset: session.actualStartOffset || 0,
         localSeekTarget: session.localSeekTarget || 0,
@@ -7647,7 +7657,7 @@ function debugSession(session) {
         status: session.status,
         mode: session.mode,
         audioMode: audioModeForSession(session),
-        audioStreamIndex: session.audioStreamIndex,
+        audioStreamIndex: mappedAudioStreamIndexForSession(session),
         requestedSeekOffset: session.seekOffset || 0,
         actualStartOffset: session.actualStartOffset || 0,
         localSeekTarget: session.localSeekTarget || 0,

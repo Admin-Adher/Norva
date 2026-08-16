@@ -196,7 +196,7 @@ test('v82 production detect-only is signed-scope only, non-strict and falls back
   assert.notEqual(routeEnd, -1);
   const route = gateway.slice(routeStart, routeEnd);
 
-  assert.match(gateway, /const GATEWAY_VERSION = 88/);
+  assert.match(gateway, /const GATEWAY_VERSION = 89/);
   assert.match(gateway, /const LID_DETECT_ONLY_SCOPE = 'lid-production-detect-only'/);
   assert.match(gateway, /const LID_SHADOW_SCOPE = 'lid-shadow'/);
   assert.match(
