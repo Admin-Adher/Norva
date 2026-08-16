@@ -906,6 +906,88 @@ const STRICT_LID_REQUEST_BUDGET_MS = clampInt(
     60_000,
     225_000,
 );
+// Strict extraction must leave a full inference window inside the existing work deadline.
+// A 20 s speech window is long enough for LID while the additional 15 s covers remote seek,
+// demux probing and WAV finalization. The per-window timer is further bounded by the remaining
+// extraction budget, so provider work can never consume Whisper's reserved minute.
+const STRICT_LID_SAMPLE_DURATION_CAP_SECONDS = 20;
+const STRICT_LID_EXTRACTION_STARTUP_MARGIN_MS = 15_000;
+const STRICT_LID_WHISPER_RESERVE_MS = 60_000;
+
+function strictLidSampleDurationSeconds(rawDuration, strict) {
+    const parsed = Number.parseFloat(rawDuration);
+    const fallback = strict ? STRICT_LID_SAMPLE_DURATION_CAP_SECONDS : 20;
+    // Preserve the legacy non-strict `parsed || 20` semantics (including ?dur=0) while applying
+    // the new 20 s ceiling only to strict certification.
+    const requested = parsed || fallback;
+    return Math.min(Math.max(requested, 4), strict ? STRICT_LID_SAMPLE_DURATION_CAP_SECONDS : 60);
+}
+
+function strictLidMediaExtractionTimeoutMs(durationSeconds) {
+    const boundedDuration = Math.min(
+        Math.max(Number(durationSeconds) || 4, 4),
+        STRICT_LID_SAMPLE_DURATION_CAP_SECONDS,
+    );
+    return boundedDuration * 1_000 + STRICT_LID_EXTRACTION_STARTUP_MARGIN_MS;
+}
+
+function strictLidExtractionBudget(durationSeconds, workDeadlineAt, nowMs = Date.now()) {
+    const mediaTimeoutMs = strictLidMediaExtractionTimeoutMs(durationSeconds);
+    const rawAvailableMs = Number(workDeadlineAt) - Number(nowMs) - STRICT_LID_WHISPER_RESERVE_MS;
+    const availableMs = Number.isFinite(rawAvailableMs)
+        ? Math.max(0, Math.floor(rawAvailableMs))
+        : 0;
+    return {
+        mediaTimeoutMs,
+        availableMs,
+        timeoutMs: Math.min(mediaTimeoutMs, availableMs),
+    };
+}
+
+function strictLidPostExtractionFailure({
+    terminalError = null,
+    extractionTimedOut = false,
+    workBudgetExpired = false,
+} = {}) {
+    // A broker-observed terminal response, especially the first provider 458, always wins over
+    // local timers. Callers must open the terminal circuit rather than treating it as retryable.
+    if (terminalError) {
+        return {
+            status: Number.isInteger(terminalError.status) ? terminalError.status : 502,
+            payload: {
+                error: terminalError.message,
+                code: terminalError.code,
+                ...(Number.isInteger(terminalError.upstreamStatus)
+                    ? { upstreamStatus: terminalError.upstreamStatus }
+                    : {}),
+            },
+        };
+    }
+    // Once any transport window times out, already-extracted samples are unusable for strict
+    // certification: neither a pending nor a verified response may conceal incomplete evidence.
+    if (extractionTimedOut) {
+        return {
+            status: 504,
+            retryAfterSeconds: 30,
+            payload: {
+                error: 'Strict language audio extraction timed out',
+                code: 'strict_lid_extraction_timeout',
+                retryable: true,
+            },
+        };
+    }
+    if (workBudgetExpired) {
+        return {
+            status: 504,
+            payload: {
+                error: 'Strict language validation exceeded its request budget',
+                code: 'strict_lid_request_timeout',
+                retryable: true,
+            },
+        };
+    }
+    return null;
+}
 function strictLanguageSampleDisposition({
     enoughWords,
     whisperConfident,
@@ -1134,7 +1216,7 @@ const EXACT_MATROSKA_H264_MAX_HEIGHT = 1080;
 const EXACT_MATROSKA_H264_MAX_PIXELS = EXACT_MATROSKA_H264_MAX_WIDTH * EXACT_MATROSKA_H264_MAX_HEIGHT;
 const MULTI_AUDIO_HLS_PROTOCOL = 1;
 const MAX_MULTI_AUDIO_RENDITIONS = 8;
-const GATEWAY_VERSION = 96;
+const GATEWAY_VERSION = 97;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -1300,6 +1382,10 @@ app.get('/health', (req, res) => {
         strictLidActivityKindProtocol: 1,
         strictLidCjkEvidenceProtocol: 1,
         strictLidTranscriptDiversityProtocol: 1,
+        strictLidExtractionTimeoutProtocol: 1,
+        strictLidSampleDurationCapSeconds: STRICT_LID_SAMPLE_DURATION_CAP_SECONDS,
+        strictLidWhisperReserveMs: STRICT_LID_WHISPER_RESERVE_MS,
+        strictLidExtractionStartupMarginMs: STRICT_LID_EXTRACTION_STARTUP_MARGIN_MS,
         strictLidRequestBudgetMs: STRICT_LID_REQUEST_BUDGET_MS,
         strictLidCapabilityHeader: 'X-Norva-Byte-Pipe-Token',
         strictLidCapabilityMethod: 'POST',
@@ -3191,7 +3277,7 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
                 : (claims.scope === LID_SHADOW_SCOPE ? 'shadow' : 'off')
         )
         : 'off';
-    const dur = Math.min(Math.max(Number.parseFloat(req.query.dur) || (strict ? 30 : 20), 4), 60);
+    const dur = strictLidSampleDurationSeconds(req.query.dur, strict);
     // An explicit ?start pins a single offset (caller knows where speech is); otherwise sweep the
     // bounded mid-film offsets and stop at the first clip that actually contains speech.
     const explicitStart = Number.parseFloat(req.query.start);
@@ -3294,6 +3380,7 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
         let strictRepeatedSpeechSamples = 0;
         let strictMissingDiversitySamples = 0;
         let strictConsensusVerified = false;
+        let strictExtractionTimedOut = false;
         let inferencePreempted = false;
         const lockKey = accountJobKey(claims.uid, claims.url);
         // This endpoint is the catalogue/background LID route. Viewer-requested subtitle jobs
@@ -3305,9 +3392,12 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
         for (const off of offsets) {
             let wavPath = null;
             try {
-                const strictWorkRemainingMs = strict ? strictWorkDeadlineAt - Date.now() : 30_000;
-                if (strict && strictWorkRemainingMs <= 0) {
-                    expireStrictWorkBudget();
+                const extractionBudget = strict
+                    ? strictLidExtractionBudget(dur, strictWorkDeadlineAt)
+                    : null;
+                if (strict && extractionBudget.timeoutMs <= 0) {
+                    strictExtractionTimedOut = true;
+                    lastExtractErr = 'Strict audio extraction budget exhausted';
                     break;
                 }
                 // Fast-fail rather than queue behind a long extraction: the edge caller has its own
@@ -3324,7 +3414,7 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
                         trackIndex,
                         off > 0 ? off : 0,
                         dur,
-                        strict ? Math.max(1, Math.min(30_000, strictWorkRemainingMs)) : 30_000,
+                        strict ? extractionBudget.timeoutMs : 30_000,
                         claims.uid,
                         true,
                         requestController.signal,
@@ -3337,6 +3427,10 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
                 if (!ex.ok) {
                     lastExtractErr = strictBroker ? 'Strict audio extraction failed' : ex.error;
                     if (ex.preempted) inferencePreempted = true;
+                    if (strict && ex.timedOut) {
+                        strictExtractionTimedOut = true;
+                        break;
+                    }
                     if (ex.preempted || ex.aborted || strictBroker?.terminalError) break;
                     continue;
                 }   // failed or offset past the file's end → next offset
@@ -3584,22 +3678,22 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
             } catch (_) { /* try the next offset */ }
             finally { if (wavPath) fsp.unlink(wavPath).catch(() => {}); }
         }
-        if (strictBroker?.terminalError) {
-            const terminal = strictBroker.terminalError;
+        const strictPostExtractionFailure = strict
+            ? strictLidPostExtractionFailure({
+                terminalError: strictBroker?.terminalError,
+                extractionTimedOut: strictExtractionTimedOut,
+                workBudgetExpired: strictWorkBudgetExpired,
+            })
+            : null;
+        if (strictPostExtractionFailure) {
             res.setHeader('Cache-Control', 'no-store');
-            return sendDetectionJson(Number.isInteger(terminal.status) ? terminal.status : 502, {
-                error: terminal.message,
-                code: terminal.code,
-                ...(Number.isInteger(terminal.upstreamStatus) ? { upstreamStatus: terminal.upstreamStatus } : {}),
-            });
-        }
-        if (strictWorkBudgetExpired) {
-            res.setHeader('Cache-Control', 'no-store');
-            return sendDetectionJson(504, {
-                error: 'Strict language validation exceeded its request budget',
-                code: 'strict_lid_request_timeout',
-                retryable: true,
-            });
+            if (strictPostExtractionFailure.retryAfterSeconds) {
+                res.setHeader('Retry-After', String(strictPostExtractionFailure.retryAfterSeconds));
+            }
+            return sendDetectionJson(
+                strictPostExtractionFailure.status,
+                strictPostExtractionFailure.payload,
+            );
         }
         if (requestController.signal.aborted && !res.writableEnded) return;
         if (strict && strictWavSamples.length > 0) {
@@ -4599,7 +4693,8 @@ function sanitizeLanguageWavError(error, sourceUrl) {
 }
 
 // Extract a mono/16 kHz pcm_s16le WAV of one audio track to a temp file. Resolves
-// { ok:true, path } or { ok:false, error } — the error carries the REAL cause (ffmpeg stderr
+// { ok:true, path, timedOut:false, signal:null } or an equally typed failure — the error carries
+// the REAL cause (ffmpeg stderr
 // tail / timeout kill / tiny output), creds-redacted, mirroring extractSubtitleSup: the opaque
 // null of the first version made 7 failed pregen jobs indistinguishable in the admin.
 // `dur` 0 = the whole track (full-film transcription); >0 = a clip. `timeoutMs` defaults to
@@ -4619,7 +4714,13 @@ function extractAudioWav(
 ) {
     return new Promise((resolve) => {
         if (globalPreemptible && viewerPlaybackActiveLocally()) {
-            return resolve({ ok: false, preempted: true, error: 'preempted by viewer playback before extraction spawn' });
+            return resolve({
+                ok: false,
+                preempted: true,
+                timedOut: false,
+                signal: null,
+                error: 'preempted by viewer playback before extraction spawn',
+            });
         }
         const outputPath = path.join(os.tmpdir(), `norva-audio-${Date.now()}-${crypto.randomUUID()}.wav`);
         const strictLoopback = inputOptions?.strictLoopback === true;
@@ -4658,7 +4759,14 @@ function extractAudioWav(
                 env: strictLoopback ? loopbackOnlyEnv() : proxyEnvFor(providerAccountKey),
             });
         }
-        catch (e) { return resolve({ ok: false, error: 'spawn failed: ' + String((e && e.message) || e) }); }
+        catch (e) {
+            return resolve({
+                ok: false,
+                timedOut: false,
+                signal: null,
+                error: 'spawn failed: ' + String((e && e.message) || e),
+            });
+        }
         const reg = registerAccountExtraction(
             providerAccountKey,
             child,
@@ -4668,14 +4776,20 @@ function extractAudioWav(
         let stderr = '';
         let timedOut = false;
         let aborted = false;
+        let requestedSignal = null;
         const abort = () => {
             aborted = true;
+            requestedSignal = 'SIGKILL';
             try { child.kill('SIGKILL'); } catch (_) {}
         };
         const removeAbortListener = () => abortSignal?.removeEventListener?.('abort', abort);
         if (abortSignal?.aborted) abort();
         else abortSignal?.addEventListener?.('abort', abort, { once: true });
-        const timer = setTimeout(() => { timedOut = true; try { child.kill('SIGKILL'); } catch (_) {} }, timeoutMs);
+        const timer = setTimeout(() => {
+            timedOut = true;
+            requestedSignal = 'SIGKILL';
+            try { child.kill('SIGKILL'); } catch (_) {}
+        }, timeoutMs);
         child.stderr.on('data', (d) => { stderr += d.toString(); });
         child.on('error', (e) => {
             clearTimeout(timer);
@@ -4685,12 +4799,14 @@ function extractAudioWav(
             resolve({
                 ok: false,
                 aborted,
+                timedOut,
+                signal: requestedSignal,
                 error: aborted
                     ? 'extraction request aborted'
                     : 'ffmpeg error: ' + String((e && e.message) || e),
             });
         });
-        child.on('close', async (code) => {
+        child.on('close', async (code, signal) => {
             clearTimeout(timer);
             removeAbortListener();
             reg.release?.();
@@ -4698,24 +4814,48 @@ function extractAudioWav(
             const tail = redactCreds(safeStderr.trim().split('\n').filter(Boolean).pop() || 'no stderr');
             if (aborted) {
                 fsp.unlink(outputPath).catch(() => {});
-                return resolve({ ok: false, aborted: true, error: 'extraction request aborted' });
+                return resolve({
+                    ok: false,
+                    aborted: true,
+                    timedOut,
+                    signal: signal || requestedSignal,
+                    error: 'extraction request aborted',
+                });
             }
             if (reg.preempted) {
                 fsp.unlink(outputPath).catch(() => {});
-                return resolve({ ok: false, preempted: true, error: 'preempted by viewer playback on this account' });
+                return resolve({
+                    ok: false,
+                    preempted: true,
+                    timedOut,
+                    signal: signal || requestedSignal,
+                    error: 'preempted by viewer playback on this account',
+                });
             }
             if (code !== 0) {
-                console.warn(`[media-gateway] audio-extract ffmpeg exit ${code}: ${redactCreds(safeStderr.slice(-300))}`);
+                console.warn(`[media-gateway] audio-extract ffmpeg exit ${code} signal ${signal || 'none'}: ${redactCreds(safeStderr.slice(-300))}`);
                 fsp.unlink(outputPath).catch(() => {});
-                return resolve({ ok: false, error: timedOut ? `extract timeout after ${Math.round(timeoutMs / 1000)}s: ${tail}` : `ffmpeg exit ${code}: ${tail}` });
+                return resolve({
+                    ok: false,
+                    timedOut,
+                    signal: signal || requestedSignal,
+                    error: timedOut
+                        ? `extract timeout after ${Math.round(timeoutMs / 1000)}s: ${tail}`
+                        : `ffmpeg exit ${code}: ${tail}`,
+                });
             }
             let size = 0;
             try { size = (await fsp.stat(outputPath)).size; } catch (_) { size = 0; }
             if (size <= 4000) {
                 fsp.unlink(outputPath).catch(() => {});
-                return resolve({ ok: false, error: `empty/tiny WAV (${size}B) — no audio decoded (${tail})` });
+                return resolve({
+                    ok: false,
+                    timedOut: false,
+                    signal: signal || null,
+                    error: `empty/tiny WAV (${size}B) — no audio decoded (${tail})`,
+                });
             }
-            resolve({ ok: true, path: outputPath });
+            resolve({ ok: true, path: outputPath, timedOut: false, signal: signal || null });
         });
     });
 }
