@@ -124,6 +124,7 @@ const LANGUAGE_VALIDATION_MIN_SAMPLES = 4;
 const LANGUAGE_VALIDATION_MIN_PROBABILITY = 0.95;
 const LANGUAGE_VALIDATION_MIN_WORDS = 12;
 const LANGUAGE_VALIDATION_MIN_UNIQUE_WORDS = 8;
+const LANGUAGE_VALIDATION_SAMPLE_DURATION_SECONDS = 20;
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SUPABASE_SERVICE_KEY =
@@ -180,7 +181,7 @@ Deno.serve(async (req) => {
       return json(req, {
         ok: true,
         service: "norva-playback",
-        version: 49,
+        version: 50,
         nativeHeartbeatProtocol: 1,
         providerCircuitProtocol: 1,
         exactFileCodecProfileProtocol: 1,
@@ -192,6 +193,7 @@ Deno.serve(async (req) => {
         languageValidationFetchTimeoutMs: LANGUAGE_VALIDATION_FETCH_TIMEOUT_MS,
         languageValidationPostFetchReserveMs: LANGUAGE_VALIDATION_POST_FETCH_RESERVE_MS,
         languageValidationJobLeaseSeconds: LANGUAGE_VALIDATION_JOB_LEASE_SECONDS,
+        languageValidationSampleDurationSeconds: LANGUAGE_VALIDATION_SAMPLE_DURATION_SECONDS,
         languageValidationGatewayMethod: "POST",
         languageValidationHeaderCapability: true,
         languageValidationServiceAuthRequired: true,
@@ -1986,7 +1988,7 @@ async function processOneLanguageValidationTrack(db: SupabaseClient, jobId: stri
     providerAccountLeaseReleaseSafe = false;
     try {
       response = await fetch(
-        `${detectionAccess.gatewayUrl}/detect-language?index=${trackIndex}&strict=1&dur=30`,
+        `${detectionAccess.gatewayUrl}/detect-language?index=${trackIndex}&strict=1&dur=${LANGUAGE_VALIDATION_SAMPLE_DURATION_SECONDS}`,
         {
           method: "POST",
           headers: {
