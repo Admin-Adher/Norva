@@ -461,8 +461,9 @@ test('strict LID rejects an invalid signed size before creating a server or prov
   assert.match(route, /detectLanguageRequestPolicy\(req, options\)[\s\S]*validateDetectLanguageCapability\(capabilityToken, policy\.requiredScope\)/);
   assert.match(gatewaySource, /strictLidLoopbackBrokerProtocol: 1/);
   assert.match(gatewaySource, /strictLidFileSizeClaim: 'fileSizeBytes'/);
-  assert.match(gatewaySource, /const GATEWAY_VERSION = 92/);
+  assert.match(gatewaySource, /const GATEWAY_VERSION = 93/);
   assert.match(gatewaySource, /strictLidProviderDrainProtocol: 1/);
+  assert.match(gatewaySource, /strictLidWeakFallbackProtocol: 1/);
   assert.match(
     route,
     /const sendDetectionJson = async[\s\S]*await closeStrictBrokerForResponse\(\)[\s\S]*providerDrained: true[\s\S]*providerDrainProtocol: 1/,

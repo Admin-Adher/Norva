@@ -852,6 +852,16 @@ const WHISPER_STRICT_MIN_UNIQUE_WORDS = clampInt(
     8,
     30,
 );
+function strictLanguageSampleDisposition({
+    enoughWords,
+    whisperConfident,
+    transcriptDisagrees,
+}) {
+    if (!enoughWords) return 'insufficient';
+    if (!whisperConfident) return 'weak';
+    if (transcriptDisagrees) return 'conflict';
+    return 'accepted';
+}
 // Full transcription (Phase 3) runs whisper on a whole film → much longer than the 20s LID clip.
 // This flat value is a FLOOR: the effective budget adapts to the WAV's real duration (see
 // whisperBudgetMs) because a long film at a flat 20 min was mathematically guaranteed to be
@@ -1005,7 +1015,7 @@ const EXACT_MATROSKA_H264_MAX_HEIGHT = 1080;
 const EXACT_MATROSKA_H264_MAX_PIXELS = EXACT_MATROSKA_H264_MAX_WIDTH * EXACT_MATROSKA_H264_MAX_HEIGHT;
 const MULTI_AUDIO_HLS_PROTOCOL = 1;
 const MAX_MULTI_AUDIO_RENDITIONS = 8;
-const GATEWAY_VERSION = 92;
+const GATEWAY_VERSION = 93;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -1166,6 +1176,7 @@ app.get('/health', (req, res) => {
         strictLidFileSizeClaim: 'fileSizeBytes',
         strictLidHeaderCapabilityProtocol: 2,
         strictLidProviderDrainProtocol: 1,
+        strictLidWeakFallbackProtocol: 1,
         strictLidCapabilityHeader: 'X-Norva-Byte-Pipe-Token',
         strictLidCapabilityMethod: 'POST',
         strictLidServiceAuthRequired: true,
@@ -3111,6 +3122,7 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
         const strictSamples = [];
         let bestStrictAccepted = null;
         let strictRejectedSpeechSamples = 0;
+        let strictIgnoredWeakSpeechSamples = 0;
         let inferencePreempted = false;
         const lockKey = accountJobKey(claims.uid, claims.url);
         // This endpoint is the catalogue/background LID route. Viewer-requested subtitle jobs
@@ -3240,13 +3252,16 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
                     const enoughWords = Number(det.words || 0) >= (
                         strict ? WHISPER_STRICT_MIN_WORDS : 4
                     ) && (!strict || uniqueWordCount >= WHISPER_STRICT_MIN_UNIQUE_WORDS);
-                    const strictAccepted = strict
-                        && whisperConfident
-                        && enoughWords
-                        && !transcriptDisagrees;
-                    if (strict && enoughWords && !strictAccepted) {
-                        strictRejectedSpeechSamples++;
-                    }
+                    const strictDisposition = strict
+                        ? strictLanguageSampleDisposition({
+                            enoughWords,
+                            whisperConfident,
+                            transcriptDisagrees,
+                        })
+                        : null;
+                    const strictAccepted = strictDisposition === 'accepted';
+                    if (strictDisposition === 'conflict') strictRejectedSpeechSamples++;
+                    if (strictDisposition === 'weak') strictIgnoredWeakSpeechSamples++;
                     const confident = strict
                         ? strictAccepted
                         : (det.confident === true || whisperConfident);
@@ -3408,6 +3423,7 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
                 samples: strictSamples,
                 sampleCount: strictSamples.length,
                 rejectedSpeechSampleCount: 0,
+                ignoredWeakSpeechSampleCount: strictIgnoredWeakSpeechSamples,
                 minSampleProbability: Math.min(...strictSamples.map((sample) => sample.probability)),
                 minSampleWordCount: Math.min(...strictSamples.map((sample) => sample.wordCount)),
                 minSampleUniqueWordCount: Math.min(
@@ -3429,6 +3445,7 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
                 consensus: Math.max(0, ...votes.values()),
                 sampleCount: strictSamples.length,
                 rejectedSpeechSampleCount: strict ? strictRejectedSpeechSamples : undefined,
+                ignoredWeakSpeechSampleCount: strict ? strictIgnoredWeakSpeechSamples : undefined,
                 samples: strict ? strictSamples : undefined,
             };
         }
@@ -3438,7 +3455,10 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
             verified: false, validationStatus: 'pending',
             method: strict ? 'whisper-strict-consensus-v4' : 'pending',
             consensus: 0, whisperLang: null, transcriptLang: null,
-            wordCount: 0, sampleCount: 0, sample: '',
+            wordCount: 0, sampleCount: 0,
+            rejectedSpeechSampleCount: strict ? strictRejectedSpeechSamples : undefined,
+            ignoredWeakSpeechSampleCount: strict ? strictIgnoredWeakSpeechSamples : undefined,
+            sample: '',
         });
     } catch (err) {
         if (res.writableEnded || res.destroyed) return;
