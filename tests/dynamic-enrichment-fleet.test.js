@@ -315,11 +315,11 @@ test('self-hosted Edge workers outlive every bounded enrichment request', () => 
   );
   assert.match(sourceSync, /episodeProbe \? 390_000/);
   assert.match(sourceSync, /version: 12[\s\S]*exactTailDrainSafe: true/);
-  assert.match(playback, /version: 48[\s\S]*exactTailDrainSafe: true/);
+  assert.match(playback, /version: 49[\s\S]*exactTailDrainSafe: true/);
 
   const playbackWorkerMs = 20 * 60 * 1000;
   const playbackPerWorkerGuaranteedMs = playbackWorkerMs / 2;
-  const languageValidationTaskBudgetMs = 240_000;
+  const languageValidationTaskBudgetMs = 270_000;
   const sourceWorkerMs = 12 * 60 * 1000;
   const longestInnerRequestMs = 540_000;
   assert.ok(playbackPerWorkerGuaranteedMs > longestInnerRequestMs);
