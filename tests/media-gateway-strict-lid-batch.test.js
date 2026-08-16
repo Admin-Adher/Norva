@@ -6,12 +6,15 @@ const test = require('node:test');
 const vm = require('node:vm');
 
 const {
+  buildStrictLidUnverifiedObservability,
   buildWhisperBatchArgs,
   cleanupStrictLidFiles,
   evaluateStrictTranscriptEvidence,
   parseWhisperBatchLid,
   resolveStrictLidConsensus,
   runWhisperBatchProcess,
+  strictLidBatchFailureResponse,
+  strictLidBatchOutcome,
 } = require('../services/media-gateway/src/strict-lid-batch');
 
 class FakeChild extends EventEmitter {
@@ -207,6 +210,157 @@ test('strict consensus verifies four strong plus two weak samples but one strong
   assert.equal(vetoed.verified, false);
   assert.equal(vetoed.language, null);
   assert.equal(vetoed.rejectedSpeechSampleCount, 1);
+});
+
+test('strict unverified observability is a bounded closed schema with no evidence or identifiers', () => {
+  const secrets = [
+    'https://provider.invalid/movie/token-value.mkv',
+    'Bearer super-secret',
+    'transcript words must never be logged',
+    'user-661db file-a944 session-deadbeef',
+    'candidate-fr offset-600 probability-0.99',
+  ];
+  const report = buildStrictLidUnverifiedObservability({
+    extractedWindowCount: 6,
+    evaluatedWindowCount: 6,
+    acceptedSampleCount: 3,
+    acceptedLanguageCount: 1,
+    maxConsensus: 3,
+    rejectedConflictCount: 0,
+    ignoredWeakCount: 1,
+    repeatedCount: 1,
+    missingDiversityCount: 0,
+    insufficientSpeechSampleCount: 1,
+    batchOutcome: 'succeeded',
+    url: secrets[0],
+    token: secrets[1],
+    transcript: secrets[2],
+    providerAccountUserSessionFileIds: secrets[3],
+    candidatesOffsetsProbabilities: secrets[4],
+  });
+  assert.deepEqual(Object.keys(report), [
+    'event',
+    'extractedWindowCount',
+    'evaluatedWindowCount',
+    'acceptedSampleCount',
+    'acceptedLanguageCount',
+    'maxConsensus',
+    'rejectedConflictCount',
+    'ignoredWeakCount',
+    'repeatedCount',
+    'missingDiversityCount',
+    'insufficientSpeechSampleCount',
+    'batchOutcome',
+    'pendingReason',
+    'verified',
+  ]);
+  assert.equal(report.event, 'strict_lid_unverified');
+  assert.equal(report.pendingReason, 'repeated-evidence');
+  assert.equal(report.verified, false);
+  assert.equal(Object.isFrozen(report), true);
+  const line = JSON.stringify(report);
+  assert.equal(line.split(/\r?\n/).length, 1);
+  for (const secret of secrets) assert.equal(line.includes(secret), false);
+
+  const invalid = buildStrictLidUnverifiedObservability({
+    extractedWindowCount: '6',
+    evaluatedWindowCount: 65,
+    acceptedSampleCount: Number.NaN,
+    acceptedLanguageCount: Number.POSITIVE_INFINITY,
+    maxConsensus: 1.5,
+    rejectedConflictCount: {},
+    ignoredWeakCount: null,
+    repeatedCount: undefined,
+    missingDiversityCount: 'secret-value',
+    insufficientSpeechSampleCount: -99,
+    batchOutcome: 'Bearer must-not-escape',
+  });
+  assert.deepEqual(
+    Object.values(invalid).filter((value) => typeof value === 'number'),
+    Array.from({ length: 10 }, () => 0),
+  );
+  assert.equal(invalid.batchOutcome, 'not-run');
+  assert.equal(invalid.pendingReason, 'no-accepted-samples');
+  assert.doesNotMatch(JSON.stringify(invalid), /secret|Bearer/i);
+  assert.doesNotThrow(() => buildStrictLidUnverifiedObservability(null));
+
+  let batchOutcomeReads = 0;
+  const statefulOutcome = {};
+  Object.defineProperty(statefulOutcome, 'batchOutcome', {
+    enumerable: true,
+    get() {
+      batchOutcomeReads += 1;
+      return batchOutcomeReads === 1 ? 'succeeded' : 'Bearer stateful-secret';
+    },
+  });
+  const singleRead = buildStrictLidUnverifiedObservability(statefulOutcome);
+  assert.equal(batchOutcomeReads, 1);
+  assert.equal(singleRead.batchOutcome, 'succeeded');
+  assert.doesNotMatch(JSON.stringify(singleRead), /Bearer|stateful-secret/i);
+});
+
+test('strict consensus diagnostics count all six dispositions without changing certification', () => {
+  const accepted = {
+    disposition: 'accepted',
+    diversity: diversityFor('dans la maison rouge chacun prépare calmement le repas avant le voyage'),
+    result: {
+      offset: 180,
+      language: 'fr',
+      confidence: 0.99,
+      wordCount: 20,
+      uniqueWordCount: 15,
+      transcriptAgrees: true,
+    },
+  };
+  const summary = resolveStrictLidConsensus([
+    accepted,
+    {
+      disposition: 'conflict',
+      result: { offset: 600, language: null, wordCount: 19 },
+    },
+    {
+      disposition: 'weak',
+      result: { offset: 1200, language: null, wordCount: 18 },
+    },
+    {
+      ...accepted,
+      result: { ...accepted.result, offset: 2400 },
+    },
+    {
+      disposition: 'accepted',
+      diversity: null,
+      result: { ...accepted.result, offset: 60 },
+    },
+    {
+      disposition: 'insufficient',
+      result: { offset: 3000, language: null, wordCount: 1 },
+    },
+  ], 4);
+  assert.equal(summary.evaluatedSampleCount, 6);
+  assert.equal(summary.acceptedSamples.length, 1);
+  assert.equal(summary.rejectedSpeechSampleCount, 1);
+  assert.equal(summary.ignoredWeakSpeechSampleCount, 1);
+  assert.equal(summary.repeatedSpeechSampleCount, 1);
+  assert.equal(summary.missingDiversitySampleCount, 1);
+  assert.equal(summary.insufficientSpeechSampleCount, 1);
+  assert.equal(summary.votes.size, 1);
+  assert.equal(summary.verified, false);
+  assert.equal(summary.language, null);
+
+  const report = buildStrictLidUnverifiedObservability({
+    extractedWindowCount: 6,
+    evaluatedWindowCount: summary.evaluatedSampleCount,
+    acceptedSampleCount: summary.acceptedSamples.length,
+    acceptedLanguageCount: summary.votes.size,
+    maxConsensus: Math.max(0, ...summary.votes.values()),
+    rejectedConflictCount: summary.rejectedSpeechSampleCount,
+    ignoredWeakCount: summary.ignoredWeakSpeechSampleCount,
+    repeatedCount: summary.repeatedSpeechSampleCount,
+    missingDiversityCount: summary.missingDiversitySampleCount,
+    insufficientSpeechSampleCount: summary.insufficientSpeechSampleCount,
+    batchOutcome: 'succeeded',
+  });
+  assert.equal(report.pendingReason, 'rejected-conflict');
 });
 
 function gatewayTranscriptDetector() {
@@ -451,6 +605,74 @@ test('missing auto-detected line fails the whole batch closed with six empty res
   assert.ok(result.samples.every((sample) => sample.lang === null && sample.text === ''));
 });
 
+test('strict batch exit and parse failures become a fixed drained 502 contract, never consensus', async (t) => {
+  const runFailure = async ({ name, code, stderr }) => {
+    const wavPaths = sixPaths(name);
+    const outputPrefixes = sixPaths(`${name}-out`).map((file) => file.replace(/\.wav$/, ''));
+    const child = new FakeChild();
+    const resultPromise = runWhisperBatchProcess({
+      bin: 'whisper-cli',
+      model: 'model.bin',
+      wavPaths,
+      outputPrefixes,
+      threads: 4,
+      timeoutMs: 1000,
+      spawnImpl: () => child,
+      readFileImpl: async () => 'transcript must not be read on a failed batch',
+      unlinkImpl: async () => {},
+    });
+    setImmediate(() => {
+      child.stderr.emit('data', Buffer.from(stderr));
+      child.emit('close', code);
+    });
+    return resultPromise;
+  };
+
+  for (const fixture of [
+    {
+      name: 'exit-failure',
+      code: 7,
+      stderr: 'provider-token secret-transcript https://provider.invalid/file',
+    },
+    {
+      name: 'parse-failure',
+      code: 0,
+      stderr: languageLines(Array.from({ length: 5 }, () => ({ lang: 'fr', prob: 0.99 }))),
+    },
+  ]) {
+    await t.test(fixture.name, async () => {
+      const batch = await runFailure(fixture);
+      assert.equal(batch.ok, false);
+      assert.equal(strictLidBatchOutcome(batch), 'failed');
+      const failure = strictLidBatchFailureResponse({
+        ...batch,
+        error: `${batch.error} bearer-token raw-stderr transcript-text`,
+      });
+      assert.deepEqual(failure, {
+        status: 502,
+        retryAfterSeconds: 30,
+        payload: {
+          error: 'Strict language inference batch failed',
+          code: 'strict_lid_batch_failed',
+          retryable: true,
+        },
+      });
+      assert.equal(Object.isFrozen(failure), true);
+      assert.equal(Object.isFrozen(failure.payload), true);
+      assert.doesNotMatch(
+        JSON.stringify(failure),
+        /bearer-token|raw-stderr|transcript-text|provider-token|provider\.invalid/i,
+      );
+      assert.equal(resolveStrictLidConsensus([], 4).verified, false);
+    });
+  }
+
+  assert.equal(strictLidBatchFailureResponse({ ok: true }), null);
+  assert.equal(strictLidBatchFailureResponse({ ok: false, timedOut: true }), null);
+  assert.equal(strictLidBatchFailureResponse({ ok: false, aborted: true }), null);
+  assert.equal(strictLidBatchFailureResponse({ ok: false, preempted: true }), null);
+});
+
 test('strict batch bounds timeout, abort and preemption and still cleans output files', async (t) => {
   const wavPaths = sixPaths('stop');
   const outputPrefixes = sixPaths('stop-out').map((file) => file.replace(/\.wav$/, ''));
@@ -515,7 +737,7 @@ test('strict WAV cleanup is ordered-independent and fail-closed on unlink errors
   assert.equal(seen.length, 6);
 });
 
-test('v97 strict extraction budget caps media, preserves a 60 s Whisper reserve, and types failures', () => {
+test('v98 strict extraction budget caps media, preserves a 60 s Whisper reserve, and types failures', () => {
   const gateway = fs.readFileSync(
     path.join(__dirname, '../services/media-gateway/src/index.js'),
     'utf8',
@@ -582,7 +804,7 @@ test('v97 strict extraction budget caps media, preserves a 60 s Whisper reserve,
   assert.equal(timing.strictLidPostExtractionFailure({}), null);
 });
 
-test('v97 route stops on the first extraction timeout before Whisper and keeps drain attestations', () => {
+test('v98 route fails a broken Whisper batch before consensus and keeps drain attestations', () => {
   const gateway = fs.readFileSync(
     path.join(__dirname, '../services/media-gateway/src/index.js'),
     'utf8',
@@ -590,13 +812,14 @@ test('v97 route stops on the first extraction timeout before Whisper and keeps d
   const routeStart = gateway.indexOf('async function handleDetectLanguageRequest(');
   const routeEnd = gateway.indexOf('// Service-only A/B benchmark.', routeStart);
   const route = gateway.slice(routeStart, routeEnd);
-  assert.match(gateway, /const GATEWAY_VERSION = 97;/);
+  assert.match(gateway, /const GATEWAY_VERSION = 98;/);
   assert.match(gateway, /const STRICT_LID_REQUEST_BUDGET_MS = clampInt\([\s\S]*225_000,[\s\S]*225_000,/);
   assert.match(gateway, /strictLidBatchProtocol: 1/);
   assert.match(gateway, /strictLidActivityKindProtocol: 1/);
   assert.match(gateway, /strictLidCjkEvidenceProtocol: 1/);
   assert.match(gateway, /strictLidTranscriptDiversityProtocol: 1/);
   assert.match(gateway, /strictLidExtractionTimeoutProtocol: 1/);
+  assert.match(gateway, /strictLidBatchFailureProtocol: 1/);
   assert.match(gateway, /strictLidSampleDurationCapSeconds: STRICT_LID_SAMPLE_DURATION_CAP_SECONDS/);
   assert.match(gateway, /strictLidWhisperReserveMs: STRICT_LID_WHISPER_RESERVE_MS/);
   assert.match(gateway, /strictLidExtractionStartupMarginMs: STRICT_LID_EXTRACTION_STARTUP_MARGIN_MS/);
@@ -624,4 +847,19 @@ test('v97 route stops on the first extraction timeout before Whisper and keeps d
     'the first extraction timeout must stop collection before any strict Whisper batch');
   assert.match(route, /strictLidPostExtractionFailure\(\{[\s\S]*terminalError: strictBroker\?\.terminalError,[\s\S]*extractionTimedOut: strictExtractionTimedOut/);
   assert.match(route, /sendDetectionJson\([\s\S]*strictPostExtractionFailure\.status,[\s\S]*strictPostExtractionFailure\.payload/);
+  const batchFailureCheck = route.indexOf('else if (batch.ok !== true)');
+  const consensusEvaluation = route.indexOf('strictLanguageBatchSampleResult(batch.samples[index]');
+  assert.ok(batchFailureCheck >= 0 && consensusEvaluation > batchFailureCheck,
+    'a failed batch must become a retryable response before any sample reaches consensus');
+  assert.match(route, /else if \(batch\.ok !== true\) \{[\s\S]*strictLidBatchFailureResponse\(batch\)/);
+  assert.match(route, /if \(strictBatchFailure\) \{[\s\S]*logStrictLidUnverified\(\);[\s\S]*Cache-Control', 'no-store'[\s\S]*Retry-After[\s\S]*sendDetectionJson\(strictBatchFailure\.status, strictBatchFailure\.payload\)/);
+  const logStart = route.indexOf('const logStrictLidUnverified');
+  const failureResponse = route.indexOf('if (strictBatchFailure)', logStart);
+  const logBlock = route.slice(logStart, failureResponse);
+  assert.match(logBlock, /buildStrictLidUnverifiedObservability\(/);
+  assert.equal((logBlock.match(/console\.info\(/g) || []).length, 1);
+  assert.doesNotMatch(
+    logBlock,
+    /transcript|sampleText|\burl\b|token|credential|providerAccount|userId|sessionId|fileId|candidate|offset|probability/i,
+  );
 });

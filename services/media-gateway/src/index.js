@@ -9,10 +9,13 @@ const express = require('express');
 const { request: undiciRequest } = require('undici');
 const { parseWhisperLid, runWhisperDetectOnly } = require('./whisper-lid');
 const {
+    buildStrictLidUnverifiedObservability,
     cleanupStrictLidFiles,
     evaluateStrictTranscriptEvidence,
     resolveStrictLidConsensus,
     runWhisperBatchProcess,
+    strictLidBatchFailureResponse,
+    strictLidBatchOutcome,
 } = require('./strict-lid-batch');
 const {
     classifyProviderFetchFailure,
@@ -1216,7 +1219,7 @@ const EXACT_MATROSKA_H264_MAX_HEIGHT = 1080;
 const EXACT_MATROSKA_H264_MAX_PIXELS = EXACT_MATROSKA_H264_MAX_WIDTH * EXACT_MATROSKA_H264_MAX_HEIGHT;
 const MULTI_AUDIO_HLS_PROTOCOL = 1;
 const MAX_MULTI_AUDIO_RENDITIONS = 8;
-const GATEWAY_VERSION = 97;
+const GATEWAY_VERSION = 98;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -1383,6 +1386,7 @@ app.get('/health', (req, res) => {
         strictLidCjkEvidenceProtocol: 1,
         strictLidTranscriptDiversityProtocol: 1,
         strictLidExtractionTimeoutProtocol: 1,
+        strictLidBatchFailureProtocol: 1,
         strictLidSampleDurationCapSeconds: STRICT_LID_SAMPLE_DURATION_CAP_SECONDS,
         strictLidWhisperReserveMs: STRICT_LID_WHISPER_RESERVE_MS,
         strictLidExtractionStartupMarginMs: STRICT_LID_EXTRACTION_STARTUP_MARGIN_MS,
@@ -3379,7 +3383,11 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
         let strictIgnoredWeakSpeechSamples = 0;
         let strictRepeatedSpeechSamples = 0;
         let strictMissingDiversitySamples = 0;
+        let strictInsufficientSpeechSamples = 0;
+        let strictEvaluatedWindowCount = 0;
         let strictConsensusVerified = false;
+        let strictBatchOutcome = 'not-run';
+        let strictBatchFailure = null;
         let strictExtractionTimedOut = false;
         let inferencePreempted = false;
         const lockKey = accountJobKey(claims.uid, claims.url);
@@ -3709,14 +3717,18 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
                         abortSignal: requestController.signal,
                     },
                 );
+                strictBatchOutcome = strictLidBatchOutcome(batch);
                 if (batch.preempted) {
                     inferencePreempted = true;
                 } else if (batch.timedOut || (batch.aborted && strictWorkBudgetExpired)) {
                     expireStrictWorkBudget();
+                } else if (batch.ok !== true) {
+                    strictBatchFailure = strictLidBatchFailureResponse(batch);
                 } else if (!batch.aborted) {
                     const evaluated = strictWavSamples.map((sample, index) => (
                         strictLanguageBatchSampleResult(batch.samples[index], sample.offset)
                     ));
+                    strictEvaluatedWindowCount = evaluated.length;
                     const summary = resolveStrictLidConsensus(evaluated, consensusNeeded);
                     strictSamples.push(...summary.acceptedSamples);
                     bestStrictAccepted = summary.bestAccepted;
@@ -3725,6 +3737,7 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
                     strictIgnoredWeakSpeechSamples = summary.ignoredWeakSpeechSampleCount;
                     strictRepeatedSpeechSamples = summary.repeatedSpeechSampleCount;
                     strictMissingDiversitySamples = summary.missingDiversitySampleCount;
+                    strictInsufficientSpeechSamples = summary.insufficientSpeechSampleCount;
                     strictConsensusVerified = summary.verified;
                     for (const [language, count] of summary.votes) votes.set(language, count);
                 }
@@ -3750,6 +3763,27 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
                 code: 'viewer_preempted',
                 retryable: true,
             });
+        }
+        const logStrictLidUnverified = () => console.info(JSON.stringify(
+            buildStrictLidUnverifiedObservability({
+                extractedWindowCount: extractions,
+                evaluatedWindowCount: strictEvaluatedWindowCount,
+                acceptedSampleCount: strictSamples.length,
+                acceptedLanguageCount: votes.size,
+                maxConsensus: Math.max(0, ...votes.values()),
+                rejectedConflictCount: strictRejectedSpeechSamples,
+                ignoredWeakCount: strictIgnoredWeakSpeechSamples,
+                repeatedCount: strictRepeatedSpeechSamples,
+                missingDiversityCount: strictMissingDiversitySamples,
+                insufficientSpeechSampleCount: strictInsufficientSpeechSamples,
+                batchOutcome: strictBatchOutcome,
+            }),
+        ));
+        if (strictBatchFailure) {
+            logStrictLidUnverified();
+            res.setHeader('Cache-Control', 'no-store');
+            res.setHeader('Retry-After', String(strictBatchFailure.retryAfterSeconds));
+            return sendDetectionJson(strictBatchFailure.status, strictBatchFailure.payload);
         }
         if (extractions === 0) return sendDetectionJson(502, { error: 'Audio extraction failed', details: lastExtractErr });
         if (
@@ -3784,6 +3818,7 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
             res.setHeader('Cache-Control', 'private, max-age=3600');
             return sendDetectionJson(200, verified);
         }
+        if (strict) logStrictLidUnverified();
         // No strict consensus is not a language result. It is a retryable pending state, so no
         // caller can accidentally surface `candidate` as if it had been validated.
         if (best && consensusNeeded > 1) {
