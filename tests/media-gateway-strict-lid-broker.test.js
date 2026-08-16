@@ -471,7 +471,7 @@ test('strict LID pins the first strong validator and fails closed if the file ch
   assert.equal(calls[1].ifRange, '"v1"');
 });
 
-test('strict LID rejects an invalid signed size before creating a server or provider fetch', async () => {
+test('strict LID rejects invalid exact signed coordinates before creating a server or provider fetch', async () => {
   const { createStrictLidBroker } = brokerHarness();
   let fetches = 0;
   for (const fileSizeBytes of [null, '', 0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
@@ -491,12 +491,21 @@ test('strict LID rejects an invalid signed size before creating a server or prov
   const routeEnd = gatewaySource.indexOf("app.post('/extract-language-wav'", routeStart);
   const route = gatewaySource.slice(routeStart, routeEnd);
   assert.ok(route.indexOf("code: 'exact_file_size_required'") < route.indexOf('createStrictLidBroker({'));
+  assert.match(route, /normalizeStrictLidTimelineDurationSeconds\(claims\.durationSeconds\)/);
+  assert.ok(route.indexOf("code: 'exact_duration_required'") < route.indexOf('createStrictLidBroker({'));
+  assert.ok(route.indexOf("code: 'strict_lid_duration_too_short'") < route.indexOf('createStrictLidBroker({'));
+  assert.match(
+    route,
+    /code: 'strict_lid_duration_too_short'[\s\S]*providerDrained: true,[\s\S]*providerDrainProtocol: 1/,
+  );
+  assert.doesNotMatch(route, /req\.query\.(?:duration|durationSeconds)|WHISPER_STRICT_OFFSETS/);
   assert.match(route, /detectLanguageRequestPolicy\(req, options\)[\s\S]*validateDetectLanguageCapability\(capabilityToken, policy\.requiredScope\)/);
   assert.match(gatewaySource, /strictLidLoopbackBrokerProtocol: 1/);
   assert.match(gatewaySource, /strictLidFileSizeClaim: 'fileSizeBytes'/);
-  assert.match(gatewaySource, /const GATEWAY_VERSION = 98/);
+  assert.match(gatewaySource, /const GATEWAY_VERSION = 99/);
   assert.match(gatewaySource, /strictLidProviderDrainProtocol: 1/);
   assert.match(gatewaySource, /strictLidWeakFallbackProtocol: 1/);
+  assert.match(gatewaySource, /strictLidTimelineSamplingProtocol: 1/);
   assert.match(
     route,
     /const sendDetectionJson = async[\s\S]*await closeStrictBrokerForResponse\(\)[\s\S]*providerDrained: true[\s\S]*providerDrainProtocol: 1/,

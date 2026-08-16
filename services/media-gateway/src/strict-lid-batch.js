@@ -13,6 +13,10 @@ const STRICT_LID_MIN_SCRIPT_DENSITY = 0.7;
 const STRICT_LID_DIVERSITY_SHINGLE_SIZE = 3;
 const STRICT_LID_MAX_SAMPLE_SHINGLE_SIMILARITY = 0.82;
 const STRICT_LID_MAX_DIVERSITY_CHARACTERS = 4096;
+const STRICT_LID_MAX_TIMELINE_DURATION_SECONDS = 86_400;
+const STRICT_LID_SAMPLE_DURATION_SECONDS = 20;
+const STRICT_LID_MIN_TIMELINE_WINDOWS = 4;
+const STRICT_LID_FULL_TIMELINE_WINDOWS = 6;
 const STRICT_LID_OBSERVABILITY_MAX_COUNT = 64;
 const STRICT_LID_BATCH_OUTCOMES = new Set([
     'not-run',
@@ -142,6 +146,45 @@ function strictTranscriptShingleSimilarity(left, right) {
     // Containment similarity catches a repeated boilerplate phrase with a small appended suffix;
     // ordinary separated dialogue windows retain independent shingles and remain far below 0.82.
     return smaller.size > 0 ? overlap / smaller.size : 0;
+}
+
+function normalizeStrictLidTimelineDurationSeconds(value) {
+    return typeof value === 'number'
+        && Number.isFinite(value)
+        && value > 0
+        && value <= STRICT_LID_MAX_TIMELINE_DURATION_SECONDS
+        ? value
+        : null;
+}
+
+// Strict certification samples the exact signed media timeline, never a caller query or a
+// replica-local offset override. Long-form VODs use six equal temporal strata. A short film can
+// still satisfy the unchanged four-sample proof when it contains four complete 20-second strata;
+// anything shorter cannot provide four non-overlapping evidence windows and therefore fails
+// closed before provider I/O.
+function strictLidTimelineOffsets(
+    durationSeconds,
+    sampleDurationSeconds = STRICT_LID_SAMPLE_DURATION_SECONDS,
+) {
+    const duration = normalizeStrictLidTimelineDurationSeconds(durationSeconds);
+    const sampleDuration = Number(sampleDurationSeconds);
+    if (
+        duration === null
+        || !Number.isFinite(sampleDuration)
+        || sampleDuration <= 0
+        || duration < STRICT_LID_MIN_TIMELINE_WINDOWS * sampleDuration
+    ) {
+        return null;
+    }
+    const windowCount = duration >= STRICT_LID_FULL_TIMELINE_WINDOWS * sampleDuration
+        ? STRICT_LID_FULL_TIMELINE_WINDOWS
+        : STRICT_LID_MIN_TIMELINE_WINDOWS;
+    const lastStart = duration - sampleDuration;
+    return Object.freeze(Array.from({ length: windowCount }, (_, index) => {
+        const stratumCenter = ((index + 0.5) * duration) / windowCount;
+        const rawStart = stratumCenter - sampleDuration / 2;
+        return Math.min(lastStart, Math.max(0, Math.round(rawStart * 1000) / 1000));
+    }));
 }
 
 function strictLidBatchOutcome(batch) {
@@ -547,6 +590,8 @@ module.exports = {
     parseWhisperBatchLid,
     resolveStrictLidConsensus,
     runWhisperBatchProcess,
+    normalizeStrictLidTimelineDurationSeconds,
     strictLidBatchFailureResponse,
     strictLidBatchOutcome,
+    strictLidTimelineOffsets,
 };
