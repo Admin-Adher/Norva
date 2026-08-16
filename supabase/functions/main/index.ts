@@ -37,7 +37,10 @@ const HOT_POOL_SIZES: Record<string, number> = {
 // spend up to 9 minutes on a speech batch and norva-source-sync must still
 // persist the schedule outcome after that inner request completes.
 const LONG_RUNNING_WORKER_TIMEOUT_MS: Record<string, number> = {
-  'norva-playback': 10 * 60 * 1000,
+  // edge-runtime's per_worker strategy begins retirement halfway through this
+  // value. Twenty minutes therefore guarantees ten minutes to every admitted
+  // playback task, including one accepted immediately before retirement.
+  'norva-playback': 20 * 60 * 1000,
   'norva-source-sync': 12 * 60 * 1000,
 }
 const rrCounters = new Map<string, number>()

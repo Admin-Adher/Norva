@@ -9,6 +9,7 @@ const vm = require('node:vm');
 const root = path.join(__dirname, '..');
 const read = (file) => fs.readFileSync(path.join(root, file), 'utf8').replace(/\r\n?/g, '\n');
 const playback = read('supabase/functions/norva-playback/index.ts');
+const mainRouter = read('supabase/functions/main/index.ts');
 const migration = read('supabase/migrations/20260816105918_async_vod_language_validation_jobs.sql');
 const presenceMigration = read('supabase/migrations/20260816141150_provider_account_foreground_presence.sql');
 const edgeDeploy = read('ops/hetzner/scripts/04-deploy-edge-functions.sh');
@@ -85,6 +86,46 @@ test('foreground validation ignores presence intent but still blocks real provid
   );
   assert.match(worker, /release_provider_account_language_validation/);
   assert.match(playback, /LANGUAGE_VALIDATION_ACCOUNT_LEASE_SECONDS = LANGUAGE_VALIDATION_LEASE_SECONDS/);
+  assert.match(playback, /const LANGUAGE_VALIDATION_TASK_BUDGET_MS = 240_000/);
+  assert.match(playback, /const LANGUAGE_VALIDATION_POST_FETCH_RESERVE_MS = 30_000/);
+  assert.match(playback, /const LANGUAGE_VALIDATION_JOB_LEASE_SECONDS = 300/);
+  const taskBudgetMs = Number(
+    playback.match(/const LANGUAGE_VALIDATION_TASK_BUDGET_MS = ([\d_]+)/)?.[1].replaceAll('_', ''),
+  );
+  const fetchTimeoutMs = Number(
+    playback.match(/const LANGUAGE_VALIDATION_FETCH_TIMEOUT_MS = ([\d_]+)/)?.[1].replaceAll('_', ''),
+  );
+  const postFetchReserveMs = Number(
+    playback.match(/const LANGUAGE_VALIDATION_POST_FETCH_RESERVE_MS = ([\d_]+)/)?.[1].replaceAll('_', ''),
+  );
+  const jobLeaseSeconds = Number(
+    playback.match(/const LANGUAGE_VALIDATION_JOB_LEASE_SECONDS = (\d+)/)?.[1],
+  );
+  const providerLeaseSeconds = Number(
+    playback.match(/const LANGUAGE_VALIDATION_LEASE_SECONDS = (\d+)/)?.[1],
+  );
+  assert.ok(
+    fetchTimeoutMs + postFetchReserveMs <= taskBudgetMs
+      && taskBudgetMs / 1000 < jobLeaseSeconds
+      && jobLeaseSeconds < providerLeaseSeconds,
+    'fetch, cleanup reserve, task, durable claim and provider lease must remain strictly nested',
+  );
+  assert.match(worker, /const taskDeadlineAt = Date\.now\(\) \+ LANGUAGE_VALIDATION_TASK_BUDGET_MS/);
+  assert.match(worker, /languageValidationFetchBudgetMs\(taskDeadlineAt\)/);
+  assert.equal(
+    (worker.match(/"claim_catalog_file_audio_validation_job"/g) || []).length,
+    2,
+    'the same-owner durable claim is renewed immediately before provider leasing',
+  );
+  assert.match(worker, /const \{ data: renewed, error: renewError \}[\s\S]*p_lease_owner: leaseOwner[\s\S]*renewedClaim\.trackIndex[\s\S]*renewedClaim\.profileFingerprint/);
+  assert.ok(
+    worker.indexOf('const { data: renewed, error: renewError }')
+      < worker.indexOf('"claim_provider_account_language_validation"'),
+    'stale job ownership must fail before claiming the provider account',
+  );
+  assert.match(worker, /AbortSignal\.timeout\(fetchBudgetMs\)/);
+  assert.match(worker, /LANGUAGE_VALIDATION_TASK_BUDGET_EXHAUSTED[\s\S]*retryAt:/);
+  assert.match(worker, /LANGUAGE_VALIDATION_GATEWAY_TIMEOUT[\s\S]*LANGUAGE_VALIDATION_GATEWAY_TRANSPORT[\s\S]*retryAt:/);
   assert.match(
     worker,
     /providerAccountLeaseReleaseSafe = false[\s\S]*await fetch[\s\S]*await response\.text\(\)[\s\S]*JSON\.parse\(responseText\)[\s\S]*providerAccountLeaseReleaseSafe = strictLanguageProviderDrainAttested\(payload\)/,
@@ -96,17 +137,48 @@ test('foreground validation ignores presence intent but still blocks real provid
   );
   assert.match(worker, /providerAccountLeaseClaimed[\s\S]*providerAccountLeaseReleaseSafe[\s\S]*release_provider_account_language_validation/);
   assert.match(create, /claimError\.code[\s\S]*55P03[\s\S]*provider language validation in progress[\s\S]*LANGUAGE_VALIDATION_IN_PROGRESS/);
-  assert.match(playback, /version: 47[\s\S]*languageValidationPresenceIntentProtocol: 1[\s\S]*languageValidationPlaybackLeaseProtocol: 1/);
-  assert.match(edgeDeploy, /EXPECTED_PLAYBACK_VERSION=47/);
+  assert.match(playback, /version: 48[\s\S]*languageValidationPresenceIntentProtocol: 1[\s\S]*languageValidationPlaybackLeaseProtocol: 1[\s\S]*languageValidationTaskBudgetMs: LANGUAGE_VALIDATION_TASK_BUDGET_MS[\s\S]*languageValidationFetchTimeoutMs: LANGUAGE_VALIDATION_FETCH_TIMEOUT_MS[\s\S]*languageValidationPostFetchReserveMs: LANGUAGE_VALIDATION_POST_FETCH_RESERVE_MS[\s\S]*languageValidationJobLeaseSeconds: LANGUAGE_VALIDATION_JOB_LEASE_SECONDS/);
+  assert.match(playback, /const LANGUAGE_VALIDATION_FETCH_TIMEOUT_MS = 210_000/);
+  assert.match(edgeDeploy, /EXPECTED_PLAYBACK_VERSION=48/);
+  assert.match(edgeDeploy, /EXPECTED_LANGUAGE_VALIDATION_TASK_BUDGET_MS=240000/);
+  assert.match(edgeDeploy, /EXPECTED_LANGUAGE_VALIDATION_FETCH_TIMEOUT_MS=210000/);
+  assert.match(edgeDeploy, /EXPECTED_LANGUAGE_VALIDATION_POST_FETCH_RESERVE_MS=30000/);
+  assert.match(edgeDeploy, /EXPECTED_LANGUAGE_VALIDATION_JOB_LEASE_SECONDS=300/);
   assert.match(edgeDeploy, /EXPECTED_LANGUAGE_VALIDATION_PRESENCE_INTENT_PROTOCOL=1/);
   assert.match(edgeDeploy, /EXPECTED_LANGUAGE_VALIDATION_PLAYBACK_LEASE_PROTOCOL=1/);
+  assert.match(mainRouter, /'norva-playback': 20 \* 60 \* 1000/);
+  assert.match(edgeDeploy, /main_path="\/home\/deno\/functions\/main\/index\.ts"/);
+  assert.match(edgeDeploy, /main router source digest mismatch/);
+});
+
+test('language validation fetch budget preserves cleanup time inside the worker deadline', () => {
+  let helper = between(
+    playback,
+    'function languageValidationFetchBudgetMs(',
+    '\nasync function processOneLanguageValidationTrack(',
+  );
+  helper = helper
+    .replace('taskDeadlineAt: number', 'taskDeadlineAt')
+    .replace('nowMs = Date.now()', 'nowMs = Date.now()');
+  const context = {
+    Math,
+    Date,
+    LANGUAGE_VALIDATION_FETCH_TIMEOUT_MS: 210_000,
+    LANGUAGE_VALIDATION_POST_FETCH_RESERVE_MS: 30_000,
+  };
+  vm.runInNewContext(`${helper}; this.budget = languageValidationFetchBudgetMs;`, context);
+
+  assert.equal(context.budget(240_000, 0), 210_000);
+  assert.equal(context.budget(240_000, 29_000), 181_000);
+  assert.equal(context.budget(240_000, 210_000), 0);
+  assert.equal(context.budget(240_000, 240_001), 0);
 });
 
 test('provider account lease release requires the exact Gateway drain attestation', () => {
   let helper = between(
     playback,
     'function strictLanguageProviderDrainAttested(',
-    '\nasync function processOneLanguageValidationTrack(',
+    '\nfunction languageValidationFetchBudgetMs(',
   );
   helper = helper.replace('payload: JsonRecord', 'payload');
   const context = { Number };

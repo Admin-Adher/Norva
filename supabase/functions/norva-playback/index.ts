@@ -114,7 +114,9 @@ const LANGUAGE_VALIDATION_METHOD = "whisper-strict-consensus-v4";
 const LANGUAGE_VALIDATION_SCOPE = "lid-legacy-full";
 const LANGUAGE_VALIDATION_RETRY_SECONDS = 24 * 60 * 60;
 const LANGUAGE_VALIDATION_LEASE_SECONDS = 900;
-const LANGUAGE_VALIDATION_FETCH_TIMEOUT_MS = 180_000;
+const LANGUAGE_VALIDATION_TASK_BUDGET_MS = 240_000;
+const LANGUAGE_VALIDATION_POST_FETCH_RESERVE_MS = 30_000;
+const LANGUAGE_VALIDATION_FETCH_TIMEOUT_MS = 210_000;
 const LANGUAGE_VALIDATION_ACCOUNT_LEASE_SECONDS = LANGUAGE_VALIDATION_LEASE_SECONDS;
 const LANGUAGE_VALIDATION_JOB_LEASE_SECONDS = 300;
 const LANGUAGE_VALIDATION_POLL_SECONDS = 3;
@@ -178,13 +180,17 @@ Deno.serve(async (req) => {
       return json(req, {
         ok: true,
         service: "norva-playback",
-        version: 47,
+        version: 48,
         nativeHeartbeatProtocol: 1,
         providerCircuitProtocol: 1,
         exactFileCodecProfileProtocol: 1,
         languageValidationProtocol: LANGUAGE_VALIDATION_PROTOCOL,
         languageValidationPresenceIntentProtocol: 1,
         languageValidationPlaybackLeaseProtocol: 1,
+        languageValidationTaskBudgetMs: LANGUAGE_VALIDATION_TASK_BUDGET_MS,
+        languageValidationFetchTimeoutMs: LANGUAGE_VALIDATION_FETCH_TIMEOUT_MS,
+        languageValidationPostFetchReserveMs: LANGUAGE_VALIDATION_POST_FETCH_RESERVE_MS,
+        languageValidationJobLeaseSeconds: LANGUAGE_VALIDATION_JOB_LEASE_SECONDS,
         languageValidationGatewayMethod: "POST",
         languageValidationHeaderCapability: true,
         languageValidationServiceAuthRequired: true,
@@ -1787,7 +1793,18 @@ function strictLanguageProviderDrainAttested(payload: JsonRecord) {
     && payload.providerDrainProtocol === 1;
 }
 
+function languageValidationFetchBudgetMs(taskDeadlineAt: number, nowMs = Date.now()) {
+  return Math.max(0, Math.floor(Math.min(
+    LANGUAGE_VALIDATION_FETCH_TIMEOUT_MS,
+    taskDeadlineAt - nowMs - LANGUAGE_VALIDATION_POST_FETCH_RESERVE_MS,
+  )));
+}
+
 async function processOneLanguageValidationTrack(db: SupabaseClient, jobId: string) {
+  // edge-runtime v1.74 may retire a per-worker isolate halfway through its
+  // configured lifetime. Bound the complete task, not only the fetch, so DB
+  // checkpoint/finalization and provider cleanup retain a deterministic margin.
+  const taskDeadlineAt = Date.now() + LANGUAGE_VALIDATION_TASK_BUDGET_MS;
   const leaseOwner = `language-validation-job:${crypto.randomUUID()}`;
   const { data: claimed, error: claimError } = await db.rpc(
     "claim_catalog_file_audio_validation_job",
@@ -1847,6 +1864,38 @@ async function processOneLanguageValidationTrack(db: SupabaseClient, jobId: stri
       providerAccountHash,
       providerAccountKey,
     );
+
+    // The initial claim precedes ownership/profile/provider preflight. Renew it
+    // with the same owner immediately before any provider lease or I/O. If a
+    // stalled preflight let another worker reclaim the row, this CAS-style
+    // claim returns null and the stale worker exits without touching the lane.
+    if (languageValidationFetchBudgetMs(taskDeadlineAt) <= 0) {
+      await failLanguageValidationJob(db, {
+        jobId,
+        leaseOwner,
+        errorCode: "LANGUAGE_VALIDATION_TASK_BUDGET_EXHAUSTED",
+        retryAt: new Date(Date.now() + 30_000).toISOString(),
+      });
+      return;
+    }
+    const { data: renewed, error: renewError } = await db.rpc(
+      "claim_catalog_file_audio_validation_job",
+      {
+        p_job_id: jobId,
+        p_lease_owner: leaseOwner,
+        p_ttl_seconds: LANGUAGE_VALIDATION_JOB_LEASE_SECONDS,
+      },
+    );
+    const renewedClaim = recordOrEmpty(renewed);
+    if (
+      renewError || !renewed ||
+      stringOr(renewedClaim.jobId, "") !== stringOr(claim.jobId, "") ||
+      boundedNullableInt(renewedClaim.trackIndex, 0, 128) !== trackIndex ||
+      stringOr(renewedClaim.identityKey, "") !== current.identityKey ||
+      stringOr(renewedClaim.profileFingerprint, "") !== current.fingerprint
+    ) {
+      return;
+    }
 
     providerLeaseOwner = `language-validation-track:${jobId}:${trackIndex}:${crypto.randomUUID()}`;
     providerAccountLeaseHash = providerAccountHash;
@@ -1923,6 +1972,16 @@ async function processOneLanguageValidationTrack(db: SupabaseClient, jobId: stri
       exactAfterLease.exactProfile.fileSizeBytes,
     );
     let response: Response;
+    const fetchBudgetMs = languageValidationFetchBudgetMs(taskDeadlineAt);
+    if (fetchBudgetMs <= 0) {
+      await failLanguageValidationJob(db, {
+        jobId,
+        leaseOwner,
+        errorCode: "LANGUAGE_VALIDATION_TASK_BUDGET_EXHAUSTED",
+        retryAt: new Date(Date.now() + 30_000).toISOString(),
+      });
+      return;
+    }
     providerAccountLeaseReleaseSafe = false;
     try {
       response = await fetch(
@@ -1933,7 +1992,9 @@ async function processOneLanguageValidationTrack(db: SupabaseClient, jobId: stri
             Authorization: `Bearer ${detectionAccess.serviceToken}`,
             "X-Norva-Byte-Pipe-Token": detectionAccess.capability,
           },
-          signal: AbortSignal.timeout(LANGUAGE_VALIDATION_FETCH_TIMEOUT_MS),
+          // The same signal remains attached while response.text() consumes the
+          // body, so headers alone cannot escape the end-to-end task budget.
+          signal: AbortSignal.timeout(fetchBudgetMs),
         },
       );
     } catch (error) {
@@ -1943,6 +2004,7 @@ async function processOneLanguageValidationTrack(db: SupabaseClient, jobId: stri
         errorCode: error instanceof DOMException && error.name === "TimeoutError"
           ? "LANGUAGE_VALIDATION_GATEWAY_TIMEOUT"
           : "LANGUAGE_VALIDATION_GATEWAY_TRANSPORT",
+        retryAt: new Date(Date.now() + 30_000).toISOString(),
       });
       return;
     }
@@ -1954,6 +2016,7 @@ async function processOneLanguageValidationTrack(db: SupabaseClient, jobId: stri
         jobId,
         leaseOwner,
         errorCode: "LANGUAGE_VALIDATION_GATEWAY_TRANSPORT",
+        retryAt: new Date(Date.now() + 30_000).toISOString(),
       });
       return;
     }
