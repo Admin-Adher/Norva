@@ -197,7 +197,7 @@ test('v82 production detect-only is signed-scope only, non-strict and falls back
   assert.notEqual(routeEnd, -1);
   const route = gateway.slice(routeStart, routeEnd);
 
-  assert.match(gateway, /const GATEWAY_VERSION = 94/);
+  assert.match(gateway, /const GATEWAY_VERSION = 95/);
   assert.match(gateway, /const LID_DETECT_ONLY_SCOPE = 'lid-production-detect-only'/);
   assert.match(gateway, /const LID_SHADOW_SCOPE = 'lid-shadow'/);
   assert.match(
@@ -399,7 +399,7 @@ test('LID benchmark is service-only, scoped, read-only and reproducibly pinned',
   assert.match(gateway, /runWhisperDetect\(wavPath\)/);
   assert.match(gateway, /runWhisperDetectOnly\(\{[\s\S]*wavPath,/);
   assert.match(gateway, /claims\.uid,\s*\n\s*false,\s*\n\s*\)\)/);
-  assert.match(gateway, /entry\.reportActivity !== false/);
+  assert.match(gateway, /if \(entry\.reportActivity === false\) continue/);
   assert.match(playback, /\.eq\("key", "lid_benchmark_enabled"\)/);
   assert.match(playback, /operator lease expired/);
   assert.match(playback, /"lid-benchmark",\s*\n\s*\)/);

@@ -262,7 +262,7 @@ test('strict WAV cleanup is ordered-independent and fail-closed on unlink errors
   assert.equal(seen.length, 6);
 });
 
-test('v94 route batches strict only inside a 195 s request budget and keeps drain attestations', () => {
+test('v95 route batches strict inside a 225 s request budget and keeps drain attestations', () => {
   const gateway = fs.readFileSync(
     path.join(__dirname, '../services/media-gateway/src/index.js'),
     'utf8',
@@ -270,9 +270,10 @@ test('v94 route batches strict only inside a 195 s request budget and keeps drai
   const routeStart = gateway.indexOf('async function handleDetectLanguageRequest(');
   const routeEnd = gateway.indexOf('// Service-only A/B benchmark.', routeStart);
   const route = gateway.slice(routeStart, routeEnd);
-  assert.match(gateway, /const GATEWAY_VERSION = 94;/);
-  assert.match(gateway, /const STRICT_LID_REQUEST_BUDGET_MS = clampInt\([\s\S]*195_000,[\s\S]*195_000,/);
+  assert.match(gateway, /const GATEWAY_VERSION = 95;/);
+  assert.match(gateway, /const STRICT_LID_REQUEST_BUDGET_MS = clampInt\([\s\S]*225_000,[\s\S]*225_000,/);
   assert.match(gateway, /strictLidBatchProtocol: 1/);
+  assert.match(gateway, /strictLidActivityKindProtocol: 1/);
   assert.match(gateway, /strictLidRequestBudgetMs: STRICT_LID_REQUEST_BUDGET_MS/);
   assert.match(route, /strictWavSamples\.push\(\{ offset: off, path: wavPath \}\)/);
   assert.match(route, /const batchTimeoutMs = strictWorkDeadlineAt - Date\.now\(\)/);

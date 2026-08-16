@@ -418,7 +418,35 @@ function abortRawPumps(filter, keepSid, reason) {
 // account preempts them: the viewer outranks any background job, and on a single-slot panel the
 // two connections otherwise fight for minutes (the viewer eats 458s while the extraction reads
 // the whole film). Preempted jobs re-queue as 'deferred' — they resume once the viewer stops.
-const accountExtractions = new Map(); // proxyKey -> Set<{ child, preempted, reportActivity, globalPreemptible }>
+const accountExtractions = new Map(); // proxyKey -> Set<{ child, preempted, reportActivity, activityKind, globalPreemptible }>
+const ACCOUNT_ACTIVITY_KIND_GATEWAY = 'gateway';
+const ACCOUNT_ACTIVITY_KIND_LANGUAGE_VALIDATION = 'language-validation';
+function groupProviderAccountActivities(candidates, maxKeys = 64) {
+    const boundedMaxKeys = Math.max(0, Math.min(64, Number.parseInt(maxKeys, 10) || 0));
+    const byKey = new Map();
+    for (const candidate of Array.isArray(candidates) ? candidates : []) {
+        const key = typeof candidate?.key === 'string' ? candidate.key : '';
+        if (!key) continue;
+        const kind = candidate?.kind === ACCOUNT_ACTIVITY_KIND_LANGUAGE_VALIDATION
+            ? ACCOUNT_ACTIVITY_KIND_LANGUAGE_VALIDATION
+            : ACCOUNT_ACTIVITY_KIND_GATEWAY;
+        const existing = byKey.get(key);
+        if (existing === ACCOUNT_ACTIVITY_KIND_GATEWAY) continue;
+        if (existing === ACCOUNT_ACTIVITY_KIND_LANGUAGE_VALIDATION) {
+            if (kind === ACCOUNT_ACTIVITY_KIND_GATEWAY) byKey.set(key, kind);
+            continue;
+        }
+        if (byKey.size >= boundedMaxKeys) continue;
+        byKey.set(key, kind);
+    }
+    const gateway = [];
+    const languageValidation = [];
+    for (const [key, kind] of byKey) {
+        if (kind === ACCOUNT_ACTIVITY_KIND_LANGUAGE_VALIDATION) languageValidation.push(key);
+        else gateway.push(key);
+    }
+    return { gateway, languageValidation };
+}
 function preemptExtractionEntry(entry) {
     if (!entry || entry.preempted) return 0;
     entry.preempted = true;
@@ -426,7 +454,18 @@ function preemptExtractionEntry(entry) {
     return 1;
 }
 function registerAccountExtraction(proxyKey, child, reportActivity = true, globalPreemptible = true) {
-    const entry = { child, preempted: false, reportActivity, globalPreemptible: globalPreemptible !== false };
+    // Keep this normalization self-contained: the probe-preemption contract
+    // evaluates the registration ledger in isolation from the HTTP reporter.
+    const activityKind = reportActivity === false
+        ? null
+        : (reportActivity === 'language-validation' ? 'language-validation' : 'gateway');
+    const entry = {
+        child,
+        preempted: false,
+        reportActivity: activityKind !== null,
+        activityKind,
+        globalPreemptible: globalPreemptible !== false,
+    };
     if (!proxyKey) return entry;
     let set = accountExtractions.get(proxyKey);
     if (!set) { set = new Set(); accountExtractions.set(proxyKey, set); }
@@ -857,15 +896,14 @@ const WHISPER_STRICT_MIN_UNIQUE_WORDS = clampInt(
     8,
     30,
 );
-// Edge gives the Gateway fetch 210 s inside its own absolute 240 s task budget. Keep the
-// complete strict Gateway request (sequential extraction, one Whisper batch, broker drain and
-// response) inside 195 s so transport still has a separate 15 s margin. Operators may lower
-// this ceiling, never raise it above the cross-service contract.
+// Keep the complete strict Gateway request (sequential extraction, one Whisper batch, broker
+// drain and response) inside the cross-service deadline. The work deadline below still removes
+// a separate drain/response reserve. Operators may lower this ceiling, never raise it.
 const STRICT_LID_REQUEST_BUDGET_MS = clampInt(
     process.env.STRICT_LID_REQUEST_BUDGET_MS,
-    195_000,
+    225_000,
     60_000,
-    195_000,
+    225_000,
 );
 function strictLanguageSampleDisposition({
     enoughWords,
@@ -1078,7 +1116,7 @@ const EXACT_MATROSKA_H264_MAX_HEIGHT = 1080;
 const EXACT_MATROSKA_H264_MAX_PIXELS = EXACT_MATROSKA_H264_MAX_WIDTH * EXACT_MATROSKA_H264_MAX_HEIGHT;
 const MULTI_AUDIO_HLS_PROTOCOL = 1;
 const MAX_MULTI_AUDIO_RENDITIONS = 8;
-const GATEWAY_VERSION = 94;
+const GATEWAY_VERSION = 95;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -1241,6 +1279,7 @@ app.get('/health', (req, res) => {
         strictLidProviderDrainProtocol: 1,
         strictLidWeakFallbackProtocol: 1,
         strictLidBatchProtocol: 1,
+        strictLidActivityKindProtocol: 1,
         strictLidRequestBudgetMs: STRICT_LID_REQUEST_BUDGET_MS,
         strictLidCapabilityHeader: 'X-Norva-Byte-Pipe-Token',
         strictLidCapabilityMethod: 'POST',
@@ -4571,7 +4610,7 @@ function extractAudioWav(
         const reg = registerAccountExtraction(
             providerAccountKey,
             child,
-            reportActivity,
+            strictLoopback ? ACCOUNT_ACTIVITY_KIND_LANGUAGE_VALIDATION : reportActivity,
             globalPreemptible,
         );
         let stderr = '';
@@ -10060,28 +10099,42 @@ const edgeCallbackBase = (process.env.NORVA_EDGE_CALLBACK_BASE || '').replace(/\
 // The account activity key is already the canonical host + '/' + logical username used by
 // proxy affinity, provider locks and the Edge. Never decode it again here: a literal `%2B`,
 // `%20` or `%2F` in a provider username must stay literal across every producer.
-function activeProviderAccountKeys() {
-    const keys = new Set();
+function activeProviderAccountActivityGroups() {
+    const candidates = [];
     for (const s of sessions.values()) {
-        if (s && s.sourceUrl && isSessionBlockingProviderSlot(s)) keys.add(proxyKeyFromUrl(s.sourceUrl));
+        if (s && s.sourceUrl && isSessionBlockingProviderSlot(s)) {
+            candidates.push({
+                key: proxyKeyFromUrl(s.sourceUrl),
+                kind: ACCOUNT_ACTIVITY_KIND_GATEWAY,
+            });
+        }
     }
-    for (const p of rawPumps) { if (p && p.proxyKey) keys.add(p.proxyKey); }
+    for (const p of rawPumps) {
+        if (p && p.proxyKey) {
+            candidates.push({ key: p.proxyKey, kind: ACCOUNT_ACTIVITY_KIND_GATEWAY });
+        }
+    }
     for (const [key, entries] of accountExtractions) {
-        if ([...entries].some((entry) => entry.reportActivity !== false)) keys.add(key);
+        for (const entry of entries) {
+            if (entry.reportActivity === false) continue;
+            candidates.push({
+                key,
+                kind: entry.activityKind === ACCOUNT_ACTIVITY_KIND_LANGUAGE_VALIDATION
+                    ? ACCOUNT_ACTIVITY_KIND_LANGUAGE_VALIDATION
+                    : ACCOUNT_ACTIVITY_KIND_GATEWAY,
+            });
+        }
     }
-    keys.delete('');
-    return [...keys].slice(0, 64);
+    return groupProviderAccountActivities(candidates, 64);
 }
 let _accountActivityLastErrorAt = 0;
-async function reportAccountActivity() {
-    if (!ACCOUNT_ACTIVITY_REPORT_MS || !GATEWAY_TOKEN || !edgeCallbackBase) return;
-    const keys = activeProviderAccountKeys();
+async function reportAccountActivityKind(keys, kind) {
     if (!keys.length) return;
     try {
         const res = await fetch(`${edgeCallbackBase}/account-activity`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${GATEWAY_TOKEN}` },
-            body: JSON.stringify({ keys, kind: 'gateway' }),
+            body: JSON.stringify({ keys, kind }),
             signal: AbortSignal.timeout(10_000),
         });
         if (!res.ok && Date.now() - _accountActivityLastErrorAt > 60 * 60 * 1000) {
@@ -10094,6 +10147,17 @@ async function reportAccountActivity() {
             console.warn('[media-gateway] account-activity report failed:', (err && err.message) || err);
         }
     }
+}
+async function reportAccountActivity() {
+    if (!ACCOUNT_ACTIVITY_REPORT_MS || !GATEWAY_TOKEN || !edgeCallbackBase) return;
+    const groups = activeProviderAccountActivityGroups();
+    await Promise.all([
+        reportAccountActivityKind(groups.gateway, ACCOUNT_ACTIVITY_KIND_GATEWAY),
+        reportAccountActivityKind(
+            groups.languageValidation,
+            ACCOUNT_ACTIVITY_KIND_LANGUAGE_VALIDATION,
+        ),
+    ]);
 }
 if (ACCOUNT_ACTIVITY_REPORT_MS > 0) {
     if (edgeCallbackBase) {

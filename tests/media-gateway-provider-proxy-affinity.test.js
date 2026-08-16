@@ -4,6 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const vm = require('node:vm');
 
 const root = path.join(__dirname, '..');
 const gatewayPath = path.join(root, 'services/media-gateway/src/index.js');
@@ -282,9 +283,84 @@ test('gateway uses the canonical provider key on every provider network lane', (
   );
 });
 
-test('account activity reports the exact canonical affinity key without a second decode', () => {
+test('account activity groups exact canonical keys with real gateway work taking priority', () => {
   assert.doesNotMatch(gateway, /function decodeAccountKey\(/);
-  assert.match(gateway, /return \[\.\.\.keys\]\.slice\(0, 64\);/);
+  const helperStart = gateway.indexOf("const ACCOUNT_ACTIVITY_KIND_GATEWAY = 'gateway';");
+  const helperEnd = gateway.indexOf('function preemptExtractionEntry(', helperStart);
+  const helperSource = gateway.slice(helperStart, helperEnd);
+  const activeStart = gateway.indexOf('function activeProviderAccountActivityGroups()');
+  const activeEnd = gateway.indexOf('let _accountActivityLastErrorAt', activeStart);
+  const activeSource = gateway.slice(activeStart, activeEnd);
+  assert.ok(helperStart >= 0 && helperEnd > helperStart);
+  assert.ok(activeStart >= 0 && activeEnd > activeStart);
+
+  const accountExtractions = new Map([
+    ['provider/shared', new Set([{
+      reportActivity: true,
+      activityKind: 'language-validation',
+    }])],
+    ['provider/lid-only', new Set([{
+      reportActivity: true,
+      activityKind: 'language-validation',
+    }])],
+    ['provider/background', new Set([{
+      reportActivity: true,
+      activityKind: 'gateway',
+    }])],
+    ['provider/disabled', new Set([{
+      reportActivity: false,
+      activityKind: null,
+    }])],
+  ]);
+  const harness = vm.runInNewContext(
+    `(() => {
+      ${helperSource}
+      ${activeSource}
+      return { groupProviderAccountActivities, activeProviderAccountActivityGroups };
+    })()`,
+    {
+      accountExtractions,
+      sessions: new Map([['viewer', { sourceUrl: 'provider/shared', status: 'ready' }]]),
+      rawPumps: new Set([{ proxyKey: 'provider/raw' }]),
+      isSessionBlockingProviderSlot: (session) => session.status === 'ready',
+      proxyKeyFromUrl: (value) => value,
+    },
+  );
+
+  const grouped = harness.activeProviderAccountActivityGroups();
+  assert.deepEqual([...grouped.gateway].sort(), [
+    'provider/background',
+    'provider/raw',
+    'provider/shared',
+  ]);
+  assert.deepEqual([...grouped.languageValidation], ['provider/lid-only']);
+  assert.equal(grouped.gateway.includes('provider/disabled'), false);
+  assert.equal(grouped.languageValidation.includes('provider/shared'), false,
+    'a viewer/raw/non-LID candidate must never be downgraded to ignorable LID activity');
+
+  const reverseOrder = harness.groupProviderAccountActivities([
+    { key: 'provider/reverse', kind: 'gateway' },
+    { key: 'provider/reverse', kind: 'language-validation' },
+  ]);
+  assert.deepEqual([...reverseOrder.gateway], ['provider/reverse']);
+  assert.deepEqual([...reverseOrder.languageValidation], []);
+});
+
+test('strict LID reports a dedicated kind without leaving the extraction/preemption ledger', () => {
+  assert.match(
+    gateway,
+    /registerAccountExtraction\([\s\S]{0,180}strictLoopback \? ACCOUNT_ACTIVITY_KIND_LANGUAGE_VALIDATION : reportActivity,[\s\S]{0,100}globalPreemptible/,
+  );
+  assert.match(gateway, /strictLidActivityKindProtocol: 1/);
+  assert.match(
+    gateway,
+    /reportAccountActivityKind\(groups\.gateway, ACCOUNT_ACTIVITY_KIND_GATEWAY\)/,
+  );
+  assert.match(
+    gateway,
+    /reportAccountActivityKind\([\s\S]{0,120}groups\.languageValidation,[\s\S]{0,120}ACCOUNT_ACTIVITY_KIND_LANGUAGE_VALIDATION/,
+  );
+  assert.match(gateway, /body: JSON\.stringify\(\{ keys, kind \}\)/);
 });
 
 test('gateway fails proxy 407 safely before provider 458 handling', () => {
@@ -298,7 +374,7 @@ test('gateway fails proxy 407 safely before provider 458 handling', () => {
 });
 
 test('gateway advertises targeted operator override support without identities or secrets', () => {
-  assert.match(gateway, /const GATEWAY_VERSION = 94;/);
+  assert.match(gateway, /const GATEWAY_VERSION = 95;/);
   assert.match(gateway, /providerProxyAffinityProtocol:\s*1/);
   assert.match(gateway, /providerProxyAffinityKey:\s*'provider-account'/);
   assert.match(gateway, /providerProxySlotOverrideProtocol:\s*1/);
