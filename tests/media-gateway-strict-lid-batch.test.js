@@ -36,6 +36,40 @@ class FakeChild extends EventEmitter {
   }
 }
 
+class FakeClock {
+  constructor() {
+    this.now = 0;
+    this.timers = new Map();
+  }
+
+  setTimeout = (callback, delay) => {
+    const handle = {};
+    this.timers.set(handle, {
+      at: this.now + Math.max(0, Number(delay) || 0),
+      callback,
+    });
+    return handle;
+  };
+
+  clearTimeout = (handle) => {
+    this.timers.delete(handle);
+  };
+
+  advance(ms) {
+    const target = this.now + ms;
+    while (true) {
+      const due = [...this.timers.entries()]
+        .filter(([, timer]) => timer.at <= target)
+        .sort((left, right) => left[1].at - right[1].at)[0];
+      if (!due) break;
+      this.now = due[1].at;
+      this.timers.delete(due[0]);
+      due[1].callback();
+    }
+    this.now = target;
+  }
+}
+
 function sixPaths(prefix) {
   return Array.from({ length: 6 }, (_, index) => `/tmp/${prefix}-${index}.wav`);
 }
@@ -828,6 +862,64 @@ test('strict batch bounds timeout, abort and preemption and still cleans output 
   });
 });
 
+test('v102 Whisper reserve admits a 31 s batch and fails closed at 50 s with cleanup', async (t) => {
+  const wavPaths = sixPaths('v102-reserve');
+  const outputPrefixes = sixPaths('v102-reserve-out').map((file) => file.replace(/\.wav$/, ''));
+
+  await t.test('31 s success', async () => {
+    const clock = new FakeClock();
+    const child = new FakeChild();
+    const unlinked = [];
+    const resultPromise = runWhisperBatchProcess({
+      bin: 'whisper-cli', model: 'model.bin', wavPaths, outputPrefixes, threads: 4,
+      timeoutMs: 50_000,
+      spawnImpl: () => child,
+      readFileImpl: async () => 'distinct speech transcript',
+      unlinkImpl: async (filePath) => { unlinked.push(filePath); },
+      setTimer: clock.setTimeout,
+      clearTimer: clock.clearTimeout,
+    });
+
+    clock.advance(31_000);
+    assert.deepEqual(child.kills, []);
+    child.stderr.emit('data', Buffer.from(languageLines(
+      Array.from({ length: 6 }, () => ({ lang: 'fr', prob: 0.99 })),
+    )));
+    child.emit('close', 0);
+    const result = await resultPromise;
+
+    assert.equal(result.ok, true);
+    assert.equal(result.timedOut, false);
+    assert.equal(unlinked.length, 6);
+    assert.equal(clock.timers.size, 0);
+  });
+
+  await t.test('50 s timeout', async () => {
+    const clock = new FakeClock();
+    const child = new FakeChild();
+    const unlinked = [];
+    const resultPromise = runWhisperBatchProcess({
+      bin: 'whisper-cli', model: 'model.bin', wavPaths, outputPrefixes, threads: 4,
+      timeoutMs: 50_000,
+      spawnImpl: () => child,
+      unlinkImpl: async (filePath) => { unlinked.push(filePath); },
+      setTimer: clock.setTimeout,
+      clearTimer: clock.clearTimeout,
+    });
+
+    clock.advance(49_999);
+    assert.deepEqual(child.kills, []);
+    clock.advance(1);
+    const result = await resultPromise;
+
+    assert.equal(result.ok, false);
+    assert.equal(result.timedOut, true);
+    assert.deepEqual(child.kills, ['SIGKILL']);
+    assert.equal(unlinked.length, 6);
+    assert.equal(clock.timers.size, 0);
+  });
+});
+
 test('strict WAV cleanup is ordered-independent and fail-closed on unlink errors', async () => {
   const seen = [];
   await cleanupStrictLidFiles(sixPaths('cleanup'), async (filePath) => {
@@ -837,7 +929,7 @@ test('strict WAV cleanup is ordered-independent and fail-closed on unlink errors
   assert.equal(seen.length, 6);
 });
 
-test('v101 strict extraction budget widens one window while preserving the 155 s aggregate and 60 s Whisper reserve', () => {
+test('v102 strict extraction budget preserves 50 s for Whisper and exposes the 165 s aggregate', () => {
   const gateway = fs.readFileSync(
     path.join(__dirname, '../services/media-gateway/src/index.js'),
     'utf8',
@@ -858,14 +950,18 @@ test('v101 strict extraction budget widens one window while preserving the 155 s
 
   assert.deepEqual(
     { ...timing.strictLidExtractionBudget(20, 215_000, 0) },
-    { mediaTimeoutMs: 45_000, availableMs: 155_000, timeoutMs: 45_000 },
+    { mediaTimeoutMs: 45_000, availableMs: 165_000, timeoutMs: 45_000 },
   );
   assert.deepEqual(
     { ...timing.strictLidExtractionBudget(20, 215_000, 140_000) },
-    { mediaTimeoutMs: 45_000, availableMs: 15_000, timeoutMs: 15_000 },
+    { mediaTimeoutMs: 45_000, availableMs: 25_000, timeoutMs: 25_000 },
   );
   assert.deepEqual(
-    { ...timing.strictLidExtractionBudget(20, 215_000, 155_000) },
+    { ...timing.strictLidExtractionBudget(20, 215_000, 137_283) },
+    { mediaTimeoutMs: 45_000, availableMs: 27_717, timeoutMs: 27_717 },
+  );
+  assert.deepEqual(
+    { ...timing.strictLidExtractionBudget(20, 215_000, 165_000) },
     { mediaTimeoutMs: 45_000, availableMs: 0, timeoutMs: 0 },
   );
   assert.deepEqual(
@@ -904,7 +1000,7 @@ test('v101 strict extraction budget widens one window while preserving the 155 s
   assert.equal(timing.strictLidPostExtractionFailure({}), null);
 });
 
-test('v101 dynamic budget admits the measured six-window sequence and then runs one batch', () => {
+test('v102 dynamic budget admits the live first five plus a 27 s sixth window and one batch', () => {
   const gateway = fs.readFileSync(
     path.join(__dirname, '../services/media-gateway/src/index.js'),
     'utf8',
@@ -912,22 +1008,22 @@ test('v101 dynamic budget admits the measured six-window sequence and then runs 
   const timing = strictGatewayTimingHarness(gateway);
   const result = simulateStrictRouteBudget(
     timing,
-    [24_500, 29_800, 36_000, 20_000, 20_000, 20_000],
+    [25_831, 24_356, 24_095, 23_586, 39_415, 27_000],
   );
 
   assert.equal(result.completedWindowCount, 6);
-  assert.equal(result.elapsedMs, 150_300);
+  assert.equal(result.elapsedMs, 164_283);
   assert.equal(result.batchCalls, 1);
   assert.equal(result.consensusCalls, 1);
-  assert.equal(result.batchTimeoutMs, 64_700);
+  assert.equal(result.batchTimeoutMs, 50_717);
   assert.equal(result.failure, null);
   assert.deepEqual(
     result.windows.map((window) => window.timeoutMs),
-    [45_000, 45_000, 45_000, 45_000, 44_700, 24_700],
+    [45_000, 45_000, 45_000, 45_000, 45_000, 27_717],
   );
 });
 
-test('v101 dynamic aggregate exhaustion vetoes partial evidence before Whisper or consensus', () => {
+test('v102 exact 27.717 s sixth-window boundary exhausts 165 s and vetoes partial evidence', () => {
   const gateway = fs.readFileSync(
     path.join(__dirname, '../services/media-gateway/src/index.js'),
     'utf8',
@@ -935,19 +1031,19 @@ test('v101 dynamic aggregate exhaustion vetoes partial evidence before Whisper o
   const timing = strictGatewayTimingHarness(gateway);
   const result = simulateStrictRouteBudget(
     timing,
-    [44_000, 44_000, 44_000, 30_000, 20_000, 20_000],
+    [25_831, 24_356, 24_095, 23_586, 39_415, 27_717],
   );
 
-  assert.equal(result.completedWindowCount, 3);
-  assert.equal(result.elapsedMs, 155_000);
-  assert.equal(result.windows[3].timeoutMs, 23_000);
+  assert.equal(result.completedWindowCount, 5);
+  assert.equal(result.elapsedMs, 165_000);
+  assert.equal(result.windows[5].timeoutMs, 27_717);
   assert.equal(result.batchCalls, 0);
   assert.equal(result.consensusCalls, 0);
   assert.equal(result.failure.status, 504);
   assert.equal(result.failure.payload.code, 'strict_lid_extraction_timeout');
 });
 
-test('v101 dynamic terminal 458 keeps priority over extraction and aggregate timeouts', () => {
+test('v102 dynamic terminal 458 keeps priority over extraction and aggregate timeouts', () => {
   const gateway = fs.readFileSync(
     path.join(__dirname, '../services/media-gateway/src/index.js'),
     'utf8',
@@ -1008,7 +1104,7 @@ test('strict timeline invariants hold from the minimum short film through the ma
   }
 });
 
-test('v101 route uses signed timeline strata and fails a broken Whisper batch before consensus', () => {
+test('v102 route exposes the bounded budget rebalance and fails a broken Whisper batch before consensus', () => {
   const gateway = fs.readFileSync(
     path.join(__dirname, '../services/media-gateway/src/index.js'),
     'utf8',
@@ -1016,13 +1112,14 @@ test('v101 route uses signed timeline strata and fails a broken Whisper batch be
   const routeStart = gateway.indexOf('async function handleDetectLanguageRequest(');
   const routeEnd = gateway.indexOf('// Service-only A/B benchmark.', routeStart);
   const route = gateway.slice(routeStart, routeEnd);
-  assert.match(gateway, /const GATEWAY_VERSION = 101;/);
+  assert.match(gateway, /const GATEWAY_VERSION = 102;/);
   assert.match(gateway, /const STRICT_LID_REQUEST_BUDGET_MS = clampInt\([\s\S]*225_000,[\s\S]*225_000,/);
   assert.match(gateway, /strictLidBatchProtocol: 1/);
   assert.match(gateway, /strictLidActivityKindProtocol: 1/);
   assert.match(gateway, /strictLidCjkEvidenceProtocol: 1/);
   assert.match(gateway, /strictLidTranscriptDiversityProtocol: 1/);
-  assert.match(gateway, /strictLidExtractionTimeoutProtocol: 2/);
+  assert.match(gateway, /strictLidExtractionTimeoutProtocol: 3/);
+  assert.match(gateway, /strictLidBudgetRebalanceProtocol: 1/);
   assert.match(gateway, /strictLidBatchFailureProtocol: 1/);
   assert.match(gateway, /strictLidTimelineSamplingProtocol: 1/);
   assert.match(gateway, /strictLidRangeTimeoutProtocol: 2/);
@@ -1034,6 +1131,7 @@ test('v101 route uses signed timeline strata and fails a broken Whisper batch be
   assert.match(gateway, /strictLidExtractionStartupMarginMs: STRICT_LID_EXTRACTION_STARTUP_MARGIN_MS/);
   assert.match(gateway, /strictLidExtractionAggregateBudgetMs: STRICT_LID_EXTRACTION_AGGREGATE_BUDGET_MS/);
   assert.match(gateway, /strictLidRequestBudgetMs: STRICT_LID_REQUEST_BUDGET_MS/);
+  assert.match(gateway, /const STRICT_LID_WHISPER_RESERVE_MS = 50_000;/);
   assert.match(gateway, /const STRICT_LID_EXTRACTION_STARTUP_MARGIN_MS = 25_000;/);
   assert.match(gateway, /const STRICT_LID_FFMPEG_RW_TIMEOUT_US = 50_000_000;/);
   assert.match(route, /const dur = strict[\s\S]*\? STRICT_LID_SAMPLE_DURATION_CAP_SECONDS[\s\S]*: strictLidSampleDurationSeconds\(req\.query\.dur, false\)/);
