@@ -145,8 +145,8 @@ test('Gateway manifest handler gates play and fails closed without opening a ret
     assert.ok(gateAt >= 0 && playAt > gateAt, 'Gateway buffer gate must settle before autoplay');
     assert.match(handler, /minimumSeconds:\s*96/,
         'Gateway playback must mirror the production proof buffer before autoplay');
-    assert.match(handler, /timeoutMs:\s*210000/,
-        'the deeper browser buffer needs a bounded near-realtime fill budget');
+    assert.match(handler, /timeoutMs:\s*360000/,
+        'the deeper browser buffer needs a bounded slow-encode fill budget');
     assert.match(handler, /if \(!bufferReady\)[\s\S]*releasePlaybackPipelineForRetry/);
     assert.doesNotMatch(handler, /getStreamUrl|createSession|retryPlaybackInPlace/,
         'a buffer timeout must not mint another provider session');
