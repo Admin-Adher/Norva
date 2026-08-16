@@ -10,6 +10,7 @@ const { request: undiciRequest } = require('undici');
 const { parseWhisperLid, runWhisperDetectOnly } = require('./whisper-lid');
 const {
     cleanupStrictLidFiles,
+    evaluateStrictTranscriptEvidence,
     resolveStrictLidConsensus,
     runWhisperBatchProcess,
 } = require('./strict-lid-batch');
@@ -919,16 +920,21 @@ function strictLanguageBatchSampleResult(whisper, offset) {
     const det = detectLanguageFromText(whisper?.text || '');
     const whisperLang = String(whisper?.lang || '').toLowerCase() || null;
     const whisperProbability = Number(whisper?.prob || 0);
-    const uniqueWordCount = new Set(
-        String(whisper?.text || '').toLowerCase().match(/\p{L}+/gu) || [],
-    ).size;
+    const transcriptEvidence = evaluateStrictTranscriptEvidence({
+        text: whisper?.text || '',
+        wordCount: det.words,
+        minWords: WHISPER_STRICT_MIN_WORDS,
+        minUniqueWords: WHISPER_STRICT_MIN_UNIQUE_WORDS,
+        whisperLanguage: whisperLang,
+        transcriptLanguage: det.lang,
+        transcriptConfident: det.confident,
+    });
     const transcriptDisagrees = det.confident === true
         && Boolean(det.lang)
         && det.lang !== whisperLang;
     const whisperConfident = Boolean(whisperLang)
         && whisperProbability >= WHISPER_STRICT_MIN_PROBABILITY;
-    const enoughWords = Number(det.words || 0) >= WHISPER_STRICT_MIN_WORDS
-        && uniqueWordCount >= WHISPER_STRICT_MIN_UNIQUE_WORDS;
+    const enoughWords = transcriptEvidence.enough;
     const disposition = strictLanguageSampleDisposition({
         enoughWords,
         whisperConfident,
@@ -937,6 +943,10 @@ function strictLanguageBatchSampleResult(whisper, offset) {
     const accepted = disposition === 'accepted';
     return {
         disposition,
+        diversity: {
+            fingerprint: transcriptEvidence.diversityFingerprint,
+            shingles: transcriptEvidence.diversityShingles,
+        },
         result: {
             language: accepted ? whisperLang : null,
             candidate: whisperLang,
@@ -950,8 +960,16 @@ function strictLanguageBatchSampleResult(whisper, offset) {
             transcriptLang: det.confident ? det.lang : null,
             transcriptAgrees: det.confident ? det.lang === whisperLang : null,
             minProbability: WHISPER_STRICT_MIN_PROBABILITY,
-            wordCount: det.words,
-            uniqueWordCount,
+            // The legacy Edge contract still gates on wordCount/uniqueWordCount. For a CJK
+            // transcript that passed the stronger character/bigram proof, expose deterministic
+            // evidence-unit equivalents; never raise these compatibility fields on a failed proof.
+            wordCount: transcriptEvidence.compatibleWordCount,
+            uniqueWordCount: transcriptEvidence.compatibleUniqueWordCount,
+            transcriptEvidenceBasis: transcriptEvidence.basis,
+            scriptCharacterCount: transcriptEvidence.scriptCharacterCount,
+            uniqueScriptCharacterCount: transcriptEvidence.uniqueScriptCharacterCount,
+            uniqueScriptBigramCount: transcriptEvidence.uniqueScriptBigramCount,
+            scriptDensity: transcriptEvidence.scriptDensity,
             sample: String(whisper?.text || '').slice(0, 160),
             offset,
         },
@@ -1116,7 +1134,7 @@ const EXACT_MATROSKA_H264_MAX_HEIGHT = 1080;
 const EXACT_MATROSKA_H264_MAX_PIXELS = EXACT_MATROSKA_H264_MAX_WIDTH * EXACT_MATROSKA_H264_MAX_HEIGHT;
 const MULTI_AUDIO_HLS_PROTOCOL = 1;
 const MAX_MULTI_AUDIO_RENDITIONS = 8;
-const GATEWAY_VERSION = 95;
+const GATEWAY_VERSION = 96;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -1280,6 +1298,8 @@ app.get('/health', (req, res) => {
         strictLidWeakFallbackProtocol: 1,
         strictLidBatchProtocol: 1,
         strictLidActivityKindProtocol: 1,
+        strictLidCjkEvidenceProtocol: 1,
+        strictLidTranscriptDiversityProtocol: 1,
         strictLidRequestBudgetMs: STRICT_LID_REQUEST_BUDGET_MS,
         strictLidCapabilityHeader: 'X-Norva-Byte-Pipe-Token',
         strictLidCapabilityMethod: 'POST',
@@ -3271,6 +3291,9 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
         let bestStrictAccepted = null;
         let strictRejectedSpeechSamples = 0;
         let strictIgnoredWeakSpeechSamples = 0;
+        let strictRepeatedSpeechSamples = 0;
+        let strictMissingDiversitySamples = 0;
+        let strictConsensusVerified = false;
         let inferencePreempted = false;
         const lockKey = accountJobKey(claims.uid, claims.url);
         // This endpoint is the catalogue/background LID route. Viewer-requested subtitle jobs
@@ -3401,21 +3424,31 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
                     // leaves the file pending rather than choosing a majority.
                     const whisperLang = String(whisper.lang || '').toLowerCase() || null;
                     const whisperProbability = Number(whisper.prob || 0);
-                    const uniqueWordCount = new Set(
+                    const rawUniqueWordCount = new Set(
                         String(whisper.text || '').toLowerCase().match(/\p{L}+/gu) || [],
                     ).size;
+                    const transcriptEvidence = strict
+                        ? evaluateStrictTranscriptEvidence({
+                            text: whisper.text || '',
+                            wordCount: det.words,
+                            minWords: WHISPER_STRICT_MIN_WORDS,
+                            minUniqueWords: WHISPER_STRICT_MIN_UNIQUE_WORDS,
+                            whisperLanguage: whisperLang,
+                            transcriptLanguage: det.lang,
+                            transcriptConfident: det.confident,
+                        })
+                        : null;
                     const transcriptDisagrees = det.confident === true
                         && Boolean(det.lang)
                         && det.lang !== whisperLang;
                     const whisperConfident = Boolean(whisperLang) && whisperProbability >= (
                         strict ? WHISPER_STRICT_MIN_PROBABILITY : 0.75
                     );
-                    const enoughWords = Number(det.words || 0) >= (
-                        strict ? WHISPER_STRICT_MIN_WORDS : 4
-                    ) && (!strict || uniqueWordCount >= WHISPER_STRICT_MIN_UNIQUE_WORDS);
+                    const enoughWords = Number(det.words || 0) >= 4;
+                    const enoughTranscriptEvidence = strict ? transcriptEvidence.enough : enoughWords;
                     const strictDisposition = strict
                         ? strictLanguageSampleDisposition({
-                            enoughWords,
+                            enoughWords: enoughTranscriptEvidence,
                             whisperConfident,
                             transcriptDisagrees,
                         })
@@ -3447,8 +3480,17 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
                         transcriptLang: det.confident ? det.lang : null,
                         transcriptAgrees: det.confident ? det.lang === whisperLang : null,
                         minProbability: strict ? WHISPER_STRICT_MIN_PROBABILITY : 0.75,
-                        wordCount: det.words,
-                        uniqueWordCount,
+                        wordCount: strict ? transcriptEvidence.compatibleWordCount : det.words,
+                        uniqueWordCount: strict
+                            ? transcriptEvidence.compatibleUniqueWordCount
+                            : rawUniqueWordCount,
+                        ...(strict ? {
+                            transcriptEvidenceBasis: transcriptEvidence.basis,
+                            scriptCharacterCount: transcriptEvidence.scriptCharacterCount,
+                            uniqueScriptCharacterCount: transcriptEvidence.uniqueScriptCharacterCount,
+                            uniqueScriptBigramCount: transcriptEvidence.uniqueScriptBigramCount,
+                            scriptDensity: transcriptEvidence.scriptDensity,
+                        } : {}),
                         sample: String(whisper.text || '').slice(0, 160),
                         offset: off,
                         ...(detectOnlyMode === 'primary' ? { fallbackUsed: true } : {}),
@@ -3587,6 +3629,9 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
                     best = summary.best;
                     strictRejectedSpeechSamples = summary.rejectedSpeechSampleCount;
                     strictIgnoredWeakSpeechSamples = summary.ignoredWeakSpeechSampleCount;
+                    strictRepeatedSpeechSamples = summary.repeatedSpeechSampleCount;
+                    strictMissingDiversitySamples = summary.missingDiversitySampleCount;
+                    strictConsensusVerified = summary.verified;
                     for (const [language, count] of summary.votes) votes.set(language, count);
                 }
             }
@@ -3615,6 +3660,7 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
         if (extractions === 0) return sendDetectionJson(502, { error: 'Audio extraction failed', details: lastExtractErr });
         if (
             strict &&
+            strictConsensusVerified &&
             bestStrictAccepted &&
             strictSamples.length >= consensusNeeded &&
             votes.size === 1 &&
@@ -3633,6 +3679,8 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
                 sampleCount: strictSamples.length,
                 rejectedSpeechSampleCount: 0,
                 ignoredWeakSpeechSampleCount: strictIgnoredWeakSpeechSamples,
+                repeatedSpeechSampleCount: strictRepeatedSpeechSamples,
+                missingDiversitySampleCount: strictMissingDiversitySamples,
                 minSampleProbability: Math.min(...strictSamples.map((sample) => sample.probability)),
                 minSampleWordCount: Math.min(...strictSamples.map((sample) => sample.wordCount)),
                 minSampleUniqueWordCount: Math.min(
@@ -3655,6 +3703,8 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
                 sampleCount: strictSamples.length,
                 rejectedSpeechSampleCount: strict ? strictRejectedSpeechSamples : undefined,
                 ignoredWeakSpeechSampleCount: strict ? strictIgnoredWeakSpeechSamples : undefined,
+                repeatedSpeechSampleCount: strict ? strictRepeatedSpeechSamples : undefined,
+                missingDiversitySampleCount: strict ? strictMissingDiversitySamples : undefined,
                 samples: strict ? strictSamples : undefined,
             };
         }
@@ -3667,6 +3717,8 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
             wordCount: 0, sampleCount: 0,
             rejectedSpeechSampleCount: strict ? strictRejectedSpeechSamples : undefined,
             ignoredWeakSpeechSampleCount: strict ? strictIgnoredWeakSpeechSamples : undefined,
+            repeatedSpeechSampleCount: strict ? strictRepeatedSpeechSamples : undefined,
+            missingDiversitySampleCount: strict ? strictMissingDiversitySamples : undefined,
             sample: '',
         });
     } catch (err) {

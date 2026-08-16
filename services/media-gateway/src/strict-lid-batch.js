@@ -6,6 +6,134 @@ const { spawn } = require('child_process');
 const LANGUAGE_LINE_RE =
     /auto-detected language:\s*([a-z]{2,3})\s*\(p\s*=\s*((?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?)\)/gi;
 const MAX_PROCESS_OUTPUT_CHARS = 512 * 1024;
+const STRICT_LID_MIN_SCRIPT_CHARACTERS = 32;
+const STRICT_LID_MIN_UNIQUE_SCRIPT_CHARACTERS = 16;
+const STRICT_LID_MIN_UNIQUE_SCRIPT_BIGRAMS = 20;
+const STRICT_LID_MIN_SCRIPT_DENSITY = 0.7;
+const STRICT_LID_DIVERSITY_SHINGLE_SIZE = 3;
+const STRICT_LID_MAX_SAMPLE_SHINGLE_SIMILARITY = 0.82;
+const STRICT_LID_MAX_DIVERSITY_CHARACTERS = 4096;
+const STRICT_LID_CJK_CHARACTER_RE = Object.freeze({
+    // Japanese evidence deliberately includes kana and Han. The independent transcript
+    // detector must still identify `ja`, so a Han-only Chinese transcript cannot be accepted
+    // merely because Whisper guessed Japanese.
+    ja: /[\u3040-\u30ff\u31f0-\u31ff\u3400-\u4dbf\u4e00-\u9fff]/u,
+    zh: /[\u3400-\u4dbf\u4e00-\u9fff]/u,
+    ko: /[\u1100-\u11ff\u3130-\u318f\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af]/u,
+});
+
+// Whitespace word counts are not meaningful for Japanese and Chinese: a complete 30-second
+// transcript is commonly one token. Accept an alternate, deterministic CJK evidence unit only
+// when the independent transcript detector is confident and agrees exactly with Whisper. The
+// character, diversity and bigram floors reject silence labels and repeated Whisper boilerplate;
+// four separated high-probability samples must still agree before the caller can verify a track.
+function evaluateStrictTranscriptEvidence({
+    text,
+    wordCount,
+    minWords,
+    minUniqueWords,
+    whisperLanguage,
+    transcriptLanguage,
+    transcriptConfident,
+}) {
+    const normalizedText = String(text || '').normalize('NFKC').toLowerCase();
+    const uniqueWordCount = new Set(normalizedText.match(/\p{L}+/gu) || []).size;
+    const requiredWordCount = Number(minWords);
+    const requiredUniqueWordCount = Number(minUniqueWords);
+    const wordEvidenceEnough = Number.isFinite(requiredWordCount)
+        && requiredWordCount > 0
+        && Number.isFinite(requiredUniqueWordCount)
+        && requiredUniqueWordCount > 0
+        && Number(wordCount || 0) >= requiredWordCount
+        && uniqueWordCount >= requiredUniqueWordCount;
+    const normalizedWhisperLanguage = String(whisperLanguage || '').toLowerCase();
+    const normalizedTranscriptLanguage = String(transcriptLanguage || '').toLowerCase();
+    const scriptPattern = STRICT_LID_CJK_CHARACTER_RE[normalizedWhisperLanguage] || null;
+    const scriptCharacters = scriptPattern
+        ? Array.from(normalizedText).filter((character) => scriptPattern.test(character))
+        : [];
+    const allLetterCount = Array.from(normalizedText).filter((character) => /\p{L}/u.test(character)).length;
+    const uniqueScriptCharacterCount = new Set(scriptCharacters).size;
+    const scriptBigrams = new Set();
+    for (let index = 1; index < scriptCharacters.length; index++) {
+        scriptBigrams.add(`${scriptCharacters[index - 1]}${scriptCharacters[index]}`);
+    }
+    const transcriptAgrees = transcriptConfident === true
+        && Boolean(normalizedTranscriptLanguage)
+        && normalizedTranscriptLanguage === normalizedWhisperLanguage;
+    const scriptDensity = allLetterCount > 0 ? scriptCharacters.length / allLetterCount : 0;
+    const scriptEvidenceEnough = Boolean(
+        scriptPattern
+        && transcriptAgrees
+        && scriptCharacters.length >= STRICT_LID_MIN_SCRIPT_CHARACTERS
+        && uniqueScriptCharacterCount >= STRICT_LID_MIN_UNIQUE_SCRIPT_CHARACTERS
+        && scriptBigrams.size >= STRICT_LID_MIN_UNIQUE_SCRIPT_BIGRAMS
+        && scriptDensity >= STRICT_LID_MIN_SCRIPT_DENSITY
+    );
+    const compatibleWordCount = scriptEvidenceEnough
+        ? Math.max(Number(wordCount || 0), Math.floor(scriptCharacters.length / 2))
+        : Number(wordCount || 0);
+    const compatibleUniqueWordCount = scriptEvidenceEnough
+        ? Math.max(uniqueWordCount, scriptBigrams.size)
+        : uniqueWordCount;
+    const diversityCharacters = Array.from(normalizedText)
+        .filter((character) => /[\p{L}\p{N}]/u.test(character))
+        .slice(0, STRICT_LID_MAX_DIVERSITY_CHARACTERS);
+    const diversityShingles = new Set();
+    for (
+        let index = 0;
+        index + STRICT_LID_DIVERSITY_SHINGLE_SIZE <= diversityCharacters.length;
+        index++
+    ) {
+        diversityShingles.add(
+            diversityCharacters.slice(index, index + STRICT_LID_DIVERSITY_SHINGLE_SIZE).join(''),
+        );
+    }
+    const diversityFingerprint = crypto
+        .createHash('sha256')
+        .update(diversityCharacters.join(''))
+        .digest('hex');
+    return {
+        enough: wordEvidenceEnough || scriptEvidenceEnough,
+        basis: wordEvidenceEnough
+            ? 'whitespace-words'
+            : (scriptEvidenceEnough ? 'cjk-character-bigrams' : 'insufficient'),
+        uniqueWordCount,
+        compatibleWordCount,
+        compatibleUniqueWordCount,
+        scriptCharacterCount: scriptCharacters.length,
+        uniqueScriptCharacterCount,
+        uniqueScriptBigramCount: scriptBigrams.size,
+        scriptDensity,
+        transcriptAgrees,
+        diversityFingerprint,
+        diversityShingles: [...diversityShingles],
+    };
+}
+
+function validStrictTranscriptDiversity(value) {
+    return Boolean(
+        value
+        && /^[a-f0-9]{64}$/.test(String(value.fingerprint || ''))
+        && Array.isArray(value.shingles)
+        && value.shingles.length > 0
+        && value.shingles.every((shingle) => typeof shingle === 'string' && shingle.length > 0)
+    );
+}
+
+function strictTranscriptShingleSimilarity(left, right) {
+    if (!validStrictTranscriptDiversity(left) || !validStrictTranscriptDiversity(right)) return 0;
+    if (left.fingerprint === right.fingerprint) return 1;
+    const leftSet = new Set(left.shingles);
+    const rightSet = new Set(right.shingles);
+    const smaller = leftSet.size <= rightSet.size ? leftSet : rightSet;
+    const larger = smaller === leftSet ? rightSet : leftSet;
+    let overlap = 0;
+    for (const shingle of smaller) if (larger.has(shingle)) overlap++;
+    // Containment similarity catches a repeated boilerplate phrase with a small appended suffix;
+    // ordinary separated dialogue windows retain independent shingles and remain far below 0.82.
+    return smaller.size > 0 ? overlap / smaller.size : 0;
+}
 
 function appendBounded(current, chunk) {
     const next = current + chunk.toString();
@@ -239,9 +367,12 @@ function runWhisperBatchProcess({
 // the entire batch even when four other windows agree.
 function resolveStrictLidConsensus(sampleResults, consensusNeeded = 4) {
     const acceptedSamples = [];
+    const acceptedDiversity = [];
     const votes = new Map();
     let rejectedSpeechSampleCount = 0;
     let ignoredWeakSpeechSampleCount = 0;
+    let repeatedSpeechSampleCount = 0;
+    let missingDiversitySampleCount = 0;
     let bestAccepted = null;
     let best = null;
     for (const entry of sampleResults || []) {
@@ -253,6 +384,21 @@ function resolveStrictLidConsensus(sampleResults, consensusNeeded = 4) {
             best = result;
         }
         if (disposition !== 'accepted' || !result?.language) continue;
+        const diversity = entry?.diversity || null;
+        if (!validStrictTranscriptDiversity(diversity)) {
+            missingDiversitySampleCount++;
+            continue;
+        }
+        const repeated = acceptedDiversity.some((prior) => (
+            prior.fingerprint === diversity.fingerprint
+            || strictTranscriptShingleSimilarity(prior, diversity)
+                >= STRICT_LID_MAX_SAMPLE_SHINGLE_SIMILARITY
+        ));
+        if (repeated) {
+            repeatedSpeechSampleCount++;
+            continue;
+        }
+        acceptedDiversity.push(diversity);
         const language = String(result.language);
         const sample = {
             offset: result.offset,
@@ -283,12 +429,15 @@ function resolveStrictLidConsensus(sampleResults, consensusNeeded = 4) {
         best,
         rejectedSpeechSampleCount,
         ignoredWeakSpeechSampleCount,
+        repeatedSpeechSampleCount,
+        missingDiversitySampleCount,
     };
 }
 
 module.exports = {
     buildWhisperBatchArgs,
     cleanupStrictLidFiles,
+    evaluateStrictTranscriptEvidence,
     parseWhisperBatchLid,
     resolveStrictLidConsensus,
     runWhisperBatchProcess,
