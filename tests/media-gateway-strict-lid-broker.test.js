@@ -1,6 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const { EventEmitter } = require('node:events');
 const fs = require('node:fs');
 const http = require('node:http');
 const path = require('node:path');
@@ -55,6 +56,38 @@ function brokerHarness() {
       proxyKeyFromUrl: () => 'provider:test',
       setTimeout,
       undiciRequest: require('undici').request,
+    },
+  );
+}
+
+function audioExtractionHarness(spawnImpl) {
+  const start = gatewaySource.indexOf('function extractAudioWav(');
+  const end = gatewaySource.indexOf('// V2 chunked pipeline', start);
+  assert.ok(start >= 0 && end > start, 'audio extraction source must remain dynamically extractable');
+  return vm.runInNewContext(
+    `(() => { ${gatewaySource.slice(start, end)}; return extractAudioWav; })()`,
+    {
+      ACCOUNT_ACTIVITY_KIND_LANGUAGE_VALIDATION: 'language-validation',
+      FFMPEG_PATH: 'ffmpeg-test',
+      clearTimeout,
+      console: { warn() {} },
+      crypto: require('node:crypto'),
+      fsp: {
+        async stat() { return { size: 0 }; },
+        async unlink() {},
+      },
+      isHttpUrl: () => true,
+      loopbackOnlyEnv: () => ({}),
+      os: require('node:os'),
+      path,
+      proxyEnvFor: () => ({}),
+      proxyKeyFromUrl: () => 'provider:test',
+      redactCreds: (value) => String(value),
+      redactStrictLidLoopback: (value) => String(value),
+      registerAccountExtraction: () => ({ preempted: false, release() {} }),
+      setTimeout,
+      spawn: spawnImpl,
+      viewerPlaybackActiveLocally: () => false,
     },
   );
 }
@@ -461,7 +494,7 @@ test('strict LID rejects an invalid signed size before creating a server or prov
   assert.match(route, /detectLanguageRequestPolicy\(req, options\)[\s\S]*validateDetectLanguageCapability\(capabilityToken, policy\.requiredScope\)/);
   assert.match(gatewaySource, /strictLidLoopbackBrokerProtocol: 1/);
   assert.match(gatewaySource, /strictLidFileSizeClaim: 'fileSizeBytes'/);
-  assert.match(gatewaySource, /const GATEWAY_VERSION = 96/);
+  assert.match(gatewaySource, /const GATEWAY_VERSION = 97/);
   assert.match(gatewaySource, /strictLidProviderDrainProtocol: 1/);
   assert.match(gatewaySource, /strictLidWeakFallbackProtocol: 1/);
   assert.match(
@@ -667,6 +700,47 @@ test('strict ffmpeg uses only loopback while provider identity remains in the ba
   assert.match(envSource, /'http_proxy'[\s\S]+'ALL_PROXY'/);
   assert.match(envSource, /NO_PROXY = '127\.0\.0\.1,localhost,::1'/);
   assert.match(gatewaySource, /function redactStrictLidLoopback\(value\)[\s\S]+?\[strict-lid-loopback\]/);
+});
+
+test('audio extraction dynamically types a deadline kill as timedOut with its process signal', async () => {
+  class TimeoutChild extends EventEmitter {
+    constructor() {
+      super();
+      this.stderr = new EventEmitter();
+      this.kills = [];
+    }
+
+    kill(signal) {
+      this.kills.push(signal);
+      setImmediate(() => this.emit('close', null, signal));
+      return true;
+    }
+  }
+
+  const child = new TimeoutChild();
+  const extractAudioWav = audioExtractionHarness(() => child);
+  const result = await extractAudioWav(
+    'http://127.0.0.1/strict-lid-input',
+    'Norva-LID-Test/1',
+    1,
+    600,
+    20,
+    5,
+    'account-test',
+    true,
+    null,
+    true,
+    {
+      strictLoopback: true,
+      providerSourceUrl: 'https://provider.invalid/account/movie.mkv',
+    },
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.timedOut, true);
+  assert.equal(result.signal, 'SIGKILL');
+  assert.match(result.error, /extract timeout after 0s/);
+  assert.deepEqual(child.kills, ['SIGKILL']);
 });
 
 test('closing a strict LID broker aborts an active provider body and leaves no live local handle', async (t) => {

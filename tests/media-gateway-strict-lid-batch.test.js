@@ -56,6 +56,21 @@ function diversityFor(text) {
   };
 }
 
+function strictGatewayTimingHarness(gateway) {
+  const start = gateway.indexOf('const STRICT_LID_SAMPLE_DURATION_CAP_SECONDS = 20;');
+  const end = gateway.indexOf('function strictLanguageSampleDisposition(', start);
+  assert.ok(start >= 0 && end > start, 'strict timing helpers must remain dynamically extractable');
+  return vm.runInNewContext(
+    `(() => { ${gateway.slice(start, end)}; return {
+      strictLidSampleDurationSeconds,
+      strictLidMediaExtractionTimeoutMs,
+      strictLidExtractionBudget,
+      strictLidPostExtractionFailure,
+    }; })()`,
+    { Date, Math, Number, String },
+  );
+}
+
 test('strict batch builds ordered multi -f/-of args and accepts exactly six ordered LID lines', () => {
   const wavPaths = sixPaths('sample');
   const outputPrefixes = sixPaths('out').map((file) => file.replace(/\.wav$/, ''));
@@ -500,7 +515,74 @@ test('strict WAV cleanup is ordered-independent and fail-closed on unlink errors
   assert.equal(seen.length, 6);
 });
 
-test('v96 route batches strict inside a 225 s request budget and keeps drain attestations', () => {
+test('v97 strict extraction budget caps media, preserves a 60 s Whisper reserve, and types failures', () => {
+  const gateway = fs.readFileSync(
+    path.join(__dirname, '../services/media-gateway/src/index.js'),
+    'utf8',
+  );
+  const timing = strictGatewayTimingHarness(gateway);
+
+  assert.equal(timing.strictLidSampleDurationSeconds(undefined, true), 20);
+  assert.equal(timing.strictLidSampleDurationSeconds(0, true), 20);
+  assert.equal(timing.strictLidSampleDurationSeconds(60, true), 20);
+  assert.equal(timing.strictLidSampleDurationSeconds(4, true), 4);
+  assert.equal(timing.strictLidSampleDurationSeconds(0, false), 20);
+  assert.equal(timing.strictLidSampleDurationSeconds(30, false), 30);
+  assert.equal(timing.strictLidSampleDurationSeconds(120, false), 60);
+  assert.equal(timing.strictLidMediaExtractionTimeoutMs(4), 19_000);
+  assert.equal(timing.strictLidMediaExtractionTimeoutMs(4.25), 19_250);
+  assert.equal(timing.strictLidMediaExtractionTimeoutMs(20), 35_000);
+  assert.equal(timing.strictLidMediaExtractionTimeoutMs(60), 35_000);
+
+  assert.deepEqual(
+    { ...timing.strictLidExtractionBudget(20, 215_000, 0) },
+    { mediaTimeoutMs: 35_000, availableMs: 155_000, timeoutMs: 35_000 },
+  );
+  assert.deepEqual(
+    { ...timing.strictLidExtractionBudget(20, 215_000, 140_000) },
+    { mediaTimeoutMs: 35_000, availableMs: 15_000, timeoutMs: 15_000 },
+  );
+  assert.deepEqual(
+    { ...timing.strictLidExtractionBudget(20, 215_000, 155_000) },
+    { mediaTimeoutMs: 35_000, availableMs: 0, timeoutMs: 0 },
+  );
+  assert.deepEqual(
+    { ...timing.strictLidExtractionBudget(20, Number.NaN, 0) },
+    { mediaTimeoutMs: 35_000, availableMs: 0, timeoutMs: 0 },
+  );
+
+  const fourStrongThenTimeout = timing.strictLidPostExtractionFailure({
+    extractionTimedOut: true,
+    successfulSampleCount: 4,
+  });
+  assert.equal(fourStrongThenTimeout.status, 504);
+  assert.equal(fourStrongThenTimeout.payload.code, 'strict_lid_extraction_timeout');
+  assert.equal(fourStrongThenTimeout.payload.retryable, true);
+  assert.equal(fourStrongThenTimeout.retryAfterSeconds, 30);
+
+  const first458 = timing.strictLidPostExtractionFailure({
+    terminalError: {
+      status: 458,
+      message: 'provider busy',
+      code: 'PROVIDER_BUSY',
+      upstreamStatus: 458,
+    },
+    extractionTimedOut: true,
+    workBudgetExpired: true,
+  });
+  assert.equal(first458.status, 458);
+  assert.equal(first458.payload.code, 'PROVIDER_BUSY');
+  assert.equal(first458.retryAfterSeconds, undefined);
+
+  const timeoutBeatsGenericBudget = timing.strictLidPostExtractionFailure({
+    extractionTimedOut: true,
+    workBudgetExpired: true,
+  });
+  assert.equal(timeoutBeatsGenericBudget.payload.code, 'strict_lid_extraction_timeout');
+  assert.equal(timing.strictLidPostExtractionFailure({}), null);
+});
+
+test('v97 route stops on the first extraction timeout before Whisper and keeps drain attestations', () => {
   const gateway = fs.readFileSync(
     path.join(__dirname, '../services/media-gateway/src/index.js'),
     'utf8',
@@ -508,13 +590,21 @@ test('v96 route batches strict inside a 225 s request budget and keeps drain att
   const routeStart = gateway.indexOf('async function handleDetectLanguageRequest(');
   const routeEnd = gateway.indexOf('// Service-only A/B benchmark.', routeStart);
   const route = gateway.slice(routeStart, routeEnd);
-  assert.match(gateway, /const GATEWAY_VERSION = 96;/);
+  assert.match(gateway, /const GATEWAY_VERSION = 97;/);
   assert.match(gateway, /const STRICT_LID_REQUEST_BUDGET_MS = clampInt\([\s\S]*225_000,[\s\S]*225_000,/);
   assert.match(gateway, /strictLidBatchProtocol: 1/);
   assert.match(gateway, /strictLidActivityKindProtocol: 1/);
   assert.match(gateway, /strictLidCjkEvidenceProtocol: 1/);
   assert.match(gateway, /strictLidTranscriptDiversityProtocol: 1/);
+  assert.match(gateway, /strictLidExtractionTimeoutProtocol: 1/);
+  assert.match(gateway, /strictLidSampleDurationCapSeconds: STRICT_LID_SAMPLE_DURATION_CAP_SECONDS/);
+  assert.match(gateway, /strictLidWhisperReserveMs: STRICT_LID_WHISPER_RESERVE_MS/);
+  assert.match(gateway, /strictLidExtractionStartupMarginMs: STRICT_LID_EXTRACTION_STARTUP_MARGIN_MS/);
   assert.match(gateway, /strictLidRequestBudgetMs: STRICT_LID_REQUEST_BUDGET_MS/);
+  assert.match(route, /const dur = strictLidSampleDurationSeconds\(req\.query\.dur, strict\)/);
+  assert.match(route, /strictLidExtractionBudget\(dur, strictWorkDeadlineAt\)/);
+  assert.match(route, /strict \? extractionBudget\.timeoutMs : 30_000/);
+  assert.match(route, /if \(strict && ex\.timedOut\) \{[\s\S]*?strictExtractionTimedOut = true;[\s\S]*?break;/);
   assert.match(route, /strictWavSamples\.push\(\{ offset: off, path: wavPath \}\)/);
   assert.match(route, /const batchTimeoutMs = strictWorkDeadlineAt - Date\.now\(\)/);
   assert.match(route, /runStrictWhisperBatch\([\s\S]*strictWavSamples\.map/);
@@ -528,8 +618,10 @@ test('v96 route batches strict inside a 225 s request budget and keeps drain att
   assert.match(route, /await closeStrictBrokerForResponse\(\)/);
   assert.match(route, /if \(strict\) \{[\s\S]*strictWavSamples\.push[\s\S]*continue;/);
   assert.match(route, /runWhisperDetect\(wavPath, lidBackgroundOptions\)/);
-  const terminalAfterExtraction = route.indexOf('if (strictBroker?.terminalError)');
-  const budgetAfterExtraction = route.indexOf('if (strictWorkBudgetExpired)', terminalAfterExtraction);
-  assert.ok(terminalAfterExtraction >= 0 && budgetAfterExtraction > terminalAfterExtraction,
-    'a terminal first 458 must win over a simultaneous strict request timeout');
+  const timeoutStop = route.indexOf('if (strict && ex.timedOut)');
+  const batchStart = route.indexOf('runStrictWhisperBatch(');
+  assert.ok(timeoutStop >= 0 && batchStart > timeoutStop,
+    'the first extraction timeout must stop collection before any strict Whisper batch');
+  assert.match(route, /strictLidPostExtractionFailure\(\{[\s\S]*terminalError: strictBroker\?\.terminalError,[\s\S]*extractionTimedOut: strictExtractionTimedOut/);
+  assert.match(route, /sendDetectionJson\([\s\S]*strictPostExtractionFailure\.status,[\s\S]*strictPostExtractionFailure\.payload/);
 });
