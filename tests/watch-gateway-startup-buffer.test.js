@@ -71,7 +71,7 @@ test('Gateway buffered-ahead measurement fails closed when live TimeRanges mutat
     assert.equal(gatewayBufferedAheadSeconds.call(page), 0);
 });
 
-test('Gateway autoplay gate holds at 24 and 55.9 seconds, then admits 56.1 seconds', async () => {
+test('Gateway autoplay gate holds at 56 and 95.9 seconds, then admits 96.1 seconds', async () => {
     const waitForGatewayStartupBuffer = loadMethod(
         'waitForGatewayStartupBuffer',
         'playHls',
@@ -88,18 +88,18 @@ test('Gateway autoplay gate holds at 24 and 55.9 seconds, then admits 56.1 secon
         page,
         7,
         hls,
-        { minimumSeconds: 56, timeoutMs: 500 },
+        { minimumSeconds: 96, timeoutMs: 500 },
     ).then(result => {
         settled = true;
         return result;
     });
 
     await new Promise(resolve => setTimeout(resolve, 25));
-    assert.equal(settled, false, '24 seconds must no longer start Gateway playback');
-    ahead = 55.9;
+    assert.equal(settled, false, '56 seconds must no longer start Gateway playback');
+    ahead = 95.9;
     await new Promise(resolve => setTimeout(resolve, 110));
-    assert.equal(settled, false, 'the gate must not round a sub-threshold range up to 56 seconds');
-    ahead = 56.1;
+    assert.equal(settled, false, 'the gate must not round a sub-threshold range up to 96 seconds');
+    ahead = 96.1;
     assert.equal(await gate, true);
 });
 
@@ -118,7 +118,7 @@ test('Gateway autoplay gate is cancellation-safe and admits a fully buffered sho
         completePage,
         8,
         completeHls,
-        { minimumSeconds: 56, timeoutMs: 200 },
+        { minimumSeconds: 96, timeoutMs: 200 },
     ), true);
 
     const stalePage = {
@@ -130,7 +130,7 @@ test('Gateway autoplay gate is cancellation-safe and admits a fully buffered sho
         stalePage,
         9,
         completeHls,
-        { minimumSeconds: 56, timeoutMs: 200 },
+        { minimumSeconds: 96, timeoutMs: 200 },
     ), false);
 });
 
@@ -143,9 +143,9 @@ test('Gateway manifest handler gates play and fails closed without opening a ret
     const playAt = handler.indexOf('this.video.play()');
 
     assert.ok(gateAt >= 0 && playAt > gateAt, 'Gateway buffer gate must settle before autoplay');
-    assert.match(handler, /minimumSeconds:\s*56/,
+    assert.match(handler, /minimumSeconds:\s*96/,
         'Gateway playback must mirror the production proof buffer before autoplay');
-    assert.match(handler, /timeoutMs:\s*90000/,
+    assert.match(handler, /timeoutMs:\s*180000/,
         'the deeper browser buffer needs a bounded near-realtime fill budget');
     assert.match(handler, /if \(!bufferReady\)[\s\S]*releasePlaybackPipelineForRetry/);
     assert.doesNotMatch(handler, /getStreamUrl|createSession|retryPlaybackInPlace/,

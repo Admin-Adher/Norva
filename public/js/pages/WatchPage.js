@@ -4796,12 +4796,15 @@ class WatchPage {
                         playbackAttemptId,
                         activeHls,
                         {
-                            // Gateway admission already materializes at least
-                            // 60 s in production. Mirror all but one normal HLS
-                            // segment (or two exact-Matroska 2 s segments) so
-                            // minor EXTINF/PTS drift cannot strand the gate.
-                            minimumSeconds: 56,
-                            timeoutMs: 90000
+                            // Gateway admission materializes 60 s in production,
+                            // but a 1-vCPU exact-MKV encode can continue at only
+                            // ~0.25x realtime. Build 96 real buffered seconds in
+                            // the browser so a two-minute viewing proof stays
+                            // smooth even when the live encoder adds just ~24 s.
+                            // This wait happens after session creation, outside
+                            // the synchronous Edge/Kong request deadline.
+                            minimumSeconds: 96,
+                            timeoutMs: 180000
                         },
                     );
                 } catch (error) {
