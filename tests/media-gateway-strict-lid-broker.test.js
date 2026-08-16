@@ -105,7 +105,7 @@ function audioExtractionHarness(spawnImpl, timers = {}) {
     {
       ACCOUNT_ACTIVITY_KIND_LANGUAGE_VALIDATION: 'language-validation',
       FFMPEG_PATH: 'ffmpeg-test',
-      STRICT_LID_FFMPEG_RW_TIMEOUT_US: 40_000_000,
+      STRICT_LID_FFMPEG_RW_TIMEOUT_US: 50_000_000,
       clearTimeout: timers.clearTimeout || clearTimeout,
       console: { warn() {} },
       crypto: require('node:crypto'),
@@ -768,7 +768,7 @@ test('strict LID rejects invalid exact signed coordinates before creating a serv
   assert.match(route, /detectLanguageRequestPolicy\(req, options\)[\s\S]*validateDetectLanguageCapability\(capabilityToken, policy\.requiredScope\)/);
   assert.match(gatewaySource, /strictLidLoopbackBrokerProtocol: 1/);
   assert.match(gatewaySource, /strictLidFileSizeClaim: 'fileSizeBytes'/);
-  assert.match(gatewaySource, /const GATEWAY_VERSION = 100/);
+  assert.match(gatewaySource, /const GATEWAY_VERSION = 101/);
   assert.match(gatewaySource, /strictLidProviderDrainProtocol: 1/);
   assert.match(gatewaySource, /strictLidWeakFallbackProtocol: 1/);
   assert.match(gatewaySource, /strictLidTimelineSamplingProtocol: 1/);
@@ -985,7 +985,7 @@ test('strict ffmpeg uses only loopback while provider identity remains in the ba
   assert.match(gatewaySource, /function redactStrictLidLoopback\(value\)[\s\S]+?\[strict-lid-loopback\]/);
 });
 
-test('audio extraction fake clock preserves the outer 35 s SIGKILL deadline', async () => {
+test('v101 audio extraction survives 35 s and enforces the outer 45 s SIGKILL deadline', async () => {
   class TimeoutChild extends EventEmitter {
     constructor() {
       super();
@@ -1016,7 +1016,7 @@ test('audio extraction fake clock preserves the outer 35 s SIGKILL deadline', as
     1,
     600,
     20,
-    35_000,
+    45_000,
     'account-test',
     true,
     null,
@@ -1028,10 +1028,12 @@ test('audio extraction fake clock preserves the outer 35 s SIGKILL deadline', as
   );
   const rwTimeoutIndex = spawnedArgs.indexOf('-rw_timeout');
   assert.ok(rwTimeoutIndex >= 0);
-  assert.equal(spawnedArgs[rwTimeoutIndex + 1], '40000000');
+  assert.equal(spawnedArgs[rwTimeoutIndex + 1], '50000000');
   clock.advance(15_000);
   assert.deepEqual(child.kills, [], 'libav loopback timeout must not win at the legacy 15 s');
-  clock.advance(19_999);
+  clock.advance(20_000);
+  assert.deepEqual(child.kills, [], 'the widened outer timer must survive the former 35 s limit');
+  clock.advance(9_999);
   assert.deepEqual(child.kills, []);
   clock.advance(1);
   const result = await resultPromise;
@@ -1039,7 +1041,7 @@ test('audio extraction fake clock preserves the outer 35 s SIGKILL deadline', as
   assert.equal(result.ok, false);
   assert.equal(result.timedOut, true);
   assert.equal(result.signal, 'SIGKILL');
-  assert.match(result.error, /extract timeout after 35s/);
+  assert.match(result.error, /extract timeout after 45s/);
   assert.deepEqual(child.kills, ['SIGKILL']);
   assert.equal(clock.timers.size, 0);
 });
