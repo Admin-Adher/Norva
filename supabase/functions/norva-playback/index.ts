@@ -114,9 +114,9 @@ const LANGUAGE_VALIDATION_METHOD = "whisper-strict-consensus-v4";
 const LANGUAGE_VALIDATION_SCOPE = "lid-legacy-full";
 const LANGUAGE_VALIDATION_RETRY_SECONDS = 24 * 60 * 60;
 const LANGUAGE_VALIDATION_LEASE_SECONDS = 900;
-const LANGUAGE_VALIDATION_TASK_BUDGET_MS = 240_000;
+const LANGUAGE_VALIDATION_TASK_BUDGET_MS = 270_000;
 const LANGUAGE_VALIDATION_POST_FETCH_RESERVE_MS = 30_000;
-const LANGUAGE_VALIDATION_FETCH_TIMEOUT_MS = 210_000;
+const LANGUAGE_VALIDATION_FETCH_TIMEOUT_MS = 240_000;
 const LANGUAGE_VALIDATION_ACCOUNT_LEASE_SECONDS = LANGUAGE_VALIDATION_LEASE_SECONDS;
 const LANGUAGE_VALIDATION_JOB_LEASE_SECONDS = 300;
 const LANGUAGE_VALIDATION_POLL_SECONDS = 3;
@@ -180,13 +180,14 @@ Deno.serve(async (req) => {
       return json(req, {
         ok: true,
         service: "norva-playback",
-        version: 48,
+        version: 49,
         nativeHeartbeatProtocol: 1,
         providerCircuitProtocol: 1,
         exactFileCodecProfileProtocol: 1,
         languageValidationProtocol: LANGUAGE_VALIDATION_PROTOCOL,
         languageValidationPresenceIntentProtocol: 1,
         languageValidationPlaybackLeaseProtocol: 1,
+        languageValidationActivityProtocol: 1,
         languageValidationTaskBudgetMs: LANGUAGE_VALIDATION_TASK_BUDGET_MS,
         languageValidationFetchTimeoutMs: LANGUAGE_VALIDATION_FETCH_TIMEOUT_MS,
         languageValidationPostFetchReserveMs: LANGUAGE_VALIDATION_POST_FETCH_RESERVE_MS,
@@ -2056,6 +2057,11 @@ async function processOneLanguageValidationTrack(db: SupabaseClient, jobId: stri
         errorCode: gatewayCode === "PROXY_AUTH_FAILED"
           ? "PROXY_AUTH_FAILED"
           : "LANGUAGE_VALIDATION_GATEWAY_ERROR",
+        retryAt: languageValidationGatewayRetryAt(
+          response.status,
+          gatewayCode,
+          upstreamStatus,
+        ),
       });
       return;
     }
@@ -2559,10 +2565,12 @@ async function assertLanguageValidationIdle(
   }
 
   // norva-cloud deliberately marks every configured account as `presence` while
-  // the authenticated app is open. The service-only RPC ignores only that
-  // intent, while keeping null/unknown and every real fresh activity fail-closed.
-  // Its writer also prevents a later presence tick from overwriting a fresh
-  // session/raw/gateway row in the single-row provider ledger.
+  // the authenticated app is open. Strict LID also reports
+  // `language-validation` so generic background jobs keep yielding throughout
+  // the provider read. This foreground-only reader ignores those two intents;
+  // the account lease serializes LID with playback, while null/unknown and every
+  // real fresh activity remain fail-closed. The writers give real activity
+  // priority in the single-row ledger.
   const { data: providerBusy, error: providerBusyError } = await db.rpc(
     "provider_account_busy_for_foreground_validation",
     { p_key: providerAccountKey },
@@ -2575,6 +2583,22 @@ async function assertLanguageValidationIdle(
       code: "PROVIDER_ACCOUNT_BUSY",
     });
   }
+}
+
+function languageValidationGatewayRetryAt(
+  responseStatus: number,
+  gatewayCode: string,
+  upstreamStatus: number | null,
+  nowMs = Date.now(),
+) {
+  if (
+    !Number.isInteger(responseStatus) || responseStatus < 500 || responseStatus > 599 ||
+    Number(upstreamStatus) === 407 ||
+    String(gatewayCode || "").trim().toUpperCase() === "PROXY_AUTH_FAILED"
+  ) {
+    return null;
+  }
+  return new Date(nowMs + 30_000).toISOString();
 }
 
 function strictLanguageValidationEvidence(

@@ -61,6 +61,93 @@ select extensions.is(
   'foreground validation ignores only fresh presence'
 );
 
+select public.provider_account_touch_many(
+  array['provider-foreground.invalid/fixture-user'],
+  'language-validation'
+);
+
+select extensions.is(
+  (select kind from public.provider_account_activity
+   where account_key = 'provider-foreground.invalid/fixture-user'),
+  'language-validation',
+  'language validation activity immediately replaces weak presence'
+);
+select extensions.is(
+  public.provider_account_busy('provider-foreground.invalid/fixture-user'),
+  true,
+  'language validation keeps generic background work away from the mono-account slot'
+);
+select extensions.is(
+  public.provider_account_busy_for_foreground_validation(
+    'provider-foreground.invalid/fixture-user'
+  ),
+  false,
+  'foreground validation ignores its own fresh language-validation activity'
+);
+
+select public.provider_account_touch_many(
+  array['provider-foreground.invalid/fixture-user'],
+  'gateway'
+);
+
+create temporary table foreground_real_activity_snapshot as
+select kind, last_seen_at
+from public.provider_account_activity
+where account_key = 'provider-foreground.invalid/fixture-user';
+
+select public.provider_account_touch_many(
+  array['provider-foreground.invalid/fixture-user'],
+  'language-validation'
+);
+
+select extensions.is(
+  (select kind from public.provider_account_activity
+   where account_key = 'provider-foreground.invalid/fixture-user'),
+  (select kind from foreground_real_activity_snapshot),
+  'language validation cannot overwrite fresh real provider activity'
+);
+select extensions.is(
+  (select last_seen_at from public.provider_account_activity
+   where account_key = 'provider-foreground.invalid/fixture-user'),
+  (select last_seen_at from foreground_real_activity_snapshot),
+  'rejected language validation cannot refresh the real activity timestamp'
+);
+select extensions.is(
+  public.provider_account_busy_for_foreground_validation(
+    'provider-foreground.invalid/fixture-user'
+  ),
+  true,
+  'fresh real provider activity still blocks foreground validation'
+);
+
+insert into public.provider_account_activity(account_key, last_seen_at, kind)
+values (
+  'provider-foreground.invalid/stale-real',
+  statement_timestamp() - interval '6 minutes',
+  'gateway'
+);
+select public.provider_account_touch_many(
+  array['provider-foreground.invalid/stale-real'],
+  'language-validation'
+);
+select extensions.is(
+  (select kind from public.provider_account_activity
+   where account_key = 'provider-foreground.invalid/stale-real'),
+  'language-validation',
+  'language validation replaces a stale real activity row'
+);
+
+select public.provider_account_touch_many(
+  array['provider-foreground.invalid/stale-real'],
+  'raw'
+);
+select extensions.is(
+  (select kind from public.provider_account_activity
+   where account_key = 'provider-foreground.invalid/stale-real'),
+  'raw',
+  'real activity immediately overrides language validation activity'
+);
+
 update public.provider_account_activity
 set kind = 'gateway', last_seen_at = statement_timestamp()
 where account_key = 'provider-foreground.invalid/fixture-user';
@@ -168,8 +255,23 @@ select extensions.ok(
     'service_role',
     'public.provider_account_busy_for_foreground_validation(text)',
     'EXECUTE'
+  )
+  and not has_function_privilege(
+    'anon',
+    'public.provider_account_touch_many(text[],text)',
+    'EXECUTE'
+  )
+  and not has_function_privilege(
+    'authenticated',
+    'public.provider_account_touch_many(text[],text)',
+    'EXECUTE'
+  )
+  and has_function_privilege(
+    'service_role',
+    'public.provider_account_touch_many(text[],text)',
+    'EXECUTE'
   ),
-  'foreground validation RPC is executable only by service_role'
+  'activity priority and foreground validation RPCs are executable only by service_role'
 );
 
 select extensions.is(

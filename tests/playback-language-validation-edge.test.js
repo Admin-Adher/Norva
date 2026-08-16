@@ -12,6 +12,7 @@ const playback = read('supabase/functions/norva-playback/index.ts');
 const mainRouter = read('supabase/functions/main/index.ts');
 const migration = read('supabase/migrations/20260816105918_async_vod_language_validation_jobs.sql');
 const presenceMigration = read('supabase/migrations/20260816141150_provider_account_foreground_presence.sql');
+const activityMigration = read('supabase/migrations/20260816171003_provider_account_language_validation_activity.sql');
 const edgeDeploy = read('ops/hetzner/scripts/04-deploy-edge-functions.sh');
 
 function between(source, startMarker, endMarker) {
@@ -86,7 +87,7 @@ test('foreground validation ignores presence intent but still blocks real provid
   );
   assert.match(worker, /release_provider_account_language_validation/);
   assert.match(playback, /LANGUAGE_VALIDATION_ACCOUNT_LEASE_SECONDS = LANGUAGE_VALIDATION_LEASE_SECONDS/);
-  assert.match(playback, /const LANGUAGE_VALIDATION_TASK_BUDGET_MS = 240_000/);
+  assert.match(playback, /const LANGUAGE_VALIDATION_TASK_BUDGET_MS = 270_000/);
   assert.match(playback, /const LANGUAGE_VALIDATION_POST_FETCH_RESERVE_MS = 30_000/);
   assert.match(playback, /const LANGUAGE_VALIDATION_JOB_LEASE_SECONDS = 300/);
   const taskBudgetMs = Number(
@@ -137,15 +138,16 @@ test('foreground validation ignores presence intent but still blocks real provid
   );
   assert.match(worker, /providerAccountLeaseClaimed[\s\S]*providerAccountLeaseReleaseSafe[\s\S]*release_provider_account_language_validation/);
   assert.match(create, /claimError\.code[\s\S]*55P03[\s\S]*provider language validation in progress[\s\S]*LANGUAGE_VALIDATION_IN_PROGRESS/);
-  assert.match(playback, /version: 48[\s\S]*languageValidationPresenceIntentProtocol: 1[\s\S]*languageValidationPlaybackLeaseProtocol: 1[\s\S]*languageValidationTaskBudgetMs: LANGUAGE_VALIDATION_TASK_BUDGET_MS[\s\S]*languageValidationFetchTimeoutMs: LANGUAGE_VALIDATION_FETCH_TIMEOUT_MS[\s\S]*languageValidationPostFetchReserveMs: LANGUAGE_VALIDATION_POST_FETCH_RESERVE_MS[\s\S]*languageValidationJobLeaseSeconds: LANGUAGE_VALIDATION_JOB_LEASE_SECONDS/);
-  assert.match(playback, /const LANGUAGE_VALIDATION_FETCH_TIMEOUT_MS = 210_000/);
-  assert.match(edgeDeploy, /EXPECTED_PLAYBACK_VERSION=48/);
-  assert.match(edgeDeploy, /EXPECTED_LANGUAGE_VALIDATION_TASK_BUDGET_MS=240000/);
-  assert.match(edgeDeploy, /EXPECTED_LANGUAGE_VALIDATION_FETCH_TIMEOUT_MS=210000/);
+  assert.match(playback, /version: 49[\s\S]*languageValidationPresenceIntentProtocol: 1[\s\S]*languageValidationPlaybackLeaseProtocol: 1[\s\S]*languageValidationActivityProtocol: 1[\s\S]*languageValidationTaskBudgetMs: LANGUAGE_VALIDATION_TASK_BUDGET_MS[\s\S]*languageValidationFetchTimeoutMs: LANGUAGE_VALIDATION_FETCH_TIMEOUT_MS[\s\S]*languageValidationPostFetchReserveMs: LANGUAGE_VALIDATION_POST_FETCH_RESERVE_MS[\s\S]*languageValidationJobLeaseSeconds: LANGUAGE_VALIDATION_JOB_LEASE_SECONDS/);
+  assert.match(playback, /const LANGUAGE_VALIDATION_FETCH_TIMEOUT_MS = 240_000/);
+  assert.match(edgeDeploy, /EXPECTED_PLAYBACK_VERSION=49/);
+  assert.match(edgeDeploy, /EXPECTED_LANGUAGE_VALIDATION_TASK_BUDGET_MS=270000/);
+  assert.match(edgeDeploy, /EXPECTED_LANGUAGE_VALIDATION_FETCH_TIMEOUT_MS=240000/);
   assert.match(edgeDeploy, /EXPECTED_LANGUAGE_VALIDATION_POST_FETCH_RESERVE_MS=30000/);
   assert.match(edgeDeploy, /EXPECTED_LANGUAGE_VALIDATION_JOB_LEASE_SECONDS=300/);
   assert.match(edgeDeploy, /EXPECTED_LANGUAGE_VALIDATION_PRESENCE_INTENT_PROTOCOL=1/);
   assert.match(edgeDeploy, /EXPECTED_LANGUAGE_VALIDATION_PLAYBACK_LEASE_PROTOCOL=1/);
+  assert.match(edgeDeploy, /EXPECTED_LANGUAGE_VALIDATION_ACTIVITY_PROTOCOL=1/);
   assert.match(mainRouter, /'norva-playback': 20 \* 60 \* 1000/);
   assert.match(edgeDeploy, /main_path="\/home\/deno\/functions\/main\/index\.ts"/);
   assert.match(edgeDeploy, /main router source digest mismatch/);
@@ -163,15 +165,45 @@ test('language validation fetch budget preserves cleanup time inside the worker 
   const context = {
     Math,
     Date,
-    LANGUAGE_VALIDATION_FETCH_TIMEOUT_MS: 210_000,
+    LANGUAGE_VALIDATION_FETCH_TIMEOUT_MS: 240_000,
     LANGUAGE_VALIDATION_POST_FETCH_RESERVE_MS: 30_000,
   };
   vm.runInNewContext(`${helper}; this.budget = languageValidationFetchBudgetMs;`, context);
 
-  assert.equal(context.budget(240_000, 0), 210_000);
-  assert.equal(context.budget(240_000, 29_000), 181_000);
-  assert.equal(context.budget(240_000, 210_000), 0);
-  assert.equal(context.budget(240_000, 240_001), 0);
+  assert.equal(context.budget(270_000, 0), 240_000);
+  assert.equal(context.budget(270_000, 29_000), 211_000);
+  assert.equal(context.budget(270_000, 240_000), 0);
+  assert.equal(context.budget(270_000, 270_001), 0);
+});
+
+test('strict Gateway 5xx retries in 30 seconds while proxy auth and non-5xx keep the long policy', () => {
+  let helper = between(
+    playback,
+    'function languageValidationGatewayRetryAt(',
+    '\nfunction strictLanguageValidationEvidence(',
+  );
+  helper = helper
+    .replace('responseStatus: number', 'responseStatus')
+    .replace('gatewayCode: string', 'gatewayCode')
+    .replace('upstreamStatus: number | null', 'upstreamStatus');
+  const context = { Number, Date };
+  vm.runInNewContext(`${helper}; this.retryAt = languageValidationGatewayRetryAt;`, context);
+  const now = Date.parse('2026-08-16T17:00:00.000Z');
+
+  assert.equal(context.retryAt(500, 'STRICT_LID_FAILED', null, now), '2026-08-16T17:00:30.000Z');
+  assert.equal(context.retryAt(504, 'strict_lid_request_timeout', null, now), '2026-08-16T17:00:30.000Z');
+  assert.equal(context.retryAt(502, 'PROXY_AUTH_FAILED', 407, now), null);
+  assert.equal(context.retryAt(502, 'proxy_auth_failed', null, now), null);
+  assert.equal(context.retryAt(407, 'PROXY_AUTH_FAILED', 407, now), null);
+  assert.equal(context.retryAt(458, 'PROVIDER_BUSY', 458, now), null);
+  assert.equal(context.retryAt(409, 'VIEWER_PREEMPTED', null, now), null);
+
+  const worker = between(
+    playback,
+    'async function processOneLanguageValidationTrack(',
+    '\nasync function finalizeLanguageValidationJob(',
+  );
+  assert.match(worker, /if \(!response\.ok\)[\s\S]*retryAt: languageValidationGatewayRetryAt\([\s\S]*response\.status,[\s\S]*gatewayCode,[\s\S]*upstreamStatus/);
 });
 
 test('provider account lease release requires the exact Gateway drain attestation', () => {
@@ -237,6 +269,31 @@ test('presence intent cannot hide fresh provider activity and the foreground RPC
   );
   assert.match(presenceMigration, /notify pgrst, 'reload schema'/i);
   assert.match(playback, /LANGUAGE_VALIDATION_PROVIDER_LEASE_ERROR[\s\S]*Date\.now\(\) \+ 30_000/);
+});
+
+test('language-validation activity yields to real activity but remains busy for background work', () => {
+  assert.match(
+    activityMigration,
+    /create or replace function public\.provider_account_touch_many\(p_keys text\[\], p_kind text\)[\s\S]*security definer[\s\S]*set search_path = ''/i,
+  );
+  assert.match(
+    activityMigration,
+    /on conflict \(account_key\) do update[\s\S]*excluded\.kind is distinct from 'language-validation'[\s\S]*activity\.kind in \('presence', 'language-validation'\)[\s\S]*activity\.last_seen_at <= excluded\.last_seen_at - interval '5 minutes'/i,
+  );
+  assert.match(
+    activityMigration,
+    /provider_account_busy_for_foreground_validation\(p_key text\)[\s\S]*kind is distinct from 'presence'[\s\S]*kind is distinct from 'language-validation'/i,
+  );
+  assert.match(
+    activityMigration,
+    /revoke all on function public\.provider_account_touch_many\(text\[\], text\)[\s\S]*from public, anon, authenticated[\s\S]*grant execute on function public\.provider_account_touch_many\(text\[\], text\)[\s\S]*to service_role/i,
+  );
+  assert.match(
+    activityMigration,
+    /revoke all on function public\.provider_account_busy_for_foreground_validation\(text\)[\s\S]*from public, anon, authenticated[\s\S]*grant execute on function public\.provider_account_busy_for_foreground_validation\(text\)[\s\S]*to service_role/i,
+  );
+  assert.match(activityMigration, /notify pgrst, 'reload schema'/i);
+  assert.doesNotMatch(activityMigration, /alter table|drop table|create table/i);
 });
 
 test('exact gateway-inband MKV profile, signed size and index fingerprint fail closed', () => {
