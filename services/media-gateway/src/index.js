@@ -14,8 +14,10 @@ const {
     evaluateStrictTranscriptEvidence,
     resolveStrictLidConsensus,
     runWhisperBatchProcess,
+    normalizeStrictLidTimelineDurationSeconds,
     strictLidBatchFailureResponse,
     strictLidBatchOutcome,
+    strictLidTimelineOffsets,
 } = require('./strict-lid-batch');
 const {
     classifyProviderFetchFailure,
@@ -881,13 +883,8 @@ const WHISPER_SWEEP_OFFSETS = (process.env.WHISPER_SWEEP_OFFSETS || '600,1500,30
     .split(',').map((s) => Number.parseInt(s.trim(), 10)).filter((n) => Number.isFinite(n) && n >= 0);
 // A language shown as verified in Norva is held to a materially stronger contract than the
 // best-effort LID endpoint used during development. Four separated, information-rich speech
-// windows must agree unanimously. Extra fallback windows let silence/credits or a late offset
-// fail without weakening the four-sample requirement. The edge persists only `verified: true`.
-const WHISPER_STRICT_OFFSETS = [
-    ...new Set((process.env.WHISPER_STRICT_OFFSETS || '180,600,1200,2400,60,3000')
-        .split(',').map((s) => Number.parseInt(s.trim(), 10))
-        .filter((n) => Number.isFinite(n) && n >= 0)),
-];
+// windows must agree unanimously. Strict offsets are derived only from the exact signed media
+// duration below, so neither a request query nor replica-local environment can bias the proof.
 const WHISPER_STRICT_CONSENSUS = 4;
 const WHISPER_STRICT_MIN_PROBABILITY = Math.min(
     0.999,
@@ -1219,7 +1216,7 @@ const EXACT_MATROSKA_H264_MAX_HEIGHT = 1080;
 const EXACT_MATROSKA_H264_MAX_PIXELS = EXACT_MATROSKA_H264_MAX_WIDTH * EXACT_MATROSKA_H264_MAX_HEIGHT;
 const MULTI_AUDIO_HLS_PROTOCOL = 1;
 const MAX_MULTI_AUDIO_RENDITIONS = 8;
-const GATEWAY_VERSION = 98;
+const GATEWAY_VERSION = 99;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -1387,6 +1384,7 @@ app.get('/health', (req, res) => {
         strictLidTranscriptDiversityProtocol: 1,
         strictLidExtractionTimeoutProtocol: 1,
         strictLidBatchFailureProtocol: 1,
+        strictLidTimelineSamplingProtocol: 1,
         strictLidSampleDurationCapSeconds: STRICT_LID_SAMPLE_DURATION_CAP_SECONDS,
         strictLidWhisperReserveMs: STRICT_LID_WHISPER_RESERVE_MS,
         strictLidExtractionStartupMarginMs: STRICT_LID_EXTRACTION_STARTUP_MARGIN_MS,
@@ -3268,6 +3266,18 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
             code: 'exact_file_size_required',
         });
     }
+    const strictDurationSeconds = strict
+        ? normalizeStrictLidTimelineDurationSeconds(claims.durationSeconds)
+        : null;
+    if (strict && strictDurationSeconds === null) {
+        res.setHeader('Cache-Control', 'no-store');
+        return res.status(400).json({
+            error: 'Strict language validation requires an exact signed duration',
+            code: 'exact_duration_required',
+            providerDrained: true,
+            providerDrainProtocol: 1,
+        });
+    }
     if (!WHISPER_BIN || !WHISPER_MODEL) return res.status(503).json({ error: 'Language detection not configured' });
     if (rejectWhileLidBenchmarkRuns(res)) return;
     const ua = claims.ua || FFMPEG_USER_AGENT;
@@ -3281,7 +3291,22 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
                 : (claims.scope === LID_SHADOW_SCOPE ? 'shadow' : 'off')
         )
         : 'off';
-    const dur = strictLidSampleDurationSeconds(req.query.dur, strict);
+    const dur = strict
+        ? STRICT_LID_SAMPLE_DURATION_CAP_SECONDS
+        : strictLidSampleDurationSeconds(req.query.dur, false);
+    const strictTimelineOffsets = strict
+        ? strictLidTimelineOffsets(strictDurationSeconds, dur)
+        : null;
+    if (strict && !strictTimelineOffsets) {
+        res.setHeader('Cache-Control', 'no-store');
+        return res.status(422).json({
+            error: 'Strict language validation requires four complete audio windows',
+            code: 'strict_lid_duration_too_short',
+            retryable: false,
+            providerDrained: true,
+            providerDrainProtocol: 1,
+        });
+    }
     // An explicit ?start pins a single offset (caller knows where speech is); otherwise sweep the
     // bounded mid-film offsets and stop at the first clip that actually contains speech.
     const explicitStart = Number.parseFloat(req.query.start);
@@ -3290,7 +3315,7 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
     }
     const offsets = (Number.isFinite(explicitStart) && explicitStart >= 0)
         ? [explicitStart]
-        : (strict ? WHISPER_STRICT_OFFSETS : WHISPER_SWEEP_OFFSETS);
+        : (strict ? strictTimelineOffsets : WHISPER_SWEEP_OFFSETS);
     const consensusNeeded = strict
         ? WHISPER_STRICT_CONSENSUS
         : Math.max(1, Math.min(3, Number.parseInt(req.query.consensus, 10) || 1));

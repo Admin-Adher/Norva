@@ -13,8 +13,10 @@ const {
   parseWhisperBatchLid,
   resolveStrictLidConsensus,
   runWhisperBatchProcess,
+  normalizeStrictLidTimelineDurationSeconds,
   strictLidBatchFailureResponse,
   strictLidBatchOutcome,
+  strictLidTimelineOffsets,
 } = require('../services/media-gateway/src/strict-lid-batch');
 
 class FakeChild extends EventEmitter {
@@ -804,7 +806,50 @@ test('v98 strict extraction budget caps media, preserves a 60 s Whisper reserve,
   assert.equal(timing.strictLidPostExtractionFailure({}), null);
 });
 
-test('v98 route fails a broken Whisper batch before consensus and keeps drain attestations', () => {
+test('signed strict timeline duration is bounded and cannot be coerced from strings', () => {
+  assert.equal(normalizeStrictLidTimelineDurationSeconds(7_248.048), 7_248.048);
+  assert.equal(normalizeStrictLidTimelineDurationSeconds(86_400), 86_400);
+  for (const value of [undefined, null, '7248.048', 0, -1, 86_400.001, NaN, Infinity]) {
+    assert.equal(normalizeStrictLidTimelineDurationSeconds(value), null);
+  }
+});
+
+test('strict timeline sampling centers six complete windows across a long exact VOD', () => {
+  const offsets = strictLidTimelineOffsets(7_248.048, 20);
+  assert.deepEqual(offsets, [594.004, 1802.012, 3010.02, 4218.028, 5426.036, 6634.044]);
+  assert.equal(Object.isFrozen(offsets), true);
+  assert.equal(offsets.length, 6);
+  for (let index = 0; index < offsets.length; index++) {
+    assert.ok(offsets[index] >= 0);
+    assert.ok(offsets[index] + 20 <= 7_248.048 + 0.001);
+    if (index > 0) assert.ok(offsets[index] - offsets[index - 1] >= 20);
+  }
+});
+
+test('strict timeline sampling uses exactly four non-overlapping strata for short films', () => {
+  assert.deepEqual(strictLidTimelineOffsets(80, 20), [0, 20, 40, 60]);
+  assert.deepEqual(strictLidTimelineOffsets(100, 20), [2.5, 27.5, 52.5, 77.5]);
+  assert.deepEqual(strictLidTimelineOffsets(119.999, 20), [5, 35, 64.999, 94.999]);
+  assert.deepEqual(strictLidTimelineOffsets(120, 20), [0, 20, 40, 60, 80, 100]);
+  assert.equal(strictLidTimelineOffsets(79.999, 20), null);
+  assert.equal(strictLidTimelineOffsets(86_400.001, 20), null);
+  assert.equal(strictLidTimelineOffsets(120, 0), null);
+});
+
+test('strict timeline invariants hold from the minimum short film through the maximum duration', () => {
+  for (const duration of [80, 80.001, 95.5, 119.999, 120, 120.001, 600, 7_248.048, 86_400]) {
+    const offsets = strictLidTimelineOffsets(duration, 20);
+    assert.equal(offsets.length, duration < 120 ? 4 : 6);
+    assert.equal(new Set(offsets).size, offsets.length);
+    for (let index = 0; index < offsets.length; index++) {
+      assert.ok(offsets[index] >= 0);
+      assert.ok(offsets[index] <= duration - 20 + 0.001);
+      if (index > 0) assert.ok(offsets[index] - offsets[index - 1] >= 20 - 0.001);
+    }
+  }
+});
+
+test('v99 route uses signed timeline strata and fails a broken Whisper batch before consensus', () => {
   const gateway = fs.readFileSync(
     path.join(__dirname, '../services/media-gateway/src/index.js'),
     'utf8',
@@ -812,7 +857,7 @@ test('v98 route fails a broken Whisper batch before consensus and keeps drain at
   const routeStart = gateway.indexOf('async function handleDetectLanguageRequest(');
   const routeEnd = gateway.indexOf('// Service-only A/B benchmark.', routeStart);
   const route = gateway.slice(routeStart, routeEnd);
-  assert.match(gateway, /const GATEWAY_VERSION = 98;/);
+  assert.match(gateway, /const GATEWAY_VERSION = 99;/);
   assert.match(gateway, /const STRICT_LID_REQUEST_BUDGET_MS = clampInt\([\s\S]*225_000,[\s\S]*225_000,/);
   assert.match(gateway, /strictLidBatchProtocol: 1/);
   assert.match(gateway, /strictLidActivityKindProtocol: 1/);
@@ -820,11 +865,21 @@ test('v98 route fails a broken Whisper batch before consensus and keeps drain at
   assert.match(gateway, /strictLidTranscriptDiversityProtocol: 1/);
   assert.match(gateway, /strictLidExtractionTimeoutProtocol: 1/);
   assert.match(gateway, /strictLidBatchFailureProtocol: 1/);
+  assert.match(gateway, /strictLidTimelineSamplingProtocol: 1/);
   assert.match(gateway, /strictLidSampleDurationCapSeconds: STRICT_LID_SAMPLE_DURATION_CAP_SECONDS/);
   assert.match(gateway, /strictLidWhisperReserveMs: STRICT_LID_WHISPER_RESERVE_MS/);
   assert.match(gateway, /strictLidExtractionStartupMarginMs: STRICT_LID_EXTRACTION_STARTUP_MARGIN_MS/);
   assert.match(gateway, /strictLidRequestBudgetMs: STRICT_LID_REQUEST_BUDGET_MS/);
-  assert.match(route, /const dur = strictLidSampleDurationSeconds\(req\.query\.dur, strict\)/);
+  assert.match(route, /const dur = strict[\s\S]*\? STRICT_LID_SAMPLE_DURATION_CAP_SECONDS[\s\S]*: strictLidSampleDurationSeconds\(req\.query\.dur, false\)/);
+  assert.match(route, /normalizeStrictLidTimelineDurationSeconds\(claims\.durationSeconds\)/);
+  assert.match(route, /code: 'exact_duration_required'/);
+  assert.match(route, /strictLidTimelineOffsets\(strictDurationSeconds, dur\)/);
+  assert.match(route, /code: 'strict_lid_duration_too_short'/);
+  assert.doesNotMatch(route, /req\.query\.(?:duration|durationSeconds)|WHISPER_STRICT_OFFSETS/);
+  const durationPreflight = route.indexOf("code: 'strict_lid_duration_too_short'");
+  const brokerOpen = route.indexOf('createStrictLidBroker({');
+  assert.ok(durationPreflight >= 0 && brokerOpen > durationPreflight,
+    'an uncertifiable signed duration must fail before the strict provider broker opens');
   assert.match(route, /strictLidExtractionBudget\(dur, strictWorkDeadlineAt\)/);
   assert.match(route, /strict \? extractionBudget\.timeoutMs : 30_000/);
   assert.match(route, /if \(strict && ex\.timedOut\) \{[\s\S]*?strictExtractionTimedOut = true;[\s\S]*?break;/);
