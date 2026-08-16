@@ -115,6 +115,7 @@ const LANGUAGE_VALIDATION_SCOPE = "lid-legacy-full";
 const LANGUAGE_VALIDATION_RETRY_SECONDS = 24 * 60 * 60;
 const LANGUAGE_VALIDATION_LEASE_SECONDS = 900;
 const LANGUAGE_VALIDATION_FETCH_TIMEOUT_MS = 180_000;
+const LANGUAGE_VALIDATION_ACCOUNT_LEASE_SECONDS = LANGUAGE_VALIDATION_LEASE_SECONDS;
 const LANGUAGE_VALIDATION_JOB_LEASE_SECONDS = 300;
 const LANGUAGE_VALIDATION_POLL_SECONDS = 3;
 const LANGUAGE_VALIDATION_MIN_SAMPLES = 4;
@@ -177,11 +178,13 @@ Deno.serve(async (req) => {
       return json(req, {
         ok: true,
         service: "norva-playback",
-        version: 45,
+        version: 47,
         nativeHeartbeatProtocol: 1,
         providerCircuitProtocol: 1,
         exactFileCodecProfileProtocol: 1,
         languageValidationProtocol: LANGUAGE_VALIDATION_PROTOCOL,
+        languageValidationPresenceIntentProtocol: 1,
+        languageValidationPlaybackLeaseProtocol: 1,
         languageValidationGatewayMethod: "POST",
         languageValidationHeaderCapability: true,
         languageValidationServiceAuthRequired: true,
@@ -751,7 +754,17 @@ async function createPlaybackSession(
       p_expires_at: expiresAt,
     },
   );
-  if (claimError) throwDb(claimError, "Unable to claim provider playback session");
+  if (claimError) {
+    if (
+      stringOr(claimError.code, "") === "55P03"
+      && stringOr(claimError.message, "") === "provider language validation in progress"
+    ) {
+      throw new HttpError(409, "Provider account is reserved for language validation", {
+        code: "LANGUAGE_VALIDATION_IN_PROGRESS",
+      });
+    }
+    throwDb(claimError, "Unable to claim provider playback session");
+  }
 
   const claim = Array.isArray(claimRows)
     ? recordOrEmpty(claimRows[0])
@@ -1769,6 +1782,11 @@ async function revalidateLanguageValidationClaim(
   };
 }
 
+function strictLanguageProviderDrainAttested(payload: JsonRecord) {
+  return payload.providerDrained === true
+    && payload.providerDrainProtocol === 1;
+}
+
 async function processOneLanguageValidationTrack(db: SupabaseClient, jobId: string) {
   const leaseOwner = `language-validation-job:${crypto.randomUUID()}`;
   const { data: claimed, error: claimError } = await db.rpc(
@@ -1782,6 +1800,9 @@ async function processOneLanguageValidationTrack(db: SupabaseClient, jobId: stri
   if (claimError || !claimed) return;
   const claim = recordOrEmpty(claimed);
   let providerLeaseClaimed = false;
+  let providerAccountLeaseClaimed = false;
+  let providerAccountLeaseReleaseSafe = false;
+  let providerAccountLeaseHash = "";
   let providerLeaseOwner = "";
   let identityKey = stringOr(claim.identityKey, "");
   try {
@@ -1828,6 +1849,32 @@ async function processOneLanguageValidationTrack(db: SupabaseClient, jobId: stri
     );
 
     providerLeaseOwner = `language-validation-track:${jobId}:${trackIndex}:${crypto.randomUUID()}`;
+    providerAccountLeaseHash = providerAccountHash;
+    const { data: providerAccountClaimed, error: providerAccountClaimError } = await db.rpc(
+      "claim_provider_account_language_validation",
+      {
+        p_provider_account_hash: providerAccountHash,
+        p_lease_owner: providerLeaseOwner,
+        p_ttl_seconds: LANGUAGE_VALIDATION_ACCOUNT_LEASE_SECONDS,
+      },
+    );
+    if (providerAccountClaimError) {
+      throw new HttpError(503, "Unable to claim provider account validation lease", {
+        code: "LANGUAGE_VALIDATION_PROVIDER_LEASE_ERROR",
+      });
+    }
+    if (providerAccountClaimed !== true) {
+      await failLanguageValidationJob(db, {
+        jobId,
+        leaseOwner,
+        errorCode: "LANGUAGE_VALIDATION_PROVIDER_LEASE_BUSY",
+        retryAt: new Date(Date.now() + 30_000).toISOString(),
+      });
+      return;
+    }
+    providerAccountLeaseClaimed = true;
+    providerAccountLeaseReleaseSafe = true;
+
     const { data: providerClaimed, error: providerClaimError } = await db.rpc(
       "claim_provider_file_probe",
       {
@@ -1876,6 +1923,7 @@ async function processOneLanguageValidationTrack(db: SupabaseClient, jobId: stri
       exactAfterLease.exactProfile.fileSizeBytes,
     );
     let response: Response;
+    providerAccountLeaseReleaseSafe = false;
     try {
       response = await fetch(
         `${detectionAccess.gatewayUrl}/detect-language?index=${trackIndex}&strict=1&dur=30`,
@@ -1898,7 +1946,27 @@ async function processOneLanguageValidationTrack(db: SupabaseClient, jobId: stri
       });
       return;
     }
-    const payload = recordOrEmpty(await response.json().catch(() => ({})));
+    let responseText = "";
+    try {
+      responseText = await response.text();
+    } catch (_) {
+      await failLanguageValidationJob(db, {
+        jobId,
+        leaseOwner,
+        errorCode: "LANGUAGE_VALIDATION_GATEWAY_TRANSPORT",
+      });
+      return;
+    }
+    let responsePayload: unknown = {};
+    try {
+      responsePayload = JSON.parse(responseText);
+    } catch (_) { /* malformed gateway payload fails closed below */ }
+    const payload = recordOrEmpty(responsePayload);
+    // Release the account-wide lease only when the v92+ Gateway explicitly
+    // attests that the strict broker closed its provider socket and completed
+    // the panel slot-release grace before sending this response. A legacy,
+    // malformed or interrupted response keeps the crash-safe TTL lease.
+    providerAccountLeaseReleaseSafe = strictLanguageProviderDrainAttested(payload);
     const gatewayCode = stringOr(payload.code ?? payload.errorCode ?? payload.error_code, "");
     const upstreamStatus = extractProviderStatus(
       payload,
@@ -1964,6 +2032,25 @@ async function processOneLanguageValidationTrack(db: SupabaseClient, jobId: stri
       retryAt: languageValidationTaskRetryAt(error),
     });
   } finally {
+    if (
+      providerAccountLeaseClaimed
+      && providerAccountLeaseReleaseSafe
+      && providerAccountLeaseHash
+      && providerLeaseOwner
+    ) {
+      try {
+        const { error: providerAccountReleaseError } = await db.rpc(
+          "release_provider_account_language_validation",
+          {
+            p_provider_account_hash: providerAccountLeaseHash,
+            p_lease_owner: providerLeaseOwner,
+          },
+        );
+        if (providerAccountReleaseError) {
+          console.warn("[norva-playback] language validation account lease release deferred");
+        }
+      } catch (_) { /* lease expiry is the crash-safe fallback */ }
+    }
     if (providerLeaseClaimed && identityKey && providerLeaseOwner) {
       await releaseProviderFileProbe(db, identityKey, providerLeaseOwner);
     }
@@ -2075,6 +2162,9 @@ function languageValidationTaskRetryAt(error: unknown) {
   if (blockedUntil && Number.isFinite(Date.parse(blockedUntil))) return blockedUntil;
   if (code === "LANGUAGE_VALIDATION_PLAYBACK_ACTIVE" || code === "PROVIDER_ACCOUNT_BUSY") {
     return new Date(Date.now() + 15_000).toISOString();
+  }
+  if (code === "LANGUAGE_VALIDATION_PROVIDER_LEASE_ERROR") {
+    return new Date(Date.now() + 30_000).toISOString();
   }
   if (languageValidationTaskErrorIsTerminal(error)) return new Date().toISOString();
   return null;
@@ -2405,12 +2495,19 @@ async function assertLanguageValidationIdle(
     });
   }
 
+  // norva-cloud deliberately marks every configured account as `presence` while
+  // the authenticated app is open. The service-only RPC ignores only that
+  // intent, while keeping null/unknown and every real fresh activity fail-closed.
+  // Its writer also prevents a later presence tick from overwriting a fresh
+  // session/raw/gateway row in the single-row provider ledger.
   const { data: providerBusy, error: providerBusyError } = await db.rpc(
-    "provider_account_busy",
+    "provider_account_busy_for_foreground_validation",
     { p_key: providerAccountKey },
   );
-  if (providerBusyError) throwDb(providerBusyError, "Unable to verify provider availability");
-  if (providerBusy === true) {
+  if (providerBusyError) {
+    throwDb(providerBusyError, "Unable to verify provider availability");
+  }
+  if (providerBusy !== false) {
     throw new HttpError(409, "Provider account is already in use", {
       code: "PROVIDER_ACCOUNT_BUSY",
     });
