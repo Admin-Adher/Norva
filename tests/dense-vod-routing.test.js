@@ -350,14 +350,22 @@ test('known-file FFmpeg fast path keeps a full-probe fallback for demux discover
         logTail: ''
     }), false, 'provider failures must retain their own retry ladder');
 
+    const normalizeAudioStreamIndex = (value) => {
+        if (value === null || value === undefined || value === '') return null;
+        const parsed = Number.parseInt(String(value), 10);
+        return Number.isInteger(parsed) && parsed >= 0 && parsed <= 1024 ? parsed : null;
+    };
+    const selectedAudioTrackForSession = loadGatewayFunction(
+        'selectedAudioTrackForSession',
+        'mappedAudioStreamIndexForSession',
+        { normalizeAudioStreamIndex }
+    );
     const audioMapForSession = loadGatewayFunction(
         'audioMapForSession',
-        'selectedAudioTrackForSession',
+        'audioTracksForSession',
         {
-            nullableInt: (value) => value === null || value === undefined || value === ''
-                ? null
-                : Number.parseInt(String(value), 10),
-            selectedAudioTrackForSession: (session) => session.codecProfile?.audioTracks?.[0] || null
+            normalizeAudioStreamIndex,
+            selectedAudioTrackForSession
         }
     );
     const exactSession = {
@@ -365,6 +373,32 @@ test('known-file FFmpeg fast path keeps a full-probe fallback for demux discover
     };
     assert.strictEqual(audioMapForSession(exactSession, true), '0:8');
     assert.strictEqual(audioMapForSession(exactSession, false), '0:8?');
+    assert.strictEqual(
+        audioMapForSession({ audioStreamIndex: 0, codecProfile: {} }, true),
+        '0:a:0',
+        'an unproven absolute index zero must not map the video stream as audio'
+    );
+    assert.strictEqual(
+        audioMapForSession({ audioStreamIndex: 77, codecProfile: {} }, false),
+        '0:a:0?',
+        'every unproven absolute index must fall back to a typed audio map'
+    );
+    assert.strictEqual(
+        audioMapForSession({
+            audioStreamIndex: 6,
+            codecProfile: { audio_tracks: [{ index: 5 }, { index: 6, default: true }] }
+        }, false),
+        '0:6?',
+        'snake-case exact audio-track profiles preserve a proven requested index'
+    );
+    assert.strictEqual(
+        audioMapForSession({
+            audioStreamIndex: 77,
+            codecProfile: { audioTracks: [{ index: 8 }, { index: 9, default: true }] }
+        }, false),
+        '0:9?',
+        'a request absent from the exact profile falls back to the proven default audio track'
+    );
 
     assert.match(source, /KNOWN_VOD_INPUT_ANALYZE_DURATION_US[\s\S]*2_000_000/);
     assert.match(source, /KNOWN_VOD_INPUT_PROBE_SIZE_BYTES[\s\S]*2_000_000/);
@@ -373,6 +407,16 @@ test('known-file FFmpeg fast path keeps a full-probe fallback for demux discover
         source,
         /requireKnownStreams\s*=\s*[\s\S]*session\.fastInputProbe === true[\s\S]*session\.forceFullInputProbe === true[\s\S]*audioMapForSession\(session, requireKnownStreams\)/,
         'the full-budget fallback must keep exact A/V maps required'
+    );
+    assert.match(
+        source,
+        /\(requireKnownStreams \|\| multiAudioPlan\) \? '0:V:0' : '0:V:0\?'/,
+        'Gateway video maps must exclude attached pictures in both strict and optional modes'
+    );
+    assert.strictEqual(
+        (source.match(/audioStreamIndex: mappedAudioStreamIndexForSession\(session\)/g) || []).length,
+        3,
+        'session responses and diagnostics must expose only the proven mapped audio index'
     );
     assert.match(source, /knownVodInputProbeFastPathEnabled: KNOWN_VOD_INPUT_PROBE_FAST_PATH_ENABLED/);
     assert.match(source, /startupTimings[\s\S]*inputProbeMode/);

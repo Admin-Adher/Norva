@@ -3,6 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const vm = require('node:vm');
 
@@ -104,33 +105,140 @@ test('a partial request profile is completed once before FFmpeg chooses copy or 
     );
 });
 
-test('Gateway readiness rejects a header-only or one-frame HLS playlist', () => {
+test('Gateway readiness requires ten seconds and three finalized HLS segments', () => {
     const inspectHlsStartupPlaylist = loadGatewayFunction(
         'inspectHlsStartupPlaylist',
         'waitForPlaylist',
-        { path, MIN_HLS_STARTUP_BUFFER_SECONDS: 2 },
+        { path, MIN_HLS_STARTUP_BUFFER_SECONDS: 10, MIN_HLS_STARTUP_SEGMENTS: 3 },
     );
 
     assert.deepStrictEqual(
         plain(inspectHlsStartupPlaylist('#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:0\n')),
-        { ready: false, reason: 'no_segments', segmentCount: 0, durationSeconds: 0, firstSegment: null },
+        { ready: false, reason: 'no_segments', segmentCount: 0, durationSeconds: 0, firstSegment: null, segmentFiles: [] },
     );
     assert.deepStrictEqual(
         plain(inspectHlsStartupPlaylist('#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXTINF:0.100000,\nsegment-00000.ts\n')),
-        { ready: false, reason: 'insufficient_duration', segmentCount: 1, durationSeconds: 0.1, firstSegment: 'segment-00000.ts' },
-    );
-    assert.deepStrictEqual(
-        plain(inspectHlsStartupPlaylist('#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXTINF:4.004000,\nsegment-00000.ts\n')),
-        { ready: true, reason: 'ready', segmentCount: 1, durationSeconds: 4.004, firstSegment: 'segment-00000.ts' },
+        {
+            ready: false,
+            reason: 'insufficient_segments',
+            segmentCount: 1,
+            durationSeconds: 0.1,
+            firstSegment: 'segment-00000.ts',
+            segmentFiles: ['segment-00000.ts'],
+        },
     );
 
+    const playlist = (durations, endList = false) => [
+        '#EXTM3U',
+        '#EXT-X-TARGETDURATION:4',
+        ...durations.flatMap((duration, index) => [
+            `#EXTINF:${duration.toFixed(6)},`,
+            `segment-${String(index).padStart(5, '0')}.ts`,
+        ]),
+        ...(endList ? ['#EXT-X-ENDLIST'] : []),
+        '',
+    ].join('\n');
+
+    assert.equal(inspectHlsStartupPlaylist(playlist([3.333, 3.333, 3.333])).reason, 'insufficient_duration');
+    assert.equal(inspectHlsStartupPlaylist(playlist([3.33334, 3.33334, 3.33334])).ready, true,
+        'comparison uses the unrounded duration at the exact ten-second boundary');
+    assert.equal(inspectHlsStartupPlaylist(playlist([4.004, 4.004, 4.004])).ready, true,
+        'the normal 4 s plan exposes three finalized segments (~12 s)');
+    assert.equal(inspectHlsStartupPlaylist(playlist([2, 2, 2, 2, 2])).ready, true,
+        'the exact-Matroska 2 s plan exposes five finalized segments');
+    assert.equal(inspectHlsStartupPlaylist(playlist([4], true)).ready, true,
+        'a genuinely complete short VOD is not forced to time out');
+
     const source = readGateway();
+    assert.match(source, /MIN_HLS_STARTUP_BUFFER_SECONDS\s*=\s*clampInt\([^,]+,\s*10,\s*1,\s*180\)/);
+    assert.match(source, /STARTUP_TIMEOUT_MS\s*=\s*clampInt\([^,]+,\s*60_000,\s*5_000,\s*180_000\)/);
+    assert.match(source, /MIN_HLS_STARTUP_SEGMENTS\s*=\s*clampInt\([^,]+,\s*3,\s*1,\s*10\)/);
     assert.match(
         source,
-        /waitForPlaylist[\s\S]*inspectHlsStartupPlaylist[\s\S]*stat[\s\S]*size\s*>\s*0/,
-        'startup must wait for the finalized referenced segment to be non-empty',
+        /waitForPlaylist[\s\S]*inspection\.segmentFiles[\s\S]*Promise\.all[\s\S]*stats\.every[\s\S]*size\s*>\s*0/,
+        'startup must wait for every referenced buffered segment to exist and be non-empty',
     );
     assert.match(source, /startupTimings[\s\S]*playlistBufferSeconds/);
+});
+
+test('Gateway readiness materializes every segment in the ten-second buffer', async () => {
+    const source = readGateway();
+    const start = source.indexOf('function parseHlsAttributeList(');
+    const end = source.indexOf('\nasync function stopSession(', start);
+    assert.ok(start >= 0 && end > start);
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'norva-hls-ready-'));
+    const isWithin = (root, candidate) => {
+        const relative = path.relative(path.resolve(root), path.resolve(candidate));
+        return relative !== '' && !relative.startsWith('..') && !path.isAbsolute(relative);
+    };
+    const harness = vm.runInNewContext(
+        `(() => { ${source.slice(start, end)}; return { inspectHlsStartupPlaylist, waitForPlaylist }; })()`,
+        {
+            path,
+            fs,
+            fsp: fs.promises,
+            sleep: async () => {},
+            waitForVodInputRetry: async (_delayMs, signal) => !signal?.aborted,
+            abortedVodInputPumpError: () => Object.assign(
+                new Error('Finite MKV input pump was stopped'),
+                { name: 'AbortError', code: 'VOD_INPUT_ABORTED' },
+            ),
+            isWithin,
+            multiAudioHlsEnabled: () => false,
+            mappedAudioStreamIndexForSession: () => null,
+            MIN_HLS_STARTUP_BUFFER_SECONDS: 10,
+            MIN_HLS_STARTUP_SEGMENTS: 3,
+        },
+    );
+    const playlistPath = path.join(dir, 'playlist.m3u8');
+    fs.writeFileSync(playlistPath, [
+        '#EXTM3U',
+        '#EXT-X-TARGETDURATION:4',
+        '#EXTINF:4.000000,', 'segment-00000.ts',
+        '#EXTINF:4.000000,', 'segment-00001.ts',
+        '#EXTINF:4.000000,', 'segment-00002.ts',
+        '',
+    ].join('\n'));
+    fs.writeFileSync(path.join(dir, 'segment-00000.ts'), Buffer.alloc(11));
+    fs.writeFileSync(path.join(dir, 'segment-00001.ts'), Buffer.alloc(13));
+    const session = { outputDir: dir, playlistPath, startupTimings: {} };
+
+    try {
+        await assert.rejects(harness.waitForPlaylist(session, 15), /Playlist timeout/,
+            'an absent final segment cannot be advertised');
+        fs.writeFileSync(path.join(dir, 'segment-00002.ts'), Buffer.alloc(0));
+        await assert.rejects(harness.waitForPlaylist(session, 15), /Playlist timeout/,
+            'an empty final segment cannot be advertised');
+        fs.writeFileSync(path.join(dir, 'segment-00002.ts'), Buffer.alloc(17));
+        await harness.waitForPlaylist(session, 100);
+        assert.equal(session.startupTimings.playlistSegmentCount, 3);
+        assert.equal(session.startupTimings.playlistBufferSeconds, 12);
+        assert.equal(session.startupTimings.firstSegmentBytes, 11);
+        assert.equal(session.startupTimings.playlistSegmentBytes, 41);
+    } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
+});
+
+test('Gateway readiness honors a proof-sized configured VOD window', () => {
+    const inspectHlsStartupPlaylist = loadGatewayFunction(
+        'inspectHlsStartupPlaylist',
+        'waitForPlaylist',
+        { path, MIN_HLS_STARTUP_BUFFER_SECONDS: 125, MIN_HLS_STARTUP_SEGMENTS: 3 },
+    );
+    const playlist = (count) => [
+        '#EXTM3U',
+        '#EXT-X-TARGETDURATION:2',
+        ...Array.from({ length: count }, (_, index) => [
+            '#EXTINF:2.000000,',
+            `segment-${String(index).padStart(5, '0')}.ts`,
+        ]).flat(),
+        '',
+    ].join('\n');
+
+    assert.equal(inspectHlsStartupPlaylist(playlist(62)).reason, 'insufficient_duration');
+    assert.equal(inspectHlsStartupPlaylist(playlist(63)).ready, true,
+        'the browser is admitted only after the configured 125-second proof window exists');
 });
 
 test('Gateway MPEG-TS HLS copies only AAC-LC stereo and transcodes MP3-family audio', () => {
@@ -160,6 +268,7 @@ test('Gateway MPEG-TS HLS copies only AAC-LC stereo and transcodes MP3-family au
             selectedAudioTrackForSession: gatewayGlobals.selectedAudioTrackForSession,
             isKnownUnsafeAudio: () => false,
             isKnownBrowserSafeAudio,
+            multiAudioHlsEnabled: () => false,
         },
     );
     assert.strictEqual(shouldCopyAudio({
@@ -205,6 +314,100 @@ test('an unknown finite MKV video fails safe to encoding while live remains copy
         playbackHint: { streamType: 'live' },
         codecProfile: {},
     }), true, 'live keeps the existing non-probing compatibility path');
+});
+
+test('an exact finite Matroska H264 profile selects the 2s keyframe encode plan before provider I/O', () => {
+    const shouldReencodeExactMatroskaH264 = loadGatewayFunction(
+        'shouldReencodeExactMatroskaH264',
+        'multiAudioProfileAssessment',
+        {
+            asRecord: gatewayGlobals.asRecord,
+            normalizeCodecToken: gatewayGlobals.normalizeCodecToken,
+            EXACT_MATROSKA_H264_MAX_WIDTH: 1_920,
+            EXACT_MATROSKA_H264_MAX_HEIGHT: 1_080,
+            EXACT_MATROSKA_H264_MAX_PIXELS: 1_920 * 1_080,
+            isLiveSession: (session) => ['live', 'channel'].includes(
+                String(session?.playbackHint?.streamType || '').toLowerCase(),
+            ),
+        },
+    );
+    const exactMkvH264 = {
+        sourceUrl: 'https://provider.example/movie/account/file.mkv',
+        codecProfileSource: 'request',
+        playbackHint: { streamType: 'movie' },
+        codecProfile: {
+            videoCodec: 'h264',
+            videoWidth: 1_920,
+            videoHeight: 1_080,
+            audioCodec: 'aac',
+            audioTracks: [{ index: 1, codec: 'aac', channels: 2 }],
+            subtitles: [],
+            container: 'matroska,webm',
+            durationSeconds: 7_200,
+            probeSource: 'gateway_probe',
+            probedAt: '2026-08-15T00:00:00.000Z',
+        },
+    };
+
+    assert.strictEqual(shouldReencodeExactMatroskaH264(exactMkvH264), true);
+    assert.strictEqual(shouldReencodeExactMatroskaH264({
+        ...exactMkvH264,
+        codecProfileSource: 'gateway_probe',
+    }), false, 'a decision made only after Gateway ffprobe is too late for the no-extra-provider-connection invariant');
+    assert.strictEqual(shouldReencodeExactMatroskaH264({
+        ...exactMkvH264,
+        codecProfile: { ...exactMkvH264.codecProfile, probeSource: null },
+    }), false, 'an unproven client hint must not force an expensive encode');
+    assert.strictEqual(shouldReencodeExactMatroskaH264({
+        ...exactMkvH264,
+        codecProfile: { ...exactMkvH264.codecProfile, audioTracks: undefined },
+    }), false, 'a partial profile must stay on the existing conservative route');
+    assert.strictEqual(shouldReencodeExactMatroskaH264({
+        ...exactMkvH264,
+        playbackHint: { streamType: 'live' },
+    }), false, 'live streams are excluded');
+    assert.strictEqual(shouldReencodeExactMatroskaH264({
+        ...exactMkvH264,
+        codecProfile: { ...exactMkvH264.codecProfile, videoCodec: 'hevc' },
+    }), false, 'HEVC already follows the ordinary video-transcode path');
+    assert.strictEqual(shouldReencodeExactMatroskaH264({
+        ...exactMkvH264,
+        codecProfile: { ...exactMkvH264.codecProfile, container: 'mov,mp4,m4a,3gp,3g2,mj2' },
+    }), false, 'MP4 remains on its existing route');
+    assert.strictEqual(shouldReencodeExactMatroskaH264({
+        ...exactMkvH264,
+        codecProfile: { ...exactMkvH264.codecProfile, videoWidth: 3_840, videoHeight: 2_160 },
+    }), false, '4K must not enter the CPU-expensive route without a dedicated capacity proof');
+    assert.strictEqual(shouldReencodeExactMatroskaH264({
+        ...exactMkvH264,
+        codecProfile: { ...exactMkvH264.codecProfile, videoWidth: undefined },
+    }), false, 'unknown dimensions fail closed instead of risking an unbounded encode');
+
+    const source = readGateway();
+    const decision = source.indexOf('const forceExactMatroskaH264Reencode = shouldReencodeExactMatroskaH264(');
+    const providerProbe = source.indexOf('const probedCodecProfile = await probeCodecProfile(');
+    const providerFfmpeg = source.indexOf('const started = await startSessionWithProviderRetry(');
+    assert.ok(decision >= 0 && decision < providerProbe && decision < providerFfmpeg,
+        'the exact-profile route must be frozen before ffprobe or FFmpeg can connect to the provider');
+    const initialFiniteMkv = source.indexOf('const finiteMkvPlaybackAtRequest = isFiniteMkvVodSession(');
+    const effectiveFiniteMkv = source.indexOf('finiteMkvPlayback = isFiniteMkvVodSession(', initialFiniteMkv + 1);
+    assert.ok(initialFiniteMkv > decision && initialFiniteMkv < providerProbe,
+        'the declared finite-MKV lane must be known before any provider probe');
+    assert.ok(effectiveFiniteMkv > providerProbe && effectiveFiniteMkv < providerFfmpeg,
+        'cache/in-band Matroska evidence must be applied before mode selection and FFmpeg startup');
+});
+
+test('exact Matroska H264 uses independent 2s HLS segments with forced keyframes and no split-by-time', () => {
+    const source = readGateway();
+
+    assert.match(source, /const GATEWAY_VERSION = 93;/);
+    assert.match(source, /exactMatroskaH264ReencodeProtocol:\s*1/);
+    assert.match(source, /exactMatroskaH264HlsTargetSeconds:\s*EXACT_MATROSKA_H264_HLS_TARGET_SECONDS/);
+    assert.match(source, /exactMatroskaH264MaxPixels:\s*EXACT_MATROSKA_H264_MAX_PIXELS/);
+    assert.match(source, /forceExactMatroskaH264Reencode[\s\S]*'-force_key_frames',\s*`expr:gte\(t,n_forced\*\$\{EXACT_MATROSKA_H264_HLS_TARGET_SECONDS\}\)`/);
+    assert.match(source, /'-hls_time',\s*String\(session\.hlsTargetSeconds\s*\|\|\s*4\)/);
+    assert.match(source, /'-hls_flags',\s*'independent_segments\+temp_file'/);
+    assert.doesNotMatch(source, /split_by_time/);
 });
 
 test('the first provider 458 seen by ffprobe is terminal while proxy 407 stays infrastructure', () => {

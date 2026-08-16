@@ -3,8 +3,10 @@ const fs = require('fs');
 const fsp = require('fs/promises');
 const os = require('os');
 const path = require('path');
+const http = require('http');
 const { spawn, spawnSync } = require('child_process');
 const express = require('express');
+const { request: undiciRequest } = require('undici');
 const { parseWhisperLid, runWhisperDetectOnly } = require('./whisper-lid');
 const {
     classifyProviderFetchFailure,
@@ -14,9 +16,10 @@ const {
 } = require('./providerFailure');
 const {
     parseProviderProxyUrls,
+    parseProviderProxySlotOverrides,
     providerAccountAffinityKey,
     providerAccountAffinityKeyFromCredentials,
-    stableProxySlotIndex,
+    proxySlotIndexForAccount,
 } = require('./providerProxyPool');
 
 const app = express();
@@ -29,6 +32,9 @@ const app = express();
 //   PROVIDER_PROXY_URLS  comma/space/newline-separated list of proxy URLs
 //                        (e.g. http://user:pass@host:port). Used as a POOL.
 //   PROVIDER_PROXY_URL   single URL (back-compat fallback when the plural is absent).
+//   PROVIDER_PROXY_SLOT_OVERRIDES  optional service-only JSON map whose keys are
+//                        sha256(provider-account) and whose values are slots 1..5.
+//                        Used only for bounded operator A/B and emergency egress repair.
 //
 // Each provider ACCOUNT is pinned to ONE pool IP (sticky by the canonical provider
 // host+username identity). The Norva user id is deliberately never part of proxy affinity:
@@ -40,6 +46,10 @@ const app = express();
 // Secrets live in env only — never commit them.
 const providerProxyUrls = parseProviderProxyUrls(
     process.env.PROVIDER_PROXY_URLS || process.env.PROVIDER_PROXY_URL || '',
+);
+const providerProxySlotOverrides = parseProviderProxySlotOverrides(
+    process.env.PROVIDER_PROXY_SLOT_OVERRIDES || '',
+    providerProxyUrls.length,
 );
 let providerProxyAgents = [];
 if (providerProxyUrls.length) {
@@ -60,12 +70,46 @@ if (providerProxyUrls.length) {
 // FNV-1a hash → stable index into the pool for a given key (same key → same IP).
 function poolIndexForKey(key) {
     if (providerProxyAgents.length <= 1) return 0;
-    return stableProxySlotIndex(key, providerProxyAgents.length);
+    return proxySlotIndexForAccount(key, providerProxyAgents.length, providerProxySlotOverrides);
 }
 // Per-account sticky key from a provider stream URL: host + the username path segment
 // (Xtream: /movie|series|live/USER/PASS/ID.ext → USER), falling back to the host.
 function proxyKeyFromUrl(url) {
     return providerAccountAffinityKey(url);
+}
+// Sticky proxy affinity is not, by itself, a safe destructive account identity:
+// host + username can be imitated by an opaque M3U URL and different tenants can
+// legitimately share that host. A cross-owner slot is therefore recognized only
+// from the complete Xtream capability (host + username + password), held as a
+// one-way hash. Every other URL is scoped by the Edge-derived owner hash.
+function providerSlotKeyFromUrl(url, ownerKey = '') {
+    let parsed;
+    try {
+        parsed = new URL(url);
+    } catch (_) {
+        return `source:${sha256Hex(String(url || ''))}`;
+    }
+    const host = parsed.host.toLowerCase();
+    let username = String(parsed.searchParams.get('username') || '').trim();
+    let password = String(parsed.searchParams.get('password') || '').trim();
+    if (!username || !password) {
+        const segments = parsed.pathname.split('/').filter(Boolean);
+        const streamTypeIndex = segments.findIndex((segment) =>
+            ['movie', 'series', 'live'].includes(String(segment || '').toLowerCase()));
+        if (streamTypeIndex >= 0 && segments[streamTypeIndex + 1] && segments[streamTypeIndex + 2]) {
+            const decoded = (value) => {
+                try { return decodeURIComponent(value); } catch (_) { return String(value || ''); }
+            };
+            username = decoded(segments[streamTypeIndex + 1]).trim();
+            password = decoded(segments[streamTypeIndex + 2]).trim();
+        }
+    }
+    if (host && username && password) {
+        return `account:${sha256Hex(`${host}\0${username}\0${password}`)}`;
+    }
+    const normalizedOwnerKey = normalizeSessionKey(ownerKey);
+    if (normalizedOwnerKey) return `owner:${normalizedOwnerKey}/${host}`;
+    return `source:${sha256Hex(String(url || ''))}`;
 }
 function providerAccountKeyFromCredentials(serverUrl, username) {
     return providerAccountAffinityKeyFromCredentials(serverUrl, username);
@@ -77,10 +121,268 @@ function providerAccountKeyFromCredentials(serverUrl, username) {
 // exactly what keeps a single-slot provider answering 458), a conflicting transcode
 // start aborts them all, and the relay's session coordinator can evict them
 // cross-device via DELETE /raw-pumps (keyed by sha256(userId) — no credentials).
-const rawPumps = new Set(); // { ac, sid, proxyKey, ownerHash }
+const rawPumps = new Set(); // { ac, sid, proxyKey, providerSlotKey, ownerHash }
+// A transcode request performs asynchronous teardown and codec probing before it can
+// register its session. Reserve viewer priority across that whole window so a
+// service/pregen job cannot win the spawn race and consume the single replica's CPU.
+const viewerStartupReservations = new Set();
+// Viewer session creation itself is serialized per provider account. Without
+// this short lock, two concurrent POST /sessions calls can both finish teardown
+// and open their size/codec probes before either has inserted a session.
+const viewerSessionStartupLocks = new Map(); // key -> { held, waiters[] }
+const viewerSessionStartupAdmissions = new Set();
+const viewerSessionStartupAdmissionCounts = new Map();
+const viewerSessionStartupAdmissionStats = {
+    accepted: 0,
+    rejected: 0,
+    aborted: 0,
+};
+function reserveViewerStartup() {
+    const token = Symbol('viewer-startup');
+    viewerStartupReservations.add(token);
+    return token;
+}
+function releaseViewerStartup(token) {
+    if (!token || !viewerStartupReservations.delete(token)) return;
+    wakePlaybackBlockedQueues();
+}
+function viewerSessionStartupError(code, message) {
+    const error = new Error(message);
+    error.code = code;
+    return error;
+}
+function tryAdmitViewerSessionStartup(ownerKey, providerKey) {
+    const keys = [
+        providerKey ? `provider:${providerKey}` : '',
+        ownerKey ? `owner:${ownerKey}` : '',
+    ].filter(Boolean);
+    if (
+        viewerSessionStartupAdmissions.size >= MAX_VIEWER_SESSION_STARTUP_ADMISSIONS
+        || keys.some((key) => (
+            Number(viewerSessionStartupAdmissionCounts.get(key) || 0)
+            >= MAX_VIEWER_SESSION_STARTUPS_PER_KEY
+        ))
+    ) {
+        viewerSessionStartupAdmissionStats.rejected += 1;
+        return null;
+    }
+    const token = { keys, released: false };
+    viewerSessionStartupAdmissions.add(token);
+    for (const key of keys) {
+        viewerSessionStartupAdmissionCounts.set(
+            key,
+            Number(viewerSessionStartupAdmissionCounts.get(key) || 0) + 1,
+        );
+    }
+    viewerSessionStartupAdmissionStats.accepted += 1;
+    return token;
+}
+function releaseViewerSessionStartupAdmission(token) {
+    if (!token || token.released) return;
+    token.released = true;
+    viewerSessionStartupAdmissions.delete(token);
+    for (const key of token.keys || []) {
+        const next = Math.max(0, Number(viewerSessionStartupAdmissionCounts.get(key) || 0) - 1);
+        if (next) viewerSessionStartupAdmissionCounts.set(key, next);
+        else viewerSessionStartupAdmissionCounts.delete(key);
+    }
+}
+function createViewerSessionStartupLockRelease(key, state) {
+    let released = false;
+    return () => {
+        if (released) return;
+        released = true;
+        const next = state.waiters.shift();
+        if (next) {
+            next.detach();
+            next.resolve(createViewerSessionStartupLockRelease(key, state));
+            return;
+        }
+        state.held = false;
+        if (viewerSessionStartupLocks.get(key) === state) viewerSessionStartupLocks.delete(key);
+    };
+}
+function acquireViewerSessionStartupLock(key, signal = null) {
+    if (!key) return Promise.resolve(() => {});
+    if (signal?.aborted) {
+        return Promise.reject(viewerSessionStartupError(
+            'VIEWER_STARTUP_ABORTED',
+            'Viewer session startup was aborted while waiting for admission',
+        ));
+    }
+    let state = viewerSessionStartupLocks.get(key);
+    if (!state) {
+        state = { held: true, waiters: [] };
+        // This synchronous map insertion is the /raw exclusion boundary.
+        viewerSessionStartupLocks.set(key, state);
+        return Promise.resolve(createViewerSessionStartupLockRelease(key, state));
+    }
+    if (state.waiters.length >= MAX_VIEWER_SESSION_STARTUPS_PER_KEY - 1) {
+        return Promise.reject(viewerSessionStartupError(
+            'VIEWER_STARTUP_BUSY',
+            'Viewer session startup queue is full',
+        ));
+    }
+    return new Promise((resolve, reject) => {
+        const waiter = {
+            resolve,
+            reject,
+            onAbort: null,
+            detach() {
+                signal?.removeEventListener?.('abort', waiter.onAbort);
+            },
+        };
+        waiter.onAbort = () => {
+            const index = state.waiters.indexOf(waiter);
+            if (index >= 0) state.waiters.splice(index, 1);
+            waiter.detach();
+            viewerSessionStartupAdmissionStats.aborted += 1;
+            reject(viewerSessionStartupError(
+                'VIEWER_STARTUP_ABORTED',
+                'Viewer session startup was aborted while waiting for a lock',
+            ));
+        };
+        state.waiters.push(waiter);
+        signal?.addEventListener?.('abort', waiter.onAbort, { once: true });
+    });
+}
+async function acquireViewerSessionStartupLocks(ownerKey, providerKey, signal = null) {
+    const releases = [];
+    try {
+        // Reserve the provider synchronously before the first await. /raw checks
+        // this map before opening its socket, so an owner-lock wait must not leave
+        // a gap in which the old Engine lane can reclaim the mono-account slot.
+        // Every caller uses the same provider -> owner order, so the two-key
+        // serialization cannot form a lock cycle.
+        const providerRelease = providerKey
+            ? acquireViewerSessionStartupLock(`provider:${providerKey}`, signal)
+            : null;
+        if (providerRelease) releases.push(await providerRelease);
+        if (ownerKey) releases.push(await acquireViewerSessionStartupLock(`owner:${ownerKey}`, signal));
+    } catch (error) {
+        for (const release of releases.reverse()) release();
+        throw error;
+    }
+    let released = false;
+    return () => {
+        if (released) return;
+        released = true;
+        for (const release of releases.reverse()) release();
+    };
+}
 
 function sha256Hex(value) {
     return crypto.createHash('sha256').update(String(value || '')).digest('hex');
+}
+const activeViewerSubtitleOperations = new Set(); // provider-account keys
+const activeViewerSubtitlePrincipals = new Set(); // hashed uid (one active operation across sources)
+const queuedViewerSubtitlePrincipals = new Set(); // hashed uid (one bounded waiter per subscriber)
+const viewerSubtitleWaitQueue = []; // FIFO waiters; oldest eligible principal wins
+const viewerSubtitleRateWindows = new Map(); // hashed uid -> recent admitted request timestamps
+function viewerSubtitlePrincipalKey(claims) {
+    // Current playback capabilities always carry uid. Collapse legacy/malformed
+    // signed capabilities into one conservative bucket instead of letting a
+    // missing uid create unlimited per-source principals.
+    return sha256Hex(`viewer-subtitle|${String(claims?.uid || 'legacy')}`);
+}
+function createViewerSubtitleOperation(proxyKey, principalKey) {
+    activeViewerSubtitleOperations.add(proxyKey);
+    activeViewerSubtitlePrincipals.add(principalKey);
+    let released = false;
+    return {
+        ok: true,
+        proxyKey,
+        principalKey,
+        release() {
+            if (released) return;
+            released = true;
+            activeViewerSubtitleOperations.delete(proxyKey);
+            activeViewerSubtitlePrincipals.delete(principalKey);
+            drainViewerSubtitleWaitQueue();
+        },
+    };
+}
+function viewerSubtitleSlotAvailable(proxyKey, principalKey) {
+    return (
+        activeViewerSubtitleOperations.size < MAX_ACTIVE_VIEWER_SUBTITLE_OPERATIONS
+        && !activeViewerSubtitleOperations.has(proxyKey)
+        && !activeViewerSubtitlePrincipals.has(principalKey)
+    );
+}
+function drainViewerSubtitleWaitQueue() {
+    while (
+        viewerSubtitleWaitQueue.length
+        && activeViewerSubtitleOperations.size < MAX_ACTIVE_VIEWER_SUBTITLE_OPERATIONS
+    ) {
+        const index = viewerSubtitleWaitQueue.findIndex((waiter) =>
+            viewerSubtitleSlotAvailable(waiter.proxyKey, waiter.principalKey));
+        if (index < 0) return;
+        const waiter = viewerSubtitleWaitQueue[index];
+        waiter.finish(createViewerSubtitleOperation(waiter.proxyKey, waiter.principalKey));
+    }
+}
+async function reserveViewerSubtitleOperation(claims, response) {
+    const proxyKey = proxyKeyFromUrl(claims?.url || '');
+    if (!proxyKey) return { ok: false, reason: 'invalid_source' };
+    const principalKey = viewerSubtitlePrincipalKey(claims);
+    const now = Date.now();
+    const cutoff = now - 60_000;
+    if (viewerSubtitleRateWindows.size > 1_000) {
+        for (const [key, timestamps] of viewerSubtitleRateWindows) {
+            const fresh = timestamps.filter((value) => value >= cutoff);
+            if (fresh.length) viewerSubtitleRateWindows.set(key, fresh);
+            else viewerSubtitleRateWindows.delete(key);
+        }
+    }
+    const timestamps = (viewerSubtitleRateWindows.get(principalKey) || [])
+        .filter((value) => value >= cutoff);
+    if (timestamps.length >= MAX_VIEWER_SUBTITLE_REQUESTS_PER_MINUTE) {
+        viewerSubtitleRateWindows.set(principalKey, timestamps);
+        return { ok: false, reason: 'rate_limited' };
+    }
+    if (activeViewerSubtitlePrincipals.has(principalKey) || queuedViewerSubtitlePrincipals.has(principalKey)) {
+        return { ok: false, reason: 'busy' };
+    }
+    timestamps.push(now);
+    viewerSubtitleRateWindows.set(principalKey, timestamps);
+    if (!viewerSubtitleWaitQueue.length && viewerSubtitleSlotAvailable(proxyKey, principalKey)) {
+        return createViewerSubtitleOperation(proxyKey, principalKey);
+    }
+    if (viewerSubtitleWaitQueue.length >= MAX_PENDING_VIEWER_SUBTITLE_OPERATIONS) {
+        return { ok: false, reason: 'busy' };
+    }
+    return await new Promise((resolve) => {
+        let settled = false;
+        const waiter = {
+            proxyKey,
+            principalKey,
+            timer: null,
+            onClose: null,
+            finish(result) {
+                if (settled) return;
+                settled = true;
+                if (waiter.timer) clearTimeout(waiter.timer);
+                if (waiter.onClose) response?.removeListener?.('close', waiter.onClose);
+                const index = viewerSubtitleWaitQueue.indexOf(waiter);
+                if (index >= 0) viewerSubtitleWaitQueue.splice(index, 1);
+                queuedViewerSubtitlePrincipals.delete(principalKey);
+                resolve(result);
+            },
+        };
+        waiter.onClose = () => {
+            if (!response?.writableEnded) waiter.finish({ ok: false, reason: 'client_closed' });
+        };
+        waiter.timer = setTimeout(
+            () => waiter.finish({ ok: false, reason: 'busy' }),
+            VIEWER_SUBTITLE_QUEUE_WAIT_MS,
+        );
+        queuedViewerSubtitlePrincipals.add(principalKey);
+        viewerSubtitleWaitQueue.push(waiter);
+        response?.once?.('close', waiter.onClose);
+        // Capacity may have become available between the earlier check and the
+        // enqueue. Drain after registration to close that lost-wake window.
+        drainViewerSubtitleWaitQueue();
+    });
 }
 function registerRawPump(entry) {
     rawPumps.add(entry);
@@ -88,6 +390,7 @@ function registerRawPump(entry) {
 }
 function releaseRawPump(entry) {
     rawPumps.delete(entry);
+    wakePlaybackBlockedQueues();
 }
 // Abort pumps matching `filter`, sparing `keepSid` (legitimate concurrent range
 // reads within the SAME playback session must survive).
@@ -110,14 +413,29 @@ function abortRawPumps(filter, keepSid, reason) {
 // account preempts them: the viewer outranks any background job, and on a single-slot panel the
 // two connections otherwise fight for minutes (the viewer eats 458s while the extraction reads
 // the whole film). Preempted jobs re-queue as 'deferred' — they resume once the viewer stops.
-const accountExtractions = new Map(); // proxyKey -> Set<{ child, preempted, reportActivity }>
-function registerAccountExtraction(proxyKey, child, reportActivity = true) {
-    const entry = { child, preempted: false, reportActivity };
+const accountExtractions = new Map(); // proxyKey -> Set<{ child, preempted, reportActivity, globalPreemptible }>
+function preemptExtractionEntry(entry) {
+    if (!entry || entry.preempted) return 0;
+    entry.preempted = true;
+    try { entry.child.kill('SIGKILL'); } catch (_) { /* already gone */ }
+    return 1;
+}
+function registerAccountExtraction(proxyKey, child, reportActivity = true, globalPreemptible = true) {
+    const entry = { child, preempted: false, reportActivity, globalPreemptible: globalPreemptible !== false };
     if (!proxyKey) return entry;
     let set = accountExtractions.get(proxyKey);
     if (!set) { set = new Set(); accountExtractions.set(proxyKey, set); }
     set.add(entry);
     entry.release = () => { set.delete(entry); if (!set.size) accountExtractions.delete(proxyKey); };
+    // The queue may have selected this job immediately before a viewer reserved
+    // startup. Registration is the last synchronous boundary before provider I/O;
+    // close that ordering without affecting explicit viewer-origin jobs.
+    if (entry.globalPreemptible && viewerPlaybackActiveLocally()) {
+        if (preemptExtractionEntry(entry)) {
+            viewerQosStats.globalExtractionPreemptions += 1;
+            console.log('[media-gateway] preempted background extraction — viewer playback won spawn race');
+        }
+    }
     return entry;
 }
 function preemptAccountExtractions(proxyKey, reason) {
@@ -125,11 +443,21 @@ function preemptAccountExtractions(proxyKey, reason) {
     if (!set || !set.size) return 0;
     let n = 0;
     for (const entry of [...set]) {
-        entry.preempted = true;
-        try { entry.child.kill('SIGKILL'); } catch (_) { /* already gone */ }
-        n += 1;
+        n += preemptExtractionEntry(entry);
     }
     if (n) console.log(`[media-gateway] preempted ${n} background extraction(s) — ${reason}`);
+    return n;
+}
+function preemptBackgroundExtractionsGlobally(exceptProxyKey, reason) {
+    let n = 0;
+    for (const [proxyKey, set] of accountExtractions) {
+        if (exceptProxyKey && proxyKey === exceptProxyKey) continue;
+        for (const entry of [...set]) {
+            if (entry.globalPreemptible === false) continue;
+            n += preemptExtractionEntry(entry);
+        }
+    }
+    if (n) console.log(`[media-gateway] preempted ${n} global background extraction(s) — ${reason}`);
     return n;
 }
 
@@ -168,6 +496,72 @@ function preemptAccountBackgroundWhispers(proxyKey, reason) {
     }
     return n;
 }
+function preemptBackgroundWhispersGlobally(exceptProxyKey, reason) {
+    let n = 0;
+    for (const [proxyKey, set] of accountBackgroundWhispers) {
+        if (exceptProxyKey && proxyKey === exceptProxyKey) continue;
+        for (const entry of [...set]) {
+            if (entry.preempted) continue;
+            entry.preempted = true;
+            try { entry.child.kill('SIGKILL'); } catch (_) { /* already gone */ }
+            n += 1;
+        }
+    }
+    if (n) {
+        backgroundWhisperPreemptions += n;
+        console.log(`[media-gateway] preempted ${n} global background whisper inference(s) — ${reason}`);
+    }
+    return n;
+}
+const viewerQosStats = {
+    globalExtractionPreemptions: 0,
+    globalWhisperPreemptions: 0,
+    globalCpuPreemptions: 0,
+};
+const backgroundCpuProcesses = new Set(); // service/pregen OCR subprocesses
+function killBackgroundProcessTree(child) {
+    if (!child) return;
+    if (process.platform !== 'win32' && Number.isInteger(child.pid) && child.pid > 0) {
+        try {
+            process.kill(-child.pid, 'SIGKILL');
+            return;
+        } catch (_) { /* fall back to the direct child */ }
+    }
+    try { child.kill('SIGKILL'); } catch (_) { /* already gone */ }
+}
+function preemptBackgroundCpuEntry(entry) {
+    if (!entry || entry.preempted || entry.globalPreemptible === false) return 0;
+    entry.preempted = true;
+    killBackgroundProcessTree(entry.child);
+    return 1;
+}
+function registerBackgroundCpuProcess(child, globalPreemptible = true) {
+    const entry = { child, preempted: false, globalPreemptible: globalPreemptible !== false };
+    if (!child || entry.globalPreemptible === false) return entry;
+    backgroundCpuProcesses.add(entry);
+    entry.release = () => backgroundCpuProcesses.delete(entry);
+    if (viewerPlaybackActiveLocally()) {
+        if (preemptBackgroundCpuEntry(entry)) viewerQosStats.globalCpuPreemptions += 1;
+    } else {
+        lowerBackgroundProcessPriority(child);
+    }
+    return entry;
+}
+function preemptBackgroundCpuGlobally(reason) {
+    let n = 0;
+    for (const entry of [...backgroundCpuProcesses]) n += preemptBackgroundCpuEntry(entry);
+    if (n) console.log(`[media-gateway] preempted ${n} global background CPU process(es) — ${reason}`);
+    return n;
+}
+function preemptBackgroundWorkGlobally(exceptProxyKey, reason) {
+    const extractions = preemptBackgroundExtractionsGlobally(exceptProxyKey, reason);
+    const whispers = preemptBackgroundWhispersGlobally(exceptProxyKey, reason);
+    const cpu = preemptBackgroundCpuGlobally(reason);
+    viewerQosStats.globalExtractionPreemptions += extractions;
+    viewerQosStats.globalWhisperPreemptions += whispers;
+    viewerQosStats.globalCpuPreemptions += cpu;
+    return { extractions, whispers, cpu };
+}
 function backgroundWhisperCount() {
     let count = 0;
     for (const set of accountBackgroundWhispers.values()) count += set.size;
@@ -189,8 +583,9 @@ function registerPreemptibleBackgroundWhisper(proxyKey, child) {
     // Register first, then re-check synchronously. This closes both orderings around spawn:
     // playback may already have preempted before it could see this child, or it may start later
     // and find the child in the registry during its normal preemption pass.
-    if (proxyKey && accountKeyBusyLocally(proxyKey)) {
-        preemptAccountBackgroundWhispers(proxyKey, 'viewer playback won whisper spawn race');
+    if (proxyKey && viewerPlaybackActiveLocally()) {
+        const preempted = preemptAccountBackgroundWhispers(proxyKey, 'viewer playback won whisper spawn race');
+        viewerQosStats.globalWhisperPreemptions += preempted;
         return registration;
     }
     lowerBackgroundProcessPriority(child);
@@ -207,8 +602,29 @@ function accountKeyBusyLocally(key) {
     for (const p of rawPumps) { if (p && p.proxyKey === key) return true; }
     return false;
 }
-function accountSlotBusyLocally(url) {
+function accountSlotBusyLocally(url, ownerKey = '') {
+    const providerSlotKey = providerSlotKeyFromUrl(url || '', ownerKey);
+    if (providerSlotKey && viewerSessionStartupLocks.has(`provider:${providerSlotKey}`)) return true;
     return accountKeyBusyLocally(proxyKeyFromUrl(url || ''));
+}
+function providerSlotKeyForSession(session) {
+    if (!session) return '';
+    return session.providerSlotKey
+        || providerSlotKeyFromUrl(session.sourceUrl || '', session.ownerKey || '');
+}
+function providerSessionBlocksRawOpening(providerSlotKey) {
+    if (!providerSlotKey) return false;
+    if (viewerSessionStartupLocks.has(`provider:${providerSlotKey}`)) return true;
+    return Array.from(sessions.values()).some((session) => (
+        session?.sourceUrl &&
+        providerSlotKeyForSession(session) === providerSlotKey &&
+        isSessionBlockingProviderSlot(session)
+    ));
+}
+function viewerPlaybackActiveLocally() {
+    return viewerStartupReservations.size > 0
+        || rawPumps.size > 0
+        || Array.from(sessions.values()).some((session) => isSessionBlockingProviderSlot(session));
 }
 
 function pickProxyAgent(key) {
@@ -219,6 +635,25 @@ function proxyEnvFor(key) {
     if (!providerProxyAgents.length) return undefined;
     const url = providerProxyUrls[poolIndexForKey(key)];
     return { ...process.env, http_proxy: url, https_proxy: url, HTTP_PROXY: url, HTTPS_PROXY: url };
+}
+// A strict LID ffmpeg reads only the private 127.0.0.1 broker. Explicitly remove every
+// inherited proxy variable so libav cannot send that loopback capability through a
+// residential proxy. The broker itself owns the provider's sticky dispatcher.
+function loopbackOnlyEnv() {
+    const env = { ...process.env };
+    for (const key of [
+        'http_proxy', 'https_proxy', 'HTTP_PROXY', 'HTTPS_PROXY',
+        'all_proxy', 'ALL_PROXY',
+    ]) delete env[key];
+    env.NO_PROXY = '127.0.0.1,localhost,::1';
+    env.no_proxy = env.NO_PROXY;
+    return env;
+}
+function redactStrictLidLoopback(value) {
+    return String(value || '').replace(
+        /https?:\/\/(?:127\.0\.0\.1|localhost|\[::1\]):\d+\/strict-lid\/[A-Za-z0-9_-]+/gi,
+        '[strict-lid-loopback]',
+    );
 }
 // Xtream URLs embed credentials in the path (/movie/USER/PASS/id.ext) and in query params
 // (username=…&password=…). Any error string that may quote a provider URL (ffmpeg stderr)
@@ -254,6 +689,21 @@ const DEFAULT_TTL_SECONDS = clampInt(process.env.SESSION_TTL_SECONDS, 30 * 60, 6
 // byte 0, so far resumes need a longer startup budget than a normal stream.
 const STARTUP_TIMEOUT_MS = clampInt(process.env.STARTUP_TIMEOUT_MS, 60_000, 5_000, 180_000);
 const PLAYLIST_REQUEST_TIMEOUT_MS = clampInt(process.env.PLAYLIST_REQUEST_TIMEOUT_MS, 45_000, 5_000, 180_000);
+// Bound startup work before allocating provider/owner lock waiters. The global
+// ceiling protects the shared replica even when one owner fans out across many
+// source hosts; the per-key ceiling bounds one mono-account handoff chain.
+const MAX_VIEWER_SESSION_STARTUP_ADMISSIONS = clampInt(
+    process.env.MAX_VIEWER_SESSION_STARTUP_ADMISSIONS,
+    32,
+    1,
+    256,
+);
+const MAX_VIEWER_SESSION_STARTUPS_PER_KEY = clampInt(
+    process.env.MAX_VIEWER_SESSION_STARTUPS_PER_KEY,
+    4,
+    1,
+    32,
+);
 const XTREAM_REQUEST_TIMEOUT_MS = clampInt(process.env.XTREAM_REQUEST_TIMEOUT_MS, 15_000, 5_000, 60_000);
 const CODEC_PROBE_TIMEOUT_MS = clampInt(process.env.CODEC_PROBE_TIMEOUT_MS, 12_000, 1_000, 30_000);
 const CODEC_PROBE_ANALYZE_DURATION_US = clampInt(process.env.CODEC_PROBE_ANALYZE_DURATION_US, 2_000_000, 250_000, 20_000_000);
@@ -273,7 +723,16 @@ const CODEC_PROFILE_CACHE_MAX = clampInt(process.env.CODEC_PROFILE_CACHE_MAX, 5_
 // front); falls back to the provider probe when the local bytes don't parse (e.g. an
 // MP4 with moov at the end). Memory is bounded by bytes/entry × entries.
 const INBAND_HEADER_PARSE = (process.env.INBAND_HEADER_PARSE || 'false') === 'true';
+// The finite-MKV pump is already the sole provider socket and can safely tee its
+// prefix. Keep this independent from the older /raw experiment so exact playback
+// metadata works by default without enabling capture on every raw byte-pipe.
+const BOUNDED_MKV_HEADER_PARSE = (process.env.BOUNDED_MKV_HEADER_PARSE || 'true') !== 'false';
 const INBAND_HEADER_BYTES = clampInt(process.env.INBAND_HEADER_BYTES, 4_000_000, 256_000, 32_000_000);
+// A valid Matroska file normally exposes Info and Tracks within a handful of
+// top-level Segment elements. Bound the synchronous structural walk so a file
+// padded with millions of tiny Void elements cannot monopolize the Node event
+// loop before the local ffprobe result is accepted.
+const MAX_MATROSKA_METADATA_ELEMENTS = 4_096;
 const INBAND_HEADER_CACHE_MAX = clampInt(process.env.INBAND_HEADER_CACHE_MAX, 16, 0, 256);
 const INBAND_HEADER_TTL_MS = clampInt(process.env.INBAND_HEADER_TTL_MS, 5 * 60 * 1000, 0, 60 * 60 * 1000);
 // whisper.cpp audio-track language detection (Phase 2, self-hosted / free). Unset WHISPER_BIN
@@ -310,6 +769,13 @@ const WHISPER_DETECT_ONLY_MIN_PROBABILITY = Math.min(
 );
 const LID_DETECT_ONLY_SCOPE = 'lid-production-detect-only';
 const LID_SHADOW_SCOPE = 'lid-shadow';
+const LID_LEGACY_FULL_SCOPE = 'lid-legacy-full';
+const LID_CAPABILITY_HEADER = 'x-norva-byte-pipe-token';
+const LID_ROUTE_SCOPES = new Set([
+    LID_DETECT_ONLY_SCOPE,
+    LID_SHADOW_SCOPE,
+    LID_LEGACY_FULL_SCOPE,
+]);
 const LID_CASCADE_WAV_SCOPES = new Set([
     'lid-cascade-shadow-v1',
     'lid-cascade-untagged-canary-v1',
@@ -386,6 +852,16 @@ const WHISPER_STRICT_MIN_UNIQUE_WORDS = clampInt(
     8,
     30,
 );
+function strictLanguageSampleDisposition({
+    enoughWords,
+    whisperConfident,
+    transcriptDisagrees,
+}) {
+    if (!enoughWords) return 'insufficient';
+    if (!whisperConfident) return 'weak';
+    if (transcriptDisagrees) return 'conflict';
+    return 'accepted';
+}
 // Full transcription (Phase 3) runs whisper on a whole film → much longer than the 20s LID clip.
 // This flat value is a FLOOR: the effective budget adapts to the WAV's real duration (see
 // whisperBudgetMs) because a long film at a flat 20 min was mathematically guaranteed to be
@@ -489,10 +965,29 @@ const KNOWN_VOD_INPUT_PROBE_SIZE_BYTES = clampInt(process.env.KNOWN_VOD_INPUT_PR
 // browser. In particular, a short leading fragment (~100 ms) can produce an
 // invalid/near-zero HLS target duration and leave hls.js at readyState=1. Do
 // not advertise a session until the playlist references a finalized segment
-// with a small but meaningful startup buffer.
-const MIN_HLS_STARTUP_BUFFER_SECONDS = clampInt(process.env.MIN_HLS_STARTUP_BUFFER_SECONDS, 2, 1, 10);
+// with enough finalized media to absorb the provider reconnect windows observed
+// in production. With the normal 4 s target this requires three full segments.
+// A slow one-vCPU encode must be allowed to materialize a proof-sized VOD
+// window before the browser starts consuming it. The production default stays
+// quick, while deployments that need deterministic long-window playback can
+// opt into a deeper buffer without changing the session or provider socket.
+const MIN_HLS_STARTUP_BUFFER_SECONDS = clampInt(process.env.MIN_HLS_STARTUP_BUFFER_SECONDS, 10, 1, 180);
+const MIN_HLS_STARTUP_SEGMENTS = clampInt(process.env.MIN_HLS_STARTUP_SEGMENTS, 3, 1, 10);
 const MAX_SUBTITLE_TRACKS = clampInt(process.env.MAX_SUBTITLE_TRACKS, 32, 1, 64);
+const MAX_ACTIVE_VIEWER_SUBTITLE_OPERATIONS = clampInt(process.env.MAX_ACTIVE_VIEWER_SUBTITLE_OPERATIONS, 1, 1, 4);
+const MAX_VIEWER_SUBTITLE_REQUESTS_PER_MINUTE = clampInt(process.env.MAX_VIEWER_SUBTITLE_REQUESTS_PER_MINUTE, 30, 1, 120);
+const MAX_PENDING_VIEWER_SUBTITLE_OPERATIONS = clampInt(process.env.MAX_PENDING_VIEWER_SUBTITLE_OPERATIONS, 8, 1, 32);
+const VIEWER_SUBTITLE_QUEUE_WAIT_MS = clampInt(process.env.VIEWER_SUBTITLE_QUEUE_WAIT_MS, 75_000, 5_000, 180_000);
 const PROVIDER_SLOT_RELEASE_DELAY_MS = clampInt(process.env.PROVIDER_SLOT_RELEASE_DELAY_MS, 2_500, 0, 15_000);
+// The finite-MKV input pump needs the exact terminal byte so every provider
+// request is bounded (`bytes=N-M`). A one-byte request supplies that size when
+// the exact codec profile did not already preserve ffprobe format.size.
+const VOD_FILE_SIZE_PROBE_TIMEOUT_MS = clampInt(process.env.VOD_FILE_SIZE_PROBE_TIMEOUT_MS, 8_000, 1_000, 20_000);
+const VOD_INPUT_OPEN_TIMEOUT_MS = clampInt(process.env.VOD_INPUT_OPEN_TIMEOUT_MS, 15_000, 2_000, 30_000);
+const VOD_INPUT_IDLE_TIMEOUT_MS = clampInt(process.env.VOD_INPUT_IDLE_TIMEOUT_MS, 8_000, 2_000, 30_000);
+const VOD_INPUT_RETRY_LIMIT = clampInt(process.env.VOD_INPUT_RETRY_LIMIT, 3, 0, 8);
+const VOD_INPUT_MAX_RECONNECTS = clampInt(process.env.VOD_INPUT_MAX_RECONNECTS, 1_024, 1, 4_096);
+const VOD_INPUT_RETRY_DELAYS_MS = [0, 250, 1_000, 2_500, 5_000, 5_000, 5_000, 5_000];
 const STOP_CONFLICTING_SOURCE_SESSIONS = (process.env.STOP_CONFLICTING_SOURCE_SESSIONS || 'true') !== 'false';
 const STOP_CONFLICTING_OWNER_SESSIONS = (process.env.STOP_CONFLICTING_OWNER_SESSIONS || 'true') !== 'false';
 // The in-browser byte-pipe may retry transient transport/server failures within a
@@ -514,7 +1009,13 @@ const RAW_PREFIX_SNIFF_BYTES = 512;
 const FFMPEG_USER_AGENT = process.env.FFMPEG_USER_AGENT ||
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36 Norva/1.0';
 const MAX_LOG_TAIL = 12000;
-const GATEWAY_VERSION = 83;
+const EXACT_MATROSKA_H264_HLS_TARGET_SECONDS = 2;
+const EXACT_MATROSKA_H264_MAX_WIDTH = 1920;
+const EXACT_MATROSKA_H264_MAX_HEIGHT = 1080;
+const EXACT_MATROSKA_H264_MAX_PIXELS = EXACT_MATROSKA_H264_MAX_WIDTH * EXACT_MATROSKA_H264_MAX_HEIGHT;
+const MULTI_AUDIO_HLS_PROTOCOL = 1;
+const MAX_MULTI_AUDIO_RENDITIONS = 8;
+const GATEWAY_VERSION = 93;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -593,6 +1094,14 @@ const sessionStartupStats = {
     fastInputProbeFallbacks: 0,
     last: null
 };
+const vodInputPumpStats = {
+    starts: 0,
+    reconnects: 0,
+    completed: 0,
+    failures: 0,
+    bytesForwarded: 0,
+    last: null,
+};
 
 app.disable('x-powered-by');
 app.use(express.json({ limit: '1mb' }));
@@ -614,8 +1123,39 @@ app.get('/health', (req, res) => {
         knownVodInputAnalyzeDurationUs: KNOWN_VOD_INPUT_ANALYZE_DURATION_US,
         knownVodInputProbeSizeBytes: KNOWN_VOD_INPUT_PROBE_SIZE_BYTES,
         exactFileCodecProfileProtocol: 1,
+        exactMatroskaH264ReencodeProtocol: 1,
+        exactMatroskaH264HlsTargetSeconds: EXACT_MATROSKA_H264_HLS_TARGET_SECONDS,
+        exactMatroskaH264MaxWidth: EXACT_MATROSKA_H264_MAX_WIDTH,
+        exactMatroskaH264MaxHeight: EXACT_MATROSKA_H264_MAX_HEIGHT,
+        exactMatroskaH264MaxPixels: EXACT_MATROSKA_H264_MAX_PIXELS,
+        multiAudioHls: {
+            protocol: MULTI_AUDIO_HLS_PROTOCOL,
+            maxAudioRenditions: MAX_MULTI_AUDIO_RENDITIONS,
+            active: Array.from(sessions.values()).filter((session) => (
+                session?.multiAudioHls?.enabled === true
+            )).length,
+        },
+        boundedMkvInputPumpProtocol: 1,
+        vodFileSizeProbeTimeoutMs: VOD_FILE_SIZE_PROBE_TIMEOUT_MS,
+        vodInputPump: {
+            ...vodInputPumpStats,
+            active: Array.from(sessions.values()).filter((session) => (
+                session?.inputPump && session.inputPump.completed !== true
+            )).length,
+            openTimeoutMs: VOD_INPUT_OPEN_TIMEOUT_MS,
+            idleTimeoutMs: VOD_INPUT_IDLE_TIMEOUT_MS,
+            retryLimit: VOD_INPUT_RETRY_LIMIT,
+            maxReconnects: VOD_INPUT_MAX_RECONNECTS,
+        },
         minHlsStartupBufferSeconds: MIN_HLS_STARTUP_BUFFER_SECONDS,
+        minHlsStartupSegments: MIN_HLS_STARTUP_SEGMENTS,
+        startupTimeoutMs: STARTUP_TIMEOUT_MS,
         maxSubtitleTracks: MAX_SUBTITLE_TRACKS,
+        activeViewerSubtitleOperations: activeViewerSubtitleOperations.size,
+        maxActiveViewerSubtitleOperations: MAX_ACTIVE_VIEWER_SUBTITLE_OPERATIONS,
+        pendingViewerSubtitleOperations: viewerSubtitleWaitQueue.length,
+        maxPendingViewerSubtitleOperations: MAX_PENDING_VIEWER_SUBTITLE_OPERATIONS,
+        viewerSubtitleQueueWaitMs: VIEWER_SUBTITLE_QUEUE_WAIT_MS,
         probeStats,
         rawStreamHealth: {
             ...rawStreamStats,
@@ -632,6 +1172,16 @@ app.get('/health', (req, res) => {
         },
         codecProfileCacheSize: codecProfileCache.size,
         languageDetect: Boolean(WHISPER_BIN && WHISPER_MODEL),
+        strictLidLoopbackBrokerProtocol: 1,
+        strictLidFileSizeClaim: 'fileSizeBytes',
+        strictLidHeaderCapabilityProtocol: 2,
+        strictLidProviderDrainProtocol: 1,
+        strictLidWeakFallbackProtocol: 1,
+        strictLidCapabilityHeader: 'X-Norva-Byte-Pipe-Token',
+        strictLidCapabilityMethod: 'POST',
+        strictLidServiceAuthRequired: true,
+        strictLidRequiredScope: LID_LEGACY_FULL_SCOPE,
+        strictLidProviderSlotReleaseDelayMs: PROVIDER_SLOT_RELEASE_DELAY_MS,
         languageDetectEngine: WHISPER_BIN && WHISPER_MODEL ? {
             family: 'whisper.cpp',
             model: WHISPER_MODEL_NAME,
@@ -710,6 +1260,8 @@ app.get('/health', (req, res) => {
         providerProxyPool: providerProxyAgents.length,
         providerProxyAffinityProtocol: 1,
         providerProxyAffinityKey: 'provider-account',
+        providerProxySlotOverrideProtocol: 1,
+        providerProxySlotOverrideConfigured: providerProxySlotOverrides.size > 0,
         transcribeQueueDepth: transcribeQueue.length,
         transcribeBusy,
         ocrQueueDepth: ocrQueue.length,
@@ -717,12 +1269,26 @@ app.get('/health', (req, res) => {
         translateQueueDepth: translateQueue.length,
         translateBusy,
         rawPumpCount: rawPumps.size,
+        viewerStartupReservations: viewerStartupReservations.size,
+        viewerSessionStartupAdmissions: viewerSessionStartupAdmissions.size,
+        viewerSessionStartupLockCount: viewerSessionStartupLocks.size,
+        viewerSessionStartupWaiters: Array.from(viewerSessionStartupLocks.values())
+            .reduce((sum, state) => sum + Number(state?.waiters?.length || 0), 0),
+        viewerSessionStartupAdmissionLimits: {
+            global: MAX_VIEWER_SESSION_STARTUP_ADMISSIONS,
+            perKey: MAX_VIEWER_SESSION_STARTUPS_PER_KEY,
+        },
+        viewerSessionStartupAdmissionStats: { ...viewerSessionStartupAdmissionStats },
+        viewerPlaybackActiveLocally: viewerPlaybackActiveLocally(),
+        viewerQosStats: { ...viewerQosStats },
+        backgroundCpuProcessCount: backgroundCpuProcesses.size,
         whisperInferenceActive,
         backgroundWhisperInferenceActive: backgroundWhisperCount(),
         backgroundWhisperPreemptions,
         argosInferenceActive,
         lidBenchmarkBusy,
         inbandHeaderParse: INBAND_HEADER_PARSE,
+        boundedMkvHeaderParse: BOUNDED_MKV_HEADER_PARSE,
         headerByteCacheSize: headerByteCache.size,
         activeSessions: activeSessionCount(),
         totalSessions: sessions.size,
@@ -778,9 +1344,7 @@ app.post('/xtream/epg', requireGatewayAuth, async (req, res) => {
             url,
             sanitizeUserAgent(userAgent) || FFMPEG_USER_AGENT,
             XTREAM_REQUEST_TIMEOUT_MS,
-            {
-                backgroundAccountKey: providerAccountKeyFromCredentials(serverUrl, username),
-            },
+            { backgroundAccountKey: providerAccountKeyFromCredentials(serverUrl, username) },
         );
         res.json(payload);
     } catch (err) {
@@ -817,9 +1381,7 @@ app.post('/xtream/series-info', requireGatewayAuth, async (req, res) => {
             url,
             sanitizeUserAgent(userAgent) || FFMPEG_USER_AGENT,
             XTREAM_REQUEST_TIMEOUT_MS,
-            {
-                backgroundAccountKey: providerAccountKeyFromCredentials(serverUrl, username),
-            },
+            { backgroundAccountKey: providerAccountKeyFromCredentials(serverUrl, username) },
         );
         res.json(payload);
     } catch (err) {
@@ -869,9 +1431,7 @@ app.post('/xtream/metadata', requireGatewayAuth, async (req, res) => {
             url,
             sanitizeUserAgent(userAgent) || FFMPEG_USER_AGENT,
             XTREAM_METADATA_TIMEOUT_MS,
-            {
-                backgroundAccountKey: providerAccountKeyFromCredentials(serverUrl, username),
-            },
+            { backgroundAccountKey: providerAccountKeyFromCredentials(serverUrl, username) },
         );
         res.json(payload);
     } catch (err) {
@@ -1148,6 +1708,10 @@ function isExplicitRawProviderError(text) {
     return /\b(?:user_multi_ip|maximum?\s+connections?|max[_ -]?connections?|too\s+many\s+connections?|account\s+(?:is\s+)?(?:expired|disabled|blocked)|unauthori[sz]ed|access\s+denied|forbidden|provider\s+busy)\b/i.test(text);
 }
 
+function isProviderBusyText(text) {
+    return /\b(?:user_multi_ip|maximum?\s+connections?|max[_ -]?connections?|too\s+many\s+connections?|provider[_ -]+busy)\b/i.test(String(text || ''));
+}
+
 // Returns need-more only while a short textual prefix might still become a
 // known manifest or an explicit provider error. Unknown complete text from an
 // octet-stream remains fail-open; unknown text under a textual MIME is refused.
@@ -1263,18 +1827,32 @@ app.get('/raw/:token', async (req, res) => {
     if (!claims) return res.status(401).json({ error: 'Invalid byte-pipe token' });
     if (Number(claims.exp) * 1000 < Date.now()) return res.status(401).json({ error: 'Byte-pipe token expired' });
 
+    const pumpProxyKey = proxyKeyFromUrl(claims.url);
+    const pumpOwnerHash = claims.uid ? sha256Hex(claims.uid) : null;
+    const pumpProviderSlotKey = providerSlotKeyFromUrl(claims.url, pumpOwnerHash);
+    // Check and register synchronously before the first await. If a transcode
+    // startup already owns this provider account, an old Engine /raw request
+    // must not reopen the slot between its teardown and FFmpeg spawn.
+    if (providerSessionBlocksRawOpening(pumpProviderSlotKey)) {
+        return res.status(409).json({
+            error: 'This playback request was superseded by a newer session.',
+            code: 'PLAYBACK_SUPERSEDED',
+        });
+    }
     const ac = new AbortController();
     let activeAttemptGuard = null;
     // Supersede any pump left by a PREVIOUS playback session on this account —
     // same-session concurrency (parallel range reads) is spared via claims.sid.
-    const pumpProxyKey = proxyKeyFromUrl(claims.url);
     const pump = registerRawPump({
         ac,
         sid: claims.sid || null,
         proxyKey: pumpProxyKey,
-        ownerHash: claims.uid ? sha256Hex(claims.uid) : null,
+        providerSlotKey: pumpProviderSlotKey,
+        ownerHash: pumpOwnerHash,
     });
-    let abortedForHandoff = abortRawPumps((p) => p !== pump && p.proxyKey === pumpProxyKey, claims.sid || null,
+    let abortedForHandoff = abortRawPumps(
+        (p) => p !== pump && p.providerSlotKey === pumpProviderSlotKey,
+        claims.sid || null,
         `superseded by playback ${String(claims.sid || 'unknown').slice(0, 8)}`);
     // Same rule as the transcode lane: a viewer's byte-pump outranks any background extraction
     // or CPU inference for this account (the job re-queues as deferred and resumes after the
@@ -1284,6 +1862,11 @@ app.get('/raw/:token', async (req, res) => {
     // CPU preemption does not hold a provider connection and must not trigger the provider
     // slot-release delay below.
     preemptAccountBackgroundWhispers(pumpProxyKey, rawPlaybackReason);
+    // This replica has one vCPU: service/pregen work from OTHER accounts can
+    // still starve the viewer even though it does not hold this provider slot.
+    // Keep explicit viewer-origin jobs, but preempt every registered background
+    // extraction/inference and let its queue re-run it after playback.
+    preemptBackgroundWorkGlobally(pumpProxyKey, rawPlaybackReason);
     res.on('close', () => {
         ac.abort();
         if (activeAttemptGuard) activeAttemptGuard.dispose();
@@ -1303,7 +1886,8 @@ app.get('/raw/:token', async (req, res) => {
     // so the playback edge can open the account circuit without creating a request
     // cascade. Exception: one handoff retry after we ourselves aborted the previous
     // holder. All attempts still consume the same hard wall-clock deadline.
-    const maxAttempts = 1 + RAW_PROVIDER_RETRY_LIMIT + RAW_NO_DATA_RETRY_LIMIT;
+    const maxAttempts = 1 + RAW_PROVIDER_RETRY_LIMIT + RAW_NO_DATA_RETRY_LIMIT
+        + (abortedForHandoff > 0 ? 1 : 0);
     let upstream = null;
     let sniffedBody = null; // { chunk, reader } validated before response headers are committed
     let noDataAttempts = 0;
@@ -1630,6 +2214,12 @@ app.get('/subtitle/:token', async (req, res) => {
 
     // Enumeration: ffprobe the container, return its subtitle tracks (index, lang, codec).
     if (req.query.index === undefined) {
+        const operation = await reserveViewerSubtitleOperation(claims, res);
+        if (!operation.ok) {
+            if (operation.reason === 'client_closed' || res.destroyed) return;
+            res.setHeader('Retry-After', operation.reason === 'rate_limited' ? '60' : '2');
+            return res.status(429).json({ error: 'Subtitle service is busy' });
+        }
         try {
             const profile = await probeCodecProfile(claims.url, ua);
             res.setHeader('Cache-Control', 'private, max-age=3600');
@@ -1641,6 +2231,8 @@ app.get('/subtitle/:token', async (req, res) => {
             });
         } catch (err) {
             return res.status(502).json({ error: 'Subtitle probe failed', details: String((err && err.message) || err) });
+        } finally {
+            operation.release();
         }
     }
 
@@ -1653,6 +2245,12 @@ app.get('/subtitle/:token', async (req, res) => {
     const hasStart = Number.isFinite(startOffset) && startOffset > 0;
     const windowDur = Math.min(Math.max(Number.parseFloat(req.query.dur) || 300, 1), 900);
     const outputPath = path.join(os.tmpdir(), `norva-sub-${Date.now()}-${crypto.randomUUID()}.vtt`);
+    const operation = await reserveViewerSubtitleOperation(claims, res);
+    if (!operation.ok) {
+        if (operation.reason === 'client_closed' || res.destroyed) return;
+        res.setHeader('Retry-After', operation.reason === 'rate_limited' ? '60' : '2');
+        return res.status(429).json({ error: 'Subtitle service is busy' });
+    }
 
     const args = [
         '-y', '-hide_banner', '-loglevel', 'error', '-nostdin',
@@ -1668,15 +2266,21 @@ app.get('/subtitle/:token', async (req, res) => {
 
     let child;
     try { child = spawn(FFMPEG_PATH, args, { stdio: ['ignore', 'ignore', 'pipe'], env: proxyEnvFor(proxyKeyFromUrl(claims.url)) }); }
-    catch (_) { return res.status(500).json({ error: 'Subtitle extraction failed' }); }
+    catch (_) { operation.release(); return res.status(500).json({ error: 'Subtitle extraction failed' }); }
+    const extractionRegistration = registerAccountExtraction(operation.proxyKey, child, true, false);
+    const releaseOperation = () => {
+        extractionRegistration.release?.();
+        operation.release();
+    };
     let stderr = '';
     let clientClosed = false;
     const timer = setTimeout(() => { try { child.kill('SIGKILL'); } catch (_) {} }, 30_000);
     child.stderr.on('data', (d) => { stderr += d.toString(); });
     res.on('close', () => { if (!res.writableEnded) { clientClosed = true; try { child.kill('SIGKILL'); } catch (_) {} } });
-    child.on('error', () => { clearTimeout(timer); if (!res.headersSent) res.status(500).end(); });
+    child.on('error', () => { clearTimeout(timer); releaseOperation(); if (!res.headersSent) res.status(500).end(); });
     child.on('close', async (code) => {
         clearTimeout(timer);
+        releaseOperation();
         if (clientClosed) { fsp.unlink(outputPath).catch(() => {}); return; }
         if (code !== 0) {
             console.warn(`[media-gateway] /subtitle ffmpeg exit ${code}: ${stderr.slice(-300)}`);
@@ -1737,22 +2341,718 @@ app.post('/probe-audio', requireGatewayAuth, async (req, res) => {
     }
 });
 
+// ── Strict LID loopback broker (mono-account provider barrier) ───────────────
+// Strict multi-window language validation must seek through one finite file several times.
+// Letting ffmpeg open the signed provider URL directly makes libav issue its own HEAD/range
+// reconnects, which can overlap on a provider account that permits exactly one socket. This
+// private loopback broker is the only provider-facing reader for the strict lane:
+//
+//   ffmpeg -> random http://127.0.0.1 handle -> one exact provider byte range
+//
+// HEAD is answered entirely locally. GETs are serialized, the prior body is synchronously
+// aborted/cancelled, and the provider-slot release delay elapses before a successor opens.
+// The random handle never leaves this process (not in the route response or logs).
+function normalizeStrictLidFileSize(value) {
+    if (value === null || value === undefined || value === '') return null;
+    const parsed = Number(value);
+    return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+function parseStrictLidRange(value, fileSizeBytes) {
+    const size = normalizeStrictLidFileSize(fileSizeBytes);
+    const text = String(value || '').trim();
+    if (!size || !text || text.includes(',')) return null;
+    const match = /^bytes=(\d*)-(\d*)$/i.exec(text);
+    if (!match || (!match[1] && !match[2])) return null;
+    const parseOffset = (raw) => {
+        if (!/^\d+$/.test(String(raw || ''))) return null;
+        const parsed = Number(raw);
+        return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;
+    };
+    if (!match[1]) {
+        const suffixLength = parseOffset(match[2]);
+        if (!suffixLength) return null;
+        return {
+            start: Math.max(0, size - suffixLength),
+            end: size - 1,
+            total: size,
+        };
+    }
+    const start = parseOffset(match[1]);
+    if (start === null || start >= size) return null;
+    const requestedEnd = match[2] ? parseOffset(match[2]) : size - 1;
+    if (requestedEnd === null || requestedEnd < start) return null;
+    return { start, end: Math.min(requestedEnd, size - 1), total: size };
+}
+
+function strictLidContentRange(response, expectedRange) {
+    if (Number(response?.status) !== 206 || !expectedRange) return null;
+    const raw = String(response?.headers?.get?.('content-range') || '').trim();
+    const match = /^bytes\s+(\d+)-(\d+)\/(\d+)$/i.exec(raw);
+    if (!match) return null;
+    const [start, end, total] = match.slice(1).map((part) => Number(part));
+    if (
+        ![start, end, total].every(Number.isSafeInteger)
+        || start !== expectedRange.start
+        || end !== expectedRange.end
+        || total !== expectedRange.total
+    ) return null;
+    const expectedLength = end - start + 1;
+    const declaredLength = String(response?.headers?.get?.('content-length') || '').trim();
+    if (!/^\d+$/.test(declaredLength) || Number(declaredLength) !== expectedLength) return null;
+    return { start, end, total, length: expectedLength };
+}
+
+function strictLidResponseValidator(response) {
+    const etag = String(response?.headers?.get?.('etag') || '').trim();
+    if (etag && !/^W\//i.test(etag)) return { header: 'If-Range', value: etag, kind: 'etag' };
+    const lastModified = String(response?.headers?.get?.('last-modified') || '').trim();
+    if (lastModified && Number.isFinite(Date.parse(lastModified))) {
+        return { header: 'If-Range', value: lastModified, kind: 'last-modified' };
+    }
+    return null;
+}
+
+function strictLidBrokerError(code, message, options = {}) {
+    const error = new Error(message);
+    error.code = code;
+    error.status = Number.isInteger(options.status) ? options.status : 502;
+    error.upstreamStatus = Number.isInteger(options.upstreamStatus) ? options.upstreamStatus : null;
+    return error;
+}
+
+// WHATWG fetch intentionally rejects a 407 before exposing its status. The lower-level
+// undici request API preserves that status, which is required to distinguish residential
+// proxy authentication failure from a provider's mono-account 458 response.
+function strictLidNodeBodyAdapter(nodeBody) {
+    let locked = false;
+    const awaitDestroyed = () => {
+        if (!nodeBody || nodeBody.destroyed || nodeBody.readableEnded) return Promise.resolve();
+        return new Promise((resolve) => {
+            let settled = false;
+            const finish = () => {
+                if (settled) return;
+                settled = true;
+                nodeBody.off('close', finish);
+                nodeBody.off('end', finish);
+                nodeBody.off('error', finish);
+                resolve();
+            };
+            nodeBody.once('close', finish);
+            nodeBody.once('end', finish);
+            nodeBody.once('error', finish);
+            try { nodeBody.destroy(); } catch (_) { finish(); }
+            if (nodeBody.destroyed || nodeBody.readableEnded) finish();
+        });
+    };
+    return {
+        get locked() { return locked; },
+        getReader() {
+            if (locked) throw new Error('Strict LID provider body is already locked');
+            locked = true;
+            const iterator = nodeBody[Symbol.asyncIterator]();
+            let cancelled = false;
+            return {
+                async read() {
+                    if (cancelled) return { value: undefined, done: true };
+                    const next = await iterator.next();
+                    return {
+                        value: next.value === undefined ? undefined : Buffer.from(next.value),
+                        done: next.done === true,
+                    };
+                },
+                async cancel() {
+                    if (cancelled) return;
+                    cancelled = true;
+                    try { await iterator.return?.(); } catch (_) {}
+                    await awaitDestroyed();
+                },
+                releaseLock() { locked = false; },
+            };
+        },
+        async cancel() {
+            if (locked) return;
+            await awaitDestroyed();
+        },
+    };
+}
+
+async function strictLidProviderRequest(sourceUrl, options = {}) {
+    const response = await undiciRequest(sourceUrl, {
+        method: options.method || 'GET',
+        headers: options.headers || {},
+        maxRedirections: 5,
+        signal: options.signal,
+        dispatcher: options.dispatcher || undefined,
+        throwOnError: false,
+    });
+    const rawHeaders = response.headers || {};
+    const headers = {
+        get(name) {
+            const value = rawHeaders[String(name || '').toLowerCase()];
+            if (Array.isArray(value)) return value.join(', ');
+            return value === undefined || value === null ? null : String(value);
+        },
+    };
+    return {
+        status: Number(response.statusCode),
+        headers,
+        body: response.body ? strictLidNodeBodyAdapter(response.body) : null,
+    };
+}
+
+function markStrictLidTerminal(context, error) {
+    if (!context.terminalError && error) context.terminalError = error;
+    return context.terminalError;
+}
+
+function strictLidLooksTextual(buffer) {
+    if (!buffer?.length) return false;
+    let controls = 0;
+    for (const byte of buffer.subarray(0, 512)) {
+        if (byte === 0) return false;
+        if (byte < 0x09 || (byte > 0x0d && byte < 0x20) || byte === 0x7f) controls++;
+    }
+    return controls <= 2;
+}
+
+async function strictLidResponseHasBusyPrefix(response, signal = null) {
+    if (!response?.body || typeof response.body.getReader !== 'function') return false;
+    const reader = response.body.getReader();
+    const chunks = [];
+    let total = 0;
+    try {
+        while (total < 4096) {
+            if (signal?.aborted) return false;
+            const { value, done } = await reader.read();
+            if (value?.length) {
+                const part = Buffer.from(value).subarray(0, 4096 - total);
+                chunks.push(part);
+                total += part.length;
+                const prefix = Buffer.concat(chunks, total);
+                if (!strictLidLooksTextual(prefix)) return false;
+                if (/\b(?:user_multi_ip|maximum?\s+connections?|max[_ -]?connections?|too\s+many\s+connections?|provider[_ -]+busy)\b/i.test(prefix.toString('utf8'))) {
+                    return true;
+                }
+            }
+            if (done) break;
+        }
+        return false;
+    } catch (_) {
+        return false;
+    } finally {
+        try { await reader.cancel(); } catch (_) {}
+        try { reader.releaseLock(); } catch (_) {}
+    }
+}
+
+function sendStrictLidBrokerError(res, error) {
+    if (!res || res.destroyed || res.writableEnded) return;
+    if (res.headersSent) {
+        try { res.destroy(); } catch (_) {}
+        return;
+    }
+    const status = Number.isInteger(error?.status) ? error.status : 502;
+    const body = Buffer.from(JSON.stringify({
+        error: String(error?.message || 'Strict language media broker failed'),
+        code: String(error?.code || 'STRICT_LID_BROKER_FAILED'),
+        ...(Number.isInteger(error?.upstreamStatus) ? { upstreamStatus: error.upstreamStatus } : {}),
+    }));
+    res.statusCode = status;
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.setHeader('Content-Length', String(body.length));
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.end(body);
+}
+
+function waitForStrictLidBrokerSlot(context) {
+    const remaining = Math.max(0, Number(context.nextOpenAt || 0) - Date.now());
+    if (!remaining) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+        let timer = null;
+        const finish = (error) => {
+            if (timer) clearTimeout(timer);
+            context.controller.signal.removeEventListener('abort', onAbort);
+            if (error) reject(error);
+            else resolve();
+        };
+        const onAbort = () => finish(strictLidBrokerError('STRICT_LID_ABORTED', 'Strict language media broker stopped', { status: 499 }));
+        context.controller.signal.addEventListener('abort', onAbort, { once: true });
+        if (context.controller.signal.aborted) return onAbort();
+        timer = setTimeout(() => finish(), remaining);
+        timer.unref?.();
+    });
+}
+
+function waitForStrictLidDrain(res, signal) {
+    if (signal?.aborted || res.destroyed) return Promise.reject(new Error('local reader closed'));
+    return new Promise((resolve, reject) => {
+        let settled = false;
+        const cleanup = () => {
+            res.off('drain', onDrain);
+            res.off('close', onClose);
+            res.off('error', onError);
+            signal?.removeEventListener('abort', onAbort);
+        };
+        const finish = (error) => {
+            if (settled) return;
+            settled = true;
+            cleanup();
+            if (error) reject(error);
+            else resolve();
+        };
+        const onDrain = () => finish();
+        const onClose = () => finish(new Error('local reader closed'));
+        const onError = (error) => finish(error || new Error('local reader failed'));
+        const onAbort = () => finish(new Error('provider read stopped'));
+        res.once('drain', onDrain);
+        res.once('close', onClose);
+        res.once('error', onError);
+        signal?.addEventListener('abort', onAbort, { once: true });
+        if (signal?.aborted || res.destroyed) onAbort();
+    });
+}
+
+async function closeStrictLidBrokerAttempt(context, attempt, reason = 'completed') {
+    if (!attempt) return;
+    if (!attempt.closePromise) {
+        attempt.closePromise = (async () => {
+            attempt.stopReason = reason;
+            if (attempt.timer) clearTimeout(attempt.timer);
+            attempt.timer = null;
+            attempt.signalParent?.removeEventListener?.('abort', attempt.onParentAbort);
+            try { attempt.controller.abort(new Error(reason)); } catch (_) {}
+            if (attempt.reader) {
+                try { await attempt.reader.cancel(); } catch (_) {}
+                try { attempt.reader.releaseLock(); } catch (_) {}
+            } else if (attempt.response?.body && !attempt.response.body.locked) {
+                try { await attempt.response.body.cancel(); } catch (_) {}
+            }
+            if (reason !== 'completed' && attempt.localResponse && !attempt.localResponse.writableEnded) {
+                try { attempt.localResponse.destroy(); } catch (_) {}
+            }
+            if (context.activeAttempt === attempt) context.activeAttempt = null;
+            if (attempt.fetchStarted) {
+                context.nextOpenAt = Math.max(
+                    Number(context.nextOpenAt || 0),
+                    Date.now() + context.releaseDelayMs,
+                );
+            }
+        })();
+    }
+    await attempt.closePromise;
+}
+
+async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
+    if (context.closed || requestId !== context.latestRequestId) {
+        return sendStrictLidBrokerError(res, strictLidBrokerError('STRICT_LID_SUPERSEDED', 'Strict language media request was superseded', { status: 409 }));
+    }
+    if (context.terminalError) return sendStrictLidBrokerError(res, context.terminalError);
+    await waitForStrictLidBrokerSlot(context);
+    if (context.closed || requestId !== context.latestRequestId) {
+        return sendStrictLidBrokerError(res, strictLidBrokerError('STRICT_LID_SUPERSEDED', 'Strict language media request was superseded', { status: 409 }));
+    }
+
+    const controller = new AbortController();
+    const attempt = {
+        controller,
+        response: null,
+        reader: null,
+        localResponse: res,
+        signalParent: context.controller.signal,
+        onParentAbort: null,
+        timer: null,
+        fetchStarted: false,
+        timedOut: false,
+        localClosed: false,
+        closePromise: null,
+        stopReason: null,
+    };
+    attempt.onParentAbort = () => {
+        try { controller.abort(context.controller.signal.reason); } catch (_) {}
+    };
+    context.controller.signal.addEventListener('abort', attempt.onParentAbort, { once: true });
+    if (context.controller.signal.aborted) attempt.onParentAbort();
+    const onLocalClose = () => {
+        if (!res.writableEnded) {
+            attempt.localClosed = true;
+            try { controller.abort(new Error('local reader closed')); } catch (_) {}
+        }
+    };
+    res.once('close', onLocalClose);
+    context.activeAttempt = attempt;
+    attempt.timer = setTimeout(() => {
+        attempt.timedOut = true;
+        try { controller.abort(new Error('strict LID provider timeout')); } catch (_) {}
+    }, context.openTimeoutMs);
+    attempt.timer.unref?.();
+
+    try {
+        const headers = {
+            Range: `bytes=${range.start}-${range.end}`,
+            Accept: '*/*',
+            'Accept-Encoding': 'identity',
+            'User-Agent': context.userAgent,
+            Connection: 'close',
+        };
+        if (context.validator) headers[context.validator.header] = context.validator.value;
+        attempt.fetchStarted = true;
+        context.providerFetches++;
+        attempt.response = await context.fetchImpl(context.sourceUrl, {
+            method: 'GET',
+            headers,
+            redirect: 'follow',
+            signal: controller.signal,
+            dispatcher: context.dispatcher || undefined,
+        });
+        const upstreamStatus = Number(attempt.response.status);
+        if (upstreamStatus === 458) {
+            throw markStrictLidTerminal(context, strictLidBrokerError(
+                'PROVIDER_BUSY',
+                'This TV service is already being used on another device.',
+                { status: 458, upstreamStatus },
+            ));
+        }
+        if (upstreamStatus === 407) {
+            throw markStrictLidTerminal(context, strictLidBrokerError(
+                'PROXY_AUTH_FAILED',
+                'The media service is temporarily unavailable.',
+                { status: 502, upstreamStatus },
+            ));
+        }
+        if (upstreamStatus === 200) {
+            const busy = await strictLidResponseHasBusyPrefix(attempt.response, controller.signal);
+            if (busy) {
+                throw markStrictLidTerminal(context, strictLidBrokerError(
+                    'PROVIDER_BUSY',
+                    'This TV service is already being used on another device.',
+                    { status: 458, upstreamStatus },
+                ));
+            }
+            throw markStrictLidTerminal(context, strictLidBrokerError(
+                'RANGE_UNSUPPORTED',
+                'Provider ignored the exact language-validation byte range.',
+                { status: 502, upstreamStatus },
+            ));
+        }
+        if (upstreamStatus !== 206) {
+            throw markStrictLidTerminal(context, strictLidBrokerError(
+                'PROVIDER_REQUEST_FAILED',
+                'Provider rejected the language-validation byte range.',
+                { status: 502, upstreamStatus },
+            ));
+        }
+        const contentEncoding = String(attempt.response.headers?.get?.('content-encoding') || '').trim().toLowerCase();
+        if (contentEncoding && contentEncoding !== 'identity') {
+            throw markStrictLidTerminal(context, strictLidBrokerError(
+                'RANGE_UNSUPPORTED',
+                'Provider encoded the language-validation byte range.',
+                { status: 502, upstreamStatus },
+            ));
+        }
+        const exactRange = strictLidContentRange(attempt.response, range);
+        if (!exactRange) {
+            throw markStrictLidTerminal(context, strictLidBrokerError(
+                'RANGE_UNSUPPORTED',
+                'Provider returned an invalid language-validation byte range.',
+                { status: 502, upstreamStatus },
+            ));
+        }
+        const observedValidator = strictLidResponseValidator(attempt.response);
+        if (
+            context.validator
+            && (
+                !observedValidator
+                || observedValidator.kind !== context.validator.kind
+                || observedValidator.value !== context.validator.value
+            )
+        ) {
+            throw markStrictLidTerminal(context, strictLidBrokerError(
+                'VOD_CHANGED',
+                'The media file changed during language validation.',
+                { status: 502, upstreamStatus },
+            ));
+        }
+        if (!context.validator && observedValidator) context.validator = observedValidator;
+        if (!attempt.response.body || typeof attempt.response.body.getReader !== 'function') {
+            throw markStrictLidTerminal(context, strictLidBrokerError(
+                'PROVIDER_EMPTY_RESPONSE',
+                'Provider returned no language-validation media body.',
+                { status: 502, upstreamStatus },
+            ));
+        }
+        attempt.reader = attempt.response.body.getReader();
+        res.statusCode = 206;
+        res.setHeader('Accept-Ranges', 'bytes');
+        res.setHeader('Content-Type', 'application/octet-stream');
+        res.setHeader('Content-Range', `bytes ${range.start}-${range.end}/${range.total}`);
+        res.setHeader('Content-Length', String(exactRange.length));
+        res.setHeader('Cache-Control', 'no-store');
+        res.setHeader('X-Content-Type-Options', 'nosniff');
+        if (observedValidator?.kind === 'etag') res.setHeader('ETag', observedValidator.value);
+        if (observedValidator?.kind === 'last-modified') res.setHeader('Last-Modified', observedValidator.value);
+
+        let forwarded = 0;
+        while (!controller.signal.aborted) {
+            const { value, done } = await attempt.reader.read();
+            if (done) break;
+            const chunk = Buffer.from(value || []);
+            if (!chunk.length) continue;
+            if (forwarded + chunk.length > exactRange.length) {
+                throw markStrictLidTerminal(context, strictLidBrokerError(
+                    'RANGE_LENGTH_MISMATCH',
+                    'Provider exceeded the exact language-validation byte range.',
+                    { status: 502, upstreamStatus },
+                ));
+            }
+            forwarded += chunk.length;
+            if (!res.write(chunk)) await waitForStrictLidDrain(res, controller.signal);
+        }
+        if (controller.signal.aborted) throw controller.signal.reason || new Error('strict LID provider read stopped');
+        if (forwarded !== exactRange.length) {
+            throw markStrictLidTerminal(context, strictLidBrokerError(
+                'RANGE_LENGTH_MISMATCH',
+                'Provider truncated the exact language-validation byte range.',
+                { status: 502, upstreamStatus },
+            ));
+        }
+        res.end();
+    } catch (error) {
+        const intentionallyStopped = context.closed
+            || attempt.localClosed
+            || attempt.stopReason === 'superseded'
+            || attempt.stopReason === 'broker_closed';
+        if (!intentionallyStopped) {
+            let publicError = context.terminalError;
+            if (!publicError && isProxyAuthenticationFailure(error)) {
+                publicError = markStrictLidTerminal(context, strictLidBrokerError(
+                    'PROXY_AUTH_FAILED',
+                    'The media service is temporarily unavailable.',
+                    { status: 502, upstreamStatus: 407 },
+                ));
+            }
+            if (!publicError && attempt.timedOut) {
+                publicError = markStrictLidTerminal(context, strictLidBrokerError(
+                    'PROVIDER_RESPONSE_TIMEOUT',
+                    'Provider did not answer the language-validation byte range in time.',
+                    { status: 504 },
+                ));
+            }
+            if (!publicError) {
+                publicError = markStrictLidTerminal(context, strictLidBrokerError(
+                    'PROVIDER_FETCH_FAILED',
+                    'Provider media request failed during language validation.',
+                    { status: 502 },
+                ));
+            }
+            sendStrictLidBrokerError(res, publicError);
+        }
+    } finally {
+        res.off('close', onLocalClose);
+        await closeStrictLidBrokerAttempt(context, attempt, 'completed');
+    }
+}
+
+function handleStrictLidBrokerRequest(context, expectedPath, req, res) {
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    let pathname = '';
+    try { pathname = new URL(req.url || '/', 'http://127.0.0.1').pathname; } catch (_) { pathname = ''; }
+    if (pathname !== expectedPath) {
+        res.statusCode = 404;
+        return res.end();
+    }
+    if (context.closed) {
+        return sendStrictLidBrokerError(res, strictLidBrokerError('STRICT_LID_ABORTED', 'Strict language media broker stopped', { status: 503 }));
+    }
+    if (req.method === 'HEAD') {
+        res.statusCode = 200;
+        res.setHeader('Accept-Ranges', 'bytes');
+        res.setHeader('Content-Type', 'application/octet-stream');
+        res.setHeader('Content-Length', String(context.fileSizeBytes));
+        return res.end();
+    }
+    if (req.method !== 'GET') {
+        res.statusCode = 405;
+        res.setHeader('Allow', 'HEAD, GET');
+        return res.end();
+    }
+    const range = parseStrictLidRange(req.headers.range, context.fileSizeBytes);
+    if (!range) {
+        res.statusCode = 416;
+        res.setHeader('Content-Range', `bytes */${context.fileSizeBytes}`);
+        return res.end();
+    }
+
+    const requestId = ++context.latestRequestId;
+    const active = context.activeAttempt;
+    if (active) void closeStrictLidBrokerAttempt(context, active, 'superseded').catch(() => {});
+    const work = context.queue
+        .catch(() => {})
+        .then(() => serveStrictLidBrokerRange(context, req, res, range, requestId));
+    context.queue = work.catch((error) => {
+        if (!context.closed) sendStrictLidBrokerError(res, error);
+    });
+}
+
+async function createStrictLidBroker(options = {}) {
+    const sourceUrl = String(options.sourceUrl || '');
+    const fileSizeBytes = normalizeStrictLidFileSize(options.fileSizeBytes);
+    if (!isHttpUrl(sourceUrl)) throw strictLidBrokerError('INVALID_SOURCE', 'Strict language media source is invalid', { status: 400 });
+    if (!fileSizeBytes) throw strictLidBrokerError('EXACT_FILE_SIZE_REQUIRED', 'Exact media file size is required', { status: 400 });
+    const handle = crypto.randomBytes(32).toString('base64url');
+    const expectedPath = `/strict-lid/${handle}`;
+    const controller = new AbortController();
+    const context = {
+        sourceUrl,
+        fileSizeBytes,
+        userAgent: String(options.userAgent || FFMPEG_USER_AGENT),
+        dispatcher: Object.prototype.hasOwnProperty.call(options, 'dispatcher')
+            ? options.dispatcher
+            : (pickProxyAgent(proxyKeyFromUrl(sourceUrl)) || null),
+        fetchImpl: options.fetchImpl || strictLidProviderRequest,
+        releaseDelayMs: Number.isFinite(Number(options.releaseDelayMs))
+            ? Math.max(0, Number(options.releaseDelayMs))
+            : PROVIDER_SLOT_RELEASE_DELAY_MS,
+        openTimeoutMs: Number.isFinite(Number(options.openTimeoutMs))
+            ? Math.max(100, Number(options.openTimeoutMs))
+            : 30_000,
+        controller,
+        activeAttempt: null,
+        queue: Promise.resolve(),
+        nextOpenAt: 0,
+        latestRequestId: 0,
+        validator: null,
+        terminalError: null,
+        providerFetches: 0,
+        closed: false,
+    };
+    const server = http.createServer((req, res) => {
+        handleStrictLidBrokerRequest(context, expectedPath, req, res);
+    });
+    server.on('clientError', (_error, socket) => {
+        try { socket.destroy(); } catch (_) {}
+    });
+    await new Promise((resolve, reject) => {
+        const onError = (error) => {
+            server.off('listening', onListening);
+            reject(error);
+        };
+        const onListening = () => {
+            server.off('error', onError);
+            resolve();
+        };
+        server.once('error', onError);
+        server.once('listening', onListening);
+        server.listen(0, '127.0.0.1');
+    });
+    server.unref?.();
+    const address = server.address();
+    let closePromise = null;
+    const broker = {
+        inputUrl: `http://127.0.0.1:${address.port}${expectedPath}`,
+        get terminalError() { return context.terminalError; },
+        get providerFetches() { return context.providerFetches; },
+        async close() {
+            if (closePromise) return closePromise;
+            closePromise = (async () => {
+                context.closed = true;
+                context.latestRequestId++;
+                try { controller.abort(new Error('strict LID broker closed')); } catch (_) {}
+                await closeStrictLidBrokerAttempt(context, context.activeAttempt, 'broker_closed');
+                try { await context.queue; } catch (_) {}
+                // `closeStrictLidBrokerAttempt` records the provider panel's
+                // logical slot-release deadline. Do not attest a drained
+                // provider until both the socket and that grace period have
+                // completed; otherwise Edge may hand the mono-account lease
+                // to playback while the panel still counts the old request.
+                const releaseDelayRemaining = Math.max(
+                    0,
+                    Number(context.nextOpenAt || 0) - Date.now(),
+                );
+                if (releaseDelayRemaining > 0) {
+                    await new Promise((resolve) => setTimeout(resolve, releaseDelayRemaining));
+                }
+                const closed = new Promise((resolve) => {
+                    try { server.close(() => resolve()); } catch (_) { resolve(); }
+                });
+                try { server.closeAllConnections?.(); } catch (_) {}
+                await closed;
+                options.abortSignal?.removeEventListener?.('abort', onAbort);
+            })();
+            return closePromise;
+        },
+    };
+    const onAbort = () => { void broker.close(); };
+    options.abortSignal?.addEventListener?.('abort', onAbort, { once: true });
+    if (options.abortSignal?.aborted) onAbort();
+    return broker;
+}
+// ── End strict LID loopback broker ───────────────────────────────────────────
+
 // Phase 2: detect the language of ONE audio track, fully self-hosted (no paid API). ffmpeg
 // extracts a short mono/16 kHz WAV of the track, whisper.cpp identifies the spoken language,
 // and a transcript-based detector resolves script-family ambiguities (Persian/Kurdish/Urdu vs
 // Arabic, Ukrainian/Serbian vs Russian). Same byte-pipe token as /raw. Used only for untagged
 // tracks and cached upstream, so this 2nd provider connection runs at most once per file.
-app.get('/detect-language/:token', async (req, res) => {
-    const claims = verifyRawToken(req.params.token, GATEWAY_TOKEN);
-    if (!claims) return res.status(401).json({ error: 'Invalid byte-pipe token' });
-    if (Number(claims.exp) * 1000 < Date.now()) return res.status(401).json({ error: 'Byte-pipe token expired' });
+function validateDetectLanguageCapability(capabilityToken, requiredScope = null) {
+    const claims = verifyRawToken(capabilityToken, GATEWAY_TOKEN);
+    if (!claims) return { claims: null, status: 401, error: 'Invalid byte-pipe token' };
+    if (Number(claims.exp) * 1000 < Date.now()) {
+        return { claims: null, status: 401, error: 'Byte-pipe token expired' };
+    }
+    const scope = String(claims.scope || '');
+    if (requiredScope && scope !== requiredScope) {
+        return {
+            claims: null,
+            status: 403,
+            error: 'Byte-pipe token is not authorized for this language route',
+        };
+    }
+    if (!LID_ROUTE_SCOPES.has(scope)) {
+        return {
+            claims: null,
+            status: 403,
+            error: 'Byte-pipe token is not authorized for language detection',
+        };
+    }
+    return { claims, status: 200, error: null };
+}
+
+function detectLanguageRequestPolicy(req, options = {}) {
+    const strict = ['1', 'true', 'yes'].includes(String(req?.query?.strict || '').toLowerCase());
+    return {
+        strict,
+        // The service-only header route always supplies the exact required
+        // scope. The legacy path independently receives the same requirement
+        // for every strict request, closing any raw-token scope downgrade.
+        requiredScope: options.requiredScope || (strict ? LID_LEGACY_FULL_SCOPE : null),
+    };
+}
+
+async function handleDetectLanguageRequest(req, res, capabilityToken, options = {}) {
+    const policy = detectLanguageRequestPolicy(req, options);
+    const validation = validateDetectLanguageCapability(capabilityToken, policy.requiredScope);
+    if (!validation.claims) {
+        return res.status(validation.status).json({ error: validation.error });
+    }
+    const claims = validation.claims;
+    const strict = policy.strict;
+    const strictFileSizeBytes = strict ? normalizeStrictLidFileSize(claims.fileSizeBytes) : null;
+    if (strict && !strictFileSizeBytes) {
+        res.setHeader('Cache-Control', 'no-store');
+        return res.status(400).json({
+            error: 'Strict language validation requires an exact signed file size',
+            code: 'exact_file_size_required',
+        });
+    }
     if (!WHISPER_BIN || !WHISPER_MODEL) return res.status(503).json({ error: 'Language detection not configured' });
     if (rejectWhileLidBenchmarkRuns(res)) return;
     const ua = claims.ua || FFMPEG_USER_AGENT;
 
     const trackIndex = Number.parseInt(req.query.index, 10);
     if (!Number.isInteger(trackIndex) || trackIndex < 0) return res.status(400).json({ error: 'Invalid audio index' });
-    const strict = ['1', 'true', 'yes'].includes(String(req.query.strict || '').toLowerCase());
     const detectOnlyMode = !strict && WHISPER_DETECT_ONLY_PRODUCTION_AVAILABLE
         ? (
             claims.scope === LID_DETECT_ONLY_SCOPE
@@ -1777,7 +3077,44 @@ app.get('/detect-language/:token', async (req, res) => {
         return res.status(503).json({ error: 'Strict language validation needs at least four configured offsets' });
     }
 
+    const requestController = new AbortController();
+    const onRequestClose = () => {
+        if (!res.writableEnded) {
+            try { requestController.abort(new Error('language validation caller closed')); } catch (_) {}
+        }
+    };
+    res.once('close', onRequestClose);
+    let strictBroker = null;
+    let strictBrokerDrained = false;
+    const closeStrictBrokerForResponse = async () => {
+        if (!strict || strictBrokerDrained) return;
+        if (strictBroker) await strictBroker.close();
+        // A missing broker means validation failed before any provider I/O;
+        // that state is also safe to hand off. Once a broker existed, close()
+        // above is the sole authority for socket + release-grace completion.
+        strictBrokerDrained = true;
+    };
+    const sendDetectionJson = async (status, payload) => {
+        await closeStrictBrokerForResponse();
+        if (res.writableEnded || res.destroyed) return;
+        const responsePayload = strict
+            ? {
+                ...payload,
+                providerDrained: true,
+                providerDrainProtocol: 1,
+            }
+            : payload;
+        return res.status(status).json(responsePayload);
+    };
     try {
+        if (strict) {
+            strictBroker = await createStrictLidBroker({
+                sourceUrl: claims.url,
+                fileSizeBytes: strictFileSizeBytes,
+                userAgent: ua,
+                abortSignal: requestController.signal,
+            });
+        }
         let best = null;          // best partial result across offsets (most words), as a fallback
         let extractions = 0;      // bound the provider connections
         let lastExtractErr = '';  // surfaced when EVERY offset failed (was an opaque constant string)
@@ -1785,6 +3122,7 @@ app.get('/detect-language/:token', async (req, res) => {
         const strictSamples = [];
         let bestStrictAccepted = null;
         let strictRejectedSpeechSamples = 0;
+        let strictIgnoredWeakSpeechSamples = 0;
         let inferencePreempted = false;
         const lockKey = accountJobKey(claims.uid, claims.url);
         // This endpoint is the catalogue/background LID route. Viewer-requested subtitle jobs
@@ -1801,10 +3139,31 @@ app.get('/detect-language/:token', async (req, res) => {
                 if (isAccountJobBusy(lockKey)) { lastExtractErr = 'account provider slot busy (background job in progress)'; break; }
                 // Same fast-fail when a VIEWER holds the slot on this box — the edge gate is checked
                 // at tick entry only, and a viewer can start mid-sweep.
-                if (accountSlotBusyLocally(claims.url)) { lastExtractErr = 'account provider slot busy (viewer playback)'; break; }
+                if (accountSlotBusyLocally(claims.url, claims.uid ? sha256Hex(claims.uid) : '')) { lastExtractErr = 'account provider slot busy (viewer playback)'; break; }
+                const extractionUrl = strictBroker ? strictBroker.inputUrl : claims.url;
                 const ex = await withAccountJobLock(lockKey, () =>
-                    extractAudioWav(claims.url, ua, trackIndex, off > 0 ? off : 0, dur, 30_000, claims.uid));
-                if (!ex.ok) { lastExtractErr = ex.error; continue; }   // failed or offset past the file's end → next offset
+                    extractAudioWav(
+                        extractionUrl,
+                        ua,
+                        trackIndex,
+                        off > 0 ? off : 0,
+                        dur,
+                        30_000,
+                        claims.uid,
+                        true,
+                        requestController.signal,
+                        true,
+                        strictBroker ? {
+                            strictLoopback: true,
+                            providerSourceUrl: claims.url,
+                        } : null,
+                    ));
+                if (!ex.ok) {
+                    lastExtractErr = strictBroker ? 'Strict audio extraction failed' : ex.error;
+                    if (ex.preempted) inferencePreempted = true;
+                    if (ex.preempted || ex.aborted || strictBroker?.terminalError) break;
+                    continue;
+                }   // failed or offset past the file's end → next offset
                 wavPath = ex.path;
                 extractions++;
                 let fast = null;
@@ -1893,13 +3252,16 @@ app.get('/detect-language/:token', async (req, res) => {
                     const enoughWords = Number(det.words || 0) >= (
                         strict ? WHISPER_STRICT_MIN_WORDS : 4
                     ) && (!strict || uniqueWordCount >= WHISPER_STRICT_MIN_UNIQUE_WORDS);
-                    const strictAccepted = strict
-                        && whisperConfident
-                        && enoughWords
-                        && !transcriptDisagrees;
-                    if (strict && enoughWords && !strictAccepted) {
-                        strictRejectedSpeechSamples++;
-                    }
+                    const strictDisposition = strict
+                        ? strictLanguageSampleDisposition({
+                            enoughWords,
+                            whisperConfident,
+                            transcriptDisagrees,
+                        })
+                        : null;
+                    const strictAccepted = strictDisposition === 'accepted';
+                    if (strictDisposition === 'conflict') strictRejectedSpeechSamples++;
+                    if (strictDisposition === 'weak') strictIgnoredWeakSpeechSamples++;
                     const confident = strict
                         ? strictAccepted
                         : (det.confident === true || whisperConfident);
@@ -2012,26 +3374,36 @@ app.get('/detect-language/:token', async (req, res) => {
                     // fifth/sixth accepted sample that disagrees must veto four earlier votes.
                     if (!strict && voteCount >= consensusNeeded) {
                         res.setHeader('Cache-Control', 'private, max-age=3600');
-                        return res.json(result);
+                        return sendDetectionJson(200, result);
                     }
                 }
                 if (!best || result.wordCount > best.wordCount) best = result;
             } catch (_) { /* try the next offset */ }
             finally { if (wavPath) fsp.unlink(wavPath).catch(() => {}); }
         }
+        if (strictBroker?.terminalError) {
+            const terminal = strictBroker.terminalError;
+            res.setHeader('Cache-Control', 'no-store');
+            return sendDetectionJson(Number.isInteger(terminal.status) ? terminal.status : 502, {
+                error: terminal.message,
+                code: terminal.code,
+                ...(Number.isInteger(terminal.upstreamStatus) ? { upstreamStatus: terminal.upstreamStatus } : {}),
+            });
+        }
+        if (requestController.signal.aborted && !res.writableEnded) return;
         if (inferencePreempted) {
             // A transport-shaped non-2xx response is essential: both Edge callers already leave
             // their exact-file cursor untouched on !res.ok, so the cron retries later and cannot
             // persist an empty/pending sample as if Whisper had actually analysed it.
             res.setHeader('Cache-Control', 'no-store');
             res.setHeader('Retry-After', '30');
-            return res.status(409).json({
+            return sendDetectionJson(409, {
                 error: 'Language detection preempted by viewer playback',
                 code: 'viewer_preempted',
                 retryable: true,
             });
         }
-        if (extractions === 0) return res.status(502).json({ error: 'Audio extraction failed', details: lastExtractErr });
+        if (extractions === 0) return sendDetectionJson(502, { error: 'Audio extraction failed', details: lastExtractErr });
         if (
             strict &&
             bestStrictAccepted &&
@@ -2051,6 +3423,7 @@ app.get('/detect-language/:token', async (req, res) => {
                 samples: strictSamples,
                 sampleCount: strictSamples.length,
                 rejectedSpeechSampleCount: 0,
+                ignoredWeakSpeechSampleCount: strictIgnoredWeakSpeechSamples,
                 minSampleProbability: Math.min(...strictSamples.map((sample) => sample.probability)),
                 minSampleWordCount: Math.min(...strictSamples.map((sample) => sample.wordCount)),
                 minSampleUniqueWordCount: Math.min(
@@ -2058,7 +3431,7 @@ app.get('/detect-language/:token', async (req, res) => {
                 ),
             };
             res.setHeader('Cache-Control', 'private, max-age=3600');
-            return res.json(verified);
+            return sendDetectionJson(200, verified);
         }
         // No strict consensus is not a language result. It is a retryable pending state, so no
         // caller can accidentally surface `candidate` as if it had been validated.
@@ -2072,21 +3445,79 @@ app.get('/detect-language/:token', async (req, res) => {
                 consensus: Math.max(0, ...votes.values()),
                 sampleCount: strictSamples.length,
                 rejectedSpeechSampleCount: strict ? strictRejectedSpeechSamples : undefined,
+                ignoredWeakSpeechSampleCount: strict ? strictIgnoredWeakSpeechSamples : undefined,
                 samples: strict ? strictSamples : undefined,
             };
         }
         res.setHeader('Cache-Control', 'private, max-age=3600');
-        return res.json(best || {
+        return sendDetectionJson(200, best || {
             language: null, candidate: null, confidence: 0, confident: false,
             verified: false, validationStatus: 'pending',
             method: strict ? 'whisper-strict-consensus-v4' : 'pending',
             consensus: 0, whisperLang: null, transcriptLang: null,
-            wordCount: 0, sampleCount: 0, sample: '',
+            wordCount: 0, sampleCount: 0,
+            rejectedSpeechSampleCount: strict ? strictRejectedSpeechSamples : undefined,
+            ignoredWeakSpeechSampleCount: strict ? strictIgnoredWeakSpeechSamples : undefined,
+            sample: '',
         });
     } catch (err) {
+        if (res.writableEnded || res.destroyed) return;
+        if (strict) {
+            if (!strictBrokerDrained && strictBroker) {
+                // A close failure must never be turned into a positive drain
+                // attestation. Edge will keep its crash-safe account lease.
+                return res.status(502).json({
+                    error: 'Language detection provider cleanup failed',
+                    code: 'strict_lid_drain_failed',
+                });
+            }
+            return sendDetectionJson(Number.isInteger(err?.status) ? err.status : 502, {
+                error: 'Language detection failed',
+                code: String(err?.code || 'strict_lid_failed'),
+            });
+        }
         return res.status(502).json({ error: 'Language detection failed', details: String((err && err.message) || err) });
+    } finally {
+        res.off('close', onRequestClose);
+        if (strictBroker && !strictBrokerDrained) {
+            try { await strictBroker.close(); } catch (_) { /* Edge retains the TTL lease */ }
+        }
     }
+}
+
+function detectLanguageCapabilityFromHeader(req) {
+    const token = String(req?.get?.(LID_CAPABILITY_HEADER) || '').trim();
+    if (!token || token.length > 8192) return null;
+    // Reject malformed values before signature parsing without echoing or
+    // logging the capability. The signed payload may contain an Xtream URL.
+    return /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(token) ? token : null;
+}
+
+function setDetectLanguageSecurityHeaders(_req, res, next) {
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    next();
+}
+
+// Preferred service-only route: the signed capability stays out of URL paths,
+// bodies, access logs, Referer propagation and error traces. Security headers
+// run before Bearer authentication so even rejected calls are non-cacheable.
+// Never log the Authorization/capability headers or their values.
+app.post('/detect-language', setDetectLanguageSecurityHeaders, requireGatewayAuth, async (req, res) => {
+    const capabilityToken = detectLanguageCapabilityFromHeader(req);
+    if (!capabilityToken) {
+        return res.status(401).json({ error: 'Invalid byte-pipe token' });
+    }
+    return handleDetectLanguageRequest(req, res, capabilityToken, {
+        requiredScope: LID_LEGACY_FULL_SCOPE,
+    });
 });
+
+// Temporary compatibility route for already-issued clients. New callers must
+// use the header route above because this path can be captured by access logs.
+app.get('/detect-language/:token', async (req, res) => (
+    handleDetectLanguageRequest(req, res, String(req.params.token || ''))
+));
 
 // Service-only production handoff for the isolated LID cascade. The gateway is responsible
 // only for the provider-connected phase: extract one exact audio track/window and return a
@@ -2173,7 +3604,7 @@ app.post('/extract-language-wav', requireGatewayAuth, async (req, res) => {
     }
 
     const lockKey = accountJobKey(claims.uid, claims.url);
-    if (isAccountJobBusy(lockKey) || accountSlotBusyLocally(claims.url)) {
+    if (isAccountJobBusy(lockKey) || accountSlotBusyLocally(claims.url, claims.uid ? sha256Hex(claims.uid) : '')) {
         lidLanguageWavStats.busyRejections++;
         lidLanguageWavStats.last = {
             at: new Date().toISOString(),
@@ -2380,7 +3811,7 @@ app.post('/benchmark-language/:token', requireGatewayAuth, async (req, res) => {
     const order = body.order === 'detect-first' ? 'detect-first' : 'current-first';
     const includeWav = body.includeWav === true;
     const lockKey = accountJobKey(claims.uid, claims.url);
-    if (isAccountJobBusy(lockKey) || accountSlotBusyLocally(claims.url)) {
+    if (isAccountJobBusy(lockKey) || accountSlotBusyLocally(claims.url, claims.uid ? sha256Hex(claims.uid) : '')) {
         res.setHeader('Retry-After', '30');
         return res.status(429).json({ error: 'Provider account is busy' });
     }
@@ -2600,6 +4031,9 @@ app.get('/transcribe/:token', async (req, res) => {
     const claims = verifyRawToken(req.params.token, GATEWAY_TOKEN);
     if (!claims) return res.status(401).json({ error: 'Invalid byte-pipe token' });
     if (Number(claims.exp) * 1000 < Date.now()) return res.status(401).json({ error: 'Byte-pipe token expired' });
+    if (!bytePipeAllowsPurpose(claims, 'transcribe-bench')) {
+        return res.status(403).json({ error: 'Byte-pipe token is not authorized for transcription' });
+    }
     if (!WHISPER_BIN || !WHISPER_MODEL) return res.status(503).json({ error: 'Transcription not configured' });
     if (rejectWhileLidBenchmarkRuns(res)) return;
     const ua = claims.ua || FFMPEG_USER_AGENT;
@@ -2614,7 +4048,18 @@ app.get('/transcribe/:token', async (req, res) => {
     try {
         const e0 = Date.now();
         const ex = await withAccountJobLock(accountJobKey(claims.uid, claims.url), () =>
-            extractAudioWav(claims.url, ua, trackIndex, startOffset, dur, AUDIO_EXTRACT_TIMEOUT_MS, claims.uid));
+            extractAudioWav(
+                claims.url,
+                ua,
+                trackIndex,
+                startOffset,
+                dur,
+                AUDIO_EXTRACT_TIMEOUT_MS,
+                claims.uid,
+                true,
+                null,
+                false,
+            ));
         const extractMs = Date.now() - e0;
         if (!ex.ok) return res.status(502).json({ error: 'Audio extraction failed', details: ex.error });
         wavPath = ex.path;
@@ -2647,6 +4092,9 @@ app.post('/transcribe-async/:token', (req, res) => {
     const claims = verifyRawToken(req.params.token, GATEWAY_TOKEN);
     if (!claims) return res.status(401).json({ error: 'Invalid byte-pipe token' });
     if (Number(claims.exp) * 1000 < Date.now()) return res.status(401).json({ error: 'Byte-pipe token expired' });
+    if (!bytePipeAllowsPurpose(claims, 'transcribe-job')) {
+        return res.status(403).json({ error: 'Byte-pipe token is not authorized for transcription jobs' });
+    }
     if (!WHISPER_BIN || !WHISPER_MODEL) return res.status(503).json({ error: 'Transcription not configured' });
     if (rejectWhileLidBenchmarkRuns(res)) return;
     const index = Number.parseInt(req.query.index, 10);
@@ -2677,6 +4125,9 @@ app.post('/ocr-async/:token', (req, res) => {
     const claims = verifyRawToken(req.params.token, GATEWAY_TOKEN);
     if (!claims) return res.status(401).json({ error: 'Invalid byte-pipe token' });
     if (Number(claims.exp) * 1000 < Date.now()) return res.status(401).json({ error: 'Byte-pipe token expired' });
+    if (!bytePipeAllowsPurpose(claims, 'ocr-job')) {
+        return res.status(403).json({ error: 'Byte-pipe token is not authorized for OCR jobs' });
+    }
     if (!OCR_ENABLED) return res.status(503).json({ error: 'OCR not configured' });
     if (rejectWhileLidBenchmarkRuns(res)) return;
     const index = Number.parseInt(req.query.index, 10);
@@ -2690,8 +4141,10 @@ app.post('/ocr-async/:token', (req, res) => {
     // fmt selects the pipeline: 'pgs' (.sup parser) vs 'vobsub'/'dvb' (ffmpeg sub2video → frames).
     const fmt = ['pgs', 'vobsub', 'dvb'].includes(String(req.query.fmt || '')) ? String(req.query.fmt) : 'pgs';
     const ua = claims.ua || FFMPEG_USER_AGENT;
-    // OCR is viewer-triggered by nature — same priority classes for symmetry.
-    const prio = JOB_PRIORITY[String(req.query.origin || '')] ?? 0;
+    // Backward-compatible rollout: legacy Edge builds omitted OCR origin and
+    // those requests were viewer-facing. New Edge builds always send an
+    // explicit viewer/service/pregen class, so background work remains gated.
+    const prio = JOB_PRIORITY[String(req.query.origin || '')] ?? JOB_PRIORITY.viewer;
     const job = { url: claims.url, ua, index, jobId, callbackUrl, lang, fmt, uid: claims.uid, prio };
     const ok = enqueueOcr(job);
     if (!ok) return res.status(429).json({ error: 'OCR queue full' });
@@ -2706,6 +4159,9 @@ app.post('/storyboard-async/:token', (req, res) => {
     const claims = verifyRawToken(req.params.token, GATEWAY_TOKEN);
     if (!claims) return res.status(401).json({ error: 'Invalid byte-pipe token' });
     if (Number(claims.exp) * 1000 < Date.now()) return res.status(401).json({ error: 'Byte-pipe token expired' });
+    if (!bytePipeAllowsPurpose(claims, 'storyboard-job')) {
+        return res.status(403).json({ error: 'Byte-pipe token is not authorized for storyboard jobs' });
+    }
     if (rejectWhileLidBenchmarkRuns(res)) return;
     const jobId = String(req.query.jobId || '');
     const callbackUrl = String(req.query.callback || '');
@@ -2890,9 +4346,19 @@ function extractAudioWav(
     proxyKey = '',
     reportActivity = true,
     abortSignal = null,
+    globalPreemptible = true,
+    inputOptions = null,
 ) {
     return new Promise((resolve) => {
+        if (globalPreemptible && viewerPlaybackActiveLocally()) {
+            return resolve({ ok: false, preempted: true, error: 'preempted by viewer playback before extraction spawn' });
+        }
         const outputPath = path.join(os.tmpdir(), `norva-audio-${Date.now()}-${crypto.randomUUID()}.wav`);
+        const strictLoopback = inputOptions?.strictLoopback === true;
+        const providerSourceUrl = strictLoopback && isHttpUrl(inputOptions?.providerSourceUrl)
+            ? String(inputOptions.providerSourceUrl)
+            : url;
+        const providerAccountKey = proxyKeyFromUrl(providerSourceUrl);
         const args = [
             '-y', '-hide_banner', '-loglevel', 'error', '-nostdin',
             // Mid-stream drop resilience, copied from the playback ffmpeg: without these, a
@@ -2900,10 +4366,14 @@ function extractAudioWav(
             // releasing the slot was enough). Deliberately NO -reconnect_on_http_error — on a
             // single-slot panel, retrying an HTTP error HOLDS the failing connect and hammers
             // the slot into more 429s; the job-level retry below re-attempts cleanly instead.
-            '-reconnect', '1', '-reconnect_streamed', '1',
-            '-reconnect_delay_max', '5',
+            ...(!strictLoopback ? [
+                '-reconnect', '1', '-reconnect_streamed', '1',
+                '-reconnect_delay_max', '5',
+            ] : []),
             '-rw_timeout', '15000000',
-            '-headers', 'Accept: */*\r\nConnection: keep-alive\r\n',
+            '-headers', strictLoopback
+                ? 'Accept: */*\r\nConnection: close\r\n'
+                : 'Accept: */*\r\nConnection: keep-alive\r\n',
             '-user_agent', ua,
             '-probesize', '2000000', '-analyzeduration', '3000000',
             ...(startOffset > 0 ? ['-ss', String(startOffset)] : []),
@@ -2914,9 +4384,19 @@ function extractAudioWav(
             outputPath,
         ];
         let child;
-        try { child = spawn(FFMPEG_PATH, args, { stdio: ['ignore', 'ignore', 'pipe'], env: proxyEnvFor(proxyKeyFromUrl(url)) }); }
+        try {
+            child = spawn(FFMPEG_PATH, args, {
+                stdio: ['ignore', 'ignore', 'pipe'],
+                env: strictLoopback ? loopbackOnlyEnv() : proxyEnvFor(providerAccountKey),
+            });
+        }
         catch (e) { return resolve({ ok: false, error: 'spawn failed: ' + String((e && e.message) || e) }); }
-        const reg = registerAccountExtraction(proxyKeyFromUrl(url), child, reportActivity);
+        const reg = registerAccountExtraction(
+            providerAccountKey,
+            child,
+            reportActivity,
+            globalPreemptible,
+        );
         let stderr = '';
         let timedOut = false;
         let aborted = false;
@@ -2946,7 +4426,8 @@ function extractAudioWav(
             clearTimeout(timer);
             removeAbortListener();
             reg.release?.();
-            const tail = redactCreds(stderr.trim().split('\n').filter(Boolean).pop() || 'no stderr');
+            const safeStderr = strictLoopback ? redactStrictLidLoopback(stderr) : stderr;
+            const tail = redactCreds(safeStderr.trim().split('\n').filter(Boolean).pop() || 'no stderr');
             if (aborted) {
                 fsp.unlink(outputPath).catch(() => {});
                 return resolve({ ok: false, aborted: true, error: 'extraction request aborted' });
@@ -2956,7 +4437,7 @@ function extractAudioWav(
                 return resolve({ ok: false, preempted: true, error: 'preempted by viewer playback on this account' });
             }
             if (code !== 0) {
-                console.warn(`[media-gateway] audio-extract ffmpeg exit ${code}: ${redactCreds(stderr.slice(-300))}`);
+                console.warn(`[media-gateway] audio-extract ffmpeg exit ${code}: ${redactCreds(safeStderr.slice(-300))}`);
                 fsp.unlink(outputPath).catch(() => {});
                 return resolve({ ok: false, error: timedOut ? `extract timeout after ${Math.round(timeoutMs / 1000)}s: ${tail}` : `ffmpeg exit ${code}: ${tail}` });
             }
@@ -2985,7 +4466,7 @@ const CHUNK_WHISPER_TIMEOUT_MS = clampInt(process.env.CHUNK_WHISPER_TIMEOUT_MS, 
 // dir/chunk-%04d.wav pieces of chunkSec each (-reset_timestamps 1 → every chunk starts at 0;
 // audio-only segmentation is sample-accurate, so chunk N covers exactly [N*chunkSec, …)).
 // Resolves { ok, error } when ffmpeg exits; chunk files appear in `dir` as they complete.
-function extractAudioWavChunks(url, ua, trackIndex, timeoutMs, proxyKey, chunkSec, dir) {
+function extractAudioWavChunks(url, ua, trackIndex, timeoutMs, proxyKey, chunkSec, dir, globalPreemptible = true) {
     return new Promise((resolve) => {
         const args = [
             '-y', '-hide_banner', '-loglevel', 'error', '-nostdin',
@@ -3004,7 +4485,7 @@ function extractAudioWavChunks(url, ua, trackIndex, timeoutMs, proxyKey, chunkSe
         let child;
         try { child = spawn(FFMPEG_PATH, args, { stdio: ['ignore', 'ignore', 'pipe'], env: proxyEnvFor(proxyKeyFromUrl(url)) }); }
         catch (e) { return resolve({ ok: false, error: 'spawn failed: ' + String((e && e.message) || e) }); }
-        const reg = registerAccountExtraction(proxyKeyFromUrl(url), child);
+        const reg = registerAccountExtraction(proxyKeyFromUrl(url), child, true, globalPreemptible);
         let stderr = '';
         let timedOut = false;
         const timer = setTimeout(() => { timedOut = true; try { child.kill('SIGKILL'); } catch (_) {} }, timeoutMs);
@@ -3058,7 +4539,7 @@ async function runProductionWhisperDetectOnly(wavPath, mode, options = {}) {
     else lidDetectOnlyStats.shadowAttempts++;
     const backgroundKey = String(options.backgroundKey || '');
     const preemptibleBackground = options.preemptibleBackground === true && Boolean(backgroundKey);
-    if (preemptibleBackground && accountKeyBusyLocally(backgroundKey)) {
+    if (preemptibleBackground && viewerPlaybackActiveLocally()) {
         return {
             ok: false,
             lang: null,
@@ -3124,7 +4605,7 @@ function runWhisperDetect(wavPath, options = {}) {
     return new Promise((resolve) => {
         const backgroundKey = String(options.backgroundKey || '');
         const preemptibleBackground = options.preemptibleBackground === true && Boolean(backgroundKey);
-        if (preemptibleBackground && accountKeyBusyLocally(backgroundKey)) {
+        if (preemptibleBackground && viewerPlaybackActiveLocally()) {
             return resolve({
                 text: '', lang: null, prob: 0, preempted: true,
                 error: 'whisper preempted by viewer playback on this account',
@@ -3266,7 +4747,7 @@ function runWhisperVtt(wavPath, forceLang, timeoutMs = WHISPER_TRANSCRIBE_TIMEOU
         const preemptibleBackground = options.preemptibleBackground === true && Boolean(backgroundKey);
         // Close the extraction→inference race: playback may have started after the job's WAV was
         // produced but before whisper.cpp was spawned.
-        if (preemptibleBackground && accountKeyBusyLocally(backgroundKey)) {
+        if (preemptibleBackground && viewerPlaybackActiveLocally()) {
             return resolve({
                 vtt: '', lang: null, prob: 0, ms: 0, preempted: true,
                 failReason: 'whisper preempted by viewer playback on this account',
@@ -3384,6 +4865,7 @@ async function withAccountJobLock(key, fn) {
 // account lock and the edge-side tick skip still bound the damage).
 const JOB_GATE_POLL_MS = clampInt(process.env.JOB_GATE_POLL_MS, 60_000, 5_000, 600_000);
 const JOB_GATE_MAX_DEFERRALS = clampInt(process.env.JOB_GATE_MAX_DEFERRALS, 240, 1, 2000);
+const JOB_DEFER_HEARTBEAT_MIN_INTERVAL_MS = 60_000;
 async function shouldDeferJob(job) {
     try {
         const gateUrl = String(job.callbackUrl || '').replace(/\/[^/]*$/, '/pregen-gate');
@@ -3405,6 +4887,9 @@ async function shouldDeferJob(job) {
 // WITHIN a class (append after the last same-class job), so same-priority jobs stay FIFO.
 const JOB_PRIORITY = { viewer: 0, service: 1, pregen: 2 };
 function jobPrio(job) { return Number.isInteger(job?.prio) ? job.prio : 1; }
+function backgroundJobBlockedByViewer(job) {
+    return jobPrio(job) !== JOB_PRIORITY.viewer && viewerPlaybackActiveLocally();
+}
 function whisperOptionsForJob(job) {
     if (jobPrio(job) === JOB_PRIORITY.viewer) return {};
     return {
@@ -3456,6 +4941,11 @@ function transcribeCoolingDown(job) {
 // single-slot account) is no longer reaped at 2h or re-claimed at 90min mid-flight, and the
 // player can show honest progress instead of an opaque "processing". Fire-and-forget.
 function postJobHeartbeat(job, stage) {
+    if (stage === 'deferred') {
+        const now = Date.now();
+        if (now - Number(job?.lastDeferredHeartbeatAt || 0) < JOB_DEFER_HEARTBEAT_MIN_INTERVAL_MS) return;
+        job.lastDeferredHeartbeatAt = now;
+    }
     try {
         fetch(job.callbackUrl, {
             method: 'POST',
@@ -3487,11 +4977,45 @@ async function nextRunnableJob(queue, kind) {
     let picked = null;
     while (queue.length) {
         const job = queue.shift();
+        // Service/pregen enrichment is globally background work on this one-vCPU
+        // replica. A viewer-origin request keeps its interactive priority, but
+        // every other job waits while any local playback is starting or active.
+        const backgroundBlockedByViewer = backgroundJobBlockedByViewer(job);
+        if (backgroundBlockedByViewer) {
+            // Active viewing is not a provider/job failure and must not consume
+            // the bounded edge-gate deferral budget, even during a long film.
+            postJobHeartbeat(job, 'deferred');
+            deferred.push(job);
+            continue;
+        }
         // Local slot check FIRST: this box knows instantly when a viewer session or raw pump
         // holds the job's provider account — no round-trip, and it sees what the edge gate
         // can't (a paused viewer whose transcode ffmpeg still runs). Then the edge gate for
         // relay-side signals (live sessions on other lanes, enrichment ticks).
-        if (!accountSlotBusyLocally(job.url) && !storyboardCoolingDown(job) && !transcribeCoolingDown(job) && !(await shouldDeferJob(job))) { job.gateDeferrals = 0; picked = job; break; }
+        const localViewerSlotBusy = accountSlotBusyLocally(job.url, job.uid ? sha256Hex(job.uid) : '');
+        if (localViewerSlotBusy) {
+            // Same-account viewer auxiliary work cannot coexist with a
+            // single-slot playback, but that viewing time is not a job failure.
+            postJobHeartbeat(job, 'deferred');
+            deferred.push(job);
+            continue;
+        }
+        const locallyDeferred = storyboardCoolingDown(job)
+            || transcribeCoolingDown(job);
+        const edgeDeferred = locallyDeferred ? false : await shouldDeferJob(job);
+        // shouldDeferJob may wait up to 10 s. Re-check the global reservation
+        // after that await before granting the job a provider/CPU slot.
+        const viewerWonGateRace = backgroundJobBlockedByViewer(job);
+        if (!locallyDeferred && !edgeDeferred && !viewerWonGateRace) {
+            job.gateDeferrals = 0;
+            picked = job;
+            break;
+        }
+        if (viewerWonGateRace) {
+            postJobHeartbeat(job, 'deferred');
+            deferred.push(job);
+            continue;
+        }
         job.gateDeferrals = (job.gateDeferrals || 0) + 1;
         if (job.gateDeferrals > JOB_GATE_MAX_DEFERRALS) {
             console.warn(`[media-gateway] ${kind} job ${job.jobId} deferred too long — failing back to the edge`);
@@ -3512,12 +5036,44 @@ async function nextRunnableJob(queue, kind) {
 // whisper from starving the stream-proxying duties of this same instance.
 const transcribeQueue = [];
 let transcribeBusy = false;
+function createQueueWakeState() { return { waiter: null, version: 0 }; }
+function wakeQueueDrain(state) {
+    if (!state) return;
+    state.version = Number(state.version || 0) + 1;
+    const waiter = state?.waiter;
+    if (typeof waiter === 'function') waiter();
+}
+function waitForQueueWake(state, timeoutMs, observedVersion = Number(state?.version || 0)) {
+    return new Promise((resolve) => {
+        if (Number(state?.version || 0) !== observedVersion) {
+            resolve();
+            return;
+        }
+        let settled = false;
+        let timer = null;
+        const finish = () => {
+            if (settled) return;
+            settled = true;
+            if (timer) clearTimeout(timer);
+            if (state.waiter === finish) state.waiter = null;
+            resolve();
+        };
+        state.waiter = finish;
+        timer = setTimeout(finish, timeoutMs);
+    });
+}
+const transcribeWakeState = createQueueWakeState();
+function wakePlaybackBlockedQueues() {
+    wakeQueueDrain(transcribeWakeState);
+    wakeQueueDrain(ocrWakeState);
+}
 const MAX_TRANSCRIBE_QUEUE = clampInt(process.env.MAX_TRANSCRIBE_QUEUE, 50, 1, 500);
 
 function enqueueTranscribe(job) {
     if (transcribeQueue.length >= MAX_TRANSCRIBE_QUEUE) return false;
     insertByPriority(transcribeQueue, job); // viewer clicks jump ahead of the nightly pregen batch
     postJobHeartbeat(job, 'queued');
+    wakeQueueDrain(transcribeWakeState);
     queueMicrotask(drainTranscribeQueue);
     return true;
 }
@@ -3526,8 +5082,16 @@ async function drainTranscribeQueue() {
     transcribeBusy = true;
     try {
         while (transcribeQueue.length) {
+            const wakeVersion = transcribeWakeState.version;
             const job = await nextRunnableJob(transcribeQueue, 'transcribe');
-            if (!job) { await sleep(JOB_GATE_POLL_MS); continue; }
+            if (!job) {
+                await waitForQueueWake(
+                    transcribeWakeState,
+                    JOB_GATE_POLL_MS,
+                    wakeVersion,
+                );
+                continue;
+            }
             await runTranscribeJob(job).catch((e) => console.warn('[media-gateway] transcribe job error', String((e && e.message) || e)));
         }
     } finally { transcribeBusy = false; }
@@ -3548,7 +5112,20 @@ async function runTranscribeJob(job) {
             for (let attempt = 0; attempt <= AUDIO_EXTRACT_RETRIES; attempt++) {
                 // Account lock per ATTEMPT: the 30/60s backoff sleeps must not hold the slot.
                 ex = await withAccountJobLock(accountJobKey(uid, url), () =>
-                    extractAudioWav(url, ua, index, start, dur, AUDIO_EXTRACT_TIMEOUT_MS, uid));
+                    backgroundJobBlockedByViewer(job)
+                        ? { ok: false, preempted: true, error: 'preempted by viewer playback before extraction' }
+                        : extractAudioWav(
+                        url,
+                        ua,
+                        index,
+                        start,
+                        dur,
+                        AUDIO_EXTRACT_TIMEOUT_MS,
+                        uid,
+                        true,
+                        null,
+                        jobPrio(job) !== JOB_PRIORITY.viewer,
+                    ));
                 if (ex.ok) break;
                 if (ex.preempted) break; // a viewer took the slot — re-queue, don't hammer beside them
                 if (/\b(401|403)\b|Unauthorized|Forbidden/i.test(ex.error || '')) break; // abuse/auth block — do not hammer
@@ -3613,7 +5190,17 @@ const STORYBOARD_TILE_WIDTH = 212;
 const STORYBOARD_MAX_TILES = 200;
 const STORYBOARD_COLS = 10;
 
-function extractStoryboardSprite(url, ua, intervalSec, cols, rows, outputPath, timeoutMs, proxyKey = '') {
+function extractStoryboardSprite(
+    url,
+    ua,
+    intervalSec,
+    cols,
+    rows,
+    outputPath,
+    timeoutMs,
+    proxyKey = '',
+    globalPreemptible = true,
+) {
     return new Promise((resolve) => {
         const args = [
             '-y', '-hide_banner', '-loglevel', 'error', '-nostdin',
@@ -3634,7 +5221,7 @@ function extractStoryboardSprite(url, ua, intervalSec, cols, rows, outputPath, t
         let child;
         try { child = spawn(FFMPEG_PATH, args, { stdio: ['ignore', 'ignore', 'pipe'], env: proxyEnvFor(proxyKeyFromUrl(url)) }); }
         catch (e) { return resolve({ ok: false, error: 'spawn failed: ' + String((e && e.message) || e) }); }
-        const reg = registerAccountExtraction(proxyKeyFromUrl(url), child);
+        const reg = registerAccountExtraction(proxyKeyFromUrl(url), child, true, globalPreemptible);
         let stderr = '';
         let timedOut = false;
         const timer = setTimeout(() => { timedOut = true; try { child.kill('SIGKILL'); } catch (_) {} }, timeoutMs);
@@ -3677,8 +5264,20 @@ async function runStoryboardJob(job) {
         // floored at 15 min for shorts and capped at 75 min for slow panels.
         const timeoutMs = Math.min(75 * 60_000, Math.max(15 * 60_000, Math.round(dur * 600)));
         const r = await withAccountJobLock(accountJobKey(uid, url), () =>
-            extractStoryboardSprite(url, ua, intervalSec, STORYBOARD_COLS, rows, outputPath, timeoutMs, uid));
-        markStoryboardRun(url); // start the per-provider cooldown (this provider was just read)
+            backgroundJobBlockedByViewer(job)
+                ? { ok: false, preempted: true, error: 'preempted by viewer playback before storyboard extraction' }
+                : extractStoryboardSprite(
+                url,
+                ua,
+                intervalSec,
+                STORYBOARD_COLS,
+                rows,
+                outputPath,
+                timeoutMs,
+                uid,
+                jobPrio(job) !== JOB_PRIORITY.viewer,
+            ));
+        if (!r.preempted) markStoryboardRun(url); // only a real provider read starts the cooldown
         if (r.preempted) {
             payload = { requeue: true };
         } else if (!r.ok) {
@@ -3736,7 +5335,20 @@ async function runChunkedTranscription(job) {
         const extractionDone = withAccountJobLock(accountJobKey(uid, url), async () => {
             let ex = { ok: false, error: 'not attempted' };
             for (let attempt = 0; attempt <= AUDIO_EXTRACT_RETRIES; attempt++) {
-                ex = await extractAudioWavChunks(url, ua, index, AUDIO_EXTRACT_TIMEOUT_MS, uid, TRANSCRIBE_CHUNK_SEC, dir);
+                if (backgroundJobBlockedByViewer(job)) {
+                    ex = { ok: false, preempted: true, error: 'preempted by viewer playback before chunk extraction' };
+                    break;
+                }
+                ex = await extractAudioWavChunks(
+                    url,
+                    ua,
+                    index,
+                    AUDIO_EXTRACT_TIMEOUT_MS,
+                    uid,
+                    TRANSCRIBE_CHUNK_SEC,
+                    dir,
+                    jobPrio(job) !== JOB_PRIORITY.viewer,
+                );
                 if (ex.ok) break;
                 if (ex.preempted) break; // a viewer took the slot — the whole job re-queues
                 if (/\b(401|403)\b|Unauthorized|Forbidden/i.test(ex.error || '')) break; // abuse/auth block
@@ -3924,10 +5536,12 @@ async function runTranslateJob(job) {
 // A gateway restart loses in-flight jobs → the edge reaper re-enqueues rows stuck in 'processing'.
 const ocrQueue = [];
 let ocrBusy = false;
+const ocrWakeState = createQueueWakeState();
 function enqueueOcr(job) {
     if (ocrQueue.length >= MAX_OCR_QUEUE) return false;
     insertByPriority(ocrQueue, job);
     postJobHeartbeat(job, 'queued');
+    wakeQueueDrain(ocrWakeState);
     queueMicrotask(drainOcrQueue);
     return true;
 }
@@ -3936,8 +5550,16 @@ async function drainOcrQueue() {
     ocrBusy = true;
     try {
         while (ocrQueue.length) {
+            const wakeVersion = ocrWakeState.version;
             const job = await nextRunnableJob(ocrQueue, 'ocr');
-            if (!job) { await sleep(JOB_GATE_POLL_MS); continue; }
+            if (!job) {
+                await waitForQueueWake(
+                    ocrWakeState,
+                    JOB_GATE_POLL_MS,
+                    wakeVersion,
+                );
+                continue;
+            }
             await runOcrJob(job).catch((e) => console.warn('[media-gateway] ocr job error', String((e && e.message) || e)));
         }
     } finally { ocrBusy = false; }
@@ -3950,7 +5572,14 @@ async function drainOcrQueue() {
 // surface WHY extraction failed (the audio path's opaque "failed" cost real debugging time). Subtitle
 // streams are sparse across the file, so `-c:s copy` must demux the whole input — index is the
 // absolute ffprobe stream index from the probe.
-function extractSubtitleSup(url, ua, trackIndex, timeoutMs = SUP_EXTRACT_TIMEOUT_MS, proxyKey = '') {
+function extractSubtitleSup(
+    url,
+    ua,
+    trackIndex,
+    timeoutMs = SUP_EXTRACT_TIMEOUT_MS,
+    proxyKey = '',
+    globalPreemptible = true,
+) {
     return new Promise((resolve) => {
         const outputPath = path.join(os.tmpdir(), `norva-sub-${Date.now()}-${crypto.randomUUID()}.sup`);
         const args = [
@@ -3965,12 +5594,24 @@ function extractSubtitleSup(url, ua, trackIndex, timeoutMs = SUP_EXTRACT_TIMEOUT
         let child;
         try { child = spawn(FFMPEG_PATH, args, { stdio: ['ignore', 'ignore', 'pipe'], env: proxyEnvFor(proxyKeyFromUrl(url)) }); }
         catch (e) { return resolve({ ok: false, error: 'spawn failed: ' + String((e && e.message) || e) }); }
+        const reg = registerAccountExtraction(proxyKeyFromUrl(url), child, true, globalPreemptible);
         let stderr = '';
         const timer = setTimeout(() => { try { child.kill('SIGKILL'); } catch (_) {} }, timeoutMs);
         child.stderr.on('data', (d) => { stderr += d.toString(); });
-        child.on('error', (e) => { clearTimeout(timer); resolve({ ok: false, error: String((e && e.message) || e) }); });
+        child.on('error', (e) => {
+            clearTimeout(timer);
+            reg.release?.();
+            resolve(reg.preempted
+                ? { ok: false, preempted: true, error: 'preempted by viewer playback' }
+                : { ok: false, error: String((e && e.message) || e) });
+        });
         child.on('close', async (code) => {
             clearTimeout(timer);
+            reg.release?.();
+            if (reg.preempted) {
+                fsp.unlink(outputPath).catch(() => {});
+                return resolve({ ok: false, preempted: true, error: 'preempted by viewer playback' });
+            }
             if (code !== 0) {
                 console.warn(`[media-gateway] sup-extract ffmpeg exit ${code}: ${redactCreds(stderr.slice(-300))}`);
                 fsp.unlink(outputPath).catch(() => {});
@@ -3988,19 +5629,34 @@ function extractSubtitleSup(url, ua, trackIndex, timeoutMs = SUP_EXTRACT_TIMEOUT
 
 // Run ocr_pgs.py on a .sup: pipe { sup, lang } in on stdin, read the WebVTT from stdout.
 // Resolves { ok, vtt } or { ok:false, error } (the script emits a JSON error on stderr + exit code).
-function runOcrPython(supPath, lang) {
+function runOcrPython(supPath, lang, globalPreemptible = true) {
     return new Promise((resolve) => {
         let child;
         try {
-            child = spawn(OCR_PYTHON_BIN, [OCR_SCRIPT], { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env } });
+            child = spawn(OCR_PYTHON_BIN, [OCR_SCRIPT], {
+                stdio: ['pipe', 'pipe', 'pipe'],
+                env: { ...process.env },
+                detached: process.platform !== 'win32',
+            });
         } catch (e) { return resolve({ ok: false, error: 'spawn failed: ' + String((e && e.message) || e) }); }
+        const registration = registerBackgroundCpuProcess(child, globalPreemptible);
         let out = '', err = '';
-        const timer = setTimeout(() => { try { child.kill('SIGKILL'); } catch (_) {} }, OCR_TIMEOUT_MS);
+        const timer = setTimeout(() => killBackgroundProcessTree(child), OCR_TIMEOUT_MS);
         child.stdout.on('data', (d) => { out += d.toString(); });
         child.stderr.on('data', (d) => { err += d.toString(); });
-        child.on('error', (e) => { clearTimeout(timer); resolve({ ok: false, error: String((e && e.message) || e) }); });
+        child.on('error', (e) => {
+            clearTimeout(timer);
+            registration.release?.();
+            resolve(registration.preempted
+                ? { ok: false, preempted: true, error: 'preempted by viewer playback' }
+                : { ok: false, error: String((e && e.message) || e) });
+        });
         child.on('close', (code) => {
             clearTimeout(timer);
+            registration.release?.();
+            if (registration.preempted) {
+                return resolve({ ok: false, preempted: true, error: 'preempted by viewer playback' });
+            }
             if (code === 0 && out.trim()) return resolve({ ok: true, vtt: out });
             let msg = `ocr exit ${code}`;
             try { const j = JSON.parse((err.trim().split('\n').pop() || '')); if (j && j.error) msg = j.error; } catch (_) {}
@@ -4013,7 +5669,14 @@ function runOcrPython(supPath, lang) {
 // VOBSUB/DVB: render the image-sub track to timed PNGs with ffmpeg's sub2video filter (decodes the
 // bitmap stream; showinfo logs each frame's PTS) into a temp dir + showinfo.log. Resolves
 // { ok:true, dir } or { ok:false, error } (the ffmpeg error tail). One ffmpeg pass over the URL.
-function extractSubtitleFrames(url, ua, trackIndex, timeoutMs = SUP_EXTRACT_TIMEOUT_MS, proxyKey = '') {
+function extractSubtitleFrames(
+    url,
+    ua,
+    trackIndex,
+    timeoutMs = SUP_EXTRACT_TIMEOUT_MS,
+    proxyKey = '',
+    globalPreemptible = true,
+) {
     return new Promise((resolve) => {
         const dir = path.join(os.tmpdir(), `norva-imgsub-${Date.now()}-${crypto.randomUUID()}`);
         try { fs.mkdirSync(dir, { recursive: true }); } catch (e) { return resolve({ ok: false, error: 'mkdir failed: ' + String((e && e.message) || e) }); }
@@ -4030,13 +5693,24 @@ function extractSubtitleFrames(url, ua, trackIndex, timeoutMs = SUP_EXTRACT_TIME
         let child;
         try { child = spawn(FFMPEG_PATH, args, { stdio: ['ignore', 'ignore', 'pipe'], env: proxyEnvFor(proxyKeyFromUrl(url)) }); }
         catch (e) { return resolve({ ok: false, error: 'spawn failed: ' + String((e && e.message) || e) }); }
+        const reg = registerAccountExtraction(proxyKeyFromUrl(url), child, true, globalPreemptible);
         let stderr = '';
         const timer = setTimeout(() => { try { child.kill('SIGKILL'); } catch (_) {} }, timeoutMs);
         // showinfo is verbose (one line/frame) — keep the tail bounded but enough for a long film.
         child.stderr.on('data', (d) => { stderr += d.toString(); if (stderr.length > 24_000_000) stderr = stderr.slice(-16_000_000); });
-        child.on('error', (e) => { clearTimeout(timer); resolve({ ok: false, error: String((e && e.message) || e), dir }); });
+        child.on('error', (e) => {
+            clearTimeout(timer);
+            reg.release?.();
+            resolve(reg.preempted
+                ? { ok: false, preempted: true, error: 'preempted by viewer playback', dir }
+                : { ok: false, error: String((e && e.message) || e), dir });
+        });
         child.on('close', async (code) => {
             clearTimeout(timer);
+            reg.release?.();
+            if (reg.preempted) {
+                return resolve({ ok: false, preempted: true, error: 'preempted by viewer playback', dir });
+            }
             try { await fsp.writeFile(path.join(dir, 'showinfo.log'), stderr); } catch (_) { /* python falls back to file order */ }
             let nframes = 0;
             try { nframes = (await fsp.readdir(dir)).filter((f) => f.endsWith('.png')).length; } catch (_) { nframes = 0; }
@@ -4052,19 +5726,35 @@ function extractSubtitleFrames(url, ua, trackIndex, timeoutMs = SUP_EXTRACT_TIME
 }
 
 // Run ocr_imgsub.py on a rendered frame dir: pipe { dir, lang } in, read the WebVTT from stdout.
-function runOcrImgsubPython(frameDir, lang) {
+function runOcrImgsubPython(frameDir, lang, globalPreemptible = true) {
     return new Promise((resolve) => {
         let child;
         try {
-            child = spawn(OCR_PYTHON_BIN, [OCR_SCRIPT_IMGSUB], { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env }, cwd: __dirname });
+            child = spawn(OCR_PYTHON_BIN, [OCR_SCRIPT_IMGSUB], {
+                stdio: ['pipe', 'pipe', 'pipe'],
+                env: { ...process.env },
+                cwd: __dirname,
+                detached: process.platform !== 'win32',
+            });
         } catch (e) { return resolve({ ok: false, error: 'spawn failed: ' + String((e && e.message) || e) }); }
+        const registration = registerBackgroundCpuProcess(child, globalPreemptible);
         let out = '', err = '';
-        const timer = setTimeout(() => { try { child.kill('SIGKILL'); } catch (_) {} }, OCR_TIMEOUT_MS);
+        const timer = setTimeout(() => killBackgroundProcessTree(child), OCR_TIMEOUT_MS);
         child.stdout.on('data', (d) => { out += d.toString(); });
         child.stderr.on('data', (d) => { err += d.toString(); });
-        child.on('error', (e) => { clearTimeout(timer); resolve({ ok: false, error: String((e && e.message) || e) }); });
+        child.on('error', (e) => {
+            clearTimeout(timer);
+            registration.release?.();
+            resolve(registration.preempted
+                ? { ok: false, preempted: true, error: 'preempted by viewer playback' }
+                : { ok: false, error: String((e && e.message) || e) });
+        });
         child.on('close', (code) => {
             clearTimeout(timer);
+            registration.release?.();
+            if (registration.preempted) {
+                return resolve({ ok: false, preempted: true, error: 'preempted by viewer playback' });
+            }
             if (code === 0 && out.trim()) return resolve({ ok: true, vtt: out });
             let msg = `ocr exit ${code}`;
             try { const j = JSON.parse((err.trim().split('\n').pop() || '')); if (j && j.error) msg = j.error; } catch (_) {}
@@ -4085,6 +5775,7 @@ const OCR_EXTRACT_BACKOFF_MS = clampInt(process.env.OCR_EXTRACT_BACKOFF_MS, 30_0
 async function runOcrJob(job) {
     const { url, ua, index, jobId, callbackUrl, lang, fmt = 'pgs', uid = '' } = job;
     const useFrames = fmt === 'vobsub' || fmt === 'dvb';  // sub2video path; else PGS .sup parser
+    const globalPreemptible = jobPrio(job) !== JOB_PRIORITY.viewer;
     let supPath = null, frameDir = null, payload;
     try {
         postJobHeartbeat(job, 'extracting');
@@ -4093,31 +5784,53 @@ async function runOcrJob(job) {
             // Account lock per ATTEMPT (not around the loop): the 30/60 s backoff sleeps must not
             // hold the account's slot — another lane may legitimately use it between our tries.
             ex = await withAccountJobLock(accountJobKey(uid, url), () =>
-                useFrames ? extractSubtitleFrames(url, ua, index, SUP_EXTRACT_TIMEOUT_MS, uid) : extractSubtitleSup(url, ua, index, SUP_EXTRACT_TIMEOUT_MS, uid));
+                backgroundJobBlockedByViewer(job)
+                    ? { ok: false, preempted: true, error: 'preempted by viewer playback before OCR extraction' }
+                    : (useFrames
+                        ? extractSubtitleFrames(url, ua, index, SUP_EXTRACT_TIMEOUT_MS, uid, globalPreemptible)
+                        : extractSubtitleSup(url, ua, index, SUP_EXTRACT_TIMEOUT_MS, uid, globalPreemptible)));
             if (ex.ok) break;
             if (ex.dir) { fsp.rm(ex.dir, { recursive: true, force: true }).catch(() => {}); ex.dir = null; } // drop partial dir
+            if (ex.preempted) break;
             if (/\b(401|403)\b|Unauthorized|Forbidden/i.test(ex.error || '')) break; // abuse/auth block — do not hammer
             if (attempt < OCR_EXTRACT_RETRIES) await sleep(OCR_EXTRACT_BACKOFF_MS * (attempt + 1)); // 30s, 60s — spaced, not a burst
         }
         // OCR demuxes the whole input too (`-c:s copy` walks the file) — same per-provider
         // cooldown as a transcription once the attempts are done.
-        markTranscribeRun(url);
-        if (!ex.ok) {
+        if (!ex.preempted) markTranscribeRun(url);
+        if (ex.preempted) {
+            payload = { requeue: true };
+        } else if (!ex.ok) {
             payload = { jobId, ok: false, error: ('Subtitle extraction failed: ' + ex.error).slice(0, 300) };
         } else {
             let r;
-            if (useFrames) { frameDir = ex.dir; r = await runOcrImgsubPython(frameDir, lang || OCR_LANGS); }
-            else { supPath = ex.path; r = await runOcrPython(supPath, lang || OCR_LANGS); }
-            const segments = r.ok ? (r.vtt.match(/-->/g) || []).length : 0;
-            payload = (r.ok && segments > 0)
-                ? { jobId, ok: true, vtt: r.vtt, segments, sourceLang: null }
-                : { jobId, ok: false, error: String(r.error || 'OCR produced no cues').slice(0, 300) };
+            if (useFrames) {
+                frameDir = ex.dir;
+                r = await runOcrImgsubPython(frameDir, lang || OCR_LANGS, globalPreemptible);
+            } else {
+                supPath = ex.path;
+                r = await runOcrPython(supPath, lang || OCR_LANGS, globalPreemptible);
+            }
+            if (r.preempted) {
+                payload = { requeue: true };
+            } else {
+                const segments = r.ok ? (r.vtt.match(/-->/g) || []).length : 0;
+                payload = (r.ok && segments > 0)
+                    ? { jobId, ok: true, vtt: r.vtt, segments, sourceLang: null }
+                    : { jobId, ok: false, error: String(r.error || 'OCR produced no cues').slice(0, 300) };
+            }
         }
     } catch (e) {
         payload = { jobId, ok: false, error: String((e && e.message) || e).slice(0, 300) };
     } finally {
         if (supPath) fsp.unlink(supPath).catch(() => {});
         if (frameDir) fsp.rm(frameDir, { recursive: true, force: true }).catch(() => {});
+    }
+    if (payload?.requeue) {
+        console.log(`[media-gateway] ocr job ${jobId} preempted by viewer — re-queued`);
+        postJobHeartbeat(job, 'deferred');
+        insertByPriority(ocrQueue, job);
+        return;
     }
     try {
         await fetch(callbackUrl, {
@@ -4198,6 +5911,13 @@ function detectLanguageFromText(raw) {
 app.post('/sessions', requireGatewayAuth, async (req, res) => {
     const sessionCreateStartedAt = Date.now();
     sessionStartupStats.attempts += 1;
+    let viewerStartupReservation = null;
+    let viewerSessionStartupAdmission = null;
+    let releaseViewerSessionStartupLock = null;
+    let createdSession = null;
+    let pendingOutputDir = null;
+    let sessionRequestAbortController = null;
+    let detachSessionRequestAbort = null;
     try {
         const {
             sourceUrl,
@@ -4225,29 +5945,86 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
         }
 
         const normalizedOwnerKey = normalizeSessionKey(ownerKey);
+        const playbackProxyKey = proxyKeyFromUrl(sourceUrl);
+        const playbackProviderSlotKey = providerSlotKeyFromUrl(sourceUrl, normalizedOwnerKey);
+        // Observe abandonment before admission or lock allocation. A queued
+        // browser navigation must release immediately rather than wait behind a
+        // previous startup and keep shared QoS elevated.
+        sessionRequestAbortController = new AbortController();
+        const abortSessionRequest = () => {
+            try { sessionRequestAbortController.abort(); } catch (_) {}
+            if (createdSession) stopSession(createdSession).catch(() => {});
+        };
+        const onResponseClose = () => {
+            if (!res.writableEnded) abortSessionRequest();
+        };
+        req.once('aborted', abortSessionRequest);
+        res.once('close', onResponseClose);
+        detachSessionRequestAbort = () => {
+            req.off('aborted', abortSessionRequest);
+            res.off('close', onResponseClose);
+        };
+        if (req.aborted || req.destroyed || res.destroyed || res.writableEnded) {
+            abortSessionRequest();
+            return;
+        }
+        viewerSessionStartupAdmission = tryAdmitViewerSessionStartup(
+            normalizedOwnerKey,
+            playbackProviderSlotKey,
+        );
+        if (!viewerSessionStartupAdmission) {
+            res.setHeader('Retry-After', '2');
+            return res.status(503).json({
+                error: 'The media service is handling another playback startup. Try again shortly.',
+                code: 'GATEWAY_STARTUP_BUSY',
+            });
+        }
+        releaseViewerSessionStartupLock = await acquireViewerSessionStartupLocks(
+            normalizedOwnerKey,
+            playbackProviderSlotKey,
+            sessionRequestAbortController.signal,
+        );
+        if (sessionRequestAbortController.signal.aborted) return;
+        // Only an admitted live startup reserves viewer QoS. Pending lock
+        // waiters remain bounded and do not starve unrelated background work.
+        viewerStartupReservation = reserveViewerStartup();
         const cleanupStartedAt = Date.now();
         let stoppedConflictingSessions = 0;
+        // Stale engine byte-pipes on the same account hold the same provider slot as
+        // the transcode about to start (the engine just failed over here) — abort them
+        // like any other conflicting session so ffmpeg doesn't open against a 458.
+        stoppedConflictingSessions += abortRawPumps(
+            (p) => p.providerSlotKey === playbackProviderSlotKey,
+            null,
+            'transcode session start',
+        );
+        // A background extraction (whisper/storyboard) mid-film on this account would fight the
+        // viewer for the single slot for MINUTES. Its already-produced WAV must not leave a
+        // service/pregen Whisper process fighting the viewer for CPU either.
+        stoppedConflictingSessions += preemptAccountExtractions(playbackProxyKey, 'transcode session start');
+        // CPU preemption does not hold a provider connection and must not trigger the provider
+        // slot-release delay below.
+        preemptAccountBackgroundWhispers(playbackProxyKey, 'transcode session start');
+        const globalBackgroundPreemptions = preemptBackgroundWorkGlobally(
+            playbackProxyKey,
+            'transcode session start',
+        );
+
+        // Different titles from the same credentials have different source URLs
+        // but share one physical provider slot. Stop the previous account holder,
+        // including its input pump, before any new provider I/O.
+        stoppedConflictingSessions += await stopConflictingProviderSessions(playbackProviderSlotKey);
+
         if (STOP_CONFLICTING_OWNER_SESSIONS && normalizedOwnerKey) {
             stoppedConflictingSessions += await stopConflictingOwnerSessions(normalizedOwnerKey);
         }
 
         if (STOP_CONFLICTING_SOURCE_SESSIONS) {
-            stoppedConflictingSessions += await stopConflictingSourceSessions(sourceUrl);
+            stoppedConflictingSessions += await stopConflictingSourceSessions(
+                sourceUrl,
+                playbackProviderSlotKey,
+            );
         }
-
-        // Stale engine byte-pipes on the same account hold the same provider slot as
-        // the transcode about to start (the engine just failed over here) — abort them
-        // like any other conflicting session so ffmpeg doesn't open against a 458.
-        stoppedConflictingSessions += abortRawPumps(
-            (p) => p.proxyKey === proxyKeyFromUrl(sourceUrl), null, 'transcode session start');
-        // A background extraction (whisper/storyboard) mid-film on this account would fight the
-        // viewer for the single slot for MINUTES. Its already-produced WAV must not leave a
-        // service/pregen Whisper process fighting the viewer for CPU either.
-        const playbackProxyKey = proxyKeyFromUrl(sourceUrl);
-        stoppedConflictingSessions += preemptAccountExtractions(playbackProxyKey, 'transcode session start');
-        // CPU preemption does not hold a provider connection and must not trigger the provider
-        // slot-release delay below.
-        preemptAccountBackgroundWhispers(playbackProxyKey, 'transcode session start');
 
         let slotReleaseWaitMs = 0;
         if (stoppedConflictingSessions > 0 && PROVIDER_SLOT_RELEASE_DELAY_MS > 0) {
@@ -4260,6 +6037,7 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
         const id = crypto.randomUUID();
         const accessToken = randomToken();
         const outputDir = resolveSessionDir(id);
+        pendingOutputDir = outputDir;
         await fsp.mkdir(outputDir, { recursive: true });
         const sourceKey = sourceSessionKey(sourceUrl);
 
@@ -4279,14 +6057,40 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
         let normalizedCodecProfile = asRecord(codecProfile || normalizedPlaybackHint.codecProfile || normalizedPlaybackHint.codec_profile);
         let codecProfileSource = hasUsefulCodecProfile(normalizedCodecProfile) ? 'request' : '';
         const requestCodecProfileReliable = hasReliableVodCodecProfile(normalizedCodecProfile);
+        // Freeze the long-GOP-safe route from the authenticated exact-file profile
+        // before ffprobe or FFmpeg can open a provider connection. Profiles discovered
+        // only by the Gateway probe are deliberately ineligible: switching after that
+        // probe would spend a second provider connection on single-slot accounts.
+        const forceExactMatroskaH264Reencode = shouldReencodeExactMatroskaH264({
+            sourceUrl,
+            codecProfile: normalizedCodecProfile,
+            codecProfileSource,
+            playbackHint: normalizedPlaybackHint,
+        });
+        const finiteMkvPlaybackAtRequest = isFiniteMkvVodSession({
+            sourceUrl,
+            playbackHint: normalizedPlaybackHint,
+            codecProfile: normalizedCodecProfile,
+        });
+        let finiteMkvPlayback = finiteMkvPlaybackAtRequest;
         const shouldProbe = shouldProbeCodecProfile(normalizedPlaybackHint, sourceUrl);
         const shouldCompleteProfile = shouldProbe && shouldProbeMissingSubtitleTracks(normalizedCodecProfile, normalizedPlaybackHint, sourceUrl);
         const codecProfileStartedAt = Date.now();
         let codecProfileProbeRan = false;
+        let codecProfileProbeReleaseWaitMs = 0;
         if ((!codecProfileSource || !requestCodecProfileReliable || shouldCompleteProfile) && shouldProbe) {
             codecProfileProbeRan = true;
             try {
-                const probedCodecProfile = await probeCodecProfile(sourceUrl, sanitizeUserAgent(userAgent) || FFMPEG_USER_AGENT);
+                // A direct ffprobe on seekable Matroska can open a replacement
+                // HTTP connection before closing the old one while following
+                // SeekHead entries. On a mono-slot account that is itself a 458.
+                // The playback lane therefore accepts only cache/in-band probe
+                // data here; FFmpeg discovers any missing tracks from pipe:0.
+                const probedCodecProfile = await probeCodecProfile(
+                    sourceUrl,
+                    sanitizeUserAgent(userAgent) || FFMPEG_USER_AGENT,
+                    { localOnly: finiteMkvPlaybackAtRequest },
+                );
                 if (hasUsefulCodecProfile(probedCodecProfile)) {
                     normalizedCodecProfile = mergeCodecProfiles(normalizedCodecProfile, probedCodecProfile);
                     codecProfileSource = codecProfileSource ? `${codecProfileSource}+gateway_probe` : 'gateway_probe';
@@ -4312,6 +6116,26 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
                 console.warn('[media-gateway] codec probe skipped:', sanitizeLog(err.message || String(err), sourceUrl));
             }
         }
+        // Cache/in-band probing can be the first place an extensionless URL is
+        // identified as Matroska. Re-evaluate the lane after merging that local
+        // evidence so resume, video mode and the bounded input pump all make the
+        // same decision. Requests that already declare MKV never run a seekable
+        // provider ffprobe (`localOnly` above).
+        finiteMkvPlayback = isFiniteMkvVodSession({
+            sourceUrl,
+            playbackHint: normalizedPlaybackHint,
+            codecProfile: normalizedCodecProfile,
+        });
+        // probeCodecProfile may have used the exact provider URL (rather than its
+        // cache or the in-band prefix). Waiting conservatively on every invocation
+        // costs only startup latency and guarantees the panel has released its
+        // logical mono-account slot before the size preflight or input pump opens.
+        if (codecProfileProbeRan && !finiteMkvPlaybackAtRequest && PROVIDER_SLOT_RELEASE_DELAY_MS > 0) {
+            await sleep(PROVIDER_SLOT_RELEASE_DELAY_MS);
+            codecProfileProbeReleaseWaitMs = PROVIDER_SLOT_RELEASE_DELAY_MS;
+            slotReleaseWaitMs += PROVIDER_SLOT_RELEASE_DELAY_MS;
+        }
+        if (sessionRequestAbortController.signal.aborted) throw new Error('Session request aborted');
         const codecProfileMs = Math.max(0, Date.now() - codecProfileStartedAt);
         const session = {
             id,
@@ -4319,6 +6143,7 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             sourceUrl,
             sourceKey,
             ownerKey: normalizedOwnerKey,
+            providerSlotKey: playbackProviderSlotKey,
             mode: mode === 'transcode' ? 'transcode' : 'remux',
             userAgent: sanitizeUserAgent(userAgent),
             playbackHint: normalizedPlaybackHint,
@@ -4332,6 +6157,12 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             audioMode: stringOrNull(audioMode) || stringOrNull(normalizedPlaybackHint.audioMode) || stringOrNull(normalizedPlaybackHint.audio_mode),
             videoCodec: stringOrNull(videoCodec) || stringOrNull(normalizedPlaybackHint.videoCodec) || stringOrNull(normalizedPlaybackHint.video_codec) || stringOrNull(normalizedCodecProfile.videoCodec) || stringOrNull(normalizedCodecProfile.video_codec) || stringOrNull(normalizedCodecProfile.video),
             clientAudioPassthrough: clientAudioPassthrough === false || normalizedPlaybackHint.clientAudioPassthrough === false || normalizedPlaybackHint.client_audio_passthrough === false ? false : true,
+            forceExactMatroskaH264Reencode,
+            videoMode: null,
+            videoModeReason: null,
+            hlsTargetSeconds: forceExactMatroskaH264Reencode
+                ? EXACT_MATROSKA_H264_HLS_TARGET_SECONDS
+                : 4,
             status: 'starting',
             outputDir,
             playlistPath: path.join(outputDir, 'playlist.m3u8'),
@@ -4339,28 +6170,99 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             createdAt: new Date(),
             expiresAt: expiresAtDate,
             ffmpeg: null,
+            inputPump: null,
+            inputFailure: null,
+            vodInputValidator: null,
             lastError: null,
             logTail: '',
             startupTimings: {
                 cleanupMs,
                 slotReleaseWaitMs,
                 stoppedConflictingSessions,
+                globalBackgroundExtractionPreemptions: globalBackgroundPreemptions.extractions,
+                globalBackgroundWhisperPreemptions: globalBackgroundPreemptions.whispers,
+                globalBackgroundCpuPreemptions: globalBackgroundPreemptions.cpu,
                 codecProfileMs,
                 codecProfileProbeRan,
+                codecProfileProbeReleaseWaitMs,
+                boundedMkvInputPump: false,
+                fileSizeBytes: null,
+                fileSizeProbeRan: false,
+                fileSizeProbeMs: 0,
+                fileSizeProbeReleaseWaitMs: 0,
                 ffmpegReadyMs: null,
                 playlistSegmentCount: 0,
                 playlistBufferSeconds: 0,
                 firstSegmentBytes: 0,
+                playlistSegmentBytes: 0,
                 startOffsetProbeMs: null,
                 totalMs: null
             }
         };
 
+        // This panel accepts only bounded ranges (`bytes=N-M`). Resolve the exact
+        // terminal byte before the single-socket input pump is allowed to feed
+        // FFmpeg. FFmpeg itself never sees the provider URL on this lane.
+        try {
+            await ensureBoundedMkvInputPump(session, sessionRequestAbortController.signal);
+        } catch (err) {
+            if (sessionRequestAbortController.signal.aborted) throw err;
+            await removeSessionDir(outputDir).catch(() => {});
+            if (err?.status === 458 || err?.code === 'PROVIDER_BUSY') {
+                return res.status(458).json({
+                    error: 'This TV service is already being used on another device.',
+                    code: 'PROVIDER_BUSY',
+                    upstreamStatus: 458,
+                });
+            }
+            if (err?.code === 'PROXY_AUTH_FAILED') {
+                return res.status(502).json({
+                    error: 'The media service is temporarily unavailable.',
+                    code: 'PROXY_AUTH_FAILED',
+                    networkCause: 'proxy_auth',
+                });
+            }
+            console.warn('[media-gateway] unable to bound finite MKV input:', sanitizeLog(err?.message || String(err), sourceUrl));
+            return res.status(502).json({
+                error: 'Unable to prepare this media file for reliable playback.',
+                code: err?.code || 'VOD_SIZE_UNAVAILABLE',
+            });
+        }
+
+        // The exact size preflight above is provider I/O, but it neither starts
+        // the byte pump nor spawns FFmpeg. Freeze the rendition graph only now:
+        // ensureBoundedMkvInputPump has attached the exact fileSizeBytes to an
+        // otherwise complete request/cached profile, making the normal Norva
+        // exact-profile path reachable without ever mutating a running graph.
+        freezeMultiAudioHlsTopology(session);
+        createdSession = session;
+
+        session.videoMode = (
+            session.forceAlignedMultiAudioVideoEncode === true ||
+            forceExactMatroskaH264Reencode ||
+            session.mode === 'transcode' ||
+            !shouldCopyVideo(session) ||
+            (finiteMkvPlayback && normalizedSeekOffset > 0)
+        ) ? 'encode' : 'copy';
+        session.videoModeReason = session.forceAlignedMultiAudioVideoEncode === true
+            ? 'multi_audio_aligned_hls'
+            : (forceExactMatroskaH264Reencode
+                ? 'exact_matroska_h264'
+            : (session.mode === 'transcode'
+                ? 'requested_transcode'
+                : (finiteMkvPlayback && normalizedSeekOffset > 0
+                    ? 'pumped_matroska_resume'
+                    : (session.videoMode === 'encode' ? 'unsafe_or_unknown_video' : 'copy'))));
+
         sessions.set(id, session);
 
         const hlsUrl = publicUrl(req, `/sessions/${id}/playlist.m3u8?token=${encodeURIComponent(accessToken)}`);
         const ffmpegStartedAt = Date.now();
-        const started = await startSessionWithProviderRetry(session);
+        const started = await startSessionWithProviderRetry(
+            session,
+            sessionRequestAbortController.signal,
+        );
+        if (sessionRequestAbortController.signal.aborted) throw new Error('Session request aborted');
         session.startupTimings.ffmpegReadyMs = Math.max(0, Date.now() - ffmpegStartedAt);
         if (!started) {
             const detail = session.lastError || 'Playlist was not generated';
@@ -4368,7 +6270,7 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             await stopSession(session);
             // A proxy 407 is infrastructure authentication failure, never evidence that
             // the IPTV account is active elsewhere. Keep it out of the provider 458 circuit.
-            if (isProxyAuthenticationFailure(session)) {
+            if (session.inputFailure?.code === 'PROXY_AUTH_FAILED' || isProxyAuthenticationFailure(session)) {
                 return res.status(502).json({
                     error: 'The media service is temporarily unavailable.',
                     code: 'PROXY_AUTH_FAILED',
@@ -4377,7 +6279,7 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             }
             // Slot-busy upstream is terminal. Preserve the exact 458 so callers open
             // the account circuit instead of treating it as a retryable gateway 503.
-            if (isProviderSlotBusyFailure(session)) {
+            if (session.inputFailure?.code === 'PROVIDER_BUSY' || isProviderSlotBusyFailure(session)) {
                 return res.status(458).json({
                     error: 'This TV service is already being used on another device.',
                     code: 'PROVIDER_BUSY',
@@ -4389,8 +6291,18 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
                 details: detail
             });
         }
+        // The pump has already forwarded several megabytes by the time the HLS
+        // readiness buffer exists. Parse that local prefix now, while retaining
+        // the same provider socket, so the 201 response carries duration and all
+        // audio tracks even on a cold exact-file cache.
+        await enrichSessionCodecProfileFromBoundedHeader(
+            session,
+            sessionRequestAbortController.signal,
+        );
+        if (sessionRequestAbortController.signal.aborted) throw new Error('Session request aborted');
         const startOffsetProbeStartedAt = Date.now();
         await observeSessionStartOffset(session);
+        if (sessionRequestAbortController.signal.aborted) throw new Error('Session request aborted');
         session.startupTimings.startOffsetProbeMs = Math.max(0, Date.now() - startOffsetProbeStartedAt);
         session.startupTimings.totalMs = Math.max(0, Date.now() - sessionCreateStartedAt);
         session.startupTimings.inputProbeMode = session.fastInputProbe === true ? 'known-fast' : 'full';
@@ -4412,7 +6324,11 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             mode: session.mode,
             audioMode: audioModeForSession(session),
             videoMode: videoModeForSession(session),
-            audioStreamIndex: session.audioStreamIndex,
+            videoModeReason: session.videoModeReason,
+            hlsTargetSeconds: session.hlsTargetSeconds,
+            audioStreamIndex: mappedAudioStreamIndexForSession(session),
+            audioRenditions: audioRenditionsForSession(session),
+            multiAudioHls: multiAudioHlsDiagnosticsForSession(session),
             requestedSeekOffset: session.seekOffset || 0,
             actualStartOffset: session.actualStartOffset || 0,
             localSeekTarget: session.localSeekTarget || 0,
@@ -4424,8 +6340,36 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             expiresAt: session.expiresAt.toISOString()
         });
     } catch (err) {
+        if (sessionRequestAbortController?.signal.aborted) {
+            if (createdSession) {
+                await stopSession(createdSession).catch(() => {});
+            } else if (pendingOutputDir) {
+                await removeSessionDir(pendingOutputDir).catch(() => {});
+            }
+            return;
+        }
+        if (err?.code === 'VIEWER_STARTUP_BUSY') {
+            res.setHeader('Retry-After', '2');
+            if (!res.headersSent) {
+                res.status(503).json({
+                    error: 'The media service is handling another playback startup. Try again shortly.',
+                    code: 'GATEWAY_STARTUP_BUSY',
+                });
+            }
+            return;
+        }
         console.error('[media-gateway] create session failed:', err);
-        res.status(500).json({ error: 'Failed to create media session' });
+        if (createdSession) {
+            await stopSession(createdSession).catch(() => {});
+        } else if (pendingOutputDir) {
+            await removeSessionDir(pendingOutputDir).catch(() => {});
+        }
+        if (!res.headersSent) res.status(500).json({ error: 'Failed to create media session' });
+    } finally {
+        detachSessionRequestAbort?.();
+        releaseViewerSessionStartupLock?.();
+        releaseViewerSessionStartupAdmission(viewerSessionStartupAdmission);
+        releaseViewerStartup(viewerStartupReservation);
     }
 });
 
@@ -4466,29 +6410,50 @@ app.get('/sessions/:id/playlist.m3u8', requirePlaybackToken, async (req, res) =>
     if (!session) return res.status(404).send('Session not found');
 
     try {
-        await waitForPlaylist(session, PLAYLIST_REQUEST_TIMEOUT_MS);
+        if (session.lastError) throw new Error(session.lastError);
+        if (session.status === 'starting') {
+            await waitForPlaylist(session, PLAYLIST_REQUEST_TIMEOUT_MS);
+        }
         res.setHeader('Content-Type', 'application/vnd.apple.mpegurl; charset=utf-8');
         res.setHeader('Cache-Control', 'no-store');
         const playlist = await fsp.readFile(session.playlistPath, 'utf8');
-        res.send(rewritePlaylistSegments(playlist, session.accessToken));
+        res.send(rewritePlaylistSegments(playlist, session.accessToken, session));
     } catch (err) {
-        const status = session.lastError ? 502 : 202;
+        const status = session.inputFailure?.status === 458
+            ? 458
+            : (session.lastError ? 502 : 202);
         res.status(status).send(session.lastError || 'Playlist is not ready yet');
     }
 });
 
-app.get('/sessions/:id/:file', requirePlaybackToken, (req, res) => {
+app.get('/sessions/:id/:file', requirePlaybackToken, async (req, res) => {
     const session = sessions.get(req.params.id);
     if (!session) return res.status(404).send('Session not found');
 
-    const requested = path.basename(req.params.file);
-    const filePath = path.join(session.outputDir, requested);
+    const requested = safeSessionArtifactName(req.params.file);
+    if (!requested) return res.status(400).send('Invalid segment path');
+    if (requested.toLowerCase().endsWith('.m3u8') && !isAllowedSessionPlaylistName(session, requested)) {
+        return res.status(404).send('Segment not found');
+    }
+    const filePath = path.resolve(session.outputDir, requested);
     if (!isWithin(session.outputDir, filePath)) return res.status(400).send('Invalid segment path');
     if (!fs.existsSync(filePath)) return res.status(404).send('Segment not found');
 
-    res.setHeader('Content-Type', segmentContentType(requested));
-    res.setHeader('Cache-Control', 'private, max-age=30');
-    res.sendFile(filePath);
+    try {
+        res.setHeader('Content-Type', segmentContentType(requested));
+        if (requested.toLowerCase().endsWith('.m3u8')) {
+            // Every child playlist is an authenticated resource graph. Rewrite
+            // its media/segment URIs exactly like the master; serving it raw
+            // would drop the playback token on the very next hls.js request.
+            const playlist = await fsp.readFile(filePath, 'utf8');
+            res.setHeader('Cache-Control', 'no-store');
+            return res.send(rewritePlaylistSegments(playlist, session.accessToken, session));
+        }
+        res.setHeader('Cache-Control', 'private, max-age=30');
+        return res.sendFile(filePath);
+    } catch (_) {
+        return res.status(404).send('Segment not found');
+    }
 });
 
 app.use((err, req, res, next) => {
@@ -4541,6 +6506,7 @@ function isProviderConcurrencyFailure(session) {
 // never appears — so that catch-all IS the 458 signature on the transcode lane.
 function isProviderSlotBusyFailure(session) {
     if (isProxyAuthenticationFailure(session)) return false;
+    if (session?.inputFailure?.code) return session.inputFailure.code === 'PROVIDER_BUSY';
     const text = String((session && session.lastError) || '').toLowerCase();
     if (!text) return false;
     return text.includes('458')
@@ -4553,27 +6519,44 @@ function isProviderSlotBusyFailure(session) {
 // Start FFmpeg and wait for the first playlist. Provider/account failures are
 // terminal. The only second attempt is a local demux probe-budget correction for
 // an already-known file profile; it is not a gateway/direct or account retry.
-async function startSessionWithProviderRetry(session) {
+async function startSessionWithProviderRetry(session, abortSignal = null) {
     // A known-profile probe fallback is a local demux retry, not a provider
     // concurrency failure. Give it one separate attempt so it cannot consume
     // a provider/account retry budget.
     const maxTotalAttempts = 2;
     for (let totalAttempt = 1; totalAttempt <= maxTotalAttempts; totalAttempt += 1) {
+        if (abortSignal?.aborted) throw abortedVodInputPumpError();
         if (totalAttempt > 1) {
+            const stoppedProviderPump = Boolean(session.inputPump);
+            await stopBoundedMkvInputPump(session).catch(() => {});
             await stopChildProcess(session.ffmpeg).catch(() => {});
+            session.ffmpeg = null;
+            if (stoppedProviderPump && PROVIDER_SLOT_RELEASE_DELAY_MS > 0) {
+                if (!await waitForVodInputRetry(PROVIDER_SLOT_RELEASE_DELAY_MS, abortSignal)) {
+                    throw abortedVodInputPumpError();
+                }
+                session.startupTimings.inputProbeFallbackReleaseWaitMs = PROVIDER_SLOT_RELEASE_DELAY_MS;
+                session.startupTimings.slotReleaseWaitMs = Number(session.startupTimings.slotReleaseWaitMs || 0)
+                    + PROVIDER_SLOT_RELEASE_DELAY_MS;
+            }
             await removeSessionDir(session.outputDir).catch(() => {});
             await fsp.mkdir(session.outputDir, { recursive: true }).catch(() => {});
             session.status = 'starting';
             session.lastError = null;
+            session.inputFailure = null;
             session.logTail = '';
         }
+        if (abortSignal?.aborted) throw abortedVodInputPumpError();
         session.ffmpeg = startFfmpeg(session);
         try {
-            await waitForPlaylist(session, STARTUP_TIMEOUT_MS);
+            await waitForPlaylist(session, STARTUP_TIMEOUT_MS, abortSignal);
             if (session.status === 'starting') session.status = 'ready';
             return true;
         } catch (err) {
+            if (abortSignal?.aborted) throw abortedVodInputPumpError();
             if (
+                !session.inputFailure
+                &&
                 session.fastInputProbe === true
                 && session.forceFullInputProbe !== true
                 && isInsufficientInputProbeFailure(session)
@@ -4590,8 +6573,813 @@ async function startSessionWithProviderRetry(session) {
     return false;
 }
 
+function normalizeFileSizeBytes(value) {
+    if (value === null || value === undefined || value === '') return null;
+    const parsed = Number(value);
+    return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+function fileSizeBytesForSession(session) {
+    const profile = asRecord(session?.codecProfile);
+    for (const candidate of [
+        session?.fileSizeBytes,
+        profile.fileSizeBytes,
+        profile.file_size_bytes,
+        profile.formatSizeBytes,
+        profile.format_size_bytes,
+    ]) {
+        const normalized = normalizeFileSizeBytes(candidate);
+        if (normalized) return normalized;
+    }
+    return null;
+}
+
+function isFiniteMkvVodSession(session) {
+    if (!session || isLiveSession(session)) return false;
+    const hint = asRecord(session.playbackHint);
+    const profile = asRecord(session.codecProfile);
+    const containers = [hint.container, profile.container].map(normalizeCodecToken);
+    if (containers.some((container) => container === 'mkv' || container.includes('matroska'))) return true;
+    try {
+        return path.extname(new URL(session.sourceUrl).pathname).toLowerCase() === '.mkv';
+    } catch (_) {
+        return false;
+    }
+}
+
+function parseProviderFileSize(response) {
+    const contentRange = String(response?.headers?.get?.('content-range') || '').trim();
+    // A 200/Content-Length is intentionally rejected: it proves this origin
+    // ignored the bounded request, so exact-offset pumping would not be safe.
+    if (Number(response?.status) !== 206) return null;
+    const rangeMatch = /^bytes\s+0-0\/(\d+)$/i.exec(contentRange);
+    return normalizeFileSizeBytes(rangeMatch?.[1]);
+}
+
+// Some panels report the single-slot "busy" state as HTTP 200 HTML/JSON.
+// Inspect only a tiny text-shaped prefix, then synchronously cancel/release the
+// reader so classification can never leave a provider socket overlapping the
+// next attempt. Binary prefixes are never interpreted as provider errors.
+async function responseHasProviderBusyPrefix(response, signal = null, timeoutMs = VOD_INPUT_IDLE_TIMEOUT_MS) {
+    if (!response?.body || typeof response.body.getReader !== 'function') return false;
+    const reader = response.body.getReader();
+    const chunks = [];
+    let total = 0;
+    const deadline = Date.now() + Math.max(1, Number(timeoutMs) || VOD_INPUT_IDLE_TIMEOUT_MS);
+    try {
+        while (total < RAW_PREFIX_SNIFF_BYTES) {
+            const remainingMs = deadline - Date.now();
+            if (remainingMs <= 0) break;
+            const next = await readRawPrefixChunk(reader, signal, remainingMs);
+            if (next.aborted || signal?.aborted) throw abortedVodInputPumpError();
+            if (next.timedOut || next.error || next.done) break;
+            const value = next.value;
+            const available = Number(value?.byteLength || value?.length || 0);
+            if (!available) continue;
+            const take = Math.min(available, RAW_PREFIX_SNIFF_BYTES - total);
+            let part;
+            if (ArrayBuffer.isView(value)) {
+                part = Buffer.from(value.buffer, value.byteOffset, take);
+            } else {
+                part = Buffer.from(value).subarray(0, take);
+            }
+            chunks.push(Buffer.from(part));
+            total += take;
+            const prefix = Buffer.concat(chunks, total);
+            if (looksLikeTextStart(prefix) && isProviderBusyText(normalizedRawTextPrefix(prefix))) {
+                return true;
+            }
+        }
+        return false;
+    } finally {
+        try { await reader.cancel(); } catch (_) {}
+        try { reader.releaseLock(); } catch (_) {}
+    }
+}
+
+async function responseBodyIsExactlyOneByte(response) {
+    if (!response?.body || typeof response.body.getReader !== 'function') return false;
+    const reader = response.body.getReader();
+    let total = 0;
+    try {
+        while (total <= 1) {
+            const { value, done } = await reader.read();
+            if (done) return total === 1;
+            total += Number(value?.byteLength || value?.length || 0);
+            if (total > 1) return false;
+        }
+        return false;
+    } finally {
+        // This is a mono-slot barrier, not best-effort cleanup: wait until the
+        // one-byte reader is cancelled/released before another provider request.
+        try { await reader.cancel(); } catch (_) {}
+        try { reader.releaseLock(); } catch (_) {}
+    }
+}
+
+async function probeProviderFileSize(sourceUrl, userAgent, parentSignal = null) {
+    const controller = new AbortController();
+    const onParentAbort = () => {
+        try { controller.abort(parentSignal?.reason); } catch (_) {}
+    };
+    parentSignal?.addEventListener('abort', onParentAbort, { once: true });
+    if (parentSignal?.aborted) onParentAbort();
+    const timer = setTimeout(() => controller.abort(), VOD_FILE_SIZE_PROBE_TIMEOUT_MS);
+    let response = null;
+    try {
+        response = await fetch(sourceUrl, {
+            method: 'GET',
+            headers: {
+                Range: 'bytes=0-0',
+                Accept: '*/*',
+                'Accept-Encoding': 'identity',
+                'User-Agent': userAgent || FFMPEG_USER_AGENT,
+                Connection: 'close',
+            },
+            redirect: 'follow',
+            signal: controller.signal,
+            dispatcher: pickProxyAgent(proxyKeyFromUrl(sourceUrl)) || undefined,
+        });
+        if (!response.ok) {
+            const failure = classifyProviderResponseFailure(response.status, {}, {
+                proxyConfigured: providerProxyAgents.length > 0,
+            });
+            const error = new Error(failure.publicMessage);
+            error.status = failure.status;
+            error.code = failure.code;
+            error.upstreamStatus = response.status;
+            throw error;
+        }
+        const fileSizeBytes = parseProviderFileSize(response);
+        if (!fileSizeBytes) {
+            if (await responseHasProviderBusyPrefix(
+                response,
+                controller.signal,
+                VOD_FILE_SIZE_PROBE_TIMEOUT_MS,
+            )) {
+                throw providerBusyVodInputError(response.status);
+            }
+            const error = new Error('Provider did not honor the exact bounded file-size request');
+            error.status = 502;
+            error.code = 'RANGE_UNSUPPORTED';
+            throw error;
+        }
+        if (!await responseBodyIsExactlyOneByte(response)) {
+            const error = new Error('Provider returned an invalid bounded file-size response body');
+            error.status = 502;
+            error.code = 'RANGE_UNSUPPORTED';
+            throw error;
+        }
+        return fileSizeBytes;
+    } catch (err) {
+        if (err?.status || err?.code === 'VOD_SIZE_UNAVAILABLE' || err?.code === 'RANGE_UNSUPPORTED') throw err;
+        const failure = classifyProviderFetchFailure(err);
+        const error = new Error('Unable to resolve the media file size');
+        error.status = err?.name === 'AbortError' ? 504 : 502;
+        error.code = failure.code;
+        error.networkCause = failure.category;
+        throw error;
+    } finally {
+        clearTimeout(timer);
+        parentSignal?.removeEventListener('abort', onParentAbort);
+        // Fetch resolves on headers. Abort and await body cancellation before
+        // returning so the input pump cannot overlap this preflight socket.
+        try { controller.abort(); } catch (_) {}
+        if (response?.body && !response.body.locked) {
+            try { await response.body.cancel(); } catch (_) {}
+        }
+    }
+}
+
+async function ensureBoundedMkvInputPump(session, parentSignal = null) {
+    if (!isFiniteMkvVodSession(session)) return;
+    if (parentSignal?.aborted) throw abortedVodInputPumpError();
+    session.startupTimings = asRecord(session.startupTimings);
+    session.startupTimings.boundedMkvInputPump = true;
+    let fileSizeBytes = fileSizeBytesForSession(session);
+    const probeRan = !fileSizeBytes;
+    const probeStartedAt = Date.now();
+    if (probeRan) {
+        fileSizeBytes = await probeProviderFileSize(
+            session.sourceUrl,
+            session.userAgent || FFMPEG_USER_AGENT,
+            parentSignal,
+        );
+    }
+    if (parentSignal?.aborted) throw abortedVodInputPumpError();
+    session.fileSizeBytes = fileSizeBytes;
+    session.codecProfile = compactRecord({
+        ...asRecord(session.codecProfile),
+        fileSizeBytes,
+    });
+    session.startupTimings.fileSizeBytes = fileSizeBytes;
+    session.startupTimings.fileSizeProbeRan = probeRan;
+    session.startupTimings.fileSizeProbeMs = probeRan
+        ? Math.max(0, Date.now() - probeStartedAt)
+        : 0;
+    if (probeRan && PROVIDER_SLOT_RELEASE_DELAY_MS > 0) {
+        await sleep(PROVIDER_SLOT_RELEASE_DELAY_MS);
+        if (parentSignal?.aborted) throw abortedVodInputPumpError();
+        session.startupTimings.fileSizeProbeReleaseWaitMs = PROVIDER_SLOT_RELEASE_DELAY_MS;
+        session.startupTimings.slotReleaseWaitMs = Number(session.startupTimings.slotReleaseWaitMs || 0)
+            + PROVIDER_SLOT_RELEASE_DELAY_MS;
+    }
+}
+
+function parseBoundedProviderContentRange(response, expectedStart, expectedTotal) {
+    if (Number(response?.status) !== 206) return null;
+    const contentRange = String(response?.headers?.get?.('content-range') || '').trim();
+    const match = /^bytes\s+(\d+)-(\d+)\/(\d+)$/i.exec(contentRange);
+    const strictOffset = (value) => {
+        if (!/^\d+$/.test(String(value || ''))) return null;
+        const parsed = Number(value);
+        return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;
+    };
+    const start = strictOffset(match?.[1]);
+    const end = strictOffset(match?.[2]);
+    const total = normalizeFileSizeBytes(match?.[3]);
+    const normalizedExpectedStart = Number(expectedStart);
+    const normalizedExpectedTotal = normalizeFileSizeBytes(expectedTotal);
+    if (
+        !Number.isSafeInteger(normalizedExpectedStart) || normalizedExpectedStart < 0 ||
+        !normalizedExpectedTotal ||
+        start !== normalizedExpectedStart ||
+        !Number.isSafeInteger(end) || end < start || end >= total ||
+        total !== normalizedExpectedTotal
+    ) return null;
+    const declaredLength = String(response?.headers?.get?.('content-length') || '').trim();
+    if (declaredLength) {
+        const normalizedLength = normalizeFileSizeBytes(declaredLength);
+        if (!normalizedLength || normalizedLength !== (end - start + 1)) return null;
+    }
+    return { start, end, total };
+}
+
+function boundedVodResponseValidator(response) {
+    const etag = String(response?.headers?.get?.('etag') || '').trim();
+    if (etag && !/^W\//i.test(etag)) return { header: 'If-Range', value: etag, kind: 'etag' };
+    const lastModified = String(response?.headers?.get?.('last-modified') || '').trim();
+    if (lastModified && Number.isFinite(Date.parse(lastModified))) {
+        return { header: 'If-Range', value: lastModified, kind: 'last-modified' };
+    }
+    return null;
+}
+
+function vodInputPumpError(code, message, options = {}) {
+    const error = new Error(message);
+    error.vodInputPumpError = true;
+    error.code = code;
+    if (Number.isInteger(options.status)) error.status = options.status;
+    if (Number.isInteger(options.upstreamStatus)) error.upstreamStatus = options.upstreamStatus;
+    if (options.networkCause) error.networkCause = options.networkCause;
+    error.retryable = options.retryable === true;
+    return error;
+}
+
+function providerBusyVodInputError(upstreamStatus = null) {
+    const normalizedUpstreamStatus = upstreamStatus === null || upstreamStatus === undefined
+        ? null
+        : Number(upstreamStatus);
+    return vodInputPumpError(
+        'PROVIDER_BUSY',
+        'This TV service is already being used on another device.',
+        {
+            status: 458,
+            upstreamStatus: Number.isInteger(normalizedUpstreamStatus) ? normalizedUpstreamStatus : null,
+        },
+    );
+}
+
+function abortedVodInputPumpError() {
+    const error = vodInputPumpError('VOD_INPUT_ABORTED', 'Finite MKV input pump was stopped');
+    error.name = 'AbortError';
+    return error;
+}
+
+function classifyVodInputResponse(response) {
+    const status = Number(response?.status);
+    const failure = classifyProviderResponseFailure(status, {}, {
+        proxyConfigured: providerProxyAgents.length > 0,
+    });
+    return vodInputPumpError(failure.code, failure.publicMessage, {
+        status: failure.status,
+        upstreamStatus: status,
+        retryable: shouldRetryProviderStatus(status),
+    });
+}
+
+function classifyVodInputFetchError(error, timedOut = false) {
+    if (error?.vodInputPumpError === true) return error;
+    const failure = classifyProviderFetchFailure(
+        timedOut ? Object.assign(new Error('Finite MKV provider read timed out'), { name: 'AbortError' }) : error,
+    );
+    return vodInputPumpError(failure.code, 'The media provider connection was interrupted.', {
+        status: failure.category === 'timeout' ? 504 : 502,
+        networkCause: failure.category,
+        retryable: failure.code !== 'PROXY_AUTH_FAILED',
+    });
+}
+
+function waitForVodInputRetry(delayMs, signal) {
+    if (signal?.aborted) return Promise.resolve(false);
+    return new Promise((resolve) => {
+        let timer = null;
+        const finish = (completed) => {
+            if (timer) clearTimeout(timer);
+            signal?.removeEventListener('abort', onAbort);
+            resolve(completed);
+        };
+        const onAbort = () => finish(false);
+        signal?.addEventListener('abort', onAbort, { once: true });
+        timer = setTimeout(() => finish(true), Math.max(0, Number(delayMs) || 0));
+        if (signal?.aborted) onAbort();
+    });
+}
+
+function writeVodInputChunk(writable, chunk, signal) {
+    if (signal?.aborted) return Promise.reject(abortedVodInputPumpError());
+    if (!writable || writable.destroyed || writable.writableEnded) {
+        return Promise.reject(vodInputPumpError('FFMPEG_INPUT_CLOSED', 'FFmpeg input closed before the VOD completed'));
+    }
+    let accepted;
+    try {
+        accepted = writable.write(chunk);
+    } catch (error) {
+        return Promise.reject(vodInputPumpError('FFMPEG_INPUT_CLOSED', 'FFmpeg rejected the VOD input', {
+            networkCause: error?.code || error?.name,
+        }));
+    }
+    if (accepted) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+        let settled = false;
+        const cleanup = () => {
+            writable.off('drain', onDrain);
+            writable.off('error', onError);
+            writable.off('close', onClose);
+            signal?.removeEventListener('abort', onAbort);
+        };
+        const finish = (error) => {
+            if (settled) return;
+            settled = true;
+            cleanup();
+            if (error) reject(error);
+            else resolve();
+        };
+        const onDrain = () => finish();
+        const onError = () => finish(vodInputPumpError('FFMPEG_INPUT_CLOSED', 'FFmpeg rejected the VOD input'));
+        const onClose = () => finish(vodInputPumpError('FFMPEG_INPUT_CLOSED', 'FFmpeg input closed before the VOD completed'));
+        const onAbort = () => finish(abortedVodInputPumpError());
+        writable.once('drain', onDrain);
+        writable.once('error', onError);
+        writable.once('close', onClose);
+        signal?.addEventListener('abort', onAbort, { once: true });
+        if (signal?.aborted) onAbort();
+    });
+}
+
+function finishVodInput(writable, signal) {
+    if (signal?.aborted) return Promise.reject(abortedVodInputPumpError());
+    const inputClosedError = (error) => vodInputPumpError(
+        'FFMPEG_INPUT_CLOSED',
+        'FFmpeg rejected the completed VOD input',
+        { networkCause: error?.code || error?.name },
+    );
+    if (!writable) return Promise.reject(inputClosedError());
+    if (writable.writableFinished) return Promise.resolve();
+    if (writable.destroyed || writable.writableEnded) return Promise.reject(inputClosedError(writable.errored));
+    return new Promise((resolve, reject) => {
+        let settled = false;
+        const cleanup = () => {
+            writable.off('error', onError);
+            writable.off('close', onClose);
+            signal?.removeEventListener('abort', onAbort);
+        };
+        const finish = (error) => {
+            if (settled) return;
+            settled = true;
+            cleanup();
+            if (error) reject(error);
+            else resolve();
+        };
+        const onError = (error) => finish(inputClosedError(error));
+        const onClose = () => finish(writable.writableFinished ? undefined : inputClosedError(writable.errored));
+        const onAbort = () => finish(abortedVodInputPumpError());
+        writable.once('error', onError);
+        writable.once('close', onClose);
+        signal?.addEventListener('abort', onAbort, { once: true });
+        try {
+            writable.end((error) => finish(error ? inputClosedError(error) : undefined));
+        } catch (error) {
+            finish(inputClosedError(error));
+        }
+        if (signal?.aborted) onAbort();
+    });
+}
+
+async function closeVodInputAttempt(attempt) {
+    if (!attempt) return;
+    if (attempt.openTimer) clearTimeout(attempt.openTimer);
+    attempt.signal?.removeEventListener?.('abort', attempt.onParentAbort);
+    try { attempt.controller?.abort(); } catch (_) {}
+    if (attempt.reader) {
+        try { await attempt.reader.cancel(); } catch (_) {}
+        try { attempt.reader.releaseLock(); } catch (_) {}
+    } else if (attempt.response?.body) {
+        try { await attempt.response.body.cancel(); } catch (_) {}
+    }
+}
+
+// The finite-MKV lane already owns a single, strictly sequential provider
+// socket. Reuse its leading bytes for a LOCAL ffprobe instead of opening the
+// source URL again: this gives the browser an exact duration and complete track
+// map without violating mono-account providers. The cache is shared with the
+// historical /raw tee and keeps the same bounded memory/entry limits.
+function captureBoundedMkvHeaderBytes(session, byteOffset, chunk) {
+    if (!BOUNDED_MKV_HEADER_PARSE || INBAND_HEADER_BYTES <= 0 || INBAND_HEADER_CACHE_MAX <= 0) return;
+    if (hasCompleteMkvPlaybackProfile(session?.codecProfile)) return;
+    const sourceUrl = String(session?.sourceUrl || '');
+    const offset = Number(byteOffset);
+    if (!sourceUrl || !Number.isSafeInteger(offset) || offset < 0 || !chunk?.length) return;
+
+    let entry = headerByteCache.get(sourceUrl);
+    const captureOwner = String(session?.id || sourceUrl);
+    // A stopped/failed startup can leave an incomplete prefix behind. The
+    // provider lease guarantees that a new finite-MKV pump is the sole holder,
+    // so byte zero from a different session is authoritative and must replace
+    // that stale evidence instead of silently disabling metadata discovery.
+    if (entry && offset === 0 && entry.captureOwner !== captureOwner) {
+        headerByteCache.delete(sourceUrl);
+        entry = null;
+    }
+    if (!entry) {
+        if (offset !== 0) return;
+        while (headerByteCache.size >= INBAND_HEADER_CACHE_MAX) {
+            const oldest = headerByteCache.keys().next().value;
+            if (oldest === undefined) return;
+            headerByteCache.delete(oldest);
+        }
+        entry = {
+            chunks: [],
+            len: 0,
+            done: false,
+            capturing: true,
+            captureOwner,
+            updatedAt: Date.now(),
+        };
+        headerByteCache.set(sourceUrl, entry);
+    }
+    if (entry.done) return;
+    // Never interleave a /raw capture, another session, or a resumed range.
+    if (entry.captureOwner !== captureOwner || offset !== entry.len) return;
+
+    const available = INBAND_HEADER_BYTES - entry.len;
+    if (available <= 0) {
+        entry.done = true;
+        entry.capturing = false;
+        return;
+    }
+    const take = Math.min(available, chunk.length);
+    if (take <= 0) return;
+    entry.chunks.push(Buffer.from(chunk.subarray(0, take)));
+    entry.len += take;
+    entry.updatedAt = Date.now();
+    if (entry.len >= INBAND_HEADER_BYTES) {
+        entry.done = true;
+        entry.capturing = false;
+    }
+}
+
+async function openBoundedVodInputAttempt(session, offset, parentSignal, dispatcher) {
+    const fileSizeBytes = fileSizeBytesForSession(session);
+    const controller = new AbortController();
+    const attempt = { controller, response: null, reader: null, openTimer: null, signal: parentSignal, onParentAbort: null };
+    attempt.onParentAbort = () => {
+        try { controller.abort(parentSignal?.reason); } catch (_) {}
+    };
+    parentSignal?.addEventListener('abort', attempt.onParentAbort, { once: true });
+    if (parentSignal?.aborted) attempt.onParentAbort();
+    attempt.openTimer = setTimeout(() => controller.abort(), VOD_INPUT_OPEN_TIMEOUT_MS);
+    attempt.openTimer.unref?.();
+    try {
+        const headers = {
+            Range: `bytes=${offset}-${fileSizeBytes - 1}`,
+            Accept: '*/*',
+            'Accept-Encoding': 'identity',
+            'User-Agent': session.userAgent || FFMPEG_USER_AGENT,
+            Connection: 'close',
+        };
+        if (offset > 0 && session.vodInputValidator?.value) {
+            headers[session.vodInputValidator.header] = session.vodInputValidator.value;
+        }
+        attempt.response = await fetch(session.sourceUrl, {
+            method: 'GET',
+            headers,
+            redirect: 'follow',
+            signal: controller.signal,
+            dispatcher: dispatcher || undefined,
+        });
+        clearTimeout(attempt.openTimer);
+        attempt.openTimer = null;
+        if (parentSignal?.aborted) throw abortedVodInputPumpError();
+        if (attempt.response.status !== 206) {
+            if (
+                attempt.response.status === 200
+                && await responseHasProviderBusyPrefix(attempt.response, controller.signal)
+            ) {
+                throw providerBusyVodInputError(attempt.response.status);
+            }
+            if (attempt.response.status === 416) {
+                throw vodInputPumpError('VOD_CHANGED', 'The MKV file changed while it was playing.', { status: 502 });
+            }
+            if (attempt.response.status === 200) {
+                throw vodInputPumpError(
+                    offset > 0 && session.vodInputValidator ? 'VOD_CHANGED' : 'RANGE_UNSUPPORTED',
+                    offset > 0 && session.vodInputValidator
+                        ? 'The MKV file changed while it was playing.'
+                        : 'Provider ignored the exact bounded MKV byte range.',
+                    { status: 502 },
+                );
+            }
+            throw classifyVodInputResponse(attempt.response);
+        }
+        const contentEncoding = String(attempt.response.headers?.get?.('content-encoding') || '').trim().toLowerCase();
+        if (contentEncoding && contentEncoding !== 'identity') {
+            throw vodInputPumpError('RANGE_UNSUPPORTED', 'Provider encoded the bounded MKV byte range.', { status: 502 });
+        }
+        const range = parseBoundedProviderContentRange(attempt.response, offset, fileSizeBytes);
+        if (!range) {
+            if (await responseHasProviderBusyPrefix(attempt.response, controller.signal)) {
+                throw providerBusyVodInputError(attempt.response.status);
+            }
+            throw vodInputPumpError(
+                'RANGE_UNSUPPORTED',
+                'Provider did not honor the exact bounded MKV byte range.',
+                { status: 502 },
+            );
+        }
+        const observedValidator = boundedVodResponseValidator(attempt.response);
+        if (
+            session.vodInputValidator && observedValidator &&
+            (
+                observedValidator.kind !== session.vodInputValidator.kind ||
+                observedValidator.value !== session.vodInputValidator.value
+            )
+        ) {
+            throw vodInputPumpError('VOD_CHANGED', 'The MKV file changed while it was playing.', { status: 502 });
+        }
+        if (!session.vodInputValidator && observedValidator) session.vodInputValidator = observedValidator;
+        if (!attempt.response.body || typeof attempt.response.body.getReader !== 'function') {
+            throw vodInputPumpError('PROVIDER_EMPTY_RESPONSE', 'Provider returned no MKV response body', {
+                status: 502,
+                retryable: true,
+            });
+        }
+        attempt.reader = attempt.response.body.getReader();
+        return { attempt, range };
+    } catch (error) {
+        const timedOut = controller.signal.aborted && !parentSignal?.aborted;
+        await closeVodInputAttempt(attempt);
+        if (parentSignal?.aborted || error?.code === 'VOD_INPUT_ABORTED') throw abortedVodInputPumpError();
+        if (error?.vodInputPumpError === true) throw error;
+        throw classifyVodInputFetchError(error, timedOut);
+    }
+}
+
+async function runBoundedMkvInputPump(session, writable, signal, dispatcher) {
+    const fileSizeBytes = fileSizeBytesForSession(session);
+    if (!fileSizeBytes) throw vodInputPumpError('VOD_SIZE_UNAVAILABLE', 'Finite MKV input size is unavailable', { status: 502 });
+    let offset = 0;
+    let forwardedBytes = 0;
+    let prefixBuffer = Buffer.alloc(0);
+    let prefixValidated = false;
+    let consecutiveNoProgressFailures = 0;
+    let reconnects = 0;
+    while (offset < fileSizeBytes) {
+        if (signal.aborted) throw abortedVodInputPumpError();
+        const attemptOffset = offset;
+        let attempt = null;
+        let range = null;
+        let failure = null;
+        try {
+            const opened = await openBoundedVodInputAttempt(session, offset, signal, dispatcher);
+            attempt = opened.attempt;
+            range = opened.range;
+            while (offset <= range.end) {
+                const next = await readRawPrefixChunk(attempt.reader, signal, VOD_INPUT_IDLE_TIMEOUT_MS);
+                if (next.aborted || signal.aborted) throw abortedVodInputPumpError();
+                if (next.timedOut) {
+                    try { attempt.controller.abort(); } catch (_) {}
+                    throw classifyVodInputFetchError(new Error('Finite MKV provider read timed out'), true);
+                }
+                if (next.error) throw classifyVodInputFetchError(next.error);
+                if (next.done) break;
+                let chunk = Buffer.from(next.value || []);
+                if (!chunk.length) continue;
+                if (offset + chunk.length > range.end + 1 || offset + chunk.length > fileSizeBytes) {
+                    throw vodInputPumpError('RANGE_UNSUPPORTED', 'Provider exceeded the declared MKV byte range', { status: 502 });
+                }
+                captureBoundedMkvHeaderBytes(session, offset, chunk);
+                if (!prefixValidated) {
+                    const needed = Math.max(0, 4 - prefixBuffer.length);
+                    const prefixPart = chunk.subarray(0, needed);
+                    prefixBuffer = prefixBuffer.length
+                        ? Buffer.concat([prefixBuffer, prefixPart])
+                        : Buffer.from(prefixPart);
+                    offset += prefixPart.length;
+                    chunk = chunk.subarray(prefixPart.length);
+                    if (prefixBuffer.length < 4) continue;
+                    if (
+                        prefixBuffer[0] !== 0x1a || prefixBuffer[1] !== 0x45 ||
+                        prefixBuffer[2] !== 0xdf || prefixBuffer[3] !== 0xa3
+                    ) {
+                        throw vodInputPumpError('INVALID_MKV_INPUT', 'Provider response is not a Matroska file.', { status: 502 });
+                    }
+                    await writeVodInputChunk(writable, prefixBuffer, signal);
+                    forwardedBytes += prefixBuffer.length;
+                    vodInputPumpStats.bytesForwarded += prefixBuffer.length;
+                    prefixBuffer = Buffer.alloc(0);
+                    prefixValidated = true;
+                }
+                if (chunk.length) {
+                    await writeVodInputChunk(writable, chunk, signal);
+                    offset += chunk.length;
+                    forwardedBytes += chunk.length;
+                    vodInputPumpStats.bytesForwarded += chunk.length;
+                }
+            }
+            if (offset < range.end + 1) {
+                failure = vodInputPumpError(
+                    'PROVIDER_CONNECTION_RESET',
+                    'Provider ended the MKV byte range before its declared boundary.',
+                    { status: 502, networkCause: 'premature_eof', retryable: true },
+                );
+            }
+        } catch (error) {
+            failure = error;
+        } finally {
+            await closeVodInputAttempt(attempt);
+        }
+
+        if (signal.aborted || failure?.code === 'VOD_INPUT_ABORTED') throw abortedVodInputPumpError();
+        if (offset >= fileSizeBytes) break;
+        if (failure && failure.retryable !== true) throw failure;
+
+        const progressBytes = offset - attemptOffset;
+        // A provider may legally satisfy one large bounded request through many
+        // smaller Content-Range responses. Any durable byte progress resets the
+        // no-progress budget; the independent absolute reconnect cap still keeps
+        // a pathological sequence bounded.
+        consecutiveNoProgressFailures = progressBytes > 0
+            ? 0
+            : consecutiveNoProgressFailures + 1;
+        if (consecutiveNoProgressFailures > VOD_INPUT_RETRY_LIMIT) {
+            throw failure || vodInputPumpError(
+                'PROVIDER_RECONNECT_EXHAUSTED',
+                'Provider repeatedly returned no MKV data.',
+                { status: 502 },
+            );
+        }
+        reconnects += 1;
+        if (reconnects > VOD_INPUT_MAX_RECONNECTS) {
+            throw vodInputPumpError(
+                'PROVIDER_RECONNECT_EXHAUSTED',
+                'The MKV provider connection was interrupted too many times.',
+                { status: 502 },
+            );
+        }
+        vodInputPumpStats.reconnects += 1;
+        const retryDelayMs = VOD_INPUT_RETRY_DELAYS_MS[Math.max(0, consecutiveNoProgressFailures - 1)] || 0;
+        const requiresProviderReleaseWait = failure?.networkCause === 'timeout'
+            || [502, 503, 504].includes(Number(failure?.upstreamStatus));
+        const delayMs = requiresProviderReleaseWait
+            ? Math.max(retryDelayMs, PROVIDER_SLOT_RELEASE_DELAY_MS)
+            : retryDelayMs;
+        if (!await waitForVodInputRetry(delayMs, signal)) throw abortedVodInputPumpError();
+    }
+    if (!prefixValidated || forwardedBytes !== fileSizeBytes) {
+        throw vodInputPumpError('INVALID_MKV_INPUT', 'The bounded provider response did not contain one complete Matroska file.', { status: 502 });
+    }
+    await finishVodInput(writable, signal);
+    return { bytesForwarded: forwardedBytes, reconnects };
+}
+
+function startBoundedMkvInputPump(session, writable) {
+    const controller = new AbortController();
+    const dispatcher = pickProxyAgent(proxyKeyFromUrl(session.sourceUrl)) || null;
+    const pump = {
+        controller,
+        dispatcher,
+        promise: null,
+        completed: false,
+        result: null,
+        error: null,
+    };
+    vodInputPumpStats.starts += 1;
+    pump.promise = runBoundedMkvInputPump(session, writable, controller.signal, dispatcher)
+        .then((result) => {
+            pump.result = result;
+            vodInputPumpStats.completed += 1;
+            vodInputPumpStats.last = { ok: true, ...result, at: new Date().toISOString() };
+            return result;
+        })
+        .catch((error) => {
+            pump.error = error;
+            const captured = headerByteCache.get(session.sourceUrl);
+            if (captured?.captureOwner === String(session?.id || session.sourceUrl)) {
+                headerByteCache.delete(session.sourceUrl);
+            }
+            if (error?.code !== 'VOD_INPUT_ABORTED') {
+                vodInputPumpStats.failures += 1;
+                vodInputPumpStats.last = {
+                    ok: false,
+                    code: error?.code || 'VOD_INPUT_FAILED',
+                    at: new Date().toISOString(),
+                };
+            }
+            throw error;
+        })
+        .finally(() => { pump.completed = true; });
+    session.inputPump = pump;
+    return pump;
+}
+
+async function enrichSessionCodecProfileFromBoundedHeader(session, signal = null) {
+    if (!BOUNDED_MKV_HEADER_PARSE || !isFiniteMkvVodSession(session)) return false;
+    if (hasCompleteMkvPlaybackProfile(session?.codecProfile)) {
+        const captured = headerByteCache.get(session.sourceUrl);
+        if (captured?.captureOwner === String(session?.id || session.sourceUrl)) {
+            headerByteCache.delete(session.sourceUrl);
+        }
+        return true;
+    }
+
+    const startedAt = Date.now();
+    const capturedEntry = headerByteCache.get(session.sourceUrl);
+    let local = null;
+    try {
+        // Bypass the general cache: a useful-but-partial historical entry must
+        // not hide the fuller prefix captured by this exact playback.
+        local = await probeFromHeaderBytes(session.sourceUrl, { signal });
+    } finally {
+        // The prefix is per-startup evidence. Release its bounded memory even
+        // when a malformed/truncated header cannot be parsed.
+        if (headerByteCache.get(session.sourceUrl) === capturedEntry) {
+            headerByteCache.delete(session.sourceUrl);
+        }
+    }
+    session.startupTimings = asRecord(session.startupTimings);
+    session.startupTimings.inbandCodecProfileMs = Math.max(0, Date.now() - startedAt);
+    if (!hasCompleteMkvPlaybackProfile(local)) {
+        session.startupTimings.inbandCodecProfileApplied = false;
+        session.startupTimings.inbandCodecProfileComplete = false;
+        return false;
+    }
+    // The local ffprobe prefix cannot know the full source size, but the
+    // bounded startup preflight already proved it exactly. Join both pieces of
+    // evidence before caching/serializing so the next request has one complete
+    // pre-spawn profile and can safely freeze a multi-audio graph.
+    const exactLocal = compactRecord({
+        ...local,
+        fileSizeBytes: fileSizeBytesForSession(session),
+    });
+    cacheCodecProfile(session.sourceUrl, exactLocal);
+    session.codecProfile = mergeCodecProfiles(session.codecProfile, exactLocal);
+    if (
+        !Number.isInteger(normalizeAudioStreamIndex(session.actualMappedAudioStreamIndex)) &&
+        String(session.actualAudioMap || '').startsWith('0:a:0')
+    ) {
+        // `0:a:0` means the first audio stream in file order. Freeze that
+        // actual index now that the local header supplied the exact map; never
+        // relabel the already-running HLS as a later requested/default track.
+        const tracks = Array.isArray(session.codecProfile?.audioTracks)
+            ? session.codecProfile.audioTracks
+            : [];
+        const firstIndex = normalizeAudioStreamIndex(tracks[0]?.index);
+        session.actualMappedAudioStreamIndex = Number.isInteger(firstIndex) ? firstIndex : null;
+    }
+    session.codecProfileSource = session.codecProfileSource
+        ? `${session.codecProfileSource}+gateway_inband`
+        : 'gateway_inband';
+    const complete = hasCompleteMkvPlaybackProfile(session.codecProfile);
+    session.startupTimings.inbandCodecProfileApplied = complete;
+    session.startupTimings.inbandCodecProfileComplete = complete;
+    return complete;
+}
+
+async function stopBoundedMkvInputPump(session) {
+    const pump = session?.inputPump;
+    if (!pump) return;
+    try { pump.controller.abort(); } catch (_) {}
+    await pump.promise.catch(() => {});
+    if (session.inputPump === pump) session.inputPump = null;
+}
+
 function startFfmpeg(session) {
-    const segmentPattern = path.join(session.outputDir, 'segment-%05d.ts');
+    const multiAudioPlan = multiAudioHlsEnabled(session) ? session.multiAudioHls : null;
+    const segmentPattern = path.join(
+        session.outputDir,
+        multiAudioPlan ? '%v-%05d.ts' : 'segment-%05d.ts',
+    );
     const inputProbeArgs = inputProbeArgsForSession(session);
     // During the bounded fast path, require the already-known video/audio maps.
     // Otherwise FFmpeg's optional `?` can silently emit a video-only playlist
@@ -4602,40 +7390,55 @@ function startFfmpeg(session) {
     const requireKnownStreams =
         session.fastInputProbe === true ||
         session.forceFullInputProbe === true;
-    const copyAudio = shouldCopyAudio(session);
+    const copyAudio = multiAudioPlan ? false : shouldCopyAudio(session);
     const audioArgs = audioArgsForSession(session, copyAudio);
-    const audioMap = audioMapForSession(session, requireKnownStreams);
-    const encodeVideo = session.mode === 'transcode' || !shouldCopyVideo(session);
+    const audioMap = multiAudioPlan
+        ? `0:${multiAudioPlan.defaultStreamIndex}`
+        : audioMapForSession(session, requireKnownStreams);
+    session.actualAudioMap = audioMap;
+    const explicitAudioMap = /^0:(\d+)\??$/.exec(audioMap);
+    session.actualMappedAudioStreamIndex = explicitAudioMap
+        ? normalizeAudioStreamIndex(explicitAudioMap[1])
+        : null;
+    const encodeVideo = videoModeForSession(session) === 'encode';
+    const forceAlignedHlsVideoEncode = (
+        session.forceExactMatroskaH264Reencode === true ||
+        session.forceAlignedMultiAudioVideoEncode === true
+    );
+    const pumpedMkvInput = isFiniteMkvVodSession(session);
     const preserveCopySeekTimestamps = usesSourceTimestampedCopySeek(session, encodeVideo, copyAudio);
     const { preInputSeek, postInputSeek } = seekArgsForSession(session, encodeVideo);
+    const providerHttpInputArgs = pumpedMkvInput ? [] : [
+        '-reconnect', '1',
+        '-reconnect_streamed', '1',
+        '-reconnect_at_eof', '1',
+        // Deliberately no -reconnect_on_http_error: provider/account 4xx is
+        // terminal and must never create a retry cascade on a mono-slot account.
+        '-reconnect_delay_max', '5',
+        '-rw_timeout', '15000000',
+        '-user_agent', session.userAgent || FFMPEG_USER_AGENT,
+        '-headers', 'Accept: */*\r\nConnection: keep-alive\r\n',
+    ];
     const args = [
         '-hide_banner',
         '-loglevel', 'warning',
         '-nostdin',
         '-y',
-        '-reconnect', '1',
-        '-reconnect_streamed', '1',
-        '-reconnect_at_eof', '1',
-        // NOTE: deliberately NO -reconnect_on_http_error. This provider is
-        // single-connection and 429s ("user_multi_ip" / rate limit) when it sees a
-        // 2nd connection — retrying an HTTP error here makes ffmpeg HOLD the failing
-        // connect and hammer the slot, which overlaps the next attempt and triggers
-        // MORE 429s. Fast-fail instead: ffmpeg exits on the HTTP error and the
-        // gateway's own startup retry (PROVIDER_AUTH_RETRY, which first evicts the
-        // conflicting session and waits PROVIDER_SLOT_RELEASE_DELAY_MS) re-attempts
-        // cleanly. -reconnect/-reconnect_streamed still cover mid-stream drops.
-        '-reconnect_delay_max', '5',
-        '-rw_timeout', '15000000',
-        '-user_agent', session.userAgent || FFMPEG_USER_AGENT,
-        '-headers', 'Accept: */*\r\nConnection: keep-alive\r\n',
+        ...providerHttpInputArgs,
         '-fflags', '+genpts',
         ...(preserveCopySeekTimestamps ? ['-copyts'] : []),
         ...inputProbeArgs,
         ...preInputSeek,
-        '-i', session.sourceUrl,
+        '-i', pumpedMkvInput ? 'pipe:0' : session.sourceUrl,
         ...postInputSeek,
-        '-map', requireKnownStreams ? '0:v:0' : '0:v:0?',
-        '-map', audioMap,
+        // Uppercase V excludes attached pictures. A cover-art stream must
+        // never become the playable video lane or a second HLS video stream.
+        '-map', (requireKnownStreams || multiAudioPlan) ? '0:V:0' : '0:V:0?',
+        ...(multiAudioPlan
+            ? multiAudioPlan.audioRenditions.flatMap((rendition) => [
+                '-map', `0:${rendition.streamIndex}`,
+            ])
+            : ['-map', audioMap]),
         '-max_muxing_queue_size', '1024'
     ];
 
@@ -4655,6 +7458,9 @@ function startFfmpeg(session) {
             '-crf', '23',
             '-g', '48',
             '-sc_threshold', '0',
+            ...(forceAlignedHlsVideoEncode
+                ? ['-force_key_frames', `expr:gte(t,n_forced*${EXACT_MATROSKA_H264_HLS_TARGET_SECONDS})`]
+                : []),
             ...audioArgs
         );
     } else {
@@ -4664,13 +7470,13 @@ function startFfmpeg(session) {
         );
     }
 
-    args.push(
+    const hlsOutputArgs = [
         '-fps_mode', 'passthrough',
         ...(preserveCopySeekTimestamps
             ? ['-avoid_negative_ts', 'disabled', '-mpegts_copyts', '1', '-muxpreload', '0', '-muxdelay', '0']
             : []),
         '-f', 'hls',
-        '-hls_time', '4',
+        '-hls_time', String(session.hlsTargetSeconds || 4),
         '-hls_list_size', '0',
         // EVENT playlist: a growing VOD transcode the player can seek from the
         // start. Avoids the live-edge chase that LIVE playlists trigger, and
@@ -4682,13 +7488,24 @@ function startFfmpeg(session) {
         // appear in the playlist only once fully written (no partial reads).
         '-hls_flags', 'independent_segments+temp_file',
         '-hls_segment_filename', segmentPattern,
-        session.playlistPath
-    );
+        ...(multiAudioPlan
+            ? [
+                '-master_pl_name', multiAudioPlan.masterPlaylistName,
+                '-var_stream_map', multiAudioPlan.varStreamMap,
+                path.join(session.outputDir, '%v.m3u8'),
+            ]
+            : [session.playlistPath])
+    ];
+    args.push(...hlsOutputArgs);
 
     appendSubtitleOutputs(args, session, postInputSeek);
 
-    const child = spawn(FFMPEG_PATH, args, { stdio: ['ignore', 'ignore', 'pipe'], env: proxyEnvFor(proxyKeyFromUrl(session.sourceUrl)) });
+    const child = spawn(FFMPEG_PATH, args, {
+        stdio: [pumpedMkvInput ? 'pipe' : 'ignore', 'ignore', 'pipe'],
+        env: pumpedMkvInput ? undefined : proxyEnvFor(proxyKeyFromUrl(session.sourceUrl)),
+    });
     session.status = 'starting';
+    let inputPump = null;
 
     child.stderr.on('data', (chunk) => {
         const text = sanitizeLog(chunk.toString(), session.sourceUrl);
@@ -4697,20 +7514,55 @@ function startFfmpeg(session) {
     });
 
     child.on('error', (err) => {
+        try { inputPump?.controller.abort(); } catch (_) {}
         session.status = 'failed';
         session.lastError = err.message;
         console.error(`[ffmpeg:${session.id}] failed to start:`, err.message);
+        wakePlaybackBlockedQueues();
     });
 
     child.on('exit', (code, signal) => {
-        if (session.status !== 'ended' && code !== 0) {
+        const inputEndedEarly = pumpedMkvInput && inputPump && inputPump.completed !== true;
+        try { inputPump?.controller.abort(); } catch (_) {}
+        if (session.status !== 'ended' && (code !== 0 || inputEndedEarly)) {
             session.status = 'failed';
-            const reason = lastNonEmptyLine(session.logTail);
-            session.lastError = `FFmpeg exited with code ${code ?? 'null'} signal ${signal ?? 'none'}${reason ? `: ${reason}` : ''}`;
+            if (!session.inputFailure) {
+                const reason = lastNonEmptyLine(session.logTail);
+                session.lastError = `FFmpeg exited with code ${code ?? 'null'} signal ${signal ?? 'none'}${reason ? `: ${reason}` : ''}`;
+            }
         } else if (session.status !== 'failed') {
             session.status = 'ended';
         }
+        wakePlaybackBlockedQueues();
     });
+
+    if (pumpedMkvInput) {
+        // Prevent an EPIPE emitted during an explicit stop from becoming an
+        // unhandled stream error; the pump's write/drain races own classification.
+        child.stdin.on('error', () => {});
+        inputPump = startBoundedMkvInputPump(session, child.stdin);
+        inputPump.promise.catch(async (error) => {
+            if (
+                error?.code === 'VOD_INPUT_ABORTED' ||
+                session.status === 'stopping' ||
+                session.status === 'ended'
+            ) return;
+            session.inputFailure = {
+                status: Number.isInteger(error?.status) ? error.status : 502,
+                code: error?.code || 'VOD_INPUT_FAILED',
+                upstreamStatus: Number.isInteger(error?.upstreamStatus) ? error.upstreamStatus : null,
+                networkCause: error?.networkCause || null,
+            };
+            const safeMessage = sanitizeLog(error?.message || 'Finite MKV input failed', session.sourceUrl);
+            session.lastError = `${session.inputFailure.code}: ${safeMessage}`;
+            appendLogTail(session, session.lastError);
+            session.status = 'stopping';
+            try { child.stdin.destroy(); } catch (_) {}
+            await stopChildProcess(child).catch(() => {});
+            if (session.status === 'stopping') session.status = 'failed';
+            wakePlaybackBlockedQueues();
+        });
+    }
 
     waitForPlaylist(session, STARTUP_TIMEOUT_MS)
         .then(() => {
@@ -4728,24 +7580,25 @@ function startFfmpeg(session) {
 function seekArgsForSession(session, encodeVideo) {
     const seekOffset = Number(session.seekOffset) > 0 ? Math.floor(Number(session.seekOffset)) : 0;
     if (seekOffset <= 0) return { preInputSeek: [], postInputSeek: [] };
+    // The finite-MKV lane is deliberately non-seekable pipe input. Always read
+    // it linearly from byte zero and perform the temporal seek after `-i`;
+    // resumed MKV sessions are forced to encode so output seeking is precise.
+    if (isFiniteMkvVodSession(session)) {
+        return { preInputSeek: [], postInputSeek: ['-ss', String(seekOffset)] };
+    }
     // Copy mode can't decode, so it must input-seek. That's fine: copy is only
     // used for browser-safe MP4, which carries a real index and seeks cleanly.
     if (!encodeVideo) {
         return { preInputSeek: ['-ss', String(seekOffset)], postInputSeek: [] };
     }
-    // Encode path. The Xtream provider only honors BOUNDED HTTP Range requests
-    // (`bytes=N-M`); the open-ended `bytes=N-` requests ffmpeg uses to seek are
-    // answered with byte 0, so a normal seek lands on garbage and the decoder
-    // emits a continuous stream of corrupt frames ("top block unavailable /
-    // corrupt decoded frame" = the macroblock "saturation" users saw right
-    // after Resume). Force a linear read (-seekable 0 -> no range seeks) and do
-    // an ACCURATE output seek (-ss AFTER -i) to the exact target: reliable and
-    // clean. Trade-off: startup scales with the resume point (linear read from
-    // byte 0), so far resumes take longer to first frame.
-    return { preInputSeek: ['-seekable', '0'], postInputSeek: ['-ss', String(seekOffset)] };
+    // Legacy encode inputs retain their proven linear-read fallback.
+    return {
+        preInputSeek: ['-seekable', '0'],
+        postInputSeek: ['-ss', String(seekOffset)],
+    };
 }
 
-function usesSourceTimestampedCopySeek(session, encodeVideo = session.mode === 'transcode' || !shouldCopyVideo(session), copyAudio = shouldCopyAudio(session)) {
+function usesSourceTimestampedCopySeek(session, encodeVideo = videoModeForSession(session) === 'encode', copyAudio = shouldCopyAudio(session)) {
     // `-copyts` must cover every A/V output on the same clock. When video is
     // copied but audio is encoded (for example H.264 + E-AC-3 -> AAC), FFmpeg
     // preserves the video's absolute source PTS while the audio encoder starts
@@ -4900,6 +7753,285 @@ function isLiveSession(session) {
     }
 }
 
+// An H.264 stream can be browser-decodable yet still be unsuitable for copied
+// HLS when its source GOP is longer than the startup budget. The exact-file
+// profile does not currently expose GOP length, so the safe deployable boundary
+// is the complete, dated Matroska profile received with the authenticated session
+// request. Unknown/partial profiles, profiles learned only after Gateway ffprobe,
+// MP4 and live inputs retain their existing route.
+function shouldReencodeExactMatroskaH264(session) {
+    if (isLiveSession(session)) return false;
+    if (String(session.codecProfileSource || '').toLowerCase() !== 'request') return false;
+
+    const profile = asRecord(session.codecProfile);
+    const audioTracks = Array.isArray(profile.audioTracks)
+        ? profile.audioTracks
+        : (Array.isArray(profile.audio_tracks) ? profile.audio_tracks : null);
+    const subtitles = Array.isArray(profile.subtitles)
+        ? profile.subtitles
+        : (Array.isArray(profile.subtitleTracks)
+            ? profile.subtitleTracks
+            : (Array.isArray(profile.subtitle_tracks) ? profile.subtitle_tracks : null));
+    if (!audioTracks || !subtitles) return false;
+
+    const probeSource = normalizeCodecToken(profile.probeSource ?? profile.probe_source);
+    if (!['gatewayprobe', 'exactfileprobe', 'exactfilecodecprobe'].includes(probeSource)) return false;
+    const probedAt = Date.parse(String(profile.probedAt ?? profile.probed_at ?? ''));
+    if (!Number.isFinite(probedAt)) return false;
+
+    const durationSeconds = Number(profile.durationSeconds ?? profile.duration_seconds ?? profile.duration);
+    if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) return false;
+
+    // The one-thread 1080p fixture is proven comfortably realtime. 4K has no
+    // equivalent capacity proof on the production replica, so dimensions are a
+    // hard fail-closed boundary rather than an invitation to saturate the box.
+    const videoWidth = Number(profile.videoWidth ?? profile.video_width ?? profile.width);
+    const videoHeight = Number(profile.videoHeight ?? profile.video_height ?? profile.height);
+    if (!Number.isInteger(videoWidth) || !Number.isInteger(videoHeight) || videoWidth <= 0 || videoHeight <= 0) return false;
+    if (
+        videoWidth > EXACT_MATROSKA_H264_MAX_WIDTH ||
+        videoHeight > EXACT_MATROSKA_H264_MAX_HEIGHT ||
+        videoWidth * videoHeight > EXACT_MATROSKA_H264_MAX_PIXELS
+    ) return false;
+
+    const container = normalizeCodecToken(profile.container);
+    if (!(container.includes('matroska') || container === 'mkv')) return false;
+    const videoCodec = normalizeCodecToken(profile.videoCodec ?? profile.video_codec ?? profile.video);
+    return videoCodec.includes('h264') || videoCodec.includes('avc');
+}
+
+function multiAudioProfileAssessment(session) {
+    if (!isFiniteMkvVodSession(session)) {
+        return { eligible: false, reason: 'not_finite_mkv', sourceTrackCount: 0, tracks: [] };
+    }
+
+    const profile = asRecord(session?.codecProfile);
+    const profileSource = String(session?.codecProfileSource || '').trim().toLowerCase();
+    if (!profileSource || profileSource === 'request_flat') {
+        return { eligible: false, reason: 'profile_source_untrusted', sourceTrackCount: 0, tracks: [] };
+    }
+
+    const container = normalizeCodecToken(profile.container);
+    const durationSeconds = Number(profile.durationSeconds ?? profile.duration_seconds ?? profile.duration);
+    const fileSizeBytes = Number(profile.fileSizeBytes ?? profile.file_size_bytes ?? profile.sizeBytes);
+    const videoWidth = Number(profile.videoWidth ?? profile.video_width ?? profile.width);
+    const videoHeight = Number(profile.videoHeight ?? profile.video_height ?? profile.height);
+    const subtitles = Array.isArray(profile.subtitles)
+        ? profile.subtitles
+        : (Array.isArray(profile.subtitleTracks)
+            ? profile.subtitleTracks
+            : (Array.isArray(profile.subtitle_tracks) ? profile.subtitle_tracks : null));
+    const sourceTracks = Array.isArray(profile.audioTracks)
+        ? profile.audioTracks
+        : (Array.isArray(profile.audio_tracks) ? profile.audio_tracks : []);
+    const probeSource = normalizeCodecToken(profile.probeSource ?? profile.probe_source);
+    const exactProbeSources = new Set([
+        'gatewayinband',
+        'gatewayprobe',
+        'exactfileprobe',
+        'exactfilecodecprobe',
+    ]);
+    const subtitleIndexes = subtitles?.map((track) => Number(track?.index)) || [];
+    const completeProfile = Boolean(
+        (container === 'mkv' || container.includes('matroska')) &&
+        (profile.metadataComplete === true || profile.metadata_complete === true) &&
+        Number.isFinite(durationSeconds) && durationSeconds > 0 &&
+        Number.isSafeInteger(fileSizeBytes) && fileSizeBytes > 0 &&
+        stringOrNull(profile.videoCodec ?? profile.video_codec ?? profile.video) &&
+        subtitles &&
+        subtitleIndexes.every((index) => Number.isInteger(index) && index >= 0 && index <= 1024) &&
+        new Set(subtitleIndexes).size === subtitleIndexes.length &&
+        exactProbeSources.has(probeSource) &&
+        Number.isFinite(Date.parse(String(profile.probedAt ?? profile.probed_at ?? '')))
+    );
+    if (!completeProfile) {
+        return {
+            eligible: false,
+            reason: 'profile_incomplete',
+            sourceTrackCount: sourceTracks.length,
+            tracks: [],
+        };
+    }
+
+    // Every multi-audio graph is video-encoded to align its two-second HLS
+    // boundaries with every audio rendition. Keep the production v92 capacity
+    // ceiling fail-closed; an oversized or dimensionless source falls back to
+    // the unchanged single-audio path instead of risking a stalled replica.
+    if (
+        !Number.isInteger(videoWidth) || !Number.isInteger(videoHeight) ||
+        videoWidth <= 0 || videoHeight <= 0 ||
+        videoWidth > EXACT_MATROSKA_H264_MAX_WIDTH ||
+        videoHeight > EXACT_MATROSKA_H264_MAX_HEIGHT ||
+        videoWidth * videoHeight > EXACT_MATROSKA_H264_MAX_PIXELS
+    ) {
+        return {
+            eligible: false,
+            reason: 'video_dimensions_out_of_capacity',
+            sourceTrackCount: sourceTracks.length,
+            tracks: [],
+        };
+    }
+
+    if (sourceTracks.length < 2) {
+        return {
+            eligible: false,
+            reason: 'audio_track_count_below_minimum',
+            sourceTrackCount: sourceTracks.length,
+            tracks: [],
+        };
+    }
+    if (sourceTracks.length > MAX_MULTI_AUDIO_RENDITIONS) {
+        return {
+            eligible: false,
+            reason: 'audio_track_cap_exceeded',
+            sourceTrackCount: sourceTracks.length,
+            tracks: [],
+        };
+    }
+
+    const tracks = sourceTracks.map((track, hlsIndex) => {
+        const streamIndex = Number(track?.index);
+        const sourceChannels = Number(track?.channels);
+        const sourceCodec = stringOrNull(track?.codec);
+        return {
+            hlsIndex,
+            streamIndex,
+            language: normalizeHlsAudioLanguage(track?.language),
+            title: sanitizeAudioRenditionTitle(track?.title, hlsIndex),
+            sourceChannels,
+            sourceCodec,
+            sourceDefault: track?.default === true,
+        };
+    });
+    const streamIndexes = tracks.map((track) => track.streamIndex);
+    if (
+        tracks.some((track) => (
+            !Number.isInteger(track.streamIndex) || track.streamIndex < 0 || track.streamIndex > 1024 ||
+            !Number.isInteger(track.sourceChannels) || track.sourceChannels <= 0 || track.sourceChannels > 64 ||
+            !track.sourceCodec
+        )) ||
+        new Set(streamIndexes).size !== streamIndexes.length
+    ) {
+        return {
+            eligible: false,
+            reason: 'invalid_audio_tracks',
+            sourceTrackCount: sourceTracks.length,
+            tracks: [],
+        };
+    }
+
+    return {
+        eligible: true,
+        reason: 'eligible',
+        sourceTrackCount: tracks.length,
+        tracks,
+    };
+}
+
+function normalizeHlsAudioLanguage(value) {
+    const normalized = String(value || '').trim().replace(/_/g, '-').toLowerCase();
+    return /^[a-z]{2,3}(?:-[a-z0-9]{2,8})*$/.test(normalized) ? normalized : 'und';
+}
+
+function sanitizeAudioRenditionTitle(value, hlsIndex) {
+    const cleaned = String(value || '')
+        .replace(/[\x00-\x1f\x7f]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    return (cleaned || `Audio ${hlsIndex + 1}`).slice(0, 96);
+}
+
+function buildMultiAudioHlsPlan(session) {
+    const assessment = multiAudioProfileAssessment(session);
+    const base = {
+        protocol: MULTI_AUDIO_HLS_PROTOCOL,
+        enabled: false,
+        reason: assessment.reason,
+        maxAudioRenditions: MAX_MULTI_AUDIO_RENDITIONS,
+        sourceTrackCount: assessment.sourceTrackCount,
+        masterPlaylistName: 'playlist.m3u8',
+        videoPlaylistName: null,
+        defaultHlsIndex: null,
+        defaultStreamIndex: null,
+        audioRenditions: [],
+    };
+    if (!assessment.eligible) return base;
+
+    const requestedStreamIndex = normalizeAudioStreamIndex(session?.audioStreamIndex);
+    let defaultHlsIndex = Number.isInteger(requestedStreamIndex)
+        ? assessment.tracks.findIndex((track) => track.streamIndex === requestedStreamIndex)
+        : -1;
+    if (defaultHlsIndex < 0) {
+        defaultHlsIndex = assessment.tracks.findIndex((track) => track.sourceDefault === true);
+    }
+    if (defaultHlsIndex < 0) defaultHlsIndex = 0;
+
+    const audioRenditions = assessment.tracks.map((track) => ({
+        hlsIndex: track.hlsIndex,
+        streamIndex: track.streamIndex,
+        language: track.language,
+        title: track.title,
+        sourceChannels: track.sourceChannels,
+        outputChannels: 2,
+        codec: 'aac',
+    }));
+    const varStreamMap = [
+        ...audioRenditions.map((rendition) => (
+            `a:${rendition.hlsIndex},agroup:audio,language:${rendition.language},` +
+            `default:${rendition.hlsIndex === defaultHlsIndex ? 'yes' : 'no'},name:audio_${rendition.hlsIndex}`
+        )),
+        'v:0,agroup:audio,name:video',
+    ].join(' ');
+
+    return {
+        ...base,
+        enabled: true,
+        reason: 'enabled',
+        videoPlaylistName: 'video.m3u8',
+        defaultHlsIndex,
+        defaultStreamIndex: audioRenditions[defaultHlsIndex].streamIndex,
+        audioRenditions,
+        varStreamMap,
+    };
+}
+
+function multiAudioHlsEnabled(session) {
+    return session?.multiAudioHls?.enabled === true;
+}
+
+function audioRenditionsForSession(session) {
+    if (!multiAudioHlsEnabled(session)) return [];
+    return session.multiAudioHls.audioRenditions.map((rendition) => ({ ...rendition }));
+}
+
+function multiAudioHlsDiagnosticsForSession(session) {
+    const plan = asRecord(session?.multiAudioHls);
+    return {
+        protocol: MULTI_AUDIO_HLS_PROTOCOL,
+        enabled: plan.enabled === true,
+        reason: stringOrNull(plan.reason) || 'not_evaluated',
+        maxAudioRenditions: MAX_MULTI_AUDIO_RENDITIONS,
+        sourceTrackCount: Number.isInteger(plan.sourceTrackCount) ? plan.sourceTrackCount : 0,
+        masterPlaylist: 'playlist.m3u8',
+        videoPlaylist: plan.enabled === true ? plan.videoPlaylistName : 'playlist.m3u8',
+        defaultHlsIndex: Number.isInteger(plan.defaultHlsIndex) ? plan.defaultHlsIndex : null,
+        defaultStreamIndex: Number.isInteger(plan.defaultStreamIndex) ? plan.defaultStreamIndex : null,
+    };
+}
+
+function freezeMultiAudioHlsTopology(session) {
+    const plan = buildMultiAudioHlsPlan(session);
+    session.multiAudioHls = plan;
+    session.videoPlaylistPath = plan.enabled
+        ? path.join(session.outputDir, plan.videoPlaylistName)
+        : session.playlistPath;
+    session.forceAlignedMultiAudioVideoEncode = plan.enabled === true;
+    if (plan.enabled) session.hlsTargetSeconds = EXACT_MATROSKA_H264_HLS_TARGET_SECONDS;
+    session.startupTimings = asRecord(session.startupTimings);
+    session.startupTimings.multiAudioHls = multiAudioHlsDiagnosticsForSession(session);
+    return plan;
+}
+
 function audioArgsForSession(session, copyAudio = shouldCopyAudio(session)) {
     return copyAudio ? ['-c:a', 'copy'] : TRANSCODE_AUDIO_ARGS;
 }
@@ -4909,7 +8041,13 @@ function audioModeForSession(session) {
 }
 
 function videoModeForSession(session) {
-    return (session.mode === 'transcode' || !shouldCopyVideo(session)) ? 'encode' : 'copy';
+    if (session.videoMode === 'encode' || session.videoMode === 'copy') return session.videoMode;
+    return (
+        session.forceAlignedMultiAudioVideoEncode === true ||
+        session.forceExactMatroskaH264Reencode === true ||
+        session.mode === 'transcode' ||
+        !shouldCopyVideo(session)
+    ) ? 'encode' : 'copy';
 }
 
 function appendSubtitleOutputs(args, session, postInputSeek = []) {
@@ -4951,6 +8089,9 @@ function subtitleTracksForSession(session) {
 }
 
 function shouldCopyAudio(session) {
+    // Multi-rendition HLS has one normalized contract for every source track:
+    // AAC-LC, 48 kHz, stereo. Never copy a subset or advertise source 5.1.
+    if (multiAudioHlsEnabled(session)) return false;
     const requestedMode = normalizeCodecToken(session.audioMode);
     if (requestedMode === 'transcode' || requestedMode === 'encode') return false;
     if (session.clientAudioPassthrough === false) return false;
@@ -5006,10 +8147,18 @@ function isKnownBrowserSafeVideo(codec) {
 function audioMapForSession(session, required = false) {
     const optionalSuffix = required ? '' : '?';
     const selectedTrack = selectedAudioTrackForSession(session);
-    const selectedIndex = nullableInt(selectedTrack?.index);
+    const selectedIndex = normalizeAudioStreamIndex(selectedTrack?.index);
     if (Number.isInteger(selectedIndex)) return `0:${selectedIndex}${optionalSuffix}`;
-    if (Number.isInteger(session.audioStreamIndex)) return `0:${session.audioStreamIndex}${optionalSuffix}`;
+    // An unproven absolute stream index can point at video, subtitles, or an
+    // attachment. Fall back by media type unless the exact-file profile
+    // proves that the requested index belongs to an audio track.
     return `0:a:0${optionalSuffix}`;
+}
+
+function audioTracksForSession(session) {
+    return Array.isArray(session?.codecProfile?.audioTracks)
+        ? session.codecProfile.audioTracks
+        : (Array.isArray(session?.codecProfile?.audio_tracks) ? session.codecProfile.audio_tracks : []);
 }
 
 function selectedAudioTrackForSession(session) {
@@ -5017,11 +8166,21 @@ function selectedAudioTrackForSession(session) {
         ? session.codecProfile.audioTracks
         : (Array.isArray(session.codecProfile?.audio_tracks) ? session.codecProfile.audio_tracks : []);
     if (!tracks.length) return null;
-    if (Number.isInteger(session.audioStreamIndex)) {
-        const selected = tracks.find((track) => nullableInt(track?.index) === session.audioStreamIndex);
+    const requestedIndex = normalizeAudioStreamIndex(session.audioStreamIndex);
+    if (Number.isInteger(requestedIndex)) {
+        const selected = tracks.find((track) => normalizeAudioStreamIndex(track?.index) === requestedIndex);
         if (selected) return selected;
     }
     return tracks.find((track) => track?.default === true) || tracks[0] || null;
+}
+
+function mappedAudioStreamIndexForSession(session) {
+    if (Object.prototype.hasOwnProperty.call(asRecord(session), 'actualMappedAudioStreamIndex')) {
+        const actualIndex = normalizeAudioStreamIndex(session.actualMappedAudioStreamIndex);
+        return Number.isInteger(actualIndex) ? actualIndex : null;
+    }
+    const selectedIndex = normalizeAudioStreamIndex(selectedAudioTrackForSession(session)?.index);
+    return Number.isInteger(selectedIndex) ? selectedIndex : null;
 }
 
 function isKnownBrowserSafeAudio(codec, profile) {
@@ -5112,12 +8271,26 @@ function buildCodecProfile(payload, startedAt, probeSource) {
             });
         }),
         container: stringOrNull(format.format_name),
+        // The in-band probe runs against a bounded local header cache file;
+        // its format.size is that temporary prefix, never the source VOD size.
+        fileSizeBytes: probeSource === 'gateway_inband'
+            ? null
+            : normalizeFileSizeBytes(format.size),
         // MPEG-TS (and other stream containers) carry no global duration, so ffprobe leaves
         // format.duration empty even when it knows the overall bit rate and file size. Fall back to
         // size*8/bitrate (CBR estimate — plenty accurate to draw a seek bar) so an on-the-fly TS
         // transcode still gets a timeline instead of a duration-less, unseekable player.
-        durationSeconds: nullableFloat(format.duration) || estimateDurationFromFormat(format),
-        bitRate: nullableInt(format.bit_rate),
+        // A local in-band probe sees a bounded temporary prefix, not the source
+        // file size. Estimating duration from prefix-size/bitrate would create a
+        // plausible but severely truncated timeline. Only a duration declared
+        // by Matroska Info is authoritative on this lane.
+        durationSeconds: nullableFloat(format.duration) || (
+            probeSource === 'gateway_inband' ? null : estimateDurationFromFormat(format)
+        ),
+        // Like format.size, ffprobe derives format.bit_rate for the temporary
+        // prefix rather than the full source. Omit it so a truthful request
+        // profile bitrate survives the merge.
+        bitRate: probeSource === 'gateway_inband' ? null : nullableInt(format.bit_rate),
         probeSource: probeSource || 'gateway_probe',
         probeMs: Math.max(1, Date.now() - startedAt),
         probedAt: new Date().toISOString()
@@ -5141,7 +8314,76 @@ function cacheCodecProfile(sourceUrl, profile) {
 // track languages WITHOUT a provider connection. Returns a useful profile or null (caller
 // then falls back to the provider probe — e.g. an MP4 whose moov sits at the end, so the
 // leading bytes don't parse). Best-effort; never throws.
-async function probeFromHeaderBytes(sourceUrl) {
+function readEbmlElementSize(buffer, offset) {
+    if (!Buffer.isBuffer(buffer) || offset < 0 || offset >= buffer.length) return null;
+    const first = buffer[offset];
+    let width = 1;
+    let marker = 0x80;
+    while (width <= 8 && (first & marker) === 0) {
+        width += 1;
+        marker >>= 1;
+    }
+    if (width > 8 || offset + width > buffer.length) return null;
+    let value = BigInt(first & (marker - 1));
+    let allOnes = (first & (marker - 1)) === (marker - 1);
+    for (let index = 1; index < width; index += 1) {
+        value = (value << 8n) | BigInt(buffer[offset + index]);
+        allOnes = allOnes && buffer[offset + index] === 0xff;
+    }
+    if (allOnes) return { width, value: null, unknown: true };
+    if (value > BigInt(Number.MAX_SAFE_INTEGER)) return null;
+    return { width, value: Number(value), unknown: false };
+}
+
+function readEbmlElementHeader(buffer, offset) {
+    if (!Buffer.isBuffer(buffer) || offset < 0 || offset >= buffer.length) return null;
+    const first = buffer[offset];
+    let idWidth = 1;
+    let marker = 0x80;
+    while (idWidth <= 4 && (first & marker) === 0) {
+        idWidth += 1;
+        marker >>= 1;
+    }
+    if (idWidth > 4 || offset + idWidth > buffer.length) return null;
+    let id = 0n;
+    for (let index = 0; index < idWidth; index += 1) {
+        id = (id << 8n) | BigInt(buffer[offset + index]);
+    }
+    const size = readEbmlElementSize(buffer, offset + idWidth);
+    if (!size) return null;
+    const payloadStart = offset + idWidth + size.width;
+    const payloadEnd = size.unknown ? null : payloadStart + size.value;
+    return { id, payloadStart, payloadEnd, unknownSize: size.unknown };
+}
+
+function hasCompleteMatroskaMetadataPrefix(buffer) {
+    if (!Buffer.isBuffer(buffer) || buffer.length < 16) return false;
+    const ebml = readEbmlElementHeader(buffer, 0);
+    if (!ebml || ebml.id !== 0x1a45dfa3n || ebml.payloadEnd === null || ebml.payloadEnd > buffer.length) return false;
+    const segment = readEbmlElementHeader(buffer, ebml.payloadEnd);
+    if (!segment || segment.id !== 0x18538067n || segment.payloadStart > buffer.length) return false;
+
+    let foundInfo = false;
+    let foundTracks = false;
+    let inspectedElements = 0;
+    let cursor = segment.payloadStart;
+    const segmentEnd = segment.payloadEnd === null
+        ? buffer.length
+        : Math.min(buffer.length, segment.payloadEnd);
+    while (cursor < segmentEnd) {
+        if (inspectedElements >= MAX_MATROSKA_METADATA_ELEMENTS) return false;
+        inspectedElements += 1;
+        const element = readEbmlElementHeader(buffer, cursor);
+        if (!element || element.payloadEnd === null || element.payloadEnd > segmentEnd) return false;
+        if (element.id === 0x1549a966n) foundInfo = true;
+        if (element.id === 0x1654ae6bn) foundTracks = true;
+        if (foundInfo && foundTracks) return true;
+        cursor = element.payloadEnd;
+    }
+    return false;
+}
+
+async function probeFromHeaderBytes(sourceUrl, options = {}) {
     const entry = headerByteCache.get(sourceUrl);
     if (!entry || entry.len <= 0) return null;
     // Need a meaningful header slice: a completed capture, or at least 256 KB so far.
@@ -5155,19 +8397,28 @@ async function probeFromHeaderBytes(sourceUrl) {
         const args = [
             '-v', 'error',
             '-analyzeduration', String(CODEC_PROBE_ANALYZE_DURATION_US),
-            '-probesize', String(Math.min(buf.length, CODEC_PROBE_SIZE_BYTES)),
+            // The capture is already strictly bounded (default 4 MB). Let the
+            // local probe inspect all retained bytes so a large EBML header
+            // cannot hide Tracks between the legacy 2 MB probe cap and the end
+            // of the safe local prefix.
+            '-probesize', String(buf.length),
             '-show_streams',
             '-show_format',
             '-print_format', 'json',
             tmpFile
         ];
-        const payload = await runFfprobe(args, CODEC_PROBE_TIMEOUT_MS, sourceUrl);
-        const profile = buildCodecProfile(payload, startedAt, 'gateway_inband');
+        const payload = await runFfprobe(args, CODEC_PROBE_TIMEOUT_MS, sourceUrl, {
+            signal: options?.signal || null,
+        });
+        const profile = {
+            ...buildCodecProfile(payload, startedAt, 'gateway_inband'),
+            metadataComplete: hasCompleteMatroskaMetadataPrefix(buf),
+        };
         return hasUsefulCodecProfile(profile) ? profile : null;
     } catch (_) {
         return null;
     } finally {
-        fsp.unlink(tmpFile).catch(() => {});
+        await fsp.unlink(tmpFile).catch(() => {});
     }
 }
 
@@ -5188,7 +8439,7 @@ async function probeCodecProfile(sourceUrl, userAgent, options = {}) {
             codecProfileCache.delete(sourceUrl); // expired
         }
     }
-    if (INBAND_HEADER_PARSE && sourceUrl) {
+    if ((INBAND_HEADER_PARSE || BOUNDED_MKV_HEADER_PARSE) && sourceUrl) {
         try {
             const local = await probeFromHeaderBytes(sourceUrl);
             if (local && hasUsefulCodecProfile(local)) {
@@ -5199,6 +8450,7 @@ async function probeCodecProfile(sourceUrl, userAgent, options = {}) {
             }
         } catch (_) { /* fall back to the provider probe */ }
     }
+    if (options.localOnly === true) return {};
     const profile = await probeCodecProfileUncached(sourceUrl, userAgent, options);
     cacheCodecProfile(sourceUrl, profile);
     return profile;
@@ -5299,12 +8551,22 @@ function isFfprobeProviderBusyFailure(value) {
 
 function runFfprobe(args, timeoutMs, sourceUrl, options = {}) {
     return new Promise((resolve, reject) => {
+        const abortSignal = options?.signal || null;
+        const abortedError = () => {
+            const error = new Error('Codec probe aborted');
+            error.code = 'VOD_INPUT_ABORTED';
+            return error;
+        };
+        if (abortSignal?.aborted) {
+            reject(abortedError());
+            return;
+        }
         const backgroundKey = options.background === true ? proxyKeyFromUrl(sourceUrl) : '';
         // The route-level guard is intentionally repeated at the exact spawn boundary.
         // probeCodecProfile may await a local-header probe first; without this atomic
         // check, a viewer can start in the meantime or two background requests can both
         // pass the HTTP guard and open provider connections.
-        if (backgroundKey && accountSlotBusyLocally(sourceUrl)) {
+        if (backgroundKey && viewerPlaybackActiveLocally()) {
             reject(backgroundProbeError(
                 409,
                 'account_busy',
@@ -5355,14 +8617,41 @@ function runFfprobe(args, timeoutMs, sourceUrl, options = {}) {
         let stdout = '';
         let stderr = '';
         let finished = false;
+        let terminatingError = null;
+        let forceKillTimer = null;
+        const clearTimers = () => {
+            clearTimeout(timer);
+            if (forceKillTimer) clearTimeout(forceKillTimer);
+            abortSignal?.removeEventListener?.('abort', onAbort);
+        };
+        const beginTermination = (error, signal = 'SIGTERM') => {
+            if (finished || terminatingError) return;
+            terminatingError = error;
+            try { child.kill(signal); } catch (_) {}
+            forceKillTimer = setTimeout(() => {
+                if (!finished) {
+                    try { child.kill('SIGKILL'); } catch (_) {}
+                }
+            }, 1_000);
+            forceKillTimer.unref?.();
+        };
+        const onAbort = () => beginTermination(abortedError());
         const timer = setTimeout(() => {
-            if (finished) return;
-            finished = true;
-            const error = terminalError(new Error('Codec probe timeout'));
-            child.kill(registration?.preempted ? 'SIGKILL' : 'SIGTERM');
-            releaseRegistration();
-            reject(error);
+            if (finished || terminatingError) return;
+            const timeoutError = new Error('Codec probe timeout');
+            // ffprobe can print the decisive HTTP status and then hang. Preserve
+            // that evidence so a first 458/407 remains typed even when timeout
+            // wins the process-event race.
+            timeoutError.ffprobeLog = stderr;
+            timeoutError.logTail = stderr;
+            // Do not resolve/reject until the child has actually exited. The
+            // caller may open the single-slot provider immediately afterwards.
+            beginTermination(
+                terminalError(timeoutError),
+                registration?.preempted ? 'SIGKILL' : 'SIGTERM',
+            );
         }, timeoutMs);
+        abortSignal?.addEventListener?.('abort', onAbort, { once: true });
 
         child.stdout.on('data', (chunk) => {
             stdout += chunk.toString();
@@ -5375,15 +8664,19 @@ function runFfprobe(args, timeoutMs, sourceUrl, options = {}) {
         child.on('error', (err) => {
             if (finished) return;
             finished = true;
-            clearTimeout(timer);
+            clearTimers();
             releaseRegistration();
-            reject(terminalError(err));
+            reject(terminatingError || terminalError(err));
         });
         child.on('exit', (code, signal) => {
             if (finished) return;
             finished = true;
-            clearTimeout(timer);
+            clearTimers();
             releaseRegistration();
+            if (terminatingError) {
+                reject(terminatingError);
+                return;
+            }
             if (code !== 0) {
                 const failure = new Error(
                     `Codec probe exited with code ${code ?? 'null'} signal ${signal ?? 'none'}${stderr ? `: ${lastNonEmptyLine(stderr)}` : ''}`,
@@ -5434,6 +8727,48 @@ function hasUsefulCodecProfile(profile) {
         (Array.isArray(record.subtitleTracks) && record.subtitleTracks.length > 0) ||
         (Array.isArray(record.subtitle_tracks) && record.subtitle_tracks.length > 0)
     );
+}
+
+// A local Matroska prefix is authoritative only when ffprobe saw every
+// structural family needed by playback. In particular, an empty subtitles
+// array is meaningful (no subtitle tracks), while a missing array means the
+// header was truncated before ffprobe could enumerate the family.
+function hasCompleteMkvPlaybackProfile(profile) {
+    const record = asRecord(profile);
+    const container = normalizeCodecToken(record.container);
+    if (!(container === 'mkv' || container.includes('matroska'))) return false;
+    if (record.metadataComplete !== true && record.metadata_complete !== true) return false;
+
+    const durationSeconds = Number(
+        record.durationSeconds ?? record.duration_seconds ?? record.duration,
+    );
+    if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) return false;
+    if (!stringOrNull(record.videoCodec ?? record.video_codec ?? record.video)) return false;
+
+    const audioTracks = Array.isArray(record.audioTracks)
+        ? record.audioTracks
+        : (Array.isArray(record.audio_tracks) ? record.audio_tracks : null);
+    if (!audioTracks?.length) return false;
+    const audioIndexes = audioTracks.map((track) => normalizeAudioStreamIndex(track?.index));
+    if (
+        audioIndexes.some((index) => !Number.isInteger(index)) ||
+        new Set(audioIndexes).size !== audioIndexes.length
+    ) return false;
+
+    const subtitles = Array.isArray(record.subtitles)
+        ? record.subtitles
+        : (Array.isArray(record.subtitleTracks)
+            ? record.subtitleTracks
+            : (Array.isArray(record.subtitle_tracks) ? record.subtitle_tracks : null));
+    if (!subtitles) return false;
+    const subtitleIndexes = subtitles.map((track) => normalizeAudioStreamIndex(track?.index));
+    if (
+        subtitleIndexes.some((index) => !Number.isInteger(index)) ||
+        new Set(subtitleIndexes).size !== subtitleIndexes.length
+    ) return false;
+
+    if (normalizeCodecToken(record.probeSource ?? record.probe_source) !== 'gatewayinband') return false;
+    return Number.isFinite(Date.parse(String(record.probedAt ?? record.probed_at ?? '')));
 }
 
 function mergeCodecProfiles(baseProfile, probeProfile) {
@@ -5518,70 +8853,268 @@ function shouldProbeCodecProfile(playbackHint, sourceUrl) {
     }
 }
 
+function parseHlsAttributeList(line) {
+    const separator = String(line || '').indexOf(':');
+    if (separator < 0) return {};
+    const attributes = {};
+    const body = String(line).slice(separator + 1);
+    const matcher = /(?:^|,)([A-Z0-9-]+)=("[^"]*"|[^,]*)/gi;
+    let match;
+    while ((match = matcher.exec(body)) !== null) {
+        const rawValue = match[2];
+        attributes[match[1].toUpperCase()] = rawValue.startsWith('"')
+            ? rawValue.slice(1, -1)
+            : rawValue;
+    }
+    return attributes;
+}
+
+function controlledLocalPlaylistName(value) {
+    const raw = String(value || '').split(/[?#]/, 1)[0];
+    if (!raw || raw !== path.basename(raw) || raw.includes('/') || raw.includes('\\')) return null;
+    return /^[a-z0-9][a-z0-9_-]*\.m3u8$/i.test(raw) ? raw : null;
+}
+
+function inspectMultiAudioMasterPlaylist(playlist, plan) {
+    if (!plan?.enabled || !Array.isArray(plan.audioRenditions)) {
+        return { ready: false, reason: 'multi_audio_plan_disabled' };
+    }
+    const lines = String(playlist || '').split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    if (lines[0] !== '#EXTM3U') return { ready: false, reason: 'invalid_master_header' };
+
+    const audioMedia = lines
+        .filter((line) => line.startsWith('#EXT-X-MEDIA:'))
+        .map(parseHlsAttributeList)
+        .filter((attributes) => String(attributes.TYPE || '').toUpperCase() === 'AUDIO');
+    if (audioMedia.length !== plan.audioRenditions.length) {
+        return { ready: false, reason: 'audio_rendition_count_mismatch' };
+    }
+
+    const groupIds = new Set();
+    let defaultCount = 0;
+    for (let hlsIndex = 0; hlsIndex < audioMedia.length; hlsIndex += 1) {
+        const attributes = audioMedia[hlsIndex];
+        const rendition = plan.audioRenditions[hlsIndex];
+        const expectedName = `audio_${hlsIndex}`;
+        const expectedUri = `${expectedName}.m3u8`;
+        const uri = controlledLocalPlaylistName(attributes.URI);
+        const isDefault = String(attributes.DEFAULT || '').toUpperCase() === 'YES';
+        if (
+            attributes.NAME !== expectedName ||
+            uri !== expectedUri ||
+            normalizeHlsAudioLanguage(attributes.LANGUAGE) !== rendition.language ||
+            !attributes['GROUP-ID']
+        ) {
+            return { ready: false, reason: 'audio_rendition_contract_mismatch' };
+        }
+        groupIds.add(attributes['GROUP-ID']);
+        if (isDefault) defaultCount += 1;
+        if (isDefault !== (hlsIndex === plan.defaultHlsIndex)) {
+            return { ready: false, reason: 'audio_default_mismatch' };
+        }
+    }
+    if (groupIds.size !== 1 || defaultCount !== 1) {
+        return { ready: false, reason: 'audio_group_or_default_incomplete' };
+    }
+
+    const variants = [];
+    for (let index = 0; index < lines.length; index += 1) {
+        if (!lines[index].startsWith('#EXT-X-STREAM-INF:')) continue;
+        const attributes = parseHlsAttributeList(lines[index]);
+        let uri = null;
+        for (let next = index + 1; next < lines.length; next += 1) {
+            if (lines[next].startsWith('#')) continue;
+            uri = controlledLocalPlaylistName(lines[next]);
+            break;
+        }
+        variants.push({ attributes, uri });
+    }
+    const onlyVariant = variants[0];
+    if (
+        variants.length !== 1 ||
+        onlyVariant?.uri !== plan.videoPlaylistName ||
+        onlyVariant?.attributes?.AUDIO !== Array.from(groupIds)[0]
+    ) {
+        return { ready: false, reason: 'video_variant_contract_mismatch' };
+    }
+
+    return {
+        ready: true,
+        reason: 'ready',
+        audioRenditionCount: audioMedia.length,
+        videoRenditionCount: 1,
+    };
+}
+
+function hlsMediaPlaylistTargetsForSession(session) {
+    if (!multiAudioHlsEnabled(session)) {
+        return [{
+            kind: 'single',
+            hlsIndex: null,
+            streamIndex: mappedAudioStreamIndexForSession(session),
+            playlistName: path.basename(session.playlistPath),
+            playlistPath: session.playlistPath,
+        }];
+    }
+    const plan = session.multiAudioHls;
+    return [
+        {
+            kind: 'video',
+            hlsIndex: null,
+            streamIndex: null,
+            playlistName: plan.videoPlaylistName,
+            playlistPath: session.videoPlaylistPath || path.resolve(session.outputDir, plan.videoPlaylistName),
+        },
+        ...plan.audioRenditions.map((rendition) => ({
+            kind: 'audio',
+            hlsIndex: rendition.hlsIndex,
+            streamIndex: rendition.streamIndex,
+            playlistName: `audio_${rendition.hlsIndex}.m3u8`,
+            playlistPath: path.resolve(session.outputDir, `audio_${rendition.hlsIndex}.m3u8`),
+        })),
+    ];
+}
+
+async function inspectHlsMediaPlaylistArtifact(session, target) {
+    if (!isWithin(session.outputDir, target.playlistPath)) return null;
+    const playlist = await fsp.readFile(target.playlistPath, 'utf8');
+    const inspection = inspectHlsStartupPlaylist(playlist);
+    if (!inspection.ready) return null;
+    const segmentPaths = inspection.segmentFiles.map((segment) => path.resolve(session.outputDir, segment));
+    if (
+        segmentPaths.length === 0 ||
+        !segmentPaths.every((segmentPath) => isWithin(session.outputDir, segmentPath))
+    ) return null;
+    const stats = await Promise.all(segmentPaths.map((segmentPath) => fsp.stat(segmentPath)));
+    if (!stats.every((stat) => stat.isFile() && stat.size > 0)) return null;
+    return {
+        ...target,
+        inspection,
+        firstSegmentBytes: stats[0].size,
+        playlistSegmentBytes: stats.reduce((sum, stat) => sum + stat.size, 0),
+    };
+}
+
 function inspectHlsStartupPlaylist(playlist) {
     const lines = String(playlist || '').split(/\r?\n/);
     let durationSeconds = 0;
     let segmentCount = 0;
     let firstSegment = null;
+    const segmentFiles = [];
     let pendingDuration = null;
+    let completePlaylist = false;
 
     for (const rawLine of lines) {
         const line = rawLine.trim();
         if (!line) continue;
+        if (line === '#EXT-X-ENDLIST') {
+            completePlaylist = true;
+            continue;
+        }
         if (line.startsWith('#EXTINF:')) {
             const duration = Number.parseFloat(line.slice('#EXTINF:'.length).split(',')[0]);
             pendingDuration = Number.isFinite(duration) && duration >= 0 ? duration : 0;
             continue;
         }
         if (line.startsWith('#') || pendingDuration === null) continue;
-        const segment = path.basename(line.split(/[?#]/, 1)[0]);
+        const rawSegment = String(line || '').split(/[?#]/, 1)[0];
+        const segment = (
+            rawSegment &&
+            rawSegment === path.basename(rawSegment) &&
+            !rawSegment.includes('/') &&
+            !rawSegment.includes('\\') &&
+            /^[a-z0-9][a-z0-9._-]*\.(?:ts|m4s|mp4|aac)$/i.test(rawSegment)
+        ) ? rawSegment : null;
         if (!segment) {
             pendingDuration = null;
             continue;
         }
         if (!firstSegment) firstSegment = segment;
+        segmentFiles.push(segment);
         segmentCount += 1;
         durationSeconds += pendingDuration;
         pendingDuration = null;
     }
 
-    durationSeconds = Number(durationSeconds.toFixed(3));
+    const measuredDurationSeconds = durationSeconds;
+    durationSeconds = Number(measuredDurationSeconds.toFixed(3));
     if (!segmentCount || !firstSegment) {
-        return { ready: false, reason: 'no_segments', segmentCount: 0, durationSeconds: 0, firstSegment: null };
+        return { ready: false, reason: 'no_segments', segmentCount: 0, durationSeconds: 0, firstSegment: null, segmentFiles: [] };
     }
-    if (durationSeconds < MIN_HLS_STARTUP_BUFFER_SECONDS) {
-        return { ready: false, reason: 'insufficient_duration', segmentCount, durationSeconds, firstSegment };
+    if (!completePlaylist && segmentCount < MIN_HLS_STARTUP_SEGMENTS) {
+        return { ready: false, reason: 'insufficient_segments', segmentCount, durationSeconds, firstSegment, segmentFiles };
     }
-    return { ready: true, reason: 'ready', segmentCount, durationSeconds, firstSegment };
+    if (!completePlaylist && measuredDurationSeconds < MIN_HLS_STARTUP_BUFFER_SECONDS) {
+        return { ready: false, reason: 'insufficient_duration', segmentCount, durationSeconds, firstSegment, segmentFiles };
+    }
+    return { ready: true, reason: 'ready', segmentCount, durationSeconds, firstSegment, segmentFiles };
 }
 
-async function waitForPlaylist(session, timeoutMs) {
+async function waitForPlaylist(session, timeoutMs, abortSignal = null) {
+    if (abortSignal?.aborted) throw abortedVodInputPumpError();
+    if (session.status === 'ready') return;
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
+        if (abortSignal?.aborted) throw abortedVodInputPumpError();
         if (session.lastError) throw new Error(session.lastError);
         if (fs.existsSync(session.playlistPath)) {
             try {
-                const playlist = await fsp.readFile(session.playlistPath, 'utf8');
-                const inspection = inspectHlsStartupPlaylist(playlist);
-                if (inspection.ready) {
-                    const segmentPath = path.resolve(session.outputDir, inspection.firstSegment);
-                    if (isWithin(session.outputDir, segmentPath)) {
-                        const stat = await fsp.stat(segmentPath);
-                        if (stat.isFile() && stat.size > 0) {
-                            session.startupTimings = session.startupTimings || {};
-                            session.startupTimings.playlistSegmentCount = inspection.segmentCount;
-                            session.startupTimings.playlistBufferSeconds = inspection.durationSeconds;
-                            session.startupTimings.firstSegmentBytes = stat.size;
-                            return;
-                        }
-                    }
+                const masterPlaylist = await fsp.readFile(session.playlistPath, 'utf8');
+                if (multiAudioHlsEnabled(session)) {
+                    const masterInspection = inspectMultiAudioMasterPlaylist(
+                        masterPlaylist,
+                        session.multiAudioHls,
+                    );
+                    if (!masterInspection.ready) throw new Error(masterInspection.reason);
                 }
+
+                const targets = hlsMediaPlaylistTargetsForSession(session);
+                const inspected = await Promise.all(
+                    targets.map((target) => inspectHlsMediaPlaylistArtifact(session, target)),
+                );
+                if (inspected.some((result) => !result)) throw new Error('media_playlist_not_ready');
+
+                const video = multiAudioHlsEnabled(session)
+                    ? inspected.find((result) => result.kind === 'video')
+                    : inspected[0];
+                if (!video) throw new Error('video_playlist_not_ready');
+                session.startupTimings = session.startupTimings || {};
+                session.startupTimings.playlistSegmentCount = video.inspection.segmentCount;
+                session.startupTimings.playlistBufferSeconds = video.inspection.durationSeconds;
+                session.startupTimings.firstSegmentBytes = video.firstSegmentBytes;
+                session.startupTimings.playlistSegmentBytes = video.playlistSegmentBytes;
+                if (multiAudioHlsEnabled(session)) {
+                    session.startupTimings.multiAudioHls = {
+                        ...multiAudioHlsDiagnosticsForSession(session),
+                        ready: true,
+                        video: {
+                            segmentCount: video.inspection.segmentCount,
+                            bufferSeconds: video.inspection.durationSeconds,
+                            firstSegmentBytes: video.firstSegmentBytes,
+                            playlistSegmentBytes: video.playlistSegmentBytes,
+                        },
+                        audio: inspected
+                            .filter((result) => result.kind === 'audio')
+                            .map((result) => ({
+                                hlsIndex: result.hlsIndex,
+                                streamIndex: result.streamIndex,
+                                segmentCount: result.inspection.segmentCount,
+                                bufferSeconds: result.inspection.durationSeconds,
+                                firstSegmentBytes: result.firstSegmentBytes,
+                                playlistSegmentBytes: result.playlistSegmentBytes,
+                            })),
+                    };
+                }
+                return;
             } catch (error) {
                 // FFmpeg updates HLS artifacts atomically. A rename/read/stat
                 // race means "not ready yet", not a terminal provider failure.
             }
         }
-        await sleep(250);
+        const remainingMs = Math.max(1, deadline - Date.now());
+        if (!await waitForVodInputRetry(Math.min(250, remainingMs), abortSignal)) {
+            throw abortedVodInputPumpError();
+        }
     }
     throw new Error('Playlist timeout');
 }
@@ -5593,26 +9126,46 @@ async function stopSession(session) {
     session.stoppingPromise = (async () => {
         const child = session.ffmpeg;
         session.ffmpeg = null;
+        // The provider socket belongs to the pump, not FFmpeg. Abort and await
+        // that exact owner first so a subsequent title cannot open until the old
+        // mono-account connection has fully settled.
+        await stopBoundedMkvInputPump(session);
         await stopChildProcess(child);
         session.status = 'ended';
         sessions.delete(session.id);
+        wakePlaybackBlockedQueues();
         await removeSessionDir(session.outputDir);
     })();
 
     return session.stoppingPromise;
 }
 
-async function stopConflictingSourceSessions(sourceUrl) {
+async function stopConflictingSourceSessions(sourceUrl, providerSlotKey) {
     const sourceKey = sourceSessionKey(sourceUrl);
-    if (!sourceKey) return 0;
+    if (!sourceKey || !providerSlotKey) return 0;
 
     const conflicts = Array.from(sessions.values()).filter((session) => {
         if (session.sourceKey !== sourceKey) return false;
+        if (providerSlotKeyForSession(session) !== providerSlotKey) return false;
         return isSessionBlockingProviderSlot(session);
     });
 
     await Promise.allSettled(conflicts.map(async (session) => {
         console.log(`[media-gateway] stopping previous session for same source: ${session.id}`);
+        await stopSession(session);
+    }));
+    return conflicts.length;
+}
+
+async function stopConflictingProviderSessions(providerSlotKey) {
+    if (!providerSlotKey) return 0;
+    const conflicts = Array.from(sessions.values()).filter((session) => (
+        session?.sourceUrl &&
+        providerSlotKeyForSession(session) === providerSlotKey &&
+        isSessionBlockingProviderSlot(session)
+    ));
+    await Promise.allSettled(conflicts.map(async (session) => {
+        console.log(`[media-gateway] stopping previous session for same provider account: ${session.id}`);
         await stopSession(session);
     }));
     return conflicts.length;
@@ -5641,7 +9194,10 @@ function activeSessionCount() {
 }
 
 function isSessionBlockingProviderSlot(session) {
-    return session?.status === 'starting' || session?.status === 'ready' || session?.status === 'stopping';
+    return session?.status === 'starting' ||
+        session?.status === 'ready' ||
+        session?.status === 'stopping' ||
+        Boolean(session?.inputPump && session.inputPump.completed !== true);
 }
 
 function stopChildProcess(child, timeoutMs = 2500) {
@@ -5739,7 +9295,9 @@ function serializeSession(req, session) {
         status: session.status,
         mode: session.mode,
         audioMode: audioModeForSession(session),
-        audioStreamIndex: session.audioStreamIndex,
+        audioStreamIndex: mappedAudioStreamIndexForSession(session),
+        audioRenditions: audioRenditionsForSession(session),
+        multiAudioHls: multiAudioHlsDiagnosticsForSession(session),
         requestedSeekOffset: session.seekOffset || 0,
         actualStartOffset: session.actualStartOffset || 0,
         localSeekTarget: session.localSeekTarget || 0,
@@ -5756,19 +9314,25 @@ function serializeSession(req, session) {
 }
 
 function debugSession(session) {
-    const selectedTrack = selectedAudioTrackForSession(session);
+    const mappedIndex = mappedAudioStreamIndexForSession(session);
+    const exactTracks = audioTracksForSession(session);
+    const selectedTrack = Number.isInteger(mappedIndex)
+        ? exactTracks.find((track) => normalizeAudioStreamIndex(track?.index) === mappedIndex) || null
+        : selectedAudioTrackForSession(session);
     return {
         id: session.id,
         playbackSessionId: session.playbackSessionId,
         status: session.status,
         mode: session.mode,
         audioMode: audioModeForSession(session),
-        audioStreamIndex: session.audioStreamIndex,
+        audioStreamIndex: mappedAudioStreamIndexForSession(session),
+        audioRenditions: audioRenditionsForSession(session),
+        multiAudioHls: multiAudioHlsDiagnosticsForSession(session),
         requestedSeekOffset: session.seekOffset || 0,
         actualStartOffset: session.actualStartOffset || 0,
         localSeekTarget: session.localSeekTarget || 0,
         sourceTimestamps: session.sourceTimestamps === true,
-        audioMap: audioMapForSession(session),
+        audioMap: session.actualAudioMap || audioMapForSession(session),
         audioCodec: session.audioCodec,
         audioChannels: session.audioChannels,
         selectedAudioTrack: selectedTrack
@@ -5844,6 +9408,15 @@ function verifyRawToken(token, secret) {
     }
 }
 
+// `sid` is part of the HMAC-signed byte-pipe payload. Treat the fixed internal
+// job identifiers as capabilities: a browser-visible playback /raw token has a
+// per-session sid and therefore cannot be replayed against heavy worker routes
+// or use their unsigned query parameters (origin, callback, jobId) to claim
+// viewer priority and consume the replica's provider/CPU queues.
+function bytePipeAllowsPurpose(claims, expectedPurpose) {
+    return Boolean(claims && String(claims.sid || '') === String(expectedPurpose || ''));
+}
+
 function isHttpUrl(value) {
     try {
         const url = new URL(value);
@@ -5878,7 +9451,7 @@ function xtreamPlayerApiUrl({ serverUrl, username, password, action, streamId, l
 async function fetchProviderJson(url, userAgent, timeoutMs = XTREAM_REQUEST_TIMEOUT_MS, options = {}) {
     const controller = new AbortController();
     const backgroundKey = String(options.backgroundAccountKey || '');
-    if (backgroundKey && accountKeyBusyLocally(backgroundKey)) {
+    if (backgroundKey && viewerPlaybackActiveLocally()) {
         throw backgroundProbeError(409, 'account_busy', 'Account busy (active playback)');
     }
     if (backgroundKey && accountExtractions.get(backgroundKey)?.size) {
@@ -6025,7 +9598,34 @@ function sourceSessionKey(value) {
     }
 }
 
+function safeSessionArtifactName(value) {
+    const raw = String(value || '');
+    if (
+        !raw ||
+        raw !== path.basename(raw) ||
+        raw.includes('/') ||
+        raw.includes('\\') ||
+        raw.includes('\0') ||
+        raw.length > 128
+    ) return null;
+    return /^[a-z0-9][a-z0-9._-]*$/i.test(raw) ? raw : null;
+}
+
+function isAllowedSessionPlaylistName(session, value) {
+    const requested = safeSessionArtifactName(value);
+    if (!requested || !requested.toLowerCase().endsWith('.m3u8')) return false;
+    const allowed = new Set(['playlist.m3u8']);
+    if (multiAudioHlsEnabled(session)) {
+        allowed.add(session.multiAudioHls.videoPlaylistName);
+        for (const rendition of session.multiAudioHls.audioRenditions) {
+            allowed.add(`audio_${rendition.hlsIndex}.m3u8`);
+        }
+    }
+    return allowed.has(requested);
+}
+
 function segmentContentType(file) {
+    if (file.endsWith('.m3u8')) return 'application/vnd.apple.mpegurl; charset=utf-8';
     if (file.endsWith('.vtt')) return 'text/vtt; charset=utf-8';
     if (file.endsWith('.m4s')) return 'video/iso.segment';
     if (file.endsWith('.mp4')) return 'video/mp4';
@@ -6050,17 +9650,52 @@ function rememberFailure(session, detail) {
     while (lastFailures.length > 10) lastFailures.shift();
 }
 
-function rewritePlaylistSegments(playlist, token) {
-    const encodedToken = encodeURIComponent(token);
+function controlledAudioRenditionName(plan, rendition) {
+    const language = normalizeHlsAudioLanguage(rendition?.language).toUpperCase();
+    if (language === 'UND') return `Audio ${Number(rendition?.hlsIndex) + 1}`;
+    const priorWithLanguage = plan.audioRenditions
+        .slice(0, rendition.hlsIndex)
+        .filter((candidate) => normalizeHlsAudioLanguage(candidate.language).toUpperCase() === language)
+        .length;
+    return priorWithLanguage > 0 ? `${language} ${priorWithLanguage + 1}` : language;
+}
+
+function rewriteMultiAudioMasterNames(playlist, session) {
+    if (!multiAudioHlsEnabled(session)) return String(playlist || '');
+    const plan = session.multiAudioHls;
     return String(playlist || '')
+        .split(/\r?\n/)
+        .map((line) => {
+            if (!line.trim().startsWith('#EXT-X-MEDIA:')) return line;
+            const attributes = parseHlsAttributeList(line);
+            if (String(attributes.TYPE || '').toUpperCase() !== 'AUDIO') return line;
+            const uri = controlledLocalPlaylistName(attributes.URI);
+            const match = /^audio_(\d+)\.m3u8$/i.exec(String(uri || ''));
+            if (!match) return line;
+            const hlsIndex = Number(match[1]);
+            const rendition = plan.audioRenditions[hlsIndex];
+            if (!rendition || rendition.hlsIndex !== hlsIndex) return line;
+            const generatedName = controlledAudioRenditionName(plan, rendition);
+            return line.replace(/NAME="audio_\d+"/i, `NAME="${generatedName}"`);
+        })
+        .join('\n');
+}
+
+function rewritePlaylistSegments(playlist, token, session = null) {
+    const encodedToken = encodeURIComponent(token);
+    return rewriteMultiAudioMasterNames(playlist, session)
         .split(/\r?\n/)
         .map((line) => {
             const trimmed = line.trim();
             if (!trimmed) return line;
-            if (trimmed.startsWith('#EXT-X-MAP')) {
-                return line.replace(/URI="([^"]+)"/i, (_match, uri) => `URI="${appendToken(uri, encodedToken)}"`);
+            if (trimmed.startsWith('#')) {
+                // Master audio renditions and media init maps both carry URIs
+                // inside tag attributes. Tokenize every URI attribute so new
+                // HLS tags cannot accidentally create an unauthenticated edge.
+                return line.replace(/URI="([^"]+)"/gi, (_match, uri) => (
+                    `URI="${appendToken(uri, encodedToken)}"`
+                ));
             }
-            if (trimmed.startsWith('#')) return line;
             if (/^https?:\/\//i.test(trimmed)) return appendToken(trimmed, encodedToken);
             return appendToken(trimmed, encodedToken);
         })
@@ -6068,8 +9703,22 @@ function rewritePlaylistSegments(playlist, token) {
 }
 
 function appendToken(uri, encodedToken) {
-    if (/[?&]token=/.test(uri)) return uri;
-    return `${uri}${uri.includes('?') ? '&' : '?'}token=${encodedToken}`;
+    const raw = String(uri || '');
+    const localName = raw.split(/[?#]/, 1)[0];
+    // FFmpeg's HLS graph consists exclusively of controlled flat names. Refuse
+    // every absolute, scheme-relative or traversing URI before considering an
+    // existing query token, so a malformed playlist cannot exfiltrate the
+    // session bearer to another origin.
+    if (
+        !localName || localName !== path.basename(localName) ||
+        localName.includes('/') || localName.includes('\\') ||
+        !/^[a-z0-9][a-z0-9._-]*$/i.test(localName)
+    ) return raw;
+    if (/[?&]token=/.test(raw)) return raw;
+    const fragmentIndex = raw.indexOf('#');
+    const base = fragmentIndex >= 0 ? raw.slice(0, fragmentIndex) : raw;
+    const fragment = fragmentIndex >= 0 ? raw.slice(fragmentIndex) : '';
+    return `${base}${base.includes('?') ? '&' : '?'}token=${encodedToken}${fragment}`;
 }
 
 function sanitizeLog(text, sourceUrl) {

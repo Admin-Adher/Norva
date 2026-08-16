@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const fs = require('node:fs');
 const path = require('node:path');
+const vm = require('node:vm');
 
 const {
   buildWhisperDetectOnlyArgs,
@@ -190,13 +191,13 @@ test('v82 production detect-only is signed-scope only, non-strict and falls back
     path.join(root, 'services/media-gateway/src/index.js'),
     'utf8',
   );
-  const routeStart = gateway.indexOf("app.get('/detect-language/:token'");
+  const routeStart = gateway.indexOf('async function handleDetectLanguageRequest(');
   const routeEnd = gateway.indexOf('// Service-only A/B benchmark.', routeStart);
   assert.notEqual(routeStart, -1);
   assert.notEqual(routeEnd, -1);
   const route = gateway.slice(routeStart, routeEnd);
 
-  assert.match(gateway, /const GATEWAY_VERSION = 83/);
+  assert.match(gateway, /const GATEWAY_VERSION = 93/);
   assert.match(gateway, /const LID_DETECT_ONLY_SCOPE = 'lid-production-detect-only'/);
   assert.match(gateway, /const LID_SHADOW_SCOPE = 'lid-shadow'/);
   assert.match(
@@ -260,7 +261,47 @@ test('v82 production detect-only is signed-scope only, non-strict and falls back
   assert.match(route, /const offsets =[\s\S]*strict \? WHISPER_STRICT_OFFSETS : WHISPER_SWEEP_OFFSETS/);
   assert.match(route, /strictSamples\.length >= consensusNeeded/);
   assert.match(route, /strictRejectedSpeechSamples === 0/);
+  assert.match(route, /strictDisposition === 'conflict'/);
+  assert.match(route, /strictDisposition === 'weak'/);
+  assert.match(route, /ignoredWeakSpeechSampleCount: strictIgnoredWeakSpeechSamples/);
   assert.match(route, /method: strict[\s\S]*\? 'whisper-strict-consensus-v4'/);
+});
+
+test('strict consensus ignores weak fallback speech but vetoes strong conflicts', () => {
+  const root = path.join(__dirname, '..');
+  const gateway = fs.readFileSync(
+    path.join(root, 'services/media-gateway/src/index.js'),
+    'utf8',
+  );
+  const start = gateway.indexOf('function strictLanguageSampleDisposition(');
+  const end = gateway.indexOf('\n// Full transcription', start);
+  assert.ok(start >= 0 && end > start);
+  const context = {};
+  vm.runInNewContext(
+    `${gateway.slice(start, end)}; this.classify = strictLanguageSampleDisposition;`,
+    context,
+  );
+
+  assert.equal(context.classify({
+    enoughWords: true,
+    whisperConfident: true,
+    transcriptDisagrees: false,
+  }), 'accepted');
+  assert.equal(context.classify({
+    enoughWords: true,
+    whisperConfident: false,
+    transcriptDisagrees: true,
+  }), 'weak');
+  assert.equal(context.classify({
+    enoughWords: true,
+    whisperConfident: true,
+    transcriptDisagrees: true,
+  }), 'conflict');
+  assert.equal(context.classify({
+    enoughWords: false,
+    whisperConfident: true,
+    transcriptDisagrees: true,
+  }), 'insufficient');
 });
 
 test('production LID health exposes the kill switch, threshold and bounded rollout counters', () => {

@@ -16,7 +16,7 @@ const routeEnd = gateway.indexOf('// Service-only A/B benchmark.', routeStart);
 const route = gateway.slice(routeStart, routeEnd);
 
 test('language WAV extraction is a v82 service-only scoped contract', () => {
-  assert.match(gateway, /const GATEWAY_VERSION = 83/);
+  assert.match(gateway, /const GATEWAY_VERSION = 93/);
   assert.notEqual(routeStart, -1);
   assert.notEqual(routeEnd, -1);
   assert.match(
@@ -63,7 +63,7 @@ test('extraction fails fast for global CPU work and the exact provider account o
     'lidBenchmarkBusy',
     'lidProductionCpuBusy()',
     'isAccountJobBusy(lockKey)',
-    'accountSlotBusyLocally(claims.url)',
+    "accountSlotBusyLocally(claims.url, claims.uid ? sha256Hex(claims.uid) : '')",
   ]) {
     assert.ok(route.includes(guard), `missing busy guard: ${guard}`);
   }
