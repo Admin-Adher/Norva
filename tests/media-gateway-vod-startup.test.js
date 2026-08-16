@@ -177,6 +177,11 @@ test('Gateway readiness materializes every segment in the ten-second buffer', as
             fs,
             fsp: fs.promises,
             sleep: async () => {},
+            waitForVodInputRetry: async (_delayMs, signal) => !signal?.aborted,
+            abortedVodInputPumpError: () => Object.assign(
+                new Error('Finite MKV input pump was stopped'),
+                { name: 'AbortError', code: 'VOD_INPUT_ABORTED' },
+            ),
             isWithin,
             MIN_HLS_STARTUP_BUFFER_SECONDS: 10,
             MIN_HLS_STARTUP_SEGMENTS: 3,
@@ -355,16 +360,22 @@ test('an exact finite Matroska H264 profile selects the 2s keyframe encode plan 
 
     const source = readGateway();
     const decision = source.indexOf('const forceExactMatroskaH264Reencode = shouldReencodeExactMatroskaH264(');
-    const providerProbe = source.indexOf('await probeCodecProfile(sourceUrl');
-    const providerFfmpeg = source.indexOf('const started = await startSessionWithProviderRetry(session)');
+    const providerProbe = source.indexOf('const probedCodecProfile = await probeCodecProfile(');
+    const providerFfmpeg = source.indexOf('const started = await startSessionWithProviderRetry(');
     assert.ok(decision >= 0 && decision < providerProbe && decision < providerFfmpeg,
         'the exact-profile route must be frozen before ffprobe or FFmpeg can connect to the provider');
+    const initialFiniteMkv = source.indexOf('const finiteMkvPlaybackAtRequest = isFiniteMkvVodSession(');
+    const effectiveFiniteMkv = source.indexOf('finiteMkvPlayback = isFiniteMkvVodSession(', initialFiniteMkv + 1);
+    assert.ok(initialFiniteMkv > decision && initialFiniteMkv < providerProbe,
+        'the declared finite-MKV lane must be known before any provider probe');
+    assert.ok(effectiveFiniteMkv > providerProbe && effectiveFiniteMkv < providerFfmpeg,
+        'cache/in-band Matroska evidence must be applied before mode selection and FFmpeg startup');
 });
 
 test('exact Matroska H264 uses independent 2s HLS segments with forced keyframes and no split-by-time', () => {
     const source = readGateway();
 
-    assert.match(source, /const GATEWAY_VERSION = 87;/);
+    assert.match(source, /const GATEWAY_VERSION = 88;/);
     assert.match(source, /exactMatroskaH264ReencodeProtocol:\s*1/);
     assert.match(source, /exactMatroskaH264HlsTargetSeconds:\s*EXACT_MATROSKA_H264_HLS_TARGET_SECONDS/);
     assert.match(source, /exactMatroskaH264MaxPixels:\s*EXACT_MATROSKA_H264_MAX_PIXELS/);

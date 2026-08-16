@@ -242,8 +242,13 @@ test('gateway uses the canonical provider key on every provider network lane', (
   );
   assert.match(
     gateway,
-    /spawn\(FFMPEG_PATH, args, \{ stdio: \['ignore', 'ignore', 'pipe'\], env: proxyEnvFor\(proxyKeyFromUrl\(session\.sourceUrl\)\) \}\);/,
-    'session transcode must use the provider-account key',
+    /const dispatcher = pickProxyAgent\(proxyKeyFromUrl\(session\.sourceUrl\)\) \|\| null;/,
+    'the finite-MKV input pump must freeze one sticky provider-account dispatcher',
+  );
+  assert.match(
+    gateway,
+    /env: pumpedMkvInput \? undefined : proxyEnvFor\(proxyKeyFromUrl\(session\.sourceUrl\)\)/,
+    'non-pumped session transcodes must retain provider-account proxy affinity',
   );
   assert.match(
     gateway,
@@ -283,7 +288,7 @@ test('gateway fails proxy 407 safely before provider 458 handling', () => {
 });
 
 test('gateway advertises targeted operator override support without identities or secrets', () => {
-  assert.match(gateway, /const GATEWAY_VERSION = 87;/);
+  assert.match(gateway, /const GATEWAY_VERSION = 88;/);
   assert.match(gateway, /providerProxyAffinityProtocol:\s*1/);
   assert.match(gateway, /providerProxyAffinityKey:\s*'provider-account'/);
   assert.match(gateway, /providerProxySlotOverrideProtocol:\s*1/);

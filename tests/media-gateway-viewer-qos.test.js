@@ -270,10 +270,17 @@ test('transcode reservation is cleanup-safe and global QoS never authorizes a 45
   const rawRoute = section("app.get('/raw/:token'", '// Tee the leading bytes');
 
   const reserve = sessionsRoute.indexOf('viewerStartupReservation = reserveViewerStartup()');
-  const firstAwait = sessionsRoute.indexOf('await stopConflictingOwnerSessions');
-  assert.ok(reserve >= 0 && reserve < firstAwait);
-  assert.match(sessionsRoute, /finally\s*\{\s*releaseViewerStartup\(viewerStartupReservation\)/);
+  const acquire = sessionsRoute.indexOf('await acquireViewerSessionStartupLocks');
+  const firstPreemption = sessionsRoute.indexOf('await stopConflictingOwnerSessions');
+  assert.ok(acquire >= 0 && acquire < reserve && reserve < firstPreemption);
+  assert.match(
+    sessionsRoute,
+    /finally\s*\{\s*detachSessionRequestAbort\?\.\(\);\s*releaseViewerSessionStartupLock\?\.\(\);\s*releaseViewerSessionStartupAdmission\(viewerSessionStartupAdmission\);\s*releaseViewerStartup\(viewerStartupReservation\)/,
+  );
   assert.match(sessionsRoute, /catch \(err\)[\s\S]*await stopSession\(createdSession\)/);
+  assert.match(sessionsRoute, /req\.once\('aborted', abortSessionRequest\)/);
+  assert.match(sessionsRoute, /abortSessionRequest[\s\S]*if \(createdSession\) stopSession\(createdSession\)/);
+  assert.match(sessionsRoute, /sessionRequestAbortController\?\.signal\.aborted[\s\S]*await stopSession\(createdSession\)/);
   assert.doesNotMatch(
     sessionsRoute,
     /stoppedConflictingSessions\s*\+=\s*preemptBackgroundWorkGlobally/,

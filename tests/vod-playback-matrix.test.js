@@ -215,11 +215,13 @@ test('gateway: raw-pump ledger wired at /raw, /sessions and DELETE /raw-pumps', 
   const src = read('services/media-gateway/src/index.js');
   assert.ok(src.includes('const rawPumps = new Set()'), 'pump ledger missing');
   assert.ok(/registerRawPump\(\{\s*ac,/.test(src), '/raw must register its pump');
-  assert.ok(src.includes("p !== pump && p.proxyKey === pumpProxyKey"), '/raw must supersede prior-session pumps');
-  assert.ok(src.includes("abortRawPumps(\n            (p) => p.proxyKey === proxyKeyFromUrl(sourceUrl)")
+  assert.ok(src.includes("p !== pump && p.providerSlotKey === pumpProviderSlotKey"),
+    '/raw must supersede only prior-session pumps in the exact provider slot');
+  assert.ok(src.includes("abortRawPumps(\n            (p) => p.providerSlotKey === playbackProviderSlotKey")
     || /stoppedConflictingSessions \+= abortRawPumps\(/.test(src), '/sessions must abort conflicting raw pumps');
   assert.ok(src.includes("app.delete('/raw-pumps', requireGatewayAuth"), 'coordinator kill-switch endpoint missing');
-  assert.ok(src.includes('ownerHash: claims.uid ? sha256Hex(claims.uid) : null'), 'owner hash keying missing');
+  assert.ok(src.includes('const pumpOwnerHash = claims.uid ? sha256Hex(claims.uid) : null')
+    && src.includes('ownerHash: pumpOwnerHash'), 'owner hash keying missing');
   assert.ok(src.includes("sid required (or global=1 for explicit owner cleanup)"), 'kill-switch must be session-scoped by default');
   assert.ok(src.includes("p.ownerHash === ownerKey && (globalCleanup || p.sid === sid)"), 'kill-switch must spare sibling sessions');
 });

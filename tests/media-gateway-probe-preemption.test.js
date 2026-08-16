@@ -158,8 +158,12 @@ test('background ffprobe is released on child error and timeout', async (t) => {
     const harness = makeHarness();
     const pending = harness.runFfprobe([], 10, providerUrl, { background: true });
 
-    await assert.rejects(pending, /Codec probe timeout/);
+    await new Promise((resolve) => setTimeout(resolve, 20));
     assert.deepEqual(harness.children[0].killSignals, ['SIGTERM']);
+    assert.equal(harness.accountExtractions.get(providerKey)?.size, 1,
+      'the provider ledger remains held until the timed-out child actually exits');
+    harness.children[0].emit('exit', null, 'SIGTERM');
+    await assert.rejects(pending, /Codec probe timeout/);
     assert.equal(harness.accountExtractions.has(providerKey), false);
   });
 });
@@ -203,6 +207,8 @@ test('viewer preemption remains typed when timeout wins the event race', async (
   const pending = harness.runFfprobe([], 10, providerUrl, { background: true });
 
   harness.preemptAccountExtractions(providerKey, 'viewer play');
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  harness.children[0].emit('exit', null, 'SIGKILL');
 
   await assert.rejects(pending, (error) => {
     assert.equal(error.status, 409);
