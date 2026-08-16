@@ -26,7 +26,7 @@ FUNCS_DIR="$REPO/supabase/functions"
 CONFIG="$REPO/supabase/config.toml"
 COMPOSE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/docker-compose.supabase.yml"
 ENV_FILE="$(dirname "$COMPOSE")/.env"
-EXPECTED_PLAYBACK_VERSION=49
+EXPECTED_PLAYBACK_VERSION=50
 EXPECTED_PLAYBACK_PROTOCOL=1
 EXPECTED_RELAY_TAKEOVER_PROTOCOL=1
 EXPECTED_ENGINE_TRACK_PROBE_BLOCKING=false
@@ -39,6 +39,7 @@ EXPECTED_LANGUAGE_VALIDATION_TASK_BUDGET_MS=270000
 EXPECTED_LANGUAGE_VALIDATION_FETCH_TIMEOUT_MS=240000
 EXPECTED_LANGUAGE_VALIDATION_POST_FETCH_RESERVE_MS=30000
 EXPECTED_LANGUAGE_VALIDATION_JOB_LEASE_SECONDS=300
+EXPECTED_LANGUAGE_VALIDATION_SAMPLE_DURATION_SECONDS=20
 EXPECTED_CLOUD_VERSION=24
 EXPECTED_CLOUD_PROTOCOL=1
 EXPECTED_CATALOG_VERSION=6
@@ -188,7 +189,8 @@ if command -v docker >/dev/null 2>&1 && [[ -f "$COMPOSE" ]]; then
         && "$playback_health" == *"\"languageValidationTaskBudgetMs\":$EXPECTED_LANGUAGE_VALIDATION_TASK_BUDGET_MS"* \
         && "$playback_health" == *"\"languageValidationFetchTimeoutMs\":$EXPECTED_LANGUAGE_VALIDATION_FETCH_TIMEOUT_MS"* \
         && "$playback_health" == *"\"languageValidationPostFetchReserveMs\":$EXPECTED_LANGUAGE_VALIDATION_POST_FETCH_RESERVE_MS"* \
-        && "$playback_health" == *"\"languageValidationJobLeaseSeconds\":$EXPECTED_LANGUAGE_VALIDATION_JOB_LEASE_SECONDS"* ]] || {
+        && "$playback_health" == *"\"languageValidationJobLeaseSeconds\":$EXPECTED_LANGUAGE_VALIDATION_JOB_LEASE_SECONDS"* \
+        && "$playback_health" == *"\"languageValidationSampleDurationSeconds\":$EXPECTED_LANGUAGE_VALIDATION_SAMPLE_DURATION_SECONDS"* ]] || {
       echo "ERROR: $service norva-playback protocol marker mismatch" >&2
       exit 1
     }

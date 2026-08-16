@@ -90,6 +90,7 @@ test('foreground validation ignores presence intent but still blocks real provid
   assert.match(playback, /const LANGUAGE_VALIDATION_TASK_BUDGET_MS = 270_000/);
   assert.match(playback, /const LANGUAGE_VALIDATION_POST_FETCH_RESERVE_MS = 30_000/);
   assert.match(playback, /const LANGUAGE_VALIDATION_JOB_LEASE_SECONDS = 300/);
+  assert.match(playback, /const LANGUAGE_VALIDATION_SAMPLE_DURATION_SECONDS = 20/);
   const taskBudgetMs = Number(
     playback.match(/const LANGUAGE_VALIDATION_TASK_BUDGET_MS = ([\d_]+)/)?.[1].replaceAll('_', ''),
   );
@@ -138,13 +139,15 @@ test('foreground validation ignores presence intent but still blocks real provid
   );
   assert.match(worker, /providerAccountLeaseClaimed[\s\S]*providerAccountLeaseReleaseSafe[\s\S]*release_provider_account_language_validation/);
   assert.match(create, /claimError\.code[\s\S]*55P03[\s\S]*provider language validation in progress[\s\S]*LANGUAGE_VALIDATION_IN_PROGRESS/);
-  assert.match(playback, /version: 49[\s\S]*languageValidationPresenceIntentProtocol: 1[\s\S]*languageValidationPlaybackLeaseProtocol: 1[\s\S]*languageValidationActivityProtocol: 1[\s\S]*languageValidationTaskBudgetMs: LANGUAGE_VALIDATION_TASK_BUDGET_MS[\s\S]*languageValidationFetchTimeoutMs: LANGUAGE_VALIDATION_FETCH_TIMEOUT_MS[\s\S]*languageValidationPostFetchReserveMs: LANGUAGE_VALIDATION_POST_FETCH_RESERVE_MS[\s\S]*languageValidationJobLeaseSeconds: LANGUAGE_VALIDATION_JOB_LEASE_SECONDS/);
+  assert.match(playback, /version: 50[\s\S]*languageValidationPresenceIntentProtocol: 1[\s\S]*languageValidationPlaybackLeaseProtocol: 1[\s\S]*languageValidationActivityProtocol: 1[\s\S]*languageValidationTaskBudgetMs: LANGUAGE_VALIDATION_TASK_BUDGET_MS[\s\S]*languageValidationFetchTimeoutMs: LANGUAGE_VALIDATION_FETCH_TIMEOUT_MS[\s\S]*languageValidationPostFetchReserveMs: LANGUAGE_VALIDATION_POST_FETCH_RESERVE_MS[\s\S]*languageValidationJobLeaseSeconds: LANGUAGE_VALIDATION_JOB_LEASE_SECONDS[\s\S]*languageValidationSampleDurationSeconds: LANGUAGE_VALIDATION_SAMPLE_DURATION_SECONDS/);
   assert.match(playback, /const LANGUAGE_VALIDATION_FETCH_TIMEOUT_MS = 240_000/);
-  assert.match(edgeDeploy, /EXPECTED_PLAYBACK_VERSION=49/);
+  assert.match(edgeDeploy, /EXPECTED_PLAYBACK_VERSION=50/);
   assert.match(edgeDeploy, /EXPECTED_LANGUAGE_VALIDATION_TASK_BUDGET_MS=270000/);
   assert.match(edgeDeploy, /EXPECTED_LANGUAGE_VALIDATION_FETCH_TIMEOUT_MS=240000/);
   assert.match(edgeDeploy, /EXPECTED_LANGUAGE_VALIDATION_POST_FETCH_RESERVE_MS=30000/);
   assert.match(edgeDeploy, /EXPECTED_LANGUAGE_VALIDATION_JOB_LEASE_SECONDS=300/);
+  assert.match(edgeDeploy, /EXPECTED_LANGUAGE_VALIDATION_SAMPLE_DURATION_SECONDS=20/);
+  assert.match(edgeDeploy, /languageValidationSampleDurationSeconds\\\":\$EXPECTED_LANGUAGE_VALIDATION_SAMPLE_DURATION_SECONDS/);
   assert.match(edgeDeploy, /EXPECTED_LANGUAGE_VALIDATION_PRESENCE_INTENT_PROTOCOL=1/);
   assert.match(edgeDeploy, /EXPECTED_LANGUAGE_VALIDATION_PLAYBACK_LEASE_PROTOCOL=1/);
   assert.match(edgeDeploy, /EXPECTED_LANGUAGE_VALIDATION_ACTIVITY_PROTOCOL=1/);
@@ -488,7 +491,7 @@ test('one waitUntil task handles at most one provider track and first 458 is ter
   assert.match(worker, /"claim_provider_file_probe"/);
   assert.match(worker, /p_ttl_seconds: LANGUAGE_VALIDATION_LEASE_SECONDS/);
   assert.match(worker, /LANGUAGE_VALIDATION_SCOPE,[\s\S]*exactAfterLease\.exactProfile\.fileSizeBytes/);
-  assert.match(worker, /\?index=\$\{trackIndex\}&strict=1&dur=30/);
+  assert.match(worker, /\?index=\$\{trackIndex\}&strict=1&dur=\$\{LANGUAGE_VALIDATION_SAMPLE_DURATION_SECONDS\}/);
   assert.match(worker, /method: "POST"/);
   assert.match(worker, /Authorization: `Bearer \$\{detectionAccess\.serviceToken\}`/);
   assert.match(worker, /"X-Norva-Byte-Pipe-Token": detectionAccess\.capability/);
