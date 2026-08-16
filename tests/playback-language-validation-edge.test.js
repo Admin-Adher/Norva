@@ -139,9 +139,9 @@ test('foreground validation ignores presence intent but still blocks real provid
   );
   assert.match(worker, /providerAccountLeaseClaimed[\s\S]*providerAccountLeaseReleaseSafe[\s\S]*release_provider_account_language_validation/);
   assert.match(create, /claimError\.code[\s\S]*55P03[\s\S]*provider language validation in progress[\s\S]*LANGUAGE_VALIDATION_IN_PROGRESS/);
-  assert.match(playback, /version: 50[\s\S]*languageValidationPresenceIntentProtocol: 1[\s\S]*languageValidationPlaybackLeaseProtocol: 1[\s\S]*languageValidationActivityProtocol: 1[\s\S]*languageValidationTaskBudgetMs: LANGUAGE_VALIDATION_TASK_BUDGET_MS[\s\S]*languageValidationFetchTimeoutMs: LANGUAGE_VALIDATION_FETCH_TIMEOUT_MS[\s\S]*languageValidationPostFetchReserveMs: LANGUAGE_VALIDATION_POST_FETCH_RESERVE_MS[\s\S]*languageValidationJobLeaseSeconds: LANGUAGE_VALIDATION_JOB_LEASE_SECONDS[\s\S]*languageValidationSampleDurationSeconds: LANGUAGE_VALIDATION_SAMPLE_DURATION_SECONDS/);
+  assert.match(playback, /version: 51[\s\S]*languageValidationPresenceIntentProtocol: 1[\s\S]*languageValidationPlaybackLeaseProtocol: 1[\s\S]*languageValidationActivityProtocol: 1[\s\S]*languageValidationDurationClaimProtocol: 1[\s\S]*languageValidationTaskBudgetMs: LANGUAGE_VALIDATION_TASK_BUDGET_MS[\s\S]*languageValidationFetchTimeoutMs: LANGUAGE_VALIDATION_FETCH_TIMEOUT_MS[\s\S]*languageValidationPostFetchReserveMs: LANGUAGE_VALIDATION_POST_FETCH_RESERVE_MS[\s\S]*languageValidationJobLeaseSeconds: LANGUAGE_VALIDATION_JOB_LEASE_SECONDS[\s\S]*languageValidationSampleDurationSeconds: LANGUAGE_VALIDATION_SAMPLE_DURATION_SECONDS/);
   assert.match(playback, /const LANGUAGE_VALIDATION_FETCH_TIMEOUT_MS = 240_000/);
-  assert.match(edgeDeploy, /EXPECTED_PLAYBACK_VERSION=50/);
+  assert.match(edgeDeploy, /EXPECTED_PLAYBACK_VERSION=51/);
   assert.match(edgeDeploy, /EXPECTED_LANGUAGE_VALIDATION_TASK_BUDGET_MS=270000/);
   assert.match(edgeDeploy, /EXPECTED_LANGUAGE_VALIDATION_FETCH_TIMEOUT_MS=240000/);
   assert.match(edgeDeploy, /EXPECTED_LANGUAGE_VALIDATION_POST_FETCH_RESERVE_MS=30000/);
@@ -151,6 +151,8 @@ test('foreground validation ignores presence intent but still blocks real provid
   assert.match(edgeDeploy, /EXPECTED_LANGUAGE_VALIDATION_PRESENCE_INTENT_PROTOCOL=1/);
   assert.match(edgeDeploy, /EXPECTED_LANGUAGE_VALIDATION_PLAYBACK_LEASE_PROTOCOL=1/);
   assert.match(edgeDeploy, /EXPECTED_LANGUAGE_VALIDATION_ACTIVITY_PROTOCOL=1/);
+  assert.match(edgeDeploy, /EXPECTED_LANGUAGE_VALIDATION_DURATION_CLAIM_PROTOCOL=1/);
+  assert.match(edgeDeploy, /languageValidationDurationClaimProtocol\\\":\$EXPECTED_LANGUAGE_VALIDATION_DURATION_CLAIM_PROTOCOL/);
   assert.match(mainRouter, /'norva-playback': 20 \* 60 \* 1000/);
   assert.match(edgeDeploy, /main_path="\/home\/deno\/functions\/main\/index\.ts"/);
   assert.match(edgeDeploy, /main router source digest mismatch/);
@@ -320,6 +322,11 @@ test('exact gateway-inband MKV profile, signed size and index fingerprint fail c
     'async function createBytePipeCapability(',
     '\nasync function createGatewaySession(',
   );
+  const rawBytePipe = between(
+    playback,
+    'async function createBytePipeAccess(',
+    '\nasync function createGatewaySession(',
+  );
   const strictCache = between(
     playback,
     'function cachedStrictLanguageValidation(',
@@ -336,12 +343,19 @@ test('exact gateway-inband MKV profile, signed size and index fingerprint fail c
   assert.match(exact, /normalizeCodecToken\(profile\.probeSource\) === "gatewayinband"/);
   assert.match(revalidate, /languageValidationProfileFingerprint/);
   assert.match(revalidate, /exactProfile\.fileSizeBytes !== expectedFileSizeBytes/);
+  assert.match(revalidate, /fingerprint !== stringOr\(claim\.profileFingerprint, ""\)/);
   assert.match(revalidate, /loadLanguageValidationIdentity/);
   assert.match(revalidate, /exactCachedAudioTracks/);
   assert.match(strictCache, /provenance\.profileFingerprint/);
   assert.match(strictCache, /provenance\.fileSizeBytes/);
   assert.match(strictCache, /provenance\.profileProbedAt/);
   assert.match(bytePipe, /\? \{ fileSizeBytes \}/);
+  assert.match(bytePipe, /Number\.isFinite\(durationSeconds\)/);
+  assert.match(bytePipe, /Number\(durationSeconds\) > 0/);
+  assert.match(bytePipe, /Number\(durationSeconds\) <= 24 \* 60 \* 60/);
+  assert.match(bytePipe, /\? \{ durationSeconds: Number\(durationSeconds\) \}/);
+  assert.ok(bytePipe.indexOf('{ durationSeconds: Number(durationSeconds) }') < bytePipe.indexOf('hmacBase64Url'));
+  assert.doesNotMatch(rawBytePipe, /durationSeconds/);
   assert.match(bytePipe, /capability/);
   assert.doesNotMatch(startBody(playback), /body\.(?:url|targetUrl|providerUrl|token|password)/);
 });
@@ -463,6 +477,7 @@ test('language validation protocol 2 is constant across health, fingerprint, cac
     '\nasync function revalidateLanguageValidationClaim(',
   );
   assert.match(fingerprint, /protocol: LANGUAGE_VALIDATION_PROTOCOL/);
+  assert.match(fingerprint, /durationSeconds: Number\(profile\.durationSeconds\)/);
   const cache = between(
     playback,
     'function cachedStrictLanguageValidation(',
@@ -490,8 +505,13 @@ test('one waitUntil task handles at most one provider track and first 458 is ter
   assert.match(worker, /"claim_catalog_file_audio_validation_job"/);
   assert.match(worker, /"claim_provider_file_probe"/);
   assert.match(worker, /p_ttl_seconds: LANGUAGE_VALIDATION_LEASE_SECONDS/);
-  assert.match(worker, /LANGUAGE_VALIDATION_SCOPE,[\s\S]*exactAfterLease\.exactProfile\.fileSizeBytes/);
+  assert.match(worker, /const exactDurationSeconds = Number\([\s\S]*exactAfterLease\.exactProfile\.profile\.durationSeconds/);
+  assert.match(worker, /!Number\.isFinite\(exactDurationSeconds\)[\s\S]*exactDurationSeconds <= 0[\s\S]*exactDurationSeconds > 24 \* 60 \* 60/);
+  assert.match(worker, /LANGUAGE_VALIDATION_DURATION_INVALID/);
+  assert.match(playback, /"LANGUAGE_VALIDATION_DURATION_INVALID",[\s\S]*"LANGUAGE_VALIDATION_IDENTITY_REQUIRED"/);
+  assert.match(worker, /LANGUAGE_VALIDATION_SCOPE,[\s\S]*exactAfterLease\.exactProfile\.fileSizeBytes,[\s\S]*exactDurationSeconds/);
   assert.match(worker, /\?index=\$\{trackIndex\}&strict=1&dur=\$\{LANGUAGE_VALIDATION_SAMPLE_DURATION_SECONDS\}/);
+  assert.doesNotMatch(worker, /[?&]durationSeconds=/);
   assert.match(worker, /method: "POST"/);
   assert.match(worker, /Authorization: `Bearer \$\{detectionAccess\.serviceToken\}`/);
   assert.match(worker, /"X-Norva-Byte-Pipe-Token": detectionAccess\.capability/);

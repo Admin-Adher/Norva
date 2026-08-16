@@ -181,7 +181,7 @@ Deno.serve(async (req) => {
       return json(req, {
         ok: true,
         service: "norva-playback",
-        version: 50,
+        version: 51,
         nativeHeartbeatProtocol: 1,
         providerCircuitProtocol: 1,
         exactFileCodecProfileProtocol: 1,
@@ -189,6 +189,7 @@ Deno.serve(async (req) => {
         languageValidationPresenceIntentProtocol: 1,
         languageValidationPlaybackLeaseProtocol: 1,
         languageValidationActivityProtocol: 1,
+        languageValidationDurationClaimProtocol: 1,
         languageValidationTaskBudgetMs: LANGUAGE_VALIDATION_TASK_BUDGET_MS,
         languageValidationFetchTimeoutMs: LANGUAGE_VALIDATION_FETCH_TIMEOUT_MS,
         languageValidationPostFetchReserveMs: LANGUAGE_VALIDATION_POST_FETCH_RESERVE_MS,
@@ -1961,6 +1962,22 @@ async function processOneLanguageValidationTrack(db: SupabaseClient, jobId: stri
       providerAccountKey,
     );
     const exactAfterLease = await revalidateLanguageValidationClaim(db, claim);
+    // Bind timeline sampling to the same server-observed MKV profile that was
+    // fingerprinted for this job and revalidated after both provider leases.
+    // The duration stays inside the HMAC capability; no unsigned query value
+    // can select strict sampling offsets.
+    const exactDurationSeconds = Number(
+      exactAfterLease.exactProfile.profile.durationSeconds,
+    );
+    if (
+      !Number.isFinite(exactDurationSeconds) ||
+      exactDurationSeconds <= 0 ||
+      exactDurationSeconds > 24 * 60 * 60
+    ) {
+      throw new HttpError(409, "Exact language validation duration is invalid", {
+        code: "LANGUAGE_VALIDATION_DURATION_INVALID",
+      });
+    }
     const pipeExpiresAt = new Date(
       Date.now() + LANGUAGE_VALIDATION_LEASE_SECONDS * 1000,
     ).toISOString();
@@ -1973,6 +1990,7 @@ async function processOneLanguageValidationTrack(db: SupabaseClient, jobId: stri
       null,
       LANGUAGE_VALIDATION_SCOPE,
       exactAfterLease.exactProfile.fileSizeBytes,
+      exactDurationSeconds,
     );
     let response: Response;
     const fetchBudgetMs = languageValidationFetchBudgetMs(taskDeadlineAt);
@@ -2221,6 +2239,7 @@ function languageValidationTaskErrorIsTerminal(error: unknown) {
     "LANGUAGE_VALIDATION_CURSOR_MISMATCH",
     "LANGUAGE_VALIDATION_CODEC_PROFILE_REQUIRED",
     "LANGUAGE_VALIDATION_CODEC_AUDIO_INVALID",
+    "LANGUAGE_VALIDATION_DURATION_INVALID",
     "LANGUAGE_VALIDATION_IDENTITY_REQUIRED",
     "LANGUAGE_VALIDATION_ACCESS_REVOKED",
   ]).has(code);
@@ -3814,6 +3833,7 @@ async function createBytePipeCapability(
   userAgent: string | null = null,
   scope: string | null = null,
   fileSizeBytes: number | null = null,
+  durationSeconds: number | null = null,
 ) {
   const runtimeConfig = await getRuntimeConfig(_db);
   if (!runtimeConfig.mediaGatewayUrl || !runtimeConfig.mediaGatewayToken) {
@@ -3828,6 +3848,11 @@ async function createBytePipeCapability(
     ...(scope ? { scope } : {}),
     ...(Number.isSafeInteger(fileSizeBytes) && Number(fileSizeBytes) > 0
       ? { fileSizeBytes }
+      : {}),
+    ...(Number.isFinite(durationSeconds) &&
+        Number(durationSeconds) > 0 &&
+        Number(durationSeconds) <= 24 * 60 * 60
+      ? { durationSeconds: Number(durationSeconds) }
       : {}),
     exp: Math.floor(new Date(expiresAt).getTime() / 1000),
   });
