@@ -150,7 +150,8 @@ test('Gateway readiness requires ten seconds and three finalized HLS segments', 
         'a genuinely complete short VOD is not forced to time out');
 
     const source = readGateway();
-    assert.match(source, /MIN_HLS_STARTUP_BUFFER_SECONDS\s*=\s*clampInt\([^,]+,\s*10,\s*1,\s*30\)/);
+    assert.match(source, /MIN_HLS_STARTUP_BUFFER_SECONDS\s*=\s*clampInt\([^,]+,\s*10,\s*1,\s*180\)/);
+    assert.match(source, /STARTUP_TIMEOUT_MS\s*=\s*clampInt\([^,]+,\s*60_000,\s*5_000,\s*180_000\)/);
     assert.match(source, /MIN_HLS_STARTUP_SEGMENTS\s*=\s*clampInt\([^,]+,\s*3,\s*1,\s*10\)/);
     assert.match(
         source,
@@ -215,6 +216,27 @@ test('Gateway readiness materializes every segment in the ten-second buffer', as
     } finally {
         fs.rmSync(dir, { recursive: true, force: true });
     }
+});
+
+test('Gateway readiness honors a proof-sized configured VOD window', () => {
+    const inspectHlsStartupPlaylist = loadGatewayFunction(
+        'inspectHlsStartupPlaylist',
+        'waitForPlaylist',
+        { path, MIN_HLS_STARTUP_BUFFER_SECONDS: 125, MIN_HLS_STARTUP_SEGMENTS: 3 },
+    );
+    const playlist = (count) => [
+        '#EXTM3U',
+        '#EXT-X-TARGETDURATION:2',
+        ...Array.from({ length: count }, (_, index) => [
+            '#EXTINF:2.000000,',
+            `segment-${String(index).padStart(5, '0')}.ts`,
+        ]).flat(),
+        '',
+    ].join('\n');
+
+    assert.equal(inspectHlsStartupPlaylist(playlist(62)).reason, 'insufficient_duration');
+    assert.equal(inspectHlsStartupPlaylist(playlist(63)).ready, true,
+        'the browser is admitted only after the configured 125-second proof window exists');
 });
 
 test('Gateway MPEG-TS HLS copies only AAC-LC stereo and transcodes MP3-family audio', () => {

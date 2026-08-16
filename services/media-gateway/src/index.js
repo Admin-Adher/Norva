@@ -926,7 +926,11 @@ const KNOWN_VOD_INPUT_PROBE_SIZE_BYTES = clampInt(process.env.KNOWN_VOD_INPUT_PR
 // not advertise a session until the playlist references a finalized segment
 // with enough finalized media to absorb the provider reconnect windows observed
 // in production. With the normal 4 s target this requires three full segments.
-const MIN_HLS_STARTUP_BUFFER_SECONDS = clampInt(process.env.MIN_HLS_STARTUP_BUFFER_SECONDS, 10, 1, 30);
+// A slow one-vCPU encode must be allowed to materialize a proof-sized VOD
+// window before the browser starts consuming it. The production default stays
+// quick, while deployments that need deterministic long-window playback can
+// opt into a deeper buffer without changing the session or provider socket.
+const MIN_HLS_STARTUP_BUFFER_SECONDS = clampInt(process.env.MIN_HLS_STARTUP_BUFFER_SECONDS, 10, 1, 180);
 const MIN_HLS_STARTUP_SEGMENTS = clampInt(process.env.MIN_HLS_STARTUP_SEGMENTS, 3, 1, 10);
 const MAX_SUBTITLE_TRACKS = clampInt(process.env.MAX_SUBTITLE_TRACKS, 32, 1, 64);
 const MAX_ACTIVE_VIEWER_SUBTITLE_OPERATIONS = clampInt(process.env.MAX_ACTIVE_VIEWER_SUBTITLE_OPERATIONS, 1, 1, 4);
@@ -1095,6 +1099,7 @@ app.get('/health', (req, res) => {
         },
         minHlsStartupBufferSeconds: MIN_HLS_STARTUP_BUFFER_SECONDS,
         minHlsStartupSegments: MIN_HLS_STARTUP_SEGMENTS,
+        startupTimeoutMs: STARTUP_TIMEOUT_MS,
         maxSubtitleTracks: MAX_SUBTITLE_TRACKS,
         activeViewerSubtitleOperations: activeViewerSubtitleOperations.size,
         maxActiveViewerSubtitleOperations: MAX_ACTIVE_VIEWER_SUBTITLE_OPERATIONS,
