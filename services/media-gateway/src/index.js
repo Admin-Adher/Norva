@@ -9,6 +9,11 @@ const express = require('express');
 const { request: undiciRequest } = require('undici');
 const { parseWhisperLid, runWhisperDetectOnly } = require('./whisper-lid');
 const {
+    cleanupStrictLidFiles,
+    resolveStrictLidConsensus,
+    runWhisperBatchProcess,
+} = require('./strict-lid-batch');
+const {
     classifyProviderFetchFailure,
     classifyProviderResponseFailure,
     isProxyAuthenticationFailure,
@@ -852,6 +857,16 @@ const WHISPER_STRICT_MIN_UNIQUE_WORDS = clampInt(
     8,
     30,
 );
+// Edge gives the Gateway fetch 210 s inside its own absolute 240 s task budget. Keep the
+// complete strict Gateway request (sequential extraction, one Whisper batch, broker drain and
+// response) inside 195 s so transport still has a separate 15 s margin. Operators may lower
+// this ceiling, never raise it above the cross-service contract.
+const STRICT_LID_REQUEST_BUDGET_MS = clampInt(
+    process.env.STRICT_LID_REQUEST_BUDGET_MS,
+    195_000,
+    60_000,
+    195_000,
+);
 function strictLanguageSampleDisposition({
     enoughWords,
     whisperConfident,
@@ -861,6 +876,48 @@ function strictLanguageSampleDisposition({
     if (!whisperConfident) return 'weak';
     if (transcriptDisagrees) return 'conflict';
     return 'accepted';
+}
+function strictLanguageBatchSampleResult(whisper, offset) {
+    const det = detectLanguageFromText(whisper?.text || '');
+    const whisperLang = String(whisper?.lang || '').toLowerCase() || null;
+    const whisperProbability = Number(whisper?.prob || 0);
+    const uniqueWordCount = new Set(
+        String(whisper?.text || '').toLowerCase().match(/\p{L}+/gu) || [],
+    ).size;
+    const transcriptDisagrees = det.confident === true
+        && Boolean(det.lang)
+        && det.lang !== whisperLang;
+    const whisperConfident = Boolean(whisperLang)
+        && whisperProbability >= WHISPER_STRICT_MIN_PROBABILITY;
+    const enoughWords = Number(det.words || 0) >= WHISPER_STRICT_MIN_WORDS
+        && uniqueWordCount >= WHISPER_STRICT_MIN_UNIQUE_WORDS;
+    const disposition = strictLanguageSampleDisposition({
+        enoughWords,
+        whisperConfident,
+        transcriptDisagrees,
+    });
+    const accepted = disposition === 'accepted';
+    return {
+        disposition,
+        result: {
+            language: accepted ? whisperLang : null,
+            candidate: whisperLang,
+            confidence: whisperProbability,
+            confident: accepted,
+            verified: false,
+            validationStatus: 'pending',
+            method: 'whisper-strict-consensus-v4',
+            consensus: 0,
+            whisperLang,
+            transcriptLang: det.confident ? det.lang : null,
+            transcriptAgrees: det.confident ? det.lang === whisperLang : null,
+            minProbability: WHISPER_STRICT_MIN_PROBABILITY,
+            wordCount: det.words,
+            uniqueWordCount,
+            sample: String(whisper?.text || '').slice(0, 160),
+            offset,
+        },
+    };
 }
 // Full transcription (Phase 3) runs whisper on a whole film → much longer than the 20s LID clip.
 // This flat value is a FLOOR: the effective budget adapts to the WAV's real duration (see
@@ -979,6 +1036,12 @@ const MAX_VIEWER_SUBTITLE_REQUESTS_PER_MINUTE = clampInt(process.env.MAX_VIEWER_
 const MAX_PENDING_VIEWER_SUBTITLE_OPERATIONS = clampInt(process.env.MAX_PENDING_VIEWER_SUBTITLE_OPERATIONS, 8, 1, 32);
 const VIEWER_SUBTITLE_QUEUE_WAIT_MS = clampInt(process.env.VIEWER_SUBTITLE_QUEUE_WAIT_MS, 75_000, 5_000, 180_000);
 const PROVIDER_SLOT_RELEASE_DELAY_MS = clampInt(process.env.PROVIDER_SLOT_RELEASE_DELAY_MS, 2_500, 0, 15_000);
+// Stop provider/CPU work before the public request deadline. The reserve includes the provider
+// panel's logical socket-release grace plus bounded Node response overhead.
+const STRICT_LID_DRAIN_RESPONSE_RESERVE_MS = Math.min(
+    30_000,
+    Math.max(10_000, PROVIDER_SLOT_RELEASE_DELAY_MS + 5_000),
+);
 // The finite-MKV input pump needs the exact terminal byte so every provider
 // request is bounded (`bytes=N-M`). A one-byte request supplies that size when
 // the exact codec profile did not already preserve ffprobe format.size.
@@ -1015,7 +1078,7 @@ const EXACT_MATROSKA_H264_MAX_HEIGHT = 1080;
 const EXACT_MATROSKA_H264_MAX_PIXELS = EXACT_MATROSKA_H264_MAX_WIDTH * EXACT_MATROSKA_H264_MAX_HEIGHT;
 const MULTI_AUDIO_HLS_PROTOCOL = 1;
 const MAX_MULTI_AUDIO_RENDITIONS = 8;
-const GATEWAY_VERSION = 93;
+const GATEWAY_VERSION = 94;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -1177,6 +1240,8 @@ app.get('/health', (req, res) => {
         strictLidHeaderCapabilityProtocol: 2,
         strictLidProviderDrainProtocol: 1,
         strictLidWeakFallbackProtocol: 1,
+        strictLidBatchProtocol: 1,
+        strictLidRequestBudgetMs: STRICT_LID_REQUEST_BUDGET_MS,
         strictLidCapabilityHeader: 'X-Norva-Byte-Pipe-Token',
         strictLidCapabilityMethod: 'POST',
         strictLidServiceAuthRequired: true,
@@ -3039,6 +3104,13 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
     }
     const claims = validation.claims;
     const strict = policy.strict;
+    const strictRequestStartedAt = strict ? Date.now() : 0;
+    const strictRequestDeadlineAt = strict
+        ? strictRequestStartedAt + STRICT_LID_REQUEST_BUDGET_MS
+        : 0;
+    const strictWorkDeadlineAt = strict
+        ? strictRequestDeadlineAt - STRICT_LID_DRAIN_RESPONSE_RESERVE_MS
+        : 0;
     const strictFileSizeBytes = strict ? normalizeStrictLidFileSize(claims.fileSizeBytes) : null;
     if (strict && !strictFileSizeBytes) {
         res.setHeader('Cache-Control', 'no-store');
@@ -3078,6 +3150,20 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
     }
 
     const requestController = new AbortController();
+    let strictWorkBudgetExpired = false;
+    let strictWorkBudgetTimer = null;
+    const expireStrictWorkBudget = () => {
+        if (!strict || strictWorkBudgetExpired) return;
+        strictWorkBudgetExpired = true;
+        try { requestController.abort(new Error('strict language request budget exhausted')); } catch (_) {}
+    };
+    if (strict) {
+        strictWorkBudgetTimer = setTimeout(
+            expireStrictWorkBudget,
+            Math.max(1, strictWorkDeadlineAt - Date.now()),
+        );
+        strictWorkBudgetTimer.unref?.();
+    }
     const onRequestClose = () => {
         if (!res.writableEnded) {
             try { requestController.abort(new Error('language validation caller closed')); } catch (_) {}
@@ -3086,9 +3172,32 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
     res.once('close', onRequestClose);
     let strictBroker = null;
     let strictBrokerDrained = false;
+    const strictWavSamples = [];
     const closeStrictBrokerForResponse = async () => {
         if (!strict || strictBrokerDrained) return;
-        if (strictBroker) await strictBroker.close();
+        if (strictWorkBudgetTimer !== null) {
+            clearTimeout(strictWorkBudgetTimer);
+            strictWorkBudgetTimer = null;
+        }
+        if (strictBroker) {
+            const remainingMs = Math.max(0, strictRequestDeadlineAt - Date.now());
+            if (!remainingMs) throw new Error('strict language provider drain exceeded request budget');
+            let drainTimer = null;
+            try {
+                await Promise.race([
+                    strictBroker.close(),
+                    new Promise((_, reject) => {
+                        drainTimer = setTimeout(
+                            () => reject(new Error('strict language provider drain exceeded request budget')),
+                            remainingMs,
+                        );
+                        drainTimer.unref?.();
+                    }),
+                ]);
+            } finally {
+                if (drainTimer !== null) clearTimeout(drainTimer);
+            }
+        }
         // A missing broker means validation failed before any provider I/O;
         // that state is also safe to hand off. Once a broker existed, close()
         // above is the sole authority for socket + release-grace completion.
@@ -3134,6 +3243,11 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
         for (const off of offsets) {
             let wavPath = null;
             try {
+                const strictWorkRemainingMs = strict ? strictWorkDeadlineAt - Date.now() : 30_000;
+                if (strict && strictWorkRemainingMs <= 0) {
+                    expireStrictWorkBudget();
+                    break;
+                }
                 // Fast-fail rather than queue behind a long extraction: the edge caller has its own
                 // HTTP timeout — waiting minutes here would spend a provider hit after it hung up.
                 if (isAccountJobBusy(lockKey)) { lastExtractErr = 'account provider slot busy (background job in progress)'; break; }
@@ -3148,7 +3262,7 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
                         trackIndex,
                         off > 0 ? off : 0,
                         dur,
-                        30_000,
+                        strict ? Math.max(1, Math.min(30_000, strictWorkRemainingMs)) : 30_000,
                         claims.uid,
                         true,
                         requestController.signal,
@@ -3166,6 +3280,14 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
                 }   // failed or offset past the file's end → next offset
                 wavPath = ex.path;
                 extractions++;
+                if (strict) {
+                    // Provider access stays sequential through the mono-socket broker. Keep all
+                    // completed WAVs locally, then load Whisper once for the complete ordered
+                    // batch after provider extraction has finished.
+                    strictWavSamples.push({ offset: off, path: wavPath });
+                    wavPath = null;
+                    continue;
+                }
                 let fast = null;
                 let fastEligible = false;
                 let result = null;
@@ -3390,6 +3512,54 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
                 ...(Number.isInteger(terminal.upstreamStatus) ? { upstreamStatus: terminal.upstreamStatus } : {}),
             });
         }
+        if (strictWorkBudgetExpired) {
+            res.setHeader('Cache-Control', 'no-store');
+            return sendDetectionJson(504, {
+                error: 'Strict language validation exceeded its request budget',
+                code: 'strict_lid_request_timeout',
+                retryable: true,
+            });
+        }
+        if (requestController.signal.aborted && !res.writableEnded) return;
+        if (strict && strictWavSamples.length > 0) {
+            const batchTimeoutMs = strictWorkDeadlineAt - Date.now();
+            if (batchTimeoutMs <= 0) {
+                expireStrictWorkBudget();
+            } else {
+                const batch = await runStrictWhisperBatch(
+                    strictWavSamples.map((sample) => sample.path),
+                    {
+                        ...lidBackgroundOptions,
+                        timeoutMs: batchTimeoutMs,
+                        abortSignal: requestController.signal,
+                    },
+                );
+                if (batch.preempted) {
+                    inferencePreempted = true;
+                } else if (batch.timedOut || (batch.aborted && strictWorkBudgetExpired)) {
+                    expireStrictWorkBudget();
+                } else if (!batch.aborted) {
+                    const evaluated = strictWavSamples.map((sample, index) => (
+                        strictLanguageBatchSampleResult(batch.samples[index], sample.offset)
+                    ));
+                    const summary = resolveStrictLidConsensus(evaluated, consensusNeeded);
+                    strictSamples.push(...summary.acceptedSamples);
+                    bestStrictAccepted = summary.bestAccepted;
+                    best = summary.best;
+                    strictRejectedSpeechSamples = summary.rejectedSpeechSampleCount;
+                    strictIgnoredWeakSpeechSamples = summary.ignoredWeakSpeechSampleCount;
+                    for (const [language, count] of summary.votes) votes.set(language, count);
+                }
+            }
+        }
+        if (strictWorkBudgetExpired) {
+            res.setHeader('Cache-Control', 'no-store');
+            return sendDetectionJson(504, {
+                error: 'Strict language validation exceeded its request budget',
+                code: 'strict_lid_request_timeout',
+                retryable: true,
+            });
+        }
         if (requestController.signal.aborted && !res.writableEnded) return;
         if (inferencePreempted) {
             // A transport-shaped non-2xx response is essential: both Edge callers already leave
@@ -3479,8 +3649,15 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
         return res.status(502).json({ error: 'Language detection failed', details: String((err && err.message) || err) });
     } finally {
         res.off('close', onRequestClose);
+        if (strictWorkBudgetTimer !== null) {
+            clearTimeout(strictWorkBudgetTimer);
+            strictWorkBudgetTimer = null;
+        }
         if (strictBroker && !strictBrokerDrained) {
             try { await strictBroker.close(); } catch (_) { /* Edge retains the TTL lease */ }
+        }
+        if (strictWavSamples.length > 0) {
+            await cleanupStrictLidFiles(strictWavSamples.map((sample) => sample.path));
         }
     }
 }
@@ -4593,6 +4770,54 @@ async function runProductionWhisperDetectOnly(wavPath, mode, options = {}) {
             error: String(error?.message || error),
             elapsedMs,
         };
+    } finally {
+        backgroundRegistration?.release?.();
+        whisperInferenceActive = Math.max(0, whisperInferenceActive - 1);
+    }
+}
+
+// Strict LID consumes every successfully extracted window in one whisper-cli process. The
+// pinned whisper.cpp build accepts ordered repeated -f/-of arguments, so model initialization
+// happens once while each transcript and LID line remains mapped to its own offset.
+async function runStrictWhisperBatch(wavPaths, options = {}) {
+    const backgroundKey = String(options.backgroundKey || '');
+    const preemptibleBackground = options.preemptibleBackground === true && Boolean(backgroundKey);
+    if (preemptibleBackground && viewerPlaybackActiveLocally()) {
+        return {
+            ok: false,
+            samples: wavPaths.map(() => ({ text: '', lang: null, prob: 0 })),
+            timedOut: false,
+            aborted: false,
+            preempted: true,
+            error: 'whisper preempted by viewer playback on this account',
+        };
+    }
+    whisperInferenceActive += 1;
+    let backgroundRegistration = null;
+    try {
+        const value = await runWhisperBatchProcess({
+            bin: WHISPER_BIN,
+            model: WHISPER_MODEL,
+            wavPaths,
+            threads: WHISPER_THREADS,
+            timeoutMs: Math.max(1, Number(options.timeoutMs) || 1),
+            abortSignal: options.abortSignal || null,
+            onSpawn: (child) => {
+                if (!preemptibleBackground) return;
+                backgroundRegistration = registerPreemptibleBackgroundWhisper(backgroundKey, child);
+            },
+            isPreempted: () => backgroundRegistration?.preempted === true,
+        });
+        if (backgroundRegistration?.preempted === true) {
+            return {
+                ...value,
+                ok: false,
+                samples: wavPaths.map(() => ({ text: '', lang: null, prob: 0 })),
+                preempted: true,
+                error: 'whisper preempted by viewer playback on this account',
+            };
+        }
+        return value;
     } finally {
         backgroundRegistration?.release?.();
         whisperInferenceActive = Math.max(0, whisperInferenceActive - 1);
