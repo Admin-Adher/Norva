@@ -3168,8 +3168,12 @@ class MoviesPage {
             playbackHint.startOffset = resumePlan.sessionStart;
             playbackHint.resumeTime = resumePlan.sessionStart;
         }
-        const audioStreamIndex = Number(playbackPreferences?.audio?.streamIndex ?? playbackPreferences?.audio?.stream_index);
-        if (Number.isInteger(audioStreamIndex)) {
+        const preferredAudioStreamIndex = playbackPreferences?.audio?.streamIndex
+            ?? playbackPreferences?.audio?.stream_index;
+        const audioStreamIndex = preferredAudioStreamIndex === null || preferredAudioStreamIndex === undefined
+            ? null
+            : Number(preferredAudioStreamIndex);
+        if (Number.isInteger(audioStreamIndex) && audioStreamIndex >= 0) {
             playbackHint.audioStreamIndex = audioStreamIndex;
         }
         const fileAudioTracks = movie.audio_tracks_scope === 'file' || movie.audioTracksScope === 'file'

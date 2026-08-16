@@ -396,6 +396,38 @@ test('version failover remaps a language preference instead of reusing the old f
   assert.notStrictEqual(options.audioStreamIndex, 7);
 });
 
+test('missing engine audio indices never coerce to stream zero', () => {
+  const context = { window: {}, console, setTimeout, clearTimeout };
+  vm.runInNewContext(watchSrc, context, { filename: 'WatchPage.js' });
+  const page = Object.create(context.window.WatchPage.prototype);
+  page.directAudioStreamIndex = null;
+  page.selectedAudioStreamIndex = undefined;
+  page.audioTracks = [{ index: 0, codec: 'aac', channels: 2 }];
+  page.currentStreamInfo = { audioTracks: page.audioTracks };
+  page._relayAudioTracks = null;
+
+  const options = page.getPlayingEngineAudioOptions();
+
+  assert.strictEqual(Object.hasOwn(options, 'audioStreamIndex'), false);
+});
+
+test('missing explicit audio choice falls back to the playing engine stream while real zero remains valid', () => {
+  const context = { window: {}, console, setTimeout, clearTimeout };
+  vm.runInNewContext(watchSrc, context, { filename: 'WatchPage.js' });
+  const page = Object.create(context.window.WatchPage.prototype);
+  page.getPlayingEngineAudioOptions = () => ({ audioStreamIndex: 6, audioCodec: 'aac' });
+
+  for (const missingIndex of [null, undefined]) {
+    page.getSelectedAudioPlaybackOptions = () => ({ audioStreamIndex: missingIndex });
+    const options = page.getCurrentAudioPlaybackOptions();
+    assert.strictEqual(options.audioStreamIndex, 6);
+  }
+
+  page.getSelectedAudioPlaybackOptions = () => ({ audioStreamIndex: 0 });
+  const explicitZero = page.getCurrentAudioPlaybackOptions();
+  assert.strictEqual(explicitZero.audioStreamIndex, 0);
+});
+
 test('an in-session version switch replaces a stale French mono label without a stored preference', () => {
   const context = { window: {}, console, setTimeout, clearTimeout };
   vm.runInNewContext(watchSrc, context, { filename: 'WatchPage.js' });
