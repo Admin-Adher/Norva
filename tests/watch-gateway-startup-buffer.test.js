@@ -154,6 +154,7 @@ test('Gateway manifest handler gates play and fails closed without opening a ret
 
 test('Gateway media recovery cannot play before the startup buffer gate settles', async () => {
     const timers = [];
+    const switchMetrics = [];
     let resolveGate;
     const gate = new Promise(resolve => { resolveGate = resolve; });
     let playCalls = 0;
@@ -196,6 +197,10 @@ test('Gateway media recovery cannot play before the startup buffer gate settles'
         isGatewayPlaybackUrl: () => true,
         isStalePlaybackAttempt: () => false,
         waitForGatewayStartupBuffer: () => gate,
+        gatewayBufferedAheadSeconds: () => 96.25,
+        updateGatewayAudioSwitchMetrics: (requestId, status, details) => {
+            switchMetrics.push({ requestId, status, details });
+        },
         _reattachAiTrackIfActive: () => {},
         restorePendingAudioPreference: () => {},
         updateAudioTracks: () => {},
@@ -214,7 +219,7 @@ test('Gateway media recovery cannot play before the startup buffer gate settles'
     playHls.call(
         page,
         'https://norva-production.up.railway.app/sessions/test/playlist.m3u8',
-        { playbackAttemptId: 1 },
+        { playbackAttemptId: 1, audioSwitchRequestId: 4 },
     );
 
     const activeHls = page.hls;
@@ -226,10 +231,14 @@ test('Gateway media recovery cannot play before the startup buffer gate settles'
     });
     while (timers.length) timers.shift()();
     assert.equal(playCalls, 0, 'recovery must stay paused while the Gateway gate is pending');
+    assert.deepEqual(switchMetrics, [], 'the switch must not report readiness before the real gate');
 
     resolveGate(true);
     await manifest;
+    await Promise.resolve();
     assert.equal(playCalls, 1, 'the manifest path starts playback exactly once after the gate');
+    assert.deepEqual(switchMetrics.map(metric => metric.status), ['gateway_gate_ready', 'playing']);
+    assert.equal(switchMetrics[0].details.bufferedAheadSeconds, 96.25);
 });
 
 test('Gateway seek delegates autoplay to loadVideo instead of bypassing its buffer gate', () => {
@@ -240,4 +249,146 @@ test('Gateway seek delegates autoplay to loadVideo instead of bypassing its buff
     assert.match(method, /loadVideo\([\s\S]*\bautoplay,/);
     assert.doesNotMatch(method, /if \(autoplay\)[\s\S]*video\?\.play/,
         'seek must not play directly after loadVideo starts the gated HLS lane');
+});
+
+test('Gateway audio switch expires the prior lane, creates once, and delegates autoplay to gate96', async () => {
+    const restartCloudGatewayWithSelectedAudioTrack = loadMethod(
+        'restartCloudGatewayWithSelectedAudioTrack',
+        'updateGatewayAudioSwitchMetrics',
+        {
+            MediaUtils: {
+                playbackHintFromItem: () => ({ container: 'mkv', streamType: 'movie' }),
+            },
+            console,
+        },
+    );
+    const lifecycle = [];
+    const metrics = [];
+    let createCalls = 0;
+    let playCalls = 0;
+    let attached = null;
+    const page = {
+        _audioSwitchRequestId: 11,
+        _playbackAttemptId: 27,
+        video: {
+            paused: false,
+            play: () => { playCalls += 1; return Promise.resolve(); },
+        },
+        content: { sourceId: 'source-1', id: '90843', type: 'movie', containerExtension: 'mkv' },
+        containerExtension: 'mkv',
+        currentStreamInfo: { audioTracks: [{ index: 2, language: 'fra' }] },
+        audioTracks: [{ index: 2, language: 'fra' }],
+        getSelectedAudioTrack: () => ({ index: 2, language: 'fra' }),
+        getPlaybackPosition: () => 125,
+        getGatewaySeekPreRoll: () => 5,
+        getAudioProcessingOptions: () => ({ audioStreamIndex: 2, audioCodec: 'ac3' }),
+        setSelectedAudioPreference: () => ({ audio: { streamIndex: 2 } }),
+        getTrackLabel: () => 'French',
+        hidePlaybackError: () => {},
+        showLoading: () => {},
+        updateTranscodeStatus: () => {},
+        trackPlaybackPosition: () => {},
+        saveResumeSnapshotThrottled: () => {},
+        releasePlaybackPipelineForRetry: async () => { lifecycle.push('release'); },
+        waitForProviderSlotRelease: async () => { lifecycle.push('cooldown'); },
+        isStaleAudioSwitch: () => false,
+        updateGatewayAudioSwitchMetrics: (requestId, status, details = {}) => {
+            metrics.push({ requestId, status, details });
+        },
+        requestAudioSwitchGatewayUrl: async () => {
+            createCalls += 1;
+            lifecycle.push('create');
+            return {
+                url: 'https://gateway.test/sessions/new/playlist.m3u8',
+                session: { id: 'session-new' },
+                playback: {
+                    audioStreamIndex: 2,
+                    actualStartOffset: 120,
+                    localSeekTarget: 5,
+                    sourceTimestamps: true,
+                },
+            };
+        },
+        playbackMetadataFromResult: (playback = {}, extra = {}) => ({
+            ...(playback.playback || playback),
+            ...extra,
+            sessionId: extra.sessionId || playback.sessionId || playback.session?.id || 'session-new',
+            audioStreamIndex: extra.audioStreamIndex ?? playback.playback?.audioStreamIndex ?? playback.audioStreamIndex,
+        }),
+        cleanupStaleCloudPlaybackSession: async () => {},
+        handlePlaybackFailure: async () => {},
+        getMeasuredGatewaySeekPlan: () => ({
+            actualStartOffset: 120,
+            localSeekTarget: 5,
+            sourceTimestamps: true,
+        }),
+        loadVideo: async (url, options) => {
+            lifecycle.push('attach');
+            attached = { url, options };
+        },
+        setVolumeFromStorage: () => {},
+    };
+
+    assert.equal(await restartCloudGatewayWithSelectedAudioTrack.call(page, 11), true);
+    assert.equal(createCalls, 1, 'an audio switch may mint only one provider session');
+    assert.ok(lifecycle.indexOf('release') < lifecycle.indexOf('create'), 'old lane release is a hard barrier');
+    assert.equal(playCalls, 0, 'restart must never bypass loadVideo/gate96 with a direct play call');
+    assert.equal(attached.options.autoplay, true);
+    assert.equal(attached.options.audioSwitchRequestId, 11);
+    assert.equal(attached.options.audioStreamIndex, 2);
+    assert.equal(attached.options.cloudPlaybackSessionId, 'session-new');
+    assert.equal(page.content.cloudPlaybackSessionId, 'session-new');
+    assert.deepEqual(
+        metrics.map(metric => metric.status),
+        ['provider_cooldown', 'creating_session', 'attaching_gateway_lane', 'waiting_gateway_gate'],
+    );
+});
+
+test('Gateway audio switch resolver does not retry an ambiguous session create', async () => {
+    let createCalls = 0;
+    const requestAudioSwitchGatewayUrl = loadMethod(
+        'requestAudioSwitchGatewayUrl',
+        'clearExternalSubtitleTracks',
+        {
+            API: {
+                proxy: {
+                    xtream: {
+                        getStreamUrl: async () => {
+                            createCalls += 1;
+                            throw Object.assign(new Error('connection reset'), { code: 'ECONNRESET' });
+                        },
+                    },
+                },
+            },
+        },
+    );
+    const page = {
+        content: { sourceId: 'source-1', id: '90843' },
+        isStaleAudioSwitch: () => false,
+        isPlaybackSupersededError: () => false,
+        isProviderBusyError: () => false,
+        getErrorText: (error) => error.message,
+        reportProviderPlaybackFailure: async () => {},
+    };
+
+    await assert.rejects(
+        requestAudioSwitchGatewayUrl.call(page, 'movie', 'mkv', { audioStreamIndex: 2 }, 12),
+        /connection reset/,
+    );
+    assert.equal(createCalls, 1, 'network ambiguity must not create a second provider session');
+});
+
+test('Gateway audio switch never treats a missing mapped index as stream zero or as the requested track', () => {
+    const start = source.indexOf('    async restartCloudGatewayWithSelectedAudioTrack(');
+    const end = source.indexOf('\n    updateGatewayAudioSwitchMetrics(', start);
+    assert.ok(start >= 0 && end > start);
+    const method = source.slice(start, end);
+
+    assert.match(method, /rawActualAudioStreamIndex === null[\s\S]*\? null[\s\S]*: Number\(rawActualAudioStreamIndex\)/);
+    assert.match(method, /!Number\.isInteger\(actualAudioStreamIndex\)[\s\S]*audio_map_unverified/);
+    assert.doesNotMatch(
+        method,
+        /effectiveAudioStreamIndex[\s\S]*requestedAudioStreamIndex\s*:\s*null/,
+        'the requested index is intent, never proof of the stream mapped by Gateway',
+    );
 });

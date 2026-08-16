@@ -3957,6 +3957,140 @@
         return validatePartnersReferralVisibility(payload, safeLimit, safeCursor);
     }
 
+    function languageValidationClientError(code, message, payload = null) {
+        const error = new Error(message);
+        error.code = code;
+        if (payload && typeof payload === 'object') error.payload = payload;
+        return error;
+    }
+
+    function requireLanguageValidationProtocol(payload) {
+        if (!payload || typeof payload !== 'object' || payload.protocol !== 2) {
+            throw languageValidationClientError(
+                'LANGUAGE_VALIDATION_PROTOCOL_INVALID',
+                'Norva returned an incompatible language validation protocol',
+                payload
+            );
+        }
+        return payload;
+    }
+
+    async function requestPlaybackLanguageValidation(method, path, body, requestOptions) {
+        try {
+            return requireLanguageValidationProtocol(await requestToBase(
+                playbackBase(),
+                method,
+                path,
+                body,
+                requestOptions
+            ));
+        } catch (error) {
+            const payload = error?.payload;
+            if (!payload || typeof payload !== 'object') throw error;
+            requireLanguageValidationProtocol(payload);
+            if (payload.status === 'failed') {
+                const rejected = languageValidationClientError(
+                    String(payload.errorCode || 'LANGUAGE_VALIDATION_FAILED'),
+                    'Strict audio language validation failed',
+                    payload
+                );
+                rejected.status = error?.status;
+                throw rejected;
+            }
+            throw error;
+        }
+    }
+
+    function languageValidationDelay(ms, signal) {
+        if (signal?.aborted) {
+            const error = new Error('Language validation aborted');
+            error.name = 'AbortError';
+            return Promise.reject(error);
+        }
+        return new Promise((resolve, reject) => {
+            const timer = setTimeout(() => {
+                signal?.removeEventListener?.('abort', onAbort);
+                resolve();
+            }, Math.max(0, ms));
+            const onAbort = () => {
+                clearTimeout(timer);
+                const error = new Error('Language validation aborted');
+                error.name = 'AbortError';
+                reject(error);
+            };
+            signal?.addEventListener?.('abort', onAbort, { once: true });
+        });
+    }
+
+    async function validatePlaybackLanguages(body, options = {}) {
+        const timeoutMs = Math.max(
+            1000,
+            Math.min(30 * 60 * 1000, Number(options.timeoutMs) || 20 * 60 * 1000)
+        );
+        const deadline = Date.now() + timeoutMs;
+        const requestOptions = options.signal ? { signal: options.signal } : {};
+        let result = await requestPlaybackLanguageValidation(
+            'POST',
+            '/playback/language-validation',
+            body,
+            requestOptions
+        );
+        if (result?.status === 'verified') return result;
+        const jobId = String(result?.jobId || '');
+        if (result?.status !== 'pending' || !/^[0-9a-f-]{36}$/i.test(jobId)) {
+            throw languageValidationClientError(
+                'LANGUAGE_VALIDATION_PROTOCOL_INVALID',
+                'Norva returned an invalid language validation job'
+            );
+        }
+
+        for (let pollCount = 0; pollCount < 600; pollCount += 1) {
+            const now = Date.now();
+            if (now >= deadline) break;
+            const retryAtMs = Date.parse(String(result.retryAt || ''));
+            if (Number.isFinite(retryAtMs) && retryAtMs > deadline) {
+                throw languageValidationClientError(
+                    'LANGUAGE_VALIDATION_RETRY_LATER',
+                    'Language validation must be retried later',
+                    result
+                );
+            }
+            const requestedDelay = Number(options.pollIntervalMs);
+            const serverDelay = Math.max(
+                1,
+                Math.min(30, Number(result.retryAfter ?? result.retryAfterSeconds) || 3)
+            ) * 1000;
+            const delayMs = Number.isFinite(requestedDelay)
+                ? Math.max(0, Math.min(30_000, requestedDelay))
+                : serverDelay;
+            await languageValidationDelay(Math.min(delayMs, Math.max(0, deadline - now)), options.signal);
+            result = await requestPlaybackLanguageValidation(
+                'GET',
+                `/playback/language-validation/${encodeURIComponent(jobId)}`,
+                null,
+                requestOptions
+            );
+            if (result?.status === 'verified') return result;
+            if (result?.status === 'failed') {
+                throw languageValidationClientError(
+                    String(result.errorCode || 'LANGUAGE_VALIDATION_FAILED'),
+                    'Strict audio language validation failed',
+                    result
+                );
+            }
+            if (result?.status !== 'pending' || result?.jobId !== jobId) {
+                throw languageValidationClientError(
+                    'LANGUAGE_VALIDATION_PROTOCOL_INVALID',
+                    'Norva returned an invalid language validation status'
+                );
+            }
+        }
+        throw languageValidationClientError(
+            'LANGUAGE_VALIDATION_TIMEOUT',
+            'Strict audio language validation timed out'
+        );
+    }
+
     const NorvaCloud = {
         get apiUrl() { return apiBase(); },
         get edgeUrl() { return edgeBase(); },
@@ -4249,6 +4383,10 @@
 
         playback: {
             createSession: (session) => playbackRequest(session),
+            // Server-owned strict language validation. The browser submits only
+            // catalog identity + expected absolute audio indexes; playback/raw
+            // tokens remain inside norva-playback and the media gateway.
+            validateLanguages: validatePlaybackLanguages,
             getSession: (id) => playbackSessionRequest('GET', `/playback/sessions/${encodeURIComponent(id)}`),
             heartbeatSession: (id) => playbackHeartbeatRequest(id),
             expireSession: (id, options = {}) => playbackSessionRequest(

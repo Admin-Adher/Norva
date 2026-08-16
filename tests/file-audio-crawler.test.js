@@ -274,7 +274,7 @@ test('Edge rollout is signed, dynamically reversible and keeps fast evidence sco
   const migration = read('supabase/migrations/20260720120000_audio_lid_rollout_flags.sql');
   const bytePipe = between(
     playback,
-    'async function createBytePipeAccess(',
+    'async function createBytePipeCapability(',
     '\nasync function createGatewaySession(',
   );
   const policy = between(
