@@ -1667,7 +1667,13 @@ class WatchPage {
             } catch (err) {
                 if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
                 const errorText = this.getErrorText(err) || 'This title could not be started. Please try again.';
-                this.showPlaybackError(errorText, { immediate: true });
+                // The initial resolver has not handed this attempt a playable
+                // Gateway lane. A timer-driven retry would silently mint a new
+                // session; leave that decision to the visible Retry button.
+                this.showPlaybackError(errorText, {
+                    immediate: true,
+                    allowAutomaticRetry: false
+                });
                 return;
             }
             // A cloud resolver can finish after Back/navigation invalidated this
@@ -1684,7 +1690,10 @@ class WatchPage {
             }
             if (!resolved || !resolved.url) {
                 await this.cleanupStaleCloudPlaybackSession(resolvedSessionId);
-                this.showPlaybackError('This title could not be started. Please try again.', { immediate: true });
+                this.showPlaybackError('This title could not be started. Please try again.', {
+                    immediate: true,
+                    allowAutomaticRetry: false
+                });
                 return;
             }
             streamUrl = resolved.url;
@@ -4786,6 +4795,14 @@ class WatchPage {
                     bufferReady = await this.waitForGatewayStartupBuffer(
                         playbackAttemptId,
                         activeHls,
+                        {
+                            // Gateway admission already materializes at least
+                            // 60 s in production. Mirror all but one normal HLS
+                            // segment (or two exact-Matroska 2 s segments) so
+                            // minor EXTINF/PTS drift cannot strand the gate.
+                            minimumSeconds: 56,
+                            timeoutMs: 90000
+                        },
                     );
                 } catch (error) {
                     console.warn('[WatchPage] Gateway startup buffer inspection failed:', error?.message || error);
@@ -6363,9 +6380,12 @@ class WatchPage {
         const recoveryCopy = serverRecovery ? this.cloudTranscodeRecoveryCopy() : null;
         // A 458 opens a server-side circuit. Automatic retries would extend the
         // provider conflict; only an explicit user retry may probe after cooldown.
+        const allowAutomaticRetry = options.allowAutomaticRetry !== false;
         const refreshScheduled = playbackSuperseded || providerBusy || serverRecovery
             ? false
-            : providerBlocked ? false : this.schedulePlaybackErrorRefresh();
+            : providerBlocked || !allowAutomaticRetry
+                ? false
+                : this.schedulePlaybackErrorRefresh();
         const refreshHint = playbackSuperseded || providerBusy
             ? conflictCopy.hint
             : serverRecovery
@@ -7542,6 +7562,7 @@ class WatchPage {
     // decide whether that exact stream can be copied or needs audio encoding.
     getPlayingEngineAudioOptions() {
         const asStreamIndex = (value) => {
+            if (value === null || value === undefined) return null;
             const parsed = Number(value);
             return Number.isInteger(parsed) && parsed >= 0 ? parsed : null;
         };
@@ -7597,7 +7618,11 @@ class WatchPage {
 
     getCurrentAudioPlaybackOptions() {
         const explicit = this.getSelectedAudioPlaybackOptions();
-        if (Number.isInteger(Number(explicit.audioStreamIndex))) return explicit;
+        const explicitIndex = explicit?.audioStreamIndex;
+        if (explicitIndex !== null && explicitIndex !== undefined) {
+            const parsedIndex = Number(explicitIndex);
+            if (Number.isInteger(parsedIndex) && parsedIndex >= 0) return explicit;
+        }
         return this.getPlayingEngineAudioOptions();
     }
 

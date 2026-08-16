@@ -67,3 +67,55 @@ test('pending audio metadata stays out of the consumer catalogue', () => {
   assert.equal(page.displayLanguageStatus('Identifying audio'), '');
   assert.equal(page.displayLanguageStatus('French'), 'French');
 });
+
+test('movie playback never turns a missing saved audio index into stream zero', async () => {
+  const playbackHints = [];
+  context.MediaUtils = {
+    playbackHintFromItem: (_movie, { container }) => ({ container }),
+    versionLabel: () => 'Test version',
+    safeImageUrl: (value) => value,
+    tmdbPosterUrl: () => null,
+    normalizeLanguagePreference: (value) => value,
+  };
+  context.API = {
+    proxy: {
+      xtream: {
+        getStreamUrl: async (_sourceId, _streamId, _type, _container, hint) => {
+          playbackHints.push(hint);
+          return { url: 'https://gateway.test/session/playlist.m3u8' };
+        },
+      },
+    },
+  };
+
+  const moviePage = Object.create(context.window.MoviesPage.prototype);
+  const watch = {
+    play: async (_content, resolver) => resolver(),
+  };
+  moviePage.app = { pages: { watch } };
+  moviePage.prepareForPlaybackSession = async () => {};
+  moviePage.getMovieDisplayTitle = (movie) => movie.name;
+  moviePage.getItemYear = () => 2026;
+  moviePage.getSourceName = () => 'Test source';
+
+  const movie = {
+    sourceId: 'source-1',
+    stream_id: 'movie-1',
+    container_extension: 'mkv',
+    stream_icon: 'poster.jpg',
+    name: 'Test movie',
+  };
+
+  for (const missingIndex of [null, undefined]) {
+    await moviePage.playMovie(movie, {
+      playbackPreferences: { audio: { streamIndex: missingIndex } },
+    });
+    assert.equal(Object.hasOwn(playbackHints.at(-1), 'audioStreamIndex'), false);
+  }
+
+  await moviePage.playMovie(movie, {
+    playbackPreferences: { audio: { streamIndex: 0 } },
+  });
+  assert.equal(playbackHints.at(-1).audioStreamIndex, 0,
+    'a real stream index zero must remain selectable');
+});

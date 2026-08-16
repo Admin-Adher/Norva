@@ -71,26 +71,36 @@ test('Gateway buffered-ahead measurement fails closed when live TimeRanges mutat
     assert.equal(gatewayBufferedAheadSeconds.call(page), 0);
 });
 
-test('Gateway autoplay gate waits for 24 real browser-buffer seconds', async () => {
+test('Gateway autoplay gate holds at 24 and 55.9 seconds, then admits 56.1 seconds', async () => {
     const waitForGatewayStartupBuffer = loadMethod(
         'waitForGatewayStartupBuffer',
         'playHls',
     );
     const hls = { levels: [{ details: { live: true, totalduration: 60 } }] };
-    let ahead = 0;
+    let ahead = 24.1;
     const page = {
         hls,
         isStalePlaybackAttempt: () => false,
         gatewayBufferedAheadSeconds: () => ahead,
     };
-    setTimeout(() => { ahead = 24.1; }, 20);
-
-    assert.equal(await waitForGatewayStartupBuffer.call(
+    let settled = false;
+    const gate = waitForGatewayStartupBuffer.call(
         page,
         7,
         hls,
-        { minimumSeconds: 24, timeoutMs: 500 },
-    ), true);
+        { minimumSeconds: 56, timeoutMs: 500 },
+    ).then(result => {
+        settled = true;
+        return result;
+    });
+
+    await new Promise(resolve => setTimeout(resolve, 25));
+    assert.equal(settled, false, '24 seconds must no longer start Gateway playback');
+    ahead = 55.9;
+    await new Promise(resolve => setTimeout(resolve, 110));
+    assert.equal(settled, false, 'the gate must not round a sub-threshold range up to 56 seconds');
+    ahead = 56.1;
+    assert.equal(await gate, true);
 });
 
 test('Gateway autoplay gate is cancellation-safe and admits a fully buffered short VOD', async () => {
@@ -108,7 +118,7 @@ test('Gateway autoplay gate is cancellation-safe and admits a fully buffered sho
         completePage,
         8,
         completeHls,
-        { minimumSeconds: 24, timeoutMs: 200 },
+        { minimumSeconds: 56, timeoutMs: 200 },
     ), true);
 
     const stalePage = {
@@ -120,7 +130,7 @@ test('Gateway autoplay gate is cancellation-safe and admits a fully buffered sho
         stalePage,
         9,
         completeHls,
-        { minimumSeconds: 24, timeoutMs: 200 },
+        { minimumSeconds: 56, timeoutMs: 200 },
     ), false);
 });
 
@@ -133,6 +143,10 @@ test('Gateway manifest handler gates play and fails closed without opening a ret
     const playAt = handler.indexOf('this.video.play()');
 
     assert.ok(gateAt >= 0 && playAt > gateAt, 'Gateway buffer gate must settle before autoplay');
+    assert.match(handler, /minimumSeconds:\s*56/,
+        'Gateway playback must mirror the production proof buffer before autoplay');
+    assert.match(handler, /timeoutMs:\s*90000/,
+        'the deeper browser buffer needs a bounded near-realtime fill budget');
     assert.match(handler, /if \(!bufferReady\)[\s\S]*releasePlaybackPipelineForRetry/);
     assert.doesNotMatch(handler, /getStreamUrl|createSession|retryPlaybackInPlace/,
         'a buffer timeout must not mint another provider session');

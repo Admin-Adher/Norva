@@ -128,6 +128,78 @@ test('a resolved response without a media URL also expires its server-owned sess
     assert.ok(error > cleanup, 'the session release must be awaited before the terminal error is painted');
 });
 
+test('an initial resolver failure disables silent retry while keeping the explicit Retry action', () => {
+    const play = methodBody('async play(content, streamUrl, playback = {})', '\n    async ');
+    const resolverCatchStart = play.indexOf('} catch (err) {', play.indexOf('resolved = await streamUrlResolver()'));
+    const resolverCatchEnd = play.indexOf('// A cloud resolver can finish after Back/navigation', resolverCatchStart);
+    const resolverCatch = play.slice(resolverCatchStart, resolverCatchEnd);
+    assert.match(resolverCatch, /allowAutomaticRetry:\s*false/,
+        'a rejected initial resolver must not schedule a second hidden session');
+
+    const missingUrlStart = play.indexOf('if (!resolved || !resolved.url)');
+    const missingUrlEnd = play.indexOf('streamUrl = resolved.url', missingUrlStart);
+    assert.match(play.slice(missingUrlStart, missingUrlEnd), /allowAutomaticRetry:\s*false/,
+        'a malformed initial resolution must also remain user-driven after cleanup');
+
+    let retryClick = null;
+    let scheduled = 0;
+    let explicitRetries = 0;
+    const errorEl = {
+        innerHTML: '',
+        classList: { add() {}, remove() {}, contains() { return false; } },
+        setAttribute() {},
+    };
+    const retryButton = {
+        addEventListener(type, listener) {
+            if (type === 'click') retryClick = listener;
+        },
+    };
+    const document = {
+        getElementById(id) {
+            if (id === 'watch-error') return errorEl;
+            if (id === 'watch-error-refresh-btn') return retryButton;
+            return null;
+        },
+        createElement() { return errorEl; },
+        querySelector() { return { appendChild() {} }; },
+    };
+    const context = {
+        window: { NorvaCloud: {} },
+        document,
+        console,
+        setTimeout: () => 0,
+        clearTimeout,
+        Promise,
+    };
+    vm.runInNewContext(source, context, { filename: 'WatchPage.js' });
+    const page = Object.create(context.window.WatchPage.prototype);
+    page.hasCurrentMedia = () => false;
+    page.sanitizePlaybackMessage = (message) => message;
+    page.shouldDeferPlaybackError = () => false;
+    page.clearDeferredPlaybackError = () => {};
+    page.hideLoading = () => {};
+    page.updateTranscodeStatus = () => {};
+    page.getFriendlyPlaybackError = (message) => message;
+    page.isPlaybackSupersededError = () => false;
+    page.isProviderBusyError = () => false;
+    page.isConnectionLimitError = () => false;
+    page.isCloudPlaybackMode = () => false;
+    page.schedulePlaybackErrorRefresh = () => { scheduled += 1; return true; };
+    page.escapeHtml = (value) => String(value);
+    page.clearPlaybackErrorRefreshTimer = () => {};
+    page.retryPlaybackInPlace = () => { explicitRetries += 1; };
+
+    page.showPlaybackError('resolver failed', {
+        immediate: true,
+        allowAutomaticRetry: false,
+    });
+
+    assert.strictEqual(scheduled, 0, 'no timer-driven retry may be armed');
+    assert.strictEqual(typeof retryClick, 'function', 'the visible Retry button must stay wired');
+    retryClick();
+    assert.strictEqual(explicitRetries, 1, 'only the explicit click starts a new attempt');
+});
+
 test('stale-session cleanup keeps the JWT playback API when a user token is present', async () => {
     const calls = [];
     const cloud = {
