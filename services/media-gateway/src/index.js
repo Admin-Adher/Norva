@@ -9,6 +9,7 @@ const express = require('express');
 const { request: undiciRequest } = require('undici');
 const { parseWhisperLid, runWhisperDetectOnly } = require('./whisper-lid');
 const {
+    buildStrictLidExtractionObservability,
     buildStrictLidUnverifiedObservability,
     cleanupStrictLidFiles,
     evaluateStrictTranscriptEvidence,
@@ -1180,6 +1181,25 @@ const STRICT_LID_DRAIN_RESPONSE_RESERVE_MS = Math.min(
     30_000,
     Math.max(10_000, PROVIDER_SLOT_RELEASE_DELAY_MS + 5_000),
 );
+// The broker's provider-range deadline has two independent phases. Headers or a continuously
+// flowing body must not consume the "open" timer forever: the first byte has its own deadline,
+// then every non-empty chunk rearms a shorter inactivity deadline. The outer 35 s ffmpeg timer
+// and the 155 s aggregate extraction budget remain the authoritative total-work bounds.
+const STRICT_LID_BROKER_FIRST_BYTE_TIMEOUT_MS = clampInt(
+    process.env.STRICT_LID_BROKER_FIRST_BYTE_TIMEOUT_MS,
+    30_000,
+    5_000,
+    30_000,
+);
+const STRICT_LID_BROKER_IDLE_TIMEOUT_MS = clampInt(
+    process.env.STRICT_LID_BROKER_IDLE_TIMEOUT_MS,
+    15_000,
+    5_000,
+    30_000,
+);
+// libav must never abandon the private loopback before either the broker deadline or the outer
+// extraction deadline. This is microseconds (`-rw_timeout`) and intentionally exceeds 35 s.
+const STRICT_LID_FFMPEG_RW_TIMEOUT_US = 40_000_000;
 // The finite-MKV input pump needs the exact terminal byte so every provider
 // request is bounded (`bytes=N-M`). A one-byte request supplies that size when
 // the exact codec profile did not already preserve ffprobe format.size.
@@ -1216,7 +1236,7 @@ const EXACT_MATROSKA_H264_MAX_HEIGHT = 1080;
 const EXACT_MATROSKA_H264_MAX_PIXELS = EXACT_MATROSKA_H264_MAX_WIDTH * EXACT_MATROSKA_H264_MAX_HEIGHT;
 const MULTI_AUDIO_HLS_PROTOCOL = 1;
 const MAX_MULTI_AUDIO_RENDITIONS = 8;
-const GATEWAY_VERSION = 99;
+const GATEWAY_VERSION = 100;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -1385,6 +1405,10 @@ app.get('/health', (req, res) => {
         strictLidExtractionTimeoutProtocol: 1,
         strictLidBatchFailureProtocol: 1,
         strictLidTimelineSamplingProtocol: 1,
+        strictLidRangeTimeoutProtocol: 2,
+        strictLidRangeFirstByteTimeoutMs: STRICT_LID_BROKER_FIRST_BYTE_TIMEOUT_MS,
+        strictLidRangeIdleTimeoutMs: STRICT_LID_BROKER_IDLE_TIMEOUT_MS,
+        strictLidFfmpegRwTimeoutUs: STRICT_LID_FFMPEG_RW_TIMEOUT_US,
         strictLidSampleDurationCapSeconds: STRICT_LID_SAMPLE_DURATION_CAP_SECONDS,
         strictLidWhisperReserveMs: STRICT_LID_WHISPER_RESERVE_MS,
         strictLidExtractionStartupMarginMs: STRICT_LID_EXTRACTION_STARTUP_MARGIN_MS,
@@ -2728,16 +2752,22 @@ function strictLidLooksTextual(buffer) {
     return controls <= 2;
 }
 
-async function strictLidResponseHasBusyPrefix(response, signal = null) {
+async function strictLidResponseHasBusyPrefix(response, signal = null, onProgress = null) {
     if (!response?.body || typeof response.body.getReader !== 'function') return false;
     const reader = response.body.getReader();
     const chunks = [];
     let total = 0;
+    const aborted = (fallback = null) => (
+        signal?.reason instanceof Error
+            ? signal.reason
+            : (fallback instanceof Error ? fallback : new Error('strict LID provider read stopped'))
+    );
     try {
         while (total < 4096) {
-            if (signal?.aborted) return false;
+            if (signal?.aborted) throw aborted();
             const { value, done } = await reader.read();
             if (value?.length) {
+                onProgress?.();
                 const part = Buffer.from(value).subarray(0, 4096 - total);
                 chunks.push(part);
                 total += part.length;
@@ -2750,7 +2780,8 @@ async function strictLidResponseHasBusyPrefix(response, signal = null) {
             if (done) break;
         }
         return false;
-    } catch (_) {
+    } catch (error) {
+        if (signal?.aborted) throw aborted(error);
         return false;
     } finally {
         try { await reader.cancel(); } catch (_) {}
@@ -2826,13 +2857,53 @@ function waitForStrictLidDrain(res, signal) {
     });
 }
 
+function createStrictLidRangeDeadline({
+    controller,
+    firstByteTimeoutMs,
+    idleTimeoutMs,
+    setTimer = setTimeout,
+    clearTimer = clearTimeout,
+}) {
+    let timer = null;
+    let closed = false;
+    let timedOut = false;
+    let timeoutKind = null;
+    const clear = () => {
+        if (timer !== null) clearTimer(timer);
+        timer = null;
+    };
+    const expire = (kind) => {
+        if (closed || timedOut) return;
+        timedOut = true;
+        timeoutKind = kind;
+        clear();
+        try { controller.abort(new Error(`strict LID provider ${kind} timeout`)); } catch (_) {}
+    };
+    const arm = (kind, timeoutMs) => {
+        if (closed || timedOut) return;
+        clear();
+        timer = setTimer(() => expire(kind), Math.max(1, Number(timeoutMs) || 1));
+        timer?.unref?.();
+    };
+    arm('first-byte', firstByteTimeoutMs);
+    return {
+        progress() { arm('idle', idleTimeoutMs); },
+        close() {
+            if (closed) return;
+            closed = true;
+            clear();
+        },
+        get timedOut() { return timedOut; },
+        get timeoutKind() { return timeoutKind; },
+    };
+}
+
 async function closeStrictLidBrokerAttempt(context, attempt, reason = 'completed') {
     if (!attempt) return;
     if (!attempt.closePromise) {
         attempt.closePromise = (async () => {
             attempt.stopReason = reason;
-            if (attempt.timer) clearTimeout(attempt.timer);
-            attempt.timer = null;
+            attempt.deadline?.close?.();
             attempt.signalParent?.removeEventListener?.('abort', attempt.onParentAbort);
             try { attempt.controller.abort(new Error(reason)); } catch (_) {}
             if (attempt.reader) {
@@ -2874,9 +2945,8 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
         localResponse: res,
         signalParent: context.controller.signal,
         onParentAbort: null,
-        timer: null,
+        deadline: null,
         fetchStarted: false,
-        timedOut: false,
         localClosed: false,
         closePromise: null,
         stopReason: null,
@@ -2894,11 +2964,13 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
     };
     res.once('close', onLocalClose);
     context.activeAttempt = attempt;
-    attempt.timer = setTimeout(() => {
-        attempt.timedOut = true;
-        try { controller.abort(new Error('strict LID provider timeout')); } catch (_) {}
-    }, context.openTimeoutMs);
-    attempt.timer.unref?.();
+    attempt.deadline = createStrictLidRangeDeadline({
+        controller,
+        firstByteTimeoutMs: context.firstByteTimeoutMs,
+        idleTimeoutMs: context.idleTimeoutMs,
+        setTimer: context.setTimer,
+        clearTimer: context.clearTimer,
+    });
 
     try {
         const headers = {
@@ -2934,13 +3006,20 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
             ));
         }
         if (upstreamStatus === 200) {
-            const busy = await strictLidResponseHasBusyPrefix(attempt.response, controller.signal);
+            const busy = await strictLidResponseHasBusyPrefix(
+                attempt.response,
+                controller.signal,
+                () => attempt.deadline.progress(),
+            );
             if (busy) {
                 throw markStrictLidTerminal(context, strictLidBrokerError(
                     'PROVIDER_BUSY',
                     'This TV service is already being used on another device.',
                     { status: 458, upstreamStatus },
                 ));
+            }
+            if (controller.signal.aborted) {
+                throw controller.signal.reason || new Error('strict LID provider read stopped');
             }
             throw markStrictLidTerminal(context, strictLidBrokerError(
                 'RANGE_UNSUPPORTED',
@@ -3011,6 +3090,7 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
             if (done) break;
             const chunk = Buffer.from(value || []);
             if (!chunk.length) continue;
+            attempt.deadline.progress();
             if (forwarded + chunk.length > exactRange.length) {
                 throw markStrictLidTerminal(context, strictLidBrokerError(
                     'RANGE_LENGTH_MISMATCH',
@@ -3044,10 +3124,17 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                     { status: 502, upstreamStatus: 407 },
                 ));
             }
-            if (!publicError && attempt.timedOut) {
+            if (!publicError && attempt.deadline?.timeoutKind === 'first-byte') {
                 publicError = markStrictLidTerminal(context, strictLidBrokerError(
-                    'PROVIDER_RESPONSE_TIMEOUT',
-                    'Provider did not answer the language-validation byte range in time.',
+                    'PROVIDER_FIRST_BYTE_TIMEOUT',
+                    'Provider did not start the language-validation byte range in time.',
+                    { status: 504 },
+                ));
+            }
+            if (!publicError && attempt.deadline?.timeoutKind === 'idle') {
+                publicError = markStrictLidTerminal(context, strictLidBrokerError(
+                    'PROVIDER_IDLE_TIMEOUT',
+                    'Provider stopped the language-validation byte range.',
                     { status: 504 },
                 ));
             }
@@ -3127,9 +3214,18 @@ async function createStrictLidBroker(options = {}) {
         releaseDelayMs: Number.isFinite(Number(options.releaseDelayMs))
             ? Math.max(0, Number(options.releaseDelayMs))
             : PROVIDER_SLOT_RELEASE_DELAY_MS,
-        openTimeoutMs: Number.isFinite(Number(options.openTimeoutMs))
-            ? Math.max(100, Number(options.openTimeoutMs))
-            : 30_000,
+        // `openTimeoutMs` remains a test/backward-compatibility alias for callers that predate
+        // protocol 2. Production uses the explicit first-byte and inactivity deadlines.
+        firstByteTimeoutMs: Number.isFinite(Number(options.firstByteTimeoutMs))
+            ? Math.max(100, Number(options.firstByteTimeoutMs))
+            : (Number.isFinite(Number(options.openTimeoutMs))
+                ? Math.max(100, Number(options.openTimeoutMs))
+                : STRICT_LID_BROKER_FIRST_BYTE_TIMEOUT_MS),
+        idleTimeoutMs: Number.isFinite(Number(options.idleTimeoutMs))
+            ? Math.max(100, Number(options.idleTimeoutMs))
+            : STRICT_LID_BROKER_IDLE_TIMEOUT_MS,
+        setTimer: typeof options.setTimer === 'function' ? options.setTimer : setTimeout,
+        clearTimer: typeof options.clearTimer === 'function' ? options.clearTimer : clearTimeout,
         controller,
         activeAttempt: null,
         queue: Promise.resolve(),
@@ -3422,13 +3518,24 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
             backgroundKey: proxyKeyFromUrl(claims.url),
             preemptibleBackground: true,
         };
-        for (const off of offsets) {
+        const logStrictExtractionWindow = (input) => {
+            if (!strict) return;
+            console.info(JSON.stringify(buildStrictLidExtractionObservability(input)));
+        };
+        for (const [offsetIndex, off] of offsets.entries()) {
             let wavPath = null;
             try {
                 const extractionBudget = strict
                     ? strictLidExtractionBudget(dur, strictWorkDeadlineAt)
                     : null;
                 if (strict && extractionBudget.timeoutMs <= 0) {
+                    logStrictExtractionWindow({
+                        windowOrdinal: offsetIndex + 1,
+                        elapsedMs: 0,
+                        timeoutMs: 0,
+                        providerFetches: 0,
+                        outcome: 'budget-exhausted',
+                    });
                     strictExtractionTimedOut = true;
                     lastExtractErr = 'Strict audio extraction budget exhausted';
                     break;
@@ -3440,6 +3547,8 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
                 // at tick entry only, and a viewer can start mid-sweep.
                 if (accountSlotBusyLocally(claims.url, claims.uid ? sha256Hex(claims.uid) : '')) { lastExtractErr = 'account provider slot busy (viewer playback)'; break; }
                 const extractionUrl = strictBroker ? strictBroker.inputUrl : claims.url;
+                const extractionStartedAt = strict ? Date.now() : 0;
+                const providerFetchesBefore = strict ? Number(strictBroker?.providerFetches || 0) : 0;
                 const ex = await withAccountJobLock(lockKey, () =>
                     extractAudioWav(
                         extractionUrl,
@@ -3457,6 +3566,27 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
                             providerSourceUrl: claims.url,
                         } : null,
                     ));
+                if (strict) {
+                    logStrictExtractionWindow({
+                        windowOrdinal: offsetIndex + 1,
+                        elapsedMs: Math.max(0, Date.now() - extractionStartedAt),
+                        timeoutMs: extractionBudget.timeoutMs,
+                        providerFetches: Math.max(
+                            0,
+                            Number(strictBroker?.providerFetches || 0) - providerFetchesBefore,
+                        ),
+                        outcome: ex.ok === true
+                            ? 'succeeded'
+                            : (ex.timedOut === true || [
+                                'PROVIDER_FIRST_BYTE_TIMEOUT',
+                                'PROVIDER_IDLE_TIMEOUT',
+                            ].includes(strictBroker?.terminalError?.code)
+                                ? 'timed-out'
+                                : (ex.preempted === true
+                                    ? 'preempted'
+                                    : (ex.aborted === true ? 'aborted' : 'failed'))),
+                    });
+                }
                 if (!ex.ok) {
                     lastExtractErr = strictBroker ? 'Strict audio extraction failed' : ex.error;
                     if (ex.preempted) inferencePreempted = true;
@@ -4799,7 +4929,7 @@ function extractAudioWav(
                 '-reconnect', '1', '-reconnect_streamed', '1',
                 '-reconnect_delay_max', '5',
             ] : []),
-            '-rw_timeout', '15000000',
+            '-rw_timeout', strictLoopback ? String(STRICT_LID_FFMPEG_RW_TIMEOUT_US) : '15000000',
             '-headers', strictLoopback
                 ? 'Accept: */*\r\nConnection: close\r\n'
                 : 'Accept: */*\r\nConnection: keep-alive\r\n',
