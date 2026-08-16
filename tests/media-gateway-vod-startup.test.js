@@ -163,7 +163,7 @@ test('Gateway readiness requires ten seconds and three finalized HLS segments', 
 
 test('Gateway readiness materializes every segment in the ten-second buffer', async () => {
     const source = readGateway();
-    const start = source.indexOf('function inspectHlsStartupPlaylist(');
+    const start = source.indexOf('function parseHlsAttributeList(');
     const end = source.indexOf('\nasync function stopSession(', start);
     assert.ok(start >= 0 && end > start);
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'norva-hls-ready-'));
@@ -184,6 +184,8 @@ test('Gateway readiness materializes every segment in the ten-second buffer', as
                 { name: 'AbortError', code: 'VOD_INPUT_ABORTED' },
             ),
             isWithin,
+            multiAudioHlsEnabled: () => false,
+            mappedAudioStreamIndexForSession: () => null,
             MIN_HLS_STARTUP_BUFFER_SECONDS: 10,
             MIN_HLS_STARTUP_SEGMENTS: 3,
         },
@@ -266,6 +268,7 @@ test('Gateway MPEG-TS HLS copies only AAC-LC stereo and transcodes MP3-family au
             selectedAudioTrackForSession: gatewayGlobals.selectedAudioTrackForSession,
             isKnownUnsafeAudio: () => false,
             isKnownBrowserSafeAudio,
+            multiAudioHlsEnabled: () => false,
         },
     );
     assert.strictEqual(shouldCopyAudio({
@@ -316,7 +319,7 @@ test('an unknown finite MKV video fails safe to encoding while live remains copy
 test('an exact finite Matroska H264 profile selects the 2s keyframe encode plan before provider I/O', () => {
     const shouldReencodeExactMatroskaH264 = loadGatewayFunction(
         'shouldReencodeExactMatroskaH264',
-        'audioArgsForSession',
+        'multiAudioProfileAssessment',
         {
             asRecord: gatewayGlobals.asRecord,
             normalizeCodecToken: gatewayGlobals.normalizeCodecToken,
@@ -397,7 +400,7 @@ test('an exact finite Matroska H264 profile selects the 2s keyframe encode plan 
 test('exact Matroska H264 uses independent 2s HLS segments with forced keyframes and no split-by-time', () => {
     const source = readGateway();
 
-    assert.match(source, /const GATEWAY_VERSION = 90;/);
+    assert.match(source, /const GATEWAY_VERSION = 91;/);
     assert.match(source, /exactMatroskaH264ReencodeProtocol:\s*1/);
     assert.match(source, /exactMatroskaH264HlsTargetSeconds:\s*EXACT_MATROSKA_H264_HLS_TARGET_SECONDS/);
     assert.match(source, /exactMatroskaH264MaxPixels:\s*EXACT_MATROSKA_H264_MAX_PIXELS/);

@@ -359,10 +359,11 @@ test('browser-visible raw tokens cannot be replayed into heavy worker queues', (
 });
 
 test('language detection requires a signed LID scope and viewer subtitle work is bounded and fair', async () => {
-  const detectRoute = section("app.get('/detect-language/:token'", "app.post('/extract-language-wav'");
-  assert.match(detectRoute, /LID_ROUTE_SCOPES\.has\(String\(claims\.scope \|\| ''\)\)/);
+  const detectRoute = section('function validateDetectLanguageCapability(', "app.post('/extract-language-wav'");
+  assert.match(detectRoute, /LID_ROUTE_SCOPES\.has\(scope\)/);
+  assert.match(detectRoute, /requiredScope\s*&&\s*scope\s*!==\s*requiredScope/);
   assert.ok(
-    detectRoute.indexOf('LID_ROUTE_SCOPES.has') < detectRoute.indexOf('extractAudioWav'),
+    detectRoute.indexOf('validateDetectLanguageCapability(capabilityToken, policy.requiredScope)') < detectRoute.indexOf('extractAudioWav'),
     'scope is checked before any provider or Whisper work',
   );
   assert.match(source, /const LID_LEGACY_FULL_SCOPE = 'lid-legacy-full'/);

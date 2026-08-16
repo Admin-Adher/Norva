@@ -54,7 +54,7 @@ const chunkedSource = sourceBetween(
   '// Phase 3b translation queue',
 );
 const lidRouteSource = sourceBetween(
-  "app.get('/detect-language/:token'",
+  'async function handleDetectLanguageRequest(',
   '// Service-only production handoff',
 );
 const playbackEdge = fs.readFileSync(

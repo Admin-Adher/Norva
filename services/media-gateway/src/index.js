@@ -3,8 +3,10 @@ const fs = require('fs');
 const fsp = require('fs/promises');
 const os = require('os');
 const path = require('path');
+const http = require('http');
 const { spawn, spawnSync } = require('child_process');
 const express = require('express');
+const { request: undiciRequest } = require('undici');
 const { parseWhisperLid, runWhisperDetectOnly } = require('./whisper-lid');
 const {
     classifyProviderFetchFailure,
@@ -634,6 +636,25 @@ function proxyEnvFor(key) {
     const url = providerProxyUrls[poolIndexForKey(key)];
     return { ...process.env, http_proxy: url, https_proxy: url, HTTP_PROXY: url, HTTPS_PROXY: url };
 }
+// A strict LID ffmpeg reads only the private 127.0.0.1 broker. Explicitly remove every
+// inherited proxy variable so libav cannot send that loopback capability through a
+// residential proxy. The broker itself owns the provider's sticky dispatcher.
+function loopbackOnlyEnv() {
+    const env = { ...process.env };
+    for (const key of [
+        'http_proxy', 'https_proxy', 'HTTP_PROXY', 'HTTPS_PROXY',
+        'all_proxy', 'ALL_PROXY',
+    ]) delete env[key];
+    env.NO_PROXY = '127.0.0.1,localhost,::1';
+    env.no_proxy = env.NO_PROXY;
+    return env;
+}
+function redactStrictLidLoopback(value) {
+    return String(value || '').replace(
+        /https?:\/\/(?:127\.0\.0\.1|localhost|\[::1\]):\d+\/strict-lid\/[A-Za-z0-9_-]+/gi,
+        '[strict-lid-loopback]',
+    );
+}
 // Xtream URLs embed credentials in the path (/movie/USER/PASS/id.ext) and in query params
 // (username=…&password=…). Any error string that may quote a provider URL (ffmpeg stderr)
 // MUST pass through here before leaving the process — job-callback errors land verbatim in
@@ -749,6 +770,7 @@ const WHISPER_DETECT_ONLY_MIN_PROBABILITY = Math.min(
 const LID_DETECT_ONLY_SCOPE = 'lid-production-detect-only';
 const LID_SHADOW_SCOPE = 'lid-shadow';
 const LID_LEGACY_FULL_SCOPE = 'lid-legacy-full';
+const LID_CAPABILITY_HEADER = 'x-norva-byte-pipe-token';
 const LID_ROUTE_SCOPES = new Set([
     LID_DETECT_ONLY_SCOPE,
     LID_SHADOW_SCOPE,
@@ -981,7 +1003,9 @@ const EXACT_MATROSKA_H264_HLS_TARGET_SECONDS = 2;
 const EXACT_MATROSKA_H264_MAX_WIDTH = 1920;
 const EXACT_MATROSKA_H264_MAX_HEIGHT = 1080;
 const EXACT_MATROSKA_H264_MAX_PIXELS = EXACT_MATROSKA_H264_MAX_WIDTH * EXACT_MATROSKA_H264_MAX_HEIGHT;
-const GATEWAY_VERSION = 90;
+const MULTI_AUDIO_HLS_PROTOCOL = 1;
+const MAX_MULTI_AUDIO_RENDITIONS = 8;
+const GATEWAY_VERSION = 91;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -1094,6 +1118,13 @@ app.get('/health', (req, res) => {
         exactMatroskaH264MaxWidth: EXACT_MATROSKA_H264_MAX_WIDTH,
         exactMatroskaH264MaxHeight: EXACT_MATROSKA_H264_MAX_HEIGHT,
         exactMatroskaH264MaxPixels: EXACT_MATROSKA_H264_MAX_PIXELS,
+        multiAudioHls: {
+            protocol: MULTI_AUDIO_HLS_PROTOCOL,
+            maxAudioRenditions: MAX_MULTI_AUDIO_RENDITIONS,
+            active: Array.from(sessions.values()).filter((session) => (
+                session?.multiAudioHls?.enabled === true
+            )).length,
+        },
         boundedMkvInputPumpProtocol: 1,
         vodFileSizeProbeTimeoutMs: VOD_FILE_SIZE_PROBE_TIMEOUT_MS,
         vodInputPump: {
@@ -1131,6 +1162,14 @@ app.get('/health', (req, res) => {
         },
         codecProfileCacheSize: codecProfileCache.size,
         languageDetect: Boolean(WHISPER_BIN && WHISPER_MODEL),
+        strictLidLoopbackBrokerProtocol: 1,
+        strictLidFileSizeClaim: 'fileSizeBytes',
+        strictLidHeaderCapabilityProtocol: 2,
+        strictLidCapabilityHeader: 'X-Norva-Byte-Pipe-Token',
+        strictLidCapabilityMethod: 'POST',
+        strictLidServiceAuthRequired: true,
+        strictLidRequiredScope: LID_LEGACY_FULL_SCOPE,
+        strictLidProviderSlotReleaseDelayMs: PROVIDER_SLOT_RELEASE_DELAY_MS,
         languageDetectEngine: WHISPER_BIN && WHISPER_MODEL ? {
             family: 'whisper.cpp',
             model: WHISPER_MODEL_NAME,
@@ -2290,17 +2329,699 @@ app.post('/probe-audio', requireGatewayAuth, async (req, res) => {
     }
 });
 
+// ── Strict LID loopback broker (mono-account provider barrier) ───────────────
+// Strict multi-window language validation must seek through one finite file several times.
+// Letting ffmpeg open the signed provider URL directly makes libav issue its own HEAD/range
+// reconnects, which can overlap on a provider account that permits exactly one socket. This
+// private loopback broker is the only provider-facing reader for the strict lane:
+//
+//   ffmpeg -> random http://127.0.0.1 handle -> one exact provider byte range
+//
+// HEAD is answered entirely locally. GETs are serialized, the prior body is synchronously
+// aborted/cancelled, and the provider-slot release delay elapses before a successor opens.
+// The random handle never leaves this process (not in the route response or logs).
+function normalizeStrictLidFileSize(value) {
+    if (value === null || value === undefined || value === '') return null;
+    const parsed = Number(value);
+    return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+function parseStrictLidRange(value, fileSizeBytes) {
+    const size = normalizeStrictLidFileSize(fileSizeBytes);
+    const text = String(value || '').trim();
+    if (!size || !text || text.includes(',')) return null;
+    const match = /^bytes=(\d*)-(\d*)$/i.exec(text);
+    if (!match || (!match[1] && !match[2])) return null;
+    const parseOffset = (raw) => {
+        if (!/^\d+$/.test(String(raw || ''))) return null;
+        const parsed = Number(raw);
+        return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;
+    };
+    if (!match[1]) {
+        const suffixLength = parseOffset(match[2]);
+        if (!suffixLength) return null;
+        return {
+            start: Math.max(0, size - suffixLength),
+            end: size - 1,
+            total: size,
+        };
+    }
+    const start = parseOffset(match[1]);
+    if (start === null || start >= size) return null;
+    const requestedEnd = match[2] ? parseOffset(match[2]) : size - 1;
+    if (requestedEnd === null || requestedEnd < start) return null;
+    return { start, end: Math.min(requestedEnd, size - 1), total: size };
+}
+
+function strictLidContentRange(response, expectedRange) {
+    if (Number(response?.status) !== 206 || !expectedRange) return null;
+    const raw = String(response?.headers?.get?.('content-range') || '').trim();
+    const match = /^bytes\s+(\d+)-(\d+)\/(\d+)$/i.exec(raw);
+    if (!match) return null;
+    const [start, end, total] = match.slice(1).map((part) => Number(part));
+    if (
+        ![start, end, total].every(Number.isSafeInteger)
+        || start !== expectedRange.start
+        || end !== expectedRange.end
+        || total !== expectedRange.total
+    ) return null;
+    const expectedLength = end - start + 1;
+    const declaredLength = String(response?.headers?.get?.('content-length') || '').trim();
+    if (!/^\d+$/.test(declaredLength) || Number(declaredLength) !== expectedLength) return null;
+    return { start, end, total, length: expectedLength };
+}
+
+function strictLidResponseValidator(response) {
+    const etag = String(response?.headers?.get?.('etag') || '').trim();
+    if (etag && !/^W\//i.test(etag)) return { header: 'If-Range', value: etag, kind: 'etag' };
+    const lastModified = String(response?.headers?.get?.('last-modified') || '').trim();
+    if (lastModified && Number.isFinite(Date.parse(lastModified))) {
+        return { header: 'If-Range', value: lastModified, kind: 'last-modified' };
+    }
+    return null;
+}
+
+function strictLidBrokerError(code, message, options = {}) {
+    const error = new Error(message);
+    error.code = code;
+    error.status = Number.isInteger(options.status) ? options.status : 502;
+    error.upstreamStatus = Number.isInteger(options.upstreamStatus) ? options.upstreamStatus : null;
+    return error;
+}
+
+// WHATWG fetch intentionally rejects a 407 before exposing its status. The lower-level
+// undici request API preserves that status, which is required to distinguish residential
+// proxy authentication failure from a provider's mono-account 458 response.
+function strictLidNodeBodyAdapter(nodeBody) {
+    let locked = false;
+    const awaitDestroyed = () => {
+        if (!nodeBody || nodeBody.destroyed || nodeBody.readableEnded) return Promise.resolve();
+        return new Promise((resolve) => {
+            let settled = false;
+            const finish = () => {
+                if (settled) return;
+                settled = true;
+                nodeBody.off('close', finish);
+                nodeBody.off('end', finish);
+                nodeBody.off('error', finish);
+                resolve();
+            };
+            nodeBody.once('close', finish);
+            nodeBody.once('end', finish);
+            nodeBody.once('error', finish);
+            try { nodeBody.destroy(); } catch (_) { finish(); }
+            if (nodeBody.destroyed || nodeBody.readableEnded) finish();
+        });
+    };
+    return {
+        get locked() { return locked; },
+        getReader() {
+            if (locked) throw new Error('Strict LID provider body is already locked');
+            locked = true;
+            const iterator = nodeBody[Symbol.asyncIterator]();
+            let cancelled = false;
+            return {
+                async read() {
+                    if (cancelled) return { value: undefined, done: true };
+                    const next = await iterator.next();
+                    return {
+                        value: next.value === undefined ? undefined : Buffer.from(next.value),
+                        done: next.done === true,
+                    };
+                },
+                async cancel() {
+                    if (cancelled) return;
+                    cancelled = true;
+                    try { await iterator.return?.(); } catch (_) {}
+                    await awaitDestroyed();
+                },
+                releaseLock() { locked = false; },
+            };
+        },
+        async cancel() {
+            if (locked) return;
+            await awaitDestroyed();
+        },
+    };
+}
+
+async function strictLidProviderRequest(sourceUrl, options = {}) {
+    const response = await undiciRequest(sourceUrl, {
+        method: options.method || 'GET',
+        headers: options.headers || {},
+        maxRedirections: 5,
+        signal: options.signal,
+        dispatcher: options.dispatcher || undefined,
+        throwOnError: false,
+    });
+    const rawHeaders = response.headers || {};
+    const headers = {
+        get(name) {
+            const value = rawHeaders[String(name || '').toLowerCase()];
+            if (Array.isArray(value)) return value.join(', ');
+            return value === undefined || value === null ? null : String(value);
+        },
+    };
+    return {
+        status: Number(response.statusCode),
+        headers,
+        body: response.body ? strictLidNodeBodyAdapter(response.body) : null,
+    };
+}
+
+function markStrictLidTerminal(context, error) {
+    if (!context.terminalError && error) context.terminalError = error;
+    return context.terminalError;
+}
+
+function strictLidLooksTextual(buffer) {
+    if (!buffer?.length) return false;
+    let controls = 0;
+    for (const byte of buffer.subarray(0, 512)) {
+        if (byte === 0) return false;
+        if (byte < 0x09 || (byte > 0x0d && byte < 0x20) || byte === 0x7f) controls++;
+    }
+    return controls <= 2;
+}
+
+async function strictLidResponseHasBusyPrefix(response, signal = null) {
+    if (!response?.body || typeof response.body.getReader !== 'function') return false;
+    const reader = response.body.getReader();
+    const chunks = [];
+    let total = 0;
+    try {
+        while (total < 4096) {
+            if (signal?.aborted) return false;
+            const { value, done } = await reader.read();
+            if (value?.length) {
+                const part = Buffer.from(value).subarray(0, 4096 - total);
+                chunks.push(part);
+                total += part.length;
+                const prefix = Buffer.concat(chunks, total);
+                if (!strictLidLooksTextual(prefix)) return false;
+                if (/\b(?:user_multi_ip|maximum?\s+connections?|max[_ -]?connections?|too\s+many\s+connections?|provider[_ -]+busy)\b/i.test(prefix.toString('utf8'))) {
+                    return true;
+                }
+            }
+            if (done) break;
+        }
+        return false;
+    } catch (_) {
+        return false;
+    } finally {
+        try { await reader.cancel(); } catch (_) {}
+        try { reader.releaseLock(); } catch (_) {}
+    }
+}
+
+function sendStrictLidBrokerError(res, error) {
+    if (!res || res.destroyed || res.writableEnded) return;
+    if (res.headersSent) {
+        try { res.destroy(); } catch (_) {}
+        return;
+    }
+    const status = Number.isInteger(error?.status) ? error.status : 502;
+    const body = Buffer.from(JSON.stringify({
+        error: String(error?.message || 'Strict language media broker failed'),
+        code: String(error?.code || 'STRICT_LID_BROKER_FAILED'),
+        ...(Number.isInteger(error?.upstreamStatus) ? { upstreamStatus: error.upstreamStatus } : {}),
+    }));
+    res.statusCode = status;
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.setHeader('Content-Length', String(body.length));
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.end(body);
+}
+
+function waitForStrictLidBrokerSlot(context) {
+    const remaining = Math.max(0, Number(context.nextOpenAt || 0) - Date.now());
+    if (!remaining) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+        let timer = null;
+        const finish = (error) => {
+            if (timer) clearTimeout(timer);
+            context.controller.signal.removeEventListener('abort', onAbort);
+            if (error) reject(error);
+            else resolve();
+        };
+        const onAbort = () => finish(strictLidBrokerError('STRICT_LID_ABORTED', 'Strict language media broker stopped', { status: 499 }));
+        context.controller.signal.addEventListener('abort', onAbort, { once: true });
+        if (context.controller.signal.aborted) return onAbort();
+        timer = setTimeout(() => finish(), remaining);
+        timer.unref?.();
+    });
+}
+
+function waitForStrictLidDrain(res, signal) {
+    if (signal?.aborted || res.destroyed) return Promise.reject(new Error('local reader closed'));
+    return new Promise((resolve, reject) => {
+        let settled = false;
+        const cleanup = () => {
+            res.off('drain', onDrain);
+            res.off('close', onClose);
+            res.off('error', onError);
+            signal?.removeEventListener('abort', onAbort);
+        };
+        const finish = (error) => {
+            if (settled) return;
+            settled = true;
+            cleanup();
+            if (error) reject(error);
+            else resolve();
+        };
+        const onDrain = () => finish();
+        const onClose = () => finish(new Error('local reader closed'));
+        const onError = (error) => finish(error || new Error('local reader failed'));
+        const onAbort = () => finish(new Error('provider read stopped'));
+        res.once('drain', onDrain);
+        res.once('close', onClose);
+        res.once('error', onError);
+        signal?.addEventListener('abort', onAbort, { once: true });
+        if (signal?.aborted || res.destroyed) onAbort();
+    });
+}
+
+async function closeStrictLidBrokerAttempt(context, attempt, reason = 'completed') {
+    if (!attempt) return;
+    if (!attempt.closePromise) {
+        attempt.closePromise = (async () => {
+            attempt.stopReason = reason;
+            if (attempt.timer) clearTimeout(attempt.timer);
+            attempt.timer = null;
+            attempt.signalParent?.removeEventListener?.('abort', attempt.onParentAbort);
+            try { attempt.controller.abort(new Error(reason)); } catch (_) {}
+            if (attempt.reader) {
+                try { await attempt.reader.cancel(); } catch (_) {}
+                try { attempt.reader.releaseLock(); } catch (_) {}
+            } else if (attempt.response?.body && !attempt.response.body.locked) {
+                try { await attempt.response.body.cancel(); } catch (_) {}
+            }
+            if (reason !== 'completed' && attempt.localResponse && !attempt.localResponse.writableEnded) {
+                try { attempt.localResponse.destroy(); } catch (_) {}
+            }
+            if (context.activeAttempt === attempt) context.activeAttempt = null;
+            if (attempt.fetchStarted) {
+                context.nextOpenAt = Math.max(
+                    Number(context.nextOpenAt || 0),
+                    Date.now() + context.releaseDelayMs,
+                );
+            }
+        })();
+    }
+    await attempt.closePromise;
+}
+
+async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
+    if (context.closed || requestId !== context.latestRequestId) {
+        return sendStrictLidBrokerError(res, strictLidBrokerError('STRICT_LID_SUPERSEDED', 'Strict language media request was superseded', { status: 409 }));
+    }
+    if (context.terminalError) return sendStrictLidBrokerError(res, context.terminalError);
+    await waitForStrictLidBrokerSlot(context);
+    if (context.closed || requestId !== context.latestRequestId) {
+        return sendStrictLidBrokerError(res, strictLidBrokerError('STRICT_LID_SUPERSEDED', 'Strict language media request was superseded', { status: 409 }));
+    }
+
+    const controller = new AbortController();
+    const attempt = {
+        controller,
+        response: null,
+        reader: null,
+        localResponse: res,
+        signalParent: context.controller.signal,
+        onParentAbort: null,
+        timer: null,
+        fetchStarted: false,
+        timedOut: false,
+        localClosed: false,
+        closePromise: null,
+        stopReason: null,
+    };
+    attempt.onParentAbort = () => {
+        try { controller.abort(context.controller.signal.reason); } catch (_) {}
+    };
+    context.controller.signal.addEventListener('abort', attempt.onParentAbort, { once: true });
+    if (context.controller.signal.aborted) attempt.onParentAbort();
+    const onLocalClose = () => {
+        if (!res.writableEnded) {
+            attempt.localClosed = true;
+            try { controller.abort(new Error('local reader closed')); } catch (_) {}
+        }
+    };
+    res.once('close', onLocalClose);
+    context.activeAttempt = attempt;
+    attempt.timer = setTimeout(() => {
+        attempt.timedOut = true;
+        try { controller.abort(new Error('strict LID provider timeout')); } catch (_) {}
+    }, context.openTimeoutMs);
+    attempt.timer.unref?.();
+
+    try {
+        const headers = {
+            Range: `bytes=${range.start}-${range.end}`,
+            Accept: '*/*',
+            'Accept-Encoding': 'identity',
+            'User-Agent': context.userAgent,
+            Connection: 'close',
+        };
+        if (context.validator) headers[context.validator.header] = context.validator.value;
+        attempt.fetchStarted = true;
+        context.providerFetches++;
+        attempt.response = await context.fetchImpl(context.sourceUrl, {
+            method: 'GET',
+            headers,
+            redirect: 'follow',
+            signal: controller.signal,
+            dispatcher: context.dispatcher || undefined,
+        });
+        const upstreamStatus = Number(attempt.response.status);
+        if (upstreamStatus === 458) {
+            throw markStrictLidTerminal(context, strictLidBrokerError(
+                'PROVIDER_BUSY',
+                'This TV service is already being used on another device.',
+                { status: 458, upstreamStatus },
+            ));
+        }
+        if (upstreamStatus === 407) {
+            throw markStrictLidTerminal(context, strictLidBrokerError(
+                'PROXY_AUTH_FAILED',
+                'The media service is temporarily unavailable.',
+                { status: 502, upstreamStatus },
+            ));
+        }
+        if (upstreamStatus === 200) {
+            const busy = await strictLidResponseHasBusyPrefix(attempt.response, controller.signal);
+            if (busy) {
+                throw markStrictLidTerminal(context, strictLidBrokerError(
+                    'PROVIDER_BUSY',
+                    'This TV service is already being used on another device.',
+                    { status: 458, upstreamStatus },
+                ));
+            }
+            throw markStrictLidTerminal(context, strictLidBrokerError(
+                'RANGE_UNSUPPORTED',
+                'Provider ignored the exact language-validation byte range.',
+                { status: 502, upstreamStatus },
+            ));
+        }
+        if (upstreamStatus !== 206) {
+            throw markStrictLidTerminal(context, strictLidBrokerError(
+                'PROVIDER_REQUEST_FAILED',
+                'Provider rejected the language-validation byte range.',
+                { status: 502, upstreamStatus },
+            ));
+        }
+        const contentEncoding = String(attempt.response.headers?.get?.('content-encoding') || '').trim().toLowerCase();
+        if (contentEncoding && contentEncoding !== 'identity') {
+            throw markStrictLidTerminal(context, strictLidBrokerError(
+                'RANGE_UNSUPPORTED',
+                'Provider encoded the language-validation byte range.',
+                { status: 502, upstreamStatus },
+            ));
+        }
+        const exactRange = strictLidContentRange(attempt.response, range);
+        if (!exactRange) {
+            throw markStrictLidTerminal(context, strictLidBrokerError(
+                'RANGE_UNSUPPORTED',
+                'Provider returned an invalid language-validation byte range.',
+                { status: 502, upstreamStatus },
+            ));
+        }
+        const observedValidator = strictLidResponseValidator(attempt.response);
+        if (
+            context.validator
+            && (
+                !observedValidator
+                || observedValidator.kind !== context.validator.kind
+                || observedValidator.value !== context.validator.value
+            )
+        ) {
+            throw markStrictLidTerminal(context, strictLidBrokerError(
+                'VOD_CHANGED',
+                'The media file changed during language validation.',
+                { status: 502, upstreamStatus },
+            ));
+        }
+        if (!context.validator && observedValidator) context.validator = observedValidator;
+        if (!attempt.response.body || typeof attempt.response.body.getReader !== 'function') {
+            throw markStrictLidTerminal(context, strictLidBrokerError(
+                'PROVIDER_EMPTY_RESPONSE',
+                'Provider returned no language-validation media body.',
+                { status: 502, upstreamStatus },
+            ));
+        }
+        attempt.reader = attempt.response.body.getReader();
+        res.statusCode = 206;
+        res.setHeader('Accept-Ranges', 'bytes');
+        res.setHeader('Content-Type', 'application/octet-stream');
+        res.setHeader('Content-Range', `bytes ${range.start}-${range.end}/${range.total}`);
+        res.setHeader('Content-Length', String(exactRange.length));
+        res.setHeader('Cache-Control', 'no-store');
+        res.setHeader('X-Content-Type-Options', 'nosniff');
+        if (observedValidator?.kind === 'etag') res.setHeader('ETag', observedValidator.value);
+        if (observedValidator?.kind === 'last-modified') res.setHeader('Last-Modified', observedValidator.value);
+
+        let forwarded = 0;
+        while (!controller.signal.aborted) {
+            const { value, done } = await attempt.reader.read();
+            if (done) break;
+            const chunk = Buffer.from(value || []);
+            if (!chunk.length) continue;
+            if (forwarded + chunk.length > exactRange.length) {
+                throw markStrictLidTerminal(context, strictLidBrokerError(
+                    'RANGE_LENGTH_MISMATCH',
+                    'Provider exceeded the exact language-validation byte range.',
+                    { status: 502, upstreamStatus },
+                ));
+            }
+            forwarded += chunk.length;
+            if (!res.write(chunk)) await waitForStrictLidDrain(res, controller.signal);
+        }
+        if (controller.signal.aborted) throw controller.signal.reason || new Error('strict LID provider read stopped');
+        if (forwarded !== exactRange.length) {
+            throw markStrictLidTerminal(context, strictLidBrokerError(
+                'RANGE_LENGTH_MISMATCH',
+                'Provider truncated the exact language-validation byte range.',
+                { status: 502, upstreamStatus },
+            ));
+        }
+        res.end();
+    } catch (error) {
+        const intentionallyStopped = context.closed
+            || attempt.localClosed
+            || attempt.stopReason === 'superseded'
+            || attempt.stopReason === 'broker_closed';
+        if (!intentionallyStopped) {
+            let publicError = context.terminalError;
+            if (!publicError && isProxyAuthenticationFailure(error)) {
+                publicError = markStrictLidTerminal(context, strictLidBrokerError(
+                    'PROXY_AUTH_FAILED',
+                    'The media service is temporarily unavailable.',
+                    { status: 502, upstreamStatus: 407 },
+                ));
+            }
+            if (!publicError && attempt.timedOut) {
+                publicError = markStrictLidTerminal(context, strictLidBrokerError(
+                    'PROVIDER_RESPONSE_TIMEOUT',
+                    'Provider did not answer the language-validation byte range in time.',
+                    { status: 504 },
+                ));
+            }
+            if (!publicError) {
+                publicError = markStrictLidTerminal(context, strictLidBrokerError(
+                    'PROVIDER_FETCH_FAILED',
+                    'Provider media request failed during language validation.',
+                    { status: 502 },
+                ));
+            }
+            sendStrictLidBrokerError(res, publicError);
+        }
+    } finally {
+        res.off('close', onLocalClose);
+        await closeStrictLidBrokerAttempt(context, attempt, 'completed');
+    }
+}
+
+function handleStrictLidBrokerRequest(context, expectedPath, req, res) {
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    let pathname = '';
+    try { pathname = new URL(req.url || '/', 'http://127.0.0.1').pathname; } catch (_) { pathname = ''; }
+    if (pathname !== expectedPath) {
+        res.statusCode = 404;
+        return res.end();
+    }
+    if (context.closed) {
+        return sendStrictLidBrokerError(res, strictLidBrokerError('STRICT_LID_ABORTED', 'Strict language media broker stopped', { status: 503 }));
+    }
+    if (req.method === 'HEAD') {
+        res.statusCode = 200;
+        res.setHeader('Accept-Ranges', 'bytes');
+        res.setHeader('Content-Type', 'application/octet-stream');
+        res.setHeader('Content-Length', String(context.fileSizeBytes));
+        return res.end();
+    }
+    if (req.method !== 'GET') {
+        res.statusCode = 405;
+        res.setHeader('Allow', 'HEAD, GET');
+        return res.end();
+    }
+    const range = parseStrictLidRange(req.headers.range, context.fileSizeBytes);
+    if (!range) {
+        res.statusCode = 416;
+        res.setHeader('Content-Range', `bytes */${context.fileSizeBytes}`);
+        return res.end();
+    }
+
+    const requestId = ++context.latestRequestId;
+    const active = context.activeAttempt;
+    if (active) void closeStrictLidBrokerAttempt(context, active, 'superseded').catch(() => {});
+    const work = context.queue
+        .catch(() => {})
+        .then(() => serveStrictLidBrokerRange(context, req, res, range, requestId));
+    context.queue = work.catch((error) => {
+        if (!context.closed) sendStrictLidBrokerError(res, error);
+    });
+}
+
+async function createStrictLidBroker(options = {}) {
+    const sourceUrl = String(options.sourceUrl || '');
+    const fileSizeBytes = normalizeStrictLidFileSize(options.fileSizeBytes);
+    if (!isHttpUrl(sourceUrl)) throw strictLidBrokerError('INVALID_SOURCE', 'Strict language media source is invalid', { status: 400 });
+    if (!fileSizeBytes) throw strictLidBrokerError('EXACT_FILE_SIZE_REQUIRED', 'Exact media file size is required', { status: 400 });
+    const handle = crypto.randomBytes(32).toString('base64url');
+    const expectedPath = `/strict-lid/${handle}`;
+    const controller = new AbortController();
+    const context = {
+        sourceUrl,
+        fileSizeBytes,
+        userAgent: String(options.userAgent || FFMPEG_USER_AGENT),
+        dispatcher: Object.prototype.hasOwnProperty.call(options, 'dispatcher')
+            ? options.dispatcher
+            : (pickProxyAgent(proxyKeyFromUrl(sourceUrl)) || null),
+        fetchImpl: options.fetchImpl || strictLidProviderRequest,
+        releaseDelayMs: Number.isFinite(Number(options.releaseDelayMs))
+            ? Math.max(0, Number(options.releaseDelayMs))
+            : PROVIDER_SLOT_RELEASE_DELAY_MS,
+        openTimeoutMs: Number.isFinite(Number(options.openTimeoutMs))
+            ? Math.max(100, Number(options.openTimeoutMs))
+            : 30_000,
+        controller,
+        activeAttempt: null,
+        queue: Promise.resolve(),
+        nextOpenAt: 0,
+        latestRequestId: 0,
+        validator: null,
+        terminalError: null,
+        providerFetches: 0,
+        closed: false,
+    };
+    const server = http.createServer((req, res) => {
+        handleStrictLidBrokerRequest(context, expectedPath, req, res);
+    });
+    server.on('clientError', (_error, socket) => {
+        try { socket.destroy(); } catch (_) {}
+    });
+    await new Promise((resolve, reject) => {
+        const onError = (error) => {
+            server.off('listening', onListening);
+            reject(error);
+        };
+        const onListening = () => {
+            server.off('error', onError);
+            resolve();
+        };
+        server.once('error', onError);
+        server.once('listening', onListening);
+        server.listen(0, '127.0.0.1');
+    });
+    server.unref?.();
+    const address = server.address();
+    let closePromise = null;
+    const broker = {
+        inputUrl: `http://127.0.0.1:${address.port}${expectedPath}`,
+        get terminalError() { return context.terminalError; },
+        get providerFetches() { return context.providerFetches; },
+        async close() {
+            if (closePromise) return closePromise;
+            closePromise = (async () => {
+                context.closed = true;
+                context.latestRequestId++;
+                try { controller.abort(new Error('strict LID broker closed')); } catch (_) {}
+                await closeStrictLidBrokerAttempt(context, context.activeAttempt, 'broker_closed');
+                try { await context.queue; } catch (_) {}
+                const closed = new Promise((resolve) => {
+                    try { server.close(() => resolve()); } catch (_) { resolve(); }
+                });
+                try { server.closeAllConnections?.(); } catch (_) {}
+                await closed;
+                options.abortSignal?.removeEventListener?.('abort', onAbort);
+            })();
+            return closePromise;
+        },
+    };
+    const onAbort = () => { void broker.close(); };
+    options.abortSignal?.addEventListener?.('abort', onAbort, { once: true });
+    if (options.abortSignal?.aborted) onAbort();
+    return broker;
+}
+// ── End strict LID loopback broker ───────────────────────────────────────────
+
 // Phase 2: detect the language of ONE audio track, fully self-hosted (no paid API). ffmpeg
 // extracts a short mono/16 kHz WAV of the track, whisper.cpp identifies the spoken language,
 // and a transcript-based detector resolves script-family ambiguities (Persian/Kurdish/Urdu vs
 // Arabic, Ukrainian/Serbian vs Russian). Same byte-pipe token as /raw. Used only for untagged
 // tracks and cached upstream, so this 2nd provider connection runs at most once per file.
-app.get('/detect-language/:token', async (req, res) => {
-    const claims = verifyRawToken(req.params.token, GATEWAY_TOKEN);
-    if (!claims) return res.status(401).json({ error: 'Invalid byte-pipe token' });
-    if (Number(claims.exp) * 1000 < Date.now()) return res.status(401).json({ error: 'Byte-pipe token expired' });
-    if (!LID_ROUTE_SCOPES.has(String(claims.scope || ''))) {
-        return res.status(403).json({ error: 'Byte-pipe token is not authorized for language detection' });
+function validateDetectLanguageCapability(capabilityToken, requiredScope = null) {
+    const claims = verifyRawToken(capabilityToken, GATEWAY_TOKEN);
+    if (!claims) return { claims: null, status: 401, error: 'Invalid byte-pipe token' };
+    if (Number(claims.exp) * 1000 < Date.now()) {
+        return { claims: null, status: 401, error: 'Byte-pipe token expired' };
+    }
+    const scope = String(claims.scope || '');
+    if (requiredScope && scope !== requiredScope) {
+        return {
+            claims: null,
+            status: 403,
+            error: 'Byte-pipe token is not authorized for this language route',
+        };
+    }
+    if (!LID_ROUTE_SCOPES.has(scope)) {
+        return {
+            claims: null,
+            status: 403,
+            error: 'Byte-pipe token is not authorized for language detection',
+        };
+    }
+    return { claims, status: 200, error: null };
+}
+
+function detectLanguageRequestPolicy(req, options = {}) {
+    const strict = ['1', 'true', 'yes'].includes(String(req?.query?.strict || '').toLowerCase());
+    return {
+        strict,
+        // The service-only header route always supplies the exact required
+        // scope. The legacy path independently receives the same requirement
+        // for every strict request, closing any raw-token scope downgrade.
+        requiredScope: options.requiredScope || (strict ? LID_LEGACY_FULL_SCOPE : null),
+    };
+}
+
+async function handleDetectLanguageRequest(req, res, capabilityToken, options = {}) {
+    const policy = detectLanguageRequestPolicy(req, options);
+    const validation = validateDetectLanguageCapability(capabilityToken, policy.requiredScope);
+    if (!validation.claims) {
+        return res.status(validation.status).json({ error: validation.error });
+    }
+    const claims = validation.claims;
+    const strict = policy.strict;
+    const strictFileSizeBytes = strict ? normalizeStrictLidFileSize(claims.fileSizeBytes) : null;
+    if (strict && !strictFileSizeBytes) {
+        res.setHeader('Cache-Control', 'no-store');
+        return res.status(400).json({
+            error: 'Strict language validation requires an exact signed file size',
+            code: 'exact_file_size_required',
+        });
     }
     if (!WHISPER_BIN || !WHISPER_MODEL) return res.status(503).json({ error: 'Language detection not configured' });
     if (rejectWhileLidBenchmarkRuns(res)) return;
@@ -2308,7 +3029,6 @@ app.get('/detect-language/:token', async (req, res) => {
 
     const trackIndex = Number.parseInt(req.query.index, 10);
     if (!Number.isInteger(trackIndex) || trackIndex < 0) return res.status(400).json({ error: 'Invalid audio index' });
-    const strict = ['1', 'true', 'yes'].includes(String(req.query.strict || '').toLowerCase());
     const detectOnlyMode = !strict && WHISPER_DETECT_ONLY_PRODUCTION_AVAILABLE
         ? (
             claims.scope === LID_DETECT_ONLY_SCOPE
@@ -2333,7 +3053,23 @@ app.get('/detect-language/:token', async (req, res) => {
         return res.status(503).json({ error: 'Strict language validation needs at least four configured offsets' });
     }
 
+    const requestController = new AbortController();
+    const onRequestClose = () => {
+        if (!res.writableEnded) {
+            try { requestController.abort(new Error('language validation caller closed')); } catch (_) {}
+        }
+    };
+    res.once('close', onRequestClose);
+    let strictBroker = null;
     try {
+        if (strict) {
+            strictBroker = await createStrictLidBroker({
+                sourceUrl: claims.url,
+                fileSizeBytes: strictFileSizeBytes,
+                userAgent: ua,
+                abortSignal: requestController.signal,
+            });
+        }
         let best = null;          // best partial result across offsets (most words), as a fallback
         let extractions = 0;      // bound the provider connections
         let lastExtractErr = '';  // surfaced when EVERY offset failed (was an opaque constant string)
@@ -2358,9 +3094,30 @@ app.get('/detect-language/:token', async (req, res) => {
                 // Same fast-fail when a VIEWER holds the slot on this box — the edge gate is checked
                 // at tick entry only, and a viewer can start mid-sweep.
                 if (accountSlotBusyLocally(claims.url, claims.uid ? sha256Hex(claims.uid) : '')) { lastExtractErr = 'account provider slot busy (viewer playback)'; break; }
+                const extractionUrl = strictBroker ? strictBroker.inputUrl : claims.url;
                 const ex = await withAccountJobLock(lockKey, () =>
-                    extractAudioWav(claims.url, ua, trackIndex, off > 0 ? off : 0, dur, 30_000, claims.uid));
-                if (!ex.ok) { lastExtractErr = ex.error; continue; }   // failed or offset past the file's end → next offset
+                    extractAudioWav(
+                        extractionUrl,
+                        ua,
+                        trackIndex,
+                        off > 0 ? off : 0,
+                        dur,
+                        30_000,
+                        claims.uid,
+                        true,
+                        requestController.signal,
+                        true,
+                        strictBroker ? {
+                            strictLoopback: true,
+                            providerSourceUrl: claims.url,
+                        } : null,
+                    ));
+                if (!ex.ok) {
+                    lastExtractErr = strictBroker ? 'Strict audio extraction failed' : ex.error;
+                    if (ex.preempted) inferencePreempted = true;
+                    if (ex.preempted || ex.aborted || strictBroker?.terminalError) break;
+                    continue;
+                }   // failed or offset past the file's end → next offset
                 wavPath = ex.path;
                 extractions++;
                 let fast = null;
@@ -2575,6 +3332,16 @@ app.get('/detect-language/:token', async (req, res) => {
             } catch (_) { /* try the next offset */ }
             finally { if (wavPath) fsp.unlink(wavPath).catch(() => {}); }
         }
+        if (strictBroker?.terminalError) {
+            const terminal = strictBroker.terminalError;
+            res.setHeader('Cache-Control', 'no-store');
+            return res.status(Number.isInteger(terminal.status) ? terminal.status : 502).json({
+                error: terminal.message,
+                code: terminal.code,
+                ...(Number.isInteger(terminal.upstreamStatus) ? { upstreamStatus: terminal.upstreamStatus } : {}),
+            });
+        }
+        if (requestController.signal.aborted && !res.writableEnded) return;
         if (inferencePreempted) {
             // A transport-shaped non-2xx response is essential: both Edge callers already leave
             // their exact-file cursor untouched on !res.ok, so the cron retries later and cannot
@@ -2640,9 +3407,53 @@ app.get('/detect-language/:token', async (req, res) => {
             wordCount: 0, sampleCount: 0, sample: '',
         });
     } catch (err) {
+        if (res.writableEnded || res.destroyed) return;
+        if (strict) {
+            return res.status(Number.isInteger(err?.status) ? err.status : 502).json({
+                error: 'Language detection failed',
+                code: String(err?.code || 'strict_lid_failed'),
+            });
+        }
         return res.status(502).json({ error: 'Language detection failed', details: String((err && err.message) || err) });
+    } finally {
+        res.off('close', onRequestClose);
+        if (strictBroker) await strictBroker.close();
     }
+}
+
+function detectLanguageCapabilityFromHeader(req) {
+    const token = String(req?.get?.(LID_CAPABILITY_HEADER) || '').trim();
+    if (!token || token.length > 8192) return null;
+    // Reject malformed values before signature parsing without echoing or
+    // logging the capability. The signed payload may contain an Xtream URL.
+    return /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(token) ? token : null;
+}
+
+function setDetectLanguageSecurityHeaders(_req, res, next) {
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    next();
+}
+
+// Preferred service-only route: the signed capability stays out of URL paths,
+// bodies, access logs, Referer propagation and error traces. Security headers
+// run before Bearer authentication so even rejected calls are non-cacheable.
+// Never log the Authorization/capability headers or their values.
+app.post('/detect-language', setDetectLanguageSecurityHeaders, requireGatewayAuth, async (req, res) => {
+    const capabilityToken = detectLanguageCapabilityFromHeader(req);
+    if (!capabilityToken) {
+        return res.status(401).json({ error: 'Invalid byte-pipe token' });
+    }
+    return handleDetectLanguageRequest(req, res, capabilityToken, {
+        requiredScope: LID_LEGACY_FULL_SCOPE,
+    });
 });
+
+// Temporary compatibility route for already-issued clients. New callers must
+// use the header route above because this path can be captured by access logs.
+app.get('/detect-language/:token', async (req, res) => (
+    handleDetectLanguageRequest(req, res, String(req.params.token || ''))
+));
 
 // Service-only production handoff for the isolated LID cascade. The gateway is responsible
 // only for the provider-connected phase: extract one exact audio track/window and return a
@@ -3472,12 +4283,18 @@ function extractAudioWav(
     reportActivity = true,
     abortSignal = null,
     globalPreemptible = true,
+    inputOptions = null,
 ) {
     return new Promise((resolve) => {
         if (globalPreemptible && viewerPlaybackActiveLocally()) {
             return resolve({ ok: false, preempted: true, error: 'preempted by viewer playback before extraction spawn' });
         }
         const outputPath = path.join(os.tmpdir(), `norva-audio-${Date.now()}-${crypto.randomUUID()}.wav`);
+        const strictLoopback = inputOptions?.strictLoopback === true;
+        const providerSourceUrl = strictLoopback && isHttpUrl(inputOptions?.providerSourceUrl)
+            ? String(inputOptions.providerSourceUrl)
+            : url;
+        const providerAccountKey = proxyKeyFromUrl(providerSourceUrl);
         const args = [
             '-y', '-hide_banner', '-loglevel', 'error', '-nostdin',
             // Mid-stream drop resilience, copied from the playback ffmpeg: without these, a
@@ -3485,10 +4302,14 @@ function extractAudioWav(
             // releasing the slot was enough). Deliberately NO -reconnect_on_http_error — on a
             // single-slot panel, retrying an HTTP error HOLDS the failing connect and hammers
             // the slot into more 429s; the job-level retry below re-attempts cleanly instead.
-            '-reconnect', '1', '-reconnect_streamed', '1',
-            '-reconnect_delay_max', '5',
+            ...(!strictLoopback ? [
+                '-reconnect', '1', '-reconnect_streamed', '1',
+                '-reconnect_delay_max', '5',
+            ] : []),
             '-rw_timeout', '15000000',
-            '-headers', 'Accept: */*\r\nConnection: keep-alive\r\n',
+            '-headers', strictLoopback
+                ? 'Accept: */*\r\nConnection: close\r\n'
+                : 'Accept: */*\r\nConnection: keep-alive\r\n',
             '-user_agent', ua,
             '-probesize', '2000000', '-analyzeduration', '3000000',
             ...(startOffset > 0 ? ['-ss', String(startOffset)] : []),
@@ -3499,10 +4320,15 @@ function extractAudioWav(
             outputPath,
         ];
         let child;
-        try { child = spawn(FFMPEG_PATH, args, { stdio: ['ignore', 'ignore', 'pipe'], env: proxyEnvFor(proxyKeyFromUrl(url)) }); }
+        try {
+            child = spawn(FFMPEG_PATH, args, {
+                stdio: ['ignore', 'ignore', 'pipe'],
+                env: strictLoopback ? loopbackOnlyEnv() : proxyEnvFor(providerAccountKey),
+            });
+        }
         catch (e) { return resolve({ ok: false, error: 'spawn failed: ' + String((e && e.message) || e) }); }
         const reg = registerAccountExtraction(
-            proxyKeyFromUrl(url),
+            providerAccountKey,
             child,
             reportActivity,
             globalPreemptible,
@@ -3536,7 +4362,8 @@ function extractAudioWav(
             clearTimeout(timer);
             removeAbortListener();
             reg.release?.();
-            const tail = redactCreds(stderr.trim().split('\n').filter(Boolean).pop() || 'no stderr');
+            const safeStderr = strictLoopback ? redactStrictLidLoopback(stderr) : stderr;
+            const tail = redactCreds(safeStderr.trim().split('\n').filter(Boolean).pop() || 'no stderr');
             if (aborted) {
                 fsp.unlink(outputPath).catch(() => {});
                 return resolve({ ok: false, aborted: true, error: 'extraction request aborted' });
@@ -3546,7 +4373,7 @@ function extractAudioWav(
                 return resolve({ ok: false, preempted: true, error: 'preempted by viewer playback on this account' });
             }
             if (code !== 0) {
-                console.warn(`[media-gateway] audio-extract ffmpeg exit ${code}: ${redactCreds(stderr.slice(-300))}`);
+                console.warn(`[media-gateway] audio-extract ffmpeg exit ${code}: ${redactCreds(safeStderr.slice(-300))}`);
                 fsp.unlink(outputPath).catch(() => {});
                 return resolve({ ok: false, error: timedOut ? `extract timeout after ${Math.round(timeoutMs / 1000)}s: ${tail}` : `ffmpeg exit ${code}: ${tail}` });
             }
@@ -5337,21 +6164,31 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
                 code: err?.code || 'VOD_SIZE_UNAVAILABLE',
             });
         }
+
+        // The exact size preflight above is provider I/O, but it neither starts
+        // the byte pump nor spawns FFmpeg. Freeze the rendition graph only now:
+        // ensureBoundedMkvInputPump has attached the exact fileSizeBytes to an
+        // otherwise complete request/cached profile, making the normal Norva
+        // exact-profile path reachable without ever mutating a running graph.
+        freezeMultiAudioHlsTopology(session);
         createdSession = session;
 
         session.videoMode = (
+            session.forceAlignedMultiAudioVideoEncode === true ||
             forceExactMatroskaH264Reencode ||
             session.mode === 'transcode' ||
             !shouldCopyVideo(session) ||
             (finiteMkvPlayback && normalizedSeekOffset > 0)
         ) ? 'encode' : 'copy';
-        session.videoModeReason = forceExactMatroskaH264Reencode
-            ? 'exact_matroska_h264'
+        session.videoModeReason = session.forceAlignedMultiAudioVideoEncode === true
+            ? 'multi_audio_aligned_hls'
+            : (forceExactMatroskaH264Reencode
+                ? 'exact_matroska_h264'
             : (session.mode === 'transcode'
                 ? 'requested_transcode'
                 : (finiteMkvPlayback && normalizedSeekOffset > 0
                     ? 'pumped_matroska_resume'
-                    : (session.videoMode === 'encode' ? 'unsafe_or_unknown_video' : 'copy')));
+                    : (session.videoMode === 'encode' ? 'unsafe_or_unknown_video' : 'copy'))));
 
         sessions.set(id, session);
 
@@ -5426,6 +6263,8 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             videoModeReason: session.videoModeReason,
             hlsTargetSeconds: session.hlsTargetSeconds,
             audioStreamIndex: mappedAudioStreamIndexForSession(session),
+            audioRenditions: audioRenditionsForSession(session),
+            multiAudioHls: multiAudioHlsDiagnosticsForSession(session),
             requestedSeekOffset: session.seekOffset || 0,
             actualStartOffset: session.actualStartOffset || 0,
             localSeekTarget: session.localSeekTarget || 0,
@@ -5514,7 +6353,7 @@ app.get('/sessions/:id/playlist.m3u8', requirePlaybackToken, async (req, res) =>
         res.setHeader('Content-Type', 'application/vnd.apple.mpegurl; charset=utf-8');
         res.setHeader('Cache-Control', 'no-store');
         const playlist = await fsp.readFile(session.playlistPath, 'utf8');
-        res.send(rewritePlaylistSegments(playlist, session.accessToken));
+        res.send(rewritePlaylistSegments(playlist, session.accessToken, session));
     } catch (err) {
         const status = session.inputFailure?.status === 458
             ? 458
@@ -5523,18 +6362,34 @@ app.get('/sessions/:id/playlist.m3u8', requirePlaybackToken, async (req, res) =>
     }
 });
 
-app.get('/sessions/:id/:file', requirePlaybackToken, (req, res) => {
+app.get('/sessions/:id/:file', requirePlaybackToken, async (req, res) => {
     const session = sessions.get(req.params.id);
     if (!session) return res.status(404).send('Session not found');
 
-    const requested = path.basename(req.params.file);
-    const filePath = path.join(session.outputDir, requested);
+    const requested = safeSessionArtifactName(req.params.file);
+    if (!requested) return res.status(400).send('Invalid segment path');
+    if (requested.toLowerCase().endsWith('.m3u8') && !isAllowedSessionPlaylistName(session, requested)) {
+        return res.status(404).send('Segment not found');
+    }
+    const filePath = path.resolve(session.outputDir, requested);
     if (!isWithin(session.outputDir, filePath)) return res.status(400).send('Invalid segment path');
     if (!fs.existsSync(filePath)) return res.status(404).send('Segment not found');
 
-    res.setHeader('Content-Type', segmentContentType(requested));
-    res.setHeader('Cache-Control', 'private, max-age=30');
-    res.sendFile(filePath);
+    try {
+        res.setHeader('Content-Type', segmentContentType(requested));
+        if (requested.toLowerCase().endsWith('.m3u8')) {
+            // Every child playlist is an authenticated resource graph. Rewrite
+            // its media/segment URIs exactly like the master; serving it raw
+            // would drop the playback token on the very next hls.js request.
+            const playlist = await fsp.readFile(filePath, 'utf8');
+            res.setHeader('Cache-Control', 'no-store');
+            return res.send(rewritePlaylistSegments(playlist, session.accessToken, session));
+        }
+        res.setHeader('Cache-Control', 'private, max-age=30');
+        return res.sendFile(filePath);
+    } catch (_) {
+        return res.status(404).send('Segment not found');
+    }
 });
 
 app.use((err, req, res, next) => {
@@ -6415,8 +7270,16 @@ async function enrichSessionCodecProfileFromBoundedHeader(session, signal = null
         session.startupTimings.inbandCodecProfileComplete = false;
         return false;
     }
-    cacheCodecProfile(session.sourceUrl, local);
-    session.codecProfile = mergeCodecProfiles(session.codecProfile, local);
+    // The local ffprobe prefix cannot know the full source size, but the
+    // bounded startup preflight already proved it exactly. Join both pieces of
+    // evidence before caching/serializing so the next request has one complete
+    // pre-spawn profile and can safely freeze a multi-audio graph.
+    const exactLocal = compactRecord({
+        ...local,
+        fileSizeBytes: fileSizeBytesForSession(session),
+    });
+    cacheCodecProfile(session.sourceUrl, exactLocal);
+    session.codecProfile = mergeCodecProfiles(session.codecProfile, exactLocal);
     if (
         !Number.isInteger(normalizeAudioStreamIndex(session.actualMappedAudioStreamIndex)) &&
         String(session.actualAudioMap || '').startsWith('0:a:0')
@@ -6448,7 +7311,11 @@ async function stopBoundedMkvInputPump(session) {
 }
 
 function startFfmpeg(session) {
-    const segmentPattern = path.join(session.outputDir, 'segment-%05d.ts');
+    const multiAudioPlan = multiAudioHlsEnabled(session) ? session.multiAudioHls : null;
+    const segmentPattern = path.join(
+        session.outputDir,
+        multiAudioPlan ? '%v-%05d.ts' : 'segment-%05d.ts',
+    );
     const inputProbeArgs = inputProbeArgsForSession(session);
     // During the bounded fast path, require the already-known video/audio maps.
     // Otherwise FFmpeg's optional `?` can silently emit a video-only playlist
@@ -6459,16 +7326,21 @@ function startFfmpeg(session) {
     const requireKnownStreams =
         session.fastInputProbe === true ||
         session.forceFullInputProbe === true;
-    const copyAudio = shouldCopyAudio(session);
+    const copyAudio = multiAudioPlan ? false : shouldCopyAudio(session);
     const audioArgs = audioArgsForSession(session, copyAudio);
-    const audioMap = audioMapForSession(session, requireKnownStreams);
+    const audioMap = multiAudioPlan
+        ? `0:${multiAudioPlan.defaultStreamIndex}`
+        : audioMapForSession(session, requireKnownStreams);
     session.actualAudioMap = audioMap;
     const explicitAudioMap = /^0:(\d+)\??$/.exec(audioMap);
     session.actualMappedAudioStreamIndex = explicitAudioMap
         ? normalizeAudioStreamIndex(explicitAudioMap[1])
         : null;
     const encodeVideo = videoModeForSession(session) === 'encode';
-    const forceExactMatroskaH264Reencode = session.forceExactMatroskaH264Reencode === true;
+    const forceAlignedHlsVideoEncode = (
+        session.forceExactMatroskaH264Reencode === true ||
+        session.forceAlignedMultiAudioVideoEncode === true
+    );
     const pumpedMkvInput = isFiniteMkvVodSession(session);
     const preserveCopySeekTimestamps = usesSourceTimestampedCopySeek(session, encodeVideo, copyAudio);
     const { preInputSeek, postInputSeek } = seekArgsForSession(session, encodeVideo);
@@ -6497,8 +7369,12 @@ function startFfmpeg(session) {
         ...postInputSeek,
         // Uppercase V excludes attached pictures. A cover-art stream must
         // never become the playable video lane or a second HLS video stream.
-        '-map', requireKnownStreams ? '0:V:0' : '0:V:0?',
-        '-map', audioMap,
+        '-map', (requireKnownStreams || multiAudioPlan) ? '0:V:0' : '0:V:0?',
+        ...(multiAudioPlan
+            ? multiAudioPlan.audioRenditions.flatMap((rendition) => [
+                '-map', `0:${rendition.streamIndex}`,
+            ])
+            : ['-map', audioMap]),
         '-max_muxing_queue_size', '1024'
     ];
 
@@ -6518,7 +7394,7 @@ function startFfmpeg(session) {
             '-crf', '23',
             '-g', '48',
             '-sc_threshold', '0',
-            ...(forceExactMatroskaH264Reencode
+            ...(forceAlignedHlsVideoEncode
                 ? ['-force_key_frames', `expr:gte(t,n_forced*${EXACT_MATROSKA_H264_HLS_TARGET_SECONDS})`]
                 : []),
             ...audioArgs
@@ -6530,7 +7406,7 @@ function startFfmpeg(session) {
         );
     }
 
-    args.push(
+    const hlsOutputArgs = [
         '-fps_mode', 'passthrough',
         ...(preserveCopySeekTimestamps
             ? ['-avoid_negative_ts', 'disabled', '-mpegts_copyts', '1', '-muxpreload', '0', '-muxdelay', '0']
@@ -6548,8 +7424,15 @@ function startFfmpeg(session) {
         // appear in the playlist only once fully written (no partial reads).
         '-hls_flags', 'independent_segments+temp_file',
         '-hls_segment_filename', segmentPattern,
-        session.playlistPath
-    );
+        ...(multiAudioPlan
+            ? [
+                '-master_pl_name', multiAudioPlan.masterPlaylistName,
+                '-var_stream_map', multiAudioPlan.varStreamMap,
+                path.join(session.outputDir, '%v.m3u8'),
+            ]
+            : [session.playlistPath])
+    ];
+    args.push(...hlsOutputArgs);
 
     appendSubtitleOutputs(args, session, postInputSeek);
 
@@ -6853,6 +7736,238 @@ function shouldReencodeExactMatroskaH264(session) {
     return videoCodec.includes('h264') || videoCodec.includes('avc');
 }
 
+function multiAudioProfileAssessment(session) {
+    if (!isFiniteMkvVodSession(session)) {
+        return { eligible: false, reason: 'not_finite_mkv', sourceTrackCount: 0, tracks: [] };
+    }
+
+    const profile = asRecord(session?.codecProfile);
+    const profileSource = String(session?.codecProfileSource || '').trim().toLowerCase();
+    if (!profileSource || profileSource === 'request_flat') {
+        return { eligible: false, reason: 'profile_source_untrusted', sourceTrackCount: 0, tracks: [] };
+    }
+
+    const container = normalizeCodecToken(profile.container);
+    const durationSeconds = Number(profile.durationSeconds ?? profile.duration_seconds ?? profile.duration);
+    const fileSizeBytes = Number(profile.fileSizeBytes ?? profile.file_size_bytes ?? profile.sizeBytes);
+    const videoWidth = Number(profile.videoWidth ?? profile.video_width ?? profile.width);
+    const videoHeight = Number(profile.videoHeight ?? profile.video_height ?? profile.height);
+    const subtitles = Array.isArray(profile.subtitles)
+        ? profile.subtitles
+        : (Array.isArray(profile.subtitleTracks)
+            ? profile.subtitleTracks
+            : (Array.isArray(profile.subtitle_tracks) ? profile.subtitle_tracks : null));
+    const sourceTracks = Array.isArray(profile.audioTracks)
+        ? profile.audioTracks
+        : (Array.isArray(profile.audio_tracks) ? profile.audio_tracks : []);
+    const probeSource = normalizeCodecToken(profile.probeSource ?? profile.probe_source);
+    const exactProbeSources = new Set([
+        'gatewayinband',
+        'gatewayprobe',
+        'exactfileprobe',
+        'exactfilecodecprobe',
+    ]);
+    const subtitleIndexes = subtitles?.map((track) => Number(track?.index)) || [];
+    const completeProfile = Boolean(
+        (container === 'mkv' || container.includes('matroska')) &&
+        (profile.metadataComplete === true || profile.metadata_complete === true) &&
+        Number.isFinite(durationSeconds) && durationSeconds > 0 &&
+        Number.isSafeInteger(fileSizeBytes) && fileSizeBytes > 0 &&
+        stringOrNull(profile.videoCodec ?? profile.video_codec ?? profile.video) &&
+        subtitles &&
+        subtitleIndexes.every((index) => Number.isInteger(index) && index >= 0 && index <= 1024) &&
+        new Set(subtitleIndexes).size === subtitleIndexes.length &&
+        exactProbeSources.has(probeSource) &&
+        Number.isFinite(Date.parse(String(profile.probedAt ?? profile.probed_at ?? '')))
+    );
+    if (!completeProfile) {
+        return {
+            eligible: false,
+            reason: 'profile_incomplete',
+            sourceTrackCount: sourceTracks.length,
+            tracks: [],
+        };
+    }
+
+    // Every multi-audio graph is video-encoded to align its two-second HLS
+    // boundaries with every audio rendition. Keep the production v91 capacity
+    // ceiling fail-closed; an oversized or dimensionless source falls back to
+    // the unchanged single-audio path instead of risking a stalled replica.
+    if (
+        !Number.isInteger(videoWidth) || !Number.isInteger(videoHeight) ||
+        videoWidth <= 0 || videoHeight <= 0 ||
+        videoWidth > EXACT_MATROSKA_H264_MAX_WIDTH ||
+        videoHeight > EXACT_MATROSKA_H264_MAX_HEIGHT ||
+        videoWidth * videoHeight > EXACT_MATROSKA_H264_MAX_PIXELS
+    ) {
+        return {
+            eligible: false,
+            reason: 'video_dimensions_out_of_capacity',
+            sourceTrackCount: sourceTracks.length,
+            tracks: [],
+        };
+    }
+
+    if (sourceTracks.length < 2) {
+        return {
+            eligible: false,
+            reason: 'audio_track_count_below_minimum',
+            sourceTrackCount: sourceTracks.length,
+            tracks: [],
+        };
+    }
+    if (sourceTracks.length > MAX_MULTI_AUDIO_RENDITIONS) {
+        return {
+            eligible: false,
+            reason: 'audio_track_cap_exceeded',
+            sourceTrackCount: sourceTracks.length,
+            tracks: [],
+        };
+    }
+
+    const tracks = sourceTracks.map((track, hlsIndex) => {
+        const streamIndex = Number(track?.index);
+        const sourceChannels = Number(track?.channels);
+        const sourceCodec = stringOrNull(track?.codec);
+        return {
+            hlsIndex,
+            streamIndex,
+            language: normalizeHlsAudioLanguage(track?.language),
+            title: sanitizeAudioRenditionTitle(track?.title, hlsIndex),
+            sourceChannels,
+            sourceCodec,
+            sourceDefault: track?.default === true,
+        };
+    });
+    const streamIndexes = tracks.map((track) => track.streamIndex);
+    if (
+        tracks.some((track) => (
+            !Number.isInteger(track.streamIndex) || track.streamIndex < 0 || track.streamIndex > 1024 ||
+            !Number.isInteger(track.sourceChannels) || track.sourceChannels <= 0 || track.sourceChannels > 64 ||
+            !track.sourceCodec
+        )) ||
+        new Set(streamIndexes).size !== streamIndexes.length
+    ) {
+        return {
+            eligible: false,
+            reason: 'invalid_audio_tracks',
+            sourceTrackCount: sourceTracks.length,
+            tracks: [],
+        };
+    }
+
+    return {
+        eligible: true,
+        reason: 'eligible',
+        sourceTrackCount: tracks.length,
+        tracks,
+    };
+}
+
+function normalizeHlsAudioLanguage(value) {
+    const normalized = String(value || '').trim().replace(/_/g, '-').toLowerCase();
+    return /^[a-z]{2,3}(?:-[a-z0-9]{2,8})*$/.test(normalized) ? normalized : 'und';
+}
+
+function sanitizeAudioRenditionTitle(value, hlsIndex) {
+    const cleaned = String(value || '')
+        .replace(/[\x00-\x1f\x7f]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    return (cleaned || `Audio ${hlsIndex + 1}`).slice(0, 96);
+}
+
+function buildMultiAudioHlsPlan(session) {
+    const assessment = multiAudioProfileAssessment(session);
+    const base = {
+        protocol: MULTI_AUDIO_HLS_PROTOCOL,
+        enabled: false,
+        reason: assessment.reason,
+        maxAudioRenditions: MAX_MULTI_AUDIO_RENDITIONS,
+        sourceTrackCount: assessment.sourceTrackCount,
+        masterPlaylistName: 'playlist.m3u8',
+        videoPlaylistName: null,
+        defaultHlsIndex: null,
+        defaultStreamIndex: null,
+        audioRenditions: [],
+    };
+    if (!assessment.eligible) return base;
+
+    const requestedStreamIndex = normalizeAudioStreamIndex(session?.audioStreamIndex);
+    let defaultHlsIndex = Number.isInteger(requestedStreamIndex)
+        ? assessment.tracks.findIndex((track) => track.streamIndex === requestedStreamIndex)
+        : -1;
+    if (defaultHlsIndex < 0) {
+        defaultHlsIndex = assessment.tracks.findIndex((track) => track.sourceDefault === true);
+    }
+    if (defaultHlsIndex < 0) defaultHlsIndex = 0;
+
+    const audioRenditions = assessment.tracks.map((track) => ({
+        hlsIndex: track.hlsIndex,
+        streamIndex: track.streamIndex,
+        language: track.language,
+        title: track.title,
+        sourceChannels: track.sourceChannels,
+        outputChannels: 2,
+        codec: 'aac',
+    }));
+    const varStreamMap = [
+        ...audioRenditions.map((rendition) => (
+            `a:${rendition.hlsIndex},agroup:audio,language:${rendition.language},` +
+            `default:${rendition.hlsIndex === defaultHlsIndex ? 'yes' : 'no'},name:audio_${rendition.hlsIndex}`
+        )),
+        'v:0,agroup:audio,name:video',
+    ].join(' ');
+
+    return {
+        ...base,
+        enabled: true,
+        reason: 'enabled',
+        videoPlaylistName: 'video.m3u8',
+        defaultHlsIndex,
+        defaultStreamIndex: audioRenditions[defaultHlsIndex].streamIndex,
+        audioRenditions,
+        varStreamMap,
+    };
+}
+
+function multiAudioHlsEnabled(session) {
+    return session?.multiAudioHls?.enabled === true;
+}
+
+function audioRenditionsForSession(session) {
+    if (!multiAudioHlsEnabled(session)) return [];
+    return session.multiAudioHls.audioRenditions.map((rendition) => ({ ...rendition }));
+}
+
+function multiAudioHlsDiagnosticsForSession(session) {
+    const plan = asRecord(session?.multiAudioHls);
+    return {
+        protocol: MULTI_AUDIO_HLS_PROTOCOL,
+        enabled: plan.enabled === true,
+        reason: stringOrNull(plan.reason) || 'not_evaluated',
+        maxAudioRenditions: MAX_MULTI_AUDIO_RENDITIONS,
+        sourceTrackCount: Number.isInteger(plan.sourceTrackCount) ? plan.sourceTrackCount : 0,
+        masterPlaylist: 'playlist.m3u8',
+        videoPlaylist: plan.enabled === true ? plan.videoPlaylistName : 'playlist.m3u8',
+        defaultHlsIndex: Number.isInteger(plan.defaultHlsIndex) ? plan.defaultHlsIndex : null,
+        defaultStreamIndex: Number.isInteger(plan.defaultStreamIndex) ? plan.defaultStreamIndex : null,
+    };
+}
+
+function freezeMultiAudioHlsTopology(session) {
+    const plan = buildMultiAudioHlsPlan(session);
+    session.multiAudioHls = plan;
+    session.videoPlaylistPath = plan.enabled
+        ? path.join(session.outputDir, plan.videoPlaylistName)
+        : session.playlistPath;
+    session.forceAlignedMultiAudioVideoEncode = plan.enabled === true;
+    if (plan.enabled) session.hlsTargetSeconds = EXACT_MATROSKA_H264_HLS_TARGET_SECONDS;
+    session.startupTimings = asRecord(session.startupTimings);
+    session.startupTimings.multiAudioHls = multiAudioHlsDiagnosticsForSession(session);
+    return plan;
+}
+
 function audioArgsForSession(session, copyAudio = shouldCopyAudio(session)) {
     return copyAudio ? ['-c:a', 'copy'] : TRANSCODE_AUDIO_ARGS;
 }
@@ -6864,6 +7979,7 @@ function audioModeForSession(session) {
 function videoModeForSession(session) {
     if (session.videoMode === 'encode' || session.videoMode === 'copy') return session.videoMode;
     return (
+        session.forceAlignedMultiAudioVideoEncode === true ||
         session.forceExactMatroskaH264Reencode === true ||
         session.mode === 'transcode' ||
         !shouldCopyVideo(session)
@@ -6909,6 +8025,9 @@ function subtitleTracksForSession(session) {
 }
 
 function shouldCopyAudio(session) {
+    // Multi-rendition HLS has one normalized contract for every source track:
+    // AAC-LC, 48 kHz, stereo. Never copy a subset or advertise source 5.1.
+    if (multiAudioHlsEnabled(session)) return false;
     const requestedMode = normalizeCodecToken(session.audioMode);
     if (requestedMode === 'transcode' || requestedMode === 'encode') return false;
     if (session.clientAudioPassthrough === false) return false;
@@ -6970,6 +8089,12 @@ function audioMapForSession(session, required = false) {
     // attachment. Fall back by media type unless the exact-file profile
     // proves that the requested index belongs to an audio track.
     return `0:a:0${optionalSuffix}`;
+}
+
+function audioTracksForSession(session) {
+    return Array.isArray(session?.codecProfile?.audioTracks)
+        ? session.codecProfile.audioTracks
+        : (Array.isArray(session?.codecProfile?.audio_tracks) ? session.codecProfile.audio_tracks : []);
 }
 
 function selectedAudioTrackForSession(session) {
@@ -7664,6 +8789,148 @@ function shouldProbeCodecProfile(playbackHint, sourceUrl) {
     }
 }
 
+function parseHlsAttributeList(line) {
+    const separator = String(line || '').indexOf(':');
+    if (separator < 0) return {};
+    const attributes = {};
+    const body = String(line).slice(separator + 1);
+    const matcher = /(?:^|,)([A-Z0-9-]+)=("[^"]*"|[^,]*)/gi;
+    let match;
+    while ((match = matcher.exec(body)) !== null) {
+        const rawValue = match[2];
+        attributes[match[1].toUpperCase()] = rawValue.startsWith('"')
+            ? rawValue.slice(1, -1)
+            : rawValue;
+    }
+    return attributes;
+}
+
+function controlledLocalPlaylistName(value) {
+    const raw = String(value || '').split(/[?#]/, 1)[0];
+    if (!raw || raw !== path.basename(raw) || raw.includes('/') || raw.includes('\\')) return null;
+    return /^[a-z0-9][a-z0-9_-]*\.m3u8$/i.test(raw) ? raw : null;
+}
+
+function inspectMultiAudioMasterPlaylist(playlist, plan) {
+    if (!plan?.enabled || !Array.isArray(plan.audioRenditions)) {
+        return { ready: false, reason: 'multi_audio_plan_disabled' };
+    }
+    const lines = String(playlist || '').split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    if (lines[0] !== '#EXTM3U') return { ready: false, reason: 'invalid_master_header' };
+
+    const audioMedia = lines
+        .filter((line) => line.startsWith('#EXT-X-MEDIA:'))
+        .map(parseHlsAttributeList)
+        .filter((attributes) => String(attributes.TYPE || '').toUpperCase() === 'AUDIO');
+    if (audioMedia.length !== plan.audioRenditions.length) {
+        return { ready: false, reason: 'audio_rendition_count_mismatch' };
+    }
+
+    const groupIds = new Set();
+    let defaultCount = 0;
+    for (let hlsIndex = 0; hlsIndex < audioMedia.length; hlsIndex += 1) {
+        const attributes = audioMedia[hlsIndex];
+        const rendition = plan.audioRenditions[hlsIndex];
+        const expectedName = `audio_${hlsIndex}`;
+        const expectedUri = `${expectedName}.m3u8`;
+        const uri = controlledLocalPlaylistName(attributes.URI);
+        const isDefault = String(attributes.DEFAULT || '').toUpperCase() === 'YES';
+        if (
+            attributes.NAME !== expectedName ||
+            uri !== expectedUri ||
+            normalizeHlsAudioLanguage(attributes.LANGUAGE) !== rendition.language ||
+            !attributes['GROUP-ID']
+        ) {
+            return { ready: false, reason: 'audio_rendition_contract_mismatch' };
+        }
+        groupIds.add(attributes['GROUP-ID']);
+        if (isDefault) defaultCount += 1;
+        if (isDefault !== (hlsIndex === plan.defaultHlsIndex)) {
+            return { ready: false, reason: 'audio_default_mismatch' };
+        }
+    }
+    if (groupIds.size !== 1 || defaultCount !== 1) {
+        return { ready: false, reason: 'audio_group_or_default_incomplete' };
+    }
+
+    const variants = [];
+    for (let index = 0; index < lines.length; index += 1) {
+        if (!lines[index].startsWith('#EXT-X-STREAM-INF:')) continue;
+        const attributes = parseHlsAttributeList(lines[index]);
+        let uri = null;
+        for (let next = index + 1; next < lines.length; next += 1) {
+            if (lines[next].startsWith('#')) continue;
+            uri = controlledLocalPlaylistName(lines[next]);
+            break;
+        }
+        variants.push({ attributes, uri });
+    }
+    const onlyVariant = variants[0];
+    if (
+        variants.length !== 1 ||
+        onlyVariant?.uri !== plan.videoPlaylistName ||
+        onlyVariant?.attributes?.AUDIO !== Array.from(groupIds)[0]
+    ) {
+        return { ready: false, reason: 'video_variant_contract_mismatch' };
+    }
+
+    return {
+        ready: true,
+        reason: 'ready',
+        audioRenditionCount: audioMedia.length,
+        videoRenditionCount: 1,
+    };
+}
+
+function hlsMediaPlaylistTargetsForSession(session) {
+    if (!multiAudioHlsEnabled(session)) {
+        return [{
+            kind: 'single',
+            hlsIndex: null,
+            streamIndex: mappedAudioStreamIndexForSession(session),
+            playlistName: path.basename(session.playlistPath),
+            playlistPath: session.playlistPath,
+        }];
+    }
+    const plan = session.multiAudioHls;
+    return [
+        {
+            kind: 'video',
+            hlsIndex: null,
+            streamIndex: null,
+            playlistName: plan.videoPlaylistName,
+            playlistPath: session.videoPlaylistPath || path.resolve(session.outputDir, plan.videoPlaylistName),
+        },
+        ...plan.audioRenditions.map((rendition) => ({
+            kind: 'audio',
+            hlsIndex: rendition.hlsIndex,
+            streamIndex: rendition.streamIndex,
+            playlistName: `audio_${rendition.hlsIndex}.m3u8`,
+            playlistPath: path.resolve(session.outputDir, `audio_${rendition.hlsIndex}.m3u8`),
+        })),
+    ];
+}
+
+async function inspectHlsMediaPlaylistArtifact(session, target) {
+    if (!isWithin(session.outputDir, target.playlistPath)) return null;
+    const playlist = await fsp.readFile(target.playlistPath, 'utf8');
+    const inspection = inspectHlsStartupPlaylist(playlist);
+    if (!inspection.ready) return null;
+    const segmentPaths = inspection.segmentFiles.map((segment) => path.resolve(session.outputDir, segment));
+    if (
+        segmentPaths.length === 0 ||
+        !segmentPaths.every((segmentPath) => isWithin(session.outputDir, segmentPath))
+    ) return null;
+    const stats = await Promise.all(segmentPaths.map((segmentPath) => fsp.stat(segmentPath)));
+    if (!stats.every((stat) => stat.isFile() && stat.size > 0)) return null;
+    return {
+        ...target,
+        inspection,
+        firstSegmentBytes: stats[0].size,
+        playlistSegmentBytes: stats.reduce((sum, stat) => sum + stat.size, 0),
+    };
+}
+
 function inspectHlsStartupPlaylist(playlist) {
     const lines = String(playlist || '').split(/\r?\n/);
     let durationSeconds = 0;
@@ -7686,7 +8953,14 @@ function inspectHlsStartupPlaylist(playlist) {
             continue;
         }
         if (line.startsWith('#') || pendingDuration === null) continue;
-        const segment = path.basename(line.split(/[?#]/, 1)[0]);
+        const rawSegment = String(line || '').split(/[?#]/, 1)[0];
+        const segment = (
+            rawSegment &&
+            rawSegment === path.basename(rawSegment) &&
+            !rawSegment.includes('/') &&
+            !rawSegment.includes('\\') &&
+            /^[a-z0-9][a-z0-9._-]*\.(?:ts|m4s|mp4|aac)$/i.test(rawSegment)
+        ) ? rawSegment : null;
         if (!segment) {
             pendingDuration = null;
             continue;
@@ -7721,24 +8995,53 @@ async function waitForPlaylist(session, timeoutMs, abortSignal = null) {
         if (session.lastError) throw new Error(session.lastError);
         if (fs.existsSync(session.playlistPath)) {
             try {
-                const playlist = await fsp.readFile(session.playlistPath, 'utf8');
-                const inspection = inspectHlsStartupPlaylist(playlist);
-                if (inspection.ready) {
-                    const segmentPaths = inspection.segmentFiles.map((segment) =>
-                        path.resolve(session.outputDir, segment));
-                    if (segmentPaths.length > 0 && segmentPaths.every((segmentPath) =>
-                        isWithin(session.outputDir, segmentPath))) {
-                        const stats = await Promise.all(segmentPaths.map((segmentPath) => fsp.stat(segmentPath)));
-                        if (stats.every((stat) => stat.isFile() && stat.size > 0)) {
-                            session.startupTimings = session.startupTimings || {};
-                            session.startupTimings.playlistSegmentCount = inspection.segmentCount;
-                            session.startupTimings.playlistBufferSeconds = inspection.durationSeconds;
-                            session.startupTimings.firstSegmentBytes = stats[0].size;
-                            session.startupTimings.playlistSegmentBytes = stats.reduce((sum, stat) => sum + stat.size, 0);
-                            return;
-                        }
-                    }
+                const masterPlaylist = await fsp.readFile(session.playlistPath, 'utf8');
+                if (multiAudioHlsEnabled(session)) {
+                    const masterInspection = inspectMultiAudioMasterPlaylist(
+                        masterPlaylist,
+                        session.multiAudioHls,
+                    );
+                    if (!masterInspection.ready) throw new Error(masterInspection.reason);
                 }
+
+                const targets = hlsMediaPlaylistTargetsForSession(session);
+                const inspected = await Promise.all(
+                    targets.map((target) => inspectHlsMediaPlaylistArtifact(session, target)),
+                );
+                if (inspected.some((result) => !result)) throw new Error('media_playlist_not_ready');
+
+                const video = multiAudioHlsEnabled(session)
+                    ? inspected.find((result) => result.kind === 'video')
+                    : inspected[0];
+                if (!video) throw new Error('video_playlist_not_ready');
+                session.startupTimings = session.startupTimings || {};
+                session.startupTimings.playlistSegmentCount = video.inspection.segmentCount;
+                session.startupTimings.playlistBufferSeconds = video.inspection.durationSeconds;
+                session.startupTimings.firstSegmentBytes = video.firstSegmentBytes;
+                session.startupTimings.playlistSegmentBytes = video.playlistSegmentBytes;
+                if (multiAudioHlsEnabled(session)) {
+                    session.startupTimings.multiAudioHls = {
+                        ...multiAudioHlsDiagnosticsForSession(session),
+                        ready: true,
+                        video: {
+                            segmentCount: video.inspection.segmentCount,
+                            bufferSeconds: video.inspection.durationSeconds,
+                            firstSegmentBytes: video.firstSegmentBytes,
+                            playlistSegmentBytes: video.playlistSegmentBytes,
+                        },
+                        audio: inspected
+                            .filter((result) => result.kind === 'audio')
+                            .map((result) => ({
+                                hlsIndex: result.hlsIndex,
+                                streamIndex: result.streamIndex,
+                                segmentCount: result.inspection.segmentCount,
+                                bufferSeconds: result.inspection.durationSeconds,
+                                firstSegmentBytes: result.firstSegmentBytes,
+                                playlistSegmentBytes: result.playlistSegmentBytes,
+                            })),
+                    };
+                }
+                return;
             } catch (error) {
                 // FFmpeg updates HLS artifacts atomically. A rename/read/stat
                 // race means "not ready yet", not a terminal provider failure.
@@ -7929,6 +9232,8 @@ function serializeSession(req, session) {
         mode: session.mode,
         audioMode: audioModeForSession(session),
         audioStreamIndex: mappedAudioStreamIndexForSession(session),
+        audioRenditions: audioRenditionsForSession(session),
+        multiAudioHls: multiAudioHlsDiagnosticsForSession(session),
         requestedSeekOffset: session.seekOffset || 0,
         actualStartOffset: session.actualStartOffset || 0,
         localSeekTarget: session.localSeekTarget || 0,
@@ -7957,6 +9262,8 @@ function debugSession(session) {
         mode: session.mode,
         audioMode: audioModeForSession(session),
         audioStreamIndex: mappedAudioStreamIndexForSession(session),
+        audioRenditions: audioRenditionsForSession(session),
+        multiAudioHls: multiAudioHlsDiagnosticsForSession(session),
         requestedSeekOffset: session.seekOffset || 0,
         actualStartOffset: session.actualStartOffset || 0,
         localSeekTarget: session.localSeekTarget || 0,
@@ -8227,7 +9534,34 @@ function sourceSessionKey(value) {
     }
 }
 
+function safeSessionArtifactName(value) {
+    const raw = String(value || '');
+    if (
+        !raw ||
+        raw !== path.basename(raw) ||
+        raw.includes('/') ||
+        raw.includes('\\') ||
+        raw.includes('\0') ||
+        raw.length > 128
+    ) return null;
+    return /^[a-z0-9][a-z0-9._-]*$/i.test(raw) ? raw : null;
+}
+
+function isAllowedSessionPlaylistName(session, value) {
+    const requested = safeSessionArtifactName(value);
+    if (!requested || !requested.toLowerCase().endsWith('.m3u8')) return false;
+    const allowed = new Set(['playlist.m3u8']);
+    if (multiAudioHlsEnabled(session)) {
+        allowed.add(session.multiAudioHls.videoPlaylistName);
+        for (const rendition of session.multiAudioHls.audioRenditions) {
+            allowed.add(`audio_${rendition.hlsIndex}.m3u8`);
+        }
+    }
+    return allowed.has(requested);
+}
+
 function segmentContentType(file) {
+    if (file.endsWith('.m3u8')) return 'application/vnd.apple.mpegurl; charset=utf-8';
     if (file.endsWith('.vtt')) return 'text/vtt; charset=utf-8';
     if (file.endsWith('.m4s')) return 'video/iso.segment';
     if (file.endsWith('.mp4')) return 'video/mp4';
@@ -8252,17 +9586,52 @@ function rememberFailure(session, detail) {
     while (lastFailures.length > 10) lastFailures.shift();
 }
 
-function rewritePlaylistSegments(playlist, token) {
-    const encodedToken = encodeURIComponent(token);
+function controlledAudioRenditionName(plan, rendition) {
+    const language = normalizeHlsAudioLanguage(rendition?.language).toUpperCase();
+    if (language === 'UND') return `Audio ${Number(rendition?.hlsIndex) + 1}`;
+    const priorWithLanguage = plan.audioRenditions
+        .slice(0, rendition.hlsIndex)
+        .filter((candidate) => normalizeHlsAudioLanguage(candidate.language).toUpperCase() === language)
+        .length;
+    return priorWithLanguage > 0 ? `${language} ${priorWithLanguage + 1}` : language;
+}
+
+function rewriteMultiAudioMasterNames(playlist, session) {
+    if (!multiAudioHlsEnabled(session)) return String(playlist || '');
+    const plan = session.multiAudioHls;
     return String(playlist || '')
+        .split(/\r?\n/)
+        .map((line) => {
+            if (!line.trim().startsWith('#EXT-X-MEDIA:')) return line;
+            const attributes = parseHlsAttributeList(line);
+            if (String(attributes.TYPE || '').toUpperCase() !== 'AUDIO') return line;
+            const uri = controlledLocalPlaylistName(attributes.URI);
+            const match = /^audio_(\d+)\.m3u8$/i.exec(String(uri || ''));
+            if (!match) return line;
+            const hlsIndex = Number(match[1]);
+            const rendition = plan.audioRenditions[hlsIndex];
+            if (!rendition || rendition.hlsIndex !== hlsIndex) return line;
+            const generatedName = controlledAudioRenditionName(plan, rendition);
+            return line.replace(/NAME="audio_\d+"/i, `NAME="${generatedName}"`);
+        })
+        .join('\n');
+}
+
+function rewritePlaylistSegments(playlist, token, session = null) {
+    const encodedToken = encodeURIComponent(token);
+    return rewriteMultiAudioMasterNames(playlist, session)
         .split(/\r?\n/)
         .map((line) => {
             const trimmed = line.trim();
             if (!trimmed) return line;
-            if (trimmed.startsWith('#EXT-X-MAP')) {
-                return line.replace(/URI="([^"]+)"/i, (_match, uri) => `URI="${appendToken(uri, encodedToken)}"`);
+            if (trimmed.startsWith('#')) {
+                // Master audio renditions and media init maps both carry URIs
+                // inside tag attributes. Tokenize every URI attribute so new
+                // HLS tags cannot accidentally create an unauthenticated edge.
+                return line.replace(/URI="([^"]+)"/gi, (_match, uri) => (
+                    `URI="${appendToken(uri, encodedToken)}"`
+                ));
             }
-            if (trimmed.startsWith('#')) return line;
             if (/^https?:\/\//i.test(trimmed)) return appendToken(trimmed, encodedToken);
             return appendToken(trimmed, encodedToken);
         })
@@ -8270,8 +9639,22 @@ function rewritePlaylistSegments(playlist, token) {
 }
 
 function appendToken(uri, encodedToken) {
-    if (/[?&]token=/.test(uri)) return uri;
-    return `${uri}${uri.includes('?') ? '&' : '?'}token=${encodedToken}`;
+    const raw = String(uri || '');
+    const localName = raw.split(/[?#]/, 1)[0];
+    // FFmpeg's HLS graph consists exclusively of controlled flat names. Refuse
+    // every absolute, scheme-relative or traversing URI before considering an
+    // existing query token, so a malformed playlist cannot exfiltrate the
+    // session bearer to another origin.
+    if (
+        !localName || localName !== path.basename(localName) ||
+        localName.includes('/') || localName.includes('\\') ||
+        !/^[a-z0-9][a-z0-9._-]*$/i.test(localName)
+    ) return raw;
+    if (/[?&]token=/.test(raw)) return raw;
+    const fragmentIndex = raw.indexOf('#');
+    const base = fragmentIndex >= 0 ? raw.slice(0, fragmentIndex) : raw;
+    const fragment = fragmentIndex >= 0 ? raw.slice(fragmentIndex) : '';
+    return `${base}${base.includes('?') ? '&' : '?'}token=${encodedToken}${fragment}`;
 }
 
 function sanitizeLog(text, sourceUrl) {

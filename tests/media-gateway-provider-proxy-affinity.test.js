@@ -237,8 +237,18 @@ test('gateway uses the canonical provider key on every provider network lane', (
   );
   assert.equal(
     gateway.match(/env: proxyEnvFor\(proxyKeyFromUrl\(url\)\)/g)?.length,
-    5,
-    'audio, audio chunks, storyboard, PGS OCR and frame OCR must each use the provider-account key',
+    4,
+    'audio chunks, storyboard, PGS OCR and frame OCR must each use the provider-account key',
+  );
+  assert.match(
+    gateway,
+    /const providerAccountKey = proxyKeyFromUrl\(providerSourceUrl\);[\s\S]{0,1800}env: strictLoopback \? loopbackOnlyEnv\(\) : proxyEnvFor\(providerAccountKey\)/,
+    'audio extraction must retain provider-account affinity while strict loopback bypasses child proxy env',
+  );
+  assert.match(
+    gateway,
+    /dispatcher:[\s\S]{0,160}pickProxyAgent\(proxyKeyFromUrl\(sourceUrl\)\)/,
+    'the strict LID broker must freeze the provider-account dispatcher before serving loopback',
   );
   assert.match(
     gateway,
@@ -288,7 +298,7 @@ test('gateway fails proxy 407 safely before provider 458 handling', () => {
 });
 
 test('gateway advertises targeted operator override support without identities or secrets', () => {
-  assert.match(gateway, /const GATEWAY_VERSION = 90;/);
+  assert.match(gateway, /const GATEWAY_VERSION = 91;/);
   assert.match(gateway, /providerProxyAffinityProtocol:\s*1/);
   assert.match(gateway, /providerProxyAffinityKey:\s*'provider-account'/);
   assert.match(gateway, /providerProxySlotOverrideProtocol:\s*1/);

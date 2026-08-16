@@ -190,13 +190,13 @@ test('v82 production detect-only is signed-scope only, non-strict and falls back
     path.join(root, 'services/media-gateway/src/index.js'),
     'utf8',
   );
-  const routeStart = gateway.indexOf("app.get('/detect-language/:token'");
+  const routeStart = gateway.indexOf('async function handleDetectLanguageRequest(');
   const routeEnd = gateway.indexOf('// Service-only A/B benchmark.', routeStart);
   assert.notEqual(routeStart, -1);
   assert.notEqual(routeEnd, -1);
   const route = gateway.slice(routeStart, routeEnd);
 
-  assert.match(gateway, /const GATEWAY_VERSION = 90/);
+  assert.match(gateway, /const GATEWAY_VERSION = 91/);
   assert.match(gateway, /const LID_DETECT_ONLY_SCOPE = 'lid-production-detect-only'/);
   assert.match(gateway, /const LID_SHADOW_SCOPE = 'lid-shadow'/);
   assert.match(

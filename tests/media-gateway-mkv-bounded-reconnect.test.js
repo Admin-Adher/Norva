@@ -1443,6 +1443,18 @@ function metadataHarness(overrides = {}) {
             const parsed = Number(value);
             return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
         },
+        fileSizeBytesForSession: (session) => {
+            const candidates = [
+                session?.fileSizeBytes,
+                session?.codecProfile?.fileSizeBytes,
+                session?.codecProfile?.file_size_bytes,
+            ];
+            for (const candidate of candidates) {
+                const parsed = Number(candidate);
+                if (Number.isSafeInteger(parsed) && parsed > 0) return parsed;
+            }
+            return null;
+        },
         estimateDurationFromFormat: overrides.estimateDurationFromFormat || (() => null),
         streamLanguage: (stream) => stringOrNull(stream?.tags?.language),
         streamTitle: (stream, fallback) => stringOrNull(stream?.tags?.title) || fallback,
@@ -1647,6 +1659,8 @@ test('the ready finite session parses, caches, merges and returns a strict local
     assert.equal(session.startupTimings.inbandCodecProfileComplete, true);
     assert.equal(headerByteCache.has(sourceUrl), false, 'per-startup header bytes are released');
     assert.equal(h.codecProfileCache.get(sourceUrl)?.profile?.probeSource, 'gateway_inband');
+    assert.equal(h.codecProfileCache.get(sourceUrl)?.profile?.fileSizeBytes, 100,
+        'the exact bounded size is joined to in-band metadata before caching');
 
     const source = readGateway();
     const route = sourceBetween(source, "app.post('/sessions'", "app.delete('/sessions/:id'");
@@ -2092,5 +2106,5 @@ test('FFmpeg MKV input uses pipe:0 only, keeps exact post-input resume, and tear
         'session handoff must close and await the provider socket before releasing the old FFmpeg',
     );
     assert.match(source, /boundedMkvInputPumpProtocol:\s*1/);
-    assert.match(source, /const GATEWAY_VERSION = 90;/);
+    assert.match(source, /const GATEWAY_VERSION = 91;/);
 });
