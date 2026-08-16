@@ -908,11 +908,11 @@ const STRICT_LID_REQUEST_BUDGET_MS = clampInt(
     225_000,
 );
 // Strict extraction must leave a full inference window inside the existing work deadline.
-// A 20 s speech window is long enough for LID while the additional 15 s covers remote seek,
+// A 20 s speech window is long enough for LID while the additional 25 s covers remote seek,
 // demux probing and WAV finalization. The per-window timer is further bounded by the remaining
 // extraction budget, so provider work can never consume Whisper's reserved minute.
 const STRICT_LID_SAMPLE_DURATION_CAP_SECONDS = 20;
-const STRICT_LID_EXTRACTION_STARTUP_MARGIN_MS = 15_000;
+const STRICT_LID_EXTRACTION_STARTUP_MARGIN_MS = 25_000;
 const STRICT_LID_WHISPER_RESERVE_MS = 60_000;
 
 function strictLidSampleDurationSeconds(rawDuration, strict) {
@@ -1181,9 +1181,15 @@ const STRICT_LID_DRAIN_RESPONSE_RESERVE_MS = Math.min(
     30_000,
     Math.max(10_000, PROVIDER_SLOT_RELEASE_DELAY_MS + 5_000),
 );
+const STRICT_LID_EXTRACTION_AGGREGATE_BUDGET_MS = Math.max(
+    0,
+    STRICT_LID_REQUEST_BUDGET_MS
+        - STRICT_LID_DRAIN_RESPONSE_RESERVE_MS
+        - STRICT_LID_WHISPER_RESERVE_MS,
+);
 // The broker's provider-range deadline has two independent phases. Headers or a continuously
 // flowing body must not consume the "open" timer forever: the first byte has its own deadline,
-// then every non-empty chunk rearms a shorter inactivity deadline. The outer 35 s ffmpeg timer
+// then every non-empty chunk rearms a shorter inactivity deadline. The outer 45 s ffmpeg timer
 // and the 155 s aggregate extraction budget remain the authoritative total-work bounds.
 const STRICT_LID_BROKER_FIRST_BYTE_TIMEOUT_MS = clampInt(
     process.env.STRICT_LID_BROKER_FIRST_BYTE_TIMEOUT_MS,
@@ -1198,8 +1204,8 @@ const STRICT_LID_BROKER_IDLE_TIMEOUT_MS = clampInt(
     30_000,
 );
 // libav must never abandon the private loopback before either the broker deadline or the outer
-// extraction deadline. This is microseconds (`-rw_timeout`) and intentionally exceeds 35 s.
-const STRICT_LID_FFMPEG_RW_TIMEOUT_US = 40_000_000;
+// extraction deadline. This is microseconds (`-rw_timeout`) and intentionally exceeds 45 s.
+const STRICT_LID_FFMPEG_RW_TIMEOUT_US = 50_000_000;
 // The finite-MKV input pump needs the exact terminal byte so every provider
 // request is bounded (`bytes=N-M`). A one-byte request supplies that size when
 // the exact codec profile did not already preserve ffprobe format.size.
@@ -1236,7 +1242,7 @@ const EXACT_MATROSKA_H264_MAX_HEIGHT = 1080;
 const EXACT_MATROSKA_H264_MAX_PIXELS = EXACT_MATROSKA_H264_MAX_WIDTH * EXACT_MATROSKA_H264_MAX_HEIGHT;
 const MULTI_AUDIO_HLS_PROTOCOL = 1;
 const MAX_MULTI_AUDIO_RENDITIONS = 8;
-const GATEWAY_VERSION = 100;
+const GATEWAY_VERSION = 101;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -1402,7 +1408,7 @@ app.get('/health', (req, res) => {
         strictLidActivityKindProtocol: 1,
         strictLidCjkEvidenceProtocol: 1,
         strictLidTranscriptDiversityProtocol: 1,
-        strictLidExtractionTimeoutProtocol: 1,
+        strictLidExtractionTimeoutProtocol: 2,
         strictLidBatchFailureProtocol: 1,
         strictLidTimelineSamplingProtocol: 1,
         strictLidRangeTimeoutProtocol: 2,
@@ -1412,6 +1418,7 @@ app.get('/health', (req, res) => {
         strictLidSampleDurationCapSeconds: STRICT_LID_SAMPLE_DURATION_CAP_SECONDS,
         strictLidWhisperReserveMs: STRICT_LID_WHISPER_RESERVE_MS,
         strictLidExtractionStartupMarginMs: STRICT_LID_EXTRACTION_STARTUP_MARGIN_MS,
+        strictLidExtractionAggregateBudgetMs: STRICT_LID_EXTRACTION_AGGREGATE_BUDGET_MS,
         strictLidRequestBudgetMs: STRICT_LID_REQUEST_BUDGET_MS,
         strictLidCapabilityHeader: 'X-Norva-Byte-Pipe-Token',
         strictLidCapabilityMethod: 'POST',
