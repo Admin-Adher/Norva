@@ -86,6 +86,11 @@ function pumpHarness(overrides = {}) {
         VOD_INPUT_MAX_RECONNECTS: 16,
         VOD_INPUT_RETRY_DELAYS_MS: [0, 0, 0, 0],
         VOD_INPUT_MIN_PROGRESS_RESET_BYTES: 8,
+        INBAND_HEADER_PARSE: false,
+        BOUNDED_MKV_HEADER_PARSE: false,
+        INBAND_HEADER_BYTES: 4_000_000,
+        INBAND_HEADER_CACHE_MAX: 16,
+        headerByteCache: new Map(),
         RAW_PREFIX_SNIFF_BYTES: 512,
         FFMPEG_USER_AGENT: 'Norva/Test',
         providerProxyAgents: [],
@@ -102,6 +107,7 @@ function pumpHarness(overrides = {}) {
             value !== undefined && value !== null && value !== ''
         ))),
         normalizeCodecToken: (value) => String(value || '').toLowerCase().replace(/[^a-z0-9.]+/g, ''),
+        hasCompleteMkvPlaybackProfile: () => false,
         isLiveSession: (session) => ['live', 'channel'].includes(String(
             session?.playbackHint?.streamType || session?.playbackHint?.stream_type || '',
         ).toLowerCase()),
@@ -130,6 +136,7 @@ function pumpHarness(overrides = {}) {
             boundedVodResponseValidator,
             writeVodInputChunk,
             finishVodInput,
+            captureBoundedMkvHeaderBytes,
             runBoundedMkvInputPump,
             startBoundedMkvInputPump,
             stopBoundedMkvInputPump,
@@ -1227,6 +1234,7 @@ test('an extensionless cached Matroska profile becomes finite after merge withou
             codecProfileCache,
             probeStats: { cacheHits: 0, inbandHits: 0 },
             INBAND_HEADER_PARSE: true,
+            BOUNDED_MKV_HEADER_PARSE: false,
             probeFromHeaderBytes: async () => { throw new Error('cache hit must precede in-band parsing'); },
             hasUsefulCodecProfile: () => true,
             cacheCodecProfile: () => {},
@@ -1271,6 +1279,517 @@ test('an extensionless cached Matroska profile becomes finite after merge withou
     assert.equal(session.startupTimings.boundedMkvInputPump, true);
     assert.equal(session.fileSizeBytes, cachedProfile.fileSizeBytes);
     assert.equal(boundedPreflightFetches, 0);
+});
+
+test('the bounded MKV pump tees one exact leading prefix without another provider request', async () => {
+    const file = Buffer.from([
+        0x1a, 0x45, 0xdf, 0xa3,
+        4, 5, 6, 7, 8, 9, 10, 11,
+    ]);
+    const cache = new Map();
+    const tracker = makeTracker();
+    let fetches = 0;
+    const h = pumpHarness({
+        INBAND_HEADER_PARSE: true,
+        BOUNDED_MKV_HEADER_PARSE: true,
+        INBAND_HEADER_BYTES: 8,
+        INBAND_HEADER_CACHE_MAX: 2,
+        headerByteCache: cache,
+        fetch: async (_url, options) => {
+            fetches += 1;
+            const start = Number(/^bytes=(\d+)-/.exec(options.headers.Range)?.[1] || 0);
+            return trackedResponse(tracker, {
+                chunks: [file.subarray(start, start + 5), file.subarray(start + 5)],
+                headers: {
+                    'content-range': `bytes ${start}-${file.length - 1}/${file.length}`,
+                    'content-length': String(file.length - start),
+                },
+            });
+        },
+    });
+    const written = [];
+    const writable = new Writable({ write(chunk, _enc, callback) { written.push(Buffer.from(chunk)); callback(); } });
+    const session = {
+        id: 'capture-session',
+        sourceUrl: 'https://provider.example/movie/account/capture.mkv',
+        playbackHint: { streamType: 'movie', container: 'mkv' },
+        codecProfile: { container: 'matroska,webm', fileSizeBytes: file.length },
+    };
+
+    await h.runBoundedMkvInputPump(session, writable, new AbortController().signal, null);
+    assert.equal(fetches, 1, 'header capture must reuse the playback request');
+    assert.deepEqual(Buffer.concat(written), file);
+    const entry = cache.get(session.sourceUrl);
+    assert.ok(entry);
+    assert.equal(entry.len, 8);
+    assert.equal(entry.done, true);
+    assert.deepEqual(Buffer.concat(entry.chunks), file.subarray(0, 8));
+    assert.equal(tracker.maxActive, 1);
+});
+
+function exactMetadataPayload() {
+    return {
+        streams: [
+            { index: 0, codec_type: 'video', codec_name: 'h264', width: 1920, height: 1080 },
+            {
+                index: 1,
+                codec_type: 'audio',
+                codec_name: 'eac3',
+                channels: 6,
+                tags: { language: 'fre', title: 'Fran\u00e7ais' },
+                disposition: { default: 0 },
+            },
+            {
+                index: 2,
+                codec_type: 'audio',
+                codec_name: 'eac3',
+                channels: 6,
+                tags: { language: 'jpn', title: 'Japanese' },
+                disposition: { default: 1 },
+            },
+        ],
+        format: { format_name: 'matroska,webm', duration: '7248.032' },
+    };
+}
+
+function completeMatroskaPrefix(byteLength) {
+    const length = Math.max(20, Number(byteLength) || 20);
+    const bytes = Buffer.alloc(length);
+    Buffer.from([0x1a, 0x45, 0xdf, 0xa3]).copy(bytes, 0);
+    bytes[4] = 0x80; // finite zero-byte EBML header payload
+    Buffer.from([0x18, 0x53, 0x80, 0x67, 0xff]).copy(bytes, 5); // unknown-size Segment
+    Buffer.from([0x15, 0x49, 0xa9, 0x66, 0x80]).copy(bytes, 10); // complete Info
+    Buffer.from([0x16, 0x54, 0xae, 0x6b, 0x80]).copy(bytes, 15); // complete Tracks
+    return bytes;
+}
+
+function metadataHarness(overrides = {}) {
+    const source = readGateway();
+    const snippets = [
+        sourceBetween(source, 'function buildCodecProfile(', '\n// Store a successful profile'),
+        sourceBetween(source, 'function cacheCodecProfile(', '\n// Run ffprobe on the in-band-captured'),
+        sourceBetween(source, 'function readEbmlElementSize(', '\nasync function probeFromHeaderBytes('),
+        sourceBetween(source, 'async function probeFromHeaderBytes(', '\n// Cached front for probeCodecProfileUncached'),
+        sourceBetween(source, 'function mergeCodecProfiles(', '\nfunction shouldProbeMissingSubtitleTracks('),
+        sourceBetween(source, 'function selectedAudioTrackForSession(', '\nfunction isKnownBrowserSafeAudio('),
+        sourceBetween(source, 'function hasCompleteMkvPlaybackProfile(', '\nasync function waitForPlaylist('),
+        sourceBetween(
+            source,
+            'async function enrichSessionCodecProfileFromBoundedHeader(',
+            '\nasync function stopBoundedMkvInputPump(',
+        ),
+    ].join('\n');
+    const headerByteCache = overrides.headerByteCache || new Map();
+    const codecProfileCache = overrides.codecProfileCache || new Map();
+    const ffprobeCalls = [];
+    const writes = [];
+    const unlinks = [];
+    const runFfprobeImpl = overrides.runFfprobe || (async () => exactMetadataPayload());
+    const fsp = {
+        mkdir: async () => {},
+        writeFile: async (file, bytes) => { writes.push({ file, bytes: Buffer.from(bytes) }); },
+        unlink: async (file) => { unlinks.push(file); },
+        ...overrides.fsp,
+    };
+    const nullableInt = (value) => {
+        if (value === null || value === undefined || value === '') return null;
+        const parsed = Number.parseInt(String(value), 10);
+        return Number.isFinite(parsed) ? parsed : null;
+    };
+    const stringOrNull = (value) => {
+        if (typeof value === 'string' && value.trim()) return value.trim();
+        if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+        if (typeof value === 'boolean') return String(value);
+        return null;
+    };
+    const globals = {
+        Buffer,
+        path,
+        Date,
+        BOUNDED_MKV_HEADER_PARSE: true,
+        MAX_MATROSKA_METADATA_ELEMENTS: 4_096,
+        CODEC_PROFILE_CACHE_TTL_MS: 60_000,
+        CODEC_PROFILE_CACHE_MAX: 16,
+        CODEC_PROBE_ANALYZE_DURATION_US: 4_000_000,
+        CODEC_PROBE_TIMEOUT_MS: 5_000,
+        OUTPUT_DIR: '/virtual/norva-gateway-test',
+        headerByteCache,
+        codecProfileCache,
+        fsp,
+        crypto: { randomBytes: () => Buffer.alloc(8, 0x5a) },
+        runFfprobe: async (...args) => {
+            ffprobeCalls.push(args);
+            return runFfprobeImpl(...args);
+        },
+        isFiniteMkvVodSession: () => true,
+        asRecord: (value) => value && typeof value === 'object' && !Array.isArray(value) ? value : {},
+        stringOrNull,
+        nullableInt,
+        nullableFloat: (value) => {
+            if (value === null || value === undefined || value === '') return null;
+            const parsed = Number.parseFloat(String(value));
+            return Number.isFinite(parsed) ? parsed : null;
+        },
+        normalizeAudioStreamIndex: (value) => {
+            const parsed = nullableInt(value);
+            return Number.isInteger(parsed) && parsed >= 0 && parsed <= 1024 ? parsed : null;
+        },
+        normalizeCodecToken: (value) => String(value || '').toLowerCase().replace(/[^a-z0-9.]+/g, ''),
+        compactRecord: (record) => Object.fromEntries(Object.entries(record || {}).filter(([, value]) => (
+            value !== undefined && value !== null && value !== '' &&
+            !(typeof value === 'number' && !Number.isFinite(value))
+        ))),
+        normalizeFileSizeBytes: (value) => {
+            const parsed = Number(value);
+            return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+        },
+        estimateDurationFromFormat: overrides.estimateDurationFromFormat || (() => null),
+        streamLanguage: (stream) => stringOrNull(stream?.tags?.language),
+        streamTitle: (stream, fallback) => stringOrNull(stream?.tags?.title) || fallback,
+        subtitleKind: (codec) => ['subrip', 'ass', 'ssa', 'webvtt', 'mov_text'].includes(String(codec || ''))
+            ? 'text'
+            : 'image',
+        hasUsefulCodecProfile: (profile) => Boolean(
+            stringOrNull(profile?.videoCodec) || stringOrNull(profile?.audioCodec) ||
+            (Array.isArray(profile?.audioTracks) && profile.audioTracks.length > 0) ||
+            (Array.isArray(profile?.subtitles) && profile.subtitles.length > 0)
+        ),
+    };
+    const functions = vm.runInNewContext(
+        `(() => { ${snippets}; return {
+            buildCodecProfile,
+            cacheCodecProfile,
+            hasCompleteMatroskaMetadataPrefix,
+            probeFromHeaderBytes,
+            mergeCodecProfiles,
+            selectedAudioTrackForSession,
+            mappedAudioStreamIndexForSession,
+            hasCompleteMkvPlaybackProfile,
+            enrichSessionCodecProfileFromBoundedHeader,
+        }; })()`,
+        globals,
+    );
+    return { ...functions, headerByteCache, codecProfileCache, ffprobeCalls, writes, unlinks };
+}
+
+test('the structural completeness check walks real top-level Matroska elements, not SeekHead references', () => {
+    const h = metadataHarness();
+    const fixture = fs.readFileSync(path.join(ROOT, 'public/webengine/media/s_h264_ac3.mkv'));
+    assert.equal(h.hasCompleteMatroskaMetadataPrefix(fixture), true);
+
+    const tracksId = Buffer.from([0x16, 0x54, 0xae, 0x6b]);
+    const tracksAt = fixture.lastIndexOf(tracksId);
+    assert.ok(tracksAt > 0);
+    assert.equal(
+        h.hasCompleteMatroskaMetadataPrefix(fixture.subarray(0, tracksAt + tracksId.length)),
+        false,
+        'an element ID or SeekHead reference without its complete payload is not proof',
+    );
+});
+
+test('the structural completeness check fails closed after a bounded number of top-level elements', () => {
+    const h = metadataHarness();
+    const ebmlHeader = Buffer.from([0x1a, 0x45, 0xdf, 0xa3, 0x80]);
+    const unknownSegment = Buffer.from([0x18, 0x53, 0x80, 0x67, 0xff]);
+    const info = Buffer.from([0x15, 0x49, 0xa9, 0x66, 0x80]);
+    const tracks = Buffer.from([0x16, 0x54, 0xae, 0x6b, 0x80]);
+    const voidElement = Buffer.from([0xec, 0x80]);
+    const prefixWithVoids = (count) => Buffer.concat([
+        ebmlHeader,
+        unknownSegment,
+        Buffer.alloc(count * voidElement.length, voidElement),
+        info,
+        tracks,
+    ]);
+
+    assert.equal(
+        h.hasCompleteMatroskaMetadataPrefix(prefixWithVoids(4_094)),
+        true,
+        'Info and Tracks at the deterministic inspection boundary remain accepted',
+    );
+    assert.equal(
+        h.hasCompleteMatroskaMetadataPrefix(prefixWithVoids(4_096)),
+        false,
+        'excessive Void padding is rejected before an unbounded synchronous walk',
+    );
+});
+
+function completeInbandProfile(overrides = {}) {
+    return {
+        container: 'matroska,webm',
+        metadataComplete: true,
+        durationSeconds: 7_248.032,
+        videoCodec: 'h264',
+        audioTracks: [
+            { index: 1, language: 'fre', codec: 'eac3' },
+            { index: 2, language: 'jpn', codec: 'eac3' },
+        ],
+        subtitles: [],
+        probeSource: 'gateway_inband',
+        probedAt: '2026-08-16T12:00:00.000Z',
+        ...overrides,
+    };
+}
+
+test('only a dated in-band Matroska profile with complete unique stream families is authoritative', async (t) => {
+    const h = metadataHarness();
+    const complete = completeInbandProfile();
+    assert.equal(h.hasCompleteMkvPlaybackProfile(complete), true,
+        'an explicit empty subtitle family is complete and authoritative');
+
+    const incompleteProfiles = [
+        ['duration', { durationSeconds: undefined }],
+        ['complete EBML metadata proof', { metadataComplete: undefined }],
+        ['audio family', { audioTracks: undefined }],
+        ['subtitle family', { subtitles: undefined }],
+        ['probe source', { probeSource: undefined }],
+        ['probe timestamp', { probedAt: undefined }],
+        ['video codec', { videoCodec: undefined }],
+        ['unique audio indexes', { audioTracks: [{ index: 1 }, { index: 1 }] }],
+    ];
+    for (const [name, missing] of incompleteProfiles) {
+        await t.test(`rejects missing ${name}`, () => {
+            assert.equal(h.hasCompleteMkvPlaybackProfile(completeInbandProfile(missing)), false);
+        });
+    }
+});
+
+test('an in-band prefix never invents VOD duration or bitrate from its temporary file', () => {
+    const h = metadataHarness({
+        estimateDurationFromFormat: (format) => Number(format.size) * 8 / Number(format.bit_rate),
+    });
+    const payload = exactMetadataPayload();
+    delete payload.format.duration;
+    payload.format.size = '4000000';
+    payload.format.bit_rate = '8000000';
+    const profile = h.buildCodecProfile(payload, Date.now(), 'gateway_inband');
+    assert.equal(profile.durationSeconds, undefined);
+    assert.equal(profile.bitRate, undefined);
+    assert.equal(h.hasCompleteMkvPlaybackProfile({
+        ...profile,
+        metadataComplete: true,
+    }), false);
+});
+
+test('finishing a local probe never deletes a newer header entry from another owner', async () => {
+    const sourceUrl = 'https://provider.example/movie/account/owner-race.mkv';
+    const original = {
+        chunks: [completeMatroskaPrefix(300_000)],
+        len: 300_000,
+        done: true,
+        captureOwner: 'owner-race-session',
+    };
+    const headerByteCache = new Map([[sourceUrl, original]]);
+    let releaseProbe;
+    const probeReleased = new Promise((resolve) => { releaseProbe = resolve; });
+    let markStarted;
+    const started = new Promise((resolve) => { markStarted = resolve; });
+    const h = metadataHarness({
+        headerByteCache,
+        runFfprobe: async () => {
+            markStarted();
+            await probeReleased;
+            return exactMetadataPayload();
+        },
+    });
+    const session = {
+        id: 'owner-race-session',
+        sourceUrl,
+        playbackHint: { streamType: 'movie', container: 'mkv' },
+        codecProfile: { fileSizeBytes: 100 },
+        startupTimings: {},
+    };
+    const pending = h.enrichSessionCodecProfileFromBoundedHeader(session);
+    await started;
+    const replacement = {
+        chunks: [completeMatroskaPrefix(300_000)],
+        len: 300_000,
+        done: true,
+        captureOwner: 'new-owner',
+    };
+    headerByteCache.set(sourceUrl, replacement);
+    releaseProbe();
+    assert.equal(await pending, true);
+    assert.equal(headerByteCache.get(sourceUrl), replacement);
+});
+
+test('the ready finite session parses, caches, merges and returns a strict local profile before 201', async () => {
+    const sourceUrl = 'https://provider.example/movie/account/metadata.mkv';
+    const headerByteCache = new Map([[sourceUrl, {
+        chunks: [completeMatroskaPrefix(300_000)],
+        len: 300_000,
+        done: true,
+        capturing: false,
+        captureOwner: 'metadata-session',
+    }]]);
+    const h = metadataHarness({ headerByteCache });
+    const session = {
+        id: 'metadata-session',
+        sourceUrl,
+        userAgent: 'Norva/Test',
+        playbackHint: { streamType: 'movie', container: 'mkv' },
+        codecProfile: { fileSizeBytes: 100 },
+        codecProfileSource: '',
+        startupTimings: {},
+    };
+
+    assert.equal(await h.enrichSessionCodecProfileFromBoundedHeader(session), true);
+    assert.equal(h.ffprobeCalls.length, 1);
+    assert.equal(h.hasCompleteMkvPlaybackProfile(session.codecProfile), true);
+    assert.equal(session.codecProfile.durationSeconds, 7_248.032);
+    assert.equal(session.codecProfile.audioTracks.length, 2);
+    assert.equal(Array.isArray(session.codecProfile.subtitles), true);
+    assert.equal(session.codecProfile.subtitles.length, 0);
+    assert.equal(session.codecProfile.probeSource, 'gateway_inband');
+    assert.equal(Number.isFinite(Date.parse(session.codecProfile.probedAt)), true);
+    assert.equal(session.codecProfileSource, 'gateway_inband');
+    assert.equal(session.startupTimings.inbandCodecProfileApplied, true);
+    assert.equal(session.startupTimings.inbandCodecProfileComplete, true);
+    assert.equal(headerByteCache.has(sourceUrl), false, 'per-startup header bytes are released');
+    assert.equal(h.codecProfileCache.get(sourceUrl)?.profile?.probeSource, 'gateway_inband');
+
+    const source = readGateway();
+    const route = sourceBetween(source, "app.post('/sessions'", "app.delete('/sessions/:id'");
+    const enrichAt = route.indexOf('await enrichSessionCodecProfileFromBoundedHeader(');
+    assert.match(route, /await enrichSessionCodecProfileFromBoundedHeader\(\s*session,\s*sessionRequestAbortController\.signal,?\s*\)/);
+    assert.ok(enrichAt > route.indexOf('const started = await startSessionWithProviderRetry('));
+    assert.ok(enrichAt < route.indexOf('res.status(201).json({'));
+});
+
+test('cold 0:a:0 fallback reports the first actual audio index instead of the requested later index', async () => {
+    const sourceUrl = 'https://provider.example/movie/account/cold-map.mkv';
+    const headerByteCache = new Map([[sourceUrl, {
+        chunks: [completeMatroskaPrefix(300_000)],
+        len: 300_000,
+        done: true,
+        captureOwner: 'cold-map-session',
+    }]]);
+    const h = metadataHarness({ headerByteCache });
+    const session = {
+        id: 'cold-map-session',
+        sourceUrl,
+        playbackHint: { streamType: 'movie', container: 'mkv' },
+        codecProfile: { fileSizeBytes: 100 },
+        audioStreamIndex: 2,
+        actualAudioMap: '0:a:0',
+        startupTimings: {},
+    };
+
+    assert.equal(await h.enrichSessionCodecProfileFromBoundedHeader(session), true);
+    assert.equal(session.actualMappedAudioStreamIndex, 1);
+    assert.equal(h.mappedAudioStreamIndexForSession(session), 1);
+    assert.notEqual(h.mappedAudioStreamIndexForSession(session), session.audioStreamIndex);
+});
+
+test('a new bounded owner replaces a stale partial prefix and invalid EBML is cleaned after enrichment', async () => {
+    const sourceUrl = 'https://provider.example/movie/account/takeover.mkv';
+    const stale = Buffer.from([0x1a, 0x45, 0xdf, 0xa3]);
+    const invalid = Buffer.from('not-ebml');
+    const headerByteCache = new Map([[sourceUrl, {
+        chunks: [stale],
+        len: stale.length,
+        done: false,
+        capturing: true,
+        captureOwner: 'old-owner',
+    }]]);
+    const pump = pumpHarness({
+        BOUNDED_MKV_HEADER_PARSE: true,
+        INBAND_HEADER_BYTES: invalid.length,
+        INBAND_HEADER_CACHE_MAX: 2,
+        headerByteCache,
+    });
+    const session = {
+        id: 'new-owner',
+        sourceUrl,
+        playbackHint: { streamType: 'movie', container: 'mkv' },
+        codecProfile: { container: 'matroska,webm', fileSizeBytes: invalid.length },
+        startupTimings: {},
+    };
+
+    pump.captureBoundedMkvHeaderBytes(session, 0, invalid);
+    const replacement = headerByteCache.get(sourceUrl);
+    assert.equal(replacement.captureOwner, 'new-owner');
+    assert.deepEqual(Buffer.concat(replacement.chunks), invalid);
+    assert.equal(replacement.done, true);
+
+    let invalidProbeCalls = 0;
+    const h = metadataHarness({
+        headerByteCache,
+        runFfprobe: async () => {
+            invalidProbeCalls += 1;
+            throw new Error('Invalid data found when processing input');
+        },
+    });
+    assert.equal(await h.enrichSessionCodecProfileFromBoundedHeader(session), false);
+    assert.equal(invalidProbeCalls, 1);
+    assert.equal(headerByteCache.has(sourceUrl), false);
+    assert.equal(session.startupTimings.inbandCodecProfileApplied, false);
+    assert.equal(session.startupTimings.inbandCodecProfileComplete, false);
+});
+
+test('request abort reaches an active local ffprobe and still releases the captured prefix', async () => {
+    const sourceUrl = 'https://provider.example/movie/account/abort-local-probe.mkv';
+    const headerByteCache = new Map([[sourceUrl, {
+        chunks: [completeMatroskaPrefix(300_000)],
+        len: 300_000,
+        done: true,
+        captureOwner: 'abort-session',
+    }]]);
+    let signalSeen = null;
+    let markStarted;
+    const started = new Promise((resolve) => { markStarted = resolve; });
+    const h = metadataHarness({
+        headerByteCache,
+        runFfprobe: async (_args, _timeoutMs, _sourceUrl, options) => {
+            signalSeen = options.signal;
+            markStarted();
+            return new Promise((_resolve, reject) => {
+                const abort = () => reject(Object.assign(new Error('Codec probe aborted'), {
+                    code: 'VOD_INPUT_ABORTED',
+                }));
+                options.signal.addEventListener('abort', abort, { once: true });
+                if (options.signal.aborted) abort();
+            });
+        },
+    });
+    const controller = new AbortController();
+    const session = {
+        id: 'abort-session',
+        sourceUrl,
+        playbackHint: { streamType: 'movie', container: 'mkv' },
+        codecProfile: { container: 'matroska,webm', fileSizeBytes: 300_000 },
+        startupTimings: {},
+    };
+    const pending = h.enrichSessionCodecProfileFromBoundedHeader(session, controller.signal);
+    await started;
+    controller.abort();
+
+    assert.equal(await pending, false);
+    assert.equal(signalSeen, controller.signal);
+    assert.equal(signalSeen.aborted, true);
+    assert.equal(headerByteCache.has(sourceUrl), false);
+});
+
+test('local ffprobe probesize spans every retained header byte beyond the legacy 2 MB cap', async () => {
+    const sourceUrl = 'https://provider.example/movie/account/large-header.mkv';
+    const byteLength = 2_500_123;
+    const headerByteCache = new Map([[sourceUrl, {
+        chunks: [completeMatroskaPrefix(byteLength)],
+        len: byteLength,
+        done: true,
+        captureOwner: 'large-header-session',
+    }]]);
+    const h = metadataHarness({ headerByteCache });
+
+    const profile = await h.probeFromHeaderBytes(sourceUrl);
+    assert.equal(h.hasCompleteMkvPlaybackProfile(profile), true);
+    assert.equal(h.ffprobeCalls.length, 1);
+    const args = h.ffprobeCalls[0][0];
+    const probeSizeAt = args.indexOf('-probesize');
+    assert.notEqual(probeSizeAt, -1);
+    assert.equal(args[probeSizeAt + 1], String(byteLength));
+    assert.ok(Number(args[probeSizeAt + 1]) > 2_000_000);
+    assert.equal(h.writes[0].bytes.length, byteLength);
 });
 
 test('viewer startup admission is bounded, provider-first and abort-aware before QoS reservation', async () => {
@@ -1573,5 +2092,5 @@ test('FFmpeg MKV input uses pipe:0 only, keeps exact post-input resume, and tear
         'session handoff must close and await the provider socket before releasing the old FFmpeg',
     );
     assert.match(source, /boundedMkvInputPumpProtocol:\s*1/);
-    assert.match(source, /const GATEWAY_VERSION = 89;/);
+    assert.match(source, /const GATEWAY_VERSION = 90;/);
 });

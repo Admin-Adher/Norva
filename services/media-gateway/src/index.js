@@ -702,7 +702,16 @@ const CODEC_PROFILE_CACHE_MAX = clampInt(process.env.CODEC_PROFILE_CACHE_MAX, 5_
 // front); falls back to the provider probe when the local bytes don't parse (e.g. an
 // MP4 with moov at the end). Memory is bounded by bytes/entry × entries.
 const INBAND_HEADER_PARSE = (process.env.INBAND_HEADER_PARSE || 'false') === 'true';
+// The finite-MKV pump is already the sole provider socket and can safely tee its
+// prefix. Keep this independent from the older /raw experiment so exact playback
+// metadata works by default without enabling capture on every raw byte-pipe.
+const BOUNDED_MKV_HEADER_PARSE = (process.env.BOUNDED_MKV_HEADER_PARSE || 'true') !== 'false';
 const INBAND_HEADER_BYTES = clampInt(process.env.INBAND_HEADER_BYTES, 4_000_000, 256_000, 32_000_000);
+// A valid Matroska file normally exposes Info and Tracks within a handful of
+// top-level Segment elements. Bound the synchronous structural walk so a file
+// padded with millions of tiny Void elements cannot monopolize the Node event
+// loop before the local ffprobe result is accepted.
+const MAX_MATROSKA_METADATA_ELEMENTS = 4_096;
 const INBAND_HEADER_CACHE_MAX = clampInt(process.env.INBAND_HEADER_CACHE_MAX, 16, 0, 256);
 const INBAND_HEADER_TTL_MS = clampInt(process.env.INBAND_HEADER_TTL_MS, 5 * 60 * 1000, 0, 60 * 60 * 1000);
 // whisper.cpp audio-track language detection (Phase 2, self-hosted / free). Unset WHISPER_BIN
@@ -972,7 +981,7 @@ const EXACT_MATROSKA_H264_HLS_TARGET_SECONDS = 2;
 const EXACT_MATROSKA_H264_MAX_WIDTH = 1920;
 const EXACT_MATROSKA_H264_MAX_HEIGHT = 1080;
 const EXACT_MATROSKA_H264_MAX_PIXELS = EXACT_MATROSKA_H264_MAX_WIDTH * EXACT_MATROSKA_H264_MAX_HEIGHT;
-const GATEWAY_VERSION = 89;
+const GATEWAY_VERSION = 90;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -1228,6 +1237,7 @@ app.get('/health', (req, res) => {
         argosInferenceActive,
         lidBenchmarkBusy,
         inbandHeaderParse: INBAND_HEADER_PARSE,
+        boundedMkvHeaderParse: BOUNDED_MKV_HEADER_PARSE,
         headerByteCacheSize: headerByteCache.size,
         activeSessions: activeSessionCount(),
         totalSessions: sessions.size,
@@ -5380,6 +5390,15 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
                 details: detail
             });
         }
+        // The pump has already forwarded several megabytes by the time the HLS
+        // readiness buffer exists. Parse that local prefix now, while retaining
+        // the same provider socket, so the 201 response carries duration and all
+        // audio tracks even on a cold exact-file cache.
+        await enrichSessionCodecProfileFromBoundedHeader(
+            session,
+            sessionRequestAbortController.signal,
+        );
+        if (sessionRequestAbortController.signal.aborted) throw new Error('Session request aborted');
         const startOffsetProbeStartedAt = Date.now();
         await observeSessionStartOffset(session);
         if (sessionRequestAbortController.signal.aborted) throw new Error('Session request aborted');
@@ -6051,6 +6070,66 @@ async function closeVodInputAttempt(attempt) {
     }
 }
 
+// The finite-MKV lane already owns a single, strictly sequential provider
+// socket. Reuse its leading bytes for a LOCAL ffprobe instead of opening the
+// source URL again: this gives the browser an exact duration and complete track
+// map without violating mono-account providers. The cache is shared with the
+// historical /raw tee and keeps the same bounded memory/entry limits.
+function captureBoundedMkvHeaderBytes(session, byteOffset, chunk) {
+    if (!BOUNDED_MKV_HEADER_PARSE || INBAND_HEADER_BYTES <= 0 || INBAND_HEADER_CACHE_MAX <= 0) return;
+    if (hasCompleteMkvPlaybackProfile(session?.codecProfile)) return;
+    const sourceUrl = String(session?.sourceUrl || '');
+    const offset = Number(byteOffset);
+    if (!sourceUrl || !Number.isSafeInteger(offset) || offset < 0 || !chunk?.length) return;
+
+    let entry = headerByteCache.get(sourceUrl);
+    const captureOwner = String(session?.id || sourceUrl);
+    // A stopped/failed startup can leave an incomplete prefix behind. The
+    // provider lease guarantees that a new finite-MKV pump is the sole holder,
+    // so byte zero from a different session is authoritative and must replace
+    // that stale evidence instead of silently disabling metadata discovery.
+    if (entry && offset === 0 && entry.captureOwner !== captureOwner) {
+        headerByteCache.delete(sourceUrl);
+        entry = null;
+    }
+    if (!entry) {
+        if (offset !== 0) return;
+        while (headerByteCache.size >= INBAND_HEADER_CACHE_MAX) {
+            const oldest = headerByteCache.keys().next().value;
+            if (oldest === undefined) return;
+            headerByteCache.delete(oldest);
+        }
+        entry = {
+            chunks: [],
+            len: 0,
+            done: false,
+            capturing: true,
+            captureOwner,
+            updatedAt: Date.now(),
+        };
+        headerByteCache.set(sourceUrl, entry);
+    }
+    if (entry.done) return;
+    // Never interleave a /raw capture, another session, or a resumed range.
+    if (entry.captureOwner !== captureOwner || offset !== entry.len) return;
+
+    const available = INBAND_HEADER_BYTES - entry.len;
+    if (available <= 0) {
+        entry.done = true;
+        entry.capturing = false;
+        return;
+    }
+    const take = Math.min(available, chunk.length);
+    if (take <= 0) return;
+    entry.chunks.push(Buffer.from(chunk.subarray(0, take)));
+    entry.len += take;
+    entry.updatedAt = Date.now();
+    if (entry.len >= INBAND_HEADER_BYTES) {
+        entry.done = true;
+        entry.capturing = false;
+    }
+}
+
 async function openBoundedVodInputAttempt(session, offset, parentSignal, dispatcher) {
     const fileSizeBytes = fileSizeBytesForSession(session);
     const controller = new AbortController();
@@ -6180,6 +6259,7 @@ async function runBoundedMkvInputPump(session, writable, signal, dispatcher) {
                 if (offset + chunk.length > range.end + 1 || offset + chunk.length > fileSizeBytes) {
                     throw vodInputPumpError('RANGE_UNSUPPORTED', 'Provider exceeded the declared MKV byte range', { status: 502 });
                 }
+                captureBoundedMkvHeaderBytes(session, offset, chunk);
                 if (!prefixValidated) {
                     const needed = Math.max(0, 4 - prefixBuffer.length);
                     const prefixPart = chunk.subarray(0, needed);
@@ -6285,6 +6365,10 @@ function startBoundedMkvInputPump(session, writable) {
         })
         .catch((error) => {
             pump.error = error;
+            const captured = headerByteCache.get(session.sourceUrl);
+            if (captured?.captureOwner === String(session?.id || session.sourceUrl)) {
+                headerByteCache.delete(session.sourceUrl);
+            }
             if (error?.code !== 'VOD_INPUT_ABORTED') {
                 vodInputPumpStats.failures += 1;
                 vodInputPumpStats.last = {
@@ -6298,6 +6382,61 @@ function startBoundedMkvInputPump(session, writable) {
         .finally(() => { pump.completed = true; });
     session.inputPump = pump;
     return pump;
+}
+
+async function enrichSessionCodecProfileFromBoundedHeader(session, signal = null) {
+    if (!BOUNDED_MKV_HEADER_PARSE || !isFiniteMkvVodSession(session)) return false;
+    if (hasCompleteMkvPlaybackProfile(session?.codecProfile)) {
+        const captured = headerByteCache.get(session.sourceUrl);
+        if (captured?.captureOwner === String(session?.id || session.sourceUrl)) {
+            headerByteCache.delete(session.sourceUrl);
+        }
+        return true;
+    }
+
+    const startedAt = Date.now();
+    const capturedEntry = headerByteCache.get(session.sourceUrl);
+    let local = null;
+    try {
+        // Bypass the general cache: a useful-but-partial historical entry must
+        // not hide the fuller prefix captured by this exact playback.
+        local = await probeFromHeaderBytes(session.sourceUrl, { signal });
+    } finally {
+        // The prefix is per-startup evidence. Release its bounded memory even
+        // when a malformed/truncated header cannot be parsed.
+        if (headerByteCache.get(session.sourceUrl) === capturedEntry) {
+            headerByteCache.delete(session.sourceUrl);
+        }
+    }
+    session.startupTimings = asRecord(session.startupTimings);
+    session.startupTimings.inbandCodecProfileMs = Math.max(0, Date.now() - startedAt);
+    if (!hasCompleteMkvPlaybackProfile(local)) {
+        session.startupTimings.inbandCodecProfileApplied = false;
+        session.startupTimings.inbandCodecProfileComplete = false;
+        return false;
+    }
+    cacheCodecProfile(session.sourceUrl, local);
+    session.codecProfile = mergeCodecProfiles(session.codecProfile, local);
+    if (
+        !Number.isInteger(normalizeAudioStreamIndex(session.actualMappedAudioStreamIndex)) &&
+        String(session.actualAudioMap || '').startsWith('0:a:0')
+    ) {
+        // `0:a:0` means the first audio stream in file order. Freeze that
+        // actual index now that the local header supplied the exact map; never
+        // relabel the already-running HLS as a later requested/default track.
+        const tracks = Array.isArray(session.codecProfile?.audioTracks)
+            ? session.codecProfile.audioTracks
+            : [];
+        const firstIndex = normalizeAudioStreamIndex(tracks[0]?.index);
+        session.actualMappedAudioStreamIndex = Number.isInteger(firstIndex) ? firstIndex : null;
+    }
+    session.codecProfileSource = session.codecProfileSource
+        ? `${session.codecProfileSource}+gateway_inband`
+        : 'gateway_inband';
+    const complete = hasCompleteMkvPlaybackProfile(session.codecProfile);
+    session.startupTimings.inbandCodecProfileApplied = complete;
+    session.startupTimings.inbandCodecProfileComplete = complete;
+    return complete;
 }
 
 async function stopBoundedMkvInputPump(session) {
@@ -6323,6 +6462,11 @@ function startFfmpeg(session) {
     const copyAudio = shouldCopyAudio(session);
     const audioArgs = audioArgsForSession(session, copyAudio);
     const audioMap = audioMapForSession(session, requireKnownStreams);
+    session.actualAudioMap = audioMap;
+    const explicitAudioMap = /^0:(\d+)\??$/.exec(audioMap);
+    session.actualMappedAudioStreamIndex = explicitAudioMap
+        ? normalizeAudioStreamIndex(explicitAudioMap[1])
+        : null;
     const encodeVideo = videoModeForSession(session) === 'encode';
     const forceExactMatroskaH264Reencode = session.forceExactMatroskaH264Reencode === true;
     const pumpedMkvInput = isFiniteMkvVodSession(session);
@@ -6842,6 +6986,10 @@ function selectedAudioTrackForSession(session) {
 }
 
 function mappedAudioStreamIndexForSession(session) {
+    if (Object.prototype.hasOwnProperty.call(asRecord(session), 'actualMappedAudioStreamIndex')) {
+        const actualIndex = normalizeAudioStreamIndex(session.actualMappedAudioStreamIndex);
+        return Number.isInteger(actualIndex) ? actualIndex : null;
+    }
     const selectedIndex = normalizeAudioStreamIndex(selectedAudioTrackForSession(session)?.index);
     return Number.isInteger(selectedIndex) ? selectedIndex : null;
 }
@@ -6943,8 +7091,17 @@ function buildCodecProfile(payload, startedAt, probeSource) {
         // format.duration empty even when it knows the overall bit rate and file size. Fall back to
         // size*8/bitrate (CBR estimate — plenty accurate to draw a seek bar) so an on-the-fly TS
         // transcode still gets a timeline instead of a duration-less, unseekable player.
-        durationSeconds: nullableFloat(format.duration) || estimateDurationFromFormat(format),
-        bitRate: nullableInt(format.bit_rate),
+        // A local in-band probe sees a bounded temporary prefix, not the source
+        // file size. Estimating duration from prefix-size/bitrate would create a
+        // plausible but severely truncated timeline. Only a duration declared
+        // by Matroska Info is authoritative on this lane.
+        durationSeconds: nullableFloat(format.duration) || (
+            probeSource === 'gateway_inband' ? null : estimateDurationFromFormat(format)
+        ),
+        // Like format.size, ffprobe derives format.bit_rate for the temporary
+        // prefix rather than the full source. Omit it so a truthful request
+        // profile bitrate survives the merge.
+        bitRate: probeSource === 'gateway_inband' ? null : nullableInt(format.bit_rate),
         probeSource: probeSource || 'gateway_probe',
         probeMs: Math.max(1, Date.now() - startedAt),
         probedAt: new Date().toISOString()
@@ -6968,7 +7125,76 @@ function cacheCodecProfile(sourceUrl, profile) {
 // track languages WITHOUT a provider connection. Returns a useful profile or null (caller
 // then falls back to the provider probe — e.g. an MP4 whose moov sits at the end, so the
 // leading bytes don't parse). Best-effort; never throws.
-async function probeFromHeaderBytes(sourceUrl) {
+function readEbmlElementSize(buffer, offset) {
+    if (!Buffer.isBuffer(buffer) || offset < 0 || offset >= buffer.length) return null;
+    const first = buffer[offset];
+    let width = 1;
+    let marker = 0x80;
+    while (width <= 8 && (first & marker) === 0) {
+        width += 1;
+        marker >>= 1;
+    }
+    if (width > 8 || offset + width > buffer.length) return null;
+    let value = BigInt(first & (marker - 1));
+    let allOnes = (first & (marker - 1)) === (marker - 1);
+    for (let index = 1; index < width; index += 1) {
+        value = (value << 8n) | BigInt(buffer[offset + index]);
+        allOnes = allOnes && buffer[offset + index] === 0xff;
+    }
+    if (allOnes) return { width, value: null, unknown: true };
+    if (value > BigInt(Number.MAX_SAFE_INTEGER)) return null;
+    return { width, value: Number(value), unknown: false };
+}
+
+function readEbmlElementHeader(buffer, offset) {
+    if (!Buffer.isBuffer(buffer) || offset < 0 || offset >= buffer.length) return null;
+    const first = buffer[offset];
+    let idWidth = 1;
+    let marker = 0x80;
+    while (idWidth <= 4 && (first & marker) === 0) {
+        idWidth += 1;
+        marker >>= 1;
+    }
+    if (idWidth > 4 || offset + idWidth > buffer.length) return null;
+    let id = 0n;
+    for (let index = 0; index < idWidth; index += 1) {
+        id = (id << 8n) | BigInt(buffer[offset + index]);
+    }
+    const size = readEbmlElementSize(buffer, offset + idWidth);
+    if (!size) return null;
+    const payloadStart = offset + idWidth + size.width;
+    const payloadEnd = size.unknown ? null : payloadStart + size.value;
+    return { id, payloadStart, payloadEnd, unknownSize: size.unknown };
+}
+
+function hasCompleteMatroskaMetadataPrefix(buffer) {
+    if (!Buffer.isBuffer(buffer) || buffer.length < 16) return false;
+    const ebml = readEbmlElementHeader(buffer, 0);
+    if (!ebml || ebml.id !== 0x1a45dfa3n || ebml.payloadEnd === null || ebml.payloadEnd > buffer.length) return false;
+    const segment = readEbmlElementHeader(buffer, ebml.payloadEnd);
+    if (!segment || segment.id !== 0x18538067n || segment.payloadStart > buffer.length) return false;
+
+    let foundInfo = false;
+    let foundTracks = false;
+    let inspectedElements = 0;
+    let cursor = segment.payloadStart;
+    const segmentEnd = segment.payloadEnd === null
+        ? buffer.length
+        : Math.min(buffer.length, segment.payloadEnd);
+    while (cursor < segmentEnd) {
+        if (inspectedElements >= MAX_MATROSKA_METADATA_ELEMENTS) return false;
+        inspectedElements += 1;
+        const element = readEbmlElementHeader(buffer, cursor);
+        if (!element || element.payloadEnd === null || element.payloadEnd > segmentEnd) return false;
+        if (element.id === 0x1549a966n) foundInfo = true;
+        if (element.id === 0x1654ae6bn) foundTracks = true;
+        if (foundInfo && foundTracks) return true;
+        cursor = element.payloadEnd;
+    }
+    return false;
+}
+
+async function probeFromHeaderBytes(sourceUrl, options = {}) {
     const entry = headerByteCache.get(sourceUrl);
     if (!entry || entry.len <= 0) return null;
     // Need a meaningful header slice: a completed capture, or at least 256 KB so far.
@@ -6982,19 +7208,28 @@ async function probeFromHeaderBytes(sourceUrl) {
         const args = [
             '-v', 'error',
             '-analyzeduration', String(CODEC_PROBE_ANALYZE_DURATION_US),
-            '-probesize', String(Math.min(buf.length, CODEC_PROBE_SIZE_BYTES)),
+            // The capture is already strictly bounded (default 4 MB). Let the
+            // local probe inspect all retained bytes so a large EBML header
+            // cannot hide Tracks between the legacy 2 MB probe cap and the end
+            // of the safe local prefix.
+            '-probesize', String(buf.length),
             '-show_streams',
             '-show_format',
             '-print_format', 'json',
             tmpFile
         ];
-        const payload = await runFfprobe(args, CODEC_PROBE_TIMEOUT_MS, sourceUrl);
-        const profile = buildCodecProfile(payload, startedAt, 'gateway_inband');
+        const payload = await runFfprobe(args, CODEC_PROBE_TIMEOUT_MS, sourceUrl, {
+            signal: options?.signal || null,
+        });
+        const profile = {
+            ...buildCodecProfile(payload, startedAt, 'gateway_inband'),
+            metadataComplete: hasCompleteMatroskaMetadataPrefix(buf),
+        };
         return hasUsefulCodecProfile(profile) ? profile : null;
     } catch (_) {
         return null;
     } finally {
-        fsp.unlink(tmpFile).catch(() => {});
+        await fsp.unlink(tmpFile).catch(() => {});
     }
 }
 
@@ -7015,7 +7250,7 @@ async function probeCodecProfile(sourceUrl, userAgent, options = {}) {
             codecProfileCache.delete(sourceUrl); // expired
         }
     }
-    if (INBAND_HEADER_PARSE && sourceUrl) {
+    if ((INBAND_HEADER_PARSE || BOUNDED_MKV_HEADER_PARSE) && sourceUrl) {
         try {
             const local = await probeFromHeaderBytes(sourceUrl);
             if (local && hasUsefulCodecProfile(local)) {
@@ -7127,6 +7362,16 @@ function isFfprobeProviderBusyFailure(value) {
 
 function runFfprobe(args, timeoutMs, sourceUrl, options = {}) {
     return new Promise((resolve, reject) => {
+        const abortSignal = options?.signal || null;
+        const abortedError = () => {
+            const error = new Error('Codec probe aborted');
+            error.code = 'VOD_INPUT_ABORTED';
+            return error;
+        };
+        if (abortSignal?.aborted) {
+            reject(abortedError());
+            return;
+        }
         const backgroundKey = options.background === true ? proxyKeyFromUrl(sourceUrl) : '';
         // The route-level guard is intentionally repeated at the exact spawn boundary.
         // probeCodecProfile may await a local-header probe first; without this atomic
@@ -7188,7 +7433,20 @@ function runFfprobe(args, timeoutMs, sourceUrl, options = {}) {
         const clearTimers = () => {
             clearTimeout(timer);
             if (forceKillTimer) clearTimeout(forceKillTimer);
+            abortSignal?.removeEventListener?.('abort', onAbort);
         };
+        const beginTermination = (error, signal = 'SIGTERM') => {
+            if (finished || terminatingError) return;
+            terminatingError = error;
+            try { child.kill(signal); } catch (_) {}
+            forceKillTimer = setTimeout(() => {
+                if (!finished) {
+                    try { child.kill('SIGKILL'); } catch (_) {}
+                }
+            }, 1_000);
+            forceKillTimer.unref?.();
+        };
+        const onAbort = () => beginTermination(abortedError());
         const timer = setTimeout(() => {
             if (finished || terminatingError) return;
             const timeoutError = new Error('Codec probe timeout');
@@ -7197,19 +7455,14 @@ function runFfprobe(args, timeoutMs, sourceUrl, options = {}) {
             // wins the process-event race.
             timeoutError.ffprobeLog = stderr;
             timeoutError.logTail = stderr;
-            terminatingError = terminalError(timeoutError);
             // Do not resolve/reject until the child has actually exited. The
             // caller may open the single-slot provider immediately afterwards.
-            try { child.kill(registration?.preempted ? 'SIGKILL' : 'SIGTERM'); } catch (_) {}
-            if (!registration?.preempted) {
-                forceKillTimer = setTimeout(() => {
-                    if (!finished) {
-                        try { child.kill('SIGKILL'); } catch (_) {}
-                    }
-                }, 1_000);
-                forceKillTimer.unref?.();
-            }
+            beginTermination(
+                terminalError(timeoutError),
+                registration?.preempted ? 'SIGKILL' : 'SIGTERM',
+            );
         }, timeoutMs);
+        abortSignal?.addEventListener?.('abort', onAbort, { once: true });
 
         child.stdout.on('data', (chunk) => {
             stdout += chunk.toString();
@@ -7285,6 +7538,48 @@ function hasUsefulCodecProfile(profile) {
         (Array.isArray(record.subtitleTracks) && record.subtitleTracks.length > 0) ||
         (Array.isArray(record.subtitle_tracks) && record.subtitle_tracks.length > 0)
     );
+}
+
+// A local Matroska prefix is authoritative only when ffprobe saw every
+// structural family needed by playback. In particular, an empty subtitles
+// array is meaningful (no subtitle tracks), while a missing array means the
+// header was truncated before ffprobe could enumerate the family.
+function hasCompleteMkvPlaybackProfile(profile) {
+    const record = asRecord(profile);
+    const container = normalizeCodecToken(record.container);
+    if (!(container === 'mkv' || container.includes('matroska'))) return false;
+    if (record.metadataComplete !== true && record.metadata_complete !== true) return false;
+
+    const durationSeconds = Number(
+        record.durationSeconds ?? record.duration_seconds ?? record.duration,
+    );
+    if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) return false;
+    if (!stringOrNull(record.videoCodec ?? record.video_codec ?? record.video)) return false;
+
+    const audioTracks = Array.isArray(record.audioTracks)
+        ? record.audioTracks
+        : (Array.isArray(record.audio_tracks) ? record.audio_tracks : null);
+    if (!audioTracks?.length) return false;
+    const audioIndexes = audioTracks.map((track) => normalizeAudioStreamIndex(track?.index));
+    if (
+        audioIndexes.some((index) => !Number.isInteger(index)) ||
+        new Set(audioIndexes).size !== audioIndexes.length
+    ) return false;
+
+    const subtitles = Array.isArray(record.subtitles)
+        ? record.subtitles
+        : (Array.isArray(record.subtitleTracks)
+            ? record.subtitleTracks
+            : (Array.isArray(record.subtitle_tracks) ? record.subtitle_tracks : null));
+    if (!subtitles) return false;
+    const subtitleIndexes = subtitles.map((track) => normalizeAudioStreamIndex(track?.index));
+    if (
+        subtitleIndexes.some((index) => !Number.isInteger(index)) ||
+        new Set(subtitleIndexes).size !== subtitleIndexes.length
+    ) return false;
+
+    if (normalizeCodecToken(record.probeSource ?? record.probe_source) !== 'gatewayinband') return false;
+    return Number.isFinite(Date.parse(String(record.probedAt ?? record.probed_at ?? '')));
 }
 
 function mergeCodecProfiles(baseProfile, probeProfile) {
@@ -7650,7 +7945,11 @@ function serializeSession(req, session) {
 }
 
 function debugSession(session) {
-    const selectedTrack = selectedAudioTrackForSession(session);
+    const mappedIndex = mappedAudioStreamIndexForSession(session);
+    const exactTracks = audioTracksForSession(session);
+    const selectedTrack = Number.isInteger(mappedIndex)
+        ? exactTracks.find((track) => normalizeAudioStreamIndex(track?.index) === mappedIndex) || null
+        : selectedAudioTrackForSession(session);
     return {
         id: session.id,
         playbackSessionId: session.playbackSessionId,
@@ -7662,7 +7961,7 @@ function debugSession(session) {
         actualStartOffset: session.actualStartOffset || 0,
         localSeekTarget: session.localSeekTarget || 0,
         sourceTimestamps: session.sourceTimestamps === true,
-        audioMap: audioMapForSession(session),
+        audioMap: session.actualAudioMap || audioMapForSession(session),
         audioCodec: session.audioCodec,
         audioChannels: session.audioChannels,
         selectedAudioTrack: selectedTrack
