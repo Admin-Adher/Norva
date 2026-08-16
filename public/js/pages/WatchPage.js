@@ -4908,9 +4908,10 @@ class WatchPage {
                             // the browser so a two-minute viewing proof stays
                             // smooth even when the live encoder adds just ~24 s.
                             // This wait happens after session creation, outside
-                            // the synchronous Edge/Kong request deadline.
+                            // the synchronous Edge/Kong request deadline, and
+                            // remains bounded for slow cold exact-MKV encodes.
                             minimumSeconds: 96,
-                            timeoutMs: 210000
+                            timeoutMs: 360000
                         },
                     );
                 } catch (error) {
