@@ -4804,7 +4804,7 @@ class WatchPage {
                             // This wait happens after session creation, outside
                             // the synchronous Edge/Kong request deadline.
                             minimumSeconds: 96,
-                            timeoutMs: 180000
+                            timeoutMs: 210000
                         },
                     );
                 } catch (error) {
