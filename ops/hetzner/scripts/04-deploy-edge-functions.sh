@@ -26,7 +26,7 @@ FUNCS_DIR="$REPO/supabase/functions"
 CONFIG="$REPO/supabase/config.toml"
 COMPOSE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/docker-compose.supabase.yml"
 ENV_FILE="$(dirname "$COMPOSE")/.env"
-EXPECTED_PLAYBACK_VERSION=50
+EXPECTED_PLAYBACK_VERSION=51
 EXPECTED_PLAYBACK_PROTOCOL=1
 EXPECTED_RELAY_TAKEOVER_PROTOCOL=1
 EXPECTED_ENGINE_TRACK_PROBE_BLOCKING=false
@@ -35,6 +35,7 @@ EXPECTED_LANGUAGE_VALIDATION_PROTOCOL=2
 EXPECTED_LANGUAGE_VALIDATION_PRESENCE_INTENT_PROTOCOL=1
 EXPECTED_LANGUAGE_VALIDATION_PLAYBACK_LEASE_PROTOCOL=1
 EXPECTED_LANGUAGE_VALIDATION_ACTIVITY_PROTOCOL=1
+EXPECTED_LANGUAGE_VALIDATION_DURATION_CLAIM_PROTOCOL=1
 EXPECTED_LANGUAGE_VALIDATION_TASK_BUDGET_MS=270000
 EXPECTED_LANGUAGE_VALIDATION_FETCH_TIMEOUT_MS=240000
 EXPECTED_LANGUAGE_VALIDATION_POST_FETCH_RESERVE_MS=30000
@@ -186,6 +187,7 @@ if command -v docker >/dev/null 2>&1 && [[ -f "$COMPOSE" ]]; then
         && "$playback_health" == *"\"languageValidationPresenceIntentProtocol\":$EXPECTED_LANGUAGE_VALIDATION_PRESENCE_INTENT_PROTOCOL"* \
         && "$playback_health" == *"\"languageValidationPlaybackLeaseProtocol\":$EXPECTED_LANGUAGE_VALIDATION_PLAYBACK_LEASE_PROTOCOL"* \
         && "$playback_health" == *"\"languageValidationActivityProtocol\":$EXPECTED_LANGUAGE_VALIDATION_ACTIVITY_PROTOCOL"* \
+        && "$playback_health" == *"\"languageValidationDurationClaimProtocol\":$EXPECTED_LANGUAGE_VALIDATION_DURATION_CLAIM_PROTOCOL"* \
         && "$playback_health" == *"\"languageValidationTaskBudgetMs\":$EXPECTED_LANGUAGE_VALIDATION_TASK_BUDGET_MS"* \
         && "$playback_health" == *"\"languageValidationFetchTimeoutMs\":$EXPECTED_LANGUAGE_VALIDATION_FETCH_TIMEOUT_MS"* \
         && "$playback_health" == *"\"languageValidationPostFetchReserveMs\":$EXPECTED_LANGUAGE_VALIDATION_POST_FETCH_RESERVE_MS"* \
