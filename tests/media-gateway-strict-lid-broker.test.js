@@ -20,7 +20,7 @@ function brokerHarness() {
   assert.ok(start >= 0 && end > start, 'strict LID broker source block must remain extractable');
   const source = gatewaySource.slice(start, end);
   return vm.runInNewContext(
-    `(() => { ${source}; return { parseStrictLidRange, createStrictLidBroker }; })()`,
+    `(() => { ${source}; return { parseStrictLidRange, createStrictLidBroker, createStrictLidRangeDeadline }; })()`,
     {
       AbortController,
       Buffer,
@@ -31,6 +31,8 @@ function brokerHarness() {
       Object,
       Promise,
       PROVIDER_SLOT_RELEASE_DELAY_MS: 0,
+      STRICT_LID_BROKER_FIRST_BYTE_TIMEOUT_MS: 30_000,
+      STRICT_LID_BROKER_IDLE_TIMEOUT_MS: 15_000,
       Readable: require('node:stream').Readable,
       String,
       URL,
@@ -60,7 +62,41 @@ function brokerHarness() {
   );
 }
 
-function audioExtractionHarness(spawnImpl) {
+class FakeClock {
+  constructor() {
+    this.now = 0;
+    this.timers = new Map();
+  }
+
+  setTimeout = (callback, delay) => {
+    const handle = { unref() {} };
+    this.timers.set(handle, {
+      at: this.now + Math.max(0, Number(delay) || 0),
+      callback,
+    });
+    return handle;
+  };
+
+  clearTimeout = (handle) => {
+    this.timers.delete(handle);
+  };
+
+  advance(ms) {
+    const target = this.now + ms;
+    while (true) {
+      const due = [...this.timers.entries()]
+        .filter(([, timer]) => timer.at <= target)
+        .sort((left, right) => left[1].at - right[1].at)[0];
+      if (!due) break;
+      this.now = due[1].at;
+      this.timers.delete(due[0]);
+      due[1].callback();
+    }
+    this.now = target;
+  }
+}
+
+function audioExtractionHarness(spawnImpl, timers = {}) {
   const start = gatewaySource.indexOf('function extractAudioWav(');
   const end = gatewaySource.indexOf('// V2 chunked pipeline', start);
   assert.ok(start >= 0 && end > start, 'audio extraction source must remain dynamically extractable');
@@ -69,7 +105,8 @@ function audioExtractionHarness(spawnImpl) {
     {
       ACCOUNT_ACTIVITY_KIND_LANGUAGE_VALIDATION: 'language-validation',
       FFMPEG_PATH: 'ffmpeg-test',
-      clearTimeout,
+      STRICT_LID_FFMPEG_RW_TIMEOUT_US: 40_000_000,
+      clearTimeout: timers.clearTimeout || clearTimeout,
       console: { warn() {} },
       crypto: require('node:crypto'),
       fsp: {
@@ -85,7 +122,7 @@ function audioExtractionHarness(spawnImpl) {
       redactCreds: (value) => String(value),
       redactStrictLidLoopback: (value) => String(value),
       registerAccountExtraction: () => ({ preempted: false, release() {} }),
-      setTimeout,
+      setTimeout: timers.setTimeout || setTimeout,
       spawn: spawnImpl,
       viewerPlaybackActiveLocally: () => false,
     },
@@ -140,6 +177,205 @@ test('strict LID range parser converts only one bounded range into exact safe of
   for (const invalid of ['', 'bytes=-0', 'bytes=20-', 'bytes=9-2', 'bytes=0-1,4-5', 'items=0-1']) {
     assert.equal(parseStrictLidRange(invalid, 20), null, invalid);
   }
+});
+
+test('strict LID range deadline times out before the first byte with a fake clock', () => {
+  const { createStrictLidRangeDeadline } = brokerHarness();
+  const clock = new FakeClock();
+  const controller = new AbortController();
+  const deadline = createStrictLidRangeDeadline({
+    controller,
+    firstByteTimeoutMs: 30_000,
+    idleTimeoutMs: 15_000,
+    setTimer: clock.setTimeout,
+    clearTimer: clock.clearTimeout,
+  });
+
+  clock.advance(29_999);
+  assert.equal(controller.signal.aborted, false);
+  clock.advance(1);
+  assert.equal(controller.signal.aborted, true);
+  assert.equal(deadline.timedOut, true);
+  assert.equal(deadline.timeoutKind, 'first-byte');
+  assert.equal(clock.timers.size, 0);
+});
+
+test('strict LID broker maps the fake first-byte deadline to a closed 504', async (t) => {
+  const { createStrictLidBroker } = brokerHarness();
+  const clock = new FakeClock();
+  let markFetchStarted;
+  const fetchStarted = new Promise((resolve) => { markFetchStarted = resolve; });
+  const broker = await createStrictLidBroker({
+    sourceUrl: 'https://provider.invalid/movie/account/secret/file.mkv',
+    fileSizeBytes: 100,
+    dispatcher: null,
+    releaseDelayMs: 0,
+    firstByteTimeoutMs: 30_000,
+    idleTimeoutMs: 15_000,
+    setTimer: clock.setTimeout,
+    clearTimer: clock.clearTimeout,
+    fetchImpl: async (_url, options) => {
+      markFetchStarted();
+      return new Promise((_resolve, reject) => {
+        const fail = () => reject(options.signal.reason || new Error('aborted'));
+        options.signal.addEventListener('abort', fail, { once: true });
+        if (options.signal.aborted) fail();
+      });
+    },
+  });
+  t.after(() => broker.close());
+
+  const responsePromise = fetch(broker.inputUrl, { headers: { Range: 'bytes=0-9' } });
+  await fetchStarted;
+  clock.advance(29_999);
+  assert.equal(broker.terminalError, null);
+  clock.advance(1);
+  const response = await responsePromise;
+  assert.equal(response.status, 504);
+  assert.equal((await response.json()).code, 'PROVIDER_FIRST_BYTE_TIMEOUT');
+  assert.equal(broker.terminalError.code, 'PROVIDER_FIRST_BYTE_TIMEOUT');
+  assert.equal(clock.timers.size, 0);
+});
+
+test('strict LID range progress may exceed 30 s total while resetting only the idle deadline', () => {
+  const { createStrictLidRangeDeadline } = brokerHarness();
+  const clock = new FakeClock();
+  const controller = new AbortController();
+  const deadline = createStrictLidRangeDeadline({
+    controller,
+    firstByteTimeoutMs: 30_000,
+    idleTimeoutMs: 15_000,
+    setTimer: clock.setTimeout,
+    clearTimer: clock.clearTimeout,
+  });
+
+  deadline.progress();
+  for (let index = 0; index < 4; index++) {
+    clock.advance(10_000);
+    deadline.progress();
+  }
+  assert.equal(clock.now, 40_000);
+  assert.equal(controller.signal.aborted, false);
+  assert.equal(deadline.timedOut, false);
+  deadline.close();
+  assert.equal(clock.timers.size, 0);
+  clock.advance(60_000);
+  assert.equal(controller.signal.aborted, false, 'cleanup must prevent a late timeout');
+});
+
+test('strict LID range deadline aborts a stalled body after the inactivity interval', () => {
+  const { createStrictLidRangeDeadline } = brokerHarness();
+  const clock = new FakeClock();
+  const controller = new AbortController();
+  const deadline = createStrictLidRangeDeadline({
+    controller,
+    firstByteTimeoutMs: 30_000,
+    idleTimeoutMs: 15_000,
+    setTimer: clock.setTimeout,
+    clearTimer: clock.clearTimeout,
+  });
+
+  deadline.progress();
+  clock.advance(14_999);
+  assert.equal(controller.signal.aborted, false);
+  clock.advance(1);
+  assert.equal(controller.signal.aborted, true);
+  assert.equal(deadline.timeoutKind, 'idle');
+  assert.equal(clock.timers.size, 0);
+});
+
+test('HTTP 200 busy-prefix stall preserves the fake first-byte timeout instead of RANGE_UNSUPPORTED', async (t) => {
+  const { createStrictLidBroker } = brokerHarness();
+  const clock = new FakeClock();
+  let markFetchStarted;
+  const fetchStarted = new Promise((resolve) => { markFetchStarted = resolve; });
+  const broker = await createStrictLidBroker({
+    sourceUrl: 'https://provider.invalid/movie/account/secret/file.mkv',
+    fileSizeBytes: 100,
+    dispatcher: null,
+    releaseDelayMs: 0,
+    firstByteTimeoutMs: 30_000,
+    idleTimeoutMs: 15_000,
+    setTimer: clock.setTimeout,
+    clearTimer: clock.clearTimeout,
+    fetchImpl: async (_url, options) => {
+      markFetchStarted();
+      const body = new ReadableStream({
+        start(controller) {
+          options.signal.addEventListener('abort', () => {
+            try { controller.error(options.signal.reason || new Error('aborted')); } catch (_) {}
+          }, { once: true });
+        },
+      });
+      return new Response(body, {
+        status: 200,
+        headers: { 'Content-Type': 'text/plain' },
+      });
+    },
+  });
+  t.after(() => broker.close());
+
+  const responsePromise = fetch(broker.inputUrl, { headers: { Range: 'bytes=0-9' } });
+  await fetchStarted;
+  await new Promise((resolve) => setImmediate(resolve));
+  clock.advance(30_000);
+  const response = await responsePromise;
+  assert.equal(response.status, 504);
+  const payload = await response.json();
+  assert.equal(payload.code, 'PROVIDER_FIRST_BYTE_TIMEOUT');
+  assert.notEqual(payload.code, 'RANGE_UNSUPPORTED');
+  assert.equal(broker.terminalError.code, 'PROVIDER_FIRST_BYTE_TIMEOUT');
+  assert.equal(broker.providerFetches, 1);
+  assert.equal(clock.timers.size, 0);
+});
+
+test('strict LID broker maps a fake body stall to the idle timeout and drains it', async (t) => {
+  const { createStrictLidBroker } = brokerHarness();
+  const clock = new FakeClock();
+  const broker = await createStrictLidBroker({
+    sourceUrl: 'https://provider.invalid/movie/account/secret/file.mkv',
+    fileSizeBytes: 10,
+    dispatcher: null,
+    releaseDelayMs: 0,
+    firstByteTimeoutMs: 30_000,
+    idleTimeoutMs: 15_000,
+    setTimer: clock.setTimeout,
+    clearTimer: clock.clearTimeout,
+    fetchImpl: async (_url, options) => {
+      const body = new ReadableStream({
+        start(controller) {
+          controller.enqueue(Uint8Array.of(0x2a));
+          options.signal.addEventListener('abort', () => {
+            try { controller.error(options.signal.reason || new Error('aborted')); } catch (_) {}
+          }, { once: true });
+        },
+      });
+      return new Response(body, {
+        status: 206,
+        headers: {
+          'Content-Range': 'bytes 0-9/10',
+          'Content-Length': '10',
+          ETag: '"idle-v1"',
+        },
+      });
+    },
+  });
+  t.after(() => broker.close());
+
+  const response = await fetch(broker.inputUrl, { headers: { Range: 'bytes=0-9' } });
+  assert.equal(response.status, 206);
+  const reader = response.body.getReader();
+  assert.equal((await reader.read()).value.byteLength, 1);
+  const closedBody = reader.read().catch(() => null);
+  clock.advance(14_999);
+  assert.equal(broker.terminalError, null);
+  clock.advance(1);
+  for (let attempt = 0; attempt < 5 && !broker.terminalError; attempt++) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  assert.equal(broker.terminalError.code, 'PROVIDER_IDLE_TIMEOUT');
+  await closedBody;
+  assert.equal(clock.timers.size, 0);
 });
 
 test('strict LID broker stays on loopback, answers HEAD locally, and forwards exact sticky ranges', async (t) => {
@@ -329,6 +565,36 @@ for (const fixture of [
   });
 }
 
+test('first HTTP 458 remains terminal when fake range deadlines advance afterwards', async (t) => {
+  const { createStrictLidBroker } = brokerHarness();
+  const clock = new FakeClock();
+  let calls = 0;
+  const broker = await createStrictLidBroker({
+    sourceUrl: 'https://provider.invalid/movie/account/secret/file.mkv',
+    fileSizeBytes: 100,
+    dispatcher: null,
+    releaseDelayMs: 0,
+    firstByteTimeoutMs: 30_000,
+    idleTimeoutMs: 15_000,
+    setTimer: clock.setTimeout,
+    clearTimer: clock.clearTimeout,
+    fetchImpl: async () => {
+      calls++;
+      return new Response('provider busy', { status: 458 });
+    },
+  });
+  t.after(() => broker.close());
+
+  const response = await fetch(broker.inputUrl, { headers: { Range: 'bytes=0-9' } });
+  assert.equal(response.status, 458);
+  assert.equal((await response.json()).code, 'PROVIDER_BUSY');
+  assert.equal(broker.terminalError.code, 'PROVIDER_BUSY');
+  assert.equal(clock.timers.size, 0, 'terminal cleanup must clear the range deadline');
+  clock.advance(60_000);
+  assert.equal(broker.terminalError.code, 'PROVIDER_BUSY');
+  assert.equal(calls, 1);
+});
+
 test('strict LID keeps proxy HTTP 407 distinct from provider-busy and never retries it', async (t) => {
   const { createStrictLidBroker } = brokerHarness();
   let calls = 0;
@@ -502,10 +768,14 @@ test('strict LID rejects invalid exact signed coordinates before creating a serv
   assert.match(route, /detectLanguageRequestPolicy\(req, options\)[\s\S]*validateDetectLanguageCapability\(capabilityToken, policy\.requiredScope\)/);
   assert.match(gatewaySource, /strictLidLoopbackBrokerProtocol: 1/);
   assert.match(gatewaySource, /strictLidFileSizeClaim: 'fileSizeBytes'/);
-  assert.match(gatewaySource, /const GATEWAY_VERSION = 99/);
+  assert.match(gatewaySource, /const GATEWAY_VERSION = 100/);
   assert.match(gatewaySource, /strictLidProviderDrainProtocol: 1/);
   assert.match(gatewaySource, /strictLidWeakFallbackProtocol: 1/);
   assert.match(gatewaySource, /strictLidTimelineSamplingProtocol: 1/);
+  assert.match(gatewaySource, /strictLidRangeTimeoutProtocol: 2/);
+  assert.match(gatewaySource, /strictLidRangeFirstByteTimeoutMs: STRICT_LID_BROKER_FIRST_BYTE_TIMEOUT_MS/);
+  assert.match(gatewaySource, /strictLidRangeIdleTimeoutMs: STRICT_LID_BROKER_IDLE_TIMEOUT_MS/);
+  assert.match(gatewaySource, /strictLidFfmpegRwTimeoutUs: STRICT_LID_FFMPEG_RW_TIMEOUT_US/);
   assert.match(
     route,
     /const sendDetectionJson = async[\s\S]*await closeStrictBrokerForResponse\(\)[\s\S]*providerDrained: true[\s\S]*providerDrainProtocol: 1/,
@@ -702,6 +972,10 @@ test('strict ffmpeg uses only loopback while provider identity remains in the ba
   assert.match(extraction, /env: strictLoopback \? loopbackOnlyEnv\(\)/);
   assert.match(extraction, /\.\.\.\(!strictLoopback \? \[[\s\S]+?'-reconnect'/);
   assert.match(extraction, /strictLoopback \? redactStrictLidLoopback\(stderr\) : stderr/);
+  assert.match(
+    extraction,
+    /'-rw_timeout', strictLoopback \? String\(STRICT_LID_FFMPEG_RW_TIMEOUT_US\) : '15000000'/,
+  );
 
   const envStart = gatewaySource.indexOf('function loopbackOnlyEnv()');
   const envEnd = gatewaySource.indexOf('// Xtream URLs embed credentials', envStart);
@@ -711,7 +985,7 @@ test('strict ffmpeg uses only loopback while provider identity remains in the ba
   assert.match(gatewaySource, /function redactStrictLidLoopback\(value\)[\s\S]+?\[strict-lid-loopback\]/);
 });
 
-test('audio extraction dynamically types a deadline kill as timedOut with its process signal', async () => {
+test('audio extraction fake clock preserves the outer 35 s SIGKILL deadline', async () => {
   class TimeoutChild extends EventEmitter {
     constructor() {
       super();
@@ -727,14 +1001,22 @@ test('audio extraction dynamically types a deadline kill as timedOut with its pr
   }
 
   const child = new TimeoutChild();
-  const extractAudioWav = audioExtractionHarness(() => child);
-  const result = await extractAudioWav(
+  const clock = new FakeClock();
+  let spawnedArgs = null;
+  const extractAudioWav = audioExtractionHarness((_bin, args) => {
+    spawnedArgs = args;
+    return child;
+  }, {
+    setTimeout: clock.setTimeout,
+    clearTimeout: clock.clearTimeout,
+  });
+  const resultPromise = extractAudioWav(
     'http://127.0.0.1/strict-lid-input',
     'Norva-LID-Test/1',
     1,
     600,
     20,
-    5,
+    35_000,
     'account-test',
     true,
     null,
@@ -744,12 +1026,22 @@ test('audio extraction dynamically types a deadline kill as timedOut with its pr
       providerSourceUrl: 'https://provider.invalid/account/movie.mkv',
     },
   );
+  const rwTimeoutIndex = spawnedArgs.indexOf('-rw_timeout');
+  assert.ok(rwTimeoutIndex >= 0);
+  assert.equal(spawnedArgs[rwTimeoutIndex + 1], '40000000');
+  clock.advance(15_000);
+  assert.deepEqual(child.kills, [], 'libav loopback timeout must not win at the legacy 15 s');
+  clock.advance(19_999);
+  assert.deepEqual(child.kills, []);
+  clock.advance(1);
+  const result = await resultPromise;
 
   assert.equal(result.ok, false);
   assert.equal(result.timedOut, true);
   assert.equal(result.signal, 'SIGKILL');
-  assert.match(result.error, /extract timeout after 0s/);
+  assert.match(result.error, /extract timeout after 35s/);
   assert.deepEqual(child.kills, ['SIGKILL']);
+  assert.equal(clock.timers.size, 0);
 });
 
 test('closing a strict LID broker aborts an active provider body and leaves no live local handle', async (t) => {

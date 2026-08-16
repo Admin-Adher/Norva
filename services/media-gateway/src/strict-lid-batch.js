@@ -18,6 +18,7 @@ const STRICT_LID_SAMPLE_DURATION_SECONDS = 20;
 const STRICT_LID_MIN_TIMELINE_WINDOWS = 4;
 const STRICT_LID_FULL_TIMELINE_WINDOWS = 6;
 const STRICT_LID_OBSERVABILITY_MAX_COUNT = 64;
+const STRICT_LID_OBSERVABILITY_MAX_MS = 225_000;
 const STRICT_LID_BATCH_OUTCOMES = new Set([
     'not-run',
     'succeeded',
@@ -25,6 +26,14 @@ const STRICT_LID_BATCH_OUTCOMES = new Set([
     'timed-out',
     'aborted',
     'preempted',
+]);
+const STRICT_LID_EXTRACTION_OUTCOMES = new Set([
+    'succeeded',
+    'failed',
+    'timed-out',
+    'aborted',
+    'preempted',
+    'budget-exhausted',
 ]);
 const STRICT_LID_CJK_CHARACTER_RE = Object.freeze({
     // Japanese evidence deliberately includes kana and Han. The independent transcript
@@ -274,6 +283,39 @@ function buildStrictLidUnverifiedObservability(input = {}) {
         batchOutcome: safeBatchOutcome,
         pendingReason: strictLidPendingReason({ ...counts, batchOutcome: safeBatchOutcome }),
         verified: false,
+    });
+}
+
+// Per-window extraction diagnostics are deliberately closed in the same way as the aggregate
+// above. Only a bounded ordinal, bounded timings, a bounded provider-fetch count and a fixed
+// outcome enum may reach logs; source URLs, account identifiers, offsets and errors are ignored.
+function buildStrictLidExtractionObservability(input = {}) {
+    const source = input && typeof input === 'object' && !Array.isArray(input) ? input : {};
+    const read = (key) => {
+        try { return source[key]; } catch (_) { return undefined; }
+    };
+    const boundedMs = (value) => (
+        typeof value === 'number'
+        && Number.isSafeInteger(value)
+        && value >= 0
+        && value <= STRICT_LID_OBSERVABILITY_MAX_MS
+            ? value
+            : 0
+    );
+    const outcome = read('outcome');
+    const rawOrdinal = read('windowOrdinal');
+    const windowOrdinal = Number.isSafeInteger(rawOrdinal)
+        && rawOrdinal >= 1
+        && rawOrdinal <= STRICT_LID_FULL_TIMELINE_WINDOWS
+        ? rawOrdinal
+        : 0;
+    return Object.freeze({
+        event: 'strict_lid_extraction_window',
+        windowOrdinal,
+        elapsedMs: boundedMs(read('elapsedMs')),
+        timeoutMs: boundedMs(read('timeoutMs')),
+        providerFetches: boundedStrictLidObservabilityCount(read('providerFetches')),
+        outcome: STRICT_LID_EXTRACTION_OUTCOMES.has(outcome) ? outcome : 'failed',
     });
 }
 
@@ -584,6 +626,7 @@ function resolveStrictLidConsensus(sampleResults, consensusNeeded = 4) {
 
 module.exports = {
     buildWhisperBatchArgs,
+    buildStrictLidExtractionObservability,
     buildStrictLidUnverifiedObservability,
     cleanupStrictLidFiles,
     evaluateStrictTranscriptEvidence,

@@ -6,6 +6,7 @@ const test = require('node:test');
 const vm = require('node:vm');
 
 const {
+  buildStrictLidExtractionObservability,
   buildStrictLidUnverifiedObservability,
   buildWhisperBatchArgs,
   cleanupStrictLidFiles,
@@ -299,6 +300,50 @@ test('strict unverified observability is a bounded closed schema with no evidenc
   assert.equal(batchOutcomeReads, 1);
   assert.equal(singleRead.batchOutcome, 'succeeded');
   assert.doesNotMatch(JSON.stringify(singleRead), /Bearer|stateful-secret/i);
+});
+
+test('strict extraction observability exposes only bounded ordinal timing and fetch counts', () => {
+  const secrets = {
+    url: 'https://provider.invalid/account/secret/movie.mkv',
+    uid: 'user-secret',
+    offset: 1667.867,
+    error: 'Bearer credential and transcript',
+  };
+  const report = buildStrictLidExtractionObservability({
+    windowOrdinal: 4,
+    elapsedMs: 34_999,
+    timeoutMs: 35_000,
+    providerFetches: 3,
+    outcome: 'timed-out',
+    ...secrets,
+  });
+  assert.deepEqual(report, {
+    event: 'strict_lid_extraction_window',
+    windowOrdinal: 4,
+    elapsedMs: 34_999,
+    timeoutMs: 35_000,
+    providerFetches: 3,
+    outcome: 'timed-out',
+  });
+  assert.equal(Object.isFrozen(report), true);
+  const line = JSON.stringify(report);
+  assert.equal(line.split(/\r?\n/).length, 1);
+  for (const secret of Object.values(secrets)) assert.equal(line.includes(String(secret)), false);
+
+  assert.deepEqual(buildStrictLidExtractionObservability({
+    windowOrdinal: 7,
+    elapsedMs: 225_001,
+    timeoutMs: -1,
+    providerFetches: 1.5,
+    outcome: 'invented',
+  }), {
+    event: 'strict_lid_extraction_window',
+    windowOrdinal: 0,
+    elapsedMs: 0,
+    timeoutMs: 0,
+    providerFetches: 0,
+    outcome: 'failed',
+  });
 });
 
 test('strict consensus diagnostics count all six dispositions without changing certification', () => {
@@ -849,7 +894,7 @@ test('strict timeline invariants hold from the minimum short film through the ma
   }
 });
 
-test('v99 route uses signed timeline strata and fails a broken Whisper batch before consensus', () => {
+test('v100 route uses signed timeline strata and fails a broken Whisper batch before consensus', () => {
   const gateway = fs.readFileSync(
     path.join(__dirname, '../services/media-gateway/src/index.js'),
     'utf8',
@@ -857,7 +902,7 @@ test('v99 route uses signed timeline strata and fails a broken Whisper batch bef
   const routeStart = gateway.indexOf('async function handleDetectLanguageRequest(');
   const routeEnd = gateway.indexOf('// Service-only A/B benchmark.', routeStart);
   const route = gateway.slice(routeStart, routeEnd);
-  assert.match(gateway, /const GATEWAY_VERSION = 99;/);
+  assert.match(gateway, /const GATEWAY_VERSION = 100;/);
   assert.match(gateway, /const STRICT_LID_REQUEST_BUDGET_MS = clampInt\([\s\S]*225_000,[\s\S]*225_000,/);
   assert.match(gateway, /strictLidBatchProtocol: 1/);
   assert.match(gateway, /strictLidActivityKindProtocol: 1/);
@@ -866,6 +911,10 @@ test('v99 route uses signed timeline strata and fails a broken Whisper batch bef
   assert.match(gateway, /strictLidExtractionTimeoutProtocol: 1/);
   assert.match(gateway, /strictLidBatchFailureProtocol: 1/);
   assert.match(gateway, /strictLidTimelineSamplingProtocol: 1/);
+  assert.match(gateway, /strictLidRangeTimeoutProtocol: 2/);
+  assert.match(gateway, /strictLidRangeFirstByteTimeoutMs: STRICT_LID_BROKER_FIRST_BYTE_TIMEOUT_MS/);
+  assert.match(gateway, /strictLidRangeIdleTimeoutMs: STRICT_LID_BROKER_IDLE_TIMEOUT_MS/);
+  assert.match(gateway, /strictLidFfmpegRwTimeoutUs: STRICT_LID_FFMPEG_RW_TIMEOUT_US/);
   assert.match(gateway, /strictLidSampleDurationCapSeconds: STRICT_LID_SAMPLE_DURATION_CAP_SECONDS/);
   assert.match(gateway, /strictLidWhisperReserveMs: STRICT_LID_WHISPER_RESERVE_MS/);
   assert.match(gateway, /strictLidExtractionStartupMarginMs: STRICT_LID_EXTRACTION_STARTUP_MARGIN_MS/);
@@ -883,6 +932,7 @@ test('v99 route uses signed timeline strata and fails a broken Whisper batch bef
   assert.match(route, /strictLidExtractionBudget\(dur, strictWorkDeadlineAt\)/);
   assert.match(route, /strict \? extractionBudget\.timeoutMs : 30_000/);
   assert.match(route, /if \(strict && ex\.timedOut\) \{[\s\S]*?strictExtractionTimedOut = true;[\s\S]*?break;/);
+  assert.match(route, /buildStrictLidExtractionObservability\(input\)/);
   assert.match(route, /strictWavSamples\.push\(\{ offset: off, path: wavPath \}\)/);
   assert.match(route, /const batchTimeoutMs = strictWorkDeadlineAt - Date\.now\(\)/);
   assert.match(route, /runStrictWhisperBatch\([\s\S]*strictWavSamples\.map/);
