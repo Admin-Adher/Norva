@@ -72,7 +72,7 @@ test('MKV codec backfill persists only complete exact-file profiles and terminal
   const route = between(edge, 'async function runCodecProfileBackfill(', '\nasync function runLidBenchmarkEndpoint');
   const gateway = read('services/media-gateway/src/index.js');
 
-  assert.match(gateway, /res\.json\(\{ audioLanguages, audioTracks, audioDefaultLanguage, subtitles, codecProfile: profile \}\)/);
+  assert.match(gateway, /res\.json\(\{[\s\S]*audioLanguages,[\s\S]*audioTracks,[\s\S]*audioDefaultLanguage,[\s\S]*subtitles,[\s\S]*codecProfile: publicMkvCodecProfile\(profile\),?[\s\S]*\}\)/);
   assert.match(route, /hasReliableVodCodecProfile\(observedProfile\)/);
   assert.match(route, /persistObservedCodecProfile\(db, \{[\s\S]*userId,[\s\S]*sourceId,[\s\S]*itemType: "movie",[\s\S]*itemId: externalId/);
   assert.match(route, /variantId,[\s\S]*strict: true/);

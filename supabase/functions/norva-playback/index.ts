@@ -442,13 +442,33 @@ function throwEntitlementRequired(feature: string, decision: unknown, usage?: un
 }
 
 function publicPlaybackSession(value: unknown): JsonRecord {
-  const session = recordOrEmpty(value);
+  const session = recordOrEmpty(stripMkvH264FastStartProofDeep(value));
   const {
     provider_account_hash: _providerAccountHash,
     superseded_by: _supersededBy,
     ...safe
   } = session;
   return safe;
+}
+
+function stripMkvH264FastStartProofDeep(value: unknown, depth = 0): unknown {
+  // Playback hints are persisted owner-readable JSON. The signed attestation is
+  // not a secret, but it is deliberately not part of the public playback API.
+  // Copy while walking so response sanitization never mutates the DB object.
+  if (depth > 24) return null;
+  if (Array.isArray(value)) {
+    return value.map((entry) => stripMkvH264FastStartProofDeep(entry, depth + 1));
+  }
+  if (!value || typeof value !== "object") return value;
+  const clean: JsonRecord = {};
+  for (const [key, entry] of Object.entries(value as JsonRecord)) {
+    if (
+      key === "mkvH264FastStartProof" || key === "mkv_h264_fast_start_proof" ||
+      key === "__norvaMkvH264FastStartItemCasV2"
+    ) continue;
+    clean[key] = stripMkvH264FastStartProofDeep(entry, depth + 1);
+  }
+  return clean;
 }
 
 async function providerAccountHashFromUrl(targetUrl: string): Promise<string> {
@@ -722,10 +742,19 @@ async function createPlaybackSession(
       requestedPlaybackHint,
     );
   const targetUrl = resolved.targetUrl;
-  requestedPlaybackHint = mergePlaybackHints(resolved.playbackHint, requestedPlaybackHint);
+  requestedPlaybackHint = bindServerMkvFastStartProof(
+    mergePlaybackHints(resolved.playbackHint, requestedPlaybackHint),
+    // Exact-episode resolution currently carries the caller hint forward and
+    // exposes no persisted episode profile. Do not mistake that echo for
+    // server authority; episode fast-start remains fail-closed until its proof
+    // is loaded from an owned server-side row.
+    itemType === "movie" ? resolved.playbackHint : {},
+    itemType === "movie",
+  );
   assertHttpUrl(targetUrl);
 
   const mode = choosePlaybackMode(requestedMode, body);
+  const gatewayVideoTranscodeExplicit = mode === "transcode" && body.gatewayAutoMode !== true;
   const ttlSeconds = boundedInt(body.ttlSeconds ?? body.ttl_seconds, 900, 60, 7200);
   const expiresAt = new Date(Date.now() + ttlSeconds * 1000).toISOString();
   // Entitlement/concurrency stays short-lived, but a VOD gateway transport must
@@ -740,6 +769,21 @@ async function createPlaybackSession(
     ? transportExpiresAt
     : expiresAt;
   const targetUrlHash = await sha256Hex(targetUrl);
+  const resolvedItemCas = "itemCas" in resolved ? recordOrEmpty(resolved.itemCas) : {};
+  const itemCasId = stringOrNull(resolvedItemCas.id);
+  const itemCasUpdatedAt = stringOrNull(resolvedItemCas.updatedAt ?? resolvedItemCas.updated_at);
+  requestedPlaybackHint = compactRecord({
+    ...stripMkvH264FastStartInternalHints(requestedPlaybackHint),
+    ...(itemType === "movie" && itemCasId && itemCasUpdatedAt
+      ? {
+        __norvaMkvH264FastStartItemCasV2: {
+          id: itemCasId,
+          updatedAt: itemCasUpdatedAt,
+          targetUrlHash,
+        },
+      }
+      : {}),
+  });
   const providerAccountScope = "providerAccountScope" in resolved
     ? stringOr(resolved.providerAccountScope, "")
     : "";
@@ -1200,6 +1244,15 @@ async function createPlaybackSession(
       mode,
       userAgent,
       requestedPlaybackHint,
+      {
+        sourceId,
+        itemType,
+        itemId,
+        // Variant identity is omitted until loaded from an exact owned row;
+        // caller playback hints are never authority for proof scope.
+        variantId: null,
+      },
+      gatewayVideoTranscodeExplicit,
       releasedSuperseded,
     );
     await commitEdgeSessionCoordinator(edgeCoordination, {
@@ -1236,7 +1289,19 @@ async function createPlaybackSession(
       startupMs: gateway.startupMs,
     });
   }
-  if (sourceId && gateway.codecProfile) {
+  const originalFastStartItemCas = mkvH264FastStartItemCasFromPlaybackSession(session);
+  const gatewayProfileContainer = stringOr(
+    requestedPlaybackHint.container ?? gateway.codecProfile?.container,
+    "",
+  ).toLowerCase();
+  const deferGatewayProfilePersistenceForMkvFastStart = Boolean(
+    originalFastStartItemCas &&
+    (gatewayProfileContainer === "mkv" || gatewayProfileContainer.includes("matroska")),
+  );
+  // Preserve the item version captured before playback. The full-file proof is
+  // the authoritative write for this lifecycle; an intermediate public profile
+  // write would advance updated_at and make the later exact CAS always miss.
+  if (sourceId && gateway.codecProfile && !deferGatewayProfilePersistenceForMkvFastStart) {
     await persistObservedCodecProfile(db, {
       userId,
       sourceId,
@@ -1247,10 +1312,10 @@ async function createPlaybackSession(
       audioMode: gateway.audioMode,
     });
   }
-  const responseCodecProfile = mergeCodecProfileAnnotations(
+  const responseCodecProfile = stripMkvH264FastStartProof(mergeCodecProfileAnnotations(
     firstUsefulCodecProfile(requestedPlaybackHint.codecProfile, requestedPlaybackHint.codec_profile),
     recordOrEmpty(gateway.codecProfile),
-  );
+  ));
   const gatewaySessionResponse = gateway.session && typeof gateway.session === "object"
     ? {
       ...gateway.session,
@@ -1270,6 +1335,8 @@ async function createPlaybackSession(
       audio_renditions: gateway.audioRenditions ?? null,
       multiAudioHls: gateway.multiAudioHls ?? null,
       multi_audio_hls: gateway.multiAudioHls ?? null,
+      startupPolicy: gateway.startupPolicy ?? null,
+      startup_policy: gateway.startupPolicy ?? null,
     }
     : gateway.session;
   return {
@@ -1298,6 +1365,8 @@ async function createPlaybackSession(
       audio_renditions: gateway.audioRenditions ?? null,
       multiAudioHls: gateway.multiAudioHls ?? null,
       multi_audio_hls: gateway.multiAudioHls ?? null,
+      startupPolicy: gateway.startupPolicy ?? null,
+      startup_policy: gateway.startupPolicy ?? null,
       codecProfile: hasUsefulCodecProfile(responseCodecProfile) ? responseCodecProfile : null,
       transportExpiresAt: gatewayTransportExpiresAt,
       sessionExpiresAt: expiresAt,
@@ -3250,6 +3319,7 @@ async function expirePlaybackSession(id: string, userId: string, db: SupabaseCli
   const closedGatewayIds: string[] = [];
   const gatewayErrors: unknown[] = [];
   let rawPumpsAborted = 0;
+  let fastStartProofPersisted = false;
 
   if (runtimeConfig.mediaGatewayUrl && runtimeConfig.mediaGatewayToken) {
     // Direct/native sessions may have switched to their long-lived signed /raw
@@ -3287,6 +3357,32 @@ async function expirePlaybackSession(id: string, userId: string, db: SupabaseCli
       if (!response.ok && response.status !== 404) {
         const body = await response.text().catch(() => "");
         throw new HttpError(response.status, "Media gateway refused session expiry", body);
+      }
+      const cleanupBody = response.ok
+        ? await response.json().catch(() => ({} as JsonRecord))
+        : ({} as JsonRecord);
+      const finalCodecProfile = normalizeCodecProfile(recordOrEmpty(
+        cleanupBody.finalCodecProfile ?? cleanupBody.final_codec_profile,
+      ));
+      const finalProof = normalizeMkvH264FastStartProof(finalCodecProfile.mkvH264FastStartProof);
+      if (
+        hasUsefulCodecProfile(finalCodecProfile) && stringOr(session.item_type, "") === "movie" &&
+        stringOrNull(session.source_id) && stringOrNull(session.item_id)
+      ) {
+        const persisted = await persistObservedCodecProfile(db, {
+          userId,
+          sourceId: String(session.source_id),
+          itemType: "movie",
+          itemId: String(session.item_id),
+          codecProfile: finalCodecProfile,
+          startupMs: null,
+          audioMode: null,
+          requireItemCas: true,
+          expectedItemCas: mkvH264FastStartItemCasFromPlaybackSession(session),
+          itemOnly: true,
+          allowProofReplacement: Boolean(finalProof),
+        });
+        fastStartProofPersisted = fastStartProofPersisted || persisted;
       }
       closedGatewayIds.push(String(gateway.id ?? externalSessionId));
     })).then((results) => {
@@ -3332,6 +3428,7 @@ async function expirePlaybackSession(id: string, userId: string, db: SupabaseCli
     session: publicPlaybackSession(expired),
     gatewayClosed: closedGatewayIds.length,
     rawPumpsAborted,
+    fastStartProofPersisted,
     gatewayErrors: gatewayErrors.length,
   };
 }
@@ -3651,6 +3748,23 @@ async function closeOpenGatewaySessionsForUser(userId: string, db: SupabaseClien
     .map((gateway: JsonRecord) => stringOrNull(gateway.playback_session_id))
     .filter((sessionId: string | null): sessionId is string => Boolean(sessionId));
 
+  const playbackSessionsById = new Map<string, JsonRecord>();
+  if (playbackSessionIds.length) {
+    const { data: playbackSessions, error: playbackLoadError } = await db
+      .from("cloud_playback_sessions")
+      .select("id,user_id,source_id,item_type,item_id,target_url_hash,playback_hint")
+      .eq("user_id", userId)
+      .in("id", playbackSessionIds);
+    if (playbackLoadError) {
+      console.warn("[norva-playback] unable to load cleanup playback identities", playbackLoadError.message);
+    } else {
+      for (const playbackSession of playbackSessions ?? []) {
+        const playbackSessionId = stringOrNull(playbackSession.id);
+        if (playbackSessionId) playbackSessionsById.set(playbackSessionId, playbackSession as JsonRecord);
+      }
+    }
+  }
+
   if (runtimeConfig.mediaGatewayUrl && runtimeConfig.mediaGatewayToken) {
     await Promise.allSettled(gatewaySessions.map(async (gateway: JsonRecord) => {
       const externalSessionId = stringOrNull(gateway.external_session_id);
@@ -3661,6 +3775,34 @@ async function closeOpenGatewaySessionsForUser(userId: string, db: SupabaseClien
       });
       if (!response.ok && response.status !== 404) {
         console.warn("[norva-playback] gateway cleanup refused", response.status, await response.text().catch(() => ""));
+        return;
+      }
+      if (response.ok) {
+        const cleanupBody = await response.json().catch(() => ({} as JsonRecord));
+        const finalCodecProfile = normalizeCodecProfile(recordOrEmpty(
+          cleanupBody.finalCodecProfile ?? cleanupBody.final_codec_profile,
+        ));
+        const finalProof = normalizeMkvH264FastStartProof(finalCodecProfile.mkvH264FastStartProof);
+        const playbackSessionId = stringOrNull(gateway.playback_session_id);
+        const playbackSession = playbackSessionId ? playbackSessionsById.get(playbackSessionId) : null;
+        if (
+          hasUsefulCodecProfile(finalCodecProfile) && playbackSession && stringOr(playbackSession.item_type, "") === "movie" &&
+          stringOrNull(playbackSession.source_id) && stringOrNull(playbackSession.item_id)
+        ) {
+          await persistObservedCodecProfile(db, {
+            userId,
+            sourceId: String(playbackSession.source_id),
+            itemType: "movie",
+            itemId: String(playbackSession.item_id),
+            codecProfile: finalCodecProfile,
+            startupMs: null,
+            audioMode: null,
+            requireItemCas: true,
+            expectedItemCas: mkvH264FastStartItemCasFromPlaybackSession(playbackSession),
+            itemOnly: true,
+            allowProofReplacement: Boolean(finalProof),
+          });
+        }
       }
     }));
   }
@@ -4006,6 +4148,12 @@ async function resolvePlaybackTarget(
   // playback. mirror-verify proves playback_hint is byte-identical between the two,
   // so flag-on is provably equivalent — until the per-user copy is thinned away.
   let item: { playback_hint?: unknown; metadata?: unknown } | null = null;
+  let ownedItem: {
+    id?: unknown;
+    updated_at?: unknown;
+    playback_hint?: unknown;
+    metadata?: unknown;
+  } | null = null;
   if (mediaReadFromCatalog()) {
     const host = await resolveSourceHost(sourceId, userId, db);
     if (host) {
@@ -4019,17 +4167,18 @@ async function resolvePlaybackTarget(
       if (data) item = data;
     }
   }
-  if (!item) {
+  if (!item || mediaReadFromCatalog()) {
     const { data, error } = await db
       .from("cloud_media_items")
-      .select("playback_hint,metadata")
+      .select("id,updated_at,playback_hint,metadata")
       .eq("source_id", sourceId)
       .eq("user_id", userId)
       .eq("item_type", itemType)
       .eq("external_id", itemId)
       .maybeSingle();
     if (error) throwDb(error, "Unable to resolve playback item");
-    item = data;
+    ownedItem = data;
+    if (!item) item = data;
   }
   if (!item) {
     if (itemType === "series") {
@@ -4056,12 +4205,27 @@ async function resolvePlaybackTarget(
 
   const hint = recordOrEmpty(item.playback_hint);
   const metadata = recordOrEmpty(item.metadata);
-  const storedCodecProfile = firstUsefulCodecProfile(
+  const catalogueCodecProfile = firstUsefulCodecProfile(
     hint.codecProfile,
     hint.codec_profile,
     metadata.codecProfile,
     metadata.codec_profile,
   );
+  const ownedHint = recordOrEmpty(ownedItem?.playback_hint);
+  const ownedMetadata = recordOrEmpty(ownedItem?.metadata);
+  const ownedCodecProfile = firstUsefulCodecProfile(
+    ownedHint.codecProfile,
+    ownedHint.codec_profile,
+    ownedMetadata.codecProfile,
+    ownedMetadata.codec_profile,
+  );
+  const ownedFastStartProof = normalizeMkvH264FastStartProof(
+    ownedCodecProfile.mkvH264FastStartProof ?? ownedCodecProfile.mkv_h264_fast_start_proof,
+  );
+  // The global catalogue mirror may lag a playback-produced proof. Prefer the
+  // owned row only when it carries that bounded server observation; otherwise
+  // keep the normal mirror-first profile choice unchanged.
+  const storedCodecProfile = ownedFastStartProof ? ownedCodecProfile : catalogueCodecProfile;
   const storedPlaybackHint = mergePlaybackHints(
     compactRecord({
       ...hint,
@@ -4069,6 +4233,12 @@ async function resolvePlaybackTarget(
     }),
     {},
   );
+  const itemCas = stringOrNull(ownedItem?.id) && stringOrNull(ownedItem?.updated_at)
+    ? {
+      id: String(ownedItem?.id),
+      updatedAt: String(ownedItem?.updated_at),
+    }
+    : null;
   if (hint.sourceType === "xtream") {
     const sourceConfig = await loadSourceConfig(sourceId, userId, db);
     const requestContainer = stringOrNull(requestHint.container);
@@ -4084,6 +4254,7 @@ async function resolvePlaybackTarget(
         container,
       }),
       playbackHint: mergePlaybackHints(storedPlaybackHint, compactRecord({ container })),
+      itemCas,
     };
   }
 
@@ -4096,6 +4267,7 @@ async function resolvePlaybackTarget(
       targetUrl: hint.targetUrl,
       playbackHint: storedPlaybackHint,
       providerAccountScope: `user-source:${userId}:${sourceId}`,
+      itemCas,
     };
   }
 
@@ -4202,7 +4374,7 @@ async function createRelayAccess(
   expiresAt: string,
   db: SupabaseClient,
   coord: string,
-  userAgent: string | null = null,
+  userAgent: string | null,
 ) {
   const runtimeConfig = await getRuntimeConfig(db);
   if (!runtimeConfig.relayBaseUrl || !runtimeConfig.relayTokenSecret) {
@@ -4346,11 +4518,18 @@ async function createGatewaySession(
   expiresAt: string,
   db: SupabaseClient,
   mode: "direct" | "relay" | "transcode",
-  userAgent: string | null = null,
-  playbackHint: JsonRecord = {},
+  userAgent: string | null,
+  playbackHint: JsonRecord,
+  playbackIdentity: {
+    sourceId: string;
+    itemType: string;
+    itemId: string;
+    variantId: string | null;
+  },
+  forceVideoTranscode: boolean,
   releasedSuperseded = 0,
 ) {
-  const gatewayMode = gatewayModeForPlayback(mode, playbackHint);
+  const gatewayMode = gatewayModeForPlayback(mode, playbackHint, forceVideoTranscode);
   const gatewayHints = gatewayPlaybackHints(playbackHint);
   const requestedAudioStreamIndex = boundedNullableInt(
     gatewayHints.audioStreamIndex ?? gatewayHints.audio_stream_index,
@@ -4384,6 +4563,7 @@ async function createGatewaySession(
       sourceTimestamps: false,
       audioRenditions: null,
       multiAudioHls: null,
+      startupPolicy: null,
     };
   }
 
@@ -4394,7 +4574,8 @@ async function createGatewaySession(
     sourceUrl: targetUrl,
     mode: gatewayMode,
     expiresAt,
-    playbackHint: compactRecord(playbackHint),
+    playbackHint: compactRecord(stripMkvH264FastStartInternalHints(playbackHint)),
+    playbackIdentity: compactRecord(playbackIdentity),
     seekOffset: gatewayHints.seekOffset,
     startOffset: gatewayHints.startOffset,
     ...gatewayHints,
@@ -4510,6 +4691,9 @@ async function createGatewaySession(
   // stream to the exact rendition array returned by this same Gateway response.
   const audioRenditions = multiAudioHls ? normalizedAudioRenditions : null;
   const codecProfile = firstUsefulCodecProfile(gatewayBody.codecProfile, gatewayBody.codec_profile);
+  const startupPolicy = normalizeGatewayStartupPolicy(
+    gatewayBody.startupPolicy ?? gatewayBody.startup_policy,
+  );
 
   const { data, error } = await db
     .from("cloud_gateway_sessions")
@@ -4539,6 +4723,7 @@ async function createGatewaySession(
     sourceTimestamps,
     audioRenditions,
     multiAudioHls,
+    startupPolicy,
     codecProfile,
   };
 }
@@ -4562,7 +4747,12 @@ async function requestGatewaySession(
   };
 }
 
-function gatewayModeForPlayback(mode: "direct" | "relay" | "transcode", playbackHint: JsonRecord): "remux" | "transcode" {
+function gatewayModeForPlayback(
+  mode: "direct" | "relay" | "transcode",
+  playbackHint: JsonRecord,
+  forceVideoTranscode = false,
+): "remux" | "transcode" {
+  if (forceVideoTranscode) return "transcode";
   const requested = normalizeCodecToken(playbackHint.gatewayMode ?? playbackHint.gateway_mode);
   if (requested === "remux" || requested === "copy") return "remux";
   if (requested === "transcode" || requested === "encode") return "transcode";
@@ -4673,19 +4863,34 @@ async function persistObservedCodecProfile(
     audioMode: string | null;
     variantId?: string | null;
     strict?: boolean;
+    requireItemCas?: boolean;
+    expectedItemCas?: {
+      id: string;
+      updatedAt: string;
+      targetUrlHash: string;
+    } | null;
+    itemOnly?: boolean;
+    allowProofReplacement?: boolean;
   },
 ) {
   const itemType = options.itemType === "series" ? "series" : options.itemType === "movie" ? "movie" : "";
-  const observedCodecProfile = normalizeCodecProfile(options.codecProfile);
+  const normalizedObservedCodecProfile = normalizeCodecProfile(options.codecProfile);
+  const observedCodecProfile = options.allowProofReplacement
+    ? normalizedObservedCodecProfile
+    : stripMkvH264FastStartProof(normalizedObservedCodecProfile);
   if (!itemType || !options.itemId || !hasUsefulCodecProfile(observedCodecProfile)) {
     if (options.strict) throw new HttpError(422, "A useful codec profile is required");
     return false;
   }
 
   const observedAt = new Date().toISOString();
+  if (options.requireItemCas && !options.expectedItemCas) {
+    if (options.strict) throw new HttpError(409, "Exact media item CAS snapshot is unavailable");
+    return false;
+  }
   const { data: item, error } = await db
     .from("cloud_media_items")
-    .select("id,metadata,playback_hint")
+    .select("id,metadata,playback_hint,updated_at")
     .eq("user_id", options.userId)
     .eq("source_id", options.sourceId)
     .eq("item_type", itemType)
@@ -4707,8 +4912,18 @@ async function persistObservedCodecProfile(
     codecProfile,
     audioMode: options.audioMode || undefined,
   }));
+  if (
+    options.requireItemCas && (
+      !item?.id || !stringOrNull(item.updated_at) ||
+      String(item.id) !== options.expectedItemCas?.id ||
+      String(item.updated_at) !== options.expectedItemCas?.updatedAt
+    )
+  ) {
+    if (options.strict) throw new HttpError(409, "Exact media item CAS state is unavailable");
+    return false;
+  }
   if (item?.id) {
-    const { error: itemUpdateError } = await db
+    let itemUpdate = db
       .from("cloud_media_items")
       .update({
         metadata: compactRecord({
@@ -4718,12 +4933,24 @@ async function persistObservedCodecProfile(
         }),
         playback_hint: mergedPlaybackHint,
       })
-      .eq("id", item.id);
+      .eq("id", options.requireItemCas ? options.expectedItemCas!.id : item.id);
+    if (options.requireItemCas) itemUpdate = itemUpdate.eq("updated_at", options.expectedItemCas!.updatedAt);
+    const itemUpdateResult = options.requireItemCas
+      ? await itemUpdate.select("id")
+      : await itemUpdate;
+    const updatedItems = options.requireItemCas ? itemUpdateResult.data : null;
+    const itemUpdateError = itemUpdateResult.error;
     if (itemUpdateError) {
       if (options.strict) throwDb(itemUpdateError, "Unable to persist media codec profile");
       console.warn("[norva-playback] unable to persist media codec profile", itemUpdateError.message);
     }
+    if (options.requireItemCas && (!Array.isArray(updatedItems) || updatedItems.length !== 1)) {
+      if (options.strict) throw new HttpError(409, "Media codec profile changed before CAS persistence");
+      return false;
+    }
   }
+
+  if (options.itemOnly) return Boolean(item?.id);
 
   const tier = compatibilityTierForCodecProfile(codecProfile, mergedPlaybackHint);
   const variantPatch: JsonRecord = compactRecord({
@@ -4769,6 +4996,38 @@ function mergePlaybackHints(base: JsonRecord, override: JsonRecord) {
   });
 }
 
+function bindServerMkvFastStartProof(
+  mergedHintValue: unknown,
+  authoritativeHintValue: unknown,
+  serverAuthority: boolean,
+) {
+  const mergedHint = recordOrEmpty(mergedHintValue);
+  const authoritativeHint = recordOrEmpty(authoritativeHintValue);
+  const mergedProfile = firstUsefulCodecProfile(
+    mergedHint.codecProfile,
+    mergedHint.codec_profile,
+  );
+  if (!hasUsefulCodecProfile(mergedProfile)) return mergedHint;
+  const authoritativeProfile = firstUsefulCodecProfile(
+    authoritativeHint.codecProfile,
+    authoritativeHint.codec_profile,
+  );
+  const serverProof = serverAuthority ? normalizeMkvH264FastStartProof(
+    authoritativeProfile.mkvH264FastStartProof ??
+      authoritativeProfile.mkv_h264_fast_start_proof,
+  ) : null;
+  // The caller controls playbackHint. Codec metadata may remain a useful hint,
+  // but only a profile loaded from the owned server-side catalogue may attest
+  // that packet/GOP evidence is safe enough to bypass video encoding.
+  return compactRecord({
+    ...mergedHint,
+    codecProfile: compactRecord({
+      ...mergedProfile,
+      mkvH264FastStartProof: serverProof,
+    }),
+  });
+}
+
 function firstUsefulCodecProfile(...values: unknown[]) {
   for (const value of values) {
     const profile = normalizeCodecProfile(recordOrEmpty(value));
@@ -4793,9 +5052,12 @@ function mergeCodecProfileAnnotations(existingValue: unknown, observedValue: unk
   if (!hasUsefulCodecProfile(observed)) return existing;
   if (!hasUsefulCodecProfile(existing)) return observed;
 
+  const existingProof = normalizeMkvH264FastStartProof(existing.mkvH264FastStartProof);
+  const observedProof = normalizeMkvH264FastStartProof(observed.mkvH264FastStartProof);
   return compactRecord({
     ...observed,
     subtitles: mergeSubtitleTrackAnnotations(existing.subtitles, observed.subtitles),
+    mkvH264FastStartProof: observedProof ?? existingProof,
   });
 }
 
@@ -4829,7 +5091,99 @@ function findMatchingCodecTrack(tracks: JsonRecord[], target: JsonRecord, order:
   return tracks[order] ?? null;
 }
 
+function normalizeMkvH264FastStartProof(value: unknown) {
+  if (typeof value !== "string" || value.length === 0 || value.length > 16_384) return null;
+  const parts = value.split(".");
+  if (
+    parts.length !== 2 || parts[0].length === 0 || parts[0].length > 16_000 ||
+    parts[1].length !== 43 ||
+    !/^[A-Za-z0-9_-]+$/.test(parts[0]) ||
+    !/^[A-Za-z0-9_-]+$/.test(parts[1])
+  ) return null;
+  // Edge deliberately does not decode or authorize this envelope. Gateway is
+  // the sole HMAC verifier after current-file/validator pre-open.
+  return value;
+}
+
+function stripMkvH264FastStartProof(value: unknown): JsonRecord {
+  const profile = { ...recordOrEmpty(value) };
+  delete profile.mkvH264FastStartProof;
+  delete profile.mkv_h264_fast_start_proof;
+  return compactRecord(profile);
+}
+
+function stripMkvH264FastStartInternalHints(value: unknown): JsonRecord {
+  const hint = { ...recordOrEmpty(value) };
+  delete hint.__norvaMkvH264FastStartItemCasV2;
+  return compactRecord(hint);
+}
+
+function mkvH264FastStartItemCasFromPlaybackSession(value: unknown) {
+  const session = recordOrEmpty(value);
+  const hint = recordOrEmpty(session.playback_hint ?? session.playbackHint);
+  const raw = recordOrEmpty(hint.__norvaMkvH264FastStartItemCasV2);
+  const id = stringOrNull(raw.id);
+  const updatedAt = stringOrNull(raw.updatedAt ?? raw.updated_at);
+  const targetUrlHash = stringOrNull(raw.targetUrlHash ?? raw.target_url_hash)?.toLowerCase() ?? null;
+  const sessionTargetUrlHash = stringOrNull(session.target_url_hash ?? session.targetUrlHash)?.toLowerCase() ?? null;
+  if (
+    !id || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id) ||
+    !updatedAt || !Number.isFinite(Date.parse(updatedAt)) ||
+    !targetUrlHash || !/^[0-9a-f]{64}$/.test(targetUrlHash) ||
+    sessionTargetUrlHash !== targetUrlHash
+  ) return null;
+  return { id, updatedAt, targetUrlHash };
+}
+
+function normalizeGatewayStartupPolicy(value: unknown) {
+  const raw = recordOrEmpty(value);
+  const protocol = Number(raw.protocol);
+  const pipeline = stringOr(raw.pipeline, "");
+  const targetBufferSeconds = boundedNullableNumber(
+    raw.targetBufferSeconds ?? raw.target_buffer_seconds,
+    1,
+    180,
+  );
+  const minimumEncodeRateX = boundedNullableNumber(
+    raw.minimumEncodeRateX ?? raw.minimum_encode_rate_x,
+    1,
+    10,
+  );
+  const observedEncodeRateX = boundedNullableNumber(
+    raw.observedEncodeRateX ?? raw.observed_encode_rate_x,
+    0,
+    20,
+  );
+  const reason = stringOr(raw.reason, "");
+  const eligible = raw.eligible === true;
+  if (
+    protocol !== 2 ||
+    !["copy", "audio-transcode", "video-transcode"].includes(pipeline) ||
+    minimumEncodeRateX === null ||
+    !/^[a-z0-9-]{1,64}$/.test(reason) ||
+    (eligible && (
+      targetBufferSeconds === null ||
+      observedEncodeRateX === null ||
+      observedEncodeRateX < minimumEncodeRateX ||
+      pipeline === "video-transcode"
+    )) ||
+    (!eligible && targetBufferSeconds !== null)
+  ) return null;
+  return {
+    protocol: 2,
+    eligible,
+    pipeline,
+    targetBufferSeconds: eligible ? targetBufferSeconds : null,
+    minimumEncodeRateX,
+    observedEncodeRateX,
+    reason,
+  };
+}
+
 function normalizeCodecProfile(profile: JsonRecord) {
+  const mkvH264FastStartProof = normalizeMkvH264FastStartProof(
+    profile.mkvH264FastStartProof ?? profile.mkv_h264_fast_start_proof,
+  );
   return compactRecord({
     videoCodec: stringOrNull(profile.videoCodec ?? profile.video_codec ?? profile.video),
     videoProfile: stringOrNull(profile.videoProfile ?? profile.video_profile),
@@ -4853,6 +5207,7 @@ function normalizeCodecProfile(profile: JsonRecord) {
     probeMs: boundedNullableInt(profile.probeMs ?? profile.probe_ms, 0, 120_000),
     probedAt: stringOrNull(profile.probedAt ?? profile.probed_at),
     metadataComplete: profile.metadataComplete === true || profile.metadata_complete === true,
+    mkvH264FastStartProof,
   });
 }
 
@@ -4945,7 +5300,10 @@ function normalizeCodecProfileTracks(value: unknown, kind: "audio" | "subtitle")
           language: stringOrNull(track.language ?? track.lang),
           title: stringOrNull(track.title ?? track.name),
           codec: stringOrNull(track.codec ?? track.codecName ?? track.codec_name),
+          profile: stringOrNull(track.profile),
           channels: boundedNullableInt(track.channels, 0, 16),
+          sampleRate: boundedNullableInt(track.sampleRate ?? track.sample_rate, 0, 384_000),
+          channelLayout: stringOrNull(track.channelLayout ?? track.channel_layout),
           default: booleanOrNull(track.default),
         });
       }

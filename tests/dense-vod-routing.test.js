@@ -528,7 +528,7 @@ test('dense browser VOD without exact codecs uses one full Gateway conversion la
     assert.strictEqual(calls.length, 1);
     assert.strictEqual(calls[0].mode, 'transcode');
     assert.strictEqual(calls[0].requiresTranscode, true);
-    assert.strictEqual(calls[0].playbackHint.gatewayMode, 'transcode');
+    assert.strictEqual(calls[0].playbackHint.gatewayMode, 'remux');
     assert.strictEqual(calls[0].playbackHint.audioMode, 'transcode');
     assert.strictEqual(calls[0].playbackHint.audioTrackCount, 23);
     assert.strictEqual(calls[0].playbackHint.subtitleTrackCount, 34);
@@ -555,7 +555,7 @@ test('ordinary unknown MKV opens one bounded Gateway conversion lane', async () 
     assert.strictEqual(calls[0].mode, 'transcode');
     assert.strictEqual(calls[0].requiresTranscode, true);
     assert.strictEqual(calls[0].enginePipe, undefined);
-    assert.strictEqual(calls[0].playbackHint.gatewayMode, 'transcode');
+    assert.strictEqual(calls[0].playbackHint.gatewayMode, 'remux');
     assert.strictEqual(calls[0].playbackHint.audioMode, 'transcode');
     assert.strictEqual(calls[0].playbackHint.audioStreamIndex, 3);
 });
@@ -582,7 +582,7 @@ test('absent or partial MKV codec facts always stay on one full Gateway lane', a
         assert.strictEqual(calls[0].mode, 'transcode', label);
         assert.strictEqual(calls[0].requiresTranscode, true, label);
         assert.strictEqual(calls[0].enginePipe, undefined, label);
-        assert.strictEqual(calls[0].playbackHint.gatewayMode, 'transcode', label);
+        assert.strictEqual(calls[0].playbackHint.gatewayMode, 'remux', label);
         assert.strictEqual(calls[0].playbackHint.audioMode, 'transcode', label);
     }
 });
@@ -602,7 +602,7 @@ test('an explicit Engine preference cannot reopen a RAW lane for unknown MKV', a
     assert.strictEqual(calls[0].mode, 'transcode');
     assert.strictEqual(calls[0].requiresTranscode, true);
     assert.strictEqual(calls[0].enginePipe, undefined);
-    assert.strictEqual(calls[0].playbackHint.gatewayMode, 'transcode');
+    assert.strictEqual(calls[0].playbackHint.gatewayMode, 'remux');
     assert.strictEqual(calls[0].playbackHint.audioMode, 'transcode');
 });
 
@@ -628,7 +628,7 @@ test('unknown MKV provider busy is terminal and never opens a second lane', asyn
     assert.strictEqual(calls[0].mode, 'transcode');
     assert.strictEqual(calls[0].requiresTranscode, true);
     assert.strictEqual(calls[0].enginePipe, undefined);
-    assert.strictEqual(calls[0].playbackHint.gatewayMode, 'transcode');
+    assert.strictEqual(calls[0].playbackHint.gatewayMode, 'remux');
 });
 
 test('a fresh probe replaces stale exact track maps even when the new maps are empty', () => {

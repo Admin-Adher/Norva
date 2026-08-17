@@ -5,8 +5,9 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const crypto = require('node:crypto');
 const { EventEmitter } = require('node:events');
-const { Writable } = require('node:stream');
+const { Writable, PassThrough } = require('node:stream');
 const providerFailure = require('../services/media-gateway/src/providerFailure.js');
 const { providerAccountAffinityKey } = require('../services/media-gateway/src/providerProxyPool.js');
 
@@ -70,6 +71,7 @@ function pumpHarness(overrides = {}) {
     );
     const globals = {
         URL,
+        crypto,
         path,
         Buffer,
         ArrayBuffer,
@@ -84,6 +86,7 @@ function pumpHarness(overrides = {}) {
         VOD_INPUT_IDLE_TIMEOUT_MS: 1_000,
         VOD_INPUT_RETRY_LIMIT: 2,
         VOD_INPUT_MAX_RECONNECTS: 16,
+        VOD_INPUT_DISCOVERY_RANGE_END: Number.MAX_SAFE_INTEGER - 1,
         VOD_INPUT_RETRY_DELAYS_MS: [0, 0, 0, 0],
         VOD_INPUT_MIN_PROGRESS_RESET_BYTES: 8,
         INBAND_HEADER_PARSE: false,
@@ -91,6 +94,25 @@ function pumpHarness(overrides = {}) {
         INBAND_HEADER_BYTES: 4_000_000,
         INBAND_HEADER_CACHE_MAX: 16,
         headerByteCache: new Map(),
+        MKV_H264_FAST_START_PROOF_CURRENT_KEY: null,
+        MKV_H264_FAST_START_COPY_ACTIVATION_READY: false,
+        PassThrough,
+        FFPROBE_PATH: 'ffprobe-test',
+        MKV_H264_FAST_START_ANALYZER_BUFFER_BYTES: 8 * 1024 * 1024,
+        MKV_H264_FAST_START_ANALYZER_STOP_TIMEOUT_MS: 100,
+        CODEC_PROBE_TIMEOUT_MS: 100,
+        EXACT_MATROSKA_H264_HLS_TARGET_SECONDS: 2,
+        EXACT_MATROSKA_H264_MAX_WIDTH: 1920,
+        EXACT_MATROSKA_H264_MAX_HEIGHT: 1080,
+        EXACT_MATROSKA_H264_MAX_PIXELS: 1920 * 1080,
+        mkvH264FullFileAnalyzers: new Set(),
+        mkvH264FastStartIdentityContext: () => null,
+        loopbackOnlyEnv: () => ({}),
+        sanitizeLog: (value) => String(value || ''),
+        spawn: () => { throw new Error('unexpected analyzer spawn'); },
+        sha256Hex: (value) => crypto.createHash('sha256').update(String(value)).digest('hex'),
+        needsMkvH264CurrentHeaderAuthority: () => false,
+        maybeFinalizeMkvH264FastStartProof: () => null,
         RAW_PREFIX_SNIFF_BYTES: 512,
         FFMPEG_USER_AGENT: 'Norva/Test',
         providerProxyAgents: [],
@@ -100,6 +122,7 @@ function pumpHarness(overrides = {}) {
             failures: 0,
             reconnects: 0,
             bytesForwarded: 0,
+            validatorEvidence: { strongEtag: 0, lastModified: 0, weakOrAbsent: 0 },
             last: null,
         },
         asRecord: (value) => value && typeof value === 'object' && !Array.isArray(value) ? value : {},
@@ -179,6 +202,7 @@ function trackedResponse(tracker, options = {}) {
     return {
         status,
         ok: status >= 200 && status < 300,
+        url: options.url,
         headers,
         body,
     };
@@ -394,6 +418,34 @@ function mkvSession(fileSizeBytes) {
     };
 }
 
+function analyzerChild({ slow = false } = {}) {
+    const child = new EventEmitter();
+    child.stdout = new PassThrough();
+    child.stderr = new PassThrough();
+    child.kills = 0;
+    child.stdin = new Writable({
+        write(_chunk, _encoding, callback) {
+            if (!slow) callback();
+        },
+        final(callback) {
+            if (!slow) {
+                child.stdout.end('0.000000,0.000000,0.040000,K__\n2.000000,2.000000,0.040000,K__\n4.000000,4.000000,0.040000,K__\n');
+                callback();
+                queueMicrotask(() => child.emit('exit', 0));
+            }
+        },
+    });
+    child.kill = () => {
+        child.kills += 1;
+        child.stdin.destroy();
+        child.stdout.destroy();
+        child.stderr.destroy();
+        queueMicrotask(() => child.emit('exit', null));
+        return true;
+    };
+    return child;
+}
+
 test('bounded MKV pump forwards exact bytes, resumes at the exact offset, and never overlaps upstream sockets', async () => {
     const fixture = mkvFixture();
     const tracker = makeTracker();
@@ -449,6 +501,101 @@ test('bounded MKV pump forwards exact bytes, resumes at the exact offset, and ne
     ]);
     assert.equal(tracker.calls[1]['If-Range'], '"mkv-v1"');
     assert.deepEqual(tracker.dispatchers, [dispatcher, dispatcher], 'every reconnect stays on one sticky proxy');
+});
+
+test('cold unknown-size MKV discovers total from the retained playback GET and opens one provider socket', async () => {
+    const fixture = mkvFixture(64);
+    const tracker = makeTracker();
+    let fetches = 0;
+    const h = pumpHarness({
+        fetch: async (_url, options) => {
+            fetches += 1;
+            tracker.calls.push(options.headers);
+            return trackedResponse(tracker, {
+                chunks: [fixture],
+                headers: {
+                    'Content-Range': `bytes 0-${fixture.length - 1}/${fixture.length}`,
+                    'Content-Length': String(fixture.length),
+                    ETag: '"unknown-size-v1"',
+                },
+            });
+        },
+    });
+    const session = mkvSession(null);
+    delete session.fileSizeBytes;
+    delete session.codecProfile.fileSizeBytes;
+    await h.ensureBoundedMkvInputPump(session);
+    const writable = new CapturingWritable();
+    const result = await h.runBoundedMkvInputPump(session, writable, new AbortController().signal, null);
+    assert.equal(fetches, 1);
+    assert.equal(tracker.maxActive, 1);
+    assert.equal(result.bytesForwarded, fixture.length);
+    assert.deepEqual(writable.bytes(), fixture);
+    assert.equal(session.startupTimings.fileSizeDiscoveredFromPlaybackGet, true);
+});
+
+test('optional analyzer backpressure abandons proof without slowing the primary pump', async () => {
+    const fixture = mkvFixture(4_096);
+    const tracker = makeTracker();
+    const child = analyzerChild({ slow: true });
+    const analyzers = new Set();
+    const h = pumpHarness({
+        MKV_H264_FAST_START_COPY_ACTIVATION_READY: true,
+        MKV_H264_FAST_START_PROOF_CURRENT_KEY: Buffer.alloc(32, 1),
+        MKV_H264_FAST_START_ANALYZER_BUFFER_BYTES: 1,
+        mkvH264FastStartIdentityContext: () => ({ tenantScopeSha256: 'a', itemScopeSha256: 'b' }),
+        mkvH264FullFileAnalyzers: analyzers,
+        spawn: () => child,
+        fetch: async () => trackedResponse(tracker, {
+            chunks: [fixture],
+            headers: {
+                'Content-Range': `bytes 0-${fixture.length - 1}/${fixture.length}`,
+                'Content-Length': String(fixture.length),
+                ETag: '"analyzer-slow"',
+            },
+        }),
+    });
+    const session = mkvSession(fixture.length);
+    session.playbackIdentity = { sourceId: 's', itemType: 'movie', itemId: 'm' };
+    session.mkvH264FastStart = { eligible: false };
+    const writable = new CapturingWritable();
+    const result = await h.runBoundedMkvInputPump(session, writable, new AbortController().signal, null);
+    assert.equal(result.bytesForwarded, fixture.length);
+    assert.deepEqual(writable.bytes(), fixture);
+    assert.ok(child.kills >= 1);
+    assert.equal(analyzers.size, 0);
+    assert.equal(session.mkvH264FullFilePacketMetrics, null);
+});
+
+test('provider error and abort reap the optional analyzer and preserve the primary error', async (t) => {
+    for (const [label, setup, expectedCode] of [
+        ['provider-error', () => ({ fetch: async () => { throw new Error('provider down'); }, signal: new AbortController().signal }), 'PROVIDER_FETCH_FAILED'],
+        ['abort', () => { const controller = new AbortController(); controller.abort(); return { fetch: async () => { throw new Error('must not fetch'); }, signal: controller.signal }; }, 'VOD_INPUT_ABORTED'],
+    ]) {
+        await t.test(label, async () => {
+            const child = analyzerChild();
+            const analyzers = new Set();
+            const scenario = setup();
+            const h = pumpHarness({
+                MKV_H264_FAST_START_COPY_ACTIVATION_READY: true,
+                MKV_H264_FAST_START_PROOF_CURRENT_KEY: Buffer.alloc(32, 1),
+                mkvH264FastStartIdentityContext: () => ({ tenantScopeSha256: 'a', itemScopeSha256: 'b' }),
+                mkvH264FullFileAnalyzers: analyzers,
+                spawn: () => child,
+                fetch: scenario.fetch,
+            });
+            const session = mkvSession(64);
+            session.playbackIdentity = { sourceId: 's', itemType: 'movie', itemId: 'm' };
+            session.mkvH264FastStart = { eligible: false };
+            await assert.rejects(
+                h.runBoundedMkvInputPump(session, new CapturingWritable(), scenario.signal, null),
+                (error) => error?.code === expectedCode,
+            );
+            assert.ok(child.kills >= 1);
+            assert.equal(analyzers.size, 0);
+            assert.equal(session.mkvH264FullFilePacketMetrics, undefined);
+        });
+    }
 });
 
 test('FFmpeg stdin completion is successful only after the Writable finishes cleanly', async (t) => {
@@ -575,7 +722,10 @@ test('bounded range validation rejects rewinds, total drift, compression, and ov
     );
     assert.equal(h.parseBoundedProviderContentRange(response(200, '', '10'), 0, 10), null);
     assert.equal(h.parseBoundedProviderContentRange(response(206, 'bytes 0-9/10', '10'), 4, 10), null);
-    assert.equal(h.parseBoundedProviderContentRange(response(206, 'bytes 4-9/11', '6'), 4, 10), null);
+    assert.deepEqual(
+        JSON.parse(JSON.stringify(h.parseBoundedProviderContentRange(response(206, 'bytes 4-9/11', '6'), 4, 10))),
+        { start: 4, end: 9, total: 11 },
+    );
     assert.equal(h.parseBoundedProviderContentRange(response(206, 'bytes 4-9/10', '7'), 4, 10), null);
 
     await t.test('a reconnect response that rewinds to zero is terminal', async () => {
@@ -978,6 +1128,32 @@ test('changed ETag and compressed ranges are terminal before their bytes reach F
         assert.equal(tracker.active, 0);
     });
 
+    await t.test('an offset-zero retry cannot switch the effective redirect target', async () => {
+        const fixture = mkvFixture(16);
+        const tracker = makeTracker();
+        const originalUrl = 'https://cdn-a.example/title.mkv';
+        const session = mkvSession(fixture.length);
+        session.vodInputEffectiveUrlSha256 = crypto.createHash('sha256').update(originalUrl).digest('hex');
+        const h = pumpHarness({
+            fetch: async () => trackedResponse(tracker, {
+                url: 'https://cdn-b.example/title.mkv',
+                chunks: [fixture],
+                headers: {
+                    'Content-Range': `bytes 0-${fixture.length - 1}/${fixture.length}`,
+                    'Content-Length': String(fixture.length),
+                    ETag: '"same-etag"',
+                },
+            }),
+        });
+        const writable = new CapturingWritable();
+        await assert.rejects(
+            h.runBoundedMkvInputPump(session, writable, new AbortController().signal, null),
+            (error) => error?.code === 'VOD_CHANGED' && error?.status === 502,
+        );
+        assert.equal(writable.bytes().length, 0);
+        assert.equal(tracker.active, 0);
+    });
+
     await t.test('a compressed bounded response is rejected before its first write', async () => {
         const fixture = mkvFixture(16);
         const tracker = makeTracker();
@@ -1259,7 +1435,14 @@ test('an extensionless cached Matroska profile becomes finite after merge withou
     const h = pumpHarness({
         fetch: async () => {
             boundedPreflightFetches += 1;
-            throw new Error('merged exact size must avoid a provider size preflight');
+            return trackedResponse(makeTracker(), {
+                chunks: [Buffer.alloc(cachedProfile.fileSizeBytes)],
+                headers: {
+                    'Content-Range': `bytes 0-${cachedProfile.fileSizeBytes - 1}/${cachedProfile.fileSizeBytes}`,
+                    'Content-Length': String(cachedProfile.fileSizeBytes),
+                    ETag: '"opaque-v1"',
+                },
+            });
         },
     });
     const session = {
@@ -1278,7 +1461,7 @@ test('an extensionless cached Matroska profile becomes finite after merge withou
     await h.ensureBoundedMkvInputPump(session);
     assert.equal(session.startupTimings.boundedMkvInputPump, true);
     assert.equal(session.fileSizeBytes, cachedProfile.fileSizeBytes);
-    assert.equal(boundedPreflightFetches, 0);
+    assert.equal(boundedPreflightFetches, 1, 'the single playback GET is preopened and retained');
 });
 
 test('the bounded MKV pump tees one exact leading prefix without another provider request', async () => {
@@ -1422,6 +1605,9 @@ function metadataHarness(overrides = {}) {
             return runFfprobeImpl(...args);
         },
         isFiniteMkvVodSession: () => true,
+        needsMkvH264CurrentHeaderAuthority: () => false,
+        maybeFinalizeMkvH264FastStartProof: () => null,
+        mkvH264FastStartProfileFingerprint: () => 'a'.repeat(64),
         asRecord: (value) => value && typeof value === 'object' && !Array.isArray(value) ? value : {},
         stringOrNull,
         nullableInt,

@@ -2660,7 +2660,7 @@ class WatchPage {
                 providerTmdbId: this.content?.providerTmdbId || this.content?.data?.providerTmdbId || null,
                 titleId: this.content?.titleId || this.content?.title_id || this.content?.data?.titleId || null,
                 readyState: this.video?.readyState ?? null,
-                currentSrcType: this.getTelemetryCurrentSrcType(),
+                currentSrcType: this.video?.currentSrc ? (this.isGatewayPlaybackUrl(this.video.currentSrc) ? 'gateway' : 'direct') : null,
                 // Codec-mix telemetry (the 3rd sizing unknown, docs §9.8/§10): the
                 // container extension is a reliable codec-path proxy (mp4->relay,
                 // mkv/ts->gateway, avi/...->engine); videoCodec when the profile is known.
@@ -2796,21 +2796,6 @@ class WatchPage {
     isGatewayPlaybackUrl(url) {
         const value = String(url || '');
         return /\/sessions\/[^/?#]+\/playlist\.m3u8/i.test(value);
-    }
-
-    getTelemetryCurrentSrcType() {
-        const mediaElementSrc = String(this.video?.currentSrc || this.video?.src || '').trim();
-        const gatewaySourceUrl = [this.currentUrl, this.baseStreamUrl, this.hls?.url]
-            .find((url) => this.isGatewayPlaybackUrl(url));
-
-        // hls.js attaches a blob: MediaSource to the video element. Preserve the
-        // server-owned playback authority in telemetry only when both the active
-        // lane and one of its retained source URLs prove a Gateway session.
-        if (this.currentPlaybackMode === 'gateway-session' && gatewaySourceUrl) {
-            return 'gateway';
-        }
-        if (!mediaElementSrc) return null;
-        return this.isGatewayPlaybackUrl(mediaElementSrc) ? 'gateway' : 'direct';
     }
 
     describePlaybackUrl(url) {
@@ -4754,14 +4739,8 @@ class WatchPage {
         if (!policy || Number(policy.protocol) !== 2 || policy.eligible !== true) return null;
 
         const pipeline = String(policy.pipeline || '').trim().toLowerCase();
-        if (pipeline !== 'copy' && pipeline !== 'audio-transcode' && pipeline !== 'video-transcode') return null;
-        const reason = String(policy.reason || '').trim().toLowerCase();
-        if (reason !== 'mkv-h264-copy-ready'
-            && reason !== 'complete-hls-cache-hit'
-            && reason !== 'vaapi-transcode-ready') return null;
-        if (reason === 'complete-hls-cache-hit' && pipeline !== 'copy') return null;
-        if (reason === 'vaapi-transcode-ready' && pipeline !== 'video-transcode') return null;
-        if (reason === 'mkv-h264-copy-ready' && pipeline === 'video-transcode') return null;
+        if (pipeline !== 'copy' && pipeline !== 'audio-transcode') return null;
+        if (String(policy.reason || '').trim().toLowerCase() !== 'mkv-h264-copy-ready') return null;
 
         const targetBufferSeconds = Number(policy.targetBufferSeconds ?? policy.target_buffer_seconds);
         const minimumEncodeRateX = Number(policy.minimumEncodeRateX ?? policy.minimum_encode_rate_x);
@@ -4772,7 +4751,6 @@ class WatchPage {
             || !Number.isFinite(minimumEncodeRateX)
             || minimumEncodeRateX < 1.15
             || minimumEncodeRateX > 20
-            || (reason === 'vaapi-transcode-ready' && minimumEncodeRateX < 2)
             || !Number.isFinite(observedEncodeRateX)
             || observedEncodeRateX < minimumEncodeRateX
             || observedEncodeRateX > 20) {
@@ -4783,7 +4761,7 @@ class WatchPage {
             protocol: 2,
             eligible: true,
             pipeline,
-            reason,
+            reason: 'mkv-h264-copy-ready',
             targetBufferSeconds,
             minimumEncodeRateX,
             observedEncodeRateX,
@@ -5011,10 +4989,10 @@ class WatchPage {
                         activeHls,
                         {
                             // A signed session policy may shorten the gate only
-                            // after Gateway proved a safe graph and measured
-                            // production above realtime. Unknown, slow or
-                            // malformed policies keep the deep 96-second
-                            // anti-stall buffer used by the legacy path.
+                            // after Gateway proved a file-exact H.264 copy graph
+                            // and measured production above realtime. Unknown,
+                            // encoded, slow or malformed policies keep the deep
+                            // 96-second anti-stall buffer used by the legacy path.
                             minimumSeconds: gatewayStartupBuffer.minimumSeconds,
                             timeoutMs: gatewayStartupBuffer.timeoutMs
                         },

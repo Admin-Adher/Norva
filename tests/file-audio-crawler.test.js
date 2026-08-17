@@ -123,7 +123,7 @@ test('gateway-selected audio index survives the edge response metadata', () => {
   );
   const response = between(
     playback,
-    'const responseCodecProfile = mergeCodecProfileAnnotations(',
+    'const responseCodecProfile = stripMkvH264FastStartProof(mergeCodecProfileAnnotations(',
     '\nasync function getPlaybackSession',
   );
 

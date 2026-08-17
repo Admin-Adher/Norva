@@ -319,7 +319,7 @@ test('an unknown finite MKV video fails safe to encoding while live remains copy
 test('an exact finite Matroska H264 profile selects the 2s keyframe encode plan before provider I/O', () => {
     const shouldReencodeExactMatroskaH264 = loadGatewayFunction(
         'shouldReencodeExactMatroskaH264',
-        'multiAudioProfileAssessment',
+        'mkvH264FastStartProofForProfile',
         {
             asRecord: gatewayGlobals.asRecord,
             normalizeCodecToken: gatewayGlobals.normalizeCodecToken,

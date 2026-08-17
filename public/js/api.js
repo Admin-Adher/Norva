@@ -1788,10 +1788,11 @@ const CloudAdapter = (() => {
                                 ? 'engine'
                                 : (((isVodPlayback || needsGateway) && preferredMode !== 'direct') ? 'transcode' : preferredMode));
                 if (unprofiledMkv) {
-                    // No exact A/V profile means copying H.264 after the startup
-                    // probe is still unsafe (long GOPs can starve the HLS buffer).
-                    // The one proven-smooth path is a full H.264/AAC conversion.
-                    playbackHint.gatewayMode = 'transcode';
+                    // `remux` selects the Gateway's automatic finite-MKV policy,
+                    // not an unconditional copy. Missing/invalid full-file proof
+                    // still encodes this cold playback, while EOF can attest the
+                    // next replay without creating a different provider lane.
+                    playbackHint.gatewayMode = 'remux';
                     playbackHint.audioMode = 'transcode';
                 } else if (profiledMkv) {
                     // `mode=transcode` selects the Gateway transport; `remux`
@@ -1831,6 +1832,7 @@ const CloudAdapter = (() => {
                     itemType: type === 'series' ? 'series' : type === 'movie' ? 'movie' : 'live',
                     itemId: streamId,
                     playbackHint,
+                    gatewayAutoMode: mode === 'transcode' && !forcedMode,
                     seekOffset: playbackHint.seekOffset,
                     clientMetadata: _cloudClientTelemetryMetadata(),
                     corsSafe: false,

@@ -4,6 +4,8 @@ const fsp = require('fs/promises');
 const os = require('os');
 const path = require('path');
 const http = require('http');
+const { PassThrough } = require('stream');
+const { TextDecoder } = require('util');
 const { spawn, spawnSync } = require('child_process');
 const express = require('express');
 const { request: undiciRequest } = require('undici');
@@ -1405,9 +1407,12 @@ const STRICT_LID_FFMPEG_RW_TIMEOUT_US = 50_000_000;
 // outer timer so the authoritative request controller wins, while the broker still enforces its
 // independent 30 s first-byte and 15 s idle deadlines.
 const STRICT_LID_CHECKPOINT_FFMPEG_RW_TIMEOUT_US = 170_000_000;
-// The finite-MKV input pump needs the exact terminal byte so every provider
-// request is bounded (`bytes=N-M`). A one-byte request supplies that size when
-// the exact codec profile did not already preserve ffprobe format.size.
+// The finite-MKV input pump discovers an unknown terminal byte from the
+// Content-Range of the same bounded GET that is retained for playback. The
+// explicit end remains below Number.MAX_SAFE_INTEGER while being far beyond any
+// supported media object, so a cold file never needs a 0-0 size probe followed
+// by a second provider socket.
+const VOD_INPUT_DISCOVERY_RANGE_END = Number.MAX_SAFE_INTEGER - 1;
 const VOD_FILE_SIZE_PROBE_TIMEOUT_MS = clampInt(process.env.VOD_FILE_SIZE_PROBE_TIMEOUT_MS, 8_000, 1_000, 20_000);
 const VOD_INPUT_OPEN_TIMEOUT_MS = clampInt(process.env.VOD_INPUT_OPEN_TIMEOUT_MS, 15_000, 2_000, 30_000);
 const VOD_INPUT_IDLE_TIMEOUT_MS = clampInt(process.env.VOD_INPUT_IDLE_TIMEOUT_MS, 8_000, 2_000, 30_000);
@@ -1439,6 +1444,117 @@ const EXACT_MATROSKA_H264_HLS_TARGET_SECONDS = 2;
 const EXACT_MATROSKA_H264_MAX_WIDTH = 1920;
 const EXACT_MATROSKA_H264_MAX_HEIGHT = 1080;
 const EXACT_MATROSKA_H264_MAX_PIXELS = EXACT_MATROSKA_H264_MAX_WIDTH * EXACT_MATROSKA_H264_MAX_HEIGHT;
+const MKV_H264_FAST_START_PROTOCOL = 2;
+// Stable proof-graph version. This changes only when the packet validator or
+// FFmpeg copy graph semantics change, not on unrelated Gateway releases.
+const MKV_H264_FAST_START_PROOF_BUILD = 1;
+// AVPacket key flags and GOP spacing do not prove H264 IDR/closed-GOP segment
+// independence. Keep video copy dark until the full-file analyzer carries an
+// explicit bitstream-level proof and an open-GOP negative fixture passes.
+const MKV_H264_FAST_START_COPY_ACTIVATION_READY = false;
+// Dedicated signing material is mandatory. The general Gateway bearer token is
+// deliberately not a fallback: proof minting/verification must be independently
+// rotatable and an absent/short key keeps every finite MKV on the encode path.
+function decodeMkvH264FastStartProofKey(value) {
+    const encoded = String(value || '').trim().toLowerCase();
+    return /^[a-f0-9]{64}$/.test(encoded) ? Buffer.from(encoded, 'hex') : null;
+}
+function mkvH264FastStartProofKeyId(key) {
+    return key
+        ? crypto.createHash('sha256')
+            .update('NORVA/MKV-H264-FASTSTART/V2/KID\0')
+            .update(key)
+            .digest('hex')
+        : null;
+}
+const MKV_H264_FAST_START_PROOF_CURRENT_KEY = decodeMkvH264FastStartProofKey(
+    process.env.MKV_H264_FAST_START_PROOF_HMAC_KEY,
+);
+const MKV_H264_FAST_START_PROOF_PREVIOUS_KEY = decodeMkvH264FastStartProofKey(
+    process.env.MKV_H264_FAST_START_PROOF_HMAC_PREVIOUS_KEY,
+);
+const MKV_H264_FAST_START_PROOF_VERIFICATION_KEYS = [
+    MKV_H264_FAST_START_PROOF_CURRENT_KEY,
+    MKV_H264_FAST_START_PROOF_PREVIOUS_KEY,
+].filter((key, index, keys) => key && keys.findIndex((candidate) => candidate?.equals(key)) === index)
+    .map((key) => ({ key, kid: mkvH264FastStartProofKeyId(key) }));
+const MKV_H264_FAST_START_PROOF_MAX_AGE_MS = clampInt(
+    process.env.MKV_H264_FAST_START_PROOF_MAX_AGE_MS,
+    30 * 24 * 60 * 60 * 1_000,
+    5 * 60 * 1_000,
+    90 * 24 * 60 * 60 * 1_000,
+);
+const MKV_H264_FAST_START_PROOF_FUTURE_SKEW_MS = 5 * 60 * 1_000;
+const MKV_H264_FAST_START_MAX_GOP_SECONDS = EXACT_MATROSKA_H264_HLS_TARGET_SECONDS;
+const MKV_H264_FAST_START_MIN_KEYFRAMES = 3;
+const MKV_H264_FAST_START_ANALYZER_BUFFER_BYTES = clampInt(
+    process.env.MKV_H264_FAST_START_ANALYZER_BUFFER_BYTES,
+    8 * 1024 * 1024,
+    256 * 1024,
+    32 * 1024 * 1024,
+);
+const MKV_H264_FAST_START_ANALYZER_STOP_TIMEOUT_MS = clampInt(
+    process.env.MKV_H264_FAST_START_ANALYZER_STOP_TIMEOUT_MS,
+    1_000,
+    100,
+    5_000,
+);
+const MKV_H264_FAST_START_BUFFER_SECONDS = 6;
+const MKV_H264_FAST_START_MIN_SEGMENTS = 3;
+const MKV_H264_FAST_START_MIN_ENCODE_RATE_X = 1.15;
+// Local HLS cache v1. Entries live only on this Gateway replica and expire from
+// their original promotion time; reads never extend the deadline. A published
+// entry is usable only after the same provider pump has completed the entire
+// source and the closed HLS graph has been validated. The first 24 seconds may
+// then be retained as a bounded prefix, or the whole graph when quotas permit.
+const MKV_H264_HLS_CACHE_PROTOCOL = 1;
+// Kept dark until exact file identity and prefix continuation complete review.
+const MKV_H264_HLS_CACHE_ACTIVATION_READY = false;
+const MKV_H264_HLS_CACHE_PREFIX_SEGMENTS = 12;
+const MKV_H264_HLS_CACHE_PREFIX_SECONDS = 24;
+const MKV_H264_HLS_CACHE_MIN_PRODUCTION_RATE_X = 1.5;
+const MKV_H264_HLS_CACHE_TTL_MS = clampInt(
+    process.env.MKV_H264_HLS_CACHE_TTL_MS,
+    60 * 60 * 1_000,
+    60 * 1_000,
+    60 * 60 * 1_000,
+);
+const MKV_H264_HLS_CACHE_MAX_ENTRIES = clampInt(
+    process.env.MKV_H264_HLS_CACHE_MAX_ENTRIES,
+    16,
+    1,
+    128,
+);
+const MKV_H264_HLS_CACHE_MAX_BYTES = clampInt(
+    process.env.MKV_H264_HLS_CACHE_MAX_BYTES,
+    512 * 1024 * 1024,
+    32 * 1024 * 1024,
+    2 * 1024 * 1024 * 1024,
+);
+const MKV_H264_HLS_CACHE_MAX_COMPLETE_BYTES = clampInt(
+    process.env.MKV_H264_HLS_CACHE_MAX_COMPLETE_BYTES,
+    256 * 1024 * 1024,
+    16 * 1024 * 1024,
+    MKV_H264_HLS_CACHE_MAX_BYTES,
+);
+const MKV_H264_HLS_CACHE_MAX_FILES = clampInt(
+    process.env.MKV_H264_HLS_CACHE_MAX_FILES,
+    10_000,
+    MKV_H264_HLS_CACHE_PREFIX_SEGMENTS,
+    50_000,
+);
+const MKV_H264_HLS_CACHE_SCAN_TIMEOUT_MS = clampInt(
+    process.env.MKV_H264_HLS_CACHE_SCAN_TIMEOUT_MS,
+    5 * 60 * 1_000,
+    30 * 1_000,
+    10 * 60 * 1_000,
+);
+const MKV_H264_HLS_CACHE_ROOT = path.resolve(
+    process.env.MKV_H264_HLS_CACHE_DIR || path.join(OUTPUT_DIR, '.mkv-h264-hls-cache-v1'),
+);
+const MKV_H264_HLS_CACHE_SECRET = decodeMkvH264FastStartProofKey(
+    process.env.MKV_H264_HLS_CACHE_HMAC_KEY,
+);
 const MULTI_AUDIO_HLS_PROTOCOL = 1;
 const MAX_MULTI_AUDIO_RENDITIONS = 8;
 const GATEWAY_VERSION = 104;
@@ -1526,8 +1642,14 @@ const vodInputPumpStats = {
     completed: 0,
     failures: 0,
     bytesForwarded: 0,
+    validatorEvidence: {
+        strongEtag: 0,
+        lastModified: 0,
+        weakOrAbsent: 0,
+    },
     last: null,
 };
+const mkvH264FullFileAnalyzers = new Set();
 
 app.disable('x-powered-by');
 app.use(express.json({ limit: '1mb' }));
@@ -1554,6 +1676,37 @@ app.get('/health', (req, res) => {
         exactMatroskaH264MaxWidth: EXACT_MATROSKA_H264_MAX_WIDTH,
         exactMatroskaH264MaxHeight: EXACT_MATROSKA_H264_MAX_HEIGHT,
         exactMatroskaH264MaxPixels: EXACT_MATROSKA_H264_MAX_PIXELS,
+        mkvH264FastStart: {
+            protocol: MKV_H264_FAST_START_PROTOCOL,
+            proofBuild: MKV_H264_FAST_START_PROOF_BUILD,
+            copyActivationReady: MKV_H264_FAST_START_COPY_ACTIVATION_READY,
+            closedGopProof: 'unavailable',
+            proofRequiresFullEof: true,
+            fullFileProofSigningConfigured: Boolean(MKV_H264_FAST_START_PROOF_CURRENT_KEY),
+            fullFileProofPreviousKeyConfigured: Boolean(MKV_H264_FAST_START_PROOF_PREVIOUS_KEY),
+            proofMaxAgeMs: MKV_H264_FAST_START_PROOF_MAX_AGE_MS,
+            proofScope: 'full-file',
+            maxGopSeconds: MKV_H264_FAST_START_MAX_GOP_SECONDS,
+            minKeyframes: MKV_H264_FAST_START_MIN_KEYFRAMES,
+            hlsTargetSeconds: EXACT_MATROSKA_H264_HLS_TARGET_SECONDS,
+            targetBufferSeconds: MKV_H264_FAST_START_BUFFER_SECONDS,
+            minSegments: MKV_H264_FAST_START_MIN_SEGMENTS,
+            minimumEncodeRateX: MKV_H264_FAST_START_MIN_ENCODE_RATE_X,
+            activeAnalyzers: mkvH264FullFileAnalyzers.size,
+        },
+        mkvH264HlsCache: {
+            protocol: MKV_H264_HLS_CACHE_PROTOCOL,
+            enabled: mkvH264HlsCacheEnabled(),
+            scope: 'local-replica',
+            prefixSegments: MKV_H264_HLS_CACHE_PREFIX_SEGMENTS,
+            prefixSeconds: MKV_H264_HLS_CACHE_PREFIX_SECONDS,
+            minimumProductionRateX: MKV_H264_HLS_CACHE_MIN_PRODUCTION_RATE_X,
+            ttlMs: MKV_H264_HLS_CACHE_TTL_MS,
+            maxEntries: MKV_H264_HLS_CACHE_MAX_ENTRIES,
+            maxBytes: MKV_H264_HLS_CACHE_MAX_BYTES,
+            maxCompleteBytes: MKV_H264_HLS_CACHE_MAX_COMPLETE_BYTES,
+            stats: { ...mkvH264HlsCacheStats },
+        },
         multiAudioHls: {
             protocol: MULTI_AUDIO_HLS_PROTOCOL,
             maxAudioRenditions: MAX_MULTI_AUDIO_RENDITIONS,
@@ -2782,7 +2935,13 @@ app.post('/probe-audio', requireGatewayAuth, async (req, res) => {
             if (t.language && !audioLanguages.includes(t.language)) audioLanguages.push(t.language);
             if (t.default && !audioDefaultLanguage) audioDefaultLanguage = t.language || null;
         }
-        res.json({ audioLanguages, audioTracks, audioDefaultLanguage, subtitles, codecProfile: profile });
+        res.json({
+            audioLanguages,
+            audioTracks,
+            audioDefaultLanguage,
+            subtitles,
+            codecProfile: publicMkvCodecProfile(profile),
+        });
     } catch (err) {
         const status = Number.isInteger(err.status) ? err.status : 502;
         res.status(status).json({ error: err.publicMessage || 'Audio probe failed', code: err.code || undefined });
@@ -7007,6 +7166,7 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             expiresAt,
             userAgent,
             playbackHint,
+            playbackIdentity,
             codecProfile,
             audioCodec,
             audioProfile,
@@ -7136,6 +7296,13 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
         );
         let normalizedCodecProfile = asRecord(codecProfile || normalizedPlaybackHint.codecProfile || normalizedPlaybackHint.codec_profile);
         let codecProfileSource = hasUsefulCodecProfile(normalizedCodecProfile) ? 'request' : '';
+        const signedGatewayCachedProfile = cachedSignedMkvH264FastStartProfile(sourceUrl);
+        if (signedGatewayCachedProfile) {
+            normalizedCodecProfile = mergeCodecProfiles(normalizedCodecProfile, signedGatewayCachedProfile);
+            codecProfileSource = codecProfileSource
+                ? `${codecProfileSource}+gateway_signed_cache`
+                : 'gateway_signed_cache';
+        }
         const requestCodecProfileReliable = hasReliableVodCodecProfile(normalizedCodecProfile);
         // Freeze the long-GOP-safe route from the authenticated exact-file profile
         // before ffprobe or FFmpeg can open a provider connection. Profiles discovered
@@ -7227,6 +7394,7 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             mode: mode === 'transcode' ? 'transcode' : 'remux',
             userAgent: sanitizeUserAgent(userAgent),
             playbackHint: normalizedPlaybackHint,
+            playbackIdentity: asRecord(playbackIdentity),
             seekOffset: normalizedSeekOffset,
             codecProfile: normalizedCodecProfile,
             codecProfileSource,
@@ -7238,11 +7406,15 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             videoCodec: stringOrNull(videoCodec) || stringOrNull(normalizedPlaybackHint.videoCodec) || stringOrNull(normalizedPlaybackHint.video_codec) || stringOrNull(normalizedCodecProfile.videoCodec) || stringOrNull(normalizedCodecProfile.video_codec) || stringOrNull(normalizedCodecProfile.video),
             clientAudioPassthrough: clientAudioPassthrough === false || normalizedPlaybackHint.clientAudioPassthrough === false || normalizedPlaybackHint.client_audio_passthrough === false ? false : true,
             forceExactMatroskaH264Reencode,
+            mkvH264FastStart: null,
+            startupPolicy: null,
             videoMode: null,
             videoModeReason: null,
             hlsTargetSeconds: forceExactMatroskaH264Reencode
                 ? EXACT_MATROSKA_H264_HLS_TARGET_SECONDS
                 : 4,
+            minHlsStartupBufferSeconds: MIN_HLS_STARTUP_BUFFER_SECONDS,
+            minHlsStartupSegments: MIN_HLS_STARTUP_SEGMENTS,
             status: 'starting',
             outputDir,
             playlistPath: path.join(outputDir, 'playlist.m3u8'),
@@ -7308,6 +7480,10 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
                 code: err?.code || 'VOD_SIZE_UNAVAILABLE',
             });
         }
+        // From this point the session owns an open provider body even though it
+        // is not yet published in `sessions`. Outer error handling must stop it
+        // if topology freezing or FFmpeg setup throws.
+        createdSession = session;
 
         // The exact size preflight above is provider I/O, but it neither starts
         // the byte pump nor spawns FFmpeg. Freeze the rendition graph only now:
@@ -7315,35 +7491,45 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
         // otherwise complete request/cached profile, making the normal Norva
         // exact-profile path reachable without ever mutating a running graph.
         freezeMultiAudioHlsTopology(session);
-        createdSession = session;
+        const fastStartAssessment = freezeMkvH264FastStart(session);
 
+        const finiteMkvH264RequiresProof = Boolean(
+            finiteMkvPlayback && shouldCopyVideo(session) && fastStartAssessment.eligible !== true
+        );
         session.videoMode = (
             session.forceAlignedMultiAudioVideoEncode === true ||
-            forceExactMatroskaH264Reencode ||
+            finiteMkvH264RequiresProof ||
             session.mode === 'transcode' ||
             !shouldCopyVideo(session) ||
             (finiteMkvPlayback && normalizedSeekOffset > 0)
         ) ? 'encode' : 'copy';
         session.videoModeReason = session.forceAlignedMultiAudioVideoEncode === true
             ? 'multi_audio_aligned_hls'
-            : (forceExactMatroskaH264Reencode
-                ? 'exact_matroska_h264'
+            : (fastStartAssessment.eligible === true
+                ? 'mkv_h264_fast_start_copy'
+            : (finiteMkvH264RequiresProof
+                ? 'finite_mkv_h264_requires_full_proof'
             : (session.mode === 'transcode'
                 ? 'requested_transcode'
                 : (finiteMkvPlayback && normalizedSeekOffset > 0
                     ? 'pumped_matroska_resume'
-                    : (session.videoMode === 'encode' ? 'unsafe_or_unknown_video' : 'copy'))));
+                    : (session.videoMode === 'encode' ? 'unsafe_or_unknown_video' : 'copy')))));
+        session.hlsCacheDescriptor = session.videoMode === 'copy'
+            ? mkvH264HlsCacheDescriptorForSession(session)
+            : null;
 
         sessions.set(id, session);
 
         const hlsUrl = publicUrl(req, `/sessions/${id}/playlist.m3u8?token=${encodeURIComponent(accessToken)}`);
         const ffmpegStartedAt = Date.now();
+        session.hlsCacheProductionStartedAtMs = ffmpegStartedAt;
         const started = await startSessionWithProviderRetry(
             session,
             sessionRequestAbortController.signal,
         );
         if (sessionRequestAbortController.signal.aborted) throw new Error('Session request aborted');
         session.startupTimings.ffmpegReadyMs = Math.max(0, Date.now() - ffmpegStartedAt);
+        session.startupTimings.mediaProductionRateX = observedMediaProductionRateX(session);
         if (!started) {
             const detail = session.lastError || 'Playlist was not generated';
             rememberFailure(session, detail);
@@ -7387,6 +7573,7 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
         session.startupTimings.totalMs = Math.max(0, Date.now() - sessionCreateStartedAt);
         session.startupTimings.inputProbeMode = session.fastInputProbe === true ? 'known-fast' : 'full';
         session.startupTimings.fastInputProbeFallbacks = Number(session.fastInputProbeFallbacks || 0);
+        session.startupPolicy = startupPolicyForSession(session);
         sessionStartupStats.successes += 1;
         sessionStartupStats.totalMs += session.startupTimings.totalMs;
         if (session.fastInputProbe === true) sessionStartupStats.fastInputProbeSuccesses += 1;
@@ -7413,8 +7600,9 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             actualStartOffset: session.actualStartOffset || 0,
             localSeekTarget: session.localSeekTarget || 0,
             sourceTimestamps: session.sourceTimestamps === true,
-            codecProfile: session.codecProfile,
+            codecProfile: publicMkvCodecProfile(session.codecProfile),
             codecProfileSource: session.codecProfileSource || null,
+            startupPolicy: session.startupPolicy,
             startupTimings: session.startupTimings,
             hlsUrl,
             expiresAt: session.expiresAt.toISOString()
@@ -7481,8 +7669,14 @@ app.get('/sessions/:id', requireGatewayAuth, (req, res) => {
 app.delete('/sessions/:id', requireGatewayAuth, async (req, res) => {
     const session = sessions.get(req.params.id);
     if (!session) return res.status(404).json({ error: 'Session not found' });
+    const finalEnvelope = mkvH264FastStartProofForProfile(session.codecProfile);
+    const finalProofAccepted = session.mkvH264FastStartProofFinalized === true &&
+        finalEnvelope && openMkvH264FastStartProof(finalEnvelope);
+    const finalCodecProfile = hasUsefulCodecProfile(session.codecProfile)
+        ? (finalProofAccepted ? session.codecProfile : publicMkvCodecProfile(session.codecProfile))
+        : null;
     await stopSession(session);
-    res.json({ success: true });
+    res.json(compactRecord({ success: true, finalCodecProfile }));
 });
 
 app.get('/sessions/:id/playlist.m3u8', requirePlaybackToken, async (req, res) => {
@@ -7836,37 +8030,27 @@ async function ensureBoundedMkvInputPump(session, parentSignal = null) {
     if (parentSignal?.aborted) throw abortedVodInputPumpError();
     session.startupTimings = asRecord(session.startupTimings);
     session.startupTimings.boundedMkvInputPump = true;
-    let fileSizeBytes = fileSizeBytesForSession(session);
-    const probeRan = !fileSizeBytes;
-    const probeStartedAt = Date.now();
-    if (probeRan) {
-        fileSizeBytes = await probeProviderFileSize(
-            session.sourceUrl,
-            session.userAgent || FFMPEG_USER_AGENT,
-            parentSignal,
-        );
+    // Open the one playback GET before the codec graph is frozen. A signed v2
+    // proof may lift the finite-MKV encode lock only after this exact response
+    // has proved the same byte range and strong validator. The reader is kept
+    // open and handed directly to the pump; FFmpeg never triggers a second GET.
+    const preopenStartedAt = Date.now();
+    const hadExactFileSize = Boolean(fileSizeBytesForSession(session));
+    await preopenBoundedMkvInputPump(session, parentSignal);
+    const fileSizeBytes = fileSizeBytesForSession(session);
+    if (!fileSizeBytes) {
+        await closePreopenedBoundedMkvInput(session);
+        throw vodInputPumpError('VOD_SIZE_UNAVAILABLE', 'Finite MKV input size is unavailable', { status: 502 });
     }
-    if (parentSignal?.aborted) throw abortedVodInputPumpError();
-    session.fileSizeBytes = fileSizeBytes;
-    session.codecProfile = compactRecord({
-        ...asRecord(session.codecProfile),
-        fileSizeBytes,
-    });
     session.startupTimings.fileSizeBytes = fileSizeBytes;
-    session.startupTimings.fileSizeProbeRan = probeRan;
-    session.startupTimings.fileSizeProbeMs = probeRan
-        ? Math.max(0, Date.now() - probeStartedAt)
-        : 0;
-    if (probeRan && PROVIDER_SLOT_RELEASE_DELAY_MS > 0) {
-        await sleep(PROVIDER_SLOT_RELEASE_DELAY_MS);
-        if (parentSignal?.aborted) throw abortedVodInputPumpError();
-        session.startupTimings.fileSizeProbeReleaseWaitMs = PROVIDER_SLOT_RELEASE_DELAY_MS;
-        session.startupTimings.slotReleaseWaitMs = Number(session.startupTimings.slotReleaseWaitMs || 0)
-            + PROVIDER_SLOT_RELEASE_DELAY_MS;
-    }
+    session.startupTimings.fileSizeProbeRan = false;
+    session.startupTimings.fileSizeProbeMs = 0;
+    session.startupTimings.fileSizeProbeReleaseWaitMs = 0;
+    session.startupTimings.fileSizeDiscoveredFromPlaybackGet = !hadExactFileSize;
+    session.startupTimings.providerGetPreopenMs = Math.max(0, Date.now() - preopenStartedAt);
 }
 
-function parseBoundedProviderContentRange(response, expectedStart, expectedTotal) {
+function parseBoundedProviderContentRange(response, expectedStart, maximumRequestedEnd) {
     if (Number(response?.status) !== 206) return null;
     const contentRange = String(response?.headers?.get?.('content-range') || '').trim();
     const match = /^bytes\s+(\d+)-(\d+)\/(\d+)$/i.exec(contentRange);
@@ -7879,13 +8063,13 @@ function parseBoundedProviderContentRange(response, expectedStart, expectedTotal
     const end = strictOffset(match?.[2]);
     const total = normalizeFileSizeBytes(match?.[3]);
     const normalizedExpectedStart = Number(expectedStart);
-    const normalizedExpectedTotal = normalizeFileSizeBytes(expectedTotal);
+    const normalizedMaximumRequestedEnd = Number(maximumRequestedEnd);
     if (
         !Number.isSafeInteger(normalizedExpectedStart) || normalizedExpectedStart < 0 ||
-        !normalizedExpectedTotal ||
+        !Number.isSafeInteger(normalizedMaximumRequestedEnd) || normalizedMaximumRequestedEnd < normalizedExpectedStart ||
         start !== normalizedExpectedStart ||
         !Number.isSafeInteger(end) || end < start || end >= total ||
-        total !== normalizedExpectedTotal
+        end > normalizedMaximumRequestedEnd
     ) return null;
     const declaredLength = String(response?.headers?.get?.('content-length') || '').trim();
     if (declaredLength) {
@@ -8076,7 +8260,8 @@ async function closeVodInputAttempt(attempt) {
 // historical /raw tee and keeps the same bounded memory/entry limits.
 function captureBoundedMkvHeaderBytes(session, byteOffset, chunk) {
     if (!BOUNDED_MKV_HEADER_PARSE || INBAND_HEADER_BYTES <= 0 || INBAND_HEADER_CACHE_MAX <= 0) return;
-    if (hasCompleteMkvPlaybackProfile(session?.codecProfile)) return;
+    const currentHeaderAuthorityRequired = needsMkvH264CurrentHeaderAuthority(session);
+    if (hasCompleteMkvPlaybackProfile(session?.codecProfile) && !currentHeaderAuthorityRequired) return;
     const sourceUrl = String(session?.sourceUrl || '');
     const offset = Number(byteOffset);
     if (!sourceUrl || !Number.isSafeInteger(offset) || offset < 0 || !chunk?.length) return;
@@ -8104,6 +8289,7 @@ function captureBoundedMkvHeaderBytes(session, byteOffset, chunk) {
             done: false,
             capturing: true,
             captureOwner,
+            limitBytes: INBAND_HEADER_BYTES,
             updatedAt: Date.now(),
         };
         headerByteCache.set(sourceUrl, entry);
@@ -8112,7 +8298,10 @@ function captureBoundedMkvHeaderBytes(session, byteOffset, chunk) {
     // Never interleave a /raw capture, another session, or a resumed range.
     if (entry.captureOwner !== captureOwner || offset !== entry.len) return;
 
-    const available = INBAND_HEADER_BYTES - entry.len;
+    const captureLimitBytes = Number.isSafeInteger(entry.limitBytes) && entry.limitBytes > 0
+        ? entry.limitBytes
+        : INBAND_HEADER_BYTES;
+    const available = captureLimitBytes - entry.len;
     if (available <= 0) {
         entry.done = true;
         entry.capturing = false;
@@ -8123,7 +8312,7 @@ function captureBoundedMkvHeaderBytes(session, byteOffset, chunk) {
     entry.chunks.push(Buffer.from(chunk.subarray(0, take)));
     entry.len += take;
     entry.updatedAt = Date.now();
-    if (entry.len >= INBAND_HEADER_BYTES) {
+    if (entry.len >= captureLimitBytes) {
         entry.done = true;
         entry.capturing = false;
     }
@@ -8131,6 +8320,12 @@ function captureBoundedMkvHeaderBytes(session, byteOffset, chunk) {
 
 async function openBoundedVodInputAttempt(session, offset, parentSignal, dispatcher) {
     const fileSizeBytes = fileSizeBytesForSession(session);
+    if (offset > 0 && !fileSizeBytes) {
+        throw vodInputPumpError('VOD_SIZE_UNAVAILABLE', 'Finite MKV input size is unavailable', { status: 502 });
+    }
+    const requestEnd = fileSizeBytes
+        ? fileSizeBytes - 1
+        : VOD_INPUT_DISCOVERY_RANGE_END;
     const controller = new AbortController();
     const attempt = { controller, response: null, reader: null, openTimer: null, signal: parentSignal, onParentAbort: null };
     attempt.onParentAbort = () => {
@@ -8142,7 +8337,7 @@ async function openBoundedVodInputAttempt(session, offset, parentSignal, dispatc
     attempt.openTimer.unref?.();
     try {
         const headers = {
-            Range: `bytes=${offset}-${fileSizeBytes - 1}`,
+            Range: `bytes=${offset}-${requestEnd}`,
             Accept: '*/*',
             'Accept-Encoding': 'identity',
             'User-Agent': session.userAgent || FFMPEG_USER_AGENT,
@@ -8186,7 +8381,7 @@ async function openBoundedVodInputAttempt(session, offset, parentSignal, dispatc
         if (contentEncoding && contentEncoding !== 'identity') {
             throw vodInputPumpError('RANGE_UNSUPPORTED', 'Provider encoded the bounded MKV byte range.', { status: 502 });
         }
-        const range = parseBoundedProviderContentRange(attempt.response, offset, fileSizeBytes);
+        const range = parseBoundedProviderContentRange(attempt.response, offset, requestEnd);
         if (!range) {
             if (await responseHasProviderBusyPrefix(attempt.response, controller.signal)) {
                 throw providerBusyVodInputError(attempt.response.status);
@@ -8197,14 +8392,28 @@ async function openBoundedVodInputAttempt(session, offset, parentSignal, dispatc
                 { status: 502 },
             );
         }
-        const observedValidator = boundedVodResponseValidator(attempt.response);
+        if (fileSizeBytes && range.total !== fileSizeBytes) {
+            throw vodInputPumpError('VOD_CHANGED', 'The MKV file changed while it was playing.', { status: 502 });
+        }
+        const effectiveUrlSha256 = sha256Hex(String(attempt.response?.url || session.sourceUrl || ''));
         if (
-            session.vodInputValidator && observedValidator &&
-            (
-                observedValidator.kind !== session.vodInputValidator.kind ||
-                observedValidator.value !== session.vodInputValidator.value
-            )
+            session.vodInputEffectiveUrlSha256 &&
+            effectiveUrlSha256 !== session.vodInputEffectiveUrlSha256
         ) {
+            throw vodInputPumpError('VOD_CHANGED', 'The MKV provider target changed while it was playing.', { status: 502 });
+        }
+        const observedValidator = boundedVodResponseValidator(attempt.response);
+        if (offset > 0 && !session.vodInputValidator) {
+            throw vodInputPumpError('VOD_CHANGED', 'The MKV file cannot be resumed without a stable validator.', { status: 502 });
+        }
+        if (session.vodInputValidator && (
+            !observedValidator ||
+            observedValidator.kind !== session.vodInputValidator.kind ||
+            observedValidator.value !== session.vodInputValidator.value
+        )) {
+            // If-Range is an integrity boundary, not merely an optimization. A
+            // resumed 206 without the same validator could splice two versions
+            // of the file and must never produce a proof or cache entry.
             throw vodInputPumpError('VOD_CHANGED', 'The MKV file changed while it was playing.', { status: 502 });
         }
         if (!session.vodInputValidator && observedValidator) session.vodInputValidator = observedValidator;
@@ -8225,6 +8434,322 @@ async function openBoundedVodInputAttempt(session, offset, parentSignal, dispatc
     }
 }
 
+async function preopenBoundedMkvInputPump(session, parentSignal = null) {
+    if (!isFiniteMkvVodSession(session) || session.preopenedVodInputAttempt) return;
+    const dispatcher = pickProxyAgent(proxyKeyFromUrl(session.sourceUrl)) || null;
+    const opened = await openBoundedVodInputAttempt(session, 0, parentSignal, dispatcher);
+    const existingFileSizeBytes = fileSizeBytesForSession(session);
+    if (existingFileSizeBytes && opened.range.total !== existingFileSizeBytes) {
+        await closeVodInputAttempt(opened.attempt);
+        throw vodInputPumpError('VOD_CHANGED', 'The MKV file changed before playback started.', { status: 502 });
+    }
+    session.fileSizeBytes = opened.range.total;
+    session.codecProfile = compactRecord({
+        ...asRecord(session.codecProfile),
+        fileSizeBytes: opened.range.total,
+    });
+    const strongValidator = strongBoundedVodResponseValidator(opened.attempt.response);
+    const validatorEvidence = strongValidator
+        ? 'strong-etag'
+        : (boundedVodResponseValidator(opened.attempt.response)?.kind === 'last-modified'
+            ? 'last-modified'
+            : 'weak-or-absent');
+    if (validatorEvidence === 'strong-etag') vodInputPumpStats.validatorEvidence.strongEtag += 1;
+    else if (validatorEvidence === 'last-modified') vodInputPumpStats.validatorEvidence.lastModified += 1;
+    else vodInputPumpStats.validatorEvidence.weakOrAbsent += 1;
+    session.vodInputStrongValidator = strongValidator;
+    session.vodInputEffectiveUrlSha256 = sha256Hex(String(
+        opened.attempt.response?.url || session.sourceUrl || '',
+    ));
+    session.preopenedVodInputAttempt = {
+        ...opened,
+        dispatcher,
+    };
+    session.startupTimings = asRecord(session.startupTimings);
+    session.startupTimings.providerGetPreopened = true;
+    session.startupTimings.providerValidatorEvidence = validatorEvidence;
+}
+
+async function closePreopenedBoundedMkvInput(session) {
+    const opened = session?.preopenedVodInputAttempt;
+    if (!opened) return;
+    session.preopenedVodInputAttempt = null;
+    await closeVodInputAttempt(opened.attempt).catch(() => {});
+}
+
+function createMkvH264FullFilePacketAnalyzer(session) {
+    if (!shouldCreateMkvH264FullFilePacketAnalyzer(session)) return null;
+    let child;
+    try {
+        child = spawn(FFPROBE_PATH, [
+            '-v', 'error',
+            '-select_streams', 'v:0',
+            '-show_packets',
+            '-show_entries', 'packet=pts_time,dts_time,duration_time,flags',
+            '-of', 'csv=p=0',
+            '-i', 'pipe:0',
+        ], {
+            stdio: ['pipe', 'pipe', 'pipe'],
+            env: loopbackOnlyEnv(),
+        });
+    } catch (_) {
+        return null;
+    }
+    // The provider -> primary FFmpeg pump must never wait for the optional
+    // proof analyzer. PassThrough provides a strict local-only queue; its first
+    // saturation abandons proof generation instead of propagating backpressure.
+    const tee = new PassThrough({ highWaterMark: MKV_H264_FAST_START_ANALYZER_BUFFER_BYTES });
+    tee.pipe(child.stdin);
+    child.stdin.on('error', () => {});
+    const analyzer = {
+        child,
+        tee,
+        bytesAnalyzed: 0,
+        packetCount: 0,
+        keyframeCount: 0,
+        firstPacketKeyframe: false,
+        firstPtsSeconds: null,
+        firstDtsSeconds: null,
+        lastDtsSeconds: null,
+        maximumTimestampSeconds: 0,
+        lastKeyframeSeconds: null,
+        maxKeyframeGapSeconds: 0,
+        maxPtsDtsSkewSeconds: 0,
+        negativeTimestampCount: 0,
+        timestampDiscontinuityCount: 0,
+        pending: '',
+        stderr: '',
+        failed: false,
+        droppedChunks: 0,
+        exited: false,
+        exitCode: null,
+        exitPromise: null,
+        finalizing: false,
+        abandonedReason: null,
+        stopRequested: false,
+    };
+    mkvH264FullFileAnalyzers.add(analyzer);
+    const consume = (line) => {
+        const fields = String(line || '').trim().split(',');
+        if (fields.length < 4) return;
+        const pts = Number(fields[0]);
+        const dts = Number(fields[1]);
+        const duration = Number(fields[2]);
+        const flags = fields.slice(3).join(',');
+        if (!Number.isFinite(pts) || !Number.isFinite(dts)) {
+            analyzer.failed = true;
+            return;
+        }
+        if (analyzer.packetCount === 0) {
+            analyzer.firstPtsSeconds = pts;
+            analyzer.firstDtsSeconds = dts;
+            analyzer.firstPacketKeyframe = flags.includes('K');
+        }
+        if (analyzer.lastDtsSeconds !== null && (
+            dts + 0.000_001 < analyzer.lastDtsSeconds ||
+            dts - analyzer.lastDtsSeconds > EXACT_MATROSKA_H264_HLS_TARGET_SECONDS + 1
+        )) analyzer.timestampDiscontinuityCount += 1;
+        if (pts < 0 || dts < 0) analyzer.negativeTimestampCount += 1;
+        const packetEnd = Math.max(pts, dts) + (Number.isFinite(duration) && duration > 0 ? duration : 0);
+        analyzer.maximumTimestampSeconds = Math.max(analyzer.maximumTimestampSeconds, packetEnd);
+        analyzer.maxPtsDtsSkewSeconds = Math.max(analyzer.maxPtsDtsSkewSeconds, Math.abs(pts - dts));
+        if (flags.includes('K')) {
+            if (analyzer.lastKeyframeSeconds !== null) {
+                analyzer.maxKeyframeGapSeconds = Math.max(
+                    analyzer.maxKeyframeGapSeconds,
+                    pts - analyzer.lastKeyframeSeconds,
+                );
+            } else {
+                analyzer.maxKeyframeGapSeconds = Math.max(analyzer.maxKeyframeGapSeconds, pts);
+            }
+            analyzer.lastKeyframeSeconds = pts;
+            analyzer.keyframeCount += 1;
+        }
+        analyzer.lastDtsSeconds = dts;
+        analyzer.packetCount += 1;
+        if (analyzer.packetCount > 20_000_000) analyzer.failed = true;
+    };
+    child.stdout.on('data', (chunk) => {
+        analyzer.pending += chunk.toString();
+        const lines = analyzer.pending.split(/\r?\n/);
+        analyzer.pending = lines.pop() || '';
+        for (const line of lines) consume(line);
+        if (analyzer.failed) {
+            try { child.kill('SIGTERM'); } catch (_) {}
+        }
+    });
+    child.stderr.on('data', (chunk) => {
+        analyzer.stderr += sanitizeLog(chunk.toString(), session.sourceUrl);
+        if (analyzer.stderr.length > 8_000) analyzer.stderr = analyzer.stderr.slice(-8_000);
+    });
+    tee.on('error', () => {
+        abandonMkvH264FullFileAnalyzer(analyzer, 'tee-error');
+    });
+    analyzer.exitPromise = new Promise((resolve) => {
+        const finish = (code) => {
+            if (analyzer.exited) return;
+            analyzer.exited = true;
+            analyzer.exitCode = code;
+            mkvH264FullFileAnalyzers.delete(analyzer);
+            if (!analyzer.finalizing) {
+                analyzer.failed = true;
+                analyzer.abandonedReason ||= 'analyzer-exited-early';
+            }
+            if (analyzer.pending.trim()) consume(analyzer.pending);
+            resolve();
+        };
+        child.once('error', () => {
+            analyzer.failed = true;
+            finish(-1);
+        });
+        child.once('exit', (code) => finish(code));
+    });
+    return analyzer;
+}
+
+function shouldCreateMkvH264FullFilePacketAnalyzer(session) {
+    if (
+        !MKV_H264_FAST_START_COPY_ACTIVATION_READY ||
+        !MKV_H264_FAST_START_PROOF_CURRENT_KEY ||
+        !isFiniteMkvVodSession(session) ||
+        Number(session?.seekOffset || 0) > 0 ||
+        session?.forceAlignedMultiAudioVideoEncode === true ||
+        session?.mode === 'transcode' ||
+        asRecord(session?.mkvH264FastStart).eligible === true ||
+        !mkvH264FastStartIdentityContext(session)
+    ) return false;
+    const profile = asRecord(session?.codecProfile);
+    const videoCodec = normalizeCodecToken(profile.videoCodec ?? profile.video_codec ?? profile.video);
+    if (videoCodec && !(videoCodec.includes('h264') || videoCodec.includes('avc'))) return false;
+    const videoWidth = Number(profile.videoWidth ?? profile.video_width ?? profile.width);
+    const videoHeight = Number(profile.videoHeight ?? profile.video_height ?? profile.height);
+    if (
+        (Number.isFinite(videoWidth) && (videoWidth <= 0 || videoWidth > EXACT_MATROSKA_H264_MAX_WIDTH)) ||
+        (Number.isFinite(videoHeight) && (videoHeight <= 0 || videoHeight > EXACT_MATROSKA_H264_MAX_HEIGHT)) ||
+        (Number.isFinite(videoWidth) && Number.isFinite(videoHeight) && videoWidth * videoHeight > EXACT_MATROSKA_H264_MAX_PIXELS)
+    ) return false;
+    const audioTracks = Array.isArray(profile.audioTracks)
+        ? profile.audioTracks
+        : (Array.isArray(profile.audio_tracks) ? profile.audio_tracks : null);
+    if (audioTracks && audioTracks.length !== 1) return false;
+    return true;
+}
+
+function abandonMkvH264FullFileAnalyzer(analyzer, reason = 'abandoned') {
+    if (!analyzer || analyzer.stopRequested) return;
+    analyzer.stopRequested = true;
+    analyzer.failed = true;
+    analyzer.abandonedReason ||= reason;
+    analyzer.droppedChunks += 1;
+    try {
+        analyzer.tee.unpipe(analyzer.child.stdin);
+        analyzer.tee.destroy();
+    } catch (_) {}
+    try { analyzer.child.stdin.destroy(); } catch (_) {}
+    if (!analyzer.exited) {
+        try { analyzer.child.kill('SIGTERM'); } catch (_) {}
+    }
+}
+
+function writeMkvH264FullFileAnalyzerChunk(analyzer, chunk) {
+    if (!analyzer || analyzer.failed || analyzer.exited || !chunk?.length) return false;
+    let accepted = false;
+    try {
+        accepted = analyzer.tee.write(chunk);
+    } catch (_) {
+        abandonMkvH264FullFileAnalyzer(analyzer, 'tee-write-error');
+        return false;
+    }
+    analyzer.bytesAnalyzed += chunk.length;
+    if (!accepted) {
+        abandonMkvH264FullFileAnalyzer(analyzer, 'tee-backpressure');
+        return false;
+    }
+    return true;
+}
+
+async function waitForMkvH264FullFileAnalyzerExit(analyzer) {
+    if (!analyzer || analyzer.exited) return;
+    await Promise.race([
+        analyzer.exitPromise,
+        new Promise((resolve) => setTimeout(resolve, MKV_H264_FAST_START_ANALYZER_STOP_TIMEOUT_MS)),
+    ]);
+    if (!analyzer.exited) {
+        try { analyzer.child.kill('SIGKILL'); } catch (_) {}
+        await Promise.race([
+            analyzer.exitPromise,
+            new Promise((resolve) => setTimeout(resolve, MKV_H264_FAST_START_ANALYZER_STOP_TIMEOUT_MS)),
+        ]);
+    }
+}
+
+async function stopMkvH264FullFileAnalyzer(analyzer, reason = 'pump-incomplete') {
+    if (!analyzer) return;
+    abandonMkvH264FullFileAnalyzer(analyzer, reason);
+    await waitForMkvH264FullFileAnalyzerExit(analyzer);
+}
+
+async function finishMkvH264FullFileAnalyzer(analyzer) {
+    if (!analyzer) return null;
+    if (!analyzer.failed && !analyzer.exited) {
+        analyzer.finalizing = true;
+        try {
+            analyzer.tee.end();
+        } catch (_) {
+            abandonMkvH264FullFileAnalyzer(analyzer, 'tee-finish-error');
+        }
+    }
+    if (analyzer.failed && !analyzer.exited) {
+        abandonMkvH264FullFileAnalyzer(analyzer, analyzer.abandonedReason || 'analyzer-failed');
+    }
+    await Promise.race([
+        analyzer.exitPromise,
+        new Promise((resolve) => setTimeout(resolve, CODEC_PROBE_TIMEOUT_MS)),
+    ]);
+    if (!analyzer.exited) {
+        analyzer.failed = true;
+        abandonMkvH264FullFileAnalyzer(analyzer, 'analyzer-timeout');
+        await waitForMkvH264FullFileAnalyzerExit(analyzer);
+    }
+    if (
+        analyzer.failed || analyzer.exitCode !== 0 || analyzer.stderr.trim() ||
+        analyzer.droppedChunks !== 0 || analyzer.packetCount < MKV_H264_FAST_START_MIN_KEYFRAMES ||
+        analyzer.keyframeCount < MKV_H264_FAST_START_MIN_KEYFRAMES ||
+        analyzer.firstPacketKeyframe !== true || analyzer.lastKeyframeSeconds === null
+    ) return null;
+    analyzer.maxKeyframeGapSeconds = Math.max(
+        analyzer.maxKeyframeGapSeconds,
+        analyzer.maximumTimestampSeconds - analyzer.lastKeyframeSeconds,
+    );
+    return {
+        bytesAnalyzed: analyzer.bytesAnalyzed,
+        packetCount: analyzer.packetCount,
+        keyframeCount: analyzer.keyframeCount,
+        firstPacketKeyframe: true,
+        coverageSeconds: Number(analyzer.maximumTimestampSeconds.toFixed(3)),
+        maxKeyframeGapSeconds: Number(analyzer.maxKeyframeGapSeconds.toFixed(6)),
+        ptsPresent: true,
+        dtsPresent: true,
+        dtsMonotonic: analyzer.timestampDiscontinuityCount === 0,
+        muxTimestampsSafe: Boolean(
+            analyzer.negativeTimestampCount === 0 &&
+            analyzer.timestampDiscontinuityCount === 0 &&
+            analyzer.firstPtsSeconds >= 0 && analyzer.firstPtsSeconds <= 1 &&
+            analyzer.firstDtsSeconds >= 0 && analyzer.firstDtsSeconds <= 1 &&
+            analyzer.maxPtsDtsSkewSeconds <= 2
+        ),
+        negativeTimestampCount: analyzer.negativeTimestampCount,
+        timestampDiscontinuityCount: analyzer.timestampDiscontinuityCount,
+        firstPtsSeconds: Number(analyzer.firstPtsSeconds.toFixed(6)),
+        firstDtsSeconds: Number(analyzer.firstDtsSeconds.toFixed(6)),
+        maxPtsDtsSkewSeconds: Number(analyzer.maxPtsDtsSkewSeconds.toFixed(6)),
+        analyzerType: 'ffprobe-packet-stream-v1',
+        analyzerDigest: crypto.createHash('sha256')
+            .update('ffprobe-packet-stream-v1|pts_time,dts_time,duration_time,flags')
+            .digest('hex'),
+    };
+}
+
 async function runBoundedMkvInputPump(session, writable, signal, dispatcher) {
     const fileSizeBytes = fileSizeBytesForSession(session);
     if (!fileSizeBytes) throw vodInputPumpError('VOD_SIZE_UNAVAILABLE', 'Finite MKV input size is unavailable', { status: 502 });
@@ -8234,6 +8759,9 @@ async function runBoundedMkvInputPump(session, writable, signal, dispatcher) {
     let prefixValidated = false;
     let consecutiveNoProgressFailures = 0;
     let reconnects = 0;
+    const fullFileAnalyzer = createMkvH264FullFilePacketAnalyzer(session);
+    let fullFileAnalyzerSettled = false;
+    try {
     while (offset < fileSizeBytes) {
         if (signal.aborted) throw abortedVodInputPumpError();
         const attemptOffset = offset;
@@ -8241,7 +8769,13 @@ async function runBoundedMkvInputPump(session, writable, signal, dispatcher) {
         let range = null;
         let failure = null;
         try {
-            const opened = await openBoundedVodInputAttempt(session, offset, signal, dispatcher);
+            const opened = offset === 0 && session.preopenedVodInputAttempt
+                ? (() => {
+                    const preopened = session.preopenedVodInputAttempt;
+                    session.preopenedVodInputAttempt = null;
+                    return preopened;
+                })()
+                : await openBoundedVodInputAttempt(session, offset, signal, dispatcher);
             attempt = opened.attempt;
             range = opened.range;
             while (offset <= range.end) {
@@ -8275,6 +8809,7 @@ async function runBoundedMkvInputPump(session, writable, signal, dispatcher) {
                         throw vodInputPumpError('INVALID_MKV_INPUT', 'Provider response is not a Matroska file.', { status: 502 });
                     }
                     await writeVodInputChunk(writable, prefixBuffer, signal);
+                    writeMkvH264FullFileAnalyzerChunk(fullFileAnalyzer, prefixBuffer);
                     forwardedBytes += prefixBuffer.length;
                     vodInputPumpStats.bytesForwarded += prefixBuffer.length;
                     prefixBuffer = Buffer.alloc(0);
@@ -8282,6 +8817,7 @@ async function runBoundedMkvInputPump(session, writable, signal, dispatcher) {
                 }
                 if (chunk.length) {
                     await writeVodInputChunk(writable, chunk, signal);
+                    writeMkvH264FullFileAnalyzerChunk(fullFileAnalyzer, chunk);
                     offset += chunk.length;
                     forwardedBytes += chunk.length;
                     vodInputPumpStats.bytesForwarded += chunk.length;
@@ -8340,7 +8876,18 @@ async function runBoundedMkvInputPump(session, writable, signal, dispatcher) {
         throw vodInputPumpError('INVALID_MKV_INPUT', 'The bounded provider response did not contain one complete Matroska file.', { status: 502 });
     }
     await finishVodInput(writable, signal);
-    return { bytesForwarded: forwardedBytes, reconnects };
+    const fullFilePacketMetrics = await finishMkvH264FullFileAnalyzer(fullFileAnalyzer);
+    fullFileAnalyzerSettled = true;
+    session.mkvH264FullFilePacketMetrics = fullFilePacketMetrics;
+    maybeFinalizeMkvH264FastStartProof(session);
+    return { bytesForwarded: forwardedBytes, reconnects, fullFilePacketProof: Boolean(session.mkvH264FastStartProofFinalized) };
+    } finally {
+        if (!fullFileAnalyzerSettled) {
+            // Never replace the provider/primary/abort error with optional proof
+            // cleanup. stopMkv... is bounded and deliberately non-throwing.
+            await stopMkvH264FullFileAnalyzer(fullFileAnalyzer, 'pump-incomplete').catch(() => {});
+        }
+    }
 }
 
 function startBoundedMkvInputPump(session, writable) {
@@ -8385,7 +8932,8 @@ function startBoundedMkvInputPump(session, writable) {
 
 async function enrichSessionCodecProfileFromBoundedHeader(session, signal = null) {
     if (!BOUNDED_MKV_HEADER_PARSE || !isFiniteMkvVodSession(session)) return false;
-    if (hasCompleteMkvPlaybackProfile(session?.codecProfile)) {
+    const currentHeaderAuthorityRequired = needsMkvH264CurrentHeaderAuthority(session);
+    if (hasCompleteMkvPlaybackProfile(session?.codecProfile) && !currentHeaderAuthorityRequired) {
         const captured = headerByteCache.get(session.sourceUrl);
         if (captured?.captureOwner === String(session?.id || session.sourceUrl)) {
             headerByteCache.delete(session.sourceUrl);
@@ -8399,7 +8947,10 @@ async function enrichSessionCodecProfileFromBoundedHeader(session, signal = null
     try {
         // Bypass the general cache: a useful-but-partial historical entry must
         // not hide the fuller prefix captured by this exact playback.
-        local = await probeFromHeaderBytes(session.sourceUrl, { signal });
+        local = await probeFromHeaderBytes(session.sourceUrl, {
+            signal,
+            fileSizeBytes: fileSizeBytesForSession(session),
+        });
     } finally {
         // The prefix is per-startup evidence. Release its bounded memory even
         // when a malformed/truncated header cannot be parsed.
@@ -8424,6 +8975,14 @@ async function enrichSessionCodecProfileFromBoundedHeader(session, signal = null
     });
     cacheCodecProfile(session.sourceUrl, exactLocal);
     session.codecProfile = mergeCodecProfiles(session.codecProfile, exactLocal);
+    session.mkvH264CurrentHeaderAuthority = {
+        source: 'gateway-inband-current',
+        captureOwner: String(session.id || ''),
+        profileFingerprint: mkvH264FastStartProfileFingerprint(
+            session.codecProfile,
+            fileSizeBytesForSession(session),
+        ),
+    };
     if (
         !Number.isInteger(normalizeAudioStreamIndex(session.actualMappedAudioStreamIndex)) &&
         String(session.actualAudioMap || '').startsWith('0:a:0')
@@ -8443,7 +9002,28 @@ async function enrichSessionCodecProfileFromBoundedHeader(session, signal = null
     const complete = hasCompleteMkvPlaybackProfile(session.codecProfile);
     session.startupTimings.inbandCodecProfileApplied = complete;
     session.startupTimings.inbandCodecProfileComplete = complete;
+    // Finalization has two independent barriers: complete local metadata and
+    // full-file packet metrics. Calling it here and at pump EOF makes either
+    // completion order work without ever signing a prefix-only observation.
+    maybeFinalizeMkvH264FastStartProof(session);
+    session.startupTimings.mkvH264FastStartProofProduced = Boolean(
+        session.mkvH264FastStartProofFinalized,
+    );
     return complete;
+}
+
+function strongBoundedVodResponseValidator(response) {
+    const etag = String(response?.headers?.get?.('etag') || '').trim();
+    // RFC 9110 strong entity-tag: a quoted opaque tag, no weak prefix, control
+    // bytes, embedded quote, or unbounded attacker-controlled header value.
+    if (
+        !etag || etag.length > 512 || /^W\//i.test(etag) ||
+        !/^"[\x21\x23-\x7e\x80-\xff]*"$/.test(etag)
+    ) return null;
+    return {
+        type: 'etag-sha256',
+        digest: crypto.createHash('sha256').update(etag).digest('hex'),
+    };
 }
 
 async function stopBoundedMkvInputPump(session) {
@@ -8603,6 +9183,7 @@ function startFfmpeg(session) {
 
     child.on('exit', (code, signal) => {
         const inputEndedEarly = pumpedMkvInput && inputPump && inputPump.completed !== true;
+        const completedCleanly = code === 0 && !inputEndedEarly && !session.inputFailure && !session.lastError;
         try { inputPump?.controller.abort(); } catch (_) {}
         if (session.status !== 'ended' && (code !== 0 || inputEndedEarly)) {
             session.status = 'failed';
@@ -8612,6 +9193,13 @@ function startFfmpeg(session) {
             }
         } else if (session.status !== 'failed') {
             session.status = 'ended';
+        }
+        if (completedCleanly && session.hlsCacheDescriptor) {
+            setImmediate(() => {
+                promoteMkvH264HlsCacheFromCompletedSession(session).catch((error) => {
+                    console.warn(`[media-gateway] local HLS cache promotion skipped for ${session.id}: ${String(error?.code || error?.message || 'validation_failed').slice(0, 120)}`);
+                });
+            });
         }
         wakePlaybackBlockedQueues();
     });
@@ -8878,6 +9466,1181 @@ function shouldReencodeExactMatroskaH264(session) {
     if (!(container.includes('matroska') || container === 'mkv')) return false;
     const videoCodec = normalizeCodecToken(profile.videoCodec ?? profile.video_codec ?? profile.video);
     return videoCodec.includes('h264') || videoCodec.includes('avc');
+}
+
+function mkvH264FastStartProofForProfile(profile) {
+    const record = asRecord(profile);
+    const envelope = record.mkvH264FastStartProof;
+    return typeof envelope === 'string' && envelope.length > 0 && envelope.length <= 16_384
+        ? envelope
+        : null;
+}
+
+function mkvH264FastStartProfileFingerprint(profile, fileSizeOverride = null) {
+    const record = asRecord(profile);
+    const fileSizeBytes = Number(
+        fileSizeOverride ??
+        record.fileSizeBytes ??
+        record.file_size_bytes
+    );
+    if (!Number.isSafeInteger(fileSizeBytes) || fileSizeBytes <= 0) return null;
+    const audioTracks = (Array.isArray(record.audioTracks)
+        ? record.audioTracks
+        : (Array.isArray(record.audio_tracks) ? record.audio_tracks : []))
+        .map((track) => ({
+            index: Number(track?.index),
+            codec: normalizeCodecToken(track?.codec),
+            profile: normalizeCodecToken(track?.profile),
+            channels: Number(track?.channels),
+            sampleRate: Number(track?.sampleRate ?? track?.sample_rate),
+            channelLayout: normalizeCodecToken(track?.channelLayout ?? track?.channel_layout),
+            default: track?.default === true,
+        }))
+        .sort((left, right) => left.index - right.index);
+    const subtitles = (Array.isArray(record.subtitles)
+        ? record.subtitles
+        : (Array.isArray(record.subtitleTracks)
+            ? record.subtitleTracks
+            : (Array.isArray(record.subtitle_tracks) ? record.subtitle_tracks : [])))
+        .map((track) => ({
+            index: Number(track?.index),
+            codec: normalizeCodecToken(track?.codec),
+        }))
+        .sort((left, right) => left.index - right.index);
+    const material = {
+        protocol: MKV_H264_FAST_START_PROTOCOL,
+        metadataComplete: record.metadataComplete === true || record.metadata_complete === true,
+        fileSizeBytes,
+        container: normalizeCodecToken(record.container),
+        durationSeconds: Number(record.durationSeconds ?? record.duration_seconds ?? record.duration),
+        videoCodec: normalizeCodecToken(record.videoCodec ?? record.video_codec ?? record.video),
+        videoProfile: normalizeCodecToken(record.videoProfile ?? record.video_profile),
+        videoPixelFormat: normalizeCodecToken(record.videoPixelFormat ?? record.video_pixel_format ?? record.pix_fmt),
+        videoWidth: Number(record.videoWidth ?? record.video_width ?? record.width),
+        videoHeight: Number(record.videoHeight ?? record.video_height ?? record.height),
+        audioCodec: normalizeCodecToken(record.audioCodec ?? record.audio_codec ?? record.audio),
+        audioProfile: normalizeCodecToken(record.audioProfile ?? record.audio_profile),
+        audioChannels: Number(record.audioChannels ?? record.audio_channels ?? record.channels),
+        audioSampleRate: Number(record.audioSampleRate ?? record.audio_sample_rate),
+        audioChannelLayout: normalizeCodecToken(record.audioChannelLayout ?? record.audio_channel_layout),
+        audioTracks,
+        subtitles,
+    };
+    return crypto.createHash('sha256').update(JSON.stringify(material)).digest('hex');
+}
+
+const MKV_H264_FAST_START_PROOF_DOMAIN = Buffer.from('NORVA/MKV-H264-FASTSTART/V2\0', 'utf8');
+const MKV_H264_FAST_START_ANALYZER_TYPE = 'ffprobe-packet-stream-v1';
+const MKV_H264_FAST_START_ANALYZER_DIGEST = crypto.createHash('sha256')
+    .update('ffprobe-packet-stream-v1|pts_time,dts_time,duration_time,flags')
+    .digest('hex');
+
+function exactRecordKeys(value, expected) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+    const actual = Object.keys(value).sort();
+    const wanted = [...expected].sort();
+    return actual.length === wanted.length && actual.every((key, index) => key === wanted[index]);
+}
+
+function canonicalBase64urlBytes(value, maximumBytes) {
+    const encoded = String(value || '');
+    if (!encoded || encoded.includes('=') || !/^[A-Za-z0-9_-]+$/.test(encoded)) return null;
+    let decoded;
+    try { decoded = Buffer.from(encoded, 'base64url'); } catch (_) { return null; }
+    if (!decoded.length || decoded.length > maximumBytes || decoded.toString('base64url') !== encoded) return null;
+    return decoded;
+}
+
+function mkvH264FastStartProofMac(payloadBytes, key) {
+    return crypto.createHmac('sha256', key)
+        .update(MKV_H264_FAST_START_PROOF_DOMAIN)
+        .update(payloadBytes)
+        .digest();
+}
+
+function sealMkvH264FastStartProof(payload) {
+    if (!MKV_H264_FAST_START_PROOF_CURRENT_KEY) return null;
+    const canonical = Buffer.from(stableJson(payload), 'utf8');
+    const mac = mkvH264FastStartProofMac(canonical, MKV_H264_FAST_START_PROOF_CURRENT_KEY);
+    return `${canonical.toString('base64url')}.${mac.toString('base64url')}`;
+}
+
+function openMkvH264FastStartProof(envelope) {
+    if (typeof envelope !== 'string' || envelope.length > 16_384) return null;
+    const parts = envelope.split('.');
+    if (parts.length !== 2) return null;
+    const payloadBytes = canonicalBase64urlBytes(parts[0], 12_000);
+    const suppliedMac = canonicalBase64urlBytes(parts[1], 32);
+    if (!payloadBytes || !suppliedMac || suppliedMac.length !== 32) return null;
+
+    // Calculate every configured MAC before parsing attacker-controlled JSON.
+    // This keeps current/previous-key rotation from becoming a parse oracle.
+    const matches = MKV_H264_FAST_START_PROOF_VERIFICATION_KEYS.map(({ key, kid }) => ({
+        kid,
+        matched: crypto.timingSafeEqual(mkvH264FastStartProofMac(payloadBytes, key), suppliedMac),
+    }));
+    const matched = matches.find((entry) => entry.matched);
+    if (!matched) return null;
+
+    let payloadText;
+    let payload;
+    try {
+        payloadText = new TextDecoder('utf-8', { fatal: true }).decode(payloadBytes);
+        payload = JSON.parse(payloadText);
+    } catch (_) {
+        return null;
+    }
+    if (stableJson(payload) !== payloadText) return null;
+    if (!exactRecordKeys(payload, [
+        'protocol', 'kid', 'scope', 'sourceUrlSha256', 'effectiveUrlSha256',
+        'providerScopeSha256', 'tenantScopeSha256', 'itemScopeSha256',
+        'fileSizeBytes', 'profileFingerprint', 'validator', 'metrics', 'analyzer',
+        'issuedAtMs', 'expiresAtMs', 'build',
+    ])) return null;
+    if (!exactRecordKeys(payload.validator, ['type', 'digest'])) return null;
+    if (!exactRecordKeys(payload.analyzer, ['type', 'digest'])) return null;
+    if (!exactRecordKeys(payload.metrics, [
+        'bytesAnalyzed', 'packetCount', 'keyframeCount', 'firstPacketKeyframe',
+        'coverageSeconds', 'maxKeyframeGapSeconds', 'ptsPresent', 'dtsPresent',
+        'dtsMonotonic', 'muxTimestampsSafe', 'negativeTimestampCount',
+        'timestampDiscontinuityCount', 'firstPtsSeconds', 'firstDtsSeconds',
+        'maxPtsDtsSkewSeconds',
+    ])) return null;
+    if (payload.kid !== matched.kid) return null;
+    return payload;
+}
+
+function mkvH264FastStartStaticContext(session) {
+    const fail = (reason) => ({ ok: false, reason });
+    if (!isFiniteMkvVodSession(session) || isLiveSession(session)) return fail('not-finite-mkv');
+    if (Number(session?.seekOffset || 0) > 0) return fail('seek');
+    if (session?.forceAlignedMultiAudioVideoEncode === true) return fail('multi-audio');
+    const profile = asRecord(session?.codecProfile);
+    const container = normalizeCodecToken(profile.container);
+    const videoCodec = normalizeCodecToken(profile.videoCodec ?? profile.video_codec ?? profile.video);
+    if (!(container === 'mkv' || container.includes('matroska'))) return fail('not-matroska');
+    if (!(videoCodec.includes('h264') || videoCodec.includes('avc'))) return fail('video-transcode');
+    if (profile.metadataComplete !== true && profile.metadata_complete !== true) return fail('incomplete-profile');
+    const videoWidth = Number(profile.videoWidth ?? profile.video_width ?? profile.width);
+    const videoHeight = Number(profile.videoHeight ?? profile.video_height ?? profile.height);
+    if (
+        !Number.isInteger(videoWidth) || !Number.isInteger(videoHeight) || videoWidth <= 0 || videoHeight <= 0 ||
+        videoWidth > EXACT_MATROSKA_H264_MAX_WIDTH || videoHeight > EXACT_MATROSKA_H264_MAX_HEIGHT ||
+        videoWidth * videoHeight > EXACT_MATROSKA_H264_MAX_PIXELS
+    ) return fail('unsafe-video-dimensions');
+    const videoProfile = normalizeCodecToken(profile.videoProfile ?? profile.video_profile);
+    const videoPixelFormat = normalizeCodecToken(profile.videoPixelFormat ?? profile.video_pixel_format ?? profile.pix_fmt);
+    if (!['baseline', 'constrainedbaseline', 'main', 'high'].includes(videoProfile)) return fail('unsafe-h264-profile');
+    if (!['yuv420p', 'yuvj420p'].includes(videoPixelFormat)) return fail('unsafe-h264-pixel-format');
+    const durationSeconds = Number(profile.durationSeconds ?? profile.duration_seconds ?? profile.duration);
+    const fileSizeBytes = Number(profile.fileSizeBytes ?? profile.file_size_bytes);
+    const profileProbedAt = Date.parse(String(profile.probedAt ?? profile.probed_at ?? ''));
+    const probeSource = normalizeCodecToken(profile.probeSource ?? profile.probe_source);
+    if (
+        !Number.isFinite(durationSeconds) || durationSeconds <= 0 ||
+        !Number.isSafeInteger(fileSizeBytes) || fileSizeBytes <= 0 ||
+        !Number.isFinite(profileProbedAt) ||
+        !['gatewayinband', 'gatewayprobe', 'exactfileprobe', 'exactfilecodecprobe'].includes(probeSource)
+    ) return fail('incomplete-profile');
+    const audioTracks = Array.isArray(profile.audioTracks)
+        ? profile.audioTracks
+        : (Array.isArray(profile.audio_tracks) ? profile.audio_tracks : null);
+    const subtitles = Array.isArray(profile.subtitles)
+        ? profile.subtitles
+        : (Array.isArray(profile.subtitleTracks)
+            ? profile.subtitleTracks
+            : (Array.isArray(profile.subtitle_tracks) ? profile.subtitle_tracks : null));
+    if (!audioTracks || !subtitles) return fail('incomplete-profile');
+    if (audioTracks.length !== 1) return fail(audioTracks.length > 1 ? 'multi-audio' : 'missing-audio');
+    const onlyAudioTrack = asRecord(audioTracks[0]);
+    if (
+        !Number.isInteger(Number(onlyAudioTrack.index)) || Number(onlyAudioTrack.index) < 0 ||
+        !normalizeCodecToken(onlyAudioTrack.codec) ||
+        !Number.isInteger(Number(onlyAudioTrack.channels)) || Number(onlyAudioTrack.channels) <= 0
+    ) return fail('incomplete-audio-profile');
+    const profileFingerprint = mkvH264FastStartProfileFingerprint(profile, fileSizeBytes);
+    if (!profileFingerprint) return fail('profile-fingerprint-unavailable');
+    return { ok: true, profile, durationSeconds, fileSizeBytes, profileFingerprint };
+}
+
+function mkvH264FastStartIdentityContext(session) {
+    const identity = asRecord(session?.playbackIdentity);
+    const ownerKey = normalizeSessionKey(session?.ownerKey);
+    const sourceId = String(identity.sourceId || '').trim();
+    const itemType = normalizeCodecToken(identity.itemType);
+    const itemId = String(identity.itemId || '').trim();
+    const variantId = String(identity.variantId || '').trim();
+    if (!ownerKey || !sourceId || itemType !== 'movie' || !itemId) return null;
+    if ([sourceId, itemId, variantId].some((value) => value.length > 512)) return null;
+    return {
+        tenantScopeSha256: sha256Hex(ownerKey),
+        itemScopeSha256: sha256Hex(stableJson({ sourceId, itemType, itemId, variantId })),
+    };
+}
+
+function validMkvH264FastStartFullFileMetrics(metrics, fileSizeBytes, durationSeconds) {
+    const record = asRecord(metrics);
+    const coverageSeconds = Number(record.coverageSeconds);
+    const coverageToleranceSeconds = Math.max(2, durationSeconds * 0.005);
+    const maxKeyframeGapSeconds = Number(record.maxKeyframeGapSeconds);
+    const firstPtsSeconds = Number(record.firstPtsSeconds);
+    const firstDtsSeconds = Number(record.firstDtsSeconds);
+    const maxPtsDtsSkewSeconds = Number(record.maxPtsDtsSkewSeconds);
+    return Boolean(
+        Number.isSafeInteger(record.bytesAnalyzed) && record.bytesAnalyzed === fileSizeBytes &&
+        Number.isInteger(record.packetCount) && record.packetCount >= MKV_H264_FAST_START_MIN_KEYFRAMES && record.packetCount <= 20_000_000 &&
+        Number.isInteger(record.keyframeCount) && record.keyframeCount >= MKV_H264_FAST_START_MIN_KEYFRAMES && record.keyframeCount <= record.packetCount &&
+        record.firstPacketKeyframe === true &&
+        Number.isFinite(coverageSeconds) && !Object.is(coverageSeconds, -0) &&
+        Math.abs(coverageSeconds - durationSeconds) <= coverageToleranceSeconds &&
+        Number.isFinite(maxKeyframeGapSeconds) && !Object.is(maxKeyframeGapSeconds, -0) &&
+        maxKeyframeGapSeconds > 0 && maxKeyframeGapSeconds <= MKV_H264_FAST_START_MAX_GOP_SECONDS &&
+        record.ptsPresent === true && record.dtsPresent === true && record.dtsMonotonic === true &&
+        record.muxTimestampsSafe === true && record.negativeTimestampCount === 0 &&
+        record.timestampDiscontinuityCount === 0 &&
+        Number.isFinite(firstPtsSeconds) && firstPtsSeconds >= 0 && firstPtsSeconds <= 1 &&
+        Number.isFinite(firstDtsSeconds) && firstDtsSeconds >= 0 && firstDtsSeconds <= 1 &&
+        Number.isFinite(maxPtsDtsSkewSeconds) && maxPtsDtsSkewSeconds >= 0 && maxPtsDtsSkewSeconds <= 2
+    );
+}
+
+function maybeFinalizeMkvH264FastStartProof(session, nowMs = Date.now()) {
+    if (!MKV_H264_FAST_START_COPY_ACTIVATION_READY) return null;
+    if (session?.mkvH264FastStartProofFinalized === true) {
+        return mkvH264FastStartProofForProfile(session.codecProfile);
+    }
+    session.mkvH264FastStartProofFinalized = false;
+    const context = mkvH264FastStartStaticContext(session);
+    const identity = mkvH264FastStartIdentityContext(session);
+    const currentHeaderAuthority = asRecord(session?.mkvH264CurrentHeaderAuthority);
+    const validator = asRecord(session?.vodInputStrongValidator);
+    const metrics = asRecord(session?.mkvH264FullFilePacketMetrics);
+    if (
+        !MKV_H264_FAST_START_PROOF_CURRENT_KEY || !context.ok || !identity ||
+        currentHeaderAuthority.source !== 'gateway-inband-current' ||
+        currentHeaderAuthority.captureOwner !== String(session?.id || '') ||
+        currentHeaderAuthority.profileFingerprint !== context.profileFingerprint ||
+        validator.type !== 'etag-sha256' || !/^[a-f0-9]{64}$/.test(String(validator.digest || '')) ||
+        metrics.analyzerType !== MKV_H264_FAST_START_ANALYZER_TYPE ||
+        metrics.analyzerDigest !== MKV_H264_FAST_START_ANALYZER_DIGEST ||
+        !validMkvH264FastStartFullFileMetrics(metrics, context.fileSizeBytes, context.durationSeconds)
+    ) return null;
+    const payload = {
+        protocol: MKV_H264_FAST_START_PROTOCOL,
+        kid: mkvH264FastStartProofKeyId(MKV_H264_FAST_START_PROOF_CURRENT_KEY),
+        scope: 'full-file',
+        sourceUrlSha256: sha256Hex(String(session.sourceUrl || '')),
+        effectiveUrlSha256: String(session.vodInputEffectiveUrlSha256 || ''),
+        providerScopeSha256: sha256Hex(String(session.providerSlotKey || '')),
+        tenantScopeSha256: identity.tenantScopeSha256,
+        itemScopeSha256: identity.itemScopeSha256,
+        fileSizeBytes: context.fileSizeBytes,
+        profileFingerprint: context.profileFingerprint,
+        validator: { type: validator.type, digest: validator.digest },
+        metrics: {
+            bytesAnalyzed: metrics.bytesAnalyzed,
+            packetCount: metrics.packetCount,
+            keyframeCount: metrics.keyframeCount,
+            firstPacketKeyframe: true,
+            coverageSeconds: metrics.coverageSeconds,
+            maxKeyframeGapSeconds: metrics.maxKeyframeGapSeconds,
+            ptsPresent: true,
+            dtsPresent: true,
+            dtsMonotonic: true,
+            muxTimestampsSafe: true,
+            negativeTimestampCount: 0,
+            timestampDiscontinuityCount: 0,
+            firstPtsSeconds: metrics.firstPtsSeconds,
+            firstDtsSeconds: metrics.firstDtsSeconds,
+            maxPtsDtsSkewSeconds: metrics.maxPtsDtsSkewSeconds,
+        },
+        analyzer: { type: metrics.analyzerType, digest: metrics.analyzerDigest },
+        issuedAtMs: Number(nowMs),
+        expiresAtMs: Number(nowMs) + MKV_H264_FAST_START_PROOF_MAX_AGE_MS,
+        build: MKV_H264_FAST_START_PROOF_BUILD,
+    };
+    if (
+        !/^[a-f0-9]{64}$/.test(payload.effectiveUrlSha256) ||
+        !Number.isSafeInteger(payload.issuedAtMs) || payload.issuedAtMs <= 0 ||
+        !Number.isSafeInteger(payload.expiresAtMs) || payload.expiresAtMs <= payload.issuedAtMs
+    ) return null;
+    const envelope = sealMkvH264FastStartProof(payload);
+    if (!envelope) return null;
+    session.codecProfile = compactRecord({ ...context.profile, mkvH264FastStartProof: envelope });
+    cacheCodecProfile(session.sourceUrl, session.codecProfile);
+    session.mkvH264FastStartProofFinalized = true;
+    session.startupTimings = asRecord(session.startupTimings);
+    session.startupTimings.mkvH264FastStartProofProduced = true;
+    return envelope;
+}
+
+function assessMkvH264FastStart(session, nowMs = Date.now()) {
+    const reject = (reason) => ({ protocol: MKV_H264_FAST_START_PROTOCOL, eligible: false, reason, proof: null });
+    if (session?.mode === 'transcode') return reject('requested-transcode');
+    if (!MKV_H264_FAST_START_COPY_ACTIVATION_READY) return reject('closed-gop-proof-unavailable');
+    const context = mkvH264FastStartStaticContext(session);
+    const identity = mkvH264FastStartIdentityContext(session);
+    if (!context.ok) return reject(context.reason);
+    if (!identity) return reject('missing-server-identity');
+    const envelope = mkvH264FastStartProofForProfile(context.profile);
+    if (!envelope) return reject('missing-proof');
+    const proof = openMkvH264FastStartProof(envelope);
+    if (!proof) return reject('invalid-proof');
+    if (
+        proof.protocol !== MKV_H264_FAST_START_PROTOCOL || proof.scope !== 'full-file' ||
+        proof.build !== MKV_H264_FAST_START_PROOF_BUILD || !Number.isSafeInteger(proof.issuedAtMs) || proof.issuedAtMs <= 0 ||
+        !Number.isSafeInteger(proof.expiresAtMs) || proof.expiresAtMs <= proof.issuedAtMs ||
+        proof.expiresAtMs - proof.issuedAtMs > MKV_H264_FAST_START_PROOF_MAX_AGE_MS
+    ) return reject('unsupported-proof');
+    if (
+        proof.issuedAtMs > Number(nowMs) + MKV_H264_FAST_START_PROOF_FUTURE_SKEW_MS ||
+        Number(nowMs) > proof.expiresAtMs
+    ) return reject('stale-proof');
+    if (proof.sourceUrlSha256 !== sha256Hex(String(session.sourceUrl || ''))) return reject('proof-source-mismatch');
+    if (proof.effectiveUrlSha256 !== String(session.vodInputEffectiveUrlSha256 || '')) return reject('proof-effective-url-mismatch');
+    if (proof.providerScopeSha256 !== sha256Hex(String(session.providerSlotKey || ''))) return reject('proof-provider-mismatch');
+    if (proof.tenantScopeSha256 !== identity.tenantScopeSha256) return reject('proof-tenant-mismatch');
+    if (proof.itemScopeSha256 !== identity.itemScopeSha256) return reject('proof-item-mismatch');
+    if (proof.fileSizeBytes !== context.fileSizeBytes) return reject('proof-file-mismatch');
+    if (proof.profileFingerprint !== context.profileFingerprint) return reject('profile-fingerprint-mismatch');
+    const validator = asRecord(session?.vodInputStrongValidator);
+    if (validator.type !== 'etag-sha256' || !/^[a-f0-9]{64}$/.test(String(validator.digest || ''))) {
+        return reject('strong-validator-required');
+    }
+    if (proof.validator.type !== validator.type || proof.validator.digest !== validator.digest) {
+        return reject('validator-mismatch');
+    }
+    if (
+        proof.analyzer.type !== MKV_H264_FAST_START_ANALYZER_TYPE ||
+        proof.analyzer.digest !== MKV_H264_FAST_START_ANALYZER_DIGEST ||
+        !validMkvH264FastStartFullFileMetrics(proof.metrics, context.fileSizeBytes, context.durationSeconds)
+    ) return reject('invalid-full-file-proof');
+    return {
+        protocol: MKV_H264_FAST_START_PROTOCOL,
+        eligible: true,
+        reason: 'full-file-proof-accepted',
+        proof: {
+            protocol: MKV_H264_FAST_START_PROTOCOL,
+            scope: 'full-file',
+            profileFingerprint: context.profileFingerprint,
+            fileSizeBytes: context.fileSizeBytes,
+            coverageSeconds: proof.metrics.coverageSeconds,
+            maxKeyframeGapSeconds: proof.metrics.maxKeyframeGapSeconds,
+            timestampsSafe: true,
+        },
+    };
+}
+
+function needsMkvH264CurrentHeaderAuthority(session) {
+    if (
+        !MKV_H264_FAST_START_PROOF_CURRENT_KEY ||
+        !isFiniteMkvVodSession(session) ||
+        Number(session?.seekOffset || 0) > 0 ||
+        session?.forceAlignedMultiAudioVideoEncode === true ||
+        !mkvH264FastStartIdentityContext(session)
+    ) return false;
+    return asRecord(session?.mkvH264FastStart).eligible !== true;
+}
+
+function freezeMkvH264FastStart(session) {
+    const assessment = assessMkvH264FastStart(session);
+    session.mkvH264FastStart = assessment;
+    if (assessment.eligible) {
+        // Video copy is attested, but client/request audio hints are not part of
+        // the full-file packet proof. Normalize the single audio track to AAC-LC
+        // rather than letting mutable hints select an unsafe copy graph.
+        session.forceMkvH264FastStartAudioTranscode = true;
+        session.hlsTargetSeconds = EXACT_MATROSKA_H264_HLS_TARGET_SECONDS;
+        session.minHlsStartupBufferSeconds = MKV_H264_FAST_START_BUFFER_SECONDS;
+        session.minHlsStartupSegments = MKV_H264_FAST_START_MIN_SEGMENTS;
+    }
+    return assessment;
+}
+
+function observedMediaProductionRateX(session) {
+    const timings = asRecord(session?.startupTimings);
+    const bufferSeconds = Number(timings.playlistBufferSeconds);
+    const elapsedMs = Number(timings.ffmpegReadyMs);
+    if (!Number.isFinite(bufferSeconds) || bufferSeconds <= 0 || !Number.isFinite(elapsedMs) || elapsedMs <= 0) {
+        return null;
+    }
+    const rate = bufferSeconds / (elapsedMs / 1_000);
+    if (!Number.isFinite(rate) || rate <= 0) return null;
+    return Number(Math.min(rate, 20).toFixed(3));
+}
+
+function startupPolicyForSession(session) {
+    const videoMode = videoModeForSession(session);
+    const audioMode = audioModeForSession(session);
+    const pipeline = videoMode === 'encode'
+        ? 'video-transcode'
+        : (audioMode === 'copy' ? 'copy' : 'audio-transcode');
+    const assessment = asRecord(session?.mkvH264FastStart);
+    const observedEncodeRateX = observedMediaProductionRateX(session);
+    const selected = assessment.eligible === true && videoMode === 'copy';
+    const eligible = selected &&
+        observedEncodeRateX !== null &&
+        observedEncodeRateX >= MKV_H264_FAST_START_MIN_ENCODE_RATE_X;
+    const reason = eligible
+        ? 'mkv-h264-copy-ready'
+        : (selected
+            ? (observedEncodeRateX === null ? 'encode-rate-unavailable' : 'encode-rate-below-minimum')
+            : (stringOrNull(assessment.reason) || (videoMode === 'encode' ? 'video-transcode' : 'missing-proof')));
+    return {
+        protocol: MKV_H264_FAST_START_PROTOCOL,
+        eligible,
+        pipeline,
+        targetBufferSeconds: eligible ? MKV_H264_FAST_START_BUFFER_SECONDS : null,
+        minimumEncodeRateX: MKV_H264_FAST_START_MIN_ENCODE_RATE_X,
+        observedEncodeRateX,
+        reason,
+    };
+}
+
+const mkvH264HlsCacheStats = {
+    hits: 0,
+    misses: 0,
+    corruptions: 0,
+    promotions: 0,
+    prefixPromotions: 0,
+    completePromotions: 0,
+    evictions: 0,
+};
+const mkvH264HlsCachePromotionLocks = new Map();
+
+function mkvH264HlsCacheEnabled() {
+    return Boolean(
+        MKV_H264_HLS_CACHE_ACTIVATION_READY &&
+        process.env.MKV_H264_HLS_CACHE_ENABLED === 'true' &&
+        MKV_H264_HLS_CACHE_SECRET &&
+        MKV_H264_HLS_CACHE_TTL_MS > 0 &&
+        MKV_H264_HLS_CACHE_MAX_ENTRIES > 0 &&
+        MKV_H264_HLS_CACHE_MAX_BYTES > 0 &&
+        isWithin(OUTPUT_DIR, MKV_H264_HLS_CACHE_ROOT) &&
+        MKV_H264_HLS_CACHE_ROOT !== OUTPUT_DIR
+    );
+}
+
+function stableJson(value) {
+    if (Array.isArray(value)) return `[${value.map((entry) => stableJson(entry)).join(',')}]`;
+    if (value && typeof value === 'object') {
+        const record = value;
+        return `{${Object.keys(record).sort().map((key) => (
+            `${JSON.stringify(key)}:${stableJson(record[key])}`
+        )).join(',')}}`;
+    }
+    return JSON.stringify(value);
+}
+
+function hmacMkvH264HlsCache(value) {
+    if (!MKV_H264_HLS_CACHE_SECRET) return null;
+    return crypto.createHmac('sha256', MKV_H264_HLS_CACHE_SECRET)
+        .update(typeof value === 'string' ? value : stableJson(value))
+        .digest('hex');
+}
+
+function signedMkvH264HlsCacheRecord(value) {
+    const body = { ...asRecord(value) };
+    delete body.signature;
+    return {
+        ...body,
+        signature: hmacMkvH264HlsCache(body),
+    };
+}
+
+function verifyMkvH264HlsCacheRecord(value) {
+    const record = asRecord(value);
+    const signature = String(record.signature || '').toLowerCase();
+    if (!/^[a-f0-9]{64}$/.test(signature)) return null;
+    const body = { ...record };
+    delete body.signature;
+    const expected = hmacMkvH264HlsCache(body);
+    if (!expected || !timingSafeEqual(signature, expected)) return null;
+    return body;
+}
+
+function mkvH264HlsCacheDescriptorForSession(session) {
+    if (!mkvH264HlsCacheEnabled()) return null;
+    const hint = asRecord(session?.playbackHint);
+    const itemType = normalizeCodecToken(hint.itemType ?? hint.item_type ?? hint.streamType ?? hint.stream_type);
+    if (itemType !== 'movie') return null;
+    if (!normalizeSessionKey(session?.ownerKey)) return null;
+    if (!/^[a-f0-9]{64}$/.test(String(session?.providerSlotKey || ''))) return null;
+    if (!/^[a-f0-9]{64}$/.test(String(session?.sourceKey || ''))) return null;
+    if (Number(session?.seekOffset || 0) !== 0 || session?.forceAlignedMultiAudioVideoEncode === true) return null;
+
+    const assessment = assessMkvH264FastStart(session);
+    if (assessment.eligible !== true) return null;
+    const profile = asRecord(session?.codecProfile);
+    const audioTracks = Array.isArray(profile.audioTracks)
+        ? profile.audioTracks
+        : (Array.isArray(profile.audio_tracks) ? profile.audio_tracks : []);
+    if (audioTracks.length !== 1) return null;
+    const pipeline = shouldCopyAudio(session) ? 'copy' : 'audio-transcode';
+    const profileFingerprint = String(assessment?.proof?.profileFingerprint || '').toLowerCase();
+    if (!/^[a-f0-9]{64}$/.test(profileFingerprint)) return null;
+    const audioTrack = asRecord(audioTracks[0]);
+    const keyMaterial = {
+        protocol: MKV_H264_HLS_CACHE_PROTOCOL,
+        tenant: String(session.ownerKey),
+        provider: String(session.providerSlotKey),
+        file: String(session.sourceKey),
+        profile: profileFingerprint,
+        pipeline,
+        audio: {
+            index: Number(audioTrack.index),
+            codec: normalizeCodecToken(audioTrack.codec),
+            channels: Number(audioTrack.channels),
+        },
+        build: GATEWAY_VERSION,
+    };
+    const cacheKey = hmacMkvH264HlsCache(keyMaterial);
+    if (!cacheKey) return null;
+    return {
+        protocol: MKV_H264_HLS_CACHE_PROTOCOL,
+        cacheKey,
+        profileFingerprint,
+        pipeline,
+        build: GATEWAY_VERSION,
+    };
+}
+
+function inspectMkvH264HlsCachePlaylist(playlist) {
+    const rawLines = String(playlist || '').split(/\r?\n/);
+    const segments = [];
+    let pendingDuration = null;
+    let complete = false;
+    let independent = false;
+    let discontinuityCount = 0;
+    let unsafeReference = false;
+    for (const rawLine of rawLines) {
+        const line = rawLine.trim();
+        if (!line) continue;
+        if (line === '#EXT-X-ENDLIST') {
+            complete = true;
+            continue;
+        }
+        if (line === '#EXT-X-INDEPENDENT-SEGMENTS') {
+            independent = true;
+            continue;
+        }
+        if (line === '#EXT-X-DISCONTINUITY') {
+            discontinuityCount += 1;
+            continue;
+        }
+        if (line.startsWith('#EXT-X-KEY:') || line.startsWith('#EXT-X-MAP:') || /\bURI=/i.test(line)) {
+            unsafeReference = true;
+            continue;
+        }
+        if (line.startsWith('#EXTINF:')) {
+            const duration = Number.parseFloat(line.slice('#EXTINF:'.length).split(',')[0]);
+            pendingDuration = Number.isFinite(duration) && duration > 0 ? duration : null;
+            continue;
+        }
+        if (line.startsWith('#')) continue;
+        const name = safeSessionArtifactName(String(line).split(/[?#]/, 1)[0]);
+        if (!name || pendingDuration === null || !/^segment-\d{5}\.ts$/.test(name)) {
+            unsafeReference = true;
+            pendingDuration = null;
+            continue;
+        }
+        segments.push({ name, durationSeconds: Number(pendingDuration.toFixed(6)) });
+        pendingDuration = null;
+    }
+    const sequential = segments.every((segment, index) => (
+        segment.name === `segment-${String(index).padStart(5, '0')}.ts`
+    ));
+    const durationSeconds = Number(segments.reduce(
+        (sum, segment) => sum + segment.durationSeconds,
+        0,
+    ).toFixed(3));
+    const maxSegmentDurationSeconds = segments.reduce(
+        (maximum, segment) => Math.max(maximum, segment.durationSeconds),
+        0,
+    );
+    return {
+        complete,
+        independent,
+        discontinuityCount,
+        unsafeReference,
+        sequential,
+        segments,
+        durationSeconds,
+        maxSegmentDurationSeconds: Number(maxSegmentDurationSeconds.toFixed(6)),
+    };
+}
+
+function renderMkvH264HlsPrefixPlaylist(inspection) {
+    const segments = Array.isArray(inspection?.segments)
+        ? inspection.segments.slice(0, MKV_H264_HLS_CACHE_PREFIX_SEGMENTS)
+        : [];
+    if (segments.length !== MKV_H264_HLS_CACHE_PREFIX_SEGMENTS) return null;
+    const targetDuration = Math.max(1, Math.ceil(segments.reduce(
+        (maximum, segment) => Math.max(maximum, Number(segment.durationSeconds) || 0),
+        0,
+    )));
+    return [
+        '#EXTM3U',
+        '#EXT-X-VERSION:3',
+        `#EXT-X-TARGETDURATION:${targetDuration}`,
+        '#EXT-X-MEDIA-SEQUENCE:0',
+        '#EXT-X-PLAYLIST-TYPE:EVENT',
+        '#EXT-X-INDEPENDENT-SEGMENTS',
+        ...segments.flatMap((segment) => [
+            `#EXTINF:${Number(segment.durationSeconds).toFixed(6)},`,
+            segment.name,
+        ]),
+        '',
+    ].join('\n');
+}
+
+async function scanLocalMkvH264HlsPackets(playlistPath, expectedDurationSeconds) {
+    const resolvedPlaylist = path.resolve(playlistPath);
+    const parent = path.dirname(resolvedPlaylist);
+    if (!isWithin(OUTPUT_DIR, resolvedPlaylist) || !fs.existsSync(resolvedPlaylist)) return null;
+    return new Promise((resolve) => {
+        const child = spawn(FFPROBE_PATH, [
+            '-v', 'error',
+            '-select_streams', 'v:0',
+            '-show_packets',
+            '-show_entries', 'packet=pts_time,dts_time,flags',
+            '-of', 'csv=p=0',
+            resolvedPlaylist,
+        ], {
+            cwd: parent,
+            stdio: ['ignore', 'pipe', 'pipe'],
+            env: loopbackOnlyEnv(),
+        });
+        let pending = '';
+        let stderr = '';
+        let packetCount = 0;
+        let firstPacketKeyframe = false;
+        let firstPtsSeconds = null;
+        let firstDtsSeconds = null;
+        let lastDtsSeconds = null;
+        let maximumTimestampSeconds = 0;
+        let maxPtsDtsSkewSeconds = 0;
+        let negativeTimestampCount = 0;
+        let timestampDiscontinuityCount = 0;
+        let invalid = false;
+        let settled = false;
+        const consume = (line) => {
+            const fields = String(line || '').trim().split(',');
+            if (fields.length < 3) return;
+            const pts = Number(fields[0]);
+            const dts = Number(fields[1]);
+            const flags = fields.slice(2).join(',');
+            if (!Number.isFinite(pts) || !Number.isFinite(dts)) {
+                invalid = true;
+                return;
+            }
+            if (packetCount === 0) {
+                firstPtsSeconds = pts;
+                firstDtsSeconds = dts;
+                firstPacketKeyframe = flags.includes('K');
+            }
+            if (lastDtsSeconds !== null && (
+                dts + 0.000_001 < lastDtsSeconds ||
+                dts - lastDtsSeconds > EXACT_MATROSKA_H264_HLS_TARGET_SECONDS + 1
+            )) timestampDiscontinuityCount += 1;
+            if (pts < 0 || dts < 0) negativeTimestampCount += 1;
+            lastDtsSeconds = dts;
+            maximumTimestampSeconds = Math.max(maximumTimestampSeconds, pts, dts);
+            maxPtsDtsSkewSeconds = Math.max(maxPtsDtsSkewSeconds, Math.abs(pts - dts));
+            packetCount += 1;
+            if (packetCount > 20_000_000) invalid = true;
+        };
+        child.stdout.on('data', (chunk) => {
+            pending += chunk.toString();
+            const lines = pending.split(/\r?\n/);
+            pending = lines.pop() || '';
+            for (const line of lines) consume(line);
+            if (invalid) {
+                try { child.kill('SIGTERM'); } catch (_) {}
+            }
+        });
+        child.stderr.on('data', (chunk) => {
+            stderr += chunk.toString();
+            if (stderr.length > 8_000) stderr = stderr.slice(-8_000);
+        });
+        const timer = setTimeout(() => {
+            invalid = true;
+            try { child.kill('SIGKILL'); } catch (_) {}
+        }, MKV_H264_HLS_CACHE_SCAN_TIMEOUT_MS);
+        timer.unref?.();
+        const finish = (code) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            if (pending.trim()) consume(pending);
+            const duration = Number(expectedDurationSeconds);
+            const coverageTolerance = Math.max(6, Number.isFinite(duration) ? duration * 0.02 : 0);
+            if (
+                code !== 0 || invalid || stderr.trim() ||
+                packetCount < MKV_H264_HLS_CACHE_PREFIX_SEGMENTS ||
+                firstPacketKeyframe !== true ||
+                firstPtsSeconds === null || firstDtsSeconds === null ||
+                firstPtsSeconds < 0 || firstPtsSeconds > 2 ||
+                firstDtsSeconds < 0 || firstDtsSeconds > 2 ||
+                negativeTimestampCount !== 0 ||
+                timestampDiscontinuityCount !== 0 ||
+                maxPtsDtsSkewSeconds > 2 ||
+                !Number.isFinite(duration) || duration <= 0 ||
+                Math.abs(maximumTimestampSeconds - duration) > coverageTolerance
+            ) {
+                resolve(null);
+                return;
+            }
+            resolve({
+                source: 'gateway-local-hls-packet-scan',
+                packetCount,
+                firstPacketKeyframe,
+                firstPtsSeconds: Number(firstPtsSeconds.toFixed(6)),
+                firstDtsSeconds: Number(firstDtsSeconds.toFixed(6)),
+                maximumTimestampSeconds: Number(maximumTimestampSeconds.toFixed(3)),
+                maxPtsDtsSkewSeconds: Number(maxPtsDtsSkewSeconds.toFixed(6)),
+                negativeTimestampCount,
+                timestampDiscontinuityCount,
+                dtsMonotonic: true,
+                timelineComplete: true,
+            });
+        };
+        child.once('error', () => finish(-1));
+        child.once('exit', (code) => finish(code));
+    });
+}
+
+function buildMkvH264HlsFullFileProof(playlist, descriptor, profileDurationSeconds, packetScan) {
+    const inspection = inspectMkvH264HlsCachePlaylist(playlist);
+    const duration = Number(profileDurationSeconds);
+    const durationTolerance = Math.max(6, Number.isFinite(duration) ? duration * 0.02 : 0);
+    if (
+        !inspection.complete ||
+        !inspection.independent ||
+        inspection.discontinuityCount !== 0 ||
+        inspection.unsafeReference ||
+        !inspection.sequential ||
+        inspection.segments.length < MKV_H264_HLS_CACHE_PREFIX_SEGMENTS ||
+        inspection.segments.length > MKV_H264_HLS_CACHE_MAX_FILES ||
+        inspection.maxSegmentDurationSeconds > EXACT_MATROSKA_H264_HLS_TARGET_SECONDS + 0.25 ||
+        !Number.isFinite(duration) || duration <= 0 ||
+        Math.abs(inspection.durationSeconds - duration) > durationTolerance ||
+        packetScan?.source !== 'gateway-local-hls-packet-scan' ||
+        packetScan?.timelineComplete !== true ||
+        packetScan?.dtsMonotonic !== true ||
+        packetScan?.firstPacketKeyframe !== true ||
+        Number(packetScan?.negativeTimestampCount) !== 0 ||
+        Number(packetScan?.timestampDiscontinuityCount) !== 0
+    ) return null;
+    return {
+        protocol: MKV_H264_HLS_CACHE_PROTOCOL,
+        source: 'gateway-hls-complete',
+        profileFingerprint: descriptor.profileFingerprint,
+        segmentCount: inspection.segments.length,
+        durationSeconds: inspection.durationSeconds,
+        maxSegmentDurationSeconds: inspection.maxSegmentDurationSeconds,
+        independentSegments: true,
+        discontinuityCount: 0,
+        timelineComplete: true,
+        packetScan: {
+            source: 'gateway-local-hls-packet-scan',
+            packetCount: Number(packetScan.packetCount),
+            firstPacketKeyframe: true,
+            firstPtsSeconds: Number(packetScan.firstPtsSeconds),
+            firstDtsSeconds: Number(packetScan.firstDtsSeconds),
+            maximumTimestampSeconds: Number(packetScan.maximumTimestampSeconds),
+            maxPtsDtsSkewSeconds: Number(packetScan.maxPtsDtsSkewSeconds),
+            negativeTimestampCount: 0,
+            timestampDiscontinuityCount: 0,
+            dtsMonotonic: true,
+            timelineComplete: true,
+        },
+    };
+}
+
+function validateMkvH264HlsFullFileProof(value, descriptor) {
+    const proof = asRecord(value);
+    const packetScan = asRecord(proof.packetScan);
+    return Boolean(
+        Number(proof.protocol) === MKV_H264_HLS_CACHE_PROTOCOL &&
+        proof.source === 'gateway-hls-complete' &&
+        proof.profileFingerprint === descriptor.profileFingerprint &&
+        Number.isInteger(proof.segmentCount) &&
+        proof.segmentCount >= MKV_H264_HLS_CACHE_PREFIX_SEGMENTS &&
+        proof.segmentCount <= MKV_H264_HLS_CACHE_MAX_FILES &&
+        Number.isFinite(Number(proof.durationSeconds)) && Number(proof.durationSeconds) >= MKV_H264_HLS_CACHE_PREFIX_SECONDS &&
+        Number.isFinite(Number(proof.maxSegmentDurationSeconds)) &&
+        Number(proof.maxSegmentDurationSeconds) <= EXACT_MATROSKA_H264_HLS_TARGET_SECONDS + 0.25 &&
+        proof.independentSegments === true &&
+        Number(proof.discontinuityCount) === 0 &&
+        proof.timelineComplete === true &&
+        packetScan.source === 'gateway-local-hls-packet-scan' &&
+        Number.isInteger(packetScan.packetCount) && packetScan.packetCount >= MKV_H264_HLS_CACHE_PREFIX_SEGMENTS &&
+        packetScan.firstPacketKeyframe === true &&
+        packetScan.dtsMonotonic === true &&
+        packetScan.timelineComplete === true &&
+        Number(packetScan.negativeTimestampCount) === 0 &&
+        Number(packetScan.timestampDiscontinuityCount) === 0 &&
+        Number.isFinite(Number(packetScan.maxPtsDtsSkewSeconds)) && Number(packetScan.maxPtsDtsSkewSeconds) <= 2
+    );
+}
+
+function mkvH264HlsCachePaths(cacheKey, generation = null) {
+    if (!/^[a-f0-9]{64}$/.test(String(cacheKey || ''))) return null;
+    const refsDir = path.resolve(MKV_H264_HLS_CACHE_ROOT, 'refs');
+    const entriesDir = path.resolve(MKV_H264_HLS_CACHE_ROOT, 'entries');
+    const keyDir = path.resolve(entriesDir, cacheKey);
+    if (![refsDir, entriesDir, keyDir].every((candidate) => isWithin(MKV_H264_HLS_CACHE_ROOT, candidate))) return null;
+    const base = {
+        refsDir,
+        entriesDir,
+        keyDir,
+        refPath: path.resolve(refsDir, `${cacheKey}.json`),
+    };
+    if (generation === null) return base;
+    if (!/^[a-f0-9-]{16,80}$/.test(String(generation || ''))) return null;
+    const generationDir = path.resolve(keyDir, generation);
+    if (!isWithin(keyDir, generationDir)) return null;
+    return {
+        ...base,
+        generationDir,
+        manifestPath: path.resolve(generationDir, 'manifest.json'),
+        playlistPath: path.resolve(generationDir, 'playlist.m3u8'),
+    };
+}
+
+async function readBoundedJsonFile(filePath, maxBytes = 8 * 1024 * 1024) {
+    const stat = await fsp.stat(filePath);
+    if (!stat.isFile() || stat.size <= 1 || stat.size > maxBytes) throw new Error('cache_json_size_invalid');
+    return JSON.parse(await fsp.readFile(filePath, 'utf8'));
+}
+
+async function hashMkvH264HlsCacheFile(filePath) {
+    return new Promise((resolve, reject) => {
+        const hash = crypto.createHash('sha256');
+        const stream = fs.createReadStream(filePath);
+        stream.on('data', (chunk) => hash.update(chunk));
+        stream.once('error', reject);
+        stream.once('end', () => resolve(hash.digest('hex')));
+    });
+}
+
+async function atomicWriteMkvH264HlsCacheJson(filePath, value) {
+    const parent = path.dirname(filePath);
+    await fsp.mkdir(parent, { recursive: true });
+    const temporary = path.resolve(parent, `.${path.basename(filePath)}.${crypto.randomUUID()}.tmp`);
+    if (!isWithin(parent, temporary)) throw new Error('cache_temp_path_invalid');
+    const handle = await fsp.open(temporary, 'wx', 0o600);
+    try {
+        await handle.writeFile(`${JSON.stringify(value)}\n`, 'utf8');
+        await handle.sync();
+    } finally {
+        await handle.close();
+    }
+    await fsp.rename(temporary, filePath);
+}
+
+async function removeMkvH264HlsCachePath(target) {
+    const resolved = path.resolve(target);
+    if (!isWithin(MKV_H264_HLS_CACHE_ROOT, resolved) || resolved === MKV_H264_HLS_CACHE_ROOT) return;
+    await fsp.rm(resolved, { recursive: true, force: true });
+}
+
+async function invalidateMkvH264HlsCacheEntry(cacheKey, generation = null) {
+    const paths = mkvH264HlsCachePaths(cacheKey, generation);
+    if (!paths) return;
+    await removeMkvH264HlsCachePath(paths.refPath).catch(() => {});
+    if (generation) await removeMkvH264HlsCachePath(paths.generationDir).catch(() => {});
+}
+
+async function validateMkvH264HlsCacheFiles(paths, manifest) {
+    const files = Array.isArray(manifest.files) ? manifest.files : [];
+    if (!files.length || files.length > MKV_H264_HLS_CACHE_MAX_FILES + 1) return false;
+    const names = new Set();
+    for (const entry of files) {
+        const record = asRecord(entry);
+        const name = safeSessionArtifactName(record.name);
+        const size = Number(record.size);
+        const digest = String(record.sha256 || '').toLowerCase();
+        if (
+            !name || names.has(name) ||
+            !/^(?:playlist\.m3u8|segment-\d{5}\.ts)$/.test(name) ||
+            !Number.isSafeInteger(size) || size <= 0 ||
+            !/^[a-f0-9]{64}$/.test(digest)
+        ) return false;
+        names.add(name);
+        const filePath = path.resolve(paths.generationDir, name);
+        if (!isWithin(paths.generationDir, filePath)) return false;
+        const stat = await fsp.stat(filePath).catch(() => null);
+        if (!stat?.isFile() || stat.size !== size) return false;
+        if (await hashMkvH264HlsCacheFile(filePath) !== digest) return false;
+    }
+    return names.has('playlist.m3u8');
+}
+
+async function readMkvH264HlsCacheEntry(descriptor, nowMs = Date.now()) {
+    if (!descriptor || !mkvH264HlsCacheEnabled()) return null;
+    const basePaths = mkvH264HlsCachePaths(descriptor.cacheKey);
+    if (!basePaths) return null;
+    let generation = null;
+    try {
+        const ref = verifyMkvH264HlsCacheRecord(await readBoundedJsonFile(basePaths.refPath, 16 * 1024));
+        generation = String(ref?.generation || '');
+        if (
+            Number(ref?.protocol) !== MKV_H264_HLS_CACHE_PROTOCOL ||
+            ref?.cacheKey !== descriptor.cacheKey ||
+            !/^[a-f0-9-]{16,80}$/.test(generation)
+        ) throw new Error('cache_ref_invalid');
+        const paths = mkvH264HlsCachePaths(descriptor.cacheKey, generation);
+        if (!paths) throw new Error('cache_paths_invalid');
+        const manifest = verifyMkvH264HlsCacheRecord(await readBoundedJsonFile(paths.manifestPath));
+        const createdAtMs = Date.parse(String(manifest?.createdAt || ''));
+        const expiresAtMs = Date.parse(String(manifest?.expiresAt || ''));
+        if (
+            Number(manifest?.protocol) !== MKV_H264_HLS_CACHE_PROTOCOL ||
+            manifest?.cacheKey !== descriptor.cacheKey ||
+            manifest?.generation !== generation ||
+            manifest?.profileFingerprint !== descriptor.profileFingerprint ||
+            manifest?.pipeline !== descriptor.pipeline ||
+            Number(manifest?.build) !== descriptor.build ||
+            !['prefix', 'complete'].includes(manifest?.state) ||
+            !Number.isFinite(createdAtMs) || !Number.isFinite(expiresAtMs) ||
+            expiresAtMs <= createdAtMs ||
+            expiresAtMs - createdAtMs > MKV_H264_HLS_CACHE_TTL_MS ||
+            Number(nowMs) >= expiresAtMs ||
+            !validateMkvH264HlsFullFileProof(manifest?.fullFileProof, descriptor) ||
+            !await validateMkvH264HlsCacheFiles(paths, manifest)
+        ) throw new Error('cache_manifest_invalid');
+        const playlist = await fsp.readFile(paths.playlistPath, 'utf8');
+        const inspection = inspectMkvH264HlsCachePlaylist(playlist);
+        const expectedSegments = manifest.state === 'prefix'
+            ? MKV_H264_HLS_CACHE_PREFIX_SEGMENTS
+            : Number(manifest.fullFileProof.segmentCount);
+        if (
+            inspection.unsafeReference || !inspection.independent || !inspection.sequential ||
+            inspection.discontinuityCount !== 0 ||
+            inspection.segments.length !== expectedSegments ||
+            (manifest.state === 'prefix' && inspection.complete) ||
+            (manifest.state === 'complete' && !inspection.complete)
+        ) throw new Error('cache_playlist_invalid');
+        mkvH264HlsCacheStats.hits += 1;
+        return { descriptor, generation, paths, manifest, inspection };
+    } catch (_) {
+        mkvH264HlsCacheStats.misses += 1;
+        if (generation) {
+            mkvH264HlsCacheStats.corruptions += 1;
+            await invalidateMkvH264HlsCacheEntry(descriptor.cacheKey, generation).catch(() => {});
+        }
+        return null;
+    }
+}
+
+async function withMkvH264HlsCachePromotionLock(cacheKey, operation) {
+    const prior = mkvH264HlsCachePromotionLocks.get(cacheKey) || Promise.resolve();
+    const next = prior.catch(() => {}).then(operation);
+    mkvH264HlsCachePromotionLocks.set(cacheKey, next);
+    try {
+        return await next;
+    } finally {
+        if (mkvH264HlsCachePromotionLocks.get(cacheKey) === next) {
+            mkvH264HlsCachePromotionLocks.delete(cacheKey);
+        }
+    }
+}
+
+async function listMkvH264HlsCacheMetadata(nowMs = Date.now()) {
+    if (!mkvH264HlsCacheEnabled()) return [];
+    const rootPaths = mkvH264HlsCachePaths('0'.repeat(64));
+    if (!rootPaths) return [];
+    await fsp.mkdir(rootPaths.refsDir, { recursive: true });
+    await fsp.mkdir(rootPaths.entriesDir, { recursive: true });
+    const names = (await fsp.readdir(rootPaths.refsDir).catch(() => []))
+        .filter((name) => /^[a-f0-9]{64}\.json$/.test(name))
+        .slice(0, MKV_H264_HLS_CACHE_MAX_ENTRIES * 4);
+    const metadata = [];
+    for (const name of names) {
+        const cacheKey = name.slice(0, -5);
+        let generation = null;
+        try {
+            const paths = mkvH264HlsCachePaths(cacheKey);
+            const ref = verifyMkvH264HlsCacheRecord(await readBoundedJsonFile(paths.refPath, 16 * 1024));
+            generation = String(ref?.generation || '');
+            const generationPaths = mkvH264HlsCachePaths(cacheKey, generation);
+            if (
+                Number(ref?.protocol) !== MKV_H264_HLS_CACHE_PROTOCOL ||
+                ref?.cacheKey !== cacheKey ||
+                !generationPaths
+            ) throw new Error('cache_ref_invalid');
+            const manifest = verifyMkvH264HlsCacheRecord(await readBoundedJsonFile(generationPaths.manifestPath));
+            const createdAtMs = Date.parse(String(manifest?.createdAt || ''));
+            const expiresAtMs = Date.parse(String(manifest?.expiresAt || ''));
+            const totalBytes = Number(manifest?.totalBytes);
+            if (
+                manifest?.cacheKey !== cacheKey ||
+                manifest?.generation !== generation ||
+                !Number.isFinite(createdAtMs) || !Number.isFinite(expiresAtMs) ||
+                !Number.isSafeInteger(totalBytes) || totalBytes <= 0 ||
+                Number(nowMs) >= expiresAtMs
+            ) throw new Error('cache_metadata_invalid');
+            metadata.push({ cacheKey, generation, paths: generationPaths, manifest, createdAtMs, expiresAtMs, totalBytes });
+        } catch (_) {
+            await invalidateMkvH264HlsCacheEntry(cacheKey, generation).catch(() => {});
+        }
+    }
+    return metadata;
+}
+
+async function enforceMkvH264HlsCacheQuotas(incomingBytes, replacingKey = null) {
+    if (!Number.isSafeInteger(incomingBytes) || incomingBytes <= 0 || incomingBytes > MKV_H264_HLS_CACHE_MAX_BYTES) {
+        return false;
+    }
+    const metadata = await listMkvH264HlsCacheMetadata();
+    const retained = metadata.filter((entry) => entry.cacheKey !== replacingKey);
+    retained.sort((left, right) => left.createdAtMs - right.createdAtMs);
+    let totalBytes = retained.reduce((sum, entry) => sum + entry.totalBytes, 0);
+    while (
+        retained.length >= MKV_H264_HLS_CACHE_MAX_ENTRIES ||
+        totalBytes + incomingBytes > MKV_H264_HLS_CACHE_MAX_BYTES
+    ) {
+        const evicted = retained.shift();
+        if (!evicted) return false;
+        totalBytes -= evicted.totalBytes;
+        await invalidateMkvH264HlsCacheEntry(evicted.cacheKey, evicted.generation).catch(() => {});
+        mkvH264HlsCacheStats.evictions += 1;
+    }
+    return totalBytes + incomingBytes <= MKV_H264_HLS_CACHE_MAX_BYTES;
+}
+
+async function promoteMkvH264HlsCacheFromCompletedSession(session) {
+    const descriptor = session?.hlsCacheDescriptor || mkvH264HlsCacheDescriptorForSession(session);
+    if (
+        !descriptor ||
+        videoModeForSession(session) !== 'copy' ||
+        session?.inputFailure || session?.lastError ||
+        !session?.playlistPath || !isWithin(session.outputDir, session.playlistPath)
+    ) return null;
+    const startedAtMs = Number(session?.hlsCacheProductionStartedAtMs);
+    const elapsedSeconds = (Date.now() - startedAtMs) / 1_000;
+    if (!Number.isFinite(elapsedSeconds) || elapsedSeconds <= 0) return null;
+    const playlist = await fsp.readFile(session.playlistPath, 'utf8').catch(() => null);
+    if (!playlist) return null;
+    const inspection = inspectMkvH264HlsCachePlaylist(playlist);
+    const productionRateX = inspection.durationSeconds / elapsedSeconds;
+    if (!Number.isFinite(productionRateX) || productionRateX < MKV_H264_HLS_CACHE_MIN_PRODUCTION_RATE_X) return null;
+    const profile = asRecord(session.codecProfile);
+    const profileDurationSeconds = Number(profile.durationSeconds ?? profile.duration_seconds ?? profile.duration);
+    const packetScan = await scanLocalMkvH264HlsPackets(session.playlistPath, inspection.durationSeconds);
+    const fullFileProof = buildMkvH264HlsFullFileProof(
+        playlist,
+        descriptor,
+        profileDurationSeconds,
+        packetScan,
+    );
+    if (!fullFileProof) return null;
+
+    const segmentSources = [];
+    let allSegmentBytes = 0;
+    for (const segment of inspection.segments) {
+        const sourcePath = path.resolve(session.outputDir, segment.name);
+        if (!isWithin(session.outputDir, sourcePath)) return null;
+        const stat = await fsp.stat(sourcePath).catch(() => null);
+        if (!stat?.isFile() || stat.size <= 0) return null;
+        allSegmentBytes += stat.size;
+        segmentSources.push({ ...segment, sourcePath, size: stat.size });
+    }
+    const completeBytes = Buffer.byteLength(playlist) + allSegmentBytes;
+    const state = completeBytes <= MKV_H264_HLS_CACHE_MAX_COMPLETE_BYTES ? 'complete' : 'prefix';
+    const selectedSegments = state === 'complete'
+        ? segmentSources
+        : segmentSources.slice(0, MKV_H264_HLS_CACHE_PREFIX_SEGMENTS);
+    if (selectedSegments.length < MKV_H264_HLS_CACHE_PREFIX_SEGMENTS) return null;
+    const publishedPlaylist = state === 'complete'
+        ? playlist
+        : renderMkvH264HlsPrefixPlaylist(inspection);
+    if (!publishedPlaylist) return null;
+    const mediaBytes = Buffer.byteLength(publishedPlaylist) + selectedSegments.reduce(
+        (sum, segment) => sum + segment.size,
+        0,
+    );
+    // Reserve a conservative signed-manifest allowance in the quota. This
+    // intentionally over-counts rather than allowing metadata to escape the
+    // bounded media-byte budget on entries with thousands of segments.
+    const totalBytes = mediaBytes + Math.min(
+        8 * 1024 * 1024,
+        4_096 + ((selectedSegments.length + 1) * 256),
+    );
+
+    return withMkvH264HlsCachePromotionLock('__global__', async () => {
+        if (!await enforceMkvH264HlsCacheQuotas(totalBytes, descriptor.cacheKey)) return null;
+        const prior = (await listMkvH264HlsCacheMetadata())
+            .find((entry) => entry.cacheKey === descriptor.cacheKey) || null;
+        const createdAtMs = prior?.createdAtMs || Date.now();
+        const expiresAtMs = prior?.expiresAtMs || (createdAtMs + MKV_H264_HLS_CACHE_TTL_MS);
+        if (Date.now() >= expiresAtMs) return null;
+        const generation = `${Date.now().toString(16)}-${crypto.randomUUID()}`.toLowerCase();
+        const paths = mkvH264HlsCachePaths(descriptor.cacheKey, generation);
+        if (!paths) return null;
+        const stagingDir = path.resolve(paths.keyDir, `.${generation}.tmp`);
+        if (!isWithin(paths.keyDir, stagingDir)) return null;
+        let published = false;
+        try {
+            await fsp.mkdir(paths.keyDir, { recursive: true });
+            await fsp.mkdir(stagingDir, { recursive: false });
+            const files = [];
+            const stagingPlaylistPath = path.resolve(stagingDir, 'playlist.m3u8');
+            await fsp.writeFile(stagingPlaylistPath, publishedPlaylist, { encoding: 'utf8', flag: 'wx', mode: 0o600 });
+            files.push({
+                name: 'playlist.m3u8',
+                size: Buffer.byteLength(publishedPlaylist),
+                sha256: await hashMkvH264HlsCacheFile(stagingPlaylistPath),
+            });
+            for (const segment of selectedSegments) {
+                const destination = path.resolve(stagingDir, segment.name);
+                if (!isWithin(stagingDir, destination)) throw new Error('cache_segment_path_invalid');
+                await fsp.copyFile(segment.sourcePath, destination, fs.constants.COPYFILE_EXCL);
+                files.push({
+                    name: segment.name,
+                    size: segment.size,
+                    sha256: await hashMkvH264HlsCacheFile(destination),
+                });
+            }
+            const manifest = signedMkvH264HlsCacheRecord({
+                protocol: MKV_H264_HLS_CACHE_PROTOCOL,
+                cacheKey: descriptor.cacheKey,
+                generation,
+                state,
+                profileFingerprint: descriptor.profileFingerprint,
+                pipeline: descriptor.pipeline,
+                build: descriptor.build,
+                createdAt: new Date(createdAtMs).toISOString(),
+                expiresAt: new Date(expiresAtMs).toISOString(),
+                productionRateX: Number(productionRateX.toFixed(3)),
+                totalBytes,
+                fullFileProof,
+                files,
+            });
+            await atomicWriteMkvH264HlsCacheJson(path.resolve(stagingDir, 'manifest.json'), manifest);
+            await fsp.rename(stagingDir, paths.generationDir);
+            await atomicWriteMkvH264HlsCacheJson(paths.refPath, signedMkvH264HlsCacheRecord({
+                protocol: MKV_H264_HLS_CACHE_PROTOCOL,
+                cacheKey: descriptor.cacheKey,
+                generation,
+            }));
+            published = true;
+            if (prior?.generation && prior.generation !== generation) {
+                await removeMkvH264HlsCachePath(prior.paths.generationDir).catch(() => {});
+            }
+            mkvH264HlsCacheStats.promotions += 1;
+            if (state === 'complete') mkvH264HlsCacheStats.completePromotions += 1;
+            else mkvH264HlsCacheStats.prefixPromotions += 1;
+            return { descriptor, generation, paths, manifest, inspection };
+        } finally {
+            if (!published) {
+                await removeMkvH264HlsCachePath(stagingDir).catch(() => {});
+                await removeMkvH264HlsCachePath(paths.generationDir).catch(() => {});
+            }
+        }
+    });
 }
 
 function multiAudioProfileAssessment(session) {
@@ -9171,7 +10934,7 @@ function subtitleTracksForSession(session) {
 function shouldCopyAudio(session) {
     // Multi-rendition HLS has one normalized contract for every source track:
     // AAC-LC, 48 kHz, stereo. Never copy a subset or advertise source 5.1.
-    if (multiAudioHlsEnabled(session)) return false;
+    if (multiAudioHlsEnabled(session) || session.forceMkvH264FastStartAudioTranscode === true) return false;
     const requestedMode = normalizeCodecToken(session.audioMode);
     if (requestedMode === 'transcode' || requestedMode === 'encode') return false;
     if (session.clientAudioPassthrough === false) return false;
@@ -9300,6 +11063,7 @@ function hasHeAacMarker(value) {
     );
 }
 
+
 // Map an ffprobe JSON payload (-show_streams -show_format) to the codec profile the
 // rest of the gateway consumes. Shared by the provider probe and the in-band local
 // header probe so both yield identical shapes (incl. per-track audio languages).
@@ -9327,7 +11091,10 @@ function buildCodecProfile(payload, startedAt, probeSource) {
             language: streamLanguage(stream),
             title: streamTitle(stream, `Audio ${order + 1}`),
             codec: stringOrNull(stream.codec_name),
+            profile: stringOrNull(stream.profile),
             channels: nullableInt(stream.channels),
+            sampleRate: nullableInt(stream.sample_rate),
+            channelLayout: stringOrNull(stream.channel_layout),
             default: stream.disposition?.default === 1
         })),
         subtitles: subtitleStreams.map((stream, order) => {
@@ -9388,6 +11155,21 @@ function cacheCodecProfile(sourceUrl, profile) {
         if (oldest === undefined) break;
         codecProfileCache.delete(oldest);
     }
+}
+
+function cachedSignedMkvH264FastStartProfile(sourceUrl) {
+    if (CODEC_PROFILE_CACHE_TTL_MS <= 0 || !sourceUrl) return null;
+    const hit = codecProfileCache.get(sourceUrl);
+    if (!hit) return null;
+    if (hit.expiresAt <= Date.now()) {
+        codecProfileCache.delete(sourceUrl);
+        return null;
+    }
+    const profile = asRecord(hit.profile);
+    // Do not treat arbitrary cached metadata as authorization. Only carry a
+    // v2-shaped opaque envelope forward; the current source, provider, profile,
+    // size and pre-opened ETag are still verified after the one provider GET.
+    return mkvH264FastStartProofForProfile(profile) ? profile : null;
 }
 
 // Run ffprobe on the in-band-captured leading bytes (a local temp file) so we learn the
@@ -9492,6 +11274,7 @@ async function probeFromHeaderBytes(sourceUrl, options = {}) {
         });
         const profile = {
             ...buildCodecProfile(payload, startedAt, 'gateway_inband'),
+            fileSizeBytes: normalizeFileSizeBytes(options?.fileSizeBytes),
             metadataComplete: hasCompleteMatroskaMetadataPrefix(buf),
         };
         return hasUsefulCodecProfile(profile) ? profile : null;
@@ -10058,7 +11841,10 @@ function hlsMediaPlaylistTargetsForSession(session) {
 async function inspectHlsMediaPlaylistArtifact(session, target) {
     if (!isWithin(session.outputDir, target.playlistPath)) return null;
     const playlist = await fsp.readFile(target.playlistPath, 'utf8');
-    const inspection = inspectHlsStartupPlaylist(playlist);
+    const inspection = inspectHlsStartupPlaylist(playlist, {
+        minBufferSeconds: session?.minHlsStartupBufferSeconds,
+        minSegments: session?.minHlsStartupSegments,
+    });
     if (!inspection.ready) return null;
     const segmentPaths = inspection.segmentFiles.map((segment) => path.resolve(session.outputDir, segment));
     if (
@@ -10075,7 +11861,15 @@ async function inspectHlsMediaPlaylistArtifact(session, target) {
     };
 }
 
-function inspectHlsStartupPlaylist(playlist) {
+function inspectHlsStartupPlaylist(playlist, requirements = {}) {
+    const requestedMinBufferSeconds = Number(requirements?.minBufferSeconds);
+    const requestedMinSegments = Number(requirements?.minSegments);
+    const minBufferSeconds = Number.isFinite(requestedMinBufferSeconds) && requestedMinBufferSeconds > 0
+        ? requestedMinBufferSeconds
+        : MIN_HLS_STARTUP_BUFFER_SECONDS;
+    const minSegments = Number.isInteger(requestedMinSegments) && requestedMinSegments > 0
+        ? requestedMinSegments
+        : MIN_HLS_STARTUP_SEGMENTS;
     const lines = String(playlist || '').split(/\r?\n/);
     let durationSeconds = 0;
     let segmentCount = 0;
@@ -10121,10 +11915,10 @@ function inspectHlsStartupPlaylist(playlist) {
     if (!segmentCount || !firstSegment) {
         return { ready: false, reason: 'no_segments', segmentCount: 0, durationSeconds: 0, firstSegment: null, segmentFiles: [] };
     }
-    if (!completePlaylist && segmentCount < MIN_HLS_STARTUP_SEGMENTS) {
+    if (!completePlaylist && segmentCount < minSegments) {
         return { ready: false, reason: 'insufficient_segments', segmentCount, durationSeconds, firstSegment, segmentFiles };
     }
-    if (!completePlaylist && measuredDurationSeconds < MIN_HLS_STARTUP_BUFFER_SECONDS) {
+    if (!completePlaylist && measuredDurationSeconds < minBufferSeconds) {
         return { ready: false, reason: 'insufficient_duration', segmentCount, durationSeconds, firstSegment, segmentFiles };
     }
     return { ready: true, reason: 'ready', segmentCount, durationSeconds, firstSegment, segmentFiles };
@@ -10209,6 +12003,7 @@ async function stopSession(session) {
         // The provider socket belongs to the pump, not FFmpeg. Abort and await
         // that exact owner first so a subsequent title cannot open until the old
         // mono-account connection has fully settled.
+        await closePreopenedBoundedMkvInput(session);
         await stopBoundedMkvInputPump(session);
         await stopChildProcess(child);
         session.status = 'ended';
@@ -10368,6 +12163,13 @@ function cors(req, res, next) {
     next();
 }
 
+function publicMkvCodecProfile(profile) {
+    const publicProfile = { ...asRecord(profile) };
+    delete publicProfile.mkvH264FastStartProof;
+    delete publicProfile.mkv_h264_fast_start_proof;
+    return compactRecord(publicProfile);
+}
+
 function serializeSession(req, session) {
     return {
         id: session.id,
@@ -10382,8 +12184,9 @@ function serializeSession(req, session) {
         actualStartOffset: session.actualStartOffset || 0,
         localSeekTarget: session.localSeekTarget || 0,
         sourceTimestamps: session.sourceTimestamps === true,
-        codecProfile: session.codecProfile,
+        codecProfile: publicMkvCodecProfile(session.codecProfile),
         codecProfileSource: session.codecProfileSource || null,
+        startupPolicy: session.startupPolicy || startupPolicyForSession(session),
         startupTimings: session.startupTimings || null,
         hlsUrl: publicUrl(req, `/sessions/${session.id}/playlist.m3u8?token=${encodeURIComponent(session.accessToken)}`),
         createdAt: session.createdAt.toISOString(),
@@ -10426,6 +12229,7 @@ function debugSession(session) {
             }
             : null,
         codecProfileSource: session.codecProfileSource || null,
+        startupPolicy: session.startupPolicy || startupPolicyForSession(session),
         startupTimings: session.startupTimings || null,
         inputProbeMode: session.fastInputProbe === true ? 'known-fast' : 'full',
         fastInputProbeFallbacks: Number(session.fastInputProbeFallbacks || 0),
