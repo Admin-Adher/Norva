@@ -4775,6 +4775,13 @@ class WatchPage {
         // the playlist (never the live edge), even before EXT-X-ENDLIST exists.
         const isTranscodeSession = url.startsWith('/api/transcode/');
         const isGatewaySession = this.isGatewayPlaybackUrl(url);
+        const gatewayAudioContext = this._gatewayAudioRenditionRequired
+            || this.currentPlaybackMode === 'gateway-session';
+        if (gatewayAudioContext) {
+            // Each Hls instance must earn its own topology proof. A recovery can
+            // replace Hls without incrementing the playback attempt id.
+            this._gatewayHlsAudioTracksReady = false;
+        }
 
         // Fresh recovery budget for each new stream
         this._mediaRecoveries = 0;
@@ -4887,8 +4894,19 @@ class WatchPage {
         });
 
         let autoplayGateRunning = false;
-        this.hls.on(Hls.Events.MANIFEST_PARSED, async () => {
+        this.hls.on(Hls.Events.MANIFEST_PARSED, async (event, data = {}) => {
             if (this.isStalePlaybackAttempt(playbackAttemptId) || this.hls !== activeHls) return;
+            // hls.js does not emit AUDIO_TRACKS_UPDATED when audio is muxed into
+            // the sole video playlist. MANIFEST_PARSED is the positive proof that
+            // the current Hls instance completed enumeration with zero alternates.
+            if (gatewayAudioContext
+                && Array.isArray(data.audioTracks)
+                && data.audioTracks.length === 0
+                && Array.isArray(activeHls.audioTracks)
+                && activeHls.audioTracks.length === 0) {
+                this._gatewayHlsAudioTracksReady = true;
+                this.updateAudioTracks();
+            }
             // A paused Gateway lane still fills the same proof buffer; it simply
             // stops after the gate instead of starting the media element.
             if (!autoplay && !isGatewaySession) return;
@@ -7220,6 +7238,7 @@ class WatchPage {
         const hlsTracks = activeHls.audioTracks;
         const renditions = this._gatewayAudioRenditions;
         if (!Array.isArray(hlsTracks) || !Array.isArray(renditions)
+            || hlsTracks.length === 0 || renditions.length === 0
             || hlsTracks.length !== renditions.length) {
             return null;
         }
@@ -7247,9 +7266,112 @@ class WatchPage {
         // positively reported exactly one track. Zero/unknown or multiple tracks
         // without an absolute map are intentionally non-selectable.
         const hlsTracks = this.hls?.audioTracks;
-        return !this._gatewayHlsAudioTracksReady
+        if (!this._gatewayHlsAudioTracksReady
             || !Array.isArray(hlsTracks)
-            || hlsTracks.length !== 1;
+            || hlsTracks.length !== 1) {
+            return true;
+        }
+        const advertisedId = hlsTracks[0]?.id;
+        if (advertisedId === null || advertisedId === undefined) return false;
+        const parsedId = Number(advertisedId);
+        return !Number.isSafeInteger(parsedId) || parsedId !== 0;
+    }
+
+    getVerifiedGatewayMuxedMonoAudioTrack(activeHls = this.hls) {
+        if (this._gatewayAudioRenditionStatus !== 'absent'
+            || this._gatewayAudioRenditionRequired !== true
+            || this.currentPlaybackMode !== 'gateway-session'
+            || !activeHls || activeHls !== this.hls
+            || this._gatewayAudioRenditionAttemptId !== this._playbackAttemptId
+            || !this._gatewayHlsAudioTracksReady
+            || this._pendingGatewayAudioStreamIndex !== null) {
+            return null;
+        }
+
+        const video = this.video;
+        const readyState = Number(video?.readyState);
+        const videoWidth = Number(video?.videoWidth);
+        const videoHeight = Number(video?.videoHeight);
+        if (!video || video.error
+            || !Number.isFinite(readyState) || readyState < 3
+            || !Number.isFinite(videoWidth) || videoWidth <= 0
+            || !Number.isFinite(videoHeight) || videoHeight <= 0) {
+            return null;
+        }
+
+        // A mono rendition may be muxed into the only video playlist. hls.js then
+        // positively reports zero alternate audio tracks. Accept that UI-only case
+        // (and the existing single alternate-track form) without weakening the
+        // fail-closed topology used by preference restoration or HLS switching.
+        const hlsTracks = activeHls.audioTracks;
+        if (!Array.isArray(hlsTracks) || hlsTracks.length > 1) return null;
+        if (hlsTracks.length === 1) {
+            const rawAdvertisedId = hlsTracks[0]?.id;
+            if (rawAdvertisedId !== null && rawAdvertisedId !== undefined) {
+                const advertisedId = Number(rawAdvertisedId);
+                if (!Number.isSafeInteger(advertisedId) || advertisedId !== 0) return null;
+            }
+        }
+
+        const scope = String(
+            this.content?.audioTracksScope || this.content?.audio_tracks_scope || '',
+        ).toLowerCase();
+        const validationStatus = String(
+            this.content?.audioLanguageValidationStatus
+                || this.content?.audio_language_validation_status
+                || '',
+        ).toLowerCase();
+        const playbackValidationStatus = String(this.audioLanguageValidationStatus || '').toLowerCase();
+        if (scope !== 'file' || validationStatus !== 'verified'
+            || playbackValidationStatus !== 'verified') {
+            return null;
+        }
+
+        const exactIndex = (value) => {
+            if (typeof value !== 'number'
+                && !(typeof value === 'string' && /^(0|[1-9]\d*)$/.test(value))) {
+                return null;
+            }
+            const parsed = Number(value);
+            return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;
+        };
+        const rawVerifiedTracks = this.content?.audioTracks || this.content?.audio_tracks;
+        const verifiedTracks = this.getContentAudioTracks();
+        const probeTracks = Array.isArray(this.audioTracks) ? this.audioTracks : [];
+        if (!Array.isArray(rawVerifiedTracks) || rawVerifiedTracks.length !== 1
+            || exactIndex(rawVerifiedTracks[0]?.index) === null
+            || verifiedTracks.length !== 1 || probeTracks.length !== 1) {
+            return null;
+        }
+
+        const verifiedTrack = verifiedTracks[0];
+        const probeTrack = probeTracks[0];
+        const streamIndex = exactIndex(verifiedTrack.index);
+        const probeStreamIndex = exactIndex(probeTrack?.index);
+        const directStreamIndex = exactIndex(this.directAudioStreamIndex);
+        const selectedStreamIndex = exactIndex(this.selectedAudioStreamIndex);
+        const verifiedLanguage = this.normalizeTrackLanguage(verifiedTrack.lang);
+        const probeLanguage = this.normalizeTrackLanguage(probeTrack?.language ?? probeTrack?.lang);
+        if (streamIndex === null
+            || probeStreamIndex !== streamIndex
+            || !verifiedLanguage || verifiedLanguage === 'und'
+            || probeLanguage !== verifiedLanguage
+            || directStreamIndex !== streamIndex
+            || selectedStreamIndex !== streamIndex) {
+            return null;
+        }
+
+        const displayLanguage = this.getLanguageDisplayName(verifiedLanguage);
+        if (!displayLanguage) return null;
+
+        return {
+            source: 'gateway-muxed-mono',
+            index: 0,
+            streamIndex,
+            label: displayLanguage,
+            language: verifiedLanguage,
+            active: true,
+        };
     }
 
     getGatewayAudioRenditionLabel(track, index, allTracks) {
@@ -7878,6 +8000,8 @@ class WatchPage {
     getVisibleAudioTracks() {
         const hlsTracks = this.getHlsAudioTracks();
         if (hlsTracks.length > 1) return hlsTracks;
+        const verifiedMuxedMono = this.getVerifiedGatewayMuxedMonoAudioTrack();
+        if (verifiedMuxedMono) return [verifiedMuxedMono];
         if (this.isGatewayAudioRenditionFailClosed()) {
             return [{ source: 'none', index: -1, label: 'Audio tracks unavailable', active: true }];
         }
@@ -8008,6 +8132,21 @@ class WatchPage {
             this.saveResumeSnapshotThrottled(true);
             this.saveProgress({ force: true });
             return;
+        }
+
+        // This dedicated source can only be rendered by the verified muxed-mono
+        // exception. Revalidate every guard at click time and never let a stale
+        // row fall through to the generic probe restart path.
+        if (source === 'gateway-muxed-mono') {
+            const verifiedMuxedMono = this.getVerifiedGatewayMuxedMonoAudioTrack();
+            if (index !== 0 || !Number.isSafeInteger(streamIndex) || streamIndex < 0
+                || !verifiedMuxedMono || verifiedMuxedMono.streamIndex !== streamIndex) {
+                this.closeAudioMenu();
+                return false;
+            }
+            this.updateAudioTracks();
+            this.closeAudioMenu();
+            return true;
         }
 
         if (source !== 'probe' || !Number.isInteger(streamIndex)) {

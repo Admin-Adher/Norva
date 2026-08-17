@@ -412,6 +412,255 @@ test('missing or mismatched Gateway maps fail closed while legacy mono-audio sta
     assert.equal(mono.page.getVisibleAudioTracks()[0].streamIndex, 7);
 });
 
+test('verified muxed mono exposes one exact catalogue row and clicking it never restarts playback', async () => {
+    const WatchPage = loadWatchPage();
+    const harness = makePage(WatchPage);
+    const { page } = harness;
+    page.content = {
+        id: 'movie-mono',
+        type: 'movie',
+        audioTracksScope: 'file',
+        audioLanguageValidationStatus: 'verified',
+        audioTracks: [{ index: 7, lang: 'fra' }],
+    };
+    page.audioLanguageValidationStatus = 'verified';
+    page.currentPlaybackMode = 'gateway-session';
+    page.audioTracks = [{
+        index: 7,
+        language: 'fr',
+        title: 'Provider supplied title must not appear',
+        codec: 'eac3',
+        channels: 2,
+        default: true,
+    }];
+    page.selectedAudioStreamIndex = 7;
+    page.directAudioStreamIndex = 7;
+    page.video.readyState = 4;
+    page.video.videoWidth = 1280;
+    page.video.videoHeight = 720;
+    let restartCalls = 0;
+    page.queueSelectedAudioTrackRestart = () => {
+        restartCalls += 1;
+        throw new Error('muxed mono must never restart playback');
+    };
+
+    let option = null;
+    page.audioList = {
+        _html: '',
+        set innerHTML(value) {
+            this._html = value;
+            const attrs = Object.fromEntries(
+                [...value.matchAll(/data-([a-z-]+)="([^"]*)"/g)]
+                    .map((match) => [match[1].replace(/-([a-z])/g, (_, letter) => letter.toUpperCase()), match[2]]),
+            );
+            const listener = { click: null };
+            option = {
+                dataset: attrs,
+                textContent: value.replace(/<[^>]+>/g, '').trim(),
+                addEventListener(type, callback) { listener[type] = callback; },
+                click() { return listener.click?.(); },
+            };
+        },
+        get innerHTML() { return this._html; },
+        querySelectorAll(selector) { return selector === '.audio-option' && option ? [option] : []; },
+    };
+    page.updateAudioTracks = WatchPage.prototype.updateAudioTracks;
+
+    assert.equal(page.configureGatewayAudioRenditions(null, null, [], {
+        required: true,
+        playbackAttemptId: 17,
+    }), false);
+    page.playHls('https://gateway.example/sessions/session-mono/playlist.m3u8', {
+        playbackAttemptId: 17,
+        autoplay: false,
+    });
+    const activeHls = page.hls;
+    activeHls.audioTracks = [];
+    activeHls.emit(FakeHls.Events.MANIFEST_PARSED, { audioTracks: [] });
+
+    const tracks = page.getVisibleAudioTracks();
+    assert.equal(page.isGatewayAudioRenditionFailClosed(), true, 'global topology remains fail closed');
+    assert.deepEqual(Array.from(tracks, (track) => [track.source, track.index, track.streamIndex]), [
+        ['gateway-muxed-mono', 0, 7],
+    ]);
+    assert.equal(tracks[0].label, 'French');
+    assert.doesNotMatch(tracks[0].label, /Provider supplied title/i);
+    assert.equal(option.dataset.source, 'gateway-muxed-mono');
+    assert.equal(option.dataset.streamIndex, '7');
+
+    const loadCalls = activeHls.loadSourceCalls.length;
+    const destroyCalls = activeHls.destroyCalls;
+    assert.equal(await page.selectAudioTrack('gateway-muxed-mono', 0, 7), true);
+    option.click();
+    await Promise.resolve();
+    assert.equal(restartCalls, 0);
+    assert.equal(page.hls, activeHls);
+    assert.equal(activeHls.loadSourceCalls.length, loadCalls);
+    assert.equal(activeHls.destroyCalls, destroyCalls);
+    assert.equal(page.selectedAudioStreamIndex, 7);
+    assert.equal(page.directAudioStreamIndex, 7);
+
+    page.directAudioStreamIndex = 8;
+    assert.equal(await page.selectAudioTrack('gateway-muxed-mono', 0, 7), false, 'a click-time identity race fails closed');
+    assert.equal(restartCalls, 0);
+    assert.equal(activeHls.loadSourceCalls.length, loadCalls);
+    assert.equal(activeHls.destroyCalls, destroyCalls);
+
+    page.directAudioStreamIndex = 7;
+    page._gatewayAudioRenditionRequired = false;
+    assert.equal(await page.selectAudioTrack('gateway-muxed-mono', 0, 7), false,
+        'a click-time Gateway-context race never falls through to a probe restart');
+    assert.equal(restartCalls, 0);
+    page._gatewayAudioRenditionRequired = true;
+    assert.equal(await page.selectAudioTrack('gateway-muxed-mono', 1, 7), false,
+        'a forged relative row index is rejected');
+    assert.equal(restartCalls, 0);
+});
+
+test('verified muxed mono exception rejects every ambiguous identity and topology', async () => {
+    const WatchPage = loadWatchPage();
+    const makeMuxedMono = () => {
+        const harness = makePage(WatchPage);
+        const { page } = harness;
+        page.content = {
+            id: 'movie-mono',
+            type: 'movie',
+            audioTracksScope: 'file',
+            audioLanguageValidationStatus: 'verified',
+            audioTracks: [{ index: 7, lang: 'fra' }],
+        };
+        page.audioLanguageValidationStatus = 'verified';
+        page.currentPlaybackMode = 'gateway-session';
+        page.audioTracks = [{ index: 7, language: 'fr', codec: 'aac', channels: 2, default: true }];
+        page.selectedAudioStreamIndex = 7;
+        page.directAudioStreamIndex = 7;
+        page.video.readyState = 4;
+        page.video.videoWidth = 1280;
+        page.video.videoHeight = 720;
+        page.configureGatewayAudioRenditions(null, null, [], {
+            required: true,
+            playbackAttemptId: 17,
+        });
+        page.playHls('https://gateway.example/sessions/session-mono/playlist.m3u8', {
+            playbackAttemptId: 17,
+            autoplay: false,
+        });
+        page.hls.audioTracks = [];
+        page.hls.emit(FakeHls.Events.MANIFEST_PARSED, { audioTracks: [] });
+        return page;
+    };
+
+    const mutations = [
+        ['invalid rendition declaration', (page) => { page._gatewayAudioRenditionStatus = 'invalid'; }],
+        ['unexpected ready status', (page) => { page._gatewayAudioRenditionStatus = 'ready'; }],
+        ['unknown rendition status', (page) => { page._gatewayAudioRenditionStatus = 'unknown'; }],
+        ['pending rendition status', (page) => { page._gatewayAudioRenditionStatus = 'pending'; }],
+        ['Gateway not required', (page) => { page._gatewayAudioRenditionRequired = false; }],
+        ['wrong playback mode', (page) => { page.currentPlaybackMode = 'engine'; }],
+        ['stale attempt', (page) => { page._gatewayAudioRenditionAttemptId = 16; }],
+        ['enumeration not observed', (page) => { page._gatewayHlsAudioTracksReady = false; }],
+        ['pending audio selection', (page) => { page._pendingGatewayAudioStreamIndex = 7; }],
+        ['video not ready', (page) => { page.video.readyState = 2; }],
+        ['video readiness missing', (page) => { page.video.readyState = undefined; }],
+        ['video readiness is NaN', (page) => { page.video.readyState = Number.NaN; }],
+        ['video has a media error', (page) => { page.video.error = { code: 3 }; }],
+        ['video has no rendered width', (page) => { page.video.videoWidth = 0; }],
+        ['video width missing', (page) => { page.video.videoWidth = undefined; }],
+        ['video height missing', (page) => { page.video.videoHeight = undefined; }],
+        ['multiple HLS tracks', (page) => { page.hls.audioTracks = [{ id: 0 }, { id: 1 }]; }],
+        ['single HLS id mismatch', (page) => { page.hls.audioTracks = [{ id: 2 }]; }],
+        ['non-file catalogue scope', (page) => { page.content.audioTracksScope = 'union'; }],
+        ['union validation status', (page) => { page.content.audioLanguageValidationStatus = 'verified_union'; }],
+        ['fresh playback validation pending', (page) => { page.audioLanguageValidationStatus = 'pending'; }],
+        ['unknown verified language', (page) => { page.content.audioTracks[0].lang = 'und'; }],
+        ['multiple catalogue tracks', (page) => { page.content.audioTracks.push({ index: 8, lang: 'eng' }); }],
+        ['probe index mismatch', (page) => { page.audioTracks[0].index = 8; }],
+        ['probe language mismatch', (page) => { page.audioTracks[0].language = 'en'; }],
+        ['direct stream mismatch', (page) => { page.directAudioStreamIndex = 8; }],
+        ['direct stream missing', (page) => { page.directAudioStreamIndex = null; page.content.audioTracks[0].index = 0; page.audioTracks[0].index = 0; page.selectedAudioStreamIndex = 0; }],
+        ['selected stream mismatch', (page) => { page.selectedAudioStreamIndex = 8; }],
+        ['selected stream missing', (page) => { page.selectedAudioStreamIndex = null; page.content.audioTracks[0].index = 0; page.audioTracks[0].index = 0; page.directAudioStreamIndex = 0; }],
+        ['catalogue stream missing', (page) => { page.content.audioTracks[0].index = null; page.audioTracks[0].index = 0; page.directAudioStreamIndex = 0; page.selectedAudioStreamIndex = 0; }],
+        ['probe stream missing', (page) => { page.audioTracks[0].index = null; page.content.audioTracks[0].index = 0; page.directAudioStreamIndex = 0; page.selectedAudioStreamIndex = 0; }],
+        ['catalogue stream boolean', (page) => { page.content.audioTracks[0].index = true; page.audioTracks[0].index = 1; page.directAudioStreamIndex = 1; page.selectedAudioStreamIndex = 1; }],
+        ['probe stream whitespace', (page) => { page.content.audioTracks[0].index = 0; page.audioTracks[0].index = ' '; page.directAudioStreamIndex = 0; page.selectedAudioStreamIndex = 0; }],
+    ];
+
+    for (const [label, mutate] of mutations) {
+        const page = makeMuxedMono();
+        mutate(page);
+        assert.equal(page.getVerifiedGatewayMuxedMonoAudioTrack(), null, label);
+        if (label !== 'Gateway not required' && label !== 'wrong playback mode') {
+            assert.equal(page.getVisibleAudioTracks()[0].source, 'none', `${label} stays visibly fail closed`);
+            assert.equal(await page.selectAudioTrack('gateway-muxed-mono', 0, 7), false,
+                `${label} cannot activate a stale muxed-mono button`);
+        }
+    }
+
+    const strictSingleAlternate = makeMuxedMono();
+    strictSingleAlternate.hls.audioTracks = [{ id: 0 }];
+    strictSingleAlternate.hls.emit(FakeHls.Events.AUDIO_TRACKS_UPDATED, {
+        audioTracks: strictSingleAlternate.hls.audioTracks,
+    });
+    assert.equal(strictSingleAlternate.getVerifiedGatewayMuxedMonoAudioTrack()?.streamIndex, 7,
+        'the strict identity guard also accepts hls.js single-alternate form with id zero');
+});
+
+test('muxed-mono manifest proof belongs only to the current Hls instance', () => {
+    const WatchPage = loadWatchPage();
+    const harness = makePage(WatchPage);
+    const { page } = harness;
+    page.content = {
+        id: 'movie-mono-reset',
+        type: 'movie',
+        audioTracksScope: 'file',
+        audioLanguageValidationStatus: 'verified',
+        audioTracks: [{ index: 1, lang: 'fra' }],
+    };
+    page.audioLanguageValidationStatus = 'verified';
+    page.currentPlaybackMode = 'gateway-session';
+    page.audioTracks = [{ index: 1, language: 'fr', codec: 'eac3', channels: 2 }];
+    page.selectedAudioStreamIndex = 1;
+    page.directAudioStreamIndex = 1;
+    Object.assign(page.video, { readyState: 4, videoWidth: 1280, videoHeight: 720, error: null });
+    page.configureGatewayAudioRenditions(null, null, [], {
+        required: true,
+        playbackAttemptId: 17,
+    });
+
+    page.playHls('https://gateway.example/sessions/first/playlist.m3u8', {
+        playbackAttemptId: 17,
+        autoplay: false,
+    });
+    const firstHls = page.hls;
+    firstHls.audioTracks = [];
+    firstHls.emit(FakeHls.Events.MANIFEST_PARSED, { audioTracks: [] });
+    assert.equal(page.getVerifiedGatewayMuxedMonoAudioTrack()?.streamIndex, 1);
+
+    page.playHls('https://gateway.example/sessions/recovery/playlist.m3u8', {
+        playbackAttemptId: 17,
+        autoplay: false,
+    });
+    const replacementHls = page.hls;
+    assert.notEqual(replacementHls, firstHls);
+    assert.equal(page._gatewayHlsAudioTracksReady, false);
+    assert.equal(page.getVerifiedGatewayMuxedMonoAudioTrack(), null,
+        'a replacement Hls cannot inherit the prior manifest proof');
+    assert.equal(page.getVisibleAudioTracks()[0].source, 'none');
+
+    replacementHls.audioTracks = [];
+    replacementHls.emit(FakeHls.Events.MANIFEST_PARSED, {
+        audioTracks: [{ id: 0 }, { id: 1 }],
+    });
+    assert.equal(page._gatewayHlsAudioTracksReady, false,
+        'parsed alternate tracks cannot be mistaken for muxed mono while tracksInGroup is empty');
+    assert.equal(page.getVerifiedGatewayMuxedMonoAudioTrack(), null);
+
+    replacementHls.audioTracks = [];
+    replacementHls.emit(FakeHls.Events.MANIFEST_PARSED, { audioTracks: [] });
+    assert.equal(page.getVerifiedGatewayMuxedMonoAudioTrack()?.streamIndex, 1);
+});
+
 test('a stale playback attempt cannot confirm or mutate a pending HLS audio switch', async () => {
     const WatchPage = loadWatchPage();
     const harness = makePage(WatchPage);
