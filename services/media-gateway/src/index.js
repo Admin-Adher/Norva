@@ -1441,7 +1441,7 @@ const EXACT_MATROSKA_H264_MAX_HEIGHT = 1080;
 const EXACT_MATROSKA_H264_MAX_PIXELS = EXACT_MATROSKA_H264_MAX_WIDTH * EXACT_MATROSKA_H264_MAX_HEIGHT;
 const MULTI_AUDIO_HLS_PROTOCOL = 1;
 const MAX_MULTI_AUDIO_RENDITIONS = 8;
-const GATEWAY_VERSION = 103;
+const GATEWAY_VERSION = 104;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -1611,6 +1611,7 @@ app.get('/health', (req, res) => {
         strictLidBudgetRebalanceProtocol: 1,
         strictLidWindowCheckpointProtocol: STRICT_LID_WINDOW_CHECKPOINT_PROTOCOL,
         strictLidWindowEvidenceEnvelopeProtocol: STRICT_LID_WINDOW_ENVELOPE_PROTOCOL,
+        strictLidWindowFinalizeObservabilityProtocol: 1,
         strictLidBatchFailureProtocol: 1,
         strictLidTimelineSamplingProtocol: 1,
         strictLidRangeTimeoutProtocol: 2,
@@ -4320,6 +4321,50 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
     }
 }
 
+function buildStrictLidWindowFinalizePendingObservability(summary, extractedWindowCount) {
+    const source = summary && typeof summary === 'object' && !Array.isArray(summary)
+        ? summary
+        : {};
+    const read = (key) => {
+        try { return source[key]; } catch (_) { return undefined; }
+    };
+    const acceptedSamples = read('acceptedSamples');
+    const votes = read('votes');
+    let acceptedSampleCount = 0;
+    let acceptedLanguageCount = 0;
+    let maxConsensus = 0;
+    try {
+        acceptedSampleCount = Array.isArray(acceptedSamples) ? acceptedSamples.length : 0;
+    } catch (_) { /* fail closed to zero */ }
+    if (votes instanceof Map) {
+        try {
+            const mapSize = Object.getOwnPropertyDescriptor(Map.prototype, 'size')?.get;
+            acceptedLanguageCount = typeof mapSize === 'function' ? mapSize.call(votes) : 0;
+            Map.prototype.forEach.call(votes, (count) => {
+                if (typeof count === 'number' && Number.isSafeInteger(count) && count >= 0) {
+                    maxConsensus = Math.max(maxConsensus, count);
+                }
+            });
+        } catch (_) {
+            acceptedLanguageCount = 0;
+            maxConsensus = 0;
+        }
+    }
+    return buildStrictLidUnverifiedObservability({
+        extractedWindowCount,
+        evaluatedWindowCount: read('evaluatedSampleCount'),
+        acceptedSampleCount,
+        acceptedLanguageCount,
+        maxConsensus,
+        rejectedConflictCount: read('rejectedSpeechSampleCount'),
+        ignoredWeakCount: read('ignoredWeakSpeechSampleCount'),
+        repeatedCount: read('repeatedSpeechSampleCount'),
+        missingDiversityCount: read('missingDiversitySampleCount'),
+        insufficientSpeechSampleCount: read('insufficientSpeechSampleCount'),
+        batchOutcome: 'succeeded',
+    });
+}
+
 async function handleFinalizeStrictLidWindows(req, res, capabilityToken) {
     const validation = validateDetectLanguageCapability(capabilityToken, LID_LEGACY_FULL_SCOPE);
     if (!validation.claims) {
@@ -4396,6 +4441,11 @@ async function handleFinalizeStrictLidWindows(req, res, capabilityToken) {
             providerDrained: true,
             providerDrainProtocol: 1,
         });
+    }
+    if (payload.verified !== true) {
+        console.info(JSON.stringify(
+            buildStrictLidWindowFinalizePendingObservability(summary, evaluated.length),
+        ));
     }
     return res.status(200).json({
         ...payload,
