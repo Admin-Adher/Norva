@@ -11,6 +11,7 @@ const read = (file) => fs.readFileSync(path.join(root, file), 'utf8').replace(/\
 const playback = read('supabase/functions/norva-playback/index.ts');
 const mainRouter = read('supabase/functions/main/index.ts');
 const migration = read('supabase/migrations/20260816105918_async_vod_language_validation_jobs.sql');
+const windowMigration = read('supabase/migrations/20260817001127_strict_lid_window_checkpoints.sql');
 const presenceMigration = read('supabase/migrations/20260816141150_provider_account_foreground_presence.sql');
 const activityMigration = read('supabase/migrations/20260816171003_provider_account_language_validation_activity.sql');
 const edgeDeploy = read('ops/hetzner/scripts/04-deploy-edge-functions.sh');
@@ -64,7 +65,7 @@ test('foreground validation ignores presence intent but still blocks real provid
   const worker = between(
     playback,
     'async function processOneLanguageValidationTrack(',
-    '\nasync function finalizeLanguageValidationJob(',
+    '\nasync function finalizeLanguageValidationTrackWindows(',
   );
   const create = between(
     playback,
@@ -130,18 +131,21 @@ test('foreground validation ignores presence intent but still blocks real provid
   assert.match(worker, /LANGUAGE_VALIDATION_GATEWAY_TIMEOUT[\s\S]*LANGUAGE_VALIDATION_GATEWAY_TRANSPORT[\s\S]*retryAt:/);
   assert.match(
     worker,
-    /providerAccountLeaseReleaseSafe = false[\s\S]*await fetch[\s\S]*await response\.text\(\)[\s\S]*JSON\.parse\(responseText\)[\s\S]*providerAccountLeaseReleaseSafe = strictLanguageProviderDrainAttested\(payload\)/,
+    /providerAccountLeaseReleaseSafe = false[\s\S]*await fetch[\s\S]*readLanguageValidationGatewayResponse\(response\)[\s\S]*recordOrEmpty\(responseRead\.payload\)[\s\S]*providerAccountLeaseReleaseSafe = strictLanguageProviderDrainAttested\(payload\)/,
   );
   assert.doesNotMatch(
-    worker.slice(worker.indexOf('await response.text()'), worker.indexOf('const payload = recordOrEmpty(responsePayload)')),
+    worker.slice(
+      worker.indexOf('readLanguageValidationGatewayResponse(response)'),
+      worker.indexOf('const payload = recordOrEmpty(responseRead.payload)'),
+    ),
     /providerAccountLeaseReleaseSafe = true/,
     'transport EOF alone must not release the provider account lease',
   );
   assert.match(worker, /providerAccountLeaseClaimed[\s\S]*providerAccountLeaseReleaseSafe[\s\S]*release_provider_account_language_validation/);
   assert.match(create, /claimError\.code[\s\S]*55P03[\s\S]*provider language validation in progress[\s\S]*LANGUAGE_VALIDATION_IN_PROGRESS/);
-  assert.match(playback, /version: 51[\s\S]*languageValidationPresenceIntentProtocol: 1[\s\S]*languageValidationPlaybackLeaseProtocol: 1[\s\S]*languageValidationActivityProtocol: 1[\s\S]*languageValidationDurationClaimProtocol: 1[\s\S]*languageValidationTaskBudgetMs: LANGUAGE_VALIDATION_TASK_BUDGET_MS[\s\S]*languageValidationFetchTimeoutMs: LANGUAGE_VALIDATION_FETCH_TIMEOUT_MS[\s\S]*languageValidationPostFetchReserveMs: LANGUAGE_VALIDATION_POST_FETCH_RESERVE_MS[\s\S]*languageValidationJobLeaseSeconds: LANGUAGE_VALIDATION_JOB_LEASE_SECONDS[\s\S]*languageValidationSampleDurationSeconds: LANGUAGE_VALIDATION_SAMPLE_DURATION_SECONDS/);
+  assert.match(playback, /version: 52[\s\S]*languageValidationPresenceIntentProtocol: 1[\s\S]*languageValidationPlaybackLeaseProtocol: 1[\s\S]*languageValidationActivityProtocol: 1[\s\S]*languageValidationDurationClaimProtocol: 1[\s\S]*languageValidationWindowCheckpointProtocol: LANGUAGE_VALIDATION_WINDOW_CHECKPOINT_PROTOCOL[\s\S]*languageValidationTaskBudgetMs: LANGUAGE_VALIDATION_TASK_BUDGET_MS[\s\S]*languageValidationFetchTimeoutMs: LANGUAGE_VALIDATION_FETCH_TIMEOUT_MS[\s\S]*languageValidationPostFetchReserveMs: LANGUAGE_VALIDATION_POST_FETCH_RESERVE_MS[\s\S]*languageValidationJobLeaseSeconds: LANGUAGE_VALIDATION_JOB_LEASE_SECONDS[\s\S]*languageValidationSampleDurationSeconds: LANGUAGE_VALIDATION_SAMPLE_DURATION_SECONDS/);
   assert.match(playback, /const LANGUAGE_VALIDATION_FETCH_TIMEOUT_MS = 240_000/);
-  assert.match(edgeDeploy, /EXPECTED_PLAYBACK_VERSION=51/);
+  assert.match(edgeDeploy, /EXPECTED_PLAYBACK_VERSION=52/);
   assert.match(edgeDeploy, /EXPECTED_LANGUAGE_VALIDATION_TASK_BUDGET_MS=270000/);
   assert.match(edgeDeploy, /EXPECTED_LANGUAGE_VALIDATION_FETCH_TIMEOUT_MS=240000/);
   assert.match(edgeDeploy, /EXPECTED_LANGUAGE_VALIDATION_POST_FETCH_RESERVE_MS=30000/);
@@ -153,6 +157,8 @@ test('foreground validation ignores presence intent but still blocks real provid
   assert.match(edgeDeploy, /EXPECTED_LANGUAGE_VALIDATION_ACTIVITY_PROTOCOL=1/);
   assert.match(edgeDeploy, /EXPECTED_LANGUAGE_VALIDATION_DURATION_CLAIM_PROTOCOL=1/);
   assert.match(edgeDeploy, /languageValidationDurationClaimProtocol\\\":\$EXPECTED_LANGUAGE_VALIDATION_DURATION_CLAIM_PROTOCOL/);
+  assert.match(edgeDeploy, /EXPECTED_LANGUAGE_VALIDATION_WINDOW_CHECKPOINT_PROTOCOL=1/);
+  assert.match(edgeDeploy, /languageValidationWindowCheckpointProtocol\\\":\$EXPECTED_LANGUAGE_VALIDATION_WINDOW_CHECKPOINT_PROTOCOL/);
   assert.match(mainRouter, /'norva-playback': 20 \* 60 \* 1000/);
   assert.match(edgeDeploy, /main_path="\/home\/deno\/functions\/main\/index\.ts"/);
   assert.match(edgeDeploy, /main router source digest mismatch/);
@@ -162,7 +168,7 @@ test('language validation fetch budget preserves cleanup time inside the worker 
   let helper = between(
     playback,
     'function languageValidationFetchBudgetMs(',
-    '\nasync function processOneLanguageValidationTrack(',
+    '\ntype StrictLidWindowState =',
   );
   helper = helper
     .replace('taskDeadlineAt: number', 'taskDeadlineAt')
@@ -179,6 +185,176 @@ test('language validation fetch budget preserves cleanup time inside the worker 
   assert.equal(context.budget(270_000, 29_000), 211_000);
   assert.equal(context.budget(270_000, 240_000), 0);
   assert.equal(context.budget(270_000, 270_001), 0);
+});
+
+test('short exact VOD is terminal before job creation or provider work while boundary counts stay exact', () => {
+  let helpers = between(
+    playback,
+    'function strictLidWindowCountForDuration(',
+    '\nfunction strictLidWindowToken(',
+  );
+  helpers = helpers
+    .replace(
+      'function strictLidWindowCountForDuration(durationSeconds: number): 4 | 6 | null',
+      'function strictLidWindowCountForDuration(durationSeconds)',
+    )
+    .replace(
+      'function requireStrictLidWindowCount(durationSeconds: number): 4 | 6',
+      'function requireStrictLidWindowCount(durationSeconds)',
+    );
+  class HttpError extends Error {
+    constructor(status, message, details) {
+      super(message);
+      this.status = status;
+      this.details = details;
+    }
+  }
+  const context = {
+    Number,
+    HttpError,
+    LANGUAGE_VALIDATION_SAMPLE_DURATION_SECONDS: 20,
+  };
+  vm.runInNewContext(
+    `${helpers}; this.count = strictLidWindowCountForDuration; this.requireCount = requireStrictLidWindowCount;`,
+    context,
+  );
+  assert.equal(context.count(79.999), null);
+  assert.equal(context.count(80), 4);
+  assert.equal(context.count(119.999), 4);
+  assert.equal(context.count(120), 6);
+  let shortError = null;
+  try {
+    context.requireCount(79.999);
+  } catch (error) {
+    shortError = error;
+  }
+  assert.equal(shortError?.status, 422);
+  assert.equal(shortError?.details?.code, 'LANGUAGE_VALIDATION_DURATION_TOO_SHORT');
+
+  const start = startBody(playback);
+  const startDurationGateAt = start.indexOf('requireStrictLidWindowCount(');
+  const retryGateAt = start.indexOf('const retryAt = stringOrNull(cache.audio_lang_retry_at)');
+  const startRpcAt = start.indexOf('"start_catalog_file_audio_validation_job"');
+  assert.ok(startDurationGateAt >= 0 && startDurationGateAt < retryGateAt && retryGateAt < startRpcAt);
+  assert.doesNotMatch(
+    start.slice(startDurationGateAt, startRpcAt),
+    /resolvePlaybackTarget|createBytePipeCapability|await fetch|scheduleLanguageValidationJob/,
+  );
+
+  const worker = between(
+    playback,
+    'async function processOneLanguageValidationTrack(',
+    '\nasync function finalizeLanguageValidationTrackWindows(',
+  );
+  const workerDurationGateAt = worker.indexOf('requireStrictLidWindowCount(initialDurationSeconds)');
+  assert.ok(workerDurationGateAt >= 0 && workerDurationGateAt < worker.indexOf('resolvePlaybackTarget('));
+
+  let terminal = between(
+    playback,
+    'function languageValidationTaskErrorIsTerminal(',
+    '\nfunction languageValidationTaskRetryAt(',
+  );
+  terminal = terminal.replace('(error: unknown)', '(error)');
+  const terminalContext = { Set, languageValidationTaskErrorCode: (code) => code };
+  vm.runInNewContext(`${terminal}; this.isTerminal = languageValidationTaskErrorIsTerminal;`, terminalContext);
+  assert.equal(terminalContext.isTerminal('LANGUAGE_VALIDATION_DURATION_TOO_SHORT'), true);
+});
+
+test('Gateway JSON is bounded in bytes before parse and overflow cancels without drain evidence', async () => {
+  let helper = between(
+    playback,
+    'async function readLanguageValidationGatewayResponse(',
+    '\nasync function processOneLanguageValidationTrack(',
+  );
+  helper = helper
+    .replace(
+      /async function readLanguageValidationGatewayResponse\([\s\S]*?\): Promise<LanguageValidationGatewayResponseRead> \{/,
+      'async function readLanguageValidationGatewayResponse(response, maxBytes = LANGUAGE_VALIDATION_FINALIZE_BODY_MAX_BYTES) {',
+    )
+    .replaceAll('(): LanguageValidationGatewayResponseRead', '()')
+    .replace('const chunks: Uint8Array[] = [];', 'const chunks = [];');
+  const context = {
+    JSON,
+    Number,
+    TextDecoder,
+    Uint8Array,
+    LANGUAGE_VALIDATION_FINALIZE_BODY_MAX_BYTES: 1_048_576,
+  };
+  vm.runInNewContext(`${helper}; this.readGateway = readLanguageValidationGatewayResponse;`, context);
+
+  const makeResponse = ({ contentLength = null, chunks = [], readError = null }) => {
+    const counters = { bodyCancel: 0, readerCancel: 0, readerReads: 0, release: 0 };
+    let position = 0;
+    const reader = {
+      async read() {
+        counters.readerReads += 1;
+        if (readError) throw readError;
+        if (position >= chunks.length) return { done: true, value: undefined };
+        return { done: false, value: chunks[position++] };
+      },
+      async cancel() { counters.readerCancel += 1; },
+      releaseLock() { counters.release += 1; },
+    };
+    return {
+      counters,
+      response: {
+        headers: { get: (name) => name === 'content-length' ? contentLength : null },
+        body: {
+          getReader: () => reader,
+          async cancel() { counters.bodyCancel += 1; },
+        },
+      },
+    };
+  };
+  const encoder = new TextEncoder();
+  const payloadBytes = encoder.encode('{"providerDrained":true,"providerDrainProtocol":1}');
+  const success = makeResponse({ chunks: [payloadBytes.subarray(0, 7), payloadBytes.subarray(7)] });
+  const successResult = await context.readGateway(success.response, 64);
+  assert.equal(successResult.ok, true);
+  assert.equal(successResult.payload.providerDrained, true);
+
+  const advertisedOverflow = makeResponse({ contentLength: '65', chunks: [payloadBytes] });
+  const advertisedResult = await context.readGateway(advertisedOverflow.response, 64);
+  assert.equal(advertisedResult.ok, false);
+  assert.equal(advertisedResult.errorCode, 'LANGUAGE_VALIDATION_GATEWAY_RESPONSE_INVALID');
+  assert.equal(advertisedOverflow.counters.bodyCancel, 1);
+  assert.equal(advertisedOverflow.counters.readerReads, 0);
+  assert.equal('payload' in advertisedResult, false);
+
+  const streamedOverflow = makeResponse({
+    chunks: [encoder.encode('{"provid'), encoder.encode('erDrained":true}')],
+  });
+  const streamedResult = await context.readGateway(streamedOverflow.response, 8);
+  assert.equal(streamedResult.ok, false);
+  assert.equal(streamedResult.errorCode, 'LANGUAGE_VALIDATION_GATEWAY_RESPONSE_INVALID');
+  assert.equal(streamedOverflow.counters.readerCancel, 1);
+  assert.equal(streamedOverflow.counters.release, 1);
+  assert.equal('payload' in streamedResult, false);
+
+  const broken = makeResponse({ readError: new Error('stream reset') });
+  const brokenResult = await context.readGateway(broken.response, 64);
+  assert.equal(brokenResult.ok, false);
+  assert.equal(brokenResult.errorCode, 'LANGUAGE_VALIDATION_GATEWAY_TRANSPORT');
+  assert.equal(broken.counters.readerCancel, 1);
+
+  const worker = between(
+    playback,
+    'async function processOneLanguageValidationTrack(',
+    '\nasync function finalizeLanguageValidationTrackWindows(',
+  );
+  const finalize = between(
+    playback,
+    'async function finalizeLanguageValidationTrackWindows(',
+    '\nasync function finalizeLanguageValidationJob(',
+  );
+  assert.equal((worker.match(/readLanguageValidationGatewayResponse\(response\)/g) || []).length, 1);
+  assert.equal((finalize.match(/readLanguageValidationGatewayResponse\(response\)/g) || []).length, 1);
+  assert.doesNotMatch(worker, /response\.text\(\)/);
+  assert.doesNotMatch(finalize, /response\.text\(\)/);
+  assert.ok(
+    worker.indexOf('if (!responseRead.ok)')
+      < worker.indexOf('providerAccountLeaseReleaseSafe = strictLanguageProviderDrainAttested(payload)'),
+  );
 });
 
 test('strict Gateway 5xx retries in 30 seconds while proxy auth and non-5xx keep the long policy', () => {
@@ -206,7 +382,7 @@ test('strict Gateway 5xx retries in 30 seconds while proxy auth and non-5xx keep
   const worker = between(
     playback,
     'async function processOneLanguageValidationTrack(',
-    '\nasync function finalizeLanguageValidationJob(',
+    '\nasync function finalizeLanguageValidationTrackWindows(',
   );
   assert.match(worker, /if \(!response\.ok\)[\s\S]*retryAt: languageValidationGatewayRetryAt\([\s\S]*response\.status,[\s\S]*gatewayCode,[\s\S]*upstreamStatus/);
 });
@@ -500,7 +676,7 @@ test('one waitUntil task handles at most one provider track and first 458 is ter
   const worker = between(
     playback,
     'async function processOneLanguageValidationTrack(',
-    '\nasync function finalizeLanguageValidationJob(',
+    '\nasync function finalizeLanguageValidationTrackWindows(',
   );
   assert.match(worker, /"claim_catalog_file_audio_validation_job"/);
   assert.match(worker, /"claim_provider_file_probe"/);
@@ -522,8 +698,75 @@ test('one waitUntil task handles at most one provider track and first 458 is ter
   assert.ok(worker.indexOf('isProviderBusyFailure') < worker.indexOf('if (!response.ok)'));
   assert.match(worker, /openProviderPlaybackCircuit\(providerAccountHash, db, true\)/);
   assert.match(worker, /errorCode: "PROVIDER_ACCOUNT_BUSY"[\s\S]*terminal: true/);
-  assert.match(worker, /"checkpoint_catalog_file_audio_validation_job"/);
-  assert.match(worker, /releaseProviderFileProbe\(db, identityKey, providerLeaseOwner\)/);
+  assert.match(worker, /"checkpoint_catalog_file_audio_validation_window"/);
+  assert.match(worker, /providerLeaseClaimed[\s\S]*providerAccountLeaseReleaseSafe[\s\S]*releaseProviderFileProbe\(db, identityKey, providerLeaseOwner\)/);
+});
+
+test('Edge checkpoints exactly one signed window and never returns its opaque receipt', () => {
+  const worker = between(
+    playback,
+    'async function processOneLanguageValidationTrack(',
+    '\nasync function finalizeLanguageValidationTrackWindows(',
+  );
+  assert.match(worker, /strictLidWindowStateFromClaim\(claim, initialDurationSeconds\)/);
+  assert.match(worker, /windowState\.position === windowState\.count[\s\S]*finalizeLanguageValidationTrackWindows/);
+  assert.match(worker, /windowCheckpointProtocol: LANGUAGE_VALIDATION_WINDOW_CHECKPOINT_PROTOCOL/);
+  assert.match(worker, /profileFingerprint: exactAfterLease\.fingerprint/);
+  assert.match(worker, /windowOrdinal,[\s\S]*windowCount: windowState\.count/);
+  assert.match(worker, /strictLidWindowCheckpointFromGateway\([\s\S]*windowOrdinal,[\s\S]*windowState\.count/);
+  assert.match(worker, /strictLanguageProviderDrainAttested\(payload\)/);
+  assert.match(worker, /"checkpoint_catalog_file_audio_validation_window"/);
+  assert.match(worker, /p_window_token: receipt/);
+  assert.ok(worker.indexOf('if (!response.ok)') < worker.indexOf('checkpoint_catalog_file_audio_validation_window'));
+  assert.doesNotMatch(worker, /languageValidationPendingResponse[\s\S]*receipt/);
+});
+
+test('finalize uses a dedicated no-provider capability and resets only the authenticated 409 contract', () => {
+  const finalizeWindows = between(
+    playback,
+    'async function finalizeLanguageValidationTrackWindows(',
+    '\nasync function finalizeLanguageValidationJob(',
+  );
+  assert.match(finalizeWindows, /windowFinalize: true/);
+  assert.doesNotMatch(
+    finalizeWindows.slice(finalizeWindows.indexOf('windowFinalize: true'), finalizeWindows.indexOf('let response: Response')),
+    /windowOrdinal/,
+  );
+  assert.match(finalizeWindows, /\/detect-language\/finalize\?index=\$\{trackIndex\}/);
+  assert.match(finalizeWindows, /body = JSON\.stringify\(\{ receipts: windowState\.tokens \}\)/);
+  assert.match(finalizeWindows, /response\.status === 409/);
+  assert.match(finalizeWindows, /gatewayCode === "strict_lid_checkpoint_reset_required"/);
+  assert.match(finalizeWindows, /payload\.resetRequired === true/);
+  assert.match(finalizeWindows, /providerDrained/);
+  assert.match(finalizeWindows, /"reset_catalog_file_audio_validation_windows"/);
+  assert.match(finalizeWindows, /"checkpoint_catalog_file_audio_validation_track"/);
+  assert.ok(
+    finalizeWindows.indexOf('strictLanguageValidationEvidence')
+      < finalizeWindows.indexOf('checkpoint_catalog_file_audio_validation_track'),
+  );
+  assert.doesNotMatch(finalizeWindows, /claim_provider_account_language_validation|claim_provider_file_probe/);
+});
+
+test('window receipt grammar, cardinality and capability bindings are fail-closed', () => {
+  assert.match(playback, /LANGUAGE_VALIDATION_WINDOW_RECEIPT_MAX_CHARS = 98_304/);
+  assert.match(playback, /\^v1\\\.\[a-f0-9\]\{16\}\\\.\[A-Za-z0-9_-\]\{16\}\\\.\[A-Za-z0-9_-\]\+\\\.\[A-Za-z0-9_-\]\{22\}\$/);
+  const state = between(
+    playback,
+    'function strictLidWindowStateFromClaim(',
+    '\nfunction strictLidWindowCheckpointFromGateway(',
+  );
+  assert.match(state, /count !== expectedCount/);
+  assert.match(state, /rawTokens\.length !== position/);
+  assert.match(state, /new Set\(exactTokens\)\.size !== exactTokens\.length/);
+  const capability = between(
+    playback,
+    'async function createBytePipeCapability(',
+    '\nasync function createBytePipeAccess(',
+  );
+  assert.match(capability, /PLAYBACK_SESSION_UUID_PATTERN\.test\(strictLidWindowClaims\.jobId\)/);
+  assert.match(capability, /\^\[a-f0-9\]\{64\}\$/);
+  assert.match(capability, /finalizing && strictLidWindowClaims\.windowOrdinal !== undefined/);
+  assert.match(capability, /windowFinalize: true/);
 });
 
 test('durable SQL journal is RLS/private and every state transition is service-role CAS', () => {
