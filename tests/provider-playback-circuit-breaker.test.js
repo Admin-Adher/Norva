@@ -316,7 +316,7 @@ test('playback edge checks the circuit, claims one account session and reports s
   assert.match(heartbeat, /PLAYBACK_SUPERSEDED/);
   assert.match(edge, /open_provider_playback_circuit/);
   assert.match(edge, /PROVIDER_ACCOUNT_BUSY/);
-  assert.match(edge, /version:\s*51/);
+  assert.match(edge, /version:\s*52/);
   assert.match(edge, /providerCircuitProtocol:\s*1/);
   assert.match(edge, /exactFileCodecProfileProtocol:\s*1/);
 });
@@ -575,7 +575,7 @@ test('production rollout proves the provider circuit protocol on every runtime',
   assert.match(gateway, /providerCircuitProtocol:\s*1/);
   assert.match(gateway, /providerProxyAffinityProtocol:\s*1/);
   assert.match(gateway, /exactFileCodecProfileProtocol:\s*1/);
-  assert.match(playback, /version:\s*51/);
+  assert.match(playback, /version:\s*52/);
   assert.match(playback, /providerCircuitProtocol:\s*1/);
   assert.match(playback, /exactFileCodecProfileProtocol:\s*1/);
   assert.match(playback, /relayTakeoverProtocol:\s*1/);
@@ -584,7 +584,7 @@ test('production rollout proves the provider circuit protocol on every runtime',
   assert.match(cloud, /relayTakeoverProtocol:\s*1/);
 
   assert.match(deploy, /verify_function_protocol "\$service"/);
-  assert.match(deploy, /EXPECTED_PLAYBACK_VERSION=51/);
+  assert.match(deploy, /EXPECTED_PLAYBACK_VERSION=52/);
   assert.match(deploy, /EXPECTED_ENGINE_TRACK_PROBE_BLOCKING=false/);
   assert.match(deploy, /EXPECTED_EXACT_FILE_CODEC_PROFILE_PROTOCOL=1/);
   assert.match(deploy, /sha256sum "\$path" \| awk/);

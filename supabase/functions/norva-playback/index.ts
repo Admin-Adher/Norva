@@ -125,6 +125,11 @@ const LANGUAGE_VALIDATION_MIN_PROBABILITY = 0.95;
 const LANGUAGE_VALIDATION_MIN_WORDS = 12;
 const LANGUAGE_VALIDATION_MIN_UNIQUE_WORDS = 8;
 const LANGUAGE_VALIDATION_SAMPLE_DURATION_SECONDS = 20;
+const LANGUAGE_VALIDATION_WINDOW_CHECKPOINT_PROTOCOL = 1;
+const LANGUAGE_VALIDATION_WINDOW_RECEIPT_MAX_CHARS = 98_304;
+const LANGUAGE_VALIDATION_FINALIZE_BODY_MAX_BYTES = 1_048_576;
+const LANGUAGE_VALIDATION_WINDOW_RECEIPT_PATTERN =
+  /^v1\.[a-f0-9]{16}\.[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{22}$/;
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SUPABASE_SERVICE_KEY =
@@ -181,7 +186,7 @@ Deno.serve(async (req) => {
       return json(req, {
         ok: true,
         service: "norva-playback",
-        version: 51,
+        version: 52,
         nativeHeartbeatProtocol: 1,
         providerCircuitProtocol: 1,
         exactFileCodecProfileProtocol: 1,
@@ -190,6 +195,7 @@ Deno.serve(async (req) => {
         languageValidationPlaybackLeaseProtocol: 1,
         languageValidationActivityProtocol: 1,
         languageValidationDurationClaimProtocol: 1,
+        languageValidationWindowCheckpointProtocol: LANGUAGE_VALIDATION_WINDOW_CHECKPOINT_PROTOCOL,
         languageValidationTaskBudgetMs: LANGUAGE_VALIDATION_TASK_BUDGET_MS,
         languageValidationFetchTimeoutMs: LANGUAGE_VALIDATION_FETCH_TIMEOUT_MS,
         languageValidationPostFetchReserveMs: LANGUAGE_VALIDATION_POST_FETCH_RESERVE_MS,
@@ -1453,6 +1459,7 @@ async function startPlaybackLanguageValidation(
     };
   }
 
+  requireStrictLidWindowCount(Number(exactProfile.profile.durationSeconds));
   const retryAt = stringOrNull(cache.audio_lang_retry_at);
   const retryAtMs = retryAt ? Date.parse(retryAt) : Number.NaN;
   if (Number.isFinite(retryAtMs) && retryAtMs > Date.now()) {
@@ -1804,6 +1811,179 @@ function languageValidationFetchBudgetMs(taskDeadlineAt: number, nowMs = Date.no
   )));
 }
 
+type StrictLidWindowState = {
+  position: number;
+  count: 4 | 6;
+  protocol: 1;
+  tokens: string[];
+};
+
+type StrictLidWindowCapabilityClaims = {
+  windowCheckpointProtocol: 1;
+  jobId: string;
+  profileFingerprint: string;
+  windowCount: 4 | 6;
+  windowOrdinal?: number;
+  windowFinalize?: true;
+};
+
+function strictLidWindowCountForDuration(durationSeconds: number): 4 | 6 | null {
+  if (!Number.isFinite(durationSeconds) || durationSeconds < 4 * LANGUAGE_VALIDATION_SAMPLE_DURATION_SECONDS) {
+    return null;
+  }
+  return durationSeconds >= 6 * LANGUAGE_VALIDATION_SAMPLE_DURATION_SECONDS ? 6 : 4;
+}
+
+function requireStrictLidWindowCount(durationSeconds: number): 4 | 6 {
+  if (!Number.isFinite(durationSeconds) || durationSeconds <= 0 || durationSeconds > 24 * 60 * 60) {
+    throw new HttpError(409, "Exact language validation duration is invalid", {
+      code: "LANGUAGE_VALIDATION_DURATION_INVALID",
+    });
+  }
+  const count = strictLidWindowCountForDuration(durationSeconds);
+  if (!count) {
+    throw new HttpError(422, "Exact media is too short for strict language validation", {
+      code: "LANGUAGE_VALIDATION_DURATION_TOO_SHORT",
+    });
+  }
+  return count;
+}
+
+function strictLidWindowToken(value: unknown): string | null {
+  if (typeof value !== "string" || value.length > LANGUAGE_VALIDATION_WINDOW_RECEIPT_MAX_CHARS) {
+    return null;
+  }
+  return LANGUAGE_VALIDATION_WINDOW_RECEIPT_PATTERN.test(value) ? value : null;
+}
+
+function strictLidWindowStateFromClaim(
+  claim: JsonRecord,
+  exactDurationSeconds: number,
+): StrictLidWindowState | null {
+  const expectedCount = strictLidWindowCountForDuration(exactDurationSeconds);
+  const position = Number(claim.windowPosition);
+  const count = Number(claim.windowCount);
+  const protocol = Number(claim.windowProtocol);
+  const rawTokens = Array.isArray(claim.windowTokens) ? claim.windowTokens : [];
+  const tokens = rawTokens.map(strictLidWindowToken);
+  if (
+    !expectedCount || count !== expectedCount || protocol !== LANGUAGE_VALIDATION_WINDOW_CHECKPOINT_PROTOCOL ||
+    !Number.isInteger(position) || position < 0 || position > count ||
+    rawTokens.length !== position || tokens.some((token) => token === null)
+  ) {
+    return null;
+  }
+  const exactTokens = tokens as string[];
+  if (new Set(exactTokens).size !== exactTokens.length) return null;
+  return { position, count: expectedCount, protocol: 1, tokens: exactTokens };
+}
+
+function strictLidWindowCheckpointFromGateway(
+  payload: JsonRecord,
+  expectedOrdinal: number,
+  expectedCount: 4 | 6,
+) {
+  const receipt = strictLidWindowToken(payload.receipt);
+  if (
+    Number(payload.windowCheckpointProtocol) !== LANGUAGE_VALIDATION_WINDOW_CHECKPOINT_PROTOCOL ||
+    Number(payload.windowOrdinal) !== expectedOrdinal ||
+    Number(payload.windowCount) !== expectedCount ||
+    payload.verified === true ||
+    !receipt
+  ) {
+    return null;
+  }
+  return receipt;
+}
+
+function sameStrictLidWindowState(left: StrictLidWindowState, right: StrictLidWindowState) {
+  return left.position === right.position &&
+    left.count === right.count &&
+    left.protocol === right.protocol &&
+    left.tokens.length === right.tokens.length &&
+    left.tokens.every((token, index) => token === right.tokens[index]);
+}
+
+type LanguageValidationGatewayResponseRead =
+  | { ok: true; payload: unknown }
+  | {
+    ok: false;
+    errorCode:
+      | "LANGUAGE_VALIDATION_GATEWAY_RESPONSE_INVALID"
+      | "LANGUAGE_VALIDATION_GATEWAY_TRANSPORT";
+  };
+
+async function readLanguageValidationGatewayResponse(
+  response: Response,
+  maxBytes = LANGUAGE_VALIDATION_FINALIZE_BODY_MAX_BYTES,
+): Promise<LanguageValidationGatewayResponseRead> {
+  const invalid = (): LanguageValidationGatewayResponseRead => ({
+    ok: false,
+    errorCode: "LANGUAGE_VALIDATION_GATEWAY_RESPONSE_INVALID",
+  });
+  const transport = (): LanguageValidationGatewayResponseRead => ({
+    ok: false,
+    errorCode: "LANGUAGE_VALIDATION_GATEWAY_TRANSPORT",
+  });
+  const rawContentLength = response.headers.get("content-length");
+  if (rawContentLength !== null) {
+    const normalizedContentLength = rawContentLength.trim();
+    const advertisedBytes = Number(normalizedContentLength);
+    if (
+      !/^(?:0|[1-9][0-9]*)$/.test(normalizedContentLength) ||
+      !Number.isSafeInteger(advertisedBytes) ||
+      advertisedBytes > maxBytes
+    ) {
+      try {
+        await response.body?.cancel();
+      } catch (_) { /* cancellation is best-effort; the response remains untrusted */ }
+      return invalid();
+    }
+  }
+  if (!response.body) return invalid();
+
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value || value.byteLength === 0) continue;
+      if (totalBytes + value.byteLength > maxBytes) {
+        try {
+          await reader.cancel();
+        } catch (_) { /* the bounded reader has already rejected the payload */ }
+        return invalid();
+      }
+      chunks.push(value);
+      totalBytes += value.byteLength;
+    }
+  } catch (_) {
+    try {
+      await reader.cancel();
+    } catch (_) { /* the transport error remains authoritative */ }
+    return transport();
+  } finally {
+    try {
+      reader.releaseLock();
+    } catch (_) { /* no reusable body is trusted after this read */ }
+  }
+
+  const bytes = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  try {
+    const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    return { ok: true, payload: JSON.parse(text) };
+  } catch (_) {
+    return invalid();
+  }
+}
+
 async function processOneLanguageValidationTrack(db: SupabaseClient, jobId: string) {
   // edge-runtime v1.74 may retire a per-worker isolate halfway through its
   // configured lifetime. Bound the complete task, not only the fetch, so DB
@@ -1839,6 +2019,14 @@ async function processOneLanguageValidationTrack(db: SupabaseClient, jobId: stri
         code: "LANGUAGE_VALIDATION_CURSOR_MISMATCH",
       });
     }
+    const initialDurationSeconds = Number(current.exactProfile.profile.durationSeconds);
+    requireStrictLidWindowCount(initialDurationSeconds);
+    const windowState = strictLidWindowStateFromClaim(claim, initialDurationSeconds);
+    if (!windowState) {
+      throw new HttpError(409, "Strict language validation window cursor is invalid", {
+        code: "LANGUAGE_VALIDATION_WINDOW_CURSOR_INVALID",
+      });
+    }
 
     const resolved = await resolvePlaybackTarget(
       current.sourceId,
@@ -1849,6 +2037,20 @@ async function processOneLanguageValidationTrack(db: SupabaseClient, jobId: stri
     );
     const targetUrl = stringOr(resolved.targetUrl, "");
     assertHttpUrl(targetUrl);
+    if (windowState.position === windowState.count) {
+      await finalizeLanguageValidationTrackWindows({
+        db,
+        jobId,
+        leaseOwner,
+        claim,
+        current,
+        targetUrl,
+        trackIndex,
+        windowState,
+        taskDeadlineAt,
+      });
+      return;
+    }
     const providerAccountScope = "providerAccountScope" in resolved
       ? stringOr(resolved.providerAccountScope, "")
       : "";
@@ -1891,17 +2093,23 @@ async function processOneLanguageValidationTrack(db: SupabaseClient, jobId: stri
       },
     );
     const renewedClaim = recordOrEmpty(renewed);
+    const renewedWindowState = strictLidWindowStateFromClaim(
+      renewedClaim,
+      initialDurationSeconds,
+    );
     if (
       renewError || !renewed ||
       stringOr(renewedClaim.jobId, "") !== stringOr(claim.jobId, "") ||
       boundedNullableInt(renewedClaim.trackIndex, 0, 128) !== trackIndex ||
       stringOr(renewedClaim.identityKey, "") !== current.identityKey ||
-      stringOr(renewedClaim.profileFingerprint, "") !== current.fingerprint
+      stringOr(renewedClaim.profileFingerprint, "") !== current.fingerprint ||
+      !renewedWindowState || !sameStrictLidWindowState(windowState, renewedWindowState)
     ) {
       return;
     }
 
-    providerLeaseOwner = `language-validation-track:${jobId}:${trackIndex}:${crypto.randomUUID()}`;
+    const windowOrdinal = windowState.position + 1;
+    providerLeaseOwner = `language-validation-track:${jobId}:${trackIndex}:window:${windowOrdinal}:${crypto.randomUUID()}`;
     providerAccountLeaseHash = providerAccountHash;
     const { data: providerAccountClaimed, error: providerAccountClaimError } = await db.rpc(
       "claim_provider_account_language_validation",
@@ -1972,7 +2180,8 @@ async function processOneLanguageValidationTrack(db: SupabaseClient, jobId: stri
     if (
       !Number.isFinite(exactDurationSeconds) ||
       exactDurationSeconds <= 0 ||
-      exactDurationSeconds > 24 * 60 * 60
+      exactDurationSeconds > 24 * 60 * 60 ||
+      strictLidWindowCountForDuration(exactDurationSeconds) !== windowState.count
     ) {
       throw new HttpError(409, "Exact language validation duration is invalid", {
         code: "LANGUAGE_VALIDATION_DURATION_INVALID",
@@ -1991,6 +2200,13 @@ async function processOneLanguageValidationTrack(db: SupabaseClient, jobId: stri
       LANGUAGE_VALIDATION_SCOPE,
       exactAfterLease.exactProfile.fileSizeBytes,
       exactDurationSeconds,
+      {
+        windowCheckpointProtocol: LANGUAGE_VALIDATION_WINDOW_CHECKPOINT_PROTOCOL,
+        jobId,
+        profileFingerprint: exactAfterLease.fingerprint,
+        windowOrdinal,
+        windowCount: windowState.count,
+      },
     );
     let response: Response;
     const fetchBudgetMs = languageValidationFetchBudgetMs(taskDeadlineAt);
@@ -2013,8 +2229,8 @@ async function processOneLanguageValidationTrack(db: SupabaseClient, jobId: stri
             Authorization: `Bearer ${detectionAccess.serviceToken}`,
             "X-Norva-Byte-Pipe-Token": detectionAccess.capability,
           },
-          // The same signal remains attached while response.text() consumes the
-          // body, so headers alone cannot escape the end-to-end task budget.
+          // The same signal remains attached while the bounded body reader consumes
+          // the stream, so headers alone cannot escape the end-to-end task budget.
           signal: AbortSignal.timeout(fetchBudgetMs),
         },
       );
@@ -2029,23 +2245,17 @@ async function processOneLanguageValidationTrack(db: SupabaseClient, jobId: stri
       });
       return;
     }
-    let responseText = "";
-    try {
-      responseText = await response.text();
-    } catch (_) {
+    const responseRead = await readLanguageValidationGatewayResponse(response);
+    if (!responseRead.ok) {
       await failLanguageValidationJob(db, {
         jobId,
         leaseOwner,
-        errorCode: "LANGUAGE_VALIDATION_GATEWAY_TRANSPORT",
+        errorCode: responseRead.errorCode,
         retryAt: new Date(Date.now() + 30_000).toISOString(),
       });
       return;
     }
-    let responsePayload: unknown = {};
-    try {
-      responsePayload = JSON.parse(responseText);
-    } catch (_) { /* malformed gateway payload fails closed below */ }
-    const payload = recordOrEmpty(responsePayload);
+    const payload = recordOrEmpty(responseRead.payload);
     // Release the account-wide lease only when the v92+ Gateway explicitly
     // attests that the strict broker closed its provider socket and completed
     // the panel slot-release grace before sending this response. A legacy,
@@ -2085,32 +2295,55 @@ async function processOneLanguageValidationTrack(db: SupabaseClient, jobId: stri
       });
       return;
     }
-    const accepted = strictLanguageValidationEvidence(payload, trackIndex);
-    if (!accepted) {
+    const receipt = strictLidWindowCheckpointFromGateway(
+      payload,
+      windowOrdinal,
+      windowState.count,
+    );
+    if (!receipt || !providerAccountLeaseReleaseSafe) {
       await failLanguageValidationJob(db, {
         jobId,
         leaseOwner,
-        errorCode: "LANGUAGE_VALIDATION_STRICT_CONSENSUS_PENDING",
+        errorCode: "LANGUAGE_VALIDATION_WINDOW_CHECKPOINT_INVALID",
+        retryAt: new Date(Date.now() + 30_000).toISOString(),
       });
       return;
     }
     const { data: checkpoint, error: checkpointError } = await db.rpc(
-      "checkpoint_catalog_file_audio_validation_job",
+      "checkpoint_catalog_file_audio_validation_window",
       {
         p_job_id: jobId,
         p_lease_owner: leaseOwner,
         p_stream_index: trackIndex,
-        p_evidence: accepted,
+        p_window_ordinal: windowOrdinal,
+        p_window_count: windowState.count,
+        p_window_protocol: LANGUAGE_VALIDATION_WINDOW_CHECKPOINT_PROTOCOL,
+        p_window_token: receipt,
       },
     );
     if (checkpointError || !checkpoint) {
-      throw new HttpError(409, "Language validation checkpoint was not persisted", {
-        code: "LANGUAGE_VALIDATION_CHECKPOINT_FAILED",
+      throw new HttpError(409, "Language validation window checkpoint was not persisted", {
+        code: "LANGUAGE_VALIDATION_WINDOW_CHECKPOINT_FAILED",
       });
     }
     if (recordOrEmpty(checkpoint).complete === true) {
       const finalCurrent = await revalidateLanguageValidationClaim(db, claim);
-      await finalizeLanguageValidationJob(db, jobId, leaseOwner, claim, finalCurrent);
+      await finalizeLanguageValidationTrackWindows({
+        db,
+        jobId,
+        leaseOwner,
+        claim,
+        current: finalCurrent,
+        targetUrl,
+        trackIndex,
+        windowState: {
+          position: windowState.count,
+          count: windowState.count,
+          protocol: LANGUAGE_VALIDATION_WINDOW_CHECKPOINT_PROTOCOL,
+          tokens: [...windowState.tokens, receipt],
+        },
+        taskDeadlineAt,
+      });
     }
   } catch (error) {
     await failLanguageValidationJob(db, {
@@ -2140,9 +2373,194 @@ async function processOneLanguageValidationTrack(db: SupabaseClient, jobId: stri
         }
       } catch (_) { /* lease expiry is the crash-safe fallback */ }
     }
-    if (providerLeaseClaimed && identityKey && providerLeaseOwner) {
+    if (
+      providerLeaseClaimed
+      && providerAccountLeaseReleaseSafe
+      && identityKey
+      && providerLeaseOwner
+    ) {
       await releaseProviderFileProbe(db, identityKey, providerLeaseOwner);
     }
+  }
+}
+
+async function finalizeLanguageValidationTrackWindows(options: {
+  db: SupabaseClient;
+  jobId: string;
+  leaseOwner: string;
+  claim: JsonRecord;
+  current: Awaited<ReturnType<typeof revalidateLanguageValidationClaim>>;
+  targetUrl: string;
+  trackIndex: number;
+  windowState: StrictLidWindowState;
+  taskDeadlineAt: number;
+}) {
+  const {
+    db,
+    jobId,
+    leaseOwner,
+    claim,
+    current,
+    targetUrl,
+    trackIndex,
+    windowState,
+    taskDeadlineAt,
+  } = options;
+  const exactDurationSeconds = Number(current.exactProfile.profile.durationSeconds);
+  if (
+    windowState.position !== windowState.count ||
+    windowState.tokens.length !== windowState.count ||
+    new Set(windowState.tokens).size !== windowState.tokens.length ||
+    strictLidWindowCountForDuration(exactDurationSeconds) !== windowState.count ||
+    !current.expectedAudioIndices.includes(trackIndex)
+  ) {
+    throw new HttpError(409, "Strict language validation receipt set is incomplete", {
+      code: "LANGUAGE_VALIDATION_WINDOW_CURSOR_INVALID",
+    });
+  }
+  const body = JSON.stringify({ receipts: windowState.tokens });
+  if (new TextEncoder().encode(body).byteLength > LANGUAGE_VALIDATION_FINALIZE_BODY_MAX_BYTES) {
+    throw new HttpError(409, "Strict language validation receipt set is too large", {
+      code: "LANGUAGE_VALIDATION_WINDOW_RECEIPTS_INVALID",
+    });
+  }
+  const capabilityExpiresAt = new Date(
+    Date.now() + LANGUAGE_VALIDATION_LEASE_SECONDS * 1000,
+  ).toISOString();
+  const finalAccess = await createBytePipeCapability(
+    `language-validation-finalize:${jobId}:${trackIndex}:${crypto.randomUUID()}`,
+    current.userId,
+    targetUrl,
+    capabilityExpiresAt,
+    db,
+    null,
+    LANGUAGE_VALIDATION_SCOPE,
+    current.exactProfile.fileSizeBytes,
+    exactDurationSeconds,
+    {
+      windowCheckpointProtocol: LANGUAGE_VALIDATION_WINDOW_CHECKPOINT_PROTOCOL,
+      windowFinalize: true,
+      jobId,
+      profileFingerprint: current.fingerprint,
+      windowCount: windowState.count,
+    },
+  );
+  const fetchBudgetMs = languageValidationFetchBudgetMs(taskDeadlineAt);
+  if (fetchBudgetMs <= 0) {
+    await failLanguageValidationJob(db, {
+      jobId,
+      leaseOwner,
+      errorCode: "LANGUAGE_VALIDATION_TASK_BUDGET_EXHAUSTED",
+      retryAt: new Date(Date.now() + 30_000).toISOString(),
+    });
+    return;
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(
+      `${finalAccess.gatewayUrl}/detect-language/finalize?index=${trackIndex}`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${finalAccess.serviceToken}`,
+          "Content-Type": "application/json",
+          "X-Norva-Byte-Pipe-Token": finalAccess.capability,
+        },
+        body,
+        signal: AbortSignal.timeout(fetchBudgetMs),
+      },
+    );
+  } catch (error) {
+    await failLanguageValidationJob(db, {
+      jobId,
+      leaseOwner,
+      errorCode: error instanceof DOMException && error.name === "TimeoutError"
+        ? "LANGUAGE_VALIDATION_GATEWAY_TIMEOUT"
+        : "LANGUAGE_VALIDATION_GATEWAY_TRANSPORT",
+      retryAt: new Date(Date.now() + 30_000).toISOString(),
+    });
+    return;
+  }
+
+  const responseRead = await readLanguageValidationGatewayResponse(response);
+  if (!responseRead.ok) {
+    await failLanguageValidationJob(db, {
+      jobId,
+      leaseOwner,
+      errorCode: responseRead.errorCode,
+      retryAt: new Date(Date.now() + 30_000).toISOString(),
+    });
+    return;
+  }
+  const payload = recordOrEmpty(responseRead.payload);
+  const providerDrained = strictLanguageProviderDrainAttested(payload);
+  const gatewayCode = stringOr(payload.code ?? payload.errorCode ?? payload.error_code, "");
+  if (
+    response.status === 409 &&
+    gatewayCode === "strict_lid_checkpoint_reset_required" &&
+    payload.resetRequired === true &&
+    providerDrained
+  ) {
+    const { data: reset, error: resetError } = await db.rpc(
+      "reset_catalog_file_audio_validation_windows",
+      {
+        p_job_id: jobId,
+        p_lease_owner: leaseOwner,
+        p_stream_index: trackIndex,
+        p_window_position: windowState.position,
+        p_window_count: windowState.count,
+        p_window_protocol: windowState.protocol,
+      },
+    );
+    if (resetError || reset !== true) {
+      throw new HttpError(409, "Strict language validation receipt reset lost ownership", {
+        code: "LANGUAGE_VALIDATION_WINDOW_RESET_FAILED",
+      });
+    }
+    await failLanguageValidationJob(db, {
+      jobId,
+      leaseOwner,
+      errorCode: "LANGUAGE_VALIDATION_CHECKPOINT_RESET_REQUIRED",
+      retryAt: new Date(Date.now() + 30_000).toISOString(),
+    });
+    return;
+  }
+  if (!response.ok || !providerDrained) {
+    await failLanguageValidationJob(db, {
+      jobId,
+      leaseOwner,
+      errorCode: "LANGUAGE_VALIDATION_GATEWAY_ERROR",
+      retryAt: languageValidationGatewayRetryAt(response.status, gatewayCode, null),
+    });
+    return;
+  }
+  const accepted = strictLanguageValidationEvidence(payload, trackIndex);
+  if (!accepted) {
+    await failLanguageValidationJob(db, {
+      jobId,
+      leaseOwner,
+      errorCode: "LANGUAGE_VALIDATION_STRICT_CONSENSUS_PENDING",
+    });
+    return;
+  }
+  const { data: checkpoint, error: checkpointError } = await db.rpc(
+    "checkpoint_catalog_file_audio_validation_track",
+    {
+      p_job_id: jobId,
+      p_lease_owner: leaseOwner,
+      p_stream_index: trackIndex,
+      p_evidence: accepted,
+    },
+  );
+  if (checkpointError || !checkpoint) {
+    throw new HttpError(409, "Language validation track checkpoint was not persisted", {
+      code: "LANGUAGE_VALIDATION_CHECKPOINT_FAILED",
+    });
+  }
+  if (recordOrEmpty(checkpoint).complete === true) {
+    const finalCurrent = await revalidateLanguageValidationClaim(db, claim);
+    await finalizeLanguageValidationJob(db, jobId, leaseOwner, claim, finalCurrent);
   }
 }
 
@@ -2240,6 +2658,7 @@ function languageValidationTaskErrorIsTerminal(error: unknown) {
     "LANGUAGE_VALIDATION_CODEC_PROFILE_REQUIRED",
     "LANGUAGE_VALIDATION_CODEC_AUDIO_INVALID",
     "LANGUAGE_VALIDATION_DURATION_INVALID",
+    "LANGUAGE_VALIDATION_DURATION_TOO_SHORT",
     "LANGUAGE_VALIDATION_IDENTITY_REQUIRED",
     "LANGUAGE_VALIDATION_ACCESS_REVOKED",
   ]).has(code);
@@ -3834,10 +4253,30 @@ async function createBytePipeCapability(
   scope: string | null = null,
   fileSizeBytes: number | null = null,
   durationSeconds: number | null = null,
+  strictLidWindowClaims: StrictLidWindowCapabilityClaims | null = null,
 ) {
   const runtimeConfig = await getRuntimeConfig(_db);
   if (!runtimeConfig.mediaGatewayUrl || !runtimeConfig.mediaGatewayToken) {
     throw new HttpError(503, "Media gateway is not configured");
+  }
+  if (strictLidWindowClaims) {
+    const finalizing = strictLidWindowClaims.windowFinalize === true;
+    if (
+      strictLidWindowClaims.windowCheckpointProtocol !== LANGUAGE_VALIDATION_WINDOW_CHECKPOINT_PROTOCOL ||
+      !PLAYBACK_SESSION_UUID_PATTERN.test(strictLidWindowClaims.jobId) ||
+      !/^[a-f0-9]{64}$/.test(strictLidWindowClaims.profileFingerprint) ||
+      ![4, 6].includes(strictLidWindowClaims.windowCount) ||
+      (finalizing && strictLidWindowClaims.windowOrdinal !== undefined) ||
+      (!finalizing && (
+        !Number.isInteger(strictLidWindowClaims.windowOrdinal) ||
+        Number(strictLidWindowClaims.windowOrdinal) < 1 ||
+        Number(strictLidWindowClaims.windowOrdinal) > strictLidWindowClaims.windowCount
+      ))
+    ) {
+      throw new HttpError(409, "Strict language validation window claims are invalid", {
+        code: "LANGUAGE_VALIDATION_WINDOW_CLAIMS_INVALID",
+      });
+    }
   }
   const payload = JSON.stringify({
     v: 1,
@@ -3853,6 +4292,17 @@ async function createBytePipeCapability(
         Number(durationSeconds) > 0 &&
         Number(durationSeconds) <= 24 * 60 * 60
       ? { durationSeconds: Number(durationSeconds) }
+      : {}),
+    ...(strictLidWindowClaims
+      ? {
+        windowCheckpointProtocol: strictLidWindowClaims.windowCheckpointProtocol,
+        jobId: strictLidWindowClaims.jobId,
+        profileFingerprint: strictLidWindowClaims.profileFingerprint,
+        windowCount: strictLidWindowClaims.windowCount,
+        ...(strictLidWindowClaims.windowFinalize === true
+          ? { windowFinalize: true }
+          : { windowOrdinal: strictLidWindowClaims.windowOrdinal }),
+      }
       : {}),
     exp: Math.floor(new Date(expiresAt).getTime() / 1000),
   });

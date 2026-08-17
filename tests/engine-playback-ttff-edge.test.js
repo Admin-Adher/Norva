@@ -38,6 +38,6 @@ test('engine playback never waits for provider track enrichment before returning
 });
 
 test('playback health publishes the non-blocking engine-track contract', () => {
-  assert.match(playback, /version:\s*51/);
+  assert.match(playback, /version:\s*52/);
   assert.match(playback, /engineTrackProbeBlocking:\s*false/);
 });
