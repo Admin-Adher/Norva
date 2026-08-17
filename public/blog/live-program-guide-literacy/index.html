@@ -135,7 +135,7 @@
 <p>Determine which time zone the guide uses and whether the interface displays local device time. A schedule timestamp may be supplied in Coordinated Universal Time and presented after local conversion. The IANA Time Zone Database tracks political and daylight-saving changes used by many systems; a fixed offset alone may not describe future or historical local time correctly.</p>
 <p>Use the guide time-zone worksheet when events appear shifted or cross midnight.</p>
 <h2 id="read-now-and-next-as-a-calculation">Read now-and-next as a calculation</h2>
-<p>“Now” is normally the event whose interval contains the current guide clock. “Next” is the following valid event for the same service. Verify service identity, current zone, event boundaries, and freshness before trusting the labels. The now-and-next checksum provides a quick repeatable test.</p>
+<p>“Now” is normally the event whose interval contains the current guide clock. “Next” is the following valid event for the same service. Verify service identity, current zone, event boundaries, and freshness before trusting the labels. <a href="/blog/read-now-and-next-guide/">The now-and-next checksum</a> provides a quick repeatable test.</p>
 <p>A progress bar is generally derived from elapsed time divided by scheduled duration. It can look precise while the underlying schedule is stale. Read it as a visual estimate based on guide data.</p>
 <h2 id="check-freshness-before-drawing-conclusions">Check freshness before drawing conclusions</h2>
 <p>Record when the schedule was fetched or refreshed, the coverage window, and whether a recent event boundary transitioned correctly. A guide that still shows yesterday’s event as current may have a clock, zone, cache, or source update problem.</p>
@@ -165,7 +165,16 @@
       <h2>Sources</h2>
       <ul><li><a href="https://dvb.org/metadata/" target="_blank" rel="noopener">https://dvb.org/metadata/</a></li><li><a href="https://dvb.org/resources/public/standards/a177_dvb-i_specification.pdf" target="_blank" rel="noopener">https://dvb.org/resources/public/standards/a177_dvb-i_specification.pdf</a></li><li><a href="https://www.iana.org/time-zones" target="_blank" rel="noopener">https://www.iana.org/time-zones</a></li><li><a href="https://norva.tv/#how-it-works" target="_blank" rel="noopener">https://norva.tv/#how-it-works</a></li></ul>
     </section>
-      
+      <section class="related">
+      <h2>Related reading</h2>
+      <div class="related-grid">
+        <a class="card" href="/blog/read-now-and-next-guide/">
+          <span class="tag">Live Guide Literacy</span>
+          <div class="card-title">How to Read Now-and-Next Information Quickly</div>
+          <p>A now-and-next checksum turns two compact labels into a traceable service, clock, interval, sequence, and freshness decision.</p>
+        </a>
+      </div>
+    </section>
     </article>
   </main>
   <footer class="blog-footer">
