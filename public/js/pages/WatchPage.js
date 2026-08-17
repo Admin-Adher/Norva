@@ -1410,6 +1410,15 @@ class WatchPage {
             ?? gatewaySession?.multiAudioHls
             ?? gatewaySession?.multi_audio_hls
             ?? null;
+        const startupPolicy = extra.startupPolicy
+            ?? extra.startup_policy
+            ?? root.startupPolicy
+            ?? root.startup_policy
+            ?? nestedPlayback.startupPolicy
+            ?? nestedPlayback.startup_policy
+            ?? gatewaySession?.startupPolicy
+            ?? gatewaySession?.startup_policy
+            ?? null;
 
         return {
             ...nestedPlayback,
@@ -1423,6 +1432,7 @@ class WatchPage {
             gatewaySession,
             audioRenditions,
             multiAudioHls,
+            startupPolicy,
             codecProfile: extra.codecProfile
                 || extra.codec_profile
                 || root.codecProfile
@@ -1797,6 +1807,10 @@ class WatchPage {
             audioStreamIndex: playbackMetadata.audioStreamIndex ?? playbackMetadata.audio_stream_index ?? null,
             audioRenditions: playbackMetadata.audioRenditions ?? playbackMetadata.audio_renditions ?? null,
             multiAudioHls: playbackMetadata.multiAudioHls ?? playbackMetadata.multi_audio_hls ?? null,
+            startupPolicy: playbackMetadata.startupPolicy ?? playbackMetadata.startup_policy
+                ?? playbackMetadata.gatewaySession?.startupPolicy
+                ?? playbackMetadata.gatewaySession?.startup_policy
+                ?? null,
             audioLanguageValidationStatus: playbackMetadata.audioLanguageValidationStatus ||
                 playbackMetadata.audio_language_validation_status ||
                 content.audioLanguageValidationStatus ||
@@ -4661,7 +4675,8 @@ class WatchPage {
             this.playHls(finalUrl, {
                 playbackAttemptId,
                 autoplay: options.autoplay !== false,
-                audioSwitchRequestId: options.audioSwitchRequestId
+                audioSwitchRequestId: options.audioSwitchRequestId,
+                startupPolicy: options.startupPolicy ?? options.startup_policy ?? null
             });
             const requestedOffset = Number(
                 options.requestedSeekOffset ??
@@ -4717,6 +4732,63 @@ class WatchPage {
         } catch (_) {
             return 0;
         }
+    }
+
+    normalizeGatewayStartupPolicy(value = null) {
+        const policy = value && typeof value === 'object' && !Array.isArray(value) ? value : null;
+        if (!policy || Number(policy.protocol) !== 2 || policy.eligible !== true) return null;
+
+        const pipeline = String(policy.pipeline || '').trim().toLowerCase();
+        if (pipeline !== 'copy' && pipeline !== 'audio-transcode' && pipeline !== 'video-transcode') return null;
+        const reason = String(policy.reason || '').trim().toLowerCase();
+        if (reason !== 'mkv-h264-copy-ready'
+            && reason !== 'complete-hls-cache-hit'
+            && reason !== 'vaapi-transcode-ready') return null;
+        if (reason === 'complete-hls-cache-hit' && pipeline !== 'copy') return null;
+        if (reason === 'vaapi-transcode-ready' && pipeline !== 'video-transcode') return null;
+        if (reason === 'mkv-h264-copy-ready' && pipeline === 'video-transcode') return null;
+
+        const targetBufferSeconds = Number(policy.targetBufferSeconds ?? policy.target_buffer_seconds);
+        const minimumEncodeRateX = Number(policy.minimumEncodeRateX ?? policy.minimum_encode_rate_x);
+        const observedEncodeRateX = Number(policy.observedEncodeRateX ?? policy.observed_encode_rate_x);
+        if (!Number.isFinite(targetBufferSeconds)
+            || targetBufferSeconds < 6
+            || targetBufferSeconds > 24
+            || !Number.isFinite(minimumEncodeRateX)
+            || minimumEncodeRateX < 1.15
+            || minimumEncodeRateX > 20
+            || (reason === 'vaapi-transcode-ready' && minimumEncodeRateX < 2)
+            || !Number.isFinite(observedEncodeRateX)
+            || observedEncodeRateX < minimumEncodeRateX
+            || observedEncodeRateX > 20) {
+            return null;
+        }
+
+        return {
+            protocol: 2,
+            eligible: true,
+            pipeline,
+            reason,
+            targetBufferSeconds,
+            minimumEncodeRateX,
+            observedEncodeRateX,
+        };
+    }
+
+    gatewayStartupBufferOptions(startupPolicy = null) {
+        const policy = this.normalizeGatewayStartupPolicy(startupPolicy);
+        if (!policy) {
+            return {
+                minimumSeconds: 96,
+                timeoutMs: 360000,
+                policy: null,
+            };
+        }
+        return {
+            minimumSeconds: policy.targetBufferSeconds,
+            timeoutMs: 45000,
+            policy,
+        };
     }
 
     async waitForGatewayStartupBuffer(playbackAttemptId, hls, options = {}) {
@@ -4808,6 +4880,9 @@ class WatchPage {
         });
 
         const activeHls = this.hls;
+        const gatewayStartupBuffer = isGatewaySession
+            ? this.gatewayStartupBufferOptions(options.startupPolicy)
+            : null;
         let gatewayStartupBufferReady = !isGatewaySession;
         const resumeAfterHlsRecovery = () => {
             setTimeout(() => {
@@ -4920,16 +4995,13 @@ class WatchPage {
                         playbackAttemptId,
                         activeHls,
                         {
-                            // Gateway admission materializes 56 s in production,
-                            // but a 1-vCPU exact-MKV encode can continue at only
-                            // ~0.25x realtime. Build 96 real buffered seconds in
-                            // the browser so a two-minute viewing proof stays
-                            // smooth even when the live encoder adds just ~24 s.
-                            // This wait happens after session creation, outside
-                            // the synchronous Edge/Kong request deadline, and
-                            // remains bounded for slow cold exact-MKV encodes.
-                            minimumSeconds: 96,
-                            timeoutMs: 360000
+                            // A signed session policy may shorten the gate only
+                            // after Gateway proved a safe graph and measured
+                            // production above realtime. Unknown, slow or
+                            // malformed policies keep the deep 96-second
+                            // anti-stall buffer used by the legacy path.
+                            minimumSeconds: gatewayStartupBuffer.minimumSeconds,
+                            timeoutMs: gatewayStartupBuffer.timeoutMs
                         },
                     );
                 } catch (error) {
@@ -4951,6 +5023,7 @@ class WatchPage {
                         {
                             gateReadyAt: Date.now(),
                             bufferedAheadSeconds: this.gatewayBufferedAheadSeconds(),
+                            startupPolicy: gatewayStartupBuffer.policy,
                         },
                     );
                 }

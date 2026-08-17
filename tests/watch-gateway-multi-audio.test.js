@@ -181,6 +181,9 @@ function makePage(WatchPage, { validationStatus = 'verified' } = {}) {
         saveResumeSnapshotThrottled() { throw new Error('audio rendition switch must not save/reload'); },
         saveProgress() { throw new Error('audio rendition switch must not perform a network progress write'); },
         queueSelectedAudioTrackRestart() { throw new Error('audio rendition switch must not restart playback'); },
+        gatewayStartupBufferOptions() {
+            return { minimumSeconds: 96, timeoutMs: 360000, policy: null };
+        },
         waitForGatewayStartupBuffer() { gateCalls += 1; return Promise.resolve(true); },
         _reattachAiTrackIfActive() {},
         showLoading() {},

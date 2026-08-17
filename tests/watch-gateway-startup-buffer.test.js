@@ -31,7 +31,7 @@ function loadMethod(name, nextName, globals = {}) {
 test('Gateway buffered-ahead measurement uses only the range containing currentTime', () => {
     const gatewayBufferedAheadSeconds = loadMethod(
         'gatewayBufferedAheadSeconds',
-        'waitForGatewayStartupBuffer',
+        'normalizeGatewayStartupPolicy',
     );
     const page = {
         video: {
@@ -50,7 +50,7 @@ test('Gateway buffered-ahead measurement uses only the range containing currentT
 test('Gateway buffered-ahead measurement fails closed when live TimeRanges mutates', () => {
     const gatewayBufferedAheadSeconds = loadMethod(
         'gatewayBufferedAheadSeconds',
-        'waitForGatewayStartupBuffer',
+        'normalizeGatewayStartupPolicy',
     );
     const page = {
         video: {
@@ -69,6 +69,100 @@ test('Gateway buffered-ahead measurement fails closed when live TimeRanges mutat
     };
 
     assert.equal(gatewayBufferedAheadSeconds.call(page), 0);
+});
+
+test('Gateway fast-start policy accepts only measured copy, complete-cache, or VAAPI graphs', () => {
+    const normalizeGatewayStartupPolicy = loadMethod(
+        'normalizeGatewayStartupPolicy',
+        'gatewayStartupBufferOptions',
+    );
+    const valid = {
+        protocol: 2,
+        eligible: true,
+        pipeline: 'audio-transcode',
+        reason: 'mkv-h264-copy-ready',
+        targetBufferSeconds: 6,
+        minimumEncodeRateX: 1.15,
+        observedEncodeRateX: 1.42,
+    };
+
+    assert.deepEqual(
+        normalizeGatewayStartupPolicy.call({}, valid),
+        valid,
+    );
+    const completeCache = {
+        ...valid,
+        pipeline: 'copy',
+        reason: 'complete-hls-cache-hit',
+        observedEncodeRateX: 20,
+    };
+    assert.deepEqual(
+        normalizeGatewayStartupPolicy.call({}, completeCache),
+        completeCache,
+    );
+    const vaapiTranscode = {
+        ...valid,
+        pipeline: 'video-transcode',
+        reason: 'vaapi-transcode-ready',
+        minimumEncodeRateX: 2,
+        observedEncodeRateX: 12,
+    };
+    assert.deepEqual(
+        normalizeGatewayStartupPolicy.call({}, vaapiTranscode),
+        vaapiTranscode,
+    );
+
+    const invalidMutations = [
+        null,
+        [],
+        { ...valid, protocol: 1 },
+        { ...valid, eligible: false },
+        { ...valid, pipeline: 'video-transcode' },
+        { ...valid, reason: 'encode-rate-below-minimum' },
+        { ...completeCache, pipeline: 'audio-transcode' },
+        { ...vaapiTranscode, pipeline: 'copy' },
+        { ...vaapiTranscode, minimumEncodeRateX: 1.99 },
+        { ...valid, targetBufferSeconds: 5.99 },
+        { ...valid, targetBufferSeconds: 24.01 },
+        { ...valid, minimumEncodeRateX: 1.14 },
+        { ...valid, observedEncodeRateX: 1.149 },
+        { ...valid, observedEncodeRateX: 21 },
+    ];
+    for (const mutation of invalidMutations) {
+        assert.equal(normalizeGatewayStartupPolicy.call({}, mutation), null);
+    }
+});
+
+test('Gateway startup buffer shortens to six seconds only for an admitted fast path', () => {
+    const gatewayStartupBufferOptions = loadMethod(
+        'gatewayStartupBufferOptions',
+        'waitForGatewayStartupBuffer',
+    );
+    const valid = {
+        protocol: 2,
+        eligible: true,
+        pipeline: 'copy',
+        reason: 'mkv-h264-copy-ready',
+        targetBufferSeconds: 6,
+        minimumEncodeRateX: 1.15,
+        observedEncodeRateX: 3.25,
+    };
+    const page = {
+        normalizeGatewayStartupPolicy(value) {
+            return value === valid ? valid : null;
+        },
+    };
+
+    assert.deepEqual(gatewayStartupBufferOptions.call(page, valid), {
+        minimumSeconds: 6,
+        timeoutMs: 45000,
+        policy: valid,
+    });
+    assert.deepEqual(gatewayStartupBufferOptions.call(page, { ...valid, eligible: false }), {
+        minimumSeconds: 96,
+        timeoutMs: 360000,
+        policy: null,
+    });
 });
 
 test('Gateway autoplay gate holds at 56 and 95.9 seconds, then admits 96.1 seconds', async () => {
@@ -143,10 +237,10 @@ test('Gateway manifest handler gates play and fails closed without opening a ret
     const playAt = handler.indexOf('this.video.play()');
 
     assert.ok(gateAt >= 0 && playAt > gateAt, 'Gateway buffer gate must settle before autoplay');
-    assert.match(handler, /minimumSeconds:\s*96/,
-        'Gateway playback must mirror the production proof buffer before autoplay');
-    assert.match(handler, /timeoutMs:\s*360000/,
-        'the deeper browser buffer needs a bounded slow-encode fill budget');
+    assert.match(handler, /minimumSeconds:\s*gatewayStartupBuffer\.minimumSeconds/,
+        'Gateway playback must consume only the normalized per-session buffer policy');
+    assert.match(handler, /timeoutMs:\s*gatewayStartupBuffer\.timeoutMs/,
+        'the fast and fallback paths keep independently bounded fill budgets');
     assert.match(handler, /if \(!bufferReady\)[\s\S]*releasePlaybackPipelineForRetry/);
     assert.doesNotMatch(handler, /getStreamUrl|createSession|retryPlaybackInPlace/,
         'a buffer timeout must not mint another provider session');
@@ -196,6 +290,7 @@ test('Gateway media recovery cannot play before the startup buffer gate settles'
         _playbackAttemptId: 1,
         isGatewayPlaybackUrl: () => true,
         isStalePlaybackAttempt: () => false,
+        gatewayStartupBufferOptions: () => ({ minimumSeconds: 96, timeoutMs: 360000, policy: null }),
         waitForGatewayStartupBuffer: () => gate,
         gatewayBufferedAheadSeconds: () => 96.25,
         updateGatewayAudioSwitchMetrics: (requestId, status, details) => {
@@ -239,6 +334,25 @@ test('Gateway media recovery cannot play before the startup buffer gate settles'
     assert.equal(playCalls, 1, 'the manifest path starts playback exactly once after the gate');
     assert.deepEqual(switchMetrics.map(metric => metric.status), ['gateway_gate_ready', 'playing']);
     assert.equal(switchMetrics[0].details.bufferedAheadSeconds, 96.25);
+    assert.equal(switchMetrics[0].details.startupPolicy, null);
+});
+
+test('Playback metadata forwards Gateway fast-start policy into the HLS attachment only', () => {
+    const metadataStart = source.indexOf('    playbackMetadataFromResult(');
+    const metadataEnd = source.indexOf('\n    normalizePlaybackCodecProfile(', metadataStart);
+    const metadata = source.slice(metadataStart, metadataEnd);
+    const playStart = source.indexOf('    async play(');
+    const playEnd = source.indexOf('\n    updateMediaSessionMetadata(', playStart);
+    const play = source.slice(playStart, playEnd);
+    const loadStart = source.indexOf('    async loadVideo(');
+    const loadEnd = source.indexOf('\n    gatewayBufferedAheadSeconds(', loadStart);
+    const load = source.slice(loadStart, loadEnd);
+
+    assert.match(metadata, /gatewaySession\?\.startupPolicy/);
+    assert.match(play, /startupPolicy:\s*playbackMetadata\.startupPolicy/);
+    assert.match(load, /startupPolicy:\s*options\.startupPolicy/);
+    assert.doesNotMatch(load, /createSession|getStreamUrl|retryPlaybackInPlace/,
+        'policy forwarding must not open a second lane');
 });
 
 test('Gateway seek delegates autoplay to loadVideo instead of bypassing its buffer gate', () => {
