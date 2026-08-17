@@ -197,7 +197,7 @@ test('v82 production detect-only is signed-scope only, non-strict and falls back
   assert.notEqual(routeEnd, -1);
   const route = gateway.slice(routeStart, routeEnd);
 
-  assert.match(gateway, /const GATEWAY_VERSION = 102/);
+  assert.match(gateway, /const GATEWAY_VERSION = 103/);
   assert.match(gateway, /const LID_DETECT_ONLY_SCOPE = 'lid-production-detect-only'/);
   assert.match(gateway, /const LID_SHADOW_SCOPE = 'lid-shadow'/);
   assert.match(
@@ -259,7 +259,7 @@ test('v82 production detect-only is signed-scope only, non-strict and falls back
   // multi-window full-transcript consensus.
   assert.match(route, /const detectOnlyMode = !strict/);
   assert.match(route, /const strictTimelineOffsets = strict[\s\S]*strictLidTimelineOffsets\(strictDurationSeconds, dur\)/);
-  assert.match(route, /const offsets =[\s\S]*strict \? strictTimelineOffsets : WHISPER_SWEEP_OFFSETS/);
+  assert.match(route, /const offsets =[\s\S]*strictWindowContext[\s\S]*strictTimelineOffsets[\s\S]*WHISPER_SWEEP_OFFSETS/);
   assert.match(route, /strictSamples\.length >= consensusNeeded/);
   assert.match(route, /strictRejectedSpeechSamples === 0/);
   assert.match(route, /strictDisposition === 'conflict'/);
