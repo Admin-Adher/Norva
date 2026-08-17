@@ -768,7 +768,7 @@ test('strict LID rejects invalid exact signed coordinates before creating a serv
   assert.match(route, /detectLanguageRequestPolicy\(req, options\)[\s\S]*validateDetectLanguageCapability\(capabilityToken, policy\.requiredScope\)/);
   assert.match(gatewaySource, /strictLidLoopbackBrokerProtocol: 1/);
   assert.match(gatewaySource, /strictLidFileSizeClaim: 'fileSizeBytes'/);
-  assert.match(gatewaySource, /const GATEWAY_VERSION = 102/);
+  assert.match(gatewaySource, /const GATEWAY_VERSION = 103/);
   assert.match(gatewaySource, /strictLidProviderDrainProtocol: 1/);
   assert.match(gatewaySource, /strictLidWeakFallbackProtocol: 1/);
   assert.match(gatewaySource, /strictLidTimelineSamplingProtocol: 1/);
@@ -974,7 +974,7 @@ test('strict ffmpeg uses only loopback while provider identity remains in the ba
   assert.match(extraction, /strictLoopback \? redactStrictLidLoopback\(stderr\) : stderr/);
   assert.match(
     extraction,
-    /'-rw_timeout', strictLoopback \? String\(STRICT_LID_FFMPEG_RW_TIMEOUT_US\) : '15000000'/,
+    /'-rw_timeout', strictLoopback[\s\S]*STRICT_LID_CHECKPOINT_FFMPEG_RW_TIMEOUT_US[\s\S]*STRICT_LID_FFMPEG_RW_TIMEOUT_US[\s\S]*: '15000000'/,
   );
 
   const envStart = gatewaySource.indexOf('function loopbackOnlyEnv()');

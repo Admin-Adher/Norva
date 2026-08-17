@@ -1112,13 +1112,13 @@ test('v102 route exposes the bounded budget rebalance and fails a broken Whisper
   const routeStart = gateway.indexOf('async function handleDetectLanguageRequest(');
   const routeEnd = gateway.indexOf('// Service-only A/B benchmark.', routeStart);
   const route = gateway.slice(routeStart, routeEnd);
-  assert.match(gateway, /const GATEWAY_VERSION = 102;/);
+  assert.match(gateway, /const GATEWAY_VERSION = 103;/);
   assert.match(gateway, /const STRICT_LID_REQUEST_BUDGET_MS = clampInt\([\s\S]*225_000,[\s\S]*225_000,/);
   assert.match(gateway, /strictLidBatchProtocol: 1/);
   assert.match(gateway, /strictLidActivityKindProtocol: 1/);
   assert.match(gateway, /strictLidCjkEvidenceProtocol: 1/);
   assert.match(gateway, /strictLidTranscriptDiversityProtocol: 1/);
-  assert.match(gateway, /strictLidExtractionTimeoutProtocol: 3/);
+  assert.match(gateway, /strictLidExtractionTimeoutProtocol: 4/);
   assert.match(gateway, /strictLidBudgetRebalanceProtocol: 1/);
   assert.match(gateway, /strictLidBatchFailureProtocol: 1/);
   assert.match(gateway, /strictLidTimelineSamplingProtocol: 1/);
@@ -1149,7 +1149,10 @@ test('v102 route exposes the bounded budget rebalance and fails a broken Whisper
   assert.match(route, /if \(strict && ex\.timedOut\) \{[\s\S]*?strictExtractionTimedOut = true;[\s\S]*?break;/);
   assert.match(route, /buildStrictLidExtractionObservability\(input\)/);
   assert.match(route, /strictWavSamples\.push\(\{ offset: off, path: wavPath \}\)/);
-  assert.match(route, /const batchTimeoutMs = strictWorkDeadlineAt - Date\.now\(\)/);
+  assert.match(
+    route,
+    /const batchTimeoutMs = strictLidWhisperBatchTimeoutMs\([\s\S]*strictWorkDeadlineAt,[\s\S]*Boolean\(strictWindowContext\)/,
+  );
   assert.match(route, /runStrictWhisperBatch\([\s\S]*strictWavSamples\.map/);
   assert.match(route, /strictLanguageBatchSampleResult\(batch\.samples\[index\], sample\.offset\)/);
   assert.equal((gateway.match(/evaluateStrictTranscriptEvidence\(/g) || []).length, 2);

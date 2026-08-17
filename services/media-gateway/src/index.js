@@ -21,6 +21,15 @@ const {
     strictLidTimelineOffsets,
 } = require('./strict-lid-batch');
 const {
+    STRICT_LID_WINDOW_CHECKPOINT_PROTOCOL,
+    STRICT_LID_WINDOW_ENVELOPE_PROTOCOL,
+    STRICT_LID_WINDOW_METHOD,
+    StrictLidWindowCheckpointError,
+    createStrictLidWindowReceipt,
+    openStrictLidWindowReceipt,
+    validateStrictLidWindowReceiptsInput,
+} = require('./strict-lid-window-checkpoint');
+const {
     classifyProviderFetchFailure,
     classifyProviderResponseFailure,
     isProxyAuthenticationFailure,
@@ -914,6 +923,10 @@ const STRICT_LID_REQUEST_BUDGET_MS = clampInt(
 const STRICT_LID_SAMPLE_DURATION_CAP_SECONDS = 20;
 const STRICT_LID_EXTRACTION_STARTUP_MARGIN_MS = 25_000;
 const STRICT_LID_WHISPER_RESERVE_MS = 50_000;
+// A resumable v103 request owns exactly one signed timeline window, so it may use the complete
+// extraction slice that v102 had to share across all windows. Whisper and provider drain retain
+// their unchanged, independent reserves inside the same 225 s request ceiling.
+const STRICT_LID_WINDOW_EXTRACTION_BUDGET_MS = 165_000;
 
 function strictLidSampleDurationSeconds(rawDuration, strict) {
     const parsed = Number.parseFloat(rawDuration);
@@ -943,6 +956,28 @@ function strictLidExtractionBudget(durationSeconds, workDeadlineAt, nowMs = Date
         availableMs,
         timeoutMs: Math.min(mediaTimeoutMs, availableMs),
     };
+}
+
+function strictLidWindowExtractionBudget(workDeadlineAt, nowMs = Date.now()) {
+    const rawAvailableMs = Number(workDeadlineAt) - Number(nowMs) - STRICT_LID_WHISPER_RESERVE_MS;
+    const availableMs = Number.isFinite(rawAvailableMs)
+        ? Math.max(0, Math.floor(rawAvailableMs))
+        : 0;
+    return {
+        mediaTimeoutMs: STRICT_LID_WINDOW_EXTRACTION_BUDGET_MS,
+        availableMs,
+        timeoutMs: Math.min(STRICT_LID_WINDOW_EXTRACTION_BUDGET_MS, availableMs),
+    };
+}
+
+function strictLidWhisperBatchTimeoutMs(workDeadlineAt, checkpointWindow, nowMs = Date.now()) {
+    const rawAvailableMs = Number(workDeadlineAt) - Number(nowMs);
+    const availableMs = Number.isFinite(rawAvailableMs)
+        ? Math.max(0, Math.floor(rawAvailableMs))
+        : 0;
+    return checkpointWindow
+        ? Math.min(STRICT_LID_WHISPER_RESERVE_MS, availableMs)
+        : availableMs;
 }
 
 function strictLidPostExtractionFailure({
@@ -1056,6 +1091,166 @@ function strictLanguageBatchSampleResult(whisper, offset) {
             sample: String(whisper?.text || '').slice(0, 160),
             offset,
         },
+    };
+}
+
+function strictLidWindowRuntimeBinding() {
+    const modelDigest = String(WHISPER_MODEL_SHA256 || WHISPER_MODEL_BUILD_SHA256 || '').toLowerCase();
+    const binaryDigest = String(WHISPER_BIN_SHA256 || WHISPER_BIN_BUILD_SHA256 || '').toLowerCase();
+    if (!/^[a-f0-9]{64}$/.test(modelDigest) || !/^[a-f0-9]{64}$/.test(binaryDigest)) return null;
+    const configDigest = crypto.createHash('sha256').update(JSON.stringify({
+        windowCheckpointProtocol: STRICT_LID_WINDOW_CHECKPOINT_PROTOCOL,
+        windowEvidenceEnvelopeProtocol: STRICT_LID_WINDOW_ENVELOPE_PROTOCOL,
+        method: STRICT_LID_WINDOW_METHOD,
+        modelDigest,
+        binaryDigest,
+        whisperCommit: String(WHISPER_CPP_COMMIT || ''),
+        consensus: WHISPER_STRICT_CONSENSUS,
+        minimumProbability: WHISPER_STRICT_MIN_PROBABILITY,
+        minimumWords: WHISPER_STRICT_MIN_WORDS,
+        minimumUniqueWords: WHISPER_STRICT_MIN_UNIQUE_WORDS,
+        sampleDurationSeconds: STRICT_LID_SAMPLE_DURATION_CAP_SECONDS,
+        transcriptDiversityProtocol: 1,
+        cjkEvidenceProtocol: 1,
+    })).digest('hex');
+    return Object.freeze({ modelDigest, configDigest });
+}
+
+function strictLidWindowClaimContext(claims, trackIndex, { finalize = false } = {}) {
+    if (!claims || typeof claims !== 'object' || Array.isArray(claims)) return null;
+    if (claims.windowCheckpointProtocol !== STRICT_LID_WINDOW_CHECKPOINT_PROTOCOL) return null;
+    if (finalize ? claims.windowFinalize !== true : (
+        Object.prototype.hasOwnProperty.call(claims, 'windowFinalize')
+        && claims.windowFinalize !== false
+    )) return null;
+    if (finalize && Object.prototype.hasOwnProperty.call(claims, 'windowOrdinal')) return null;
+    const jobId = String(claims.jobId || '').toLowerCase();
+    const profileFingerprint = String(claims.profileFingerprint || '').toLowerCase();
+    const userId = String(claims.uid || '');
+    const windowCount = claims.windowCount;
+    const windowOrdinal = finalize ? null : claims.windowOrdinal;
+    const fileSizeBytes = normalizeStrictLidFileSize(claims.fileSizeBytes);
+    const durationSeconds = normalizeStrictLidTimelineDurationSeconds(claims.durationSeconds);
+    if (
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(jobId)
+        || !/^[a-f0-9]{64}$/.test(profileFingerprint)
+        || !userId || userId.length > 256
+        || !Number.isInteger(trackIndex) || trackIndex < 0 || trackIndex > 1024
+        || ![4, 6].includes(windowCount)
+        || (!finalize && (!Number.isInteger(windowOrdinal) || windowOrdinal < 1 || windowOrdinal > windowCount))
+        || !fileSizeBytes
+        || durationSeconds === null
+    ) {
+        return null;
+    }
+    const offsets = strictLidTimelineOffsets(durationSeconds, STRICT_LID_SAMPLE_DURATION_CAP_SECONDS);
+    const runtime = strictLidWindowRuntimeBinding();
+    if (!offsets || offsets.length !== windowCount || !runtime) return null;
+    return Object.freeze({
+        jobId,
+        profileFingerprint,
+        userId,
+        trackIndex,
+        fileSizeBytes,
+        durationSeconds,
+        windowOrdinal,
+        windowCount,
+        offsets,
+        modelDigest: runtime.modelDigest,
+        configDigest: runtime.configDigest,
+    });
+}
+
+function strictLidWindowReceiptBinding(context, windowOrdinal) {
+    const offset = context.offsets[windowOrdinal - 1];
+    return {
+        jobId: context.jobId,
+        profileFingerprint: context.profileFingerprint,
+        userId: context.userId,
+        trackIndex: context.trackIndex,
+        fileSizeBytes: context.fileSizeBytes,
+        durationSeconds: context.durationSeconds,
+        windowOrdinal,
+        windowCount: context.windowCount,
+        offsetMilliseconds: Math.round(offset * 1000),
+        method: STRICT_LID_WINDOW_METHOD,
+        configDigest: context.configDigest,
+        modelDigest: context.modelDigest,
+    };
+}
+
+function strictLidWindowConsensusPayload(summary, expectedWindowCount, consensusNeeded) {
+    const evaluatedWindowCount = Number(summary?.evaluatedSampleCount || 0);
+    if (evaluatedWindowCount !== expectedWindowCount) return null;
+    const acceptedSamples = Array.isArray(summary.acceptedSamples) ? summary.acceptedSamples : [];
+    const votes = summary.votes instanceof Map ? summary.votes : new Map();
+    if (
+        summary.verified === true
+        && summary.bestAccepted
+        && acceptedSamples.length >= consensusNeeded
+        && votes.size === 1
+        && summary.rejectedSpeechSampleCount === 0
+    ) {
+        const language = acceptedSamples[0].language;
+        return {
+            ...summary.bestAccepted,
+            sample: '',
+            language,
+            candidate: language,
+            confident: true,
+            verified: true,
+            validationStatus: 'verified',
+            method: STRICT_LID_WINDOW_METHOD,
+            consensus: acceptedSamples.length,
+            samples: acceptedSamples,
+            sampleCount: acceptedSamples.length,
+            evaluatedWindowCount,
+            rejectedSpeechSampleCount: 0,
+            ignoredWeakSpeechSampleCount: summary.ignoredWeakSpeechSampleCount,
+            repeatedSpeechSampleCount: summary.repeatedSpeechSampleCount,
+            missingDiversitySampleCount: summary.missingDiversitySampleCount,
+            minSampleProbability: Math.min(...acceptedSamples.map((sample) => sample.probability)),
+            minSampleWordCount: Math.min(...acceptedSamples.map((sample) => sample.wordCount)),
+            minSampleUniqueWordCount: Math.min(...acceptedSamples.map((sample) => sample.uniqueWordCount)),
+        };
+    }
+    const best = summary.best ? {
+        ...summary.best,
+        sample: '',
+        language: null,
+        confident: false,
+        verified: false,
+        validationStatus: 'pending',
+        method: STRICT_LID_WINDOW_METHOD,
+        consensus: Math.max(0, ...votes.values()),
+        samples: acceptedSamples,
+        sampleCount: acceptedSamples.length,
+        evaluatedWindowCount,
+        rejectedSpeechSampleCount: summary.rejectedSpeechSampleCount,
+        ignoredWeakSpeechSampleCount: summary.ignoredWeakSpeechSampleCount,
+        repeatedSpeechSampleCount: summary.repeatedSpeechSampleCount,
+        missingDiversitySampleCount: summary.missingDiversitySampleCount,
+    } : null;
+    return best || {
+        language: null,
+        candidate: null,
+        confidence: 0,
+        confident: false,
+        verified: false,
+        validationStatus: 'pending',
+        method: STRICT_LID_WINDOW_METHOD,
+        consensus: 0,
+        whisperLang: null,
+        transcriptLang: null,
+        wordCount: 0,
+        samples: [],
+        sampleCount: 0,
+        evaluatedWindowCount,
+        rejectedSpeechSampleCount: summary.rejectedSpeechSampleCount,
+        ignoredWeakSpeechSampleCount: summary.ignoredWeakSpeechSampleCount,
+        repeatedSpeechSampleCount: summary.repeatedSpeechSampleCount,
+        missingDiversitySampleCount: summary.missingDiversitySampleCount,
+        sample: '',
     };
 }
 // Full transcription (Phase 3) runs whisper on a whole film → much longer than the 20s LID clip.
@@ -1206,6 +1401,10 @@ const STRICT_LID_BROKER_IDLE_TIMEOUT_MS = clampInt(
 // libav must never abandon the private loopback before either the broker deadline or the outer
 // extraction deadline. This is microseconds (`-rw_timeout`) and intentionally exceeds 45 s.
 const STRICT_LID_FFMPEG_RW_TIMEOUT_US = 50_000_000;
+// The checkpoint route has a 165 s outer extraction timer. Keep libav's per-I/O guard beyond that
+// outer timer so the authoritative request controller wins, while the broker still enforces its
+// independent 30 s first-byte and 15 s idle deadlines.
+const STRICT_LID_CHECKPOINT_FFMPEG_RW_TIMEOUT_US = 170_000_000;
 // The finite-MKV input pump needs the exact terminal byte so every provider
 // request is bounded (`bytes=N-M`). A one-byte request supplies that size when
 // the exact codec profile did not already preserve ffprobe format.size.
@@ -1242,7 +1441,7 @@ const EXACT_MATROSKA_H264_MAX_HEIGHT = 1080;
 const EXACT_MATROSKA_H264_MAX_PIXELS = EXACT_MATROSKA_H264_MAX_WIDTH * EXACT_MATROSKA_H264_MAX_HEIGHT;
 const MULTI_AUDIO_HLS_PROTOCOL = 1;
 const MAX_MULTI_AUDIO_RENDITIONS = 8;
-const GATEWAY_VERSION = 102;
+const GATEWAY_VERSION = 103;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -1408,18 +1607,22 @@ app.get('/health', (req, res) => {
         strictLidActivityKindProtocol: 1,
         strictLidCjkEvidenceProtocol: 1,
         strictLidTranscriptDiversityProtocol: 1,
-        strictLidExtractionTimeoutProtocol: 3,
+        strictLidExtractionTimeoutProtocol: 4,
         strictLidBudgetRebalanceProtocol: 1,
+        strictLidWindowCheckpointProtocol: STRICT_LID_WINDOW_CHECKPOINT_PROTOCOL,
+        strictLidWindowEvidenceEnvelopeProtocol: STRICT_LID_WINDOW_ENVELOPE_PROTOCOL,
         strictLidBatchFailureProtocol: 1,
         strictLidTimelineSamplingProtocol: 1,
         strictLidRangeTimeoutProtocol: 2,
         strictLidRangeFirstByteTimeoutMs: STRICT_LID_BROKER_FIRST_BYTE_TIMEOUT_MS,
         strictLidRangeIdleTimeoutMs: STRICT_LID_BROKER_IDLE_TIMEOUT_MS,
         strictLidFfmpegRwTimeoutUs: STRICT_LID_FFMPEG_RW_TIMEOUT_US,
+        strictLidCheckpointFfmpegRwTimeoutUs: STRICT_LID_CHECKPOINT_FFMPEG_RW_TIMEOUT_US,
         strictLidSampleDurationCapSeconds: STRICT_LID_SAMPLE_DURATION_CAP_SECONDS,
         strictLidWhisperReserveMs: STRICT_LID_WHISPER_RESERVE_MS,
         strictLidExtractionStartupMarginMs: STRICT_LID_EXTRACTION_STARTUP_MARGIN_MS,
         strictLidExtractionAggregateBudgetMs: STRICT_LID_EXTRACTION_AGGREGATE_BUDGET_MS,
+        strictLidWindowExtractionBudgetMs: STRICT_LID_WINDOW_EXTRACTION_BUDGET_MS,
         strictLidRequestBudgetMs: STRICT_LID_REQUEST_BUDGET_MS,
         strictLidCapabilityHeader: 'X-Norva-Byte-Pipe-Token',
         strictLidCapabilityMethod: 'POST',
@@ -3355,6 +3558,24 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
     }
     const claims = validation.claims;
     const strict = policy.strict;
+    const hasStrictWindowMarker = Object.prototype.hasOwnProperty.call(
+        claims,
+        'windowCheckpointProtocol',
+    );
+    const strictWindowRequested = strict
+        && claims.windowCheckpointProtocol === STRICT_LID_WINDOW_CHECKPOINT_PROTOCOL;
+    if (
+        hasStrictWindowMarker
+        && (!strict || claims.windowCheckpointProtocol !== STRICT_LID_WINDOW_CHECKPOINT_PROTOCOL)
+    ) {
+        res.setHeader('Cache-Control', 'no-store');
+        return res.status(400).json({
+            error: 'Strict language window claims are invalid',
+            code: 'strict_lid_window_claims_invalid',
+            providerDrained: true,
+            providerDrainProtocol: 1,
+        });
+    }
     const strictRequestStartedAt = strict ? Date.now() : 0;
     const strictRequestDeadlineAt = strict
         ? strictRequestStartedAt + STRICT_LID_REQUEST_BUDGET_MS
@@ -3388,6 +3609,17 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
 
     const trackIndex = Number.parseInt(req.query.index, 10);
     if (!Number.isInteger(trackIndex) || trackIndex < 0) return res.status(400).json({ error: 'Invalid audio index' });
+    if (
+        strictWindowRequested
+        && !/^(?:0|[1-9][0-9]{0,3})$/.test(String(req.query.index ?? ''))
+    ) {
+        return res.status(400).json({
+            error: 'Strict language window claims are invalid',
+            code: 'strict_lid_window_claims_invalid',
+            providerDrained: true,
+            providerDrainProtocol: 1,
+        });
+    }
     const detectOnlyMode = !strict && WHISPER_DETECT_ONLY_PRODUCTION_AVAILABLE
         ? (
             claims.scope === LID_DETECT_ONLY_SCOPE
@@ -3417,13 +3649,29 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
     if (strict && Number.isFinite(explicitStart)) {
         return res.status(400).json({ error: 'Strict language validation requires separated samples' });
     }
+    const strictWindowContext = strictWindowRequested
+        ? strictLidWindowClaimContext(claims, trackIndex)
+        : null;
+    if (strictWindowRequested && !strictWindowContext) {
+        res.setHeader('Cache-Control', 'no-store');
+        return res.status(400).json({
+            error: 'Strict language window claims are invalid',
+            code: 'strict_lid_window_claims_invalid',
+            providerDrained: true,
+            providerDrainProtocol: 1,
+        });
+    }
     const offsets = (Number.isFinite(explicitStart) && explicitStart >= 0)
         ? [explicitStart]
-        : (strict ? strictTimelineOffsets : WHISPER_SWEEP_OFFSETS);
+        : (strict
+            ? (strictWindowContext
+                ? [strictWindowContext.offsets[strictWindowContext.windowOrdinal - 1]]
+                : strictTimelineOffsets)
+            : WHISPER_SWEEP_OFFSETS);
     const consensusNeeded = strict
         ? WHISPER_STRICT_CONSENSUS
         : Math.max(1, Math.min(3, Number.parseInt(req.query.consensus, 10) || 1));
-    if (strict && offsets.length < consensusNeeded) {
+    if (strict && !strictWindowContext && offsets.length < consensusNeeded) {
         return res.status(503).json({ error: 'Strict language validation needs at least four configured offsets' });
     }
 
@@ -3531,14 +3779,17 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
             console.info(JSON.stringify(buildStrictLidExtractionObservability(input)));
         };
         for (const [offsetIndex, off] of offsets.entries()) {
+            const observedWindowOrdinal = strictWindowContext?.windowOrdinal || offsetIndex + 1;
             let wavPath = null;
             try {
                 const extractionBudget = strict
-                    ? strictLidExtractionBudget(dur, strictWorkDeadlineAt)
+                    ? (strictWindowContext
+                        ? strictLidWindowExtractionBudget(strictWorkDeadlineAt)
+                        : strictLidExtractionBudget(dur, strictWorkDeadlineAt))
                     : null;
                 if (strict && extractionBudget.timeoutMs <= 0) {
                     logStrictExtractionWindow({
-                        windowOrdinal: offsetIndex + 1,
+                        windowOrdinal: observedWindowOrdinal,
                         elapsedMs: 0,
                         timeoutMs: 0,
                         providerFetches: 0,
@@ -3572,11 +3823,12 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
                         strictBroker ? {
                             strictLoopback: true,
                             providerSourceUrl: claims.url,
+                            ...(strictWindowContext ? { checkpointWindow: true } : {}),
                         } : null,
                     ));
                 if (strict) {
                     logStrictExtractionWindow({
-                        windowOrdinal: offsetIndex + 1,
+                        windowOrdinal: observedWindowOrdinal,
                         elapsedMs: Math.max(0, Date.now() - extractionStartedAt),
                         timeoutMs: extractionBudget.timeoutMs,
                         providerFetches: Math.max(
@@ -3868,7 +4120,10 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
         }
         if (requestController.signal.aborted && !res.writableEnded) return;
         if (strict && strictWavSamples.length > 0) {
-            const batchTimeoutMs = strictWorkDeadlineAt - Date.now();
+            const batchTimeoutMs = strictLidWhisperBatchTimeoutMs(
+                strictWorkDeadlineAt,
+                Boolean(strictWindowContext),
+            );
             if (batchTimeoutMs <= 0) {
                 expireStrictWorkBudget();
             } else {
@@ -3891,6 +4146,26 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
                     const evaluated = strictWavSamples.map((sample, index) => (
                         strictLanguageBatchSampleResult(batch.samples[index], sample.offset)
                     ));
+                    if (strictWindowContext) {
+                        if (evaluated.length !== 1) {
+                            throw new Error('strict window inference returned an invalid sample count');
+                        }
+                        const receipt = createStrictLidWindowReceipt({
+                            secret: GATEWAY_TOKEN,
+                            binding: strictLidWindowReceiptBinding(
+                                strictWindowContext,
+                                strictWindowContext.windowOrdinal,
+                            ),
+                            evidence: evaluated[0],
+                        });
+                        res.setHeader('Cache-Control', 'no-store');
+                        return sendDetectionJson(200, {
+                            windowCheckpointProtocol: STRICT_LID_WINDOW_CHECKPOINT_PROTOCOL,
+                            windowOrdinal: strictWindowContext.windowOrdinal,
+                            windowCount: strictWindowContext.windowCount,
+                            receipt,
+                        });
+                    }
                     strictEvaluatedWindowCount = evaluated.length;
                     const summary = resolveStrictLidConsensus(evaluated, consensusNeeded);
                     strictSamples.push(...summary.acceptedSamples);
@@ -4045,6 +4320,90 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
     }
 }
 
+async function handleFinalizeStrictLidWindows(req, res, capabilityToken) {
+    const validation = validateDetectLanguageCapability(capabilityToken, LID_LEGACY_FULL_SCOPE);
+    if (!validation.claims) {
+        return res.status(validation.status).json({
+            error: validation.error,
+            providerDrained: true,
+            providerDrainProtocol: 1,
+        });
+    }
+    const rawTrackIndex = String(req?.query?.index ?? '');
+    if (!/^(?:0|[1-9][0-9]{0,3})$/.test(rawTrackIndex)) {
+        return res.status(400).json({
+            error: 'Strict language window claims are invalid',
+            code: 'strict_lid_window_claims_invalid',
+            providerDrained: true,
+            providerDrainProtocol: 1,
+        });
+    }
+    const trackIndex = Number(rawTrackIndex);
+    const context = strictLidWindowClaimContext(validation.claims, trackIndex, { finalize: true });
+    if (!context) {
+        return res.status(400).json({
+            error: 'Strict language window claims are invalid',
+            code: 'strict_lid_window_claims_invalid',
+            providerDrained: true,
+            providerDrainProtocol: 1,
+        });
+    }
+    const body = req.body;
+    if (
+        !body || typeof body !== 'object' || Array.isArray(body)
+        || Object.keys(body).length !== 1
+        || !Array.isArray(body.receipts)
+    ) {
+        return res.status(400).json({
+            error: 'Strict language window receipts are invalid',
+            code: 'strict_lid_receipts_invalid',
+            providerDrained: true,
+            providerDrainProtocol: 1,
+        });
+    }
+    let receipts;
+    let evaluated;
+    try {
+        receipts = validateStrictLidWindowReceiptsInput(body.receipts, context.windowCount);
+        evaluated = receipts.map((receipt, index) => openStrictLidWindowReceipt({
+            secret: GATEWAY_TOKEN,
+            receipt,
+            binding: strictLidWindowReceiptBinding(context, index + 1),
+        }));
+    } catch (error) {
+        if (!(error instanceof StrictLidWindowCheckpointError)) throw error;
+        return res.status(409).json({
+            error: 'Strict language window checkpoints must be reset',
+            code: 'strict_lid_checkpoint_reset_required',
+            retryable: true,
+            resetRequired: true,
+            providerDrained: true,
+            providerDrainProtocol: 1,
+        });
+    }
+    const summary = resolveStrictLidConsensus(evaluated, WHISPER_STRICT_CONSENSUS);
+    const payload = strictLidWindowConsensusPayload(
+        summary,
+        context.windowCount,
+        WHISPER_STRICT_CONSENSUS,
+    );
+    if (!payload) {
+        return res.status(409).json({
+            error: 'Strict language window checkpoints must be reset',
+            code: 'strict_lid_checkpoint_reset_required',
+            retryable: true,
+            resetRequired: true,
+            providerDrained: true,
+            providerDrainProtocol: 1,
+        });
+    }
+    return res.status(200).json({
+        ...payload,
+        providerDrained: true,
+        providerDrainProtocol: 1,
+    });
+}
+
 function detectLanguageCapabilityFromHeader(req) {
     const token = String(req?.get?.(LID_CAPABILITY_HEADER) || '').trim();
     if (!token || token.length > 8192) return null;
@@ -4071,6 +4430,18 @@ app.post('/detect-language', setDetectLanguageSecurityHeaders, requireGatewayAut
     return handleDetectLanguageRequest(req, res, capabilityToken, {
         requiredScope: LID_LEGACY_FULL_SCOPE,
     });
+});
+
+app.post('/detect-language/finalize', setDetectLanguageSecurityHeaders, requireGatewayAuth, async (req, res) => {
+    const capabilityToken = detectLanguageCapabilityFromHeader(req);
+    if (!capabilityToken) {
+        return res.status(401).json({
+            error: 'Invalid byte-pipe token',
+            providerDrained: true,
+            providerDrainProtocol: 1,
+        });
+    }
+    return handleFinalizeStrictLidWindows(req, res, capabilityToken);
 });
 
 // Temporary compatibility route for already-issued clients. New callers must
@@ -4922,6 +5293,7 @@ function extractAudioWav(
         }
         const outputPath = path.join(os.tmpdir(), `norva-audio-${Date.now()}-${crypto.randomUUID()}.wav`);
         const strictLoopback = inputOptions?.strictLoopback === true;
+        const strictCheckpointWindow = strictLoopback && inputOptions?.checkpointWindow === true;
         const providerSourceUrl = strictLoopback && isHttpUrl(inputOptions?.providerSourceUrl)
             ? String(inputOptions.providerSourceUrl)
             : url;
@@ -4937,7 +5309,11 @@ function extractAudioWav(
                 '-reconnect', '1', '-reconnect_streamed', '1',
                 '-reconnect_delay_max', '5',
             ] : []),
-            '-rw_timeout', strictLoopback ? String(STRICT_LID_FFMPEG_RW_TIMEOUT_US) : '15000000',
+            '-rw_timeout', strictLoopback
+                ? String(strictCheckpointWindow
+                    ? STRICT_LID_CHECKPOINT_FFMPEG_RW_TIMEOUT_US
+                    : STRICT_LID_FFMPEG_RW_TIMEOUT_US)
+                : '15000000',
             '-headers', strictLoopback
                 ? 'Accept: */*\r\nConnection: close\r\n'
                 : 'Accept: */*\r\nConnection: keep-alive\r\n',
