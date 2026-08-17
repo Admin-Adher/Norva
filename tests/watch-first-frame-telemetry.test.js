@@ -130,6 +130,34 @@ test('requestVideoFrameCallback is authoritative and first_frame is emitted exac
   assert.equal(events[0].extra.metadata.frameEvidence, 'video-frame-callback');
 });
 
+test('gateway HLS telemetry keeps Gateway authority when hls.js exposes a blob media source', () => {
+  const WatchPage = loadWatchPage();
+  const page = Object.create(WatchPage.prototype);
+  Object.assign(page, {
+    video: {
+      currentSrc: 'blob:https://norva.tv/active-media-source',
+      src: 'blob:https://norva.tv/active-media-source',
+    },
+    currentPlaybackMode: 'gateway-session',
+    currentUrl: 'https://media.norva.tv/sessions/session-1/playlist.m3u8?token=redacted',
+    baseStreamUrl: null,
+    hls: null,
+  });
+
+  assert.equal(page.getTelemetryCurrentSrcType(), 'gateway');
+
+  page.currentPlaybackMode = 'direct-hls';
+  page.currentUrl = 'https://provider.example/movie.m3u8';
+  assert.equal(page.getTelemetryCurrentSrcType(), 'direct');
+
+  page.currentPlaybackMode = 'gateway-session';
+  assert.equal(
+    page.getTelemetryCurrentSrcType(),
+    'direct',
+    'mode alone must not promote an unbound blob to Gateway evidence'
+  );
+});
+
 test('fallback requires playing media with readyState >= 2 and remains exactly once', () => {
   const video = {
     readyState: 1,

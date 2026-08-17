@@ -2660,7 +2660,7 @@ class WatchPage {
                 providerTmdbId: this.content?.providerTmdbId || this.content?.data?.providerTmdbId || null,
                 titleId: this.content?.titleId || this.content?.title_id || this.content?.data?.titleId || null,
                 readyState: this.video?.readyState ?? null,
-                currentSrcType: this.video?.currentSrc ? (this.isGatewayPlaybackUrl(this.video.currentSrc) ? 'gateway' : 'direct') : null,
+                currentSrcType: this.getTelemetryCurrentSrcType(),
                 // Codec-mix telemetry (the 3rd sizing unknown, docs §9.8/§10): the
                 // container extension is a reliable codec-path proxy (mp4->relay,
                 // mkv/ts->gateway, avi/...->engine); videoCodec when the profile is known.
@@ -2796,6 +2796,21 @@ class WatchPage {
     isGatewayPlaybackUrl(url) {
         const value = String(url || '');
         return /\/sessions\/[^/?#]+\/playlist\.m3u8/i.test(value);
+    }
+
+    getTelemetryCurrentSrcType() {
+        const mediaElementSrc = String(this.video?.currentSrc || this.video?.src || '').trim();
+        const gatewaySourceUrl = [this.currentUrl, this.baseStreamUrl, this.hls?.url]
+            .find((url) => this.isGatewayPlaybackUrl(url));
+
+        // hls.js attaches a blob: MediaSource to the video element. Preserve the
+        // server-owned playback authority in telemetry only when both the active
+        // lane and one of its retained source URLs prove a Gateway session.
+        if (this.currentPlaybackMode === 'gateway-session' && gatewaySourceUrl) {
+            return 'gateway';
+        }
+        if (!mediaElementSrc) return null;
+        return this.isGatewayPlaybackUrl(mediaElementSrc) ? 'gateway' : 'direct';
     }
 
     describePlaybackUrl(url) {
