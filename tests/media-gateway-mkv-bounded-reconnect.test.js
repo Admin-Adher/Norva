@@ -98,8 +98,14 @@ function pumpHarness(overrides = {}) {
         MKV_H264_FAST_START_COPY_ACTIVATION_READY: false,
         PassThrough,
         FFPROBE_PATH: 'ffprobe-test',
+        FFMPEG_PATH: 'ffmpeg-test',
         MKV_H264_FAST_START_ANALYZER_BUFFER_BYTES: 8 * 1024 * 1024,
         MKV_H264_FAST_START_ANALYZER_STOP_TIMEOUT_MS: 100,
+        MKV_H264_FAST_START_ANALYZER_MAX_LINE_BYTES: 4 * 1024,
+        MKV_H264_FAST_START_ANALYZER_MAX_TIMELINE_RECORDS: 100_000,
+        MKV_H264_FAST_START_MIN_KEYFRAMES: 3,
+        MKV_H264_FAST_START_ANALYZER_TYPE: 'ffprobe-key-packets-plus-ffmpeg-idr-framecrc-v2',
+        MKV_H264_FAST_START_ANALYZER_DIGEST: 'a'.repeat(64),
         CODEC_PROBE_TIMEOUT_MS: 100,
         EXACT_MATROSKA_H264_HLS_TARGET_SECONDS: 2,
         EXACT_MATROSKA_H264_MAX_WIDTH: 1920,
@@ -126,6 +132,12 @@ function pumpHarness(overrides = {}) {
             last: null,
         },
         asRecord: (value) => value && typeof value === 'object' && !Array.isArray(value) ? value : {},
+        exactRecordKeys: (value, expected) => {
+            if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+            const actual = Object.keys(value).sort();
+            const wanted = [...expected].sort();
+            return actual.length === wanted.length && actual.every((key, index) => key === wanted[index]);
+        },
         compactRecord: (record) => Object.fromEntries(Object.entries(record || {}).filter(([, value]) => (
             value !== undefined && value !== null && value !== ''
         ))),
@@ -418,20 +430,27 @@ function mkvSession(fileSizeBytes) {
     };
 }
 
-function analyzerChild({ slow = false } = {}) {
+function analyzerChild({ slow = false, kind = 'packet' } = {}) {
     const child = new EventEmitter();
     child.stdout = new PassThrough();
     child.stderr = new PassThrough();
     child.kills = 0;
+    child.exited = false;
     child.stdin = new Writable({
         write(_chunk, _encoding, callback) {
             if (!slow) callback();
         },
         final(callback) {
             if (!slow) {
-                child.stdout.end('0.000000,0.000000,0.040000,K__\n2.000000,2.000000,0.040000,K__\n4.000000,4.000000,0.040000,K__\n');
+                child.stdout.end(kind === 'packet'
+                    ? 'packet|stream_index=0|pts=0|dts=N/A|duration=40|flags=K__\npacket|stream_index=0|pts=80|dts=0|duration=40|flags=___\npacket|stream_index=0|pts=2000|dts=1920|duration=40|flags=K__\npacket|stream_index=0|pts=4000|dts=3920|duration=40|flags=K__\nstream|index=0|profile=High|width=320|height=180|pix_fmt=yuv420p|level=40|refs=1|r_frame_rate=25/1|avg_frame_rate=25/1|time_base=1/1000\n'
+                    : '#tb 0: 1/1000\n0,0,0,40,100,0x01\n0,1920,2000,40,100,0x02\n0,3920,4000,40,100,0x03\n');
                 callback();
-                queueMicrotask(() => child.emit('exit', 0));
+                queueMicrotask(() => {
+                    child.exited = true;
+                    child.emit('exit', 0);
+                    child.emit('close', 0);
+                });
             }
         },
     });
@@ -440,10 +459,21 @@ function analyzerChild({ slow = false } = {}) {
         child.stdin.destroy();
         child.stdout.destroy();
         child.stderr.destroy();
-        queueMicrotask(() => child.emit('exit', null));
+        queueMicrotask(() => {
+            child.exited = true;
+            child.emit('exit', null);
+            child.emit('close', null);
+        });
         return true;
     };
     return child;
+}
+
+function analyzerChildPair(options = {}) {
+    return [
+        analyzerChild({ slow: options.slow === true || options.slowPacket === true, kind: 'packet' }),
+        analyzerChild({ slow: options.slow === true || options.slowIdr === true, kind: 'idr' }),
+    ];
 }
 
 test('bounded MKV pump forwards exact bytes, resumes at the exact offset, and never overlaps upstream sockets', async () => {
@@ -534,10 +564,55 @@ test('cold unknown-size MKV discovers total from the retained playback GET and o
     assert.equal(session.startupTimings.fileSizeDiscoveredFromPlaybackGet, true);
 });
 
+test('cold proof training reuses that one provider body for both local analyzers', async () => {
+    const fixture = mkvFixture(4_096);
+    const tracker = makeTracker();
+    const children = analyzerChildPair();
+    let spawned = 0;
+    let fetches = 0;
+    const h = pumpHarness({
+        MKV_H264_FAST_START_COPY_ACTIVATION_READY: true,
+        MKV_H264_FAST_START_PROOF_CURRENT_KEY: Buffer.alloc(32, 1),
+        mkvH264FastStartIdentityContext: () => ({ tenantScopeSha256: 'a', itemScopeSha256: 'b' }),
+        spawn: () => children[spawned++],
+        fetch: async () => {
+            fetches += 1;
+            return trackedResponse(tracker, {
+                chunks: [fixture],
+                headers: {
+                    'Content-Range': `bytes 0-${fixture.length - 1}/${fixture.length}`,
+                    'Content-Length': String(fixture.length),
+                    ETag: '"training-v1"',
+                },
+            });
+        },
+    });
+    const session = mkvSession(null);
+    delete session.fileSizeBytes;
+    delete session.codecProfile.fileSizeBytes;
+    session.codecProfile.videoCodec = 'h264';
+    session.codecProfile.audioTracks = [{ index: 1, codec: 'aac', channels: 2 }];
+    session.playbackIdentity = { sourceId: 's', itemType: 'movie', itemId: 'm' };
+    session.mkvH264FastStart = { eligible: false };
+    session.mode = 'remux';
+    await h.ensureBoundedMkvInputPump(session);
+    const writable = new CapturingWritable();
+    const result = await h.runBoundedMkvInputPump(session, writable, new AbortController().signal, null);
+    assert.equal(fetches, 1);
+    assert.equal(tracker.maxActive, 1);
+    assert.equal(spawned, 2, 'both analyzers are local children of the retained body');
+    assert.equal(result.bytesForwarded, fixture.length);
+    assert.equal(session.mkvH264FullFilePacketMetrics.closedGopIdrVerified, true);
+    assert.equal(session.mkvH264FullFilePacketMetrics.keyframeCount, 3);
+    assert.equal(session.mkvH264FullFilePacketMetrics.idrCount, 3);
+    assert.ok(children.every((child) => child.exited));
+});
+
 test('optional analyzer backpressure abandons proof without slowing the primary pump', async () => {
     const fixture = mkvFixture(4_096);
     const tracker = makeTracker();
-    const child = analyzerChild({ slow: true });
+    const children = analyzerChildPair({ slowIdr: true });
+    let spawned = 0;
     const analyzers = new Set();
     const h = pumpHarness({
         MKV_H264_FAST_START_COPY_ACTIVATION_READY: true,
@@ -545,7 +620,7 @@ test('optional analyzer backpressure abandons proof without slowing the primary 
         MKV_H264_FAST_START_ANALYZER_BUFFER_BYTES: 1,
         mkvH264FastStartIdentityContext: () => ({ tenantScopeSha256: 'a', itemScopeSha256: 'b' }),
         mkvH264FullFileAnalyzers: analyzers,
-        spawn: () => child,
+        spawn: () => children[spawned++],
         fetch: async () => trackedResponse(tracker, {
             chunks: [fixture],
             headers: {
@@ -562,7 +637,8 @@ test('optional analyzer backpressure abandons proof without slowing the primary 
     const result = await h.runBoundedMkvInputPump(session, writable, new AbortController().signal, null);
     assert.equal(result.bytesForwarded, fixture.length);
     assert.deepEqual(writable.bytes(), fixture);
-    assert.ok(child.kills >= 1);
+    assert.ok(children.some((child) => child.kills >= 1));
+    assert.ok(children.every((child) => child.exited));
     assert.equal(analyzers.size, 0);
     assert.equal(session.mkvH264FullFilePacketMetrics, null);
 });
@@ -573,7 +649,8 @@ test('provider error and abort reap the optional analyzer and preserve the prima
         ['abort', () => { const controller = new AbortController(); controller.abort(); return { fetch: async () => { throw new Error('must not fetch'); }, signal: controller.signal }; }, 'VOD_INPUT_ABORTED'],
     ]) {
         await t.test(label, async () => {
-            const child = analyzerChild();
+            const children = analyzerChildPair();
+            let spawned = 0;
             const analyzers = new Set();
             const scenario = setup();
             const h = pumpHarness({
@@ -581,7 +658,7 @@ test('provider error and abort reap the optional analyzer and preserve the prima
                 MKV_H264_FAST_START_PROOF_CURRENT_KEY: Buffer.alloc(32, 1),
                 mkvH264FastStartIdentityContext: () => ({ tenantScopeSha256: 'a', itemScopeSha256: 'b' }),
                 mkvH264FullFileAnalyzers: analyzers,
-                spawn: () => child,
+                spawn: () => children[spawned++],
                 fetch: scenario.fetch,
             });
             const session = mkvSession(64);
@@ -591,7 +668,8 @@ test('provider error and abort reap the optional analyzer and preserve the prima
                 h.runBoundedMkvInputPump(session, new CapturingWritable(), scenario.signal, null),
                 (error) => error?.code === expectedCode,
             );
-            assert.ok(child.kills >= 1);
+            assert.ok(children.some((child) => child.kills >= 1));
+            assert.ok(children.every((child) => child.exited));
             assert.equal(analyzers.size, 0);
             assert.equal(session.mkvH264FullFilePacketMetrics, undefined);
         });

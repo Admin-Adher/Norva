@@ -1290,10 +1290,10 @@ async function createPlaybackSession(
     });
   }
   const originalFastStartItemCas = mkvH264FastStartItemCasFromPlaybackSession(session);
-  const gatewayProfileContainer = stringOr(
-    requestedPlaybackHint.container ?? gateway.codecProfile?.container,
-    "",
-  ).toLowerCase();
+  const gatewayProfileContainer = gatewayCodecProfileContainer(
+    gateway.codecProfile,
+    requestedPlaybackHint,
+  );
   const deferGatewayProfilePersistenceForMkvFastStart = Boolean(
     originalFastStartItemCas &&
     (gatewayProfileContainer === "mkv" || gatewayProfileContainer.includes("matroska")),
@@ -4759,6 +4759,18 @@ function gatewayModeForPlayback(
   return mode === "transcode" ? "transcode" : "remux";
 }
 
+function gatewayCodecProfileContainer(
+  gatewayCodecProfile: unknown,
+  requestedPlaybackHint: unknown,
+): string {
+  const observed = recordOrEmpty(gatewayCodecProfile);
+  const requested = recordOrEmpty(requestedPlaybackHint);
+  // The current Gateway observation is authoritative for this lifecycle. A
+  // stale/client `mp4` hint must not force an intermediate T0->T1 write before
+  // DELETE persists the final Matroska profile/proof under the original CAS.
+  return stringOr(observed.container ?? requested.container, "").toLowerCase();
+}
+
 function gatewayPlaybackHints(playbackHint: JsonRecord) {
   const codecProfile = recordOrEmpty(playbackHint.codecProfile ?? playbackHint.codec_profile);
   return compactRecord({
@@ -5185,6 +5197,11 @@ function normalizeCodecProfile(profile: JsonRecord) {
     profile.mkvH264FastStartProof ?? profile.mkv_h264_fast_start_proof,
   );
   return compactRecord({
+    videoStreamIndex: boundedNullableInt(
+      profile.videoStreamIndex ?? profile.video_stream_index,
+      0,
+      1_024,
+    ),
     videoCodec: stringOrNull(profile.videoCodec ?? profile.video_codec ?? profile.video),
     videoProfile: stringOrNull(profile.videoProfile ?? profile.video_profile),
     videoWidth: boundedNullableInt(profile.videoWidth ?? profile.video_width ?? profile.width, 0, 16_384),

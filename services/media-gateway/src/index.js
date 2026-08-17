@@ -1447,11 +1447,11 @@ const EXACT_MATROSKA_H264_MAX_PIXELS = EXACT_MATROSKA_H264_MAX_WIDTH * EXACT_MAT
 const MKV_H264_FAST_START_PROTOCOL = 2;
 // Stable proof-graph version. This changes only when the packet validator or
 // FFmpeg copy graph semantics change, not on unrelated Gateway releases.
-const MKV_H264_FAST_START_PROOF_BUILD = 1;
-// AVPacket key flags and GOP spacing do not prove H264 IDR/closed-GOP segment
-// independence. Keep video copy dark until the full-file analyzer carries an
-// explicit bitstream-level proof and an open-GOP negative fixture passes.
-const MKV_H264_FAST_START_COPY_ACTIVATION_READY = false;
+const MKV_H264_FAST_START_PROOF_BUILD = 2;
+// Video copy is admitted only after the full-file packet timeline and an
+// independent H264 type-5 (IDR) bitstream timeline agree. Recovery-point/open
+// GOP files therefore remain on the encode path.
+const MKV_H264_FAST_START_COPY_ACTIVATION_READY = true;
 // Dedicated signing material is mandatory. The general Gateway bearer token is
 // deliberately not a fallback: proof minting/verification must be independently
 // rotatable and an absent/short key keeps every finite MKV on the encode path.
@@ -1499,6 +1499,8 @@ const MKV_H264_FAST_START_ANALYZER_STOP_TIMEOUT_MS = clampInt(
     100,
     5_000,
 );
+const MKV_H264_FAST_START_ANALYZER_MAX_LINE_BYTES = 4 * 1024;
+const MKV_H264_FAST_START_ANALYZER_MAX_TIMELINE_RECORDS = 100_000;
 const MKV_H264_FAST_START_BUFFER_SECONDS = 6;
 const MKV_H264_FAST_START_MIN_SEGMENTS = 3;
 const MKV_H264_FAST_START_MIN_ENCODE_RATE_X = 1.15;
@@ -1680,7 +1682,7 @@ app.get('/health', (req, res) => {
             protocol: MKV_H264_FAST_START_PROTOCOL,
             proofBuild: MKV_H264_FAST_START_PROOF_BUILD,
             copyActivationReady: MKV_H264_FAST_START_COPY_ACTIVATION_READY,
-            closedGopProof: 'unavailable',
+            closedGopProof: 'full-file-keyframe-idr-match',
             proofRequiresFullEof: true,
             fullFileProofSigningConfigured: Boolean(MKV_H264_FAST_START_PROOF_CURRENT_KEY),
             fullFileProofPreviousKeyConfigured: Boolean(MKV_H264_FAST_START_PROOF_PREVIOUS_KEY),
@@ -8477,132 +8479,374 @@ async function closePreopenedBoundedMkvInput(session) {
     await closeVodInputAttempt(opened.attempt).catch(() => {});
 }
 
+function strictMkvAnalyzerInteger(value) {
+    const encoded = String(value ?? '');
+    if (!/^-?(?:0|[1-9][0-9]*)$/.test(encoded)) return null;
+    const parsed = Number(encoded);
+    return Number.isSafeInteger(parsed) && !Object.is(parsed, -0) ? parsed : null;
+}
+
+function strictMkvAnalyzerRational(value) {
+    const match = /^([1-9][0-9]*)\/([1-9][0-9]*)$/.exec(String(value || ''));
+    if (!match) return null;
+    const numerator = Number(match[1]);
+    const denominator = Number(match[2]);
+    if (
+        !Number.isSafeInteger(numerator) || !Number.isSafeInteger(denominator) ||
+        numerator > 1_000_000_000 || denominator > 1_000_000_000
+    ) return null;
+    let left = numerator;
+    let right = denominator;
+    while (right) {
+        const remainder = left % right;
+        left = right;
+        right = remainder;
+    }
+    return { numerator: numerator / left, denominator: denominator / left };
+}
+
+function sameMkvAnalyzerRational(left, right) {
+    return Boolean(
+        left && right && left.numerator === right.numerator && left.denominator === right.denominator,
+    );
+}
+
+function parseMkvAnalyzerCompactLine(line, prefix) {
+    const parts = String(line || '').split('|');
+    if (parts.shift() !== prefix || parts.length === 0) return null;
+    const fields = {};
+    for (const part of parts) {
+        const splitAt = part.indexOf('=');
+        if (splitAt <= 0) return null;
+        const key = part.slice(0, splitAt);
+        if (!/^[A-Za-z0-9_:]+$/.test(key) || Object.hasOwn(fields, key)) return null;
+        fields[key] = part.slice(splitAt + 1);
+    }
+    return fields;
+}
+
+function mkvAnalyzerTicksToMicroseconds(ticks, timeBase) {
+    if (!Number.isSafeInteger(ticks) || !timeBase) return null;
+    const scaled = BigInt(ticks) * BigInt(timeBase.numerator) * 1_000_000n;
+    const divisor = BigInt(timeBase.denominator);
+    const rounded = scaled >= 0n
+        ? (scaled + divisor / 2n) / divisor
+        : -((-scaled + divisor / 2n) / divisor);
+    return rounded.toString();
+}
+
+function mkvAnalyzerTimelineDigest(records, timeBase) {
+    if (!Array.isArray(records) || records.length < MKV_H264_FAST_START_MIN_KEYFRAMES || !timeBase) return null;
+    // Matroska commonly omits DTS for the leading B-frame reorder window. Both
+    // timelines therefore use key/IDR #1 as their relative DTS anchor while PTS
+    // always uses key/IDR #0. Every later DTS remains mandatory and ordered.
+    const firstPts = records[0]?.pts;
+    const dtsAnchor = records[1]?.dts;
+    if (!Number.isSafeInteger(firstPts) || !Number.isSafeInteger(dtsAnchor)) return null;
+    const hash = crypto.createHash('sha256').update('NORVA/MKV-H264-IDR-TIMELINE/V2\0');
+    for (let index = 0; index < records.length; index += 1) {
+        const record = records[index];
+        if (
+            !record || !Number.isSafeInteger(record.pts) || !Number.isSafeInteger(record.duration) ||
+            record.duration <= 0 || (index > 0 && !Number.isSafeInteger(record.dts))
+        ) return null;
+        const ptsDelta = record.pts - firstPts;
+        const dtsDelta = index === 0 ? 0 : record.dts - dtsAnchor;
+        if (!Number.isSafeInteger(ptsDelta) || !Number.isSafeInteger(dtsDelta) || ptsDelta < 0 || dtsDelta < 0) return null;
+        const ptsUs = mkvAnalyzerTicksToMicroseconds(ptsDelta, timeBase);
+        const dtsUs = mkvAnalyzerTicksToMicroseconds(dtsDelta, timeBase);
+        const durationUs = mkvAnalyzerTicksToMicroseconds(record.duration, timeBase);
+        if (ptsUs === null || dtsUs === null || durationUs === null) return null;
+        hash.update(`${index}:${ptsUs}:${dtsUs}:${durationUs}\n`);
+    }
+    return hash.digest('hex');
+}
+
 function createMkvH264FullFilePacketAnalyzer(session) {
     if (!shouldCreateMkvH264FullFilePacketAnalyzer(session)) return null;
-    let child;
+    let packetChild;
+    let idrChild;
     try {
-        child = spawn(FFPROBE_PATH, [
+        packetChild = spawn(FFPROBE_PATH, [
             '-v', 'error',
-            '-select_streams', 'v:0',
+            // Match the exact stream selected by the playback graph. Uppercase
+            // `V` excludes attached pictures/cover art; lowercase `v` does not.
+            '-select_streams', 'V:0',
             '-show_packets',
-            '-show_entries', 'packet=pts_time,dts_time,duration_time,flags',
-            '-of', 'csv=p=0',
+            '-show_streams',
+            '-show_entries', [
+                'packet=stream_index,pts,dts,duration,flags',
+                'stream=index,time_base,profile,level,refs,r_frame_rate,avg_frame_rate,pix_fmt,width,height',
+            ].join(':'),
+            '-of', 'compact=p=1:nk=0',
             '-i', 'pipe:0',
         ], {
             stdio: ['pipe', 'pipe', 'pipe'],
             env: loopbackOnlyEnv(),
         });
+        idrChild = spawn(FFMPEG_PATH, [
+            '-v', 'error',
+            '-nostdin',
+            '-copyts',
+            '-copytb', '1',
+            '-avoid_negative_ts', 'disabled',
+            '-i', 'pipe:0',
+            '-map', '0:V:0',
+            '-c:v', 'copy',
+            '-bsf:v', 'h264_mp4toannexb,filter_units=pass_types=5',
+            '-f', 'framecrc',
+            'pipe:1',
+        ], {
+            stdio: ['pipe', 'pipe', 'pipe'],
+            env: loopbackOnlyEnv(),
+        });
     } catch (_) {
+        try { packetChild?.kill('SIGTERM'); } catch (_) {}
+        try { idrChild?.kill('SIGTERM'); } catch (_) {}
         return null;
     }
-    // The provider -> primary FFmpeg pump must never wait for the optional
-    // proof analyzer. PassThrough provides a strict local-only queue; its first
-    // saturation abandons proof generation instead of propagating backpressure.
-    const tee = new PassThrough({ highWaterMark: MKV_H264_FAST_START_ANALYZER_BUFFER_BYTES });
-    tee.pipe(child.stdin);
-    child.stdin.on('error', () => {});
+    const packetTee = new PassThrough({ highWaterMark: MKV_H264_FAST_START_ANALYZER_BUFFER_BYTES });
+    const idrTee = new PassThrough({ highWaterMark: MKV_H264_FAST_START_ANALYZER_BUFFER_BYTES });
+    packetTee.pipe(packetChild.stdin);
+    idrTee.pipe(idrChild.stdin);
+    packetChild.stdin.on('error', () => {});
+    idrChild.stdin.on('error', () => {});
     const analyzer = {
-        child,
-        tee,
+        packetChild,
+        idrChild,
+        packetTee,
+        idrTee,
         bytesAnalyzed: 0,
         packetCount: 0,
+        packetStreamIndex: null,
         keyframeCount: 0,
+        idrCount: 0,
         firstPacketKeyframe: false,
-        firstPtsSeconds: null,
-        firstDtsSeconds: null,
-        lastDtsSeconds: null,
-        maximumTimestampSeconds: 0,
-        lastKeyframeSeconds: null,
-        maxKeyframeGapSeconds: 0,
-        maxPtsDtsSkewSeconds: 0,
+        firstPtsTicks: null,
+        firstDtsTicks: null,
+        lastDtsTicks: null,
+        maximumTimestampTicks: 0,
+        lastKeyframePtsTicks: null,
+        maxKeyframeGapTicks: 0,
+        maxDtsGapTicks: 0,
+        maxPtsDtsSkewTicks: 0,
+        leadingMissingDtsCount: 0,
+        seenPresentDts: false,
         negativeTimestampCount: 0,
         timestampDiscontinuityCount: 0,
-        pending: '',
-        stderr: '',
+        keyTimeline: [],
+        idrTimeline: [],
+        packetTimeBase: null,
+        idrTimeBase: null,
+        streamMetadata: null,
+        packetPending: '',
+        idrPending: '',
+        packetStderr: '',
+        idrStderr: '',
         failed: false,
         droppedChunks: 0,
-        exited: false,
-        exitCode: null,
+        packetExited: false,
+        idrExited: false,
+        packetExitCode: null,
+        idrExitCode: null,
         exitPromise: null,
         finalizing: false,
         abandonedReason: null,
         stopRequested: false,
     };
     mkvH264FullFileAnalyzers.add(analyzer);
-    const consume = (line) => {
-        const fields = String(line || '').trim().split(',');
-        if (fields.length < 4) return;
-        const pts = Number(fields[0]);
-        const dts = Number(fields[1]);
-        const duration = Number(fields[2]);
-        const flags = fields.slice(3).join(',');
-        if (!Number.isFinite(pts) || !Number.isFinite(dts)) {
-            analyzer.failed = true;
+
+    const fail = (reason) => {
+        analyzer.failed = true;
+        analyzer.abandonedReason ||= reason;
+        abandonMkvH264FullFileAnalyzer(analyzer, reason);
+    };
+    const consumePacketLine = (line) => {
+        if (!line) return;
+        if (Buffer.byteLength(line) > MKV_H264_FAST_START_ANALYZER_MAX_LINE_BYTES) return fail('packet-line-too-long');
+        if (line.startsWith('stream|')) {
+            if (analyzer.streamMetadata) return fail('duplicate-video-stream');
+            const fields = parseMkvAnalyzerCompactLine(line, 'stream');
+            const index = strictMkvAnalyzerInteger(fields?.index);
+            const level = strictMkvAnalyzerInteger(fields?.level);
+            const refs = strictMkvAnalyzerInteger(fields?.refs);
+            const width = strictMkvAnalyzerInteger(fields?.width);
+            const height = strictMkvAnalyzerInteger(fields?.height);
+            const timeBase = strictMkvAnalyzerRational(fields?.time_base);
+            const rFrameRate = strictMkvAnalyzerRational(fields?.r_frame_rate);
+            const avgFrameRate = strictMkvAnalyzerRational(fields?.avg_frame_rate);
+            if (
+                !fields || !Number.isInteger(index) || index < 0 || index > 1_024 ||
+                analyzer.packetStreamIndex === null || index !== analyzer.packetStreamIndex ||
+                !timeBase || !rFrameRate || !avgFrameRate ||
+                !Number.isInteger(level) || level <= 0 || !Number.isInteger(refs) || refs <= 0 ||
+                !Number.isInteger(width) || width <= 0 || !Number.isInteger(height) || height <= 0 ||
+                !String(fields.profile || '').trim() || !String(fields.pix_fmt || '').trim()
+            ) return fail('invalid-video-stream-metadata');
+            analyzer.packetTimeBase = timeBase;
+            analyzer.streamMetadata = {
+                index,
+                profile: String(fields.profile).trim(),
+                level,
+                refs,
+                width,
+                height,
+                pixelFormat: String(fields.pix_fmt).trim(),
+                rFrameRate,
+                avgFrameRate,
+            };
             return;
         }
+        if (!line.startsWith('packet|')) return fail('unexpected-ffprobe-line');
+        const fields = parseMkvAnalyzerCompactLine(line, 'packet');
+        if (!fields || !exactRecordKeys(fields, ['stream_index', 'pts', 'dts', 'duration', 'flags'])) {
+            return fail('invalid-packet-fields');
+        }
+        const streamIndex = strictMkvAnalyzerInteger(fields.stream_index);
+        const pts = strictMkvAnalyzerInteger(fields.pts);
+        const duration = strictMkvAnalyzerInteger(fields.duration);
+        const dtsMissing = fields.dts === 'N/A';
+        const dts = dtsMissing ? null : strictMkvAnalyzerInteger(fields.dts);
+        const flags = String(fields.flags || '');
+        if (
+            !Number.isInteger(streamIndex) || streamIndex < 0 || streamIndex > 1_024 ||
+            !Number.isSafeInteger(pts) || !Number.isSafeInteger(duration) || duration <= 0 ||
+            (!dtsMissing && !Number.isSafeInteger(dts)) || !/^[A-Z_]{3,8}$/.test(flags) ||
+            flags.includes('C') || flags.includes('D')
+        ) return fail('invalid-packet');
+        if (analyzer.packetStreamIndex === null) analyzer.packetStreamIndex = streamIndex;
+        else if (analyzer.packetStreamIndex !== streamIndex) return fail('packet-stream-changed');
+        if (dtsMissing) {
+            if (analyzer.seenPresentDts || analyzer.leadingMissingDtsCount >= 4) return fail('missing-packet-dts');
+            analyzer.leadingMissingDtsCount += 1;
+        } else {
+            analyzer.seenPresentDts = true;
+            if (analyzer.firstDtsTicks === null) analyzer.firstDtsTicks = dts;
+            if (analyzer.lastDtsTicks !== null) {
+                if (dts < analyzer.lastDtsTicks) analyzer.timestampDiscontinuityCount += 1;
+                analyzer.maxDtsGapTicks = Math.max(analyzer.maxDtsGapTicks, dts - analyzer.lastDtsTicks);
+            }
+            analyzer.lastDtsTicks = dts;
+            analyzer.maxPtsDtsSkewTicks = Math.max(analyzer.maxPtsDtsSkewTicks, Math.abs(pts - dts));
+        }
         if (analyzer.packetCount === 0) {
-            analyzer.firstPtsSeconds = pts;
-            analyzer.firstDtsSeconds = dts;
+            analyzer.firstPtsTicks = pts;
             analyzer.firstPacketKeyframe = flags.includes('K');
         }
-        if (analyzer.lastDtsSeconds !== null && (
-            dts + 0.000_001 < analyzer.lastDtsSeconds ||
-            dts - analyzer.lastDtsSeconds > EXACT_MATROSKA_H264_HLS_TARGET_SECONDS + 1
-        )) analyzer.timestampDiscontinuityCount += 1;
-        if (pts < 0 || dts < 0) analyzer.negativeTimestampCount += 1;
-        const packetEnd = Math.max(pts, dts) + (Number.isFinite(duration) && duration > 0 ? duration : 0);
-        analyzer.maximumTimestampSeconds = Math.max(analyzer.maximumTimestampSeconds, packetEnd);
-        analyzer.maxPtsDtsSkewSeconds = Math.max(analyzer.maxPtsDtsSkewSeconds, Math.abs(pts - dts));
+        if (pts < 0 || (dts !== null && dts < 0)) analyzer.negativeTimestampCount += 1;
+        analyzer.maximumTimestampTicks = Math.max(analyzer.maximumTimestampTicks, pts, dts ?? pts) + 0;
+        analyzer.maximumTimestampTicks = Math.max(analyzer.maximumTimestampTicks, Math.max(pts, dts ?? pts) + duration);
         if (flags.includes('K')) {
-            if (analyzer.lastKeyframeSeconds !== null) {
-                analyzer.maxKeyframeGapSeconds = Math.max(
-                    analyzer.maxKeyframeGapSeconds,
-                    pts - analyzer.lastKeyframeSeconds,
-                );
-            } else {
-                analyzer.maxKeyframeGapSeconds = Math.max(analyzer.maxKeyframeGapSeconds, pts);
+            if (analyzer.keyTimeline.length >= MKV_H264_FAST_START_ANALYZER_MAX_TIMELINE_RECORDS) {
+                return fail('keyframe-timeline-limit');
             }
-            analyzer.lastKeyframeSeconds = pts;
+            if (analyzer.lastKeyframePtsTicks !== null) {
+                if (pts <= analyzer.lastKeyframePtsTicks) return fail('non-increasing-keyframe-pts');
+                analyzer.maxKeyframeGapTicks = Math.max(
+                    analyzer.maxKeyframeGapTicks,
+                    pts - analyzer.lastKeyframePtsTicks,
+                );
+            }
+            analyzer.lastKeyframePtsTicks = pts;
+            analyzer.keyTimeline.push({ pts, dts, duration });
             analyzer.keyframeCount += 1;
         }
-        analyzer.lastDtsSeconds = dts;
         analyzer.packetCount += 1;
-        if (analyzer.packetCount > 20_000_000) analyzer.failed = true;
+        if (analyzer.packetCount > 20_000_000) return fail('packet-count-limit');
     };
-    child.stdout.on('data', (chunk) => {
-        analyzer.pending += chunk.toString();
-        const lines = analyzer.pending.split(/\r?\n/);
-        analyzer.pending = lines.pop() || '';
-        for (const line of lines) consume(line);
-        if (analyzer.failed) {
-            try { child.kill('SIGTERM'); } catch (_) {}
+    const consumeIdrLine = (line) => {
+        if (!line) return;
+        if (Buffer.byteLength(line) > MKV_H264_FAST_START_ANALYZER_MAX_LINE_BYTES) return fail('idr-line-too-long');
+        if (line.startsWith('#')) {
+            if (line.startsWith('#tb')) {
+                const match = /^#tb 0: ([1-9][0-9]*\/[1-9][0-9]*)$/.exec(line);
+                if (!match || analyzer.idrTimeBase) return fail('invalid-idr-time-base');
+                analyzer.idrTimeBase = strictMkvAnalyzerRational(match[1]);
+                if (!analyzer.idrTimeBase) return fail('invalid-idr-time-base');
+            }
+            return;
         }
+        if (!analyzer.idrTimeBase) return fail('idr-data-before-time-base');
+        const fields = line.split(',').map((field) => field.trim());
+        if (fields.length !== 6) return fail('invalid-idr-fields');
+        const streamIndex = strictMkvAnalyzerInteger(fields[0]);
+        const dts = strictMkvAnalyzerInteger(fields[1]);
+        const pts = strictMkvAnalyzerInteger(fields[2]);
+        const duration = strictMkvAnalyzerInteger(fields[3]);
+        const size = strictMkvAnalyzerInteger(fields[4]);
+        if (
+            streamIndex !== 0 || !Number.isSafeInteger(dts) || !Number.isSafeInteger(pts) ||
+            !Number.isSafeInteger(duration) || duration <= 0 || !Number.isSafeInteger(size) || size <= 0 ||
+            !/^(?:0x)?[A-Fa-f0-9]+$/.test(fields[5])
+        ) return fail('invalid-idr-record');
+        if (analyzer.idrTimeline.length >= MKV_H264_FAST_START_ANALYZER_MAX_TIMELINE_RECORDS) {
+            return fail('idr-timeline-limit');
+        }
+        analyzer.idrTimeline.push({ pts, dts, duration });
+        analyzer.idrCount += 1;
+    };
+    const consumeOutput = (kind, chunk) => {
+        const pendingKey = kind === 'packet' ? 'packetPending' : 'idrPending';
+        const combined = analyzer[pendingKey] + chunk.toString('utf8');
+        const lines = combined.split(/\r?\n/);
+        analyzer[pendingKey] = lines.pop() || '';
+        if (Buffer.byteLength(analyzer[pendingKey]) > MKV_H264_FAST_START_ANALYZER_MAX_LINE_BYTES) {
+            return fail(`${kind}-unterminated-line`);
+        }
+        for (const line of lines) {
+            if (kind === 'packet') consumePacketLine(line);
+            else consumeIdrLine(line);
+            if (analyzer.failed) break;
+        }
+    };
+    packetChild.stdout.on('data', (chunk) => consumeOutput('packet', chunk));
+    idrChild.stdout.on('data', (chunk) => consumeOutput('idr', chunk));
+    packetChild.stderr.on('data', (chunk) => {
+        analyzer.packetStderr += sanitizeLog(chunk.toString(), session.sourceUrl);
+        if (analyzer.packetStderr.length > 8_000) analyzer.packetStderr = analyzer.packetStderr.slice(-8_000);
     });
-    child.stderr.on('data', (chunk) => {
-        analyzer.stderr += sanitizeLog(chunk.toString(), session.sourceUrl);
-        if (analyzer.stderr.length > 8_000) analyzer.stderr = analyzer.stderr.slice(-8_000);
+    idrChild.stderr.on('data', (chunk) => {
+        analyzer.idrStderr += sanitizeLog(chunk.toString(), session.sourceUrl);
+        if (analyzer.idrStderr.length > 8_000) analyzer.idrStderr = analyzer.idrStderr.slice(-8_000);
     });
-    tee.on('error', () => {
-        abandonMkvH264FullFileAnalyzer(analyzer, 'tee-error');
-    });
-    analyzer.exitPromise = new Promise((resolve) => {
+    packetTee.on('error', () => fail('packet-tee-error'));
+    idrTee.on('error', () => fail('idr-tee-error'));
+
+    const observeExit = (kind, child) => new Promise((resolve) => {
+        const exitedKey = kind === 'packet' ? 'packetExited' : 'idrExited';
+        const exitCodeKey = kind === 'packet' ? 'packetExitCode' : 'idrExitCode';
         const finish = (code) => {
-            if (analyzer.exited) return;
-            analyzer.exited = true;
-            analyzer.exitCode = code;
-            mkvH264FullFileAnalyzers.delete(analyzer);
+            if (analyzer[exitedKey]) return;
+            analyzer[exitedKey] = true;
+            analyzer[exitCodeKey] = code;
+            const pendingKey = kind === 'packet' ? 'packetPending' : 'idrPending';
+            const pending = analyzer[pendingKey];
+            analyzer[pendingKey] = '';
+            if (pending) {
+                if (kind === 'packet') consumePacketLine(pending);
+                else consumeIdrLine(pending);
+            }
             if (!analyzer.finalizing) {
                 analyzer.failed = true;
-                analyzer.abandonedReason ||= 'analyzer-exited-early';
+                analyzer.abandonedReason ||= `${kind}-analyzer-exited-early`;
+                try { (kind === 'packet' ? idrChild : packetChild).kill('SIGTERM'); } catch (_) {}
             }
-            if (analyzer.pending.trim()) consume(analyzer.pending);
             resolve();
         };
         child.once('error', () => {
             analyzer.failed = true;
             finish(-1);
         });
-        child.once('exit', (code) => finish(code));
+        // `close` is later than `exit` and guarantees stdout/stderr pipes have
+        // drained. A proof must never finalize against a truncated tail that is
+        // still buffered in the parent process.
+        child.once('close', (code) => finish(code));
+    });
+    analyzer.exitPromise = Promise.all([
+        observeExit('packet', packetChild),
+        observeExit('idr', idrChild),
+    ]).then(() => {
+        mkvH264FullFileAnalyzers.delete(analyzer);
     });
     return analyzer;
 }
@@ -8641,45 +8885,68 @@ function abandonMkvH264FullFileAnalyzer(analyzer, reason = 'abandoned') {
     analyzer.failed = true;
     analyzer.abandonedReason ||= reason;
     analyzer.droppedChunks += 1;
-    try {
-        analyzer.tee.unpipe(analyzer.child.stdin);
-        analyzer.tee.destroy();
-    } catch (_) {}
-    try { analyzer.child.stdin.destroy(); } catch (_) {}
-    if (!analyzer.exited) {
-        try { analyzer.child.kill('SIGTERM'); } catch (_) {}
+    for (const [tee, child, exited] of [
+        [analyzer.packetTee, analyzer.packetChild, analyzer.packetExited],
+        [analyzer.idrTee, analyzer.idrChild, analyzer.idrExited],
+    ]) {
+        try {
+            tee?.unpipe(child?.stdin);
+            tee?.destroy();
+        } catch (_) {}
+        try { child?.stdin?.destroy(); } catch (_) {}
+        if (!exited) {
+            try { child?.kill('SIGTERM'); } catch (_) {}
+        }
     }
 }
 
 function writeMkvH264FullFileAnalyzerChunk(analyzer, chunk) {
-    if (!analyzer || analyzer.failed || analyzer.exited || !chunk?.length) return false;
-    let accepted = false;
+    if (!analyzer || analyzer.failed || analyzer.packetExited || analyzer.idrExited || !chunk?.length) return false;
+    let packetAccepted = false;
+    let idrAccepted = false;
     try {
-        accepted = analyzer.tee.write(chunk);
+        packetAccepted = analyzer.packetTee.write(chunk);
+        idrAccepted = analyzer.idrTee.write(chunk);
     } catch (_) {
         abandonMkvH264FullFileAnalyzer(analyzer, 'tee-write-error');
         return false;
     }
-    analyzer.bytesAnalyzed += chunk.length;
-    if (!accepted) {
+    if (!packetAccepted || !idrAccepted) {
         abandonMkvH264FullFileAnalyzer(analyzer, 'tee-backpressure');
         return false;
     }
+    analyzer.bytesAnalyzed += chunk.length;
     return true;
 }
 
 async function waitForMkvH264FullFileAnalyzerExit(analyzer) {
-    if (!analyzer || analyzer.exited) return;
-    await Promise.race([
+    if (!analyzer || (analyzer.packetExited && analyzer.idrExited)) return;
+    await waitForMkvH264AnalyzerDeadline(
         analyzer.exitPromise,
-        new Promise((resolve) => setTimeout(resolve, MKV_H264_FAST_START_ANALYZER_STOP_TIMEOUT_MS)),
-    ]);
-    if (!analyzer.exited) {
-        try { analyzer.child.kill('SIGKILL'); } catch (_) {}
-        await Promise.race([
+        MKV_H264_FAST_START_ANALYZER_STOP_TIMEOUT_MS,
+    );
+    if (!analyzer.packetExited || !analyzer.idrExited) {
+        if (!analyzer.packetExited) try { analyzer.packetChild.kill('SIGKILL'); } catch (_) {}
+        if (!analyzer.idrExited) try { analyzer.idrChild.kill('SIGKILL'); } catch (_) {}
+        await waitForMkvH264AnalyzerDeadline(
             analyzer.exitPromise,
-            new Promise((resolve) => setTimeout(resolve, MKV_H264_FAST_START_ANALYZER_STOP_TIMEOUT_MS)),
+            MKV_H264_FAST_START_ANALYZER_STOP_TIMEOUT_MS,
+        );
+    }
+}
+
+async function waitForMkvH264AnalyzerDeadline(promise, timeoutMs) {
+    let timer = null;
+    try {
+        await Promise.race([
+            promise,
+            new Promise((resolve) => {
+                timer = setTimeout(resolve, timeoutMs);
+                timer?.unref?.();
+            }),
         ]);
+    } finally {
+        if (timer) clearTimeout(timer);
     }
 }
 
@@ -8691,62 +8958,89 @@ async function stopMkvH264FullFileAnalyzer(analyzer, reason = 'pump-incomplete')
 
 async function finishMkvH264FullFileAnalyzer(analyzer) {
     if (!analyzer) return null;
-    if (!analyzer.failed && !analyzer.exited) {
+    if (!analyzer.failed && !analyzer.packetExited && !analyzer.idrExited) {
         analyzer.finalizing = true;
         try {
-            analyzer.tee.end();
+            analyzer.packetTee.end();
+            analyzer.idrTee.end();
         } catch (_) {
             abandonMkvH264FullFileAnalyzer(analyzer, 'tee-finish-error');
         }
     }
-    if (analyzer.failed && !analyzer.exited) {
+    if (analyzer.failed && (!analyzer.packetExited || !analyzer.idrExited)) {
         abandonMkvH264FullFileAnalyzer(analyzer, analyzer.abandonedReason || 'analyzer-failed');
     }
-    await Promise.race([
-        analyzer.exitPromise,
-        new Promise((resolve) => setTimeout(resolve, CODEC_PROBE_TIMEOUT_MS)),
-    ]);
-    if (!analyzer.exited) {
+    await waitForMkvH264AnalyzerDeadline(analyzer.exitPromise, CODEC_PROBE_TIMEOUT_MS);
+    if (!analyzer.packetExited || !analyzer.idrExited) {
         analyzer.failed = true;
         abandonMkvH264FullFileAnalyzer(analyzer, 'analyzer-timeout');
         await waitForMkvH264FullFileAnalyzerExit(analyzer);
     }
+    const keyTimelineSha256 = mkvAnalyzerTimelineDigest(analyzer.keyTimeline, analyzer.packetTimeBase);
+    const idrTimelineSha256 = mkvAnalyzerTimelineDigest(analyzer.idrTimeline, analyzer.idrTimeBase);
+    const streamMetadata = analyzer.streamMetadata;
     if (
-        analyzer.failed || analyzer.exitCode !== 0 || analyzer.stderr.trim() ||
+        analyzer.failed || analyzer.packetExitCode !== 0 || analyzer.idrExitCode !== 0 ||
+        analyzer.packetStderr.trim() || analyzer.idrStderr.trim() ||
         analyzer.droppedChunks !== 0 || analyzer.packetCount < MKV_H264_FAST_START_MIN_KEYFRAMES ||
         analyzer.keyframeCount < MKV_H264_FAST_START_MIN_KEYFRAMES ||
-        analyzer.firstPacketKeyframe !== true || analyzer.lastKeyframeSeconds === null
+        analyzer.keyframeCount !== analyzer.idrCount ||
+        analyzer.firstPacketKeyframe !== true || analyzer.lastKeyframePtsTicks === null ||
+        !sameMkvAnalyzerRational(analyzer.packetTimeBase, analyzer.idrTimeBase) ||
+        !keyTimelineSha256 || keyTimelineSha256 !== idrTimelineSha256 ||
+        !streamMetadata || !sameMkvAnalyzerRational(streamMetadata.rFrameRate, streamMetadata.avgFrameRate)
     ) return null;
-    analyzer.maxKeyframeGapSeconds = Math.max(
-        analyzer.maxKeyframeGapSeconds,
-        analyzer.maximumTimestampSeconds - analyzer.lastKeyframeSeconds,
+    analyzer.maxKeyframeGapTicks = Math.max(
+        analyzer.maxKeyframeGapTicks,
+        analyzer.maximumTimestampTicks - analyzer.lastKeyframePtsTicks,
     );
+    const timeBaseSeconds = analyzer.packetTimeBase.numerator / analyzer.packetTimeBase.denominator;
+    const firstPtsSeconds = analyzer.firstPtsTicks * timeBaseSeconds;
+    const firstDtsSeconds = analyzer.firstDtsTicks * timeBaseSeconds;
+    const maxPtsDtsSkewSeconds = analyzer.maxPtsDtsSkewTicks * timeBaseSeconds;
+    const maxDtsGapSeconds = analyzer.maxDtsGapTicks * timeBaseSeconds;
     return {
         bytesAnalyzed: analyzer.bytesAnalyzed,
         packetCount: analyzer.packetCount,
+        videoStreamIndex: streamMetadata.index,
         keyframeCount: analyzer.keyframeCount,
+        idrCount: analyzer.idrCount,
+        keyTimelineSha256,
+        idrTimelineSha256,
+        closedGopIdrVerified: true,
         firstPacketKeyframe: true,
-        coverageSeconds: Number(analyzer.maximumTimestampSeconds.toFixed(3)),
-        maxKeyframeGapSeconds: Number(analyzer.maxKeyframeGapSeconds.toFixed(6)),
+        coverageSeconds: Number((analyzer.maximumTimestampTicks * timeBaseSeconds).toFixed(3)),
+        maxKeyframeGapSeconds: Number((analyzer.maxKeyframeGapTicks * timeBaseSeconds).toFixed(6)),
         ptsPresent: true,
-        dtsPresent: true,
-        dtsMonotonic: analyzer.timestampDiscontinuityCount === 0,
+        dtsPresent: analyzer.seenPresentDts === true,
+        dtsMonotonic: analyzer.timestampDiscontinuityCount === 0 && maxDtsGapSeconds <= EXACT_MATROSKA_H264_HLS_TARGET_SECONDS + 1,
         muxTimestampsSafe: Boolean(
             analyzer.negativeTimestampCount === 0 &&
             analyzer.timestampDiscontinuityCount === 0 &&
-            analyzer.firstPtsSeconds >= 0 && analyzer.firstPtsSeconds <= 1 &&
-            analyzer.firstDtsSeconds >= 0 && analyzer.firstDtsSeconds <= 1 &&
-            analyzer.maxPtsDtsSkewSeconds <= 2
+            analyzer.leadingMissingDtsCount <= 4 &&
+            firstPtsSeconds >= 0 && firstPtsSeconds <= 1 &&
+            firstDtsSeconds >= 0 && firstDtsSeconds <= 1 &&
+            maxPtsDtsSkewSeconds <= 2 &&
+            maxDtsGapSeconds <= EXACT_MATROSKA_H264_HLS_TARGET_SECONDS + 1
         ),
+        leadingMissingDtsCount: analyzer.leadingMissingDtsCount,
         negativeTimestampCount: analyzer.negativeTimestampCount,
         timestampDiscontinuityCount: analyzer.timestampDiscontinuityCount,
-        firstPtsSeconds: Number(analyzer.firstPtsSeconds.toFixed(6)),
-        firstDtsSeconds: Number(analyzer.firstDtsSeconds.toFixed(6)),
-        maxPtsDtsSkewSeconds: Number(analyzer.maxPtsDtsSkewSeconds.toFixed(6)),
-        analyzerType: 'ffprobe-packet-stream-v1',
-        analyzerDigest: crypto.createHash('sha256')
-            .update('ffprobe-packet-stream-v1|pts_time,dts_time,duration_time,flags')
-            .digest('hex'),
+        firstPtsSeconds: Number(firstPtsSeconds.toFixed(6)),
+        firstDtsSeconds: Number(firstDtsSeconds.toFixed(6)),
+        maxPtsDtsSkewSeconds: Number(maxPtsDtsSkewSeconds.toFixed(6)),
+        streamTimeBaseNumerator: analyzer.packetTimeBase.numerator,
+        streamTimeBaseDenominator: analyzer.packetTimeBase.denominator,
+        videoProfile: streamMetadata.profile,
+        videoLevel: streamMetadata.level,
+        videoRefs: streamMetadata.refs,
+        videoFpsNumerator: streamMetadata.avgFrameRate.numerator,
+        videoFpsDenominator: streamMetadata.avgFrameRate.denominator,
+        videoWidth: streamMetadata.width,
+        videoHeight: streamMetadata.height,
+        videoPixelFormat: streamMetadata.pixelFormat,
+        analyzerType: MKV_H264_FAST_START_ANALYZER_TYPE,
+        analyzerDigest: MKV_H264_FAST_START_ANALYZER_DIGEST,
     };
 }
 
@@ -9513,6 +9807,7 @@ function mkvH264FastStartProfileFingerprint(profile, fileSizeOverride = null) {
         fileSizeBytes,
         container: normalizeCodecToken(record.container),
         durationSeconds: Number(record.durationSeconds ?? record.duration_seconds ?? record.duration),
+        videoStreamIndex: Number(record.videoStreamIndex ?? record.video_stream_index),
         videoCodec: normalizeCodecToken(record.videoCodec ?? record.video_codec ?? record.video),
         videoProfile: normalizeCodecToken(record.videoProfile ?? record.video_profile),
         videoPixelFormat: normalizeCodecToken(record.videoPixelFormat ?? record.video_pixel_format ?? record.pix_fmt),
@@ -9530,9 +9825,17 @@ function mkvH264FastStartProfileFingerprint(profile, fileSizeOverride = null) {
 }
 
 const MKV_H264_FAST_START_PROOF_DOMAIN = Buffer.from('NORVA/MKV-H264-FASTSTART/V2\0', 'utf8');
-const MKV_H264_FAST_START_ANALYZER_TYPE = 'ffprobe-packet-stream-v1';
+const MKV_H264_FAST_START_ANALYZER_TYPE = 'ffprobe-key-packets-plus-ffmpeg-idr-framecrc-v2';
 const MKV_H264_FAST_START_ANALYZER_DIGEST = crypto.createHash('sha256')
-    .update('ffprobe-packet-stream-v1|pts_time,dts_time,duration_time,flags')
+    .update([
+        'ffprobe-key-packets-plus-ffmpeg-idr-framecrc-v2',
+        'stream-select:ffprobe=V:0,ffmpeg=0:V:0',
+        'ffprobe:packet=stream_index,pts,dts,duration,flags',
+        'ffprobe:stream=index,time_base,profile,level,refs,r_frame_rate,avg_frame_rate,pix_fmt,width,height',
+        'ffmpeg:-copyts,-copytb=1,-avoid_negative_ts=disabled',
+        'bsf:h264_mp4toannexb,filter_units=pass_types=5',
+        'timeline:relative-pts0,dts1,duration,time-base-microseconds',
+    ].join('|'))
     .digest('hex');
 
 function exactRecordKeys(value, expected) {
@@ -9600,11 +9903,16 @@ function openMkvH264FastStartProof(envelope) {
     if (!exactRecordKeys(payload.validator, ['type', 'digest'])) return null;
     if (!exactRecordKeys(payload.analyzer, ['type', 'digest'])) return null;
     if (!exactRecordKeys(payload.metrics, [
-        'bytesAnalyzed', 'packetCount', 'keyframeCount', 'firstPacketKeyframe',
+        'bytesAnalyzed', 'packetCount', 'videoStreamIndex', 'keyframeCount', 'firstPacketKeyframe',
+        'idrCount', 'keyTimelineSha256', 'idrTimelineSha256', 'closedGopIdrVerified',
         'coverageSeconds', 'maxKeyframeGapSeconds', 'ptsPresent', 'dtsPresent',
         'dtsMonotonic', 'muxTimestampsSafe', 'negativeTimestampCount',
         'timestampDiscontinuityCount', 'firstPtsSeconds', 'firstDtsSeconds',
-        'maxPtsDtsSkewSeconds',
+        'maxPtsDtsSkewSeconds', 'leadingMissingDtsCount',
+        'streamTimeBaseNumerator', 'streamTimeBaseDenominator',
+        'videoProfile', 'videoLevel', 'videoRefs',
+        'videoFpsNumerator', 'videoFpsDenominator',
+        'videoWidth', 'videoHeight', 'videoPixelFormat',
     ])) return null;
     if (payload.kid !== matched.kid) return null;
     return payload;
@@ -9621,9 +9929,11 @@ function mkvH264FastStartStaticContext(session) {
     if (!(container === 'mkv' || container.includes('matroska'))) return fail('not-matroska');
     if (!(videoCodec.includes('h264') || videoCodec.includes('avc'))) return fail('video-transcode');
     if (profile.metadataComplete !== true && profile.metadata_complete !== true) return fail('incomplete-profile');
+    const videoStreamIndex = Number(profile.videoStreamIndex ?? profile.video_stream_index);
     const videoWidth = Number(profile.videoWidth ?? profile.video_width ?? profile.width);
     const videoHeight = Number(profile.videoHeight ?? profile.video_height ?? profile.height);
     if (
+        !Number.isInteger(videoStreamIndex) || videoStreamIndex < 0 || videoStreamIndex > 1_024 ||
         !Number.isInteger(videoWidth) || !Number.isInteger(videoHeight) || videoWidth <= 0 || videoHeight <= 0 ||
         videoWidth > EXACT_MATROSKA_H264_MAX_WIDTH || videoHeight > EXACT_MATROSKA_H264_MAX_HEIGHT ||
         videoWidth * videoHeight > EXACT_MATROSKA_H264_MAX_PIXELS
@@ -9678,7 +9988,69 @@ function mkvH264FastStartIdentityContext(session) {
     };
 }
 
-function validMkvH264FastStartFullFileMetrics(metrics, fileSizeBytes, durationSeconds) {
+const MKV_H264_LEVEL_LIMITS = Object.freeze({
+    10: { maxFs: 99, maxMbps: 1_485, maxDpbMbs: 396 },
+    11: { maxFs: 396, maxMbps: 3_000, maxDpbMbs: 900 },
+    12: { maxFs: 396, maxMbps: 6_000, maxDpbMbs: 2_376 },
+    13: { maxFs: 396, maxMbps: 11_880, maxDpbMbs: 2_376 },
+    20: { maxFs: 396, maxMbps: 11_880, maxDpbMbs: 2_376 },
+    21: { maxFs: 792, maxMbps: 19_800, maxDpbMbs: 4_752 },
+    22: { maxFs: 1_620, maxMbps: 20_250, maxDpbMbs: 8_100 },
+    30: { maxFs: 1_620, maxMbps: 40_500, maxDpbMbs: 8_100 },
+    31: { maxFs: 3_600, maxMbps: 108_000, maxDpbMbs: 18_000 },
+    32: { maxFs: 5_120, maxMbps: 216_000, maxDpbMbs: 20_480 },
+    40: { maxFs: 8_192, maxMbps: 245_760, maxDpbMbs: 32_768 },
+    41: { maxFs: 8_192, maxMbps: 245_760, maxDpbMbs: 32_768 },
+    42: { maxFs: 8_704, maxMbps: 522_240, maxDpbMbs: 34_816 },
+});
+
+function validMkvH264FastStartVideoCompatibility(metrics, profile) {
+    const record = asRecord(metrics);
+    const codecProfile = asRecord(profile);
+    const videoProfile = normalizeCodecToken(record.videoProfile);
+    const expectedProfile = normalizeCodecToken(codecProfile.videoProfile ?? codecProfile.video_profile);
+    const pixelFormat = normalizeCodecToken(record.videoPixelFormat);
+    const expectedPixelFormat = normalizeCodecToken(
+        codecProfile.videoPixelFormat ?? codecProfile.video_pixel_format ?? codecProfile.pix_fmt,
+    );
+    const level = Number(record.videoLevel);
+    const refs = Number(record.videoRefs);
+    const width = Number(record.videoWidth);
+    const height = Number(record.videoHeight);
+    const fpsNumerator = Number(record.videoFpsNumerator);
+    const fpsDenominator = Number(record.videoFpsDenominator);
+    const timeBaseNumerator = Number(record.streamTimeBaseNumerator);
+    const timeBaseDenominator = Number(record.streamTimeBaseDenominator);
+    const videoStreamIndex = Number(record.videoStreamIndex);
+    const expectedVideoStreamIndex = Number(
+        codecProfile.videoStreamIndex ?? codecProfile.video_stream_index,
+    );
+    const limits = MKV_H264_LEVEL_LIMITS[level];
+    if (
+        !['baseline', 'constrainedbaseline', 'main', 'high'].includes(videoProfile) ||
+        videoProfile !== expectedProfile || !['yuv420p', 'yuvj420p'].includes(pixelFormat) ||
+        pixelFormat !== expectedPixelFormat || !limits ||
+        !Number.isInteger(videoStreamIndex) || videoStreamIndex < 0 || videoStreamIndex > 1_024 ||
+        videoStreamIndex !== expectedVideoStreamIndex ||
+        !Number.isInteger(refs) || refs < 1 || refs > 16 ||
+        !Number.isInteger(width) || !Number.isInteger(height) ||
+        width !== Number(codecProfile.videoWidth ?? codecProfile.video_width ?? codecProfile.width) ||
+        height !== Number(codecProfile.videoHeight ?? codecProfile.video_height ?? codecProfile.height) ||
+        !Number.isSafeInteger(fpsNumerator) || !Number.isSafeInteger(fpsDenominator) ||
+        fpsNumerator <= 0 || fpsDenominator <= 0 || fpsNumerator > 60 * fpsDenominator ||
+        !Number.isSafeInteger(timeBaseNumerator) || !Number.isSafeInteger(timeBaseDenominator) ||
+        timeBaseNumerator <= 0 || timeBaseDenominator <= 0 || timeBaseNumerator > timeBaseDenominator ||
+        timeBaseDenominator > 1_000_000_000
+    ) return false;
+    const macroblocksPerFrame = Math.ceil(width / 16) * Math.ceil(height / 16);
+    return Boolean(
+        macroblocksPerFrame <= limits.maxFs &&
+        macroblocksPerFrame * fpsNumerator <= limits.maxMbps * fpsDenominator &&
+        refs * macroblocksPerFrame <= limits.maxDpbMbs
+    );
+}
+
+function validMkvH264FastStartFullFileMetrics(metrics, fileSizeBytes, durationSeconds, profile) {
     const record = asRecord(metrics);
     const coverageSeconds = Number(record.coverageSeconds);
     const coverageToleranceSeconds = Math.max(2, durationSeconds * 0.005);
@@ -9690,6 +10062,10 @@ function validMkvH264FastStartFullFileMetrics(metrics, fileSizeBytes, durationSe
         Number.isSafeInteger(record.bytesAnalyzed) && record.bytesAnalyzed === fileSizeBytes &&
         Number.isInteger(record.packetCount) && record.packetCount >= MKV_H264_FAST_START_MIN_KEYFRAMES && record.packetCount <= 20_000_000 &&
         Number.isInteger(record.keyframeCount) && record.keyframeCount >= MKV_H264_FAST_START_MIN_KEYFRAMES && record.keyframeCount <= record.packetCount &&
+        Number.isInteger(record.idrCount) && record.idrCount === record.keyframeCount &&
+        record.closedGopIdrVerified === true &&
+        /^[a-f0-9]{64}$/.test(String(record.keyTimelineSha256 || '')) &&
+        record.idrTimelineSha256 === record.keyTimelineSha256 &&
         record.firstPacketKeyframe === true &&
         Number.isFinite(coverageSeconds) && !Object.is(coverageSeconds, -0) &&
         Math.abs(coverageSeconds - durationSeconds) <= coverageToleranceSeconds &&
@@ -9698,9 +10074,11 @@ function validMkvH264FastStartFullFileMetrics(metrics, fileSizeBytes, durationSe
         record.ptsPresent === true && record.dtsPresent === true && record.dtsMonotonic === true &&
         record.muxTimestampsSafe === true && record.negativeTimestampCount === 0 &&
         record.timestampDiscontinuityCount === 0 &&
+        Number.isInteger(record.leadingMissingDtsCount) && record.leadingMissingDtsCount >= 0 && record.leadingMissingDtsCount <= 4 &&
         Number.isFinite(firstPtsSeconds) && firstPtsSeconds >= 0 && firstPtsSeconds <= 1 &&
         Number.isFinite(firstDtsSeconds) && firstDtsSeconds >= 0 && firstDtsSeconds <= 1 &&
-        Number.isFinite(maxPtsDtsSkewSeconds) && maxPtsDtsSkewSeconds >= 0 && maxPtsDtsSkewSeconds <= 2
+        Number.isFinite(maxPtsDtsSkewSeconds) && maxPtsDtsSkewSeconds >= 0 && maxPtsDtsSkewSeconds <= 2 &&
+        validMkvH264FastStartVideoCompatibility(record, profile)
     );
 }
 
@@ -9723,7 +10101,7 @@ function maybeFinalizeMkvH264FastStartProof(session, nowMs = Date.now()) {
         validator.type !== 'etag-sha256' || !/^[a-f0-9]{64}$/.test(String(validator.digest || '')) ||
         metrics.analyzerType !== MKV_H264_FAST_START_ANALYZER_TYPE ||
         metrics.analyzerDigest !== MKV_H264_FAST_START_ANALYZER_DIGEST ||
-        !validMkvH264FastStartFullFileMetrics(metrics, context.fileSizeBytes, context.durationSeconds)
+        !validMkvH264FastStartFullFileMetrics(metrics, context.fileSizeBytes, context.durationSeconds, context.profile)
     ) return null;
     const payload = {
         protocol: MKV_H264_FAST_START_PROTOCOL,
@@ -9740,7 +10118,12 @@ function maybeFinalizeMkvH264FastStartProof(session, nowMs = Date.now()) {
         metrics: {
             bytesAnalyzed: metrics.bytesAnalyzed,
             packetCount: metrics.packetCount,
+            videoStreamIndex: metrics.videoStreamIndex,
             keyframeCount: metrics.keyframeCount,
+            idrCount: metrics.idrCount,
+            keyTimelineSha256: metrics.keyTimelineSha256,
+            idrTimelineSha256: metrics.idrTimelineSha256,
+            closedGopIdrVerified: true,
             firstPacketKeyframe: true,
             coverageSeconds: metrics.coverageSeconds,
             maxKeyframeGapSeconds: metrics.maxKeyframeGapSeconds,
@@ -9750,9 +10133,20 @@ function maybeFinalizeMkvH264FastStartProof(session, nowMs = Date.now()) {
             muxTimestampsSafe: true,
             negativeTimestampCount: 0,
             timestampDiscontinuityCount: 0,
+            leadingMissingDtsCount: metrics.leadingMissingDtsCount,
             firstPtsSeconds: metrics.firstPtsSeconds,
             firstDtsSeconds: metrics.firstDtsSeconds,
             maxPtsDtsSkewSeconds: metrics.maxPtsDtsSkewSeconds,
+            streamTimeBaseNumerator: metrics.streamTimeBaseNumerator,
+            streamTimeBaseDenominator: metrics.streamTimeBaseDenominator,
+            videoProfile: metrics.videoProfile,
+            videoLevel: metrics.videoLevel,
+            videoRefs: metrics.videoRefs,
+            videoFpsNumerator: metrics.videoFpsNumerator,
+            videoFpsDenominator: metrics.videoFpsDenominator,
+            videoWidth: metrics.videoWidth,
+            videoHeight: metrics.videoHeight,
+            videoPixelFormat: metrics.videoPixelFormat,
         },
         analyzer: { type: metrics.analyzerType, digest: metrics.analyzerDigest },
         issuedAtMs: Number(nowMs),
@@ -9778,6 +10172,7 @@ function assessMkvH264FastStart(session, nowMs = Date.now()) {
     const reject = (reason) => ({ protocol: MKV_H264_FAST_START_PROTOCOL, eligible: false, reason, proof: null });
     if (session?.mode === 'transcode') return reject('requested-transcode');
     if (!MKV_H264_FAST_START_COPY_ACTIVATION_READY) return reject('closed-gop-proof-unavailable');
+    if (!MKV_H264_FAST_START_PROOF_CURRENT_KEY) return reject('proof-signing-unavailable');
     const context = mkvH264FastStartStaticContext(session);
     const identity = mkvH264FastStartIdentityContext(session);
     if (!context.ok) return reject(context.reason);
@@ -9813,7 +10208,7 @@ function assessMkvH264FastStart(session, nowMs = Date.now()) {
     if (
         proof.analyzer.type !== MKV_H264_FAST_START_ANALYZER_TYPE ||
         proof.analyzer.digest !== MKV_H264_FAST_START_ANALYZER_DIGEST ||
-        !validMkvH264FastStartFullFileMetrics(proof.metrics, context.fileSizeBytes, context.durationSeconds)
+        !validMkvH264FastStartFullFileMetrics(proof.metrics, context.fileSizeBytes, context.durationSeconds, context.profile)
     ) return reject('invalid-full-file-proof');
     return {
         protocol: MKV_H264_FAST_START_PROTOCOL,
@@ -9826,6 +10221,8 @@ function assessMkvH264FastStart(session, nowMs = Date.now()) {
             fileSizeBytes: context.fileSizeBytes,
             coverageSeconds: proof.metrics.coverageSeconds,
             maxKeyframeGapSeconds: proof.metrics.maxKeyframeGapSeconds,
+            idrCount: proof.metrics.idrCount,
+            closedGopIdrVerified: true,
             timestampsSafe: true,
         },
     };
@@ -11069,12 +11466,21 @@ function hasHeAacMarker(value) {
 // header probe so both yield identical shapes (incl. per-track audio languages).
 function buildCodecProfile(payload, startedAt, probeSource) {
     const streams = Array.isArray(payload.streams) ? payload.streams : [];
-    const video = streams.find((stream) => stream?.codec_type === 'video') || {};
+    // This must stay aligned with FFmpeg's `0:V:0` playback map. In
+    // particular, cover art and thumbnail streams can precede the actual movie
+    // video in ffprobe JSON but uppercase `V` excludes them from playback.
+    const video = streams.find((stream) => (
+        stream?.codec_type === 'video' &&
+        Number(stream?.disposition?.attached_pic || 0) !== 1 &&
+        Number(stream?.disposition?.timed_thumbnails || 0) !== 1 &&
+        Number(stream?.disposition?.still_image || 0) !== 1
+    )) || {};
     const audioStreams = streams.filter((stream) => stream?.codec_type === 'audio');
     const subtitleStreams = streams.filter((stream) => stream?.codec_type === 'subtitle');
     const audio = audioStreams[0] || {};
     const format = asRecord(payload.format);
     return compactRecord({
+        videoStreamIndex: nullableInt(video.index),
         videoCodec: stringOrNull(video.codec_name),
         videoProfile: stringOrNull(video.profile),
         videoWidth: nullableInt(video.width),
