@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#05080f">
+  <title>How Source-Based Recommendations Support Discovery | Norva Blog</title>
+  <meta name="description" content="Learn how source-based recommendations help explore a connected media library, why available titles and metadata shape the result, and how to verify each suggestion.">
+  <link rel="canonical" href="https://norva.tv/blog/source-based-recommendations-explained/">
+  <meta name="robots" content="index,follow">
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/css/blog.css?v=1">
+  <meta property="og:type" content="article">
+  <meta property="og:site_name" content="Norva">
+  <meta property="og:title" content="How Source-Based Recommendations Support Discovery | Norva Blog">
+  <meta property="og:description" content="Learn how source-based recommendations help explore a connected media library, why available titles and metadata shape the result, and how to verify each suggestion.">
+  <meta property="og:url" content="https://norva.tv/blog/source-based-recommendations-explained/">
+  <meta property="og:image" content="https://norva.tv/img/devices/norva-device-tv.webp">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="How Source-Based Recommendations Support Discovery | Norva Blog">
+  <meta name="twitter:description" content="Learn how source-based recommendations help explore a connected media library, why available titles and metadata shape the result, and how to verify each suggestion.">
+  <meta name="twitter:image" content="https://norva.tv/img/devices/norva-device-tv.webp">
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "headline": "How Source-Based Recommendations Support Discovery",
+  "description": "Learn how source-based recommendations help explore a connected media library, why available titles and metadata shape the result, and how to verify each suggestion.",
+  "inLanguage": "en",
+  "datePublished": "2026-08-18T20:00:00+02:00",
+  "dateModified": "2026-08-18T20:00:00+02:00",
+  "author": {
+    "@type": "Organization",
+    "name": "Norva"
+  },
+  "publisher": {
+    "@type": "Organization",
+    "name": "Norva",
+    "logo": {
+      "@type": "ImageObject",
+      "url": "https://norva.tv/img/norva-app-icon-96.png"
+    }
+  },
+  "image": [
+    "https://norva.tv/img/devices/norva-device-tv.webp"
+  ],
+  "mainEntityOfPage": {
+    "@type": "WebPage",
+    "@id": "https://norva.tv/blog/source-based-recommendations-explained/"
+  }
+}
+  </script>
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    {
+      "@type": "ListItem",
+      "position": 1,
+      "name": "Home",
+      "item": "https://norva.tv/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 2,
+      "name": "Blog",
+      "item": "https://norva.tv/blog/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 3,
+      "name": "How Source-Based Recommendations Support Discovery",
+      "item": "https://norva.tv/blog/source-based-recommendations-explained/"
+    }
+  ]
+}
+  </script>
+  <script src="/js/marketing-config.js?v=1"></script>
+  <script defer src="/js/marketing.js?v=1"></script>
+  <script defer src="/js/consent-banner.js?v=1"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="blog-nav">
+    <a class="brand" href="/" aria-label="Norva home">
+      <img src="/img/norva-app-icon-96.png" width="34" height="34" alt="" decoding="async">
+      <span>Norva</span>
+    </a>
+    <nav class="nav-right" aria-label="Primary">
+      <a href="/blog/">Blog</a>
+      <a class="hide-sm" href="/#how-it-works">How it works</a>
+      <a class="cta" href="/account.html?returnTo=%2Fsubscribe.html%3Fplan%3Dplus%26period%3Dmonthly" data-cta="blog-nav" data-auth-action>Start free trial</a>
+    </nav>
+  </header>
+  <main id="main-content">
+    <nav class="breadcrumb" aria-label="Breadcrumb"><a href="/">Home</a><span class="sep">›</span><a href="/blog/">Blog</a><span class="sep">›</span><span aria-current="page">How Source-Based Recommendations Support Discovery</span></nav>
+    <article>
+      <div class="article-meta">
+        <span class="tag">Recommendations &amp; Discovery</span>
+        <span>By Norva Editorial Team</span>
+        <span class="dot">·</span>
+        <time datetime="2026-08-18T20:00:00+02:00">18 August 2026</time>
+        <span class="dot">·</span>
+        <span>7 min read</span>
+      </div>
+      <h1>How Source-Based Recommendations Support Discovery</h1>
+      <p class="lede">Source-based recommendations form paths through the media and metadata already available from a compatible source rather than supplying a separate catalogue.</p>
+      <nav class="toc" aria-label="On this page">
+      <strong>On this page</strong>
+      <ul><li><a href="#separate-four-layers">Separate four layers</a></li><li><a href="#understand-the-source-boundary">Understand the source boundary</a></li><li><a href="#see-how-metadata-creates-paths">See how metadata creates paths</a></li><li><a href="#verify-each-recommendation-as-a-lead">Verify each recommendation as a lead</a></li><li><a href="#diagnose-coverage-gaps-carefully">Diagnose coverage gaps carefully</a></li><li><a href="#original-evidence-source-boundary-map">Original evidence: source-boundary map</a></li><li><a href="#common-mistakes-and-limitations">Common mistakes and limitations</a></li><li><a href="#frequently-asked-questions">Frequently asked questions</a></li><li><a href="#your-next-step">Your next step</a></li><li><a href="#sources">Sources</a></li></ul>
+    </nav>
+      <blockquote><strong>In short:</strong> Source-based recommendations help you move from one known title to related items already represented by your connected source. Their coverage depends on what that compatible source contains and how its metadata describes each work. Treat every suggestion as a discovery lead, then verify identity, version, availability, language, subtitles, and relevance before shortlisting it.</blockquote>
+<p>This model is useful because it narrows exploration to a library the viewer can actually inspect. It also has a clear boundary: a discovery interface cannot recommend a source item it does not know or repair metadata it never received.</p>
+<h2 id="separate-four-layers">Separate four layers</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>Layer</th><th>Question</th></tr></thead>
+<tbody><tr><td>Source availability</td><td>Which media records are currently represented?</td></tr><tr><td>Work identity</td><td>Which film, series, season, episode, or version is this?</td></tr><tr><td>Descriptive metadata</td><td>Which creators, subjects, dates, genres, languages, and relations are available?</td></tr><tr><td>Viewer decision</td><td>Does this candidate fit the current discovery brief?</td></tr></tbody>
+</table></div>
+<p>Confusing these layers leads to false conclusions. A missing suggestion can reflect source coverage or incomplete metadata; an irrelevant suggestion can still be an available work whose visible relationship is too broad for the current brief.</p>
+<h2 id="understand-the-source-boundary">Understand the source boundary</h2>
+<p>Norva is software that organises and plays media from a compatible source the user owns or is authorised to use. It does not include a media catalogue in the subscription. Its public features describe recommendations from the connected source.</p>
+<p>Therefore, “source-based” should not be rewritten as universal, global, or unlimited. Availability, languages, subtitles, and versions depend on the source and media. Review <a href="/blog/recommendations-discovery-guide/">the complete discovery guide</a> for the search, browse, and recommendation roles around this boundary.</p>
+<h2 id="see-how-metadata-creates-paths">See how metadata creates paths</h2>
+<p>DCMI metadata terms distinguish title, creator, subject, date, type, format, language, and relation. EIDR’s work on media identifiers and hierarchies illustrates the difference between a creative work, series, episode, edit, and manifestation. These fields can support meaningful paths such as same creator, related series, similar subject, or shared period.</p>
+<p>The presence of a field does not prove its weight in the current product. Use the metadata discovery explainer to observe which relationships are visible without inventing an internal formula.</p>
+<h2 id="verify-each-recommendation-as-a-lead">Verify each recommendation as a lead</h2>
+<p>For one candidate, record:</p>
+<ol><li>the seed title;</li><li>visible shared attributes;</li><li>important differences;</li><li>exact candidate identity;</li><li>available version and access options;</li><li>whether it answers the discovery question.</li></ol>
+<p>Open the detail surface before playback where possible. A candidate can be related at work level yet unsuitable because the available version lacks the required language or subtitles. Conversely, a surprising candidate can be valuable when one credible relation fits the brief.</p>
+<p>Use the related-title evaluation card when the relationship is not obvious.</p>
+<h2 id="diagnose-coverage-gaps-carefully">Diagnose coverage gaps carefully</h2>
+<p>When a known related work is not suggested, search for it directly. If search finds it, compare its metadata with the seed. If it is absent entirely, note source availability rather than blaming recommendation relevance. If it exists but key fields are blank or inconsistent, follow the incomplete-metadata workflow.</p>
+<p>Do not edit dates, creators, or categories merely to force a relationship unless the source’s authorised metadata workflow and evidence support the correction.</p>
+<h2 id="original-evidence-source-boundary-map">Original evidence: source-boundary map</h2>
+<p>Choose one seed and five visible suggestions. Build four columns for availability, identity, metadata relationship, and viewer decision. Use “unknown” whenever a field is not visible. Ask another reviewer to explain why each candidate entered or left the shortlist.</p>
+<p>The map reveals where evidence ends. It can show that a relation is visible or missing; it cannot identify an internal ranking rule or measure recommendation quality across all libraries.</p>
+<h2 id="common-mistakes-and-limitations">Common mistakes and limitations</h2>
+<ul><li>Describing source-based suggestions as a separate media catalogue.</li><li>Assuming card order reveals relationship strength.</li><li>Treating absent metadata as a negative attribute.</li><li>Ignoring version and accessibility needs.</li><li>Claiming a particular algorithm or personalisation method without proof.</li><li>Correcting source metadata without authority or evidence.</li></ul>
+<h2 id="frequently-asked-questions">Frequently asked questions</h2>
+<h3 id="can-a-recommendation-include-an-unavailable-title">Can a recommendation include an unavailable title?</h3>
+<p>The visible state depends on current source and product behavior. Verify availability separately and use the unavailable-title workflow when a card cannot be opened.</p>
+<h3 id="why-do-two-sources-produce-different-discovery-paths">Why do two sources produce different discovery paths?</h3>
+<p>They can contain different works, versions, and metadata. Compare those inputs before comparing the resulting suggestions.</p>
+<h3 id="does-a-source-based-recommendation-guarantee-relevance">Does a source-based recommendation guarantee relevance?</h3>
+<p>No. It is a lead. The viewer still evaluates the visible relationship against a specific discovery brief.</p>
+<h2 id="your-next-step">Your next step</h2>
+<p><a href="https://norva.tv/#features" target="_blank" rel="noopener">Explore Norva Features</a></p>
+<h2 id="sources">Sources</h2>
+<ul><li><a href="https://www.dublincore.org/specifications/dublin-core/dcmi-terms/" target="_blank" rel="noopener">DCMI Metadata Terms</a></li><li><a href="https://www.eidr.org/how-we-work" target="_blank" rel="noopener">EIDR: How We Work</a></li><li><a href="https://norva.tv/#features" target="_blank" rel="noopener">Norva Features</a></li></ul>
+      <section class="article-cta">
+      <a class="btn" href="https://norva.tv/#features" data-cta="blog-article">Explore Norva Features</a>
+    </section>
+      <section class="sources">
+      <h2>Sources</h2>
+      <ul><li><a href="https://www.dublincore.org/specifications/dublin-core/dcmi-terms/" target="_blank" rel="noopener">https://www.dublincore.org/specifications/dublin-core/dcmi-terms/</a></li><li><a href="https://www.eidr.org/how-we-work" target="_blank" rel="noopener">https://www.eidr.org/how-we-work</a></li><li><a href="https://norva.tv/#features" target="_blank" rel="noopener">https://norva.tv/#features</a></li></ul>
+    </section>
+      
+    </article>
+  </main>
+  <footer class="blog-footer">
+    <div class="foot-inner">
+      <nav class="foot-links" aria-label="Footer">
+        <a href="/">Home</a>
+        <a href="/blog/">Blog</a>
+        <a href="/#features">Benefits</a>
+        <a href="/#pricing">Pricing</a>
+        <a href="/support.html?returnTo=%2Fblog%2F">Support</a>
+        <a href="/terms.html">Terms</a>
+        <a href="/privacy.html">Privacy</a>
+        <a href="/mentions-legales.html">Legal notice</a>
+      </nav>
+      <p class="disclaimer">&copy; 2026 Norva. Norva is a media player and organiser. It does not provide media. Use requires a compatible source you own or are authorised to access.</p>
+    </div>
+  </footer>
+</body>
+</html>
