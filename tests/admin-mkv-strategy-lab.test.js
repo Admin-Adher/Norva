@@ -43,10 +43,6 @@ function canonicalHash(relativePath) {
   return crypto.createHash('sha256').update(source).digest('hex');
 }
 
-function rawHash(relativePath) {
-  return crypto.createHash('sha256').update(fs.readFileSync(path.join(root, relativePath))).digest('hex');
-}
-
 function loadAdminPage(documentOverride, windowOverride) {
   const window = windowOverride || {};
   const document = documentOverride || {
@@ -551,7 +547,7 @@ test('Admin route lazy-loads the exact lab assets and mounts only on the current
   const runtimeHash = canonicalHash('public/js/utils/MkvStrategyLabRuntime.js').slice(0, 10);
   const styleHash = canonicalHash('public/css/mkv-strategy-lab.css').slice(0, 10);
   const adminHash = canonicalHash('public/js/pages/AdminPage.js').slice(0, 10);
-  const appHash = rawHash('public/js/app.js').slice(0, 10);
+  const appHash = canonicalHash('public/js/app.js').slice(0, 10);
   assert.match(adminSource, new RegExp(`MkvStrategyLabPage\\.js\\?v=${scriptHash}`));
   assert.match(adminSource, new RegExp(`MkvStrategyLabRuntime\\.js\\?v=${runtimeHash}`));
   assert.match(adminSource, new RegExp(`mkv-strategy-lab\\.css\\?v=${styleHash}`));
