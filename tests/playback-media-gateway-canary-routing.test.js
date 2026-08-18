@@ -70,6 +70,13 @@ const DEACTIVATE_SCRIPT_PATH = path.join(
   'media',
   'deactivate-edge-vaapi-canary-user.sh',
 );
+const GLOBAL_ACTIVATION_SCRIPT_PATH = path.join(
+  ROOT,
+  'ops',
+  'hetzner',
+  'media',
+  'activate-private-media-gateway-global.sh',
+);
 
 const USER_HASH = 'a'.repeat(64);
 const OTHER_HASH = 'b'.repeat(64);
@@ -357,4 +364,29 @@ test('one-user deactivation stops routing before waiting for active session drai
   assert.ok(clearSelection >= 0 && standbyWait >= 0 && activeSessionGate > clearSelection && callbackRestore > activeSessionGate);
   assert.match(deactivate, /gateway_id='\$\{GATEWAY_ID\}'::uuid/);
   assert.match(deactivate, /EDGE_VAAPI_CANARY_ONE_USER_DEACTIVATED_OK/);
+});
+
+test('global activation is drained, atomic, cache-settled, and rollback-armed', () => {
+  const activate = fs.readFileSync(GLOBAL_ACTIVATION_SCRIPT_PATH, 'utf8');
+  assert.match(activate, /readonly GATEWAY_IMAGE='norva-media-gateway:vaapi-b180cdcbf0be'/);
+  assert.match(activate, /h\.version === 109/);
+  assert.match(activate, /readonly FUNCTION_VERSION='56'/);
+  assert.match(activate, /readonly EDGE_RUNTIME_CONFIG_CACHE_SETTLE_SECONDS=35/);
+  assert.match(activate, /active_state=[\s\S]*cloud_playback_sessions[\s\S]*cloud_gateway_sessions/);
+  assert.match(activate, /\[\[ "\$\{active_state\}" == '0\|0' \]\]/);
+  assert.match(activate, /chmod 0600 "\$\{ROLLBACK_SQL\}"/);
+  assert.match(activate, /sha256sum "\$\{ROLLBACK_SQL\}" > "\$\{ROLLBACK_SQL\}\.sha256"/);
+  assert.match(activate, /trap 'restore_previous_config \$\?' ERR INT TERM/);
+  assert.match(activate, /set value = v_canary_url[\s\S]*key = 'NORVA_MEDIA_GATEWAY_URL'/);
+  assert.match(activate, /set value = v_canary_token[\s\S]*key = 'NORVA_MEDIA_GATEWAY_TOKEN'/);
+  assert.match(activate, /set value = ''[\s\S]*key = 'NORVA_MEDIA_GATEWAY_CANARY_USER_HASHES'/);
+
+  const mutation = activate.indexOf("do $global_route$");
+  const settle = activate.indexOf('sleep "${EDGE_RUNTIME_CONFIG_CACHE_SETTLE_SECONDS}"', mutation);
+  const standby = activate.indexOf('wait_edge_state standby 0', settle);
+  const verification = activate.indexOf('global-binding-verification', standby);
+  assert.ok(mutation >= 0 && settle > mutation && standby > settle && verification > standby);
+
+  assert.match(activate, /audience=all-current-and-future-users route=default-private selected_users=0/);
+  assert.doesNotMatch(activate, /echo[^\n]*(gateway_token|db_canary_token)/i);
 });
