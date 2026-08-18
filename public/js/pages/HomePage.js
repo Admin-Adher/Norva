@@ -2781,6 +2781,8 @@ class HomePage {
             id: streamId,
             type,
             title: this.displayTitle(item),
+            rawTitle: item.raw_title || item.rawTitle || item.name || item.title
+                || data.rawTitle || data.raw_title || null,
             subtitle: data.subtitle || this.typeLabel(type),
             poster: item.stream_icon || item.poster_url || item.posterUrl || data.poster || data.posterUrl,
             sourceId,
@@ -2789,6 +2791,9 @@ class HomePage {
             playbackPreferences,
             containerExtension: container,
             titleId: data.titleId || item.titleId || item.title_id || null,
+            codecProfile: item.codecProfile || item.codec_profile
+                || data.codecProfile || data.codec_profile
+                || item.playbackHint?.codecProfile || item.playback_hint?.codec_profile || null,
             variantCount: item.variantCount || item.variant_count || data.variantCount || 1,
             defaultVariant: item.defaultVariant || item.default_variant || null,
             audioLanguages: item.audioLanguages || item.audio_languages || data.audioLanguages || data.audio_languages || null,

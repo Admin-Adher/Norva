@@ -219,7 +219,7 @@ Deno.serve(async (req) => {
       return json(req, {
         ok: true,
         service: "norva-playback",
-        version: 57,
+        version: 58,
         nativeHeartbeatProtocol: 1,
         providerCircuitProtocol: 1,
         vodContainerSelfHealProtocol: 1,
@@ -801,8 +801,26 @@ async function createPlaybackSession(
   );
   assertHttpUrl(targetUrl);
 
-  const mode = choosePlaybackMode(requestedMode, body);
-  const gatewayVideoTranscodeExplicit = mode === "transcode" && body.gatewayAutoMode !== true;
+  const clientMode = choosePlaybackMode(requestedMode, body);
+  const authoritativeVodTier = itemType === "movie"
+    ? authoritativeVodGatewayTier(resolved.playbackHint, resolvedContainerObservation)
+    : null;
+  const serverPromotedRelay = clientMode === "relay" &&
+    (authoritativeVodTier === "video_transcode" || authoritativeVodTier === "audio_transcode");
+  const mode = serverPromotedRelay ? "transcode" : clientMode;
+  if (serverPromotedRelay) {
+    // The browser may still be holding a catalogue extension (for example MP4)
+    // while a server-owned probe has already identified an AVI/MPEG-4/AC-3
+    // file. Never ask it to fail once through the raw relay first. Preserve the
+    // cheaper video-copy lane when only audio is unsafe.
+    requestedPlaybackHint = mergePlaybackHints(requestedPlaybackHint, {
+      gatewayMode: authoritativeVodTier === "video_transcode" ? "transcode" : "remux",
+    });
+  }
+  const gatewayVideoTranscodeExplicit = mode === "transcode" && (
+    (serverPromotedRelay && authoritativeVodTier === "video_transcode") ||
+    (!serverPromotedRelay && body.gatewayAutoMode !== true)
+  );
   const ttlSeconds = boundedInt(body.ttlSeconds ?? body.ttl_seconds, 900, 60, 7200);
   const expiresAt = new Date(Date.now() + ttlSeconds * 1000).toISOString();
   // Entitlement/concurrency stays short-lived, but a VOD gateway transport must
@@ -2931,7 +2949,7 @@ async function loadExactLanguageValidationProfile(
     throw new HttpError(404, "Exact movie variant not found");
   }
   const rawProfile = recordOrEmpty((data[0] as JsonRecord).codec_profile);
-  if (!hasExactGatewayInbandMkvProfile(rawProfile)) {
+  if (!hasExactGatewayInbandVodProfile(rawProfile)) {
     throw new HttpError(409, "Exact movie codec profile is incomplete", {
       code: "LANGUAGE_VALIDATION_CODEC_PROFILE_REQUIRED",
     });
@@ -2957,21 +2975,25 @@ async function loadExactLanguageValidationProfile(
   return { variantId, profile, profileProbedAt, fileSizeBytes, audioTracks, subtitleTracks };
 }
 
-function hasExactGatewayInbandMkvProfile(value: unknown) {
+function hasExactGatewayInbandVodProfile(value: unknown) {
   const raw = recordOrEmpty(value);
   if (!hasReliableVodCodecProfile(raw)) return false;
   const profile = normalizeCodecProfile(raw);
   const container = normalizeCodecToken(profile.container);
+  const canonicalContainer = canonicalVodContainer(profile.container);
   const durationSeconds = Number(profile.durationSeconds);
   const fileSizeBytes = Number(profile.fileSizeBytes);
+  const probeSource = normalizeCodecToken(profile.probeSource);
+  const exactGatewayProfile = probeSource === "gatewayinband"
+    ? profile.metadataComplete === true
+    : probeSource === "gatewayprobe";
   return Boolean(
-    profile.metadataComplete === true &&
-    (container === "mkv" || container.includes("matroska")) &&
+    exactGatewayProfile &&
+    (canonicalContainer || container.includes("matroska") || container.includes("webm")) &&
     Number.isFinite(durationSeconds) &&
     durationSeconds > 0 &&
     Number.isSafeInteger(fileSizeBytes) &&
     fileSizeBytes > 0 &&
-    normalizeCodecToken(profile.probeSource) === "gatewayinband" &&
     Number.isFinite(Date.parse(stringOr(profile.probedAt, "")))
   );
 }
@@ -5939,6 +5961,35 @@ function compatibilityTierForCodecProfile(profile: JsonRecord, playbackHint: Jso
   if (audio && !safeAudio) return "audio_transcode";
   if (safeVideo && safeAudio) return container === "mp4" || container === "movmp4m4a3gp3g2mj2" ? "direct" : "remux";
   return "unknown";
+}
+
+function authoritativeVodGatewayTier(
+  playbackHintValue: unknown,
+  containerObservationValue: unknown = {},
+) {
+  const playbackHint = recordOrEmpty(playbackHintValue);
+  const profile = firstUsefulCodecProfile(
+    playbackHint.codecProfile,
+    playbackHint.codec_profile,
+  );
+  if (hasReliableVodCodecProfile(profile)) {
+    // This helper is called only with resolvePlaybackTarget() output. Prefer the
+    // exact probed container over any stale top-level catalogue extension.
+    return compatibilityTierForCodecProfile(profile, {
+      container: profile.container,
+    });
+  }
+
+  const observedContainer = canonicalVodContainer(
+    recordOrEmpty(containerObservationValue).container,
+  );
+  // A persisted prefix observation is service-only and file-bound. These
+  // legacy containers have no dependable direct browser lane, even before the
+  // full codec inventory has propagated to every catalogue mirror.
+  if (["avi", "flv", "mpg", "ogg"].includes(String(observedContainer || ""))) {
+    return "video_transcode";
+  }
+  return null;
 }
 
 function playbackCostScoreForObservation(tier: string, startupMs: number | null) {

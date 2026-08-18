@@ -289,13 +289,18 @@ const MediaUtils = (() => {
     const SUB_MARKERS = new Set(['sub', 'subs', 'subt', 'subbed', 'subtitle', 'subtitles', 'st', 'vost', 'vostfr']);
     const DUB_MARKERS = new Set(['dub', 'dubbed', 'dublado', 'doblado', 'doublage']);
     const PREFIX_QUALITY = new Set(['4k', '8k', 'uhd', '2160p', '1440p', '1080p', '720p', '480p', '360p', 'fhd', 'hd', 'sd', 'hdr', 'hdr10', 'sdr', 'dv']);
+    const BAR_SEPARATORS = /[▎▏▍▌│┃┆┊｜•·・]/g;
     // Arabic-script markers that mean "subtitled/translated".
     const RTL_SUB_RE = /مترجم|ترجمة|زیرنویس|زیرنویس‌دار/;
 
     // Parse the leading "XX - " (or "XX-YY - ") segment of an IPTV label/category
     // into a structured language hint. Returns null when there is no usable prefix.
     function parseLeadingRegionTag(name) {
-        const raw = String(name || '');
+        // Providers commonly use decorative IPTV bars instead of an ASCII
+        // delimiter (for example "ES ▎ Amar"). Normalize only the separator;
+        // the same strict leading-token grammar still prevents title words
+        // from becoming language evidence.
+        const raw = String(name || '').replace(BAR_SEPARATORS, ' - ');
         const m = raw.match(/^\s*([0-9a-z+][0-9a-z+À-ɏ\s._\-/]{0,24}?)\s*[-–—|:/]\s+/i);
         if (!m) return null;
         const seg = stripDiacritics(m[1]).toLowerCase();
@@ -658,8 +663,9 @@ const MediaUtils = (() => {
     }
 
     function parseTitleLanguageSignals(name) {
-        const raw = stripDiacritics(String(name || '')).toLowerCase();
-        const region = parseLeadingRegionTag(name);
+        const normalizedName = String(name || '').replace(BAR_SEPARATORS, ' - ');
+        const raw = stripDiacritics(normalizedName).toLowerCase();
+        const region = parseLeadingRegionTag(normalizedName);
         // "AR-SUBS - …" contains the token "AR", which the generic free-form
         // audio regex would otherwise misread as Arabic audio. When the leading
         // segment is explicitly subtitle-only, scan audio markers in the title
@@ -1575,8 +1581,6 @@ const MediaUtils = (() => {
         'THE', 'AND', 'NEW', 'TOP', 'VOD', 'TV', 'PPV', 'LIVE', 'HD', 'FHD', 'UHD', 'SD',
         '4K', '8K', 'DOC', 'DOCU', 'EX', 'SOC', 'SPT', 'STH', 'UNV', 'PJ', 'TM', 'TG', 'AS', 'KA'
     ]);
-    const BAR_SEPARATORS = /[▎▏▍▌│┃┆┊｜•·・]/g;
-
     function versionTierInfo(item = {}) {
         const raw = String(item.compatibilityTier || item.compatibility_tier || '').toLowerCase();
         return VERSION_TIERS[raw] || null; // 'unknown'/absent -> no dot

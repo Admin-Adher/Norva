@@ -143,9 +143,9 @@ test('foreground validation ignores presence intent but still blocks real provid
   );
   assert.match(worker, /providerAccountLeaseClaimed[\s\S]*providerAccountLeaseReleaseSafe[\s\S]*release_provider_account_language_validation/);
   assert.match(create, /claimError\.code[\s\S]*55P03[\s\S]*provider language validation in progress[\s\S]*LANGUAGE_VALIDATION_IN_PROGRESS/);
-  assert.match(playback, /version: 57[\s\S]*languageValidationPresenceIntentProtocol: 1[\s\S]*languageValidationPlaybackLeaseProtocol: 1[\s\S]*languageValidationActivityProtocol: 1[\s\S]*languageValidationDurationClaimProtocol: 1[\s\S]*languageValidationWindowCheckpointProtocol: LANGUAGE_VALIDATION_WINDOW_CHECKPOINT_PROTOCOL[\s\S]*languageValidationTaskBudgetMs: LANGUAGE_VALIDATION_TASK_BUDGET_MS[\s\S]*languageValidationFetchTimeoutMs: LANGUAGE_VALIDATION_FETCH_TIMEOUT_MS[\s\S]*languageValidationPostFetchReserveMs: LANGUAGE_VALIDATION_POST_FETCH_RESERVE_MS[\s\S]*languageValidationJobLeaseSeconds: LANGUAGE_VALIDATION_JOB_LEASE_SECONDS[\s\S]*languageValidationSampleDurationSeconds: LANGUAGE_VALIDATION_SAMPLE_DURATION_SECONDS/);
+  assert.match(playback, /version: 58[\s\S]*languageValidationPresenceIntentProtocol: 1[\s\S]*languageValidationPlaybackLeaseProtocol: 1[\s\S]*languageValidationActivityProtocol: 1[\s\S]*languageValidationDurationClaimProtocol: 1[\s\S]*languageValidationWindowCheckpointProtocol: LANGUAGE_VALIDATION_WINDOW_CHECKPOINT_PROTOCOL[\s\S]*languageValidationTaskBudgetMs: LANGUAGE_VALIDATION_TASK_BUDGET_MS[\s\S]*languageValidationFetchTimeoutMs: LANGUAGE_VALIDATION_FETCH_TIMEOUT_MS[\s\S]*languageValidationPostFetchReserveMs: LANGUAGE_VALIDATION_POST_FETCH_RESERVE_MS[\s\S]*languageValidationJobLeaseSeconds: LANGUAGE_VALIDATION_JOB_LEASE_SECONDS[\s\S]*languageValidationSampleDurationSeconds: LANGUAGE_VALIDATION_SAMPLE_DURATION_SECONDS/);
   assert.match(playback, /const LANGUAGE_VALIDATION_FETCH_TIMEOUT_MS = 240_000/);
-  assert.match(edgeDeploy, /EXPECTED_PLAYBACK_VERSION=57/);
+  assert.match(edgeDeploy, /EXPECTED_PLAYBACK_VERSION=58/);
   assert.match(edgeDeploy, /EXPECTED_LANGUAGE_VALIDATION_TASK_BUDGET_MS=270000/);
   assert.match(edgeDeploy, /EXPECTED_LANGUAGE_VALIDATION_FETCH_TIMEOUT_MS=240000/);
   assert.match(edgeDeploy, /EXPECTED_LANGUAGE_VALIDATION_POST_FETCH_RESERVE_MS=30000/);
@@ -477,7 +477,7 @@ test('language-validation activity yields to real activity but remains busy for 
   assert.doesNotMatch(activityMigration, /alter table|drop table|create table/i);
 });
 
-test('exact gateway-inband MKV profile, signed size and index fingerprint fail closed', () => {
+test('exact Gateway VOD profile, signed size and index fingerprint fail closed', () => {
   const profile = between(
     playback,
     'async function loadExactLanguageValidationProfile(',
@@ -485,7 +485,7 @@ test('exact gateway-inband MKV profile, signed size and index fingerprint fail c
   );
   const exact = between(
     playback,
-    'function hasExactGatewayInbandMkvProfile(',
+    'function hasExactGatewayInbandVodProfile(',
     '\nasync function loadLanguageValidationIdentity(',
   );
   const revalidate = between(
@@ -513,10 +513,11 @@ test('exact gateway-inband MKV profile, signed size and index fingerprint fail c
   assert.match(profile, /eq\("user_id", userId\)/);
   assert.match(profile, /eq\("source_id", sourceId\)/);
   assert.match(profile, /eq\("external_id", itemId\)/);
-  assert.match(exact, /profile\.metadataComplete === true/);
-  assert.match(exact, /container === "mkv" \|\| container\.includes\("matroska"\)/);
+  assert.match(exact, /probeSource === "gatewayinband"[\s\S]*profile\.metadataComplete === true/);
+  assert.match(exact, /probeSource === "gatewayprobe"/);
+  assert.match(exact, /canonicalVodContainer\(profile\.container\)/);
+  assert.match(exact, /container\.includes\("matroska"\)/);
   assert.match(exact, /Number\.isSafeInteger\(fileSizeBytes\)/);
-  assert.match(exact, /normalizeCodecToken\(profile\.probeSource\) === "gatewayinband"/);
   assert.match(revalidate, /languageValidationProfileFingerprint/);
   assert.match(revalidate, /exactProfile\.fileSizeBytes !== expectedFileSizeBytes/);
   assert.match(revalidate, /fingerprint !== stringOr\(claim\.profileFingerprint, ""\)/);
@@ -534,6 +535,45 @@ test('exact gateway-inband MKV profile, signed size and index fingerprint fail c
   assert.doesNotMatch(rawBytePipe, /durationSeconds/);
   assert.match(bytePipe, /capability/);
   assert.doesNotMatch(startBody(playback), /body\.(?:url|targetUrl|providerUrl|token|password)/);
+});
+
+test('strict language validation accepts exact AVI Gateway probes without accepting request hints', () => {
+  const source = between(
+    playback,
+    'function hasExactGatewayInbandVodProfile(',
+    '\nasync function loadLanguageValidationIdentity(',
+  ).replace('value: unknown', 'value');
+  const context = {
+    recordOrEmpty: value => value && typeof value === 'object' && !Array.isArray(value) ? value : {},
+    hasReliableVodCodecProfile: value => Boolean(value?.videoCodec && value?.audioCodec && value?.container),
+    normalizeCodecProfile: value => value,
+    normalizeCodecToken: value => String(value || '').toLowerCase().replace(/[^a-z0-9.]+/g, ''),
+    canonicalVodContainer: value => {
+      const token = String(value || '').toLowerCase();
+      return ['mkv', 'mp4', 'mov', 'avi', 'ogg', 'flv', 'mpg'].includes(token) ? token : null;
+    },
+    stringOr: (value, fallback) => typeof value === 'string' && value ? value : fallback,
+    Number,
+    Date,
+    Boolean,
+  };
+  vm.runInNewContext(`${source}; this.accepts = hasExactGatewayInbandVodProfile;`, context);
+  const base = {
+    metadataComplete: false,
+    container: 'avi',
+    videoCodec: 'mpeg4',
+    audioCodec: 'ac3',
+    audioTracks: [{ index: 1 }],
+    subtitles: [],
+    durationSeconds: 6215.904,
+    fileSizeBytes: 3633791388,
+    probedAt: '2026-08-18T11:48:43.623Z',
+  };
+
+  assert.equal(context.accepts({ ...base, probeSource: 'gateway_probe' }), true);
+  assert.equal(context.accepts({ ...base, container: 'mkv', metadataComplete: true, probeSource: 'gateway_inband' }), true);
+  assert.equal(context.accepts({ ...base, probeSource: 'request' }), false);
+  assert.equal(context.accepts({ ...base, metadataComplete: false, probeSource: 'gateway_inband' }), false);
 });
 
 test('stale unverified track maps are repaired only from the exact profile without provider I/O', () => {

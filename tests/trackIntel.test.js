@@ -54,6 +54,7 @@ test('parseVersionInfo exposes the region audio signal (player audio-menu path)'
     assert.strictEqual(code('IR - The Secret Agent (2025)'), 'fa');
     assert.strictEqual(code('GR - The Secret Agent (2025)'), 'el');
     assert.strictEqual(code('AL - The Secret Agent (2025)'), 'sq');
+    assert.strictEqual(code('ES ▎ Amar'), 'es');
 });
 
 test('no false positives on ordinary film titles', () => {

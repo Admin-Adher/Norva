@@ -3198,10 +3198,13 @@ class MoviesPage {
         const versionList = (versions || [movie]).map(v => ({
             sourceId: v.sourceId,
             cloudSourceId: v.cloudSourceId || v.cloud_source_id || null,
-            streamId: v.stream_id,
+            streamId: v.stream_id || v.streamId,
             container: v.container_extension || 'mp4',
             type: 'movie',
             label: MediaUtils.versionLabel(v, this.getSourceName(v.sourceId)),
+            rawTitle: v.raw_title || v.rawTitle || v.name || v.title || null,
+            codecProfile: v.codecProfile || v.codec_profile
+                || v.playbackHint?.codecProfile || v.playback_hint?.codec_profile || null,
             audioTracks: v.audio_tracks_scope === 'file' || v.audioTracksScope === 'file'
                 ? (v.audioTracks || v.audio_tracks || [])
                 : null,
@@ -3219,6 +3222,7 @@ class MoviesPage {
             type: 'movie',
             id: movie.stream_id,
             title: this.getMovieDisplayTitle(movie),
+            rawTitle: movie.raw_title || movie.rawTitle || movie.name || movie.title || null,
             poster: MediaUtils.safeImageUrl(movie.stream_icon || movie.cover || MediaUtils.tmdbPosterUrl(movie.tmdb)),
             description: movie.plot || movie.tmdb?.overview || '',
             year: this.getItemYear(movie),
@@ -3226,6 +3230,8 @@ class MoviesPage {
             sourceId: movie.sourceId,
             cloudSourceId: movie.cloudSourceId || movie.cloud_source_id || null,
             titleId: movie.titleId || movie.title_id || null,
+            codecProfile: movie.codecProfile || movie.codec_profile
+                || movie.playbackHint?.codecProfile || movie.playback_hint?.codec_profile || null,
             categoryId: movie.category_id,
             containerExtension: container,
             resumeTime: resumePlan.target,

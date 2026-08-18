@@ -204,6 +204,7 @@ class WatchPage {
         this._firstFrameCallbackId = null;
         this._firstFrameObserverAttemptId = null;
         this._firstFrameObserverAvailable = null;
+        this._watchedLanguageValidationIntent = null;
         this._deferredEngineTrackEnrichment = null;
         this._deferredEngineTrackEnrichmentTimer = null;
         this._playStartedReported = false;
@@ -483,7 +484,7 @@ class WatchPage {
 
         const copy = {};
         [
-            'type', 'id', 'title', 'subtitle', 'poster', 'description', 'year', 'rating',
+            'type', 'id', 'title', 'rawTitle', 'subtitle', 'poster', 'description', 'year', 'rating',
             'sourceId', 'cloudSourceId', 'seriesId', 'categoryId', 'currentSeason',
             'currentEpisode', 'containerExtension', 'durationHint', 'titleId',
             'variantCount', '_variantCount', 'providerTmdbId',
@@ -491,12 +492,15 @@ class WatchPage {
         ].forEach(key => {
             if (content[key] !== undefined && content[key] !== null) copy[key] = content[key];
         });
+        const codecProfile = this.cloneForResumeStorage(content.codecProfile || content.codec_profile);
+        if (codecProfile) copy.codecProfile = codecProfile;
 
         if (Array.isArray(content.versions)) {
             copy.versions = content.versions.map(version => {
                 const audioTracks = this.cloneForResumeStorage(version.audioTracks || version.audio_tracks);
                 const subtitleTracks = this.cloneForResumeStorage(version.subtitleTracks || version.subtitle_tracks);
                 const audioLanguages = this.cloneForResumeStorage(version.audioLanguages || version.audio_languages);
+                const codecProfile = this.cloneForResumeStorage(version.codecProfile || version.codec_profile);
                 return {
                     sourceId: version.sourceId || version.source_id,
                     cloudSourceId: version.cloudSourceId || version.cloud_source_id || null,
@@ -504,6 +508,8 @@ class WatchPage {
                     container: version.container || version.containerExtension || version.container_extension,
                     type: version.type,
                     label: version.label,
+                    rawTitle: version.rawTitle || version.raw_title || null,
+                    codecProfile: codecProfile || null,
                     audioTracks: Array.isArray(audioTracks) ? audioTracks : null,
                     audioTracksScope: Array.isArray(audioTracks)
                         ? (version.audioTracksScope || version.audio_tracks_scope || 'file')
@@ -2557,8 +2563,56 @@ class WatchPage {
                 ...(engineTimings ? { engineTimings } : {})
             }
         });
+        this.rememberWatchedLanguageValidationIntent(playbackAttemptId);
         this.flushDeferredEngineTrackEnrichment(playbackAttemptId);
         return true;
+    }
+
+    rememberWatchedLanguageValidationIntent(playbackAttemptId = this._playbackAttemptId) {
+        if (this.isStalePlaybackAttempt(playbackAttemptId) || this.isAudioLanguageVerified()) return null;
+        if (this.contentType !== 'movie' && this.content?.type !== 'movie') return null;
+
+        const sourceId = this.content?.cloudSourceId || this.content?.cloud_source_id
+            || this.content?.sourceId || this.content?.source_id || null;
+        const itemId = this.content?.externalId || this.content?.external_id
+            || this.content?.itemId || this.content?.item_id
+            || this.content?.streamId || this.content?.stream_id || this.content?.id || null;
+        const candidates = [
+            ...(Array.isArray(this.currentStreamInfo?.audioTracks) ? this.currentStreamInfo.audioTracks : []),
+            ...(Array.isArray(this.audioTracks) ? this.audioTracks : []),
+            ...this.getContentAudioTracks(),
+        ];
+        const expectedAudioIndices = Array.from(new Set(candidates
+            .map(track => Number(track?.index))
+            .filter(index => Number.isInteger(index) && index >= 0 && index <= 128)))
+            .sort((a, b) => a - b);
+        if (!sourceId || !itemId || !expectedAudioIndices.length) return null;
+
+        this._watchedLanguageValidationIntent = {
+            playbackAttemptId,
+            sourceId: String(sourceId),
+            itemId: String(itemId),
+            expectedAudioIndices,
+        };
+        return this._watchedLanguageValidationIntent;
+    }
+
+    async queueWatchedLanguageValidation(intent) {
+        if (!intent || !window.NorvaCloud?.playback?.queueLanguageValidation) return null;
+        let sourceId = String(intent.sourceId || '');
+        if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(sourceId)
+            && typeof window.API?.resolveSourceId === 'function') {
+            sourceId = String(await window.API.resolveSourceId(sourceId));
+        }
+        if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(sourceId)) {
+            return null;
+        }
+        return window.NorvaCloud.playback.queueLanguageValidation({
+            sourceId,
+            itemType: 'movie',
+            itemId: String(intent.itemId),
+            expectedAudioIndices: [...intent.expectedAudioIndices],
+        });
     }
 
     cancelDeferredEngineTrackEnrichment() {
@@ -3529,14 +3583,19 @@ class WatchPage {
         // matching the card badge + the native mobile player.
         const language = languageKnown ? this.getLanguageDisplayName(track.language) : null;
         const codec = track.codec ? String(track.codec).toUpperCase() : null;
-        const channels = track.channels ? `${track.channels}ch` : null;
+        const channels = this.formatChannelLayout(track.channelLayout || track.channel_layout, track.channels);
+        const providerLabel = type === 'audio' && !title && !language && this.audioTracks.length <= 1
+            ? this.playingAudioVersionLabel()
+            : null;
 
         if (title) parts.push(title);
         if (language && !parts.some(part => part.toLowerCase() === language.toLowerCase())) parts.push(language);
+        if (providerLabel) parts.push(providerLabel);
+        if (type === 'audio' && !parts.length) parts.push(fallback || 'Audio track');
         if (codec && type === 'audio') parts.push(codec);
         if (channels && type === 'audio') parts.push(channels);
 
-        return parts.length ? parts.join(' - ') : fallback;
+        return parts.length ? parts.join(' · ') : fallback;
     }
 
     ensureSelectedAudioTrack() {
@@ -3651,6 +3710,8 @@ class WatchPage {
             audioTracks,
             subtitles,
             container: profile.container || 'unknown',
+            probeSource: profile.probeSource || profile.probe_source || null,
+            probedAt: profile.probedAt || profile.probed_at || null,
             compatible: false,
             needsRemux: false,
             needsTranscode: false
@@ -4403,6 +4464,20 @@ class WatchPage {
         const codecProfileInfo = this.normalizePlaybackCodecProfile(options.codecProfile);
         if (codecProfileInfo) {
             this.applyProbeInfo(codecProfileInfo);
+            const hasExactEmbeddedLanguage = Boolean(
+                codecProfileInfo.probeSource && codecProfileInfo.probedAt &&
+                codecProfileInfo.audioTracks.some(track => {
+                    const language = this.normalizeTrackLanguage(track?.language || track?.lang);
+                    return language && language !== 'und';
+                })
+            );
+            if (hasExactEmbeddedLanguage) {
+                this.replaceExactContentAudioMetadata(
+                    codecProfileInfo.audioTracks,
+                    codecProfileInfo.audioTracks.map(track => track?.language || track?.lang),
+                    this.isAudioLanguageVerified() ? 'verified' : 'probed'
+                );
+            }
         }
         this.configureGatewayAudioRenditions(
             options.audioRenditions ?? options.audio_renditions ?? options.gatewaySession?.audioRenditions
@@ -5204,6 +5279,10 @@ class WatchPage {
         this.cancelPendingHlsAudioSwitch(false);
         this.cancelFirstFrameTelemetryObserver();
         this.cancelDeferredEngineTrackEnrichment();
+        const languageValidationIntent = enqueueStoryboard
+            ? this._watchedLanguageValidationIntent
+            : null;
+        if (enqueueStoryboard) this._watchedLanguageValidationIntent = null;
         // Only a genuine exit after a rendered frame may warm the storyboard cache.
         // Internal loadVideo() teardowns and abandoned starts must never open provider
         // work ahead of the incoming media's first request/frame.
@@ -5274,6 +5353,13 @@ class WatchPage {
         const p = sessionTeardown.finally(() => {
             if (this._stopPromise === p) this._stopPromise = null;
         });
+        if (languageValidationIntent) {
+            // Start strict Whisper validation only after the playback transports
+            // have released the provider's single-connection lane. The request is
+            // intentionally detached from navigation and can never delay a new play.
+            sessionTeardown.then(() => this.queueWatchedLanguageValidation(languageValidationIntent))
+                .catch(() => { /* best effort; server-side cache remains authoritative */ });
+        }
         this._stopPromise = p;
         return this._stopPromise;
     }
@@ -6986,6 +7072,10 @@ class WatchPage {
         const nextSubtitleTracks = Array.isArray(next.subtitleTracks)
             ? next.subtitleTracks
             : (Array.isArray(next.subtitle_tracks) ? next.subtitle_tracks : null);
+        const nextCodecProfile = next.codecProfile || next.codec_profile || null;
+        const nextPlaybackHint = window.MediaUtils?.playbackHintFromItem
+            ? window.MediaUtils.playbackHintFromItem(next, { container: nextContainer })
+            : { container: nextContainer, ...(nextCodecProfile ? { codecProfile: nextCodecProfile } : {}) };
         const playbackPreferences = this.getLanguageSafeFailoverPreferences();
         const nextAudioOptions = this.getLanguageSafeFailoverAudioOptions(
             nextAudioTracks,
@@ -7001,6 +7091,7 @@ class WatchPage {
                 ? Math.max(0, Math.floor(Number(positionOverride) || 0))
                 : Math.max(0, Math.floor(this.getPlaybackPosition()));
             const result = await API.proxy.xtream.getStreamUrl(nextSourceId, nextStreamId, next.type || 'movie', nextContainer, {
+                ...nextPlaybackHint,
                 ...nextAudioOptions,
                 seekOffset: position,
                 startOffset: position,
@@ -7049,6 +7140,8 @@ class WatchPage {
                 this.content.cloud_source_id = nextCloudSourceId;
                 this.content.containerExtension = nextContainer;
                 this.content.container_extension = nextContainer;
+                this.content.rawTitle = next.rawTitle || next.raw_title || this.content.rawTitle || null;
+                this.content.codecProfile = nextCodecProfile;
                 this.content.versionIndex = nextIndex;
                 this.content.version_index = nextIndex;
                 this.replaceExactContentAudioMetadata(
@@ -7649,7 +7742,11 @@ class WatchPage {
             source: 'probe',
             index,
             streamIndex: track.index,
-            label: this.getTrackLabel(track, `Audio ${index + 1}`, 'audio'),
+            label: this.getTrackLabel(
+                track,
+                this.audioTracks.length === 1 ? 'Audio track' : `Audio track ${index + 1}`,
+                'audio'
+            ),
             active: Number(track.index) === Number(selected?.index)
         }));
     }
@@ -8040,11 +8137,10 @@ class WatchPage {
     // otherwise to a plain "VO". We never assume a specific language from the VOSTFR tag.
     playingAudioVersionLabel() {
         try {
-            // Provider filename tags (VF/VO/region prefixes) are routing hints,
-            // not proof of spoken language. Never surface them as a player-track
-            // language while strict speech validation is pending.
-            if (!this.isAudioLanguageVerified()) return null;
-            const name = this.currentEpisodeRawTitle() || this.content?.title || '';
+            // Provider filename tags are useful immediately, but remain explicitly
+            // labelled as provider evidence until an embedded tag or Whisper wins.
+            const name = this.currentEpisodeRawTitle() || this.content?.rawTitle
+                || this.content?.raw_title || this.content?.title || '';
             const info = window.MediaUtils?.parseVersionInfo?.(name);
             const audioSig = (info?.audioSignals || [])[0];
             if (!audioSig) return null;
@@ -8054,11 +8150,12 @@ class WatchPage {
                 );
                 if (orig && orig !== 'und') {
                     const display = this.getLanguageDisplayName(orig);
-                    if (display) return display; // real original language, e.g. "Japanese" / "English"
+                    if (display) return `${display} · Provider label`;
                 }
-                return 'VO'; // original audio, language unknown — honest, never guessed
+                return 'Original version · Provider label';
             }
-            return this.getLanguageDisplayName(audioSig.language) || null; // a concrete dub tag (VF…)
+            const display = this.getLanguageDisplayName(audioSig.language);
+            return display ? `${display} · Provider label` : null;
         } catch (_) {
             return null;
         }
@@ -8068,21 +8165,25 @@ class WatchPage {
         if (!a) {
             return this.contentAudioLanguageLabel() ||
                 this.playingAudioVersionLabel() ||
-                (this.isAudioLanguageKnown() ? 'Default' : 'Audio language pending');
+                'Audio track';
         }
         const parts = [];
         // PRIMARY: the real per-track language from get_vod_info. When the provider
         // omits it (language:""), fall back to the title's detected language so a
         // real-language file still reads "French · AAC · 5.1" instead of codec-only.
         const lang = this.isAudioLanguageKnown()
-            ? (this.getLanguageDisplayName(a.language) || this.contentAudioLanguageLabel() || this.playingAudioVersionLabel())
+            ? (this.getLanguageDisplayName(a.language) || this.contentAudioLanguageLabel())
             : null;
         if (lang) parts.push(lang);
+        if (!lang) {
+            const providerLabel = this.playingAudioVersionLabel();
+            if (providerLabel) parts.push(providerLabel);
+        }
         if (a.codec) parts.push(String(a.codec).toUpperCase());
         const ch = this.formatChannelLayout(a.channelLayout, a.channels);
         if (ch) parts.push(ch);
         if (a.bitRate) parts.push(`${Math.round(a.bitRate / 1000)} kbps`);
-        return parts.length ? parts.join(' · ') : 'Default';
+        return parts.length ? parts.join(' · ') : 'Audio track';
     }
 
     getVisibleAudioTracks() {
@@ -8108,8 +8209,7 @@ class WatchPage {
         // switchable track list. Show the title's detected language (matches the card
         // badge + the native mobile player) instead of a meaningless "Default".
         const contentLabel = this.contentAudioLanguageLabel() || this.playingAudioVersionLabel();
-        const fallback = this.isAudioLanguageKnown() ? 'Default' : 'Audio language pending';
-        return [{ source: 'none', index: -1, label: contentLabel || fallback, active: true }];
+        return [{ source: 'none', index: -1, label: contentLabel || 'Audio track', active: true }];
     }
 
     // Persist only a COMPLETE ordered map already returned by the trusted

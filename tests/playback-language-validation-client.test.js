@@ -72,6 +72,22 @@ const body = {
 };
 const jobId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 
+test('watched-file priority queues exactly one job without keeping the page in a poll loop', async () => {
+  const requests = [];
+  const { accessToken, window } = loadCloudClient(async (url, options) => {
+    requests.push({ url, options });
+    return jsonResponse(202, { protocol: 2, status: 'pending', jobId, retryAfter: 3 });
+  });
+
+  const result = await window.NorvaCloud.playback.queueLanguageValidation(body);
+
+  assert.equal(result.status, 'pending');
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].options.method, 'POST');
+  assert.equal(requests[0].options.headers.Authorization, `Bearer ${accessToken}`);
+  assert.deepEqual(JSON.parse(requests[0].options.body), body);
+});
+
 test('cached verification returns after one opaque POST without credentials in JSON', async () => {
   const requests = [];
   const { accessToken, window } = loadCloudClient(async (url, options) => {

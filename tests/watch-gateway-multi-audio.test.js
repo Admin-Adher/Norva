@@ -279,7 +279,7 @@ test('Gateway menu maps exact HLS indexes to absolute streams and names only ver
     assert.equal(harness.page._gatewayAudioRenditions[0].renditionCodec, 'aac');
     assert.deepEqual(
         JSON.parse(JSON.stringify(harness.page.getCurrentAudioPreference())),
-        { source: 'probe', streamIndex: 5, label: 'French - AC3 - 6ch', language: 'fr', codec: 'ac3', channels: 6 },
+        { source: 'probe', streamIndex: 5, label: 'French · AC3 · 6ch', language: 'fr', codec: 'ac3', channels: 6 },
         'resume state persists the verified absolute identity, never the HLS English tag',
     );
     assert.equal(hls.loadSourceCalls.length, 1);

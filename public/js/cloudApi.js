@@ -4022,6 +4022,18 @@
         });
     }
 
+    async function queuePlaybackLanguageValidation(body, options = {}) {
+        const requestOptions = {};
+        if (options.signal) requestOptions.signal = options.signal;
+        if (options.keepalive === true) requestOptions.keepalive = true;
+        return requestPlaybackLanguageValidation(
+            'POST',
+            '/playback/language-validation',
+            body,
+            requestOptions
+        );
+    }
+
     async function validatePlaybackLanguages(body, options = {}) {
         const timeoutMs = Math.max(
             1000,
@@ -4386,6 +4398,7 @@
             // Server-owned strict language validation. The browser submits only
             // catalog identity + expected absolute audio indexes; playback/raw
             // tokens remain inside norva-playback and the media gateway.
+            queueLanguageValidation: queuePlaybackLanguageValidation,
             validateLanguages: validatePlaybackLanguages,
             getSession: (id) => playbackSessionRequest('GET', `/playback/sessions/${encodeURIComponent(id)}`),
             heartbeatSession: (id) => playbackHeartbeatRequest(id),

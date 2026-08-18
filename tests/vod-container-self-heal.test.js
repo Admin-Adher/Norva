@@ -137,6 +137,23 @@ test('a persisted observation overrides client and provider extensions for curre
   assert.match(edge, /sourceContainerAuthorityFromObservation\([\s\S]*sourceContainerObservation[\s\S]*targetUrl/);
 });
 
+test('a reliable server profile promotes only unsafe browser relays to the Gateway', () => {
+  const edge = read(EDGE_PATH);
+  const create = sourceBetween(edge, 'async function createPlaybackSession(', '\nasync function getPlaybackSession(');
+  const helper = sourceBetween(
+    edge,
+    'function authoritativeVodGatewayTier(',
+    '\nfunction playbackCostScoreForObservation(',
+  );
+  assert.match(create, /const clientMode = choosePlaybackMode/);
+  assert.match(create, /itemType === "movie"[\s\S]*authoritativeVodGatewayTier\(resolved\.playbackHint/);
+  assert.match(create, /clientMode === "relay"[\s\S]*authoritativeVodTier === "video_transcode"/);
+  assert.match(create, /gatewayMode: authoritativeVodTier === "video_transcode" \? "transcode" : "remux"/);
+  assert.doesNotMatch(create, /clientMode === "direct"\s*&&\s*serverPromotedRelay/);
+  assert.match(helper, /container: profile\.container/);
+  assert.match(helper, /\["avi", "flv", "mpg", "ogg"\]/);
+});
+
 test('only a Norva-built Xtream URL has its terminal container rewritten', () => {
   const rewrite = containerUrlRewriter();
   const xtream = 'https://provider.example/panel/movie/user/pass/42.mkv?token=kept';
@@ -177,8 +194,8 @@ test('Gateway emits only redacted hashes and recognizes MP4 before FFmpeg startu
   const edge = read(EDGE_PATH);
   const deploy = read(path.join(ROOT, 'ops/hetzner/scripts/04-deploy-edge-functions.sh'));
   assert.match(gateway, /version: GATEWAY_VERSION,[\s\S]*vodContainerSelfHealProtocol: 1/);
-  assert.match(edge, /version: 57,[\s\S]*vodContainerSelfHealProtocol: 1/);
-  assert.match(deploy, /EXPECTED_PLAYBACK_VERSION=57/);
+  assert.match(edge, /version: 58,[\s\S]*vodContainerSelfHealProtocol: 1/);
+  assert.match(deploy, /EXPECTED_PLAYBACK_VERSION=58/);
   assert.match(deploy, /EXPECTED_VOD_CONTAINER_SELF_HEAL_PROTOCOL=1/);
   assert.match(deploy, /vodContainerSelfHealProtocol\\\":\$EXPECTED_VOD_CONTAINER_SELF_HEAL_PROTOCOL/);
   const classifier = sourceBetween(

@@ -484,7 +484,7 @@ test('an in-session version switch replaces a stale French mono label without a 
     assert.strictEqual(Object.hasOwn(page.audioTracks[0], key), false);
     assert.strictEqual(Object.hasOwn(page.currentStreamInfo.audioTracks[0], key), false);
   }
-  assert.strictEqual(page.getProbeAudioTracks()[0].label, 'English - AAC - 2ch');
+  assert.strictEqual(page.getProbeAudioTracks()[0].label, 'English · AAC · Stereo');
   assert.strictEqual(page.getProbeAudioTracks()[0].active, true);
 });
 
@@ -567,7 +567,7 @@ test('an exact unknown mono track clears every stale language display field', ()
     assert.strictEqual(Object.hasOwn(page.audioTracks[0], key), false);
     assert.strictEqual(Object.hasOwn(page.currentStreamInfo.audioTracks[0], key), false);
   }
-  assert.strictEqual(page.getProbeAudioTracks()[0].label, 'AAC');
+  assert.strictEqual(page.getProbeAudioTracks()[0].label, 'Audio track · AAC');
   assert.strictEqual(page.getProbeAudioTracks()[0].active, true);
 });
 
