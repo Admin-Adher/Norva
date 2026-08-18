@@ -70,6 +70,11 @@ test('ops email is explicit, singular, validated and never discovered from Auth/
   assert.match(envExample, /NORVA_OPS_EMAIL=/);
 });
 
+test('flappy source counters do not delete alert state on a 15-minute heal', () => {
+  assert.match(admin, /const FLAPPY_ALERT_KEYS = new Set\(\["sources_error", "sources_incomplete"\]\)/);
+  assert.match(admin, /FLAPPY_ALERT_KEYS\.has\(k\) && \(state\.get\(k\) \?\? 0\) > Date\.now\(\) - ALERT_COOLDOWN_MS/);
+});
+
 test('ops notifications stay aggregated with Telegram fallback and six-hour cooldown', () => {
   assert.match(admin, /const ALERT_COOLDOWN_MS = 6 \* 3600 \* 1000/);
   assert.match(admin, /toAlert\.map\(\(p\) => `• \$\{tgEscape\(p\.detail\)\}`\)\.join\("\\n"\)/);

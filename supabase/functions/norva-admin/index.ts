@@ -232,9 +232,12 @@ async function readLidCascadeLeaseHealth(): Promise<JsonRecord> {
 // Checks are CHEAP: counters come from the precomputed admin_dashboard_cache overview (refreshed
 // every 5 min by its own cron) + two live pings (gateway/relay) + one bounded LID lease RPC.
 // Each problem has a stable key with
-// a 6h cooldown persisted in admin_alert_state so an ongoing incident emails at most 4×/day — and
-// the state row is DELETED the moment its condition heals, so a NEW occurrence alerts immediately.
+// a 6h cooldown persisted in admin_alert_state so an ongoing incident emails at most 4×/day.
+// Hard-down keys (gateway, crons…) still delete on heal so a new outage alerts immediately.
+// Flappy counters (sources_error / sources_incomplete) keep their row until the 6h cooldown
+// expires, otherwise a 15-min sync blip sends alert → résolu → alert in a loop.
 const ALERT_COOLDOWN_MS = 6 * 3600 * 1000;
+const FLAPPY_ALERT_KEYS = new Set(["sources_error", "sources_incomplete"]);
 
 type PartnersOpsSnapshot = {
   enabled: boolean;
@@ -409,10 +412,14 @@ async function runOpsAlertSweep(): Promise<JsonRecord> {
   }
   const activeKeys = new Set(problems.map((p) => p.key));
   const lidIncidentActive = problems.some((p) => p.key.startsWith("lid_cascade_"));
-  const healed = [...state.keys()].filter((k) =>
-    !activeKeys.has(k) &&
-    !(lidIncidentActive && k.startsWith("lid_cascade_"))
-  );
+  const healed = [...state.keys()].filter((k) => {
+    if (activeKeys.has(k)) return false;
+    if (lidIncidentActive && k.startsWith("lid_cascade_")) return false;
+    if (FLAPPY_ALERT_KEYS.has(k) && (state.get(k) ?? 0) > Date.now() - ALERT_COOLDOWN_MS) {
+      return false;
+    }
+    return true;
+  });
   const toAlert = problems.filter((p) => (state.get(p.key) ?? 0) < Date.now() - ALERT_COOLDOWN_MS);
 
   // 5) Notify — one digest per sweep, Telegram first, plus the one explicitly
