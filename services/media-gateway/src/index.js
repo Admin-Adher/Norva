@@ -1731,7 +1731,7 @@ if (
 }
 const MULTI_AUDIO_HLS_PROTOCOL = 1;
 const MAX_MULTI_AUDIO_RENDITIONS = 8;
-const GATEWAY_VERSION = 109;
+const GATEWAY_VERSION = 110;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -1858,6 +1858,7 @@ app.get('/health', (req, res) => {
         knownVodInputProbeFastPathEnabled: KNOWN_VOD_INPUT_PROBE_FAST_PATH_ENABLED,
         knownVodInputAnalyzeDurationUs: KNOWN_VOD_INPUT_ANALYZE_DURATION_US,
         knownVodInputProbeSizeBytes: KNOWN_VOD_INPUT_PROBE_SIZE_BYTES,
+        finiteMkvFullBodyAtZeroFallback: true,
         exactFileCodecProfileProtocol: 1,
         exactMatroskaH264ReencodeProtocol: 1,
         exactMatroskaH264HlsTargetSeconds: EXACT_MATROSKA_H264_HLS_TARGET_SECONDS,
@@ -8653,6 +8654,88 @@ function parseBoundedProviderContentRange(response, expectedStart, maximumReques
     return { start, end, total };
 }
 
+// A minority of VOD panels ignore Range but still return one exact, finite
+// object. That response is safe to retain only for byte zero: Content-Length
+// becomes the immutable boundary and the pump verifies exact EOF. It must never
+// be used for a seek/reconnect because HTTP 200 provides no offset authority.
+function parseFullBodyProviderResponse(response) {
+    if (Number(response?.status) !== 200) return null;
+    if (String(response?.headers?.get?.('content-range') || '').trim()) return null;
+    const declaredLength = String(response?.headers?.get?.('content-length') || '').trim();
+    if (!/^\d+$/.test(declaredLength)) return null;
+    const total = normalizeFileSizeBytes(declaredLength);
+    if (!total || total < 4) return null;
+    const contentEncoding = String(response?.headers?.get?.('content-encoding') || '').trim().toLowerCase();
+    if (contentEncoding && contentEncoding !== 'identity') return null;
+    return { start: 0, end: total - 1, total, fullBody: true };
+}
+
+async function primeFullBodyMatroskaAttempt(attempt, parentSignal) {
+    if (!attempt?.response?.body || typeof attempt.response.body.getReader !== 'function') {
+        throw vodInputPumpError('PROVIDER_EMPTY_RESPONSE', 'Provider returned no MKV response body', {
+            status: 502,
+            retryable: true,
+        });
+    }
+    attempt.reader = attempt.response.body.getReader();
+    attempt.preloadedChunks = [];
+    let inspectionPrefix = Buffer.alloc(0);
+    const readAndRetain = async () => {
+        const next = await readRawPrefixChunk(
+            attempt.reader,
+            parentSignal,
+            VOD_INPUT_IDLE_TIMEOUT_MS,
+        );
+        if (next.aborted || parentSignal?.aborted) throw abortedVodInputPumpError();
+        if (next.timedOut) {
+            throw vodInputPumpError(
+                'PROVIDER_IDLE_TIMEOUT',
+                'Provider did not start the MKV response in time.',
+                { status: 504, retryable: true },
+            );
+        }
+        if (next.error) throw classifyVodInputFetchError(next.error, false);
+        if (next.done) return false;
+        const chunk = Buffer.from(next.value || []);
+        if (!chunk.length) return true;
+        attempt.preloadedChunks.push(chunk);
+        const remainingInspectionBytes = RAW_PREFIX_SNIFF_BYTES - inspectionPrefix.length;
+        if (remainingInspectionBytes > 0) {
+            const part = chunk.subarray(0, remainingInspectionBytes);
+            inspectionPrefix = inspectionPrefix.length
+                ? Buffer.concat([inspectionPrefix, part])
+                : Buffer.from(part);
+        }
+        return true;
+    };
+    while (inspectionPrefix.length < 4) {
+        if (!await readAndRetain()) break;
+    }
+    if (
+        inspectionPrefix.length >= 4 &&
+        inspectionPrefix[0] === 0x1a && inspectionPrefix[1] === 0x45 &&
+        inspectionPrefix[2] === 0xdf && inspectionPrefix[3] === 0xa3
+    ) return;
+    if (inspectionPrefix.length && looksLikeTextStart(inspectionPrefix)) {
+        while (true) {
+            if (isProviderBusyText(normalizedRawTextPrefix(inspectionPrefix))) {
+                throw providerBusyVodInputError(attempt.response.status);
+            }
+            if (inspectionPrefix.length >= RAW_PREFIX_SNIFF_BYTES) break;
+            if (!await readAndRetain()) break;
+        }
+        if (isProviderBusyText(normalizedRawTextPrefix(inspectionPrefix))) {
+            throw providerBusyVodInputError(attempt.response.status);
+        }
+        throw vodInputPumpError(
+            'RANGE_UNSUPPORTED',
+            'Provider ignored the exact bounded MKV byte range.',
+            { status: 502 },
+        );
+    }
+    throw vodInputPumpError('INVALID_MKV_INPUT', 'Provider response is not a Matroska file.', { status: 502 });
+}
+
 function boundedVodResponseValidator(response) {
     const etag = String(response?.headers?.get?.('etag') || '').trim();
     if (etag && !/^W\//i.test(etag)) return { header: 'If-Range', value: etag, kind: 'etag' };
@@ -8902,7 +8985,15 @@ async function openBoundedVodInputAttempt(session, offset, parentSignal, dispatc
         ? Math.min(requestedEndOverride, fileSizeBytes ? fileSizeBytes - 1 : requestedEndOverride)
         : (fileSizeBytes ? fileSizeBytes - 1 : VOD_INPUT_DISCOVERY_RANGE_END);
     const controller = new AbortController();
-    const attempt = { controller, response: null, reader: null, openTimer: null, signal: parentSignal, onParentAbort: null };
+    const attempt = {
+        controller,
+        response: null,
+        reader: null,
+        preloadedChunks: [],
+        openTimer: null,
+        signal: parentSignal,
+        onParentAbort: null,
+    };
     attempt.onParentAbort = () => {
         try { controller.abort(parentSignal?.reason); } catch (_) {}
     };
@@ -8931,7 +9022,11 @@ async function openBoundedVodInputAttempt(session, offset, parentSignal, dispatc
         clearTimeout(attempt.openTimer);
         attempt.openTimer = null;
         if (parentSignal?.aborted) throw abortedVodInputPumpError();
-        if (attempt.response.status !== 206) {
+        const allowFullBodyAtZero = options.allowFullBodyAtZero === true && offset === 0;
+        let range = allowFullBodyAtZero
+            ? parseFullBodyProviderResponse(attempt.response)
+            : null;
+        if (attempt.response.status !== 206 && !range) {
             if (
                 attempt.response.status === 200
                 && await responseHasProviderBusyPrefix(attempt.response, controller.signal)
@@ -8956,7 +9051,7 @@ async function openBoundedVodInputAttempt(session, offset, parentSignal, dispatc
         if (contentEncoding && contentEncoding !== 'identity') {
             throw vodInputPumpError('RANGE_UNSUPPORTED', 'Provider encoded the bounded MKV byte range.', { status: 502 });
         }
-        const range = parseBoundedProviderContentRange(attempt.response, offset, requestEnd);
+        if (!range) range = parseBoundedProviderContentRange(attempt.response, offset, requestEnd);
         if (!range) {
             if (await responseHasProviderBusyPrefix(attempt.response, controller.signal)) {
                 throw providerBusyVodInputError(attempt.response.status);
@@ -8966,6 +9061,9 @@ async function openBoundedVodInputAttempt(session, offset, parentSignal, dispatc
                 'Provider did not honor the exact bounded MKV byte range.',
                 { status: 502 },
             );
+        }
+        if (range.fullBody === true) {
+            await primeFullBodyMatroskaAttempt(attempt, parentSignal);
         }
         if (fileSizeBytes && range.total !== fileSizeBytes) {
             throw vodInputPumpError('VOD_CHANGED', 'The MKV file changed while it was playing.', { status: 502 });
@@ -8998,7 +9096,7 @@ async function openBoundedVodInputAttempt(session, offset, parentSignal, dispatc
                 retryable: true,
             });
         }
-        attempt.reader = attempt.response.body.getReader();
+        if (!attempt.reader) attempt.reader = attempt.response.body.getReader();
         return { attempt, range };
     } catch (error) {
         const timedOut = controller.signal.aborted && !parentSignal?.aborted;
@@ -9018,7 +9116,7 @@ async function preopenBoundedMkvInputPump(session, parentSignal = null, options 
         0,
         parentSignal,
         dispatcher,
-        drainExactRange ? { requestEnd: 0 } : {},
+        drainExactRange ? { requestEnd: 0 } : { allowFullBodyAtZero: true },
     );
     let retained = false;
     try {
@@ -9046,6 +9144,7 @@ async function preopenBoundedMkvInputPump(session, parentSignal = null, options 
         ));
         session.startupTimings = asRecord(session.startupTimings);
         session.startupTimings.providerValidatorEvidence = validatorEvidence;
+        session.startupTimings.providerFullBodyAtZero = opened.range.fullBody === true;
 
         if (drainExactRange) {
             const expectedBytes = opened.range.end - opened.range.start + 1;
@@ -9792,11 +9891,24 @@ async function runBoundedMkvInputPump(session, writable, signal, dispatcher) {
                     session.preopenedVodInputAttempt = null;
                     return preopened;
                 })()
-                : await openBoundedVodInputAttempt(session, offset, signal, dispatcher);
+                : await openBoundedVodInputAttempt(
+                    session,
+                    offset,
+                    signal,
+                    dispatcher,
+                    offset === 0 && forwardedBytes === 0 ? { allowFullBodyAtZero: true } : {},
+                );
             attempt = opened.attempt;
             range = opened.range;
             while (offset <= range.end) {
-                const next = await readRawPrefixChunk(attempt.reader, signal, VOD_INPUT_IDLE_TIMEOUT_MS);
+                const next = Array.isArray(attempt.preloadedChunks) && attempt.preloadedChunks.length
+                    ? {
+                        value: attempt.preloadedChunks.shift(),
+                        done: false,
+                        timedOut: false,
+                        aborted: false,
+                    }
+                    : await readRawPrefixChunk(attempt.reader, signal, VOD_INPUT_IDLE_TIMEOUT_MS);
                 if (next.aborted || signal.aborted) throw abortedVodInputPumpError();
                 if (next.timedOut) {
                     try { attempt.controller.abort(); } catch (_) {}

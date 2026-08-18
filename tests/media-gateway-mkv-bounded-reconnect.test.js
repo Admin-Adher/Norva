@@ -565,6 +565,168 @@ test('cold unknown-size MKV discovers total from the retained playback GET and o
     assert.equal(session.startupTimings.fileSizeDiscoveredFromPlaybackGet, true);
 });
 
+test('cold offset-zero MKV accepts one exact HTTP 200 body without losing pre-read bytes', async () => {
+    const fixture = mkvFixture(97);
+    const tracker = makeTracker();
+    let fetches = 0;
+    const h = pumpHarness({
+        fetch: async (_url, options) => {
+            fetches += 1;
+            tracker.calls.push(options.headers);
+            return trackedResponse(tracker, {
+                status: 200,
+                chunks: [fixture.subarray(0, 2), fixture.subarray(2, 11), fixture.subarray(11)],
+                headers: {
+                    'Content-Length': String(fixture.length),
+                    ETag: '"full-body-v1"',
+                },
+            });
+        },
+    });
+    const session = mkvSession(null);
+    delete session.fileSizeBytes;
+    delete session.codecProfile.fileSizeBytes;
+
+    await h.ensureBoundedMkvInputPump(session);
+    const writable = new CapturingWritable();
+    const result = await h.runBoundedMkvInputPump(
+        session,
+        writable,
+        new AbortController().signal,
+        null,
+    );
+
+    assert.equal(fetches, 1, 'the retained HTTP 200 body is the only provider connection');
+    assert.equal(tracker.calls[0].Range, `bytes=0-${Number.MAX_SAFE_INTEGER - 1}`);
+    assert.equal(session.startupTimings.providerFullBodyAtZero, true);
+    assert.equal(session.fileSizeBytes, fixture.length);
+    assert.equal(result.bytesForwarded, fixture.length);
+    assert.deepEqual(writable.bytes(), fixture, 'the bytes consumed for EBML validation are replayed exactly once');
+    assert.equal(tracker.maxActive, 1);
+    assert.equal(tracker.active, 0);
+});
+
+test('HTTP 200 full-body fallback stays fail-closed outside an exact offset-zero MKV', async (t) => {
+    const fixture = mkvFixture(64);
+
+    for (const scenario of [
+        {
+            name: 'missing Content-Length',
+            headers: { ETag: '"missing-length"' },
+            expectedCode: 'RANGE_UNSUPPORTED',
+        },
+        {
+            name: 'compressed body',
+            headers: {
+                'Content-Length': String(fixture.length),
+                'Content-Encoding': 'gzip',
+                ETag: '"compressed"',
+            },
+            expectedCode: 'RANGE_UNSUPPORTED',
+        },
+        {
+            name: 'non-Matroska binary',
+            chunks: [Buffer.alloc(fixture.length, 0xff)],
+            headers: { 'Content-Length': String(fixture.length), ETag: '"not-mkv"' },
+            expectedCode: 'INVALID_MKV_INPUT',
+        },
+    ]) {
+        await t.test(scenario.name, async () => {
+            const tracker = makeTracker();
+            let fetches = 0;
+            const writable = new CapturingWritable();
+            const h = pumpHarness({
+                fetch: async () => {
+                    fetches += 1;
+                    return trackedResponse(tracker, {
+                        status: 200,
+                        chunks: scenario.chunks || [fixture],
+                        headers: scenario.headers,
+                    });
+                },
+            });
+            await assert.rejects(
+                h.runBoundedMkvInputPump(
+                    mkvSession(fixture.length),
+                    writable,
+                    new AbortController().signal,
+                    null,
+                ),
+                (error) => error?.code === scenario.expectedCode && error?.status === 502,
+            );
+            assert.equal(fetches, 1);
+            assert.equal(writable.bytes().length, 0);
+            assert.equal(tracker.active, 0);
+        });
+    }
+
+    await t.test('seek identity preflight', async () => {
+        const tracker = makeTracker();
+        let fetches = 0;
+        const h = pumpHarness({
+            fetch: async (_url, options) => {
+                fetches += 1;
+                tracker.calls.push(options.headers);
+                return trackedResponse(tracker, {
+                    status: 200,
+                    chunks: [fixture],
+                    headers: { 'Content-Length': String(fixture.length), ETag: '"seek-full-body"' },
+                });
+            },
+        });
+        const session = mkvSession(fixture.length);
+        session.seekOffset = 12;
+        await assert.rejects(
+            h.ensureBoundedMkvInputPump(session),
+            (error) => error?.code === 'RANGE_UNSUPPORTED' && error?.status === 502,
+        );
+        assert.equal(fetches, 1);
+        assert.equal(tracker.calls[0].Range, 'bytes=0-0');
+        assert.equal(tracker.active, 0);
+    });
+
+    await t.test('reconnect at a non-zero offset', async () => {
+        const tracker = makeTracker();
+        const cut = 19;
+        let fetches = 0;
+        const h = pumpHarness({
+            fetch: async (_url, options) => {
+                fetches += 1;
+                tracker.calls.push(options.headers);
+                if (fetches === 1) {
+                    return trackedResponse(tracker, {
+                        chunks: [fixture.subarray(0, cut)],
+                        headers: {
+                            'Content-Range': `bytes 0-${fixture.length - 1}/${fixture.length}`,
+                            'Content-Length': String(fixture.length),
+                            ETag: '"reconnect-v1"',
+                        },
+                    });
+                }
+                return trackedResponse(tracker, {
+                    status: 200,
+                    chunks: [fixture],
+                    headers: { 'Content-Length': String(fixture.length), ETag: '"reconnect-v1"' },
+                });
+            },
+        });
+        const writable = new CapturingWritable();
+        await assert.rejects(
+            h.runBoundedMkvInputPump(
+                mkvSession(fixture.length),
+                writable,
+                new AbortController().signal,
+                null,
+            ),
+            (error) => error?.code === 'VOD_CHANGED' && error?.status === 502,
+        );
+        assert.equal(fetches, 2);
+        assert.equal(tracker.calls[1].Range, `bytes=${cut}-${fixture.length - 1}`);
+        assert.deepEqual(writable.bytes(), fixture.subarray(0, cut));
+        assert.equal(tracker.active, 0);
+    });
+});
+
 test('finite MKV seek drains a one-byte identity range instead of retaining a full-file preopen', async () => {
     const fixture = mkvFixture(128);
     const tracker = makeTracker();
