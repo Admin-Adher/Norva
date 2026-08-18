@@ -6,7 +6,7 @@ readonly ENV_FILE="${SCRIPT_DIR}/.env.media-lab"
 readonly COMPOSE_FILE="${SCRIPT_DIR}/docker-compose.media-lab.yml"
 readonly SOURCE_MARKER="${SCRIPT_DIR}/media-lab-runner-source.sha256"
 readonly PRIMARY_CONTAINER='norva-media-gateway'
-readonly PRIMARY_IMAGE='norva-media-gateway:vaapi-3d9cbd892800'
+readonly PRIMARY_IMAGE='norva-media-gateway:vaapi-04505a4b21d0'
 readonly LAB_GATEWAY_CONTAINER='norva-media-lab-gateway'
 readonly LAB_RUNNER_CONTAINER='norva-media-lab-runner'
 

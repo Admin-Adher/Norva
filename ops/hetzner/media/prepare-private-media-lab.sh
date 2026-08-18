@@ -9,8 +9,8 @@ readonly COMPOSE_FILE="${SCRIPT_DIR}/docker-compose.media-lab.yml"
 readonly ENV_FILE="${SCRIPT_DIR}/.env.media-lab"
 readonly SOURCE_MARKER="${SCRIPT_DIR}/media-lab-runner-source.sha256"
 readonly PRIMARY_CONTAINER='norva-media-gateway'
-readonly PRIMARY_IMAGE='norva-media-gateway:vaapi-3d9cbd892800'
-readonly PRIMARY_IMAGE_ID='sha256:1997592fd597b1f51735a2bcece179a0c3ab4b55502440b4c86ec19dfc2f0ad6'
+readonly PRIMARY_IMAGE='norva-media-gateway:vaapi-04505a4b21d0'
+readonly PRIMARY_IMAGE_ID='sha256:21496b9b0ea8f2968aaeba58f6ce28746eb720189f355780397409467fdca4f1'
 readonly LAB_GATEWAY_CONTAINER='norva-media-lab-gateway'
 readonly LAB_RUNNER_CONTAINER='norva-media-lab-runner'
 readonly LAB_NETWORK='norva_default'
@@ -166,7 +166,7 @@ docker exec "${LAB_RUNNER_CONTAINER}" node -e \
   "fetch('http://127.0.0.1:8093/health',{headers:{Authorization:'Bearer '+process.env.MEDIA_LAB_RUNNER_TOKEN}}).then(async r=>{const h=await r.json();if(!r.ok||h.ok!==true||h.protocol!==1||h.busy!==false||h.physicalAdapterReady!==true)process.exit(1);process.stdout.write(JSON.stringify(h))}).catch(()=>process.exit(1))"
 printf '\n'
 docker exec "${LAB_GATEWAY_CONTAINER}" node -e \
-  "fetch('http://127.0.0.1:8080/health').then(async r=>{const h=await r.json();if(!r.ok||h.ok!==true||h.version!==105||h.activeSessions!==0||h.videoEncoder?.backend!=='vaapi'||h.videoEncoder?.ready!==true||h.videoEncoderCapacity?.active!==0||h.videoEncoderCapacity?.maxActive!==1||h.mkvCompleteHlsCache?.enabled!==true)process.exit(1);process.stdout.write(JSON.stringify({version:h.version,activeSessions:h.activeSessions,encoder:h.videoEncoder.backend,maxActive:h.videoEncoderCapacity.maxActive,cache:h.mkvCompleteHlsCache.enabled}))}).catch(()=>process.exit(1))"
+  "fetch('http://127.0.0.1:8080/health').then(async r=>{const h=await r.json();if(!r.ok||h.ok!==true||h.version!==106||h.activeSessions!==0||h.videoEncoder?.backend!=='vaapi'||h.videoEncoder?.ready!==true||h.videoEncoderCapacity?.active!==0||h.videoEncoderCapacity?.maxActive!==1||h.mkvCompleteHlsCache?.enabled!==true||h.mkvCompleteHlsCache?.genericMultiAudio!==true)process.exit(1);process.stdout.write(JSON.stringify({version:h.version,activeSessions:h.activeSessions,encoder:h.videoEncoder.backend,maxActive:h.videoEncoderCapacity.maxActive,cache:h.mkvCompleteHlsCache.enabled,multiAudioCache:h.mkvCompleteHlsCache.genericMultiAudio}))}).catch(()=>process.exit(1))"
 printf '\n'
 
 CURRENT_GATE='final-primary-invariant'
