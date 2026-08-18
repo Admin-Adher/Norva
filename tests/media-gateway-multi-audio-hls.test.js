@@ -7,6 +7,10 @@ const os = require('node:os');
 const path = require('node:path');
 const vm = require('node:vm');
 const { EventEmitter } = require('node:events');
+const {
+    videoEncoderInputArgs,
+    videoEncoderOutputArgs,
+} = require('../services/media-gateway/src/video-encoder');
 
 const ROOT = path.join(__dirname, '..');
 const GATEWAY_PATH = path.join(ROOT, 'services/media-gateway/src/index.js');
@@ -171,12 +175,14 @@ test('normal exact-size preflight freezes a reachable gateway-inband multi graph
     assert.match(session.videoPlaylistPath, /video\.m3u8$/);
 
     const route = sourceBetween("app.post('/sessions'", "\n// Cross-device kill-switch");
+    const boundedPumpIndex = route.indexOf('await ensureBoundedMkvInputPump(');
+    const normalMissFreezeIndex = route.indexOf('freezeMultiAudioHlsTopology(session)', boundedPumpIndex);
     assert.ok(
-        route.indexOf('await ensureBoundedMkvInputPump(') < route.indexOf('freezeMultiAudioHlsTopology(session)'),
+        boundedPumpIndex >= 0 && normalMissFreezeIndex > boundedPumpIndex,
         'the exact size is attached before the graph freezes',
     );
     assert.ok(
-        route.indexOf('freezeMultiAudioHlsTopology(session)') < route.indexOf('startSessionWithProviderRetry('),
+        normalMissFreezeIndex < route.indexOf('startSessionWithProviderRetry('),
         'the graph freezes before any FFmpeg spawn',
     );
     assert.match(route, /forceAlignedMultiAudioVideoEncode === true[\s\S]*\? 'encode' : 'copy'/);
@@ -230,10 +236,16 @@ test('one FFmpeg maps absolute input indexes to audio-only ordinals and keeps th
             audioMapForSession: () => { throw new Error('relative a:N input map must not run'); },
             normalizeAudioStreamIndex: (value) => Number(value),
             videoModeForSession: (value) => value.videoMode,
+            videoEncoderInputArgs,
+            videoEncoderOutputArgs,
+            VIDEO_ENCODER_CONFIG: { backend: 'software' },
+            reserveVideoEncoderAdmission: () => true,
+            releaseVideoEncoderAdmission: () => {},
             isFiniteMkvVodSession: () => true,
             usesSourceTimestampedCopySeek: () => false,
             seekArgsForSession: () => ({ preInputSeek: [], postInputSeek: [] }),
             appendSubtitleOutputs: () => {},
+            asRecord: (value) => value && typeof value === 'object' && !Array.isArray(value) ? value : {},
             spawn: fakeSpawn,
             FFMPEG_PATH: 'ffmpeg',
             proxyEnvFor: () => ({}),

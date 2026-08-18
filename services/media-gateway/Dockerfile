@@ -1,5 +1,6 @@
 ARG WHISPER_MODEL=small
 ARG WHISPER_CPP_COMMIT=080bbbe85230f624f0b52127f1ae1218247989f9
+ARG WHISPER_BUILD_JOBS=4
 
 # --- whisper.cpp build stage: compile a static CLI + fetch the model (Phase 2 audio-track
 # language detection, fully self-hosted / no paid API). Same Debian base as runtime → ABI-safe.
@@ -8,6 +9,7 @@ FROM debian:bookworm-slim AS whisper
 # (~0.3 RTF on CPU → ~30-45 min/2h film, background only). Also used by the Phase 2 LID clip.
 ARG WHISPER_MODEL
 ARG WHISPER_CPP_COMMIT
+ARG WHISPER_BUILD_JOBS
 RUN apt-get update \
     && apt-get install -y --no-install-recommends git build-essential cmake ca-certificates wget \
     && rm -rf /var/lib/apt/lists/*
@@ -18,7 +20,10 @@ RUN git init whisper.cpp \
     && git fetch --depth 1 origin "${WHISPER_CPP_COMMIT}" \
     && git checkout --detach FETCH_HEAD \
     && cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_EXAMPLES=ON \
-    && cmake --build build -j --config Release --target whisper-cli \
+    && case "${WHISPER_BUILD_JOBS}" in ''|*[!0-9]*) exit 1 ;; esac \
+    && test "${WHISPER_BUILD_JOBS}" -ge 1 \
+    && test "${WHISPER_BUILD_JOBS}" -le 8 \
+    && cmake --build build --parallel "${WHISPER_BUILD_JOBS}" --config Release --target whisper-cli \
     && sh ./models/download-ggml-model.sh "${WHISPER_MODEL}" \
     && cp "models/ggml-${WHISPER_MODEL}.bin" /opt/whisper-model.bin \
     && printf '%s\n' "${WHISPER_MODEL}" > /opt/whisper-model-name \
@@ -30,10 +35,11 @@ FROM node:20-bookworm-slim
 ARG WHISPER_MODEL
 ARG WHISPER_CPP_COMMIT
 
-# ffmpeg for remux/extraction; libgomp1 for whisper.cpp's OpenMP; python3 for Argos translation;
+# ffmpeg for remux/extraction; Mesa VA-API for an explicitly enabled AMD/Intel
+# render node; libgomp1 for whisper.cpp's OpenMP; python3 for Argos translation;
 # tesseract-ocr + language packs for Phase 4 PGS image-subtitle OCR (eng/fra/spa/deu/ita/por).
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg ca-certificates libgomp1 python3 python3-venv \
+    && apt-get install -y --no-install-recommends ffmpeg mesa-va-drivers util-linux ca-certificates libgomp1 python3 python3-venv \
         tesseract-ocr tesseract-ocr-eng tesseract-ocr-fra tesseract-ocr-spa tesseract-ocr-deu tesseract-ocr-ita tesseract-ocr-por \
     && rm -rf /var/lib/apt/lists/*
 
@@ -61,7 +67,8 @@ COPY --from=whisper /opt/whisper-bin.sha256 /opt/whisper/bin.sha256
 COPY --from=whisper /opt/whisper-model.sha256 /opt/whisper/model.sha256
 
 COPY package*.json ./
-RUN npm install --omit=dev
+RUN npm ci --omit=dev --ignore-scripts \
+    && npm cache clean --force
 
 COPY src ./src
 

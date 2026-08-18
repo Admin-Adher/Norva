@@ -11,6 +11,7 @@ const {
   CompleteMkvHlsCache,
   MkvHlsCacheError,
   deriveCompleteHlsCacheKey,
+  deriveCompleteHlsCacheKeyFromVerifiedBinding,
   parseDedicatedManifestHmacKey,
 } = require('../services/media-gateway/src/mkv-hls-cache');
 
@@ -46,6 +47,22 @@ function cacheOptions(root, overrides = {}) {
     ttlMs: 60_000,
     maxEntryBytes: 256 * 1024,
     statfs: async () => ({ availableBytes: 1024 * 1024 * 1024 }),
+    ...overrides,
+  };
+}
+
+function verifiedBinding(overrides = {}) {
+  return {
+    tenantScopeSha256: '11'.repeat(32),
+    providerScopeSha256: '22'.repeat(32),
+    itemScopeSha256: '33'.repeat(32),
+    sourceUrlSha256: '44'.repeat(32),
+    effectiveUrlSha256: '55'.repeat(32),
+    strongEtagSha256: '66'.repeat(32),
+    profileFingerprint: '77'.repeat(32),
+    fileSizeBytes: 123456,
+    pipelineBuild: 'mkv-h264-hls-fmp4-v2',
+    proofBuild: 2,
     ...overrides,
   };
 }
@@ -120,6 +137,56 @@ test('manifest key must be a dedicated exact 32-byte value', () => {
     assert.throws(() => parseDedicatedManifestHmacKey(invalid), (error) => error.code === 'INVALID_CACHE_HMAC_KEY');
   }
   assert.throws(() => new CompleteMkvHlsCache(cacheOptions('C:\\unused', { ttlMs: 91 * 24 * 60 * 60 * 1000 })), (error) => error.code === 'INVALID_CACHE_CONFIG');
+});
+
+test('verified proof bindings derive a secret-free key and reject any missing or malformed authority', () => {
+  const baseline = deriveCompleteHlsCacheKeyFromVerifiedBinding(verifiedBinding());
+  assert.match(baseline.key, /^[0-9a-f]{64}$/);
+  for (const [field, value] of [
+    ['tenantScopeSha256', 'aa'.repeat(32)],
+    ['providerScopeSha256', 'bb'.repeat(32)],
+    ['itemScopeSha256', 'cc'.repeat(32)],
+    ['sourceUrlSha256', 'dd'.repeat(32)],
+    ['effectiveUrlSha256', 'ee'.repeat(32)],
+    ['strongEtagSha256', 'ff'.repeat(32)],
+    ['profileFingerprint', '01'.repeat(32)],
+    ['fileSizeBytes', 123457],
+    ['pipelineBuild', 'mkv-h264-hls-fmp4-v3'],
+    ['proofBuild', 3],
+  ]) {
+    assert.notEqual(deriveCompleteHlsCacheKeyFromVerifiedBinding(verifiedBinding({ [field]: value })).key, baseline.key, field);
+  }
+  assert.throws(
+    () => deriveCompleteHlsCacheKeyFromVerifiedBinding({ ...verifiedBinding(), sourceUrlSha256: 'not-a-digest' }),
+    (error) => error.code === 'INVALID_CACHE_IDENTITY',
+  );
+  const missing = verifiedBinding();
+  delete missing.itemScopeSha256;
+  assert.throws(
+    () => deriveCompleteHlsCacheKeyFromVerifiedBinding(missing),
+    (error) => error.code === 'INVALID_CACHE_IDENTITY',
+  );
+});
+
+test('verified proof bindings publish and acquire the same complete HLS graph', async (t) => {
+  const root = await tempDirectory(t, 'norva-hls-cache-verified-');
+  const stage = await makeSimpleHls(t);
+  const binding = verifiedBinding();
+  const cache = new CompleteMkvHlsCache(cacheOptions(root));
+  const published = await cache.publishCompleteVerified({
+    binding,
+    sourceDirectory: stage.directory,
+    rootPlaylist: stage.rootPlaylist,
+    files: stage.files,
+    completion: { kind: 'complete-hls', sourceEof: true, ffmpegExitCode: 0 },
+  });
+  assert.equal(published.key, deriveCompleteHlsCacheKeyFromVerifiedBinding(binding).key);
+  const hit = await cache.acquireVerified(binding);
+  assert.equal(hit.hit, true);
+  const playlist = await hit.openAsset(hit.rootPlaylist);
+  assert.match(await playlist.readFile('utf8'), /#EXT-X-ENDLIST/);
+  await playlist.close();
+  hit.release();
 });
 
 test('a complete HLS publish yields an authenticated private hit with zero provider and FFmpeg calls', async (t) => {
@@ -225,6 +292,7 @@ test('manifest tampering, wrong HMAC key, and asset mutation turn a would-be hit
     envelope.mac = `${envelope.mac.slice(0, -1)}${envelope.mac.endsWith('A') ? 'B' : 'A'}`;
     await fsp.writeFile(file, JSON.stringify(envelope));
     assert.deepEqual(await cache.acquire(identity), { hit: false, reason: 'invalid', key: deriveCompleteHlsCacheKey(identity).key });
+    assert.equal((await cache.acquire(identity)).reason, 'miss', 'invalid manifests are removed after quarantine');
   });
 
   await t.test('wrong dedicated key', async (inner) => {
@@ -260,6 +328,8 @@ test('manifest tampering, wrong HMAC key, and asset mutation turn a would-be hit
     assert.equal(hit.hit, true, 'segment verification is intentionally lazy per asset');
     await assert.rejects(hit.openAsset('segment-000.m4s'), (error) => error.code === 'INVALID_CACHE_ENTRY');
     hit.release();
+    assert.equal((await cache.acquire(identity)).reason, 'miss', 'a poisoned leased entry is removed after release');
+    assert.equal((await cache.publishComplete(publishOptions(stage, identity))).status, 'published');
   });
 });
 
@@ -300,6 +370,16 @@ test('TTL expiry is a miss and prune removes the expired complete entry', async 
   assert.equal(pruned.removedEntries, 1);
   assert.ok(pruned.removedBytes > 0);
   assert.equal((await cache.acquire(identity)).reason, 'miss');
+});
+
+test('single-instance startup removes only bounded crash residue from the private publish temp root', async (t) => {
+  const root = await tempDirectory(t, 'norva-hls-cache-crash-residue-');
+  const orphan = path.join(root, 'tmp', 'publish-orphan123');
+  await fsp.mkdir(orphan, { recursive: true });
+  await fsp.writeFile(path.join(orphan, 'partial.ts'), Buffer.alloc(1024, 0x47));
+  const cache = new CompleteMkvHlsCache(cacheOptions(root));
+  assert.equal((await cache.acquire(cacheIdentity())).reason, 'miss');
+  await assert.rejects(fsp.stat(orphan), (error) => error.code === 'ENOENT');
 });
 
 test('quota eviction is LRU and never evicts an active refcounted hit', async (t) => {

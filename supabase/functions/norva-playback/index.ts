@@ -21,13 +21,34 @@ import {
 } from "../_shared/provider-playback-circuit-policy.mjs";
 import { sealRelayCoordinatorRoute } from "../_shared/relay-coordinator-route.mjs";
 import { renderSubtitleReadyEmail } from "../_shared/subtitle-ready-email.ts";
+import { cleanupMediaGatewaySession } from "../_shared/media-gateway-session-lifecycle.mjs";
+import {
+  buildMediaGatewayRoutingConfig,
+  MEDIA_GATEWAY_CANARY_ROUTING_PROTOCOL,
+  selectMediaGatewayRouteForGatewayId,
+  selectMediaGatewayRouteForUserHash,
+} from "../_shared/media-gateway-canary-routing.mjs";
 
 type JsonRecord = Record<string, unknown>;
+type MediaGatewayRoute = {
+  kind: "default" | "canary";
+  url: string;
+  token: string;
+  gatewayId: string | null;
+};
+type MediaGatewayRoutingConfig = {
+  protocol: number;
+  defaultRoute: MediaGatewayRoute | null;
+  canaryRoute: MediaGatewayRoute | null;
+  canaryUserHashes: readonly string[];
+  canaryState: "off" | "standby" | "invalid" | "ready";
+};
 type RuntimeConfig = {
   relayBaseUrl: string;
   relayTokenSecret: string;
   mediaGatewayUrl: string;
   mediaGatewayToken: string;
+  mediaGatewayRouting: MediaGatewayRoutingConfig;
   lidWorkerUrl: string;
   lidWorkerToken: string;
   sourceConfigKey: string;
@@ -77,6 +98,10 @@ const RUNTIME_CONFIG_KEYS = [
   "RELAY_TOKEN_SECRET",
   "NORVA_MEDIA_GATEWAY_URL",
   "NORVA_MEDIA_GATEWAY_TOKEN",
+  "NORVA_MEDIA_GATEWAY_CANARY_URL",
+  "NORVA_MEDIA_GATEWAY_CANARY_TOKEN",
+  "NORVA_MEDIA_GATEWAY_CANARY_ID",
+  "NORVA_MEDIA_GATEWAY_CANARY_USER_HASHES",
   "NORVA_LID_WORKER_URL",
   "NORVA_LID_WORKER_TOKEN",
   "NORVA_SOURCE_CONFIG_KEY",
@@ -146,6 +171,10 @@ const ENV_RELAY_BASE_URL = trimTrailingSlash(Deno.env.get("NORVA_RELAY_BASE_URL"
 const ENV_RELAY_TOKEN_SECRET = Deno.env.get("RELAY_TOKEN_SECRET") ?? "";
 const ENV_MEDIA_GATEWAY_URL = trimTrailingSlash(Deno.env.get("NORVA_MEDIA_GATEWAY_URL") ?? "");
 const ENV_MEDIA_GATEWAY_TOKEN = Deno.env.get("NORVA_MEDIA_GATEWAY_TOKEN") ?? "";
+const ENV_MEDIA_GATEWAY_CANARY_URL = trimTrailingSlash(Deno.env.get("NORVA_MEDIA_GATEWAY_CANARY_URL") ?? "");
+const ENV_MEDIA_GATEWAY_CANARY_TOKEN = Deno.env.get("NORVA_MEDIA_GATEWAY_CANARY_TOKEN") ?? "";
+const ENV_MEDIA_GATEWAY_CANARY_ID = Deno.env.get("NORVA_MEDIA_GATEWAY_CANARY_ID") ?? "";
+const ENV_MEDIA_GATEWAY_CANARY_USER_HASHES = Deno.env.get("NORVA_MEDIA_GATEWAY_CANARY_USER_HASHES") ?? "";
 const ENV_LID_WORKER_URL = trimTrailingSlash(Deno.env.get("NORVA_LID_WORKER_URL") ?? "");
 const ENV_LID_WORKER_TOKEN = Deno.env.get("NORVA_LID_WORKER_TOKEN") ?? "";
 const ENV_SOURCE_CONFIG_KEY = Deno.env.get("NORVA_SOURCE_CONFIG_KEY") ?? "";
@@ -186,7 +215,7 @@ Deno.serve(async (req) => {
       return json(req, {
         ok: true,
         service: "norva-playback",
-        version: 52,
+        version: 54,
         nativeHeartbeatProtocol: 1,
         providerCircuitProtocol: 1,
         exactFileCodecProfileProtocol: 1,
@@ -227,6 +256,11 @@ Deno.serve(async (req) => {
         entitlementsEnforced: entitlementRuntime.enforced,
         relayConfigured: Boolean(config.relayBaseUrl && config.relayTokenSecret),
         gatewayConfigured: Boolean(config.mediaGatewayUrl && config.mediaGatewayToken),
+        mediaGatewayCanaryRouting: {
+          protocol: MEDIA_GATEWAY_CANARY_ROUTING_PROTOCOL,
+          state: config.mediaGatewayRouting.canaryState,
+          selectedUsers: config.mediaGatewayRouting.canaryUserHashes.length,
+        },
         exactTailDrainSafe: true,
       });
     }
@@ -464,6 +498,7 @@ function stripMkvH264FastStartProofDeep(value: unknown, depth = 0): unknown {
   for (const [key, entry] of Object.entries(value as JsonRecord)) {
     if (
       key === "mkvH264FastStartProof" || key === "mkv_h264_fast_start_proof" ||
+      key === "mkvCompleteHlsCacheProof" || key === "mkv_complete_hls_cache_proof" ||
       key === "__norvaMkvH264FastStartItemCasV2"
     ) continue;
     clean[key] = stripMkvH264FastStartProofDeep(entry, depth + 1);
@@ -940,6 +975,9 @@ async function createPlaybackSession(
         rawTokenExpiresAt,
         db,
         userAgent,
+        null,
+        null,
+        true,
       );
       await commitEdgeSessionCoordinator(rawCoordination, {
         playbackSessionId: session.id,
@@ -1255,7 +1293,7 @@ async function createPlaybackSession(
       gatewayVideoTranscodeExplicit,
       releasedSuperseded,
     );
-    await commitEdgeSessionCoordinator(edgeCoordination, {
+    const gatewayCommit = await commitEdgeSessionCoordinator(edgeCoordination, {
       playbackSessionId: session.id,
       gatewaySessionId: stringOrNull(gateway.session?.external_session_id),
       itemType,
@@ -1265,8 +1303,46 @@ async function createPlaybackSession(
       supersededSessionIds,
       expiresAt: gatewayTransportExpiresAt,
     });
+    // The relay coordinator is an optional deployment component. Preserve the
+    // existing no-coordinator path, but once a prepare lock exists its commit
+    // must be acknowledged or the freshly-created Gateway session is rolled
+    // back below.
+    if (edgeCoordination && !gatewayCommit?.ok) {
+      throw new HttpError(503, "Playback session coordinator did not accept the gateway session", {
+        code: "PLAYBACK_COORDINATOR_UNAVAILABLE",
+      });
+    }
   } catch (error) {
-    await abortEdgeSessionCoordinator(edgeCoordination);
+    const gatewayExternalSessionId = stringOrNull(gateway?.session?.external_session_id);
+    if (gatewayExternalSessionId) {
+      const cleanup = await gateway?.cleanupCreatedSession?.();
+      if (!cleanup?.ok) {
+        console.warn(
+          "[norva-playback] gateway startup rollback cleanup failed",
+          cleanup?.status ?? 0,
+          cleanup?.reason ?? "cleanup-not-available",
+        );
+      }
+    }
+    await rollbackEdgeSessionCoordinator(edgeCoordination, {
+      playbackSessionId: session.id,
+      gatewaySessionId: gatewayExternalSessionId,
+    });
+    const gatewayDatabaseId = stringOrNull(gateway?.session?.id);
+    if (gatewayDatabaseId) {
+      try {
+        const { error: gatewayRollbackError } = await db
+          .from("cloud_gateway_sessions")
+          .update({ status: "failed", expires_at: new Date().toISOString() })
+          .eq("id", gatewayDatabaseId)
+          .eq("user_id", userId);
+        if (gatewayRollbackError) {
+          console.warn("[norva-playback] unable to mark rolled-back gateway session failed");
+        }
+      } catch (_) {
+        console.warn("[norva-playback] unable to mark rolled-back gateway session failed");
+      }
+    }
     await recordPlaybackSessionFailure(db, {
       userId,
       deviceId,
@@ -3321,18 +3397,23 @@ async function expirePlaybackSession(id: string, userId: string, db: SupabaseCli
   let rawPumpsAborted = 0;
   let fastStartProofPersisted = false;
 
-  if (runtimeConfig.mediaGatewayUrl && runtimeConfig.mediaGatewayToken) {
+  if (
+    runtimeConfig.mediaGatewayRouting.defaultRoute ||
+    runtimeConfig.mediaGatewayRouting.canaryRoute
+  ) {
     // Direct/native sessions may have switched to their long-lived signed /raw
     // fallback. It has no cloud_gateway_sessions row, so explicitly abort its
     // active pump on normal exit instead of leaving a provider slot occupied.
     try {
+      const rawGatewayRoute = await mediaGatewayRouteForPlaybackUser(runtimeConfig, userId);
+      if (!rawGatewayRoute) throw new Error("MEDIA_GATEWAY_ROUTE_UNAVAILABLE");
       const ownerKey = await sha256Hex(userId);
-      const rawUrl = new URL(`${runtimeConfig.mediaGatewayUrl}/raw-pumps`);
+      const rawUrl = new URL(`${rawGatewayRoute.url}/raw-pumps`);
       rawUrl.searchParams.set("ownerKey", ownerKey);
       rawUrl.searchParams.set("sid", id);
       const rawResponse = await fetch(rawUrl.toString(), {
         method: "DELETE",
-        headers: { Authorization: `Bearer ${runtimeConfig.mediaGatewayToken}` },
+        headers: { Authorization: `Bearer ${rawGatewayRoute.token}` },
         signal: AbortSignal.timeout(8_000),
       });
       if (!rawResponse.ok && rawResponse.status !== 404) {
@@ -3348,10 +3429,16 @@ async function expirePlaybackSession(id: string, userId: string, db: SupabaseCli
     await Promise.allSettled(gatewaySessions.map(async (gateway: JsonRecord) => {
       const externalSessionId = stringOrNull(gateway.external_session_id);
       if (!externalSessionId) return;
+      const storedGatewayRoute = mediaGatewayRouteForStoredSession(runtimeConfig, gateway);
+      if (!storedGatewayRoute) {
+        throw new HttpError(503, "Stored media gateway route is unavailable", {
+          code: "MEDIA_GATEWAY_STORED_ROUTE_UNAVAILABLE",
+        });
+      }
 
-      const response = await fetch(`${runtimeConfig.mediaGatewayUrl}/sessions/${encodeURIComponent(externalSessionId)}`, {
+      const response = await fetch(`${storedGatewayRoute.url}/sessions/${encodeURIComponent(externalSessionId)}`, {
         method: "DELETE",
-        headers: { Authorization: `Bearer ${runtimeConfig.mediaGatewayToken}` },
+        headers: { Authorization: `Bearer ${storedGatewayRoute.token}` },
         signal: AbortSignal.timeout(8_000),
       });
       if (!response.ok && response.status !== 404) {
@@ -3365,6 +3452,9 @@ async function expirePlaybackSession(id: string, userId: string, db: SupabaseCli
         cleanupBody.finalCodecProfile ?? cleanupBody.final_codec_profile,
       ));
       const finalProof = normalizeMkvH264FastStartProof(finalCodecProfile.mkvH264FastStartProof);
+      const finalCompleteCacheProof = normalizeMkvH264FastStartProof(
+        finalCodecProfile.mkvCompleteHlsCacheProof,
+      );
       if (
         hasUsefulCodecProfile(finalCodecProfile) && stringOr(session.item_type, "") === "movie" &&
         stringOrNull(session.source_id) && stringOrNull(session.item_id)
@@ -3380,7 +3470,7 @@ async function expirePlaybackSession(id: string, userId: string, db: SupabaseCli
           requireItemCas: true,
           expectedItemCas: mkvH264FastStartItemCasFromPlaybackSession(session),
           itemOnly: true,
-          allowProofReplacement: Boolean(finalProof),
+          allowProofReplacement: Boolean(finalProof || finalCompleteCacheProof),
         });
         fastStartProofPersisted = fastStartProofPersisted || persisted;
       }
@@ -3731,7 +3821,7 @@ async function getPlaybackTelemetrySummary(url: URL, userId: string, db: Supabas
 async function closeOpenGatewaySessionsForUser(userId: string, db: SupabaseClient): Promise<number> {
   const { data: gatewaySessions, error } = await db
     .from("cloud_gateway_sessions")
-    .select("id, playback_session_id, external_session_id, status")
+    .select("id, playback_session_id, gateway_id, external_session_id, status")
     .eq("user_id", userId)
     .in("status", ["pending", "starting", "ready"]);
   if (error) {
@@ -3765,13 +3855,21 @@ async function closeOpenGatewaySessionsForUser(userId: string, db: SupabaseClien
     }
   }
 
-  if (runtimeConfig.mediaGatewayUrl && runtimeConfig.mediaGatewayToken) {
+  if (
+    runtimeConfig.mediaGatewayRouting.defaultRoute ||
+    runtimeConfig.mediaGatewayRouting.canaryRoute
+  ) {
     await Promise.allSettled(gatewaySessions.map(async (gateway: JsonRecord) => {
       const externalSessionId = stringOrNull(gateway.external_session_id);
       if (!externalSessionId) return;
-      const response = await fetch(`${runtimeConfig.mediaGatewayUrl}/sessions/${encodeURIComponent(externalSessionId)}`, {
+      const storedGatewayRoute = mediaGatewayRouteForStoredSession(runtimeConfig, gateway);
+      if (!storedGatewayRoute) {
+        console.warn("[norva-playback] stored gateway cleanup route unavailable");
+        return;
+      }
+      const response = await fetch(`${storedGatewayRoute.url}/sessions/${encodeURIComponent(externalSessionId)}`, {
         method: "DELETE",
-        headers: { Authorization: `Bearer ${runtimeConfig.mediaGatewayToken}` },
+        headers: { Authorization: `Bearer ${storedGatewayRoute.token}` },
       });
       if (!response.ok && response.status !== 404) {
         console.warn("[norva-playback] gateway cleanup refused", response.status, await response.text().catch(() => ""));
@@ -3783,6 +3881,9 @@ async function closeOpenGatewaySessionsForUser(userId: string, db: SupabaseClien
           cleanupBody.finalCodecProfile ?? cleanupBody.final_codec_profile,
         ));
         const finalProof = normalizeMkvH264FastStartProof(finalCodecProfile.mkvH264FastStartProof);
+        const finalCompleteCacheProof = normalizeMkvH264FastStartProof(
+          finalCodecProfile.mkvCompleteHlsCacheProof,
+        );
         const playbackSessionId = stringOrNull(gateway.playback_session_id);
         const playbackSession = playbackSessionId ? playbackSessionsById.get(playbackSessionId) : null;
         if (
@@ -3800,7 +3901,7 @@ async function closeOpenGatewaySessionsForUser(userId: string, db: SupabaseClien
             requireItemCas: true,
             expectedItemCas: mkvH264FastStartItemCasFromPlaybackSession(playbackSession),
             itemOnly: true,
-            allowProofReplacement: Boolean(finalProof),
+            allowProofReplacement: Boolean(finalProof || finalCompleteCacheProof),
           });
         }
       }
@@ -3925,6 +4026,26 @@ async function abortEdgeSessionCoordinator(coordination: Awaited<ReturnType<type
     ownerKey: coordination.ownerKey,
     sourceKey: coordination.sourceKey,
   });
+}
+
+async function rollbackEdgeSessionCoordinator(
+  coordination: Awaited<ReturnType<typeof prepareEdgeSessionCoordinator>>,
+  options: { playbackSessionId: string; gatewaySessionId: string | null },
+) {
+  if (!coordination?.runtimeConfig || !coordination.lockId) return;
+  // /sessions/start can commit durably even when its response is lost. End the
+  // exact generation before aborting the prepare lock so that an ambiguous
+  // response cannot leave a coordinator record behind.
+  if (options.gatewaySessionId) {
+    await requestEdgeCoordinator(coordination.runtimeConfig, "/sessions/end", compactRecord({
+      coord: coordination.coord,
+      ownerKey: coordination.ownerKey,
+      sourceKey: coordination.sourceKey,
+      playbackSessionId: options.playbackSessionId,
+      gatewaySessionId: options.gatewaySessionId,
+    }));
+  }
+  await abortEdgeSessionCoordinator(coordination);
 }
 
 async function endEdgeSessionCoordinator(
@@ -4222,10 +4343,15 @@ async function resolvePlaybackTarget(
   const ownedFastStartProof = normalizeMkvH264FastStartProof(
     ownedCodecProfile.mkvH264FastStartProof ?? ownedCodecProfile.mkv_h264_fast_start_proof,
   );
+  const ownedCompleteHlsCacheProof = normalizeMkvH264FastStartProof(
+    ownedCodecProfile.mkvCompleteHlsCacheProof ?? ownedCodecProfile.mkv_complete_hls_cache_proof,
+  );
   // The global catalogue mirror may lag a playback-produced proof. Prefer the
   // owned row only when it carries that bounded server observation; otherwise
   // keep the normal mirror-first profile choice unchanged.
-  const storedCodecProfile = ownedFastStartProof ? ownedCodecProfile : catalogueCodecProfile;
+  const storedCodecProfile = (ownedFastStartProof || ownedCompleteHlsCacheProof)
+    ? ownedCodecProfile
+    : catalogueCodecProfile;
   const storedPlaybackHint = mergePlaybackHints(
     compactRecord({
       ...hint,
@@ -4426,9 +4552,13 @@ async function createBytePipeCapability(
   fileSizeBytes: number | null = null,
   durationSeconds: number | null = null,
   strictLidWindowClaims: StrictLidWindowCapabilityClaims | null = null,
+  usePlaybackCanary = false,
 ) {
   const runtimeConfig = await getRuntimeConfig(_db);
-  if (!runtimeConfig.mediaGatewayUrl || !runtimeConfig.mediaGatewayToken) {
+  const gatewayRoute = usePlaybackCanary
+    ? await mediaGatewayRouteForPlaybackUser(runtimeConfig, userId)
+    : runtimeConfig.mediaGatewayRouting.defaultRoute;
+  if (!gatewayRoute) {
     throw new HttpError(503, "Media gateway is not configured");
   }
   if (strictLidWindowClaims) {
@@ -4478,12 +4608,12 @@ async function createBytePipeCapability(
       : {}),
     exp: Math.floor(new Date(expiresAt).getTime() / 1000),
   });
-  const signature = await hmacBase64Url(runtimeConfig.mediaGatewayToken, payload);
+  const signature = await hmacBase64Url(gatewayRoute.token, payload);
   const capability = `${base64Url(encoder.encode(payload))}.${signature}`;
   return {
     capability,
-    gatewayUrl: runtimeConfig.mediaGatewayUrl,
-    serviceToken: runtimeConfig.mediaGatewayToken,
+    gatewayUrl: gatewayRoute.url,
+    serviceToken: gatewayRoute.token,
   };
 }
 
@@ -4496,6 +4626,7 @@ async function createBytePipeAccess(
   userAgent: string | null = null,
   scope: string | null = null,
   fileSizeBytes: number | null = null,
+  usePlaybackCanary = false,
 ) {
   const access = await createBytePipeCapability(
     playbackSessionId,
@@ -4506,6 +4637,9 @@ async function createBytePipeAccess(
     userAgent,
     scope,
     fileSizeBytes,
+    null,
+    null,
+    usePlaybackCanary,
   );
   return { url: `${access.gatewayUrl}/raw/${access.capability}` };
 }
@@ -4537,7 +4671,8 @@ async function createGatewaySession(
     1024,
   );
   const runtimeConfig = await getRuntimeConfig(db);
-  if (!runtimeConfig.mediaGatewayUrl || !runtimeConfig.mediaGatewayToken) {
+  const gatewayRoute = await mediaGatewayRouteForPlaybackUser(runtimeConfig, userId);
+  if (!gatewayRoute) {
     const { data, error } = await db
       .from("cloud_gateway_sessions")
       .insert({
@@ -4582,8 +4717,8 @@ async function createGatewaySession(
     ...(userAgent ? { userAgent } : {}),
   };
   let { response, body: gatewayBody } = await requestGatewaySession(
-    runtimeConfig.mediaGatewayUrl,
-    runtimeConfig.mediaGatewayToken,
+    gatewayRoute.url,
+    gatewayRoute.token,
     baseGatewayBody,
   );
   if (!response.ok) {
@@ -4601,8 +4736,8 @@ async function createGatewaySession(
       if (!shouldOpenCircuitForProviderBusy({ lastSelfReleaseAt })) {
         await sleep(PROVIDER_SLOT_RELEASE_DELAY_MS);
         const retry = await requestGatewaySession(
-          runtimeConfig.mediaGatewayUrl,
-          runtimeConfig.mediaGatewayToken,
+          gatewayRoute.url,
+          gatewayRoute.token,
           baseGatewayBody,
         );
         response = retry.response;
@@ -4617,6 +4752,17 @@ async function createGatewaySession(
       throw new HttpError(response.status, "Media gateway refused the session", gatewayBody);
     }
   }
+  const externalSessionId = stringOrNull(gatewayBody.id);
+  if (!externalSessionId) {
+    throw new HttpError(502, "Media gateway returned an unmanageable session", {
+      code: "GATEWAY_SESSION_ID_MISSING",
+    });
+  }
+  const cleanupCreatedSession = () => cleanupMediaGatewaySession({
+    baseUrl: gatewayRoute.url,
+    token: gatewayRoute.token,
+    sessionId: externalSessionId,
+  });
   const startupMs = Math.max(1, Math.round(performance.now() - startupStartedAt));
   const audioMode = stringOrNull(gatewayBody.audioMode ?? gatewayBody.audio_mode);
   // The gateway resolves the absolute ffmpeg stream index it actually mapped.
@@ -4632,19 +4778,9 @@ async function createGatewaySession(
     requestedAudioStreamIndex !== null &&
     audioStreamIndex !== requestedAudioStreamIndex
   ) {
-    const externalSessionId = stringOrNull(gatewayBody.id);
-    if (externalSessionId) {
-      const cleanup = await fetch(
-        `${runtimeConfig.mediaGatewayUrl}/sessions/${encodeURIComponent(externalSessionId)}`,
-        {
-          method: "DELETE",
-          headers: { Authorization: `Bearer ${runtimeConfig.mediaGatewayToken}` },
-          signal: AbortSignal.timeout(8_000),
-        },
-      ).catch(() => null);
-      if (cleanup && !cleanup.ok && cleanup.status !== 404) {
-        console.warn("[norva-playback] mismatched audio gateway cleanup failed");
-      }
+    const cleanup = await cleanupCreatedSession();
+    if (!cleanup.ok) {
+      console.warn("[norva-playback] mismatched audio gateway cleanup failed");
     }
     throw new HttpError(502, "Media gateway did not map the requested audio stream", {
       code: "AUDIO_STREAM_MAP_MISMATCH",
@@ -4695,37 +4831,51 @@ async function createGatewaySession(
     gatewayBody.startupPolicy ?? gatewayBody.startup_policy,
   );
 
-  const { data, error } = await db
-    .from("cloud_gateway_sessions")
-    .insert({
-      user_id: userId,
-      playback_session_id: playbackSessionId,
-      external_session_id: stringOrNull(gatewayBody.id),
-      status: stringOr(gatewayBody.status, "starting"),
-      mode: stringOr(gatewayBody.mode, "remux"),
-      hls_url: stringOrNull(gatewayBody.hlsUrl ?? gatewayBody.hls_url),
-      expires_at: expiresAt,
-    })
-    .select("*")
-    .single();
-  if (error) throwDb(error, "Unable to record gateway session");
-  return {
-    status: data.status,
-    session: data,
-    hlsUrl: data.hls_url,
-    startupMs,
-    audioMode,
-    audioStreamIndex,
-    requestedAudioStreamIndex,
-    requestedSeekOffset,
-    actualStartOffset,
-    localSeekTarget,
-    sourceTimestamps,
-    audioRenditions,
-    multiAudioHls,
-    startupPolicy,
-    codecProfile,
-  };
+  try {
+    const { data, error } = await db
+      .from("cloud_gateway_sessions")
+      .insert({
+        user_id: userId,
+        playback_session_id: playbackSessionId,
+        gateway_id: gatewayRoute.gatewayId,
+        external_session_id: externalSessionId,
+        status: stringOr(gatewayBody.status, "starting"),
+        mode: stringOr(gatewayBody.mode, "remux"),
+        hls_url: stringOrNull(gatewayBody.hlsUrl ?? gatewayBody.hls_url),
+        expires_at: expiresAt,
+      })
+      .select("*")
+      .single();
+    if (error) throwDb(error, "Unable to record gateway session");
+    return {
+      status: data.status,
+      session: data,
+      hlsUrl: data.hls_url,
+      startupMs,
+      audioMode,
+      audioStreamIndex,
+      requestedAudioStreamIndex,
+      requestedSeekOffset,
+      actualStartOffset,
+      localSeekTarget,
+      sourceTimestamps,
+      audioRenditions,
+      multiAudioHls,
+      startupPolicy,
+      codecProfile,
+      cleanupCreatedSession,
+    };
+  } catch (databaseError) {
+    const cleanup = await cleanupCreatedSession();
+    if (!cleanup.ok) {
+      console.warn(
+        "[norva-playback] gateway database rollback cleanup failed",
+        cleanup.status,
+        cleanup.reason,
+      );
+    }
+    throw databaseError;
+  }
 }
 
 async function requestGatewaySession(
@@ -5028,6 +5178,10 @@ function bindServerMkvFastStartProof(
     authoritativeProfile.mkvH264FastStartProof ??
       authoritativeProfile.mkv_h264_fast_start_proof,
   ) : null;
+  const serverCompleteCacheProof = serverAuthority ? normalizeMkvH264FastStartProof(
+    authoritativeProfile.mkvCompleteHlsCacheProof ??
+      authoritativeProfile.mkv_complete_hls_cache_proof,
+  ) : null;
   // The caller controls playbackHint. Codec metadata may remain a useful hint,
   // but only a profile loaded from the owned server-side catalogue may attest
   // that packet/GOP evidence is safe enough to bypass video encoding.
@@ -5036,6 +5190,7 @@ function bindServerMkvFastStartProof(
     codecProfile: compactRecord({
       ...mergedProfile,
       mkvH264FastStartProof: serverProof,
+      mkvCompleteHlsCacheProof: serverCompleteCacheProof,
     }),
   });
 }
@@ -5066,10 +5221,13 @@ function mergeCodecProfileAnnotations(existingValue: unknown, observedValue: unk
 
   const existingProof = normalizeMkvH264FastStartProof(existing.mkvH264FastStartProof);
   const observedProof = normalizeMkvH264FastStartProof(observed.mkvH264FastStartProof);
+  const existingCompleteCacheProof = normalizeMkvH264FastStartProof(existing.mkvCompleteHlsCacheProof);
+  const observedCompleteCacheProof = normalizeMkvH264FastStartProof(observed.mkvCompleteHlsCacheProof);
   return compactRecord({
     ...observed,
     subtitles: mergeSubtitleTrackAnnotations(existing.subtitles, observed.subtitles),
     mkvH264FastStartProof: observedProof ?? existingProof,
+    mkvCompleteHlsCacheProof: observedCompleteCacheProof ?? existingCompleteCacheProof,
   });
 }
 
@@ -5121,6 +5279,8 @@ function stripMkvH264FastStartProof(value: unknown): JsonRecord {
   const profile = { ...recordOrEmpty(value) };
   delete profile.mkvH264FastStartProof;
   delete profile.mkv_h264_fast_start_proof;
+  delete profile.mkvCompleteHlsCacheProof;
+  delete profile.mkv_complete_hls_cache_proof;
   return compactRecord(profile);
 }
 
@@ -5168,6 +5328,13 @@ function normalizeGatewayStartupPolicy(value: unknown) {
   );
   const reason = stringOr(raw.reason, "");
   const eligible = raw.eligible === true;
+  const eligibleGraph =
+    ((pipeline === "copy" || pipeline === "audio-transcode") &&
+      reason === "mkv-h264-copy-ready") ||
+    (pipeline === "copy" && reason === "complete-hls-cache-hit") ||
+    (pipeline === "video-transcode" &&
+      reason === "vaapi-transcode-ready" &&
+      minimumEncodeRateX !== null && minimumEncodeRateX >= 2);
   if (
     protocol !== 2 ||
     !["copy", "audio-transcode", "video-transcode"].includes(pipeline) ||
@@ -5177,7 +5344,7 @@ function normalizeGatewayStartupPolicy(value: unknown) {
       targetBufferSeconds === null ||
       observedEncodeRateX === null ||
       observedEncodeRateX < minimumEncodeRateX ||
-      pipeline === "video-transcode"
+      !eligibleGraph
     )) ||
     (!eligible && targetBufferSeconds !== null)
   ) return null;
@@ -5195,6 +5362,9 @@ function normalizeGatewayStartupPolicy(value: unknown) {
 function normalizeCodecProfile(profile: JsonRecord) {
   const mkvH264FastStartProof = normalizeMkvH264FastStartProof(
     profile.mkvH264FastStartProof ?? profile.mkv_h264_fast_start_proof,
+  );
+  const mkvCompleteHlsCacheProof = normalizeMkvH264FastStartProof(
+    profile.mkvCompleteHlsCacheProof ?? profile.mkv_complete_hls_cache_proof,
   );
   return compactRecord({
     videoStreamIndex: boundedNullableInt(
@@ -5225,6 +5395,7 @@ function normalizeCodecProfile(profile: JsonRecord) {
     probedAt: stringOrNull(profile.probedAt ?? profile.probed_at),
     metadataComplete: profile.metadataComplete === true || profile.metadata_complete === true,
     mkvH264FastStartProof,
+    mkvCompleteHlsCacheProof,
   });
 }
 
@@ -5496,6 +5667,10 @@ async function getRuntimeConfig(db: SupabaseClient): Promise<RuntimeConfig> {
     !ENV_RELAY_TOKEN_SECRET ||
     !ENV_MEDIA_GATEWAY_URL ||
     !ENV_MEDIA_GATEWAY_TOKEN ||
+    !ENV_MEDIA_GATEWAY_CANARY_URL ||
+    !ENV_MEDIA_GATEWAY_CANARY_TOKEN ||
+    !ENV_MEDIA_GATEWAY_CANARY_ID ||
+    !ENV_MEDIA_GATEWAY_CANARY_USER_HASHES ||
     !ENV_LID_WORKER_URL ||
     !ENV_LID_WORKER_TOKEN ||
     !ENV_SOURCE_CONFIG_KEY;
@@ -5513,11 +5688,24 @@ async function getRuntimeConfig(db: SupabaseClient): Promise<RuntimeConfig> {
     }
   }
 
+  const mediaGatewayUrl = trimTrailingSlash(ENV_MEDIA_GATEWAY_URL || fromDb.get("NORVA_MEDIA_GATEWAY_URL") || "");
+  const mediaGatewayToken = ENV_MEDIA_GATEWAY_TOKEN || fromDb.get("NORVA_MEDIA_GATEWAY_TOKEN") || "";
+  const mediaGatewayRouting = buildMediaGatewayRoutingConfig({
+    defaultRoute: { url: mediaGatewayUrl, token: mediaGatewayToken },
+    canaryRoute: {
+      url: ENV_MEDIA_GATEWAY_CANARY_URL || fromDb.get("NORVA_MEDIA_GATEWAY_CANARY_URL") || "",
+      token: ENV_MEDIA_GATEWAY_CANARY_TOKEN || fromDb.get("NORVA_MEDIA_GATEWAY_CANARY_TOKEN") || "",
+      gatewayId: ENV_MEDIA_GATEWAY_CANARY_ID || fromDb.get("NORVA_MEDIA_GATEWAY_CANARY_ID") || "",
+    },
+    canaryUserHashes: ENV_MEDIA_GATEWAY_CANARY_USER_HASHES ||
+      fromDb.get("NORVA_MEDIA_GATEWAY_CANARY_USER_HASHES") || "",
+  }) as MediaGatewayRoutingConfig;
   const value = {
     relayBaseUrl: trimTrailingSlash(ENV_RELAY_BASE_URL || fromDb.get("NORVA_RELAY_BASE_URL") || ""),
     relayTokenSecret: ENV_RELAY_TOKEN_SECRET || fromDb.get("RELAY_TOKEN_SECRET") || "",
-    mediaGatewayUrl: trimTrailingSlash(ENV_MEDIA_GATEWAY_URL || fromDb.get("NORVA_MEDIA_GATEWAY_URL") || ""),
-    mediaGatewayToken: ENV_MEDIA_GATEWAY_TOKEN || fromDb.get("NORVA_MEDIA_GATEWAY_TOKEN") || "",
+    mediaGatewayUrl,
+    mediaGatewayToken,
+    mediaGatewayRouting,
     lidWorkerUrl: trimTrailingSlash(ENV_LID_WORKER_URL || fromDb.get("NORVA_LID_WORKER_URL") || ""),
     lidWorkerToken: ENV_LID_WORKER_TOKEN || fromDb.get("NORVA_LID_WORKER_TOKEN") || "",
     sourceConfigKey: ENV_SOURCE_CONFIG_KEY || fromDb.get("NORVA_SOURCE_CONFIG_KEY") || "",
@@ -5525,6 +5713,32 @@ async function getRuntimeConfig(db: SupabaseClient): Promise<RuntimeConfig> {
   };
   runtimeConfigCache = { value, expiresAt: Date.now() + 30_000 };
   return value;
+}
+
+async function mediaGatewayRouteForPlaybackUser(
+  runtimeConfig: RuntimeConfig,
+  userId: string,
+): Promise<MediaGatewayRoute | null> {
+  const userHash = await sha256Hex(userId);
+  const canarySelected = runtimeConfig.mediaGatewayRouting.canaryUserHashes.includes(userHash);
+  const route = selectMediaGatewayRouteForUserHash(runtimeConfig.mediaGatewayRouting, userHash) as
+    MediaGatewayRoute | null;
+  if (canarySelected && !route) {
+    throw new HttpError(503, "Media gateway canary route is unavailable", {
+      code: "MEDIA_GATEWAY_CANARY_ROUTE_UNAVAILABLE",
+    });
+  }
+  return route;
+}
+
+function mediaGatewayRouteForStoredSession(
+  runtimeConfig: RuntimeConfig,
+  gateway: JsonRecord,
+): MediaGatewayRoute | null {
+  return selectMediaGatewayRouteForGatewayId(
+    runtimeConfig.mediaGatewayRouting,
+    stringOrNull(gateway.gateway_id),
+  ) as MediaGatewayRoute | null;
 }
 
 // Dynamic, database-backed rollout policy. This deliberately does not piggyback on

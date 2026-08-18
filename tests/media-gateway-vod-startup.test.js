@@ -282,6 +282,47 @@ test('Gateway MPEG-TS HLS copies only AAC-LC stereo and transcodes MP3-family au
         audioChannels: 2,
         clientAudioPassthrough: true,
     }), true, 'proven AAC-LC stereo remains a zero-cost copy');
+    assert.strictEqual(shouldCopyAudio({
+        mkvH264FastStart: { eligible: true },
+        mkvH264FastStartAudioAuthority: true,
+        codecProfile: {
+            audioTracks: [{ index: 1, codec: 'aac', profile: 'LC', channels: 2 }],
+        },
+        audioCodec: 'ac3',
+        audioProfile: 'HE-AAC',
+        audioChannels: 8,
+        clientAudioPassthrough: true,
+    }), true, 'fast-start audio copy is derived only from the proof-bound exact track');
+    assert.strictEqual(shouldCopyAudio({
+        mkvH264FastStart: { eligible: true },
+        mkvH264FastStartAudioAuthority: true,
+        codecProfile: {
+            audioTracks: [{ index: 1, codec: 'ac3', profile: '', channels: 2 }],
+        },
+        audioCodec: 'aac',
+        audioProfile: 'LC',
+        audioChannels: 2,
+        clientAudioPassthrough: true,
+    }), false, 'proof-bound AC3 is transcoded even when mutable flat hints claim AAC-LC');
+    assert.strictEqual(shouldCopyAudio({
+        mkvH264FastStart: { eligible: true },
+        mkvH264FastStartAudioAuthority: true,
+        codecProfile: {
+            audioTracks: [{ index: 1, codec: 'aac', profile: 'HE-AAC', channels: 2 }],
+        },
+        audioCodec: 'aac',
+        audioProfile: 'LC',
+        audioChannels: 2,
+        clientAudioPassthrough: true,
+    }), false, 'proof-bound HE-AAC remains on the AAC-LC normalization path');
+    assert.strictEqual(shouldCopyAudio({
+        mkvH264FastStart: { eligible: true },
+        mkvH264FastStartAudioAuthority: true,
+        codecProfile: {
+            audioTracks: [{ index: 1, codec: 'aac', profile: 'LC', channels: 6 }],
+        },
+        clientAudioPassthrough: true,
+    }), false, 'proof-bound multichannel AAC is normalized to stereo');
 
     const source = readGateway();
     assert.match(source, /TRANSCODE_AUDIO_ARGS[\s\S]*'-c:a', 'aac'[\s\S]*'-profile:a', 'aac_low'/);
@@ -400,11 +441,13 @@ test('an exact finite Matroska H264 profile selects the 2s keyframe encode plan 
 test('exact Matroska H264 uses independent 2s HLS segments with forced keyframes and no split-by-time', () => {
     const source = readGateway();
 
-    assert.match(source, /const GATEWAY_VERSION = 104;/);
+    assert.match(source, /const GATEWAY_VERSION = 105;/);
     assert.match(source, /exactMatroskaH264ReencodeProtocol:\s*1/);
     assert.match(source, /exactMatroskaH264HlsTargetSeconds:\s*EXACT_MATROSKA_H264_HLS_TARGET_SECONDS/);
     assert.match(source, /exactMatroskaH264MaxPixels:\s*EXACT_MATROSKA_H264_MAX_PIXELS/);
-    assert.match(source, /forceExactMatroskaH264Reencode[\s\S]*'-force_key_frames',\s*`expr:gte\(t,n_forced\*\$\{EXACT_MATROSKA_H264_HLS_TARGET_SECONDS\}\)`/);
+    assert.match(source, /videoEncoderOutputArgs\(VIDEO_ENCODER_CONFIG,[\s\S]*forceAligned:\s*forceAlignedHlsVideoEncode[\s\S]*targetSeconds:\s*session\.hlsTargetSeconds\s*\|\|\s*4/);
+    const encoder = fs.readFileSync(path.join(ROOT, 'services/media-gateway/src/video-encoder.js'), 'utf8');
+    assert.match(encoder, /'-force_key_frames',\s*`expr:gte\(t,n_forced\*\$\{boundedTargetSeconds\}\)`/);
     assert.match(source, /'-hls_time',\s*String\(session\.hlsTargetSeconds\s*\|\|\s*4\)/);
     assert.match(source, /'-hls_flags',\s*'independent_segments\+temp_file'/);
     assert.doesNotMatch(source, /split_by_time/);

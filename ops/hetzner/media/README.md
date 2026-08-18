@@ -1,4 +1,13 @@
-# Norva — Migration de l'étage MÉDIA (Railway → Hetzner GEX44 + Cloudflare)
+# Norva — options de déploiement de l'étage média
+
+> **Cible actuelle (2026-08-17) :** le serveur Hetzner existant possède un
+> Ryzen 7 PRO 8700GE avec Radeon 780M VAAPI, physiquement validé à 19,6x sur le
+> graphe HLS Norva. Le profil partagé et borné est documenté dans
+> [`README-vaapi-shared-host.md`](README-vaapi-shared-host.md). Aucun GEX44
+> supplémentaire n'est requis pour cette première cible. Le kit NVENC ci-dessous
+> reste une option de scale-out future, pas le plan de déploiement courant.
+
+# Archive de préparation : Railway → GEX44 + Cloudflare
 
 > **Statut : PRÉPARÉ, rien déployé.** Ce kit rend la bascule média *turnkey* le jour du push.
 > Il est le pendant de `ops/hetzner/` (étage DB). Le *pourquoi / le chiffrage* : voir

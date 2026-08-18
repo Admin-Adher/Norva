@@ -158,15 +158,52 @@ test('a truncated attempt resumes with one new GET and proof fires only after ex
   assert.equal(requests[1].headers['If-Range'], '"source-v1"');
 
   let unexpectedGet = 0;
-  let unexpectedProof = 0;
+  let replayedProof = 0;
   const already = await runMkvPrewarmAttempt(attemptOptions(spoolRoot, {
     coordinator: first.coordinator,
     openProviderGet: async () => { unexpectedGet += 1; throw new Error('must not run'); },
-    onComplete: async () => { unexpectedProof += 1; },
+    onComplete: async (proofInput) => {
+      replayedProof += 1;
+      assert.deepEqual(await fsp.readFile(proofInput.sourcePath), source);
+      return { proofId: 'replayed-local-publication' };
+    },
   }));
   assert.equal(already.status, 'already-complete');
   assert.equal(unexpectedGet, 0);
-  assert.equal(unexpectedProof, 0);
+  assert.equal(replayedProof, 1);
+  assert.deepEqual(already.proof, { proofId: 'replayed-local-publication' });
+});
+
+test('provider lane is released at durable EOF before a slow local completion callback', async (t) => {
+  const spoolRoot = await tempDirectory(t, 'norva-prewarm-local-completion-');
+  const coordinator = new PrewarmLaneCoordinator();
+  const laneKey = derivePrewarmLaneKey('provider.example/account-local-completion');
+  let callbackEntered;
+  const entered = new Promise((resolve) => { callbackEntered = resolve; });
+  let releaseCallback;
+  const callbackRelease = new Promise((resolve) => { releaseCallback = resolve; });
+
+  const attempt = runMkvPrewarmAttempt(attemptOptions(spoolRoot, {
+    coordinator,
+    laneKey,
+    openProviderGet: async () => providerResponse({
+      start: 0,
+      end: 9,
+      total: 10,
+      chunks: [Buffer.from('0123456789')],
+    }),
+    onComplete: async () => {
+      callbackEntered();
+      await callbackRelease;
+      return { published: true };
+    },
+  }));
+
+  await entered;
+  const viewer = await coordinator.runViewer(laneKey, async () => 'viewer-opened');
+  assert.equal(viewer, 'viewer-opened', 'local publication must not retain the provider lane');
+  releaseCallback();
+  assert.equal((await attempt).status, 'complete');
 });
 
 test('resume fails closed when strong ETag, effective URL, or total size changes', async (t) => {

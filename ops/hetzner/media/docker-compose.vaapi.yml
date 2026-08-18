@@ -1,0 +1,87 @@
+# Norva media-gateway on the existing Ryzen 7 PRO 8700GE host.
+# This profile is intentionally single-instance and resource-bounded so the
+# co-located Supabase/PostgreSQL stack retains ten logical CPUs and ample RAM.
+
+name: norva-media-vaapi
+
+services:
+  gateway:
+    container_name: norva-media-gateway
+    build:
+      context: ../../../services/media-gateway
+      dockerfile: Dockerfile
+    image: ${MEDIA_GATEWAY_IMAGE:?MEDIA_GATEWAY_IMAGE is required}
+    pull_policy: never
+    restart: unless-stopped
+    init: true
+    user: "${MEDIA_GATEWAY_UID:-1000}:${MEDIA_GATEWAY_GID:-1000}"
+    ports:
+      - "127.0.0.1:${MEDIA_GATEWAY_HOST_PORT:-8081}:8080"
+    devices:
+      - /dev/dri/renderD128:/dev/dri/renderD128
+    group_add:
+      - "${RENDER_GID:?RENDER_GID is required}"
+    cpus: "${MEDIA_GATEWAY_CPUS:-6.0}"
+    mem_limit: "${MEDIA_GATEWAY_MEMORY_LIMIT:-10g}"
+    mem_reservation: "${MEDIA_GATEWAY_MEMORY_RESERVATION:-2g}"
+    pids_limit: 512
+    stop_grace_period: 30s
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    command: ["ionice", "-c2", "-n7", "nice", "-n", "10", "npm", "start"]
+    environment:
+      NODE_ENV: production
+      PORT: 8080
+      OUTPUT_DIR: /var/lib/norva-media/output
+      FFMPEG_PATH: ffmpeg
+      FFPROBE_PATH: ffprobe
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?PUBLIC_BASE_URL is required}
+      GATEWAY_TOKEN: ${GATEWAY_TOKEN:?GATEWAY_TOKEN is required}
+      NORVA_BACKEND_ORIGINS: ${NORVA_BACKEND_ORIGINS:-https://api.norva.tv}
+      NORVA_EDGE_CALLBACK_BASE: ${NORVA_EDGE_CALLBACK_BASE:?NORVA_EDGE_CALLBACK_BASE is required}
+      PROVIDER_PROXY_URLS: ${PROVIDER_PROXY_URLS:-}
+      PROVIDER_PROXY_SLOT_OVERRIDES: ${PROVIDER_PROXY_SLOT_OVERRIDES:-}
+      MEDIA_GATEWAY_VIDEO_ENCODER: vaapi
+      MEDIA_GATEWAY_VAAPI_DEVICE: /dev/dri/renderD128
+      MAX_ACTIVE_VIDEO_ENCODER_SESSIONS: ${MAX_ACTIVE_VIDEO_ENCODER_SESSIONS:-4}
+      MKV_H264_FAST_START_PROOF_HMAC_KEY: ${MKV_H264_FAST_START_PROOF_HMAC_KEY:?MKV_H264_FAST_START_PROOF_HMAC_KEY is required}
+      MKV_H264_FAST_START_PROOF_HMAC_PREVIOUS_KEY: ${MKV_H264_FAST_START_PROOF_HMAC_PREVIOUS_KEY:-}
+      MKV_COMPLETE_HLS_CACHE_ENABLED: "true"
+      MKV_CACHE_COORDINATION_MODE: local
+      MKV_CACHE_SINGLE_INSTANCE_ATTESTED: "true"
+      MKV_COMPLETE_HLS_CACHE_ROOT: /var/lib/norva-media/cache
+      MKV_COMPLETE_HLS_CACHE_MANIFEST_HMAC_KEY: ${MKV_COMPLETE_HLS_CACHE_MANIFEST_HMAC_KEY:?MKV_COMPLETE_HLS_CACHE_MANIFEST_HMAC_KEY is required}
+      MKV_COMPLETE_HLS_CACHE_TTL_MS: ${MKV_COMPLETE_HLS_CACHE_TTL_MS:-604800000}
+      MKV_COMPLETE_HLS_CACHE_MAX_BYTES: ${MKV_COMPLETE_HLS_CACHE_MAX_BYTES:-103079215104}
+      MKV_COMPLETE_HLS_CACHE_MIN_FREE_BYTES: ${MKV_COMPLETE_HLS_CACHE_MIN_FREE_BYTES:-171798691840}
+      MKV_COMPLETE_HLS_CACHE_MAX_ENTRY_BYTES: ${MKV_COMPLETE_HLS_CACHE_MAX_ENTRY_BYTES:-25769803776}
+      MKV_COMPLETE_HLS_CACHE_MAX_FILES: ${MKV_COMPLETE_HLS_CACHE_MAX_FILES:-20000}
+      MKV_COMPLETE_HLS_CACHE_MAX_PLAYLIST_BYTES: ${MKV_COMPLETE_HLS_CACHE_MAX_PLAYLIST_BYTES:-8388608}
+      MKV_COMPLETE_HLS_CACHE_PRUNE_INTERVAL_MS: ${MKV_COMPLETE_HLS_CACHE_PRUNE_INTERVAL_MS:-900000}
+    volumes:
+      - ${MEDIA_GATEWAY_OUTPUT_DIR:-/srv/norva-media/output}:/var/lib/norva-media/output
+      - ${MEDIA_GATEWAY_CACHE_DIR:-/srv/norva-media/cache}:/var/lib/norva-media/cache
+    networks:
+      - norva-internal
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - >-
+          fetch('http://127.0.0.1:8080/health').then(async (response) => {
+            const body = await response.json();
+            if (!response.ok || body.ok !== true || body.videoEncoder?.backend !== 'vaapi'
+              || body.videoEncoder?.ready !== true || body.mkvCompleteHlsCache?.enabled !== true) process.exit(1);
+          }).catch(() => process.exit(1))
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 120s
+
+networks:
+  norva-internal:
+    external: true
+    name: ${NORVA_DOCKER_NETWORK:-norva_default}

@@ -71,7 +71,7 @@ test('Gateway buffered-ahead measurement fails closed when live TimeRanges mutat
     assert.equal(gatewayBufferedAheadSeconds.call(page), 0);
 });
 
-test('Gateway fast-start policy accepts only a measured file-exact copy graph', () => {
+test('Gateway fast-start policy accepts only a measured file-exact or complete-cache graph', () => {
     const normalizeGatewayStartupPolicy = loadMethod(
         'normalizeGatewayStartupPolicy',
         'gatewayStartupBufferOptions',
@@ -90,6 +90,27 @@ test('Gateway fast-start policy accepts only a measured file-exact copy graph', 
         normalizeGatewayStartupPolicy.call({}, valid),
         valid,
     );
+    const completeCache = {
+        ...valid,
+        pipeline: 'copy',
+        reason: 'complete-hls-cache-hit',
+        observedEncodeRateX: 20,
+    };
+    assert.deepEqual(
+        normalizeGatewayStartupPolicy.call({}, completeCache),
+        completeCache,
+    );
+    const vaapiTranscode = {
+        ...valid,
+        pipeline: 'video-transcode',
+        reason: 'vaapi-transcode-ready',
+        minimumEncodeRateX: 2,
+        observedEncodeRateX: 12,
+    };
+    assert.deepEqual(
+        normalizeGatewayStartupPolicy.call({}, vaapiTranscode),
+        vaapiTranscode,
+    );
 
     const invalidMutations = [
         null,
@@ -98,6 +119,9 @@ test('Gateway fast-start policy accepts only a measured file-exact copy graph', 
         { ...valid, eligible: false },
         { ...valid, pipeline: 'video-transcode' },
         { ...valid, reason: 'encode-rate-below-minimum' },
+        { ...completeCache, pipeline: 'audio-transcode' },
+        { ...vaapiTranscode, pipeline: 'copy' },
+        { ...vaapiTranscode, minimumEncodeRateX: 1.99 },
         { ...valid, targetBufferSeconds: 5.99 },
         { ...valid, targetBufferSeconds: 24.01 },
         { ...valid, minimumEncodeRateX: 1.14 },

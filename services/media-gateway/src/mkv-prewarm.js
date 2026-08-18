@@ -295,6 +295,18 @@ function validateMetadata(metadata, spoolKey, normalizedIdentity) {
     }
 }
 
+function completedSpoolInput(spoolKey, sourcePath, metadata) {
+    return Object.freeze({
+        spoolKey,
+        sourcePath,
+        totalBytes: metadata.totalBytes,
+        initialUrlHash: metadata.initialUrlHash,
+        effectiveUrlHash: metadata.effectiveUrlHash,
+        strongEtagHash: metadata.strongEtagHash,
+        profileBuildHash: metadata.profileBuildHash,
+    });
+}
+
 async function cancelBody(body) {
     if (!body) return;
     if (typeof body.cancel === 'function') {
@@ -386,7 +398,14 @@ async function runMkvPrewarmAttempt(options) {
                 || complete.totalBytes !== metadata.totalBytes || sourceStat.size !== metadata.totalBytes) {
                 throw new MkvPrewarmError('CORRUPT_COMPLETE_SPOOL', 'complete spool size or binding changed', { terminal: true });
             }
-            return { status: 'already-complete', spoolKey, sourcePath, totalBytes: metadata.totalBytes };
+            // Source spooling and rendition publication are separate durable
+            // stages. A previous analyzer/FFmpeg/cache publication may have
+            // failed after the source reached EOF, so a complete spool must
+            // replay the idempotent local completion callback without opening
+            // the provider again.
+            const proofInput = completedSpoolInput(spoolKey, sourcePath, metadata);
+            const proof = await options.onComplete(proofInput);
+            return { status: 'already-complete', ...proofInput, proof };
         }
         if (metadataStat !== null && sourceStat === null) {
             throw new MkvPrewarmError('CORRUPT_PARTIAL_SPOOL', 'spool metadata exists without source bytes', { terminal: true });
@@ -547,15 +566,14 @@ async function runMkvPrewarmAttempt(options) {
             completedAtMs: Date.now(),
         };
         await writeNewJsonDurably(completePath, complete);
-        const proofInput = Object.freeze({
-            spoolKey,
-            sourcePath,
-            totalBytes: metadata.totalBytes,
-            initialUrlHash: metadata.initialUrlHash,
-            effectiveUrlHash: metadata.effectiveUrlHash,
-            strongEtagHash: metadata.strongEtagHash,
-            profileBuildHash: metadata.profileBuildHash,
-        });
+        const proofInput = completedSpoolInput(spoolKey, sourcePath, metadata);
+        // EOF, fsync and the durable completion marker are the provider-lane
+        // boundary. Release that scarce lane before local analysis/FFmpeg/cache
+        // publication, which is coordinated separately by the Gateway's
+        // background CPU registry. A viewer may now open the provider without
+        // waiting for a long local callback.
+        laneLease.finish();
+        laneLease = null;
         const proof = await options.onComplete(proofInput);
         return { status: 'complete', ...proofInput, proof };
     } catch (error) {

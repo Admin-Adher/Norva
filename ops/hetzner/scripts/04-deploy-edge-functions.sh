@@ -26,8 +26,9 @@ FUNCS_DIR="$REPO/supabase/functions"
 CONFIG="$REPO/supabase/config.toml"
 COMPOSE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/docker-compose.supabase.yml"
 ENV_FILE="$(dirname "$COMPOSE")/.env"
-EXPECTED_PLAYBACK_VERSION=52
+EXPECTED_PLAYBACK_VERSION=54
 EXPECTED_PLAYBACK_PROTOCOL=1
+EXPECTED_MEDIA_GATEWAY_CANARY_ROUTING_PROTOCOL=1
 EXPECTED_RELAY_TAKEOVER_PROTOCOL=1
 EXPECTED_ENGINE_TRACK_PROBE_BLOCKING=false
 EXPECTED_EXACT_FILE_CODEC_PROFILE_PROTOCOL=1
@@ -196,6 +197,11 @@ if command -v docker >/dev/null 2>&1 && [[ -f "$COMPOSE" ]]; then
         && "$playback_health" == *"\"languageValidationJobLeaseSeconds\":$EXPECTED_LANGUAGE_VALIDATION_JOB_LEASE_SECONDS"* \
         && "$playback_health" == *"\"languageValidationSampleDurationSeconds\":$EXPECTED_LANGUAGE_VALIDATION_SAMPLE_DURATION_SECONDS"* ]] || {
       echo "ERROR: $service norva-playback protocol marker mismatch" >&2
+      exit 1
+    }
+    [[ "$playback_health" == *"\"mediaGatewayCanaryRouting\":{\"protocol\":$EXPECTED_MEDIA_GATEWAY_CANARY_ROUTING_PROTOCOL"* \
+        && "$playback_health" != *"\"state\":\"invalid\""* ]] || {
+      echo "ERROR: $service media Gateway canary routing is missing or invalid" >&2
       exit 1
     }
     [[ "$cloud_health" == *"\"version\":$EXPECTED_CLOUD_VERSION"* \

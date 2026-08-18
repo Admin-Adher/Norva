@@ -1931,7 +1931,7 @@ test('the ready finite session parses, caches, merges and returns a strict local
     const enrichAt = route.indexOf('await enrichSessionCodecProfileFromBoundedHeader(');
     assert.match(route, /await enrichSessionCodecProfileFromBoundedHeader\(\s*session,\s*sessionRequestAbortController\.signal,?\s*\)/);
     assert.ok(enrichAt > route.indexOf('const started = await startSessionWithProviderRetry('));
-    assert.ok(enrichAt < route.indexOf('res.status(201).json({'));
+    assert.ok(enrichAt < route.lastIndexOf('res.status(201).json(gatewayCreatedSessionPayload(req, session))'));
 });
 
 test('cold 0:a:0 fallback reports the first actual audio index instead of the requested later index', async () => {
@@ -2370,5 +2370,5 @@ test('FFmpeg MKV input uses pipe:0 only, keeps exact post-input resume, and tear
         'session handoff must close and await the provider socket before releasing the old FFmpeg',
     );
     assert.match(source, /boundedMkvInputPumpProtocol:\s*1/);
-    assert.match(source, /const GATEWAY_VERSION = 104;/);
+    assert.match(source, /const GATEWAY_VERSION = 105;/);
 });

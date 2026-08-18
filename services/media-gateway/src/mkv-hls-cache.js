@@ -11,6 +11,7 @@ const fsp = require('node:fs/promises');
 const path = require('node:path');
 
 const CACHE_KEY_SCHEMA = 1;
+const VERIFIED_CACHE_KEY_SCHEMA = 2;
 const MANIFEST_SCHEMA = 1;
 const ENVELOPE_SCHEMA = 1;
 const PRIVATE_DIRECTORY_MODE = 0o700;
@@ -124,6 +125,67 @@ function deriveCompleteHlsCacheKey(identity) {
     };
     return {
         key: sha256(canonicalJson({ schema: CACHE_KEY_SCHEMA, components })),
+        components,
+    };
+}
+
+function exactSha256(value, field) {
+    const digest = typeof value === 'string' ? value.trim().toLowerCase() : '';
+    if (!/^[0-9a-f]{64}$/.test(digest)) {
+        throw new MkvHlsCacheError('INVALID_CACHE_IDENTITY', `${field} is invalid`);
+    }
+    return digest;
+}
+
+// A zero-provider cache lookup cannot rediscover the provider's effective URL
+// or ETag. The Gateway therefore derives the key from the already-verified,
+// full-file HMAC proof. This function accepts digests only; callers must verify
+// the proof signature, expiry and current request bindings before invoking it.
+function normalizeVerifiedCacheBinding(binding) {
+    const keys = [
+        'tenantScopeSha256', 'providerScopeSha256', 'itemScopeSha256',
+        'sourceUrlSha256', 'effectiveUrlSha256', 'strongEtagSha256',
+        'profileFingerprint', 'fileSizeBytes', 'pipelineBuild', 'proofBuild',
+    ];
+    if (!exactKeys(binding, keys)) {
+        throw new MkvHlsCacheError('INVALID_CACHE_IDENTITY', 'verified cache binding has an unexpected shape');
+    }
+    const fileSizeBytes = Number(binding.fileSizeBytes);
+    const proofBuild = Number(binding.proofBuild);
+    if (!Number.isSafeInteger(fileSizeBytes) || fileSizeBytes <= 0 || !Number.isSafeInteger(proofBuild) || proofBuild <= 0) {
+        throw new MkvHlsCacheError('INVALID_CACHE_IDENTITY', 'verified cache file or proof build is invalid');
+    }
+    return {
+        tenantScopeSha256: exactSha256(binding.tenantScopeSha256, 'tenantScopeSha256'),
+        providerScopeSha256: exactSha256(binding.providerScopeSha256, 'providerScopeSha256'),
+        itemScopeSha256: exactSha256(binding.itemScopeSha256, 'itemScopeSha256'),
+        sourceUrlSha256: exactSha256(binding.sourceUrlSha256, 'sourceUrlSha256'),
+        effectiveUrlSha256: exactSha256(binding.effectiveUrlSha256, 'effectiveUrlSha256'),
+        strongEtagSha256: exactSha256(binding.strongEtagSha256, 'strongEtagSha256'),
+        profileFingerprint: exactSha256(binding.profileFingerprint, 'profileFingerprint'),
+        fileSizeBytes,
+        pipelineBuild: boundedString(binding.pipelineBuild, 'pipelineBuild', 512),
+        proofBuild,
+    };
+}
+
+function deriveCompleteHlsCacheKeyFromVerifiedBinding(binding) {
+    const normalized = normalizeVerifiedCacheBinding(binding);
+    const components = {
+        tenant: normalized.tenantScopeSha256,
+        provider: normalized.providerScopeSha256,
+        item: normalized.itemScopeSha256,
+        // itemScopeSha256 already binds source/item/variant. Retain the shared
+        // manifest component shape while domain-separating this verified form.
+        variant: sha256(`verified-variant-in-item\0${normalized.itemScopeSha256}`),
+        initialUrl: normalized.sourceUrlSha256,
+        effectiveUrl: normalized.effectiveUrlSha256,
+        strongEtag: normalized.strongEtagSha256,
+        profile: sha256(`verified-profile\0${normalized.profileFingerprint}\0${normalized.fileSizeBytes}`),
+        pipelineBuild: sha256(`pipeline-build\0${normalized.pipelineBuild}\0proof-build\0${normalized.proofBuild}`),
+    };
+    return {
+        key: sha256(canonicalJson({ schema: VERIFIED_CACHE_KEY_SCHEMA, components })),
         components,
     };
 }
@@ -480,6 +542,7 @@ class CompleteMkvHlsCache {
         this.now = typeof options.now === 'function' ? options.now : Date.now;
         this.statfs = typeof options.statfs === 'function' ? options.statfs : (root) => fsp.statfs(root);
         this.refcounts = new Map();
+        this.quarantined = new Set();
         this.tail = Promise.resolve();
         this.initialized = false;
         this.rootReal = '';
@@ -500,6 +563,16 @@ class CompleteMkvHlsCache {
         this.tempRoot = await ensurePrivateDirectory(path.join(this.rootReal, 'tmp'));
         assertInsideRoot(this.rootReal, this.entriesRoot);
         assertInsideRoot(this.rootReal, this.tempRoot);
+        const tempEntries = await fsp.readdir(this.tempRoot, { withFileTypes: true });
+        for (const entry of tempEntries) {
+            if (!/^publish-[A-Za-z0-9_-]+$/.test(entry.name) || !entry.isDirectory() || entry.isSymbolicLink()) {
+                throw new MkvHlsCacheError('UNSAFE_CACHE_PATH', 'cache temp root contains an unexpected object');
+            }
+            const candidate = path.join(this.tempRoot, entry.name);
+            const real = await fsp.realpath(candidate);
+            assertInsideRoot(this.tempRoot, real);
+            await fsp.rm(real, { recursive: true, force: false });
+        }
         this.initialized = true;
     }
 
@@ -543,17 +616,45 @@ class CompleteMkvHlsCache {
         await validateCompleteHlsDirectory(entryReal, payload.rootPlaylist, payload.files, this.maxPlaylistBytes);
     }
 
-    async acquire(identity) {
+    async _removeQuarantinedEntry(key) {
+        if (!this.quarantined.has(key)) return { status: 'not-quarantined', key };
+        if ((this.refcounts.get(key) || 0) > 0) return { status: 'quarantined-active', key };
+        const entryDirectory = this._entryDirectory(key);
+        const stat = await optionalLstat(entryDirectory);
+        if (!stat) {
+            this.quarantined.delete(key);
+            return { status: 'quarantined-missing', key };
+        }
+        const removed = await this._removeEntry({ key, directory: entryDirectory });
+        if (removed) this.quarantined.delete(key);
+        return { status: removed ? 'quarantined-removed' : 'quarantined-active', key };
+    }
+
+    quarantine(key) {
+        if (!/^[0-9a-f]{64}$/.test(key)) throw new MkvHlsCacheError('INVALID_CACHE_KEY', 'cache key is invalid');
+        this.quarantined.add(key);
         return this._serial(async () => {
             await this._init();
-            const derived = deriveCompleteHlsCacheKey(identity);
+            return this._removeQuarantinedEntry(key);
+        });
+    }
+
+    async _acquireDerived(derived) {
+        return this._serial(async () => {
+            await this._init();
+            if (this.quarantined.has(derived.key)) {
+                await this._removeQuarantinedEntry(derived.key);
+                if (this.quarantined.has(derived.key)) {
+                    return { hit: false, reason: 'quarantined', key: derived.key };
+                }
+            }
             const entryDirectory = this._entryDirectory(derived.key);
             const stat = await optionalLstat(entryDirectory);
             if (!stat) return { hit: false, reason: 'miss', key: derived.key };
             try {
                 const { payload, entryReal } = await this._readManifest(entryDirectory, derived.key);
                 if (canonicalJson(payload.components) !== canonicalJson(derived.components)) {
-                    return { hit: false, reason: 'binding-mismatch', key: derived.key };
+                    throw new MkvHlsCacheError('CACHE_KEY_COLLISION', 'cache entry bindings do not match the derived key');
                 }
                 if (payload.expiresAtMs <= Number(this.now())) {
                     return { hit: false, reason: 'expired', key: derived.key };
@@ -574,7 +675,12 @@ class CompleteMkvHlsCache {
                         const safe = safeRelativeAsset(relative);
                         const record = records.get(safe);
                         if (!record) throw new MkvHlsCacheError('CACHE_ASSET_NOT_LISTED', 'asset is not part of the authenticated HLS graph');
-                        return openVerifiedCacheAsset(entryReal, record);
+                        try {
+                            return await openVerifiedCacheAsset(entryReal, record);
+                        } catch (error) {
+                            if (error instanceof MkvHlsCacheError) this.quarantine(derived.key).catch(() => {});
+                            throw error;
+                        }
                     },
                     release: () => {
                         if (released) return;
@@ -582,13 +688,28 @@ class CompleteMkvHlsCache {
                         const remaining = Math.max(0, (this.refcounts.get(derived.key) || 1) - 1);
                         if (remaining === 0) this.refcounts.delete(derived.key);
                         else this.refcounts.set(derived.key, remaining);
+                        if (remaining === 0 && this.quarantined.has(derived.key)) {
+                            this.quarantine(derived.key).catch(() => {});
+                        }
                     },
                 };
             } catch (error) {
-                if (error instanceof MkvHlsCacheError) return { hit: false, reason: 'invalid', key: derived.key };
+                if (error instanceof MkvHlsCacheError) {
+                    this.quarantined.add(derived.key);
+                    await this._removeQuarantinedEntry(derived.key).catch(() => {});
+                    return { hit: false, reason: 'invalid', key: derived.key };
+                }
                 throw error;
             }
         });
+    }
+
+    async acquire(identity) {
+        return this._acquireDerived(deriveCompleteHlsCacheKey(identity));
+    }
+
+    async acquireVerified(binding) {
+        return this._acquireDerived(deriveCompleteHlsCacheKeyFromVerifiedBinding(binding));
     }
 
     async _availableBytes() {
@@ -656,12 +777,11 @@ class CompleteMkvHlsCache {
         }
     }
 
-    async publishComplete(options) {
+    async _publishCompleteDerived(options, derived) {
         return this._serial(async () => {
             await this._init();
             if (!options || typeof options !== 'object') throw new TypeError('publish options are required');
             validateCompletionEvidence(options.completion);
-            const derived = deriveCompleteHlsCacheKey(options.identity);
             const rootPlaylist = safeRelativeAsset(options.rootPlaylist, 'root playlist');
             if (!Array.isArray(options.files) || options.files.length === 0 || options.files.length > this.maxFiles) {
                 throw new MkvHlsCacheError('INVALID_CACHE_ASSETS', 'complete HLS asset list is invalid');
@@ -671,19 +791,38 @@ class CompleteMkvHlsCache {
             names.sort();
 
             const existingDirectory = this._entryDirectory(derived.key);
+            if (this.quarantined.has(derived.key)) {
+                await this._removeQuarantinedEntry(derived.key);
+                if (this.quarantined.has(derived.key)) {
+                    throw new MkvHlsCacheError('CACHE_ENTRY_ACTIVE_INVALID', 'invalid cache entry is still leased');
+                }
+            }
             if (await optionalLstat(existingDirectory)) {
-                const { payload, entryReal } = await this._readManifest(existingDirectory, derived.key);
-                if (canonicalJson(payload.components) !== canonicalJson(derived.components)) {
-                    throw new MkvHlsCacheError('CACHE_KEY_COLLISION', 'existing cache entry has different bindings');
+                try {
+                    const { payload, entryReal } = await this._readManifest(existingDirectory, derived.key);
+                    if (canonicalJson(payload.components) !== canonicalJson(derived.components)) {
+                        throw new MkvHlsCacheError('CACHE_KEY_COLLISION', 'existing cache entry has different bindings');
+                    }
+                    if (payload.expiresAtMs > Number(this.now())) {
+                        await this._validateEntryFiles(entryReal, payload);
+                        return { status: 'already-exists', key: derived.key, totalBytes: payload.totalBytes };
+                    }
+                    if ((this.refcounts.get(derived.key) || 0) > 0) {
+                        throw new MkvHlsCacheError('CACHE_ENTRY_ACTIVE_EXPIRED', 'expired cache entry is still leased');
+                    }
+                    await this._removeEntry({ key: derived.key, directory: entryReal });
+                } catch (error) {
+                    if (
+                        !(error instanceof MkvHlsCacheError)
+                        || error.code === 'CACHE_KEY_COLLISION'
+                        || error.code === 'CACHE_ENTRY_ACTIVE_EXPIRED'
+                    ) throw error;
+                    this.quarantined.add(derived.key);
+                    await this._removeQuarantinedEntry(derived.key);
+                    if (this.quarantined.has(derived.key)) {
+                        throw new MkvHlsCacheError('CACHE_ENTRY_ACTIVE_INVALID', 'invalid cache entry is still leased');
+                    }
                 }
-                if (payload.expiresAtMs > Number(this.now())) {
-                    await this._validateEntryFiles(entryReal, payload);
-                    return { status: 'already-exists', key: derived.key, totalBytes: payload.totalBytes };
-                }
-                if ((this.refcounts.get(derived.key) || 0) > 0) {
-                    throw new MkvHlsCacheError('CACHE_ENTRY_ACTIVE_EXPIRED', 'expired cache entry is still leased');
-                }
-                await this._removeEntry({ key: derived.key, directory: entryReal });
             }
 
             const sourceDirectory = path.resolve(boundedString(options.sourceDirectory, 'sourceDirectory', 16_384));
@@ -758,6 +897,16 @@ class CompleteMkvHlsCache {
         });
     }
 
+    async publishComplete(options) {
+        if (!options || typeof options !== 'object') throw new TypeError('publish options are required');
+        return this._publishCompleteDerived(options, deriveCompleteHlsCacheKey(options.identity));
+    }
+
+    async publishCompleteVerified(options) {
+        if (!options || typeof options !== 'object') throw new TypeError('publish options are required');
+        return this._publishCompleteDerived(options, deriveCompleteHlsCacheKeyFromVerifiedBinding(options.binding));
+    }
+
     async prune() {
         return this._serial(async () => {
             await this._init();
@@ -776,5 +925,6 @@ module.exports = {
     MkvHlsCacheError,
     canonicalJson,
     deriveCompleteHlsCacheKey,
+    deriveCompleteHlsCacheKeyFromVerifiedBinding,
     parseDedicatedManifestHmacKey,
 };

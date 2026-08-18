@@ -391,6 +391,12 @@ services:
       TMDB_API_KEY: ${TMDB_API_KEY:-}
       NORVA_MEDIA_GATEWAY_URL: ${NORVA_MEDIA_GATEWAY_URL:-}
       NORVA_MEDIA_GATEWAY_TOKEN: ${NORVA_MEDIA_GATEWAY_TOKEN:-}
+      # Exact-account playback-only canary. Empty keeps every account on the
+      # default Gateway; database-backed values remain supported for staged ops.
+      NORVA_MEDIA_GATEWAY_CANARY_URL: ${NORVA_MEDIA_GATEWAY_CANARY_URL:-}
+      NORVA_MEDIA_GATEWAY_CANARY_TOKEN: ${NORVA_MEDIA_GATEWAY_CANARY_TOKEN:-}
+      NORVA_MEDIA_GATEWAY_CANARY_ID: ${NORVA_MEDIA_GATEWAY_CANARY_ID:-}
+      NORVA_MEDIA_GATEWAY_CANARY_USER_HASHES: ${NORVA_MEDIA_GATEWAY_CANARY_USER_HASHES:-}
       # Private, admin-only fixed-corpus media Lab. All four values are required
       # together; false/empty keeps the route fail-closed.
       NORVA_MEDIA_LAB_ENABLED: ${NORVA_MEDIA_LAB_ENABLED:-false}
