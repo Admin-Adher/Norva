@@ -1445,6 +1445,12 @@ const STRICT_LID_CHECKPOINT_FFMPEG_RW_TIMEOUT_US = 170_000_000;
 // supported media object, so a cold file never needs a 0-0 size probe followed
 // by a second provider socket.
 const VOD_INPUT_DISCOVERY_RANGE_END = Number.MAX_SAFE_INTEGER - 1;
+const VOD_INPUT_FULL_BODY_MAX_BYTES = clampInt(
+    process.env.VOD_INPUT_FULL_BODY_MAX_BYTES,
+    128 * 1024 * 1024 * 1024,
+    1024 * 1024,
+    Number.MAX_SAFE_INTEGER - 1,
+);
 const VOD_FILE_SIZE_PROBE_TIMEOUT_MS = clampInt(process.env.VOD_FILE_SIZE_PROBE_TIMEOUT_MS, 8_000, 1_000, 20_000);
 const VOD_INPUT_OPEN_TIMEOUT_MS = clampInt(process.env.VOD_INPUT_OPEN_TIMEOUT_MS, 15_000, 2_000, 30_000);
 const VOD_INPUT_IDLE_TIMEOUT_MS = clampInt(process.env.VOD_INPUT_IDLE_TIMEOUT_MS, 8_000, 2_000, 30_000);
@@ -1731,7 +1737,7 @@ if (
 }
 const MULTI_AUDIO_HLS_PROTOCOL = 1;
 const MAX_MULTI_AUDIO_RENDITIONS = 8;
-const GATEWAY_VERSION = 111;
+const GATEWAY_VERSION = 112;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -1860,6 +1866,8 @@ app.get('/health', (req, res) => {
         knownVodInputProbeSizeBytes: KNOWN_VOD_INPUT_PROBE_SIZE_BYTES,
         finiteMkvFullBodyAtZeroFallback: true,
         finiteMkvFullBodyKnownSizeExactEof: true,
+        finiteMkvFullBodyUnknownSizeEof: true,
+        finiteMkvFullBodyMaximumBytes: VOD_INPUT_FULL_BODY_MAX_BYTES,
         exactFileCodecProfileProtocol: 1,
         exactMatroskaH264ReencodeProtocol: 1,
         exactMatroskaH264HlsTargetSeconds: EXACT_MATROSKA_H264_HLS_TARGET_SECONDS,
@@ -8614,15 +8622,17 @@ async function ensureBoundedMkvInputPump(session, parentSignal = null) {
         drainExactRange: Number(session?.seekOffset || 0) > 0,
     });
     const fileSizeBytes = fileSizeBytesForSession(session);
-    if (!fileSizeBytes) {
+    const unknownLengthFullBody = session.preopenedVodInputAttempt?.range?.fullBodyUnknownSize === true;
+    if (!fileSizeBytes && !unknownLengthFullBody) {
         await closePreopenedBoundedMkvInput(session);
         throw vodInputPumpError('VOD_SIZE_UNAVAILABLE', 'Finite MKV input size is unavailable', { status: 502 });
     }
-    session.startupTimings.fileSizeBytes = fileSizeBytes;
+    session.startupTimings.fileSizeBytes = fileSizeBytes || null;
     session.startupTimings.fileSizeProbeRan = false;
     session.startupTimings.fileSizeProbeMs = 0;
     session.startupTimings.fileSizeProbeReleaseWaitMs = 0;
-    session.startupTimings.fileSizeDiscoveredFromPlaybackGet = !hadExactFileSize;
+    session.startupTimings.fileSizeDiscoveredFromPlaybackGet = !hadExactFileSize && Boolean(fileSizeBytes);
+    session.startupTimings.fileSizePendingFullBodyEof = unknownLengthFullBody;
     session.startupTimings.providerGetPreopenMs = Math.max(0, Date.now() - preopenStartedAt);
 }
 
@@ -8667,9 +8677,20 @@ function parseFullBodyProviderResponse(response, expectedTotal = null) {
     if (declaredLength && !/^\d+$/.test(declaredLength)) return null;
     const declaredTotal = declaredLength ? normalizeFileSizeBytes(declaredLength) : null;
     const total = declaredTotal || normalizedExpectedTotal;
-    if (!total || total < 4) return null;
+    if (total && total < 4) return null;
     const contentEncoding = String(response?.headers?.get?.('content-encoding') || '').trim().toLowerCase();
     if (contentEncoding && contentEncoding !== 'identity') return null;
+    if (!total) {
+        return {
+            start: 0,
+            end: VOD_INPUT_FULL_BODY_MAX_BYTES - 1,
+            total: null,
+            fullBody: true,
+            fullBodyBoundary: 'stream-eof',
+            fullBodyUnknownSize: true,
+            fullBodyRequiresExactEof: false,
+        };
+    }
     return {
         start: 0,
         end: total - 1,
@@ -9161,11 +9182,13 @@ async function preopenBoundedMkvInputPump(session, parentSignal = null, options 
         if (existingFileSizeBytes && opened.range.total !== existingFileSizeBytes) {
             throw vodInputPumpError('VOD_CHANGED', 'The MKV file changed before playback started.', { status: 502 });
         }
-        session.fileSizeBytes = opened.range.total;
-        session.codecProfile = compactRecord({
-            ...asRecord(session.codecProfile),
-            fileSizeBytes: opened.range.total,
-        });
+        if (opened.range.total) {
+            session.fileSizeBytes = opened.range.total;
+            session.codecProfile = compactRecord({
+                ...asRecord(session.codecProfile),
+                fileSizeBytes: opened.range.total,
+            });
+        }
         const strongValidator = strongBoundedVodResponseValidator(opened.attempt.response);
         const validatorEvidence = strongValidator
             ? 'strong-etag'
@@ -9905,18 +9928,24 @@ async function finishMkvH264FullFileAnalyzer(analyzer) {
 }
 
 async function runBoundedMkvInputPump(session, writable, signal, dispatcher) {
-    const fileSizeBytes = fileSizeBytesForSession(session);
-    if (!fileSizeBytes) throw vodInputPumpError('VOD_SIZE_UNAVAILABLE', 'Finite MKV input size is unavailable', { status: 502 });
+    let fileSizeBytes = fileSizeBytesForSession(session);
+    const unknownLengthFullBody = Boolean(
+        !fileSizeBytes && session.preopenedVodInputAttempt?.range?.fullBodyUnknownSize === true
+    );
+    if (!fileSizeBytes && !unknownLengthFullBody) {
+        throw vodInputPumpError('VOD_SIZE_UNAVAILABLE', 'Finite MKV input size is unavailable', { status: 502 });
+    }
     let offset = 0;
     let forwardedBytes = 0;
     let prefixBuffer = Buffer.alloc(0);
     let prefixValidated = false;
     let consecutiveNoProgressFailures = 0;
     let reconnects = 0;
+    let unknownLengthFullBodyEof = false;
     const fullFileAnalyzer = createMkvH264FullFilePacketAnalyzer(session);
     let fullFileAnalyzerSettled = false;
     try {
-    while (offset < fileSizeBytes) {
+    while (unknownLengthFullBody ? !unknownLengthFullBodyEof : offset < fileSizeBytes) {
         if (signal.aborted) throw abortedVodInputPumpError();
         const attemptOffset = offset;
         let attempt = null;
@@ -9953,10 +9982,16 @@ async function runBoundedMkvInputPump(session, writable, signal, dispatcher) {
                     throw classifyVodInputFetchError(new Error('Finite MKV provider read timed out'), true);
                 }
                 if (next.error) throw classifyVodInputFetchError(next.error);
-                if (next.done) break;
+                if (next.done) {
+                    if (range.fullBodyUnknownSize === true) unknownLengthFullBodyEof = true;
+                    break;
+                }
                 let chunk = Buffer.from(next.value || []);
                 if (!chunk.length) continue;
-                if (offset + chunk.length > range.end + 1 || offset + chunk.length > fileSizeBytes) {
+                if (
+                    offset + chunk.length > range.end + 1 ||
+                    (fileSizeBytes && offset + chunk.length > fileSizeBytes)
+                ) {
                     throw vodInputPumpError('RANGE_UNSUPPORTED', 'Provider exceeded the declared MKV byte range', { status: 502 });
                 }
                 captureBoundedMkvHeaderBytes(session, offset, chunk);
@@ -9990,7 +10025,32 @@ async function runBoundedMkvInputPump(session, writable, signal, dispatcher) {
                     vodInputPumpStats.bytesForwarded += chunk.length;
                 }
             }
-            if (offset < range.end + 1) {
+            if (range.fullBodyUnknownSize === true) {
+                if (!unknownLengthFullBodyEof) {
+                    failure = vodInputPumpError(
+                        'PROVIDER_CONNECTION_RESET',
+                        'Provider ended the unknown-size MKV body unexpectedly.',
+                        { status: 502, networkCause: 'premature_eof', retryable: false },
+                    );
+                } else if (offset < 4) {
+                    failure = vodInputPumpError(
+                        'INVALID_MKV_INPUT',
+                        'Provider response is not a complete Matroska file.',
+                        { status: 502 },
+                    );
+                } else {
+                    fileSizeBytes = offset;
+                    session.fileSizeBytes = offset;
+                    session.codecProfile = compactRecord({
+                        ...asRecord(session.codecProfile),
+                        fileSizeBytes: offset,
+                    });
+                    session.startupTimings = asRecord(session.startupTimings);
+                    session.startupTimings.fileSizeBytes = offset;
+                    session.startupTimings.fileSizeDiscoveredFromPlaybackGet = true;
+                    session.startupTimings.fileSizePendingFullBodyEof = false;
+                }
+            } else if (offset < range.end + 1) {
                 failure = vodInputPumpError(
                     'PROVIDER_CONNECTION_RESET',
                     'Provider ended the MKV byte range before its declared boundary.',
@@ -10008,8 +10068,12 @@ async function runBoundedMkvInputPump(session, writable, signal, dispatcher) {
         if (signal.aborted || failure?.code === 'VOD_INPUT_ABORTED') throw abortedVodInputPumpError();
         // Exact-EOF validation happens after the final expected byte. Never let
         // the size-complete branch swallow an overrun, timeout, or read error.
-        if (failure && offset >= fileSizeBytes) throw failure;
-        if (offset >= fileSizeBytes) break;
+        if (failure && fileSizeBytes && offset >= fileSizeBytes) throw failure;
+        if (unknownLengthFullBodyEof) {
+            if (failure) throw failure;
+            break;
+        }
+        if (fileSizeBytes && offset >= fileSizeBytes) break;
         if (failure && failure.retryable !== true) throw failure;
 
         const progressBytes = offset - attemptOffset;
@@ -10044,7 +10108,7 @@ async function runBoundedMkvInputPump(session, writable, signal, dispatcher) {
             : retryDelayMs;
         if (!await waitForVodInputRetry(delayMs, signal)) throw abortedVodInputPumpError();
     }
-    if (!prefixValidated || forwardedBytes !== fileSizeBytes) {
+    if (!prefixValidated || !fileSizeBytes || forwardedBytes !== fileSizeBytes) {
         throw vodInputPumpError('INVALID_MKV_INPUT', 'The bounded provider response did not contain one complete Matroska file.', { status: 502 });
     }
     await finishVodInput(writable, signal);
