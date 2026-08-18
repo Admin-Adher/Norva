@@ -193,9 +193,9 @@ keys = (
 )
 if any(key in text for key in keys):
     raise SystemExit("media Lab compose keys already present")
-needle = "      NORVA_MEDIA_GATEWAY_CANARY_USER_HASHES: ${NORVA_MEDIA_GATEWAY_CANARY_USER_HASHES:-}\n"
+needle = "      NORVA_MEDIA_GATEWAY_TOKEN: ${NORVA_MEDIA_GATEWAY_TOKEN:-}\n"
 if text.count(needle) != 1:
-    raise SystemExit("media Gateway canary env anchor drift")
+    raise SystemExit("media Gateway token env anchor drift")
 addition = needle + (
     "      # Private, admin-only fixed-corpus media Lab. All values fail closed.\n"
     "      NORVA_MEDIA_LAB_ENABLED: ${NORVA_MEDIA_LAB_ENABLED:-false}\n"
