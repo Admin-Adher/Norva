@@ -459,6 +459,48 @@ test('strict LID freezes one sticky provider dispatcher for every sequential ran
   assert.equal(observedDispatchers[1], stickyDispatcher);
 });
 
+test('strict broker can reopen immediately only after an exact provider range is fully drained', async (t) => {
+  const { createStrictLidBroker } = brokerHarness();
+  const data = Buffer.alloc(64, 0x5c);
+  const openedAt = [];
+  const broker = await createStrictLidBroker({
+    sourceUrl: 'https://provider.invalid/movie/account/secret/file.mkv',
+    fileSizeBytes: data.length,
+    dispatcher: null,
+    releaseDelayMs: 500,
+    completedReleaseDelayMs: 0,
+    openTimeoutMs: 2000,
+    fetchImpl: async (_url, options) => {
+      openedAt.push(Date.now());
+      const match = /^bytes=(\d+)-(\d+)$/.exec(options.headers.Range);
+      const start = Number(match[1]);
+      const end = Number(match[2]);
+      const body = data.subarray(start, end + 1);
+      return new Response(body, {
+        status: 206,
+        headers: {
+          'Content-Range': `bytes ${start}-${end}/${data.length}`,
+          'Content-Length': String(body.length),
+          ETag: '"drained-v1"',
+        },
+      });
+    },
+  });
+  t.after(() => broker.close());
+
+  for (const range of ['bytes=0-15', 'bytes=16-31']) {
+    const response = await fetch(broker.inputUrl, { headers: { Range: range } });
+    assert.equal(response.status, 206);
+    assert.equal((await response.arrayBuffer()).byteLength, 16);
+  }
+
+  assert.equal(openedAt.length, 2);
+  assert.ok(openedAt[1] - openedAt[0] < 400,
+    `fully drained successor waited ${openedAt[1] - openedAt[0]}ms`);
+  assert.equal(broker.completedProviderFetches, 2);
+  assert.equal(broker.interruptedProviderFetches, 0);
+});
+
 test('strict LID broker preempts an old local range, awaits close, and never exceeds one provider socket', async (t) => {
   const { createStrictLidBroker } = brokerHarness();
   const data = Buffer.alloc(256, 0x5a);
@@ -815,7 +857,7 @@ test('strict LID rejects invalid exact signed coordinates before creating a serv
   assert.match(route, /detectLanguageRequestPolicy\(req, options\)[\s\S]*validateDetectLanguageCapability\(capabilityToken, policy\.requiredScope\)/);
   assert.match(gatewaySource, /strictLidLoopbackBrokerProtocol: 1/);
   assert.match(gatewaySource, /strictLidFileSizeClaim: 'fileSizeBytes'/);
-  assert.match(gatewaySource, /const GATEWAY_VERSION = 107/);
+  assert.match(gatewaySource, /const GATEWAY_VERSION = 108/);
   assert.match(gatewaySource, /strictLidProviderDrainProtocol: 1/);
   assert.match(gatewaySource, /strictLidWeakFallbackProtocol: 1/);
   assert.match(gatewaySource, /strictLidTimelineSamplingProtocol: 1/);

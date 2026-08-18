@@ -950,6 +950,14 @@ test('generic complete-cache locator admits a prepared HEVC graph without provid
   assert.equal(accepted.eligible, true);
   assert.equal(accepted.binding.pipelineBuild, locator.payload.pipelineBuild);
 
+  const acceptedSeek = h.verifyGenericCompleteCache({
+    ...replay,
+    seekOffset: 2_062,
+  }, issuedAtMs + 1_000);
+  assert.equal(acceptedSeek.eligible, true,
+    'a complete local HLS graph must remain valid for a non-zero local seek');
+  assert.equal(acceptedSeek.binding.pipelineBuild, locator.payload.pipelineBuild);
+
   assert.equal(h.verifyGenericCompleteCache({ ...replay, sourceUrl: `${replay.sourceUrl}?changed=1` }, issuedAtMs + 1_000).eligible, false);
   assert.equal(h.verifyGenericCompleteCache({
     ...replay,
@@ -1982,6 +1990,27 @@ test('complete-cache Gateway sessions stay authenticated, bound and fail closed 
   const after = await readHealth();
   assert.equal(after.mkvCompleteHlsCache.stats.activeLeases, 0);
   assert.equal(providerGets, 0);
+
+  const cachedSeekResponse = await createSession(cachedAuthority, {
+    playbackSessionId: 'edge-movie-cached-seek',
+    seekOffset: 4,
+  });
+  assert.equal(cachedSeekResponse.response.status, 201, cachedSeekResponse.text);
+  assert.equal(cachedSeekResponse.payload.videoModeReason, 'complete_hls_cache_hit');
+  assert.equal(cachedSeekResponse.payload.requestedSeekOffset, 4);
+  assert.equal(cachedSeekResponse.payload.actualStartOffset, 0);
+  assert.equal(cachedSeekResponse.payload.localSeekTarget, 4);
+  assert.equal(cachedSeekResponse.payload.sourceTimestamps, true);
+  assert.equal(cachedSeekResponse.payload.startupTimings.completeHlsCacheLocalSeek, true);
+  assert.equal(cachedSeekResponse.payload.startupTimings.providerGetCount, 0);
+  assert.equal(cachedSeekResponse.payload.startupTimings.ffmpegSpawnCount, 0);
+  assert.equal(providerGets, 0, 'cached seek must remain zero-provider');
+  const cachedSeekDelete = await fetch(`${base}/sessions/${cachedSeekResponse.payload.id}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${gatewayToken}` },
+  });
+  assert.equal(cachedSeekDelete.status, 200);
+  assert.equal((await readHealth()).mkvCompleteHlsCache.stats.activeLeases, 0);
 
   const beforeBypass = await readHealth();
   const providerBeforeBypass = providerGets;

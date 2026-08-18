@@ -2350,6 +2350,8 @@ test('finite MKV seek preparation drains the retained provider before opening on
     const broker = {
         inputUrl: 'http://127.0.0.1:12345/finite-mkv-seek/secret',
         providerFetches: 3,
+        completedProviderFetches: 2,
+        interruptedProviderFetches: 1,
         terminalError: null,
         async close() { events.push('broker-close'); },
     };
@@ -2401,11 +2403,14 @@ test('finite MKV seek preparation drains the retained provider before opening on
     assert.deepEqual({ ...brokerOptions.expectedValidator }, session.vodInputValidator);
     assert.equal(brokerOptions.effectiveUrlSha256, session.vodInputEffectiveUrlSha256);
     assert.equal(brokerOptions.pathPrefix, 'finite-mkv-seek');
+    assert.equal(brokerOptions.completedReleaseDelayMs, 0);
     assert.equal(harness.usesFiniteMkvSeekBroker(session), true);
 
     await harness.closeFiniteMkvSeekBroker(session);
     assert.equal(session.finiteMkvSeekBroker, null);
     assert.equal(session.startupTimings.finiteMkvSeekProviderFetches, 3);
+    assert.equal(session.startupTimings.finiteMkvSeekCompletedProviderFetches, 2);
+    assert.equal(session.startupTimings.finiteMkvSeekInterruptedProviderFetches, 1);
     assert.equal(events.at(-1), 'broker-close');
 });
 

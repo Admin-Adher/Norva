@@ -1731,7 +1731,7 @@ if (
 }
 const MULTI_AUDIO_HLS_PROTOCOL = 1;
 const MAX_MULTI_AUDIO_RENDITIONS = 8;
-const GATEWAY_VERSION = 107;
+const GATEWAY_VERSION = 108;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -1951,6 +1951,8 @@ app.get('/health', (req, res) => {
                 Boolean(session?.finiteMkvSeekBroker)
             )).length,
             providerConnectionsSerialized: true,
+            exactRangeDrainReopensImmediately: true,
+            interruptedRangeReleaseDelayMs: PROVIDER_SLOT_RELEASE_DELAY_MS,
             effectiveUrlPinned: true,
             validatorPinnedWhenAvailable: true,
         },
@@ -3553,10 +3555,17 @@ async function closeStrictLidBrokerAttempt(context, attempt, reason = 'completed
             }
             if (context.activeAttempt === attempt) context.activeAttempt = null;
             if (attempt.fetchStarted) {
-                context.nextOpenAt = Math.max(
-                    Number(context.nextOpenAt || 0),
-                    Date.now() + context.releaseDelayMs,
-                );
+                const releaseDelayMs = attempt.completedExactRange === true
+                    ? context.completedReleaseDelayMs
+                    : context.releaseDelayMs;
+                if (attempt.completedExactRange === true) context.completedProviderFetches++;
+                else context.interruptedProviderFetches++;
+                if (releaseDelayMs > 0) {
+                    context.nextOpenAt = Math.max(
+                        Number(context.nextOpenAt || 0),
+                        Date.now() + releaseDelayMs,
+                    );
+                }
             }
         })();
     }
@@ -3586,6 +3595,7 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
         localClosed: false,
         closePromise: null,
         stopReason: null,
+        completedExactRange: false,
     };
     attempt.onParentAbort = () => {
         try { controller.abort(context.controller.signal.reason); } catch (_) {}
@@ -3769,6 +3779,10 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                 { status: 502, upstreamStatus },
             ));
         }
+        // The provider body has been consumed to the exact terminal byte. Its
+        // account slot is drained, so finite-MKV seek may safely open the next
+        // serialized demux range without the abort-only grace delay.
+        attempt.completedExactRange = true;
         res.end();
     } catch (error) {
         const intentionallyStopped = context.closed
@@ -3879,6 +3893,11 @@ async function createStrictLidBroker(options = {}) {
         releaseDelayMs: Number.isFinite(Number(options.releaseDelayMs))
             ? Math.max(0, Number(options.releaseDelayMs))
             : PROVIDER_SLOT_RELEASE_DELAY_MS,
+        completedReleaseDelayMs: Number.isFinite(Number(options.completedReleaseDelayMs))
+            ? Math.max(0, Number(options.completedReleaseDelayMs))
+            : (Number.isFinite(Number(options.releaseDelayMs))
+                ? Math.max(0, Number(options.releaseDelayMs))
+                : PROVIDER_SLOT_RELEASE_DELAY_MS),
         // `openTimeoutMs` remains a test/backward-compatibility alias for callers that predate
         // protocol 2. Production uses the explicit first-byte and inactivity deadlines.
         firstByteTimeoutMs: Number.isFinite(Number(options.firstByteTimeoutMs))
@@ -3900,6 +3919,8 @@ async function createStrictLidBroker(options = {}) {
         effectiveUrlSha256: expectedEffectiveUrlSha256,
         terminalError: null,
         providerFetches: 0,
+        completedProviderFetches: 0,
+        interruptedProviderFetches: 0,
         closed: false,
     };
     const server = http.createServer((req, res) => {
@@ -3928,6 +3949,8 @@ async function createStrictLidBroker(options = {}) {
         inputUrl: `http://127.0.0.1:${address.port}${expectedPath}`,
         get terminalError() { return context.terminalError; },
         get providerFetches() { return context.providerFetches; },
+        get completedProviderFetches() { return context.completedProviderFetches; },
+        get interruptedProviderFetches() { return context.interruptedProviderFetches; },
         async close() {
             if (closePromise) return closePromise;
             closePromise = (async () => {
@@ -7841,11 +7864,18 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             freezeMultiAudioHlsTopology(session);
             session.videoMode = 'copy';
             session.videoModeReason = 'complete_hls_cache_hit';
+            // The cached playlist covers the complete movie from t=0. Expose
+            // the requested resume as a local HLS seek instead of pretending
+            // this zero-provider session was transcoded from that offset.
+            session.actualStartOffset = 0;
+            session.localSeekTarget = Math.max(0, Number(session.seekOffset) || 0);
+            session.sourceTimestamps = session.localSeekTarget > 0;
             session.status = 'ready';
             session.startupTimings.fileSizeBytes = completeHlsCacheLookup.assessment.context.fileSizeBytes;
             session.startupTimings.ffmpegReadyMs = 0;
             session.startupTimings.mediaProductionRateX = 20;
             session.startupTimings.completeHlsCacheHit = true;
+            session.startupTimings.completeHlsCacheLocalSeek = session.localSeekTarget > 0;
             session.startupTimings.providerGetCount = 0;
             session.startupTimings.ffmpegSpawnCount = 0;
             session.startupTimings.totalMs = Math.max(0, Date.now() - sessionCreateStartedAt);
@@ -9048,6 +9078,11 @@ async function prepareFiniteMkvSeekBroker(session, parentSignal = null) {
         expectedValidator: session.vodInputValidator,
         effectiveUrlSha256: session.vodInputEffectiveUrlSha256,
         pathPrefix: 'finite-mkv-seek',
+        // Exact responses are fully drained and the broker remains strictly
+        // serialized, so no provider-slot grace is needed between them. An
+        // interrupted/superseded range still keeps the conservative global
+        // release delay before the next provider request.
+        completedReleaseDelayMs: 0,
         abortSignal: parentSignal,
     });
     session.finiteMkvSeekBroker = broker;
@@ -9080,6 +9115,12 @@ async function closeFiniteMkvSeekBroker(session) {
     session.finiteMkvSeekBroker = null;
     session.startupTimings = asRecord(session.startupTimings);
     session.startupTimings.finiteMkvSeekProviderFetches = Number(broker.providerFetches || 0);
+    session.startupTimings.finiteMkvSeekCompletedProviderFetches = Number(
+        broker.completedProviderFetches || 0,
+    );
+    session.startupTimings.finiteMkvSeekInterruptedProviderFetches = Number(
+        broker.interruptedProviderFetches || 0,
+    );
     await broker.close().catch(() => {});
 }
 
@@ -10833,13 +10874,22 @@ function buildMkvCompleteHlsCacheLocator(session, nowMs = Date.now()) {
 function verifiedGenericMkvCompleteCacheBinding(session, nowMs = Date.now()) {
     const reject = (reason, hasProof = false) => ({ eligible: false, reason, hasProof });
     if (!mkvCompleteHlsCache) return reject('cache-disabled');
-    const context = mkvCompleteHlsCacheStaticContext(session);
+    // A complete local HLS snapshot is the seekable rendition itself. The
+    // requested playback offset must not invalidate its immutable identity:
+    // cache admission still binds source/provider/tenant/item/profile/graph,
+    // while the player seeks inside the already-complete playlist locally.
+    // Keep the strict `seek` rejection in mkvCompleteHlsCacheStaticContext for
+    // publication/training paths; relax it only for this verified lookup.
+    const cacheLookupSession = Number(session?.seekOffset || 0) > 0
+        ? { ...session, seekOffset: 0 }
+        : session;
+    const context = mkvCompleteHlsCacheStaticContext(cacheLookupSession);
     if (!context.eligible) return reject(context.reason);
     const envelope = mkvCompleteHlsCacheProofForProfile(context.profile);
     if (!envelope) return reject('missing-cache-proof');
     const proof = openMkvCompleteHlsCacheProof(envelope);
     if (!proof) return reject('invalid-cache-proof', true);
-    const expectedPipelineBuild = mkvCompleteHlsCachePipelineBuildForSession(session, context);
+    const expectedPipelineBuild = mkvCompleteHlsCachePipelineBuildForSession(cacheLookupSession, context);
     if (
         proof.protocol !== MKV_COMPLETE_HLS_CACHE_PROTOCOL || proof.scope !== 'complete-hls' ||
         proof.build !== MKV_COMPLETE_HLS_CACHE_LOCATOR_BUILD ||
@@ -11205,8 +11255,14 @@ function verifiedMkvH264CompleteCacheBinding(session, nowMs = Date.now()) {
     if (!MKV_H264_FAST_START_COPY_ACTIVATION_READY || !MKV_H264_FAST_START_PROOF_CURRENT_KEY) {
         return reject('proof-signing-unavailable');
     }
-    const context = mkvH264FastStartStaticContext(session);
-    const identity = mkvH264FastStartIdentityContext(session);
+    // Full HLS cache reads are locally seekable. Validate the proof against the
+    // canonical zero-offset graph, then retain the caller's requested offset on
+    // the published cache-backed session.
+    const cacheLookupSession = Number(session?.seekOffset || 0) > 0
+        ? { ...session, seekOffset: 0 }
+        : session;
+    const context = mkvH264FastStartStaticContext(cacheLookupSession);
+    const identity = mkvH264FastStartIdentityContext(cacheLookupSession);
     if (!context.ok) return reject(context.reason);
     if (!identity) return reject('missing-server-identity');
     const envelope = mkvH264FastStartProofForProfile(context.profile);
@@ -11243,7 +11299,7 @@ function verifiedMkvH264CompleteCacheBinding(session, nowMs = Date.now()) {
     ) return reject('invalid-full-file-proof');
 
     const proofBoundSession = {
-        ...session,
+        ...cacheLookupSession,
         mkvH264FastStart: { eligible: true },
         mkvH264FastStartAudioAuthority: true,
     };
