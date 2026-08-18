@@ -159,6 +159,11 @@ const LANGUAGE_VALIDATION_WINDOW_RECEIPT_MAX_CHARS = 98_304;
 const LANGUAGE_VALIDATION_FINALIZE_BODY_MAX_BYTES = 1_048_576;
 const LANGUAGE_VALIDATION_RETRY_WORKER_PROTOCOL = 1;
 const LANGUAGE_VALIDATION_RETRY_WORKER_BATCH = 2;
+// Persistent media-extraction failures must not consume a single-connection
+// provider twice every minute. Watched files stay prioritized by the durable
+// worker, but a failed Gateway attempt yields the provider lane for five
+// minutes before another bounded retry.
+const LANGUAGE_VALIDATION_GATEWAY_FAILURE_RETRY_MS = 5 * 60 * 1000;
 const LANGUAGE_VALIDATION_WINDOW_RECEIPT_PATTERN =
   /^v1\.[a-f0-9]{16}\.[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{22}$/;
 
@@ -221,7 +226,7 @@ Deno.serve(async (req) => {
       return json(req, {
         ok: true,
         service: "norva-playback",
-        version: 60,
+        version: 61,
         nativeHeartbeatProtocol: 1,
         providerCircuitProtocol: 1,
         vodContainerSelfHealProtocol: 1,
@@ -240,6 +245,8 @@ Deno.serve(async (req) => {
         languageValidationSampleDurationSeconds: LANGUAGE_VALIDATION_SAMPLE_DURATION_SECONDS,
         languageValidationRetryWorkerProtocol: LANGUAGE_VALIDATION_RETRY_WORKER_PROTOCOL,
         languageValidationRetryWorkerBatch: LANGUAGE_VALIDATION_RETRY_WORKER_BATCH,
+        languageValidationGatewayFailureRetrySeconds:
+          LANGUAGE_VALIDATION_GATEWAY_FAILURE_RETRY_MS / 1000,
         languageValidationGatewayMethod: "POST",
         languageValidationHeaderCapability: true,
         languageValidationServiceAuthRequired: true,
@@ -3255,7 +3262,7 @@ function languageValidationGatewayRetryAt(
   ) {
     return null;
   }
-  return new Date(nowMs + 30_000).toISOString();
+  return new Date(nowMs + LANGUAGE_VALIDATION_GATEWAY_FAILURE_RETRY_MS).toISOString();
 }
 
 function strictLanguageValidationEvidence(

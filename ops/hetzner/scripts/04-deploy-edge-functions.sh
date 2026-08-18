@@ -26,7 +26,7 @@ FUNCS_DIR="$REPO/supabase/functions"
 CONFIG="$REPO/supabase/config.toml"
 COMPOSE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/docker-compose.supabase.yml"
 ENV_FILE="$(dirname "$COMPOSE")/.env"
-EXPECTED_PLAYBACK_VERSION=60
+EXPECTED_PLAYBACK_VERSION=61
 EXPECTED_PLAYBACK_PROTOCOL=1
 EXPECTED_VOD_CONTAINER_SELF_HEAL_PROTOCOL=1
 EXPECTED_MEDIA_GATEWAY_CANARY_ROUTING_PROTOCOL=1
@@ -47,6 +47,7 @@ EXPECTED_LANGUAGE_VALIDATION_JOB_LEASE_SECONDS=300
 EXPECTED_LANGUAGE_VALIDATION_SAMPLE_DURATION_SECONDS=20
 EXPECTED_LANGUAGE_VALIDATION_RETRY_WORKER_PROTOCOL=1
 EXPECTED_LANGUAGE_VALIDATION_RETRY_WORKER_BATCH=2
+EXPECTED_LANGUAGE_VALIDATION_GATEWAY_FAILURE_RETRY_SECONDS=300
 EXPECTED_CLOUD_VERSION=25
 EXPECTED_CLOUD_PROTOCOL=1
 EXPECTED_CATALOG_VERSION=6
@@ -203,7 +204,8 @@ if command -v docker >/dev/null 2>&1 && [[ -f "$COMPOSE" ]]; then
         && "$playback_health" == *"\"languageValidationJobLeaseSeconds\":$EXPECTED_LANGUAGE_VALIDATION_JOB_LEASE_SECONDS"* \
         && "$playback_health" == *"\"languageValidationSampleDurationSeconds\":$EXPECTED_LANGUAGE_VALIDATION_SAMPLE_DURATION_SECONDS"* \
         && "$playback_health" == *"\"languageValidationRetryWorkerProtocol\":$EXPECTED_LANGUAGE_VALIDATION_RETRY_WORKER_PROTOCOL"* \
-        && "$playback_health" == *"\"languageValidationRetryWorkerBatch\":$EXPECTED_LANGUAGE_VALIDATION_RETRY_WORKER_BATCH"* ]] || {
+        && "$playback_health" == *"\"languageValidationRetryWorkerBatch\":$EXPECTED_LANGUAGE_VALIDATION_RETRY_WORKER_BATCH"* \
+        && "$playback_health" == *"\"languageValidationGatewayFailureRetrySeconds\":$EXPECTED_LANGUAGE_VALIDATION_GATEWAY_FAILURE_RETRY_SECONDS"* ]] || {
       echo "ERROR: $service norva-playback protocol marker mismatch" >&2
       exit 1
     }

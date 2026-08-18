@@ -176,9 +176,9 @@ test('foreground validation ignores presence intent but still blocks real provid
   );
   assert.match(worker, /providerAccountLeaseClaimed[\s\S]*providerAccountLeaseReleaseSafe[\s\S]*release_provider_account_language_validation/);
   assert.match(create, /claimError\.code[\s\S]*55P03[\s\S]*provider language validation in progress[\s\S]*LANGUAGE_VALIDATION_IN_PROGRESS/);
-  assert.match(playback, /version: 60[\s\S]*languageValidationPresenceIntentProtocol: 1[\s\S]*languageValidationPlaybackLeaseProtocol: 1[\s\S]*languageValidationActivityProtocol: 1[\s\S]*languageValidationDurationClaimProtocol: 1[\s\S]*languageValidationWindowCheckpointProtocol: LANGUAGE_VALIDATION_WINDOW_CHECKPOINT_PROTOCOL[\s\S]*languageValidationTaskBudgetMs: LANGUAGE_VALIDATION_TASK_BUDGET_MS[\s\S]*languageValidationFetchTimeoutMs: LANGUAGE_VALIDATION_FETCH_TIMEOUT_MS[\s\S]*languageValidationPostFetchReserveMs: LANGUAGE_VALIDATION_POST_FETCH_RESERVE_MS[\s\S]*languageValidationJobLeaseSeconds: LANGUAGE_VALIDATION_JOB_LEASE_SECONDS[\s\S]*languageValidationSampleDurationSeconds: LANGUAGE_VALIDATION_SAMPLE_DURATION_SECONDS[\s\S]*languageValidationRetryWorkerProtocol: LANGUAGE_VALIDATION_RETRY_WORKER_PROTOCOL[\s\S]*languageValidationRetryWorkerBatch: LANGUAGE_VALIDATION_RETRY_WORKER_BATCH/);
+  assert.match(playback, /version: 61[\s\S]*languageValidationPresenceIntentProtocol: 1[\s\S]*languageValidationPlaybackLeaseProtocol: 1[\s\S]*languageValidationActivityProtocol: 1[\s\S]*languageValidationDurationClaimProtocol: 1[\s\S]*languageValidationWindowCheckpointProtocol: LANGUAGE_VALIDATION_WINDOW_CHECKPOINT_PROTOCOL[\s\S]*languageValidationTaskBudgetMs: LANGUAGE_VALIDATION_TASK_BUDGET_MS[\s\S]*languageValidationFetchTimeoutMs: LANGUAGE_VALIDATION_FETCH_TIMEOUT_MS[\s\S]*languageValidationPostFetchReserveMs: LANGUAGE_VALIDATION_POST_FETCH_RESERVE_MS[\s\S]*languageValidationJobLeaseSeconds: LANGUAGE_VALIDATION_JOB_LEASE_SECONDS[\s\S]*languageValidationSampleDurationSeconds: LANGUAGE_VALIDATION_SAMPLE_DURATION_SECONDS[\s\S]*languageValidationRetryWorkerProtocol: LANGUAGE_VALIDATION_RETRY_WORKER_PROTOCOL[\s\S]*languageValidationRetryWorkerBatch: LANGUAGE_VALIDATION_RETRY_WORKER_BATCH[\s\S]*languageValidationGatewayFailureRetrySeconds:[\s\S]*LANGUAGE_VALIDATION_GATEWAY_FAILURE_RETRY_MS \/ 1000/);
   assert.match(playback, /const LANGUAGE_VALIDATION_FETCH_TIMEOUT_MS = 240_000/);
-  assert.match(edgeDeploy, /EXPECTED_PLAYBACK_VERSION=60/);
+  assert.match(edgeDeploy, /EXPECTED_PLAYBACK_VERSION=61/);
   assert.match(edgeDeploy, /EXPECTED_LANGUAGE_VALIDATION_TASK_BUDGET_MS=270000/);
   assert.match(edgeDeploy, /EXPECTED_LANGUAGE_VALIDATION_FETCH_TIMEOUT_MS=240000/);
   assert.match(edgeDeploy, /EXPECTED_LANGUAGE_VALIDATION_POST_FETCH_RESERVE_MS=30000/);
@@ -186,6 +186,7 @@ test('foreground validation ignores presence intent but still blocks real provid
   assert.match(edgeDeploy, /EXPECTED_LANGUAGE_VALIDATION_SAMPLE_DURATION_SECONDS=20/);
   assert.match(edgeDeploy, /EXPECTED_LANGUAGE_VALIDATION_RETRY_WORKER_PROTOCOL=1/);
   assert.match(edgeDeploy, /EXPECTED_LANGUAGE_VALIDATION_RETRY_WORKER_BATCH=2/);
+  assert.match(edgeDeploy, /EXPECTED_LANGUAGE_VALIDATION_GATEWAY_FAILURE_RETRY_SECONDS=300/);
   assert.match(edgeDeploy, /languageValidationSampleDurationSeconds\\\":\$EXPECTED_LANGUAGE_VALIDATION_SAMPLE_DURATION_SECONDS/);
   assert.match(edgeDeploy, /languageValidationRetryWorkerProtocol\\\":\$EXPECTED_LANGUAGE_VALIDATION_RETRY_WORKER_PROTOCOL/);
   assert.match(edgeDeploy, /languageValidationRetryWorkerBatch\\\":\$EXPECTED_LANGUAGE_VALIDATION_RETRY_WORKER_BATCH/);
@@ -394,7 +395,7 @@ test('Gateway JSON is bounded in bytes before parse and overflow cancels without
   );
 });
 
-test('strict Gateway 5xx retries in 30 seconds while proxy auth and non-5xx keep the long policy', () => {
+test('strict Gateway 5xx backs off for five minutes while proxy auth and non-5xx keep the long policy', () => {
   let helper = between(
     playback,
     'function languageValidationGatewayRetryAt(',
@@ -404,12 +405,16 @@ test('strict Gateway 5xx retries in 30 seconds while proxy auth and non-5xx keep
     .replace('responseStatus: number', 'responseStatus')
     .replace('gatewayCode: string', 'gatewayCode')
     .replace('upstreamStatus: number | null', 'upstreamStatus');
-  const context = { Number, Date };
+  const context = {
+    Number,
+    Date,
+    LANGUAGE_VALIDATION_GATEWAY_FAILURE_RETRY_MS: 5 * 60 * 1000,
+  };
   vm.runInNewContext(`${helper}; this.retryAt = languageValidationGatewayRetryAt;`, context);
   const now = Date.parse('2026-08-16T17:00:00.000Z');
 
-  assert.equal(context.retryAt(500, 'STRICT_LID_FAILED', null, now), '2026-08-16T17:00:30.000Z');
-  assert.equal(context.retryAt(504, 'strict_lid_request_timeout', null, now), '2026-08-16T17:00:30.000Z');
+  assert.equal(context.retryAt(500, 'STRICT_LID_FAILED', null, now), '2026-08-16T17:05:00.000Z');
+  assert.equal(context.retryAt(504, 'strict_lid_request_timeout', null, now), '2026-08-16T17:05:00.000Z');
   assert.equal(context.retryAt(502, 'PROXY_AUTH_FAILED', 407, now), null);
   assert.equal(context.retryAt(502, 'proxy_auth_failed', null, now), null);
   assert.equal(context.retryAt(407, 'PROXY_AUTH_FAILED', 407, now), null);
