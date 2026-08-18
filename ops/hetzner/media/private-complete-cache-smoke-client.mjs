@@ -139,7 +139,7 @@ function cacheProofBindingDiagnostics(profile, fileSizeBytes) {
             profileVariant: matchingProfileVariant || 'structural-or-unexpected',
             effectiveUrl: /^[a-f0-9]{64}$/.test(String(proof.effectiveUrlSha256 || '')),
             strongEtag: /^[a-f0-9]{64}$/.test(String(proof.strongEtagSha256 || '')),
-            pipeline: typeof proof.pipelineBuild === 'string' && proof.pipelineBuild.startsWith('mkv-complete-hls-mpegts-v3:'),
+            pipeline: typeof proof.pipelineBuild === 'string' && proof.pipelineBuild.startsWith('mkv-complete-hls-mpegts-v4:'),
         };
     } catch (_) {
         return { parsed: false };

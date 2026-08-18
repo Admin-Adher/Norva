@@ -141,4 +141,3 @@ printf 'host=%s dns=%s tls=ok cors=https://norva.tv public_surface=GET_HEAD_OPTI
 if [[ -n "${backup}" ]]; then
   printf 'ROLLBACK_CADDYFILE=%s\n' "${backup}"
 fi
-

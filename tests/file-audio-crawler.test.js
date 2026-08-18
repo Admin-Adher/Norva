@@ -306,10 +306,10 @@ test('Edge rollout is signed, dynamically reversible and keeps fast evidence sco
   // A browser query parameter cannot opt into a rollout. The Edge embeds the
   // selected scope inside the HMAC-signed byte-pipe payload.
   assert.ok(bytePipe.includes('...(scope ? { scope } : {})'));
-  assert.ok(bytePipe.includes('hmacBase64Url(runtimeConfig.mediaGatewayToken, payload)'));
+  assert.ok(bytePipe.includes('hmacBase64Url(gatewayRoute.token, payload)'));
   assert.ok(
     bytePipe.indexOf('...(scope ? { scope } : {})') <
-      bytePipe.indexOf('hmacBase64Url(runtimeConfig.mediaGatewayToken, payload)'),
+      bytePipe.indexOf('hmacBase64Url(gatewayRoute.token, payload)'),
   );
 
   // The database is consulted independently from runtime secrets, so the kill
@@ -384,7 +384,7 @@ test('Edge rollout is signed, dynamically reversible and keeps fast evidence sco
   assert.ok(migration.includes('observation.audio_verified_at is null'));
   assert.ok(detector.includes(': "whisper-basic-v1"'));
 
-  assert.ok(health.includes('version: 52'));
+  assert.ok(health.includes('version: 55'));
   assert.ok(health.includes('lidDetectOnlyProtocol: 1'));
   assert.ok(health.includes('audioLidEnabled: lidPolicy.enabled'));
   assert.ok(health.includes('lidDetectOnlyMode: lidPolicy.mode'));
@@ -560,7 +560,7 @@ test('LID cascade rollout is exact-file, bounded, fail-closed and atomically aud
   assert.ok(!rpc.includes('merge_catalog_title_audio'));
   assert.ok(!rpc.includes('audio_lang_verified_at ='));
 
-  assert.ok(health.includes('version: 52'));
+  assert.ok(health.includes('version: 55'));
   assert.ok(health.includes('lidCascadeProtocol: 2'));
   assert.ok(health.includes('lidCascadeMode: lidPolicy.cascadeMode'));
   assert.ok(health.includes('lidCascadeWorkerConfigured'));

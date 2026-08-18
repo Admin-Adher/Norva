@@ -1,7 +1,7 @@
 # Norva media Gateway on the existing Hetzner host (VAAPI)
 
-Status: private Gateway promoted on the existing host; still loopback-only,
-with the Edge callback pinned to `127.0.0.1:9` and no browser/public traffic.
+Status: the single-instance Gateway is promoted on the existing host, remains
+loopback-only behind Caddy, and is routed by Edge to an exact-account canary.
 
 This is the current cost-conscious target for the Ryzen 7 PRO 8700GE host that
 already runs the self-hosted Supabase stack. It does not require a GEX44.
@@ -27,6 +27,11 @@ H.264 VAAPI preflight and fails closed if the real container cannot encode.
 - Four simultaneous video encoders maximum. Video copy/remux and local cache
   hits do not consume these slots.
 - Cache capped at 96 GiB and refuses publication below 160 GiB host free space.
+- A normal viewer close may detach the existing pump/FFmpeg for at most 30
+  minutes to finish a complete HLS entry. Browser access is revoked first; a
+  new viewer on the same provider account preempts and drains it before GET.
+- Completed background entries are persisted by an authenticated Edge callback
+  bound to the exact Gateway/playback rows and the item CAS captured at create.
 - Container has no Linux capabilities and receives only the DRM render node.
 - Port is loopback-only. TLS/reverse proxy remains mandatory.
 

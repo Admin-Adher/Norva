@@ -203,10 +203,10 @@ test('norva-playback persists the chosen gateway identity and routes cleanup by 
   assert.match(edge, /MEDIA_GATEWAY_STORED_ROUTE_UNAVAILABLE/);
   assert.match(edge, /MEDIA_GATEWAY_CANARY_ROUTE_UNAVAILABLE/);
   assert.match(edge, /createBytePipeAccess\([\s\S]*?rawTokenExpiresAt,[\s\S]*?true,[\s\S]*?\);/);
-  assert.match(edge, /version: 54[\s\S]*mediaGatewayCanaryRouting:/);
+  assert.match(edge, /version: 55[\s\S]*mediaGatewayCanaryRouting:/);
 });
 
-test('Edge v54 forwards only admitted copy, complete-cache, or measured VAAPI startup policies', () => {
+test('Edge v55 forwards only admitted copy, complete-cache, or measured VAAPI startup policies', () => {
   const normalize = edgeStartupPolicyNormalizer();
   const base = {
     protocol: 2,
@@ -286,7 +286,7 @@ test('Edge v53 deploy is revisioned, route-off, and rolls both replicas back on 
   assert.match(deploy, /canary_state=off selected_users=0 gateway_callback=private/);
 });
 
-test('Edge v54 deploy drains one-user routing, upgrades both replicas, and restores it only after verification', () => {
+test('Edge v55 deploy drains one-user routing, upgrades both replicas, and restores it only after verification', () => {
   const deploy = fs.readFileSync(DEPLOY_V54_SCRIPT_PATH, 'utf8');
   const reload = fs.readFileSync(EDGE_RELOAD_SCRIPT_PATH, 'utf8');
   assert.match(deploy, /readonly SOURCE_ROOT='\/home\/adrien\/norva-deployments\/mkv-vaapi-v53-11a301100cd0'/);

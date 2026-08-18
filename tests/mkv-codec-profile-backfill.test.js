@@ -17,7 +17,7 @@ test('MKV codec backfill is service-gated, exact-owner scoped and bounded to ten
   const route = between(edge, 'async function runCodecProfileBackfill(', '\nasync function runLidBenchmarkEndpoint');
 
   assert.match(edge, /segments\[0\] === "codec-profile-backfill"/);
-  assert.match(edge, /version:\s*52[\s\S]*exactFileCodecProfileProtocol:\s*1/);
+  assert.match(edge, /version:\s*55[\s\S]*exactFileCodecProfileProtocol:\s*1/);
   assert.match(route, /NORVA_BACKFILL_TOKEN/);
   assert.match(route, /uniqueVariantIds\.slice\(0, 10\)/);
   assert.match(route, /PLAYBACK_SESSION_UUID_PATTERN\.test/);

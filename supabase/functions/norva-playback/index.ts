@@ -215,7 +215,7 @@ Deno.serve(async (req) => {
       return json(req, {
         ok: true,
         service: "norva-playback",
-        version: 54,
+        version: 55,
         nativeHeartbeatProtocol: 1,
         providerCircuitProtocol: 1,
         exactFileCodecProfileProtocol: 1,
@@ -262,6 +262,7 @@ Deno.serve(async (req) => {
           selectedUsers: config.mediaGatewayRouting.canaryUserHashes.length,
         },
         exactTailDrainSafe: true,
+        completeHlsCacheCallbackProtocol: 1,
       });
     }
     if (req.method === "GET" && segments[0] === "telemetry" && segments[1] === "summary") {
@@ -363,6 +364,9 @@ Deno.serve(async (req) => {
     }
     if (req.method === "POST" && segments[0] === "account-activity") {
       return json(req, await runAccountActivity(req, supabase));
+    }
+    if (req.method === "POST" && segments[0] === "complete-cache-callback") {
+      return json(req, await runCompleteHlsCacheCallback(req, supabase));
     }
     if (req.method === "GET" && segments[0] === "generated-subtitle") {
       const identity = await requireIdentity(req, supabase);
@@ -3436,7 +3440,14 @@ async function expirePlaybackSession(id: string, userId: string, db: SupabaseCli
         });
       }
 
-      const response = await fetch(`${storedGatewayRoute.url}/sessions/${encodeURIComponent(externalSessionId)}`, {
+      const cleanupUrl = new URL(
+        `${storedGatewayRoute.url}/sessions/${encodeURIComponent(externalSessionId)}`,
+      );
+      // A normal user close may detach an eligible finite MKV into the same
+      // provider GET/FFmpeg until EOF. The Gateway revokes browser access first;
+      // any new viewer preempts that background owner before opening a socket.
+      cleanupUrl.searchParams.set("completeCache", "continue");
+      const response = await fetch(cleanupUrl.toString(), {
         method: "DELETE",
         headers: { Authorization: `Bearer ${storedGatewayRoute.token}` },
         signal: AbortSignal.timeout(8_000),
@@ -8806,6 +8817,111 @@ async function runAccountActivity(req: Request, db: SupabaseClient) {
     if (error) return { ok: true, touched: 0, warn: "rpc-error" };
   } catch (_) { return { ok: true, touched: 0, warn: "rpc-exception" }; }
   return { ok: true, touched: keys.length };
+}
+
+function requireConfiguredMediaGatewayCallback(
+  req: Request,
+  runtimeConfig: RuntimeConfig,
+): Set<string | null> {
+  const provided = req.headers.get("Authorization")?.match(/^Bearer\s+(.+)$/i)?.[1] ?? "";
+  const routes = [
+    runtimeConfig.mediaGatewayRouting.defaultRoute,
+    runtimeConfig.mediaGatewayRouting.canaryRoute,
+  ].filter((route): route is MediaGatewayRoute => Boolean(route?.token));
+  const matchedRoutes = provided
+    ? routes.filter((route) => route.token === provided)
+    : [];
+  if (!matchedRoutes.length) throw new HttpError(401, "Unauthorized");
+  return new Set(matchedRoutes.map((route) => stringOrNull(route.gatewayId)));
+}
+
+async function runCompleteHlsCacheCallback(
+  req: Request,
+  db: SupabaseClient,
+): Promise<JsonRecord> {
+  const runtimeConfig = await getRuntimeConfig(db);
+  const authorizedGatewayIds = requireConfiguredMediaGatewayCallback(req, runtimeConfig);
+  const body = await req.json()
+    .then(recordOrEmpty)
+    .catch(() => { throw new HttpError(400, "Invalid callback JSON"); });
+  const expectedKeys = [
+    "finalCodecProfile",
+    "gatewaySessionId",
+    "playbackSessionId",
+    "protocol",
+    "status",
+  ];
+  const actualKeys = Object.keys(body).sort();
+  if (
+    actualKeys.length !== expectedKeys.length ||
+    !actualKeys.every((key, index) => key === expectedKeys[index])
+  ) {
+    throw new HttpError(400, "Invalid complete-cache callback shape");
+  }
+
+  const playbackSessionId = stringOrNull(body.playbackSessionId);
+  const gatewaySessionId = stringOrNull(body.gatewaySessionId);
+  if (
+    body.protocol !== 1 || body.status !== "completed" ||
+    !playbackSessionId || !PLAYBACK_SESSION_UUID_PATTERN.test(playbackSessionId) ||
+    !gatewaySessionId || !PLAYBACK_SESSION_UUID_PATTERN.test(gatewaySessionId)
+  ) {
+    throw new HttpError(400, "Invalid complete-cache callback identity");
+  }
+  const finalCodecProfile = normalizeCodecProfile(recordOrEmpty(body.finalCodecProfile));
+  if (
+    !hasUsefulCodecProfile(finalCodecProfile) ||
+    !normalizeMkvH264FastStartProof(finalCodecProfile.mkvCompleteHlsCacheProof)
+  ) {
+    throw new HttpError(422, "A finalized complete-cache profile is required");
+  }
+
+  const { data: gatewaySession, error: gatewayError } = await db
+    .from("cloud_gateway_sessions")
+    .select("id,user_id,playback_session_id,gateway_id,external_session_id,status")
+    .eq("external_session_id", gatewaySessionId)
+    .eq("playback_session_id", playbackSessionId)
+    .maybeSingle();
+  if (gatewayError) throwDb(gatewayError, "Unable to verify complete-cache gateway session");
+  if (
+    !gatewaySession ||
+    !authorizedGatewayIds.has(stringOrNull(gatewaySession.gateway_id))
+  ) {
+    throw new HttpError(404, "Complete-cache session not found");
+  }
+
+  const gatewayUserId = stringOrNull(gatewaySession.user_id);
+  if (!gatewayUserId) throw new HttpError(404, "Complete-cache session not found");
+  const { data: playbackSession, error: playbackError } = await db
+    .from("cloud_playback_sessions")
+    .select("id,user_id,source_id,item_type,item_id,target_url_hash,playback_hint,status")
+    .eq("id", playbackSessionId)
+    .eq("user_id", gatewayUserId)
+    .maybeSingle();
+  if (playbackError) throwDb(playbackError, "Unable to verify complete-cache playback session");
+  if (
+    !playbackSession ||
+    stringOr(playbackSession.item_type, "") !== "movie" ||
+    !stringOrNull(playbackSession.source_id) ||
+    !stringOrNull(playbackSession.item_id)
+  ) {
+    throw new HttpError(404, "Complete-cache session not found");
+  }
+
+  const persisted = await persistObservedCodecProfile(db, {
+    userId: gatewayUserId,
+    sourceId: String(playbackSession.source_id),
+    itemType: "movie",
+    itemId: String(playbackSession.item_id),
+    codecProfile: finalCodecProfile,
+    startupMs: null,
+    audioMode: null,
+    requireItemCas: true,
+    expectedItemCas: mkvH264FastStartItemCasFromPlaybackSession(playbackSession),
+    itemOnly: true,
+    allowProofReplacement: true,
+  });
+  return { ok: true, protocol: 1, persisted };
 }
 
 // Best-effort account-activity touches from the edge's own playback paths (fail-open — a

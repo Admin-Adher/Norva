@@ -60,6 +60,9 @@ services:
       MKV_COMPLETE_HLS_CACHE_MAX_FILES: ${MKV_COMPLETE_HLS_CACHE_MAX_FILES:-20000}
       MKV_COMPLETE_HLS_CACHE_MAX_PLAYLIST_BYTES: ${MKV_COMPLETE_HLS_CACHE_MAX_PLAYLIST_BYTES:-8388608}
       MKV_COMPLETE_HLS_CACHE_PRUNE_INTERVAL_MS: ${MKV_COMPLETE_HLS_CACHE_PRUNE_INTERVAL_MS:-900000}
+      MKV_COMPLETE_HLS_BACKGROUND_CONTINUATION_ENABLED: ${MKV_COMPLETE_HLS_BACKGROUND_CONTINUATION_ENABLED:-true}
+      MKV_COMPLETE_HLS_BACKGROUND_CONTINUATION_MAX_MS: ${MKV_COMPLETE_HLS_BACKGROUND_CONTINUATION_MAX_MS:-1800000}
+      MKV_COMPLETE_HLS_BACKGROUND_CALLBACK_TIMEOUT_MS: ${MKV_COMPLETE_HLS_BACKGROUND_CALLBACK_TIMEOUT_MS:-10000}
     volumes:
       - ${MEDIA_GATEWAY_OUTPUT_DIR:-/srv/norva-media/output}:/var/lib/norva-media/output
       - ${MEDIA_GATEWAY_CACHE_DIR:-/srv/norva-media/cache}:/var/lib/norva-media/cache
@@ -74,7 +77,8 @@ services:
           fetch('http://127.0.0.1:8080/health').then(async (response) => {
             const body = await response.json();
             if (!response.ok || body.ok !== true || body.videoEncoder?.backend !== 'vaapi'
-              || body.videoEncoder?.ready !== true || body.mkvCompleteHlsCache?.enabled !== true) process.exit(1);
+              || body.videoEncoder?.ready !== true || body.mkvCompleteHlsCache?.enabled !== true
+              || body.mkvCompleteHlsCache?.backgroundContinuation?.enabled !== true) process.exit(1);
           }).catch(() => process.exit(1))
       interval: 15s
       timeout: 5s
