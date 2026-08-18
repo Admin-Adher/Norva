@@ -10585,7 +10585,14 @@ function mkvCompleteHlsCachePipelineBuildForSession(session, staticContext = nul
     const audioMode = multiAudio
         ? `multi-aac-${context.audioTopology.audioRenditions.length}`
         : audioModeForSession(session);
-    const targetSeconds = Number(session?.hlsTargetSeconds || 4);
+    // A lookup is evaluated before the live session object exists, so it does
+    // not carry the later `freezeMultiAudioHlsTopology` mutation. Multi-audio
+    // always uses the exact aligned two-second target; derive that value from
+    // the authenticated topology on both publish and lookup instead of relying
+    // on an internal session field that is absent on zero-provider cache hits.
+    const targetSeconds = multiAudio
+        ? EXACT_MATROSKA_H264_HLS_TARGET_SECONDS
+        : Number(session?.hlsTargetSeconds || 4);
     if (!['copy', 'encode'].includes(videoMode)) return null;
     if (!multiAudio && !['copy', 'transcode'].includes(audioMode)) return null;
     if (!Number.isInteger(targetSeconds) || targetSeconds < 1 || targetSeconds > 30) return null;

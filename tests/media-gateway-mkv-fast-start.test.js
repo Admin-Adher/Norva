@@ -1004,6 +1004,9 @@ test('generic complete-cache locator binds the exact multi-audio HLS topology', 
 
   const replay = {
     ...trained,
+    // The pre-provider cache lookup is constructed directly from the request
+    // and has no live-session HLS target yet.
+    hlsTargetSeconds: undefined,
     inputPump: null,
     codecProfile: { ...locator.codecProfileSnapshot, mkvCompleteHlsCacheProof: locator.envelope },
   };
