@@ -14,6 +14,7 @@ const migration = read('supabase/migrations/20260816105918_async_vod_language_va
 const windowMigration = read('supabase/migrations/20260817001127_strict_lid_window_checkpoints.sql');
 const presenceMigration = read('supabase/migrations/20260816141150_provider_account_foreground_presence.sql');
 const activityMigration = read('supabase/migrations/20260816171003_provider_account_language_validation_activity.sql');
+const profileParityMigration = read('supabase/migrations/20260818162200_vod_language_validation_profile_parity.sql');
 const edgeDeploy = read('ops/hetzner/scripts/04-deploy-edge-functions.sh');
 
 function between(source, startMarker, endMarker) {
@@ -574,6 +575,22 @@ test('strict language validation accepts exact AVI Gateway probes without accept
   assert.equal(context.accepts({ ...base, container: 'mkv', metadataComplete: true, probeSource: 'gateway_inband' }), true);
   assert.equal(context.accepts({ ...base, probeSource: 'request' }), false);
   assert.equal(context.accepts({ ...base, metadataComplete: false, probeSource: 'gateway_inband' }), false);
+});
+
+test('durable exact-profile gate accepts the same canonical Gateway probes as Edge', () => {
+  assert.match(profileParityMigration, /normalized\.probe_token = 'gatewayprobe'/);
+  assert.match(profileParityMigration, /normalized\.probe_token = 'gatewayinband'[\s\S]*metadataComplete/);
+  for (const container of ['mkv', 'mp4', 'mov', 'avi', 'ogg', 'flv', 'mpg']) {
+    assert.match(profileParityMigration, new RegExp(`'${container}'`));
+  }
+  assert.match(profileParityMigration, /videoCodec[\s\S]*audioCodec/);
+  assert.match(profileParityMigration, /jsonb_typeof\(p_profile->'subtitles'\) = 'array'/);
+  assert.match(profileParityMigration, /vod_language_profile_file_size_bytes/);
+  assert.match(profileParityMigration, /vod_language_profile_audio_indices/);
+  assert.match(
+    profileParityMigration,
+    /grant execute on function public\.vod_language_profile_is_exact\(jsonb\) to service_role/,
+  );
 });
 
 test('stale unverified track maps are repaired only from the exact profile without provider I/O', () => {
