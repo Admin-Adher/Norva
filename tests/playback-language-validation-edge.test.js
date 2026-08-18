@@ -15,6 +15,7 @@ const windowMigration = read('supabase/migrations/20260817001127_strict_lid_wind
 const presenceMigration = read('supabase/migrations/20260816141150_provider_account_foreground_presence.sql');
 const activityMigration = read('supabase/migrations/20260816171003_provider_account_language_validation_activity.sql');
 const profileParityMigration = read('supabase/migrations/20260818162200_vod_language_validation_profile_parity.sql');
+const retryWorkerMigration = read('supabase/migrations/20260818165000_vod_language_validation_retry_worker.sql');
 const edgeDeploy = read('ops/hetzner/scripts/04-deploy-edge-functions.sh');
 
 function between(source, startMarker, endMarker) {
@@ -55,6 +56,37 @@ test('POST starts quickly and GET polls one caller-owned durable job', () => {
   assert.match(poll, /assertOwnedSource\(sourceId, userId, db\)/);
   assert.match(poll, /requireLanguageValidationEntitlement\(userId, db\)/);
   assert.match(poll, /scheduleLanguageValidationJob\(waitUntil, db, jobId\)/);
+});
+
+test('cron-authenticated retry worker schedules a bounded provider-distinct batch', () => {
+  const route = between(
+    playback,
+    'segments[0] === "language-validation-worker"',
+    'if (req.method === "POST" && segments[0] === "pregen-gate")',
+  );
+  const worker = between(
+    playback,
+    'async function runLanguageValidationRetryWorker(',
+    '\nasync function revalidateLanguageValidationClaim(',
+  );
+
+  assert.match(route, /runLanguageValidationRetryWorker\(req, supabase\)[\s\S]*202/);
+  assert.match(worker, /"norva_verify_cron_secret"/);
+  assert.match(worker, /authorized !== true[\s\S]*HttpError\(403/);
+  assert.match(worker, /"list_due_catalog_file_audio_validation_jobs"/);
+  assert.match(worker, /LANGUAGE_VALIDATION_RETRY_WORKER_BATCH/);
+  assert.match(worker, /scheduleLanguageValidationJob\(waitUntil, db, jobId\)/);
+  assert.doesNotMatch(worker, /sourceId|itemId|identityKey|targetUrl/);
+
+  assert.match(retryWorkerMigration, /row_number\(\) over \([\s\S]*partition by job\.identity_key/);
+  assert.match(retryWorkerMigration, /job\.state = 'retry_wait'[\s\S]*job\.retry_at <= now\(\)/);
+  assert.match(retryWorkerMigration, /job\.state in \('running', 'finalizing'\)[\s\S]*job\.lease_expires_at <= now\(\)/);
+  assert.match(retryWorkerMigration, /limit greatest\(1, least\(coalesce\(p_limit, 2\), 4\)\)/);
+  assert.match(retryWorkerMigration, /revoke all on function public\.list_due_catalog_file_audio_validation_jobs\(integer\)[\s\S]*from public, anon, authenticated/);
+  assert.match(retryWorkerMigration, /grant execute on function public\.list_due_catalog_file_audio_validation_jobs\(integer\)[\s\S]*to service_role/);
+  assert.match(retryWorkerMigration, /cron\.schedule\([\s\S]*norva-playback-language-validation-worker[\s\S]*'\* \* \* \* \*'/);
+  assert.match(retryWorkerMigration, /norva-playback\/language-validation-worker/);
+  assert.match(retryWorkerMigration, /norva_cron_shared_secret/);
 });
 
 test('foreground validation ignores presence intent but still blocks real provider activity', () => {
@@ -144,15 +176,19 @@ test('foreground validation ignores presence intent but still blocks real provid
   );
   assert.match(worker, /providerAccountLeaseClaimed[\s\S]*providerAccountLeaseReleaseSafe[\s\S]*release_provider_account_language_validation/);
   assert.match(create, /claimError\.code[\s\S]*55P03[\s\S]*provider language validation in progress[\s\S]*LANGUAGE_VALIDATION_IN_PROGRESS/);
-  assert.match(playback, /version: 59[\s\S]*languageValidationPresenceIntentProtocol: 1[\s\S]*languageValidationPlaybackLeaseProtocol: 1[\s\S]*languageValidationActivityProtocol: 1[\s\S]*languageValidationDurationClaimProtocol: 1[\s\S]*languageValidationWindowCheckpointProtocol: LANGUAGE_VALIDATION_WINDOW_CHECKPOINT_PROTOCOL[\s\S]*languageValidationTaskBudgetMs: LANGUAGE_VALIDATION_TASK_BUDGET_MS[\s\S]*languageValidationFetchTimeoutMs: LANGUAGE_VALIDATION_FETCH_TIMEOUT_MS[\s\S]*languageValidationPostFetchReserveMs: LANGUAGE_VALIDATION_POST_FETCH_RESERVE_MS[\s\S]*languageValidationJobLeaseSeconds: LANGUAGE_VALIDATION_JOB_LEASE_SECONDS[\s\S]*languageValidationSampleDurationSeconds: LANGUAGE_VALIDATION_SAMPLE_DURATION_SECONDS/);
+  assert.match(playback, /version: 60[\s\S]*languageValidationPresenceIntentProtocol: 1[\s\S]*languageValidationPlaybackLeaseProtocol: 1[\s\S]*languageValidationActivityProtocol: 1[\s\S]*languageValidationDurationClaimProtocol: 1[\s\S]*languageValidationWindowCheckpointProtocol: LANGUAGE_VALIDATION_WINDOW_CHECKPOINT_PROTOCOL[\s\S]*languageValidationTaskBudgetMs: LANGUAGE_VALIDATION_TASK_BUDGET_MS[\s\S]*languageValidationFetchTimeoutMs: LANGUAGE_VALIDATION_FETCH_TIMEOUT_MS[\s\S]*languageValidationPostFetchReserveMs: LANGUAGE_VALIDATION_POST_FETCH_RESERVE_MS[\s\S]*languageValidationJobLeaseSeconds: LANGUAGE_VALIDATION_JOB_LEASE_SECONDS[\s\S]*languageValidationSampleDurationSeconds: LANGUAGE_VALIDATION_SAMPLE_DURATION_SECONDS[\s\S]*languageValidationRetryWorkerProtocol: LANGUAGE_VALIDATION_RETRY_WORKER_PROTOCOL[\s\S]*languageValidationRetryWorkerBatch: LANGUAGE_VALIDATION_RETRY_WORKER_BATCH/);
   assert.match(playback, /const LANGUAGE_VALIDATION_FETCH_TIMEOUT_MS = 240_000/);
-  assert.match(edgeDeploy, /EXPECTED_PLAYBACK_VERSION=59/);
+  assert.match(edgeDeploy, /EXPECTED_PLAYBACK_VERSION=60/);
   assert.match(edgeDeploy, /EXPECTED_LANGUAGE_VALIDATION_TASK_BUDGET_MS=270000/);
   assert.match(edgeDeploy, /EXPECTED_LANGUAGE_VALIDATION_FETCH_TIMEOUT_MS=240000/);
   assert.match(edgeDeploy, /EXPECTED_LANGUAGE_VALIDATION_POST_FETCH_RESERVE_MS=30000/);
   assert.match(edgeDeploy, /EXPECTED_LANGUAGE_VALIDATION_JOB_LEASE_SECONDS=300/);
   assert.match(edgeDeploy, /EXPECTED_LANGUAGE_VALIDATION_SAMPLE_DURATION_SECONDS=20/);
+  assert.match(edgeDeploy, /EXPECTED_LANGUAGE_VALIDATION_RETRY_WORKER_PROTOCOL=1/);
+  assert.match(edgeDeploy, /EXPECTED_LANGUAGE_VALIDATION_RETRY_WORKER_BATCH=2/);
   assert.match(edgeDeploy, /languageValidationSampleDurationSeconds\\\":\$EXPECTED_LANGUAGE_VALIDATION_SAMPLE_DURATION_SECONDS/);
+  assert.match(edgeDeploy, /languageValidationRetryWorkerProtocol\\\":\$EXPECTED_LANGUAGE_VALIDATION_RETRY_WORKER_PROTOCOL/);
+  assert.match(edgeDeploy, /languageValidationRetryWorkerBatch\\\":\$EXPECTED_LANGUAGE_VALIDATION_RETRY_WORKER_BATCH/);
   assert.match(edgeDeploy, /EXPECTED_LANGUAGE_VALIDATION_PRESENCE_INTENT_PROTOCOL=1/);
   assert.match(edgeDeploy, /EXPECTED_LANGUAGE_VALIDATION_PLAYBACK_LEASE_PROTOCOL=1/);
   assert.match(edgeDeploy, /EXPECTED_LANGUAGE_VALIDATION_ACTIVITY_PROTOCOL=1/);

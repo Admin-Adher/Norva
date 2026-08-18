@@ -157,6 +157,8 @@ const LANGUAGE_VALIDATION_SAMPLE_DURATION_SECONDS = 20;
 const LANGUAGE_VALIDATION_WINDOW_CHECKPOINT_PROTOCOL = 1;
 const LANGUAGE_VALIDATION_WINDOW_RECEIPT_MAX_CHARS = 98_304;
 const LANGUAGE_VALIDATION_FINALIZE_BODY_MAX_BYTES = 1_048_576;
+const LANGUAGE_VALIDATION_RETRY_WORKER_PROTOCOL = 1;
+const LANGUAGE_VALIDATION_RETRY_WORKER_BATCH = 2;
 const LANGUAGE_VALIDATION_WINDOW_RECEIPT_PATTERN =
   /^v1\.[a-f0-9]{16}\.[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{22}$/;
 
@@ -219,7 +221,7 @@ Deno.serve(async (req) => {
       return json(req, {
         ok: true,
         service: "norva-playback",
-        version: 59,
+        version: 60,
         nativeHeartbeatProtocol: 1,
         providerCircuitProtocol: 1,
         vodContainerSelfHealProtocol: 1,
@@ -236,6 +238,8 @@ Deno.serve(async (req) => {
         languageValidationPostFetchReserveMs: LANGUAGE_VALIDATION_POST_FETCH_RESERVE_MS,
         languageValidationJobLeaseSeconds: LANGUAGE_VALIDATION_JOB_LEASE_SECONDS,
         languageValidationSampleDurationSeconds: LANGUAGE_VALIDATION_SAMPLE_DURATION_SECONDS,
+        languageValidationRetryWorkerProtocol: LANGUAGE_VALIDATION_RETRY_WORKER_PROTOCOL,
+        languageValidationRetryWorkerBatch: LANGUAGE_VALIDATION_RETRY_WORKER_BATCH,
         languageValidationGatewayMethod: "POST",
         languageValidationHeaderCapability: true,
         languageValidationServiceAuthRequired: true,
@@ -364,6 +368,9 @@ Deno.serve(async (req) => {
     }
     if (req.method === "POST" && segments[0] === "subtitle-email-delivery") {
       return json(req, await runSubtitleEmailDelivery(req, supabase));
+    }
+    if (req.method === "POST" && segments[0] === "language-validation-worker" && !segments[1]) {
+      return json(req, await runLanguageValidationRetryWorker(req, supabase), 202);
     }
     if (req.method === "POST" && segments[0] === "pregen-gate") {
       return json(req, await runPregenGate(req, supabase));
@@ -1899,6 +1906,35 @@ async function languageValidationProfileFingerprint(
     fileSizeBytes,
     audioTracks: stableTracks,
   }));
+}
+
+async function runLanguageValidationRetryWorker(req: Request, db: SupabaseClient) {
+  const token = req.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ?? "";
+  const { data: authorized, error: authError } = await db.rpc(
+    "norva_verify_cron_secret",
+    { presented: token },
+  );
+  if (authError || authorized !== true) throw new HttpError(403, "Unauthorized");
+
+  const { data, error } = await db.rpc(
+    "list_due_catalog_file_audio_validation_jobs",
+    { p_limit: LANGUAGE_VALIDATION_RETRY_WORKER_BATCH },
+  );
+  if (error) throwDb(error, "Unable to load due language validation jobs");
+  const jobIds = (Array.isArray(data) ? data : [])
+    .map((row) => stringOr(recordOrEmpty(row).job_id, ""))
+    .filter((jobId) => PLAYBACK_SESSION_UUID_PATTERN.test(jobId));
+  const waitUntil = jobIds.length ? requireLanguageValidationWaitUntil() : null;
+  let scheduled = 0;
+  for (const jobId of jobIds) {
+    if (waitUntil && scheduleLanguageValidationJob(waitUntil, db, jobId)) scheduled++;
+  }
+  return {
+    ok: true,
+    protocol: LANGUAGE_VALIDATION_RETRY_WORKER_PROTOCOL,
+    due: jobIds.length,
+    scheduled,
+  };
 }
 
 async function revalidateLanguageValidationClaim(
