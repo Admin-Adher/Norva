@@ -584,7 +584,7 @@ test('production rollout proves the provider circuit protocol on every runtime',
   assert.match(cloud, /relayTakeoverProtocol:\s*1/);
 
   assert.match(deploy, /verify_function_protocol "\$service"/);
-  assert.match(deploy, /EXPECTED_PLAYBACK_VERSION=54/);
+  assert.match(deploy, /EXPECTED_PLAYBACK_VERSION=55/);
   assert.match(deploy, /EXPECTED_ENGINE_TRACK_PROBE_BLOCKING=false/);
   assert.match(deploy, /EXPECTED_EXACT_FILE_CODEC_PROFILE_PROTOCOL=1/);
   assert.match(deploy, /sha256sum "\$path" \| awk/);
