@@ -84,13 +84,13 @@ test('Movie cards and details clean visible titles and never expose a zero ratin
 });
 
 test('cache versions publish the changed phone surfaces', () => {
-  assert.match(appHtml, /main\.css\?v=110/);
+  assert.match(appHtml, /main\.css\?v=113/);
   assert.match(appHtml, /MultiSelect\.js\?v=4/);
   assert.match(appHtml, /ChannelList\.js\?v=49/);
   assert.match(appHtml, /SourceManager\.js\?v=42/);
   assert.match(appHtml, /LiveGuideFusion\.js\?v=29/);
   assert.match(appHtml, /api\.js\?v=84/);
-  assert.match(appHtml, /HomePage\.js\?v=62/);
+  assert.match(appHtml, /HomePage\.js\?v=63/);
   assert.match(appHtml, /LivePage\.js\?v=9/);
   assert.match(appHtml, /MoviesPage\.js\?v=57/);
   assert.match(appHtml, /SeriesPage\.js\?v=56/);

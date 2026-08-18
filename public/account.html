@@ -54,6 +54,7 @@
         }
         body {
             min-height: 100vh;
+            min-height: 100dvh;
             background:
                 radial-gradient(circle at 18% 12%, rgba(33, 212, 253, 0.16), transparent 30%),
                 radial-gradient(circle at 86% 4%, rgba(199, 92, 255, 0.13), transparent 28%),
@@ -61,8 +62,12 @@
             color: var(--text);
             font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
             display: grid;
-            place-items: center;
-            padding: 24px;
+            place-items: start center;
+            overflow-y: auto;
+            padding: max(24px, env(safe-area-inset-top, 0px)) max(24px, env(safe-area-inset-right, 0px)) max(24px, env(safe-area-inset-bottom, 0px)) max(24px, env(safe-area-inset-left, 0px));
+        }
+        @media (min-height: 760px) {
+            body { place-items: center; }
         }
         .shell {
             width: min(960px, 100%);
@@ -143,7 +148,7 @@
             margin-bottom: 22px;
         }
         .tab {
-            min-height: 42px;
+            min-height: 44px;
             border: 0;
             border-radius: 6px;
             color: var(--muted);
@@ -201,7 +206,7 @@
         .ghost {
             color: #a5b4fc;
             background: transparent;
-            min-height: 38px;
+            min-height: 44px;
             margin-top: 6px;
         }
         button:disabled {
@@ -281,7 +286,7 @@
             .lead { margin-top: 12px; margin-bottom: 6px; }
             .panel { padding: 16px; }
             .tabs { gap: 4px; padding: 4px; }
-            .tab { min-height: 38px; font-size: 13px; }
+            .tab { min-height: 44px; font-size: 13px; }
             input { min-height: 44px; }
             .btn { min-height: 44px; }
         }
@@ -289,10 +294,13 @@
            web marketing copy, keep only the logo + the form, and show the
            advantages carousel above it. */
         html.native-app body {
-            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
             gap: 18px; padding: 22px 18px;
             padding-bottom: calc(22px + env(safe-area-inset-bottom, 0px));
             padding-top: calc(22px + env(safe-area-inset-top, 0px));
+        }
+        @media (min-height: 760px) {
+            html.native-app body { justify-content: center; }
         }
         html.native-app .shell { grid-template-columns: 1fr; max-width: 420px; gap: 16px; width: 100%; }
         html.native-app .brand { text-align: center; padding: 0; }
@@ -345,12 +353,16 @@
             font-size: 11px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase;
             color: #d8b4fe; background: rgba(199,92,255,.14); border: 1px solid rgba(199,92,255,.32);
         }
-        .onb-dots { display: flex; justify-content: center; gap: 7px; margin-top: 14px; }
+        .onb-dots { display: flex; justify-content: center; gap: 0; margin-top: 14px; }
         .onb-dots span {
-            width: 7px; height: 7px; border-radius: 999px; background: #334155;
-            transition: width .25s ease, background .25s ease; cursor: pointer;
+            width: 44px; height: 44px; display: grid; place-items: center;
+            background: transparent; cursor: pointer;
         }
-        .onb-dots span.active { width: 22px; background: linear-gradient(135deg, var(--accent), #c75cff); }
+        .onb-dots span::after {
+            content: ""; width: 7px; height: 7px; border-radius: 999px; background: #334155;
+            transition: width .25s ease, background .25s ease;
+        }
+        .onb-dots span.active::after { width: 22px; background: linear-gradient(135deg, var(--accent), #c75cff); }
 
         /* Native compaction: trim vertical space so the default views fit a phone
            without scrolling (Sign in, and Create-account with the carousel + Google
@@ -505,7 +517,7 @@
                 .auth-sub { margin:0; color:var(--muted,#9ca3af); font-size:14px; line-height:1.5; }
                 .auth-hint { display:flex; align-items:center; justify-content:center; gap:6px; color:var(--muted,#9ca3af); font-size:12.5px; margin:10px 0 2px; }
                 .auth-hint svg { color:var(--accent,#7e9bff); flex:0 0 auto; }
-                .linklike { background:none; border:0; color:var(--text,#f8fafc); font-weight:600; font-size:14px; cursor:pointer; padding:8px; width:100%; }
+                .linklike { background:none; border:0; color:var(--text,#f8fafc); font-weight:600; font-size:14px; cursor:pointer; padding:8px; width:100%; min-height:44px; }
                 .linklike:hover { color:var(--accent,#7e9bff); }
                 .social-auth { margin-top: 4px; }
                 .social-auth .divider { display:flex; align-items:center; gap:10px; color:var(--muted,#8a94a7); font-size:12px; margin:14px 0; text-transform:uppercase; letter-spacing:.06em; }

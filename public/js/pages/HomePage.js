@@ -1090,8 +1090,9 @@ class HomePage {
                             <input type="url" id="home-source-url" class="form-input setup-form-input"
                                    placeholder="https://provider.com/get.php?username=…&password=…"
                                    inputmode="url" autocomplete="url" required
-                                   aria-describedby="home-source-url-hint home-source-url-error">
+                                   aria-describedby="home-source-url-hint home-source-find-link home-source-url-error">
                             <p class="setup-form-hint" id="home-source-url-hint">Xtream or M3U — login fills in automatically.</p>
+                            <p class="setup-form-help" id="home-source-find-link">Don’t have the link handy? Check the email or account of your TV service for “M3U” or “Xtream”. You can also search your provider’s name plus “Xtream” or “M3U”.</p>
                             <p class="setup-field-error hidden" id="home-source-url-error"></p>
                         </div>
                         <details class="source-advanced-login setup-manual-login" id="home-source-advanced">
