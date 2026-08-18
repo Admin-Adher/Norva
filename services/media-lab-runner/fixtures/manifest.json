@@ -1,0 +1,68 @@
+{
+  "protocol": 1,
+  "generatorVersion": "mkv-lab-fixtures-v2",
+  "durationSeconds": 8,
+  "fixedMetadata": {
+    "creation_time": "2026-08-17T00:00:00Z",
+    "title": "Norva Media Lab deterministic fixture"
+  },
+  "fixtures": [
+    {
+      "id": "h264-closed-aac",
+      "output": "h264-closed-aac.mkv",
+      "recipe": "h264-closed-aac-v1"
+    },
+    {
+      "id": "h264-closed-ac3",
+      "output": "h264-closed-ac3.mkv",
+      "recipe": "h264-closed-ac3-v1"
+    },
+    {
+      "id": "h264-open-gop",
+      "output": "h264-open-gop.mkv",
+      "recipe": "h264-open-gop-v1"
+    },
+    {
+      "id": "h264-multi-audio",
+      "output": "h264-multi-audio.mkv",
+      "recipe": "h264-multi-audio-v1"
+    },
+    {
+      "id": "hevc-eac3-cold",
+      "output": "hevc-eac3-cold.mkv",
+      "recipe": "hevc-eac3-cold-v1"
+    },
+    {
+      "id": "h264-level52",
+      "output": "h264-level52.mkv",
+      "recipe": "h264-level52-v1"
+    },
+    {
+      "id": "h264-bad-timestamps",
+      "output": "h264-bad-timestamps.mkv",
+      "recipe": "h264-bad-timestamps-v1"
+    },
+    {
+      "id": "h264-pgs",
+      "output": "h264-pgs.mkv",
+      "recipe": "h264-pgs-v1",
+      "requires": ["seeds/bitmap-subtitle.sup"]
+    },
+    {
+      "id": "h264-no-etag",
+      "output": "h264-no-etag.mkv",
+      "recipe": "h264-closed-aac-v1"
+    },
+    {
+      "id": "hevc-full-cache",
+      "output": "hevc-full-cache.mkv",
+      "recipe": "hevc-eac3-cold-v1",
+      "postcondition": "seed-through-dedicated-gateway-cache"
+    },
+    {
+      "id": "provider-458",
+      "output": null,
+      "recipe": "provider-response-only-v1"
+    }
+  ]
+}

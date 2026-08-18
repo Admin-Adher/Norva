@@ -1,0 +1,19 @@
+{
+  "name": "@norva/media-lab-runner",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Private, fixed-corpus MKV strategy runner for Norva QA.",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "fixtures:plan": "node scripts/generate-fixtures.js --plan",
+    "fixtures:generate": "node scripts/generate-fixtures.js --execute",
+    "test": "node --test test/*.test.js"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "dependencies": {
+    "playwright-core": "1.62.0"
+  }
+}

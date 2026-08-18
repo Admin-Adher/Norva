@@ -135,6 +135,7 @@ class AdminPage {
 
     async show() {
         if (!(await this.isAdmin())) { this.app.navigateTo('home'); return; }
+        this._isVisible = true;
         this._ensureLayout();
         // Deep-link / F5: restore the exact CRM view from "#admin/<route>". The app's
         // navigateTo rewrites the hash to "#admin" before we run, so init stashes the
@@ -146,6 +147,7 @@ class AdminPage {
         this._navigate(sub || this._route || 'cockpit');
     }
     hide() {
+        this._isVisible = false;
         clearTimeout(this._partnersSearchDebounce);
         clearTimeout(this._partnersRoutesDebounce);
         clearTimeout(this._partnersPayoutOnboardingDebounce);
@@ -153,6 +155,7 @@ class AdminPage {
         clearTimeout(this._partnersKycCertificationPollTimer);
         this._partnersKycCertificationPollTimer = null;
         this._partnersAbortAll?.();
+        this._mkvStrategyLab?.unmount?.();
     }
 
     // Whitelist CRM routes coming from the URL (never trust a raw hash): static pages by
@@ -162,7 +165,7 @@ class AdminPage {
         r = String(r || '');
         if (['cockpit', 'finance', 'finance/vat', 'finance/promos', 'finance/paiements', 'finance/analyse',
             'marketing', 'marketing/promos', 'marketing/notifs',
-            'clients', 'partners', 'support', 'providers', 'identites', 'moteur', 'systeme', 'telemetrie'].includes(r)) return r;
+            'clients', 'partners', 'support', 'providers', 'identites', 'moteur', 'mkv-lab', 'systeme', 'telemetrie'].includes(r)) return r;
         const m = r.match(/^(client|ticket|partner):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i);
         if (m) return m[1] + ':' + m[2];
         const publicPartner = r.match(/^partner-public:(prt_[0-9a-f]{24})$/);
@@ -182,6 +185,7 @@ class AdminPage {
             { key: 'providers', label: 'Providers', icon: '📡', section: 'Catalogue' },
             { key: 'identites', label: 'Identités', icon: '🧬', section: 'Catalogue' },
             { key: 'moteur', label: 'Moteur', icon: '⚙️', section: 'Catalogue' },
+            { key: 'mkv-lab', label: 'Lab VOD', iconSrc: '/img/icons/norva-movies.svg', section: 'Infra' },
             { key: 'systeme', label: 'Système', icon: '🛡️', section: 'Infra' },
             { key: 'telemetrie', label: 'Télémétrie', icon: '📊', section: 'Infra' }
         ];
@@ -205,8 +209,12 @@ class AdminPage {
         });
         const nav = navSecOrder.map(s =>
             `<div class="crm-nav-sec" aria-hidden="true">${s}</div>` +
-            navBySec[s].map(n =>
-                `<button class="crm-nav-item" data-route="${n.key}" title="${n.label}" aria-label="${n.label}"><span class="ic" aria-hidden="true">${n.icon}</span><span class="lb">${n.label}</span></button>`).join('')
+            navBySec[s].map(n => {
+                const icon = n.iconSrc
+                    ? `<img src="${n.iconSrc}" alt="">`
+                    : n.icon;
+                return `<button class="crm-nav-item" data-route="${n.key}" title="${n.label}" aria-label="${n.label}"><span class="ic" aria-hidden="true">${icon}</span><span class="lb">${n.label}</span></button>`;
+            }).join('')
         ).join('');
         root.innerHTML = `
 <style>
@@ -229,6 +237,7 @@ class AdminPage {
 #page-admin .crm-nav-sec:first-child{padding-top:2px;}
 #page-admin .crm-nav-item{position:relative;display:flex;align-items:center;gap:12px;width:100%;background:none;border:0;color:var(--adm-tx2);padding:10px 12px;border-radius:10px;cursor:pointer;font-size:13.5px;font-weight:500;text-align:left;margin-bottom:3px;transition:background .15s,color .15s,box-shadow .15s;}
 #page-admin .crm-nav-item .ic{font-size:16px;width:20px;text-align:center;opacity:.9;}
+#page-admin .crm-nav-item .ic img{display:block;width:20px;height:20px;object-fit:contain;}
 #page-admin .crm-nav-item:hover{background:rgba(255,255,255,.05);color:var(--adm-tx);}
 #page-admin .crm-nav-item.active{background:linear-gradient(90deg,rgba(91,124,250,.22),rgba(168,85,247,.09));color:#c6d0ff;font-weight:600;box-shadow:inset 0 0 0 1px rgba(120,150,255,.16);}
 #page-admin .crm-nav-item.active .ic{opacity:1;}
@@ -1382,6 +1391,134 @@ class AdminPage {
             }
         } catch (_) { el.innerHTML = ''; }
     }
+    async _ensureMkvStrategyLabAssets() {
+        const stylesheetHref = '/css/mkv-strategy-lab.css?v=7c8b47daf5';
+        const scriptSrc = '/js/pages/MkvStrategyLabPage.js?v=c3e17e6a28';
+        const runtimeScriptSrc = '/js/utils/MkvStrategyLabRuntime.js?v=378dbc7df6';
+        const readyStylesheet = document.querySelector('link[data-norva-asset="mkv-strategy-lab"]');
+        if (window.MkvStrategyLabPage && readyStylesheet?.sheet) return window.MkvStrategyLabPage;
+        if (!this._mkvStrategyLabAssetsLoading) {
+            const loadStylesheet = () => new Promise((resolve, reject) => {
+                let link = document.querySelector('link[data-norva-asset="mkv-strategy-lab"]');
+                let created = false;
+                if (link?.sheet) { resolve(); return; }
+                if (link && !link.sheet && ['failed', 'loaded'].includes(link.dataset?.norvaLoadState)) {
+                    link.remove?.();
+                    link = null;
+                }
+                if (!link) {
+                    link = document.createElement('link');
+                    link.rel = 'stylesheet';
+                    link.href = stylesheetHref;
+                    link.dataset.norvaAsset = 'mkv-strategy-lab';
+                    link.dataset.norvaLoadState = 'loading';
+                    created = true;
+                }
+                link.addEventListener('load', () => {
+                    link.dataset.norvaLoadState = 'loaded';
+                    resolve();
+                }, { once: true });
+                link.addEventListener('error', () => {
+                    link.dataset.norvaLoadState = 'failed';
+                    link.remove?.();
+                    reject(new Error('MKV_LAB_STYLES_FAILED'));
+                }, { once: true });
+                if (created) document.head.appendChild(link);
+            });
+            const loadScript = () => new Promise((resolve, reject) => {
+                if (window.MkvStrategyLabPage) { resolve(); return; }
+                let script = document.querySelector('script[data-norva-asset="mkv-strategy-lab"]');
+                let created = false;
+                if (script && ['failed', 'loaded'].includes(script.dataset?.norvaLoadState)) {
+                    script.remove?.();
+                    script = null;
+                }
+                if (!script) {
+                    script = document.createElement('script');
+                    script.src = scriptSrc;
+                    script.defer = true;
+                    script.dataset.norvaAsset = 'mkv-strategy-lab';
+                    script.dataset.norvaLoadState = 'loading';
+                    created = true;
+                }
+                script.addEventListener('load', () => {
+                    script.dataset.norvaLoadState = 'loaded';
+                    resolve();
+                }, { once: true });
+                script.addEventListener('error', () => {
+                    script.dataset.norvaLoadState = 'failed';
+                    script.remove?.();
+                    reject(new Error('MKV_LAB_SCRIPT_FAILED'));
+                }, { once: true });
+                if (created) document.head.appendChild(script);
+            });
+            const loadRuntimeScript = () => new Promise((resolve, reject) => {
+                if (window.MkvStrategyLabRuntime) { resolve(); return; }
+                let script = document.querySelector('script[data-norva-asset="mkv-strategy-lab-runtime"]');
+                let created = false;
+                if (script?.dataset?.norvaLoadState === 'failed') {
+                    script.remove?.();
+                    script = null;
+                }
+                if (!script) {
+                    script = document.createElement('script');
+                    script.src = runtimeScriptSrc;
+                    script.defer = true;
+                    script.dataset.norvaAsset = 'mkv-strategy-lab-runtime';
+                    script.dataset.norvaLoadState = 'loading';
+                    created = true;
+                }
+                script.addEventListener('load', () => {
+                    script.dataset.norvaLoadState = 'loaded';
+                    resolve();
+                }, { once: true });
+                script.addEventListener('error', () => {
+                    script.dataset.norvaLoadState = 'failed';
+                    script.remove?.();
+                    reject(new Error('MKV_LAB_RUNTIME_SCRIPT_FAILED'));
+                }, { once: true });
+                if (created) document.head.appendChild(script);
+            });
+            const loading = Promise.all([loadStylesheet(), loadScript(), loadRuntimeScript()])
+                .then(() => {
+                    if (!window.MkvStrategyLabPage || !window.MkvStrategyLabRuntime) {
+                        document.querySelector('script[data-norva-asset="mkv-strategy-lab"]')?.remove?.();
+                        document.querySelector('script[data-norva-asset="mkv-strategy-lab-runtime"]')?.remove?.();
+                        throw new Error('MKV_LAB_MODULE_MISSING');
+                    }
+                    return window.MkvStrategyLabPage;
+                })
+                .finally(() => {
+                    if (this._mkvStrategyLabAssetsLoading === loading) this._mkvStrategyLabAssetsLoading = null;
+                });
+            this._mkvStrategyLabAssetsLoading = loading;
+        }
+        return this._mkvStrategyLabAssetsLoading;
+    }
+
+    async _pageMkvStrategyLab() {
+        const nav = this._nav;
+        this._setCrumb('Lab VOD');
+        const view = this._view();
+        view.innerHTML = `<div class="crm-page"><div class="admin-block" role="status" aria-live="polite"><div class="ssub">Chargement du laboratoire QA…</div></div></div>`;
+        try {
+            const LabPage = await this._ensureMkvStrategyLabAssets();
+            if (this._isVisible === false || this._nav !== nav || this._route !== 'mkv-lab') return;
+            if (!this._mkvStrategyLab) {
+                const runtime = this.app?.mkvStrategyLabRuntime || new window.MkvStrategyLabRuntime({
+                    baseUrl: this._sbUrl(),
+                    apiKey: this._sbKey(),
+                    getToken: () => this._token()
+                });
+                this._mkvStrategyLab = new LabPage({ runtime });
+            }
+            this._mkvStrategyLab.mount(view);
+        } catch (_) {
+            if (this._isVisible === false || this._nav !== nav || this._route !== 'mkv-lab') return;
+            view.innerHTML = `<div class="crm-page"><div class="admin-err" role="alert">Le laboratoire QA n’a pas pu être chargé. Aucun test média n’a été lancé.</div></div>`;
+        }
+    }
+
     _view() { return document.getElementById('crm-view'); }
 
     // ── Non-blocking UX primitives (replace native alert/confirm/prompt) ──
@@ -1504,7 +1641,7 @@ class AdminPage {
         if (route.startsWith('partner:') || route.startsWith('partner-public:')) return 'Retour au partenaire';
         return ({ clients: 'Retour aux clients', finance: 'Retour à la finance', cockpit: 'Retour au cockpit',
             systeme: 'Retour au système', identites: 'Retour aux identités', providers: 'Retour aux providers',
-            moteur: 'Retour au moteur', support: 'Retour au support', partners: 'Retour à Partners' })[route] || 'Retour';
+            moteur: 'Retour au moteur', 'mkv-lab': 'Retour au lab VOD', support: 'Retour au support', partners: 'Retour à Partners' })[route] || 'Retour';
     }
 
     _navigate(route) {
@@ -1516,6 +1653,7 @@ class AdminPage {
 
     _navigateImpl(route, navigation) {
         const from = this._route;
+        if (from === 'mkv-lab' && route !== 'mkv-lab') this._mkvStrategyLab?.unmount?.();
         if (from === 'partners' && route !== 'partners') {
             clearTimeout(this._partnersSearchDebounce);
             clearTimeout(this._partnersRoutesDebounce);
@@ -1578,6 +1716,7 @@ class AdminPage {
         else if (route === 'providers') this._pageProviders();
         else if (route === 'identites') this._pageIdentites();
         else if (route === 'moteur') this._pageMoteur();
+        else if (route === 'mkv-lab') this._pageMkvStrategyLab();
         else if (route === 'systeme') this._pageSysteme();
         else if (route === 'telemetrie') this._pageTelemetrie();
         else this._pageCockpit();

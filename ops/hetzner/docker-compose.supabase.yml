@@ -391,6 +391,12 @@ services:
       TMDB_API_KEY: ${TMDB_API_KEY:-}
       NORVA_MEDIA_GATEWAY_URL: ${NORVA_MEDIA_GATEWAY_URL:-}
       NORVA_MEDIA_GATEWAY_TOKEN: ${NORVA_MEDIA_GATEWAY_TOKEN:-}
+      # Private, admin-only fixed-corpus media Lab. All four values are required
+      # together; false/empty keeps the route fail-closed.
+      NORVA_MEDIA_LAB_ENABLED: ${NORVA_MEDIA_LAB_ENABLED:-false}
+      NORVA_MEDIA_LAB_RUNNER_URL: ${NORVA_MEDIA_LAB_RUNNER_URL:-}
+      NORVA_MEDIA_LAB_RUNNER_TOKEN: ${NORVA_MEDIA_LAB_RUNNER_TOKEN:-}
+      NORVA_MEDIA_LAB_ACTOR_HMAC_KEY: ${NORVA_MEDIA_LAB_ACTOR_HMAC_KEY:-}
       # Internal VAD -> ECAPA/sherpa -> Whisper LID worker. Empty keeps the
       # fail-closed cascade rollout inactive even if a DB flag is toggled.
       NORVA_LID_WORKER_URL: ${NORVA_LID_WORKER_URL:-}

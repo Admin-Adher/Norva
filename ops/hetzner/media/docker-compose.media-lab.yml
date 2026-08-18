@@ -1,0 +1,151 @@
+# Private Norva media strategy Lab on the existing Hetzner host.
+# The runner and its dedicated Gateway are internal-only and share neither
+# output, cache nor cryptographic keys with user playback.
+
+name: norva-media-lab
+
+services:
+  gateway:
+    container_name: norva-media-lab-gateway
+    image: ${MEDIA_LAB_GATEWAY_IMAGE:?MEDIA_LAB_GATEWAY_IMAGE is required}
+    pull_policy: never
+    restart: unless-stopped
+    init: true
+    user: "${MEDIA_LAB_UID:-1000}:${MEDIA_LAB_GID:-1000}"
+    devices:
+      - /dev/dri/renderD128:/dev/dri/renderD128
+    group_add:
+      - "${RENDER_GID:?RENDER_GID is required}"
+    cpus: "${MEDIA_LAB_GATEWAY_CPUS:-4.0}"
+    mem_limit: "${MEDIA_LAB_GATEWAY_MEMORY_LIMIT:-6g}"
+    mem_reservation: "${MEDIA_LAB_GATEWAY_MEMORY_RESERVATION:-1g}"
+    pids_limit: 384
+    stop_grace_period: 30s
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    command: ["ionice", "-c2", "-n7", "nice", "-n", "15", "npm", "start"]
+    environment:
+      NODE_ENV: production
+      PORT: 8080
+      OUTPUT_DIR: /var/lib/norva-media-lab/output
+      FFMPEG_PATH: ffmpeg
+      FFPROBE_PATH: ffprobe
+      PUBLIC_BASE_URL: http://norva-media-lab-gateway:8080
+      GATEWAY_TOKEN: ${MEDIA_LAB_GATEWAY_TOKEN:?MEDIA_LAB_GATEWAY_TOKEN is required}
+      NORVA_BACKEND_ORIGINS: http://norva-media-lab-runner:8093
+      # Deliberately unreachable inside this container: Lab profiles are
+      # returned by authenticated DELETE and never callback into production.
+      NORVA_EDGE_CALLBACK_BASE: http://127.0.0.1:9
+      PROVIDER_PROXY_URLS: ""
+      PROVIDER_PROXY_SLOT_OVERRIDES: ""
+      MEDIA_GATEWAY_VIDEO_ENCODER: vaapi
+      MEDIA_GATEWAY_VAAPI_DEVICE: /dev/dri/renderD128
+      MAX_ACTIVE_VIDEO_ENCODER_SESSIONS: "1"
+      MKV_H264_FAST_START_PROOF_HMAC_KEY: ${MEDIA_LAB_FAST_START_HMAC_KEY:?MEDIA_LAB_FAST_START_HMAC_KEY is required}
+      MKV_H264_FAST_START_PROOF_HMAC_PREVIOUS_KEY: ""
+      MKV_COMPLETE_HLS_CACHE_ENABLED: "true"
+      MKV_CACHE_COORDINATION_MODE: local
+      MKV_CACHE_SINGLE_INSTANCE_ATTESTED: "true"
+      MKV_COMPLETE_HLS_CACHE_ROOT: /var/lib/norva-media-lab/cache
+      MKV_COMPLETE_HLS_CACHE_MANIFEST_HMAC_KEY: ${MEDIA_LAB_CACHE_HMAC_KEY:?MEDIA_LAB_CACHE_HMAC_KEY is required}
+      MKV_COMPLETE_HLS_CACHE_TTL_MS: ${MEDIA_LAB_CACHE_TTL_MS:-86400000}
+      MKV_COMPLETE_HLS_CACHE_MAX_BYTES: ${MEDIA_LAB_CACHE_MAX_BYTES:-8589934592}
+      MKV_COMPLETE_HLS_CACHE_MIN_FREE_BYTES: ${MEDIA_LAB_CACHE_MIN_FREE_BYTES:-171798691840}
+      MKV_COMPLETE_HLS_CACHE_MAX_ENTRY_BYTES: ${MEDIA_LAB_CACHE_MAX_ENTRY_BYTES:-2147483648}
+      MKV_COMPLETE_HLS_CACHE_MAX_FILES: ${MEDIA_LAB_CACHE_MAX_FILES:-4000}
+      MKV_COMPLETE_HLS_CACHE_MAX_PLAYLIST_BYTES: ${MEDIA_LAB_CACHE_MAX_PLAYLIST_BYTES:-1048576}
+      MKV_COMPLETE_HLS_CACHE_PRUNE_INTERVAL_MS: ${MEDIA_LAB_CACHE_PRUNE_INTERVAL_MS:-300000}
+    volumes:
+      - ${MEDIA_LAB_GATEWAY_OUTPUT_DIR:-/srv/norva-media-lab/output}:/var/lib/norva-media-lab/output
+      - ${MEDIA_LAB_GATEWAY_CACHE_DIR:-/srv/norva-media-lab/cache}:/var/lib/norva-media-lab/cache
+    networks:
+      - norva-internal
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - >-
+          fetch('http://127.0.0.1:8080/health').then(async (response) => {
+            const body = await response.json();
+            if (!response.ok || body.ok !== true || body.videoEncoder?.backend !== 'vaapi'
+              || body.videoEncoder?.ready !== true || body.mkvCompleteHlsCache?.enabled !== true
+              || body.activeSessions !== 0) process.exit(1);
+          }).catch(() => process.exit(1))
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 120s
+
+  runner:
+    container_name: norva-media-lab-runner
+    build:
+      context: ../../..
+      dockerfile: services/media-lab-runner/Dockerfile
+      args:
+        MEDIA_LAB_RUNNER_SOURCE_SHA: ${MEDIA_LAB_RUNNER_SOURCE_SHA:?MEDIA_LAB_RUNNER_SOURCE_SHA is required}
+    image: ${MEDIA_LAB_RUNNER_IMAGE:?MEDIA_LAB_RUNNER_IMAGE is required}
+    pull_policy: never
+    restart: unless-stopped
+    init: true
+    user: "${MEDIA_LAB_UID:-1000}:${MEDIA_LAB_GID:-1000}"
+    read_only: true
+    tmpfs:
+      - /tmp:size=1073741824,mode=1777
+    shm_size: 512m
+    cpus: "${MEDIA_LAB_RUNNER_CPUS:-2.0}"
+    mem_limit: "${MEDIA_LAB_RUNNER_MEMORY_LIMIT:-3g}"
+    mem_reservation: "${MEDIA_LAB_RUNNER_MEMORY_RESERVATION:-512m}"
+    pids_limit: 384
+    stop_grace_period: 45s
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      NODE_ENV: production
+      HOME: /tmp
+      PORT: 8093
+      MEDIA_LAB_BIND_HOST: 0.0.0.0
+      MEDIA_LAB_ALLOW_REMOTE_BIND: "true"
+      # The Gateway is a separate container. Never let the runner advertise
+      # 127.0.0.1 here, because that would point back at the Gateway itself.
+      MEDIA_LAB_PROVIDER_ORIGIN: http://norva-media-lab-runner:8093
+      MEDIA_LAB_RUNNER_TOKEN: ${MEDIA_LAB_RUNNER_TOKEN:?MEDIA_LAB_RUNNER_TOKEN is required}
+      MEDIA_LAB_GATEWAY_URL: http://norva-media-lab-gateway:8080
+      MEDIA_LAB_GATEWAY_TOKEN: ${MEDIA_LAB_GATEWAY_TOKEN:?MEDIA_LAB_GATEWAY_TOKEN is required}
+      MEDIA_LAB_CHROMIUM_EXECUTABLE_PATH: /usr/bin/chromium
+      MEDIA_LAB_HLS_JS_PATH: /app/vendor/hls.min.js
+      MEDIA_LAB_FIXTURE_ROOT: /app/fixtures/generated
+      MEDIA_LAB_RUN_TIMEOUT_MS: ${MEDIA_LAB_RUN_TIMEOUT_MS:-600000}
+      MEDIA_LAB_GATEWAY_SESSION_TIMEOUT_MS: ${MEDIA_LAB_GATEWAY_SESSION_TIMEOUT_MS:-180000}
+      MEDIA_LAB_BROWSER_TIMEOUT_MS: ${MEDIA_LAB_BROWSER_TIMEOUT_MS:-60000}
+    depends_on:
+      gateway:
+        condition: service_healthy
+    networks:
+      - norva-internal
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - >-
+          fetch('http://127.0.0.1:8093/health', {
+            headers: { Authorization: 'Bearer ' + process.env.MEDIA_LAB_RUNNER_TOKEN }
+          }).then(async (response) => {
+            const body = await response.json();
+            if (!response.ok || body.ok !== true || body.protocol !== 1
+              || body.physicalAdapterReady !== true) process.exit(1);
+          }).catch(() => process.exit(1))
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 45s
+
+networks:
+  norva-internal:
+    external: true
+    name: ${NORVA_DOCKER_NETWORK:-norva_default}
