@@ -151,6 +151,7 @@ test('takeover interrupts a progressive relay response that is already open', as
 test('relay requests prove liveness and HLS descendants preserve the revocable identity', () => {
   const relay = read('services/norva-relay/src/index.js');
   const playback = read('supabase/functions/norva-playback/index.ts');
+  const cloud = read('supabase/functions/norva-cloud/index.ts');
   const cloudApi = read('public/js/cloudApi.js');
   const watch = read('public/js/pages/WatchPage.js');
 
@@ -167,6 +168,7 @@ test('relay requests prove liveness and HLS descendants preserve the revocable i
   assert.match(relay, /relayPlaybackSessionIsActive/);
   assert.match(relay, /classifyRelayPlaybackGeneration/);
   assert.match(relay, /Playback coordinator lock expired/);
+  assert.match(relay, /boundedInt\(body\.lockTtlMs \?\? body\.lock_ttl_ms, 20_000, 2_000, 120_000\)/);
   assert.match(relay, /RELAY_RELEASE_WAIT_MS/);
   assert.match(relay, /relaySessionRevocationProtocol:\s*1/);
   assert.match(relay, /purpose:\s*claims\.purpose/);
@@ -197,6 +199,14 @@ test('relay requests prove liveness and HLS descendants preserve the revocable i
   assert.match(playback, /sealRelayCoordinatorRoute\(runtimeConfig\.relayTokenSecret, coord\)/);
   assert.match(playback, /route,/);
   assert.match(playback, /provider-account:\$\{options\.providerAccountHash\}/);
+  for (const edge of [playback, cloud]) {
+    assert.match(edge, /const EDGE_SESSION_COORDINATOR_LOCK_TTL_MS = 120_000/);
+    const prepare = edge.slice(
+      edge.indexOf('async function prepareEdgeSessionCoordinator('),
+      edge.indexOf('async function commitEdgeSessionCoordinator('),
+    );
+    assert.match(prepare, /lockTtlMs:\s*EDGE_SESSION_COORDINATOR_LOCK_TTL_MS/);
+  }
 
   assert.match(cloudApi, /heartbeatSession:\s*\(id\)\s*=>\s*playbackHeartbeatRequest\(id\)/);
   const heartbeat = cloudApi.slice(

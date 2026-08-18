@@ -93,6 +93,9 @@ const PLAYBACK_EVENT_TYPES = new Set([
   "gateway_error",
   "seek",
 ]);
+// Match norva-playback: Gateway startup is bounded to 60 seconds, but a
+// prepared coordinator claim must also cover provider drain and commit I/O.
+const EDGE_SESSION_COORDINATOR_LOCK_TTL_MS = 120_000;
 
 if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
   throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
@@ -322,9 +325,10 @@ async function route(
       body: {
         ok: true,
         service: "norva-cloud",
-        version: 24,
+        version: 25,
         playbackCreationProtocol: 1,
         relayTakeoverProtocol: 1,
+        relayCoordinatorLockTtlMs: EDGE_SESSION_COORDINATOR_LOCK_TTL_MS,
         entitlements: true,
         entitlementsMode: entitlementRuntime.mode,
         entitlementsEnforced: entitlementRuntime.enforced,
@@ -4018,6 +4022,7 @@ async function prepareEdgeSessionCoordinator(
     itemId: options.itemId,
     targetHash: options.targetUrlHash,
     expiresAt: options.expiresAt,
+    lockTtlMs: EDGE_SESSION_COORDINATOR_LOCK_TTL_MS,
   });
 
   const payload = await requestEdgeCoordinator(runtimeConfig, "/sessions/prepare", body);

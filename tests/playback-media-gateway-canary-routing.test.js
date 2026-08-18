@@ -203,10 +203,10 @@ test('norva-playback persists the chosen gateway identity and routes cleanup by 
   assert.match(edge, /MEDIA_GATEWAY_STORED_ROUTE_UNAVAILABLE/);
   assert.match(edge, /MEDIA_GATEWAY_CANARY_ROUTE_UNAVAILABLE/);
   assert.match(edge, /createBytePipeAccess\([\s\S]*?rawTokenExpiresAt,[\s\S]*?true,[\s\S]*?\);/);
-  assert.match(edge, /version: 55[\s\S]*mediaGatewayCanaryRouting:/);
+  assert.match(edge, /version: 56[\s\S]*mediaGatewayCanaryRouting:/);
 });
 
-test('Edge v55 forwards only admitted copy, complete-cache, or measured VAAPI startup policies', () => {
+test('Edge v56 forwards only admitted copy, complete-cache, or measured VAAPI startup policies', () => {
   const normalize = edgeStartupPolicyNormalizer();
   const base = {
     protocol: 2,
@@ -298,7 +298,7 @@ test('Edge v55 deploy drains one-user routing, upgrades both replicas, and resto
   assert.match(deploy, /h\.vaapiVodFastStart\?\.minimumEncodeRateX === 2/);
   assert.match(deploy, /a7a31dca6004980ca7088eba65f64ba1b691c416faee978d1e560427b7c12546  supabase\/functions\/norva-playback\/index\.ts/);
   assert.match(deploy, /767d3315c950070c93c827adc9c2bc583b17b3adba2a425fa0ca7dbbb1039dda  ops\/hetzner\/scripts\/04-deploy-edge-functions\.sh/);
-  assert.match(reload, /^EXPECTED_PLAYBACK_VERSION=55$/m);
+  assert.match(reload, /^EXPECTED_PLAYBACK_VERSION=56$/m);
 
   const drain = deploy.indexOf("set_canary_selection ''");
   const standby = deploy.indexOf('wait_edge_state 53 standby 0', drain);

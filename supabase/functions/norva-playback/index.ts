@@ -119,6 +119,10 @@ const PROVIDER_NATIVE_TAKEOVER_GRACE_MS = boundedInt(
   0,
   15_000,
 );
+// A Gateway startup may legitimately use its full 60-second startup budget,
+// plus provider-drain and coordinator round trips. Keep the prepared claim
+// alive for that bounded window so a ready Gateway session can still commit.
+const EDGE_SESSION_COORDINATOR_LOCK_TTL_MS = 120_000;
 const PLAYBACK_EVENT_TYPES = new Set([
   "session_created",
   "play_requested",
@@ -215,10 +219,11 @@ Deno.serve(async (req) => {
       return json(req, {
         ok: true,
         service: "norva-playback",
-        version: 55,
+        version: 56,
         nativeHeartbeatProtocol: 1,
         providerCircuitProtocol: 1,
         exactFileCodecProfileProtocol: 1,
+        relayCoordinatorLockTtlMs: EDGE_SESSION_COORDINATOR_LOCK_TTL_MS,
         languageValidationProtocol: LANGUAGE_VALIDATION_PROTOCOL,
         languageValidationPresenceIntentProtocol: 1,
         languageValidationPlaybackLeaseProtocol: 1,
@@ -3977,6 +3982,7 @@ async function prepareEdgeSessionCoordinator(
     playbackCreatedAt: options.playbackCreatedAt,
     supersededSessionIds: options.supersededSessionIds,
     expiresAt: options.expiresAt,
+    lockTtlMs: EDGE_SESSION_COORDINATOR_LOCK_TTL_MS,
   });
 
   const payload = await requestEdgeCoordinator(runtimeConfig, "/sessions/prepare", body);
