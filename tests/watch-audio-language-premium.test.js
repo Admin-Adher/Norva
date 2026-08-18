@@ -79,3 +79,62 @@ test('a rendered movie records one exact-file Whisper intent and submits it only
   const stopBody = source.slice(source.indexOf('    stop({ enqueueStoryboard'), source.indexOf('\n    // === Playback Controls ==='));
   assert.match(stopBody, /sessionTeardown\.then\(\(\) => this\.queueWatchedLanguageValidation/);
 });
+
+test('watched-file Whisper enqueue retries only bounded transient failures', async () => {
+  const { WatchPage, window } = loadWatchPage();
+  const attempts = [];
+  window.NorvaCloud = {
+    playback: {
+      queueLanguageValidation: async body => {
+        attempts.push(body);
+        if (attempts.length === 1) {
+          const error = new Error('temporary upstream timeout');
+          error.status = 500;
+          throw error;
+        }
+        return { protocol: 2, status: 'pending' };
+      },
+    },
+  };
+  const page = Object.create(WatchPage.prototype);
+  const delays = [];
+  page.delayWatchedLanguageValidationRetry = async delayMs => { delays.push(delayMs); };
+  const intent = {
+    sourceId: '3eb5999e-117b-4196-aaaf-4304e80a48ff',
+    itemId: '1014297',
+    expectedAudioIndices: [1],
+  };
+
+  const result = await page.queueWatchedLanguageValidation(intent);
+
+  assert.equal(result.status, 'pending');
+  assert.equal(attempts.length, 2);
+  assert.deepEqual(delays, [5000]);
+});
+
+test('HTTP 458 remains terminal for watched-file Whisper enqueue', async () => {
+  const { WatchPage, window } = loadWatchPage();
+  let attempts = 0;
+  window.NorvaCloud = {
+    playback: {
+      queueLanguageValidation: async () => {
+        attempts += 1;
+        const error = new Error('provider circuit open');
+        error.status = 458;
+        throw error;
+      },
+    },
+  };
+  const page = Object.create(WatchPage.prototype);
+  page.delayWatchedLanguageValidationRetry = async () => {
+    throw new Error('HTTP 458 must never be retried');
+  };
+  const intent = {
+    sourceId: '3eb5999e-117b-4196-aaaf-4304e80a48ff',
+    itemId: '1014297',
+    expectedAudioIndices: [1],
+  };
+
+  await assert.rejects(() => page.queueWatchedLanguageValidation(intent), /provider circuit open/);
+  assert.equal(attempts, 1);
+});

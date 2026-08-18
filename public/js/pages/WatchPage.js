@@ -2564,6 +2564,11 @@ class WatchPage {
             }
         });
         this.rememberWatchedLanguageValidationIntent(playbackAttemptId);
+        // The muxed-mono informational row depends on real decoded-media
+        // evidence. Refresh it at the first rendered frame so an audio menu
+        // opened during startup cannot remain stuck on the earlier fail-closed
+        // placeholder for the rest of the playback.
+        this.updateAudioTracks();
         this.flushDeferredEngineTrackEnrichment(playbackAttemptId);
         return true;
     }
@@ -2597,7 +2602,38 @@ class WatchPage {
         return this._watchedLanguageValidationIntent;
     }
 
-    async queueWatchedLanguageValidation(intent) {
+    watchedLanguageValidationRetryDelayMs(error, retryCount = 0) {
+        if (!Number.isInteger(retryCount) || retryCount < 0 || retryCount >= 3) return null;
+        const status = Number(error?.status || 0);
+        // HTTP 458 remains terminal everywhere. This retry lane is limited to
+        // background enqueue contention/outages and can never reopen playback.
+        if (status === 458) return null;
+        const code = String(
+            error?.code || error?.payload?.errorCode || error?.payload?.code
+            || error?.payload?.details?.code || ''
+        ).trim().toUpperCase();
+        const transientConflict = status === 409 && [
+            'LANGUAGE_VALIDATION_JOB_BUSY',
+            'LANGUAGE_VALIDATION_PLAYBACK_ACTIVE',
+            'PROVIDER_ACCOUNT_BUSY',
+        ].includes(code);
+        const transientServer = [500, 502, 503, 504].includes(status);
+        const retryAfterSeconds = Number(error?.payload?.retryAfterSeconds);
+        const boundedRetryAfterMs = Number.isFinite(retryAfterSeconds)
+            && retryAfterSeconds > 0
+            && retryAfterSeconds <= 60
+            ? Math.ceil(retryAfterSeconds * 1000)
+            : null;
+        if (status === 429 && boundedRetryAfterMs === null) return null;
+        if (!transientConflict && !transientServer && status !== 429) return null;
+        return boundedRetryAfterMs ?? Math.min(30_000, 5_000 * (2 ** retryCount));
+    }
+
+    delayWatchedLanguageValidationRetry(delayMs) {
+        return new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+
+    async queueWatchedLanguageValidation(intent, retryCount = 0) {
         if (!intent || !window.NorvaCloud?.playback?.queueLanguageValidation) return null;
         let sourceId = String(intent.sourceId || '');
         if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(sourceId)
@@ -2607,12 +2643,19 @@ class WatchPage {
         if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(sourceId)) {
             return null;
         }
-        return window.NorvaCloud.playback.queueLanguageValidation({
-            sourceId,
-            itemType: 'movie',
-            itemId: String(intent.itemId),
-            expectedAudioIndices: [...intent.expectedAudioIndices],
-        });
+        try {
+            return await window.NorvaCloud.playback.queueLanguageValidation({
+                sourceId,
+                itemType: 'movie',
+                itemId: String(intent.itemId),
+                expectedAudioIndices: [...intent.expectedAudioIndices],
+            });
+        } catch (error) {
+            const delayMs = this.watchedLanguageValidationRetryDelayMs(error, retryCount);
+            if (delayMs === null) throw error;
+            await this.delayWatchedLanguageValidationRetry(delayMs);
+            return this.queueWatchedLanguageValidation(intent, retryCount + 1);
+        }
     }
 
     cancelDeferredEngineTrackEnrichment() {
