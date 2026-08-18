@@ -606,6 +606,69 @@ test('cold offset-zero MKV accepts one exact HTTP 200 body without losing pre-re
     assert.equal(tracker.active, 0);
 });
 
+test('known-size cold MKV accepts chunked HTTP 200 only after exact EOF', async () => {
+    const fixture = mkvFixture(103);
+    const tracker = makeTracker();
+    let fetches = 0;
+    const h = pumpHarness({
+        fetch: async (_url, options) => {
+            fetches += 1;
+            tracker.calls.push(options.headers);
+            return trackedResponse(tracker, {
+                status: 200,
+                chunks: [fixture.subarray(0, 3), fixture.subarray(3, 29), fixture.subarray(29)],
+                headers: { ETag: '"known-size-chunked-v1"' },
+            });
+        },
+    });
+    const session = mkvSession(fixture.length);
+
+    await h.ensureBoundedMkvInputPump(session);
+    const writable = new CapturingWritable();
+    const result = await h.runBoundedMkvInputPump(
+        session,
+        writable,
+        new AbortController().signal,
+        null,
+    );
+
+    assert.equal(fetches, 1);
+    assert.equal(session.startupTimings.providerFullBodyAtZero, true);
+    assert.equal(session.startupTimings.providerFullBodyBoundary, 'known-size-exact-eof');
+    assert.equal(result.bytesForwarded, fixture.length);
+    assert.deepEqual(writable.bytes(), fixture);
+    assert.equal(tracker.maxActive, 1);
+    assert.equal(tracker.active, 0);
+});
+
+test('known-size chunked HTTP 200 rejects an extra byte beyond the exact boundary', async () => {
+    const fixture = mkvFixture(81);
+    const tracker = makeTracker();
+    let fetches = 0;
+    const h = pumpHarness({
+        fetch: async () => {
+            fetches += 1;
+            return trackedResponse(tracker, {
+                status: 200,
+                chunks: [fixture, Buffer.from([0xff])],
+                headers: { ETag: '"known-size-too-long"' },
+            });
+        },
+    });
+
+    await assert.rejects(
+        h.runBoundedMkvInputPump(
+            mkvSession(fixture.length),
+            new CapturingWritable(),
+            new AbortController().signal,
+            null,
+        ),
+        (error) => error?.code === 'RANGE_UNSUPPORTED' && error?.status === 502,
+    );
+    assert.equal(fetches, 1);
+    assert.equal(tracker.active, 0);
+});
+
 test('HTTP 200 full-body fallback stays fail-closed outside an exact offset-zero MKV', async (t) => {
     const fixture = mkvFixture(64);
 
@@ -613,6 +676,7 @@ test('HTTP 200 full-body fallback stays fail-closed outside an exact offset-zero
         {
             name: 'missing Content-Length',
             headers: { ETag: '"missing-length"' },
+            unknownSize: true,
             expectedCode: 'RANGE_UNSUPPORTED',
         },
         {
@@ -645,13 +709,21 @@ test('HTTP 200 full-body fallback stays fail-closed outside an exact offset-zero
                     });
                 },
             });
-            await assert.rejects(
-                h.runBoundedMkvInputPump(
-                    mkvSession(fixture.length),
+            const session = mkvSession(fixture.length);
+            if (scenario.unknownSize) {
+                delete session.fileSizeBytes;
+                delete session.codecProfile.fileSizeBytes;
+            }
+            const operation = scenario.unknownSize
+                ? h.ensureBoundedMkvInputPump(session)
+                : h.runBoundedMkvInputPump(
+                    session,
                     writable,
                     new AbortController().signal,
                     null,
-                ),
+                );
+            await assert.rejects(
+                operation,
                 (error) => error?.code === scenario.expectedCode && error?.status === 502,
             );
             assert.equal(fetches, 1);

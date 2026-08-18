@@ -1731,7 +1731,7 @@ if (
 }
 const MULTI_AUDIO_HLS_PROTOCOL = 1;
 const MAX_MULTI_AUDIO_RENDITIONS = 8;
-const GATEWAY_VERSION = 110;
+const GATEWAY_VERSION = 111;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -1859,6 +1859,7 @@ app.get('/health', (req, res) => {
         knownVodInputAnalyzeDurationUs: KNOWN_VOD_INPUT_ANALYZE_DURATION_US,
         knownVodInputProbeSizeBytes: KNOWN_VOD_INPUT_PROBE_SIZE_BYTES,
         finiteMkvFullBodyAtZeroFallback: true,
+        finiteMkvFullBodyKnownSizeExactEof: true,
         exactFileCodecProfileProtocol: 1,
         exactMatroskaH264ReencodeProtocol: 1,
         exactMatroskaH264HlsTargetSeconds: EXACT_MATROSKA_H264_HLS_TARGET_SECONDS,
@@ -8658,16 +8659,52 @@ function parseBoundedProviderContentRange(response, expectedStart, maximumReques
 // object. That response is safe to retain only for byte zero: Content-Length
 // becomes the immutable boundary and the pump verifies exact EOF. It must never
 // be used for a seek/reconnect because HTTP 200 provides no offset authority.
-function parseFullBodyProviderResponse(response) {
+function parseFullBodyProviderResponse(response, expectedTotal = null) {
     if (Number(response?.status) !== 200) return null;
     if (String(response?.headers?.get?.('content-range') || '').trim()) return null;
     const declaredLength = String(response?.headers?.get?.('content-length') || '').trim();
-    if (!/^\d+$/.test(declaredLength)) return null;
-    const total = normalizeFileSizeBytes(declaredLength);
+    const normalizedExpectedTotal = normalizeFileSizeBytes(expectedTotal);
+    if (declaredLength && !/^\d+$/.test(declaredLength)) return null;
+    const declaredTotal = declaredLength ? normalizeFileSizeBytes(declaredLength) : null;
+    const total = declaredTotal || normalizedExpectedTotal;
     if (!total || total < 4) return null;
     const contentEncoding = String(response?.headers?.get?.('content-encoding') || '').trim().toLowerCase();
     if (contentEncoding && contentEncoding !== 'identity') return null;
-    return { start: 0, end: total - 1, total, fullBody: true };
+    return {
+        start: 0,
+        end: total - 1,
+        total,
+        fullBody: true,
+        fullBodyBoundary: declaredTotal ? 'content-length' : 'known-size-exact-eof',
+        fullBodyRequiresExactEof: !declaredTotal,
+    };
+}
+
+async function requireFullBodyExactEof(attempt, parentSignal) {
+    while (true) {
+        const next = await readRawPrefixChunk(
+            attempt.reader,
+            parentSignal,
+            VOD_INPUT_IDLE_TIMEOUT_MS,
+        );
+        if (next.aborted || parentSignal?.aborted) throw abortedVodInputPumpError();
+        if (next.timedOut) {
+            throw vodInputPumpError(
+                'PROVIDER_IDLE_TIMEOUT',
+                'Provider did not finish the MKV response at its exact known size.',
+                { status: 504, retryable: true },
+            );
+        }
+        if (next.error) throw classifyVodInputFetchError(next.error, false);
+        if (next.done) return;
+        if (Number(next.value?.byteLength || next.value?.length || 0) > 0) {
+            throw vodInputPumpError(
+                'RANGE_UNSUPPORTED',
+                'Provider exceeded the exact known MKV file size.',
+                { status: 502 },
+            );
+        }
+    }
 }
 
 async function primeFullBodyMatroskaAttempt(attempt, parentSignal) {
@@ -9024,7 +9061,7 @@ async function openBoundedVodInputAttempt(session, offset, parentSignal, dispatc
         if (parentSignal?.aborted) throw abortedVodInputPumpError();
         const allowFullBodyAtZero = options.allowFullBodyAtZero === true && offset === 0;
         let range = allowFullBodyAtZero
-            ? parseFullBodyProviderResponse(attempt.response)
+            ? parseFullBodyProviderResponse(attempt.response, fileSizeBytes)
             : null;
         if (attempt.response.status !== 206 && !range) {
             if (
@@ -9145,6 +9182,7 @@ async function preopenBoundedMkvInputPump(session, parentSignal = null, options 
         session.startupTimings = asRecord(session.startupTimings);
         session.startupTimings.providerValidatorEvidence = validatorEvidence;
         session.startupTimings.providerFullBodyAtZero = opened.range.fullBody === true;
+        session.startupTimings.providerFullBodyBoundary = opened.range.fullBodyBoundary || null;
 
         if (drainExactRange) {
             const expectedBytes = opened.range.end - opened.range.start + 1;
@@ -9958,6 +9996,8 @@ async function runBoundedMkvInputPump(session, writable, signal, dispatcher) {
                     'Provider ended the MKV byte range before its declared boundary.',
                     { status: 502, networkCause: 'premature_eof', retryable: true },
                 );
+            } else if (range.fullBodyRequiresExactEof === true) {
+                await requireFullBodyExactEof(attempt, signal);
             }
         } catch (error) {
             failure = error;
@@ -9966,6 +10006,9 @@ async function runBoundedMkvInputPump(session, writable, signal, dispatcher) {
         }
 
         if (signal.aborted || failure?.code === 'VOD_INPUT_ABORTED') throw abortedVodInputPumpError();
+        // Exact-EOF validation happens after the final expected byte. Never let
+        // the size-complete branch swallow an overrun, timeout, or read error.
+        if (failure && offset >= fileSizeBytes) throw failure;
         if (offset >= fileSizeBytes) break;
         if (failure && failure.retryable !== true) throw failure;
 
