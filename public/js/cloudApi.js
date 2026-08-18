@@ -3987,7 +3987,15 @@
         } catch (error) {
             const payload = error?.payload;
             if (!payload || typeof payload !== 'object') throw error;
-            requireLanguageValidationProtocol(payload);
+            try {
+                requireLanguageValidationProtocol(payload);
+            } catch (protocolError) {
+                // Keep the transport status when an upstream/error proxy returns
+                // malformed JSON. Background callers can then apply their bounded
+                // outage retry policy, while the payload still fails protocol 2.
+                protocolError.status = error?.status;
+                throw protocolError;
+            }
             if (payload.status === 'failed') {
                 const rejected = languageValidationClientError(
                     String(payload.errorCode || 'LANGUAGE_VALIDATION_FAILED'),

@@ -194,6 +194,23 @@ test('undeployed playback route fails closed without legacy fallback', async () 
   assert.match(requests[0].url, /\/norva-playback\/playback\/language-validation$/);
 });
 
+test('malformed upstream errors preserve HTTP status for bounded background retries', async () => {
+  const payload = {
+    error: 'Unable to start strict language validation',
+    details: { message: 'The upstream server is timing out' },
+  };
+  const { window } = loadCloudClient(async () => jsonResponse(500, payload));
+
+  await assert.rejects(
+    window.NorvaCloud.playback.queueLanguageValidation(body),
+    (error) => (
+      error?.code === 'LANGUAGE_VALIDATION_PROTOCOL_INVALID' &&
+      error?.status === 500 &&
+      error?.payload === payload
+    ),
+  );
+});
+
 test('every success, pending and failed payload must use protocol 2 exactly', async () => {
   for (const payload of [
     { status: 'verified', audioTracks: [] },
