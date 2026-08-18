@@ -249,6 +249,14 @@ class HomePage {
                     this.loadDashboardData();
                     return;
                 }
+                if (e.target.closest('[data-open-live]')) {
+                    this.app?.navigateTo?.('live');
+                    return;
+                }
+                if (e.target.closest('[data-open-movies]')) {
+                    this.app?.navigateTo?.('movies');
+                    return;
+                }
                 if (e.target.closest('[data-ecosystem-dismiss]')) {
                     try { localStorage.setItem('norva-ecosystem-card-dismissed-v1', '1'); } catch (_) { /* best effort */ }
                     document.getElementById('home-ecosystem')?.classList.add('hidden');
@@ -548,6 +556,7 @@ class HomePage {
                 }
 
                 this.clearSetupGate();
+                this.renderImportRibbon(sourceSummary);
 
                 const [historyResult, railsResult, favoritesResult] = await Promise.allSettled([
                     historyP,
@@ -617,34 +626,34 @@ class HomePage {
             const manager = this.app?.sourceManager || window.app?.sourceManager;
             const source = this.syncingSourceFromSummary(summary);
             const preparation = manager?.catalogPreparationView?.(source || {});
-            const counts = preparation?.counts || {};
             const progress = preparation?.progress || {};
-            const fmt = (n) => preparation?.formatCount?.(n) || String(Number(n) || 0);
             const percent = Math.max(0, Math.min(100, Math.round(Number(progress.percent) || 0)));
-            const ready = [];
-            if (Number(counts.movies) > 0) ready.push(`${fmt(counts.movies)} movies`);
-            if (Number(counts.live) > 0) ready.push(`${fmt(counts.live)} live channels`);
-            if (Number(counts.series) > 0) ready.push(`${fmt(counts.series)} series`);
-            const readyLine = ready.length
-                ? `${ready.join(' · ')} already available — open Movies, Live TV or Series while Home finishes building.`
-                : 'Your channels and movies will appear here shortly.';
-            // The syncing placeholder used to be STATIC: nothing refreshed it when the
-            // finalize completed, so the user stared at a frozen percent until a manual
-            // reload. Poll the same way the setup gate does (bounded, self-clearing).
+            const policy = window.NorvaSourceHealth?.catalogAvailability?.(summary) || {};
+            const liveReady = policy.categories?.live === true;
+            const moviesReady = policy.categories?.movies === true;
             if (!this.setupRefreshTimer) {
                 this.setupRefreshTimer = setTimeout(() => {
                     this.setupRefreshTimer = null;
                     if (this.app?.currentPage !== 'home') return;
                     this.lastLoadedAt = 0;
                     this.loadDashboardData();
-                }, 6000);
+                }, 4000);
             }
             return `
-                <section class="dashboard-section">
-                    <div class="empty-state hint home-sync-hint home-state-panel" role="status" aria-live="polite">
-                        <strong>Preparing your Home${percent ? ` — ${percent}%` : ''}</strong>
-                        <p>${this.escapeHtml(readyLine)}</p>
+                <section class="norva-setup-building norva-setup-building-home home-sync-hint home-state-panel" role="status" aria-live="polite">
+                    <div class="norva-setup-building-copy">
+                        <p class="norva-setup-kicker">${liveReady ? 'Live is ready' : 'Building your cinema'}</p>
+                        <h2>${liveReady ? 'Your channels are ready' : 'Titles are arriving'}</h2>
+                        <p>${liveReady
+                            ? 'Open Live now. Movies and series unlock as the first titles land.'
+                            : 'Live unlocks first. Movies follow as soon as the first titles are ready.'}</p>
+                        <div class="norva-setup-building-actions">
+                            ${liveReady ? '<button type="button" class="btn btn-primary" data-open-live>Open Live</button>' : ''}
+                            ${moviesReady ? '<button type="button" class="btn btn-secondary" data-open-movies>Open Movies</button>' : ''}
+                        </div>
                     </div>
+                    ${this.renderSetupPosterStrip()}
+                    ${this.renderSetupProgressBar(percent)}
                 </section>
             `;
         }
@@ -889,35 +898,63 @@ class HomePage {
         // renderSetupSyncingGate above, which schedules its own 4s poll.)
     }
 
+    renderSetupPosterStrip() {
+        return `
+            <div class="norva-setup-poster-row" aria-hidden="true">
+                ${Array.from({ length: 7 }, () => '<span class="norva-setup-poster"></span>').join('')}
+            </div>
+        `;
+    }
+
+    renderSetupProgressBar(percent = 0) {
+        const value = Math.max(0, Math.min(100, Math.round(Number(percent) || 0)));
+        return `
+            <div class="norva-setup-building-meter" role="progressbar" aria-valuemin="0" aria-valuemax="100"${value ? ` aria-valuenow="${value}"` : ''} aria-label="Catalog import progress">
+                <span style="width:${value}%"></span>
+            </div>
+            <p class="norva-setup-building-status">${value ? `${value}% · Live first, then movies` : 'Connecting to your TV service'}</p>
+        `;
+    }
+
+    renderImportRibbon(summary = {}) {
+        const host = document.getElementById('home-content');
+        if (!host) return;
+        host.querySelector('#home-import-ribbon')?.remove();
+        const policy = window.NorvaSourceHealth?.catalogAvailability?.(summary);
+        if (!policy?.backgrounding) return;
+        const ribbon = document.createElement('div');
+        ribbon.id = 'home-import-ribbon';
+        ribbon.className = 'norva-setup-import-ribbon';
+        ribbon.setAttribute('role', 'status');
+        ribbon.textContent = 'Still adding the rest of your library in the background.';
+        host.prepend(ribbon);
+    }
+
     renderSetupSyncingGate(container, summary = {}) {
         const manager = this.app?.sourceManager || window.app?.sourceManager;
         const source = this.syncingSourceFromSummary(summary);
         const type = source?.type || source?.source_type || source?.sourceType || 'xtream';
         const preparation = manager?.catalogPreparationView?.(source || {}, type);
         const sourceView = preparation?.source || source || {};
-        const progressHtml = preparation?.render?.() || this.renderSetupSyncFallback(summary);
+        const percent = Math.max(0, Math.min(100, Math.round(Number(preparation?.progress?.percent) || 0)));
 
         container.innerHTML = `
-            <section class="norva-setup-gate norva-setup-sync-embedded" data-setup-state="syncing">
-                <div class="norva-setup-sync-copy">
-                    <div class="norva-setup-kicker">Norva setup</div>
-                    <h1>Preparing your catalog</h1>
-                    <p>Norva is importing your TV service and unlocking Home, Live TV, Movies and Series as soon as the catalog is ready.</p>
+            <section class="norva-setup-gate norva-setup-building norva-setup-sync-embedded" data-setup-state="syncing">
+                <div class="norva-setup-building-copy">
+                    <div class="norva-setup-kicker">Building your cinema</div>
+                    <h1>Your channels and titles are arriving</h1>
+                    <p>Live unlocks first. Movies follow as soon as the first titles are ready.</p>
+                    ${this.renderSetupProgressBar(percent)}
                     <div class="norva-setup-actions">
-                        <button class="btn btn-primary" id="norva-setup-sync-refresh">Refresh progress</button>
-                        <button class="btn btn-secondary" id="norva-setup-sync-settings">TV Service settings</button>
+                        <button class="btn btn-secondary" id="norva-setup-sync-settings" type="button">TV Service settings</button>
                     </div>
                 </div>
                 <div class="norva-setup-sync-panel" aria-label="Catalog import progress">
-                    ${progressHtml}
+                    ${this.renderSetupPosterStrip()}
                 </div>
             </section>
         `;
 
-        container.querySelector('#norva-setup-sync-refresh')?.addEventListener('click', () => {
-            this.lastLoadedAt = 0;
-            this.loadDashboardData();
-        });
         container.querySelector('#norva-setup-sync-settings')?.addEventListener('click', () => {
             this.app?.navigateTo?.('settings');
             setTimeout(() => this.app?.pages?.settings?.switchTab?.('sources'), 0);
@@ -1044,26 +1081,26 @@ class HomePage {
         container.innerHTML = `
             <section class="norva-setup-gate norva-setup-connect" data-setup-state="not_configured" data-paired-screen="false">
                 <div class="norva-setup-connect-card">
-                    <div class="norva-setup-kicker">Account created · One step to watch</div>
-                    <h1>Connect your TV service to start watching</h1>
-                    <p>Paste the complete link from the TV service you already use — Norva reads it and builds your catalog automatically. No card needed to connect; you only add your own authorized source.</p>
+                    <div class="norva-setup-kicker">One step to watch</div>
+                    <h1>Paste your TV service link</h1>
+                    <p>We’ll organize your catalog. Nothing else.</p>
                     <form class="norva-setup-inline-form" id="home-tv-service-form" autocomplete="off" novalidate>
                         <div class="form-group">
-                            <label for="home-source-url">Provider URL or complete Xtream link</label>
+                            <label for="home-source-url">Xtream or M3U link</label>
                             <input type="url" id="home-source-url" class="form-input setup-form-input"
-                                   placeholder="https://provider.com/get.php?username=...&password=..."
+                                   placeholder="https://provider.com/get.php?username=…&password=…"
                                    inputmode="url" autocomplete="url" required
                                    aria-describedby="home-source-url-hint home-source-url-error">
-                            <p class="setup-form-hint" id="home-source-url-hint">If you paste a full Xtream link, Norva will fill the login fields automatically.</p>
+                            <p class="setup-form-hint" id="home-source-url-hint">Xtream or M3U — login fills in automatically.</p>
                             <p class="setup-field-error hidden" id="home-source-url-error"></p>
                         </div>
-                        <div class="form-group setup-service-name-group">
-                            <label for="home-source-name">Service name <span class="label-optional">(optional)</span></label>
-                            <input type="text" id="home-source-name" class="form-input setup-form-input" placeholder="Family TV" autocomplete="off">
-                        </div>
                         <details class="source-advanced-login setup-manual-login" id="home-source-advanced">
-                            <summary>Enter server login manually</summary>
-                            <p class="setup-form-hint">Auto-filled when a complete link is pasted above.</p>
+                            <summary>Name or login manually</summary>
+                            <p class="setup-form-hint">Optional. Auto-filled when a complete link is pasted above.</p>
+                            <div class="form-group setup-service-name-group">
+                                <label for="home-source-name">Service name <span class="label-optional">(optional)</span></label>
+                                <input type="text" id="home-source-name" class="form-input setup-form-input" placeholder="Family TV" autocomplete="off">
+                            </div>
                             <div class="setup-manual-grid">
                                 <div class="form-group">
                                     <label for="home-source-username">Username</label>
@@ -1081,15 +1118,9 @@ class HomePage {
                             </div>
                         </details>
                         <div class="norva-setup-error hidden" id="home-tv-service-error" role="alert" aria-atomic="true" tabindex="-1"></div>
-                        <button class="btn btn-primary norva-setup-submit" id="home-tv-service-submit" type="submit">Connect TV Service</button>
+                        <button class="btn btn-primary norva-setup-submit" id="home-tv-service-submit" type="submit">Connect</button>
                     </form>
                 </div>
-                <aside class="norva-setup-progress-panel" aria-label="Norva setup progress">
-                    <div class="norva-setup-progress-kicker">Progress panel</div>
-                    <div class="norva-setup-progress-list" role="list">
-                        ${steps.map((step, index) => this.renderSetupProgressStep(step, index)).join('')}
-                    </div>
-                </aside>
             </section>
         `;
         this.bindSetupConnectionForm(container);

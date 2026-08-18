@@ -2348,7 +2348,8 @@ video::cue {
 .norva-setup-connect {
   position: relative;
   min-height: calc(100dvh - 92px);
-  grid-template-columns: minmax(360px, 0.95fr) minmax(320px, 0.72fr);
+  grid-template-columns: minmax(0, 560px);
+  justify-content: center;
   align-items: center;
   background:
     linear-gradient(135deg, rgba(20, 52, 112, 0.88), rgba(11, 16, 31, 0.96)),
@@ -2557,6 +2558,112 @@ video::cue {
   font-weight: 900;
 }
 
+.norva-setup-building {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xl);
+  padding: clamp(24px, 5vw, 56px) clamp(16px, 4vw, 48px);
+  background: var(--color-bg-primary);
+}
+
+.norva-setup-building-copy {
+  max-width: 640px;
+}
+
+.norva-setup-building-copy h1,
+.norva-setup-building-copy h2 {
+  margin: 0 0 var(--space-sm);
+  font-family: var(--font-display, inherit);
+  font-size: clamp(1.8rem, 4vw, 3rem);
+  line-height: 1.05;
+  color: var(--color-text-primary);
+}
+
+.norva-setup-building-copy p {
+  margin: 0 0 var(--space-md);
+  color: var(--color-text-secondary);
+  font-size: 1rem;
+  line-height: 1.5;
+}
+
+.norva-setup-building-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-md);
+  margin-bottom: var(--space-sm);
+}
+
+.norva-setup-building-actions .btn {
+  min-height: 44px;
+}
+
+.norva-setup-building-meter {
+  width: min(420px, 100%);
+  height: 6px;
+  border-radius: 999px;
+  background: var(--color-bg-tertiary);
+  overflow: hidden;
+}
+
+.norva-setup-building-meter span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--color-accent);
+  transition: width .4s ease;
+}
+
+.norva-setup-building-status {
+  margin: var(--space-sm) 0 0;
+  color: var(--color-text-muted);
+  font-size: 0.86rem;
+}
+
+.norva-setup-poster-row {
+  display: flex;
+  gap: var(--space-sm);
+  overflow: hidden;
+}
+
+.norva-setup-poster {
+  flex: 0 0 auto;
+  width: 92px;
+  height: 138px;
+  border-radius: var(--radius-md);
+  background: var(--color-bg-tertiary);
+  animation: norva-setup-pulse 1.4s ease-in-out infinite;
+}
+
+.norva-setup-poster:nth-child(2) { animation-delay: .1s; }
+.norva-setup-poster:nth-child(3) { animation-delay: .2s; }
+.norva-setup-poster:nth-child(4) { animation-delay: .3s; }
+.norva-setup-poster:nth-child(5) { animation-delay: .4s; }
+
+@keyframes norva-setup-pulse {
+  0%, 100% { opacity: .45; }
+  50% { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .norva-setup-poster { animation: none; }
+  .norva-setup-building-meter span { transition: none; }
+}
+
+.norva-setup-import-ribbon {
+  margin: 0 0 var(--space-md);
+  padding: 10px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-secondary);
+  font-size: 0.88rem;
+}
+
+.norva-setup-building-home {
+  min-height: auto;
+  padding: var(--space-lg) 0 var(--space-xl);
+}
+
 .norva-setup-progress-panel {
   display: flex;
   flex-direction: column;
@@ -2623,9 +2730,10 @@ video::cue {
 #page-home.home-setup-connect-active .norva-setup-connect {
   height: calc(100dvh - 92px);
   min-height: 0;
-  grid-template-columns: minmax(420px, 0.92fr) minmax(320px, 0.68fr);
-  gap: clamp(28px, 5vw, 96px);
-  padding: clamp(16px, 2.4vh, 34px) clamp(28px, 5vw, 92px);
+  grid-template-columns: minmax(0, 560px);
+  justify-content: center;
+  gap: 0;
+  padding: clamp(16px, 2.4vh, 34px) clamp(20px, 5vw, 92px);
 }
 
 #page-home.home-setup-connect-active .norva-setup-connect-card {

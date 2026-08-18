@@ -46,6 +46,17 @@ test('first-source form exposes field errors and focuses recovery', () => {
   assert.match(home, /manager\.buildSourceConnection\(/);
   assert.match(home, /manager\.confirmLargePlaylistIfNeeded\(payload\)/);
   assert.match(home, /submit\.setAttribute\('aria-busy', 'true'\)/);
+  assert.match(home, /Paste your TV service link/);
+  assert.match(home, />Connect</);
+});
+
+test('onboarding import uses a cinema-building surface instead of an ops dashboard', () => {
+  assert.match(home, /Building your cinema/);
+  assert.match(home, /renderSetupPosterStrip/);
+  assert.match(home, /data-open-live/);
+  assert.match(home, /home-import-ribbon/);
+  assert.doesNotMatch(home, /Preparing your catalog/);
+  assert.doesNotMatch(home, /Progress panel/);
 });
 
 test('catalog preparation modal shares focus, Back and inert hygiene', () => {
@@ -70,9 +81,9 @@ test('setup visuals reuse Norva assets and ship cache-busted', () => {
   assert.match(shell, /class="tc-intro-icon" src="\/img\/icons\/norva-movies\.svg/);
   assert.match(shell, /class="tc-intro-icon" src="\/img\/icons\/norva-settings\.svg/);
   assert.doesNotMatch(shell, /<div class="tc-intro-icon">/);
-  assert.match(shell, /main\.css\?v=109/);
+  assert.match(shell, /main\.css\?v=110/);
   assert.match(shell, /sourceHealth\.js\?v=11/);
   assert.match(shell, /SourceManager\.js\?v=42/);
-  assert.match(shell, /HomePage\.js\?v=61/);
+  assert.match(shell, /HomePage\.js\?v=62/);
   assert.match(shell, /app\.js\?v=2c1d21d360/);
 });
