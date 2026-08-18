@@ -219,7 +219,7 @@ Deno.serve(async (req) => {
       return json(req, {
         ok: true,
         service: "norva-playback",
-        version: 58,
+        version: 59,
         nativeHeartbeatProtocol: 1,
         providerCircuitProtocol: 1,
         vodContainerSelfHealProtocol: 1,
@@ -4442,10 +4442,34 @@ async function resolvePlaybackTarget(
   const ownedCompleteHlsCacheProof = normalizeMkvH264FastStartProof(
     ownedCodecProfile.mkvCompleteHlsCacheProof ?? ownedCodecProfile.mkv_complete_hls_cache_proof,
   );
+  // Playback-produced codec evidence is stored on the exact variant row. The
+  // per-item and global catalogue mirrors may legitimately lag that row, as
+  // happened for Amar (catalogue MP4, exact Gateway probe AVI/MPEG-4/AC-3).
+  // Load only the authenticated owner's exact file tuple and accept it as
+  // routing authority only when the full reliable profile contract holds.
+  let exactVariantCodecProfile: JsonRecord = {};
+  if (itemType === "movie") {
+    const { data: variants, error: variantError } = await db
+      .from("cloud_title_variants")
+      .select("codec_profile")
+      .eq("user_id", userId)
+      .eq("source_id", sourceId)
+      .eq("item_type", "movie")
+      .eq("external_id", itemId)
+      .limit(2);
+    if (variantError) {
+      console.warn("[norva-playback] unable to load exact playback variant profile", variantError.message);
+    } else if (Array.isArray(variants) && variants.length === 1) {
+      const candidate = firstUsefulCodecProfile((variants[0] as JsonRecord).codec_profile);
+      if (hasReliableVodCodecProfile(candidate)) exactVariantCodecProfile = candidate;
+    }
+  }
   // The global catalogue mirror may lag a playback-produced proof. Prefer the
   // owned row only when it carries that bounded server observation; otherwise
   // keep the normal mirror-first profile choice unchanged.
-  const storedCodecProfile = (containerObservation && hasUsefulCodecProfile(ownedCodecProfile))
+  const storedCodecProfile = hasReliableVodCodecProfile(exactVariantCodecProfile)
+    ? exactVariantCodecProfile
+    : (containerObservation && hasUsefulCodecProfile(ownedCodecProfile))
     ? ownedCodecProfile
     : (ownedFastStartProof || ownedCompleteHlsCacheProof)
     ? ownedCodecProfile

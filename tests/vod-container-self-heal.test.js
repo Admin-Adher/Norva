@@ -137,6 +137,15 @@ test('a persisted observation overrides client and provider extensions for curre
   assert.match(edge, /sourceContainerAuthorityFromObservation\([\s\S]*sourceContainerObservation[\s\S]*targetUrl/);
 });
 
+test('the exact owner variant profile outranks lagging item and global catalogue mirrors', () => {
+  const edge = read(EDGE_PATH);
+  const resolver = sourceBetween(edge, 'async function resolvePlaybackTarget(', '\n// Series have no directly-playable');
+  assert.match(resolver, /from\("cloud_title_variants"\)[\s\S]*select\("codec_profile"\)/);
+  assert.match(resolver, /eq\("user_id", userId\)[\s\S]*eq\("source_id", sourceId\)[\s\S]*eq\("item_type", "movie"\)[\s\S]*eq\("external_id", itemId\)[\s\S]*limit\(2\)/);
+  assert.match(resolver, /variants\.length === 1[\s\S]*hasReliableVodCodecProfile\(candidate\)/);
+  assert.match(resolver, /const storedCodecProfile = hasReliableVodCodecProfile\(exactVariantCodecProfile\)[\s\S]*\? exactVariantCodecProfile/);
+});
+
 test('a reliable server profile promotes only unsafe browser relays to the Gateway', () => {
   const edge = read(EDGE_PATH);
   const create = sourceBetween(edge, 'async function createPlaybackSession(', '\nasync function getPlaybackSession(');
@@ -194,8 +203,8 @@ test('Gateway emits only redacted hashes and recognizes MP4 before FFmpeg startu
   const edge = read(EDGE_PATH);
   const deploy = read(path.join(ROOT, 'ops/hetzner/scripts/04-deploy-edge-functions.sh'));
   assert.match(gateway, /version: GATEWAY_VERSION,[\s\S]*vodContainerSelfHealProtocol: 1/);
-  assert.match(edge, /version: 58,[\s\S]*vodContainerSelfHealProtocol: 1/);
-  assert.match(deploy, /EXPECTED_PLAYBACK_VERSION=58/);
+  assert.match(edge, /version: 59,[\s\S]*vodContainerSelfHealProtocol: 1/);
+  assert.match(deploy, /EXPECTED_PLAYBACK_VERSION=59/);
   assert.match(deploy, /EXPECTED_VOD_CONTAINER_SELF_HEAL_PROTOCOL=1/);
   assert.match(deploy, /vodContainerSelfHealProtocol\\\":\$EXPECTED_VOD_CONTAINER_SELF_HEAL_PROTOCOL/);
   const classifier = sourceBetween(
