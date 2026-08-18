@@ -5279,6 +5279,25 @@ class WatchPage {
         this.cancelPendingHlsAudioSwitch(false);
         this.cancelFirstFrameTelemetryObserver();
         this.cancelDeferredEngineTrackEnrichment();
+        // requestVideoFrameCallback is best-effort telemetry: a browser may lose
+        // that callback even though decoded media is visibly progressing. Preserve
+        // the stricter first-frame gate for storyboard work, but do not lose the
+        // watched-file Whisper intent when the media element itself proves a real
+        // frame and non-zero playback progress.
+        const watchedMediaObserved = Boolean(
+            enqueueStoryboard
+            && this.video
+            && !this.video.error
+            && Number(this.video.readyState) >= 2
+            && Number(this.video.videoWidth) > 0
+            && Number(this.video.videoHeight) > 0
+            && Number.isFinite(Number(this.video.currentTime))
+            && Number(this.video.currentTime) > 0
+            && Boolean(this.video.currentSrc || this.video.src)
+        );
+        if (watchedMediaObserved && !this._watchedLanguageValidationIntent) {
+            this.rememberWatchedLanguageValidationIntent(this._playbackAttemptId);
+        }
         const languageValidationIntent = enqueueStoryboard
             ? this._watchedLanguageValidationIntent
             : null;
