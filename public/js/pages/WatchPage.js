@@ -3367,16 +3367,16 @@ class WatchPage {
         const locale = String(document.documentElement?.lang || navigator.language || '').toLowerCase();
         if (locale.startsWith('fr')) {
             return {
-                title: 'Service déjà utilisé sur un autre appareil',
-                message: 'Une autre lecture utilise actuellement ce service. Norva a arrêté l’ancienne lecture lorsqu’elle lui appartenait.',
-                hint: 'Arrêtez toute lecture externe éventuelle, attendez un instant, puis appuyez sur Réessayer.',
+                title: 'Service occupé',
+                message: 'Ce service TV est occupé. Norva réessaie dès que le créneau se libère.',
+                hint: 'Attendez quelques secondes, puis appuyez sur Réessayer.',
                 retry: 'Réessayer',
             };
         }
         return {
-            title: 'Service already in use on another device',
-            message: 'Another playback is currently using this service. Norva stopped the older playback when it belonged to Norva.',
-            hint: 'Stop any remaining external playback, wait a moment, then select Retry.',
+            title: 'This TV service is busy',
+            message: 'This TV service is busy. Norva will retry once the slot is free.',
+            hint: 'Wait a few seconds, then select Retry.',
             retry: 'Retry',
         };
     }

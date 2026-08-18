@@ -18,7 +18,7 @@ function classifyUpstreamError(value) {
             code: 'UPSTREAM_PROVIDER_BUSY',
             upstreamStatus: 458,
             terminal: true,
-            friendly: 'This TV service is already being used on another device.',
+            friendly: 'This TV service is busy. Wait a few seconds, then try again.',
             details: sanitized
         };
     }

@@ -420,7 +420,7 @@ test('gateway keeps a precise safe network cause and never retries HTTP 458', ()
     {
       status: 458,
       code: 'PROVIDER_BUSY',
-      publicMessage: 'This TV service is already being used on another device.',
+      publicMessage: 'This TV service is busy. Wait a few seconds, then try again.',
     },
   );
   assert.equal(

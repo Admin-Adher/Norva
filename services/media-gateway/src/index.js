@@ -3655,7 +3655,7 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
         if (upstreamStatus === 458) {
             throw markStrictLidTerminal(context, strictLidBrokerError(
                 'PROVIDER_BUSY',
-                'This TV service is already being used on another device.',
+                'This TV service is busy. Wait a few seconds, then try again.',
                 { status: 458, upstreamStatus },
             ));
         }
@@ -3678,7 +3678,7 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
             if (busy) {
                 throw markStrictLidTerminal(context, strictLidBrokerError(
                     'PROVIDER_BUSY',
-                    'This TV service is already being used on another device.',
+                    'This TV service is busy. Wait a few seconds, then try again.',
                     { status: 458, upstreamStatus },
                 ));
             }
@@ -7739,7 +7739,7 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
                 if (err?.status === 458 || err?.code === 'PROVIDER_BUSY') {
                     await removeSessionDir(outputDir).catch(() => {});
                     return res.status(458).json({
-                        error: 'This TV service is already being used on another device.',
+                        error: 'This TV service is busy. Wait a few seconds, then try again.',
                         code: 'PROVIDER_BUSY',
                         upstreamStatus: 458,
                     });
@@ -7944,7 +7944,7 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             await removeSessionDir(outputDir).catch(() => {});
             if (err?.status === 458 || err?.code === 'PROVIDER_BUSY') {
                 return res.status(458).json({
-                    error: 'This TV service is already being used on another device.',
+                    error: 'This TV service is busy. Wait a few seconds, then try again.',
                     code: 'PROVIDER_BUSY',
                     upstreamStatus: 458,
                 });
@@ -8038,7 +8038,7 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             // the account circuit instead of treating it as a retryable gateway 503.
             if (session.inputFailure?.code === 'PROVIDER_BUSY' || isProviderSlotBusyFailure(session)) {
                 return res.status(458).json({
-                    error: 'This TV service is already being used on another device.',
+                    error: 'This TV service is busy. Wait a few seconds, then try again.',
                     code: 'PROVIDER_BUSY',
                     upstreamStatus: 458,
                 });
@@ -8953,7 +8953,7 @@ function providerBusyVodInputError(upstreamStatus = null) {
         : Number(upstreamStatus);
     return vodInputPumpError(
         'PROVIDER_BUSY',
-        'This TV service is already being used on another device.',
+        'This TV service is busy. Wait a few seconds, then try again.',
         {
             status: 458,
             upstreamStatus: Number.isInteger(normalizedUpstreamStatus) ? normalizedUpstreamStatus : null,
@@ -13776,7 +13776,7 @@ function runFfprobe(args, timeoutMs, sourceUrl, options = {}) {
                 return backgroundProbeError(
                     458,
                     'PROVIDER_BUSY',
-                    'This TV service is already being used on another device.',
+                    'This TV service is busy. Wait a few seconds, then try again.',
                 );
             }
             return fallback;

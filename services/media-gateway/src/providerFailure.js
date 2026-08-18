@@ -98,7 +98,7 @@ function classifyProviderResponseFailure(status, payload, options = {}) {
         return {
             status: 458,
             code: 'PROVIDER_BUSY',
-            publicMessage: 'This TV service is already being used on another device.',
+            publicMessage: 'This TV service is busy. Wait a few seconds, then try again.',
         };
     }
     if (/user[_\s-]*multi[_\s-]*ip|multi[_\s-]*ip|same account.*ip|account sharing/.test(text)) {

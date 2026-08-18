@@ -1478,7 +1478,7 @@ async function testSourceConnection(id: string, userId: string, db: SupabaseClie
 
 function sourceConnectionPublicMessage(code: string, status: number): string {
   if (code === "PROVIDER_BUSY" || status === 458) {
-    return "This TV service is already being used on another device.";
+    return "This TV service is busy. Wait a few seconds, then try again.";
   }
   if (code === "PROVIDER_CONNECT_TIMEOUT" || code === "PROVIDER_RESPONSE_TIMEOUT" || status === 504) {
     return "The TV service did not respond before the connection timed out.";

@@ -245,7 +245,9 @@ async function getXtreamSeriesInfo(url: URL, sourceId: string, userId: string, d
 
   let payload: JsonRecord;
   try {
-    payload = await fetchSeriesInfoFromProvider(db, { serverUrl, username, password, seriesId, userId });
+    payload = await fetchSeriesInfoFromProvider(db, {
+      serverUrl, username, password, seriesId, userId, serverHost,
+    });
   } catch (error) {
     // Provider failed (most often user_multi_ip / 429). If we hold ANY cached copy — even a
     // stale one — serve it rather than failing the fiche; only surface the error when the
@@ -274,7 +276,68 @@ async function getXtreamSeriesInfo(url: URL, sourceId: string, userId: string, d
   return { payload, exactInventorySafe: true };
 }
 
+function providerAccountKey(serverHost: string, username: string): string {
+  return `${String(serverHost || "").trim().toLowerCase()}/${String(username || "").trim()}`;
+}
+
+function isProviderSlotBusyError(error: unknown): boolean {
+  const status = error instanceof HttpError ? error.status : 0;
+  const text = [
+    error instanceof Error ? error.message : String(error),
+    error instanceof HttpError ? JSON.stringify(error.details ?? "") : "",
+  ].join(" ");
+  return status === 458 || status === 409
+    || /(?:\b|_)458\b|already in use|user_multi_ip|max.?conn|account.?busy|account_sharing/i.test(text);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitWhileBackgroundBusy(db: SupabaseClient, accountKey: string): Promise<void> {
+  if (!accountKey || accountKey.endsWith("/")) return;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    try {
+      const { data, error } = await db.rpc("provider_account_busy_for_foreground_validation", {
+        p_key: accountKey,
+      });
+      if (error || data !== true) return;
+    } catch (_) {
+      return;
+    }
+    await sleep(2000);
+  }
+}
+
 async function fetchSeriesInfoFromProvider(
+  db: SupabaseClient,
+  params: {
+    serverUrl: string;
+    username: string;
+    password: string;
+    seriesId: string;
+    userId: string;
+    serverHost?: string;
+  },
+): Promise<JsonRecord> {
+  const { serverUrl, username, password, seriesId, userId, serverHost } = params;
+  const accountKey = providerAccountKey(serverHost || providerHost(serverUrl), username);
+  await waitWhileBackgroundBusy(db, accountKey);
+
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      return await requestSeriesInfoOnce(db, { serverUrl, username, password, seriesId, userId });
+    } catch (error) {
+      lastError = error;
+      if (!isProviderSlotBusyError(error) || attempt === 2) throw error;
+      await sleep(8000);
+    }
+  }
+  throw lastError instanceof Error ? lastError : new HttpError(502, "Unable to load series details");
+}
+
+async function requestSeriesInfoOnce(
   db: SupabaseClient,
   params: { serverUrl: string; username: string; password: string; seriesId: string; userId: string },
 ): Promise<JsonRecord> {

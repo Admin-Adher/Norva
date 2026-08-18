@@ -714,7 +714,7 @@ class SourceManager {
         const code = String(payload.code || value?.code || '').trim().toUpperCase();
         const status = Number(payload.status ?? payload.upstreamStatus ?? value?.status ?? value?.upstreamStatus);
         if (code === 'PROVIDER_BUSY' || code === 'PROVIDER_ACCOUNT_BUSY' || status === 458) {
-            return 'This TV service is already being used on another device.';
+            return 'This TV service is busy. Wait a few seconds, then try again.';
         }
         if (code === 'PROVIDER_CONNECT_TIMEOUT' || code === 'PROVIDER_RESPONSE_TIMEOUT' || status === 504) {
             return 'The provider did not respond before the connection timed out.';

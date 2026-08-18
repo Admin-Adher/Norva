@@ -62,7 +62,9 @@ test('the exact observed account-sharing payload becomes a safe account-busy sta
   const state = page.getSeriesInfoError(observedRelayPayload);
 
   assert.equal(state.kind, 'account-busy');
-  assert.equal(state.title, 'This TV service is already in use');
+  assert.equal(state.title, 'This TV service is busy');
+  assert.equal(state.message, 'Wait a few seconds, then try again.');
+  assert.doesNotMatch(state.message, /other screen|another device/i);
   assert.equal(state.action, 'retry');
   assert.equal(state.detail, undefined);
   assert.equal(state.friendly, undefined);

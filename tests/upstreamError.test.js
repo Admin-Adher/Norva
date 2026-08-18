@@ -19,7 +19,7 @@ test('classifies max connections wording as the exact terminal HTTP 458 account 
   assert.equal(result.code, 'UPSTREAM_PROVIDER_BUSY');
   assert.equal(result.upstreamStatus, 458);
   assert.equal(result.terminal, true);
-  assert.equal(result.friendly, 'This TV service is already being used on another device.');
+  assert.equal(result.friendly, 'This TV service is busy. Wait a few seconds, then try again.');
 });
 
 test('redacts credentials embedded in provider errors', () => {

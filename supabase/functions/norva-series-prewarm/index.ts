@@ -68,7 +68,16 @@ async function prewarm(sourceId: string, userId: string, limit: number, explicit
   let lastError: string | null = null;
   let aborted = false;
 
+  const accountKey = `${serverHost.toLowerCase()}/${username}`;
   for (const seriesId of targets) {
+    try {
+      const { data: busy } = await supabase.rpc("provider_account_busy", { p_key: accountKey });
+      if (busy === true) {
+        aborted = true;
+        lastError = "provider-account-busy";
+        break;
+      }
+    } catch (_) { /* fail-open: keep warming */ }
     try {
       const payload = await gatewaySeriesInfo(cfg, { serverUrl, username, password, seriesId });
       const clean = stripCreds(payload) as JsonRecord;

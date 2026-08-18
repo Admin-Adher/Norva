@@ -3789,8 +3789,8 @@ class SeriesPage {
                 allowVersionChoice: false,
             },
             'account-busy': {
-                title: 'This TV service is already in use',
-                message: 'Stop playback on the other screen, then try again.',
+                title: 'This TV service is busy',
+                message: 'Wait a few seconds, then try again.',
                 action: 'retry',
                 actionLabel: 'Try again',
                 allowVersionChoice: true,
