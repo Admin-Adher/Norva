@@ -273,25 +273,31 @@ test('client busy reports open a fixed circuit once while only a server-observed
   assert.doesNotMatch(record, /openProviderPlaybackCircuit/);
 });
 
-test('one playback intention makes only one Gateway creation request', () => {
+test('one playback intention permits only the 458 handoff or one proven container correction', () => {
   const edge = read('supabase/functions/norva-playback/index.ts');
   const gateway = section(edge, 'async function createGatewaySession(', 'async function requestGatewaySession(');
   const requests = [...gateway.matchAll(/requestGatewaySession\(/g)];
 
   assert.equal(
     requests.length,
-    2,
-    'one initial create plus one optional 458-handoff retry',
+    3,
+    'one initial create plus mutually exclusive 458-handoff and container-correction retries',
   );
   const busyBranch = gateway.indexOf('isProviderBusyFailure');
+  const mismatchBranch = gateway.indexOf('normalizeGatewaySourceContainerMismatch');
   assert.ok(busyBranch >= 0, 'handoff retry is gated on provider busy');
+  assert.ok(mismatchBranch >= 0, 'container correction requires strict gateway evidence');
   assert.ok(
     requests[0].index < busyBranch,
     'the first requestGatewaySession call is the initial create',
   );
   assert.ok(
-    requests[1].index > busyBranch,
-    'the second requestGatewaySession call must be inside the 458-handoff retry',
+    requests[2].index > busyBranch,
+    'the third requestGatewaySession call must be inside the 458-handoff retry',
+  );
+  assert.ok(
+    requests[1].index > mismatchBranch && requests[1].index < busyBranch,
+    'the only additional pre-busy request is the strict container-correction retry',
   );
   assert.match(gateway, /shouldOpenCircuitForProviderBusy/);
   assert.doesNotMatch(edge, /shouldRetryGatewayWithAudioTranscode|audioFallbackReason:\s*"copy_start_failed"/);
@@ -316,7 +322,7 @@ test('playback edge checks the circuit, claims one account session and reports s
   assert.match(heartbeat, /PLAYBACK_SUPERSEDED/);
   assert.match(edge, /open_provider_playback_circuit/);
   assert.match(edge, /PROVIDER_ACCOUNT_BUSY/);
-  assert.match(edge, /version:\s*56/);
+  assert.match(edge, /version:\s*57/);
   assert.match(edge, /providerCircuitProtocol:\s*1/);
   assert.match(edge, /exactFileCodecProfileProtocol:\s*1/);
 });
@@ -571,11 +577,11 @@ test('production rollout proves the provider circuit protocol on every runtime',
   const cloud = read('supabase/functions/norva-cloud/index.ts');
   const deploy = read('ops/hetzner/scripts/04-deploy-edge-functions.sh');
 
-  assert.match(gateway, /const GATEWAY_VERSION = 112/);
+  assert.match(gateway, /const GATEWAY_VERSION = 113/);
   assert.match(gateway, /providerCircuitProtocol:\s*1/);
   assert.match(gateway, /providerProxyAffinityProtocol:\s*1/);
   assert.match(gateway, /exactFileCodecProfileProtocol:\s*1/);
-  assert.match(playback, /version:\s*56/);
+  assert.match(playback, /version:\s*57/);
   assert.match(playback, /providerCircuitProtocol:\s*1/);
   assert.match(playback, /exactFileCodecProfileProtocol:\s*1/);
   assert.match(playback, /relayTakeoverProtocol:\s*1/);
@@ -586,7 +592,7 @@ test('production rollout proves the provider circuit protocol on every runtime',
   assert.match(cloud, /relayCoordinatorLockTtlMs:\s*EDGE_SESSION_COORDINATOR_LOCK_TTL_MS/);
 
   assert.match(deploy, /verify_function_protocol "\$service"/);
-  assert.match(deploy, /EXPECTED_PLAYBACK_VERSION=56/);
+  assert.match(deploy, /EXPECTED_PLAYBACK_VERSION=57/);
   assert.match(deploy, /EXPECTED_RELAY_COORDINATOR_LOCK_TTL_MS=120000/);
   assert.match(deploy, /EXPECTED_ENGINE_TRACK_PROBE_BLOCKING=false/);
   assert.match(deploy, /EXPECTED_EXACT_FILE_CODEC_PROFILE_PROTOCOL=1/);

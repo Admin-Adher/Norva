@@ -164,7 +164,9 @@ function pumpHarness(overrides = {}) {
         `(() => { ${helpers}; return {
             normalizeFileSizeBytes,
             fileSizeBytesForSession,
+            normalizeSourceContainerAuthority,
             isFiniteMkvVodSession,
+            classifyMediaContainerPrefix,
             parseProviderFileSize,
             probeProviderFileSize,
             ensureBoundedMkvInputPump,
@@ -418,6 +420,16 @@ function mkvFixture(length = 64) {
     const fixture = Buffer.alloc(length);
     fixture.set([0x1a, 0x45, 0xdf, 0xa3], 0);
     for (let index = 4; index < length; index += 1) fixture[index] = index % 251;
+    return fixture;
+}
+
+function mp4Fixture(length = 64, majorBrand = 'isom') {
+    assert.ok(length >= 12);
+    const fixture = Buffer.alloc(length);
+    fixture.writeUInt32BE(24, 0);
+    fixture.write('ftyp', 4, 'ascii');
+    fixture.write(majorBrand, 8, 'ascii');
+    for (let index = 12; index < length; index += 1) fixture[index] = (index * 7) % 251;
     return fixture;
 }
 
@@ -829,6 +841,84 @@ test('HTTP 200 full-body fallback stays fail-closed outside an exact offset-zero
         assert.deepEqual(writable.bytes(), fixture.subarray(0, cut));
         assert.equal(tracker.active, 0);
     });
+});
+
+test('a declared MKV with an ISO-BMFF prefix returns one bound correction and closes the only provider body', async (t) => {
+    const fixture = mp4Fixture(96, 'isom');
+
+    for (const status of [200, 206]) {
+        await t.test(`HTTP ${status}`, async () => {
+            const tracker = makeTracker();
+            let fetches = 0;
+            const h = pumpHarness({
+                fetch: async () => {
+                    fetches += 1;
+                    return trackedResponse(tracker, {
+                        status,
+                        chunks: [fixture.subarray(0, 5), fixture.subarray(5)],
+                        headers: status === 200
+                            ? { 'Content-Length': String(fixture.length), ETag: '"mp4-as-mkv"' }
+                            : {
+                                'Content-Range': `bytes 0-${fixture.length - 1}/${fixture.length}`,
+                                'Content-Length': String(fixture.length),
+                                ETag: '"mp4-as-mkv"',
+                            },
+                    });
+                },
+            });
+            const session = mkvSession(fixture.length);
+            await assert.rejects(
+                h.ensureBoundedMkvInputPump(session),
+                (error) => {
+                    assert.equal(error?.code, 'SOURCE_CONTAINER_MISMATCH');
+                    assert.equal(error?.status, 409);
+                    assert.deepEqual(JSON.parse(JSON.stringify(error?.details)), {
+                        protocol: 1,
+                        code: 'SOURCE_CONTAINER_MISMATCH',
+                        declaredContainer: 'mkv',
+                        observedContainer: 'mp4',
+                        evidence: {
+                            kind: 'iso-bmff-ftyp-v1',
+                            prefixSha256: crypto.createHash('sha256').update(fixture).digest('hex'),
+                            sourceUrlSha256: crypto.createHash('sha256').update(session.sourceUrl).digest('hex'),
+                            effectiveUrlSha256: crypto.createHash('sha256').update(session.sourceUrl).digest('hex'),
+                            validatorKind: 'etag',
+                            validatorSha256: crypto.createHash('sha256').update('"mp4-as-mkv"').digest('hex'),
+                            fileSizeBytes: fixture.length,
+                        },
+                    });
+                    return true;
+                },
+            );
+            assert.equal(fetches, 1);
+            assert.equal(tracker.maxActive, 1);
+            assert.equal(tracker.active, 0);
+        });
+    }
+});
+
+test('a server-observed MP4 authority overrides stale MKV hints without provider I/O', async () => {
+    const sourceUrl = 'https://provider.example/movie/account/title.mkv';
+    const h = pumpHarness({
+        fetch: async () => { throw new Error('an observed non-MKV must not enter the bounded MKV lane'); },
+    });
+    const authority = h.normalizeSourceContainerAuthority({
+        protocol: 1,
+        container: 'mp4',
+        sourceUrlSha256: crypto.createHash('sha256').update(sourceUrl).digest('hex'),
+        evidenceKind: 'iso-bmff-ftyp-v1',
+        prefixSha256: 'a'.repeat(64),
+    }, sourceUrl);
+    assert.ok(authority);
+    const session = {
+        ...mkvSession(96),
+        sourceUrl,
+        sourceContainerAuthority: authority,
+    };
+    assert.equal(h.isFiniteMkvVodSession(session), false);
+    await h.ensureBoundedMkvInputPump(session);
+    assert.equal(session.preopenedVodInputAttempt, undefined);
+    assert.equal(h.normalizeSourceContainerAuthority({ ...authority, sourceUrlSha256: 'b'.repeat(64) }, sourceUrl), null);
 });
 
 test('finite MKV seek drains a one-byte identity range instead of retaining a full-file preopen', async () => {
@@ -1814,7 +1904,7 @@ test('an extensionless cached Matroska profile becomes finite after merge withou
         fetch: async () => {
             boundedPreflightFetches += 1;
             return trackedResponse(makeTracker(), {
-                chunks: [Buffer.alloc(cachedProfile.fileSizeBytes)],
+                chunks: [mkvFixture(cachedProfile.fileSizeBytes)],
                 headers: {
                     'Content-Range': `bytes 0-${cachedProfile.fileSizeBytes - 1}/${cachedProfile.fileSizeBytes}`,
                     'Content-Length': String(cachedProfile.fileSizeBytes),

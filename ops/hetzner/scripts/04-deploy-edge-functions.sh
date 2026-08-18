@@ -26,8 +26,9 @@ FUNCS_DIR="$REPO/supabase/functions"
 CONFIG="$REPO/supabase/config.toml"
 COMPOSE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/docker-compose.supabase.yml"
 ENV_FILE="$(dirname "$COMPOSE")/.env"
-EXPECTED_PLAYBACK_VERSION=56
+EXPECTED_PLAYBACK_VERSION=57
 EXPECTED_PLAYBACK_PROTOCOL=1
+EXPECTED_VOD_CONTAINER_SELF_HEAL_PROTOCOL=1
 EXPECTED_MEDIA_GATEWAY_CANARY_ROUTING_PROTOCOL=1
 EXPECTED_RELAY_TAKEOVER_PROTOCOL=1
 EXPECTED_RELAY_COORDINATOR_LOCK_TTL_MS=120000
@@ -183,6 +184,7 @@ if command -v docker >/dev/null 2>&1 && [[ -f "$COMPOSE" ]]; then
     catalog_health="$(function_health_in_service "$service" norva-catalog)"
     [[ "$playback_health" == *"\"version\":$EXPECTED_PLAYBACK_VERSION"* \
         && "$playback_health" == *"\"providerCircuitProtocol\":$EXPECTED_PLAYBACK_PROTOCOL"* \
+        && "$playback_health" == *"\"vodContainerSelfHealProtocol\":$EXPECTED_VOD_CONTAINER_SELF_HEAL_PROTOCOL"* \
         && "$playback_health" == *"\"relayTakeoverProtocol\":$EXPECTED_RELAY_TAKEOVER_PROTOCOL"* \
         && "$playback_health" == *"\"relayCoordinatorLockTtlMs\":$EXPECTED_RELAY_COORDINATOR_LOCK_TTL_MS"* \
         && "$playback_health" == *"\"engineTrackProbeBlocking\":$EXPECTED_ENGINE_TRACK_PROBE_BLOCKING"* \

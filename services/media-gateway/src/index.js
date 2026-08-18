@@ -1737,7 +1737,7 @@ if (
 }
 const MULTI_AUDIO_HLS_PROTOCOL = 1;
 const MAX_MULTI_AUDIO_RENDITIONS = 8;
-const GATEWAY_VERSION = 112;
+const GATEWAY_VERSION = 113;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -1857,6 +1857,7 @@ app.get('/health', (req, res) => {
         service: 'norva-media-gateway',
         version: GATEWAY_VERSION,
         providerCircuitProtocol: 1,
+        vodContainerSelfHealProtocol: 1,
         codecProbe: true,
         codecProbeTimeoutMs: CODEC_PROBE_TIMEOUT_MS,
         codecProbeAnalyzeDurationUs: CODEC_PROBE_ANALYZE_DURATION_US,
@@ -7505,6 +7506,7 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             userAgent,
             playbackHint,
             playbackIdentity,
+            sourceContainerAuthority,
             codecProfile,
             audioCodec,
             audioProfile,
@@ -7521,6 +7523,16 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
         } = req.body || {};
         if (!sourceUrl || !isHttpUrl(sourceUrl)) {
             return res.status(400).json({ error: 'sourceUrl must be a valid http(s) URL' });
+        }
+        const normalizedSourceContainerAuthority = normalizeSourceContainerAuthority(
+            sourceContainerAuthority,
+            sourceUrl,
+        );
+        if (sourceContainerAuthority !== undefined && !normalizedSourceContainerAuthority) {
+            return res.status(400).json({
+                error: 'sourceContainerAuthority is invalid',
+                code: 'SOURCE_CONTAINER_AUTHORITY_INVALID',
+            });
         }
 
         const normalizedOwnerKey = normalizeSessionKey(ownerKey);
@@ -7697,6 +7709,7 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             sourceUrl,
             playbackHint: normalizedPlaybackHint,
             codecProfile: normalizedCodecProfile,
+            sourceContainerAuthority: normalizedSourceContainerAuthority,
         });
         let finiteMkvPlayback = finiteMkvPlaybackAtRequest;
         const shouldProbe = shouldProbeCodecProfile(normalizedPlaybackHint, sourceUrl);
@@ -7751,6 +7764,7 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             sourceUrl,
             playbackHint: normalizedPlaybackHint,
             codecProfile: normalizedCodecProfile,
+            sourceContainerAuthority: normalizedSourceContainerAuthority,
         });
         // probeCodecProfile may have used the exact provider URL (rather than its
         // cache or the in-band prefix). Waiting conservatively on every invocation
@@ -7774,6 +7788,7 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             userAgent: sanitizeUserAgent(userAgent),
             playbackHint: normalizedPlaybackHint,
             playbackIdentity: asRecord(playbackIdentity),
+            sourceContainerAuthority: normalizedSourceContainerAuthority,
             seekOffset: normalizedSeekOffset,
             codecProfile: normalizedCodecProfile,
             codecProfileSource,
@@ -7940,6 +7955,9 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
                     code: 'PROXY_AUTH_FAILED',
                     networkCause: 'proxy_auth',
                 });
+            }
+            if (err?.code === 'SOURCE_CONTAINER_MISMATCH' && err?.details?.protocol === 1) {
+                return res.status(409).json(err.details);
             }
             console.warn('[media-gateway] unable to bound finite MKV input:', sanitizeLog(err?.message || String(err), sourceUrl));
             return res.status(502).json({
@@ -8449,8 +8467,47 @@ function fileSizeBytesForSession(session) {
     return null;
 }
 
+function normalizeSourceContainerAuthority(value, sourceUrl) {
+    const record = asRecord(value);
+    if (!exactRecordKeys(record, [
+        'protocol',
+        'container',
+        'sourceUrlSha256',
+        'evidenceKind',
+        'prefixSha256',
+    ])) return null;
+    const container = normalizeCodecToken(record.container);
+    if (!['mkv', 'mp4', 'mov', 'avi', 'ogg', 'flv', 'mpg', 'mpeg'].includes(container)) return null;
+    const sourceUrlSha256 = String(record.sourceUrlSha256 || '').trim().toLowerCase();
+    const prefixSha256 = String(record.prefixSha256 || '').trim().toLowerCase();
+    const evidenceKind = String(record.evidenceKind || '').trim();
+    const expectedEvidenceKind = {
+        mkv: 'ebml-v1',
+        mp4: 'iso-bmff-ftyp-v1',
+        mov: 'iso-bmff-ftyp-v1',
+        avi: 'riff-avi-v1',
+        ogg: 'ogg-v1',
+        flv: 'flv-v1',
+        mpg: 'mpeg-ps-v1',
+        mpeg: 'mpeg-ps-v1',
+    }[container];
+    if (
+        record.protocol !== 1 ||
+        !/^[0-9a-f]{64}$/.test(sourceUrlSha256) ||
+        sourceUrlSha256 !== sha256Hex(String(sourceUrl || '')) ||
+        !/^[0-9a-f]{64}$/.test(prefixSha256) ||
+        evidenceKind !== expectedEvidenceKind
+    ) return null;
+    return { protocol: 1, container, sourceUrlSha256, evidenceKind, prefixSha256 };
+}
+
 function isFiniteMkvVodSession(session) {
     if (!session || isLiveSession(session)) return false;
+    const sourceContainerAuthority = asRecord(session.sourceContainerAuthority);
+    const authoritativeContainer = normalizeCodecToken(sourceContainerAuthority.container);
+    if (authoritativeContainer) {
+        return authoritativeContainer === 'mkv' || authoritativeContainer.includes('matroska');
+    }
     const hint = asRecord(session.playbackHint);
     const profile = asRecord(session.codecProfile);
     const containers = [hint.container, profile.container].map(normalizeCodecToken);
@@ -8728,7 +8785,76 @@ async function requireFullBodyExactEof(attempt, parentSignal) {
     }
 }
 
-async function primeFullBodyMatroskaAttempt(attempt, parentSignal) {
+function classifyMediaContainerPrefix(value) {
+    const prefix = Buffer.from(value || []);
+    if (
+        prefix.length >= 4 &&
+        prefix[0] === 0x1a && prefix[1] === 0x45 &&
+        prefix[2] === 0xdf && prefix[3] === 0xa3
+    ) {
+        return { container: 'mkv', evidenceKind: 'ebml-v1' };
+    }
+    if (prefix.length >= 12 && prefix.subarray(0, 4).toString('ascii') === 'RIFF') {
+        const riffType = prefix.subarray(8, 12).toString('ascii');
+        if (riffType === 'AVI ') return { container: 'avi', evidenceKind: 'riff-avi-v1' };
+    }
+    if (prefix.length >= 8 && prefix.subarray(4, 8).toString('ascii') === 'ftyp') {
+        const majorBrand = prefix.length >= 12 ? prefix.subarray(8, 12).toString('ascii') : '';
+        return {
+            container: majorBrand === 'qt  ' ? 'mov' : 'mp4',
+            evidenceKind: 'iso-bmff-ftyp-v1',
+        };
+    }
+    if (prefix.length >= 4 && prefix.subarray(0, 4).toString('ascii') === 'OggS') {
+        return { container: 'ogg', evidenceKind: 'ogg-v1' };
+    }
+    if (prefix.length >= 3 && prefix.subarray(0, 3).toString('ascii') === 'FLV') {
+        return { container: 'flv', evidenceKind: 'flv-v1' };
+    }
+    if (
+        prefix.length >= 4 &&
+        prefix[0] === 0x00 && prefix[1] === 0x00 && prefix[2] === 0x01 && prefix[3] === 0xba
+    ) {
+        return { container: 'mpg', evidenceKind: 'mpeg-ps-v1' };
+    }
+    return null;
+}
+
+function sourceContainerMismatchError(attempt, session, range, inspectionPrefix, observed) {
+    const validator = boundedVodResponseValidator(attempt?.response);
+    const validatorSha256 = validator?.value
+        ? sha256Hex(validator.value)
+        : null;
+    const prefixSha256 = crypto.createHash('sha256')
+        .update(Buffer.from(inspectionPrefix || []))
+        .digest('hex');
+    return vodInputPumpError(
+        'SOURCE_CONTAINER_MISMATCH',
+        'Provider metadata does not match the media file container.',
+        {
+            status: 409,
+            details: {
+                protocol: 1,
+                code: 'SOURCE_CONTAINER_MISMATCH',
+                declaredContainer: 'mkv',
+                observedContainer: observed.container,
+                evidence: {
+                    kind: observed.evidenceKind,
+                    prefixSha256,
+                    sourceUrlSha256: sha256Hex(String(session?.sourceUrl || '')),
+                    effectiveUrlSha256: sha256Hex(String(
+                        attempt?.response?.url || session?.sourceUrl || '',
+                    )),
+                    validatorKind: validator?.kind || 'none',
+                    validatorSha256,
+                    fileSizeBytes: normalizeFileSizeBytes(range?.total),
+                },
+            },
+        },
+    );
+}
+
+async function primeFullBodyMatroskaAttempt(attempt, parentSignal, session = null, range = null) {
     if (!attempt?.response?.body || typeof attempt.response.body.getReader !== 'function') {
         throw vodInputPumpError('PROVIDER_EMPTY_RESPONSE', 'Provider returned no MKV response body', {
             status: 502,
@@ -8766,14 +8892,19 @@ async function primeFullBodyMatroskaAttempt(attempt, parentSignal) {
         }
         return true;
     };
-    while (inspectionPrefix.length < 4) {
+    while (inspectionPrefix.length < 12) {
         if (!await readAndRetain()) break;
+        const observed = classifyMediaContainerPrefix(inspectionPrefix);
+        if (observed?.container === 'mkv') return;
+        if (observed && observed.container !== 'mkv') {
+            throw sourceContainerMismatchError(attempt, session, range, inspectionPrefix, observed);
+        }
     }
-    if (
-        inspectionPrefix.length >= 4 &&
-        inspectionPrefix[0] === 0x1a && inspectionPrefix[1] === 0x45 &&
-        inspectionPrefix[2] === 0xdf && inspectionPrefix[3] === 0xa3
-    ) return;
+    const observed = classifyMediaContainerPrefix(inspectionPrefix);
+    if (observed?.container === 'mkv') return;
+    if (observed && observed.container !== 'mkv') {
+        throw sourceContainerMismatchError(attempt, session, range, inspectionPrefix, observed);
+    }
     if (inspectionPrefix.length && looksLikeTextStart(inspectionPrefix)) {
         while (true) {
             if (isProviderBusyText(normalizedRawTextPrefix(inspectionPrefix))) {
@@ -8811,6 +8942,7 @@ function vodInputPumpError(code, message, options = {}) {
     if (Number.isInteger(options.status)) error.status = options.status;
     if (Number.isInteger(options.upstreamStatus)) error.upstreamStatus = options.upstreamStatus;
     if (options.networkCause) error.networkCause = options.networkCause;
+    if (options.details && typeof options.details === 'object') error.details = options.details;
     error.retryable = options.retryable === true;
     return error;
 }
@@ -9120,8 +9252,9 @@ async function openBoundedVodInputAttempt(session, offset, parentSignal, dispatc
                 { status: 502 },
             );
         }
-        if (range.fullBody === true) {
-            await primeFullBodyMatroskaAttempt(attempt, parentSignal);
+        const responseByteCount = range.end - range.start + 1;
+        if (offset === 0 && (range.fullBody === true || responseByteCount >= 8)) {
+            await primeFullBodyMatroskaAttempt(attempt, parentSignal, session, range);
         }
         if (fileSizeBytes && range.total !== fileSizeBytes) {
             throw vodInputPumpError('VOD_CHANGED', 'The MKV file changed while it was playing.', { status: 502 });

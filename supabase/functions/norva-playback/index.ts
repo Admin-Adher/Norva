@@ -219,9 +219,10 @@ Deno.serve(async (req) => {
       return json(req, {
         ok: true,
         service: "norva-playback",
-        version: 56,
+        version: 57,
         nativeHeartbeatProtocol: 1,
         providerCircuitProtocol: 1,
+        vodContainerSelfHealProtocol: 1,
         exactFileCodecProfileProtocol: 1,
         relayCoordinatorLockTtlMs: EDGE_SESSION_COORDINATOR_LOCK_TTL_MS,
         languageValidationProtocol: LANGUAGE_VALIDATION_PROTOCOL,
@@ -786,6 +787,9 @@ async function createPlaybackSession(
       requestedPlaybackHint,
     );
   const targetUrl = resolved.targetUrl;
+  const resolvedContainerObservation = "containerObservation" in resolved
+    ? recordOrEmpty(resolved.containerObservation)
+    : {};
   requestedPlaybackHint = bindServerMkvFastStartProof(
     mergePlaybackHints(resolved.playbackHint, requestedPlaybackHint),
     // Exact-episode resolution currently carries the caller hint forward and
@@ -1301,6 +1305,7 @@ async function createPlaybackSession(
       },
       gatewayVideoTranscodeExplicit,
       releasedSuperseded,
+      resolvedContainerObservation,
     );
     const gatewayCommit = await commitEdgeSessionCoordinator(edgeCoordination, {
       playbackSessionId: session.id,
@@ -4170,6 +4175,42 @@ async function resolveSourceIdentity(sourceId: string, userId: string, db: Supab
 async function resolveSourceHost(sourceId: string, userId: string, db: SupabaseClient): Promise<string> {
   return (await resolveSourceIdentity(sourceId, userId, db)).host;
 }
+
+async function resolveObservedVodContainer(
+  sourceId: string,
+  userId: string,
+  itemType: string,
+  itemId: string,
+  db: SupabaseClient,
+): Promise<{ container: string; evidenceKind: string; prefixSha256: string } | null> {
+  if (!sourceId || !userId || !["movie", "series"].includes(itemType) || !itemId) return null;
+  try {
+    const serverHost = await resolveSourceHost(sourceId, userId, db);
+    if (!serverHost) return null;
+    const { data, error } = await db
+      .from("catalog_file_container_observations")
+      .select("observed_container,evidence_kind,prefix_sha256")
+      .eq("server_host", serverHost)
+      .eq("item_type", itemType)
+      .eq("external_id", itemId)
+      .maybeSingle();
+    if (error) return null;
+    const row = recordOrEmpty(data);
+    const container = canonicalVodContainer(row.observed_container);
+    const evidenceKind = stringOr(row.evidence_kind, "");
+    const prefixSha256 = stringOr(row.prefix_sha256, "").toLowerCase();
+    if (
+      !container ||
+      evidenceKind !== containerEvidenceKind(container) ||
+      !/^[0-9a-f]{64}$/.test(prefixSha256)
+    ) return null;
+    return { container, evidenceKind, prefixSha256 };
+  } catch (_) {
+    // Rolling deployment: playback remains available before the additive
+    // observation table is migrated.
+    return null;
+  }
+}
 // Cross-mirror cache key for catalog_file_tracks. The fallback is source-scoped,
 // so an owner-editable host cannot authorize a cross-tenant cache read/write.
 async function resolveFileTracksKey(sourceId: string, userId: string, db: SupabaseClient, _fallbackUrl: string): Promise<string> {
@@ -4249,7 +4290,14 @@ async function resolveExactEpisodePlaybackTarget(
   db: SupabaseClient,
 ) {
   const episodeId = stringOr(episodeCoordinates.episode_id, "");
-  const container = stringOr(episodeCoordinates.container_extension, "mp4");
+  const containerObservation = await resolveObservedVodContainer(
+    sourceId,
+    userId,
+    "series",
+    episodeId,
+    db,
+  );
+  const container = containerObservation?.container ?? stringOr(episodeCoordinates.container_extension, "mp4");
   if (!episodeId || !container) {
     throw new HttpError(404, "Exact episode coordinates are incomplete");
   }
@@ -4269,6 +4317,7 @@ async function resolveExactEpisodePlaybackTarget(
       itemType: "series",
       audioSeriesId: stringOr(episodeCoordinates.parent_series_id, ""),
     }),
+    containerObservation,
   };
 }
 
@@ -4292,6 +4341,13 @@ async function resolvePlaybackTarget(
     playback_hint?: unknown;
     metadata?: unknown;
   } | null = null;
+  const containerObservation = await resolveObservedVodContainer(
+    sourceId,
+    userId,
+    itemType,
+    itemId,
+    db,
+  );
   if (mediaReadFromCatalog()) {
     const host = await resolveSourceHost(sourceId, userId, db);
     if (host) {
@@ -4321,7 +4377,7 @@ async function resolvePlaybackTarget(
   if (!item) {
     if (itemType === "series") {
       const sourceConfig = await loadSourceConfig(sourceId, userId, db);
-      const requestContainer = stringOr(requestHint.container, "mp4");
+      const requestContainer = containerObservation?.container ?? stringOr(requestHint.container, "mp4");
       return {
         targetUrl: xtreamStreamUrl({
           serverUrl: stringOr(sourceConfig.serverUrl, ""),
@@ -4336,6 +4392,7 @@ async function resolvePlaybackTarget(
           streamType: "series",
           itemType: "series",
         })),
+        containerObservation,
       };
     }
     throw new HttpError(404, "Media item not found");
@@ -4366,16 +4423,21 @@ async function resolvePlaybackTarget(
   // The global catalogue mirror may lag a playback-produced proof. Prefer the
   // owned row only when it carries that bounded server observation; otherwise
   // keep the normal mirror-first profile choice unchanged.
-  const storedCodecProfile = (ownedFastStartProof || ownedCompleteHlsCacheProof)
+  const storedCodecProfile = (containerObservation && hasUsefulCodecProfile(ownedCodecProfile))
+    ? ownedCodecProfile
+    : (ownedFastStartProof || ownedCompleteHlsCacheProof)
     ? ownedCodecProfile
     : catalogueCodecProfile;
-  const storedPlaybackHint = mergePlaybackHints(
+  const storedPlaybackHintBase = mergePlaybackHints(
     compactRecord({
       ...hint,
       codecProfile: storedCodecProfile,
     }),
     {},
   );
+  const storedPlaybackHint = containerObservation
+    ? playbackHintForObservedContainer(storedPlaybackHintBase, containerObservation.container)
+    : storedPlaybackHintBase;
   const itemCas = stringOrNull(ownedItem?.id) && stringOrNull(ownedItem?.updated_at)
     ? {
       id: String(ownedItem?.id),
@@ -4386,7 +4448,7 @@ async function resolvePlaybackTarget(
     const sourceConfig = await loadSourceConfig(sourceId, userId, db);
     const requestContainer = stringOrNull(requestHint.container);
     const streamType = stringOr(hint.streamType, "live");
-    const container = xtreamPlaybackContainer(hint, streamType, requestContainer);
+    const container = containerObservation?.container ?? xtreamPlaybackContainer(hint, streamType, requestContainer);
     return {
       targetUrl: xtreamStreamUrl({
         serverUrl: stringOr(sourceConfig.serverUrl, ""),
@@ -4398,6 +4460,7 @@ async function resolvePlaybackTarget(
       }),
       playbackHint: mergePlaybackHints(storedPlaybackHint, compactRecord({ container })),
       itemCas,
+      containerObservation,
     };
   }
 
@@ -4411,6 +4474,7 @@ async function resolvePlaybackTarget(
       playbackHint: storedPlaybackHint,
       providerAccountScope: `user-source:${userId}:${sourceId}`,
       itemCas,
+      containerObservation,
     };
   }
 
@@ -4661,6 +4725,229 @@ async function createBytePipeAccess(
   return { url: `${access.gatewayUrl}/raw/${access.capability}` };
 }
 
+function exactJsonKeys(value: JsonRecord, expected: string[]) {
+  const actual = Object.keys(value).sort();
+  const wanted = [...expected].sort();
+  return actual.length === wanted.length && actual.every((key, index) => key === wanted[index]);
+}
+
+function canonicalVodContainer(value: unknown): string | null {
+  const token = normalizeCodecToken(value);
+  const canonical = token === "matroska" ? "mkv" : token === "mpeg" ? "mpg" : token;
+  return ["mkv", "mp4", "mov", "avi", "ogg", "flv", "mpg"].includes(canonical)
+    ? canonical
+    : null;
+}
+
+function containerEvidenceKind(container: string): string | null {
+  return {
+    mkv: "ebml-v1",
+    mp4: "iso-bmff-ftyp-v1",
+    mov: "iso-bmff-ftyp-v1",
+    avi: "riff-avi-v1",
+    ogg: "ogg-v1",
+    flv: "flv-v1",
+    mpg: "mpeg-ps-v1",
+  }[container] ?? null;
+}
+
+function normalizeGatewaySourceContainerMismatch(
+  status: number,
+  value: unknown,
+  expectedSourceUrlSha256: string,
+) {
+  const body = recordOrEmpty(value);
+  if (
+    status !== 409 ||
+    !exactJsonKeys(body, ["protocol", "code", "declaredContainer", "observedContainer", "evidence"]) ||
+    body.protocol !== 1 ||
+    body.code !== "SOURCE_CONTAINER_MISMATCH" ||
+    typeof body.declaredContainer !== "string" ||
+    typeof body.observedContainer !== "string"
+  ) return null;
+  const declaredContainer = canonicalVodContainer(body.declaredContainer);
+  const observedContainer = canonicalVodContainer(body.observedContainer);
+  const evidence = recordOrEmpty(body.evidence);
+  if (
+    declaredContainer !== "mkv" ||
+    !observedContainer ||
+    observedContainer === declaredContainer ||
+    typeof evidence.kind !== "string" ||
+    typeof evidence.prefixSha256 !== "string" ||
+    typeof evidence.sourceUrlSha256 !== "string" ||
+    typeof evidence.effectiveUrlSha256 !== "string" ||
+    typeof evidence.validatorKind !== "string" ||
+    !(evidence.validatorSha256 === null || typeof evidence.validatorSha256 === "string") ||
+    !(evidence.fileSizeBytes === null || typeof evidence.fileSizeBytes === "number") ||
+    !exactJsonKeys(evidence, [
+      "kind",
+      "prefixSha256",
+      "sourceUrlSha256",
+      "effectiveUrlSha256",
+      "validatorKind",
+      "validatorSha256",
+      "fileSizeBytes",
+    ])
+  ) return null;
+  const kind = stringOr(evidence.kind, "");
+  const prefixSha256 = stringOr(evidence.prefixSha256, "").toLowerCase();
+  const sourceUrlSha256 = stringOr(evidence.sourceUrlSha256, "").toLowerCase();
+  const effectiveUrlSha256 = stringOr(evidence.effectiveUrlSha256, "").toLowerCase();
+  const validatorKind = stringOr(evidence.validatorKind, "");
+  const validatorSha256 = evidence.validatorSha256 === null
+    ? null
+    : stringOr(evidence.validatorSha256, "").toLowerCase();
+  const fileSizeBytes = evidence.fileSizeBytes === null
+    ? null
+    : exactPositiveSafeInteger(evidence.fileSizeBytes);
+  const expectedKind = containerEvidenceKind(observedContainer);
+  if (
+    !expectedKind || kind !== expectedKind ||
+    !/^[0-9a-f]{64}$/.test(prefixSha256) ||
+    !/^[0-9a-f]{64}$/.test(sourceUrlSha256) ||
+    sourceUrlSha256 !== expectedSourceUrlSha256 ||
+    !/^[0-9a-f]{64}$/.test(effectiveUrlSha256) ||
+    !["etag", "last-modified", "none"].includes(validatorKind) ||
+    (validatorKind === "none" ? validatorSha256 !== null : !/^[0-9a-f]{64}$/.test(validatorSha256 || "")) ||
+    (evidence.fileSizeBytes !== null && fileSizeBytes === null)
+  ) return null;
+  return {
+    declaredContainer,
+    observedContainer,
+    evidence: {
+      kind,
+      prefixSha256,
+      sourceUrlSha256,
+      effectiveUrlSha256,
+      validatorKind,
+      validatorSha256,
+      fileSizeBytes,
+    },
+  };
+}
+
+function playbackHintForObservedContainer(value: unknown, observedContainer: string) {
+  const hint = { ...recordOrEmpty(value) };
+  // A wrong container label means the catalogue profile was not established
+  // from this exact byte stream. Keep user track choices and identity hints,
+  // but make the corrected Gateway session re-probe codecs before selecting a
+  // copy/transcode graph.
+  delete hint.videoCodec;
+  delete hint.video_codec;
+  delete hint.audioCodec;
+  delete hint.audio_codec;
+  delete hint.audioProfile;
+  delete hint.audio_profile;
+  delete hint.audioChannels;
+  delete hint.audio_channels;
+  const existingProfile = firstUsefulCodecProfile(hint.codecProfile, hint.codec_profile);
+  const existingProfileContainer = canonicalVodContainer(existingProfile.container);
+  const exactObservedProfile = Boolean(
+    existingProfileContainer === observedContainer &&
+    stringOrNull(existingProfile.probeSource ?? existingProfile.probe_source) &&
+    stringOrNull(existingProfile.probedAt ?? existingProfile.probed_at),
+  );
+  delete hint.codec_profile;
+  return compactRecord({
+    ...hint,
+    container: observedContainer,
+    containerExplicit: true,
+    codecProfile: exactObservedProfile
+      ? compactRecord({ ...stripMkvH264FastStartProof(existingProfile), container: observedContainer })
+      : { container: observedContainer },
+  });
+}
+
+async function sourceContainerAuthorityFromObservation(value: unknown, sourceUrl: string) {
+  const observation = recordOrEmpty(value);
+  const container = canonicalVodContainer(observation.container);
+  const evidenceKind = stringOr(observation.evidenceKind ?? observation.evidence_kind, "");
+  const prefixSha256 = stringOr(observation.prefixSha256 ?? observation.prefix_sha256, "").toLowerCase();
+  if (
+    !container ||
+    evidenceKind !== containerEvidenceKind(container) ||
+    !/^[0-9a-f]{64}$/.test(prefixSha256)
+  ) return null;
+  return {
+    protocol: 1,
+    container,
+    sourceUrlSha256: await sha256Hex(sourceUrl),
+    evidenceKind,
+    prefixSha256,
+  };
+}
+
+function rewriteVodContainerUrl(
+  value: string,
+  declaredContainer: string,
+  observedContainer: string,
+  sourceType: string,
+) {
+  // Only Norva's Xtream URL builder owns the terminal extension. An opaque M3U
+  // URL may merely happen to end in `.mkv`; changing it could invalidate a
+  // signed/static provider path. The Gateway authority is enough for those
+  // sources and keeps their exact URL intact.
+  if (sourceType !== "xtream") return value;
+  try {
+    const parsed = new URL(value);
+    const segments = parsed.pathname.split("/").filter(Boolean);
+    if (segments.length < 4 || !["movie", "series"].includes(segments.at(-4) || "")) return value;
+    const suffix = `.${declaredContainer.toLowerCase()}`;
+    if (parsed.pathname.toLowerCase().endsWith(suffix)) {
+      parsed.pathname = `${parsed.pathname.slice(0, -suffix.length)}.${observedContainer}`;
+      return parsed.toString();
+    }
+  } catch (_) { /* retain the authenticated exact target */ }
+  return value;
+}
+
+function containerObservationItemCas(value: unknown, expectedTargetUrlHash: string) {
+  const hint = recordOrEmpty(value);
+  const raw = recordOrEmpty(hint.__norvaMkvH264FastStartItemCasV2);
+  const id = stringOrNull(raw.id);
+  const updatedAt = stringOrNull(raw.updatedAt ?? raw.updated_at);
+  const targetUrlHash = stringOr(raw.targetUrlHash ?? raw.target_url_hash, "").toLowerCase();
+  if (
+    !id || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id) ||
+    !updatedAt || !Number.isFinite(Date.parse(updatedAt)) ||
+    targetUrlHash !== expectedTargetUrlHash
+  ) return null;
+  return { id, updatedAt };
+}
+
+async function persistGatewaySourceContainerMismatch(
+  db: SupabaseClient,
+  options: {
+    playbackSessionId: string;
+    userId: string;
+    sourceId: string;
+    itemType: string;
+    itemId: string;
+    playbackHint: JsonRecord;
+    expectedTargetUrlHash: string;
+    mismatch: JsonRecord;
+  },
+) {
+  const itemCas = containerObservationItemCas(options.playbackHint, options.expectedTargetUrlHash);
+  const { data, error } = await db.rpc("record_catalog_file_container_observation", {
+    p_playback_session_id: options.playbackSessionId,
+    p_user_id: options.userId,
+    p_source_id: options.sourceId,
+    p_item_type: options.itemType,
+    p_external_id: options.itemId,
+    p_declared_container: options.mismatch.declaredContainer,
+    p_observed_container: options.mismatch.observedContainer,
+    p_evidence: options.mismatch.evidence,
+    p_expected_media_item_id: itemCas?.id ?? null,
+    p_expected_media_item_updated_at: itemCas?.updatedAt ?? null,
+  });
+  if (error || recordOrEmpty(data).ok !== true) {
+    console.warn("[norva-playback] unable to persist provider container correction", error?.message || "invalid RPC result");
+    return false;
+  }
+  return true;
+}
+
 async function createGatewaySession(
   playbackSessionId: string,
   userId: string,
@@ -4679,6 +4966,7 @@ async function createGatewaySession(
   },
   forceVideoTranscode: boolean,
   releasedSuperseded = 0,
+  sourceContainerObservation: JsonRecord = {},
 ) {
   const gatewayMode = gatewayModeForPlayback(mode, playbackHint, forceVideoTranscode);
   const gatewayHints = gatewayPlaybackHints(playbackHint);
@@ -4720,6 +5008,11 @@ async function createGatewaySession(
   }
 
   const startupStartedAt = performance.now();
+  const originalTargetUrlHash = await sha256Hex(targetUrl);
+  const initialSourceContainerAuthority = await sourceContainerAuthorityFromObservation(
+    sourceContainerObservation,
+    targetUrl,
+  );
   const baseGatewayBody = {
     playbackSessionId,
     ownerKey: await sha256Hex(userId),
@@ -4731,6 +5024,7 @@ async function createGatewaySession(
     seekOffset: gatewayHints.seekOffset,
     startOffset: gatewayHints.startOffset,
     ...gatewayHints,
+    ...(initialSourceContainerAuthority ? { sourceContainerAuthority: initialSourceContainerAuthority } : {}),
     ...(userAgent ? { userAgent } : {}),
   };
   let { response, body: gatewayBody } = await requestGatewaySession(
@@ -4738,6 +5032,58 @@ async function createGatewaySession(
     gatewayRoute.token,
     baseGatewayBody,
   );
+  let containerCorrectionRetried = false;
+  if (!response.ok) {
+    const mismatch = normalizeGatewaySourceContainerMismatch(
+      response.status,
+      gatewayBody,
+      originalTargetUrlHash,
+    );
+    if (mismatch) {
+      await persistGatewaySourceContainerMismatch(db, {
+        playbackSessionId,
+        userId,
+        sourceId: playbackIdentity.sourceId,
+        itemType: playbackIdentity.itemType,
+        itemId: playbackIdentity.itemId,
+        playbackHint,
+        expectedTargetUrlHash: originalTargetUrlHash,
+        mismatch,
+      });
+      if (PROVIDER_SLOT_RELEASE_DELAY_MS > 0) await sleep(PROVIDER_SLOT_RELEASE_DELAY_MS);
+      const correctedTargetUrl = rewriteVodContainerUrl(
+        targetUrl,
+        mismatch.declaredContainer,
+        mismatch.observedContainer,
+        stringOr(playbackHint.sourceType, ""),
+      );
+      const correctedPlaybackHint = playbackHintForObservedContainer(
+        playbackHint,
+        mismatch.observedContainer,
+      );
+      const correctedGatewayHints = gatewayPlaybackHints(correctedPlaybackHint);
+      const retry = await requestGatewaySession(
+        gatewayRoute.url,
+        gatewayRoute.token,
+        {
+          ...baseGatewayBody,
+          sourceUrl: correctedTargetUrl,
+          playbackHint: stripMkvH264FastStartInternalHints(correctedPlaybackHint),
+          ...correctedGatewayHints,
+          sourceContainerAuthority: {
+            protocol: 1,
+            container: mismatch.observedContainer,
+            sourceUrlSha256: await sha256Hex(correctedTargetUrl),
+            evidenceKind: mismatch.evidence.kind,
+            prefixSha256: mismatch.evidence.prefixSha256,
+          },
+        },
+      );
+      response = retry.response;
+      gatewayBody = retry.body;
+      containerCorrectionRetried = true;
+    }
+  }
   if (!response.ok) {
     const gatewayFailureCode = stringOr(
       gatewayBody.code ?? gatewayBody.errorCode ?? gatewayBody.error_code,
@@ -4747,22 +5093,35 @@ async function createGatewaySession(
       code: gatewayFailureCode,
       upstreamStatus: response.status,
     })) {
-      const lastSelfReleaseAt = releasedSuperseded > 0
-        ? new Date().toISOString()
-        : await latestProviderSelfReleaseAt(providerAccountHash, db);
-      if (!shouldOpenCircuitForProviderBusy({ lastSelfReleaseAt })) {
-        await sleep(PROVIDER_SLOT_RELEASE_DELAY_MS);
-        const retry = await requestGatewaySession(
-          gatewayRoute.url,
-          gatewayRoute.token,
-          baseGatewayBody,
-        );
-        response = retry.response;
-        gatewayBody = retry.body;
+      if (containerCorrectionRetried) {
+        // The correction already consumed the only authorized second provider
+        // attempt. A first 458 on that attempt is terminal: never turn a
+        // metadata repair into a connection cascade. Circuit escalation still
+        // honors the same bounded self-release grace as every other 458 path.
+        const lastSelfReleaseAt = releasedSuperseded > 0
+          ? new Date().toISOString()
+          : await latestProviderSelfReleaseAt(providerAccountHash, db);
+        if (shouldOpenCircuitForProviderBusy({ lastSelfReleaseAt })) {
+          await openProviderPlaybackCircuit(providerAccountHash, db, true);
+        }
       } else {
-        // This is the only escalating signal: norva-playback itself observed the
-        // gateway's HTTP 458. Open the circuit before preserving that exact error.
-        await openProviderPlaybackCircuit(providerAccountHash, db, true);
+        const lastSelfReleaseAt = releasedSuperseded > 0
+          ? new Date().toISOString()
+          : await latestProviderSelfReleaseAt(providerAccountHash, db);
+        if (!shouldOpenCircuitForProviderBusy({ lastSelfReleaseAt })) {
+          await sleep(PROVIDER_SLOT_RELEASE_DELAY_MS);
+          const retry = await requestGatewaySession(
+            gatewayRoute.url,
+            gatewayRoute.token,
+            baseGatewayBody,
+          );
+          response = retry.response;
+          gatewayBody = retry.body;
+        } else {
+          // This is the only escalating signal: norva-playback itself observed the
+          // gateway's HTTP 458. Open the circuit before preserving that exact error.
+          await openProviderPlaybackCircuit(providerAccountHash, db, true);
+        }
       }
     }
     if (!response.ok) {
