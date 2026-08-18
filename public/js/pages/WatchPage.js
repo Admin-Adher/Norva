@@ -7555,6 +7555,62 @@ class WatchPage {
         };
     }
 
+    getInformationalGatewayMuxedMonoAudioTrack(activeHls = this.hls) {
+        if (this._gatewayAudioRenditionStatus !== 'absent'
+            || this._gatewayAudioRenditionRequired !== true
+            || this.currentPlaybackMode !== 'gateway-session'
+            || !activeHls || activeHls !== this.hls
+            || this._gatewayAudioRenditionAttemptId !== this._playbackAttemptId
+            || !this._gatewayHlsAudioTracksReady
+            || this._pendingGatewayAudioStreamIndex !== null) {
+            return null;
+        }
+
+        const video = this.video;
+        const readyState = Number(video?.readyState);
+        const videoWidth = Number(video?.videoWidth);
+        const videoHeight = Number(video?.videoHeight);
+        if (!video || video.error
+            || !Number.isFinite(readyState) || readyState < 3
+            || !Number.isFinite(videoWidth) || videoWidth <= 0
+            || !Number.isFinite(videoHeight) || videoHeight <= 0) {
+            return null;
+        }
+
+        // The current Hls instance has positively enumerated no alternate audio
+        // rendition (or the legacy single id=0 form), while the exact Gateway
+        // profile describes one muxed source track. This is display-only: keep
+        // source=none so an unverified/provider label can never restart playback
+        // or become an authority for HLS track switching.
+        const hlsTracks = activeHls.audioTracks;
+        if (!Array.isArray(hlsTracks) || hlsTracks.length > 1) return null;
+        if (hlsTracks.length === 1) {
+            const rawAdvertisedId = hlsTracks[0]?.id;
+            if (rawAdvertisedId !== null && rawAdvertisedId !== undefined) {
+                const advertisedId = Number(rawAdvertisedId);
+                if (!Number.isSafeInteger(advertisedId) || advertisedId !== 0) return null;
+            }
+        }
+
+        const probeTracks = this.getProbeAudioTracks();
+        const rawTracks = Array.isArray(this.audioTracks) ? this.audioTracks : [];
+        if (probeTracks.length !== 1 || rawTracks.length !== 1) return null;
+
+        const streamIndex = Number(rawTracks[0]?.index);
+        if (!Number.isSafeInteger(streamIndex) || streamIndex < 0
+            || Number(this.directAudioStreamIndex) !== streamIndex
+            || Number(this.selectedAudioStreamIndex) !== streamIndex) {
+            return null;
+        }
+
+        return {
+            source: 'none',
+            index: -1,
+            label: probeTracks[0].label || 'Audio track',
+            active: true,
+        };
+    }
+
     getGatewayAudioRenditionLabel(track, index, allTracks) {
         const buildBase = (candidate, fallbackIndex) => {
             const parts = [];
@@ -8191,6 +8247,8 @@ class WatchPage {
         if (hlsTracks.length > 1) return hlsTracks;
         const verifiedMuxedMono = this.getVerifiedGatewayMuxedMonoAudioTrack();
         if (verifiedMuxedMono) return [verifiedMuxedMono];
+        const informationalMuxedMono = this.getInformationalGatewayMuxedMonoAudioTrack();
+        if (informationalMuxedMono) return [informationalMuxedMono];
         if (this.isGatewayAudioRenditionFailClosed()) {
             return [{ source: 'none', index: -1, label: 'Audio tracks unavailable', active: true }];
         }

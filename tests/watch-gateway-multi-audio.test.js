@@ -520,6 +520,56 @@ test('verified muxed mono exposes one exact catalogue row and clicking it never 
     assert.equal(restartCalls, 0);
 });
 
+test('unverified muxed mono exposes one honest informational row without enabling a restart', async () => {
+    const WatchPage = loadWatchPage();
+    const harness = makePage(WatchPage);
+    const { page } = harness;
+    page.content = { id: 'movie-amar', type: 'movie', rawTitle: 'ES ▎ Amar' };
+    page.audioLanguageValidationStatus = 'not_analyzed';
+    page.playingAudioVersionLabel = () => 'Spanish · Provider label';
+    page.currentPlaybackMode = 'gateway-session';
+    page.audioTracks = [{
+        index: 1,
+        title: 'Audio 1',
+        codec: 'ac3',
+        channels: 6,
+        channelLayout: '5.1(side)',
+        default: false,
+    }];
+    page.selectedAudioStreamIndex = 1;
+    page.directAudioStreamIndex = 1;
+    page.video.readyState = 4;
+    page.video.videoWidth = 720;
+    page.video.videoHeight = 304;
+    let restartCalls = 0;
+    page.queueSelectedAudioTrackRestart = () => { restartCalls += 1; };
+
+    assert.equal(page.configureGatewayAudioRenditions(null, null, [], {
+        required: true,
+        playbackAttemptId: 17,
+    }), false);
+    page.playHls('https://gateway.example/sessions/session-amar/playlist.m3u8', {
+        playbackAttemptId: 17,
+        autoplay: false,
+    });
+    page.hls.audioTracks = [];
+    page.hls.emit(FakeHls.Events.MANIFEST_PARSED, { audioTracks: [] });
+
+    assert.equal(page.isGatewayAudioRenditionFailClosed(), true,
+        'unmapped Gateway topology remains non-switchable');
+    const tracks = page.getVisibleAudioTracks();
+    assert.deepEqual(Array.from(tracks, (track) => [track.source, track.index]), [['none', -1]]);
+    assert.equal(tracks[0].label, 'Spanish · Provider label · AC3 · 5.1');
+    assert.doesNotMatch(tracks[0].label, /pending|verified/i);
+    assert.equal(await page.selectAudioTrack(tracks[0].source, tracks[0].index), undefined);
+    assert.equal(restartCalls, 0);
+
+    page.directAudioStreamIndex = 2;
+    assert.equal(page.getInformationalGatewayMuxedMonoAudioTrack(), null,
+        'a stream identity mismatch stays visibly fail closed');
+    assert.equal(page.getVisibleAudioTracks()[0].label, 'Audio tracks unavailable');
+});
+
 test('verified muxed mono exception rejects every ambiguous identity and topology', async () => {
     const WatchPage = loadWatchPage();
     const makeMuxedMono = () => {
