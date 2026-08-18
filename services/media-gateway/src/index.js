@@ -1731,7 +1731,7 @@ if (
 }
 const MULTI_AUDIO_HLS_PROTOCOL = 1;
 const MAX_MULTI_AUDIO_RENDITIONS = 8;
-const GATEWAY_VERSION = 108;
+const GATEWAY_VERSION = 109;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -1952,6 +1952,8 @@ app.get('/health', (req, res) => {
             )).length,
             providerConnectionsSerialized: true,
             exactRangeDrainReopensImmediately: true,
+            plannedSupersessionReopensImmediately: true,
+            identityPreflightRange: 'bytes=0-0',
             interruptedRangeReleaseDelayMs: PROVIDER_SLOT_RELEASE_DELAY_MS,
             effectiveUrlPinned: true,
             validatorPinnedWhenAvailable: true,
@@ -3557,7 +3559,9 @@ async function closeStrictLidBrokerAttempt(context, attempt, reason = 'completed
             if (attempt.fetchStarted) {
                 const releaseDelayMs = attempt.completedExactRange === true
                     ? context.completedReleaseDelayMs
-                    : context.releaseDelayMs;
+                    : (attempt.stopReason === 'superseded'
+                        ? context.supersededReleaseDelayMs
+                        : context.releaseDelayMs);
                 if (attempt.completedExactRange === true) context.completedProviderFetches++;
                 else context.interruptedProviderFetches++;
                 if (releaseDelayMs > 0) {
@@ -3895,6 +3899,11 @@ async function createStrictLidBroker(options = {}) {
             : PROVIDER_SLOT_RELEASE_DELAY_MS,
         completedReleaseDelayMs: Number.isFinite(Number(options.completedReleaseDelayMs))
             ? Math.max(0, Number(options.completedReleaseDelayMs))
+            : (Number.isFinite(Number(options.releaseDelayMs))
+                ? Math.max(0, Number(options.releaseDelayMs))
+                : PROVIDER_SLOT_RELEASE_DELAY_MS),
+        supersededReleaseDelayMs: Number.isFinite(Number(options.supersededReleaseDelayMs))
+            ? Math.max(0, Number(options.supersededReleaseDelayMs))
             : (Number.isFinite(Number(options.releaseDelayMs))
                 ? Math.max(0, Number(options.releaseDelayMs))
                 : PROVIDER_SLOT_RELEASE_DELAY_MS),
@@ -8592,13 +8601,16 @@ async function ensureBoundedMkvInputPump(session, parentSignal = null) {
     if (parentSignal?.aborted) throw abortedVodInputPumpError();
     session.startupTimings = asRecord(session.startupTimings);
     session.startupTimings.boundedMkvInputPump = true;
-    // Open the one playback GET before the codec graph is frozen. A signed v2
-    // proof may lift the finite-MKV encode lock only after this exact response
-    // has proved the same byte range and strong validator. The reader is kept
-    // open and handed directly to the pump; FFmpeg never triggers a second GET.
+    // Normal playback retains one full-file response for the pump. A seek only
+    // needs an authoritative file identity before FFmpeg starts issuing ranges,
+    // so drain bytes=0-0 instead of opening then cancelling a full-file body.
+    // This proves size, effective URL and validator without an artificial slot
+    // handoff delay or overlapping the first broker request.
     const preopenStartedAt = Date.now();
     const hadExactFileSize = Boolean(fileSizeBytesForSession(session));
-    await preopenBoundedMkvInputPump(session, parentSignal);
+    await preopenBoundedMkvInputPump(session, parentSignal, {
+        drainExactRange: Number(session?.seekOffset || 0) > 0,
+    });
     const fileSizeBytes = fileSizeBytesForSession(session);
     if (!fileSizeBytes) {
         await closePreopenedBoundedMkvInput(session);
@@ -8880,14 +8892,15 @@ function captureBoundedMkvHeaderBytes(session, byteOffset, chunk) {
     }
 }
 
-async function openBoundedVodInputAttempt(session, offset, parentSignal, dispatcher) {
+async function openBoundedVodInputAttempt(session, offset, parentSignal, dispatcher, options = {}) {
     const fileSizeBytes = fileSizeBytesForSession(session);
     if (offset > 0 && !fileSizeBytes) {
         throw vodInputPumpError('VOD_SIZE_UNAVAILABLE', 'Finite MKV input size is unavailable', { status: 502 });
     }
-    const requestEnd = fileSizeBytes
-        ? fileSizeBytes - 1
-        : VOD_INPUT_DISCOVERY_RANGE_END;
+    const requestedEndOverride = Number(options.requestEnd);
+    const requestEnd = Number.isSafeInteger(requestedEndOverride) && requestedEndOverride >= offset
+        ? Math.min(requestedEndOverride, fileSizeBytes ? fileSizeBytes - 1 : requestedEndOverride)
+        : (fileSizeBytes ? fileSizeBytes - 1 : VOD_INPUT_DISCOVERY_RANGE_END);
     const controller = new AbortController();
     const attempt = { controller, response: null, reader: null, openTimer: null, signal: parentSignal, onParentAbort: null };
     attempt.onParentAbort = () => {
@@ -8996,40 +9009,94 @@ async function openBoundedVodInputAttempt(session, offset, parentSignal, dispatc
     }
 }
 
-async function preopenBoundedMkvInputPump(session, parentSignal = null) {
+async function preopenBoundedMkvInputPump(session, parentSignal = null, options = {}) {
     if (!isFiniteMkvVodSession(session) || session.preopenedVodInputAttempt) return;
     const dispatcher = pickProxyAgent(proxyKeyFromUrl(session.sourceUrl)) || null;
-    const opened = await openBoundedVodInputAttempt(session, 0, parentSignal, dispatcher);
-    const existingFileSizeBytes = fileSizeBytesForSession(session);
-    if (existingFileSizeBytes && opened.range.total !== existingFileSizeBytes) {
-        await closeVodInputAttempt(opened.attempt);
-        throw vodInputPumpError('VOD_CHANGED', 'The MKV file changed before playback started.', { status: 502 });
-    }
-    session.fileSizeBytes = opened.range.total;
-    session.codecProfile = compactRecord({
-        ...asRecord(session.codecProfile),
-        fileSizeBytes: opened.range.total,
-    });
-    const strongValidator = strongBoundedVodResponseValidator(opened.attempt.response);
-    const validatorEvidence = strongValidator
-        ? 'strong-etag'
-        : (boundedVodResponseValidator(opened.attempt.response)?.kind === 'last-modified'
-            ? 'last-modified'
-            : 'weak-or-absent');
-    if (validatorEvidence === 'strong-etag') vodInputPumpStats.validatorEvidence.strongEtag += 1;
-    else if (validatorEvidence === 'last-modified') vodInputPumpStats.validatorEvidence.lastModified += 1;
-    else vodInputPumpStats.validatorEvidence.weakOrAbsent += 1;
-    session.vodInputStrongValidator = strongValidator;
-    session.vodInputEffectiveUrlSha256 = sha256Hex(String(
-        opened.attempt.response?.url || session.sourceUrl || '',
-    ));
-    session.preopenedVodInputAttempt = {
-        ...opened,
+    const drainExactRange = options.drainExactRange === true;
+    const opened = await openBoundedVodInputAttempt(
+        session,
+        0,
+        parentSignal,
         dispatcher,
-    };
-    session.startupTimings = asRecord(session.startupTimings);
-    session.startupTimings.providerGetPreopened = true;
-    session.startupTimings.providerValidatorEvidence = validatorEvidence;
+        drainExactRange ? { requestEnd: 0 } : {},
+    );
+    let retained = false;
+    try {
+        const existingFileSizeBytes = fileSizeBytesForSession(session);
+        if (existingFileSizeBytes && opened.range.total !== existingFileSizeBytes) {
+            throw vodInputPumpError('VOD_CHANGED', 'The MKV file changed before playback started.', { status: 502 });
+        }
+        session.fileSizeBytes = opened.range.total;
+        session.codecProfile = compactRecord({
+            ...asRecord(session.codecProfile),
+            fileSizeBytes: opened.range.total,
+        });
+        const strongValidator = strongBoundedVodResponseValidator(opened.attempt.response);
+        const validatorEvidence = strongValidator
+            ? 'strong-etag'
+            : (boundedVodResponseValidator(opened.attempt.response)?.kind === 'last-modified'
+                ? 'last-modified'
+                : 'weak-or-absent');
+        if (validatorEvidence === 'strong-etag') vodInputPumpStats.validatorEvidence.strongEtag += 1;
+        else if (validatorEvidence === 'last-modified') vodInputPumpStats.validatorEvidence.lastModified += 1;
+        else vodInputPumpStats.validatorEvidence.weakOrAbsent += 1;
+        session.vodInputStrongValidator = strongValidator;
+        session.vodInputEffectiveUrlSha256 = sha256Hex(String(
+            opened.attempt.response?.url || session.sourceUrl || '',
+        ));
+        session.startupTimings = asRecord(session.startupTimings);
+        session.startupTimings.providerValidatorEvidence = validatorEvidence;
+
+        if (drainExactRange) {
+            const expectedBytes = opened.range.end - opened.range.start + 1;
+            let drainedBytes = 0;
+            while (true) {
+                const next = await readRawPrefixChunk(
+                    opened.attempt.reader,
+                    parentSignal,
+                    VOD_INPUT_IDLE_TIMEOUT_MS,
+                );
+                if (next.aborted || parentSignal?.aborted) throw abortedVodInputPumpError();
+                if (next.timedOut) {
+                    throw vodInputPumpError(
+                        'PROVIDER_IDLE_TIMEOUT',
+                        'Provider did not finish the MKV identity range in time.',
+                        { status: 504 },
+                    );
+                }
+                if (next.error) throw classifyVodInputFetchError(next.error, false);
+                if (next.done) break;
+                drainedBytes += Buffer.from(next.value || []).length;
+                if (drainedBytes > expectedBytes) {
+                    throw vodInputPumpError(
+                        'RANGE_LENGTH_MISMATCH',
+                        'Provider exceeded the exact MKV identity range.',
+                        { status: 502 },
+                    );
+                }
+            }
+            if (drainedBytes !== expectedBytes) {
+                throw vodInputPumpError(
+                    'RANGE_LENGTH_MISMATCH',
+                    'Provider truncated the exact MKV identity range.',
+                    { status: 502 },
+                );
+            }
+            session.startupTimings.providerGetPreopened = false;
+            session.startupTimings.providerSeekIdentityPreflight = true;
+            session.startupTimings.providerSeekIdentityPreflightBytes = drainedBytes;
+            return;
+        }
+
+        session.preopenedVodInputAttempt = {
+            ...opened,
+            dispatcher,
+        };
+        session.startupTimings.providerGetPreopened = true;
+        retained = true;
+    } finally {
+        if (!retained) await closeVodInputAttempt(opened.attempt).catch(() => {});
+    }
 }
 
 async function closePreopenedBoundedMkvInput(session) {
@@ -9079,10 +9146,12 @@ async function prepareFiniteMkvSeekBroker(session, parentSignal = null) {
         effectiveUrlSha256: session.vodInputEffectiveUrlSha256,
         pathPrefix: 'finite-mkv-seek',
         // Exact responses are fully drained and the broker remains strictly
-        // serialized, so no provider-slot grace is needed between them. An
-        // interrupted/superseded range still keeps the conservative global
-        // release delay before the next provider request.
+        // serialized, so no provider-slot grace is needed between them. A
+        // planned FFmpeg supersession also waits for cancellation/socket close
+        // before the next GET. Shutdown, timeout and error paths retain the
+        // conservative global release delay for safe external handoff.
         completedReleaseDelayMs: 0,
+        supersededReleaseDelayMs: 0,
         abortSignal: parentSignal,
     });
     session.finiteMkvSeekBroker = broker;

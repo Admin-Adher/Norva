@@ -565,6 +565,39 @@ test('cold unknown-size MKV discovers total from the retained playback GET and o
     assert.equal(session.startupTimings.fileSizeDiscoveredFromPlaybackGet, true);
 });
 
+test('finite MKV seek drains a one-byte identity range instead of retaining a full-file preopen', async () => {
+    const fixture = mkvFixture(128);
+    const tracker = makeTracker();
+    const h = pumpHarness({
+        fetch: async (_url, options) => {
+            tracker.calls.push(options.headers);
+            return trackedResponse(tracker, {
+                chunks: [fixture.subarray(0, 1)],
+                headers: {
+                    'Content-Range': `bytes 0-0/${fixture.length}`,
+                    'Content-Length': '1',
+                    ETag: '"seek-identity-v1"',
+                },
+            });
+        },
+    });
+    const session = mkvSession(fixture.length);
+    session.seekOffset = 93;
+
+    await h.ensureBoundedMkvInputPump(session);
+
+    assert.equal(tracker.calls.length, 1);
+    assert.equal(tracker.calls[0].Range, 'bytes=0-0');
+    assert.equal(tracker.maxActive, 1);
+    assert.equal(tracker.active, 0, 'identity response is fully drained before the broker opens');
+    assert.equal(session.preopenedVodInputAttempt, undefined);
+    assert.equal(session.startupTimings.providerGetPreopened, false);
+    assert.equal(session.startupTimings.providerSeekIdentityPreflight, true);
+    assert.equal(session.startupTimings.providerSeekIdentityPreflightBytes, 1);
+    assert.equal(session.startupTimings.fileSizeBytes, fixture.length);
+    assert.equal(session.vodInputValidator.value, '"seek-identity-v1"');
+});
+
 test('cold proof training reuses that one provider body for both local analyzers', async () => {
     const fixture = mkvFixture(4_096);
     const tracker = makeTracker();
@@ -2404,6 +2437,7 @@ test('finite MKV seek preparation drains the retained provider before opening on
     assert.equal(brokerOptions.effectiveUrlSha256, session.vodInputEffectiveUrlSha256);
     assert.equal(brokerOptions.pathPrefix, 'finite-mkv-seek');
     assert.equal(brokerOptions.completedReleaseDelayMs, 0);
+    assert.equal(brokerOptions.supersededReleaseDelayMs, 0);
     assert.equal(harness.usesFiniteMkvSeekBroker(session), true);
 
     await harness.closeFiniteMkvSeekBroker(session);

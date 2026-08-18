@@ -564,6 +564,73 @@ test('strict LID broker preempts an old local range, awaits close, and never exc
   );
 });
 
+test('finite seek broker reopens immediately after planned supersession without overlapping provider sockets', async (t) => {
+  const { createStrictLidBroker } = brokerHarness();
+  const data = Buffer.alloc(256, 0x5b);
+  const state = { active: 0, maxActive: 0, calls: 0, firstClosedAt: 0, secondOpenedAt: 0 };
+  const provider = http.createServer((req, res) => {
+    state.calls++;
+    state.active++;
+    state.maxActive = Math.max(state.maxActive, state.active);
+    if (state.calls === 2) state.secondOpenedAt = Date.now();
+    let closed = false;
+    const release = () => {
+      if (closed) return;
+      closed = true;
+      state.active--;
+      if (state.calls === 1) state.firstClosedAt = Date.now();
+    };
+    res.once('close', release);
+    res.once('finish', release);
+    const { start, end } = exactRange(req, data.length);
+    const length = end - start + 1;
+    res.writeHead(206, {
+      'Content-Type': 'application/octet-stream',
+      'Content-Range': `bytes ${start}-${end}/${data.length}`,
+      'Content-Length': String(length),
+      ETag: '"finite-serial-v1"',
+    });
+    if (state.calls === 1) {
+      res.write(data.subarray(start, start + 1));
+      return;
+    }
+    res.end(data.subarray(start, end + 1));
+  });
+  const sourceUrl = await listen(provider);
+  t.after(() => closeServer(provider));
+  const broker = await createStrictLidBroker({
+    sourceUrl,
+    fileSizeBytes: data.length,
+    dispatcher: null,
+    releaseDelayMs: 500,
+    completedReleaseDelayMs: 0,
+    supersededReleaseDelayMs: 0,
+    openTimeoutMs: 2000,
+  });
+  t.after(() => broker.close());
+
+  const first = await fetch(broker.inputUrl, { headers: { Range: 'bytes=0-127' } });
+  assert.equal(first.status, 206);
+  const firstReader = first.body.getReader();
+  const firstChunk = await firstReader.read();
+  assert.equal(firstChunk.value.length, 1);
+
+  const second = await fetch(broker.inputUrl, { headers: { Range: 'bytes=128-255' } });
+  assert.equal(second.status, 206);
+  assert.equal((await second.arrayBuffer()).byteLength, 128);
+  await firstReader.cancel().catch(() => {});
+
+  assert.equal(state.calls, 2);
+  assert.equal(state.maxActive, 1, 'planned supersession must remain strictly serialized');
+  assert.ok(state.firstClosedAt > 0 && state.secondOpenedAt >= state.firstClosedAt);
+  assert.ok(
+    state.secondOpenedAt - state.firstClosedAt < 300,
+    `planned successor waited ${state.secondOpenedAt - state.firstClosedAt}ms`,
+  );
+  assert.equal(broker.completedProviderFetches, 1);
+  assert.equal(broker.interruptedProviderFetches, 1);
+});
+
 for (const fixture of [
   {
     name: 'first HTTP 458',
@@ -857,7 +924,7 @@ test('strict LID rejects invalid exact signed coordinates before creating a serv
   assert.match(route, /detectLanguageRequestPolicy\(req, options\)[\s\S]*validateDetectLanguageCapability\(capabilityToken, policy\.requiredScope\)/);
   assert.match(gatewaySource, /strictLidLoopbackBrokerProtocol: 1/);
   assert.match(gatewaySource, /strictLidFileSizeClaim: 'fileSizeBytes'/);
-  assert.match(gatewaySource, /const GATEWAY_VERSION = 108/);
+  assert.match(gatewaySource, /const GATEWAY_VERSION = 109/);
   assert.match(gatewaySource, /strictLidProviderDrainProtocol: 1/);
   assert.match(gatewaySource, /strictLidWeakFallbackProtocol: 1/);
   assert.match(gatewaySource, /strictLidTimelineSamplingProtocol: 1/);
