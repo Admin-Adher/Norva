@@ -315,7 +315,7 @@ test('self-hosted Edge workers outlive every bounded enrichment request', () => 
   );
   assert.match(sourceSync, /episodeProbe \? 390_000/);
   assert.match(sourceSync, /version: 12[\s\S]*exactTailDrainSafe: true/);
-  assert.match(playback, /version: 59[\s\S]*exactTailDrainSafe: true/);
+  assert.match(playback, /version: 60[\s\S]*exactTailDrainSafe: true/);
 
   const playbackWorkerMs = 20 * 60 * 1000;
   const playbackPerWorkerGuaranteedMs = playbackWorkerMs / 2;
