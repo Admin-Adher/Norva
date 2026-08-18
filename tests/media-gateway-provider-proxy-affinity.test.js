@@ -258,8 +258,8 @@ test('gateway uses the canonical provider key on every provider network lane', (
   );
   assert.match(
     gateway,
-    /env: pumpedMkvInput \? undefined : proxyEnvFor\(proxyKeyFromUrl\(session\.sourceUrl\)\)/,
-    'non-pumped session transcodes must retain provider-account proxy affinity',
+    /env: pumpedMkvInput[\s\S]{0,180}\? loopbackOnlyEnv\(\)[\s\S]{0,120}: proxyEnvFor\(proxyKeyFromUrl\(session\.sourceUrl\)\)/,
+    'seek-broker transcodes must stay loopback-only while direct provider inputs retain account proxy affinity',
   );
   assert.match(
     gateway,
@@ -374,7 +374,7 @@ test('gateway fails proxy 407 safely before provider 458 handling', () => {
 });
 
 test('gateway advertises targeted operator override support without identities or secrets', () => {
-  assert.match(gateway, /const GATEWAY_VERSION = 106;/);
+  assert.match(gateway, /const GATEWAY_VERSION = 107;/);
   assert.match(gateway, /providerProxyAffinityProtocol:\s*1/);
   assert.match(gateway, /providerProxyAffinityKey:\s*'provider-account'/);
   assert.match(gateway, /providerProxySlotOverrideProtocol:\s*1/);

@@ -737,6 +737,53 @@ test('strict LID pins the first strong validator and fails closed if the file ch
   assert.equal(calls[1].ifRange, '"v1"');
 });
 
+test('finite MKV seek broker pins preopen validator and effective URL before forwarding bytes', async (t) => {
+  const { createStrictLidBroker } = brokerHarness();
+  const data = Buffer.alloc(32, 0x44);
+  const calls = [];
+  const provider = http.createServer((req, res) => {
+    calls.push({ range: req.headers.range, ifRange: req.headers['if-range'] || null });
+    sendExactRange(req, res, data, { etag: '"v1"' });
+  });
+  const sourceUrl = await listen(provider);
+  t.after(() => closeServer(provider));
+
+  const broker = await createStrictLidBroker({
+    sourceUrl,
+    fileSizeBytes: data.length,
+    dispatcher: null,
+    releaseDelayMs: 0,
+    openTimeoutMs: 2000,
+    pathPrefix: 'finite-mkv-seek',
+    expectedValidator: { header: 'If-Range', value: '"v1"', kind: 'etag' },
+    effectiveUrlSha256: require('node:crypto').createHash('sha256').update(sourceUrl).digest('hex'),
+  });
+  t.after(() => broker.close());
+  assert.match(new URL(broker.inputUrl).pathname, /^\/finite-mkv-seek\/[A-Za-z0-9_-]{40,}$/);
+
+  const response = await fetch(broker.inputUrl, { headers: { Range: 'bytes=4-11' } });
+  assert.equal(response.status, 206);
+  assert.deepEqual(Buffer.from(await response.arrayBuffer()), data.subarray(4, 12));
+  assert.deepEqual(calls, [{ range: 'bytes=4-11', ifRange: '"v1"' }]);
+
+  const mismatched = await createStrictLidBroker({
+    sourceUrl,
+    fileSizeBytes: data.length,
+    dispatcher: null,
+    releaseDelayMs: 0,
+    openTimeoutMs: 2000,
+    pathPrefix: 'finite-mkv-seek',
+    effectiveUrlSha256: require('node:crypto').createHash('sha256').update(`${sourceUrl}/redirected`).digest('hex'),
+  });
+  try {
+    const rejected = await fetch(mismatched.inputUrl, { headers: { Range: 'bytes=0-3' } });
+    assert.equal(rejected.status, 502);
+    assert.equal((await rejected.json()).code, 'VOD_CHANGED');
+  } finally {
+    await mismatched.close();
+  }
+});
+
 test('strict LID rejects invalid exact signed coordinates before creating a server or provider fetch', async () => {
   const { createStrictLidBroker } = brokerHarness();
   let fetches = 0;
@@ -768,7 +815,7 @@ test('strict LID rejects invalid exact signed coordinates before creating a serv
   assert.match(route, /detectLanguageRequestPolicy\(req, options\)[\s\S]*validateDetectLanguageCapability\(capabilityToken, policy\.requiredScope\)/);
   assert.match(gatewaySource, /strictLidLoopbackBrokerProtocol: 1/);
   assert.match(gatewaySource, /strictLidFileSizeClaim: 'fileSizeBytes'/);
-  assert.match(gatewaySource, /const GATEWAY_VERSION = 106/);
+  assert.match(gatewaySource, /const GATEWAY_VERSION = 107/);
   assert.match(gatewaySource, /strictLidProviderDrainProtocol: 1/);
   assert.match(gatewaySource, /strictLidWeakFallbackProtocol: 1/);
   assert.match(gatewaySource, /strictLidTimelineSamplingProtocol: 1/);

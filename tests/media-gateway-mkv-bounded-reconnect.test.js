@@ -333,6 +333,7 @@ function startRetryHarness(overrides = {}) {
         removeSessionDir: async () => {},
         fsp: { mkdir: async () => {} },
         isInsufficientInputProbeFailure,
+        applyFiniteMkvSeekBrokerFailure: () => false,
         console: { warn() {} },
         ...overrides,
     });
@@ -2338,25 +2339,193 @@ test('ffprobe timeout preserves terminal 458/407 stderr, waits for exit, and for
     }
 });
 
-test('FFmpeg MKV input uses pipe:0 only, keeps exact post-input resume, and teardown awaits the pump owner', () => {
+test('finite MKV seek preparation drains the retained provider before opening one pinned broker', async () => {
+    const source = readGateway();
+    const block = sourceBetween(
+        source,
+        'function usesFiniteMkvSeekBroker(',
+        '\nfunction strictMkvAnalyzerInteger(',
+    );
+    const events = [];
+    const broker = {
+        inputUrl: 'http://127.0.0.1:12345/finite-mkv-seek/secret',
+        providerFetches: 3,
+        terminalError: null,
+        async close() { events.push('broker-close'); },
+    };
+    let brokerOptions = null;
+    const harness = vm.runInNewContext(
+        `(() => { ${block}; return { usesFiniteMkvSeekBroker, prepareFiniteMkvSeekBroker, closeFiniteMkvSeekBroker }; })()`,
+        {
+            Number,
+            FFMPEG_USER_AGENT: 'Norva-Test/1',
+            PROVIDER_SLOT_RELEASE_DELAY_MS: 2500,
+            isFiniteMkvVodSession: () => true,
+            fileSizeBytesForSession: (session) => session.fileSizeBytes,
+            vodInputPumpError: (code, message, options = {}) => Object.assign(new Error(message), { code, ...options }),
+            closePreopenedBoundedMkvInput: async (session) => {
+                events.push('preopen-close');
+                session.preopenedVodInputAttempt = null;
+            },
+            waitForVodInputRetry: async () => { events.push('release-wait'); return true; },
+            abortedVodInputPumpError: () => Object.assign(new Error('aborted'), { code: 'VOD_INPUT_ABORTED' }),
+            asRecord: (value) => value && typeof value === 'object' && !Array.isArray(value) ? value : {},
+            createStrictLidBroker: async (options) => {
+                events.push('broker-open');
+                brokerOptions = options;
+                return broker;
+            },
+            sanitizeLog: (value) => String(value || ''),
+            appendLogTail: () => {},
+        },
+    );
+    const session = {
+        sourceUrl: 'https://provider.example/movie/user/pass/title.mkv',
+        userAgent: 'Norva/Seek',
+        seekOffset: 2062,
+        fileSizeBytes: 3_633_791_388,
+        vodInputValidator: { header: 'If-Range', value: '"v1"', kind: 'etag' },
+        vodInputEffectiveUrlSha256: 'a'.repeat(64),
+        preopenedVodInputAttempt: { attempt: {} },
+        startupTimings: { boundedMkvInputPump: true, slotReleaseWaitMs: 0 },
+    };
+
+    await harness.prepareFiniteMkvSeekBroker(session, new AbortController().signal);
+    assert.deepEqual(events, ['preopen-close', 'release-wait', 'broker-open']);
+    assert.equal(session.finiteMkvSeekBroker.inputUrl, broker.inputUrl);
+    assert.equal(session.startupTimings.boundedMkvInputPump, false);
+    assert.equal(session.startupTimings.finiteMkvSeekBroker, true);
+    assert.equal(session.startupTimings.mkvSeekPreopenReleaseWaitMs, 2500);
+    assert.equal(brokerOptions.sourceUrl, session.sourceUrl);
+    assert.equal(brokerOptions.fileSizeBytes, session.fileSizeBytes);
+    assert.deepEqual({ ...brokerOptions.expectedValidator }, session.vodInputValidator);
+    assert.equal(brokerOptions.effectiveUrlSha256, session.vodInputEffectiveUrlSha256);
+    assert.equal(brokerOptions.pathPrefix, 'finite-mkv-seek');
+    assert.equal(harness.usesFiniteMkvSeekBroker(session), true);
+
+    await harness.closeFiniteMkvSeekBroker(session);
+    assert.equal(session.finiteMkvSeekBroker, null);
+    assert.equal(session.startupTimings.finiteMkvSeekProviderFetches, 3);
+    assert.equal(events.at(-1), 'broker-close');
+});
+
+test('finite MKV resume spawns FFmpeg against only the loopback URL with pre-input seek', () => {
+    const source = readGateway();
+    const startSource = sourceBetween(source, 'function startFfmpeg(', '\nfunction seekArgsForSession(').trim();
+    const seekSource = sourceBetween(source, 'function seekArgsForSession(', '\nfunction usesSourceTimestampedCopySeek(').trim();
+    const isFiniteMkvVodSession = () => true;
+    const usesFiniteMkvSeekBroker = (session) => Boolean(session?.finiteMkvSeekBroker?.inputUrl);
+    const seekArgsForSession = vm.runInNewContext(`(${seekSource})`, {
+        Number,
+        isFiniteMkvVodSession,
+        usesFiniteMkvSeekBroker,
+    });
+    let capturedArgs = null;
+    let capturedOptions = null;
+    const fakeSpawn = (_binary, args, options) => {
+        capturedArgs = args;
+        capturedOptions = options;
+        const child = new EventEmitter();
+        child.stderr = new EventEmitter();
+        child.stdin = new EventEmitter();
+        child.stdin.destroy = () => {};
+        return child;
+    };
+    const startFfmpeg = vm.runInNewContext(`(${startSource})`, {
+        path,
+        Number,
+        multiAudioHlsEnabled: () => false,
+        inputProbeArgsForSession: () => [],
+        shouldCopyAudio: () => false,
+        audioArgsForSession: () => ['-c:a', 'aac'],
+        audioMapForSession: () => '0:1',
+        normalizeAudioStreamIndex: Number,
+        videoModeForSession: () => 'encode',
+        reserveVideoEncoderAdmission: () => true,
+        releaseVideoEncoderAdmission: () => {},
+        videoEncoderInputArgs: () => [],
+        videoEncoderOutputArgs: () => ['-c:v', 'h264'],
+        VIDEO_ENCODER_CONFIG: { backend: 'software' },
+        isFiniteMkvVodSession,
+        usesFiniteMkvSeekBroker,
+        usesSourceTimestampedCopySeek: () => false,
+        seekArgsForSession,
+        appendSubtitleOutputs: () => {},
+        asRecord: (value) => value && typeof value === 'object' && !Array.isArray(value) ? value : {},
+        spawn: fakeSpawn,
+        FFMPEG_PATH: 'ffmpeg',
+        proxyEnvFor: () => { throw new Error('provider proxy env must not receive a loopback capability'); },
+        proxyKeyFromUrl: () => 'provider.example',
+        loopbackOnlyEnv: () => ({ NO_PROXY: '127.0.0.1,localhost,::1' }),
+        sanitizeLog: String,
+        appendLogTail: () => {},
+        applyFiniteMkvSeekBrokerFailure: () => false,
+        console: { warn() {}, error() {} },
+        lastNonEmptyLine: () => '',
+        wakePlaybackBlockedQueues: () => {},
+        startBoundedMkvInputPump: () => { throw new Error('seek broker input must not start the byte-zero pipe'); },
+        stopChildProcess: async () => {},
+        waitForPlaylist: async () => {},
+        STARTUP_TIMEOUT_MS: 60_000,
+        EXACT_MATROSKA_H264_HLS_TARGET_SECONDS: 2,
+    });
+    const session = {
+        id: 'seek-2062',
+        sourceUrl: 'https://provider.example/movie/user/password/title.mkv',
+        finiteMkvSeekBroker: { inputUrl: 'http://127.0.0.1:4567/finite-mkv-seek/private-handle' },
+        seekOffset: 2062,
+        outputDir: 'C:\\tmp\\seek-2062',
+        playlistPath: 'C:\\tmp\\seek-2062\\playlist.m3u8',
+        hlsTargetSeconds: 4,
+        videoMode: 'encode',
+        status: 'starting',
+        startupTimings: {},
+        logTail: '',
+    };
+
+    startFfmpeg(session);
+    const inputAt = capturedArgs.indexOf('-i');
+    const seekAt = capturedArgs.indexOf('-ss');
+    assert.ok(seekAt >= 0 && seekAt < inputAt, 'the temporal seek must be an input seek before -i');
+    assert.equal(capturedArgs[seekAt + 1], '2062');
+    assert.equal(capturedArgs[inputAt + 1], session.finiteMkvSeekBroker.inputUrl);
+    assert.equal(capturedArgs.includes(session.sourceUrl), false, 'FFmpeg must never receive the credential-bearing provider URL');
+    assert.equal(capturedArgs.includes('pipe:0'), false);
+    assert.equal(capturedArgs[capturedArgs.indexOf('-seekable') + 1], '1');
+    assert.equal(capturedOptions.stdio[0], 'ignore');
+    assert.equal(capturedOptions.env.NO_PROXY, '127.0.0.1,localhost,::1');
+});
+
+test('FFmpeg MKV input keeps pipe:0 at offset zero and uses the serialized loopback broker for resume', () => {
     const source = readGateway();
     const startFfmpeg = sourceBetween(source, 'function startFfmpeg(', '\nfunction seekArgsForSession(');
-    assert.match(startFfmpeg, /const pumpedMkvInput = isFiniteMkvVodSession\(session\)/);
-    assert.match(startFfmpeg, /const providerHttpInputArgs = pumpedMkvInput \? \[\] : \[/);
-    assert.match(startFfmpeg, /'-i', pumpedMkvInput \? 'pipe:0' : session\.sourceUrl/);
+    assert.match(startFfmpeg, /const seekableMkvInput = usesFiniteMkvSeekBroker\(session\)/);
+    assert.match(startFfmpeg, /const pumpedMkvInput = isFiniteMkvVodSession\(session\) && !seekableMkvInput/);
+    assert.match(startFfmpeg, /seekableMkvInput \? \[/);
+    assert.match(startFfmpeg, /'-seekable', '1'/);
+    assert.match(startFfmpeg, /session\.finiteMkvSeekBroker\.inputUrl/);
     assert.match(startFfmpeg, /stdio: \[pumpedMkvInput \? 'pipe' : 'ignore', 'ignore', 'pipe'\]/);
-    assert.match(startFfmpeg, /env: pumpedMkvInput \? undefined : proxyEnvFor/);
+    assert.match(startFfmpeg, /seekableMkvInput[\s\S]+?loopbackOnlyEnv\(\)/);
     assert.match(startFfmpeg, /startBoundedMkvInputPump\(session, child\.stdin\)/);
-    assert.doesNotMatch(startFfmpeg, /end_offset|seekable/);
 
     const seekSource = sourceBetween(source, 'function seekArgsForSession(', '\nfunction usesSourceTimestampedCopySeek(').trim();
     const seekArgsForSession = vm.runInNewContext(`(${seekSource})`, {
         isFiniteMkvVodSession: (session) => String(session?.sourceUrl || '').endsWith('.mkv'),
+        usesFiniteMkvSeekBroker: (session) => Boolean(session?.finiteMkvSeekBroker),
     });
+    assert.deepEqual(
+        JSON.parse(JSON.stringify(seekArgsForSession({
+            sourceUrl: 'https://p/title.mkv',
+            seekOffset: 120,
+            finiteMkvSeekBroker: { inputUrl: 'http://127.0.0.1/private' },
+        }, true))),
+        { preInputSeek: ['-ss', '120'], postInputSeek: [] },
+        'the private seekable input uses Matroska cues instead of decoding from byte zero',
+    );
     assert.deepEqual(
         JSON.parse(JSON.stringify(seekArgsForSession({ sourceUrl: 'https://p/title.mkv', seekOffset: 120 }, true))),
         { preInputSeek: [], postInputSeek: ['-ss', '120'] },
-        'time resume stays after pipe input; it is never guessed as a byte offset',
+        'an incompletely prepared finite MKV fails safe to the historical linear seek',
     );
 
     const retry = sourceBetween(source, 'async function startSessionWithProviderRetry(', '\nfunction normalizeFileSizeBytes(');
@@ -2369,6 +2538,12 @@ test('FFmpeg MKV input uses pipe:0 only, keeps exact post-input resume, and tear
         stop.indexOf('await stopBoundedMkvInputPump(session)') < stop.indexOf('await stopChildProcess(child)'),
         'session handoff must close and await the provider socket before releasing the old FFmpeg',
     );
+    assert.ok(
+        stop.indexOf('await closeFiniteMkvSeekBroker(session)') < stop.indexOf('await stopChildProcess(child)'),
+        'session handoff must close and await the range broker before releasing the old FFmpeg',
+    );
+    assert.match(source, /pathPrefix:\s*'finite-mkv-seek'/);
+    assert.match(source, /effectiveUrlSha256:\s*session\.vodInputEffectiveUrlSha256/);
     assert.match(source, /boundedMkvInputPumpProtocol:\s*1/);
-    assert.match(source, /const GATEWAY_VERSION = 106;/);
+    assert.match(source, /finiteMkvSeekBroker:\s*\{[\s\S]+?providerConnectionsSerialized:\s*true/);
 });
