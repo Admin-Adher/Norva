@@ -571,14 +571,15 @@
 
     function buildPlanHref(plan, period) {
       const base = sameOriginBase();
-      const destination = new URL('/subscribe.html', base);
-      destination.searchParams.set('plan', plan);
-      destination.searchParams.set('period', period);
-      mergeAttribution(destination);
-
-      if (signedIn) return relativeInternalUrl(destination);
+      if (signedIn) {
+        const destination = new URL('/subscribe.html', base);
+        destination.searchParams.set('plan', plan);
+        destination.searchParams.set('period', period);
+        mergeAttribution(destination);
+        return relativeInternalUrl(destination);
+      }
       const account = new URL('/account.html', base);
-      account.searchParams.set('returnTo', relativeInternalUrl(destination));
+      account.searchParams.set('returnTo', '/app#home');
       mergeAttribution(account);
       return relativeInternalUrl(account);
     }
@@ -1117,7 +1118,7 @@
         {
           id: 'trial-terms', label: 'Clear trial terms', title: 'Start with a 7-day free trial',
           body: 'Payment method required. We remind you before renewal, and you can cancel anytime.',
-          cta: 'Start my 7-day free trial', href: '/account.html?returnTo=%2Fsubscribe.html%3Fplan%3Dplus%26period%3Dannual', action: 'signup'
+          cta: 'Start my 7-day free trial', href: '/account.html?returnTo=%2Fapp%23home', action: 'signup'
         }
       ],
       trust: [
@@ -1143,7 +1144,7 @@
         {
           id: 'ready-to-start', label: 'Ready when you are', title: 'Bring every screen together',
           body: 'Create your Norva space and begin with a 7-day free trial.',
-          cta: 'Start my 7-day free trial', href: '/account.html?returnTo=%2Fsubscribe.html%3Fplan%3Dplus%26period%3Dannual', action: 'signup'
+          cta: 'Start my 7-day free trial', href: '/account.html?returnTo=%2Fapp%23home', action: 'signup'
         }
       ]
     };

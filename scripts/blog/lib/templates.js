@@ -12,7 +12,7 @@ const SITE = 'https://norva.tv';
 const CSS_HREF = '/css/blog.css?v=1'; // hash:assets rewrites ?v= to a content hash at deploy
 const DEFAULT_OG = `${SITE}/img/devices/norva-device-tv.webp`;
 const LOGO = `${SITE}/img/norva-app-icon-96.png`;
-const TRIAL_HREF = '/account.html?returnTo=%2Fsubscribe.html%3Fplan%3Dplus%26period%3Dmonthly';
+const TRIAL_HREF = '/account.html?returnTo=%2Fapp%23home';
 const BYLINE = 'Norva Editorial Team';
 
 const commonHead = ({ title, description, canonical, robots, ogType, ogImage, jsonLdBlocks }) => `  <meta charset="UTF-8">
