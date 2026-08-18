@@ -9399,7 +9399,9 @@ async function waitForMkvH264AnalyzerDeadline(promise, timeoutMs) {
             promise,
             new Promise((resolve) => {
                 timer = setTimeout(resolve, timeoutMs);
-                timer?.unref?.();
+                // This deadline is part of an awaited child-reaping contract.
+                // Keeping it referenced guarantees a stalled optional analyzer
+                // is killed even when no unrelated event-loop handle remains.
             }),
         ]);
     } finally {
