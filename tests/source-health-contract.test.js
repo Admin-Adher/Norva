@@ -96,6 +96,37 @@ test('catalog policy never treats discovery counts as browsable rows', () => {
   assert.equal(health.isCatalogCategoryAvailable(summary, 'movies'), false);
 });
 
+test('catalog policy unlocks Live as soon as channels are materialized', () => {
+  const health = sourceHealthHarness();
+  const summary = health.summarize([{
+    id: 'source-1',
+    sync_status: 'syncing',
+    syncProgress: { status: 'syncing', liveReady: true, counts: { live: 120 } },
+  }]);
+  const availability = health.catalogAvailability(summary);
+
+  assert.equal(availability.gate, false);
+  assert.equal(availability.catalogReady, false);
+  assert.equal(availability.categories.live, true);
+  assert.equal(availability.categories.movies, false);
+  assert.equal(availability.categories.series, false);
+});
+
+test('catalog policy unlocks Movies and Series on the first title slice', () => {
+  const health = sourceHealthHarness();
+  const summary = health.summarize([{
+    id: 'source-1',
+    sync_status: 'syncing',
+    syncProgress: { status: 'syncing', liveReady: true, browseReady: true, counts: { movies: 80 } },
+  }]);
+  const availability = health.catalogAvailability(summary);
+
+  assert.equal(availability.gate, false);
+  assert.equal(availability.categories.live, true);
+  assert.equal(availability.categories.movies, true);
+  assert.equal(availability.categories.series, true);
+});
+
 test('catalog policy unlocks every consumer from the authoritative usable flag', () => {
   const health = sourceHealthHarness();
   const source = {

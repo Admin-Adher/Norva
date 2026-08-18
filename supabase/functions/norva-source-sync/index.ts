@@ -311,6 +311,9 @@ function mergeSyncProgress(current: JsonRecord, patch: JsonRecord) {
       boundedProgressPercent(patch.percent),
     );
   }
+  for (const flag of ["liveReady", "browseReady", "usable"]) {
+    if (current[flag] === true || patch[flag] === true) merged[flag] = true;
+  }
   return merged;
 }
 
@@ -2012,7 +2015,10 @@ async function driveFinalizeToReady(db: SupabaseClient, sourceId: string, userId
   // pause between batches keeps the finalize's duty-cycle well under 100%, leaving slots
   // for foreground traffic — a huge provider can finish in the background without ever
   // making the app feel slow. Tunable via env without a redeploy (0 disables).
-  const throttleMs = boundedInt(Deno.env.get("NORVA_FINALIZE_THROTTLE_MS"), 2500, 0, 30000);
+  const longThrottleMs = boundedInt(Deno.env.get("NORVA_FINALIZE_THROTTLE_MS"), 2500, 0, 30000);
+  const firstSliceThrottleMs = boundedInt(Deno.env.get("NORVA_FINALIZE_FIRST_SLICE_THROTTLE_MS"), 150, 0, 5000);
+  let firstSliceReady = recordOrEmpty(recordOrEmpty(src0?.config_hint).syncProgress).browseReady === true
+    || recordOrEmpty(recordOrEmpty(src0?.config_hint).syncProgress).usable === true;
   while (Date.now() < deadline && guard++ < 400) {
     let result: JsonRecord;
     try {
@@ -2053,7 +2059,8 @@ async function driveFinalizeToReady(db: SupabaseClient, sourceId: string, userId
       delete hint.syncCursor;
       return hint;
     });
-    // Yield the DB to foreground traffic between batches (see throttleMs above).
+    if (result.browseReady === true || result.usable === true) firstSliceReady = true;
+    const throttleMs = firstSliceReady ? longThrottleMs : firstSliceThrottleMs;
     if (throttleMs > 0 && Date.now() < deadline) await new Promise((r) => setTimeout(r, throttleMs));
   }
   // Budget/guard hit before ready → continue in a fresh isolate.
@@ -2180,10 +2187,16 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
     if (phase === "live" || phase === "live_channels" || phase === "live_variants") {
       const totalVod = counts.movies + counts.series;
       if (counts.live <= 0) {
+        await reportProgress({
+          liveReady: true,
+          ...(totalVod <= 0 ? { browseReady: true, usable: true } : {}),
+        });
         return {
           sourceId, status: "syncing", phase: "live",
           nextPhase: totalVod > 0 ? "titles" : "complete",
-          nextOffset: 0, limit: batchLimit, totalVod, ...result,
+          nextOffset: 0, limit: batchLimit, totalVod, liveReady: true,
+          ...(totalVod <= 0 ? { browseReady: true, usable: true } : {}),
+          ...result,
           liveCatalog: { rawLive: 0, logicalChannels: 0, liveVariants: 0, skipped: true },
         };
       }
@@ -2195,11 +2208,19 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
       if (batchOffset === 0) await clearLiveMaterialization(db, sourceId, userId);
       const liveChunk = await loadSourceItems(sourceId, userId, db, { itemTypes: ["live"], offset: batchOffset, limit: LIVE_CHUNK });
       if (!liveChunk.length) {
-        await reportProgress({ stage: "building_titles", percent: 86, steps: { finalize: { status: "running" } } });
+        await reportProgress({
+          stage: "building_titles",
+          percent: 86,
+          liveReady: true,
+          ...(totalVod <= 0 ? { browseReady: true, usable: true } : {}),
+          steps: { finalize: { status: "running" } },
+        });
         return {
           sourceId, status: "syncing", phase: "live",
           nextPhase: totalVod > 0 ? "titles" : "complete",
-          nextOffset: 0, limit: batchLimit, totalVod, ...result,
+          nextOffset: 0, limit: batchLimit, totalVod, liveReady: true,
+          ...(totalVod <= 0 ? { browseReady: true, usable: true } : {}),
+          ...result,
           liveCatalog: { rawLive: counts.live, done: true },
         };
       }
@@ -2211,11 +2232,12 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
       await reportProgress({
         stage: "building_live_channels",
         percent: Math.max(76, Math.min(85, 76 + Math.round((9 * nextOffset) / Math.max(1, counts.live)))),
+        liveReady: true,
         steps: { finalize: { status: "running" } },
       });
       return {
         sourceId, status: "syncing", phase: "live",
-        nextPhase: "live", nextOffset, limit: LIVE_CHUNK, totalVod, ...result,
+        nextPhase: "live", nextOffset, limit: LIVE_CHUNK, totalVod, liveReady: true, ...result,
         liveCatalog: { ...mat, rawLive: counts.live, offset: nextOffset },
       };
     }
@@ -2263,11 +2285,9 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
       // Home + the first grid pages. Past this the catalogue is navigable; the rest of a
       // huge VOD long-tail (which can take hours/days) is a SILENT background top-up, not a
       // bar to make the user wait on. Threshold env-tunable; 0 disables (legacy behaviour).
-      const usableThreshold = (() => {
-        const t = boundedInt(Deno.env.get("NORVA_USABLE_TITLE_THRESHOLD"), 2000, 0, 200000);
-        return t > 0 ? Math.min(totalVod, t) : totalVod;
-      })();
-      const usable = nextOffset >= usableThreshold;
+      const thresholds = titleUnlockThresholds(totalVod);
+      const browseReady = nextOffset >= thresholds.browse;
+      const usable = nextOffset >= thresholds.usable;
       // The user-facing bar fills toward the USABLE threshold (minutes), not the whole 272k
       // walk (hours): 86→99 over the first block, then pinned at 100 once usable. The walk
       // keeps advancing nextOffset internally — the offset advances 1:1 with titles built —
@@ -2276,8 +2296,10 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
       // upsert load + autovacuum, which blew the 8s batch budget and froze the cursor.)
       await reportProgress({
         stage: done ? "finalizing" : "building_titles",
-        percent: usable ? 100 : titleFinalizePercent(nextOffset, usableThreshold),
-        usable,
+        percent: usable ? 100 : titleFinalizePercent(nextOffset, thresholds.usable),
+        liveReady: true,
+        ...(browseReady ? { browseReady: true } : {}),
+        ...(usable ? { usable: true } : {}),
         steps: { finalize: { status: usable ? "done" : "running" } },
       });
       return {
@@ -2290,6 +2312,8 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
         limit: batchLimit,
         totalVod,
         done,
+        liveReady: true,
+        browseReady,
         usable,
         ...result,
         titleProjection,
@@ -2402,6 +2426,15 @@ function liveFinalizePercent(phase: string, offset: number, total: number) {
   const ratio = total ? Math.max(0, Math.min(1, offset / total)) : 1;
   if (phase === "live_channels") return Math.max(76, Math.min(80, Math.round(76 + ratio * 4)));
   return Math.max(80, Math.min(86, Math.round(80 + ratio * 6)));
+}
+
+function titleUnlockThresholds(totalVod: number) {
+  const browse = boundedInt(Deno.env.get("NORVA_BROWSE_TITLE_THRESHOLD"), 80, 0, 200000);
+  const usable = boundedInt(Deno.env.get("NORVA_USABLE_TITLE_THRESHOLD"), 2000, 0, 200000);
+  return {
+    browse: browse > 0 ? Math.min(totalVod, browse) : totalVod,
+    usable: usable > 0 ? Math.min(totalVod, usable) : totalVod,
+  };
 }
 
 function titleFinalizePercent(built: number, totalVod: number) {

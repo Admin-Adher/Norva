@@ -248,12 +248,29 @@
         return (item && item.source) || item || {};
     }
 
+    function catalogUnlocks(progress = {}, classification = {}) {
+        const blocked = classification.state === 'auth_failed' || classification.state === 'expired';
+        if (blocked) {
+            return { live: false, movies: false, series: false, browsable: false };
+        }
+        const fullyReady = classification.state === 'ready' || progress.usable === true;
+        const browseReady = fullyReady || progress.browseReady === true;
+        const liveReady = browseReady || progress.liveReady === true;
+        return {
+            live: liveReady,
+            movies: browseReady,
+            series: browseReady,
+            browsable: liveReady || browseReady
+        };
+    }
+
     /**
      * One conservative policy for every onboarding consumer.
      * Discovery counts are deliberately ignored: the server can publish them
      * before rows are materialized, so they are not proof that a category is
-     * browsable. Only a completed catalog or the authoritative `usable` flag
-     * unlocks navigation while an import is still running.
+     * browsable. Live unlocks when channels are materialized (`liveReady`);
+     * Movies/Series unlock on the first title slice (`browseReady`). The later
+     * `usable` flag still means the first large block is filled.
      */
     function catalogSourcePolicy(source = {}, statuses = []) {
         const status = statusFor(source, statuses);
@@ -262,7 +279,7 @@
         const rawStatus = lower(source.sync_status || source.syncStatus || status.status || status.sync_status || '');
         const progressStatus = lower(progress.status || progress.stage || '');
         const running = SYNCING_STATES.has(rawStatus) || SYNCING_STATES.has(progressStatus);
-        const browsable = classification.state === 'ready' || progress.usable === true;
+        const unlocks = catalogUnlocks(progress, classification);
         const phase = classification.state === 'ready'
             ? 'ready'
             : classification.state === 'syncing'
@@ -272,8 +289,13 @@
         return {
             phase,
             state: classification.state,
-            browsable,
-            backgrounding: browsable && (running || classification.refreshing === true),
+            browsable: unlocks.browsable,
+            categories: {
+                live: unlocks.live,
+                movies: unlocks.movies,
+                series: unlocks.series
+            },
+            backgrounding: unlocks.browsable && (running || classification.refreshing === true),
             classification,
             progress
         };
@@ -303,9 +325,15 @@
             const policy = catalogSourcePolicy(source);
             if (item?.source && item?.state) {
                 const itemProgress = item.progress && typeof item.progress === 'object' ? item.progress : policy.progress;
+                const unlocks = catalogUnlocks(itemProgress, item);
                 policy.state = item.state;
                 policy.phase = item.state === 'ready' ? 'ready' : item.state === 'syncing' ? 'syncing' : 'error';
-                policy.browsable = item.state === 'ready' || itemProgress?.usable === true;
+                policy.browsable = unlocks.browsable;
+                policy.categories = {
+                    live: unlocks.live,
+                    movies: unlocks.movies,
+                    series: unlocks.series
+                };
                 policy.backgrounding = policy.browsable && (item.refreshing === true || item.state === 'syncing');
                 policy.progress = itemProgress;
             }
@@ -313,8 +341,11 @@
         });
 
         const catalogReady = state === 'ready' || Boolean(summary?.ready?.length);
-        const browsable = catalogReady || policies.some(policy => policy.browsable);
-        const categories = Object.fromEntries(CATALOG_CATEGORIES.map(category => [category, browsable]));
+        const categories = Object.fromEntries(CATALOG_CATEGORIES.map((category) => [
+            category,
+            catalogReady || policies.some((policy) => policy.categories?.[category] === true)
+        ]));
+        const browsable = catalogReady || CATALOG_CATEGORIES.some((category) => categories[category]);
         return {
             state,
             gate: !browsable,

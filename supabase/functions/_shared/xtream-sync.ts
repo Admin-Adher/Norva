@@ -1318,6 +1318,9 @@ function mergeSyncProgress(current: JsonRecord, patch: JsonRecord) {
       boundedProgressPercent(patch.percent),
     );
   }
+  for (const flag of ["liveReady", "browseReady", "usable"]) {
+    if (current[flag] === true || patch[flag] === true) merged[flag] = true;
+  }
   return merged;
 }
 

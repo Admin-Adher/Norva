@@ -15,6 +15,17 @@ const app = read('public/js/app.js');
 const css = read('public/css/main.css');
 const shell = read('public/app.html');
 
+test('finalize emits early live and first-slice browse unlocks', () => {
+  const sourceSync = read('supabase/functions/norva-source-sync/index.ts');
+  const cloud = read('supabase/functions/norva-cloud/index.ts');
+  for (const source of [sourceSync, cloud]) {
+    assert.match(source, /NORVA_BROWSE_TITLE_THRESHOLD/);
+    assert.match(source, /browseReady: true/);
+    assert.match(source, /liveReady: true/);
+  }
+  assert.match(sourceSync, /NORVA_FINALIZE_FIRST_SLICE_THROTTLE_MS/);
+});
+
 test('one catalog policy drives Home, navigation and preparation state', () => {
   assert.match(sourceHealth, /function catalogSourcePolicy\(/);
   assert.match(sourceHealth, /function catalogAvailability\(/);
@@ -60,7 +71,7 @@ test('setup visuals reuse Norva assets and ship cache-busted', () => {
   assert.match(shell, /class="tc-intro-icon" src="\/img\/icons\/norva-settings\.svg/);
   assert.doesNotMatch(shell, /<div class="tc-intro-icon">/);
   assert.match(shell, /main\.css\?v=109/);
-  assert.match(shell, /sourceHealth\.js\?v=10/);
+  assert.match(shell, /sourceHealth\.js\?v=11/);
   assert.match(shell, /SourceManager\.js\?v=42/);
   assert.match(shell, /HomePage\.js\?v=61/);
   assert.match(shell, /app\.js\?v=2c1d21d360/);
