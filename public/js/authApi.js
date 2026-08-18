@@ -10,6 +10,9 @@
     const DEFAULT_SUPABASE_URL = 'https://api.norva.tv';
     const DEFAULT_PUBLISHABLE_KEY = 'sb_publishable_LJwYVgPGHYNYTDk7s3eOew_6TU73Fcw';
     const KEY_SESSION = 'norva-cloud-session';
+    const REFRESH_LOCK_WAIT_TIMEOUT_MS = 7_000;
+    const REFRESH_REQUEST_TIMEOUT_MS = 8_000;
+    const WEB_LOCKS_PROBE_TIMEOUT_MS = 250;
 
     function supabaseUrl() {
         return (localStorage.getItem('norva-supabase-url') || window.NORVA_SUPABASE_URL || DEFAULT_SUPABASE_URL).replace(/\/+$/, '');
@@ -64,7 +67,8 @@
         const response = await fetch(`${supabaseUrl()}${path}`, {
             method: options.method || 'GET',
             headers,
-            body: options.body === undefined ? undefined : JSON.stringify(options.body)
+            body: options.body === undefined ? undefined : JSON.stringify(options.body),
+            ...(options.signal ? { signal: options.signal } : {})
         });
 
         const payload = await response.json().catch(() => ({}));
@@ -185,6 +189,42 @@
     //    rotation response was lost mid-flight.
     let refreshInFlight = null;
     const KEY_REFRESH_LOCK = 'norva-session-refresh-lock';
+    let webLocksUsability = null;
+
+    function canUseWebLocks() {
+        if (!navigator.locks?.request) return Promise.resolve(false);
+        // Some embedded Chromium shells expose navigator.locks.request/query but
+        // never settle either promise. Calling request() directly would then leave
+        // every expired Norva session on the static launch shell forever. A real
+        // Web Locks implementation answers query() immediately; when it does not,
+        // use the existing rotation-safe localStorage lease instead.
+        if (typeof navigator.locks.query !== 'function') return Promise.resolve(true);
+        if (webLocksUsability) return webLocksUsability;
+
+        webLocksUsability = new Promise((resolve) => {
+            let settled = false;
+            let timer = null;
+            const finish = (usable) => {
+                if (settled) return;
+                settled = true;
+                if (timer !== null) clearTimeout(timer);
+                resolve(usable === true);
+            };
+            timer = setTimeout(() => finish(false), WEB_LOCKS_PROBE_TIMEOUT_MS);
+            Promise.resolve()
+                .then(() => navigator.locks.query())
+                .then(() => finish(true), () => finish(false));
+        });
+        return webLocksUsability;
+    }
+
+    function transientRefreshTimeout(code, message) {
+        const error = new Error(message);
+        error.name = 'TimeoutError';
+        error.code = code;
+        error.transient = true;
+        return error;
+    }
 
     function classifyRefreshError(error, failedToken) {
         const status = Number(error?.status || 0);
@@ -207,14 +247,31 @@
         const current = getSession();
         if (!current?.refresh_token) return null;
         const attemptedToken = current.refresh_token;
+        const controller = typeof AbortController === 'function' ? new AbortController() : null;
+        let timer = null;
+        const timeout = new Promise((_, reject) => {
+            timer = setTimeout(() => {
+                try { controller?.abort(); } catch (_) { /* best effort */ }
+                reject(transientRefreshTimeout(
+                    'auth_refresh_request_timeout',
+                    'Session refresh timed out',
+                ));
+            }, REFRESH_REQUEST_TIMEOUT_MS);
+        });
         try {
-            const payload = await request('/auth/v1/token?grant_type=refresh_token', {
-                method: 'POST',
-                body: { refresh_token: attemptedToken }
-            });
+            const payload = await Promise.race([
+                request('/auth/v1/token?grant_type=refresh_token', {
+                    method: 'POST',
+                    body: { refresh_token: attemptedToken },
+                    ...(controller ? { signal: controller.signal } : {}),
+                }),
+                timeout,
+            ]);
             return setSession(payload);
         } catch (error) {
             throw classifyRefreshError(error, attemptedToken);
+        } finally {
+            if (timer !== null) clearTimeout(timer);
         }
     }
 
@@ -239,9 +296,34 @@
         }
     }
 
-    function withCrossTabLock(fn) {
+    async function withCrossTabLock(fn) {
         try {
-            if (navigator.locks?.request) {
+            if (await canUseWebLocks()) {
+                const controller = typeof AbortController === 'function' ? new AbortController() : null;
+                if (controller) {
+                    let timer = null;
+                    let lockAcquired = false;
+                    const timeoutError = transientRefreshTimeout(
+                        'auth_refresh_lock_timeout',
+                        'Session refresh lock timed out',
+                    );
+                    timer = setTimeout(() => {
+                        if (lockAcquired) return;
+                        try { controller.abort(timeoutError); } catch (_) { /* best effort */ }
+                    }, REFRESH_LOCK_WAIT_TIMEOUT_MS);
+                    return Promise.resolve(navigator.locks.request(
+                        'norva-session-refresh',
+                        { signal: controller.signal },
+                        (...args) => {
+                            lockAcquired = true;
+                            clearTimeout(timer);
+                            return fn(...args);
+                        },
+                    )).catch((error) => {
+                        if (!lockAcquired && controller.signal.aborted) throw timeoutError;
+                        throw error;
+                    }).finally(() => clearTimeout(timer));
+                }
                 return navigator.locks.request('norva-session-refresh', fn);
             }
         } catch (_) { /* fall through to the lease fallback */ }
@@ -327,7 +409,7 @@
 
     async function withSessionMutationLock(fn) {
         try {
-            if (navigator.locks?.request) {
+            if (await canUseWebLocks()) {
                 return navigator.locks.request('norva-session-refresh', fn);
             }
         } catch (_) { /* fall through to the strict lease fallback */ }
