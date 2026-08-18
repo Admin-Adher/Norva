@@ -22,17 +22,27 @@
             this.liveRegion = null;
             this.entryState = null;
             this.successState = null;
+            this.scanRoot = null;
+            this.scanVideo = null;
+            this.scanStartButton = null;
+            this.scanStream = null;
+            this.scanTimer = null;
+            this.scanDetector = null;
+            this.scanning = false;
             this.requestEpoch = 0;
             this.submitting = false;
         }
 
-        canOpen() {
-            const isPhoneShell = Boolean(this.app?.isNativePhoneShell?.());
+        canOpen(options = {}) {
+            if (this.app?.isTvMode?.() || this.app?.currentUser?.device) return false;
             const isCloudAccount = Boolean(
                 this.app?.currentUser?.cloud || window.API?.isCloudMode?.()
             );
+            if (!isCloudAccount) return false;
+            if (options.force === true || options.code) return true;
+            const isPhoneShell = Boolean(this.app?.isNativePhoneShell?.());
             const catalogReady = Boolean(this.app?.isCatalogReady?.());
-            return isPhoneShell && isCloudAccount && catalogReady;
+            return isPhoneShell && catalogReady;
         }
 
         build() {
@@ -68,9 +78,14 @@
                             </li>
                             <li>
                                 <span class="pair-tv-step-number" aria-hidden="true">2</span>
-                                <span><strong>Enter the 6-character code</strong></span>
+                                <span><strong>Scan the QR or enter the 6-character code</strong></span>
                             </li>
                         </ol>
+
+                        <div class="pair-tv-scan" hidden>
+                            <video class="pair-tv-scan-video" playsinline muted autoplay></video>
+                            <button type="button" class="pair-tv-scan-cancel">Cancel scan</button>
+                        </div>
 
                         <form class="pair-tv-form" novalidate>
                             <label class="pair-tv-code-label" for="pair-tv-code">TV pairing code</label>
@@ -80,6 +95,7 @@
                                 pattern="[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{6}"
                                 aria-describedby="pair-tv-code-error">
                             <p id="pair-tv-code-error" class="pair-tv-error" hidden></p>
+                            <button type="button" class="pair-tv-scan-start">Scan QR</button>
                             <button type="submit" class="btn btn-primary pair-tv-submit" disabled>Pair TV</button>
                         </form>
 
@@ -108,6 +124,9 @@
             this.liveRegion = overlay.querySelector('.pair-tv-announcement');
             this.entryState = overlay.querySelector('.pair-tv-entry-state');
             this.successState = overlay.querySelector('.pair-tv-success-state');
+            this.scanRoot = overlay.querySelector('.pair-tv-scan');
+            this.scanVideo = overlay.querySelector('.pair-tv-scan-video');
+            this.scanStartButton = overlay.querySelector('.pair-tv-scan-start');
 
             overlay.querySelector('.modal-close')?.addEventListener('click', () => this.close());
             overlay.querySelector('.pair-tv-done')?.addEventListener('click', () => this.close());
@@ -119,18 +138,28 @@
                 event.preventDefault();
                 void this.submit();
             });
+            this.scanStartButton?.addEventListener('click', () => { void this.startScan(); });
+            overlay.querySelector('.pair-tv-scan-cancel')?.addEventListener('click', () => this.stopScan());
         }
 
-        open(opener = null) {
-            if (!this.canOpen()) return false;
+        open(opener = null, options = {}) {
+            if (!this.canOpen(options)) return false;
             this.build();
 
             if (this.overlay.classList.contains('active')) {
+                if (options.code) {
+                    this.input.value = this.normalizeCode(options.code);
+                    this.onInput();
+                }
                 this.panel?.focus?.({ preventScroll: true });
                 return true;
             }
 
             this.reset();
+            if (options.code) {
+                this.input.value = this.normalizeCode(options.code);
+                this.onInput();
+            }
             try { opener?.focus?.({ preventScroll: true }); } catch (_) { /* best effort */ }
             this.overlay.inert = false;
             this.overlay.removeAttribute('inert');
@@ -141,11 +170,13 @@
                 onClose: () => this.close(),
                 initialFocus: this.panel
             });
+            if (this.scanStartButton) this.scanStartButton.hidden = !this.canScan();
             return true;
         }
 
         close() {
             if (!this.overlay?.classList.contains('active')) return false;
+            this.stopScan();
             this.requestEpoch += 1;
             this.submitting = false;
             this.overlay.classList.remove('active');
@@ -156,6 +187,7 @@
         }
 
         reset() {
+            this.stopScan();
             this.requestEpoch += 1;
             this.submitting = false;
             this.entryState.hidden = false;
@@ -173,6 +205,107 @@
             this.liveRegion.setAttribute('role', 'status');
             this.liveRegion.setAttribute('aria-live', 'polite');
             this.liveRegion.textContent = '';
+        }
+
+        canScan() {
+            if (this.app?.isTvMode?.()) return false;
+            return Boolean(navigator.mediaDevices && typeof navigator.mediaDevices.getUserMedia === 'function');
+        }
+
+        codeFromScanPayload(raw) {
+            const text = String(raw || '').trim();
+            const query = text.match(/[?&]pair=([A-Za-z0-9]+)/i);
+            if (query) {
+                const fromQuery = this.normalizeCode(query[1]);
+                if (fromQuery.length === PAIRING_CODE_LENGTH) return fromQuery;
+            }
+            return this.normalizeCode(text);
+        }
+
+        applyScannedCode(code) {
+            const normalized = this.normalizeCode(code);
+            if (normalized.length !== PAIRING_CODE_LENGTH) return false;
+            this.input.value = normalized;
+            this.onInput();
+            this.liveRegion.setAttribute('role', 'status');
+            this.liveRegion.setAttribute('aria-live', 'polite');
+            this.liveRegion.textContent = 'Pairing code filled from the QR.';
+            return true;
+        }
+
+        async startScan() {
+            if (this.scanning || this.submitting) return false;
+            if (!this.canScan()) {
+                this.showError('Scan is not available on this device. Type the 6-character code.');
+                return false;
+            }
+            if (typeof window.BarcodeDetector !== 'function') {
+                this.showError('Scan is not available on this device. Type the 6-character code.');
+                return false;
+            }
+
+            this.clearError();
+            this.scanning = true;
+            if (this.scanRoot) this.scanRoot.hidden = false;
+            if (this.scanStartButton) this.scanStartButton.hidden = true;
+            this.liveRegion.setAttribute('role', 'status');
+            this.liveRegion.setAttribute('aria-live', 'polite');
+            this.liveRegion.textContent = 'Point your camera at the QR on the TV.';
+
+            try {
+                this.scanDetector = new window.BarcodeDetector({ formats: ['qr_code'] });
+                this.scanStream = await navigator.mediaDevices.getUserMedia({
+                    audio: false,
+                    video: { facingMode: { ideal: 'environment' } }
+                });
+                if (!this.scanning) {
+                    this.stopScan();
+                    return false;
+                }
+                if (this.scanVideo) {
+                    this.scanVideo.srcObject = this.scanStream;
+                    await this.scanVideo.play?.();
+                }
+                this.scanTimer = window.setInterval(() => { void this.readScanFrame(); }, 280);
+                return true;
+            } catch (_) {
+                this.stopScan();
+                this.showError('Camera access is needed to scan. You can still type the code.');
+                return false;
+            }
+        }
+
+        async readScanFrame() {
+            if (!this.scanning || !this.scanDetector || !this.scanVideo) return;
+            try {
+                const codes = await this.scanDetector.detect(this.scanVideo);
+                const payload = codes && codes[0] && codes[0].rawValue;
+                const code = this.codeFromScanPayload(payload);
+                if (code.length !== PAIRING_CODE_LENGTH) return;
+                this.stopScan();
+                this.applyScannedCode(code);
+            } catch (_) { /* keep scanning */ }
+        }
+
+        stopScan() {
+            this.scanning = false;
+            if (this.scanTimer) {
+                window.clearInterval(this.scanTimer);
+                this.scanTimer = null;
+            }
+            this.scanDetector = null;
+            if (this.scanVideo) {
+                try { this.scanVideo.pause?.(); } catch (_) { /* noop */ }
+                this.scanVideo.srcObject = null;
+            }
+            if (this.scanStream) {
+                this.scanStream.getTracks().forEach((track) => {
+                    try { track.stop(); } catch (_) { /* noop */ }
+                });
+                this.scanStream = null;
+            }
+            if (this.scanRoot) this.scanRoot.hidden = true;
+            if (this.scanStartButton) this.scanStartButton.hidden = !this.canScan();
         }
 
         normalizeCode(value) {

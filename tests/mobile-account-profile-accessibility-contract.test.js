@@ -178,7 +178,11 @@ test('all app-owned modal surfaces isolate the background and warning dialogs sh
   assert.match(pairTvSheet, /overlay\.setAttribute\('inert', ''\)/);
 });
 
-test('camera scanning is not exposed by the current mobile WebView surface', () => {
-  assert.doesNotMatch(app + settings + pairTvSheet, /getUserMedia|BarcodeDetector|html5-qrcode/i);
+test('pairing camera scan stays inside the sheet and the trusted WebView grant', () => {
+  assert.match(pairTvSheet, /getUserMedia/);
+  assert.match(pairTvSheet, /BarcodeDetector/);
+  assert.doesNotMatch(app + settings, /getUserMedia|BarcodeDetector|html5-qrcode/i);
   assert.match(phoneMain, /onPermissionRequest\(PermissionRequest request\)/);
+  assert.match(phoneMain, /REQ_CAMERA_PERM/);
+  assert.match(phoneMain, /RESOURCE_VIDEO_CAPTURE/);
 });

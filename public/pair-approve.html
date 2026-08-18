@@ -4,6 +4,17 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>Approve pairing - Norva</title>
+  <script>
+    (function () {
+      try {
+        var params = new URLSearchParams(location.search);
+        var pair = String(params.get('pair') || params.get('code') || '').toUpperCase().replace(/[^A-HJ-NP-Z2-9]/g, '');
+        if (/^[A-HJ-NP-Z2-9]{6}$/.test(pair)) {
+          location.replace('/app.html?pair=' + encodeURIComponent(pair) + '#home');
+        }
+      } catch (_) { /* keep legacy hub fallback */ }
+    })();
+  </script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 

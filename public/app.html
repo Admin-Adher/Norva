@@ -18,7 +18,7 @@
   <link rel="preconnect" href="https://api.norva.tv" crossorigin>
   <link rel="dns-prefetch" href="https://image.tmdb.org">
   <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
-  <link rel="stylesheet" href="/css/main.css?v=113">
+  <link rel="stylesheet" href="/css/main.css?v=115">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@800&display=swap"
@@ -61,7 +61,8 @@
       var nativeApp = /NorvaTV-/i.test(ua) || !!window.NorvaTVCloud || !!window.NodeCastNative
         || /[?&]mobile=1\b/.test(window.location.search || '');
       var returnTo = window.location.pathname + window.location.search + window.location.hash;
-      var loggedOutTarget = nativeApp
+      var pairingReturn = /[?&]pair=[A-Za-z0-9]+/.test(window.location.search || '');
+      var loggedOutTarget = (nativeApp || pairingReturn)
         ? '/account.html?returnTo=' + encodeURIComponent(returnTo || '/app.html?mobile=1#home')
         : '/';
 
@@ -822,7 +823,7 @@
               <span>Account</span>
             </button>
             <button class="tab" data-tab="screens" id="screens-tab" role="tab" aria-selected="false" style="display:none;">
-              <img class="settings-tab-icon" src="/assets/landing/norva-icon-web-android.svg" alt="" aria-hidden="true">
+              <img class="settings-tab-icon" src="/img/icons/norva-devices.svg?v=1" alt="" aria-hidden="true">
               <span>Devices</span>
             </button>
             <button class="tab" data-tab="player" role="tab" aria-selected="false">
@@ -954,8 +955,8 @@
             <style>
               .screens-wrap{max-width:880px}
               .screens-pair{display:flex;gap:18px;align-items:center;flex-wrap:wrap;background:linear-gradient(135deg,rgba(91,124,250,.12),rgba(181,121,255,.06));border:1px solid #2b3550;border-radius:16px;padding:22px}
-              .screens-pair .sp-icon{width:54px;height:54px;border-radius:14px;display:grid;place-items:center;background:rgba(91,124,250,.18);color:#9db4ff;flex:0 0 auto}
-               .screens-pair .sp-icon img{width:38px;height:38px;object-fit:contain}
+               .screens-pair .sp-icon{width:44px;height:44px;display:grid;place-items:center;background:transparent;flex:0 0 auto}
+                .screens-pair .sp-icon img{width:28px;height:28px;object-fit:contain}
               .screens-pair .sp-text{flex:1;min-width:200px}
               .screens-pair .sp-text h4{font-size:17px;margin:0 0 4px;color:#f1f5fb}
               .screens-pair .sp-text p{color:#9aa6bd;font-size:13px;margin:0;line-height:1.5}
@@ -985,17 +986,15 @@
             <div class="screens-wrap">
 
               <div class="screens-pair">
-                <div class="sp-icon"><img src="/assets/landing/norva-icon-web-android.svg" alt=""></div>
+                 <div class="sp-icon"><img src="/img/icons/norva-devices-simple.svg?v=1" alt=""></div>
                 <div class="sp-text">
-                  <h4>Add a TV, phone, tablet or browser</h4>
-                  <p>Open Norva on the other device and type the code it shows here to link it to your account.</p>
+                  <h4>Add another screen</h4>
+                  <p>Pair a TV or another screen from here. You stay in Norva — no separate pairing page.</p>
                 </div>
                 <div class="screens-pair-form">
-                  <input id="screens-pair-code" class="screens-code" type="text" inputmode="text" maxlength="10" autocomplete="one-time-code" placeholder="ABC123">
-                  <button class="btn btn-primary" id="screens-approve" type="button">Pair</button>
+                  <button class="btn btn-primary" id="screens-open-pair" type="button">Pair a screen</button>
                 </div>
               </div>
-              <div class="screens-status" id="screens-pair-status"></div>
 
               <div class="screens-h">Your devices &amp; screens</div>
               <div class="screens-grid" id="screens-devices-list"></div>
@@ -2129,7 +2128,7 @@
   <script defer src="/js/utils/GenreTaxonomy.js?v=4"></script>
   <script defer src="/js/utils/GenreRails.js?v=8"></script>
   <script defer src="/js/components/NorvaModal.js?v=2"></script>
-  <script defer src="/js/components/PairTvSheet.js?v=1"></script>
+  <script defer src="/js/components/PairTvSheet.js?v=3"></script>
   <script defer src="/js/components/MultiSelect.js?v=4"></script>
   <script defer src="/js/components/RegionPicker.js?v=1"></script>
   <script defer src="/js/vendor/qrcode.js?v=1"></script>
@@ -2144,7 +2143,7 @@
   <script defer src="/js/pages/Guide.js?v=2"></script>
   <script defer src="/js/pages/MoviesPage.js?v=57"></script>
   <script defer src="/js/pages/SeriesPage.js?v=56"></script>
-  <script defer src="/js/pages/Settings.js?v=52"></script>
+  <script defer src="/js/pages/Settings.js?v=53"></script>
   <script defer src="/js/pages/PartnersPage.js?v=10"></script>
   <script defer src="/js/pages/WatchPage.js?v=147"></script>
   <script defer src="/js/profiles.js?v=13"></script>
@@ -2152,7 +2151,7 @@
   <script defer src="/js/maintenance-banner.js?v=1"></script>
   <script defer src="/js/billing-config.js?v=8"></script>
 <script defer src="/js/billing.js?v=17"></script>
-  <script defer src="/js/app.js?v=2c1d21d360"></script>
+  <script defer src="/js/app.js?v=2c1d21d361"></script>
   <script>
     // PWA: register the app-shell service worker (network-first — a deploy always
     // wins; the cache only serves when offline). Skipped inside the native APK

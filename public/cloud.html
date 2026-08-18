@@ -6,6 +6,16 @@
     <meta name="theme-color" content="#090b10">
     <title>Norva Account</title>
     <link rel="icon" type="image/png" href="/favicon.png">
+    <script>
+      (function () {
+        try {
+          var pair = String(new URLSearchParams(location.search).get('pair') || '').toUpperCase();
+          if (/^[A-HJ-NP-Z2-9]{6}$/.test(pair)) {
+            location.replace('/app.html?pair=' + encodeURIComponent(pair) + '#home');
+          }
+        } catch (_) { /* stay on account hub */ }
+      })();
+    </script>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         :root {

@@ -591,7 +591,12 @@
     <script>
         const params = new URLSearchParams(location.search);
         const rawReturnTo = params.get('returnTo') || '';
-        const returnTo = sanitizeReturnTo(rawReturnTo) || '/app#home';
+        let storedReturnTo = '';
+        try {
+            storedReturnTo = sessionStorage.getItem('norva-post-login-return') || '';
+            if (storedReturnTo) sessionStorage.removeItem('norva-post-login-return');
+        } catch (_) { /* private mode */ }
+        const returnTo = sanitizeReturnTo(rawReturnTo) || sanitizeReturnTo(storedReturnTo) || '/app#home';
         const statusEl = document.getElementById('status');
         const socialEl = document.getElementById('social-auth');
         const nativeOnboardingEl = document.querySelector('.native-onboarding');
@@ -1552,11 +1557,11 @@
                 const url = new URL(value, location.origin);
                 if (url.origin !== location.origin) return '';
                 const target = `${url.pathname}${url.search}${url.hash}`;
-                if (url.pathname === '/cloud.html') {
+                if (url.pathname === '/cloud.html' || url.pathname === '/pair-approve.html' || url.pathname === '/app.html' || url.pathname === '/app') {
                     const pair = (url.searchParams.get('pair') || '').toUpperCase();
                     return /^[A-HJ-NP-Z2-9]{6}$/.test(pair)
-                        ? `/cloud.html?pair=${encodeURIComponent(pair)}`
-                        : '/app#home';
+                        ? `/app.html?pair=${encodeURIComponent(pair)}#home`
+                        : (url.pathname === '/app.html' || url.pathname === '/app' ? target : '/app#home');
                 }
                 return target;
             } catch (_) {

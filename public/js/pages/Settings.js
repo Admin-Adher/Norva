@@ -1700,10 +1700,9 @@ class SettingsPage {
         if (!this.screensBound) {
             this.screensBound = true;
             document.getElementById('screens-save-profile')?.addEventListener('click', () => this.saveScreensProfile());
-            const pair = document.getElementById('screens-pair-code');
-            pair?.addEventListener('input', () => { pair.value = pair.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10); });
-            pair?.addEventListener('keydown', (e) => { if (e.key === 'Enter') this.approvePairCode(); });
-            document.getElementById('screens-approve')?.addEventListener('click', () => this.approvePairCode());
+            document.getElementById('screens-open-pair')?.addEventListener('click', (event) => {
+                this.app?.openPairTvSheet?.(event.currentTarget, { force: true });
+            });
             document.getElementById('screens-send-play')?.addEventListener('click', () => this.sendScreenCommand('play'));
             document.getElementById('screens-send-open')?.addEventListener('click', () => this.sendScreenCommand('open'));
         }
@@ -1743,23 +1742,6 @@ class SettingsPage {
         } catch (e) {
             console.warn('[Settings] Screen profile save failed.', e);
             this.setScreensStatus(status, 'error', 'Could not save the screen profile. Try again.');
-        }
-    }
-
-    async approvePairCode() {
-        const input = document.getElementById('screens-pair-code');
-        const status = document.getElementById('screens-pair-status');
-        const code = (input?.value || '').trim().toUpperCase();
-        if (!code) { this.setScreensStatus(status, 'error', 'Enter the pairing code shown on the screen.'); return; }
-        try {
-            this.setScreensStatus(status, 'info', 'Approving…');
-            await window.NorvaCloud.pairing.approve(code);
-            this.setScreensStatus(status, 'success', 'Device approved.');
-            if (input) input.value = '';
-            this.loadTrustedDevices();
-        } catch (e) {
-            console.warn('[Settings] Pairing approval failed.', e);
-            this.setScreensStatus(status, 'error', 'Could not approve this code. Check it and try again.');
         }
     }
 

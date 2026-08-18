@@ -824,6 +824,7 @@ class App {
         this.navigateTo(initialPage, true); // true = replace history (don't add)
         this.restoreOpenFiche(initialPage, pendingFiche);
         this.openFicheFromRoute(initialPage);
+        requestAnimationFrame(() => this.consumePendingPairCode());
         // The destination controller has synchronously painted either real content or
         // its route skeleton by now. Fade the launch surface only at this point.
         requestAnimationFrame(() => this.finishTvLaunchScreen());
@@ -2513,8 +2514,26 @@ class App {
         requestAnimationFrame(() => this.pages.settings?.switchTab?.('screens'));
     }
 
-    openPairTvSheet(opener = null) {
-        return this.pairTvSheet?.open?.(opener) || false;
+    openPairTvSheet(opener = null, options = {}) {
+        return this.pairTvSheet?.open?.(opener, options) || false;
+    }
+
+    consumePendingPairCode() {
+        if (this.isTvMode() || this.currentUser?.device) return false;
+        let params;
+        try { params = new URLSearchParams(window.location.search); } catch (_) { return false; }
+        const code = this.pairTvSheet?.normalizeCode?.(params.get('pair'));
+        if (!code || code.length !== 6) return false;
+        params.delete('pair');
+        const query = params.toString();
+        try {
+            window.history.replaceState(
+                window.history.state,
+                '',
+                window.location.pathname + (query ? `?${query}` : '') + window.location.hash
+            );
+        } catch (_) { /* best-effort */ }
+        return this.openPairTvSheet(null, { code, force: true });
     }
 
     openPartners(opener = null) {
@@ -2546,7 +2565,7 @@ class App {
                     <img class="account-ic" src="/img/avatars/placeholder.svg" alt=""><span>Switch profile</span>
                 </button>
                 <button type="button" class="account-row" data-act="screens">
-                    <img class="account-ic account-ic-devices" src="/assets/landing/norva-icon-web-android.svg" alt="">
+                    <img class="account-ic account-ic-devices" src="/img/icons/norva-devices.svg?v=1" alt="">
                     <span class="account-row-copy">
                         <span class="account-row-title">Devices &amp; screens</span>
                         <span class="account-row-hint">Web, phone, tablet and TV</span>

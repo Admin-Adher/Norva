@@ -118,6 +118,8 @@ public class MainActivity extends Activity {
     private static final String UA_SUFFIX       = " NorvaTV-AndroidPhone/1.0";
     private static final int    REQ_PLAYER      = 1001;
     private static final int    REQ_NOTIF_PERM  = 1002;
+    private static final int    REQ_CAMERA_PERM = 1003;
+    private PermissionRequest pendingWebCameraRequest;
     private static final String DL_UA           =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
             + "(KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36";
@@ -902,6 +904,12 @@ public class MainActivity extends Activity {
                     }
                 }
                 if (trusted && cameraRequested) {
+                    if (checkSelfPermission(Manifest.permission.CAMERA)
+                            != PackageManager.PERMISSION_GRANTED) {
+                        pendingWebCameraRequest = request;
+                        requestPermissions(new String[]{ Manifest.permission.CAMERA }, REQ_CAMERA_PERM);
+                        return;
+                    }
                     request.grant(new String[]{PermissionRequest.RESOURCE_VIDEO_CAPTURE});
                 } else if (request != null) {
                     request.deny();
@@ -2167,6 +2175,18 @@ public class MainActivity extends Activity {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode == REQ_NOTIF_PERM) {
             dispatchNotificationPermissionChanged();
+        }
+        if (requestCode == REQ_CAMERA_PERM) {
+            PermissionRequest pending = pendingWebCameraRequest;
+            pendingWebCameraRequest = null;
+            if (pending == null) return;
+            boolean granted = grantResults.length > 0
+                    && grantResults[0] == PackageManager.PERMISSION_GRANTED;
+            if (granted) {
+                pending.grant(new String[]{PermissionRequest.RESOURCE_VIDEO_CAPTURE});
+            } else {
+                pending.deny();
+            }
         }
     }
 

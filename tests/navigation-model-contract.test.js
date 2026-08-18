@@ -161,7 +161,7 @@ test('app shell delegates navigation policy and removes the retired hamburger pa
   const adaptersScript = html.indexOf('/js/navigation/NavigationAdapters.js?v=1');
   const bootstrapScript = html.indexOf('/js/navigation/navigationBootstrap.js?v=1');
   const tvScript = html.indexOf('/js/utils/tvNavigation.js?v=32');
-  const appScript = html.indexOf('/js/app.js?v=2c1d21d360');
+  const appScript = html.indexOf('/js/app.js?v=2c1d21d361');
   assert.ok(modelScript > 0 && modelScript < adaptersScript);
   assert.ok(adaptersScript < bootstrapScript && bootstrapScript < tvScript && tvScript < appScript);
 

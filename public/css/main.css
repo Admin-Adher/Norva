@@ -21636,6 +21636,23 @@ html.tv-mode #page-settings #tab-sources .settings-tv-handoff {
   -webkit-backdrop-filter: none;
 }
 
+@media (min-width: 641px) {
+  .pair-tv-sheet {
+    align-items: center;
+    padding: 24px;
+  }
+
+  .pair-tv-panel {
+    border-radius: var(--radius-lg);
+    border-bottom: 1px solid var(--color-border);
+    min-height: 0;
+  }
+
+  .pair-tv-handle {
+    display: none;
+  }
+}
+
 .pair-tv-panel {
   position: relative;
   width: min(100%, 520px);
@@ -21820,6 +21837,47 @@ html.tv-mode #page-settings #tab-sources .settings-tv-handoff {
   color: var(--color-error);
   font-size: 0.8125rem;
   line-height: 1.4;
+}
+
+.pair-tv-scan {
+  margin: 0 0 16px;
+}
+
+.pair-tv-scan-video {
+  display: block;
+  width: 100%;
+  max-height: 220px;
+  object-fit: cover;
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.pair-tv-scan-start,
+.pair-tv-scan-cancel {
+  display: block;
+  width: 100%;
+  min-height: 44px;
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.pair-tv-scan-start:focus-visible,
+.pair-tv-scan-cancel:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+:root.tv-mode .pair-tv-scan,
+:root.tv-mode .pair-tv-scan-start {
+  display: none;
 }
 
 .pair-tv-submit,

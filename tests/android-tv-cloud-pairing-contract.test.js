@@ -121,7 +121,7 @@ test('QR fallback and display grouping never change the pairing protocol', () =>
   assert.match(page, /currentCode\.split\(''\)\.join\(' '\)/);
   assert.match(page, /NorvaCloud\.pairing\.start\(\{[\s\S]*?ttlSeconds: 600,[\s\S]*?capabilities: \{ cloudPairing: true \}/);
   assert.match(page, /NorvaCloud\.pairing\.poll\(currentCode, currentPairingSecret\)/);
-  assert.match(page, /const pairPath = '\/cloud\.html\?pair=' \+ encodeURIComponent\(currentCode\)/);
+  assert.match(page, /const pairPath = '\/app\.html\?pair=' \+ encodeURIComponent\(currentCode\) \+ '#home'/);
   assert.match(page, /renderQr\(pairUrl\)/);
   assert.doesNotMatch(page, /renderQr\([^)]*currentPairingSecret/);
   assert.match(page, /pollHandle = setInterval\(pollPairing, 2500\)/);

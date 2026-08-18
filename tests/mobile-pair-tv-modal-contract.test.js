@@ -30,7 +30,7 @@ test('Prototype A is shipped as an app-owned bottom sheet with the approved icon
   assert.match(component, /overlay\.className = 'modal-overlay pair-tv-sheet'/);
   assert.match(component, /Pair your TV/);
   assert.match(component, /Open Norva on your TV/);
-  assert.match(component, /Enter the 6-character code/);
+  assert.match(component, /Scan the QR or enter the 6-character code/);
   assert.match(component, /Manage all devices/);
   assert.match(component, /TV Connected/);
   assert.match(component, /screen is now linked and synced with your account/);
@@ -46,17 +46,19 @@ test('the phone Home action opens the sheet without changing route', () => {
   assert.doesNotMatch(delegatedClick, /openScreensSettings/);
 
   assert.match(app, /this\.pairTvSheet = new PairTvSheet\(this\)/);
-  assert.match(app, /openPairTvSheet\(opener = null\)/);
+  assert.match(app, /openPairTvSheet\(opener = null, options = \{\}\)/);
+  assert.match(app, /consumePendingPairCode/);
   assert.match(component, /isNativePhoneShell/);
   assert.match(component, /isCloudMode/);
   assert.match(component, /isCatalogReady/);
+  assert.match(component, /options\.force === true \|\| options\.code/);
 
   const modalIndex = appHtml.indexOf('/js/components/NorvaModal.js?v=2');
-  const pairIndex = appHtml.indexOf('/js/components/PairTvSheet.js?v=1');
+  const pairIndex = appHtml.indexOf('/js/components/PairTvSheet.js?v=3');
   const homeIndex = appHtml.indexOf('/js/pages/HomePage.js?v=63');
-  const appIndex = appHtml.indexOf('/js/app.js?v=2c1d21d360');
+  const appIndex = appHtml.indexOf('/js/app.js?v=2c1d21d361');
   assert.ok(modalIndex > 0 && modalIndex < pairIndex && pairIndex < homeIndex && homeIndex < appIndex);
-  assert.match(appHtml, /\/css\/main\.css\?v=113/);
+  assert.match(appHtml, /\/css\/main\.css\?v=115/);
 });
 
 test('pairing code normalization matches the six-character TV alphabet exactly', () => {
@@ -148,8 +150,37 @@ test('sheet focus, Back, IME, safe-area and reduced-motion contracts are explici
   assert.match(css, /\.pair-tv-close[\s\S]{0,100}width: 44px[\s\S]{0,100}height: 44px/);
 });
 
-test('the mobile sheet does not add a camera, QR scanner or a new pairing endpoint', () => {
-  assert.doesNotMatch(component, /getUserMedia|BarcodeDetector|html5-qrcode|camera|scanner/i);
+test('a logged-out web QR scan keeps the pair code through account login', () => {
+  const appHtml = read('public/app.html');
+  const account = read('public/account.html');
+  assert.match(appHtml, /var pairingReturn = \/\[\?&\]pair=\[A-Za-z0-9\]\+\//);
+  assert.match(appHtml, /nativeApp \|\| pairingReturn/);
+  assert.match(account, /norva-post-login-return/);
+  assert.match(account, /sanitizeReturnTo\(rawReturnTo\) \|\| sanitizeReturnTo\(storedReturnTo\)/);
+});
+
+test('QR and Settings open the in-app sheet instead of a standalone pairing page', () => {
+  const settings = read('public/js/pages/Settings.js');
+  const cloudPair = read('public/cloud-pair.html');
+  const cloud = read('public/cloud.html');
+  const pairApprove = read('public/pair-approve.html');
+  const account = read('public/account.html');
+
+  assert.match(settings, /openPairTvSheet\?\.\(event\.currentTarget, \{ force: true \}\)/);
+  assert.doesNotMatch(settings, /approvePairCode/);
+  assert.match(cloudPair, /\/app\.html\?pair=/);
+  assert.match(cloud, /location\.replace\('\/app\.html\?pair='/);
+  assert.match(pairApprove, /location\.replace\('\/app\.html\?pair='/);
+  assert.match(account, /\/app\.html\?pair=\$\{encodeURIComponent\(pair\)\}#home/);
+});
+
+test('the sheet can scan a TV QR into the existing approve seam', () => {
+  const { sheet } = loadSheet();
+  assert.equal(sheet.codeFromScanPayload('https://norva.tv/app.html?pair=ABC234#home'), 'ABC234');
+  assert.equal(sheet.codeFromScanPayload('abc234'), 'ABC234');
+  assert.match(component, /BarcodeDetector/);
+  assert.match(component, /getUserMedia/);
+  assert.match(component, /facingMode/);
   assert.match(component, /NorvaCloud\?\.pairing\?\.approve/);
-  assert.doesNotMatch(component, /\/api\/pair\/approve|fetch\(/);
+  assert.doesNotMatch(component, /\/api\/pair\/approve|html5-qrcode|fetch\(/);
 });

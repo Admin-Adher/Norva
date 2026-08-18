@@ -838,7 +838,7 @@
                 currentCode = result.code;
                 currentPairingSecret = result.pairingSecret || '';
                 expiresAt = new Date(result.expiresAt).getTime();
-                const pairPath = '/cloud.html?pair=' + encodeURIComponent(currentCode);
+                const pairPath = '/app.html?pair=' + encodeURIComponent(currentCode) + '#home';
                 const pairUrl = location.origin + pairPath;
                 codeEl.textContent = formatDisplayCode(currentCode);
                 codeEl.setAttribute('aria-label', 'Pairing code ' + currentCode.split('').join(' '));
