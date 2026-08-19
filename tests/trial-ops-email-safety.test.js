@@ -70,6 +70,15 @@ test('ops email is explicit, singular, validated and never discovered from Auth/
   assert.match(envExample, /NORVA_OPS_EMAIL=/);
 });
 
+test('source-error Telegram ignores expired, busy and inactive accounts', () => {
+  assert.match(admin, /function classifyOpsSourceError/);
+  assert.match(admin, /SOURCE_ERROR_INACTIVE_MS = 14 \* 24 \* 3600 \* 1000/);
+  assert.match(admin, /kind === "expired" \|\| kind === "auth" \|\| kind === "busy"/);
+  assert.match(admin, /async function collectOpsSourceErrors/);
+  assert.match(admin, /const opsSourceErrors = await collectOpsSourceErrors\(\)/);
+  assert.doesNotMatch(admin, /if \(Number\(ov\.sources_error\) > 0\) problems\.push/);
+});
+
 test('flappy source counters do not delete alert state on a 15-minute heal', () => {
   assert.match(admin, /const FLAPPY_ALERT_KEYS = new Set\(\["sources_error", "sources_incomplete"\]\)/);
   assert.match(admin, /FLAPPY_ALERT_KEYS\.has\(k\) && \(state\.get\(k\) \?\? 0\) > Date\.now\(\) - ALERT_COOLDOWN_MS/);

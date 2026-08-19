@@ -238,6 +238,76 @@ async function readLidCascadeLeaseHealth(): Promise<JsonRecord> {
 // expires, otherwise a 15-min sync blip sends alert → résolu → alert in a loop.
 const ALERT_COOLDOWN_MS = 6 * 3600 * 1000;
 const FLAPPY_ALERT_KEYS = new Set(["sources_error", "sources_incomplete"]);
+const SOURCE_ERROR_INACTIVE_MS = 14 * 24 * 3600 * 1000;
+
+function classifyOpsSourceError(text: string): "expired" | "auth" | "busy" | "infra" | "unknown" {
+  const error = String(text || "").toLowerCase();
+  if (/\b(458|user_multi_ip|account[_\s-]*shar|account[_\s-]*busy|already in use|max(?:imum)?[_\s-]*conn|slot[_\s-]*busy)\b/.test(error)) {
+    return "busy";
+  }
+  if (/\b(expired|expire|inactive|disabled|banned|subscription|renew|unpaid|trial ended)\b/.test(error)) {
+    return "expired";
+  }
+  if (/\b(401|403|unauthorized|forbidden|credential|invalid user|invalid pass|auth[_\s-]*fail)\b/.test(error)) {
+    return "auth";
+  }
+  if (/\b(media gateway|gateway refused|502|503|504|timeout|timed out|econn|unreachable)\b/.test(error)) {
+    return "infra";
+  }
+  return "unknown";
+}
+
+function sourceErrorText(source: JsonRecord): string {
+  const hint = source.config_hint && typeof source.config_hint === "object" && !Array.isArray(source.config_hint)
+    ? source.config_hint as JsonRecord
+    : {};
+  const progress = hint.syncProgress && typeof hint.syncProgress === "object" && !Array.isArray(hint.syncProgress)
+    ? hint.syncProgress as JsonRecord
+    : {};
+  return [source.sync_error, progress.error, hint.error].filter(Boolean).map(String).join(" ");
+}
+
+async function collectOpsSourceErrors(): Promise<{ count: number; detail: string } | null> {
+  const { data: sources, error } = await admin
+    .from("cloud_sources")
+    .select("display_name, sync_status, sync_error, user_id, config_hint")
+    .is("deleted_at", null);
+  if (error || !Array.isArray(sources)) return null;
+
+  const errored = sources.filter((row) => {
+    const status = String((row as JsonRecord).sync_status || "");
+    return status === "error" || status === "sync_error" || (row as JsonRecord).sync_error;
+  }) as JsonRecord[];
+  if (!errored.length) return null;
+
+  const userIds = [...new Set(errored.map((row) => String(row.user_id || "")).filter(Boolean))];
+  const lastSignIn = new Map<string, string | null>();
+  await Promise.all(userIds.map(async (userId) => {
+    try {
+      const { data } = await admin.auth.admin.getUserById(userId);
+      lastSignIn.set(userId, data.user?.last_sign_in_at ?? null);
+    } catch (_) {
+      lastSignIn.set(userId, null);
+    }
+  }));
+
+  const worthy: string[] = [];
+  for (const row of errored) {
+    const userId = String(row.user_id || "");
+    const signedIn = lastSignIn.get(userId) || null;
+    const lastMs = signedIn ? Date.parse(signedIn) : NaN;
+    const active = Number.isFinite(lastMs) && (Date.now() - lastMs) < SOURCE_ERROR_INACTIVE_MS;
+    const kind = classifyOpsSourceError(sourceErrorText(row));
+    if (!active || kind === "expired" || kind === "auth" || kind === "busy") continue;
+    const name = String(row.display_name || "source");
+    worthy.push(`${name} (${kind})`);
+  }
+  if (!worthy.length) return null;
+  return {
+    count: worthy.length,
+    detail: `${worthy.length} source(s) active(s) en erreur : ${worthy.slice(0, 6).join(", ")}`,
+  };
+}
 
 type PartnersOpsSnapshot = {
   enabled: boolean;
@@ -309,7 +379,8 @@ async function runOpsAlertSweep(): Promise<JsonRecord> {
   // 3) Conditions → stable keys. `detail` goes into the email body.
   const problems: { key: string; detail: string }[] = [];
   if (snapshotAgeMin > 20) problems.push({ key: "snapshot_stale", detail: `Snapshot admin non rafraîchi depuis ${snapshotAgeMin} min (cron admin-dashboard-refresh en panne ?)` });
-  if (Number(ov.sources_error) > 0) problems.push({ key: "sources_error", detail: `${ov.sources_error} source(s) en erreur de sync` });
+  const opsSourceErrors = await collectOpsSourceErrors();
+  if (opsSourceErrors) problems.push({ key: "sources_error", detail: opsSourceErrors.detail });
   if (Number(ov.sources_incomplete) > 0) problems.push({ key: "sources_incomplete", detail: `${ov.sources_incomplete} source(s) en sync incomplète (VOD sans variants)` });
   // Cron health: alert on jobs whose MOST RECENT run failed (an outage happening NOW), not
   // on the 24h trailing count — a one-off self-healed failure (e.g. a transient deadlock,
