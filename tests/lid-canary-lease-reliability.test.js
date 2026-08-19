@@ -168,7 +168,7 @@ test('admin health and ops sweep expose only sanitized lease state and alert bef
   assert.match(admin, /lidIncidentActive/);
   assert.match(
     admin,
-    /!\(lidIncidentActive && k\.startsWith\("lid_cascade_"\)\)/,
+    /if \(lidIncidentActive && k\.startsWith\("lid_cascade_"\)\) return false;/,
   );
   assert.match(admin, /lid_cascade: lidCascade/);
   assert.match(

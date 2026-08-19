@@ -2347,12 +2347,15 @@ video::cue {
 
 .norva-setup-connect {
   position: relative;
+  display: grid;
+  width: 100%;
   min-height: calc(100dvh - 92px);
   height: auto;
   grid-template-columns: minmax(0, 560px);
   justify-content: center;
-  align-items: start;
-  align-content: start;
+  justify-items: center;
+  align-items: center;
+  align-content: center;
   background:
     linear-gradient(135deg, rgba(20, 52, 112, 0.88), rgba(11, 16, 31, 0.96)),
     var(--color-bg-primary);
@@ -2364,6 +2367,11 @@ video::cue {
 }
 
 #page-home.home-setup-connect-active .norva-setup-connect {
+  display: grid;
+  grid-template-columns: minmax(0, 560px);
+  justify-content: center;
+  justify-items: center;
+  align-items: center;
   min-height: 100%;
   height: auto;
   padding: clamp(18px, 3.4vh, 44px) clamp(16px, 4.6vw, 72px);
@@ -6200,9 +6208,12 @@ kbd {
   }
 
   #page-home.home-setup-connect-active .norva-setup-connect {
+    display: grid;
     grid-template-columns: minmax(0, 560px);
     justify-content: center;
-    align-content: start;
+    justify-items: center;
+    align-items: center;
+    align-content: center;
     gap: 0;
   }
 

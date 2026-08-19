@@ -70,7 +70,7 @@ test('catalog preparation modal shares focus, Back and inert hygiene', () => {
 
 test('onboarding controls remain operable in short and touch viewports', () => {
   assert.match(css, /#page-home\.home-setup-active\s*\{[\s\S]{0,140}overflow-y:\s*auto/);
-  assert.match(css, /\.norva-setup-connect\s*\{[\s\S]{0,420}overflow-y:\s*auto/);
+  assert.match(css, /\.norva-setup-connect\s*\{[\s\S]{0,720}overflow-y:\s*auto/);
   assert.match(css, /\.setup-manual-grid\s*\{[\s\S]{0,80}grid-template-columns:\s*minmax\(0, 1fr\)/);
   assert.match(css, /\.norva-setup-actions \.btn\s*\{[\s\S]{0,100}min-height:\s*44px/);
   assert.match(css, /\.setup-password-toggle\s*\{[\s\S]{0,260}width:\s*44px;[\s\S]{0,60}height:\s*44px/);
@@ -84,9 +84,9 @@ test('setup visuals reuse Norva assets and ship cache-busted', () => {
   assert.match(shell, /class="tc-intro-icon" src="\/img\/icons\/norva-movies\.svg/);
   assert.match(shell, /class="tc-intro-icon" src="\/img\/icons\/norva-settings\.svg/);
   assert.doesNotMatch(shell, /<div class="tc-intro-icon">/);
-  assert.match(shell, /main\.css\?v=115/);
+  assert.match(shell, /main\.css\?v=116/);
   assert.match(shell, /sourceHealth\.js\?v=11/);
   assert.match(shell, /SourceManager\.js\?v=43/);
   assert.match(shell, /HomePage\.js\?v=63/);
-  assert.match(shell, /app\.js\?v=2c1d21d361/);
+  assert.match(shell, /app\.js\?v=183db7851f/);
 });

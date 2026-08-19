@@ -24,7 +24,7 @@ test('subscription selection is plan-first and keeps one explicit continuation a
   assert.ok(gridAt > 0 && benefitsAt > gridAt && decisionAt > benefitsAt && proofAt > decisionAt,
     'selection and decision precede secondary product proof in reading order');
   assert.match(source, /\/js\/plan-selection-ui\.js\?v=1/);
-  assert.match(source, /\/css\/commerce\.css\?v=2/);
+  assert.match(source, /\/css\/commerce\.css\?v=3/);
 });
 
 test('the presentation adapter delegates without becoming a pricing authority', () => {
