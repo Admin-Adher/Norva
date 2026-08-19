@@ -31,7 +31,10 @@ test('checkout API reuses orders, recovers ambiguous creates, and confirms only 
   assert.match(source, /merchant_order_ext_ref: merchantExtRef/);
   assert.match(source, /action === "reuse"/);
   assert.match(source, /intent\.action === "recover"[\s\S]*findOrderByExtRef\(expectedOrder\)/);
-  assert.match(source, /metadata:[\s\S]*intent_key: intentKey[\s\S]*intent_generation/);
+  assert.match(source, /metadata: revolutMetadata\(\{[\s\S]*intent_key: intentKey[\s\S]*intent_generation/);
+  assert.match(source, /function revolutMetadata/);
+  assert.match(source, /NORVA_REVOLUT_VALIDATION_CENTS"\), 100, 50, 5000\)/);
+  assert.match(source, /order w\/ redirect_url rejected, retrying without/);
   assert.match(source, /cloud_revolut_checkout_intents[\s\S]*\.eq\("status", "ready"\)/);
   assert.doesNotMatch(source, /\.order\("created_at"[^\n]+\.limit\(1\).*maybeSingle\(\)/);
 });

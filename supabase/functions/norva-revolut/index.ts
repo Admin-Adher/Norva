@@ -44,7 +44,7 @@ const PUBLIC_SITE_ORIGIN = (Deno.env.get("NORVA_PUBLIC_SITE_ORIGIN") ?? "https:/
 const TRIAL_DAYS = 7;
 // Card-validation hold (capture_mode:MANUAL → authorised, never captured, voided on
 // confirm). $0.50 keeps the card-validation footprint tiny; bump via env if the sandbox rejects it.
-const VALIDATION_CENTS = boundedInt(Deno.env.get("NORVA_REVOLUT_VALIDATION_CENTS"), 50, 1, 5000);
+const VALIDATION_CENTS = boundedInt(Deno.env.get("NORVA_REVOLUT_VALIDATION_CENTS"), 100, 50, 5000);
 // One-shot cancel-flow counter-offer: % off the NEXT charge (applied once, then cleared).
 const SAVE_OFFER_PCT = 50;
 const CANCEL_REASONS = new Set(["too_expensive", "not_using", "technical", "other", "skipped"]);
@@ -189,7 +189,18 @@ async function revolut(method: "GET" | "POST", path: string, body?: JsonRecord, 
   }
 }
 
-function revolutFailureDiagnostic(status: unknown, body: unknown): { status: number; code: string } {
+function revolutMetadata(values: JsonRecord): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(values)) {
+    if (value == null || value === "") continue;
+    const text = String(value);
+    if (text.length > 500) continue;
+    out[key] = text;
+  }
+  return out;
+}
+
+function revolutFailureDiagnostic(status: unknown, body: unknown): { status: number; code: string; message?: string } {
   const rawStatus = Number(status);
   const safeStatus = Number.isInteger(rawStatus) && rawStatus >= 0 && rawStatus <= 599 ? rawStatus : 0;
   const record = body && typeof body === "object" ? body as JsonRecord : {};
@@ -197,9 +208,11 @@ function revolutFailureDiagnostic(status: unknown, body: unknown): { status: num
   const rawCode = [record.code, nested.code, typeof record.error === "string" ? record.error : ""]
     .map((value) => String(value ?? "").trim().toLowerCase())
     .find((value) => /^[a-z0-9][a-z0-9_-]{0,47}$/.test(value));
+  const rawMessage = String(record.message ?? nested.message ?? "").replace(/sk_[a-zA-Z0-9_]+/g, "[redacted]").slice(0, 160);
   return {
     status: safeStatus,
     code: rawCode || (safeStatus === 0 ? "network_error" : "provider_rejected"),
+    ...(rawMessage ? { message: rawMessage } : {}),
   };
 }
 
@@ -833,7 +846,7 @@ Deno.serve(async (req) => {
       // amount_cents = the catalog price at checkout OPEN — /confirm commits THIS
       // amount, so a promo ending mid-checkout still honors what the page showed.
       // base_amount_cents/promo_cycles carry the « N first periods » promo terms.
-      metadata: {
+      metadata: revolutMetadata({
         user_id: user.id, plan, period, kind, amount_cents: amount,
         base_amount_cents: promoBase, promo_cycles: promoCycles,
         intent_key: intentKey, intent_generation: Number(intent.generation || 1),
@@ -845,7 +858,7 @@ Deno.serve(async (req) => {
         first_charge_at: commercialTerms.first_charge_at,
         experiment_key: experimentKey, experiment_variant: experimentVariant,
         paywall_placement: placement, paywall_surface: surface,
-      },
+      }),
     };
     // customer_id links the order → customer so the saved card attaches; fall back to
     // customer_email if the customer couldn't be created.
@@ -888,6 +901,15 @@ Deno.serve(async (req) => {
     if (!created.ok && created.status !== 0 && orderBody.save_payment_method_for) {
       console.warn("[norva-revolut] order w/ save_payment_method_for failed, retrying without", created.status);
       delete orderBody.save_payment_method_for;
+      created = await revolut("POST", "/api/1.0/orders", orderBody);
+      if (!created.ok) {
+        const recovered = await findOrderByExtRef(expectedOrder);
+        if (recovered) created = { ok: true, status: 200, body: recovered };
+      }
+    }
+    if (!created.ok && created.status === 400 && orderBody.redirect_url) {
+      console.warn("[norva-revolut] order w/ redirect_url rejected, retrying without");
+      delete orderBody.redirect_url;
       created = await revolut("POST", "/api/1.0/orders", orderBody);
       if (!created.ok) {
         const recovered = await findOrderByExtRef(expectedOrder);
