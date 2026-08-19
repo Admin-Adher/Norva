@@ -94,6 +94,15 @@ for (const target of targets) {
   });
 }
 
+test('Play Subscribe in Settings is limited to the customer-success test account', () => {
+  const settings = read('public/js/pages/Settings.js');
+  assert.match(settings, /customersuccess\.kang@gmail\.com/);
+  assert.match(settings, /isPlayBillingTestAccount/);
+  assert.match(settings, /nativePlayBillingChannelReady/);
+  assert.match(settings, /NorvaBillingNative/);
+  assert.match(read('public/app.html'), /Settings\.js\?v=54/);
+});
+
 test('Android TV delegates purchases to the web and ships no native billing surface', () => {
   const main = read('clients/android-tv/app/src/main/java/tv/norva/tv/MainActivity.java');
   const gradle = read('clients/android-tv/app/build.gradle');

@@ -23,9 +23,28 @@ function isTvSettingsShell() {
 // True once the native APK exposes the Play Billing purchase bridge. In-app
 // purchase is allowed by stores (only external web payment links are not), so
 // when this bridge is present we can surface an in-app "Subscribe" action.
-function nativeBillingReady() {
+const PLAY_BILLING_TEST_EMAILS = ['customersuccess.kang@gmail.com'];
+
+function isPlayBillingTestAccount(app) {
+    const email = String(app?.currentUser?.email || window.NorvaAuth?.getSession?.()?.user?.email || '')
+        .trim()
+        .toLowerCase();
+    return PLAY_BILLING_TEST_EMAILS.indexOf(email) !== -1;
+}
+
+function nativePlayBillingChannelReady() {
+    if (isTvSettingsShell()) return false;
+    if (window.NorvaBilling && typeof window.NorvaBilling.hasNativeBilling === 'function') {
+        return window.NorvaBilling.hasNativeBilling() === true;
+    }
+    const channel = window.NorvaBillingNative;
+    return !!(channel && typeof channel.postMessage === 'function');
+}
+
+function nativeBillingReady(app) {
     const bridge = window.NorvaTVCloud || window.NodeCastNative;
-    return !!(bridge && typeof bridge.purchase === 'function');
+    if (bridge && typeof bridge.purchase === 'function') return true;
+    return isPlayBillingTestAccount(app) && nativePlayBillingChannelReady();
 }
 
 class SettingsPage {
@@ -548,7 +567,7 @@ class SettingsPage {
             if (isTvSettingsShell()) {
                 button.style.display = 'none';
             } else if (isNativeShell()) {
-                const ready = nativeBillingReady();
+                const ready = nativeBillingReady(this.app);
                 button.style.display = ready ? '' : 'none';
                 if (ready) button.textContent = 'Subscribe';
             } else {
