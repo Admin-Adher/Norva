@@ -520,8 +520,14 @@
       function appUserId() {
         try {
           const session = JSON.parse(localStorage.getItem('norva-cloud-session') || 'null');
-          return session && session.user && session.user.id ? session.user.id : null;
-        } catch (_) { return null; }
+          if (session && session.user && session.user.id) return session.user.id;
+        } catch (_) { /* fall through */ }
+        try {
+          const user = window.NorvaAuth && typeof window.NorvaAuth.getSession === 'function'
+            && window.NorvaAuth.getSession() && window.NorvaAuth.getSession().user;
+          if (user && user.id) return user.id;
+        } catch (_) { /* ignore */ }
+        return null;
       }
 
       // Count an exposure only after a real offer card has entered the viewport and
@@ -1065,9 +1071,11 @@
           nativeOffersReady = false;
           nativeCurrentOfferingId = '';
           nativeOfferByPackage = Object.create(null);
-          nativeOffersError = 'unavailable';
+          nativeOffersError = String(error && (error.code || error.message) || 'unavailable');
           document.documentElement.classList.remove('native-prices-pending');
           applyPeriod(period);
+          const helper = document.getElementById('decision-helper');
+          if (helper) helper.textContent = 'Google Play prices could not be loaded for this account.';
           setStatus('Current Google Play prices could not be loaded. Update Norva or check your connection, then retry. No purchase can start until the exact store price is available.', true);
         }
       }
@@ -1212,7 +1220,13 @@
         try {
           const ent = window.NorvaCloud && window.NorvaCloud.entitlements;
           if (!ent) return false;
-          const dec = appUserId() ? await ent.get() : await ent.device();
+          const entitlementLookup = appUserId() ? ent.get() : ent.device();
+          const dec = await Promise.race([
+            entitlementLookup,
+            new Promise(function (_, reject) {
+              window.setTimeout(function () { reject(new Error('entitlement_timeout')); }, 4000);
+            })
+          ]);
           if (!dec) return false;
           entitlementResolved = true;
           const st = String(dec.status || '');
@@ -1551,6 +1565,10 @@
         await checkExisting();
         if (includedAccess) return;
         document.documentElement.classList.remove('entitlement-pending');
+        if (appUserId()) {
+          const helper = document.getElementById('decision-helper');
+          if (helper) helper.textContent = 'Loading your Google Play price…';
+        }
 
         const pending = [loadNativePrices(), loadTrialEligibility()];
         if (!window.NorvaBilling.isNative() && window.NorvaBilling.revolutPrices) {

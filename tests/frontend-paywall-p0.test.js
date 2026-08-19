@@ -139,6 +139,8 @@ test('native billing reads localized RevenueCat offers and fails closed without 
   assert.match(subscribe, /Number\(offer\.priceMicros\) \/ 1000000/);
   assert.match(subscribe, /No purchase can start until the exact store price is available/);
   assert.match(subscribe, /if \(nativeOffersRequired && !nativeOffersReady\)/);
+  assert.match(subscribe, /NorvaAuth\.getSession/);
+  assert.match(subscribe, /entitlement_timeout/);
   assert.match(subscribe, /offer\.trialEligibility/);
   assert.match(subscribe, /offer && offer\.trialPeriodIso8601/);
   assert.match(subscribe, /offer && offer\.trialPriceString/);
