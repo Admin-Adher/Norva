@@ -18,6 +18,10 @@ test('native sign-up leads with the real multi-device Norva promise', () => {
     assert.match(firstSlide, new RegExp(device, 'i'));
   }
   assert.match(firstSlide, /profiles, favorites and playback progress/i);
+  assert.match(account, /Paste your TV service link/);
+  assert.match(account, /Xtream or M3U/);
+  assert.doesNotMatch(account, /Your IPTV in the browser/);
+  assert.match(account, /isNativeApp && !email && !pairingReturn\) showForm\('signup'\)/);
 });
 
 test('phone Home reveals a dismissible ecosystem card only after a cloud catalog is ready', () => {
@@ -79,7 +83,7 @@ test('devices and pairing are permanent cloud-account destinations, not an Advan
   const appJs = read('public/js/app.js');
   assert.match(appHtml, /class="tab" data-tab="screens" id="screens-tab"[^>]*>[\s\S]*?<span>Devices<\/span>[\s\S]*?<\/button>/);
   assert.doesNotMatch(appHtml, /class="tab tab-advanced" data-tab="screens"/);
-  assert.match(appHtml, /Add a TV, phone, tablet or browser/);
+  assert.match(appHtml, /Add another screen/);
   assert.match(appHtml, /Your devices &amp; screens/);
   assert.match(appJs, /data-act="screens"/);
   assert.match(appJs, /Web, phone, tablet and TV/);
