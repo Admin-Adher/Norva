@@ -1408,6 +1408,8 @@ test('offsite Partners backup is scheduled, least-privilege and secret-backed', 
   assert.match(workflow, /cron: '15 3 \* \* \*'/);
   assert.match(workflow, /permissions:\s*\n\s+contents: read/);
   assert.match(workflow, /postgresql-client-17/);
+  assert.match(workflow, /awscli-exe-linux-x86_64\.zip/);
+  assert.doesNotMatch(workflow, /^\s+awscli\s*\\?$/m);
   assert.match(workflow, /bash ops\/backup\/backup-to-r2\.sh/);
   assert.match(workflow, /BACKUP_ENCRYPTION_REQUIRED: 'true'/);
   assert.match(

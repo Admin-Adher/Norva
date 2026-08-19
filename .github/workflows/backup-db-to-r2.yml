@@ -28,12 +28,15 @@ jobs:
           sudo apt-get update
           sudo apt-get install --yes \
             age \
-            awscli \
             ca-certificates \
             curl \
+            unzip \
             postgresql-common
           sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
           sudo apt-get install --yes postgresql-client-17
+          curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscliv2.zip
+          unzip -q /tmp/awscliv2.zip -d /tmp
+          sudo /tmp/aws/install
           pg_dump --version
           aws --version
           age --version
