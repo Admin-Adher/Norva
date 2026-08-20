@@ -88,11 +88,13 @@ echo ">> [1/5] Dumping managed DB (globals + schema + data) — read-only"
 # Schema of the app (public + private Partners). Supabase-managed schemas (auth/storage/realtime/
 # vault/cron) are provided by the self-host images/extensions on restore.
 "$PG_DUMP" --dbname="$DB_URL" --schema-only --no-owner --no-privileges \
-  --schema='public' --schema='affiliate_private' --file="$STAGE/01-schema.sql"
+  --schema='public' --schema='affiliate_private' \
+  > "$STAGE/01-schema.sql"
 # Data of application schemas. --disable-triggers so FK/
 # trigger order doesn't block a restore.
 "$PG_DUMP" --dbname="$DB_URL" --data-only --no-owner --no-privileges \
-  --schema='public' --schema='affiliate_private' --disable-triggers --file="$STAGE/02-data.sql"
+  --schema='public' --schema='affiliate_private' --disable-triggers \
+  > "$STAGE/02-data.sql"
 # Reference exports (for transcription during migration — crons point at the
 # managed project and get rewritten by 03-recreate-cron-guc.sql).
 psql "$DB_URL" -At -F $'\t' \
