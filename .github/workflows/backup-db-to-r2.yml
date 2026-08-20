@@ -36,7 +36,11 @@ jobs:
           sudo apt-get install --yes postgresql-client-17
           curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscliv2.zip
           unzip -q /tmp/awscliv2.zip -d /tmp
-          sudo /tmp/aws/install
+          if command -v aws >/dev/null 2>&1; then
+            sudo /tmp/aws/install --update
+          else
+            sudo /tmp/aws/install
+          fi
           pg_dump --version
           aws --version
           age --version
