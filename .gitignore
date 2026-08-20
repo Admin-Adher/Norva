@@ -59,3 +59,10 @@ output/
 ops/hetzner/.env.bak-*
 ops/hetzner/media/.env.*
 ops/hetzner/**/*.bak-*
+ops/hetzner/.env.backup-*
+ops/hetzner/**/*.bak
+# Backup archives must never land in the repo (audit 2026-08-20 : un .tar.gz.age
+# de 849 Mo et deux .env de secrets tramaient non suivis ET non ignores).
+*.age
+norva-db-*.tar.gz*
+norva-selfhost-*.tar.gz*

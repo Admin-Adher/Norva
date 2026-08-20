@@ -23,7 +23,7 @@ fi
 if [[ -n "$SKIP_BASE_RETENTION_OVERRIDE" ]]; then
   NORVA_SKIP_BASE_RETENTION="$SKIP_BASE_RETENTION_OVERRIDE"
 fi
-if [[ ! "${KEEP_BASE_COUNT:-8}" =~ ^[1-9][0-9]{0,2}$ ]]; then
+if [[ ! "${KEEP_BASE_COUNT:-3}" =~ ^[1-9][0-9]{0,2}$ ]]; then
   echo "ERROR: KEEP_BASE_COUNT must be an integer from 1 to 999." >&2
   exit 1
 fi
@@ -68,9 +68,9 @@ log "uploaded base-$STAMP ($(du -sh "$OUTDIR" | cut -f1))"
 if [[ "${NORVA_SKIP_BASE_RETENTION:-false}" == "true" ]]; then
   log "[3/3] retention skipped by explicit one-shot operator control"
 else
-  log "[3/3] retention: keep last ${KEEP_BASE_COUNT:-8} base backups"
+  log "[3/3] retention: keep last ${KEEP_BASE_COUNT:-3} base backups"
   rclone lsf "r2:${R2_BUCKET}/${R2_PREFIX_BASE%/}/" --dirs-only 2>/dev/null \
-    | sort | head -n -"${KEEP_BASE_COUNT:-8}" | while read -r d; do
+    | sort | head -n -"${KEEP_BASE_COUNT:-3}" | while read -r d; do
       log "pruning old base backup: $d"
       if ! rclone purge "r2:${R2_BUCKET}/${R2_PREFIX_BASE%/}/${d%/}" --retries 4; then
         log "WARNING: retention could not prune $d; backup creation remains valid"

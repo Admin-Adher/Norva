@@ -51,10 +51,27 @@ test('the operator template documents the complete hook pair instead of legacy S
   );
   assert.match(example, /^SEND_EMAIL_HOOK_SECRET=$/m);
   assert.equal((example.match(/^SEND_EMAIL_HOOK_SECRET=/gm) || []).length, 1);
-  assert.match(example, /^AUTH_EMAIL_FROM=Norva <support@norva\.tv>$/m);
+  // Quoted on purpose. The box loads this file with `set -a; source .env`
+  // (ops/backup/*, ops/hetzner/scripts/*), and an unquoted `<` is a shell
+  // redirection that made the WHOLE file unsourceable. Compose strips the
+  // quotes, so both consumers see the same value.
+  assert.match(example, /^AUTH_EMAIL_FROM="Norva <support@norva\.tv>"$/m);
   assert.match(example, /^AUTH_EMAIL_REPLY_TO=support@norva\.tv$/m);
   assert.match(example, /^GOTRUE_MAILER_EXTERNAL_HOSTS=api\.norva\.tv$/m);
   assert.doesNotMatch(example, /^SMTP_(?:HOST|USER|PASS)=/m);
+});
+
+test('every operator-template value stays shell-sourceable', () => {
+  const example = read('ops/hetzner/.env.hetzner.example');
+  const offenders = example
+    .split(/\r?\n/)
+    .filter((line) => /^[A-Za-z_][A-Za-z0-9_]*=/.test(line))
+    .filter((line) => {
+      const value = line.slice(line.indexOf('=') + 1);
+      if (value === '' || /^(["']).*\1$/.test(value)) return false;
+      return /[\s<>|&;()$`]/.test(value);
+    });
+  assert.deepEqual(offenders, []);
 });
 
 test('the Edge verifier accepts GoTrue pipe-delimited rotation secrets', () => {

@@ -1,6 +1,6 @@
 # Backups du self-host (box = prod) — architecture + installation
 
-> ✅ **Opérationnel depuis le 2026-07-11** : 3 timers armés, premiers backups sur R2
+> ✅ **Opérationnel depuis le 2026-07-11** : 4 timers armés, premiers backups sur R2
 > (dump 637 M, WAL, base 987 M). **Drill de restauration RÉUSSI le 2026-07-11** : base
 > backup R2 → conteneur jetable → `consistent recovery state reached`, `cloud_media_items=906087`,
 > `auth_users=6`. Refaire ce drill (idéalement + le replay WAL de `RESTORE.md §2`) chaque trimestre.
@@ -11,8 +11,8 @@
 >    crons rejouables + manifest), chiffré avec le destinataire public `age` avant
 >    envoi. La clé privée de restauration reste hors du serveur.
 >    Simple, portable, restauration prouvée (c'est le format du cutover). RPO ≤ 24 h.
-> 2. **PITR** : archivage **WAL** (5 min max, `archive_timeout=300`) syncé sur R2
->    + **base backup physique hebdo** (dimanche 04:10 UTC). RPO ≈ 5 min,
+> 2. **PITR** : archivage **WAL** (15 min max, `archive_timeout=900`) syncé sur R2
+>    + **base backup physique quotidien** (04:10 UTC). RPO ≈ 15 min,
 >    restauration à n'importe quel instant. → `RESTORE.md`.
 >
 > ~~Le workflow GitHub `backup-db-to-r2.yml` continue de sauvegarder le **managé
@@ -28,8 +28,8 @@
 ```
 db/                    ← dumps du managé (workflow GitHub, période rollback)
 selfhost/dumps/        ← dumps logiques nightly chiffrés .tar.gz.age (rétention 14 j)
-selfhost/base/base-*/  ← base backups hebdo (rétention 8)
-selfhost/wal/          ← segments WAL (rétention 35 j ≥ plus vieux base backup)
+selfhost/base/base-*/  ← base backups quotidiens (rétention KEEP_BASE_COUNT=3)
+selfhost/wal/          ← segments WAL (rétention KEEP_WAL_DAYS=3 ≥ KEEP_BASE_COUNT)
 ```
 
 ## Installation (box, une fois)
@@ -78,7 +78,8 @@ sudo journalctl -u norva-basebackup.service -n 20 --no-pager
 |---|---|---|
 | Dump logique → R2 | 03:40 UTC | `norva-backup-nightly` |
 | WAL → R2 | toutes les 5 min | `norva-wal-sync` |
-| Base backup → R2 | dim. 04:10 UTC | `norva-basebackup` |
+| Base backup → R2 | 04:10 UTC | `norva-basebackup` |
+| Rétention WAL sur R2 | 02:20 UTC | `norva-wal-prune-r2` |
 
 - État : `systemctl list-timers 'norva-*'` · logs : `journalctl -u <unité> -n 30`.
 - **Réplication pg_hba** : `pg_basebackup` a besoin d'une règle `host replication …` dans le
@@ -93,8 +94,21 @@ sudo journalctl -u norva-basebackup.service -n 20 --no-pager
 - Si l'envoi ou sa vérification de taille échoue après création de l'archive, le script
   conserve le répertoire privé `nightly-work.<stamp>.*` sous `BACKUP_STAGE_DIR` et journalise
   son chemin. Ne le supprimer qu'après avoir récupéré l'archive ou relancé un envoi vérifié.
-- `wal-sync` **échoue exprès** (unit failed) si >500 segments s'accumulent en local
+- `wal-sync` **échoue exprès** (unit failed) si >100 segments dépassent
+  `KEEP_LOCAL_WAL_MINUTES` sans être partis, ou si >2000 fichiers s'accumulent en local
   → archivage/upload en panne → vérifier réseau/R2 AVANT que `pg_wal` remplisse
   le disque.
+- **Volume de WAL — audit 2026-08-20.** Le bucket était à 183 GB, dont 122 GiB de
+  `selfhost/wal/` (79 %) pour seulement 3 jours de rétention : la base produisait
+  ~27 GiB de WAL par jour. Cause amont : `checkpoint_timeout` était resté au défaut
+  de 5 min (11761 checkpoints horaires contre 89 forcés par le volume), donc chaque
+  page touchée était réécrite entière dans le WAL toutes les 5 minutes. Corrigé à
+  `30min` dans `docker-compose.supabase.yml`. **La rétention n'était pas le problème**
+  — elle fonctionnait correctement sur les quatre préfixes. Avant de toucher à
+  `KEEP_*`, vérifier `pg_stat_checkpointer` et `wal_fpi` dans `pg_stat_statements`.
+- **Coût R2 en opérations.** `rclone` fait un HEAD par objet pour lire son propre
+  `X-Amz-Meta-Mtime` : sur un préfixe de ~8k segments c'est ~8k opérations classe B
+  par passage. D'où `--use-server-modtime` dans `wal-prune-r2.sh` et `--no-traverse`
+  dans `wal-sync.sh`. Ces deux flags valent 15 M d'opérations classe B par mois.
 - **Drill trimestriel** : dérouler `RESTORE.md` (les deux sections) sur la box ou
   une machine jetable. Un backup non testé n'existe pas.

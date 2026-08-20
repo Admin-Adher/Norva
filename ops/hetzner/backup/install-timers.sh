@@ -57,7 +57,7 @@ EOF
 
 write_unit norva-basebackup.service <<EOF
 [Unit]
-Description=Norva weekly physical base backup to R2
+Description=Norva daily physical base backup to R2
 After=docker.service network-online.target
 [Service]
 Type=oneshot
@@ -69,9 +69,33 @@ EOF
 
 write_unit norva-basebackup.timer <<'EOF'
 [Unit]
-Description=Weekly Norva base backup (Sunday 04:10 UTC)
+Description=Daily Norva base backup (04:10 UTC)
 [Timer]
-OnCalendar=Sun *-*-* 04:10:00 UTC
+OnCalendar=*-*-* 04:10:00 UTC
+RandomizedDelaySec=600
+Persistent=true
+[Install]
+WantedBy=timers.target
+EOF
+
+write_unit norva-wal-prune-r2.service <<EOF
+[Unit]
+Description=Norva prune old WAL segments from R2
+After=network-online.target
+Wants=network-online.target
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/bash $HERE/wal-prune-r2.sh
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+EOF
+
+write_unit norva-wal-prune-r2.timer <<'EOF'
+[Unit]
+Description=Daily Norva R2 WAL retention prune
+[Timer]
+OnCalendar=*-*-* 02:20:00 UTC
 RandomizedDelaySec=600
 Persistent=true
 [Install]
@@ -80,6 +104,6 @@ EOF
 
 echo ">> enabling timers"
 systemctl daemon-reload
-systemctl enable --now norva-backup-nightly.timer norva-wal-sync.timer norva-basebackup.timer
+systemctl enable --now norva-backup-nightly.timer norva-wal-sync.timer norva-basebackup.timer norva-wal-prune-r2.timer
 systemctl list-timers 'norva-*' --no-pager
 echo ">> done. Manual runs: systemctl start norva-backup-nightly.service (etc.)"

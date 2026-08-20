@@ -685,6 +685,14 @@ services:
       - -c
       - checkpoint_completion_target=0.9
       - -c
+      # Audit 2026-08-20 : laisse au defaut (5min), 99,2% des checkpoints etaient
+      # horaires (11761 timed / 89 requested) et chaque page touchee apres un
+      # checkpoint etait reecrite entiere dans le WAL (full-page image). 27 GiB
+      # de WAL par jour, dont l essentiel en FPI. 30min divise par 6 la frequence
+      # de re-imagination. Cout : jusqu a 30 min de WAL a rejouer apres un crash
+      # sale. max_wal_size=16GB encaisse largement (~0,6 GiB par tranche).
+      - checkpoint_timeout=30min
+      - -c
       - max_wal_size=16GB
       - -c
       - min_wal_size=2GB
