@@ -134,7 +134,8 @@ test('native billing reads localized RevenueCat offers and fails closed without 
   assert.match(billing, /nativeOfferPromisesByUser = new Map\(\)/);
   assert.match(billing, /pageNonce/);
   assert.match(subscribe, /native-prices-pending/);
-  assert.match(subscribe, /Both cadences for both plans must be known/);
+  assert.match(subscribe, /A plan is buyable only when both of its cadences are in the current/);
+  assert.match(subscribe, /native_catalog_incomplete/);
   assert.match(subscribe, /offer\.priceString/);
   assert.match(subscribe, /Number\(offer\.priceMicros\) \/ 1000000/);
   assert.match(subscribe, /No purchase can start until the exact store price is available/);

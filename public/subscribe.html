@@ -632,6 +632,11 @@
             b.textContent = nativeOffersError ? 'Google Play price unavailable' : 'Loading Google Play price…';
             return;
           }
+          if (nativeOffersRequired && nativeOffersReady && !nativeOfferFor(card, period)) {
+            b.disabled = true;
+            b.textContent = 'Google Play price unavailable';
+            return;
+          }
           if (webPricesRequired && !webPricesReady) {
             b.disabled = true;
             b.textContent = webPricesError ? 'Current price unavailable' : 'Loading current price…';
@@ -1004,9 +1009,8 @@
               || new Set(expectedPackageIds).size !== expectedPackageIds.length) {
             throw new Error('duplicate_expected_package_id');
           }
-          // Both cadences for both plans must be known before any native CTA is
-          // enabled. Each expected package must occur exactly once in the current
-          // offering and carry the product + ISO cadence rendered by its card.
+          // A plan is buyable only when both of its cadences are in the current
+          // offering. A missing Family package must not block Norva Plus.
           document.querySelectorAll('.card').forEach(function (card) {
             ['Monthly', 'Annual'].forEach(function (suffix) {
               const packageId = card.dataset['package' + suffix];
@@ -1014,7 +1018,7 @@
               const matches = packages.filter(function (offer) {
                 return offer && String(offer.packageId || '') === packageId;
               });
-              if (matches.length !== 1) throw new Error('ambiguous_' + packageId);
+              if (matches.length !== 1) return;
               const offer = matches[0];
               if (String(offer.offeringId || '') !== currentOfferingId
                   || String(offer.productId || '') !== String(card.dataset.product || '')
@@ -1022,7 +1026,7 @@
                   || offer.supported !== true
                   || !offer.priceString || Number(offer.priceMicros) <= 0
                   || !offer.currencyCode) {
-                throw new Error('invalid_' + packageId);
+                return;
               }
               byPackage[packageId] = offer;
               const key = suffix === 'Annual' ? 'Annual' : 'Monthly';
@@ -1031,9 +1035,14 @@
               card.dataset['nativeCurrency' + key] = String(offer.currencyCode || '');
             });
           });
-          const nativeCurrencies = new Set(packages
-            .filter(function (offer) { return offer && byPackage[String(offer.packageId || '')]; })
-            .map(function (offer) { return String(offer.currencyCode || '').toUpperCase(); }));
+          const completePlans = Array.from(document.querySelectorAll('.card')).filter(function (card) {
+            return byPackage[String(card.dataset.packageMonthly || '')]
+              && byPackage[String(card.dataset.packageAnnual || '')];
+          });
+          if (!completePlans.length) throw new Error('native_catalog_incomplete');
+          const nativeCurrencies = new Set(completePlans.map(function (card) {
+            return String(byPackage[card.dataset.packageMonthly].currencyCode || '').toUpperCase();
+          }));
           if (nativeCurrencies.size !== 1) throw new Error('inconsistent_store_currency');
 
           // The store owns the prices, so it also owns any annual-savings claim.
@@ -1076,7 +1085,7 @@
           applyPeriod(period);
           const helper = document.getElementById('decision-helper');
           if (helper) helper.textContent = 'Google Play prices could not be loaded for this account.';
-          setStatus('Current Google Play prices could not be loaded. Update Norva or check your connection, then retry. No purchase can start until the exact store price is available.', true);
+          setStatus('Current Google Play prices could not be loaded. Update Norva or check your connection, then retry. No purchase can start until the exact store price is available. (' + nativeOffersError + ')', true);
         }
       }
 

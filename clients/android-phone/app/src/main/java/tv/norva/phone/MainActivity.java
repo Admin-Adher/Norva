@@ -1698,8 +1698,11 @@ public class MainActivity extends Activity {
      */
     private void installOriginScopedBillingChannel() {
         if (!WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) return;
+        final Set<String> billingOrigins = new LinkedHashSet<>();
+        billingOrigins.add("https://norva.tv");
+        billingOrigins.add("https://www.norva.tv");
         WebViewCompat.addWebMessageListener(webView, "NorvaBillingNative",
-                Collections.singleton("https://norva.tv"),
+                billingOrigins,
                 new WebViewCompat.WebMessageListener() {
                     @Override
                     public void onPostMessage(WebView view, WebMessageCompat message,
