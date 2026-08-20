@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#05080f">
+  <title>Choose the Right Initial Focus on TV | Norva Blog</title>
+  <meta name="description" content="Choose initial TV focus by entry state, likely task, safety, visibility, and restoration context, with deterministic fallbacks for missing or delayed targets.">
+  <link rel="canonical" href="https://norva.tv/blog/choose-initial-tv-focus/">
+  <meta name="robots" content="index,follow">
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/css/blog.css?v=1">
+  <meta property="og:type" content="article">
+  <meta property="og:site_name" content="Norva">
+  <meta property="og:title" content="Choose the Right Initial Focus on TV | Norva Blog">
+  <meta property="og:description" content="Choose initial TV focus by entry state, likely task, safety, visibility, and restoration context, with deterministic fallbacks for missing or delayed targets.">
+  <meta property="og:url" content="https://norva.tv/blog/choose-initial-tv-focus/">
+  <meta property="og:image" content="https://norva.tv/img/devices/norva-device-tv.webp">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Choose the Right Initial Focus on TV | Norva Blog">
+  <meta name="twitter:description" content="Choose initial TV focus by entry state, likely task, safety, visibility, and restoration context, with deterministic fallbacks for missing or delayed targets.">
+  <meta name="twitter:image" content="https://norva.tv/img/devices/norva-device-tv.webp">
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "headline": "How to Choose the Right Initial Focus on a TV Screen",
+  "description": "Choose initial TV focus by entry state, likely task, safety, visibility, and restoration context, with deterministic fallbacks for missing or delayed targets.",
+  "inLanguage": "en",
+  "datePublished": "2026-08-19T20:00:00+02:00",
+  "dateModified": "2026-08-19T20:00:00+02:00",
+  "author": {
+    "@type": "Organization",
+    "name": "Norva"
+  },
+  "publisher": {
+    "@type": "Organization",
+    "name": "Norva",
+    "logo": {
+      "@type": "ImageObject",
+      "url": "https://norva.tv/img/norva-app-icon-96.png"
+    }
+  },
+  "image": [
+    "https://norva.tv/img/devices/norva-device-tv.webp"
+  ],
+  "mainEntityOfPage": {
+    "@type": "WebPage",
+    "@id": "https://norva.tv/blog/choose-initial-tv-focus/"
+  }
+}
+  </script>
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    {
+      "@type": "ListItem",
+      "position": 1,
+      "name": "Home",
+      "item": "https://norva.tv/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 2,
+      "name": "Blog",
+      "item": "https://norva.tv/blog/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 3,
+      "name": "How to Choose the Right Initial Focus on a TV Screen",
+      "item": "https://norva.tv/blog/choose-initial-tv-focus/"
+    }
+  ]
+}
+  </script>
+  <script src="/js/marketing-config.js?v=1"></script>
+  <script defer src="/js/marketing.js?v=1"></script>
+  <script defer src="/js/consent-banner.js?v=1"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="blog-nav">
+    <a class="brand" href="/" aria-label="Norva home">
+      <img src="/img/norva-app-icon-96.png" width="34" height="34" alt="" decoding="async">
+      <span>Norva</span>
+    </a>
+    <nav class="nav-right" aria-label="Primary">
+      <a href="/blog/">Blog</a>
+      <a class="hide-sm" href="/#how-it-works">How it works</a>
+      <a class="cta" href="/account.html?returnTo=%2Fapp%23home" data-cta="blog-nav" data-auth-action>Start free trial</a>
+    </nav>
+  </header>
+  <main id="main-content">
+    <nav class="breadcrumb" aria-label="Breadcrumb"><a href="/">Home</a><span class="sep">›</span><a href="/blog/">Blog</a><span class="sep">›</span><span aria-current="page">How to Choose the Right Initial Focus on a TV Screen</span></nav>
+    <article>
+      <div class="article-meta">
+        <span class="tag">Remote &amp; D-pad Navigation</span>
+        <span>By Norva Editorial Team</span>
+        <span class="dot">·</span>
+        <time datetime="2026-08-19T20:00:00+02:00">19 August 2026</time>
+        <span class="dot">·</span>
+        <span>7 min read</span>
+      </div>
+      <h1>How to Choose the Right Initial Focus on a TV Screen</h1>
+      <p class="lede">A state-based method for selecting a visible, safe, useful initial focus target and recovering predictably when that target is missing.</p>
+      <nav class="toc" aria-label="On this page">
+      <strong>On this page</strong>
+      <ul><li><a href="#separate-fresh-entry-from-return">Separate fresh entry from return</a></li><li><a href="#rank-targets-by-usefulness-safety-and-visibility">Rank targets by usefulness, safety, and visibility</a></li><li><a href="#exclude-dangerous-and-unstable-candidates">Exclude dangerous and unstable candidates</a></li><li><a href="#define-fallbacks-as-a-ladder">Define fallbacks as a ladder</a></li><li><a href="#coordinate-focus-with-asynchronous-rendering">Coordinate focus with asynchronous rendering</a></li><li><a href="#make-the-cue-visible-before-accepting-input">Make the cue visible before accepting input</a></li><li><a href="#build-an-initial-focus-test-table">Build an initial-focus test table</a></li><li><a href="#common-mistakes-and-limitations">Common mistakes and limitations</a></li><li><a href="#frequently-asked-questions">Frequently asked questions</a></li><li><a href="#your-next-step">Your next step</a></li><li><a href="#sources">Sources</a></li></ul>
+    </nav>
+      <blockquote><strong>In short:</strong> Choose initial focus from the entry state, not from a single page-wide default. Prefer a visible, safe target that advances the likely task. On return, restore the origin when valid. Never start on a destructive, disabled, loading, or off-screen control, and define a deterministic fallback before data can fail.</blockquote>
+<p>Initial focus answers the viewer's first question: “What can I do now?” A poor answer can make a healthy screen feel frozen because no cue appears, or risky because Enter immediately triggers an unintended action.</p>
+<h2 id="separate-fresh-entry-from-return">Separate fresh entry from return</h2>
+<p>A fresh visit and a restored visit have different goals.</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Entry state</th><th>Preferred intent</th><th>Typical target</th></tr></thead>
+<tbody><tr><td>Fresh browse page</td><td>Begin discovery</td><td>Primary browse region or first useful control</td></tr><tr><td>Deep link to detail</td><td>Confirm identity, then act</td><td>Safe primary action when unambiguous</td></tr><tr><td>Return from detail</td><td>Continue prior journey</td><td>Originating card</td></tr><tr><td>Dialog opened</td><td>Resolve the current decision</td><td>Safe action or first content field</td></tr><tr><td>Empty or error</td><td>Recover</td><td>Valid recovery or Back-compatible control</td></tr></tbody>
+</table></div>
+<p>Do not override a meaningful restored origin with the page's usual first control. That forces people to rebuild context after every reversible journey.</p>
+<h2 id="rank-targets-by-usefulness-safety-and-visibility">Rank targets by usefulness, safety, and visibility</h2>
+<p>Evaluate candidates in this order:</p>
+<ol><li>Is the target visible and fully rendered?</li><li>Is it enabled and understandable without guessing?</li><li>Does it advance the likely entry task?</li><li>Is activation safe if Enter is pressed immediately?</li><li>Does it have a clear next and reverse D-pad route?</li></ol>
+<p>The most visually prominent button is not always the best start. On a series summary, a detail or seasons action may be safer than assuming a specific episode. The primary-action placement guide explains how identity and state affect that choice.</p>
+<h2 id="exclude-dangerous-and-unstable-candidates">Exclude dangerous and unstable candidates</h2>
+<p>Never initialize focus on Delete, Remove, irreversible confirmation, a hidden input, a skeleton, or a control whose meaning depends on data still loading. A modal confirmation should normally begin on the safe action, as described in the TV dialog guide.</p>
+<p>Avoid targets inside auto-advancing carousels or collapsible regions that can move before the viewer responds. If the focused node disappears, the application should execute a documented fallback rather than allowing focus to fall to the document or an unrelated navigation item.</p>
+<h2 id="define-fallbacks-as-a-ladder">Define fallbacks as a ladder</h2>
+<p>Specify a short ordered ladder for each entry state:</p>
+<ol><li>exact restored target;</li><li>nearest valid sibling in the same row or list;</li><li>stable region anchor, such as the results heading or first valid item;</li><li>safe page-level action;</li><li>explicit empty or error recovery.</li></ol>
+<p>This ladder handles filtered-out cards, unavailable actions, deleted items, and late data. Keep the fallback inside the viewer's current task whenever possible.</p>
+<h2 id="coordinate-focus-with-asynchronous-rendering">Coordinate focus with asynchronous rendering</h2>
+<p>Initial focus should not race the interface. If the intended content is not ready, focus a stable available control or wait behind a clearly announced loading state according to the platform architecture. Do not focus a temporary skeleton and then jump to a card.</p>
+<p>When data arrives, preserve the current valid focus. Move it only if the target became invalid or the interaction explicitly requested a new layer. Automatic movement can cause an Enter press intended for one control to activate another.</p>
+<h2 id="make-the-cue-visible-before-accepting-input">Make the cue visible before accepting input</h2>
+<p>The initial target must be scrolled into view, unobscured, and visually distinct over its actual background. Ensure a sticky header, safe-area inset, or clipped row does not hide the cue. W3C's <a href="https://www.w3.org/WAI/WCAG22/Understanding/focus-visible.html" target="_blank" rel="noopener">focus-visible explanation</a> provides a useful accessibility baseline even though TV spatial navigation requires additional route testing.</p>
+<h2 id="build-an-initial-focus-test-table">Build an initial-focus test table</h2>
+<p>For each screen, record entry, preferred target, excluded targets, fallback, and first four directional outcomes. Include fresh entry, Back restoration, deep link, loading, empty, error, and expired origin.</p>
+<p>Then run the broader <a href="/blog/remote-dpad-navigation-qa/">remote and D-pad QA guide</a> to verify the start target within the full graph. The initial cue is only useful if the next step is predictable.</p>
+<h2 id="common-mistakes-and-limitations">Common mistakes and limitations</h2>
+<ul><li>Always focusing the first DOM element.</li><li>Always focusing the visually largest button.</li><li>Replacing restored focus with a fresh-page default.</li><li>Focusing content that has not finished rendering.</li><li>Starting a confirmation on the dangerous action.</li><li>Using a fallback in an unrelated region.</li><li>Accepting input before focus becomes visible.</li></ul>
+<h2 id="frequently-asked-questions">Frequently asked questions</h2>
+<h3 id="should-a-tv-page-always-focus-the-primary-action">Should a TV page always focus the primary action?</h3>
+<p>No. It is appropriate only when the action is safe, visible, unambiguous, and aligned with the entry task.</p>
+<h3 id="what-if-no-content-is-available">What if no content is available?</h3>
+<p>Focus a valid recovery or navigation action, display a clear empty or error message, and keep Back predictable.</p>
+<h3 id="should-focus-move-when-loading-completes">Should focus move when loading completes?</h3>
+<p>Not when the current focus remains valid. Move only under a documented state transition or when the existing target becomes unusable.</p>
+<h2 id="your-next-step">Your next step</h2>
+<p><a href="https://norva.tv/#product-preview" target="_blank" rel="noopener">Preview Norva's TV Navigation</a></p>
+<h2 id="sources">Sources</h2>
+<ul><li><a href="https://developer.android.com/docs/quality-guidelines/tv-app-quality" target="_blank" rel="noopener">Android TV App Quality Guidelines</a></li><li><a href="https://www.w3.org/WAI/WCAG22/Understanding/focus-order.html" target="_blank" rel="noopener">W3C: Understanding Focus Order</a></li><li><a href="https://www.w3.org/WAI/WCAG22/Understanding/focus-visible.html" target="_blank" rel="noopener">W3C: Understanding Focus Visible</a></li><li><a href="https://norva.tv/#features" target="_blank" rel="noopener">Norva Features</a></li></ul>
+      <section class="article-cta">
+      <a class="btn" href="https://norva.tv/#product-preview" data-cta="blog-article">Preview Norva's TV Navigation</a>
+    </section>
+      <section class="sources">
+      <h2>Sources</h2>
+      <ul><li><a href="https://developer.android.com/docs/quality-guidelines/tv-app-quality" target="_blank" rel="noopener">https://developer.android.com/docs/quality-guidelines/tv-app-quality</a></li><li><a href="https://www.w3.org/WAI/WCAG22/Understanding/focus-order.html" target="_blank" rel="noopener">https://www.w3.org/WAI/WCAG22/Understanding/focus-order.html</a></li><li><a href="https://www.w3.org/WAI/WCAG22/Understanding/focus-visible.html" target="_blank" rel="noopener">https://www.w3.org/WAI/WCAG22/Understanding/focus-visible.html</a></li><li><a href="https://norva.tv/#features" target="_blank" rel="noopener">https://norva.tv/#features</a></li></ul>
+    </section>
+      
+    </article>
+  </main>
+  <footer class="blog-footer">
+    <div class="foot-inner">
+      <nav class="foot-links" aria-label="Footer">
+        <a href="/">Home</a>
+        <a href="/blog/">Blog</a>
+        <a href="/#features">Benefits</a>
+        <a href="/#pricing">Pricing</a>
+        <a href="/support.html?returnTo=%2Fblog%2F">Support</a>
+        <a href="/terms.html">Terms</a>
+        <a href="/privacy.html">Privacy</a>
+        <a href="/mentions-legales.html">Legal notice</a>
+      </nav>
+      <p class="disclaimer">&copy; 2026 Norva. Norva is a media player and organiser. It does not provide media. Use requires a compatible source you own or are authorised to access.</p>
+    </div>
+  </footer>
+</body>
+</html>

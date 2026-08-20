@@ -120,7 +120,7 @@
 <p>This inventory prevents the spatial engine from deciding every route from geometry alone. It also exposes hidden controls that are technically focusable but visually absent.</p>
 <h2 id="verify-initial-focus-in-every-entry-state">Verify initial focus in every entry state</h2>
 <p>Test fresh page entry, deep link, restored session, return from detail, return from a dialog, empty results, and error. Initial focus should be visible, safe, actionable, and appropriate to the viewer's likely task. It should not land on a destructive action, disabled target, skeleton card, or off-screen node.</p>
-<p>Use the decision method in choosing initial TV focus and record why the selected target wins over alternatives.</p>
+<p>Use the decision method in <a href="/blog/choose-initial-tv-focus/">choosing initial TV focus</a> and record why the selected target wins over alternatives.</p>
 <h2 id="test-every-directional-edge-once">Test every directional edge once</h2>
 <p>For each focusable target, press Up, Down, Left, and Right separately from a known state. Record the expected and actual destination. Do not hold the key during baseline testing, because key repeat can hide an incorrect intermediate hop.</p>
 <div class="table-wrap"><table>
@@ -168,7 +168,16 @@
       <h2>Sources</h2>
       <ul><li><a href="https://developer.android.com/docs/quality-guidelines/tv-app-quality" target="_blank" rel="noopener">https://developer.android.com/docs/quality-guidelines/tv-app-quality</a></li><li><a href="https://www.w3.org/WAI/WCAG22/Understanding/focus-order.html" target="_blank" rel="noopener">https://www.w3.org/WAI/WCAG22/Understanding/focus-order.html</a></li><li><a href="https://www.w3.org/WAI/WCAG22/Understanding/focus-visible.html" target="_blank" rel="noopener">https://www.w3.org/WAI/WCAG22/Understanding/focus-visible.html</a></li><li><a href="https://www.w3.org/WAI/ARIA/apg/practices/keyboard-interface/" target="_blank" rel="noopener">https://www.w3.org/WAI/ARIA/apg/practices/keyboard-interface/</a></li><li><a href="https://norva.tv/#features" target="_blank" rel="noopener">https://norva.tv/#features</a></li></ul>
     </section>
-      
+      <section class="related">
+      <h2>Related reading</h2>
+      <div class="related-grid">
+        <a class="card" href="/blog/choose-initial-tv-focus/">
+          <span class="tag">Remote &amp; D-pad Navigation</span>
+          <div class="card-title">How to Choose the Right Initial Focus on a TV Screen</div>
+          <p>A state-based method for selecting a visible, safe, useful initial focus target and recovering predictably when that target is missing.</p>
+        </a>
+      </div>
+    </section>
     </article>
   </main>
   <footer class="blog-footer">

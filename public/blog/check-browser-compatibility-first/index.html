@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#05080f">
+  <title>Browser Viewing Compatibility Preflight | Norva Blog</title>
+  <meta name="description" content="Run a browser viewing preflight for official support, version, account context, connection, playback controls, audio output, subtitles, fullscreen, and privacy.">
+  <link rel="canonical" href="https://norva.tv/blog/check-browser-compatibility-first/">
+  <meta name="robots" content="index,follow">
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/css/blog.css?v=1">
+  <meta property="og:type" content="article">
+  <meta property="og:site_name" content="Norva">
+  <meta property="og:title" content="Browser Viewing Compatibility Preflight | Norva Blog">
+  <meta property="og:description" content="Run a browser viewing preflight for official support, version, account context, connection, playback controls, audio output, subtitles, fullscreen, and privacy.">
+  <meta property="og:url" content="https://norva.tv/blog/check-browser-compatibility-first/">
+  <meta property="og:image" content="https://norva.tv/img/devices/norva-device-tv.webp">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Browser Viewing Compatibility Preflight | Norva Blog">
+  <meta name="twitter:description" content="Run a browser viewing preflight for official support, version, account context, connection, playback controls, audio output, subtitles, fullscreen, and privacy.">
+  <meta name="twitter:image" content="https://norva.tv/img/devices/norva-device-tv.webp">
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "headline": "What to Check Before Starting a Browser Viewing Session",
+  "description": "Run a browser viewing preflight for official support, version, account context, connection, playback controls, audio output, subtitles, fullscreen, and privacy.",
+  "inLanguage": "en",
+  "datePublished": "2026-08-20T06:00:00+02:00",
+  "dateModified": "2026-08-20T06:00:00+02:00",
+  "author": {
+    "@type": "Organization",
+    "name": "Norva"
+  },
+  "publisher": {
+    "@type": "Organization",
+    "name": "Norva",
+    "logo": {
+      "@type": "ImageObject",
+      "url": "https://norva.tv/img/norva-app-icon-96.png"
+    }
+  },
+  "image": [
+    "https://norva.tv/img/devices/norva-device-tv.webp"
+  ],
+  "mainEntityOfPage": {
+    "@type": "WebPage",
+    "@id": "https://norva.tv/blog/check-browser-compatibility-first/"
+  }
+}
+  </script>
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    {
+      "@type": "ListItem",
+      "position": 1,
+      "name": "Home",
+      "item": "https://norva.tv/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 2,
+      "name": "Blog",
+      "item": "https://norva.tv/blog/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 3,
+      "name": "What to Check Before Starting a Browser Viewing Session",
+      "item": "https://norva.tv/blog/check-browser-compatibility-first/"
+    }
+  ]
+}
+  </script>
+  <script src="/js/marketing-config.js?v=1"></script>
+  <script defer src="/js/marketing.js?v=1"></script>
+  <script defer src="/js/consent-banner.js?v=1"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="blog-nav">
+    <a class="brand" href="/" aria-label="Norva home">
+      <img src="/img/norva-app-icon-96.png" width="34" height="34" alt="" decoding="async">
+      <span>Norva</span>
+    </a>
+    <nav class="nav-right" aria-label="Primary">
+      <a href="/blog/">Blog</a>
+      <a class="hide-sm" href="/#how-it-works">How it works</a>
+      <a class="cta" href="/account.html?returnTo=%2Fapp%23home" data-cta="blog-nav" data-auth-action>Start free trial</a>
+    </nav>
+  </header>
+  <main id="main-content">
+    <nav class="breadcrumb" aria-label="Breadcrumb"><a href="/">Home</a><span class="sep">›</span><a href="/blog/">Blog</a><span class="sep">›</span><span aria-current="page">What to Check Before Starting a Browser Viewing Session</span></nav>
+    <article>
+      <div class="article-meta">
+        <span class="tag">Browser Viewing Workflows</span>
+        <span>By Norva Editorial Team</span>
+        <span class="dot">·</span>
+        <time datetime="2026-08-20T06:00:00+02:00">20 August 2026</time>
+        <span class="dot">·</span>
+        <span>7 min read</span>
+      </div>
+      <h1>What to Check Before Starting a Browser Viewing Session</h1>
+      <p class="lede">A short browser preflight that verifies documented support and tests the exact output, track, display, account, and privacy context before a longer session.</p>
+      <nav class="toc" aria-label="On this page">
+      <strong>On this page</strong>
+      <ul><li><a href="#separate-official-support-from-observed-behavior">Separate official support from observed behavior</a></li><li><a href="#check-browser-and-system-status">Check browser and system status</a></li><li><a href="#verify-account-source-and-authorization">Verify account, source, and authorization</a></li><li><a href="#run-a-short-playback-control-test">Run a short playback control test</a></li><li><a href="#confirm-the-audio-destination">Confirm the audio destination</a></li><li><a href="#check-subtitle-availability-and-readability">Check subtitle availability and readability</a></li><li><a href="#test-window-and-fullscreen-transitions">Test window and fullscreen transitions</a></li><li><a href="#review-privacy-and-interruption-risk">Review privacy and interruption risk</a></li><li><a href="#confirm-one-recovery-path">Confirm one recovery path</a></li><li><a href="#use-a-pass-or-stop-card">Use a pass-or-stop card</a></li><li><a href="#common-mistakes-and-limitations">Common mistakes and limitations</a></li><li><a href="#frequently-asked-questions">Frequently asked questions</a></li><li><a href="#your-next-step">Your next step</a></li><li><a href="#sources">Sources</a></li></ul>
+    </nav>
+      <blockquote><strong>In short:</strong> Confirm the service officially supports the browser and operating system, use a current vendor-supported version, verify the intended account and source, then test one short authorized item. Check play, pause, seeking, audio output, subtitle availability and readability, fullscreen entry and exit, privacy context, and a basic recovery path.</blockquote>
+<p>A successful login proves account access, not full session compatibility. A two-minute preflight can reveal the wrong speaker, unreadable subtitles, an extension conflict, or an unsupported environment before a longer viewing plan begins.</p>
+<h2 id="separate-official-support-from-observed-behavior">Separate official support from observed behavior</h2>
+<p>Start with the service's current support documentation. Record the browser, version, operating system, and any product-specific requirements it names. If documentation is unclear, use the official support route rather than asserting compatibility from a third-party list.</p>
+<p>The <a href="https://html.spec.whatwg.org/multipage/media.html" target="_blank" rel="noopener">HTML media specification</a> defines video, audio, controls, and text-track building blocks, but it does not guarantee that every service feature, media resource, or protected workflow works in every browser.</p>
+<h2 id="check-browser-and-system-status">Check browser and system status</h2>
+<ul><li>Install available browser updates through the vendor's official update mechanism.</li><li>Restart the browser when the update or platform requests it.</li><li>Confirm the system date and time are sensible.</li><li>Check that the browser is not managed by an organization that restricts required features.</li><li>Note any VPN, proxy, filtering, or security software without disabling protection casually.</li></ul>
+<p>Use a trusted profile with known settings. A new or shared environment deserves a full preflight even if the same browser brand worked elsewhere.</p>
+<h2 id="verify-account-source-and-authorization">Verify account, source, and authorization</h2>
+<p>Confirm the signed-in account is the one intended for the session and that the content source is authorized for that account. Avoid exposing saved credentials or personal library details on shared or public screens.</p>
+<p>If the product reports unavailable content or missing access, preserve the exact message. Do not treat it as a generic browser failure until the account and source state are verified.</p>
+<h2 id="run-a-short-playback-control-test">Run a short playback control test</h2>
+<p>Choose an authorized sample that is representative but not critical. Test play, pause, a short seek, and return to the browse or detail context. Observe any explicit error and keep the page open long enough to distinguish loading from immediate failure.</p>
+<p>Do not open several copies of the same item. Duplicate tabs can confuse which page owns audio and progress state.</p>
+<h2 id="confirm-the-audio-destination">Confirm the audio destination</h2>
+<p>Select the intended operating-system output before playback, then test moderate volume, mute, and left-right balance when relevant. Check browser or site mute indicators and physical speakers or headphones.</p>
+<p>Use the browser audio-output checklist when multiple monitors, docks, Bluetooth devices, or HDMI outputs are present.</p>
+<h2 id="check-subtitle-availability-and-readability">Check subtitle availability and readability</h2>
+<p>Open the verified track menu, select the needed language when available, and watch several cues over varied scenes. Confirm readable size, contrast, line wrapping, timing, and no overlap with browser or player controls.</p>
+<p>Follow the subtitle-readability guide rather than assuming that a listed track is comfortable in the planned window size.</p>
+<h2 id="test-window-and-fullscreen-transitions">Test window and fullscreen transitions</h2>
+<p>Enter fullscreen, confirm the picture and subtitles remain usable, show and hide controls, then exit using the verified browser method. Fullscreen behavior is governed by a web standard but exposed differently across browsers and operating systems.</p>
+<p>If fullscreen is unavailable, preserve the exact browser or site message and check permissions or support documentation. Do not weaken unrelated security settings as a blanket fix.</p>
+<h2 id="review-privacy-and-interruption-risk">Review privacy and interruption risk</h2>
+<p>On a shared browser, choose a separate profile, guest session, or private window only according to vendor documentation and your privacy needs. Remember that private modes limit some local persistence; they do not make the session anonymous to services, networks, or administrators.</p>
+<p>Close pages with private notifications, stop screen sharing, and choose whether incoming calls or system alerts could interrupt playback. Connect power when battery risk is material.</p>
+<h2 id="confirm-one-recovery-path">Confirm one recovery path</h2>
+<p>Pause, note approximate position and selected tracks, then refresh only if the workflow needs testing. Verify whether the service restores context and what must be selected again. Do not clear site data during preflight unless a specific diagnosis supports it.</p>
+<p>The broader <a href="/blog/browser-viewing-workflow-guide/">browser viewing workflow guide</a> covers interruption and clean closure.</p>
+<h2 id="use-a-pass-or-stop-card">Use a pass-or-stop card</h2>
+<p>Record documented support, browser and OS, account, sample result, audio output, subtitles, fullscreen, privacy context, and recovery. Mark each pass, fail, or not required. Stop and resolve a failure that blocks control, hides required subtitles, routes audio incorrectly, or exposes a shared account.</p>
+<h2 id="common-mistakes-and-limitations">Common mistakes and limitations</h2>
+<ul><li>Treating page load as full compatibility proof.</li><li>Using an unofficial compatibility list as final authority.</li><li>Testing sound after the full session begins.</li><li>Checking subtitle presence but not readability.</li><li>Entering fullscreen without testing exit.</li><li>Disabling protections broadly to solve one symptom.</li><li>Clearing site data before preserving context.</li></ul>
+<h2 id="frequently-asked-questions">Frequently asked questions</h2>
+<h3 id="does-an-up-to-date-browser-guarantee-playback">Does an up-to-date browser guarantee playback?</h3>
+<p>No. It is one prerequisite. Product support, operating system, account state, media requirements, settings, and extensions can also affect the session.</p>
+<h3 id="how-long-should-the-sample-test-be">How long should the sample test be?</h3>
+<p>Long enough to verify controls, audio, subtitles, fullscreen, and a brief seek without turning the preflight into the full session.</p>
+<h3 id="what-if-only-one-item-fails">What if only one item fails?</h3>
+<p>Record that distinction. Compare another authorized item before concluding that the entire browser environment is incompatible.</p>
+<h2 id="your-next-step">Your next step</h2>
+<p><a href="https://norva.tv/support" target="_blank" rel="noopener">Visit Norva Support</a></p>
+<h2 id="sources">Sources</h2>
+<ul><li><a href="https://html.spec.whatwg.org/multipage/media.html" target="_blank" rel="noopener">WHATWG HTML: Media Elements</a></li><li><a href="https://fullscreen.spec.whatwg.org/" target="_blank" rel="noopener">WHATWG Fullscreen API Standard</a></li><li><a href="https://www.w3.org/WAI/WCAG22/Understanding/captions-prerecorded.html" target="_blank" rel="noopener">W3C: Understanding Captions for Prerecorded Media</a></li><li><a href="https://norva.tv/support" target="_blank" rel="noopener">Norva Support</a></li></ul>
+      <section class="article-cta">
+      <a class="btn" href="https://norva.tv/support" data-cta="blog-article">Visit Norva Support</a>
+    </section>
+      <section class="sources">
+      <h2>Sources</h2>
+      <ul><li><a href="https://html.spec.whatwg.org/multipage/media.html" target="_blank" rel="noopener">https://html.spec.whatwg.org/multipage/media.html</a></li><li><a href="https://fullscreen.spec.whatwg.org/" target="_blank" rel="noopener">https://fullscreen.spec.whatwg.org/</a></li><li><a href="https://www.w3.org/WAI/WCAG22/Understanding/captions-prerecorded.html" target="_blank" rel="noopener">https://www.w3.org/WAI/WCAG22/Understanding/captions-prerecorded.html</a></li><li><a href="https://norva.tv/support" target="_blank" rel="noopener">https://norva.tv/support</a></li></ul>
+    </section>
+      
+    </article>
+  </main>
+  <footer class="blog-footer">
+    <div class="foot-inner">
+      <nav class="foot-links" aria-label="Footer">
+        <a href="/">Home</a>
+        <a href="/blog/">Blog</a>
+        <a href="/#features">Benefits</a>
+        <a href="/#pricing">Pricing</a>
+        <a href="/support.html?returnTo=%2Fblog%2F">Support</a>
+        <a href="/terms.html">Terms</a>
+        <a href="/privacy.html">Privacy</a>
+        <a href="/mentions-legales.html">Legal notice</a>
+      </nav>
+      <p class="disclaimer">&copy; 2026 Norva. Norva is a media player and organiser. It does not provide media. Use requires a compatible source you own or are authorised to access.</p>
+    </div>
+  </footer>
+</body>
+</html>
