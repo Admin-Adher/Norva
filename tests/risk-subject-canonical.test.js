@@ -134,3 +134,63 @@ test('a user agent survives reformatting by a proxy', async () => {
     canonicalizeRiskSubject('user_agent', 'Mozilla/5.0 (Linux) Chrome/1'),
   );
 });
+
+test('consumer Gmail folds onto one mailbox, because it really is one inbox', async () => {
+  const { canonicalizeRiskSubject } = await loading;
+  const inbox = canonicalizeRiskSubject('mailbox_subject', 'username@gmail.com');
+  assert.ok(inbox);
+  for (const spelling of [
+    'User.Name+promo@gmail.com',
+    'user.name@gmail.com',
+    'u.s.e.r.n.a.m.e@gmail.com',
+    'username+anything@GMAIL.com',
+    // googlemail.com is the same service under an older name.
+    'username@googlemail.com',
+    'user.name+tag@googlemail.com',
+  ]) {
+    assert.equal(canonicalizeRiskSubject('mailbox_subject', spelling), inbox, spelling);
+  }
+});
+
+test('folding stops at consumer Gmail and touches nobody else', async () => {
+  const { canonicalizeRiskSubject } = await loading;
+  // A Workspace domain is a custom domain: its dot rules are the customer's,
+  // not Google's, so merging them would be a guess.
+  assert.notEqual(
+    canonicalizeRiskSubject('mailbox_subject', 'u.ser@norva.tv'),
+    canonicalizeRiskSubject('mailbox_subject', 'user@norva.tv'),
+  );
+  // Other providers treat a dot as significant.
+  assert.notEqual(
+    canonicalizeRiskSubject('mailbox_subject', 'u.ser@outlook.com'),
+    canonicalizeRiskSubject('mailbox_subject', 'user@outlook.com'),
+  );
+  // A plus tag elsewhere is left alone too: only Gmail's rules are documented
+  // well enough to fold on.
+  assert.notEqual(
+    canonicalizeRiskSubject('mailbox_subject', 'user+tag@outlook.com'),
+    canonicalizeRiskSubject('mailbox_subject', 'user@outlook.com'),
+  );
+});
+
+test('a fold that would empty the local part is refused, not collapsed', async () => {
+  const { canonicalizeRiskSubject } = await loading;
+  // Otherwise every Gmail user on earth would share one counter.
+  assert.equal(canonicalizeRiskSubject('mailbox_subject', '+tag@gmail.com'), null);
+  assert.equal(canonicalizeRiskSubject('mailbox_subject', '...@gmail.com'), null);
+});
+
+test('the exact address and the mailbox behind it stay separate dimensions', async () => {
+  const { canonicalizeRiskSubject } = await loading;
+  // email answers "attempts on this precise address", mailbox_subject answers
+  // "accounts behind this real inbox". They must never share a counter.
+  assert.notEqual(
+    canonicalizeRiskSubject('email', 'user@gmail.com'),
+    canonicalizeRiskSubject('mailbox_subject', 'user@gmail.com'),
+  );
+  // And the exact dimension keeps the dots it was given.
+  assert.notEqual(
+    canonicalizeRiskSubject('email', 'u.ser@gmail.com'),
+    canonicalizeRiskSubject('email', 'user@gmail.com'),
+  );
+});

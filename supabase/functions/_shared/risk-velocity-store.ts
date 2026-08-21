@@ -41,6 +41,7 @@ export type VelocityDimension =
   | "ip_subnet_64"
   | "asn"
   | "email"
+  | "mailbox_subject"
   | "device"
   | "user_agent";
 

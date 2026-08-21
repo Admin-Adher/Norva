@@ -25,6 +25,7 @@ export type RiskSubjectDimension =
   | "ip_subnet_64"
   | "asn"
   | "email"
+  | "mailbox_subject"
   | "device"
   | "user_agent";
 
@@ -153,6 +154,35 @@ export function canonicalizeRiskSubject(
       const at = email.lastIndexOf("@");
       if (at <= 0 || at === email.length - 1) return null;
       return `email:${email}`;
+    }
+    case "mailbox_subject": {
+      // The real inbox behind an address, for anti-abuse correlation only. This
+      // NEVER touches the authentication identity: the user signs in with the
+      // address they typed, and `email` above still counts that exact string.
+      // The two answer different questions — "how many attempts on this precise
+      // address" versus "how many accounts behind this one real inbox".
+      //
+      // Folding is applied only where the provider's rules are documented and
+      // unambiguous, which today means consumer Gmail alone. Google Workspace
+      // runs on custom domains and is therefore untouched by the literal-domain
+      // match below; for every other provider a dot can be significant, and
+      // merging counters a provider does not merge would punish someone who
+      // legitimately holds both addresses.
+      const email = raw.toLowerCase();
+      const at = email.lastIndexOf("@");
+      if (at <= 0 || at === email.length - 1) return null;
+      let local = email.slice(0, at);
+      let domain = email.slice(at + 1);
+      if (domain === "googlemail.com") domain = "gmail.com";
+      if (domain === "gmail.com") {
+        const plus = local.indexOf("+");
+        if (plus >= 0) local = local.slice(0, plus);
+        local = local.split(".").join("");
+        // "+tag@gmail.com" or "...@gmail.com" would fold to an empty local part
+        // and collapse every Gmail user onto one counter. Refuse instead.
+        if (!local) return null;
+      }
+      return `mailbox:${local}@${domain}`;
     }
     case "device":
       // Opaque by contract: this is our own cookie value, and any transformation

@@ -51,13 +51,19 @@ create table if not exists abuse_private.velocity_buckets (
   primary key (dimension, resolution, subject_hash, bucket_start),
   -- The list of dimensions is code, not configuration: adding one means
   -- teaching the engine to compute it. Thresholds are what stays tunable.
+  --
+  -- email and mailbox_subject are both here on purpose and answer different
+  -- questions. email counts attempts against one exact address. mailbox_subject
+  -- counts accounts behind one real inbox, folding consumer Gmail's dots and
+  -- +tags — which land in the same mailbox — so email rotation stops being free.
+  -- Neither ever changes the address someone signs in with.
   -- ip_subnet_64 exists because Norva serves real IPv6 traffic. A /64 is one
   -- LAN, i.e. one subscriber; a /48 can be a whole carrier region or business
   -- and aggregating on it would make neighbours look like one abuser.
   constraint velocity_buckets_dimension check (
     dimension in (
       'ip', 'ip_subnet_24', 'ip_subnet_64', 'asn',
-      'email', 'device', 'user_agent'
+      'email', 'mailbox_subject', 'device', 'user_agent'
     )
   ),
   constraint velocity_buckets_resolution check (resolution in ('minute', 'hour')),
