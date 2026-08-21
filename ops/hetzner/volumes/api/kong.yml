@@ -370,11 +370,10 @@ services:
     routes:
       - name: functions-v1-partners-membership-join-write
         strip_path: true
-        regex_priority: 100
-        methods:
-          - POST
-        paths:
-          - '~/functions/v1/norva-partners/join$'
+        # Same conversion as the credit-quote route: regex_priority is inert
+        # under the expressions router, so this limit never ran either.
+        priority: 1000
+        expression: 'http.path == "/functions/v1/norva-partners/join" && http.method == "POST"'
     plugins:
       - name: cors
       - name: rate-limiting
@@ -384,7 +383,7 @@ services:
           limit_by: ip
           policy: local
           fault_tolerant: true
-          hide_client_headers: false
+          hide_client_headers: true
 
   - name: functions-v1-partners-link-rotation-write
     _comment: 'Partners link rotation POST: exact path, 30/min and 240/hour per source IP.'
@@ -393,11 +392,10 @@ services:
     routes:
       - name: functions-v1-partners-link-rotation-write
         strip_path: true
-        regex_priority: 100
-        methods:
-          - POST
-        paths:
-          - '~/functions/v1/norva-partners/links$'
+        # Same conversion as the credit-quote route: regex_priority is inert
+        # under the expressions router, so this limit never ran either.
+        priority: 1000
+        expression: 'http.path == "/functions/v1/norva-partners/links" && http.method == "POST"'
     plugins:
       - name: cors
       - name: rate-limiting
@@ -407,7 +405,7 @@ services:
           limit_by: ip
           policy: local
           fault_tolerant: true
-          hide_client_headers: false
+          hide_client_headers: true
 
   - name: functions-v1-partners-payout-country-write
     _comment: 'Partners payout country POST: exact path, 30/min and 240/hour per source IP.'
@@ -416,11 +414,10 @@ services:
     routes:
       - name: functions-v1-partners-payout-country-write
         strip_path: true
-        regex_priority: 100
-        methods:
-          - POST
-        paths:
-          - '~/functions/v1/norva-partners/payout-country$'
+        # Same conversion as the credit-quote route: regex_priority is inert
+        # under the expressions router, so this limit never ran either.
+        priority: 1000
+        expression: 'http.path == "/functions/v1/norva-partners/payout-country" && http.method == "POST"'
     plugins:
       - name: cors
       - name: rate-limiting
@@ -430,7 +427,7 @@ services:
           limit_by: ip
           policy: local
           fault_tolerant: true
-          hide_client_headers: false
+          hide_client_headers: true
 
   - name: functions-v1-partners-access-credit-quote-write
     _comment: 'Partners access credit quote POST: exact path, 30/min and 240/hour per source IP.'
@@ -461,7 +458,7 @@ services:
           # plugin is actually bound to this route. Flips to true when the shape
           # rolls out to the six siblings and to the auth classes: a limit that
           # announces itself tells an attacker exactly what to pace against.
-          hide_client_headers: false
+          hide_client_headers: true
 
   - name: functions-v1-partners-access-credit-redeem-write
     _comment: 'Partners access credit redemption POST: exact path, 30/min and 240/hour per source IP.'
@@ -470,11 +467,10 @@ services:
     routes:
       - name: functions-v1-partners-access-credit-redeem-write
         strip_path: true
-        regex_priority: 100
-        methods:
-          - POST
-        paths:
-          - '~/functions/v1/norva-partners/credit/redemptions$'
+        # Same conversion as the credit-quote route: regex_priority is inert
+        # under the expressions router, so this limit never ran either.
+        priority: 1000
+        expression: 'http.path == "/functions/v1/norva-partners/credit/redemptions" && http.method == "POST"'
     plugins:
       - name: cors
       - name: rate-limiting
@@ -484,7 +480,7 @@ services:
           limit_by: ip
           policy: local
           fault_tolerant: true
-          hide_client_headers: false
+          hide_client_headers: true
 
   - name: functions-v1-partners-fiscal-profile-write
     _comment: 'Partners fiscal self-attestation POST: exact path, 30/min and 240/hour per source IP.'
@@ -493,11 +489,10 @@ services:
     routes:
       - name: functions-v1-partners-fiscal-profile-write
         strip_path: true
-        regex_priority: 100
-        methods:
-          - POST
-        paths:
-          - '~/functions/v1/norva-partners/fiscal-profile$'
+        # Same conversion as the credit-quote route: regex_priority is inert
+        # under the expressions router, so this limit never ran either.
+        priority: 1000
+        expression: 'http.path == "/functions/v1/norva-partners/fiscal-profile" && http.method == "POST"'
     plugins:
       - name: cors
       - name: rate-limiting
@@ -507,7 +502,7 @@ services:
           limit_by: ip
           policy: local
           fault_tolerant: true
-          hide_client_headers: false
+          hide_client_headers: true
 
   - name: functions-v1-partners-payout-onboarding-write
     _comment: 'Partners payout onboarding POST: exact path, 30/min and 240/hour per source IP.'
@@ -516,11 +511,10 @@ services:
     routes:
       - name: functions-v1-partners-payout-onboarding-write
         strip_path: true
-        regex_priority: 100
-        methods:
-          - POST
-        paths:
-          - '~/functions/v1/norva-partners/payout-onboarding$'
+        # Same conversion as the credit-quote route: regex_priority is inert
+        # under the expressions router, so this limit never ran either.
+        priority: 1000
+        expression: 'http.path == "/functions/v1/norva-partners/payout-onboarding" && http.method == "POST"'
     plugins:
       - name: cors
       - name: rate-limiting
@@ -530,7 +524,7 @@ services:
           limit_by: ip
           policy: local
           fault_tolerant: true
-          hide_client_headers: false
+          hide_client_headers: true
 
   ## Edge Functions routes
   - name: functions-v1
