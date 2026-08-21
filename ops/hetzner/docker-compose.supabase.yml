@@ -97,6 +97,25 @@ services:
       KONG_DATABASE: "off"
       KONG_DECLARATIVE_CONFIG: /usr/local/kong/kong.yml
       KONG_ROUTER_FLAVOR: expressions
+      # Caddy terminates TLS on this same host and proxies to the published port,
+      # so without these three Kong resolves EVERY client to the same address and
+      # any limit_by: ip collapses into one global bucket for all of Norva.
+      #
+      # Measured, not assumed: Kong logs Caddy traffic as 172.18.0.1, the Docker
+      # bridge GATEWAY — the NAT behind the published port rewrites the source, so
+      # 127.0.0.1 never reaches Kong and trusting only it would be a silent no-op.
+      # The subnet is Docker-assigned (no ipam block here), so the gateway can
+      # drift if the network is recreated; the range covers Docker default pool.
+      # Residual risk, accepted: sibling containers are trusted too, so a
+      # compromised one could forge a client IP. It cannot come from outside —
+      # Caddy OVERWRITES X-Forwarded-For at the edge, destroying anything a client
+      # sends. Clean fix (needs a full stack bounce, so not done here): pin the
+      # subnet under a top-level networks: block and trust the gateway /32 alone.
+      # real_ip_recursive stays off: the LAST entry wins, which is the one Caddy
+      # wrote, so a client-supplied value can never be the one Kong believes.
+      KONG_TRUSTED_IPS: 127.0.0.1,172.16.0.0/12
+      KONG_REAL_IP_HEADER: X-Forwarded-For
+      KONG_REAL_IP_RECURSIVE: "off"
       KONG_DNS_ORDER: LAST,A,CNAME
       KONG_DNS_NOT_FOUND_TTL: 1
       KONG_PLUGINS: request-transformer,cors,key-auth,acl,basic-auth,request-termination,ip-restriction,post-function,request-size-limiting,rate-limiting
