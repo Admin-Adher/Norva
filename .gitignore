@@ -60,6 +60,13 @@ ops/hetzner/.env.bak-*
 ops/hetzner/media/.env.*
 ops/hetzner/**/*.bak-*
 ops/hetzner/.env.backup-*
+# The dot form too. The rules above only caught .env.bak-* with a hyphen, so
+# backups named .env.bak.<date> — which is what a cp during an incident
+# actually produces — stayed untracked AND unignored, exactly the situation the
+# note below describes. These files carry every secret in the stack, not just
+# the one being rotated.
+ops/hetzner/.env.bak.*
+ops/hetzner/.env.*.bak
 ops/hetzner/**/*.bak
 # Backup archives must never land in the repo (audit 2026-08-20 : un .tar.gz.age
 # de 849 Mo et deux .env de secrets tramaient non suivis ET non ignores).
