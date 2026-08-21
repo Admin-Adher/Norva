@@ -176,23 +176,38 @@ sudo journalctl -u norva-basebackup.service -n 20 --no-pager
   # 3) DEROULER RESTORE.md section 2 sur l'artefact streame -- obligatoire
   # 4) seulement alors : BASEBACKUP_STREAM=true dans /etc/norva-backup.env
   ```
-## Cible à ~100 imports : passer au physique incrémental (pgBackRest)
+## Cible à 7 M de titres : passer au physique incrémental (pgBackRest)
 
 > **Décision prise le 2026-08-21, à appliquer plus tard.** Écrite maintenant pour ne
 > pas refaire le raisonnement le jour où le seuil tombe. **Ne rien migrer avant.**
 
 Le facteur limitant de la box n'est ni le disque ni le coût R2, c'est de
-**réexpédier la base entière chaque nuit**. Mesures du 2026-08-21 : 5 719 octets par
-titre, 18 Mo/s d'upload vers R2, ~78 000 titres par import réaliste.
+**réexpédier la base entière chaque nuit**. Mesuré le 2026-08-21 : 5 719 octets par
+titre et 18 Mo/s d'upload vers R2. La colonne « imports » ci-dessous est dérivée
+d'une hypothèse de 78 000 titres par import — voir l'encadré après le tableau.
 
-| Imports | Base | Upload quotidien | Fenêtre |
-|---|---|---|---|
-| 5 (aujourd'hui) | 5,5 GB | 1,8 GB | 100 s |
-| 150 | 67 GB | 67 GB | ~1 h |
-| 400 | 178 GB | 178 GB | **2 h 45** |
+| Titres | Imports à 78 k (hypothèse) | Base | Upload quotidien | Fenêtre |
+|---|---|---|---|---|
+| 0,78 M (aujourd'hui) | 5 | 5,5 GB | 1,8 GB | 100 s |
+| 11,7 M | 150 | 67 GB | 67 GB | ~1 h |
+| 31 M | 400 | 178 GB | 178 GB | **2 h 45** |
 
-**Déclencheur : ~100 imports porteurs de catalogue**, soit ~40 GB de base.
-`capacity-check.sh` donne le compteur (titres, et coût par titre).
+**Déclencheur : 7 millions de titres** (~40 GB de base). `capacity-check.sh` compte
+les titres tous les matins — c'est le seuil à surveiller, pas un nombre d'imports.
+
+> **Pourquoi en titres et pas en imports.** Le nombre de titres qu'apporte un import
+> est la grande inconnue de toute cette projection, et elle est mesurée sur **un**
+> compte externe. Au 2026-08-21 : `yildirim68kamil` porte 77 800 titres,
+> `projethorizon2030` en porte **523 050** — un facteur **6,7**. Selon lequel des deux
+> profils domine, 7 M de titres arrivent à 90 imports ou à 13. Le tableau ci-dessus
+> retiennent 78 000 titres/import : c'est une hypothèse de travail, pas une mesure.
+> Le seuil en titres, lui, reste juste dans les deux cas.
+>
+> À surveiller au fil des inscriptions, pour trancher :
+>
+> ```sql
+> select user_id, count(*) titres from public.cloud_titles group by 1 order by 2 desc;
+> ```
 
 **Cible : pgBackRest.** Full hebdomadaire + incrémental quotidien : l'upload
 quotidien tombe aux blocs modifiés, soit ~5-10 GB au lieu de 178. Support S3 natif
@@ -217,7 +232,7 @@ une corruption du physique. Une fois par semaine remplit ces deux rôles.
 sur un artefact pgBackRest, plus un test de restauration à un point dans le temps.
 On remplacerait trois scripts éprouvés par une configuration neuve.
 
-Plafond après migration : ~600 imports, borné par le disque et non plus par la
+Plafond après migration : ~47 M de titres, borné par le disque et non plus par la
 fenêtre de backup. Au-delà, c'est un achat de matériel.
 
 - **Drill trimestriel** : dérouler `RESTORE.md` (les deux sections) sur la box ou
