@@ -133,5 +133,26 @@ sudo journalctl -u norva-basebackup.service -n 20 --no-pager
   régime permanent. Audit 2026-08-21 : un seul index était ballonné à 69 %
   (199 → 62 MB), et un `REINDEX TABLE CONCURRENTLY` sur les quatre grosses tables
   a rendu 1,1 GB sur 6,8. À refaire mensuellement.
+- **Base backup en flux (`BASEBACKUP_STREAM`).** Par defaut `false` : `pg_basebackup`
+  ecrit une copie physique complete dans `BACKUP_STAGE_DIR` avant l'envoi, donc la
+  box a besoin de ~2x la taille de la base en disque libre. C'est **cette exigence**
+  qui pose le plafond de capacite : ~20 M de titres avec staging, ~31 M en flux.
+  En `true`, `pg_basebackup -D - | rclone rcat` supprime la copie locale.
+  L'artefact est identique (`base.tar.gz`, WAL de consistance embarque) donc
+  `RESTORE.md` est inchange. Contrepartie : un flux **ne se rejoue pas** — une
+  coupure reseau perd le run, le suivant le rattrape. Un flux interrompu laisse un
+  objet tronque que `rcat` signale comme reussi : le script verifie donc le code de
+  chaque etage du pipe puis un plancher de taille, et purge l'objet partiel.
+  **Procedure de bascule** (ne pas basculer sur la foi d'un run reussi) :
+
+  ```bash
+  # 1) un run en flux, sans toucher a la retention
+  sudo env BASEBACKUP_STREAM=true NORVA_SKIP_BASE_RETENTION=true \
+    bash ~/norva/ops/hetzner/backup/basebackup-weekly.sh
+  # 2) comparer la taille au dernier base backup stage
+  rclone lsf r2:$R2_BUCKET/selfhost/base/ --dirs-only
+  # 3) DEROULER RESTORE.md section 2 sur l'artefact streame -- obligatoire
+  # 4) seulement alors : BASEBACKUP_STREAM=true dans /etc/norva-backup.env
+  ```
 - **Drill trimestriel** : dérouler `RESTORE.md` (les deux sections) sur la box ou
   une machine jetable. Un backup non testé n'existe pas.
