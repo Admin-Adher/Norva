@@ -232,18 +232,32 @@ test('a settled attempt is terminal, and only its owner can settle it', () => {
   assert.match(settle, /p_state not in \('SUCCESS', 'FAILED_FINAL', 'UNKNOWN'\)/);
 });
 
-test('the database, not the caller, decides what may be memoised', () => {
-  // Configuration changes; a constraint does not. Even if GoTrue starts
-  // returning sessions on signup, a token has no route into this table.
-  assert.match(
-    migration,
-    /\(result - array\['user_id', 'email_confirmation_required', 'created'\]\) = '\{\}'::jsonb/,
+test('a stored secret is unrepresentable, not merely discouraged', () => {
+  // A key allow-list was the first attempt and it was not enough: it constrains
+  // the NAMES of top-level keys, so {"user_id": {"access_token": "..."}} would
+  // have been accepted — user_id is permitted and nothing looked inside it.
+  // Typed columns cannot hold a token at all, whatever the calling code does.
+  // Read the column list rather than grepping the file: a looser pattern here
+  // matched `v_result jsonb` in a DECLARE block, which is a local variable and
+  // proves nothing about storage.
+  const body = migration.slice(
+    migration.indexOf('create table if not exists abuse_private.signup_attempts ('),
+    migration.indexOf('  constraint signup_attempts_state'),
   );
-  for (const secret of [
-    'access_token', 'refresh_token', 'password', 'confirmation_token', 'magic',
-  ]) {
-    assert.ok(!migration.includes(`'${secret}'`), `${secret} must not be allow-listed`);
-  }
+  const columns = [...body.matchAll(/^\s{2}(\w+)\s+(?:text|uuid|boolean|integer|smallint|timestamptz|jsonb)\b/gm)]
+    .map((m) => m[1]);
+  assert.deepEqual(columns, [
+    'nonce', 'request_fingerprint', 'fingerprint_version', 'state',
+    'result_user_id', 'result_email_confirmation_required', 'result_created',
+    'upstream_status', 'attempt_count', 'created_at', 'updated_at', 'expires_at',
+  ]);
+  assert.doesNotMatch(body, /jsonb/, 'nothing in this table is a blob');
+  // And a result belongs only to a settled attempt: PROCESSING carries none.
+  assert.match(migration, /state <> 'PROCESSING'/);
+  // No word-search for "access_token" and friends. Three attempts at that kind
+  // of assertion in this codebase have failed on their own explanatory prose,
+  // which proves only that the prose exists. The column list above is the
+  // property: a uuid and two booleans have nowhere to put a token.
 });
 
 test('the table is private and expires on its own', () => {

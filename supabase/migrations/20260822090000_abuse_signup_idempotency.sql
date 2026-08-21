@@ -14,18 +14,26 @@
 -- second account. An UNKNOWN attempt is reconciled against the auth side and
 -- only then settled.
 --
--- The memoised result is allow-listed BY THE DATABASE, not merely by the calling
--- code. GoTrue delivers no session before confirmation today, but that is
--- configuration and configuration changes; a token, a magic link or a
--- confirmation secret must have no route into this table even then.
+-- The memoised result is three typed columns, not a jsonb blob. A key allow-list
+-- was the first attempt and it was not enough: it constrains the NAMES of
+-- top-level keys, so {"user_id": {"access_token": "..."}} would have been
+-- accepted — user_id is permitted, and nothing looked inside it. Typed columns
+-- make the shape unrepresentable rather than merely discouraged. Flexibility is
+-- exactly what is not wanted here: GoTrue delivers no session before
+-- confirmation today, but that is configuration, and a uuid column cannot hold a
+-- token however the configuration changes.
 
 create table if not exists abuse_private.signup_attempts (
   nonce               text        primary key,
   request_fingerprint text        not null,
   fingerprint_version smallint    not null default 1,
   state               text        not null,
-  -- Allow-listed projection only. See the constraint below.
-  result              jsonb,
+  -- The memoised outcome, one typed column per field. There is deliberately no
+  -- room for anything else: a uuid cannot hold a bearer token, and a boolean
+  -- cannot hold a magic link.
+  result_user_id                     uuid,
+  result_email_confirmation_required boolean,
+  result_created                     boolean,
   upstream_status     integer,
   attempt_count       integer     not null default 1,
   created_at          timestamptz not null default now(),
@@ -38,18 +46,18 @@ create table if not exists abuse_private.signup_attempts (
   constraint signup_attempts_fingerprint check (request_fingerprint ~ '^[0-9a-f]{64}$'),
   constraint signup_attempts_fingerprint_version check (fingerprint_version between 1 and 32767),
   constraint signup_attempts_count check (attempt_count between 1 and 1000000),
-  -- Subtracting the allowed keys must leave nothing. A check constraint cannot
-  -- hold a subquery, so this is the expression that enforces the allow list:
-  -- anything not named here makes the write fail rather than storing a secret.
-  constraint signup_attempts_result_allowlist check (
-    result is null
-    or (result - array['user_id', 'email_confirmation_required', 'created']) = '{}'::jsonb
+  -- A result belongs only to a settled attempt. PROCESSING carries none.
+  constraint signup_attempts_result_state check (
+    state <> 'PROCESSING'
+    or (result_user_id is null
+        and result_email_confirmation_required is null
+        and result_created is null)
   )
 );
 
 comment on table abuse_private.signup_attempts is
-  'Idempotency records for signup. Memoises an allow-listed projection of the '
-  'first outcome so a retry of the same intent never reaches GoTrue twice.';
+  'Idempotency records for signup. Memoises a typed projection of the first '
+  'outcome so a retry of the same intent never reaches GoTrue twice.';
 
 create index if not exists signup_attempts_expiry_idx
   on abuse_private.signup_attempts (expires_at);
@@ -79,6 +87,7 @@ declare
   v_ttl      integer := least(greatest(coalesce(p_ttl_seconds, 900), 60), 86400);
   v_inserted boolean := false;
   v_row      abuse_private.signup_attempts;
+  v_result   jsonb;
 begin
   insert into abuse_private.signup_attempts as a
     (nonce, request_fingerprint, fingerprint_version, state, expires_at)
@@ -120,10 +129,19 @@ begin
    where nonce = p_nonce
   returning attempt_count into v_row.attempt_count;
 
+  -- Rebuilt on the way out, so the caller keeps one shape while storage stays
+  -- typed. Nulls are stripped and an empty projection reads as absent.
+  v_result := jsonb_strip_nulls(jsonb_build_object(
+    'user_id', v_row.result_user_id,
+    'email_confirmation_required', v_row.result_email_confirmation_required,
+    'created', v_row.result_created
+  ));
+  if v_result = '{}'::jsonb then v_result := null; end if;
+
   return jsonb_build_object(
     'outcome', 'replay',
     'state', v_row.state,
-    'result', v_row.result,
+    'result', v_result,
     'attempt_count', v_row.attempt_count
   );
 end;
@@ -136,7 +154,9 @@ create or replace function abuse_private.signup_attempt_settle(
   p_nonce text,
   p_fingerprint text,
   p_state text,
-  p_result jsonb,
+  p_user_id uuid,
+  p_email_confirmation_required boolean,
+  p_created boolean,
   p_upstream_status integer
 )
 returns boolean
@@ -153,7 +173,9 @@ begin
 
   update abuse_private.signup_attempts
      set state = p_state,
-         result = p_result,
+         result_user_id = p_user_id,
+         result_email_confirmation_required = p_email_confirmation_required,
+         result_created = p_created,
          upstream_status = p_upstream_status,
          updated_at = now()
    where nonce = p_nonce
@@ -183,7 +205,7 @@ $$;
 
 revoke all on function abuse_private.signup_attempt_claim(text, text, smallint, integer)
   from public, anon, authenticated, service_role;
-revoke all on function abuse_private.signup_attempt_settle(text, text, text, jsonb, integer)
+revoke all on function abuse_private.signup_attempt_settle(text, text, text, uuid, boolean, boolean, integer)
   from public, anon, authenticated, service_role;
 revoke all on function abuse_private.signup_attempt_prune()
   from public, anon, authenticated, service_role;
@@ -208,7 +230,9 @@ create or replace function public.abuse_signup_attempt_settle(
   p_nonce text,
   p_fingerprint text,
   p_state text,
-  p_result jsonb,
+  p_user_id uuid,
+  p_email_confirmation_required boolean,
+  p_created boolean,
   p_upstream_status integer
 )
 returns boolean
@@ -217,7 +241,8 @@ security definer
 set search_path = ''
 as $$
   select abuse_private.signup_attempt_settle(
-    p_nonce, p_fingerprint, p_state, p_result, p_upstream_status
+    p_nonce, p_fingerprint, p_state, p_user_id,
+    p_email_confirmation_required, p_created, p_upstream_status
   );
 $$;
 
@@ -235,9 +260,9 @@ revoke all on function public.abuse_signup_attempt_claim(text, text, smallint, i
 grant execute on function public.abuse_signup_attempt_claim(text, text, smallint, integer)
   to service_role;
 
-revoke all on function public.abuse_signup_attempt_settle(text, text, text, jsonb, integer)
+revoke all on function public.abuse_signup_attempt_settle(text, text, text, uuid, boolean, boolean, integer)
   from public, anon, authenticated;
-grant execute on function public.abuse_signup_attempt_settle(text, text, text, jsonb, integer)
+grant execute on function public.abuse_signup_attempt_settle(text, text, text, uuid, boolean, boolean, integer)
   to service_role;
 
 revoke all on function public.abuse_signup_attempt_prune()

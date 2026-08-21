@@ -101,10 +101,11 @@ export async function signupRequestFingerprint(intent: SignupIntent): Promise<st
 export type SignupAttemptState = "PROCESSING" | "SUCCESS" | "FAILED_FINAL" | "UNKNOWN";
 
 /**
- * The only fields ever memoised. The database enforces this list too, so a
- * future caller cannot widen it by accident: a token, a magic link or a
- * confirmation secret has no way into this table even if GoTrue's configuration
- * changes and it starts returning sessions on signup.
+ * The only fields ever memoised, and the database stores them as three typed
+ * columns rather than as a blob. A key allow-list was not enough: it constrains
+ * the names of top-level keys, so {"user_id": {"access_token": "..."}} would
+ * have passed. A uuid column cannot hold a bearer token however the calling code
+ * changes, and a boolean cannot hold a magic link.
  */
 export interface SignupResultProjection {
   user_id?: string;
@@ -159,11 +160,15 @@ export function createPostgresIdempotencyStore(db: any): SignupIdempotencyStore 
       };
     },
     async settle(nonce, fingerprint, state, result, upstreamStatus) {
+      // Spread into typed parameters rather than handing over an object: there is
+      // no field here that could carry something the columns cannot hold.
       const { data, error } = await db.rpc("abuse_signup_attempt_settle", {
         p_nonce: nonce,
         p_fingerprint: fingerprint,
         p_state: state,
-        p_result: result,
+        p_user_id: result?.user_id ?? null,
+        p_email_confirmation_required: result?.email_confirmation_required ?? null,
+        p_created: result?.created ?? null,
         p_upstream_status: upstreamStatus,
       });
       if (error) throw new Error(`idempotency_settle_failed:${error.code ?? "unknown"}`);
