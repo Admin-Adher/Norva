@@ -1405,31 +1405,29 @@ test('Partners CI freezes Edge dependencies and replays a blank database', () =>
 
 test('offsite Partners backup is scheduled, least-privilege and secret-backed', () => {
   const workflow = read('.github/workflows/backup-db-to-r2.yml');
+  const hetzner = read('ops/hetzner/scripts/19-backup-db-to-r2.sh');
   assert.match(workflow, /cron: '15 3 \* \* \*'/);
   assert.match(workflow, /permissions:\s*\n\s+contents: read/);
-  assert.match(workflow, /postgresql-client-17/);
-  assert.match(workflow, /awscli-exe-linux-x86_64\.zip/);
-  assert.match(workflow, /\/tmp\/aws\/install --update/);
-  assert.doesNotMatch(workflow, /^\s+awscli\s*\\?$/m);
-  assert.match(workflow, /bash ops\/backup\/backup-to-r2\.sh/);
-  assert.match(workflow, /BACKUP_ENCRYPTION_REQUIRED: 'true'/);
+  assert.match(workflow, /appleboy\/ssh-action/);
+  assert.match(workflow, /19-backup-db-to-r2\.sh/);
+  assert.match(workflow, /BACKUP_ENCRYPTION_REQUIRED=true/);
+  assert.match(hetzner, /OPENSSL_CONF=\/tmp\/openssl-tls12\.cnf/);
+  assert.match(hetzner, /docker exec -i norva-db pg_dump/);
   assert.match(
     read('ops/backup/backup-to-r2.sh'),
     /BACKUP_ENCRYPTION_REQUIRED[\s\S]*BACKUP_AGE_RECIPIENT is required/,
   );
   for (const secret of [
-    'SUPABASE_DB_URL',
+    'HETZNER_SSH_PRIVATE_KEY',
     'R2_ACCOUNT_ID',
     'R2_ACCESS_KEY_ID',
     'R2_SECRET_ACCESS_KEY',
     'R2_BUCKET',
     'BACKUP_AGE_RECIPIENT',
   ]) {
-    assert.match(
-      workflow,
-      new RegExp(`${secret}: \\\${{ secrets\\.${secret} }}`),
-    );
+    assert.match(workflow, new RegExp(`secrets\\.${secret}`));
   }
+  assert.doesNotMatch(workflow, /secrets\.SUPABASE_DB_URL/);
   assert.doesNotMatch(workflow, /pull_request:/);
 });
 
