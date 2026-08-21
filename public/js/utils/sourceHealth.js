@@ -143,20 +143,61 @@
         return Number.isFinite(catalogVersion) && catalogVersion > 1;
     }
 
+    // Canonical classification — MIRROR of
+    // supabase/functions/_shared/source-sync-error.mjs (authoritative; the
+    // browser cannot import from supabase/functions). Behaviour parity is locked
+    // by tests/source-error-kind-parity.test.js. Change one, change both.
+    //
+    // Order is busy > expired > auth > infra. This file used to check auth
+    // BEFORE expired while the ops alert checked expired first, so a panel
+    // saying "401 subscription expired" got one verdict in the app and a
+    // different one in the alert. The expiry is the CAUSE and the 401 only its
+    // symptom, so "renew your subscription" outranks "check your credentials".
+    //
+    // Patterns are the UNION of what the two copies used to match. Two
+    // deliberate exceptions, both documented in the authoritative copy: bare
+    // `username`/`password`/`login` are gone (redaction rewrites Xtream URLs to
+    // `username=***`, which would have made a 502 outage read as auth), and
+    // `paid` is kept because this file already matched it in production.
+    const BUSY_PATTERN = /\b(458|user_multi_ip|account[_\s-]*shar|account[_\s-]*busy|already in use|max(?:imum)?[_\s-]*conn|slot[_\s-]*busy)\b/;
+    const EXPIRED_PATTERN = /\b(expired|expire|inactive|disabled|banned|subscription|renew|unpaid|paid|trial ended)\b/;
+    const AUTH_PATTERN = /\b(401|403|unauthorized|forbidden|auth|auth[_\s-]*fail|authentication|credential|credentials|invalid user|invalid pass|invalid password|invalid login|bad password|wrong password)\b/;
+    const INFRA_PATTERN = /\b(media gateway|gateway refused|refused|500|502|503|504|timeout|timed out|econn|enotfound|dns|network|unreachable|service unavailable|temporarily unavailable)\b/;
+
+    const ERROR_KIND_LABELS = {
+        busy: 'Slot occupé',
+        expired: 'Abonnement terminé',
+        auth: 'Identifiants rejetés',
+        infra: 'Panne passerelle',
+        unknown: 'Erreur non classée'
+    };
+
+    function classifyErrorKind(text) {
+        const error = lower(String(text || ''));
+        if (BUSY_PATTERN.test(error)) return 'busy';
+        if (EXPIRED_PATTERN.test(error)) return 'expired';
+        if (AUTH_PATTERN.test(error)) return 'auth';
+        if (INFRA_PATTERN.test(error)) return 'infra';
+        return 'unknown';
+    }
+
+    // Kind -> the state vocabulary the rest of this file and its callers already
+    // switch on. `busy` maps to degraded ON PURPOSE: a busy slot clears itself
+    // when the other device stops, and degraded keeps an already-built catalog
+    // usable. That is also exactly what happened before, since no pattern here
+    // matched 458 at all — so unifying adds a name, not a behaviour change.
+    const KIND_TO_STATE = {
+        busy: 'degraded',
+        expired: 'expired',
+        auth: 'auth_failed',
+        infra: 'unreachable',
+        unknown: 'degraded'
+    };
+
     function classifyError(errorText, rawStatus = '') {
         const error = lower(`${rawStatus} ${errorText}`);
-        if (!error) return 'degraded';
-
-        if (/\b(401|403|unauthorized|forbidden|auth|credential|credentials|login|password|username|invalid user|invalid pass)\b/.test(error)) {
-            return 'auth_failed';
-        }
-        if (/\b(expired|expire|inactive|disabled|banned|subscription|renew|unpaid|paid|trial ended)\b/.test(error)) {
-            return 'expired';
-        }
-        if (/\b(timeout|timed out|econn|enotfound|dns|network|unreachable|refused|503|502|500|service unavailable|temporarily unavailable)\b/.test(error)) {
-            return 'unreachable';
-        }
-        return 'degraded';
+        if (!error.trim()) return 'degraded';
+        return KIND_TO_STATE[classifyErrorKind(error)] || 'degraded';
     }
 
     function classifySource(source = {}, statuses = []) {
@@ -609,6 +650,10 @@
 
     window.NorvaSourceHealth = {
         STATE_META,
+        // Exposed so the admin dashboard can badge a source with WHY it failed
+        // instead of printing a raw provider string and an HTTP code.
+        classifyErrorKind,
+        ERROR_KIND_LABELS,
         classifySource,
         catalogSourcePolicy,
         catalogAvailability,

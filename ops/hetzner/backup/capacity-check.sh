@@ -53,6 +53,10 @@ NOW_LSN="$(q 'select pg_current_wal_lsn();')"
 # ---- 1. WAL rate ------------------------------------------------------------
 WAL_LINE="rate: no baseline yet (first run)"
 WAL_GIB_DAY=""
+# Only re-seed the baseline when we actually measured. A manual run inside the
+# hour must not shove the baseline forward and suppress the scheduled check --
+# that is exactly when someone is poking at the box during an incident.
+SEED=1
 if [ -r "$STATE" ]; then
   # shellcheck disable=SC1090
   . "$STATE"
@@ -62,10 +66,11 @@ if [ -r "$STATE" ]; then
     WAL_GIB_DAY="$(awk -v b="$BYTES" -v s="$ELAPSED" 'BEGIN{printf "%.2f", b/1073741824*86400/s}')"
     WAL_LINE="rate: ${WAL_GIB_DAY} GiB/day (seuil ${WAL_WARN_GIB})"
   else
-    WAL_LINE="rate: window too short (${ELAPSED}s) — skipped"
+    WAL_LINE="rate: window too short (${ELAPSED}s) — baseline kept"
+    SEED=0
   fi
 fi
-printf 'PREV_LSN=%s\nPREV_EPOCH=%s\n' "$NOW_LSN" "$NOW_EPOCH" > "$STATE"
+[ "$SEED" -eq 1 ] && printf 'PREV_LSN=%s\nPREV_EPOCH=%s\n' "$NOW_LSN" "$NOW_EPOCH" > "$STATE"
 
 # ---- 2. size per catalogue-bearing user -------------------------------------
 DB_BYTES="$(q "select pg_database_size('postgres');")"
