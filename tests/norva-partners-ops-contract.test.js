@@ -1417,6 +1417,8 @@ test('offsite Partners backup is scheduled, least-privilege and secret-backed', 
     read('ops/backup/backup-to-r2.sh'),
     /BACKUP_ENCRYPTION_REQUIRED[\s\S]*BACKUP_AGE_RECIPIENT is required/,
   );
+  assert.match(read('ops/backup/backup-to-r2.sh'), /BACKUP_RETAIN_DAYS="\$\{BACKUP_RETAIN_DAYS:-30\}"/);
+  assert.match(read('ops/backup/backup-to-r2.sh'), /pruning objects older than/);
   for (const secret of [
     'HETZNER_SSH_PRIVATE_KEY',
     'R2_ACCOUNT_ID',

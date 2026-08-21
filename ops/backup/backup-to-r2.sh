@@ -39,6 +39,8 @@
 #                          BACKUP_AGE_RECIPIENT is absent.
 #   BACKUP_STAMP           Override the timestamp used in the object key (for
 #                          reproducible runs / tests). Default: UTC now.
+#   BACKUP_RETAIN_DAYS     After a successful upload, delete objects under R2_PREFIX
+#                          older than this many days (default 30). Set 0 to skip.
 #   PG_DUMP / PG_DUMPALL   Override the binaries (e.g. /usr/lib/postgresql/17/bin).
 #   AWS_CLI                Override the aws binary path.
 #
@@ -150,3 +152,22 @@ echo "   object : s3://$R2_BUCKET/$KEY"
 echo "   size   : $SIZE"
 echo "   restore: aws s3 cp s3://$R2_BUCKET/$KEY . --endpoint-url $ENDPOINT"
 [[ -n "${BACKUP_AGE_RECIPIENT:-}" ]] && echo "            age -d -i <key> <file>.age | tar -xz   (then psql < 00/01/02)"
+
+BACKUP_RETAIN_DAYS="${BACKUP_RETAIN_DAYS:-30}"
+if [[ "$BACKUP_RETAIN_DAYS" =~ ^[1-9][0-9]*$ ]]; then
+  cutoff="$(date -u -d "${BACKUP_RETAIN_DAYS} days ago" +%Y%m%d)"
+  echo ">> pruning objects older than ${BACKUP_RETAIN_DAYS}d (before ${cutoff})"
+  prefix="${R2_PREFIX%/}/"
+  while read -r _ls_date _ls_time _ls_size object; do
+    [[ -n "${object:-}" ]] || continue
+    base="$(basename "$object")"
+    stamp="${base#norva-db-}"
+    stamp="${stamp%%.*}"
+    day="${stamp:0:8}"
+    if [[ "$day" =~ ^[0-9]{8}$ && "$day" < "$cutoff" ]]; then
+      echo "   delete s3://$R2_BUCKET/${prefix}${base}"
+      "$AWS_CLI" s3 rm "s3://$R2_BUCKET/${prefix}${base}" --endpoint-url "$ENDPOINT" --only-show-errors \
+        || echo "   WARN: could not delete ${base}" >&2
+    fi
+  done < <("$AWS_CLI" s3 ls "s3://$R2_BUCKET/$prefix" --endpoint-url "$ENDPOINT" || true)
+fi
