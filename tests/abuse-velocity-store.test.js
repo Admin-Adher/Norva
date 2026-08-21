@@ -9,7 +9,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const nodeCrypto = require('node:crypto');
-const { importTypescriptModule } = require('./helpers/import-typescript-module');
+const { bundleTypescriptModule } = require('./helpers/bundle-typescript-module');
 
 const root = path.join(__dirname, '..');
 const modulePath = path.join(root, 'supabase/functions/_shared/risk-velocity-store.ts');
@@ -28,7 +28,9 @@ globalThis.Deno = {
   },
 };
 
-const loading = importTypescriptModule(modulePath);
+// Bundled rather than transformed: the store imports the canonicaliser, and a
+// relative import cannot resolve inside a data: URL.
+const loading = bundleTypescriptModule(modulePath);
 
 test.after(async () => {
   await loading;
@@ -61,10 +63,12 @@ test('a subject is salted and scoped to its dimension before it is stored', asyn
   // MAC, which this reproduces byte for byte.
   const bare = nodeCrypto.createHash('sha256').update(ip).digest('hex');
   assert.notEqual(hashed, bare);
-  const salted = nodeCrypto.createHash('sha256').update(`${SALT}:ip:${ip}`).digest('hex');
+  const salted = nodeCrypto.createHash('sha256').update(`${SALT}:ip:4:58a34389`).digest('hex');
   assert.notEqual(hashed, salted, 'a salted hash is not an HMAC');
   const { HASH_VERSION } = await loading;
-  const mac = nodeCrypto.createHmac('sha256', SALT).update(`${HASH_VERSION}:ip:${ip}`).digest('hex');
+  // 88.163.67.137 canonicalises to 4:58a34389 — family tag plus the four bytes
+  // in hex — so the MAC covers the canonical form, never the raw text.
+  const mac = nodeCrypto.createHmac('sha256', SALT).update(`${HASH_VERSION}:ip:4:58a34389`).digest('hex');
   assert.equal(hashed, mac, 'HMAC-SHA256 over version:dimension:subject');
 
   // The same address in two dimensions must not be correlatable by comparing
@@ -83,7 +87,8 @@ test('an email is normalised, so rotating case or spacing does not reset a count
 
 test('an empty subject is refused rather than counted as a shared bucket', async () => {
   const { hashSubject } = await loading;
-  await assert.rejects(hashSubject('ip', '   '), /velocity_subject_empty/);
+  await assert.rejects(hashSubject('ip', '   '), /velocity_subject_invalid/);
+  await assert.rejects(hashSubject('ip', 'not-an-ip'), /velocity_subject_invalid/);
 });
 
 test('no raw subject ever reaches the database', async () => {
@@ -112,7 +117,9 @@ test('every dimension is counted in a single round trip', async () => {
 
   await store.touch([
     { dimension: 'ip', subject: '1.2.3.4', windowsSeconds: [60] },
-    { dimension: 'ip_subnet_24', subject: '1.2.3.0/24', windowsSeconds: [60] },
+    // Subnet dimensions take the full address: the mask belongs to the
+    // canonicaliser, not to every caller.
+    { dimension: 'ip_subnet_24', subject: '1.2.3.4', windowsSeconds: [60] },
     { dimension: 'asn', subject: 'AS64500', windowsSeconds: [60] },
     { dimension: 'email', subject: 'a@b.co', windowsSeconds: [60] },
     { dimension: 'device', subject: 'dev-1', windowsSeconds: [60] },

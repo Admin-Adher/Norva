@@ -31,6 +31,7 @@
 // floor stays underneath as the hard ceiling while that is true.
 
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
+import { canonicalizeRiskSubject } from "./risk-subject-canonical.ts";
 
 // Adding a dimension means teaching the engine to compute it, so the list is
 // code and mirrors the check constraint in the migration.
@@ -111,15 +112,16 @@ export async function hashSubject(
   if (!velocityHashingConfigured()) {
     throw new Error("velocity_key_missing");
   }
-  const normalised = dimension === "email"
-    ? subject.trim().toLowerCase()
-    : subject.trim();
-  if (!normalised) throw new Error("velocity_subject_empty");
+  // Canonical first, always. Two spellings of one address must not become two
+  // subjects, and an unparseable value is refused rather than counted: a missing
+  // signal costs a little accuracy, a wrong subject costs a real user.
+  const canonical = canonicalizeRiskSubject(dimension, subject);
+  if (!canonical) throw new Error("velocity_subject_invalid");
   // Version and dimension are inside the MAC input: the same address cannot be
   // correlated across dimensions by comparing identifiers, and a rotation
   // changes every identifier it produces.
   const message = new TextEncoder().encode(
-    `${HASH_VERSION}:${dimension}:${normalised}`,
+    `${HASH_VERSION}:${dimension}:${canonical}`,
   );
   const mac = await crypto.subtle.sign("HMAC", await hmacKey(), message);
   return Array.from(new Uint8Array(mac))
