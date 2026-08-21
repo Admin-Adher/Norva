@@ -122,7 +122,7 @@ conteneur `db` du compose, remplacer `/var/lib/norva/db` par le data restauré,
 `docker compose up -d db`, puis relancer la stack. **Refaire immédiatement un
 base backup** (la timeline a changé).
 
-## 2bis. Restore STANDALONE (base seul, SANS WAL archivé) — ✅ validé 2026-07-12
+## 2bis. Restore STANDALONE (base seul, SANS WAL archivé) — ✅ validé 2026-08-21 (artefact streame)
 
 Le plus simple + le plus robuste, et le test pertinent quand le WAL archivé a été purgé
 (cf. session-log 2026-07-12 §5) : restaurer le dernier base-backup dans un conteneur
@@ -154,6 +154,14 @@ PGPASSWORD="$POSTGRES_PASSWORD" docker exec -e PGPASSWORD norva-db  psql -h 127.
 docker rm -f norva-pitr; rm -rf /tmp/pitr        # nettoyage
 EOF
 ```
+
+> **Résultat 2026-08-21** — premier drill sur un artefact **streamé**
+> (`BASEBACKUP_STREAM=true`, `pg_basebackup -D - | rclone rcat`, sans copie locale) :
+> `consistent recovery state reached at B0/C20554D8` puis `database system is ready`.
+> Comptes **identiques** à la prod : 1 165 418 media / 777 160 titles / 16 users.
+> `pg_verifybackup` sur le même artefact : `backup successfully verified`.
+> Le `backup_manifest` est *dans* le tar en mode flux (un seul flux de sortie),
+> pas à côté : l'extraire avant de lancer `pg_verifybackup`.
 
 > **Résultat 2026-07-12** : clone `healthy`, `consistent recovery state reached`, `database
 > system is ready` ; 935 666 media / 719 944 titles / 7 users (≈ prod à 95 lignes près =

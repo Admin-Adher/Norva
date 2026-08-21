@@ -4,6 +4,8 @@
 > (dump 637 M, WAL, base 987 M). **Drill de restauration RÉUSSI le 2026-07-11** : base
 > backup R2 → conteneur jetable → `consistent recovery state reached`, `cloud_media_items=906087`,
 > `auth_users=6`. Refaire ce drill (idéalement + le replay WAL de `RESTORE.md §2`) chaque trimestre.
+> **Rejoué le 2026-08-21** sur un base backup **streamé** : reprise consistante,
+> comptes identiques à la prod, `pg_verifybackup` OK. Prochain dû : novembre 2026.
 
 > Deux couches, complémentaires :
 > 1. **Dump logique nightly → R2** (03:40 UTC) : `norva-selfhost-<stamp>.tar.gz.age`
