@@ -18,6 +18,7 @@
 // Everything else is private to this module.
 // ─────────────────────────────────────────────────────────────────────────────
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
+import { formatSourceSyncError } from "./source-sync-error.mjs";
 
 type JsonRecord = Record<string, unknown>;
 type RuntimeConfig = { sourceConfigKey: string; mediaGatewayUrl: string; mediaGatewayToken: string };
@@ -905,7 +906,7 @@ export async function driveXtreamSyncToReady(sourceId: string, userId: string, d
       await selfInvokeSyncStep(sourceId);
       return;
     }
-    const message = err instanceof Error ? err.message : "Source sync failed";
+    const message = formatSourceSyncError(err, "Source sync failed");
     console.error("[xtream-sync] sync driver failed", sourceId, message);
     const failedAt = new Date().toISOString();
     const { data: fresh } = await db

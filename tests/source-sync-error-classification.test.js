@@ -79,28 +79,48 @@ test('a non-HttpError failure still yields its fallback', async () => {
   assert.equal(m.formatSourceSyncError(new Error(''), 'Source sync failed'), 'Source sync failed');
 });
 
+// Discovered, not enumerated. A hand-written file list missed
+// _shared/xtream-sync.ts — the site the recurring cron sync actually reaches,
+// because the driver catches its own gateway HttpError and never lets it
+// bubble to the callers' catch blocks. Any new write site now fails here.
 test('every cloud_sources error path persists through the shared formatter', () => {
-  const files = [
-    'supabase/functions/norva-cloud/index.ts',
-    'supabase/functions/norva-source-sync/index.ts',
-  ];
-  for (const file of files) {
+  const sources = [];
+  const walk = (dir) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (/\.(ts|mjs)$/.test(entry.name) && !/\.test\.[tm]?[js]s?$/.test(entry.name)) sources.push(full);
+    }
+  };
+  walk(path.join(root, 'supabase', 'functions'));
+
+  const countWrites = (src) => src.split(/\r?\n/).filter((line) => {
+    const hit = line.match(/sync_error:\s*(\S+)/);
+    return Boolean(hit) && !hit[1].startsWith('null');
+  }).length;
+
+  const writers = sources
+    .filter((file) => countWrites(fs.readFileSync(file, 'utf8')) > 0)
+    .map((file) => path.relative(root, file).split(path.sep).join('/'));
+
+  assert.ok(writers.length >= 3, 'expected to discover the sync_error write sites, found ' + writers.length);
+  for (const file of writers) {
     const src = read(file);
     assert.ok(
-      src.includes('from "../_shared/source-sync-error.mjs"'),
-      file + ' must import the shared formatter',
+      src.includes('source-sync-error.mjs'),
+      file + ' writes sync_error but does not import the shared formatter',
     );
     assert.ok(
-      src.includes('formatSourceSyncError(error, "Source sync failed")'),
-      file + ' must format the sync failure',
+      src.includes('formatSourceSyncError('),
+      file + ' writes sync_error without formatting it',
     );
+    // Counting ties writes to formatter calls without tripping on the HTTP
+    // response paths, which legitimately surface error.message as-is.
+    const formatted = (src.match(/formatSourceSyncError\(/g) || []).length;
     assert.ok(
-      src.includes('formatSourceSyncError(error, "Source finalization failed")'),
-      file + ' must format the finalization failure',
-    );
-    assert.ok(
-      !src.includes('error instanceof Error ? error.message : "Source sync failed"'),
-      file + ' must not persist a status-less message again',
+      formatted >= countWrites(src),
+      file + ' has ' + countWrites(src) + ' sync_error write(s) but only '
+        + formatted + ' formatted value(s)',
     );
   }
 });
