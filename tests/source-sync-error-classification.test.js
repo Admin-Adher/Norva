@@ -26,7 +26,7 @@ const fail = (status, details) => Object.assign(new Error(GATEWAY), { status, de
 test('an expired provider subscription is suppressed instead of alerting', async () => {
   const m = await load();
   const text = m.formatSourceSyncError(fail(403, { error: 'subscription expired' }), 'Source sync failed');
-  assert.equal(text, GATEWAY + ' (403: subscription expired)');
+  assert.equal(text, '[403] ' + GATEWAY + ' (subscription expired)');
   assert.equal(m.classifyOpsSourceError(text), 'expired');
   assert.ok(m.SILENT_OPS_SOURCE_ERROR_KINDS.has(m.classifyOpsSourceError(text)));
 });
@@ -123,6 +123,39 @@ test('every cloud_sources error path persists through the shared formatter', () 
         + formatted + ' formatted value(s)',
     );
   }
+});
+
+test('the status leads, so it survives truncation by any consumer', async () => {
+  const m = await load();
+  // The admin dashboard used to cut this string at 80 chars while the status sat
+  // at the END, two characters from being lost. Leading it makes every consumer
+  // safe, including ones written later.
+  const text = m.formatSourceSyncError(fail(401, { error: 'x'.repeat(400) }));
+  assert.ok(text.startsWith('[401] '), 'status must lead: ' + text.slice(0, 40));
+  for (const cut of [12, 40, 80, 160]) {
+    assert.equal(m.classifyOpsSourceError(text.slice(0, cut)), 'auth', 'lost the verdict at ' + cut + ' chars');
+  }
+});
+
+test('the admin dashboard badges the kind and no longer truncates the reason', () => {
+  const admin = read('public/js/pages/AdminPage.js');
+  assert.ok(
+    admin.includes('static errKindBadge(syncError)'),
+    'AdminPage must expose the badge helper',
+  );
+  assert.equal(
+    (admin.match(/AdminPage\.errKindBadge\(s\.sync_error\)/g) || []).length,
+    2,
+    'both the alert list and the source row must badge the kind',
+  );
+  assert.ok(
+    !admin.includes('String(s.sync_error).slice(0, 80)'),
+    'the 80-char truncation must be gone (overflow is CSS-handled now)',
+  );
+  assert.ok(
+    admin.includes('.al-err{color:#ff9b9b;font-size:11px;font-family:monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis'),
+    '.al-err must ellipsise instead of the JS cutting the string',
+  );
 });
 
 test('the ops classifier and its suppression policy have a single definition', () => {

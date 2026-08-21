@@ -736,7 +736,7 @@ class AdminPage {
 #page-admin .alert-fam-h{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--adm-tx2);margin:0 0 9px 2px;}
 #page-admin .alert-fam-h .pacct{color:var(--adm-tx3);margin-left:2px;}
 #page-admin .alert-card .al-owner{color:var(--color-text-secondary,#9aa);font-size:12px;}
-#page-admin .alert-card .al-err{color:#ff9b9b;font-size:11px;font-family:monospace;}
+#page-admin .alert-card .al-err{color:#ff9b9b;font-size:11px;font-family:monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:420px;}
 #page-admin .act-row{display:flex;flex-wrap:wrap;gap:10px;}
 #page-admin .act-btn{background:var(--color-bg-primary,#0d0d0f);border:1px solid var(--color-border,#2a2a38);color:var(--color-text-primary,#fff);border-radius:8px;padding:9px 14px;cursor:pointer;font-size:13px;font-weight:600;}
 #page-admin .act-btn:hover{border-color:#5b7cfa;}
@@ -1842,7 +1842,8 @@ class AdminPage {
                 <span class="badge red">${AdminPage.esc(kind)}</span>
                 <span class="al-name">${AdminPage.esc(s.display_name)}</span>
                 <span class="al-owner">${AdminPage.esc(s.owner_email || '')}</span>
-                ${s.sync_error ? `<span class="al-err">${AdminPage.esc(String(s.sync_error).slice(0, 80))}</span>` : ''}
+                ${AdminPage.errKindBadge(s.sync_error)}
+                ${s.sync_error ? `<span class="al-err" title="${AdminPage.esc(s.sync_error)}">${AdminPage.esc(s.sync_error)}</span>` : ''}
             </div>`);
         });
         const total = fam.paiement.length + fam.crons.length + fam.sources.length + fam.soustitres.length;
@@ -13544,7 +13545,7 @@ class AdminPage {
                 <div class="src-st">${statusBadge(s, k)}${s.is_driver ? '<span class="badge blue">pilote</span>' : ''}<div class="src-prov" title="${esc(s.display_name)}">${esc(s.display_name)}</div></div>
                 <div class="src-main">
                     ${acct} · <span class="src-id">${idHtml}</span>
-                    ${s.sync_error ? `<div class="src-err" title="${esc(s.sync_error)}">⚠ ${esc(s.sync_error)}</div>` : ''}
+                    ${s.sync_error ? `<div class="src-err" title="${esc(s.sync_error)}">${AdminPage.errKindBadge(s.sync_error)} ${esc(s.sync_error)}</div>` : ''}
                     <div class="src-cat">${cat}</div>
                 </div>
                 <div class="src-meta">
@@ -14043,6 +14044,27 @@ class AdminPage {
         return String(s == null ? '' : s).replace(/[&<>"']/g, c => (
             { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
         ));
+    }
+
+    // WHY a source failed, as a badge. Reuses the one classifier the ops alert
+    // and the user-facing app already run (window.NorvaSourceHealth, mirror of
+    // supabase/functions/_shared/source-sync-error.mjs), so the three surfaces
+    // agree instead of each operator re-reading a raw provider string and
+    // decoding an HTTP status by hand.
+    //
+    // Tone says WHO has to act: red = us, amber = the source owner, gray =
+    // likely to clear itself. Returns '' rather than guessing when the util has
+    // not loaded, so a badge is never wrong — only absent.
+    static errKindBadge(syncError) {
+        const text = String(syncError == null ? '' : syncError);
+        if (!text.trim()) return '';
+        const health = typeof window !== 'undefined' ? window.NorvaSourceHealth : null;
+        if (!health || typeof health.classifyErrorKind !== 'function') return '';
+        const kind = health.classifyErrorKind(text);
+        const label = (health.ERROR_KIND_LABELS || {})[kind];
+        if (!label) return '';
+        const tone = { infra: 'red', expired: 'amber', auth: 'amber', busy: 'gray', unknown: 'gray' }[kind] || 'gray';
+        return `<span class="badge ${tone}" title="${AdminPage.esc(text)}">${AdminPage.esc(label)}</span>`;
     }
 }
 
