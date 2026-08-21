@@ -178,6 +178,143 @@ services:
           fault_tolerant: true
           hide_client_headers: true
 
+  - name: auth-v1-otp
+    _comment: 'Auth magic-link / OTP POST: own service so strip_path lands on /otp, 5/min and 20/hour per source IP.'
+    url: http://auth:9999/otp
+    routes:
+      - name: auth-v1-otp
+        strip_path: true
+        # http.path excludes the query string, verified against the live
+        # gateway: /auth/v1/otp?redirect_to=… still matches, so the
+        # ceiling cannot be shed by appending a parameter.
+        priority: 1000
+        expression: 'http.path == "/auth/v1/otp" && http.method == "POST"'
+    plugins:
+      # Copied verbatim from auth-v1, exactly as for auth-v1-recover: a more
+      # specific service inherits nothing, and request-transformer is what
+      # turns an sb_publishable_ key into a JWT.
+      - name: cors
+      - name: key-auth
+        config:
+          hide_credentials: false
+      - name: request-transformer
+        config:
+          add:
+            headers:
+              - "Authorization: $LUA_AUTH_EXPR"
+          replace:
+            headers:
+              - "Authorization: $LUA_AUTH_EXPR"
+      - name: acl
+        config:
+          hide_groups_header: true
+          allow:
+            - admin
+            - anon
+      - name: rate-limiting
+        config:
+          # A magic link is an email. The ceiling protects the sending
+          # quota, not the person who asked for a second link.
+          minute: 5
+          hour: 20
+          limit_by: ip
+          policy: local
+          fault_tolerant: true
+          hide_client_headers: true
+
+  - name: auth-v1-resend
+    _comment: 'Auth confirmation resend POST: own service so strip_path lands on /resend, 5/min and 20/hour per source IP.'
+    url: http://auth:9999/resend
+    routes:
+      - name: auth-v1-resend
+        strip_path: true
+        # http.path excludes the query string, verified against the live
+        # gateway: /auth/v1/resend?redirect_to=… still matches, so the
+        # ceiling cannot be shed by appending a parameter.
+        priority: 1000
+        expression: 'http.path == "/auth/v1/resend" && http.method == "POST"'
+    plugins:
+      # Copied verbatim from auth-v1, exactly as for auth-v1-recover: a more
+      # specific service inherits nothing, and request-transformer is what
+      # turns an sb_publishable_ key into a JWT.
+      - name: cors
+      - name: key-auth
+        config:
+          hide_credentials: false
+      - name: request-transformer
+        config:
+          add:
+            headers:
+              - "Authorization: $LUA_AUTH_EXPR"
+          replace:
+            headers:
+              - "Authorization: $LUA_AUTH_EXPR"
+      - name: acl
+        config:
+          hide_groups_header: true
+          allow:
+            - admin
+            - anon
+      - name: rate-limiting
+        config:
+          # No Norva client calls this endpoint — grep public/js for
+          # /auth/v1/ and it is absent. It is reachable all the same, and
+          # an unused email-sending path is exactly what gets found and
+          # abused to burn a sending reputation.
+          minute: 5
+          hour: 20
+          limit_by: ip
+          policy: local
+          fault_tolerant: true
+          hide_client_headers: true
+
+  - name: auth-v1-signup
+    _comment: 'Auth signup POST: own service so strip_path lands on /signup, 10/min and 40/hour per source IP.'
+    url: http://auth:9999/signup
+    routes:
+      - name: auth-v1-signup
+        strip_path: true
+        # http.path excludes the query string, verified against the live
+        # gateway: /auth/v1/signup?redirect_to=… still matches, so the
+        # ceiling cannot be shed by appending a parameter.
+        priority: 1000
+        expression: 'http.path == "/auth/v1/signup" && http.method == "POST"'
+    plugins:
+      # Copied verbatim from auth-v1, exactly as for auth-v1-recover: a more
+      # specific service inherits nothing, and request-transformer is what
+      # turns an sb_publishable_ key into a JWT.
+      - name: cors
+      - name: key-auth
+        config:
+          hide_credentials: false
+      - name: request-transformer
+        config:
+          add:
+            headers:
+              - "Authorization: $LUA_AUTH_EXPR"
+          replace:
+            headers:
+              - "Authorization: $LUA_AUTH_EXPR"
+      - name: acl
+        config:
+          hide_groups_header: true
+          allow:
+            - admin
+            - anon
+      - name: rate-limiting
+        config:
+          # The floor, not the defence. Real anti-abuse work — velocity,
+          # honeypot, timing, risk scoring — belongs in the Postgres engine
+          # that can run in observe mode; this plugin only ever blocks, so
+          # its budget sits far above any legitimate burst. A household or
+          # an office behind one NAT address must never reach it.
+          minute: 10
+          hour: 40
+          limit_by: ip
+          policy: local
+          fault_tolerant: true
+          hide_client_headers: true
+
   ## OpenAPI root - admin only
   - name: rest-v1-openapi
     _comment: 'PostgREST OpenAPI root: /rest/v1/ -> <http://rest:3000/> (admin only). See <https://github.com/orgs/supabase/discussions/42949>'
