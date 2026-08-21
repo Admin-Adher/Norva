@@ -237,62 +237,81 @@ test('Kong applies bounded IP burst limits on exact POST routes before the gener
   assert.match(
     kongSource,
     /^_format_version: '3\.0'/,
-    'Kong 3 declarative format is required for ~/ regex route paths',
+    'Kong 3 declarative format is required for expression-based routes',
   );
   assert.match(
     hetznerComposeSource,
     /KONG_PLUGINS:[^\n]*request-size-limiting[^\n]*rate-limiting/,
     'every declarative plugin used by the Partners routes is enabled in Kong',
   );
-  const genericAt = kongSource.indexOf('\n  - name: functions-v1\n');
-  assert.ok(genericAt > 0);
+  // Position in this file no longer decides precedence. Under
+  // KONG_ROUTER_FLAVOR: expressions regex_priority is ignored, the generic
+  // /functions/v1/ route was winning, and these seven ceilings never ran: 34
+  // consecutive POSTs to the credit-quote route drew no 429 and no RateLimit
+  // header at all. An explicit priority is what makes them apply, and a real
+  // 429 is what proves it — each of the seven was verified against the live
+  // gateway, so this test guards a contract that has actually been observed
+  // rather than one that merely reads correctly.
+  assert.match(kongSource, /^  - name: functions-v1$/m, 'the generic route still exists');
   for (const spec of [
     {
       name: 'functions-v1-partners-membership-join-write',
-      path: '~/functions/v1/norva-partners/join$',
+      path: '/functions/v1/norva-partners/join',
       upstream: 'http://edge-functions-pool/norva-partners/join',
     },
     {
       name: 'functions-v1-partners-link-rotation-write',
-      path: '~/functions/v1/norva-partners/links$',
+      path: '/functions/v1/norva-partners/links',
       upstream: 'http://edge-functions-pool/norva-partners/links',
     },
     {
       name: 'functions-v1-partners-payout-country-write',
-      path: '~/functions/v1/norva-partners/payout-country$',
+      path: '/functions/v1/norva-partners/payout-country',
       upstream: 'http://edge-functions-pool/norva-partners/payout-country',
     },
     {
       name: 'functions-v1-partners-access-credit-quote-write',
-      path: '~/functions/v1/norva-partners/credit/quotes$',
+      path: '/functions/v1/norva-partners/credit/quotes',
       upstream: 'http://edge-functions-pool/norva-partners/credit/quotes',
     },
     {
       name: 'functions-v1-partners-access-credit-redeem-write',
-      path: '~/functions/v1/norva-partners/credit/redemptions$',
+      path: '/functions/v1/norva-partners/credit/redemptions',
       upstream: 'http://edge-functions-pool/norva-partners/credit/redemptions',
     },
     {
       name: 'functions-v1-partners-fiscal-profile-write',
-      path: '~/functions/v1/norva-partners/fiscal-profile$',
+      path: '/functions/v1/norva-partners/fiscal-profile',
       upstream: 'http://edge-functions-pool/norva-partners/fiscal-profile',
     },
     {
       name: 'functions-v1-partners-payout-onboarding-write',
-      path: '~/functions/v1/norva-partners/payout-onboarding$',
+      path: '/functions/v1/norva-partners/payout-onboarding',
       upstream: 'http://edge-functions-pool/norva-partners/payout-onboarding',
     },
   ]) {
     const start = kongSource.indexOf(`\n  - name: ${spec.name}\n`);
-    assert.ok(start > 0 && start < genericAt, spec.name);
+    assert.ok(start > 0, spec.name);
     const block = kongSource.slice(start, kongSource.indexOf('\n  - name:', start + 4));
+    // Comments are stripped before looking for what must be absent: the block
+    // explains in prose why regex_priority is inert, and matching that prose
+    // would only ever prove the prose exists.
+    const code = block.split('\n').filter((line) => !line.trimStart().startsWith('#')).join('\n');
     assert.match(block, new RegExp(`url: ${spec.upstream.replaceAll('/', '\\/')}`));
-    assert.ok(block.includes(`- '${spec.path}'`));
-    assert.match(block, /methods:\n\s+- POST/);
+    assert.ok(
+      code.includes(`expression: 'http.path == "${spec.path}" && http.method == "POST"'`),
+      `${spec.name} matches by expression, and http.path excludes the query string`,
+    );
+    assert.match(code, /priority: 1000/);
+    assert.doesNotMatch(code, /regex_priority/, 'inert under the expressions router');
+    assert.doesNotMatch(code, /methods:/, 'the method lives in the expression now');
     assert.match(block, /name: rate-limiting/);
     assert.match(block, /minute: 30/);
     assert.match(block, /hour: 240/);
     assert.match(block, /limit_by: ip/);
     assert.match(block, /policy: local/);
+    // A ceiling that publishes its budget and its remaining count tells an
+    // attacker exactly what rate to pace against.
+    assert.match(block, /hide_client_headers: true/);
   }
 });
