@@ -17,12 +17,17 @@
 --    hour (at most 60 rows summed), hour buckets serve everything longer (24
 --    rows for a day). Precision is one minute, read cost is bounded.
 --
--- 2. Salted hashes. A bare sha256 of an IPv4 address is not pseudonymisation,
---    it is an encoding: 2^32 candidates fall to a GPU in seconds, and the same
---    holds for any email in a breach corpus. The caller salts with a secret
---    held only in the environment, never in the database. Losing the salt makes
---    the history unreadable, which is the point — a copy of this table on its
---    own reveals no one.
+-- 2. Keyed digests, not hashes. A bare sha256 of an IPv4 address is not
+--    pseudonymisation, it is an encoding: 2^32 candidates fall to a GPU in
+--    seconds, and any email in a breach corpus falls faster. The subject is
+--    therefore run through HMAC-SHA256 under a secret held only in the
+--    environment — never in this database, never in a backup of it. HMAC rather
+--    than a salted hash because a keyed MAC is the standard construction for
+--    exactly this purpose, and because it leaves no length-extension surface.
+--    hash_version records which key produced a row, so the key can be rotated
+--    on a schedule: after a rotation the old counters simply stop matching,
+--    which is the intended effect. Someone holding only this table can recover
+--    nothing by dictionary attack.
 --
 -- Retention is short and enforced by velocity_prune, called from cron: 48 hours
 -- of minute buckets, 30 days of hour buckets. Nothing here needs to outlive the
@@ -36,22 +41,28 @@ create table if not exists abuse_private.velocity_buckets (
   dimension     text        not null,
   resolution    text        not null,
   subject_hash  text        not null,
+  -- Not part of the key: a different version yields a different digest, so rows
+  -- cannot collide across versions. It is here so a rotation is auditable and
+  -- so pruning can drop a retired generation deliberately.
+  hash_version  smallint    not null default 1,
   bucket_start  timestamptz not null,
   hits          integer     not null default 1,
   updated_at    timestamptz not null default now(),
   primary key (dimension, resolution, subject_hash, bucket_start),
   -- The list of dimensions is code, not configuration: adding one means
   -- teaching the engine to compute it. Thresholds are what stays tunable.
-  -- ip_subnet_48 exists because Norva serves real IPv6 traffic, where a /48 is
-  -- the meaningful unit rather than a /24.
+  -- ip_subnet_64 exists because Norva serves real IPv6 traffic. A /64 is one
+  -- LAN, i.e. one subscriber; a /48 can be a whole carrier region or business
+  -- and aggregating on it would make neighbours look like one abuser.
   constraint velocity_buckets_dimension check (
     dimension in (
-      'ip', 'ip_subnet_24', 'ip_subnet_48', 'asn',
+      'ip', 'ip_subnet_24', 'ip_subnet_64', 'asn',
       'email', 'device', 'user_agent'
     )
   ),
   constraint velocity_buckets_resolution check (resolution in ('minute', 'hour')),
   constraint velocity_buckets_hash check (subject_hash ~ '^[0-9a-f]{64}$'),
+  constraint velocity_buckets_hash_version check (hash_version between 1 and 32767),
   constraint velocity_buckets_hits check (hits between 1 and 1000000000)
 );
 
@@ -87,6 +98,7 @@ declare
   v_entry      jsonb;
   v_dimension  text;
   v_hash       text;
+  v_version    smallint;
   v_windows    jsonb;
   v_seconds    integer;
   v_counts     jsonb;
@@ -106,6 +118,7 @@ begin
   for v_entry in select value from jsonb_array_elements(p_entries) loop
     v_dimension := v_entry->>'dimension';
     v_hash      := v_entry->>'subject_hash';
+    v_version   := coalesce((v_entry->>'hash_version')::smallint, 1);
     v_windows   := coalesce(v_entry->'windows_seconds', '[]'::jsonb);
 
     if v_dimension is null or v_hash is null then
@@ -116,14 +129,14 @@ begin
     -- single atomic write, so a hundred simultaneous signups increment a
     -- hundred times: no read-modify-write, no lost update, no advisory lock.
     insert into abuse_private.velocity_buckets as b
-      (dimension, resolution, subject_hash, bucket_start, hits, updated_at)
-    values (v_dimension, 'minute', v_hash, v_minute, 1, v_now)
+      (dimension, resolution, subject_hash, hash_version, bucket_start, hits, updated_at)
+    values (v_dimension, 'minute', v_hash, v_version, v_minute, 1, v_now)
     on conflict (dimension, resolution, subject_hash, bucket_start)
     do update set hits = b.hits + 1, updated_at = v_now;
 
     insert into abuse_private.velocity_buckets as b
-      (dimension, resolution, subject_hash, bucket_start, hits, updated_at)
-    values (v_dimension, 'hour', v_hash, v_hour, 1, v_now)
+      (dimension, resolution, subject_hash, hash_version, bucket_start, hits, updated_at)
+    values (v_dimension, 'hour', v_hash, v_version, v_hour, 1, v_now)
     on conflict (dimension, resolution, subject_hash, bucket_start)
     do update set hits = b.hits + 1, updated_at = v_now;
 

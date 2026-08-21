@@ -7,12 +7,16 @@
 // deploying code.
 //
 // PSEUDONYMISATION. Callers pass raw subjects — an IP, an email, a device id —
-// and this module is the single place that hashes them. Nothing raw reaches the
-// database. The hash is SALTED from the environment, because a bare sha256 of an
-// IPv4 address is not pseudonymisation: 2^32 candidates fall to a GPU in
-// seconds, and an email in any breach corpus falls faster. With the salt held
-// only in NORVA_ABUSE_HASH_SALT, a copy of the table identifies no one. Losing
-// the salt makes the history unreadable, which is the intended trade.
+// and this module is the single place that turns them into identifiers. Nothing
+// raw reaches the database. The construction is HMAC-SHA256 under a secret key,
+// not a hash: a bare sha256 of an IPv4 address is an encoding rather than a
+// pseudonym, since 2^32 candidates fall to a GPU in seconds and any email in a
+// breach corpus falls faster. A keyed MAC is the standard answer to exactly
+// this, and it leaves no length-extension surface. The key lives only in the
+// environment; someone holding a copy of the table, or a backup of it, can
+// recover nothing by dictionary attack. HASH_VERSION travels with every row so
+// the key can be rotated on a schedule — after a rotation the old counters stop
+// matching, which is the point.
 //
 // SUBSTITUTABILITY. The interface is deliberately narrow — one method, subjects
 // in, counts out — so a Redis-backed implementation can take over one dimension
@@ -33,7 +37,7 @@ import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 export type VelocityDimension =
   | "ip"
   | "ip_subnet_24"
-  | "ip_subnet_48"
+  | "ip_subnet_64"
   | "asn"
   | "email"
   | "device"
@@ -64,34 +68,61 @@ export interface RiskVelocityStore {
 /** Matches the bounded fan-out enforced by the SQL function. */
 export const MAX_VELOCITY_ENTRIES = 16;
 
-const HASH_SALT = Deno.env.get("NORVA_ABUSE_HASH_SALT") ?? "";
+/** Bump on key rotation. Stored per row so a retired generation is prunable. */
+export const HASH_VERSION = 1;
+
+// NORVA_ABUSE_HASH_KEY is the name going forward; NORVA_ABUSE_HASH_SALT is
+// accepted because it is already deployed, and the value serves either way.
+const HASH_KEY = Deno.env.get("NORVA_ABUSE_HASH_KEY")
+  ?? Deno.env.get("NORVA_ABUSE_HASH_SALT")
+  ?? "";
 
 export function velocityHashingConfigured(): boolean {
-  // A short salt is worse than an obvious absence, because it looks configured.
-  return HASH_SALT.length >= 32;
+  // A short key is worse than an obvious absence, because it looks configured.
+  return HASH_KEY.length >= 32;
+}
+
+// Importing the key per call would cost a few hundred microseconds on the signup
+// path for no reason. Imported once, lazily, so a missing key still throws from
+// hashSubject rather than at module load.
+let macKey: Promise<CryptoKey> | null = null;
+function hmacKey(): Promise<CryptoKey> {
+  if (!macKey) {
+    macKey = crypto.subtle.importKey(
+      "raw",
+      new TextEncoder().encode(HASH_KEY),
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["sign"],
+    );
+  }
+  return macKey;
 }
 
 /**
- * Salted, normalised subject hash. Normalisation matters as much as the salt:
- * "User@Example.COM " and "user@example.com" are one person, and counting them
- * as two is how an email-rotation limit gets bypassed for free.
+ * Keyed, normalised subject identifier. Normalisation matters as much as the
+ * key: "User@Example.COM " and "user@example.com" are one person, and counting
+ * them as two is how an email-rotation limit gets bypassed for free.
  */
 export async function hashSubject(
   dimension: VelocityDimension,
   subject: string,
 ): Promise<string> {
   if (!velocityHashingConfigured()) {
-    throw new Error("velocity_salt_missing");
+    throw new Error("velocity_key_missing");
   }
   const normalised = dimension === "email"
     ? subject.trim().toLowerCase()
     : subject.trim();
   if (!normalised) throw new Error("velocity_subject_empty");
-  // The dimension is part of the input so the same address cannot be correlated
-  // across dimensions by comparing hashes.
-  const bytes = new TextEncoder().encode(`${HASH_SALT}:${dimension}:${normalised}`);
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
-  return Array.from(new Uint8Array(digest))
+  // Version and dimension are inside the MAC input: the same address cannot be
+  // correlated across dimensions by comparing identifiers, and a rotation
+  // changes every identifier it produces.
+  const message = new TextEncoder().encode(
+    `${HASH_VERSION}:${dimension}:${normalised}`,
+  );
+  const mac = await crypto.subtle.sign("HMAC", await hmacKey(), message);
+  return Array.from(new Uint8Array(mac))
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
 }
@@ -126,6 +157,7 @@ export function createPostgresVelocityStore(db: SupabaseClient): RiskVelocitySto
         entries.push({
           dimension: query.dimension,
           subject_hash: subjectHash,
+          hash_version: HASH_VERSION,
           windows_seconds: windows,
         });
       }

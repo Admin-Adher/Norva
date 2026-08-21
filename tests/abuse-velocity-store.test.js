@@ -56,9 +56,16 @@ test('a subject is salted and scoped to its dimension before it is stored', asyn
   assert.match(hashed, /^[0-9a-f]{64}$/);
 
   // A bare sha256 of an IPv4 is reversible by brute force in seconds, so it is
-  // an encoding rather than pseudonymisation. The stored value must not be one.
+  // an encoding rather than pseudonymisation. The stored value must not be one,
+  // and must not be a merely salted digest either: the construction is a keyed
+  // MAC, which this reproduces byte for byte.
   const bare = nodeCrypto.createHash('sha256').update(ip).digest('hex');
   assert.notEqual(hashed, bare);
+  const salted = nodeCrypto.createHash('sha256').update(`${SALT}:ip:${ip}`).digest('hex');
+  assert.notEqual(hashed, salted, 'a salted hash is not an HMAC');
+  const { HASH_VERSION } = await loading;
+  const mac = nodeCrypto.createHmac('sha256', SALT).update(`${HASH_VERSION}:ip:${ip}`).digest('hex');
+  assert.equal(hashed, mac, 'HMAC-SHA256 over version:dimension:subject');
 
   // The same address in two dimensions must not be correlatable by comparing
   // hashes, or the /24 counter leaks which exact address it came from.
