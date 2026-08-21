@@ -138,8 +138,17 @@ sudo journalctl -u norva-basebackup.service -n 20 --no-pager
   box a besoin de ~2x la taille de la base en disque libre. C'est **cette exigence**
   qui pose le plafond de capacite : ~20 M de titres avec staging, ~31 M en flux.
   En `true`, `pg_basebackup -D - | rclone rcat` supprime la copie locale.
-  L'artefact est identique (`base.tar.gz`, WAL de consistance embarque) donc
-  `RESTORE.md` est inchange. Contrepartie : un flux **ne se rejoue pas** — une
+  L'artefact est equivalent (`base.tar.gz`, WAL de consistance embarque) donc
+  `RESTORE.md` est inchange. **Une seule difference, verifiee le 2026-08-21** : en
+  mode stage `backup_manifest` est un fichier a cote du tar, en mode flux il est
+  *dans* le tar (un seul flux de sortie possible). Rien n'est perdu — il faut juste
+  l'extraire pour s'en servir. Ce qui donne la validation la moins couteuse d'un
+  artefact streame, sans monter d'instance :
+
+  ```bash
+  r2 cat r2:$R2_BUCKET/selfhost/base/<stamp>/base.tar.gz | sudo tar -xzf - -C /var/lib/norva/verify
+  docker run --rm -v /var/lib/norva/verify:/data $PG_IMAGE pg_verifybackup /data
+  ``` Contrepartie : un flux **ne se rejoue pas** — une
   coupure reseau perd le run, le suivant le rattrape. Un flux interrompu laisse un
   objet tronque que `rcat` signale comme reussi : le script verifie donc le code de
   chaque etage du pipe puis un plancher de taille, et purge l'objet partiel.
