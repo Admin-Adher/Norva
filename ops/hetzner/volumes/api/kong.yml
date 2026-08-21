@@ -439,11 +439,15 @@ services:
     routes:
       - name: functions-v1-partners-access-credit-quote-write
         strip_path: true
-        regex_priority: 100
-        methods:
-          - POST
-        paths:
-          - '~/functions/v1/norva-partners/credit/quotes$'
+        # KONG_ROUTER_FLAVOR is `expressions`, which ignores regex_priority: the
+        # catch-all /functions/v1/ route was winning and this rate limit never
+        # ran. Measured, not guessed: 34 consecutive POSTs here drew no 429 and
+        # no RateLimit header at all. An explicit expression + priority is the
+        # only deterministic form under that router, and rest-v1-openapi-root
+        # already uses it in this file. Proven on this near-zero-traffic beta
+        # endpoint first, before the same shape goes near /auth/v1/*.
+        priority: 1000
+        expression: 'http.path == "/functions/v1/norva-partners/credit/quotes" && http.method == "POST"'
     plugins:
       - name: cors
       - name: rate-limiting
@@ -453,6 +457,10 @@ services:
           limit_by: ip
           policy: local
           fault_tolerant: true
+          # Left visible only while the 429 test runs, so the counters prove the
+          # plugin is actually bound to this route. Flips to true when the shape
+          # rolls out to the six siblings and to the auth classes: a limit that
+          # announces itself tells an attacker exactly what to pace against.
           hide_client_headers: false
 
   - name: functions-v1-partners-access-credit-redeem-write
