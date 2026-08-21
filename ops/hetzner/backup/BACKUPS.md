@@ -80,6 +80,7 @@ sudo journalctl -u norva-basebackup.service -n 20 --no-pager
 | WAL → R2 | toutes les 5 min | `norva-wal-sync` |
 | Base backup → R2 | 04:10 UTC | `norva-basebackup` |
 | Rétention WAL sur R2 | 02:20 UTC | `norva-wal-prune-r2` |
+| Veille capacité + débit WAL | 06:40 UTC | `norva-capacity-check` |
 
 - État : `systemctl list-timers 'norva-*'` · logs : `journalctl -u <unité> -n 30`.
 - **Réplication pg_hba** : `pg_basebackup` a besoin d'une règle `host replication …` dans le
@@ -110,5 +111,20 @@ sudo journalctl -u norva-basebackup.service -n 20 --no-pager
   `X-Amz-Meta-Mtime` : sur un préfixe de ~8k segments c'est ~8k opérations classe B
   par passage. D'où `--use-server-modtime` dans `wal-prune-r2.sh` et `--no-traverse`
   dans `wal-sync.sh`. Ces deux flags valent 15 M d'opérations classe B par mois.
+- **Veille capacité (`capacity-check.sh`).** Trois seuils, réglables dans
+  `/etc/norva-backup.env` : débit de WAL (GiB/jour, calculé sur le delta de
+  `pg_current_wal_lsn()` depuis la veille), coût par utilisateur porteur de
+  catalogue, et place disque face aux 2x que réclame le staging du base backup.
+  Dépassement → message Telegram (même bot que Netdata, identifiants lus dans le
+  `.env` de la stack) **et** sortie non nulle, donc unité en `failed`. Le premier
+  run ne fait qu'amorcer son fichier d'état et reste muet.
+- **Ce que la veille ne couvre pas encore.** Rien ne surveille l'échec des unités
+  elles-mêmes : si `norva-backup-nightly` échoue, aucune alerte ne part. Le
+  `go.d` de Netdata n'a pas de collecteur `systemdunits`. À ajouter.
+- **Réindexation.** `cloud_titles` tourne à ~14 % de HOT, donc chaque mise à jour
+  non-HOT ajoute une entrée dans **tous** ses index : le ballonnement revient en
+  régime permanent. Audit 2026-08-21 : un seul index était ballonné à 69 %
+  (199 → 62 MB), et un `REINDEX TABLE CONCURRENTLY` sur les quatre grosses tables
+  a rendu 1,1 GB sur 6,8. À refaire mensuellement.
 - **Drill trimestriel** : dérouler `RESTORE.md` (les deux sections) sur la box ou
   une machine jetable. Un backup non testé n'existe pas.
