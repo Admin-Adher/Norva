@@ -28,6 +28,11 @@ source "$HERE/lib.sh"
 STATE="${CAPACITY_STATE_FILE:-/var/lib/norva/capacity-check.state}"
 WAL_WARN_GIB="${CAPACITY_WAL_WARN_GIB:-15}"
 USER_WARN_MIB="${CAPACITY_USER_WARN_MIB:-1200}"
+# Marginal cost of one catalogue title across the per-user cloud_* tables.
+# 5719 bytes at 2026-08-21 after the reindex pass; it was 7138 before it, so
+# this doubles as the "time to REINDEX" signal. The canonical catalog_* layer
+# is fixed overhead and is deliberately excluded — it saturates, titles do not.
+TITLE_WARN_BYTES="${CAPACITY_TITLE_WARN_BYTES:-7000}"
 DISK_WARN_PCT="${CAPACITY_DISK_WARN_PCT:-70}"
 
 q() { docker exec "$DB_CONTAINER" psql -U postgres -Atc "$1"; }
@@ -78,6 +83,8 @@ USERS="$(q 'select greatest(count(distinct user_id),1) from public.cloud_titles;
 CLOUD_BYTES="$(q "select coalesce(sum(pg_total_relation_size(c.oid)),0) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relkind='r' and c.relname like 'cloud%';")"
 PER_USER_MIB="$(awk -v b="$CLOUD_BYTES" -v u="$USERS" 'BEGIN{printf "%.0f", b/1048576/u}')"
 DB_GIB="$(awk -v b="$DB_BYTES" 'BEGIN{printf "%.2f", b/1073741824}')"
+TITLES="$(q 'select greatest(count(*),1) from public.cloud_titles;')"
+BYTES_PER_TITLE="$(awk -v b="$CLOUD_BYTES" -v t="$TITLES" 'BEGIN{printf "%.0f", b/t}')"
 
 # ---- 3. disk headroom for the base backup staging ---------------------------
 AVAIL_BYTES="$(df --output=avail -B1 / | tail -1 | tr -d ' ')"
@@ -88,6 +95,7 @@ NEEDED_GIB="$(awk -v b="$NEEDED_BYTES" 'BEGIN{printf "%.1f", b/1073741824}')"
 
 log "WAL $WAL_LINE"
 log "db ${DB_GIB} GiB · ${USERS} users avec catalogue · ${PER_USER_MIB} MiB/user"
+log "catalogue ${TITLES} titres · ${BYTES_PER_TITLE} o/titre (seuil ${TITLE_WARN_BYTES})"
 log "disk ${USE_PCT}% used · ${AVAIL_GIB} GiB free · base backup needs ${NEEDED_GIB} GiB"
 
 # ---- verdict ----------------------------------------------------------------
@@ -95,8 +103,8 @@ ALERTS=()
 if [ -n "$WAL_GIB_DAY" ] && awk -v v="$WAL_GIB_DAY" -v t="$WAL_WARN_GIB" 'BEGIN{exit !(v>t)}'; then
   ALERTS+=("WAL ${WAL_GIB_DAY} GiB/jour depasse le seuil de ${WAL_WARN_GIB}. Verifier checkpoint_timeout, pg_stat_checkpointer et wal_fpi dans pg_stat_statements avant de toucher a KEEP_WAL_DAYS.")
 fi
-if [ "$PER_USER_MIB" -gt "$USER_WARN_MIB" ]; then
-  ALERTS+=("Cout par utilisateur ${PER_USER_MIB} MiB (seuil ${USER_WARN_MIB}). Ballonnement d'index probable — REINDEX TABLE CONCURRENTLY sur cloud_titles, cloud_media_items, cloud_title_variants, catalog_titles.")
+if [ "$BYTES_PER_TITLE" -gt "$TITLE_WARN_BYTES" ]; then
+  ALERTS+=("Cout ${BYTES_PER_TITLE} octets par titre (seuil ${TITLE_WARN_BYTES}). Ballonnement d'index probable — REINDEX TABLE CONCURRENTLY sur cloud_titles, cloud_media_items, cloud_title_variants, catalog_titles.")
 fi
 if [ "$AVAIL_BYTES" -lt "$NEEDED_BYTES" ]; then
   ALERTS+=("Disque insuffisant pour le base backup: ${AVAIL_GIB} GiB libres, ${NEEDED_GIB} GiB necessaires (staging = 2x la base). Le prochain norva-basebackup echouera.")

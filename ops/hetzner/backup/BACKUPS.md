@@ -118,6 +118,13 @@ sudo journalctl -u norva-basebackup.service -n 20 --no-pager
   Dépassement → message Telegram (même bot que Netdata, identifiants lus dans le
   `.env` de la stack) **et** sortie non nulle, donc unité en `failed`. Le premier
   run ne fait qu'amorcer son fichier d'état et reste muet.
+- **La bonne unite de capacite, c'est le titre.** Audit 2026-08-21 : 777 160 titres
+  pour 4 238 MB de tables `cloud_*`, soit ~5 719 octets par titre. Le nombre
+  d'utilisateurs ne dit rien — un seul compte portait 523 050 titres (67 % du
+  total) et 11 inscrits sur 16 n'avaient importe aucun catalogue. La couche
+  `catalog_*` (1,1 GB) est un cout fixe qui sature : ne pas l'inclure dans le
+  cout marginal. Plafond de la box : ~31 M de titres avec un base backup en flux,
+  ~20 M avec le staging local actuel.
 - **Ce que la veille ne couvre pas encore.** Rien ne surveille l'échec des unités
   elles-mêmes : si `norva-backup-nightly` échoue, aucune alerte ne part. Le
   `go.d` de Netdata n'a pas de collecteur `systemdunits`. À ajouter.
