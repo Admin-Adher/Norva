@@ -13,6 +13,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { sendTelegram, tgEscape } from "../_shared/telegram.ts";
 import { sendFcmPush, fcmConfigured } from "../_shared/fcm.ts";
+import { classifyOpsSourceError, SILENT_OPS_SOURCE_ERROR_KINDS } from "../_shared/source-sync-error.mjs";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -240,23 +241,6 @@ const ALERT_COOLDOWN_MS = 6 * 3600 * 1000;
 const FLAPPY_ALERT_KEYS = new Set(["sources_error", "sources_incomplete"]);
 const SOURCE_ERROR_INACTIVE_MS = 14 * 24 * 3600 * 1000;
 
-function classifyOpsSourceError(text: string): "expired" | "auth" | "busy" | "infra" | "unknown" {
-  const error = String(text || "").toLowerCase();
-  if (/\b(458|user_multi_ip|account[_\s-]*shar|account[_\s-]*busy|already in use|max(?:imum)?[_\s-]*conn|slot[_\s-]*busy)\b/.test(error)) {
-    return "busy";
-  }
-  if (/\b(expired|expire|inactive|disabled|banned|subscription|renew|unpaid|trial ended)\b/.test(error)) {
-    return "expired";
-  }
-  if (/\b(401|403|unauthorized|forbidden|credential|invalid user|invalid pass|auth[_\s-]*fail)\b/.test(error)) {
-    return "auth";
-  }
-  if (/\b(media gateway|gateway refused|502|503|504|timeout|timed out|econn|unreachable)\b/.test(error)) {
-    return "infra";
-  }
-  return "unknown";
-}
-
 function sourceErrorText(source: JsonRecord): string {
   const hint = source.config_hint && typeof source.config_hint === "object" && !Array.isArray(source.config_hint)
     ? source.config_hint as JsonRecord
@@ -298,7 +282,7 @@ async function collectOpsSourceErrors(): Promise<{ count: number; detail: string
     const lastMs = signedIn ? Date.parse(signedIn) : NaN;
     const active = Number.isFinite(lastMs) && (Date.now() - lastMs) < SOURCE_ERROR_INACTIVE_MS;
     const kind = classifyOpsSourceError(sourceErrorText(row));
-    if (!active || kind === "expired" || kind === "auth" || kind === "busy") continue;
+    if (!active || SILENT_OPS_SOURCE_ERROR_KINDS.has(kind)) continue;
     const name = String(row.display_name || "source");
     worthy.push(`${name} (${kind})`);
   }

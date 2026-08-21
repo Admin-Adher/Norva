@@ -71,9 +71,12 @@ test('ops email is explicit, singular, validated and never discovered from Auth/
 });
 
 test('source-error Telegram ignores expired, busy and inactive accounts', () => {
-  assert.match(admin, /function classifyOpsSourceError/);
+  // The classifier and its suppression set moved to _shared/source-sync-error.mjs
+  // (2026-08-21) so they sit beside the formatter that feeds them and are covered
+  // end-to-end by tests/source-sync-error-classification.test.js.
+  assert.ok(admin.includes('import { classifyOpsSourceError, SILENT_OPS_SOURCE_ERROR_KINDS } from "../_shared/source-sync-error.mjs"'));
   assert.match(admin, /SOURCE_ERROR_INACTIVE_MS = 14 \* 24 \* 3600 \* 1000/);
-  assert.match(admin, /kind === "expired" \|\| kind === "auth" \|\| kind === "busy"/);
+  assert.ok(admin.includes('SILENT_OPS_SOURCE_ERROR_KINDS.has(kind)'));
   assert.match(admin, /async function collectOpsSourceErrors/);
   assert.match(admin, /const opsSourceErrors = await collectOpsSourceErrors\(\)/);
   assert.doesNotMatch(admin, /if \(Number\(ov\.sources_error\) > 0\) problems\.push/);

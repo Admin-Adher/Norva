@@ -1,6 +1,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { playbackTransportExpiresAt } from "../_shared/playback-expiry.mjs";
+import { formatSourceSyncError } from "../_shared/source-sync-error.mjs";
 import {
   buildLiveMaterializationPlan,
   clearLiveMaterialization,
@@ -1880,7 +1881,7 @@ async function syncCloudSource(sourceId: string, userId: string, db: SupabaseCli
       .eq("id", sourceId)
       .eq("user_id", userId);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Source sync failed";
+    const message = formatSourceSyncError(error, "Source sync failed");
     console.error("[norva-cloud] source sync failed", sourceId, message);
     const failedAt = new Date().toISOString();
     await db
@@ -2148,7 +2149,7 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
 
     return { sourceId, status: "ready", ...result };
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Source finalization failed";
+    const message = formatSourceSyncError(error, "Source finalization failed");
     const failedAt = new Date().toISOString();
     await db
       .from("cloud_sources")

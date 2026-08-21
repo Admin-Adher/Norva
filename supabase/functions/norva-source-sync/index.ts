@@ -11,6 +11,7 @@ import {
 } from "../_shared/live-materialization.ts";
 import { refreshVodTitleProjection, validateTmdbCandidate, searchTmdbMatch } from "../_shared/vod-title-projection.ts";
 import { backfillProviderOverviews } from "../_shared/provider-overview-backfill.ts";
+import { formatSourceSyncError } from "../_shared/source-sync-error.mjs";
 import type { LiveCatalogItem } from "../_shared/live-catalog.ts";
 import { getEntitlementDecision, planFeatureEntitled, realPlanCode } from "../_shared/entitlements.ts";
 import { driveXtreamSyncToReady, freshSyncCursor, detectXtreamChange, enqueueImportNotification } from "../_shared/xtream-sync.ts";
@@ -529,7 +530,7 @@ async function syncCloudSource(sourceId: string, userId: string, db: SupabaseCli
     await maybeRecordContentEvent(db, userId, sourceId, previousSignature, resultRecord);
     return { sourceId, status: "ready", ...result };
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Source sync failed";
+    const message = formatSourceSyncError(error, "Source sync failed");
     await db
       .from("cloud_sources")
       .update({
@@ -2354,7 +2355,7 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
 
     return { sourceId, status: "ready", ...result };
   } catch (error) {
-    const message = error instanceof Error ? error.message : (String(error) || "Source finalization failed");
+    const message = formatSourceSyncError(error, "Source finalization failed");
     // Default to RESUMABLE: the titles grind is long and a mid-finalize source has a lot
     // built (cursor + tens of thousands of variants). Keep it "syncing" for ANY non-terminal
     // failure — a statement timeout, a deadlock, an isolate torn down mid-batch, or an
