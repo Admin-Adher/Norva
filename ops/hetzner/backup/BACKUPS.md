@@ -81,6 +81,7 @@ sudo journalctl -u norva-basebackup.service -n 20 --no-pager
 | Base backup → R2 | 04:10 UTC | `norva-basebackup` |
 | Rétention WAL sur R2 | 02:20 UTC | `norva-wal-prune-r2` |
 | Veille capacité + débit WAL | 06:40 UTC | `norva-capacity-check` |
+| Réindexation | 1er du mois, 01:00 UTC | `norva-reindex` |
 
 - État : `systemctl list-timers 'norva-*'` · logs : `journalctl -u <unité> -n 30`.
 - **Réplication pg_hba** : `pg_basebackup` a besoin d'une règle `host replication …` dans le
@@ -125,14 +126,24 @@ sudo journalctl -u norva-basebackup.service -n 20 --no-pager
   `catalog_*` (1,1 GB) est un cout fixe qui sature : ne pas l'inclure dans le
   cout marginal. Plafond de la box : ~31 M de titres avec un base backup en flux,
   ~20 M avec le staging local actuel.
-- **Ce que la veille ne couvre pas encore.** Rien ne surveille l'échec des unités
-  elles-mêmes : si `norva-backup-nightly` échoue, aucune alerte ne part. Le
-  `go.d` de Netdata n'a pas de collecteur `systemdunits`. À ajouter.
+- **Santé des unités.** `capacity-check.sh` interroge systemd sur les quatre autres
+  unités (`Result` et ancienneté du dernier run) et alerte si l'une a échoué, n'a
+  jamais tourné, ou n'a pas tourné depuis trop longtemps. Seuils dans
+  `CAPACITY_UNIT_CHECKS`. C'est ce qui rend enfin vrai le commentaire de
+  `wal-sync.sh` (« non-zero so systemd marks the unit failed, visible in
+  monitoring ») : rien ne regardait, le `go.d` de Netdata n'ayant pas de
+  collecteur `systemdunits` et en ajouter un supposant d'ouvrir le D-Bus hôte
+  au conteneur.
 - **Réindexation.** `cloud_titles` tourne à ~14 % de HOT, donc chaque mise à jour
   non-HOT ajoute une entrée dans **tous** ses index : le ballonnement revient en
   régime permanent. Audit 2026-08-21 : un seul index était ballonné à 69 %
   (199 → 62 MB), et un `REINDEX TABLE CONCURRENTLY` sur les quatre grosses tables
-  a rendu 1,1 GB sur 6,8. À refaire mensuellement.
+  a rendu 1,1 GB sur 6,8. Automatisé : `norva-reindex.timer`, le 1er de chaque
+  mois. `REINDEX TABLE CONCURRENTLY` ne pose pas de verrou exclusif mais construit
+  le nouvel index à côté de l'ancien, donc il faut la place du plus gros index en
+  cours de reconstruction. Un échec laisse un index INVALID qui consomme les
+  écritures sans servir les lectures : le script sort en non-zéro et rappelle la
+  requête pour les débusquer.
 - **Base backup en flux (`BASEBACKUP_STREAM`).** Par defaut `false` : `pg_basebackup`
   ecrit une copie physique complete dans `BACKUP_STAGE_DIR` avant l'envoi, donc la
   box a besoin de ~2x la taille de la base en disque libre. C'est **cette exigence**

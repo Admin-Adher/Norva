@@ -98,6 +98,41 @@ log "db ${DB_GIB} GiB · ${USERS} users avec catalogue · ${PER_USER_MIB} MiB/us
 log "catalogue ${TITLES} titres · ${BYTES_PER_TITLE} o/titre (seuil ${TITLE_WARN_BYTES})"
 log "disk ${USE_PCT}% used · ${AVAIL_GIB} GiB free · base backup needs ${NEEDED_GIB} GiB"
 
+
+# ---- 4. the other backup units: failed, or silently not running --------------
+# Nothing watched these until now. wal-sync.sh has exited non-zero "so systemd
+# marks the unit failed (visible in monitoring)" since day one, but nothing was
+# actually looking: Netdata's go.d here has no systemdunits collector, and adding
+# one means granting the container host D-Bus. This script already runs daily as
+# root and already has a Telegram channel, so it asks systemd directly.
+# Format: "unit:max_hours_since_last_run".
+UNIT_CHECKS="${CAPACITY_UNIT_CHECKS:-norva-backup-nightly:36 norva-basebackup:36 norva-wal-prune-r2:36 norva-wal-sync:1}"
+UNIT_PROBLEMS=""
+for spec in $UNIT_CHECKS; do
+  u="${spec%%:*}"; max_h="${spec##*:}"
+  result="$(systemctl show "$u.service" -p Result --value 2>/dev/null || true)"
+  ts="$(systemctl show "$u.service" -p ExecMainExitTimestamp --value 2>/dev/null || true)"
+  if [ -n "$result" ] && [ "$result" != "success" ]; then
+    UNIT_PROBLEMS="$UNIT_PROBLEMS $u=$result"
+    continue
+  fi
+  # A unit that never ran is as bad as one that failed, and looks healthier.
+  if [ -z "$ts" ] || [ "$ts" = "n/a" ]; then
+    UNIT_PROBLEMS="$UNIT_PROBLEMS $u=jamais-execute"
+    continue
+  fi
+  ts_epoch="$(date -d "$ts" +%s 2>/dev/null || echo 0)"
+  if [ "$ts_epoch" -eq 0 ]; then
+    UNIT_PROBLEMS="$UNIT_PROBLEMS $u=date-illisible"
+    continue
+  fi
+  age_h=$(( (NOW_EPOCH - ts_epoch) / 3600 ))
+  if [ "$age_h" -gt "$max_h" ]; then
+    UNIT_PROBLEMS="$UNIT_PROBLEMS $u=${age_h}h-sans-run"
+  fi
+done
+log "unites:${UNIT_PROBLEMS:- toutes OK}"
+
 # ---- verdict ----------------------------------------------------------------
 ALERTS=()
 if [ -n "$WAL_GIB_DAY" ] && awk -v v="$WAL_GIB_DAY" -v t="$WAL_WARN_GIB" 'BEGIN{exit !(v>t)}'; then
@@ -105,6 +140,9 @@ if [ -n "$WAL_GIB_DAY" ] && awk -v v="$WAL_GIB_DAY" -v t="$WAL_WARN_GIB" 'BEGIN{
 fi
 if [ "$BYTES_PER_TITLE" -gt "$TITLE_WARN_BYTES" ]; then
   ALERTS+=("Cout ${BYTES_PER_TITLE} octets par titre (seuil ${TITLE_WARN_BYTES}). Ballonnement d'index probable — REINDEX TABLE CONCURRENTLY sur cloud_titles, cloud_media_items, cloud_title_variants, catalog_titles.")
+fi
+if [ -n "$UNIT_PROBLEMS" ]; then
+  ALERTS+=("Unites de backup en defaut:$UNIT_PROBLEMS. Diagnostic: systemctl status <unite>.service et journalctl -u <unite>.service -n 50.")
 fi
 if [ "$AVAIL_BYTES" -lt "$NEEDED_BYTES" ]; then
   ALERTS+=("Disque insuffisant pour le base backup: ${AVAIL_GIB} GiB libres, ${NEEDED_GIB} GiB necessaires (staging = 2x la base). Le prochain norva-basebackup echouera.")

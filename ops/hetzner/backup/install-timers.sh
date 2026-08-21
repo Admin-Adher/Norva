@@ -126,8 +126,30 @@ Persistent=true
 WantedBy=timers.target
 EOF
 
+write_unit norva-reindex.service <<EOF
+[Unit]
+Description=Norva monthly index bloat reclaim
+After=docker.service
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/bash $HERE/reindex-monthly.sh
+Nice=15
+IOSchedulingClass=idle
+EOF
+
+write_unit norva-reindex.timer <<'EOF'
+[Unit]
+Description=Monthly Norva REINDEX (1st, 01:00 UTC)
+[Timer]
+OnCalendar=*-*-01 01:00:00 UTC
+RandomizedDelaySec=900
+Persistent=true
+[Install]
+WantedBy=timers.target
+EOF
+
 echo ">> enabling timers"
 systemctl daemon-reload
-systemctl enable --now norva-backup-nightly.timer norva-wal-sync.timer norva-basebackup.timer norva-wal-prune-r2.timer norva-capacity-check.timer
+systemctl enable --now norva-backup-nightly.timer norva-wal-sync.timer norva-basebackup.timer norva-wal-prune-r2.timer norva-capacity-check.timer norva-reindex.timer
 systemctl list-timers 'norva-*' --no-pager
 echo ">> done. Manual runs: systemctl start norva-backup-nightly.service (etc.)"
