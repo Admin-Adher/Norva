@@ -66,3 +66,10 @@ ops/hetzner/**/*.bak
 *.age
 norva-db-*.tar.gz*
 norva-selfhost-*.tar.gz*
+
+# Generated Kong declarative config: scripts/00-generate-kong.sh substitutes the
+# real anon/service_role JWTs and the dashboard password into it. The committed
+# artefact is the template under ops/hetzner/volumes/api/, which holds only $VAR
+# placeholders. Left untracked AND unignored, one `git add -A` would have
+# published live database credentials into the repository.
+ops/hetzner/kong/
