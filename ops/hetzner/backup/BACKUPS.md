@@ -176,5 +176,49 @@ sudo journalctl -u norva-basebackup.service -n 20 --no-pager
   # 3) DEROULER RESTORE.md section 2 sur l'artefact streame -- obligatoire
   # 4) seulement alors : BASEBACKUP_STREAM=true dans /etc/norva-backup.env
   ```
+## Cible à ~100 imports : passer au physique incrémental (pgBackRest)
+
+> **Décision prise le 2026-08-21, à appliquer plus tard.** Écrite maintenant pour ne
+> pas refaire le raisonnement le jour où le seuil tombe. **Ne rien migrer avant.**
+
+Le facteur limitant de la box n'est ni le disque ni le coût R2, c'est de
+**réexpédier la base entière chaque nuit**. Mesures du 2026-08-21 : 5 719 octets par
+titre, 18 Mo/s d'upload vers R2, ~78 000 titres par import réaliste.
+
+| Imports | Base | Upload quotidien | Fenêtre |
+|---|---|---|---|
+| 5 (aujourd'hui) | 5,5 GB | 1,8 GB | 100 s |
+| 150 | 67 GB | 67 GB | ~1 h |
+| 400 | 178 GB | 178 GB | **2 h 45** |
+
+**Déclencheur : ~100 imports porteurs de catalogue**, soit ~40 GB de base.
+`capacity-check.sh` donne le compteur (titres, et coût par titre).
+
+**Cible : pgBackRest.** Full hebdomadaire + incrémental quotidien : l'upload
+quotidien tombe aux blocs modifiés, soit ~5-10 GB au lieu de 178. Support S3 natif
+vers R2, compression et upload parallèles, rétention et `pgbackrest verify`
+intégrés. Il remplace **trois** scripts : `basebackup-weekly.sh`, `wal-sync.sh` et
+`wal-prune-r2.sh` (via `archive_command = pgbackrest archive-push`).
+
+L'argument décisif est la **restauration** : `pgbackrest restore` reconstruit
+directement depuis S3 dans le répertoire cible. Le drill trimestriel n'a plus
+besoin des ~2x la taille de la base en local — ce qui, à 178 GB, l'empêcherait de
+tenir sur cette box. Le `pg_basebackup --incremental` natif de PG17 est plus
+élégant (zéro dépendance, on est déjà en 17.6) mais `pg_combinebackup` exige le full
+**et** tous les incrémentaux en local pour reconstruire : le problème du 2x revient,
+aggravé. À écarter pour cette raison précise.
+
+**Second poste : le dump logique nightly.** À 178 GB, `pg_dump` prend des heures
+pour ~22 GB. Le passer en **hebdomadaire** : le physique + WAL couvrent déjà le PITR
+à la minute, le dump n'existe que comme format portable et comme assurance contre
+une corruption du physique. Une fois par semaine remplit ces deux rôles.
+
+**À revalider après migration**, sans exception : un drill complet `RESTORE.md`
+sur un artefact pgBackRest, plus un test de restauration à un point dans le temps.
+On remplacerait trois scripts éprouvés par une configuration neuve.
+
+Plafond après migration : ~600 imports, borné par le disque et non plus par la
+fenêtre de backup. Au-delà, c'est un achat de matériel.
+
 - **Drill trimestriel** : dérouler `RESTORE.md` (les deux sections) sur la box ou
   une machine jetable. Un backup non testé n'existe pas.
