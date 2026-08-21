@@ -279,7 +279,12 @@
     nativeOfferRequests.delete(key);
     clearTimeout(entry.timer);
     if (data.status === 'success') entry.resolve(data);
-    else entry.reject(err(data.error || 'Google Play prices unavailable', data.status || 'error', data));
+    // The reason travels in `error`; `status` is the flat 'error' for every
+    // failure. Using status as the code is what reduced every native cause the
+    // APK reports — billing_not_configured, current_offering_unavailable, a
+    // stage timeout — to an unhelpful "(error)" on the paywall.
+    else entry.reject(err(data.error || 'Google Play prices unavailable',
+      String(data.error || data.status || 'error'), data));
   };
 
   function callNative(method, args, timeoutMs) {
@@ -366,10 +371,14 @@
     if (!nativeOfferPromisesByUser.has(uid)) {
       const promise = new Promise(function (resolve, reject) {
         const requestId = nextRequestId();
+        // Last resort only. The APK answers every catalog request itself —
+        // within 12 s from RevenueCat, 20 s from the bridge watchdog — so a
+        // reply that names its cause always beats this deadline, and a bare
+        // 'timeout' here now means the native side never spoke at all.
         const timer = setTimeout(function () {
           nativeOfferRequests.delete(requestId);
           reject(err('Google Play prices timed out', 'timeout'));
-        }, 20000);
+        }, 45000);
         nativeOfferRequests.set(requestId, {
           resolve: resolve, reject: reject, timer: timer, appUserId: uid
         });

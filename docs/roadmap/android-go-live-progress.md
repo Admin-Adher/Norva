@@ -376,3 +376,33 @@ seulement (interactions/plantages/ID) ; App access → instructions d'appairage 
        `markInvalidDeviceToken` redirige le shell TV vers `cloud-pair.html` dès
        qu'un token invalide est détecté (garde anti-boucle, UA `NorvaTV-AndroidTV`).
        → révoquer une session = la TV repart sur le QR automatiquement.
+
+- **2026-08-21** — **Prix Google Play « (timeout) » sur le mur d'abonnement — corrigé côté client.**
+  RevenueCat n'était **pas** en cause : offering `default` courant, 4 produits
+  **Published**, credentials Play valides, storefront `FR` résolu sur l'appareil,
+  clé SDK bien injectée (l'APK 1.3.7 / SDK natif 9.23.1 est vu par RevenueCat).
+  Le pont natif recevait bien la demande de catalogue et **ne répondait rien** :
+  la page attendait 20 s puis affichait `(timeout)`, sans aucune façon de
+  relancer. Quatre défauts réels :
+  1. `onPostMessage` **abandonnait la demande en silence** quand le chemin de la
+     page ne passait pas le contrôle — un abandon muet est indistinguable, pour la
+     page, d'un pont mort. Le contrôle vit maintenant dans
+     `withVerifiedBillingUser`, qui **répond** `untrusted_billing_context`.
+  2. `isTrustedBillingPage` ne connaissait pas `/subscription` (Pages sert les
+     documents **sans extension** et redirige `.html` dessus) → sur l'écran de
+     gestion, « Restore purchases » était muet lui aussi.
+  3. Une erreur native remontait à la page avec `code = status = "error"` : toutes
+     les causes réelles (`billing_not_configured`, `current_offering_unavailable`…)
+     s'affichaient en `(error)`. Le `code` porte désormais la cause.
+  4. Le watchdog du verrou global RevenueCat était à **6 min** pour une simple
+     lecture de catalogue → toute demande suivante repartait en
+     `billing_account_busy`. Catalogue 12 s, restore 30 s, achat 6 min (la feuille
+     Play est au rythme de l'utilisateur).
+  **Échelle de délais** (chaque étage répond avant que celui du dessus abandonne) :
+  vérification de session 5+5 s → watchdog catalogue RevenueCat 12 s → watchdog du
+  pont 20 s (restore 40 s) → délai de la page 45 s. Plus une **relance automatique**
+  unique sur cause transitoire et un **bouton « Retry Google Play prices »**.
+  Toute panne restante nomme son étage (`native_timeout_session`,
+  `native_timeout_offerings`) au lieu de dire « timeout ».
+  ⚠️ La moitié native n'atteint un appareil **qu'avec un nouveau build** :
+  phone **vc21 / 1.3.8**. Le correctif web part avec le déploiement Pages.

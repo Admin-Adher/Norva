@@ -425,6 +425,7 @@
         </div>
 
         <div class="row">
+          <button class="btn ghost" id="retry-prices" type="button" hidden>Retry Google Play prices</button>
           <button class="btn ghost" id="restore" type="button">Restore purchases</button>
           <a class="btn ghost" id="back" href="/app#home">Not now</a>
         </div>
@@ -441,7 +442,7 @@
   <script src="/js/navigation-safety.js?v=1"></script>
   <script src="/js/promo-ui.js?v=1"></script>
   <script src="/js/billing-config.js?v=8"></script>
-  <script src="/js/billing.js?v=17"></script>
+  <script src="/js/billing.js?v=18"></script>
   <script src="/js/plan-selection-ui.js?v=1"></script>
   <script>
     (function () {
@@ -455,6 +456,7 @@
         : 'subscribe_plans';
       const statusEl = document.getElementById('status');
       const restoreBtn = document.getElementById('restore');
+      const retryPricesBtn = document.getElementById('retry-prices');
       const backBtn = document.getElementById('back');
       let period = 'monthly';
       let trialEligible = true;
@@ -985,15 +987,24 @@
         b.addEventListener('click', function () { applyPeriod(b.dataset.period); });
       });
 
-      async function loadNativePrices() {
+      // Codes worth a second attempt: the store or the bridge was busy or slow,
+      // not misconfigured. A configuration failure ('native_catalog_empty',
+      // 'billing_not_configured', …) is reported at once instead of retried.
+      const RETRYABLE_NATIVE_ERRORS = /^(timeout|billing_timeout|billing_account_busy|native_timeout_)/;
+
+      async function loadNativePrices(options) {
         if (!nativeOffersRequired) return;
+        const opts = options || {};
         nativeOffersReady = false;
         nativeOffersError = '';
+        if (retryPricesBtn) retryPricesBtn.hidden = true;
+        document.documentElement.classList.add('native-prices-pending');
         refreshCtas();
         try {
           const uid = appUserId();
           if (!uid) throw new Error('native_user_required');
-          const catalog = await window.NorvaBilling.nativeOfferings(uid);
+          const catalog = await window.NorvaBilling.nativeOfferings(uid,
+            opts.refresh === true ? { refresh: true } : undefined);
           const currentOfferingId = String(catalog && catalog.currentOfferingId || '');
           if (!currentOfferingId || String(catalog.appUserId || '') !== uid) {
             throw new Error('invalid_current_offering');
@@ -1081,12 +1092,39 @@
           nativeCurrentOfferingId = '';
           nativeOfferByPackage = Object.create(null);
           nativeOffersError = String(error && (error.code || error.message) || 'unavailable');
+          // A slow first call is not a broken catalog: retry it once, asking
+          // for a fresh lookup, before telling the user the store failed.
+          if (!opts.isRetry && RETRYABLE_NATIVE_ERRORS.test(nativeOffersError)) {
+            return loadNativePrices({ refresh: true, isRetry: true });
+          }
           document.documentElement.classList.remove('native-prices-pending');
           applyPeriod(period);
           const helper = document.getElementById('decision-helper');
           if (helper) helper.textContent = 'Google Play prices could not be loaded for this account.';
           setStatus('Current Google Play prices could not be loaded. Update Norva or check your connection, then retry. No purchase can start until the exact store price is available. (' + nativeOffersError + ')', true);
+          if (retryPricesBtn) retryPricesBtn.hidden = false;
         }
+      }
+
+      if (retryPricesBtn) {
+        retryPricesBtn.addEventListener('click', async function () {
+          retryPricesBtn.disabled = true;
+          const original = retryPricesBtn.textContent;
+          retryPricesBtn.textContent = 'Loading prices…';
+          setStatus('Asking Google Play for the current prices…', false);
+          try {
+            await loadNativePrices({ refresh: true });
+            if (nativeOffersReady) {
+              setStatus('Google Play prices loaded. Choose your plan to continue.', false);
+              // The offer only became real now, so this is when the exposure
+              // counts. The observer arms at most once, so boot cannot double it.
+              observePaywallExposure();
+            }
+          } finally {
+            retryPricesBtn.disabled = false;
+            retryPricesBtn.textContent = original;
+          }
+        });
       }
 
       async function buy(card, button) {

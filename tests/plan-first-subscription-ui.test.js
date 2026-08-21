@@ -74,5 +74,6 @@ test('the Android phone shell trusts the canonical extensionless plan URL', () =
 
   assert.match(helper, /"\/subscribe"\.equals\(path\)/);
   assert.match(helper, /"\/subscribe\.html"\.equals\(path\)/);
+  assert.match(helper, /"\/subscription"\.equals\(path\)/);
   assert.match(helper, /"\/subscription\.html"\.equals\(path\)/);
 });

@@ -57,7 +57,13 @@ final class NorvaBilling {
 
     private static final Object OPERATION_LOCK = new Object();
     private static final Handler OPERATION_HANDLER = new Handler(Looper.getMainLooper());
+    // A purchase is paced by the Play sheet, so it keeps the long watchdog.
     private static final long OPERATION_TIMEOUT_MS = 6L * 60L * 1000L;
+    // Reading the catalog or restoring is a network round trip, not a user
+    // interaction. These deadlines sit under the bridge watchdogs in
+    // MainActivity so the slot is always free again before the page retries.
+    private static final long CATALOG_TIMEOUT_MS = 12L * 1000L;
+    private static final long RESTORE_TIMEOUT_MS = 30L * 1000L;
     private static String operationUserId;
     private static long operationSequence;
     private static long activeOperationToken;
@@ -82,7 +88,7 @@ final class NorvaBilling {
     static void getOfferingsForUser(final String userId, final String requestId,
                                     final OfferingsCallback cb) {
         if (cb == null) return;
-        final long operationToken = beginOperation(userId, new Runnable() {
+        final long operationToken = beginOperation(userId, CATALOG_TIMEOUT_MS, new Runnable() {
             @Override
             public void run() {
                 cb.onResult(offeringsPayload(requestId, userId, "error", null,
@@ -151,7 +157,7 @@ final class NorvaBilling {
             cb.onResult("error", "invalid_purchase_request", null);
             return;
         }
-        final long operationToken = beginOperation(userId, new Runnable() {
+        final long operationToken = beginOperation(userId, OPERATION_TIMEOUT_MS, new Runnable() {
             @Override
             public void run() {
                 cb.onResult("error", "billing_timeout", null);
@@ -285,7 +291,7 @@ final class NorvaBilling {
 
     static void restoreForUser(final String userId, final ResultCallback cb) {
         if (cb == null) return;
-        final long operationToken = beginOperation(userId, new Runnable() {
+        final long operationToken = beginOperation(userId, RESTORE_TIMEOUT_MS, new Runnable() {
             @Override
             public void run() {
                 cb.onResult("error", "billing_timeout");
@@ -362,7 +368,8 @@ final class NorvaBilling {
         }
     }
 
-    private static long beginOperation(String userId, final Runnable onTimeout) {
+    private static long beginOperation(String userId, long timeoutMs,
+                                       final Runnable onTimeout) {
         if (!validUserId(userId)) return 0L;
         synchronized (OPERATION_LOCK) {
             // RevenueCat has one process-global account. Serialize every account-
@@ -379,7 +386,8 @@ final class NorvaBilling {
                     if (completeOperation(token) && onTimeout != null) onTimeout.run();
                 }
             };
-            OPERATION_HANDLER.postDelayed(activeOperationWatchdog, OPERATION_TIMEOUT_MS);
+            OPERATION_HANDLER.postDelayed(activeOperationWatchdog,
+                    timeoutMs > 0L ? timeoutMs : OPERATION_TIMEOUT_MS);
             return token;
         }
     }

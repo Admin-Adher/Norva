@@ -79,14 +79,14 @@ test('all changed funnel assets use fresh cache keys', () => {
   assert.match(appHtml, /PartnersPage\.js\?v=10/);
   assert.match(appHtml, /profiles\.js\?v=13/);
   assert.match(appHtml, /billing-config\.js\?v=8/);
-  assert.match(appHtml, /billing\.js\?v=17/);
+  assert.match(appHtml, /billing\.js\?v=18/);
   assert.match(appHtml, /HomePage\.js\?v=63/);
   assert.match(appHtml, /app\.js\?v=71baa0b2e4/);
   assert.match(appJs, /AdminPage\.js\?v=[0-9a-f]{10}/);
   assert.match(subscribe, /marketing\.js\?v=2/);
   assert.match(subscribe, /cloudApi\.js\?v=52/);
   assert.match(subscribe, /billing-config\.js\?v=8/);
-  assert.match(subscribe, /billing\.js\?v=17/);
+  assert.match(subscribe, /billing\.js\?v=18/);
 });
 
 test('trial recap states automatic conversion and links to plan management', () => {

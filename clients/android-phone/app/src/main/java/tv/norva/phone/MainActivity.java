@@ -104,6 +104,13 @@ public class MainActivity extends Activity {
     private static final String CLOUD_WATCH_URL = "https://norva.tv/app.html?mobile=1#home";
     private static final String SUPABASE_USER_URL = "https://api.norva.tv/auth/v1/user";
     private static final long BILLING_SESSION_CACHE_MS = 60_000L;
+    // Every layer of the billing path answers before the layer above it gives up:
+    // session verification (<= 11 s) -> NorvaBilling's catalog watchdog (12 s) ->
+    // these bridge watchdogs -> the paywall's 45 s deadline. A request that dies
+    // anywhere in between therefore reaches the page as a named reason instead of
+    // as an unexplained timeout.
+    private static final long BILLING_CATALOG_REQUEST_TIMEOUT_MS = 20_000L;
+    private static final long BILLING_RESTORE_REQUEST_TIMEOUT_MS = 40_000L;
     private static final int PARTNER_SHARE_PROTOCOL_VERSION =
             PartnersContract.SHARE_PROTOCOL_VERSION;
     private static final int MAX_PARTNER_SHARE_MESSAGE_CHARS =
@@ -129,6 +136,7 @@ public class MainActivity extends Activity {
     private String cachedBillingUserId;
     private String cachedBillingTokenHash;
     private long cachedBillingVerifiedAt;
+    private final Handler billingHandler = new Handler(Looper.getMainLooper());
     // Activity-scoped replay protection. The native share sheet has no reliable
     // cancellation result, so one request id is presented at most once. Returning
     // to the WebView can therefore never reopen a duplicate chooser.
@@ -1231,8 +1239,12 @@ public class MainActivity extends Activity {
         if (!isTrustedCloudUrl(value)) return false;
         try {
             String path = Uri.parse(value).getPath();
+            // Cloudflare Pages serves these documents extensionless and redirects
+            // the .html form onto it, so the URL the WebView settles on is the bare
+            // path. Both spellings are trusted, for both screens.
             return "/subscribe".equals(path)
                     || "/subscribe.html".equals(path)
+                    || "/subscription".equals(path)
                     || "/subscription.html".equals(path);
         } catch (Exception ignored) {
             return false;
@@ -1708,9 +1720,14 @@ public class MainActivity extends Activity {
                     public void onPostMessage(WebView view, WebMessageCompat message,
                                               Uri sourceOrigin, boolean isMainFrame,
                                               JavaScriptReplyProxy replyProxy) {
+                        // A hostile or nested frame is still dropped in silence.
+                        // The page-level check moved into withVerifiedBillingUser,
+                        // which ANSWERS untrusted_billing_context: silently dropping
+                        // a request that came from our own origin is what left the
+                        // paywall waiting for a reply that never arrived.
                         if (!isMainFrame || sourceOrigin == null
                                 || !isTrustedCloudUrl(sourceOrigin.toString())
-                                || view == null || !isTrustedBillingPage(view.getUrl())) return;
+                                || view == null) return;
                         dispatchBillingMessage(message == null ? null : message.getData());
                     }
                 });
@@ -1731,40 +1748,93 @@ public class MainActivity extends Activity {
             return;
         }
         final String claimedUserId = args.optString(0, "");
+        // The paywall refuses to sell until this request is answered, so every
+        // request gets exactly one answer: whichever of the real result and the
+        // watchdog below lands first. The watchdog names the stage the request died
+        // at, so a stuck bridge surfaces as a cause instead of a bare timeout.
+        // A purchase stays unwatched here: the Play sheet is paced by the user and
+        // NorvaBilling already guards it.
+        final AtomicBoolean answered = new AtomicBoolean(false);
+        final String[] stage = { "session" };
+        final Runnable expire = new Runnable() {
+            @Override
+            public void run() {
+                if (!answered.compareAndSet(false, true)) return;
+                sendBillingFailure(method, requestId, claimedUserId, "native_timeout_" + stage[0]);
+            }
+        };
+        if ("getOfferingsForUser".equals(method)) {
+            billingHandler.postDelayed(expire, BILLING_CATALOG_REQUEST_TIMEOUT_MS);
+        } else if ("restoreForUser".equals(method)) {
+            billingHandler.postDelayed(expire, BILLING_RESTORE_REQUEST_TIMEOUT_MS);
+        }
         withVerifiedBillingUser(claimedUserId, new VerifiedBillingUserCallback() {
             @Override
             public void onVerified(String verifiedUserId, String accessToken) {
                 if ("getOfferingsForUser".equals(method) && args.length() == 1) {
+                    stage[0] = "offerings";
                     NorvaBilling.getOfferingsForUser(verifiedUserId, requestId,
-                            payloadJson -> sendBillingOfferings(payloadJson));
+                            payloadJson -> {
+                                if (!answered.compareAndSet(false, true)) return;
+                                billingHandler.removeCallbacks(expire);
+                                sendBillingOfferings(payloadJson);
+                            });
                 } else if ("purchaseForUser".equals(method) && args.length() == 6) {
                     final String offeringId = args.optString(1, "");
                     final String packageId = args.optString(2, "");
                     final String productId = args.optString(3, "");
                     final String planCode = args.optString(4, "");
                     final String placement = args.optString(5, "");
+                    stage[0] = "purchase";
                     NorvaBilling.purchaseForUser(MainActivity.this, verifiedUserId, accessToken,
                             offeringId, packageId, productId, planCode, placement, requestId,
-                            (status, error, detailsJson) -> sendBillingResult(
-                                    requestId, status, planCode, error, detailsJson));
+                            (status, error, detailsJson) -> {
+                                if (!answered.compareAndSet(false, true)) return;
+                                billingHandler.removeCallbacks(expire);
+                                sendBillingResult(requestId, status, planCode, error, detailsJson);
+                            });
                 } else if ("restoreForUser".equals(method) && args.length() == 1) {
+                    stage[0] = "restore";
                     NorvaBilling.restoreForUser(verifiedUserId,
-                            (status, error) -> sendBillingResult(
-                                    requestId, status, null, error, null));
+                            (status, error) -> {
+                                if (!answered.compareAndSet(false, true)) return;
+                                billingHandler.removeCallbacks(expire);
+                                sendBillingResult(requestId, status, null, error, null);
+                            });
                 } else {
-                    sendBillingResult(requestId, "error", null, "invalid_billing_request", null);
+                    finishBillingRequest(answered, expire, method, requestId, claimedUserId,
+                            "invalid_billing_request");
                 }
             }
 
             @Override
             public void onError(String error) {
-                if ("getOfferingsForUser".equals(method)) {
-                    sendBillingOfferingsError(requestId, claimedUserId, error);
-                } else {
-                    sendBillingResult(requestId, "error", null, error, null);
-                }
+                finishBillingRequest(answered, expire, method, requestId, claimedUserId, error);
             }
         });
+    }
+
+    /** Settle a billing request once, cancelling its watchdog. */
+    private void finishBillingRequest(AtomicBoolean answered, Runnable expire, String method,
+                                      String requestId, String claimedUserId, String error) {
+        if (!answered.compareAndSet(false, true)) return;
+        billingHandler.removeCallbacks(expire);
+        sendBillingFailure(method, requestId, claimedUserId, error);
+    }
+
+    /**
+     * A catalog request waits on window.__norvaBilling.onOfferings, a purchase or a
+     * restore on onResult. Posting an error to the other channel is, for the page,
+     * indistinguishable from never answering — which is exactly how the paywall
+     * ended up showing "timeout" with no cause.
+     */
+    private void sendBillingFailure(String method, String requestId, String claimedUserId,
+                                    String error) {
+        if ("getOfferingsForUser".equals(method)) {
+            sendBillingOfferingsError(requestId, claimedUserId, error);
+        } else {
+            sendBillingResult(requestId, "error", null, error, null);
+        }
     }
 
     /**
@@ -1788,14 +1858,18 @@ public class MainActivity extends Activity {
                     callback.onError("untrusted_billing_context");
                     return;
                 }
-                webView.evaluateJavascript(
-                        "(function(){try{return localStorage.getItem('norva-cloud-session')||''}catch(e){return ''}})()",
-                        new ValueCallback<String>() {
-                            @Override
-                            public void onReceiveValue(String rawValue) {
-                                verifyBillingSessionValue(claimedUserId, rawValue, callback);
-                            }
-                        });
+                try {
+                    webView.evaluateJavascript(
+                            "(function(){try{return localStorage.getItem('norva-cloud-session')||''}catch(e){return ''}})()",
+                            new ValueCallback<String>() {
+                                @Override
+                                public void onReceiveValue(String rawValue) {
+                                    verifyBillingSessionValue(claimedUserId, rawValue, callback);
+                                }
+                            });
+                } catch (Throwable ignored) {
+                    callback.onError("billing_session_missing");
+                }
             }
         });
     }
@@ -1832,7 +1906,7 @@ public class MainActivity extends Activity {
             }
         }
 
-        ioPool.execute(new Runnable() {
+        final Runnable verify = new Runnable() {
             @Override
             public void run() {
                 HttpURLConnection connection = null;
@@ -1841,8 +1915,11 @@ public class MainActivity extends Activity {
                     connection = (HttpURLConnection) new URL(SUPABASE_USER_URL).openConnection();
                     connection.setRequestMethod("GET");
                     connection.setInstanceFollowRedirects(false);
-                    connection.setConnectTimeout(10_000);
-                    connection.setReadTimeout(10_000);
+                    // Halved from 10 s: this verification is only the first stage
+                    // of a billing request, and its worst case has to leave room
+                    // for RevenueCat's login and catalog calls inside the deadline.
+                    connection.setConnectTimeout(5_000);
+                    connection.setReadTimeout(5_000);
                     connection.setRequestProperty("Accept", "application/json");
                     connection.setRequestProperty("Authorization", "Bearer " + accessToken);
                     connection.setRequestProperty("apikey", BuildConfig.SUPABASE_PUBLISHABLE_KEY);
@@ -1882,7 +1959,12 @@ public class MainActivity extends Activity {
                     }
                 });
             }
-        });
+        };
+        try {
+            ioPool.execute(verify);
+        } catch (Throwable ignored) {
+            callback.onError("billing_session_verification_failed");
+        }
     }
 
     private static boolean validBillingUserId(String userId) {
