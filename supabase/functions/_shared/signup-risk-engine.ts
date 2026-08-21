@@ -82,8 +82,19 @@ export interface RiskAssessment {
   rawScore: number;
   riskScore: number;
   level: RiskLevel;
-  /** Every signal that fired, with the weight it actually contributed. */
-  contributions: Array<{ code: string; family: SignalFamily; weight: number; capped: boolean }>;
+  /**
+   * Every signal that fired. `requested` is what the catalogue asked for and
+   * `weight` is what the family cap allowed: reporting only the second makes a
+   * clipped signal indistinguishable from one that never fired, and "this cap is
+   * too tight" then becomes unarguable during calibration.
+   */
+  contributions: Array<{
+    code: string;
+    family: SignalFamily;
+    weight: number;
+    requested: number;
+    capped: boolean;
+  }>;
   /**
    * Distinct positive families involved. Logged from the first day even though
    * only enforcement will read it: honeypot plus a double-click is 85, yet both
@@ -125,7 +136,13 @@ export function assessSignupRisk(
 
     if (signal.weight < 0) {
       negative += signal.weight;
-      contributions.push({ ...signal, capped: false });
+      contributions.push({
+        code: signal.code,
+        family: signal.family,
+        weight: signal.weight,
+        requested: signal.weight,
+        capped: false,
+      });
       continue;
     }
 
@@ -138,6 +155,7 @@ export function assessSignupRisk(
       code: signal.code,
       family: signal.family,
       weight: applied,
+      requested: signal.weight,
       capped: applied < signal.weight,
     });
     // A capped-to-zero signal still proves its family was involved: the evidence
@@ -198,11 +216,23 @@ export const SIGNALS = {
     ({ code: "token_missing", family: "behaviour", weight: 35 }),
   tokenExpired: (): RiskSignal =>
     ({ code: "token_expired", family: "behaviour", weight: 10 }),
-  /** First replay floors at 40; each further one adds, so two reach HIGH. */
-  tokenReplay: (occurrence: number): RiskSignal =>
+  /**
+   * Same nonce, same intent: a double click, a network retry, a service worker.
+   * The first floors at 40, each further one adds, so two reach HIGH by
+   * arithmetic rather than by a special case.
+   */
+  idempotentRetry: (occurrence: number): RiskSignal =>
     occurrence <= 1
-      ? { code: "token_replay_first", family: "behaviour", weight: 40, floor: 40 }
-      : { code: "token_replay_repeat", family: "behaviour", weight: 25 },
+      ? { code: "idempotent_retry_first", family: "behaviour", weight: 40, floor: 40 }
+      : { code: "idempotent_retry_repeat", family: "behaviour", weight: 25 },
+  /**
+   * Same nonce, DIFFERENT intent: a token reused for another signup, which no
+   * ordinary client does. The weight is identical to a first retry for now, and
+   * deliberately so — the two are separated as codes today precisely so the data
+   * can say whether they should diverge, rather than an intuition saying it.
+   */
+  nonceIntentMismatch: (): RiskSignal =>
+    ({ code: "nonce_intent_mismatch", family: "behaviour", weight: 40, floor: 40 }),
   honeypot: (): RiskSignal =>
     ({ code: "honeypot_filled", family: "behaviour", weight: 45, floor: 45 }),
   submissionUnder1500ms: (): RiskSignal =>

@@ -34,7 +34,7 @@ test('a double click costs monitoring, never a refusal', async () => {
   const { assessSignupRisk, SIGNALS, tokenStateAllowsTiming } = await loading;
   // A replay is not proof of automation: a double click, a network retry or a
   // service worker all produce one.
-  const result = assessSignupRisk([SIGNALS.tokenReplay(1)]);
+  const result = assessSignupRisk([SIGNALS.idempotentRetry(1)]);
   assert.equal(result.riskScore, 40);
   assert.equal(result.level, 'MEDIUM');
   // And the timing must not be judged on a replay, or the same double click
@@ -45,7 +45,7 @@ test('a double click costs monitoring, never a refusal', async () => {
 test('replays escalate as they repeat', async () => {
   const { assessSignupRisk, SIGNALS } = await loading;
   const at = (n) => assessSignupRisk(
-    Array.from({ length: n }, (_, i) => SIGNALS.tokenReplay(i + 1)),
+    Array.from({ length: n }, (_, i) => SIGNALS.idempotentRetry(i + 1)),
   );
   assert.equal(at(1).level, 'MEDIUM');
   assert.equal(at(2).riskScore, 65);
@@ -86,7 +86,7 @@ test('no single signal reaches HIGH', async () => {
   const { assessSignupRisk, SIGNALS, LEVEL_THRESHOLDS } = await loading;
   const singles = [
     SIGNALS.tokenInvalid(), SIGNALS.honeypot(), SIGNALS.tokenMissing(),
-    SIGNALS.tokenReplay(1), SIGNALS.tokenExpired(),
+    SIGNALS.idempotentRetry(1), SIGNALS.nonceIntentMismatch(), SIGNALS.tokenExpired(),
     SIGNALS.submissionUnder1500ms(), SIGNALS.submissionUnder3000ms(),
     SIGNALS.velocityDevice(5), SIGNALS.velocityIp(5, 5), SIGNALS.velocitySubnet(8),
     SIGNALS.velocityEmailExact(3), SIGNALS.velocityMailbox(3),
@@ -186,7 +186,7 @@ test('families are recorded even when their budget is spent', async () => {
   const { assessSignupRisk, SIGNALS } = await loading;
   const result = assessSignupRisk([
     SIGNALS.honeypot(),
-    SIGNALS.tokenReplay(1),
+    SIGNALS.idempotentRetry(1),
   ]);
   // 85 is CRITICAL by score, but both signals are behavioural accidents that a
   // human can produce. The enforcement rule will require two independent
