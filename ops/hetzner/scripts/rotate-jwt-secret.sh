@@ -152,8 +152,12 @@ guc_value() {
     | sed 's/^app.settings.jwt_secret=//'
 }
 
-# Cherche un lecteur RÉEL dans la base, plutôt que de déduire du repo qu'il n'y
-# en a pas. Une fonction créée à la main hors migration compte aussi.
+# Compte les fonctions qui référencent le GUC. C'est une INDICATION, pas une
+# preuve d'absence de lecteur : une policy RLS (pg_policy), une vue ou une règle
+# (pg_rewrite), une valeur par défaut de colonne ou une expression d'index
+# peuvent appeler current_setting() sans apparaître dans pg_proc. Un audit
+# exhaustif est un travail d'hygiène à part, et il n'est pas nécessaire pour
+# tuer le jeton exposé.
 guc_readers() {
   psql_q "select count(*) from pg_proc where prosrc like '%app.settings.jwt_secret%'"
 }
@@ -165,12 +169,18 @@ guc_readers() {
 resolve_psql_role() {
   local role
   for role in supabase_admin postgres; do
-    if printf 'alter database postgres set "app.settings.norva_rotation_probe" = %s;\n' "'ok'" \
+    printf 'alter database postgres set "app.settings.norva_rotation_probe" = %s;\n' "'ok'" \
+      | psql_as "$role" >/dev/null 2>&1 || continue
+    # Le nettoyage fait PARTIE du test. Avec un `|| true`, un échec improbable du
+    # reset laissait app.settings.norva_rotation_probe=ok derrière lui tout en
+    # déclarant la sonde réussie — une sonde qui salit la base et s'en félicite.
+    if printf 'alter database postgres reset "app.settings.norva_rotation_probe";\n' \
          | psql_as "$role" >/dev/null 2>&1; then
-      printf 'alter database postgres reset "app.settings.norva_rotation_probe";\n' \
-        | psql_as "$role" >/dev/null 2>&1 || true
       printf '%s' "$role"; return 0
     fi
+    printf 'la sonde a écrit app.settings.norva_rotation_probe et n%s\n' \
+      "'a pas pu le retirer — à nettoyer à la main" >&2
+    return 1
   done
   return 1
 }
@@ -216,10 +226,14 @@ if [[ "$MODE" == "--plan" ]]; then
     bad "compose INVALIDE avec ce .env — --rotate refusera de démarrer"
   fi
   if guc_present; then
-    line "GUC app.settings.jwt_secret" "présent, $(guc_readers) fonction(s) le lisant"
-    printf '    Zéro lecteur signifie qu'"'"'il sera RETIRÉ plutôt que mis à jour :\n'
-    printf '    l'"'"'écrire y placerait le nouveau secret de signature, lisible dans\n'
-    printf '    pg_db_role_setting, pour personne. Forçable par GUC_ACTION.\n'
+    line "GUC app.settings.jwt_secret" "présent, $(guc_readers) fonction(s) le référençant"
+    printf '    Ce compte est une INDICATION, pas une preuve d'"'"'absence de lecteur :\n'
+    printf '    une policy RLS, une vue, un défaut de colonne ou une expression\n'
+    printf '    d'"'"'index peuvent appeler current_setting() sans figurer dans pg_proc.\n'
+    printf '\n    Pour une rotation d'"'"'urgence, le GUC n'"'"'a pas à être touché — le\n'
+    printf '    jeton exposé meurt sans lui. Lance donc :\n'
+    printf '        GUC_ACTION=skip bash %s --rotate\n' "$(basename "${BASH_SOURCE[0]}")"
+    printf '    L'"'"'audit exhaustif puis le reset sont un travail d'"'"'hygiène séparé.\n'
   else
     warn "aucun GUC app.settings.jwt_secret"
   fi
@@ -374,10 +388,29 @@ ok "base $DBC joignable"
 # nom de paramètre jetable, avant la moindre écriture.
 GUC_ACTION="${GUC_ACTION:-}"
 GUC_EXISTS=0
+OLD_GUC=""
 guc_present && GUC_EXISTS=1
-if [[ "$GUC_EXISTS" == "1" ]]; then
+
+if [[ "$GUC_EXISTS" == "0" ]]; then
+  GUC_ACTION=skip
+  warn "aucun GUC app.settings.jwt_secret — rien à faire de ce côté"
+
+elif [[ "$GUC_ACTION" == "skip" ]]; then
+  # skip veut dire AUCUNE écriture de paramètre, sonde de capacité incluse. Une
+  # version précédente sondait avant de résoudre l'action, donc skip écrivait
+  # quand même un paramètre jetable — le mode ne tenait pas sa promesse.
+  line "GUC app.settings.jwt_secret" "laissé tel quel (GUC_ACTION=skip)"
+  ok "aucune écriture de paramètre, la sonde de capacité n'est pas exécutée"
+  printf '    L'"'"'ancien secret y restera, mais il sera cryptographiquement\n'
+  printf '    inutile dès que les services porteront le nouveau JWT_SECRET.\n'
+  printf '    Le traiter est un travail d'"'"'hygiène, séparé de cet incident.\n'
+
+else
   READERS="$(guc_readers)"
-  line "GUC app.settings.jwt_secret" "présent, ${READERS:-?} fonction(s) le lisant"
+  line "GUC app.settings.jwt_secret" "présent, ${READERS:-?} fonction(s) le référençant"
+  printf '    Indication, pas une preuve : une policy RLS, une vue, un défaut de\n'
+  printf '    colonne ou une expression d'"'"'index peuvent lire ce GUC sans figurer\n'
+  printf '    dans pg_proc. GUC_ACTION=skip évite la question.\n'
   if PSQL_ROLE="$(resolve_psql_role)"; then
     ok "rôle capable d'écrire un GUC personnalisé : $PSQL_ROLE"
   else
@@ -385,23 +418,13 @@ if [[ "$GUC_EXISTS" == "1" ]]; then
     warn "aucun rôle ne peut écrire un GUC personnalisé"
   fi
   if [[ -z "$GUC_ACTION" ]]; then
-    # Rien ne le lit — et pgjwt n'est pas installé, donc la base ne peut ni
-    # signer ni vérifier un JWT. Le mettre à jour écrirait le NOUVEAU secret de
-    # signature dans pg_db_role_setting, lisible par qui peut lire le catalogue,
-    # pour personne. Le retirer est mieux : ça enlève un secret vivant d'un
-    # endroit inutile. Forçable par GUC_ACTION=update|reset|skip.
     if [[ "${READERS:-0}" -gt 0 ]]; then GUC_ACTION=update; else GUC_ACTION=reset; fi
   fi
   line "action retenue sur le GUC" "$GUC_ACTION"
-  if [[ "$GUC_ACTION" != "skip" && -z "$PSQL_ROLE" ]]; then
-    die "GUC_ACTION=$GUC_ACTION impossible sans rôle superuser — relance avec GUC_ACTION=skip pour roter sans y toucher (rien ne le lit), ou donne PSQL_ROLE=<rôle>"
-  fi
+  [[ -n "$PSQL_ROLE" ]] \
+    || die "GUC_ACTION=$GUC_ACTION impossible sans rôle superuser — relance avec GUC_ACTION=skip pour roter sans y toucher, ou donne PSQL_ROLE=<rôle>"
   OLD_GUC="$(guc_value)"
   [[ -n "$OLD_GUC" ]] || warn "valeur du GUC illisible — la restauration ne pourra pas le remettre"
-else
-  GUC_ACTION=skip
-  OLD_GUC=""
-  warn "aucun GUC app.settings.jwt_secret — rien à faire de ce côté"
 fi
 [[ "$(http_code "${KONG_URL}/auth/v1/settings" -H "apikey: $(value_of SUPABASE_PUBLISHABLE_KEY)")" == "200" ]] \
   || warn "Kong ne répond pas 200 sur /auth/v1/settings — vérifie avant de continuer"
