@@ -488,6 +488,27 @@ if [[ "$MODE" == "--reveal-ingress-secret" ]]; then
 fi
 
 # ── provisionnement ─────────────────────────────────────────────────────────
+#
+# Un mode inconnu doit ÉCHOUER, pas retomber ici. La version précédente laissait
+# tout argument non reconnu traverser jusqu'au provisionnement, qui écrit dans le
+# .env : une faute de frappe dans un nom de mode — ou un script pas encore à jour
+# sur la machine — déclenchait des écritures que personne n'avait demandées. Le
+# même « fail-open » que les vérifications qui réussissaient sans mesurer.
+if [[ -n "$MODE" && "$MODE" != "provision" ]]; then
+  bad "mode inconnu : $MODE"
+  printf '\n  Modes valides :\n' >&2
+  printf '    (aucun) | provision      génère ce qui manque dans le .env\n' >&2
+  printf '    --fingerprints           empreintes des secrets locaux\n' >&2
+  printf '    --verify-edge            compare les valeurs dans les runtimes edge\n' >&2
+  printf '    --cf-inspect             inventaire des variables Pages (lecture seule)\n' >&2
+  printf '    --cf-probe-merge         mesure la sémantique du PATCH sur preview\n' >&2
+  printf '    --cf-put-ingress         pose le secret en production par API\n' >&2
+  printf '    --push-to-cloudflare     pose via wrangler, si disponible\n' >&2
+  printf '    --reveal-ingress-secret  affiche le secret (dernier recours)\n' >&2
+  printf '\n  Si le mode attendu figure dans cette liste sans être reconnu, la copie\n' >&2
+  printf '  locale du script est en retard : lance `git pull` dans ~/norva.\n\n' >&2
+  exit 2
+fi
 
 printf '\n\033[1m[1] SAUVEGARDE, HORS DU REPOSITORY\033[0m\n'
 # Un garde-fou réel plutôt qu'un commentaire : si le dossier de sauvegarde tombe
