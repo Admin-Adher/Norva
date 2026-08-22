@@ -28,6 +28,36 @@ Le handler est exporté comme `handleSignup(request, deps)` ; `Deno.serve` ne fa
 que câbler les vraies dépendances en bas du fichier. Ce n'est pas de la coquetterie :
 un contrat qui porte sur un ordre n'est prouvable qu'en regardant les appels partir.
 
+## Préalable, fermé le 2026-08-22 : rotation de `JWT_SECRET`
+
+Le déploiement anti-abus a été suspendu le temps de fermer un incident sans
+rapport avec lui mais bloquant : un JWT `service_role` avait été exposé, et il
+restait exploitable.
+
+Ce qui rendait l'exposition grave n'était pas le vol du credential Kong mais
+`kong-entrypoint.sh`, qui transmet **tout `Authorization` ne commençant pas par
+`Bearer sb_`** tel quel à l'amont. Avec la clé `sb_publishable_` — publique par
+conception, en dur dans `public/js/authApi.js` — le porteur du jeton atteignait
+l'administration des utilisateurs GoTrue : il n'existe pas de route
+`/auth/v1/admin` dédiée, elle est derrière la route générique qui admet `anon`.
+Mesuré : sans Bearer 401, avec le jeton exposé 200.
+
+Retirer le credential du consumer Kong n'aurait rien révoqué — l'attaque ne le
+présente jamais en `apikey`. La rotation de `JWT_SECRET` était la seule
+remédiation n'exigeant aucune preuve d'exhaustivité, via
+`ops/hetzner/scripts/rotate-jwt-secret.sh`. Coût réel : huit sessions actives
+ont pris un 401 puis se sont rétablies par refresh, les 88 refresh tokens étant
+des lignes opaques que la rotation n'invalide pas.
+
+Preuves de fermeture : ancien jeton 401 sur PostgREST (signature refusée) et 403
+sur GoTrue admin avec le contrôle à 200 sur la requête identique ; nouveaux
+jetons et clé publiable à 200.
+
+Reste en hygiène, hors incident : `app.settings.jwt_secret` porte encore
+l'ancien secret — mort, mais à retirer après un audit exhaustif des lecteurs
+(pas seulement `pg_proc` : policies RLS, vues, défauts de colonne, expressions
+d'index).
+
 ## Secrets contre configuration
 
 La distinction n'est pas cosmétique : elle décide de qui peut modifier quoi, et
