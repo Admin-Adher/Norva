@@ -138,18 +138,53 @@ fi
 if [[ "$MODE" == "--push-to-cloudflare" ]]; then
   # Le chemin préféré : la valeur va du .env à Cloudflare par un pipe, sans
   # jamais passer par un terminal, un presse-papier ou un scrollback.
-  command -v wrangler >/dev/null 2>&1 \
-    || die "wrangler absent — installe-le (npm i -g wrangler) ou utilise --reveal-ingress-secret"
+  # Repli sur npx : la box n'a pas forcément wrangler installé globalement, et
+  # `npm i -g` sur un serveur de production pour une commande ponctuelle est une
+  # dette gratuite.
+  WRANGLER=()
+  if command -v wrangler >/dev/null 2>&1; then
+    WRANGLER=(wrangler)
+  elif command -v npx >/dev/null 2>&1; then
+    WRANGLER=(npx --yes wrangler)
+    warn "wrangler absent, utilisation de npx (téléchargement à la volée)"
+  else
+    die "ni wrangler ni npx sur cette machine — passe par le dashboard Cloudflare et --reveal-ingress-secret"
+  fi
+
+  # Sur une box sans navigateur, `wrangler login` ne peut pas aboutir. Il faut un
+  # jeton d'API, sinon la commande partira dans un flux OAuth qui n'ira nulle part.
+  if [[ -z "${CLOUDFLARE_API_TOKEN:-}" ]]; then
+    warn "CLOUDFLARE_API_TOKEN non défini — sans lui wrangler tentera un login navigateur"
+    printf '    Sur un serveur sans navigateur, exporte un jeton API avec la\n'
+    printf '    permission « Cloudflare Pages: Edit » :\n'
+    printf '        export CLOUDFLARE_API_TOKEN=...\n'
+    printf '        export CLOUDFLARE_ACCOUNT_ID=...\n\n'
+  fi
+
   v="$(value_of EDGE_INGRESS_SECRET_CURRENT)"
   [[ -n "$v" ]] || die "EDGE_INGRESS_SECRET_CURRENT est vide — lance d'abord le mode provision"
   printf '\n  Envoi vers le projet Pages « %s » sans afficher la valeur…\n' "$CF_PROJECT"
-  printf '%s' "$v" | wrangler pages secret put EDGE_INGRESS_SECRET_CURRENT \
+  printf '%s' "$v" | "${WRANGLER[@]}" pages secret put EDGE_INGRESS_SECRET_CURRENT \
     --project-name "$CF_PROJECT" \
     || die "wrangler a échoué — vérifie l'authentification et le nom du projet"
   unset v
   ok "posé côté Cloudflare"
-  printf '  Empreinte à retrouver dans le dashboard : \033[1m%s\033[0m\n\n' \
+  printf '  Empreinte à comparer : \033[1m%s\033[0m\n' \
     "$(fingerprint_of EDGE_INGRESS_SECRET_CURRENT)"
+  # Détail qui fait perdre une heure sinon : sur Pages, une variable
+  # d'environnement est liée au DÉPLOIEMENT. La poser ne change rien au
+  # déploiement en cours, donc /api/signup* continuera de répondre 503 jusqu'à
+  # ce qu'un nouveau déploiement soit publié.
+  printf '\n  \033[1mIl faut maintenant REDÉPLOYER Pages.\033[0m Une variable posée ne\n'
+  printf '  s'"'"'applique qu'"'"'aux déploiements suivants, donc /api/signup* répondra\n'
+  printf '  encore 503 tant qu'"'"'un nouveau déploiement n'"'"'est pas publié — un push sur\n'
+  printf '  main, ou « Retry deployment » dans le dashboard.\n\n'
+  printf '  Preuve ensuite, sans créer de compte :\n'
+  printf '      curl -sS -X POST https://norva.tv/api/signup-token \\\n'
+  printf '        -H "content-type: application/json" -d "{}"\n'
+  printf '      → 200 avec un token prouve toute la chaîne Cloudflare → edge → HMAC\n'
+  printf '      → 401 signifie que les deux côtés n'"'"'ont pas le même secret\n'
+  printf '      → 503 signifie que Pages n'"'"'a pas encore été redéployé\n\n'
   exit 0
 fi
 

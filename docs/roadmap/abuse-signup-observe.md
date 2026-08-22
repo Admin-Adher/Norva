@@ -153,15 +153,41 @@ corriger en silence :
 
 ```
 norva.tv/api/signup-token          Pages Function — Kong ne voit JAMAIS ceci
-api.norva.tv/functions/v1/…/token  route edge     — Kong voit et limite ceci
+api.norva.tv/functions/v1/…/token  route edge     — Kong voit ceci, sans le limiter
 ```
 
 Kong est derrière `api.norva.tv`. Une requête vers `norva.tv/api/*` ne traverse ni
-Caddy ni Kong. Donc :
+Caddy ni Kong.
 
-- ce que Kong borne, c'est la **moitié coûteuse** (l'invocation edge) ;
-- borner l'URL publique elle-même demande une **règle de rate limiting
-  Cloudflare**, et rien d'autre ne peut le faire.
+### Correction : Kong ne borne rien du tout ici
+
+Ce document affirmait ensuite que Kong bornait au moins « la moitié coûteuse »,
+c'est-à-dire l'invocation edge. C'est faux, et ça a été affirmé sans vérifier.
+Mesuré dans `kong.yml` :
+
+```
+service functions-v1  →  plugins : cors  (et rien d'autre)
+plugins globaux       →  aucun
+rate-limiting         →  seulement auth-v1-{signup,recover,otp,resend}
+                         et les 7 routes partners
+```
+
+Donc `/functions/v1/*` n'est ni authentifié ni compté au niveau de la
+passerelle. **Aucune couche ne limite le débit du chemin signup aujourd'hui.**
+
+Ce n'est pas une régression apportée par ce chemin — c'est la condition de
+toutes les 19 edge functions — mais le plancher volumétrique reste dû, et il est
+à poser **avant le canary public**. Deux options, à choisir plus tard :
+
+- un service + route Kong pour `/functions/v1/norva-signup`, sur le patron déjà
+  éprouvé par `auth-v1-signup` (10/min, 40/h) ;
+- une règle de rate limiting Cloudflare pour l'URL publique, seule chose capable
+  de borner la moitié publique.
+
+Ce qui reste vrai : la route `/token` de l'edge ne touche pas la base, donc un
+flood y coûte des invocations edge et non des écritures Postgres. Les
+invocations ne sont pas gratuites pour autant — le routeur d'edge-runtime est un
+isolate V8 monothread qui plafonne vers 95 req/s par conteneur.
 
 ### Modèle retenu : émission côté edge
 
@@ -277,6 +303,10 @@ régression — c'est le comportement de l'ancien chemin — mais c'est une deux
 raison de lire les distributions par version d'endpoint plutôt qu'en bloc.
 
 ## Backlog avant `enforce`
+
+0. **Plancher volumétrique sur le chemin signup.** Rien ne limite le débit
+   aujourd'hui, ni à Cloudflare ni à Kong — vérifié, la route `functions-v1` ne
+   porte que `cors`. À poser avant le canary public, pas avant les migrations.
 
 1. Indépendance des familles dans la règle de décision — un score au-dessus du
    seuil ne suffira pas, il faudra deux familles indépendantes ou une preuve
