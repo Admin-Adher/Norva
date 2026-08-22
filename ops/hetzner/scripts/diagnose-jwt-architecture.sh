@@ -5,21 +5,16 @@
 #   bash ops/hetzner/scripts/diagnose-jwt-architecture.sh
 #
 # LECTURE SEULE, ET AUCUNE VALEUR N'EST IMPRIMÉE. Ce script ne rapporte que des
-# FORMES : une longueur, un booléen, un algorithme, un nom de rôle. Jamais un
-# secret, jamais un JWT, jamais un fragment de clé.
+# FORMES : une longueur, un algorithme lu dans un en-tête JWT, un nom de rôle,
+# un compteur. Jamais un secret, jamais un JWT, jamais un fragment de clé.
 #
-# Il répond à une seule question, celle qui décide du plan de remédiation :
-# PostgREST vérifie-t-il les JWT avec un secret symétrique ou avec un JWKS ?
-#
-#   symétrique  → le chemin « sb_secret_ + JWT asymétrique » n'est PAS utilisable
-#                 en l'état : Kong enverrait à PostgREST un jeton qu'il ne peut
-#                 pas vérifier. Seule la rotation de JWT_SECRET révoque.
-#   JWKS        → le chemin asymétrique est utilisable, et une bascule
-#                 progressive sans coupure devient possible.
-#
-# Il mesure aussi le coût réel d'une rotation, parce que « déconnexion
-# générale » est une hypothèse et pas une mesure : combien de sessions vivantes,
-# quelle durée de vie des access tokens, et si les refresh tokens survivent.
+# Il lit l'environnement par `docker inspect`, PAS par `docker exec printenv`.
+# La première version faisait l'inverse et rapportait « ABSENTE » pour
+# PGRST_JWT_SECRET — non pas parce que la variable manquait, mais parce que
+# l'image PostgREST est distroless et n'embarque aucun binaire. Un échec de
+# mesure présenté comme un fait, exactement le défaut qu'on venait de corriger
+# dans la fumigation des migrations. Une mesure impossible dit maintenant
+# NON MESURABLE et ne répond pas à la question à la place de la mesure.
 # =============================================================================
 set -uo pipefail
 
@@ -27,101 +22,112 @@ DBC="${DB_CONTAINER:-norva-db}"
 KONGC="${KONG_CONTAINER:-norva-kong}"
 RESTC="${REST_CONTAINER:-norva-rest}"
 AUTHC="${AUTH_CONTAINER:-norva-auth}"
+KONG_YML="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../volumes/api/kong.yml"
 
 section() { printf '\n\033[1m================ %s ================\033[0m\n' "$1"; }
 line() { printf '  %-40s %s\n' "$1" "$2"; }
 psql() { docker exec -i "$DBC" psql -U postgres -d postgres -P pager=off -tAc "$1" 2>/dev/null; }
 
-# Ne rapporte QUE la forme d'une variable d'environnement d'un conteneur.
-# Longueur, et si ça ressemble à du JSON avec un tableau `keys` (donc un JWKS).
+# Vide l'environnement d'un conteneur. La valeur traverse les pipelines mais
+# n'est jamais imprimée.
+env_dump_of() {
+  docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$1" 2>/dev/null
+}
+
+# Rapporte la FORME d'une variable, ou pourquoi la mesure a échoué.
 shape_of() {
-  local container="$1" var="$2" value
-  value="$(docker exec "$container" printenv "$var" 2>/dev/null)" || { printf 'ABSENTE'; return; }
-  [[ -z "$value" ]] && { printf 'VIDE'; return; }
-  local n=${#value}
+  local container="$1" var="$2" dump value n
+  docker inspect "$container" >/dev/null 2>&1 || { printf 'CONTENEUR ABSENT'; return; }
+  dump="$(env_dump_of "$container")" || { printf 'NON MESURABLE'; return; }
+  [[ -n "$dump" ]] || { printf 'NON MESURABLE'; return; }
+  grep -q "^${var}=" <<<"$dump" || { printf 'NON DEFINIE'; return; }
+  value="$(sed -n "s/^${var}=//p" <<<"$dump" | head -n 1)"
+  [[ -n "$value" ]] || { printf 'VIDE'; return; }
+  n=${#value}
   if [[ "${value:0:1}" == "{" ]]; then
-    if printf '%s' "$value" | grep -q '"keys"'; then
-      printf 'JWKS (JSON avec "keys", %s octets)' "$n"
+    if grep -q '"keys"' <<<"$value"; then
+      printf 'JWKS — JSON avec "keys" (%s octets)' "$n"
     else
       printf 'JSON sans "keys" (%s octets)' "$n"
     fi
   elif [[ "$value" == eyJ* ]]; then
-    # Un JWT : on ne décode que l'en-tête, qui ne contient aucun secret, pour
-    # lire l'algorithme. Le payload et la signature ne sont jamais touchés.
+    # Seul l'en-tête est décodé, pour l'algorithme. Il ne contient aucun secret.
+    # Le payload et la signature ne sont jamais touchés.
     local alg
-    alg="$(printf '%s' "${value%%.*}" | base64 -d 2>/dev/null | grep -o '"alg":"[^"]*"' | cut -d'"' -f4)"
+    alg="$(tr '_-' '/+' <<<"${value%%.*}" | base64 -d 2>/dev/null \
+            | grep -o '"alg":"[^"]*"' | cut -d'"' -f4)"
     printf 'JWT alg=%s (%s octets)' "${alg:-inconnu}" "$n"
   elif [[ "$value" == sb_secret_* ]]; then
-    printf 'clé opaque sb_secret_ (%s octets)' "$n"
+    printf 'cle opaque sb_secret_ (%s octets)' "$n"
   elif [[ "$value" == sb_publishable_* ]]; then
-    printf 'clé opaque sb_publishable_ (%s octets)' "$n"
+    printf 'cle opaque sb_publishable_ (%s octets)' "$n"
   else
-    printf 'chaîne opaque (%s octets)' "$n"
+    printf 'chaine opaque (%s octets)' "$n"
   fi
 }
 
-section "[1] LA QUESTION QUI DÉCIDE — vérification JWT de PostgREST"
-line "PGRST_JWT_SECRET" "$(shape_of "$RESTC" PGRST_JWT_SECRET)"
-line "PGRST_JWT_SECRET_IS_BASE64" "$(docker exec "$RESTC" printenv PGRST_JWT_SECRET_IS_BASE64 2>/dev/null || echo 'non définie')"
-line "PGRST_JWT_AUD" "$(docker exec "$RESTC" printenv PGRST_JWT_AUD 2>/dev/null || echo 'non définie')"
-printf '\n  Si la forme ci-dessus est « JWT alg=… » ou « chaîne opaque », PostgREST\n'
-printf '  est en symétrique : le chemin asymétrique n'"'"'est pas utilisable en l'"'"'état.\n'
+# Valeur brute, réservée aux variables NON sensibles (durées, noms de rôle).
+plain_of() {
+  local dump; dump="$(env_dump_of "$1")" || { printf 'NON MESURABLE'; return; }
+  grep -q "^${2}=" <<<"$dump" || { printf 'NON DEFINIE'; return; }
+  sed -n "s/^${2}=//p" <<<"$dump" | head -n 1
+}
 
-section "[2] LES CLÉS EN PLACE, PAR FORME"
-for v in ANON_KEY SERVICE_ROLE_KEY SUPABASE_ANON_KEY SUPABASE_SERVICE_ROLE_KEY \
-         SUPABASE_PUBLISHABLE_KEY SUPABASE_SECRET_KEY \
-         ANON_KEY_ASYMMETRIC SERVICE_ROLE_KEY_ASYMMETRIC; do
+section "[1] LA QUESTION QUI DECIDE — verification JWT de PostgREST"
+line "PGRST_JWT_SECRET" "$(shape_of "$RESTC" PGRST_JWT_SECRET)"
+line "PGRST_JWT_SECRET_IS_BASE64" "$(plain_of "$RESTC" PGRST_JWT_SECRET_IS_BASE64)"
+line "PGRST_JWT_AUD" "$(plain_of "$RESTC" PGRST_JWT_AUD)"
+printf '\n  « JWT alg=… » ou « chaine opaque » = symetrique. « JWKS » = asymetrique.\n'
+
+section "[2] LES CLES EN PLACE, PAR FORME"
+for v in SUPABASE_ANON_KEY SUPABASE_SERVICE_KEY SUPABASE_PUBLISHABLE_KEY \
+         SUPABASE_SECRET_KEY ANON_KEY_ASYMMETRIC SERVICE_ROLE_KEY_ASYMMETRIC; do
   line "$v (kong)" "$(shape_of "$KONGC" "$v")"
 done
-printf '\n  ANON_KEY_ASYMMETRIC et SERVICE_ROLE_KEY_ASYMMETRIC VIDES expliqueraient\n'
-printf '  que les clients marchent avec sb_publishable_ : l'"'"'expression Lua retombe\n'
-printf '  alors sur headers.apikey. Non vides et alg=RS256/ES256 avec un PostgREST\n'
-printf '  symétrique serait au contraire incohérent — à comprendre avant de toucher.\n'
+printf '\n  Lecture de kong-entrypoint.sh : la branche de traduction complete exige\n'
+printf '  SUPABASE_SECRET_KEY ET SUPABASE_PUBLISHABLE_KEY non vides. Si SECRET_KEY\n'
+printf '  est VIDE, c'"'"'est la branche legacy qui tourne — aucune traduction, et\n'
+printf '  l'"'"'expression se reduit a « Authorization tel quel, sinon apikey ».\n'
 
-section "[3] CE QUE L'EDGE REÇOIT VRAIMENT"
-line "SUPABASE_SERVICE_ROLE_KEY (edge)" "$(shape_of norva-edge-functions SUPABASE_SERVICE_ROLE_KEY)"
-line "SUPABASE_SECRET_KEY (edge)" "$(shape_of norva-edge-functions SUPABASE_SECRET_KEY)"
-printf '\n  SUPABASE_SECRET_KEY ABSENTE côté edge confirme l'"'"'étape 2 du plan :\n'
-printf '  le compose ne l'"'"'injecte pas, donc le fallback ne peut pas servir.\n'
+section "[3] CE QUE L'EDGE RECOIT VRAIMENT"
+for c in norva-edge-functions norva-edge-functions-2; do
+  line "SUPABASE_SERVICE_ROLE_KEY ($c)" "$(shape_of "$c" SUPABASE_SERVICE_ROLE_KEY)"
+  line "SUPABASE_SECRET_KEY ($c)" "$(shape_of "$c" SUPABASE_SECRET_KEY)"
+done
 
-section "[4] LE COÛT RÉEL D'UNE ROTATION"
-line "durée de vie access token (s)" "$(docker exec "$AUTHC" printenv GOTRUE_JWT_EXP 2>/dev/null || echo '3600 (défaut)')"
-line "rôles admin GoTrue" "$(docker exec "$AUTHC" printenv GOTRUE_JWT_ADMIN_ROLES 2>/dev/null || echo 'non définie')"
+section "[4] LE COUT REEL D'UNE ROTATION"
+line "duree de vie access token (s)" "$(plain_of "$AUTHC" GOTRUE_JWT_EXP)"
+line "roles admin GoTrue" "$(plain_of "$AUTHC" GOTRUE_JWT_ADMIN_ROLES)"
 line "refresh tokens vivants" "$(psql 'select count(*) from auth.refresh_tokens where revoked = false')"
 line "sessions actives 24 h" "$(psql "select count(distinct user_id) from auth.refresh_tokens where created_at > now() - interval '24 hours'")"
 line "utilisateurs au total" "$(psql 'select count(*) from auth.users')"
 printf '\n  Les refresh tokens sont des lignes opaques de auth.refresh_tokens : ils ne\n'
-printf '  sont pas signés avec JWT_SECRET et SURVIVENT à une rotation. Le client web\n'
-printf '  rafraîchit déjà de façon transparente sur 401 (public/js/cloudApi.js).\n'
-printf '  Le coût attendu est donc un 401 par session vivante, pas une déconnexion.\n'
+printf '  sont pas signes avec JWT_SECRET et SURVIVENT a une rotation. Le client web\n'
+printf '  rafraichit deja de facon transparente sur 401 (public/js/cloudApi.js:922).\n'
+printf '  Le cout attendu est un 401 par session vivante, pas une deconnexion.\n'
 
-section "[5] QUI DÉPEND DE JWT_SECRET, ET DEVRA REDÉMARRER"
-for c in norva-kong norva-auth norva-rest norva-realtime norva-storage \
-         norva-edge-functions norva-edge-functions-2 norva-studio norva-meta; do
-  if docker inspect "$c" >/dev/null 2>&1; then
-    has="$(docker exec "$c" sh -c 'printenv | grep -c "JWT_SECRET\|JWT_ADMIN\|ANON_KEY\|SERVICE_ROLE_KEY" || true' 2>/dev/null)"
-    line "$c" "${has:-0} variable(s) concernée(s)"
-  else
-    line "$c" "absent"
-  fi
+section "[5] QUI DEPEND DE JWT_SECRET, ET DEVRA ETRE RECREE"
+# Recree, pas redemarre : un changement d'environnement n'est pris en compte
+# qu'a la recreation du conteneur. `docker restart` relance l'ancien env.
+for c in $(docker ps -a --format '{{.Names}}' | sort); do
+  n="$(env_dump_of "$c" | grep -cE '^([A-Z_]*JWT_SECRET|.*JWT_ADMIN.*|.*ANON_KEY.*|.*SERVICE_(ROLE_)?KEY.*)=' || true)"
+  [[ "${n:-0}" -gt 0 ]] && line "$c" "$n variable(s) concernee(s)"
 done
 
-section "[6] CE QUI NE DÉPEND PAS DE JWT_SECRET"
+section "[6] CE QUI NE DEPEND PAS DE JWT_SECRET"
 line "jobs pg_cron actifs" "$(psql 'select count(*) from cron.job where active')"
 line "secrets Vault" "$(psql 'select count(*) from vault.secrets')"
-printf '\n  Les crons s'"'"'authentifient auprès de l'"'"'edge avec norva_cron_shared_secret\n'
-printf '  tiré du Vault, pas avec un JWT service_role : une rotation ne les casse pas.\n'
-printf '  À confirmer par le compteur ci-dessus et par un run après bascule.\n'
+printf '\n  Les crons s'"'"'authentifient aupres de l'"'"'edge avec norva_cron_shared_secret\n'
+printf '  tire du Vault, pas avec un JWT service_role.\n'
 
-section "[7] LA SURFACE DU JETON EXPOSÉ"
-printf '  Routes qui transmettent Authorization tel quel : %s\n' \
-  "$(grep -c 'Authorization: \$LUA_AUTH_EXPR' "$(dirname "$0")/../volumes/api/kong.yml" 2>/dev/null || echo '?')"
-printf '  Routes qui admettent le consumer anon           : %s\n' \
-  "$(grep -A 4 'allow:' "$(dirname "$0")/../volumes/api/kong.yml" 2>/dev/null | grep -c '\- anon' || echo '?')"
-printf '\n  Rappel de la mécanique, pour que personne ne la redécouvre :\n'
-printf '  kong-entrypoint.sh fait passer tout Authorization qui ne commence pas par\n'
-printf '  « Bearer sb_ » DIRECTEMENT à l'"'"'amont. Un appelant qui présente la clé\n'
-printf '  publique en apikey est authentifié comme consumer anon, puis son Bearer\n'
-printf '  est transmis intact. PostgREST et GoTrue vérifient alors le JWT avec\n'
-printf '  JWT_SECRET et honorent role=service_role. Retirer le credential\n'
-printf '  service_role du consumer Kong ne change RIEN à ce chemin.\n\n'
+section "[7] LA SURFACE DU JETON EXPOSE"
+line "routes qui transmettent Authorization" "$(grep -c 'Authorization: \$LUA_AUTH_EXPR' "$KONG_YML" 2>/dev/null || echo '?')"
+line "routes qui admettent anon" "$(grep -A 4 'allow:' "$KONG_YML" 2>/dev/null | grep -c '\- anon' || echo '?')"
+line "route /auth/v1/admin dediee" "$(grep -qE 'auth/v1/admin' "$KONG_YML" 2>/dev/null && echo 'oui' || echo 'NON — admin derriere /auth/v1/ qui admet anon')"
+printf '\n  Mecanique, pour que personne ne la redecouvre : kong-entrypoint.sh fait\n'
+printf '  passer tout Authorization qui ne commence pas par « Bearer sb_ »\n'
+printf '  DIRECTEMENT a l'"'"'amont. Un appelant qui presente la cle publique en apikey\n'
+printf '  est authentifie comme consumer anon, puis son Bearer est transmis intact.\n'
+printf '  PostgREST et GoTrue verifient alors le JWT avec JWT_SECRET et honorent\n'
+printf '  role=service_role. Retirer le credential service_role du consumer Kong\n'
+printf '  ne change RIEN a ce chemin.\n\n'
