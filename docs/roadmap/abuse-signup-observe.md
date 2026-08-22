@@ -28,6 +28,41 @@ Le handler est exporté comme `handleSignup(request, deps)` ; `Deno.serve` ne fa
 que câbler les vraies dépendances en bas du fichier. Ce n'est pas de la coquetterie :
 un contrat qui porte sur un ordre n'est prouvable qu'en regardant les appels partir.
 
+## État du déploiement au 2026-08-22
+
+Le signup public **n'est pas branché** : le navigateur va toujours directement à
+GoTrue. Tout ce qui suit est en place sans qu'un seul utilisateur emprunte le
+nouveau chemin.
+
+| Étape | État | Preuve |
+|---|---|---|
+| 4 migrations | ✅ | 9 RPC, `service_role` seul, 5 invariants bloquants verts |
+| 4 secrets sur l'edge | ✅ | empreintes identiques sur les deux runtimes |
+| `norva-signup` déployé | ✅ | `/health` → `{"ok":true}` ; POST non signé → 401 |
+| Pages Functions | ✅ | déployées, inertes en 503 sans le secret |
+| `EDGE_INGRESS_SECRET_CURRENT` sur Pages | ✅ | `secret_text`, 5 → 6 variables, aucune perdue |
+| Redéploiement Pages | à faire | une variable Pages est liée au déploiement |
+| E2E `/api/signup-token` | à faire | un token prouve la chaîne sans créer de compte |
+| Canary web | à faire | après l'E2E, et après le plancher volumétrique |
+
+`enforcement_enabled = false` partout : à ce stade le moteur ne peut refuser
+aucun signup, quel que soit le score.
+
+### Poser le secret Pages sans que personne ne le voie
+
+Trois voies existaient. `wrangler` est hors jeu — la box n'a ni node ni npm.
+Restaient le dashboard, qui demande d'afficher la valeur et de la copier, et
+l'API, qui ne demande rien de tel mais dont la sémantique du PATCH sur
+`env_vars` était inconnue : une fusion est sans risque, un remplacement
+effacerait `NORVA_REFERRAL_EDGE_HMAC_SECRET`, dont l'API ne renvoie pas la
+valeur et qui serait donc irrécupérable.
+
+`--cf-probe-merge` a mesuré la réponse au lieu de la supposer, sur
+l'environnement **preview** — aucun trafic, une seule variable `plain_text`
+donc lisible et restaurable. Verdict : fusion. `--cf-put-ingress` a ensuite posé
+le secret par API, la valeur ne quittant jamais la box, et a vérifié que les
+cinq noms préexistants avaient survécu.
+
 ## Préalable, fermé le 2026-08-22 : rotation de `JWT_SECRET`
 
 Le déploiement anti-abus a été suspendu le temps de fermer un incident sans
