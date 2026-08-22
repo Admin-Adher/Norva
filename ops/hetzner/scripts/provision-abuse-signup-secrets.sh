@@ -207,13 +207,15 @@ if [[ "$MODE" == "--cf-put-ingress" ]]; then
   secret="$(value_of EDGE_INGRESS_SECRET_CURRENT)"
   [[ -n "$secret" ]] || die "EDGE_INGRESS_SECRET_CURRENT absent du .env — lance d'abord le mode provision"
   printf '  empreinte à retrouver ensuite : \033[1m%s\033[0m\n' "$(fingerprint_of EDGE_INGRESS_SECRET_CURRENT)"
+  printf '  version de clef posee en meme temps : %s
+' "$(value_of EDGE_INGRESS_KEY_VERSION)"
   cf_credentials
   printf '\n  Confirme que --cf-probe-merge a rendu le verdict FUSION.\n'
   read -rp '  Taper POSER pour continuer : ' answer
   [[ "$answer" == "POSER" ]] || { printf '\n  Annulé, rien n'"'"'a été écrit.\n\n'; exit 0; }
 
   rc=0
-  NORVA_INGRESS_SECRET="$secret" python3 - <<'PY' || rc=$?
+  NORVA_INGRESS_SECRET="$secret"   NORVA_INGRESS_KEY_VERSION="$(value_of EDGE_INGRESS_KEY_VERSION)"   python3 - <<'PY' || rc=$?
 import json, os, sys, urllib.request, urllib.error
 
 secret = os.environ["NORVA_INGRESS_SECRET"]
@@ -221,6 +223,8 @@ API = os.environ["CF_API"]; ACC = os.environ["CLOUDFLARE_ACCOUNT_ID"]
 PROJ = os.environ["CF_PROJECT"]; TOK = os.environ["CLOUDFLARE_API_TOKEN"]
 URL = "%s/accounts/%s/pages/projects/%s" % (API, ACC, PROJ)
 NAME = "EDGE_INGRESS_SECRET_CURRENT"
+VERSION_NAME = "EDGE_INGRESS_KEY_VERSION"
+version = os.environ.get("NORVA_INGRESS_KEY_VERSION") or "1"
 
 def call(method, payload=None):
     data = json.dumps(payload).encode() if payload is not None else None
@@ -243,8 +247,11 @@ def prod_vars():
 before = set(prod_vars())
 print("  avant  : %d variable(s)" % len(before))
 
+# Les deux dans le MEME PATCH : une version sans sa clef, ou l'inverse, est
+# precisement le mode de panne qu'on veut rendre impossible.
 r = call("PATCH", {"deployment_configs": {"production": {"env_vars": {
-    NAME: {"value": secret, "type": "secret_text"}}}}})
+    NAME: {"value": secret, "type": "secret_text"},
+    VERSION_NAME: {"value": version, "type": "plain_text"}}}}})
 del secret
 if not r.get("success"):
     print("  ECHEC du PATCH : %s" % (r.get("errors") or "inconnu")); sys.exit(1)
@@ -260,10 +267,15 @@ if NAME not in after:
     print("  %s n'a pas ete cree" % NAME); sys.exit(1)
 if (after[NAME] or {}).get("type") != "secret_text":
     print("  %s cree mais pas en secret_text" % NAME); sys.exit(1)
+if VERSION_NAME not in after:
+    print("  %s n'a pas ete cree" % VERSION_NAME); sys.exit(1)
+if (after[VERSION_NAME] or {}).get("value") != version:
+    print("  %s ne vaut pas %s" % (VERSION_NAME, version)); sys.exit(1)
 for k in sorted(after):
     print("    %-38s %s" % (k, (after[k] or {}).get("type") or "plain_text"))
 print()
-print("  OK : %s pose en secret_text, aucune variable perdue." % NAME)
+print("  OK : %s en secret_text, %s = %s, aucune variable perdue."
+      % (NAME, VERSION_NAME, version))
 PY
   if [[ "$rc" == "0" ]]; then
     printf '\n'
