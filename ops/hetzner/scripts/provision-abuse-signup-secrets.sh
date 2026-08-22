@@ -91,8 +91,27 @@ if [[ "$MODE" == "--cf-inspect" ]]; then
   # valeurs ne sont jamais affichées, seulement les noms et les types.
   command -v curl >/dev/null 2>&1 || die "curl absent"
   command -v python3 >/dev/null 2>&1 || die "python3 absent"
-  [[ -n "${CLOUDFLARE_API_TOKEN:-}" ]] || die "CLOUDFLARE_API_TOKEN non défini"
-  [[ -n "${CLOUDFLARE_ACCOUNT_ID:-}" ]] || die "CLOUDFLARE_ACCOUNT_ID non défini"
+
+  # Demandé ici plutôt que passé sur la ligne de commande, pour deux raisons.
+  # Un `CLOUDFLARE_API_TOKEN=xxx commande` atterrit dans ~/.bash_history en
+  # clair. Et une consigne écrite avec des chevrons — CLOUDFLARE_API_TOKEN=<jeton>
+  # — casse le shell, qui lit « < » comme une redirection : c'est arrivé.
+  # `read -s` n'affiche rien et ne passe pas par l'historique.
+  if [[ -z "${CLOUDFLARE_API_TOKEN:-}" ]]; then
+    [[ -t 0 ]] || die "CLOUDFLARE_API_TOKEN non défini et pas de terminal pour le demander"
+    printf '  Jeton API Cloudflare (permission « Cloudflare Pages: Edit »).\n'
+    printf '  La saisie ne s'"'"'affiche pas et ne va pas dans l'"'"'historique.\n'
+    read -rsp '  Jeton : ' CLOUDFLARE_API_TOKEN; printf '\n'
+    [[ -n "$CLOUDFLARE_API_TOKEN" ]] || die "jeton vide"
+  fi
+  if [[ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]]; then
+    [[ -t 0 ]] || die "CLOUDFLARE_ACCOUNT_ID non défini et pas de terminal pour le demander"
+    # L'identifiant de compte n'est pas un secret : il peut s'afficher. On le
+    # trouve dans le dashboard Cloudflare, ou dans le secret GitHub Actions du
+    # même nom qu'utilise deploy-cloudflare.yml.
+    read -rp '  Account ID : ' CLOUDFLARE_ACCOUNT_ID
+    [[ -n "$CLOUDFLARE_ACCOUNT_ID" ]] || die "account id vide"
+  fi
 
   printf '\n\033[1mPROJET PAGES « %s »\033[0m\n' "$CF_PROJECT"
   body="$(curl -sS --max-time 20 \
