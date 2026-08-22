@@ -4,9 +4,16 @@
 # =============================================================================
 #   bash ops/hetzner/scripts/provision-abuse-signup-secrets.sh
 #   bash ops/hetzner/scripts/provision-abuse-signup-secrets.sh --fingerprints
+#   bash ops/hetzner/scripts/provision-abuse-signup-secrets.sh --reveal-ingress-secret
 #
-# AUCUNE VALEUR N'EST AFFICHÉE. Le script génère ce qui manque directement dans
-# ops/hetzner/.env et n'imprime qu'un état (posé / déjà là) et une empreinte.
+# Les deux premiers modes n'affichent AUCUNE valeur : le script génère ce qui
+# manque directement dans ops/hetzner/.env et n'imprime qu'un état (posé / déjà
+# là) et une empreinte.
+#
+# Le troisième mode est la seule exception, et elle est explicite dans son nom.
+# EDGE_INGRESS_SECRET_CURRENT doit être posé à l'identique côté Cloudflare Pages,
+# et il n'existe aucun moyen de le transporter sans l'afficher une fois. Mieux
+# vaut un mode qui le dit que quelqu'un qui finit par faire `cat .env`.
 #
 # L'empreinte est les 12 premiers caractères de sha256(valeur). Elle sert à
 # vérifier que Cloudflare Pages et la box portent bien le MÊME
@@ -55,6 +62,22 @@ CONFIG=(
   "SIGNUP_ENDPOINT_VERSION=norva-signup-v1"
   "NORVA_ABUSE_ENFORCEMENT_ENABLED=false"
 )
+
+if [[ "$MODE" == "--reveal-ingress-secret" ]]; then
+  # Le seul secret qui doit sortir de la box, parce que Cloudflare Pages doit
+  # signer avec exactement celui-là. Il n'y a pas de façon de le transporter sans
+  # l'afficher une fois.
+  printf '\n\033[1;33m╔══════════════════════════════════════════════════════════════╗\n'
+  printf     '║  À COLLER DANS CLOUDFLARE PAGES, ET NULLE PART AILLEURS.     ║\n'
+  printf     '║  Ne le colle pas dans un chat, un ticket, ni un commit.      ║\n'
+  printf     '╚══════════════════════════════════════════════════════════════╝\033[0m\n\n'
+  printf 'EDGE_INGRESS_SECRET_CURRENT=%s\n\n' "$(value_of EDGE_INGRESS_SECRET_CURRENT)"
+  printf '  Empreinte à comparer après l'"'"'avoir posé : \033[1m%s\033[0m\n' \
+    "$(fingerprint_of EDGE_INGRESS_SECRET_CURRENT)"
+  printf '  Pense à effacer l'"'"'historique du terminal si tu partages cet écran :\n'
+  printf '      history -c\n\n'
+  exit 0
+fi
 
 if [[ "$MODE" == "--fingerprints" ]]; then
   printf '\n\033[1mEmpreintes (12 premiers caractères de sha256)\033[0m\n'
