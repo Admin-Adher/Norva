@@ -35,6 +35,16 @@ interface Env {
   NORVA_EDGE_BASE?: string;
 }
 
+// NORVA_EDGE_BASE, deliberately not NORVA_EDGE_URL. The Pages project already
+// carries a production variable of that second name, and it is a different
+// thing: it is read by the browser (`window.NORVA_EDGE_URL` in cloudApi.js),
+// whose own fallback is https://edge.norva.tv — a host that answers 404 on
+// /functions/v1/*. Only api.norva.tv serves the edge functions, verified:
+// GET /functions/v1/norva-signup/health there returns {"ok":true}.
+//
+// So reusing NORVA_EDGE_URL here would point this proxy at a host that cannot
+// serve it. Two names for two audiences, stated because the overlap invites
+// exactly the wrong assumption a year from now.
 const DEFAULT_EDGE_BASE = "https://api.norva.tv/functions/v1/norva-signup";
 
 /** 128 bits, single-use, consumed atomically on the edge. */
