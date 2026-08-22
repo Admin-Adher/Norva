@@ -608,3 +608,73 @@ raison de lire les distributions par version d'endpoint plutôt qu'en bloc.
 4. `risk_flag_retention` (72 h, pour l'analyse) distinct de
    `restriction_duration`, beaucoup plus court et décroissant sur comportement
    sain — sinon un faux positif OAuth perd son essai trois jours sans comprendre.
+
+## Ce qui reste, au 2026-08-22 — code figé, phase d'observation
+
+Le canary tourne à 1 % (`f6debcef`). Plus aucun changement au moteur ni au
+pipeline tant que du trafic réel ne le justifie. État des lieux pour ne rien
+avoir à redécouvrir à la reprise.
+
+**Bloquant avant 5 %.** Le point 0 ci-dessus : `/functions/v1/norva-signup`
+(ingress + `/token`) ne porte à Kong qu'un plugin `cors`, sans rate-limiting.
+Le hop interne `edge → GoTrue` est corrigé (le floor `auth-v1-signup` de Kong
+fonctionne enfin par IP réelle), mais l'entrée publique reste ouverte. Sans
+conséquence à 1 %. Deux options déjà posées : route Kong dédiée sur le modèle
+d'`auth-v1-signup`, ou règle Cloudflare côté URL publique.
+
+**Avant de discuter `enforcement` — pas avant, et pas maintenant.** Les quatre
+points du backlog ci-dessus, aucun commencé.
+
+**Hygiène, sans rapport avec l'anti-abus, déjà en tâches séparées.**
+Audit exhaustif des lecteurs de `app.settings.jwt_secret` (au-delà de
+`pg_proc` : policies RLS, vues, défauts de colonne, expressions d'index) puis
+retrait — le secret est mort depuis la rotation ([[norva-kong-bearer-passthrough]]),
+ce n'est plus urgent. Quota de stockage d'artefacts GitHub épuisé, fait
+échouer les builds APK/Windows en CI (`Verify cloud contracts` reste vert,
+c'est uniquement l'upload qui casse). Statuts Vercel en échec, sans rapport
+avec la prod Cloudflare, jamais creusé plus loin que le constat.
+
+**Cosmétique.** `signup_decision_outcomes` existe en base mais n'est
+alimentée par rien — à brancher avant de prétendre calibrer la conversion en
+aval par niveau de risque (Phase 4), pas avant.
+
+**Comptes de test** à nettoyer en groupe le moment venu, pas avant la fin de
+l'observation : `signup-clean-1787402704@norva.tv`,
+`signup-critical-1787402704@norva.tv`, `signup-parity-1787406846@norva.tv`.
+
+**Le prochain geste utile n'est pas un geste de code.** C'est la lecture des
+deux checkpoints ci-dessous, quand le volume ou le temps semble suffisant —
+un premier coup d'œil vers 10-20 signups réels pour détecter une panne
+systémique, puis 30-50 signups répartis sur au moins une journée avant de
+reconsidérer une montée, une fois le plancher volumétrique posé.
+
+```sql
+select
+  count(*) as decisions,
+  count(*) filter (where observed_risk_level = 'SAFE') as safe,
+  count(*) filter (where observed_risk_level = 'LOW') as low,
+  count(*) filter (where observed_risk_level = 'MEDIUM') as medium,
+  count(*) filter (where observed_risk_level = 'HIGH') as high,
+  count(*) filter (where observed_risk_level = 'CRITICAL') as critical,
+  count(*) filter (where would_have_decision = 'BLOCK') as would_block,
+  count(*) filter (where actual_decision <> 'ALLOW') as actual_not_allow,
+  bool_and(enforcement_enabled = false) as enforcement_still_off
+from abuse_private.signup_decisions
+where created_at > now() - interval '24 hours';
+```
+
+```bash
+{
+  docker logs --since 24h norva-edge-functions
+  docker logs --since 24h norva-edge-functions-2
+} 2>&1 \
+| grep -iE "signup_velocity_unavailable|signup_upstream_refused|signup_upstream_unknown|signup_ingress_refused"
+```
+
+Critères de pause immédiate : `enforcement_enabled=false` avec un
+`actual_decision != ALLOW` (ne devrait jamais arriver, la contrainte en base
+l'interdit déjà — un hit ici voudrait dire qu'un autre chemin a contourné la
+contrainte), des comptes dupliqués, une dérive de `raw_user_meta_data` par
+rapport à ce que le legacy aurait envoyé, ou une erreur systémique (plusieurs
+`signup_velocity_unavailable`/`signup_upstream_unknown` rapprochés — un seul
+isolé mérite inspection, pas une coupure automatique).
