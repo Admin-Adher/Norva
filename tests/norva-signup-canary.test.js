@@ -84,19 +84,29 @@ function fakeFetch(handlers) {
 
 // ── which path a bucket takes ────────────────────────────────────────────────
 
-test('PAUSED: even a bucket that would qualify under the announced 1% stays on legacy', async () => {
-  // The regression this whole file exists to prevent: SIGNUP_PIPELINE_ENABLED
-  // is currently false, shipped that way on purpose (d6d00101 needed
-  // confirming live on the box, and payload parity was still broken when 1%
-  // first went out). No override is set here — this is the actual switch
-  // position shipping today, exercised directly rather than assumed.
+test('LIVE: a bucket under the 1% threshold uses the new pipeline, with no override needed', async () => {
+  // Re-enabled 2026-08-22 after the parity fix was confirmed against a real
+  // production row (see the roadmap doc) — this exercises the actual shipped
+  // switch position, not an assumption about it. No override is set: this is
+  // exactly what a real browser with this bucket does today.
   const { fetch, calls } = fakeFetch({
-    '/auth/v1/signup?redirect_to=https%3A%2F%2Fnorva.tv%2Faccount.html': response(200, { id: 'user-1', identities: [{}] }),
+    '/api/signup-token': response(200, { token: 'tok-1' }),
+    '/api/signup': response(200, { status: 'ok', user_id: 'user-1', created: true, already_registered: false }),
   });
   const { auth } = loadAuth(fetch, { storage: { [KEY_BUCKET]: '0' } });
   await auth.signUp({ email: 'a@b.com', password: 'x'.repeat(12) });
+  assert.deepEqual(calls.map((c) => c.path), ['/api/signup-token', '/api/signup']);
+  assert.ok(!calls.some((c) => c.path.includes('/auth/v1/signup')), 'legacy GoTrue was never called');
+});
+
+test('LIVE: a bucket at or above the 1% threshold still uses legacy, with no override needed', async () => {
+  const { fetch, calls } = fakeFetch({
+    '/auth/v1/signup?redirect_to=https%3A%2F%2Fnorva.tv%2Faccount.html': response(200, { id: 'user-1', identities: [{}] }),
+  });
+  const { auth } = loadAuth(fetch, { storage: { [KEY_BUCKET]: '100' } });
+  await auth.signUp({ email: 'a@b.com', password: 'x'.repeat(12) });
   assert.equal(calls.length, 1);
-  assert.ok(calls[0].path.startsWith('/auth/v1/signup'), 'legacy, even though bucket 0 is under any real threshold');
+  assert.ok(calls[0].path.startsWith('/auth/v1/signup'));
 });
 
 test('the force override routes a single tab through the new pipeline regardless of the bucket or the switch', async () => {
@@ -125,20 +135,34 @@ test('the force override can also pin a tab to legacy even with a qualifying buc
   assert.ok(calls[0].path.startsWith('/auth/v1/signup'));
 });
 
-test('the bucket is generated once and reused, not re-rolled on every signup — even while paused', async () => {
-  // Assignment happens regardless of the switch: a browser's bucket is a
-  // property of that browser from its first visit, so re-enabling the switch
-  // later draws from buckets already spread out over time rather than
-  // deciding everyone's fate in one burst the moment it flips on.
+test('a bucket is generated on first visit, whichever path the draw happens to qualify for', async () => {
+  // Deliberately does NOT pin the outcome via forcePipeline: that override
+  // skips signupCanaryBucket() entirely, which would prove nothing about
+  // generation. Both endpoints are stubbed instead, so the test's own fake
+  // network never depends on which way a real 1-in-10000 draw falls — the
+  // property under test is generation-and-reuse, not which path was taken
+  // (the two LIVE tests above already cover that).
   const { fetch, calls } = fakeFetch({
     '/auth/v1/signup?redirect_to=https%3A%2F%2Fnorva.tv%2Faccount.html': () => response(200, { id: 'user-1', identities: [{}] }),
+    '/api/signup-token': () => response(200, { token: 'tok-1' }),
+    '/api/signup': () => response(200, { status: 'ok', user_id: 'user-1', created: true, already_registered: false }),
   });
   const { auth, values } = loadAuth(fetch, {}); // no seeded bucket: must be generated
   await auth.signUp({ email: 'a@b.com', password: 'x'.repeat(12) });
   const first = values.get(KEY_BUCKET);
-  assert.ok(first !== undefined, 'a bucket was generated and stored even though the pipeline is currently off');
+  assert.ok(first !== undefined, 'a bucket was generated and stored');
   await auth.signUp({ email: 'a2@b.com', password: 'x'.repeat(12) });
-  assert.equal(values.get(KEY_BUCKET), first, 'the second signup reused the same bucket');
+  assert.equal(values.get(KEY_BUCKET), first, 'the second signup reused the same bucket, not a freshly drawn one');
+});
+
+test('a stored bucket is read and reused, never regenerated, once it exists', async () => {
+  const { fetch, calls } = fakeFetch({
+    '/auth/v1/signup?redirect_to=https%3A%2F%2Fnorva.tv%2Faccount.html': () => response(200, { id: 'user-1', identities: [{}] }),
+  });
+  const { auth, values } = loadAuth(fetch, { storage: { [KEY_BUCKET]: '9999' } });
+  await auth.signUp({ email: 'a@b.com', password: 'x'.repeat(12) });
+  await auth.signUp({ email: 'a2@b.com', password: 'x'.repeat(12) });
+  assert.equal(values.get(KEY_BUCKET), '9999', 'never overwritten by a new draw');
 });
 
 // ── the asymmetric fallback rule (pipeline forced on to exercise it) ────────

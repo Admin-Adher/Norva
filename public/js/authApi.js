@@ -98,18 +98,20 @@
     const KEY_SIGNUP_CANARY_BUCKET = 'norva-signup-canary-bucket';
     const KEY_SIGNUP_DEVICE_ID = 'norva-signup-device-id';
     //
-    // PAUSED 2026-08-22, as its own switch rather than by zeroing the
-    // percentage below — the two are different questions ("is this live at
-    // all" vs "how much of it, once live") and conflating them would have left
-    // the 1% figure meaning nothing next time someone reads it. Paused before
-    // confirming the edge runtime carrying the already_registered fix
-    // (d6d00101) had actually been redeployed to Hetzner — a git push updates
-    // Cloudflare Pages on its own, but the box needs an explicit `git pull` +
-    // container recreate — and before payload parity with the legacy signup
-    // was verified: this shim was dropping displayName, signupContext and
-    // redirectTo entirely. Re-enable only after both are fixed and confirmed.
-    const SIGNUP_PIPELINE_ENABLED = false;
-    const SIGNUP_PIPELINE_CANARY_THRESHOLD = 100; // bucket < 100 of 10000 = 1%, once re-enabled
+    // Re-enabled 2026-08-22 at 1%, a few hours after being paused under this
+    // same switch: the edge carrying the already_registered + X-Forwarded-For
+    // fix (d6d00101) is confirmed redeployed to Hetzner, migration 20260822130000
+    // is applied and its 8-argument settle signature confirmed live, and payload
+    // parity is confirmed not against the edge's response shape but against
+    // the row GoTrue itself wrote — raw_user_meta_data carrying display_name and
+    // the three attribution keys from a real production signup. Zero real users
+    // were exposed to the parity gap during the ~27 minutes it was live before
+    // the pause. Do not raise the threshold past 1% before
+    // /functions/v1/norva-signup itself carries a volumetric floor — the
+    // edge->GoTrue hop's own floor is now correctly keyed by real IP, but the
+    // public entry point still carries no rate limit at all.
+    const SIGNUP_PIPELINE_ENABLED = true;
+    const SIGNUP_PIPELINE_CANARY_THRESHOLD = 100; // bucket < 100 of 10000 = 1%
 
     /**
      * Escape hatch for manual verification against production without
