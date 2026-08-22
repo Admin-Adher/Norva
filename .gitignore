@@ -68,6 +68,15 @@ ops/hetzner/.env.backup-*
 ops/hetzner/.env.bak.*
 ops/hetzner/.env.*.bak
 ops/hetzner/**/*.bak
+# Ceinture et bretelles pour le fichier temporaire de
+# provision-abuse-signup-secrets.sh. Il doit vivre dans le même répertoire que
+# le .env, sinon le mv final n'est pas atomique — rename ne traverse pas les
+# systèmes de fichiers. Il naît en 600, un trap le retire, et cette règle couvre
+# le cas où le processus est tué entre les deux. Les SAUVEGARDES, elles, ne sont
+# plus ici du tout : elles vont dans ~/.norva-secret-backups, parce qu'une règle
+# .gitignore ne protège pas d'un `git add -f`, d'un tar, d'un rsync ni de
+# quelqu'un qui lit simplement le working tree.
+ops/hetzner/.env.tmp.*
 # Backup archives must never land in the repo (audit 2026-08-20 : un .tar.gz.age
 # de 849 Mo et deux .env de secrets tramaient non suivis ET non ignores).
 *.age
