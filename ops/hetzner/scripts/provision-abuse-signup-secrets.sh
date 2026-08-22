@@ -5,6 +5,7 @@
 #   bash ops/hetzner/scripts/provision-abuse-signup-secrets.sh
 #   bash ops/hetzner/scripts/provision-abuse-signup-secrets.sh --fingerprints
 #   bash ops/hetzner/scripts/provision-abuse-signup-secrets.sh --verify-edge
+#   bash ops/hetzner/scripts/provision-abuse-signup-secrets.sh --cf-inspect
 #   bash ops/hetzner/scripts/provision-abuse-signup-secrets.sh --push-to-cloudflare
 #   bash ops/hetzner/scripts/provision-abuse-signup-secrets.sh --reveal-ingress-secret
 #
@@ -30,7 +31,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_FILE="${ENV_FILE:-$(cd "$SCRIPT_DIR/.." && pwd)/.env}"
 SECRET_BACKUP_DIR="${SECRET_BACKUP_DIR:-$HOME/.norva-secret-backups}"
 COMPOSE_FILE="${COMPOSE_FILE:-$(cd "$SCRIPT_DIR/.." && pwd)/docker-compose.supabase.yml}"
-CF_PROJECT="${CF_PAGES_PROJECT:-norva}"
+# norva-web, pas norva : c'est le nom que passe .github/workflows/deploy-cloudflare.yml
+# (`pages deploy public --project-name=norva-web`). Le défaut précédent visait un
+# projet inexistant.
+CF_PROJECT="${CF_PAGES_PROJECT:-norva-web}"
+CF_API="https://api.cloudflare.com/client/v4"
 MODE="${1:-provision}"
 
 ok()   { printf '  \033[32m✔\033[0m %s\n' "$1"; }
@@ -73,6 +78,62 @@ CONFIG=(
 )
 
 # ── modes de lecture seule ──────────────────────────────────────────────────
+
+if [[ "$MODE" == "--cf-inspect" ]]; then
+  # LECTURE SEULE. N'a besoin que de curl et python3 — cette box n'a ni node ni
+  # npm (vérifié : `npm: command not found`), donc ni wrangler ni npx n'y sont
+  # une option, et installer node en production pour poser un secret serait une
+  # dette gratuite.
+  #
+  # Sert à trois choses avant toute écriture : valider le jeton, confirmer le nom
+  # du projet, et lister les variables d'environnement DÉJÀ présentes. Ce
+  # dernier point est le plus important — il donne le rayon d'action. Les
+  # valeurs ne sont jamais affichées, seulement les noms et les types.
+  command -v curl >/dev/null 2>&1 || die "curl absent"
+  command -v python3 >/dev/null 2>&1 || die "python3 absent"
+  [[ -n "${CLOUDFLARE_API_TOKEN:-}" ]] || die "CLOUDFLARE_API_TOKEN non défini"
+  [[ -n "${CLOUDFLARE_ACCOUNT_ID:-}" ]] || die "CLOUDFLARE_ACCOUNT_ID non défini"
+
+  printf '\n\033[1mPROJET PAGES « %s »\033[0m\n' "$CF_PROJECT"
+  body="$(curl -sS --max-time 20 \
+    -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+    "$CF_API/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/$CF_PROJECT" 2>&1)" \
+    || die "appel API impossible"
+
+  printf '%s' "$body" | python3 -c '
+import sys, json
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    print("  reponse illisible"); raise SystemExit(1)
+if not d.get("success"):
+    for e in d.get("errors") or [{"message": "erreur inconnue"}]:
+        print("  ECHEC API : %s" % e.get("message"))
+    raise SystemExit(1)
+r = d.get("result") or {}
+print("  nom               : %s" % r.get("name"))
+print("  domaines          : %s" % ", ".join(r.get("domains") or []) or "-")
+dep = (r.get("deployment_configs") or {})
+for envname in ("production", "preview"):
+    cfg = dep.get(envname) or {}
+    ev = cfg.get("env_vars") or {}
+    print("\n  %s — %d variable(s) :" % (envname, len(ev)))
+    for k in sorted(ev):
+        meta = ev[k] or {}
+        # Les valeurs ne sont JAMAIS imprimees. Seulement le nom et le type.
+        t = meta.get("type") or "plain_text"
+        print("    %-38s %s" % (k, t))
+    if "EDGE_INGRESS_SECRET_CURRENT" in ev:
+        print("    -> EDGE_INGRESS_SECRET_CURRENT est DEJA present dans %s" % envname)
+' || die "lecture du projet impossible"
+
+  printf '\n  Rien n'"'"'a été modifié. Les valeurs de type secret_text ne sont pas\n'
+  printf '  renvoyées par l'"'"'API, donc une écriture qui prétendrait « fusionner »\n'
+  printf '  toute la map risquerait de les effacer. C'"'"'est pourquoi la pose se fait\n'
+  printf '  par le dashboard, et pourquoi cette liste sert de témoin : relance ce\n'
+  printf '  mode après la pose et vérifie que les mêmes noms sont toujours là.\n\n'
+  exit 0
+fi
 
 if [[ "$MODE" == "--verify-edge" ]]; then
   # Compare les VALEURS par empreinte, jamais les noms. Un `env | grep -c` rend
@@ -147,6 +208,8 @@ if [[ "$MODE" == "--push-to-cloudflare" ]]; then
   elif command -v npx >/dev/null 2>&1; then
     WRANGLER=(npx --yes wrangler)
     warn "wrangler absent, utilisation de npx (téléchargement à la volée)"
+    # Cette box n'a ni node ni npm, donc ce repli n'y servira pas. Utilise
+    # --cf-inspect puis le dashboard.
   else
     die "ni wrangler ni npx sur cette machine — passe par le dashboard Cloudflare et --reveal-ingress-secret"
   fi
