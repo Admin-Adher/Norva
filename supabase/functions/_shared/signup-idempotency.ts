@@ -16,9 +16,23 @@
 // with a different address is not a retry, it is someone reusing a token for
 // another signup, and it must never receive the first request's result.
 //
-// The password is deliberately absent from the fingerprint. It would add nothing
-// — the nonce and address already identify the attempt — and it would put a
-// credential inside a value that gets stored and logged.
+// THE CREDENTIAL. An earlier version left the password out of the fingerprint
+// entirely, on the grounds that nonce plus address already identify an attempt.
+// That was wrong: same nonce, same address, DIFFERENT password is not a retry —
+// the credential changed, so it is a different intention and must not receive
+// the first request's result. It is bound in through a keyed digest:
+//
+//   credential_binding = HMAC(IDEMPOTENCY_SECRET, "credential:v1:" + password)
+//
+// The binding is computed, folded into the fingerprint, and dropped. It is never
+// persisted on its own, never returned, never logged. The password reaches this
+// function and nothing else.
+//
+// The residual property, stated rather than glossed: the fingerprint IS stored,
+// so somebody holding the server secret AND the row AND the address could test
+// password guesses against it offline. What bounds that is the row's lifetime —
+// fifteen minutes by default — after which the oracle is gone. A plain hash of
+// the password would have been far worse: no secret needed at all.
 
 import { canonicalizeRiskSubject } from "./risk-subject-canonical.ts";
 
@@ -53,6 +67,13 @@ export interface SignupIntent {
   email: string;
   surface: SignupSurface;
   authMethod: SignupAuthMethod;
+  /**
+   * The password, for flows that carry one. Used to derive a binding and then
+   * discarded — it is never stored, returned or logged. Passwordless flows
+   * (magic link, OAuth) pass null and get a fixed marker instead, so their
+   * fingerprints stay stable across retries.
+   */
+  credential?: string | null;
 }
 
 export async function signupRequestFingerprint(intent: SignupIntent): Promise<string> {
@@ -63,6 +84,12 @@ export async function signupRequestFingerprint(intent: SignupIntent): Promise<st
   if (!email) throw new Error("idempotency_email_invalid");
   if (!/^[0-9a-f]{32}$/.test(intent.nonce)) throw new Error("idempotency_nonce_invalid");
 
+  // Derived, folded in, then out of scope. A flow with no credential uses a
+  // constant so its retries keep matching.
+  const credentialBinding = intent.credential
+    ? await keyedHex(`credential:v1:${intent.credential}`)
+    : "none";
+
   // Length-prefixed fields, so no combination of values can be rearranged into
   // another valid message. "ab|c" and "a|bc" must not collide.
   const message = [
@@ -71,11 +98,16 @@ export async function signupRequestFingerprint(intent: SignupIntent): Promise<st
     email,
     intent.surface,
     intent.authMethod,
+    credentialBinding,
   ].map((part) => {
     const text = String(part);
     return `${text.length}:${text}`;
   }).join("|");
 
+  return await keyedHex(message);
+}
+
+async function keyedHex(message: string): Promise<string> {
   const mac = await crypto.subtle.sign(
     "HMAC",
     await fingerprintKey(),

@@ -130,6 +130,8 @@ test('the fingerprint is keyed by a server secret, never by the nonce', async ()
   const message = [
     field(FINGERPRINT_VERSION), field(nonce), field('email:user@example.com'),
     field('web'), field('password'),
+    // No credential supplied, so the binding is the fixed marker.
+    field('none'),
   ].join('|');
   const expected = nodeCrypto.createHmac('sha256', IDEMPOTENCY_SECRET)
     .update(message).digest('hex');
@@ -186,12 +188,58 @@ test('a malformed intent is refused before it can be memoised', async () => {
   }), /idempotency_email_invalid/);
 });
 
-test('the password is not part of the fingerprint', async () => {
+test('the same credential retries, a different one does not', async () => {
+  const { signupRequestFingerprint } = await idem;
+  const base = {
+    nonce: '9'.repeat(32), email: 'user@example.com',
+    surface: 'web', authMethod: 'password',
+  };
+  const first = await signupRequestFingerprint({ ...base, credential: 'correct horse' });
+  // A double click resends the same credential, so it is the same intention.
+  assert.equal(
+    await signupRequestFingerprint({ ...base, credential: 'correct horse' }),
+    first,
+  );
+  // A different password is NOT a retry. An earlier version left the credential
+  // out of the fingerprint entirely and would have handed this request the first
+  // one's result.
+  assert.notEqual(
+    await signupRequestFingerprint({ ...base, credential: 'battery staple' }),
+    first,
+  );
+  // And omitting it is its own intention rather than a wildcard.
+  assert.notEqual(await signupRequestFingerprint(base), first);
+});
+
+test('a passwordless flow keeps a stable fingerprint across retries', async () => {
+  const { signupRequestFingerprint } = await idem;
+  // Magic link and OAuth carry no credential; their retries must still match, so
+  // absence maps to a fixed marker rather than to a random value.
+  const intent = {
+    nonce: '8'.repeat(32), email: 'user@example.com',
+    surface: 'web', authMethod: 'magic_link', credential: null,
+  };
+  assert.equal(
+    await signupRequestFingerprint(intent),
+    await signupRequestFingerprint({ ...intent }),
+  );
+});
+
+test('the credential is bound, never kept', async () => {
+  const { signupRequestFingerprint } = await idem;
   const source = read('supabase/functions/_shared/signup-idempotency.ts');
-  // It would add nothing — nonce and address already identify the attempt — and
-  // would put a credential inside a value that gets stored and logged.
-  assert.doesNotMatch(source, /\bpassword:/);
-  assert.doesNotMatch(source, /intent\.password/);
+  const attempts = read('supabase/migrations/20260822090000_abuse_signup_idempotency.sql');
+  // The binding is derived, folded in and dropped: no column, no return value,
+  // no second digest persisted anywhere.
+  assert.ok(!attempts.includes('credential'), 'no credential column exists');
+  assert.match(source, /credential_binding = HMAC/);
+  const fingerprint = await signupRequestFingerprint({
+    nonce: '7'.repeat(32), email: 'user@example.com',
+    surface: 'web', authMethod: 'password', credential: 'a-secret-value',
+  });
+  // The fingerprint is a MAC, so it cannot contain the credential.
+  assert.match(fingerprint, /^[0-9a-f]{64}$/);
+  assert.ok(!fingerprint.includes('a-secret'));
 });
 
 // ── the state machine, as the database enforces it ─────────────────────────
