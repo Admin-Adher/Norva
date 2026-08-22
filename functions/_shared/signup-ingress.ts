@@ -84,7 +84,12 @@ export async function proxySignedSignup(
   if (rawBody.byteLength > MAX_INGRESS_BODY_BYTES) return refuse(413);
 
   const target = `${env.NORVA_EDGE_BASE ?? DEFAULT_EDGE_BASE}${edgePath}`;
-  const targetPath = normalisePath(new URL(target).pathname);
+  // La route SIGNEE est l'identifiant logique, pas le chemin de l'URL cible.
+  // Kong pose strip_path: true sur functions-v1, donc l'amont ne voit jamais le
+  // prefixe /functions/v1 : signer le chemin complet faisait echouer chaque
+  // requete en ingress_route_mismatch. edgePath vaut deja "" ou "/token" ici,
+  // c'est-a-dire exactement ce que le handler resoudra de son cote.
+  const signedRoute = normalisePath(edgePath || "/");
 
   const cf = (request as unknown as { cf?: Record<string, unknown> }).cf ?? {};
   const clientIp = request.headers.get("CF-Connecting-IP") ?? "";
@@ -100,7 +105,7 @@ export async function proxySignedSignup(
     timestampMs: Date.now(),
     requestId: newRequestId(),
     method: normaliseMethod(request.method),
-    path: targetPath,
+    route: signedRoute,
     contentType,
     // Over the raw bytes, never over parsed-then-reserialised JSON: two layers
     // render the same structure differently, and one changed byte between here

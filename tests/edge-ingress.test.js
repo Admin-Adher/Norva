@@ -30,7 +30,7 @@ async function envelopeFor(mod, overrides = {}) {
     timestampMs: NOW,
     requestId: 'a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6',
     method: 'POST',
-    path: '/functions/v1/norva-signup',
+    route: '/',
     contentType: 'application/json',
     bodyHash: await mod.hashBody(BODY),
     clientIp: '88.163.67.137',
@@ -44,7 +44,7 @@ function expectation(mod, overrides = {}) {
   return {
     audience: mod.INGRESS_AUDIENCE_SIGNUP,
     method: 'POST',
-    path: '/functions/v1/norva-signup',
+    route: '/',
     contentType: 'application/json; charset=utf-8',
     rawBody: BODY,
     nowMs: NOW + 500,
@@ -77,11 +77,17 @@ test('one changed byte in the body invalidates the request', async () => {
 test('an envelope cannot be pointed at another route', async () => {
   const mod = await loading;
   const header = await mod.signIngress(await envelopeFor(mod), KEYS.current);
-  // The signed method and path are compared against what was actually served.
+  // The signed method and route are compared against what was actually served.
   // Reading them out of the envelope and believing them would let one signed
   // statement be aimed at a different handler.
+  //
+  // The route is FUNCTION-RELATIVE, not a URL path. Kong carries
+  // strip_path: true on functions-v1, so signing the full path bound the
+  // signature to a value the gateway rewrote in transit — every request was
+  // refused as ingress_route_mismatch in production, which is how this was
+  // found. '/token' against '/' is the real cross-route replay this stops.
   for (const overrides of [
-    { path: '/functions/v1/norva-admin' },
+    { route: '/token' },
     { method: 'GET' },
   ]) {
     const verdict = await mod.verifyIngress(header, KEYS, expectation(mod, overrides));
@@ -221,8 +227,8 @@ test('normalisation is identical on both sides', async () => {
 
 test('the canonical form cannot be rearranged into another valid one', async () => {
   const mod = await loading;
-  const a = mod.canonicalEnvelope(await envelopeFor(mod, { method: 'POST', path: '/x' }));
-  const b = mod.canonicalEnvelope(await envelopeFor(mod, { method: 'POST/x', path: '' }));
+  const a = mod.canonicalEnvelope(await envelopeFor(mod, { method: 'POST', route: '/x' }));
+  const b = mod.canonicalEnvelope(await envelopeFor(mod, { method: 'POST/x', route: '' }));
   assert.notEqual(a, b);
 });
 

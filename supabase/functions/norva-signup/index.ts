@@ -231,7 +231,10 @@ export async function handleSignup(req: Request, deps: SignupDeps): Promise<Resp
     {
       audience: INGRESS_AUDIENCE_SIGNUP,
       method: req.method,
-      path: url.pathname,
+      // `path` et non `url.pathname` : Kong a deja retire /functions/v1 en
+      // amont, donc pathname n'est pas ce que Cloudflare a signe. Les deux
+      // cotes derivent maintenant le meme nom logique.
+      route: path,
       contentType: req.headers.get("content-type"),
       rawBody,
       nowMs: deps.now(),

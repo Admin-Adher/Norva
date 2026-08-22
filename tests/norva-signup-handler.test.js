@@ -120,6 +120,12 @@ function harness(options = {}) {
   };
 }
 
+// Ce que le handler verra reellement : Kong porte strip_path: true sur
+// functions-v1, donc le prefixe /functions/v1 n'atteint jamais l'amont. Le test
+// derive la route exactement comme le handler, sinon il validerait un contrat
+// que la production ne respecte pas — c'est precisement ce qui est arrive.
+const relativeRoute = (p) => p.replace(/^.*\/norva-signup/, '') || '/';
+
 async function signedRequest(overrides = {}) {
   const [, ingress] = await loading;
   const routePath = overrides.path || ROUTE;
@@ -134,7 +140,7 @@ async function signedRequest(overrides = {}) {
     timestampMs: overrides.timestampMs || NOW,
     requestId: overrides.requestId || nodeCrypto.randomBytes(16).toString('hex'),
     method: 'POST',
-    path: overrides.signedPath || routePath,
+    route: overrides.signedRoute ?? relativeRoute(routePath),
     contentType: 'application/json',
     bodyHash: await ingress.hashBody(raw),
     clientIp: overrides.clientIp || '88.163.67.137',
@@ -249,7 +255,7 @@ test('a body changed after signing is refused', async () => {
     timestampMs: NOW,
     requestId: nodeCrypto.randomBytes(16).toString('hex'),
     method: 'POST',
-    path: ROUTE,
+    route: relativeRoute(ROUTE),
     contentType: 'application/json',
     bodyHash: await ingress.hashBody(raw),
     clientIp: '88.163.67.137',
@@ -581,7 +587,7 @@ test('an envelope signed for another route cannot be used here', async () => {
   const [mod] = await loading;
   const h = harness();
   const response = await mod.handleSignup(
-    await signedRequest({ body: payload(), path: ROUTE, signedPath: `${ROUTE}/token` }),
+    await signedRequest({ body: payload(), path: ROUTE, signedRoute: '/token' }),
     h.deps,
   );
   assert.equal(response.status, 401);

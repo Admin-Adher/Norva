@@ -24,8 +24,18 @@
 //                         same mechanism
 //   timestampMs           a short window, so a captured envelope dies quickly
 //   requestId             consumed atomically, so it works exactly once
-//   method, path          compared against the route actually called, never
-//                         merely read out of the envelope
+//   method, route         compared against the route actually called, never
+//                         merely read out of the envelope. It is the
+//                         FUNCTION-RELATIVE route ("/" or "/token"), NOT a URL
+//                         path — because a URL path is not stable across the
+//                         hop. Kong's functions-v1 route carries
+//                         strip_path: true, so an envelope signing
+//                         /functions/v1/norva-signup/token arrived at an
+//                         upstream seeing /norva-signup/token and every request
+//                         was refused as ingress_route_mismatch. Binding the
+//                         signature to a value a gateway rewrites in transit
+//                         was the defect; both sides now derive the same logical
+//                         name independently, and no proxy can rewrite it.
 //   contentType           normalised, so a signed JSON body cannot be re-fed as
 //                         something else
 //   bodyHash              SHA-256 of the RAW BYTES. Not of parsed-then-
@@ -57,7 +67,8 @@ export interface IngressEnvelope {
   timestampMs: number;
   requestId: string;
   method: string;
-  path: string;
+  /** Function-relative: "/" or "/token". Never a full URL path. */
+  route: string;
   contentType: string;
   bodyHash: string;
   clientIp: string;
@@ -130,7 +141,7 @@ export function canonicalEnvelope(envelope: IngressEnvelope): string {
     envelope.timestampMs,
     envelope.requestId,
     envelope.method,
-    envelope.path,
+    envelope.route,
     envelope.contentType,
     envelope.bodyHash,
     envelope.clientIp,
@@ -207,7 +218,8 @@ export interface IngressExpectation {
   audience: string;
   /** The route ACTUALLY called, not what the envelope claims. */
   method: string;
-  path: string;
+  /** Function-relative, as the handler resolved it. Never req.url.pathname. */
+  route: string;
   contentType: string | null;
   rawBody: ArrayBuffer | Uint8Array;
   nowMs: number;
@@ -288,7 +300,7 @@ export async function verifyIngress(
   // pointed at a different handler.
   if (
     envelope.method !== normaliseMethod(expected.method)
-    || envelope.path !== normalisePath(expected.path)
+    || envelope.route !== normalisePath(expected.route)
   ) {
     return { ok: false, reason: "ingress_route_mismatch" };
   }
