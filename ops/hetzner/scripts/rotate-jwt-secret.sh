@@ -158,25 +158,58 @@ fi
 
 if [[ "$MODE" == "--verify" ]]; then
   section "PREUVE DE RÉVOCATION"
-  BACKUP="$(ls -1t "$SECRET_BACKUP_DIR"/env.* 2>/dev/null | head -n 1 || true)"
-  [[ -n "$BACKUP" ]] || die "aucune sauvegarde dans $SECRET_BACKUP_DIR — impossible de tester l'ancien jeton"
-  OLD_SR="$(sed -n 's/^SERVICE_ROLE_KEY=//p' "$BACKUP" | tail -n 1)"
+  CURRENT_SR="$(value_of SERVICE_ROLE_KEY)"
+  BACKUP=""; OLD_SR=""
+  for candidate in $(ls -1t "$SECRET_BACKUP_DIR"/env.* 2>/dev/null); do
+    cand_sr="$(sed -n 's/^SERVICE_ROLE_KEY=//p' "$candidate" | tail -n 1)"
+    if [[ -n "$cand_sr" && "$cand_sr" != "$CURRENT_SR" ]]; then
+      BACKUP="$candidate"; OLD_SR="$cand_sr"; break
+    fi
+  done
+  [[ -n "$OLD_SR" ]] || die "aucune sauvegarde ne contient un SERVICE_ROLE_KEY different de l'actuel dans $SECRET_BACKUP_DIR — rien a tester (rotation deja verifiee, ou pas encore faite)"
   PUB="$(value_of SUPABASE_PUBLISHABLE_KEY)"
-  [[ -n "$OLD_SR" ]] || die "SERVICE_ROLE_KEY absent de $BACKUP"
+  ok "ancien jeton lu dans $(basename "$BACKUP")"
   [[ -n "$PUB" ]] || die "SUPABASE_PUBLISHABLE_KEY absent — nécessaire pour reproduire l'attaque"
   printf '  L'"'"'ancien jeton est lu depuis la sauvegarde : personne n'"'"'a à le manipuler.\n'
 
   # Exactement l'attaque décrite : clé publique en apikey, ancien jeton en Bearer.
-  for target in "/rest/v1/" "/auth/v1/admin/users"; do
+  #
+  # Le choix des cibles n'est pas cosmétique. Une première version sondait
+  # /rest/v1/ — or cette route exacte est matchée par rest-v1-openapi, dont
+  # l'ACL n'autorise que le consumer `admin`. Le consumer anon y recevait donc
+  # un 403 de l'ACL quelle que soit la validité du jeton, et la version
+  # précédente acceptait 401 OU 403 : elle aurait annoncé une révocation sans
+  # rien avoir prouvé. Une assertion qui passe pour la mauvaise raison ne
+  # prouve rien.
+  #
+  # /rest/v1/<table inexistante> passe par rest-v1-all, qui autorise anon, donc
+  # seul le JWT peut décider. Cela distingue l'authentification de
+  # l'autorisation :
+  #
+  #   404  PostgREST a ACCEPTÉ le jeton, la table n'existe pas → jeton VIVANT
+  #   401  signature refusée                                   → jeton MORT
+  #
+  # D'où l'exigence d'un 401 STRICT, jamais « 401 ou 403 ».
+  probe='/rest/v1/norva_revocation_probe_absente?limit=1'
+  dead=0; alive=0
+  for target in "$probe" "/auth/v1/admin/users?page=1&per_page=1"; do
     code="$(curl -s -o /dev/null -w '%{http_code}' \
       -H "apikey: $PUB" -H "Authorization: Bearer $OLD_SR" \
       "${KONG_URL}${target}" || echo 000)"
-    if [[ "$code" == "401" || "$code" == "403" ]]; then
-      ok "$target → HTTP $code — l'ancien jeton est refusé"
-    else
-      bad "$target → HTTP $code — L'ANCIEN JETON PASSE ENCORE"
-    fi
+    case "$code" in
+      401) ok  "${target%%\?*} → 401 — signature refusée, l'ancien jeton est MORT"; dead=$((dead+1)) ;;
+      403) bad "${target%%\?*} → 403 — refus d'ACL, pas de preuve sur le jeton" ;;
+      000) bad "${target%%\?*} → aucune réponse — Kong joignable sur $KONG_URL ?" ;;
+      *)   bad "${target%%\?*} → $code — L'ANCIEN JETON EST ENCORE ACCEPTÉ"; alive=$((alive+1)) ;;
+    esac
   done
+
+  if [[ "$alive" -gt 0 ]]; then
+    printf '\n  \033[31mLancé AVANT la rotation, c'"'"'est le résultat attendu et cela\n'
+    printf '  confirme la vulnérabilité. Lancé APRÈS, la rotation a échoué.\033[0m\n'
+  elif [[ "$dead" -eq 2 ]]; then
+    printf '\n  \033[32mLes deux surfaces refusent l'"'"'ancien jeton.\033[0m\n'
+  fi
 
   section "LE NOUVEAU JETON FONCTIONNE"
   NEW_SR="$(value_of SERVICE_ROLE_KEY)"
@@ -247,19 +280,36 @@ else
   warn "aucun GUC app.settings.jwt_secret — rien à mettre à jour"
 fi
 
-section "[5] RECRÉATION"
-# Recréer, pas redémarrer : `docker restart` relance le conteneur avec son
-# ancien environnement. Leçon d'un incident précédent : `docker compose up -d`
-# peut afficher « Started » sans rien faire, donc on vérifie après.
+section "[5] RECREATION"
+# Recreer, pas redemarrer : `docker restart` relance le conteneur avec son
+# ancien environnement.
+#
+# On ne recree QUE ce qui tourne deja. Un `compose up` sur un service arrete le
+# DEMARRERAIT, et « realtime » comme « resend-contact-worker » peuvent etre
+# volontairement a l'arret sur cette box — les allumer au passage serait un
+# changement d'etat que personne n'a demande.
+RUNNING=()
+SKIPPED=()
 for svc in "${SERVICES[@]}"; do
-  if grep -qE "^  ${svc}:" "$COMPOSE_FILE"; then
-    printf '  → %s\n' "$svc"
-    docker compose -f "$COMPOSE_FILE" up -d --force-recreate --no-deps "$svc" \
-      || warn "$svc n'a pas été recréé — à traiter avant de conclure"
+  grep -qE "^  ${svc}:" "$COMPOSE_FILE" || { SKIPPED+=("$svc (absent du compose)"); continue; }
+  cname="$(docker compose -f "$COMPOSE_FILE" ps -q "$svc" 2>/dev/null | head -n 1)"
+  if [[ -n "$cname" ]] && [[ "$(docker inspect -f '{{.State.Running}}' "$cname" 2>/dev/null)" == "true" ]]; then
+    RUNNING+=("$svc")
   else
-    warn "service $svc absent du compose, ignoré"
+    SKIPPED+=("$svc (a l'arret — laisse tel quel)")
   fi
 done
+
+[[ ${#SKIPPED[@]} -gt 0 ]] && for sk in "${SKIPPED[@]}"; do warn "$sk"; done
+[[ ${#RUNNING[@]} -gt 0 ]] || die "aucun service en marche a recreer — etat inattendu, .env deja modifie, sauvegarde en $BACKUP"
+
+# Un seul appel : Compose parallelise, ce qui raccourcit la fenetre pendant
+# laquelle certains conteneurs portent le nouveau secret et d'autres l'ancien.
+# Dans cette fenetre, un appel edge -> PostgREST peut prendre un 401.
+printf '  recreation en parallele de : %s
+' "${RUNNING[*]}"
+docker compose -f "$COMPOSE_FILE" up -d --force-recreate --no-deps "${RUNNING[@]}"   || die "la recreation a echoue — .env deja modifie, sauvegarde en $BACKUP"
+ok "${#RUNNING[@]} service(s) recree(s)"
 
 section "[6] LE NOUVEL ENVIRONNEMENT EST-IL ARRIVÉ"
 NEW_FP="$(fingerprint_of "$NEW_JWT")"
