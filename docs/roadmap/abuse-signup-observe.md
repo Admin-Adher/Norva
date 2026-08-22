@@ -43,8 +43,60 @@ nouveau chemin.
 | `EDGE_INGRESS_SECRET_CURRENT` sur Pages | ✅ | `secret_text`, 5 → 6 variables, aucune perdue |
 | Redéploiement Pages | ✅ | déploiement créé après la pose du secret |
 | E2E `/api/signup-token` | ✅ | `200` + token signé, nonce 32 hex, aucun compte créé |
-| E2E signup contrôlé | à faire | vérifier en base que CRITICAL reste `ALLOW` |
-| Canary web | à faire | après l'E2E, et après le plancher volumétrique |
+| E2E signup contrôlé | ✅ | 3 décisions réelles, contrat non négociable vérifié en base et en logs |
+| Canary web | à faire | après le plancher volumétrique — voir backlog point 0 |
+
+## Jalon `observe` fermé le 2026-08-22
+
+Trois signups réels via le nouveau pipeline, tous `enforcement_enabled = false` :
+
+| test | `rawScore` | `riskLevel` | `wouldHaveDecision` | `actualDecision` |
+|---|---|---|---|---|
+| propre | 0 | SAFE | ALLOW | ALLOW |
+| rejeu exact (même `formToken`) | 40 | MEDIUM | RESTRICT | ALLOW |
+| honeypot + soumission rapide + UA headless | 102 | CRITICAL | BLOCK | ALLOW |
+
+Le rejeu produit sa **propre** ligne de décision — `idempotent_retry_first`, famille
+`behaviour` — c'est voulu : chaque tentative est observée, y compris un second
+clic, mais `auth.users` ne contient qu'une ligne par adresse et GoTrue n'est
+jamais rappelé. Preuve à deux niveaux : même `user_id` renvoyé par l'API sur le
+rejeu, et `attempt_count = 2` avec un seul compte réel en base.
+
+Le score 102 se reconstruit intégralement depuis les `signalCodes` journalisés,
+sans accès à la base :
+
+```
+honeypot_filled            45
+submission_under_3000ms    12
+client_headless_ua         30
+velocity_ip_3_per_1h       15
+────────────────────────────
+                           102  →  plafonné à 100, CRITICAL
+```
+
+Trois familles indépendantes (`behaviour`, `client`, `velocity`) ont contribué
+sans concertation — la vélocité a émergé naturellement parce que les deux tests
+partaient de la même IP en quelques secondes, pas d'un scénario forcé.
+`repeated_strong_evidence = true` uniquement sur cette ligne.
+
+Vérifié en toutes lettres, logs de production à l'appui : ni e-mail, ni mot de
+passe, ni `formToken`, ni corps de requête dans les trois lignes de log. Le
+premier grep de vérification portait sur le mot `password` seul et aurait
+échoué à tort — `"authMethod":"password"` est une valeur légitime de
+l'énumération. Corrigé en cherchant la forme `"password":"`, qui n'apparaît
+dans aucune valeur légitime.
+
+Et une propriété structurelle vérifiée par lecture du repo entier : rien, nulle
+part, ne lit `signup_decisions` ou `observed_risk_level` en dehors du module qui
+les écrit. `actual_decision = ALLOW` en mode observe n'est donc pas seulement ce
+que dit la table — c'est aussi la garantie qu'aucun autre composant de Norva ne
+peut agir sur le niveau observé, puisqu'aucun ne le lit.
+
+Ce qui est certifié à ce stade : ingress Cloudflare → edge, token signé, nonce
+unique, idempotence, store de vélocité, scoring, caps/floors, pseudonymisation,
+snapshot append-only, HIGH/CRITICAL passifs, absence de données sensibles dans
+les logs, enforcement réellement désactivé. Plus aucun poids ni seuil ne bouge
+avant d'avoir des distributions réelles.
 
 ### La chaîne, prouvée le 2026-08-22
 
@@ -333,15 +385,24 @@ autre appel** n'a eu lieu, en filtrant la timeline sur ce qui n'est ni un RPC
 
 ## Déroulé du branchement
 
-Pas de bascule à 100 % :
+Pas de bascule à 100 %, et le plancher volumétrique (backlog point 0) précède
+toute ouverture au trafic public — le E2E a tourné à trois requêtes, pas à
+l'échelle d'un canary.
 
 ```
-tests internes
-  → quelques signups réels contrôlés
-  → nouvel endpoint pour le web
-  → 24 à 72 h d'observation
-  → comparaison legacy / nouveau pipeline
+Phase 0   plancher volumétrique posé (Kong ou Cloudflare)
+Phase 1   trafic interne / contrôlé              — fait, ce document
+Phase 2   petit pourcentage du signup web réel    → observe uniquement
+Phase 3   100 % du signup web                     → observe uniquement
+Phase 4   collecte suffisante                      → calibration des poids
+Phase 5   seulement alors, discussion de l'enforcement
 ```
+
+L'ordre est déterminant : les phases 2 à 4 ne changent **aucune** ligne du
+moteur, seulement le volume de trafic réel qui l'alimente. Le contrat vérifié
+plus haut — `actual_decision = ALLOW` toujours quand `enforcement_enabled =
+false` — reste la seule garantie qui compte tant que la phase 5 n'est pas
+ouverte.
 
 ## Ce qu'on regardera, et ce qu'on ne touchera pas
 
@@ -355,6 +416,10 @@ Aucun poids ne bouge avant d'avoir des distributions. Ce qu'il faudra lire :
 - IPv4 contre IPv6 ;
 - résidentiel contre datacenter ;
 - proportion d'`IDEMPOTENT_RETRY` et de `NONCE_INTENT_MISMATCH` ;
+- famille de navigateur (`ua_family`) ;
+- combien d'utilisateurs à score élevé poursuivent réellement l'onboarding, et
+  leur conversion en aval par niveau de risque — la question à laquelle
+  `signup_decision_outcomes` existe pour répondre ;
 - cohortes en aval (`signup_decision_outcomes`).
 
 La segmentation par `signup_endpoint_version` n'est pas optionnelle : tout client
