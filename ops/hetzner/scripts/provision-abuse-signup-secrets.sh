@@ -6,6 +6,8 @@
 #   bash ops/hetzner/scripts/provision-abuse-signup-secrets.sh --fingerprints
 #   bash ops/hetzner/scripts/provision-abuse-signup-secrets.sh --verify-edge
 #   bash ops/hetzner/scripts/provision-abuse-signup-secrets.sh --cf-inspect
+#   bash ops/hetzner/scripts/provision-abuse-signup-secrets.sh --cf-probe-merge
+#   bash ops/hetzner/scripts/provision-abuse-signup-secrets.sh --cf-put-ingress
 #   bash ops/hetzner/scripts/provision-abuse-signup-secrets.sh --push-to-cloudflare
 #   bash ops/hetzner/scripts/provision-abuse-signup-secrets.sh --reveal-ingress-secret
 #
@@ -79,6 +81,202 @@ CONFIG=(
 
 # ── modes de lecture seule ──────────────────────────────────────────────────
 
+# Demande le jeton et l'account id, sans écho pour le jeton. Partagé par les
+# modes qui parlent à l'API Cloudflare.
+cf_credentials() {
+  command -v curl >/dev/null 2>&1 || die "curl absent"
+  command -v python3 >/dev/null 2>&1 || die "python3 absent"
+  if [[ -z "${CLOUDFLARE_API_TOKEN:-}" ]]; then
+    [[ -t 0 ]] || die "CLOUDFLARE_API_TOKEN non défini et pas de terminal pour le demander"
+    printf '  Jeton API Cloudflare (permission « Cloudflare Pages: Edit »).\n'
+    printf '  La saisie ne s'"'"'affiche pas et ne va pas dans l'"'"'historique.\n'
+    read -rsp '  Jeton : ' CLOUDFLARE_API_TOKEN; printf '\n'
+    [[ -n "$CLOUDFLARE_API_TOKEN" ]] || die "jeton vide"
+  fi
+  if [[ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]]; then
+    [[ -t 0 ]] || die "CLOUDFLARE_ACCOUNT_ID non défini et pas de terminal pour le demander"
+    read -rp '  Account ID : ' CLOUDFLARE_ACCOUNT_ID
+    [[ -n "$CLOUDFLARE_ACCOUNT_ID" ]] || die "account id vide"
+  fi
+  export CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID CF_PROJECT CF_API
+}
+
+if [[ "$MODE" == "--cf-probe-merge" ]]; then
+  # MESURE la sémantique du PATCH sur env_vars au lieu de la supposer. C'est la
+  # seule chose qui me retenait d'écrire par API : si un PATCH partiel REMPLACE
+  # la map, poser une variable en production effacerait
+  # NORVA_REFERRAL_EDGE_HMAC_SECRET, dont l'API ne renvoie pas la valeur et qui
+  # serait donc irrécupérable.
+  #
+  # La sonde tourne sur PREVIEW, qui ne sert aucun trafic et ne contient qu'une
+  # variable plain_text — donc lisible par l'API, donc restaurable. Le rayon
+  # d'action est nul et la réponse est définitive.
+  printf '\n\033[1mSÉMANTIQUE DU PATCH — sonde sur l'"'"'environnement PREVIEW\033[0m\n'
+  cf_credentials
+  rc=0
+  python3 - <<'PY' || rc=$?
+import json, os, sys, urllib.request, urllib.error
+
+API = os.environ["CF_API"]; ACC = os.environ["CLOUDFLARE_ACCOUNT_ID"]
+PROJ = os.environ["CF_PROJECT"]; TOK = os.environ["CLOUDFLARE_API_TOKEN"]
+URL = "%s/accounts/%s/pages/projects/%s" % (API, ACC, PROJ)
+PROBE = "NORVA_MERGE_PROBE"
+
+def call(method, payload=None):
+    data = json.dumps(payload).encode() if payload is not None else None
+    req = urllib.request.Request(URL, data=data, method=method)
+    req.add_header("Authorization", "Bearer " + TOK)
+    if data: req.add_header("Content-Type", "application/json")
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            return json.load(r)
+    except urllib.error.HTTPError as e:
+        return json.load(e)
+
+def preview_vars():
+    d = call("GET")
+    if not d.get("success"):
+        print("  ECHEC lecture : %s" % (d.get("errors") or "inconnu")); sys.exit(1)
+    cfg = ((d.get("result") or {}).get("deployment_configs") or {}).get("preview") or {}
+    return cfg.get("env_vars") or {}
+
+before = preview_vars()
+print("  avant  : %s" % (", ".join(sorted(before)) or "(vide)"))
+if PROBE in before:
+    print("  la sonde precedente n'a pas ete nettoyee, on la retire d'abord")
+
+# On envoie UNIQUEMENT la clef sonde. Si la semantique est la fusion, les autres
+# survivent. Si c'est le remplacement, elles disparaissent — et on les remet.
+r = call("PATCH", {"deployment_configs": {"preview": {"env_vars": {
+    PROBE: {"value": "ok", "type": "plain_text"}}}}})
+if not r.get("success"):
+    print("  ECHEC du PATCH : %s" % (r.get("errors") or "inconnu")); sys.exit(1)
+
+after = preview_vars()
+print("  apres  : %s" % (", ".join(sorted(after)) or "(vide)"))
+
+survivors = [k for k in before if k != PROBE and k in after]
+lost = [k for k in before if k != PROBE and k not in after]
+merged = bool(survivors) and not lost and PROBE in after
+
+# Nettoyage : une valeur null supprime la clef.
+call("PATCH", {"deployment_configs": {"preview": {"env_vars": {PROBE: None}}}})
+restored = preview_vars()
+
+if lost:
+    # Remise en place de ce que le PATCH a effacé. Possible seulement parce que
+    # preview ne contient que du plain_text.
+    payload = {}
+    for k in lost:
+        meta = before[k] or {}
+        if (meta.get("type") or "plain_text") != "plain_text" or meta.get("value") is None:
+            print("  ATTENTION : %s ne peut pas etre restauree automatiquement" % k)
+            continue
+        payload[k] = {"value": meta["value"], "type": "plain_text"}
+    if payload:
+        call("PATCH", {"deployment_configs": {"preview": {"env_vars": payload}}})
+        restored = preview_vars()
+
+print("  final  : %s" % (", ".join(sorted(restored)) or "(vide)"))
+print()
+if merged:
+    print("  VERDICT : FUSION — un PATCH partiel conserve les autres variables.")
+    print("  La pose en production par API est donc sure. Enchaine sur :")
+    print("      --cf-put-ingress")
+    sys.exit(0)
+print("  VERDICT : REMPLACEMENT ou resultat ambigu.")
+print("  N'ecris PAS en production par API : NORVA_REFERRAL_EDGE_HMAC_SECRET")
+print("  serait efface sans possibilite de restauration. Passe par le dashboard.")
+sys.exit(2)
+PY
+  printf '\n'
+  [[ "$rc" == "0" ]] && ok "la sémantique est mesurée, pas supposée" \
+                     || warn "voir le verdict ci-dessus avant toute écriture"
+  exit "$rc"
+fi
+
+if [[ "$MODE" == "--cf-put-ingress" ]]; then
+  # Pose EDGE_INGRESS_SECRET_CURRENT en production par API. Le secret est lu
+  # depuis le .env et passe par stdin : il n'apparaît ni dans argv, ni dans
+  # l'historique, ni à l'écran, ni dans un fichier temporaire.
+  #
+  # À ne lancer qu'après --cf-probe-merge, dont le verdict FUSION est la seule
+  # chose qui rend cette écriture sûre : sans elle, un remplacement de la map
+  # effacerait NORVA_REFERRAL_EDGE_HMAC_SECRET, irrécupérable.
+  printf '\n\033[1mPOSE DE EDGE_INGRESS_SECRET_CURRENT EN PRODUCTION\033[0m\n'
+  secret="$(value_of EDGE_INGRESS_SECRET_CURRENT)"
+  [[ -n "$secret" ]] || die "EDGE_INGRESS_SECRET_CURRENT absent du .env — lance d'abord le mode provision"
+  printf '  empreinte à retrouver ensuite : \033[1m%s\033[0m\n' "$(fingerprint_of EDGE_INGRESS_SECRET_CURRENT)"
+  cf_credentials
+  printf '\n  Confirme que --cf-probe-merge a rendu le verdict FUSION.\n'
+  read -rp '  Taper POSER pour continuer : ' answer
+  [[ "$answer" == "POSER" ]] || { printf '\n  Annulé, rien n'"'"'a été écrit.\n\n'; exit 0; }
+
+  rc=0
+  NORVA_INGRESS_SECRET="$secret" python3 - <<'PY' || rc=$?
+import json, os, sys, urllib.request, urllib.error
+
+secret = os.environ["NORVA_INGRESS_SECRET"]
+API = os.environ["CF_API"]; ACC = os.environ["CLOUDFLARE_ACCOUNT_ID"]
+PROJ = os.environ["CF_PROJECT"]; TOK = os.environ["CLOUDFLARE_API_TOKEN"]
+URL = "%s/accounts/%s/pages/projects/%s" % (API, ACC, PROJ)
+NAME = "EDGE_INGRESS_SECRET_CURRENT"
+
+def call(method, payload=None):
+    data = json.dumps(payload).encode() if payload is not None else None
+    req = urllib.request.Request(URL, data=data, method=method)
+    req.add_header("Authorization", "Bearer " + TOK)
+    if data: req.add_header("Content-Type", "application/json")
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            return json.load(r)
+    except urllib.error.HTTPError as e:
+        return json.load(e)
+
+def prod_vars():
+    d = call("GET")
+    if not d.get("success"):
+        print("  ECHEC lecture : %s" % (d.get("errors") or "inconnu")); sys.exit(1)
+    cfg = ((d.get("result") or {}).get("deployment_configs") or {}).get("production") or {}
+    return cfg.get("env_vars") or {}
+
+before = set(prod_vars())
+print("  avant  : %d variable(s)" % len(before))
+
+r = call("PATCH", {"deployment_configs": {"production": {"env_vars": {
+    NAME: {"value": secret, "type": "secret_text"}}}}})
+del secret
+if not r.get("success"):
+    print("  ECHEC du PATCH : %s" % (r.get("errors") or "inconnu")); sys.exit(1)
+
+after = prod_vars()
+print("  apres  : %d variable(s)" % len(after))
+lost = sorted(before - set(after))
+if lost:
+    print("  PERDUES : %s" % ", ".join(lost))
+    print("  Restaure-les depuis le dashboard AVANT tout deploiement.")
+    sys.exit(1)
+if NAME not in after:
+    print("  %s n'a pas ete cree" % NAME); sys.exit(1)
+if (after[NAME] or {}).get("type") != "secret_text":
+    print("  %s cree mais pas en secret_text" % NAME); sys.exit(1)
+for k in sorted(after):
+    print("    %-38s %s" % (k, (after[k] or {}).get("type") or "plain_text"))
+print()
+print("  OK : %s pose en secret_text, aucune variable perdue." % NAME)
+PY
+  if [[ "$rc" == "0" ]]; then
+    printf '\n'
+    ok "posé sans que la valeur soit affichée"
+    printf '\n  \033[1mIl reste à REDÉPLOYER.\033[0m Une variable Pages est liée au\n'
+    printf '  déploiement : le déploiement courant a été créé avant cette pose et ne\n'
+    printf '  la verra pas. « Retry deployment » dans le dashboard en crée un nouveau.\n\n'
+  else
+    printf '\n'; bad "voir ci-dessus"; exit "$rc"
+  fi
+  exit 0
+fi
+
 if [[ "$MODE" == "--cf-inspect" ]]; then
   # LECTURE SEULE. N'a besoin que de curl et python3 — cette box n'a ni node ni
   # npm (vérifié : `npm: command not found`), donc ni wrangler ni npx n'y sont
@@ -89,10 +287,7 @@ if [[ "$MODE" == "--cf-inspect" ]]; then
   # du projet, et lister les variables d'environnement DÉJÀ présentes. Ce
   # dernier point est le plus important — il donne le rayon d'action. Les
   # valeurs ne sont jamais affichées, seulement les noms et les types.
-  command -v curl >/dev/null 2>&1 || die "curl absent"
-  command -v python3 >/dev/null 2>&1 || die "python3 absent"
-
-  # Demandé ici plutôt que passé sur la ligne de commande, pour deux raisons.
+  # Demandé plutôt que passé sur la ligne de commande, pour deux raisons.
   # Un `CLOUDFLARE_API_TOKEN=xxx commande` atterrit dans ~/.bash_history en
   # clair. Et une consigne écrite avec des chevrons — CLOUDFLARE_API_TOKEN=<jeton>
   # — casse le shell, qui lit « < » comme une redirection : c'est arrivé.
