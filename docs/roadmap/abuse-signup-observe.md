@@ -41,9 +41,40 @@ nouveau chemin.
 | `norva-signup` déployé | ✅ | `/health` → `{"ok":true}` ; POST non signé → 401 |
 | Pages Functions | ✅ | déployées, inertes en 503 sans le secret |
 | `EDGE_INGRESS_SECRET_CURRENT` sur Pages | ✅ | `secret_text`, 5 → 6 variables, aucune perdue |
-| Redéploiement Pages | à faire | une variable Pages est liée au déploiement |
-| E2E `/api/signup-token` | à faire | un token prouve la chaîne sans créer de compte |
+| Redéploiement Pages | ✅ | déploiement créé après la pose du secret |
+| E2E `/api/signup-token` | ✅ | `200` + token signé, nonce 32 hex, aucun compte créé |
+| E2E signup contrôlé | à faire | vérifier en base que CRITICAL reste `ALLOW` |
 | Canary web | à faire | après l'E2E, et après le plancher volumétrique |
+
+### La chaîne, prouvée le 2026-08-22
+
+```
+POST norva.tv/api/signup-token  →  200  {"token":"1.eyJ…"}
+```
+
+Ce qu'un seul appel établit : Pages porte `EDGE_INGRESS_SECRET_CURRENT` (sans
+lui, 503 avant signature) ; l'enveloppe HMAC est acceptée par l'edge (sans quoi,
+401) ; Kong route `/functions/v1/norva-signup/token` ; le token est signé par
+`NORVA_SIGNUP_TOKEN_SECRET`. Deux appels successifs rendent des nonces
+différents, donc le jeton est frappé à la demande et non mis en cache. Aucun
+compte créé, aucune ligne en base — la route `/token` ne touche pas Postgres.
+
+### Le défaut qui a coûté deux tours : signer un chemin réécrit en transit
+
+Le premier essai a répondu 401, et le log a nommé la raison :
+`ingress_route_mismatch`. Le proxy signait `/functions/v1/norva-signup/token`,
+mais la route Kong `functions-v1` porte `strip_path: true` — l'amont reçoit
+`/norva-signup/token`. La signature était liée à une valeur qu'une passerelle
+réécrit.
+
+Le champ signé est désormais la **route relative à la fonction** (`"/"` ou
+`"/token"`), que les deux côtés dérivent indépendamment et qu'aucun proxy ne peut
+réécrire. Renommé `path` → `route` : un champ nommé `path` contenant une route
+est un mensonge qui finit par coûter un débogage.
+
+Leçon à garder : lier une signature à une valeur d'URL suppose que rien ne la
+réécrit entre le signataire et le vérificateur. Sur cette stack, Caddy puis Kong
+la réécrivent tous les deux.
 
 `enforcement_enabled = false` partout : à ce stade le moteur ne peut refuser
 aucun signup, quel que soit le score.
