@@ -81,7 +81,14 @@ fingerprint_of() {
   [[ -n "$v" ]] || { printf 'ABSENT'; return; }
   printf '%s' "$v" | sha256sum | cut -c1-12
 }
+# Définir un paramètre personnalisé (`app.settings.*`) exige le superuser :
+# PostgreSQL les traite comme des placeholders. L'image de la base défaut
+# POSTGRES_USER à supabase_admin, et `postgres` n'est PAS superuser sur cette
+# stack — d'où le « permission denied to set parameter » rencontré en
+# production. Le rôle capable est résolu au préflight, plus jamais supposé.
+PSQL_ROLE="${PSQL_ROLE:-}"
 psql_q() { docker exec -i "$DBC" psql -U postgres -d postgres -P pager=off -tAc "$1" 2>/dev/null || true; }
+psql_as() { docker exec -i "$DBC" psql -U "$1" -d postgres -P pager=off -q -v ON_ERROR_STOP=1; }
 http_code() { curl -s -o /dev/null -w '%{http_code}' --max-time 15 "$@" || echo 000; }
 
 # Le payload d'un JWT n'est pas un secret. On le lit pour décrire les claims et
@@ -130,7 +137,42 @@ set_guc() {
   local secret="$1" quoted
   quoted="$(printf '%s' "$secret" | sed "s/'/''/g")"
   printf "alter database postgres set \"app.settings.jwt_secret\" = '%s';\n" "$quoted" \
-    | docker exec -i "$DBC" psql -U postgres -d postgres -q -v ON_ERROR_STOP=1
+    | psql_as "${PSQL_ROLE:-supabase_admin}"
+}
+
+reset_guc() {
+  printf 'alter database postgres reset "app.settings.jwt_secret";\n' \
+    | psql_as "${PSQL_ROLE:-supabase_admin}"
+}
+
+# Lit la valeur actuelle du GUC pour pouvoir la restaurer. Elle ne sort de cette
+# fonction que vers set_guc.
+guc_value() {
+  psql_q "select c from pg_db_role_setting s, unnest(s.setconfig) c where c like 'app.settings.jwt_secret=%' limit 1" \
+    | sed 's/^app.settings.jwt_secret=//'
+}
+
+# Cherche un lecteur RÉEL dans la base, plutôt que de déduire du repo qu'il n'y
+# en a pas. Une fonction créée à la main hors migration compte aussi.
+guc_readers() {
+  psql_q "select count(*) from pg_proc where prosrc like '%app.settings.jwt_secret%'"
+}
+
+# Teste la CAPACITÉ d'écrire un GUC personnalisé, sur un nom jetable, et rend le
+# rôle qui y arrive. C'est ce test qui manquait au préflight : il validait le
+# compose mais pas le droit d'écrire, donc l'échec tombait après la première
+# écriture au lieu d'avant.
+resolve_psql_role() {
+  local role
+  for role in supabase_admin postgres; do
+    if printf 'alter database postgres set "app.settings.norva_rotation_probe" = %s;\n' "'ok'" \
+         | psql_as "$role" >/dev/null 2>&1; then
+      printf 'alter database postgres reset "app.settings.norva_rotation_probe";\n' \
+        | psql_as "$role" >/dev/null 2>&1 || true
+      printf '%s' "$role"; return 0
+    fi
+  done
+  return 1
 }
 
 guc_present() {
@@ -173,7 +215,18 @@ if [[ "$MODE" == "--plan" ]]; then
   else
     bad "compose INVALIDE avec ce .env — --rotate refusera de démarrer"
   fi
-  guc_present && ok "GUC app.settings.jwt_secret présent" || warn "aucun GUC app.settings.jwt_secret"
+  if guc_present; then
+    line "GUC app.settings.jwt_secret" "présent, $(guc_readers) fonction(s) le lisant"
+    printf '    Zéro lecteur signifie qu'"'"'il sera RETIRÉ plutôt que mis à jour :\n'
+    printf '    l'"'"'écrire y placerait le nouveau secret de signature, lisible dans\n'
+    printf '    pg_db_role_setting, pour personne. Forçable par GUC_ACTION.\n'
+  else
+    warn "aucun GUC app.settings.jwt_secret"
+  fi
+  # Le droit d'ÉCRIRE ce GUC n'est pas testé ici : ce mode reste strictement en
+  # lecture. --rotate l'éprouve en toute première étape, avant la moindre
+  # écriture — c'est précisément ce qui manquait quand la rotation a échoué
+  # après avoir déjà modifié le .env.
   discover_services
   line "services à recréer" "${RUNNING[*]:-aucun}"
   if [[ ${#SKIPPED[@]} -gt 0 ]]; then for sk in "${SKIPPED[@]}"; do warn "$sk"; done; fi
@@ -310,8 +363,46 @@ fi
 section "[0] PRÉFLIGHT — aucune écriture dans cette section"
 docker info >/dev/null 2>&1 || die "démon Docker injoignable"
 ok "Docker répond"
-psql_q 'select 1' >/dev/null || die "base $DBC injoignable — la mise à jour du GUC échouerait"
+# psql_q se termine par `|| true` pour ne pas tuer le script sur une requête
+# ratée, donc son code de retour ne dit rien : on vérifie la RÉPONSE.
+[[ "$(psql_q 'select 1')" == "1" ]] || die "base $DBC injoignable"
 ok "base $DBC joignable"
+
+# LE TEST QUI MANQUAIT. La rotation précédente a échoué ici, après avoir écrit
+# le nouveau secret : `alter database ... set app.settings.*` exige le superuser
+# et `postgres` ne l'est pas sur cette stack. On l'éprouve maintenant, sur un
+# nom de paramètre jetable, avant la moindre écriture.
+GUC_ACTION="${GUC_ACTION:-}"
+GUC_EXISTS=0
+guc_present && GUC_EXISTS=1
+if [[ "$GUC_EXISTS" == "1" ]]; then
+  READERS="$(guc_readers)"
+  line "GUC app.settings.jwt_secret" "présent, ${READERS:-?} fonction(s) le lisant"
+  if PSQL_ROLE="$(resolve_psql_role)"; then
+    ok "rôle capable d'écrire un GUC personnalisé : $PSQL_ROLE"
+  else
+    PSQL_ROLE=""
+    warn "aucun rôle ne peut écrire un GUC personnalisé"
+  fi
+  if [[ -z "$GUC_ACTION" ]]; then
+    # Rien ne le lit — et pgjwt n'est pas installé, donc la base ne peut ni
+    # signer ni vérifier un JWT. Le mettre à jour écrirait le NOUVEAU secret de
+    # signature dans pg_db_role_setting, lisible par qui peut lire le catalogue,
+    # pour personne. Le retirer est mieux : ça enlève un secret vivant d'un
+    # endroit inutile. Forçable par GUC_ACTION=update|reset|skip.
+    if [[ "${READERS:-0}" -gt 0 ]]; then GUC_ACTION=update; else GUC_ACTION=reset; fi
+  fi
+  line "action retenue sur le GUC" "$GUC_ACTION"
+  if [[ "$GUC_ACTION" != "skip" && -z "$PSQL_ROLE" ]]; then
+    die "GUC_ACTION=$GUC_ACTION impossible sans rôle superuser — relance avec GUC_ACTION=skip pour roter sans y toucher (rien ne le lit), ou donne PSQL_ROLE=<rôle>"
+  fi
+  OLD_GUC="$(guc_value)"
+  [[ -n "$OLD_GUC" ]] || warn "valeur du GUC illisible — la restauration ne pourra pas le remettre"
+else
+  GUC_ACTION=skip
+  OLD_GUC=""
+  warn "aucun GUC app.settings.jwt_secret — rien à faire de ce côté"
+fi
 [[ "$(http_code "${KONG_URL}/auth/v1/settings" -H "apikey: $(value_of SUPABASE_PUBLISHABLE_KEY)")" == "200" ]] \
   || warn "Kong ne répond pas 200 sur /auth/v1/settings — vérifie avant de continuer"
 
@@ -391,9 +482,12 @@ on_exit() {
   else
     printf '  ÉCHEC de la restauration du .env — restaure à la main depuis %s\n' "$BACKUP" >&2
   fi
-  if [[ "${GUC_WAS_SET:-0}" == "1" ]]; then
-    if set_guc "$OLD_JWT" >/dev/null 2>&1; then
-      printf '  GUC app.settings.jwt_secret restauré à l'"'"'ancienne valeur\n' >&2
+  # Restaure la valeur d'ORIGINE lue au préflight, pas OLD_JWT : si le GUC
+  # portait autre chose que le secret courant, le remettre à OLD_JWT aurait été
+  # une deuxième modification déguisée en restauration.
+  if [[ "${GUC_TOUCHED:-0}" == "1" ]]; then
+    if [[ -n "${OLD_GUC:-}" ]] && set_guc "$OLD_GUC" >/dev/null 2>&1; then
+      printf '  GUC app.settings.jwt_secret remis à sa valeur d'"'"'origine\n' >&2
     else
       printf '  ÉCHEC de la restauration du GUC — à traiter manuellement\n' >&2
     fi
@@ -409,13 +503,21 @@ replace_var SERVICE_ROLE_KEY "$NEW_SR" || die "écriture de SERVICE_ROLE_KEY imp
 chmod 600 -- "$ENV_FILE" || die "chmod 600 impossible sur $ENV_FILE"
 ok "$ENV_FILE mis à jour"
 
-if guc_present; then
-  set_guc "$NEW_JWT" || die "mise à jour du GUC impossible"
-  GUC_WAS_SET=1
-  ok "app.settings.jwt_secret mis à jour"
-else
-  warn "aucun GUC app.settings.jwt_secret — rien à mettre à jour"
-fi
+case "$GUC_ACTION" in
+  update)
+    set_guc "$NEW_JWT" || die "mise à jour du GUC impossible"
+    GUC_TOUCHED=1
+    ok "app.settings.jwt_secret mis à jour"
+    ;;
+  reset)
+    reset_guc || die "retrait du GUC impossible"
+    GUC_TOUCHED=1
+    ok "app.settings.jwt_secret retiré — personne ne le lisait, et il n'a plus à porter un secret vivant"
+    ;;
+  skip)
+    warn "GUC laissé tel quel (GUC_ACTION=skip)"
+    ;;
+esac
 
 # Dernier filet avant le point de non-retour : le compose doit toujours valider
 # avec le NOUVEAU .env. S'il ne valide pas, le rollback est encore possible.
