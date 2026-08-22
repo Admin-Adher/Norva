@@ -15,9 +15,18 @@ tests qui conditionne le premier trafic réel.
 | Idempotence | `_shared/signup-idempotency.ts` + migration `…_abuse_signup_idempotency` | 19 |
 | Journal de décisions | `_shared/signup-decision-log.ts` + migration `…_abuse_signup_decisions` | 16 |
 | Frontière Cloudflare → edge | `_shared/edge-ingress.ts` + migration `…_abuse_ingress_request_ids` | 15 |
+| Handler edge + moitié Pages | `norva-signup/index.ts`, `functions/api/signup*.ts` | 26 |
 
-Reste à écrire : la Pages Function `functions/api/signup`, le handler edge
-`norva-signup`, et l'endpoint d'émission du token.
+Les 26 tests du handler sont **comportementaux**, pas textuels. Une version
+précédente vérifiait que `recordDecision` apparaissait avant `fetch` dans le
+source : cela démontre la mise en page d'un fichier, et cesse d'être vrai dès que
+quelqu'un déplace un appel dans une fonction auxiliaire. Le faux client Postgres
+et le faux upstream écrivent maintenant dans **une seule timeline**, et les
+assertions lisent des index dedans — dont `gotrueCallCount === 0` sur rejeu.
+
+Le handler est exporté comme `handleSignup(request, deps)` ; `Deno.serve` ne fait
+que câbler les vraies dépendances en bas du fichier. Ce n'est pas de la coquetterie :
+un contrat qui porte sur un ordre n'est prouvable qu'en regardant les appels partir.
 
 ## Secrets contre configuration
 
@@ -106,32 +115,99 @@ aucun secret requis.
 Le navigateur ne doit jamais pouvoir fabriquer un token signé, donc il faut un
 endpoint serveur qui l'émet — nonce, `issued_at`, version, HMAC.
 
-Piège à éviter : déplacer le problème de « bot qui spamme `/signup` » vers « bot
-qui spamme `/signup-token` ». L'émission doit rester très légère et porter son
-propre plancher volumétrique.
+### Où il est réellement protégé
+
+Une version antérieure de ce document affirmait que Kong pose un plancher sur
+`/api/signup-token`. C'est faux sur la topologie, et il faut le dire au lieu de le
+corriger en silence :
+
+```
+norva.tv/api/signup-token          Pages Function — Kong ne voit JAMAIS ceci
+api.norva.tv/functions/v1/…/token  route edge     — Kong voit et limite ceci
+```
+
+Kong est derrière `api.norva.tv`. Une requête vers `norva.tv/api/*` ne traverse ni
+Caddy ni Kong. Donc :
+
+- ce que Kong borne, c'est la **moitié coûteuse** (l'invocation edge) ;
+- borner l'URL publique elle-même demande une **règle de rate limiting
+  Cloudflare**, et rien d'autre ne peut le faire.
+
+### Modèle retenu : émission côté edge
+
+Deux modèles étaient possibles. L'émission dans la Pages Function (A) est
+marginalement moins chère ; l'émission côté edge via l'enveloppe signée (B) garde
+`NORVA_SIGNUP_TOKEN_SECRET` dans **un seul endroit**.
+
+B est retenu pour cette raison seule : A mettrait le secret de signature des deux
+côtés de la frontière et doublerait la surface de rotation, pour économiser
+quelques millisecondes.
+
+Le piège que A cherchait à éviter — « le bot arrête de spammer `/signup` et spamme
+`/signup-token` » — est traité autrement : la route `/token` de l'edge **ne touche
+pas la base du tout**. Pas de compteur, pas de décision, et son `request_id`
+d'enveloppe n'est même pas consommé, puisqu'un token de plus n'est pas un gain
+pour l'attaquant. C'est du HMAC pur. Sinon inonder cette route voudrait dire
+inonder Postgres, c'est-à-dire exactement le problème que le token existe pour
+réduire.
+
+## `/health`
+
+Liveness publique uniquement : `{"ok": true}`, rien d'autre. Une sonde qui liste
+les secrets présents décrit l'état interne du système à qui le demande. La
+readiness détaillée — quelles clés sont posées, quelle version signe, si
+l'enforcement est actif — reste interne et authentifiée.
 
 ## Matrice de lancement
 
 À passer intégralement avant d'envoyer un seul utilisateur réel.
 
-| Test | Attendu |
-|---|---|
-| Signup normal | compte créé, `ALLOW` |
-| Double-clic | **un seul** appel GoTrue |
-| Même nonce, autre e-mail | intent mismatch, jamais le résultat précédent |
-| Même nonce, autre mot de passe | intent mismatch |
-| Corps modifié après signature | rejet ingress |
-| Signature invalide | rejet **avant** tout scoring |
-| `request_id` rejoué | rejet ingress |
-| Timestamp expiré | rejet ingress |
-| Appel direct de l'edge sans Pages | rejet |
-| Timeout GoTrue ambigu | `UNKNOWN`, aucun retry aveugle |
-| Score HIGH simulé | **`actual_decision = ALLOW`** |
-| Score CRITICAL simulé | **`actual_decision = ALLOW`** |
-| Recherche en base et dans les logs | aucun mot de passe, token ni corps brut |
+Colonne « auto » : couvert par `tests/norva-signup-handler.test.js`, donc vérifié à
+chaque push. Les autres lignes demandent la vraie infrastructure et restent à
+passer à la main.
 
-Les deux lignes HIGH et CRITICAL sont les plus importantes du lancement : c'est
-tout le contrat du mode observe.
+| Test | Attendu | auto |
+|---|---|---|
+| Signup normal | compte créé, `ALLOW` | ✅ |
+| Double-clic | `gotrueCallCount === 0` sur le second | ✅ |
+| Même nonce, autre e-mail | intent mismatch, jamais le résultat précédent | ✅ |
+| Même nonce, autre mot de passe | empreintes différentes → intent mismatch | ✅ |
+| Corps modifié après signature | rejet ingress, **zéro** appel base | ✅ |
+| Signature invalide | rejet avant tout scoring, zéro appel base | ✅ |
+| Enveloppe signée pour une autre route | rejet | ✅ |
+| `request_id` rejoué | rejet après le seul `consume` | ✅ |
+| Timeout GoTrue ambigu | `UNKNOWN`, appelé une fois, aucun retry | ✅ |
+| Refus déterministe GoTrue | `FAILED_FINAL` | ✅ |
+| Store de vélocité en panne | compte créé quand même | ✅ |
+| Snapshot de décision perdu | compte créé quand même | ✅ |
+| Score maximal, enforcement off | `actual_decision = ALLOW`, 1 appel GoTrue | ✅ |
+| Réponse identique score bas / score 100 | octet pour octet | ✅ |
+| `/health` | `{"ok": true}` et rien de plus | ✅ |
+| `/token` | aucun appel base du tout | ✅ |
+| Aucun log ne porte e-mail, mot de passe, token | vérifié sur les logs émis | ✅ |
+| Timestamp expiré | rejet ingress | — |
+| Appel direct de l'edge sans passer par Pages | rejet | — |
+| Recherche en base **et** dans les logs de prod | aucun secret, aucun corps brut | — |
+
+### La ligne la plus importante
+
+Score artificiel à 100, niveau `CRITICAL`, `would_have_decision = BLOCK`,
+enforcement à `false`. Ce qui doit être vrai :
+
+```
+compte créé                     ✔
+e-mail de confirmation envoyé   ✔
+aucune mise en quarantaine      ✔
+aucune restriction d'essai      ✔
+aucun endpoint ralenti          ✔
+exactement un appel GoTrue      ✔
+actual_decision = ALLOW         ✔
+```
+
+C'est tout le contrat du mode observe : le produit se comporte comme si le moteur
+n'existait pas. Le test automatisé va plus loin que la liste — il vérifie qu'**aucun
+autre appel** n'a eu lieu, en filtrant la timeline sur ce qui n'est ni un RPC
+`abuse_*` ni GoTrue et en exigeant que le reste soit vide.
 
 ## Déroulé du branchement
 
@@ -162,6 +238,13 @@ Aucun poids ne bouge avant d'avoir des distributions. Ce qu'il faudra lire :
 La segmentation par `signup_endpoint_version` n'est pas optionnelle : tout client
 antérieur au nouveau pipeline rapportera `TOKEN_MISSING`, et lire la population
 en bloc déplacerait la distribution entière.
+
+Propriété résiduelle découverte en écrivant les tests, énoncée plutôt
+qu'escamotée : **sans token de formulaire, il n'y a pas de nonce, donc pas
+d'idempotence**. Un client trop ancien pour envoyer un token n'a que l'unicité de
+GoTrue sur l'adresse pour le protéger d'un double-clic. Ce n'est pas une
+régression — c'est le comportement de l'ancien chemin — mais c'est une deuxième
+raison de lire les distributions par version d'endpoint plutôt qu'en bloc.
 
 ## Backlog avant `enforce`
 
