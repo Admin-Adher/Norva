@@ -4,6 +4,7 @@
 # =============================================================================
 #   bash ops/hetzner/scripts/provision-abuse-signup-secrets.sh
 #   bash ops/hetzner/scripts/provision-abuse-signup-secrets.sh --fingerprints
+#   bash ops/hetzner/scripts/provision-abuse-signup-secrets.sh --verify-edge
 #   bash ops/hetzner/scripts/provision-abuse-signup-secrets.sh --push-to-cloudflare
 #   bash ops/hetzner/scripts/provision-abuse-signup-secrets.sh --reveal-ingress-secret
 #
@@ -28,6 +29,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_FILE="${ENV_FILE:-$(cd "$SCRIPT_DIR/.." && pwd)/.env}"
 SECRET_BACKUP_DIR="${SECRET_BACKUP_DIR:-$HOME/.norva-secret-backups}"
+COMPOSE_FILE="${COMPOSE_FILE:-$(cd "$SCRIPT_DIR/.." && pwd)/docker-compose.supabase.yml}"
 CF_PROJECT="${CF_PAGES_PROJECT:-norva}"
 MODE="${1:-provision}"
 
@@ -71,6 +73,56 @@ CONFIG=(
 )
 
 # ── modes de lecture seule ──────────────────────────────────────────────────
+
+if [[ "$MODE" == "--verify-edge" ]]; then
+  # Compare les VALEURS par empreinte, jamais les noms. Un `env | grep -c` rend
+  # 9 dès que le compose déclare les variables, même toutes vides : il
+  # confirmerait un déploiement qui n'a pas eu lieu.
+  #
+  # Lecture par `docker inspect` et non `docker exec printenv` : ça donne
+  # l'environnement tel que le conteneur a été CRÉÉ, ce qui est exactement la
+  # question posée, et ça marche même sur une image sans binaires.
+  printf '\n\033[1mVÉRIFICATION PAR EMPREINTE\033[0m\n'
+  FAIL=0
+  for c in norva-edge-functions norva-edge-functions-2; do
+    printf '\n  %s\n' "$c"
+    if ! docker inspect "$c" >/dev/null 2>&1; then
+      bad "conteneur absent"; FAIL=1; continue
+    fi
+    dump="$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$c" 2>/dev/null)"
+    for name in "${SECRETS[@]}"; do
+      want="$(fingerprint_of "$name")"
+      got_raw="$(sed -n "s/^${name}=//p" <<<"$dump" | head -n 1)"
+      if [[ -z "$got_raw" ]]; then
+        bad "$name — VIDE dans le conteneur (recréation pas faite ?)"; FAIL=1
+      elif [[ "$(printf '%s' "$got_raw" | sha256sum | cut -c1-12)" == "$want" ]]; then
+        ok "$name — $want"
+      else
+        bad "$name — empreinte différente du .env"; FAIL=1
+      fi
+    done
+    for entry in "${CONFIG[@]}"; do
+      name="${entry%%=*}"
+      got_raw="$(sed -n "s/^${name}=//p" <<<"$dump" | head -n 1)"
+      # Configuration non sensible : la valeur peut s'afficher.
+      if [[ "$got_raw" == "$(value_of "$name")" ]]; then
+        ok "$name = ${got_raw:-<vide>}"
+      else
+        bad "$name = « ${got_raw:-<vide>} », attendu « $(value_of "$name") »"; FAIL=1
+      fi
+    done
+  done
+  printf '\n'
+  if [[ "$FAIL" == "0" ]]; then
+    printf '  \033[32mLes deux runtimes portent les mêmes valeurs que le .env.\033[0m\n\n'
+  else
+    printf '  \033[31mAu moins une valeur ne correspond pas.\033[0m Recrée les conteneurs :\n'
+    printf '      docker compose --env-file %s -f %s \\\n' "$ENV_FILE" "$COMPOSE_FILE"
+    printf '        up -d --force-recreate --no-deps functions functions2\n\n'
+    exit 1
+  fi
+  exit 0
+fi
 
 if [[ "$MODE" == "--fingerprints" ]]; then
   printf '\n\033[1mEmpreintes (12 premiers caractères de sha256)\033[0m\n'
@@ -209,8 +261,14 @@ warn "EDGE_INGRESS_SECRET_CURRENT doit être posé À L'IDENTIQUE côté Cloudfl
 printf '    Pages, sinon 100 %% des signups seront rejetés à l'"'"'ingress.\n'
 printf '\n  Sans jamais l'"'"'afficher :\n'
 printf '      bash %s --push-to-cloudflare\n' "$(basename "${BASH_SOURCE[0]}")"
-printf '\n  Puis redémarrer les deux runtimes edge pour qu'"'"'ils relisent le .env :\n'
-printf '      docker restart norva-edge-functions norva-edge-functions-2\n'
-printf '\n  Et vérifier que les variables sont arrivées, sans les afficher :\n'
-printf '      docker exec norva-edge-functions env | grep -c "^NORVA_ABUSE\\|^EDGE_INGRESS\\|^NORVA_SIGNUP"\n'
-printf '      (doit répondre 9)\n\n'
+printf '\n  Puis RECRÉER les deux runtimes edge. Pas `docker restart` : celui-ci\n'
+printf '  relance le conteneur avec son ancien environnement, donc les nouveaux\n'
+printf '  secrets n'"'"'arriveraient jamais.\n\n'
+printf '      docker compose --env-file %s \\\n' "$ENV_FILE"
+printf '        -f %s \\\n' "$COMPOSE_FILE"
+printf '        up -d --force-recreate --no-deps functions functions2\n'
+printf '\n  Et vérifier par EMPREINTE, jamais en comptant des noms :\n'
+printf '      bash %s --verify-edge\n' "$(basename "${BASH_SOURCE[0]}")"
+printf '\n  Compter les noms de variables donnerait 9 dès maintenant — elles sont\n'
+printf '  déjà déclarées par le compose, avec des valeurs VIDES. Un tel compte\n'
+printf '  confirmerait un déploiement qui n'"'"'a pas eu lieu.\n\n'
