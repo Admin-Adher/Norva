@@ -143,6 +143,15 @@ export interface SignupResultProjection {
   user_id?: string;
   email_confirmation_required?: boolean;
   created?: boolean;
+  /**
+   * GoTrue's own anti-enumeration behaviour: signing up an already-registered
+   * email returns 200 with an obfuscated user and an empty `identities` array,
+   * never a duplicate-account error. The web client depends on this exact
+   * distinction to show "this email already has an account" instead of a
+   * dead-end "check your email" — memoising it is what lets a replay of that
+   * outcome answer identically to the first response.
+   */
+  already_registered?: boolean;
 }
 
 export type SignupClaim =
@@ -202,6 +211,7 @@ export function createPostgresIdempotencyStore(db: any): SignupIdempotencyStore 
         p_email_confirmation_required: result?.email_confirmation_required ?? null,
         p_created: result?.created ?? null,
         p_upstream_status: upstreamStatus,
+        p_already_registered: result?.already_registered ?? null,
       });
       if (error) throw new Error(`idempotency_settle_failed:${error.code ?? "unknown"}`);
       return data === true;

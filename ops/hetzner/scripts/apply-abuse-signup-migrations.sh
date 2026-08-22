@@ -2,7 +2,7 @@
 # =============================================================================
 # apply-abuse-signup-migrations.sh — pose le socle anti-abus du signup
 # =============================================================================
-# Applique les QUATRE migrations dans l'ordre, puis vérifie ce qu'elles ont
+# Applique les migrations de FILES dans l'ordre, puis vérifie ce qu'elles ont
 # vraiment créé. Chacune est déjà réentrante (`if not exists`, `or replace`,
 # `drop trigger if exists`), donc relancer ce script est sans effet de bord.
 #
@@ -54,6 +54,7 @@ FILES=(
   20260822090000_abuse_signup_idempotency.sql
   20260822100000_abuse_signup_decisions.sql
   20260822110000_abuse_ingress_request_ids.sql
+  20260822130000_abuse_signup_already_registered.sql
 )
 
 section "[0] PRÉ-VOL"
@@ -66,7 +67,7 @@ printf '  pgcrypto  : %s\n' "$(psql "select coalesce((select extversion from pg_
 for f in "${FILES[@]}"; do
   [[ -f "$MIGRATIONS/$f" ]] || { bad "migration manquante : $f"; exit 1; }
 done
-ok "les 4 fichiers de migration sont là"
+ok "les ${#FILES[@]} fichiers de migration sont là"
 
 printf '\n  état AVANT :\n'
 psqlt "select

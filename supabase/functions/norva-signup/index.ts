@@ -197,6 +197,33 @@ function readPayload(raw: unknown): SignupPayload | null {
 
 const HEADLESS = /headlesschrome|puppeteer|playwright|phantomjs|selenium/i;
 
+// A conservative shape check, not a full IP parser: this only guards against
+// header injection (CRLF, commas that would smuggle a second value) before the
+// string becomes an X-Forwarded-For header. facts.clientIp is signed — it came
+// from Cloudflare's own CF-Connecting-IP header via the ingress envelope — so
+// it is authentic, but trustedFacts() does not itself validate the shape.
+const PLAUSIBLE_IP = /^[0-9a-fA-F:.]{2,45}$/;
+
+/**
+ * Kong's auth-v1-signup service already rate-limits /auth/v1/signup at
+ * 10/minute and 40/hour per source IP — but this call reaches it from inside
+ * the Docker network, so without this header Kong sees the edge container's
+ * address, not the signer's. Every signup would then count against the SAME
+ * few IPs (one per edge-functions replica) instead of the real caller's, and
+ * the floor that looks like it protects account creation would in practice
+ * cap the container, not the abuser. KONG_TRUSTED_IPS already covers this
+ * Docker range and KONG_REAL_IP_HEADER is already X-Forwarded-For, so nothing
+ * downstream needs to change — only that this value is ever sent.
+ *
+ * The only acceptable source is the signed envelope. Never a header this
+ * function itself received: an edge function reachable at all only through a
+ * verified envelope has no legitimate caller who should be able to inject an
+ * X-Forwarded-For of their choosing here.
+ */
+function forwardedForHeader(clientIp: string): Record<string, string> {
+  return PLAUSIBLE_IP.test(clientIp) ? { "x-forwarded-for": clientIp } : {};
+}
+
 function uaFamily(userAgent: string | null): string | null {
   if (!userAgent) return null;
   if (HEADLESS.test(userAgent)) return "headless";
@@ -436,6 +463,14 @@ export async function handleSignup(req: Request, deps: SignupDeps): Promise<Resp
 
   let upstreamStatus: number | null = null;
   let userId: string | undefined;
+  // GoTrue's own anti-enumeration behaviour: signing up an already-registered
+  // email returns 200 with an obfuscated user whose `identities` array is
+  // empty, never a duplicate-account error — and sends no confirmation email.
+  // The web client's existing UI depends on exactly this distinction to show
+  // "this email already has an account" instead of a dead-end "check your
+  // email"; losing it here would silently break that message for every signup
+  // routed through this handler instead of straight to GoTrue.
+  let alreadyRegistered = false;
   try {
     const response = await deps.fetchUpstream(`${deps.supabaseUrl}/auth/v1/signup`, {
       method: "POST",
@@ -443,6 +478,7 @@ export async function handleSignup(req: Request, deps: SignupDeps): Promise<Resp
         "content-type": "application/json",
         apikey: deps.serviceKey,
         authorization: `Bearer ${deps.serviceKey}`,
+        ...forwardedForHeader(facts.clientIp),
       },
       body: JSON.stringify({ email: payload.email, password: payload.password }),
     });
@@ -463,6 +499,8 @@ export async function handleSignup(req: Request, deps: SignupDeps): Promise<Resp
     userId = typeof (body as { id?: unknown })?.id === "string"
       ? (body as { id: string }).id
       : undefined;
+    const identities = (body as { identities?: unknown })?.identities;
+    alreadyRegistered = Array.isArray(identities) && identities.length === 0;
   } catch (error) {
     // The call left and its outcome is unknown. FAILED_FINAL here would let the
     // retry create a second account, which is the one thing idempotency exists
@@ -479,7 +517,12 @@ export async function handleSignup(req: Request, deps: SignupDeps): Promise<Resp
     return json({ status: "pending" }, 202);
   }
 
-  const result = { user_id: userId, email_confirmation_required: true, created: true };
+  const result = {
+    user_id: userId,
+    email_confirmation_required: !alreadyRegistered,
+    created: !alreadyRegistered,
+    already_registered: alreadyRegistered,
+  };
   if (fingerprint && token.payload) {
     await idempotency.settle(token.payload.nonce, fingerprint, "SUCCESS", result, upstreamStatus);
   }

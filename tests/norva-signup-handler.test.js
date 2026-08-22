@@ -150,7 +150,7 @@ async function signedRequest(overrides = {}) {
   const signature = 'signature' in overrides
     ? overrides.signature
     : await ingress.signIngress(envelope, overrides.secret || KEYS.current);
-  const headers = { 'content-type': 'application/json' };
+  const headers = { 'content-type': 'application/json', ...overrides.extraHeaders };
   if (signature !== null) headers['x-norva-ingress'] = signature;
   return new Request(`https://api.norva.tv${routePath}`, { method: 'POST', headers, body: raw });
 }
@@ -173,6 +173,68 @@ function payload(extra = {}) {
 }
 
 // ── the order, measured ─────────────────────────────────────────────────────
+
+test('GoTrue is called with the SIGNED client IP as X-Forwarded-For', async () => {
+  // Kong's auth-v1-signup already rate-limits /auth/v1/signup at 10/min and
+  // 40/hour per source IP. This call reaches it from inside the Docker
+  // network, so without this header Kong would see the edge container's own
+  // address on every signup — one of two IPs, not the real caller's — and a
+  // floor that looks like it protects account creation would in practice cap
+  // the container instead of the abuser.
+  const [mod] = await loading;
+  const h = harness();
+  const issued = await freshToken();
+  await mod.handleSignup(
+    await signedRequest({
+      body: payload({ formToken: issued.token }),
+      clientIp: '203.0.113.77',
+    }),
+    h.deps,
+  );
+  const call = h.timeline.find((entry) => entry.name === 'GOTRUE');
+  assert.ok(call, 'GoTrue was called');
+  assert.equal(call.init.headers['x-forwarded-for'], '203.0.113.77');
+});
+
+test('X-Forwarded-For never comes from a header the edge itself received', async () => {
+  // The only legitimate source is the signed envelope. An edge function
+  // reachable only through a verified envelope has no caller who should be
+  // able to inject a forwarded-IP of their own choosing.
+  const [mod] = await loading;
+  const h = harness();
+  const issued = await freshToken();
+  await mod.handleSignup(
+    await signedRequest({
+      body: payload({ formToken: issued.token }),
+      clientIp: '203.0.113.77',
+      extraHeaders: { 'x-forwarded-for': '198.51.100.1, 198.51.100.2' },
+    }),
+    h.deps,
+  );
+  const call = h.timeline.find((entry) => entry.name === 'GOTRUE');
+  assert.equal(call.init.headers['x-forwarded-for'], '203.0.113.77');
+  assert.ok(!String(call.init.headers['x-forwarded-for']).includes('198.51.100'));
+});
+
+test('a malformed signed IP is dropped rather than forwarded as-is', async () => {
+  // Defence in depth against header injection, not a real-world path today:
+  // the one signer (functions/_shared/signup-ingress.ts) only ever sources
+  // this from Cloudflare's own CF-Connecting-IP. Never refuses the signup over
+  // it — an enrichment header is not worth failing a legitimate account over.
+  const [mod] = await loading;
+  const h = harness();
+  const issued = await freshToken();
+  const response = await mod.handleSignup(
+    await signedRequest({
+      body: payload({ formToken: issued.token }),
+      clientIp: "1.2.3.4\r\nX-Injected: yes",
+    }),
+    h.deps,
+  );
+  assert.equal(response.status, 200);
+  const call = h.timeline.find((entry) => entry.name === 'GOTRUE');
+  assert.ok(!('x-forwarded-for' in call.init.headers));
+});
 
 test('the decision snapshot is written before GoTrue is ever called', async () => {
   const [mod] = await loading;
@@ -527,6 +589,66 @@ test('a deterministic upstream refusal settles FAILED_FINAL', async () => {
   );
   assert.equal(response.status, 400);
   assert.deepEqual(settled, ['FAILED_FINAL']);
+});
+
+test('an already-registered email is a 200 with empty identities, not an error', async () => {
+  // GoTrue's actual anti-enumeration behaviour, distinct from the generic
+  // refusal above: no 4xx, an obfuscated user, an empty identities array, and
+  // no confirmation email sent. account.html's existing UI depends on this
+  // exact shape to say "this email already has an account" instead of a
+  // dead-end "check your email" — losing the distinction here would silently
+  // break that message for every signup this handler processes.
+  const [mod] = await loading;
+  let settledResult = null;
+  const h = harness({
+    upstream: () => new Response(
+      JSON.stringify({ id: 'obfuscated-0001', identities: [] }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    ),
+    rpc: {
+      abuse_signup_attempt_settle: (args) => {
+        settledResult = {
+          created: args.p_created,
+          alreadyRegistered: args.p_already_registered,
+          emailConfirmationRequired: args.p_email_confirmation_required,
+        };
+        return { data: true, error: null };
+      },
+    },
+  });
+  const issued = await freshToken();
+  const response = await mod.handleSignup(
+    await signedRequest({ body: payload({ formToken: issued.token }) }),
+    h.deps,
+  );
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.already_registered, true);
+  assert.equal(body.created, false);
+  assert.equal(body.email_confirmation_required, false);
+  assert.deepEqual(settledResult, {
+    created: false,
+    alreadyRegistered: true,
+    emailConfirmationRequired: false,
+  });
+});
+
+test('a genuinely new account is never flagged as already registered', async () => {
+  const [mod] = await loading;
+  const h = harness({
+    upstream: () => new Response(
+      JSON.stringify({ id: 'user-0001', identities: [{ id: 'ident-1' }] }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    ),
+  });
+  const issued = await freshToken();
+  const response = await mod.handleSignup(
+    await signedRequest({ body: payload({ formToken: issued.token }) }),
+    h.deps,
+  );
+  const body = await response.json();
+  assert.equal(body.already_registered, false);
+  assert.equal(body.created, true);
 });
 
 test('enforcement, once on, refuses at the one gated line', async () => {
