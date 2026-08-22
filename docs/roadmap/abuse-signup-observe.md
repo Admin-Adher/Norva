@@ -15,7 +15,9 @@ tests qui conditionne le premier trafic réel.
 | Idempotence | `_shared/signup-idempotency.ts` + migration `…_abuse_signup_idempotency` | 19 |
 | Journal de décisions | `_shared/signup-decision-log.ts` + migration `…_abuse_signup_decisions` | 16 |
 | Frontière Cloudflare → edge | `_shared/edge-ingress.ts` + migration `…_abuse_ingress_request_ids` | 15 |
-| Handler edge + moitié Pages | `norva-signup/index.ts`, `functions/api/signup*.ts` | 26 |
+| Handler edge + moitié Pages | `norva-signup/index.ts`, `functions/api/signup*.ts` | 31 |
+| Déjà-inscrit + IP vérifiée vers Kong | migration `…_abuse_signup_already_registered` | inclus ci-dessus |
+| Canary web | `public/js/authApi.js` (`signUp`, inchangé pour l'appelant) | 11 |
 
 Les 26 tests du handler sont **comportementaux**, pas textuels. Une version
 précédente vérifiait que `recordDecision` apparaissait avant `fetch` dans le
@@ -383,6 +385,57 @@ n'existait pas. Le test automatisé va plus loin que la liste — il vérifie qu
 autre appel** n'a eu lieu, en filtrant la timeline sur ce qui n'est ni un RPC
 `abuse_*` ni GoTrue et en exigeant que le reste soit vide.
 
+## Le canary web, câblé le 2026-08-22
+
+`public/js/authApi.js` route désormais `NorvaAuth.signUp()` entre les deux
+chemins. Rien ne change pour l'appelant — `account.html` n'a pas été touché —
+parce que la réponse du nouveau pipeline est reformée pour ressembler
+exactement à ce que GoTrue renvoie déjà en direct (voir plus bas).
+
+**Le bucket.** `crypto.getRandomValues()` tire un entier `0–9999` une seule
+fois par navigateur, conservé dans `localStorage`. Le pipeline observe est
+actif si `bucket < 100` (1 %). Monter le seuil plus tard n'ajoute que des
+navigateurs neufs au canary — personne déjà assigné ne change de chemin,
+puisque le bucket ne change jamais une fois écrit.
+
+Piège trouvé en écrivant le test qui générait un bucket sans en avoir un en
+stock : `localStorage.getItem` renvoie `null` pour une clé absente, et
+`Number(null)` vaut `0` — un entier qui a l'air parfaitement valide. Sans
+vérification explicite du `null`, **chaque nouveau visiteur atterrissait dans
+le canary**, silencieusement, l'entier fantôme n'étant jamais écrit ni donc
+jamais stabilisé. Corrigé avant toute mise en production.
+
+**Le fallback, volontairement asymétrique.** Un échec de `/api/signup-token`
+(réseau, timeout, 503 tant que le secret n'est pas posé) n'a **rien** envoyé :
+retomber sur l'appel GoTrue direct est aussi sûr que n'avoir jamais tenté le
+nouveau chemin. Mais dès qu'un `POST /api/signup` est parti, plus aucun
+fallback : GoTrue a peut-être déjà commencé à traiter la requête, et un repli
+créerait potentiellement un second compte — exactement ce que l'idempotence
+existe pour empêcher. Un `202 pending` est retenté avec le **même**
+`formToken` (jusqu'à deux fois, avec un court délai), pour profiter du
+mécanisme déjà certifié plutôt que d'en inventer un côté client. Un `4xx` est
+définitif et remonte tel quel — une future règle d'enforcement doit rester
+visible, jamais absorbée en silence par un repli automatique.
+
+**Le gap trouvé en câblant le client, pas avant.** GoTrue a sa propre défense
+anti-énumération : réinscrire un e-mail déjà utilisé répond `200` avec un
+utilisateur obfusqué et un tableau `identities` vide, sans envoyer d'e-mail —
+et `account.html` s'appuie déjà là-dessus pour afficher « Ce compte existe
+déjà » plutôt qu'un « vérifiez vos e-mails » qui ne mènerait nulle part.
+`norva-signup` ne capturait que `body.id` et renvoyait un `created: true`
+plat, sans distinction. Câbler le client sans corriger aurait cassé ce message
+en silence pour chaque utilisateur du canary retentant une adresse existante.
+Migration `20260822130000` : une colonne typée `result_already_registered`,
+additive, sur le même modèle que les trois colonnes existantes plutôt qu'un
+retour au blob jsonb. Le shim client reforme la réponse du nouveau pipeline
+dans la forme exacte que le code existant sait déjà lire — aucune ligne de
+`account.html` n'a changé.
+
+Testé en comportemental, pas en lecture de source : quel chemin un bucket
+prend réellement, que le bucket se génère une fois et se réutilise, les deux
+branches du fallback, la retentative sur 202 avec le nonce identique, et la
+forme de réponse pour un compte neuf comme pour un compte déjà existant.
+
 ## Déroulé du branchement
 
 Pas de bascule à 100 %, et le plancher volumétrique (backlog point 0) précède
@@ -435,9 +488,16 @@ raison de lire les distributions par version d'endpoint plutôt qu'en bloc.
 
 ## Backlog avant `enforce`
 
-0. **Plancher volumétrique sur le chemin signup.** Rien ne limite le débit
-   aujourd'hui, ni à Cloudflare ni à Kong — vérifié, la route `functions-v1` ne
-   porte que `cors`. À poser avant le canary public, pas avant les migrations.
+0. **Plancher volumétrique sur le chemin signup — pour partie corrigé.** L'appel
+   `norva-signup → GoTrue` passe par `http://kong:8000/auth/v1/signup`, donc par
+   le service Kong `auth-v1-signup` (10/min, 40/h par IP) déjà en place. Mais cet
+   appel part du réseau Docker interne, et sans `X-Forwarded-For` Kong voyait
+   l'adresse du **conteneur edge**, pas celle de l'appelant — le plancher se
+   comptait par conteneur, pas par utilisateur. Corrigé le 2026-08-22 : la
+   valeur signée (`facts.clientIp`) est transmise, jamais un en-tête que l'edge
+   aurait reçu lui-même. Toujours ouvert : la route d'entrée
+   `/functions/v1/norva-signup` (ingress + token) ne porte elle-même que `cors`
+   à Kong — sans conséquence à 1-5 %, à fermer avant 100 %.
 
 1. Indépendance des familles dans la règle de décision — un score au-dessus du
    seuil ne suffira pas, il faudra deux familles indépendantes ou une preuve

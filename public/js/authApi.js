@@ -82,7 +82,181 @@
         return payload;
     }
 
-    async function signUp({ email, password, displayName, signupContext, redirectTo }) {
+    // ── observe-mode signup pipeline: canary ─────────────────────────────────
+    //
+    // norva.tv/api/signup{,-token} → signed HMAC envelope → api.norva.tv edge →
+    // GoTrue, with server-side scoring that (while enforcement stays off, see
+    // docs/roadmap/abuse-signup-observe.md) can never refuse a signup — only
+    // observe it. A stable per-browser bucket decides who is routed there, so
+    // raising the percentage later only ADDS browsers to it; nobody already
+    // assigned changes path when the threshold moves.
+    const KEY_SIGNUP_CANARY_BUCKET = 'norva-signup-canary-bucket';
+    const KEY_SIGNUP_DEVICE_ID = 'norva-signup-device-id';
+    const SIGNUP_PIPELINE_CANARY_THRESHOLD = 100; // bucket < 100 of 10000 = 1%
+    const SIGNUP_TOKEN_TIMEOUT_MS = 8_000;
+    const SIGNUP_POST_TIMEOUT_MS = 20_000;
+    // Only for a 202 (GoTrue's own outcome still unknown server-side): retried
+    // with the identical formToken so the server's idempotency — keyed on the
+    // token's nonce — recognises it as the same intent, never a second signup.
+    const SIGNUP_PENDING_RETRY_DELAYS_MS = [1_500, 3_000];
+
+    function signupCanaryBucket() {
+        // localStorage.getItem returns null, not undefined, for a missing key —
+        // and Number(null) is 0, a value that then LOOKS like a valid bucket.
+        // Without the explicit null check, every browser with nothing stored
+        // yet would silently compute bucket 0 (always under any real
+        // threshold) instead of generating and persisting a random one.
+        const raw = localStorage.getItem(KEY_SIGNUP_CANARY_BUCKET);
+        const stored = raw === null ? NaN : Number(raw);
+        if (Number.isInteger(stored) && stored >= 0 && stored <= 9999) return stored;
+        const random = new Uint16Array(1);
+        crypto.getRandomValues(random);
+        const bucket = random[0] % 10000;
+        try { localStorage.setItem(KEY_SIGNUP_CANARY_BUCKET, String(bucket)); } catch (_) { /* private mode */ }
+        return bucket;
+    }
+
+    function signupPipelineEnabled() {
+        try {
+            return signupCanaryBucket() < SIGNUP_PIPELINE_CANARY_THRESHOLD;
+        } catch (_) {
+            // localStorage unreachable: the legacy path is the long-proven
+            // default, never the new one, on any doubt.
+            return false;
+        }
+    }
+
+    function signupDeviceId() {
+        // Deliberately its own key, not norva-cloud-device-id: that one belongs
+        // to an authenticated device-pairing concept with no writer that runs
+        // pre-signup, so depending on it here would silently send an empty
+        // value most of the time. This one exists only to give the velocity
+        // engine a stable per-browser signal.
+        try {
+            let id = localStorage.getItem(KEY_SIGNUP_DEVICE_ID);
+            if (!id) {
+                id = crypto.randomUUID();
+                localStorage.setItem(KEY_SIGNUP_DEVICE_ID, id);
+            }
+            return id;
+        } catch (_) {
+            return '';
+        }
+    }
+
+    async function fetchJsonWithTimeout(url, options, timeoutMs) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+            const response = await fetch(url, { ...options, signal: controller.signal });
+            const body = await response.json().catch(() => ({}));
+            return { response, body };
+        } finally {
+            clearTimeout(timer);
+        }
+    }
+
+    /**
+     * Thrown only when NOTHING has been sent to /api/signup yet — obtaining a
+     * form token failed (network error, our own timeout, or a non-2xx such as
+     * the 503 the proxy answers with while EDGE_INGRESS_SECRET_CURRENT is
+     * unset). At that point falling back to the legacy direct GoTrue call is
+     * exactly as safe as never having attempted the new path.
+     *
+     * Every other failure mode is NOT wrapped in this type on purpose: once a
+     * POST /api/signup has actually been dispatched, GoTrue may already be
+     * processing it, and a fallback could create a second account — the one
+     * thing the server's idempotency exists to prevent. Those cases retry
+     * idempotently (202) or surface a real, final error (4xx, exhausted
+     * retries, an ambiguous network failure after dispatch); none of them
+     * reach the legacy endpoint.
+     */
+    class SignupFallbackToLegacy extends Error {}
+
+    async function requestSignupFormToken() {
+        let outcome;
+        try {
+            outcome = await fetchJsonWithTimeout('/api/signup-token', {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({})
+            }, SIGNUP_TOKEN_TIMEOUT_MS);
+        } catch (_) {
+            throw new SignupFallbackToLegacy('signup-token unreachable');
+        }
+        if (!outcome.response.ok || typeof outcome.body.token !== 'string') {
+            throw new SignupFallbackToLegacy(`signup-token http ${outcome.response.status}`);
+        }
+        return outcome.body.token;
+    }
+
+    async function edgeSignup({ email, password }) {
+        const formToken = await requestSignupFormToken();
+        const body = {
+            email,
+            password,
+            authMethod: 'password',
+            surface: 'web',
+            // No web build-version constant exists yet to put here; the field
+            // is optional and the risk engine treats its absence as neutral.
+            deviceId: signupDeviceId(),
+            userAgent: navigator.userAgent || '',
+            acceptLanguage: (navigator.languages && navigator.languages[0]) || navigator.language || ''
+        };
+
+        let outcome;
+        let attempt = 0;
+        for (;;) {
+            try {
+                // eslint-disable-next-line no-await-in-loop
+                outcome = await fetchJsonWithTimeout('/api/signup', {
+                    method: 'POST',
+                    headers: { 'content-type': 'application/json' },
+                    body: JSON.stringify({ ...body, formToken })
+                }, SIGNUP_POST_TIMEOUT_MS);
+            } catch (_) {
+                // Timeout or network error AFTER dispatch: the outcome is
+                // unknown, exactly like the server's own UNKNOWN settlement
+                // state. Never fall back here — surfacing this lets the person
+                // retry, and a retry reaches the same memoised result if the
+                // first attempt in fact went through.
+                throw new Error('Unable to complete registration. Please try again later.');
+            }
+            if (outcome.response.status === 202 && attempt < SIGNUP_PENDING_RETRY_DELAYS_MS.length) {
+                // eslint-disable-next-line no-await-in-loop
+                await new Promise((resolve) => setTimeout(resolve, SIGNUP_PENDING_RETRY_DELAYS_MS[attempt]));
+                attempt += 1;
+                continue;
+            }
+            break;
+        }
+
+        if (outcome.response.status === 202) {
+            throw new Error('Your account is still being created — please check your email shortly, or try again in a minute.');
+        }
+        if (!outcome.response.ok) {
+            // A 4xx here is a final, genuine answer — not a signal to quietly
+            // retry the legacy endpoint and paper over it. A future
+            // enforcement refusal, in particular, must stay visible.
+            const error = new Error(outcome.body.error || 'Unable to complete registration. Please try again later.');
+            error.status = outcome.response.status;
+            throw error;
+        }
+
+        // Shaped to match what the existing signup UI already looks for in a
+        // raw GoTrue response, so the canary changes nothing about the UI: an
+        // empty `identities` array under `.user` is GoTrue's own signal for
+        // "this email is already registered" (checked first), a bare `.id`
+        // otherwise reads as a freshly created, unconfirmed account. Neither
+        // case carries a session — matching GoTrue's own behaviour today with
+        // email confirmation required.
+        if (outcome.body.already_registered) {
+            return { user: { id: outcome.body.user_id, identities: [] } };
+        }
+        return { id: outcome.body.user_id, identities: [{ id: outcome.body.user_id }] };
+    }
+
+    async function legacySignUp({ email, password, displayName, signupContext, redirectTo }) {
         const verificationReturn = redirectTo || `${location.origin}/account.html`;
         const context = signupContext && typeof signupContext === 'object' ? signupContext : {};
         const payload = await request(`/auth/v1/signup?redirect_to=${encodeURIComponent(verificationReturn)}`, {
@@ -100,6 +274,18 @@
         if (payload.session) setSession(payload.session);
         else if (payload.access_token) setSession(payload);
         return payload;
+    }
+
+    async function signUp({ email, password, displayName, signupContext, redirectTo }) {
+        if (signupPipelineEnabled()) {
+            try {
+                return await edgeSignup({ email, password });
+            } catch (error) {
+                if (!(error instanceof SignupFallbackToLegacy)) throw error;
+                // Only reachable before any /api/signup was ever sent.
+            }
+        }
+        return legacySignUp({ email, password, displayName, signupContext, redirectTo });
     }
 
     async function signIn({ email, password }) {
