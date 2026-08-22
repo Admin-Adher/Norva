@@ -2,7 +2,8 @@
 # =============================================================================
 # rotate-jwt-secret.sh — révocation réelle du service_role exposé
 # =============================================================================
-#   bash ops/hetzner/scripts/rotate-jwt-secret.sh --plan     # rien n'est touché
+#   bash ops/hetzner/scripts/rotate-jwt-secret.sh --plan              # lecture seule
+#   bash ops/hetzner/scripts/rotate-jwt-secret.sh --prove-vulnerable  # lecture seule
 #   bash ops/hetzner/scripts/rotate-jwt-secret.sh --rotate
 #   bash ops/hetzner/scripts/rotate-jwt-secret.sh --verify
 #
@@ -154,6 +155,55 @@ if [[ "$MODE" == "--plan" ]]; then
   exit 0
 fi
 
+# ── prove-vulnerable ────────────────────────────────────────────────────────
+# LECTURE SEULE. À lancer AVANT la rotation. Tout ce qui précède sur ce
+# contournement vient de la lecture de kong-entrypoint.sh et de kong.yml ; ceci
+# le mesure. Une analyse statique qui n'a jamais été confrontée à la production
+# est une hypothèse, et on a déjà vu dans cette session qu'une lecture rapide
+# pouvait être fausse.
+
+if [[ "$MODE" == "--prove-vulnerable" ]]; then
+  section "MESURE DU CONTOURNEMENT — rien n'est modifié"
+  SR="$(value_of SERVICE_ROLE_KEY)"
+  PUB="$(value_of SUPABASE_PUBLISHABLE_KEY)"
+  [[ -n "$SR" ]] || die "SERVICE_ROLE_KEY absent de $ENV_FILE"
+  [[ -n "$PUB" ]] || die "SUPABASE_PUBLISHABLE_KEY absent de $ENV_FILE"
+  PROBE='/rest/v1/norva_revocation_probe_absente?limit=1'
+  ADMIN='/auth/v1/admin/users?page=1&per_page=1'
+
+  probe() { curl -s -o /dev/null -w '%{http_code}' "$@" || echo 000; }
+
+  printf '\n  \033[1mTémoin — la clé publiable SEULE, sans Bearer\033[0m\n'
+  printf '  Si ceci passait, ce ne serait pas le jeton qui donne l'"'"'accès.\n'
+  c1="$(probe -H "apikey: $PUB" "${KONG_URL}${PROBE}")"
+  c2="$(probe -H "apikey: $PUB" "${KONG_URL}${ADMIN}")"
+  line "PostgREST, apikey seul" "HTTP $c1"
+  line "GoTrue admin, apikey seul" "HTTP $c2"
+
+  printf '\n  \033[1mL'"'"'attaque — clé publiable en apikey, service_role en Bearer\033[0m\n'
+  c3="$(probe -H "apikey: $PUB" -H "Authorization: Bearer $SR" "${KONG_URL}${PROBE}")"
+  c4="$(probe -H "apikey: $PUB" -H "Authorization: Bearer $SR" "${KONG_URL}${ADMIN}")"
+  line "PostgREST + Bearer" "HTTP $c3"
+  line "GoTrue admin + Bearer" "HTTP $c4"
+
+  printf '\n'
+  # 404 sur PostgREST = jeton ACCEPTÉ, table absente. 200 sur GoTrue admin =
+  # administration des utilisateurs atteinte.
+  if [[ "$c3" == "404" || "$c4" == "200" ]]; then
+    bad "CONTOURNEMENT CONFIRMÉ — le Bearer service_role est honoré via le consumer anon"
+    [[ "$c4" == "200" ]] && bad "et il atteint l'administration des utilisateurs GoTrue"
+    printf '\n  C'"'"'est la mesure qui justifie la rotation. Enchaîne sur --rotate.\n\n'
+  elif [[ "$c3" == "401" && "$c4" == "401" ]]; then
+    ok "le Bearer est refusé sur les deux surfaces"
+    printf '\n  Contraire à la lecture du code. Ne rote pas sans comprendre pourquoi :\n'
+    printf '  soit la rotation a déjà eu lieu, soit un garde existe que je n'"'"'ai pas vu.\n\n'
+  else
+    warn "résultat ambigu (PostgREST $c3, GoTrue $c4) — à interpréter avant d'agir"
+    printf '\n  Un 000 signifie que Kong n'"'"'est pas joignable sur %s.\n\n' "$KONG_URL"
+  fi
+  exit 0
+fi
+
 # ── verify ──────────────────────────────────────────────────────────────────
 
 if [[ "$MODE" == "--verify" ]]; then
@@ -227,7 +277,11 @@ fi
 
 # ── rotate ──────────────────────────────────────────────────────────────────
 
-[[ "$MODE" == "--rotate" ]] || { printf '\nUsage : --plan | --rotate | --verify\n\n'; exit 1; }
+[[ "$MODE" == "--rotate" ]] || {
+  printf '\nUsage : --plan | --prove-vulnerable | --rotate | --verify\n'
+  printf '        les deux premiers sont en lecture seule\n\n'
+  exit 1
+}
 
 section "[0] CONFIRMATION"
 printf '  Cette rotation invalide immédiatement TOUS les access tokens en cours.\n'
