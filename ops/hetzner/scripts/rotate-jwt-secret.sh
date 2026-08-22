@@ -334,16 +334,54 @@ if [[ "$MODE" == "--verify" ]]; then
   ok "ancien jeton lu dans $(basename "$BACKUP")"
 
   FAIL=0
-  printf '\n  \033[1mL'"'"'ancien jeton doit être mort partout\033[0m\n'
-  for target in "/auth/v1/admin/users?page=1&per_page=1" "/rest/v1/norva_revocation_probe_absente?limit=1"; do
-    code="$(http_code -H "apikey: $PUB" -H "Authorization: Bearer $OLD_SR" "${KONG_URL}${target}")"
+  ADMIN='/auth/v1/admin/users?page=1&per_page=1'
+  PROBE='/rest/v1/norva_revocation_probe_absente?limit=1'
+
+  # CONTRÔLE, et c'est lui qui rend le reste concluant. Même chemin, même
+  # apikey, même forme de requête — seul le jeton change, et c'est le NOUVEAU.
+  # S'il répond 200, alors la route et l'ACL admettent bien un consumer anon
+  # porteur d'un Bearer, donc TOUT refus sur l'ancien jeton est imputable au
+  # jeton et à rien d'autre. Sans ce contrôle, un 403 est ambigu : il pourrait
+  # venir de l'ACL Kong comme de GoTrue.
+  printf '\n  \033[1mContrôle — le même chemin avec le NOUVEAU jeton\033[0m\n'
+  CTRL_ADMIN="$(http_code -H "apikey: $PUB" -H "Authorization: Bearer $CURRENT_SR" "${KONG_URL}${ADMIN}")"
+  CTRL_PROBE="$(http_code -H "apikey: $PUB" -H "Authorization: Bearer $CURRENT_SR" "${KONG_URL}${PROBE}")"
+  line "GoTrue admin, nouveau jeton" "HTTP $CTRL_ADMIN"
+  line "PostgREST, nouveau jeton" "HTTP $CTRL_PROBE"
+
+  # Kong refuse un consumer hors ACL avec ce message précis. On l'utilise pour
+  # attribuer un 403 sans jamais imprimer le corps de la réponse.
+  kong_acl_denied() {
+    curl -s --max-time 15 -H "apikey: $2" -H "Authorization: Bearer $3" "${KONG_URL}${1}" 2>/dev/null \
+      | grep -qi 'cannot consume this service'
+  }
+
+  judge() {
+    local label="$1" code="$2" control="$3" apikey="$4" token="$5" target="$6"
     case "$code" in
-      401) ok "${target%%\?*} → 401, signature refusée" ;;
-      403) bad "${target%%\?*} → 403, refus d'ACL : aucune preuve sur le jeton"; FAIL=1 ;;
-      000) bad "${target%%\?*} → injoignable sur $KONG_URL"; FAIL=1 ;;
-      *)   bad "${target%%\?*} → $code, L'ANCIEN JETON EST ENCORE ACCEPTÉ"; FAIL=1 ;;
+      401) ok "$label → 401, signature refusée" ;;
+      403)
+        if kong_acl_denied "$target" "$apikey" "$token"; then
+          bad "$label → 403 émis par l'ACL Kong : aucune preuve sur le jeton"; FAIL=1
+        elif [[ "$control" == "200" ]]; then
+          # Le contrôle prouve que ce chemin est ouvert au consumer anon avec un
+          # Bearer. Le 403 vient donc de l'amont qui a évalué le jeton, et le
+          # jeton est refusé. C'est une révocation, pas une ambiguïté.
+          ok "$label → 403 émis par l'amont, jeton refusé (contrôle à 200 sur le même chemin)"
+        else
+          bad "$label → 403 et contrôle à $control : indécidable"; FAIL=1
+        fi
+        ;;
+      000) bad "$label → injoignable sur $KONG_URL"; FAIL=1 ;;
+      *)   bad "$label → $code, L'ANCIEN JETON EST ENCORE ACCEPTÉ"; FAIL=1 ;;
     esac
-  done
+  }
+
+  printf '\n  \033[1mL'"'"'ancien jeton doit être mort partout\033[0m\n'
+  code="$(http_code -H "apikey: $PUB" -H "Authorization: Bearer $OLD_SR" "${KONG_URL}${ADMIN}")"
+  judge "GoTrue admin" "$code" "$CTRL_ADMIN" "$PUB" "$OLD_SR" "$ADMIN"
+  code="$(http_code -H "apikey: $PUB" -H "Authorization: Bearer $OLD_SR" "${KONG_URL}${PROBE}")"
+  judge "PostgREST" "$code" "$CTRL_PROBE" "$PUB" "$OLD_SR" "$PROBE"
 
   printf '\n  \033[1mLe nouveau doit fonctionner\033[0m\n'
   code="$(http_code -H "apikey: $CURRENT_SR" -H "Authorization: Bearer $CURRENT_SR" \
@@ -578,15 +616,42 @@ MISMATCH=0
 for svc in "${RUNNING[@]}"; do
   cid="$({ "${COMPOSE[@]}" ps -q "$svc" 2>/dev/null || true; } | head -n 1)"
   [[ -n "$cid" ]] || { warn "$svc sans conteneur"; continue; }
-  got="$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$cid" \
-          | sed -n 's/^JWT_SECRET=//p;s/^GOTRUE_JWT_SECRET=//p;s/^PGRST_JWT_SECRET=//p;s/^AUTH_JWT_SECRET=//p;s/^API_JWT_SECRET=//p' \
-          | head -n 1)"
-  if [[ -z "$got" ]]; then
-    line "$svc" "pas de JWT_SECRET direct"
-  elif [[ "$(fingerprint_of "$got")" == "$NEW_FP" ]]; then
-    ok "$svc porte le nouveau secret"
+  # Kong ne porte PAS JWT_SECRET : il porte les jetons. Une version précédente
+  # ne cherchait que JWT_SECRET et affichait « pas de JWT_SECRET direct » pour
+  # Kong — ce qui se lit « rien à vérifier » alors qu'il y avait justement
+  # quelque chose à vérifier, sur le composant dont les credentials décident de
+  # l'authentification. On contrôle donc les deux familles.
+  dump="$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$cid")"
+  checked=0
+  for var in JWT_SECRET GOTRUE_JWT_SECRET PGRST_JWT_SECRET AUTH_JWT_SECRET API_JWT_SECRET \
+             METRICS_JWT_SECRET; do
+    got="$(sed -n "s/^${var}=//p" <<<"$dump" | head -n 1)"
+    [[ -n "$got" ]] || continue
+    checked=$((checked+1))
+    if [[ "$(fingerprint_of "$got")" != "$NEW_FP" ]]; then
+      bad "$svc / $var porte encore l'ancien secret"; MISMATCH=1
+    fi
+  done
+  for var in ANON_KEY SUPABASE_ANON_KEY; do
+    got="$(sed -n "s/^${var}=//p" <<<"$dump" | head -n 1)"
+    [[ -n "$got" ]] || continue
+    checked=$((checked+1))
+    if [[ "$got" != "$NEW_ANON" ]]; then
+      bad "$svc / $var n'est pas le nouveau jeton anon"; MISMATCH=1
+    fi
+  done
+  for var in SERVICE_ROLE_KEY SUPABASE_SERVICE_KEY SUPABASE_SERVICE_ROLE_KEY; do
+    got="$(sed -n "s/^${var}=//p" <<<"$dump" | head -n 1)"
+    [[ -n "$got" ]] || continue
+    checked=$((checked+1))
+    if [[ "$got" != "$NEW_SR" ]]; then
+      bad "$svc / $var n'est pas le nouveau jeton service_role"; MISMATCH=1
+    fi
+  done
+  if [[ "$checked" == "0" ]]; then
+    warn "$svc — aucune variable de clé trouvée, rien n'a pu être vérifié"
   else
-    bad "$svc porte encore l'ancien — recréation à refaire"; MISMATCH=1
+    ok "$svc — $checked variable(s) de clé vérifiée(s)"
   fi
 done
 
