@@ -363,13 +363,18 @@ if [[ "$MODE" == "--verify" ]]; then
       403)
         if kong_acl_denied "$target" "$apikey" "$token"; then
           bad "$label → 403 émis par l'ACL Kong : aucune preuve sur le jeton"; FAIL=1
-        elif [[ "$control" == "200" ]]; then
+        # Le contrôle prouve que le chemin est OUVERT, ce qui n'est pas la même
+        # chose que « répond 200 » : la réponse saine de PostgREST sur une table
+        # absente est 404. Exiger 200 rendait un 403 PostgREST « indécidable »
+        # alors que le chemin était démontré ouvert. Ce qui compte est que le
+        # contrôle ne soit ni 401 ni 403 ni injoignable.
+        elif [[ "$control" != "401" && "$control" != "403" && "$control" != "000" ]]; then
           # Le contrôle prouve que ce chemin est ouvert au consumer anon avec un
           # Bearer. Le 403 vient donc de l'amont qui a évalué le jeton, et le
           # jeton est refusé. C'est une révocation, pas une ambiguïté.
-          ok "$label → 403 émis par l'amont, jeton refusé (contrôle à 200 sur le même chemin)"
+          ok "$label → 403 émis par l'amont, jeton refusé (chemin démontré ouvert, contrôle à $control)"
         else
-          bad "$label → 403 et contrôle à $control : indécidable"; FAIL=1
+          bad "$label → 403 et contrôle à $control : chemin non démontré ouvert, indécidable"; FAIL=1
         fi
         ;;
       000) bad "$label → injoignable sur $KONG_URL"; FAIL=1 ;;
