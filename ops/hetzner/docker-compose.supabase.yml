@@ -547,6 +547,30 @@ services:
       # released at /confirm). Lower = smaller transient hold; keep it high enough that
       # issuers reliably authorise it. Tunable without a code deploy.
       NORVA_REVOLUT_VALIDATION_CENTS: ${NORVA_REVOLUT_VALIDATION_CENTS:-50}
+      # --- Signup anti-abuse (norva-signup + _shared/risk-*, observe mode) -----
+      # Deliberately `:-` and not `:?`. Every module here already fails closed on
+      # a missing secret — the form token reads INVALID, the velocity store
+      # throws and is caught, the ingress verifier refuses — so an empty value
+      # costs signals, never availability. `:?` would take the whole Edge runtime
+      # down for all nineteen functions over one unset variable.
+      NORVA_ABUSE_HASH_KEY: ${NORVA_ABUSE_HASH_KEY:-}
+      NORVA_SIGNUP_TOKEN_SECRET: ${NORVA_SIGNUP_TOKEN_SECRET:-}
+      NORVA_SIGNUP_IDEMPOTENCY_SECRET: ${NORVA_SIGNUP_IDEMPOTENCY_SECRET:-}
+      # Signed Cloudflare -> edge envelope. CURRENT is the only secret that must
+      # exist on BOTH sides: Pages signs with it, the edge verifies with it.
+      # PREVIOUS stays accepted for the length of a rotation window.
+      EDGE_INGRESS_SECRET_CURRENT: ${EDGE_INGRESS_SECRET_CURRENT:-}
+      EDGE_INGRESS_SECRET_PREVIOUS: ${EDGE_INGRESS_SECRET_PREVIOUS:-}
+      # Configuration, not secrets: non-sensitive, but a change here changes what
+      # is enforced, so they are declared rather than defaulted in code.
+      EDGE_INGRESS_KEY_VERSION: ${EDGE_INGRESS_KEY_VERSION:-1}
+      EDGE_INGRESS_PREVIOUS_KEY_VERSION: ${EDGE_INGRESS_PREVIOUS_KEY_VERSION:-}
+      NORVA_ABUSE_POLICY_VERSION: ${NORVA_ABUSE_POLICY_VERSION:-observe-v1}
+      SIGNUP_ENDPOINT_VERSION: ${SIGNUP_ENDPOINT_VERSION:-norva-signup-v1}
+      # The one switch that changes behaviour. false = every evaluation is
+      # recorded and every signup is allowed. Do not flip it before the
+      # distributions have been read.
+      NORVA_ABUSE_ENFORCEMENT_ENABLED: ${NORVA_ABUSE_ENFORCEMENT_ENABLED:-false}
     command:
       - start
       - --main-service
