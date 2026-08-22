@@ -448,6 +448,38 @@ n'existe pas dans sa nouvelle forme à 8 arguments et tout signup passant par le
 pipeline échoue au moment du settle. Voir la séquence de redéploiement
 ci-dessous avant de rouvrir le canary.
 
+### Fermeture, même jour
+
+Exposition réelle mesurée, pas supposée : `select ... from auth.users where
+created_at between '13:18' and '13:46'` sur la fenêtre où le 1 % a réellement
+tourné avec le bug de parité → **0 lignes**. Personne n'a été touché.
+
+Migration `20260822130000` appliquée, `abuse_signup_attempt_settle` confirmé
+en base avec sa forme à 8 arguments
+(`p_already_registered boolean DEFAULT NULL::boolean`), les 9 RPC et les 5
+invariants bloquants toujours verts après la recréation des conteneurs.
+
+Puis la preuve qui compte vraiment — pas la réponse de l'edge, la ligne que
+GoTrue a réellement écrite : un signup complet avec `displayName`,
+`signupContext` et `redirectTo` peuplés donne, dans `auth.users` :
+
+```
+raw_user_meta_data = {
+  "display_name": "Parity Test Person",
+  "norva_signup_platform": "web",
+  "norva_signup_surface": "browser",
+  "norva_signup_method": "email_password",
+  ...
+}
+```
+
+et dans `signup_decisions` : `SAFE / ALLOW / ALLOW / enforcement_enabled=f`.
+La parité n'est plus une inférence sur la forme de la réponse HTTP, c'est la
+donnée que l'utilisateur aurait obtenue en passant par le chemin legacy.
+
+Troisième compte de test, gardé avec les deux premiers pour la traçabilité du
+jalon : `signup-parity-<timestamp>@norva.tv`.
+
 ## Le canary web, câblé le 2026-08-22
 
 `public/js/authApi.js` route désormais `NorvaAuth.signUp()` entre les deux
