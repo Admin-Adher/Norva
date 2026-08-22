@@ -651,6 +651,58 @@ test('a genuinely new account is never flagged as already registered', async () 
   assert.equal(body.created, true);
 });
 
+test('displayName, signupContext and redirectTo reach GoTrue, matching legacy parity', async () => {
+  // The same gap fixed on the client side, closed here on the edge: the
+  // upstream call had forwarded only email and password.
+  const [mod] = await loading;
+  const h = harness();
+  const issued = await freshToken();
+  await mod.handleSignup(
+    await signedRequest({
+      body: payload({
+        formToken: issued.token,
+        displayName: 'Alex',
+        redirectTo: 'https://norva.tv/account.html?returnTo=%2Fapp',
+        signupContext: { norva_signup_platform: 'web', norva_signup_method: 'email_password' },
+      }),
+    }),
+    h.deps,
+  );
+  const call = h.timeline.find((entry) => entry.name === 'GOTRUE');
+  // Decoded rather than compared against a hand-encoded literal: URLSearchParams'
+  // percent-encoding has its own quirks (space as +, a slightly different safe
+  // set) and hand-deriving the expected string is exactly how a wrong-but-
+  // passing assertion gets written.
+  assert.equal(
+    new URL(call.url).searchParams.get('redirect_to'),
+    'https://norva.tv/account.html?returnTo=%2Fapp',
+  );
+  const sentBody = JSON.parse(call.init.body);
+  assert.deepEqual(sentBody.data, {
+    norva_signup_platform: 'web',
+    norva_signup_method: 'email_password',
+    display_name: 'Alex',
+  });
+});
+
+test('a signupContext with too many entries is trimmed, not rejected outright', async () => {
+  const [mod] = await loading;
+  const h = harness();
+  const issued = await freshToken();
+  const bloated = Object.fromEntries(
+    Array.from({ length: 15 }, (_, i) => [`field_${i}`, `value_${i}`]),
+  );
+  const response = await mod.handleSignup(
+    await signedRequest({ body: payload({ formToken: issued.token, signupContext: bloated }) }),
+    h.deps,
+  );
+  assert.equal(response.status, 200, 'oversized metadata degrades gracefully, never blocks the signup');
+  const call = h.timeline.find((entry) => entry.name === 'GOTRUE');
+  const sentBody = JSON.parse(call.init.body);
+  // 10 kept plus display_name, never all 15 plus display_name.
+  assert.equal(Object.keys(sentBody.data).length, 11);
+});
+
 test('enforcement, once on, refuses at the one gated line', async () => {
   const [mod] = await loading;
   env.NORVA_ABUSE_ENFORCEMENT_ENABLED = 'true';
@@ -735,14 +787,23 @@ test('nothing the person typed reaches a log line', async () => {
   const issued = await freshToken();
   await mod.handleSignup(
     await signedRequest({
-      body: payload({ formToken: issued.token, honeypot: 'a bot wrote this' }),
+      body: payload({
+        formToken: issued.token,
+        honeypot: 'a bot wrote this',
+        displayName: 'Runtime Probe Person',
+        redirectTo: 'https://norva.tv/account.html?returnTo=%2Fsecret-path',
+        signupContext: { norva_signup_platform: 'web' },
+      }),
     }),
     h.deps,
   );
 
   assert.ok(h.logs.length > 0, 'something was logged');
   const dumped = JSON.stringify(h.logs);
-  for (const secret of [EMAIL, PASSWORD, issued.token, 'a bot wrote this', 'runtime-probe-8371']) {
+  for (const secret of [
+    EMAIL, PASSWORD, issued.token, 'a bot wrote this', 'runtime-probe-8371',
+    'Runtime Probe Person', 'secret-path',
+  ]) {
     assert.ok(!dumped.includes(secret), `a log carried ${secret.slice(0, 12)}…`);
   }
   // And every field really is a scalar or an array of scalars: an object would

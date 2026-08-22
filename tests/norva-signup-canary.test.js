@@ -28,7 +28,14 @@ function response(status, payload) {
 
 function loadAuth(fetchImpl, options = {}) {
   const values = new Map(Object.entries(options.storage || {}));
-  const window = { NORVA_SUPABASE_URL: 'https://api.norva.tv' };
+  const window = {
+    NORVA_SUPABASE_URL: 'https://api.norva.tv',
+    // SIGNUP_PIPELINE_ENABLED is a shipped kill switch, currently false
+    // (paused 2026-08-22). Tests that need to exercise the new pipeline set
+    // this the same way manual QA would from devtools — a real, documented
+    // override, not a test-only backdoor into the module's internals.
+    __NORVA_FORCE_SIGNUP_PIPELINE__: options.forcePipeline,
+  };
   const context = vm.createContext({
     window,
     localStorage: {
@@ -77,48 +84,71 @@ function fakeFetch(handlers) {
 
 // ── which path a bucket takes ────────────────────────────────────────────────
 
-test('a bucket under the threshold uses the new pipeline, never touches GoTrue directly', async () => {
+test('PAUSED: even a bucket that would qualify under the announced 1% stays on legacy', async () => {
+  // The regression this whole file exists to prevent: SIGNUP_PIPELINE_ENABLED
+  // is currently false, shipped that way on purpose (d6d00101 needed
+  // confirming live on the box, and payload parity was still broken when 1%
+  // first went out). No override is set here — this is the actual switch
+  // position shipping today, exercised directly rather than assumed.
+  const { fetch, calls } = fakeFetch({
+    '/auth/v1/signup?redirect_to=https%3A%2F%2Fnorva.tv%2Faccount.html': response(200, { id: 'user-1', identities: [{}] }),
+  });
+  const { auth } = loadAuth(fetch, { storage: { [KEY_BUCKET]: '0' } });
+  await auth.signUp({ email: 'a@b.com', password: 'x'.repeat(12) });
+  assert.equal(calls.length, 1);
+  assert.ok(calls[0].path.startsWith('/auth/v1/signup'), 'legacy, even though bucket 0 is under any real threshold');
+});
+
+test('the force override routes a single tab through the new pipeline regardless of the bucket or the switch', async () => {
+  // The documented devtools escape hatch for manual QA against production
+  // without touching localStorage or the shipped switch: exactly what
+  // "force bucket 0 to test" was standing in for, but it does not depend on
+  // the RNG or require guessing which bucket a given browser already has.
   const { fetch, calls } = fakeFetch({
     '/api/signup-token': response(200, { token: 'tok-1' }),
     '/api/signup': response(200, { status: 'ok', user_id: 'user-1', created: true, already_registered: false }),
   });
-  const { auth } = loadAuth(fetch, { storage: { [KEY_BUCKET]: '0' } });
+  const { auth } = loadAuth(fetch, { forcePipeline: true, storage: { [KEY_BUCKET]: '9999' } });
   await auth.signUp({ email: 'a@b.com', password: 'x'.repeat(12) });
   assert.deepEqual(calls.map((c) => c.path), ['/api/signup-token', '/api/signup']);
   assert.equal(calls[1].body.formToken, 'tok-1');
   assert.ok(!calls.some((c) => c.path.includes('/auth/v1/signup')), 'legacy GoTrue was never called');
 });
 
-test('a bucket at or above the threshold uses the legacy path, never touches the new pipeline', async () => {
+test('the force override can also pin a tab to legacy even with a qualifying bucket', async () => {
   const { fetch, calls } = fakeFetch({
     '/auth/v1/signup?redirect_to=https%3A%2F%2Fnorva.tv%2Faccount.html': response(200, { id: 'user-1', identities: [{}] }),
   });
-  const { auth } = loadAuth(fetch, { storage: { [KEY_BUCKET]: '100' } });
+  const { auth } = loadAuth(fetch, { forcePipeline: false, storage: { [KEY_BUCKET]: '0' } });
   await auth.signUp({ email: 'a@b.com', password: 'x'.repeat(12) });
   assert.equal(calls.length, 1);
   assert.ok(calls[0].path.startsWith('/auth/v1/signup'));
 });
 
-test('the bucket is generated once and reused, not re-rolled on every signup', async () => {
+test('the bucket is generated once and reused, not re-rolled on every signup — even while paused', async () => {
+  // Assignment happens regardless of the switch: a browser's bucket is a
+  // property of that browser from its first visit, so re-enabling the switch
+  // later draws from buckets already spread out over time rather than
+  // deciding everyone's fate in one burst the moment it flips on.
   const { fetch, calls } = fakeFetch({
     '/auth/v1/signup?redirect_to=https%3A%2F%2Fnorva.tv%2Faccount.html': () => response(200, { id: 'user-1', identities: [{}] }),
   });
   const { auth, values } = loadAuth(fetch, {}); // no seeded bucket: must be generated
   await auth.signUp({ email: 'a@b.com', password: 'x'.repeat(12) });
   const first = values.get(KEY_BUCKET);
-  assert.ok(first !== undefined, 'a bucket was generated and stored');
+  assert.ok(first !== undefined, 'a bucket was generated and stored even though the pipeline is currently off');
   await auth.signUp({ email: 'a2@b.com', password: 'x'.repeat(12) });
   assert.equal(values.get(KEY_BUCKET), first, 'the second signup reused the same bucket');
 });
 
-// ── the asymmetric fallback rule ─────────────────────────────────────────────
+// ── the asymmetric fallback rule (pipeline forced on to exercise it) ────────
 
 test('a token-fetch failure falls back to the legacy endpoint — nothing was ever sent', async () => {
   const { fetch, calls } = fakeFetch({
     '/api/signup-token': 'network-error',
     '/auth/v1/signup?redirect_to=https%3A%2F%2Fnorva.tv%2Faccount.html': response(200, { id: 'user-1', identities: [{}] }),
   });
-  const { auth } = loadAuth(fetch, { storage: { [KEY_BUCKET]: '0' } });
+  const { auth } = loadAuth(fetch, { forcePipeline: true });
   const result = await auth.signUp({ email: 'a@b.com', password: 'x'.repeat(12) });
   assert.deepEqual(calls.map((c) => c.path), ['/api/signup-token', '/auth/v1/signup?redirect_to=https%3A%2F%2Fnorva.tv%2Faccount.html']);
   assert.equal(result.id, 'user-1');
@@ -129,7 +159,7 @@ test('a token-fetch 503 falls back to the legacy endpoint the same way', async (
     '/api/signup-token': response(503, { error: 'unavailable' }),
     '/auth/v1/signup?redirect_to=https%3A%2F%2Fnorva.tv%2Faccount.html': response(200, { id: 'user-1', identities: [{}] }),
   });
-  const { auth } = loadAuth(fetch, { storage: { [KEY_BUCKET]: '0' } });
+  const { auth } = loadAuth(fetch, { forcePipeline: true });
   await auth.signUp({ email: 'a@b.com', password: 'x'.repeat(12) });
   assert.deepEqual(calls.map((c) => c.path), ['/api/signup-token', '/auth/v1/signup?redirect_to=https%3A%2F%2Fnorva.tv%2Faccount.html']);
 });
@@ -139,7 +169,7 @@ test('once /api/signup is dispatched, a 4xx is final and never reaches legacy Go
     '/api/signup-token': response(200, { token: 'tok-1' }),
     '/api/signup': response(409, { error: 'Unable to complete registration. Please try again later.' }),
   });
-  const { auth } = loadAuth(fetch, { storage: { [KEY_BUCKET]: '0' } });
+  const { auth } = loadAuth(fetch, { forcePipeline: true });
   await assert.rejects(
     () => auth.signUp({ email: 'a@b.com', password: 'x'.repeat(12) }),
     /Unable to complete registration/,
@@ -152,7 +182,7 @@ test('once /api/signup is dispatched, a network error after sending is final and
     '/api/signup-token': response(200, { token: 'tok-1' }),
     '/api/signup': 'network-error',
   });
-  const { auth } = loadAuth(fetch, { storage: { [KEY_BUCKET]: '0' } });
+  const { auth } = loadAuth(fetch, { forcePipeline: true });
   await assert.rejects(() => auth.signUp({ email: 'a@b.com', password: 'x'.repeat(12) }));
   assert.deepEqual(calls.map((c) => c.path), ['/api/signup-token', '/api/signup']);
 });
@@ -173,7 +203,7 @@ test('a 202 is retried with the IDENTICAL form token, and a later success is ret
         : response(200, { status: 'ok', user_id: 'user-1', created: true, already_registered: false });
     },
   });
-  const { auth } = loadAuth(fetch, { storage: { [KEY_BUCKET]: '0' } });
+  const { auth } = loadAuth(fetch, { forcePipeline: true });
   const result = await auth.signUp({ email: 'a@b.com', password: 'x'.repeat(12) });
   const signupCalls = calls.filter((c) => c.path === '/api/signup');
   assert.equal(signupCalls.length, 3, 'two pendings, then the resolving call');
@@ -187,11 +217,46 @@ test('a 202 that never resolves is surfaced as an error, still never falling bac
     '/api/signup-token': response(200, { token: 'tok-stuck' }),
     '/api/signup': response(202, { status: 'pending' }),
   });
-  const { auth } = loadAuth(fetch, { storage: { [KEY_BUCKET]: '0' } });
+  const { auth } = loadAuth(fetch, { forcePipeline: true });
   await assert.rejects(() => auth.signUp({ email: 'a@b.com', password: 'x'.repeat(12) }));
   const signupCalls = calls.filter((c) => c.path === '/api/signup');
   assert.ok(signupCalls.length >= 2, 'retried at least once before giving up');
   assert.ok(!calls.some((c) => c.path.includes('/auth/v1/signup')));
+});
+
+// ── payload parity with the legacy direct-to-GoTrue call ────────────────────
+
+test('displayName, signupContext and redirectTo reach /api/signup, not just email and password', async () => {
+  // The gap found when this canary was first paused: the pipeline forwarded
+  // only email and password, silently dropping the display name, attribution
+  // metadata and confirmation redirect that legacySignUp has always sent.
+  const { fetch, calls } = fakeFetch({
+    '/api/signup-token': response(200, { token: 'tok-1' }),
+    '/api/signup': response(200, { status: 'ok', user_id: 'user-1', created: true, already_registered: false }),
+  });
+  const { auth } = loadAuth(fetch, { forcePipeline: true });
+  await auth.signUp({
+    email: 'a@b.com',
+    password: 'x'.repeat(12),
+    displayName: 'Alex',
+    signupContext: { norva_signup_platform: 'web', norva_signup_method: 'email_password' },
+    redirectTo: 'https://norva.tv/account.html?returnTo=%2Fapp',
+  });
+  const sent = calls.find((c) => c.path === '/api/signup').body;
+  assert.equal(sent.displayName, 'Alex');
+  assert.equal(sent.redirectTo, 'https://norva.tv/account.html?returnTo=%2Fapp');
+  assert.deepEqual(sent.signupContext, { norva_signup_platform: 'web', norva_signup_method: 'email_password' });
+});
+
+test('a missing redirectTo defaults the same way legacySignUp does', async () => {
+  const { fetch, calls } = fakeFetch({
+    '/api/signup-token': response(200, { token: 'tok-1' }),
+    '/api/signup': response(200, { status: 'ok', user_id: 'user-1', created: true, already_registered: false }),
+  });
+  const { auth } = loadAuth(fetch, { forcePipeline: true });
+  await auth.signUp({ email: 'a@b.com', password: 'x'.repeat(12) });
+  const sent = calls.find((c) => c.path === '/api/signup').body;
+  assert.equal(sent.redirectTo, 'https://norva.tv/account.html');
 });
 
 // ── response shape parity with the legacy anti-enumeration UI ───────────────
@@ -201,7 +266,7 @@ test('an already-registered result is shaped exactly like GoTrue\'s own anti-enu
     '/api/signup-token': response(200, { token: 'tok-1' }),
     '/api/signup': response(200, { status: 'ok', user_id: 'user-1', already_registered: true, created: false }),
   });
-  const { auth } = loadAuth(fetch, { storage: { [KEY_BUCKET]: '0' } });
+  const { auth } = loadAuth(fetch, { forcePipeline: true });
   const result = await auth.signUp({ email: 'a@b.com', password: 'x'.repeat(12) });
   // account.html's existing branch reads exactly this shape to show
   // "this email already has a Norva account" instead of a dead-end message.
@@ -216,7 +281,7 @@ test('a freshly created account is shaped so the existing "check your email" bra
     '/api/signup-token': response(200, { token: 'tok-1' }),
     '/api/signup': response(200, { status: 'ok', user_id: 'user-1', already_registered: false, created: true }),
   });
-  const { auth } = loadAuth(fetch, { storage: { [KEY_BUCKET]: '0' } });
+  const { auth } = loadAuth(fetch, { forcePipeline: true });
   const result = await auth.signUp({ email: 'a@b.com', password: 'x'.repeat(12) });
   assert.equal(result.user, undefined, 'must not hit the already-registered branch');
   assert.equal(result.id, 'user-1');

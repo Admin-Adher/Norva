@@ -87,12 +87,42 @@
     // norva.tv/api/signup{,-token} → signed HMAC envelope → api.norva.tv edge →
     // GoTrue, with server-side scoring that (while enforcement stays off, see
     // docs/roadmap/abuse-signup-observe.md) can never refuse a signup — only
-    // observe it. A stable per-browser bucket decides who is routed there, so
-    // raising the percentage later only ADDS browsers to it; nobody already
-    // assigned changes path when the threshold moves.
+    // observe it. A bucket already assigned to the pipeline at 1% STAYS
+    // assigned when the threshold later moves to 5%, 20%, ...: raising it only
+    // adds newly-qualifying buckets on top, it never reassigns one already
+    // below a lower threshold back to legacy. What is NOT true is that a given
+    // browser's TREATMENT is fixed forever — a bucket of 250 is legacy at the
+    // 1% stage and correctly starts using the new pipeline once the threshold
+    // passes 250. That is the intended, cumulative shape of the rollout, not a
+    // bug in it.
     const KEY_SIGNUP_CANARY_BUCKET = 'norva-signup-canary-bucket';
     const KEY_SIGNUP_DEVICE_ID = 'norva-signup-device-id';
-    const SIGNUP_PIPELINE_CANARY_THRESHOLD = 100; // bucket < 100 of 10000 = 1%
+    //
+    // PAUSED 2026-08-22, as its own switch rather than by zeroing the
+    // percentage below — the two are different questions ("is this live at
+    // all" vs "how much of it, once live") and conflating them would have left
+    // the 1% figure meaning nothing next time someone reads it. Paused before
+    // confirming the edge runtime carrying the already_registered fix
+    // (d6d00101) had actually been redeployed to Hetzner — a git push updates
+    // Cloudflare Pages on its own, but the box needs an explicit `git pull` +
+    // container recreate — and before payload parity with the legacy signup
+    // was verified: this shim was dropping displayName, signupContext and
+    // redirectTo entirely. Re-enable only after both are fixed and confirmed.
+    const SIGNUP_PIPELINE_ENABLED = false;
+    const SIGNUP_PIPELINE_CANARY_THRESHOLD = 100; // bucket < 100 of 10000 = 1%, once re-enabled
+
+    /**
+     * Escape hatch for manual verification against production without
+     * touching the switch above or any browser's stored bucket: from devtools,
+     * `window.__NORVA_FORCE_SIGNUP_PIPELINE__ = true` routes THIS TAB through
+     * the new pipeline regardless of SIGNUP_PIPELINE_ENABLED or the bucket;
+     * `= false` forces legacy the same way. Unset (the default), the switch
+     * and bucket decide normally.
+     */
+    function signupPipelineForced() {
+        const forced = window.__NORVA_FORCE_SIGNUP_PIPELINE__;
+        return typeof forced === 'boolean' ? forced : null;
+    }
     const SIGNUP_TOKEN_TIMEOUT_MS = 8_000;
     const SIGNUP_POST_TIMEOUT_MS = 20_000;
     // Only for a 202 (GoTrue's own outcome still unknown server-side): retried
@@ -109,21 +139,38 @@
         const raw = localStorage.getItem(KEY_SIGNUP_CANARY_BUCKET);
         const stored = raw === null ? NaN : Number(raw);
         if (Number.isInteger(stored) && stored >= 0 && stored <= 9999) return stored;
+        // 65536 is not a multiple of 10000: a bare `% 10000` gives buckets
+        // 0-5535 seven representations and the rest six, so the announced 1%
+        // (buckets 0-99, all in the seven-representation range) is actually
+        // 700/65536 ≈ 1.068% — about 6.8% more traffic than intended. Redrawing
+        // any value at or above the largest multiple of 10000 that fits in
+        // 16 bits (60000) removes the bias: every bucket then has exactly six.
         const random = new Uint16Array(1);
-        crypto.getRandomValues(random);
+        do {
+            crypto.getRandomValues(random);
+        } while (random[0] >= 60000);
         const bucket = random[0] % 10000;
         try { localStorage.setItem(KEY_SIGNUP_CANARY_BUCKET, String(bucket)); } catch (_) { /* private mode */ }
         return bucket;
     }
 
     function signupPipelineEnabled() {
+        const forced = signupPipelineForced();
+        if (forced !== null) return forced;
+        // The bucket is assigned unconditionally, switch on or off: a
+        // browser's assignment is a property of that browser from its first
+        // visit, not something that should depend on whether the feature
+        // happens to be live yet. Re-enabling the switch later then draws from
+        // buckets already spread out over time, not decided in one burst.
+        let bucket;
         try {
-            return signupCanaryBucket() < SIGNUP_PIPELINE_CANARY_THRESHOLD;
+            bucket = signupCanaryBucket();
         } catch (_) {
             // localStorage unreachable: the legacy path is the long-proven
             // default, never the new one, on any doubt.
             return false;
         }
+        return SIGNUP_PIPELINE_ENABLED && bucket < SIGNUP_PIPELINE_CANARY_THRESHOLD;
     }
 
     function signupDeviceId() {
@@ -190,8 +237,12 @@
         return outcome.body.token;
     }
 
-    async function edgeSignup({ email, password }) {
+    async function edgeSignup({ email, password, displayName, signupContext, redirectTo }) {
         const formToken = await requestSignupFormToken();
+        // Same default legacySignUp computes: the edge has no location object
+        // of its own, so this has to happen here, not server-side.
+        const resolvedRedirect = redirectTo || `${location.origin}/account.html`;
+        const context = signupContext && typeof signupContext === 'object' ? signupContext : {};
         const body = {
             email,
             password,
@@ -201,7 +252,12 @@
             // is optional and the risk engine treats its absence as neutral.
             deviceId: signupDeviceId(),
             userAgent: navigator.userAgent || '',
-            acceptLanguage: (navigator.languages && navigator.languages[0]) || navigator.language || ''
+            acceptLanguage: (navigator.languages && navigator.languages[0]) || navigator.language || '',
+            // Parity with legacySignUp: the same three fields it sends to
+            // GoTrue directly, forwarded here so the edge can relay them.
+            displayName: displayName || '',
+            redirectTo: resolvedRedirect,
+            signupContext: context
         };
 
         let outcome;
@@ -279,7 +335,7 @@
     async function signUp({ email, password, displayName, signupContext, redirectTo }) {
         if (signupPipelineEnabled()) {
             try {
-                return await edgeSignup({ email, password });
+                return await edgeSignup({ email, password, displayName, signupContext, redirectTo });
             } catch (error) {
                 if (!(error instanceof SignupFallbackToLegacy)) throw error;
                 // Only reachable before any /api/signup was ever sent.

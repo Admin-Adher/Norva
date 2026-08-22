@@ -37,7 +37,12 @@
 import { canonicalizeRiskSubject } from "./risk-subject-canonical.ts";
 
 /** Bump on key rotation; old fingerprints then stop matching by construction. */
-export const FINGERPRINT_VERSION = 1;
+// Bumped from 1 to 2: the fingerprint now also covers displayName,
+// signupContext and redirectTo (see SignupIntent below). Nothing needs
+// migrating — no real traffic has used this pipeline yet, and a stored
+// fingerprint is never compared across versions, only replayed against a
+// still-open attempt under the version that created it.
+export const FINGERPRINT_VERSION = 2;
 
 const IDEMPOTENCY_SECRET = Deno.env.get("NORVA_SIGNUP_IDEMPOTENCY_SECRET") ?? "";
 
@@ -74,6 +79,20 @@ export interface SignupIntent {
    * fingerprints stay stable across retries.
    */
   credential?: string | null;
+  /**
+   * Folded in from FINGERPRINT_VERSION 2 on: same nonce + same email/password
+   * but a different display name, attribution context or confirmation
+   * redirect is not "the same retry" any more than a different password is —
+   * it is a different request that happens to reuse a token. Deliberately
+   * NOT included: userAgent, acceptLanguage. Those can vary between a
+   * submission and its retry for reasons that have nothing to do with what
+   * was actually being requested, and folding them in would turn an ordinary
+   * page reload into a false intent_mismatch.
+   */
+  displayName?: string | null;
+  redirectTo?: string | null;
+  /** Canonicalised (key-sorted) inside signupRequestFingerprint. */
+  signupContext?: Record<string, string> | null;
 }
 
 export async function signupRequestFingerprint(intent: SignupIntent): Promise<string> {
@@ -90,6 +109,14 @@ export async function signupRequestFingerprint(intent: SignupIntent): Promise<st
     ? await keyedHex(`credential:v1:${intent.credential}`)
     : "none";
 
+  // Key-sorted so {a,b} and {b,a} — the same metadata, built in a different
+  // object literal order — canonicalise to the same string rather than two
+  // different fingerprints for one intent.
+  const context = intent.signupContext ?? {};
+  const canonicalContext = Object.keys(context).sort()
+    .map((key) => `${key.length}:${key}=${context[key].length}:${context[key]}`)
+    .join(",");
+
   // Length-prefixed fields, so no combination of values can be rearranged into
   // another valid message. "ab|c" and "a|bc" must not collide.
   const message = [
@@ -99,6 +126,9 @@ export async function signupRequestFingerprint(intent: SignupIntent): Promise<st
     intent.surface,
     intent.authMethod,
     credentialBinding,
+    intent.displayName ?? "",
+    intent.redirectTo ?? "",
+    canonicalContext,
   ].map((part) => {
     const text = String(part);
     return `${text.length}:${text}`;

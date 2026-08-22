@@ -132,6 +132,10 @@ test('the fingerprint is keyed by a server secret, never by the nonce', async ()
     field('web'), field('password'),
     // No credential supplied, so the binding is the fixed marker.
     field('none'),
+    // displayName, redirectTo, signupContext: all absent here, each an
+    // empty-string field rather than skipped, so their position in the
+    // message stays fixed whether or not a caller ever sends them.
+    field(''), field(''), field(''),
   ].join('|');
   const expected = nodeCrypto.createHmac('sha256', IDEMPOTENCY_SECRET)
     .update(message).digest('hex');
@@ -160,9 +164,57 @@ test('changing any part of the intent changes the fingerprint', async () => {
     { ...base, email: 'other@example.com' },
     { ...base, surface: 'mobile' },
     { ...base, authMethod: 'magic_link' },
+    { ...base, displayName: 'Alex' },
+    { ...base, redirectTo: 'https://norva.tv/other.html' },
+    { ...base, signupContext: { norva_signup_platform: 'web' } },
   ]) {
     assert.notEqual(await signupRequestFingerprint(variant), baseline);
   }
+});
+
+test('same nonce, different display name or redirect: a different intent, not a retry', async () => {
+  // The scenario the fingerprint exists for: reusing a nonce with the account
+  // itself unchanged (same email, same password) but different metadata is
+  // not "the same signup submitted twice" any more than a different password
+  // would be — it must fall to intent_mismatch at the claim layer, not
+  // silently replay the first metadata onto a second, different request.
+  const { signupRequestFingerprint } = await idem;
+  const base = {
+    nonce: 'f'.repeat(32), email: 'user@example.com',
+    surface: 'web', authMethod: 'password', credential: 'correct horse',
+  };
+  const withName = await signupRequestFingerprint({ ...base, displayName: 'Alex' });
+  const withOtherName = await signupRequestFingerprint({ ...base, displayName: 'Sam' });
+  const withNoName = await signupRequestFingerprint(base);
+  assert.notEqual(withName, withOtherName);
+  assert.notEqual(withName, withNoName);
+
+  const withRedirect = await signupRequestFingerprint({ ...base, redirectTo: 'https://norva.tv/a.html' });
+  const withOtherRedirect = await signupRequestFingerprint({ ...base, redirectTo: 'https://norva.tv/b.html' });
+  assert.notEqual(withRedirect, withOtherRedirect);
+});
+
+test('signupContext canonicalises by key, so object literal order never matters', async () => {
+  const { signupRequestFingerprint } = await idem;
+  const base = {
+    nonce: '12'.repeat(16), email: 'user@example.com',
+    surface: 'web', authMethod: 'password',
+  };
+  const a = await signupRequestFingerprint({
+    ...base,
+    signupContext: { norva_signup_platform: 'web', norva_signup_surface: 'browser' },
+  });
+  const b = await signupRequestFingerprint({
+    ...base,
+    signupContext: { norva_signup_surface: 'browser', norva_signup_platform: 'web' },
+  });
+  assert.equal(a, b, 'same entries, different insertion order, must be one fingerprint');
+
+  const different = await signupRequestFingerprint({
+    ...base,
+    signupContext: { norva_signup_platform: 'web', norva_signup_surface: 'tv' },
+  });
+  assert.notEqual(a, different);
 });
 
 test('fields are length-prefixed, so they cannot be rearranged into each other', async () => {

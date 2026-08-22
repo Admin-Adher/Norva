@@ -385,6 +385,69 @@ n'existait pas. Le test automatisé va plus loin que la liste — il vérifie qu
 autre appel** n'a eu lieu, en filtrant la timeline sur ce qui n'est ni un RPC
 `abuse_*` ni GoTrue et en exigeant que le reste soit vide.
 
+## Le canary, mis en pause quelques heures après son câblage — 2026-08-22
+
+Trois défauts trouvés en relisant `d6d00101`/`4b543d7b` à froid, avant que le
+1 % n'ait eu le temps de produire un vrai signup humain.
+
+**Régression de parité, le plus sérieux.** `edgeSignup({ email, password })` ne
+transportait ni `displayName`, ni `signupContext` (l'attribution), ni
+`redirectTo` — alors que `legacySignUp` les envoie tous les trois à GoTrue
+depuis toujours. Un utilisateur du canary aurait perdu son nom affiché, son
+attribution marketing et sa redirection de confirmation, en silence. Corrigé
+sur les deux côtés : `edgeSignup` les transmet, `readPayload` les accepte
+(bornées — `signupContext` en particulier n'est PAS soumis à une liste
+blanche de clés : c'est un passe-plat vers `data` de GoTrue, exactement comme
+en direct, et une liste blanche aurait fini par diverger silencieusement le
+jour où une quatrième clé d'attribution serait ajoutée côté marketing), et
+l'appel GoTrue reconstruit `redirect_to` + `data.display_name` +
+`data.{...context}` à l'identique du legacy.
+
+**L'empreinte d'idempotence ne couvrait pas ces trois champs.** Même nonce,
+même e-mail, même mot de passe mais un `displayName` différent n'est pas «
+le même envoi rejoué » — c'est une intention différente, au même titre qu'un
+mot de passe différent l'était déjà. `FINGERPRINT_VERSION` passe à 2 (rien à
+migrer : aucun trafic réel n'a encore utilisé ce pipeline), et
+`signupRequestFingerprint` couvre désormais `displayName`, `redirectTo` et
+`signupContext` — canonicalisé par tri de clés, pour que l'ordre d'un littéral
+objet ne produise pas deux empreintes pour une seule intention. Volontairement
+exclus : `userAgent` et `acceptLanguage`, qui peuvent varier entre une
+soumission et sa relance sans que l'intention change.
+
+**Le tirage du bucket n'était pas uniforme.** `65536` n'est pas multiple de
+`10000` : un `% 10000` nu donne sept représentations aux buckets `0–5535` et
+six aux autres, donc le 1 % annoncé (`0–99`, tous dans la plage à sept)
+valait en réalité `700/65536 ≈ 1,068 %` — environ 6,8 % de trafic en plus que
+prévu. Corrigé en retirant tout tirage `≥ 60000` (le plus grand multiple de
+10000 tenant sur 16 bits) avant le modulo : chaque bucket a alors exactement
+six représentations.
+
+**Correction sur ma propre affirmation.** J'avais écrit qu'un navigateur déjà
+bucketé « ne change pas de chemin » quand le seuil augmente. C'est le bucket
+qui est stable, pas le traitement : un bucket à 250 est legacy à 1 % et bascule
+légitimement sur le nouveau pipeline dès que le seuil dépasse 250 — c'est la
+forme cumulative voulue du rollout, pas un défaut.
+
+**Le canary est en pause, séparément du pourcentage.** `SIGNUP_PIPELINE_ENABLED
+= false` est un interrupteur à part, pas `SIGNUP_PIPELINE_CANARY_THRESHOLD =
+0` — les deux questions (« est-ce actif » et « à quelle proportion, une fois
+actif ») ne doivent pas se confondre dans une seule constante. Un bucket
+continue d'être tiré et stocké même pendant la pause, pour que réactiver le
+switch plus tard tire sa population de buckets déjà répartis dans le temps,
+pas décidés en une seule salve. Pour un test manuel sur un seul onglet sans
+toucher au switch ni au `localStorage` : `window.__NORVA_FORCE_SIGNUP_PIPELINE__
+= true` (ou `false`) depuis les devtools.
+
+Ce qui manquait pour que la pause soit réelle et pas seulement déclarée : le
+`git push` met à jour Cloudflare Pages tout seul, **pas** la box Hetzner. Le
+edge continue de tourner sur l'ancien code (sans le correctif
+`already_registered`, sans la nouvelle colonne) tant qu'un `git pull` +
+recréation des conteneurs n'a pas été fait — et tant que la migration
+`20260822130000` n'a pas été appliquée, `abuse_signup_attempt_settle`
+n'existe pas dans sa nouvelle forme à 8 arguments et tout signup passant par le
+pipeline échoue au moment du settle. Voir la séquence de redéploiement
+ci-dessous avant de rouvrir le canary.
+
 ## Le canary web, câblé le 2026-08-22
 
 `public/js/authApi.js` route désormais `NorvaAuth.signUp()` entre les deux

@@ -151,6 +151,11 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
+// A URL, not free text: generous enough for account.html's own
+// `?returnTo=<encoded path>` shape without accepting an arbitrary blob.
+const MAX_REDIRECT_LENGTH = 512;
+const MAX_SIGNUP_CONTEXT_ENTRIES = 10;
+
 interface SignupPayload {
   email: string;
   password: string | null;
@@ -162,6 +167,35 @@ interface SignupPayload {
   deviceId: string | null;
   userAgent: string | null;
   acceptLanguage: string | null;
+  /**
+   * Legacy parity fields. The direct-to-GoTrue signup that this pipeline
+   * replaces already forwards these to GoTrue's own `data` (raw user
+   * metadata) and `redirect_to` unvalidated — GoTrue's own allow-list is the
+   * enforcement point for redirect_to in both paths, exactly as it is today.
+   * Bounded here only against pathological size, not against a business
+   * meaning: this is a passthrough, not a field the anti-abuse layer reasons
+   * about, and an allow-list of "the three keys signupMetadata() sends today"
+   * would silently drop a fourth one the moment marketing adds it.
+   */
+  displayName: string | null;
+  redirectTo: string | null;
+  signupContext: Record<string, string> | null;
+}
+
+function readSignupContext(value: unknown): Record<string, string> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const out: Record<string, string> = {};
+  let count = 0;
+  for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
+    if (count >= MAX_SIGNUP_CONTEXT_ENTRIES) break;
+    if (typeof raw !== "string") continue;
+    const k = key.trim();
+    const v = raw.trim();
+    if (!k || k.length > MAX_METADATA_FIELD_LENGTH || v.length > MAX_METADATA_FIELD_LENGTH) continue;
+    out[k] = v;
+    count += 1;
+  }
+  return count > 0 ? out : null;
 }
 
 function readPayload(raw: unknown): SignupPayload | null {
@@ -192,6 +226,9 @@ function readPayload(raw: unknown): SignupPayload | null {
     deviceId: text(body.deviceId, MAX_METADATA_FIELD_LENGTH),
     userAgent: text(body.userAgent, 512),
     acceptLanguage: text(body.acceptLanguage, MAX_METADATA_FIELD_LENGTH),
+    displayName: text(body.displayName, MAX_METADATA_FIELD_LENGTH),
+    redirectTo: text(body.redirectTo, MAX_REDIRECT_LENGTH),
+    signupContext: readSignupContext(body.signupContext),
   };
 }
 
@@ -342,6 +379,9 @@ export async function handleSignup(req: Request, deps: SignupDeps): Promise<Resp
         surface: payload.surface,
         authMethod: payload.authMethod,
         credential: payload.password,
+        displayName: payload.displayName,
+        redirectTo: payload.redirectTo,
+        signupContext: payload.signupContext,
       });
       claim = await idempotency.claim(token.payload.nonce, fingerprint, 900);
     } catch {
@@ -472,7 +512,14 @@ export async function handleSignup(req: Request, deps: SignupDeps): Promise<Resp
   // routed through this handler instead of straight to GoTrue.
   let alreadyRegistered = false;
   try {
-    const response = await deps.fetchUpstream(`${deps.supabaseUrl}/auth/v1/signup`, {
+    // Parity with the legacy direct-to-GoTrue call this replaces: redirect_to
+    // as a query param, display_name and the attribution context under
+    // `data`. GoTrue's own URI allow-list is what actually validates
+    // redirect_to in both paths — this handler does not re-validate it, the
+    // same way the legacy path never did either.
+    const target = new URL(`${deps.supabaseUrl}/auth/v1/signup`);
+    if (payload.redirectTo) target.searchParams.set("redirect_to", payload.redirectTo);
+    const response = await deps.fetchUpstream(target.toString(), {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -480,7 +527,14 @@ export async function handleSignup(req: Request, deps: SignupDeps): Promise<Resp
         authorization: `Bearer ${deps.serviceKey}`,
         ...forwardedForHeader(facts.clientIp),
       },
-      body: JSON.stringify({ email: payload.email, password: payload.password }),
+      body: JSON.stringify({
+        email: payload.email,
+        password: payload.password,
+        data: {
+          ...(payload.signupContext ?? {}),
+          display_name: payload.displayName ?? "",
+        },
+      }),
     });
     upstreamStatus = response.status;
     const body = await response.json().catch(() => ({}));
