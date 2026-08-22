@@ -98,7 +98,15 @@ psqlt "select c.relname as objet, c.relkind as genre,
 section "[3] LES RPC ET LEURS DROITS"
 # Le service_role est le seul à pouvoir appeler : l'edge s'en sert, personne
 # d'autre. anon et authenticated ne doivent apparaître nulle part.
+# Les signatures sont affichées, pas seulement les noms. La première version ne
+# montrait que les noms, et la fumigation appelait ensuite
+# abuse_signup_attempt_claim avec un literal 1 là où la fonction déclare un
+# smallint — integer vers smallint est une assignment cast, pas une implicite,
+# donc la résolution échouait. PostgREST passe des paramètres NOMMÉS convertis
+# depuis JSON, donc le chemin de production n'a jamais eu ce problème : c'était
+# la mesure qui était fausse. Une dérive de type se verra ici désormais.
 psqlt "select p.proname as fonction,
+              pg_get_function_arguments(p.oid) as arguments,
               has_function_privilege('service_role', p.oid, 'execute') as service_role,
               has_function_privilege('anon',          p.oid, 'execute') as anon,
               has_function_privilege('authenticated', p.oid, 'execute') as authenticated
@@ -149,11 +157,11 @@ expect_eq "seconde consommation = false (rejeu refusé)" \
 
 printf '  claim idempotent :\n'
 expect_eq "premier claim = claimed" \
-  "$(psql "select public.abuse_signup_attempt_claim('$NONCE', '$HASH_A', 1, 900) ->> 'outcome'")" "claimed"
+  "$(psql "select public.abuse_signup_attempt_claim('$NONCE', '$HASH_A', 1::smallint, 900) ->> 'outcome'")" "claimed"
 expect_eq "second claim, même empreinte = replay" \
-  "$(psql "select public.abuse_signup_attempt_claim('$NONCE', '$HASH_A', 1, 900) ->> 'outcome'")" "replay"
+  "$(psql "select public.abuse_signup_attempt_claim('$NONCE', '$HASH_A', 1::smallint, 900) ->> 'outcome'")" "replay"
 expect_eq "même nonce, autre empreinte = intent_mismatch" \
-  "$(psql "select public.abuse_signup_attempt_claim('$NONCE', '$HASH_B', 1, 900) ->> 'outcome'")" "intent_mismatch"
+  "$(psql "select public.abuse_signup_attempt_claim('$NONCE', '$HASH_B', 1::smallint, 900) ->> 'outcome'")" "intent_mismatch"
 
 # Ces lignes-là sont supprimables (pas de trigger append-only sur les tentatives).
 psql "delete from abuse_private.signup_attempts where nonce = '$NONCE'" >/dev/null
