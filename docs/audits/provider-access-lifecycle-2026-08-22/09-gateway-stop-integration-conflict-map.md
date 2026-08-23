@@ -31,6 +31,13 @@ a314694c  fix(account-delete): snapshot gateway stop scope durably
 0e3f4946  docs(provider): refresh phase 3 local proof run
 f530b782  test(account-delete): fence reaper behind transport stop
 80ba4d80  fix(account-delete): archive legal billing atomically
+7824871d  test(account-delete): kill worker after gateway stop
+7c01f28e  docs(provider): record snapshot fixture guard conflict
+baf1350a  docs(provider): record local migration parity gap
+47e32609  docs(provider): record fullproof contract failures
+c0763640  docs(provider): record rebuilt database parity check
+a7eef755  docs(provider): record rebuild provenance gate
+64191b24  docs(provider): record local bootstrap gap
 ```
 
 ## Fichiers à conflit potentiel
