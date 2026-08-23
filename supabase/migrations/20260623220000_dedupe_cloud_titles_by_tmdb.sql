@@ -13,7 +13,11 @@
 -- Safe ordering: re-point variants BEFORE deleting dup titles
 -- (cloud_title_variants.title_id → cloud_titles.id is ON DELETE CASCADE).
 
-create temp table _grp on commit drop as
+-- This file is executed with psql autocommit.  `ON COMMIT DROP` would drop
+-- the relation immediately after this statement, before the later map/update
+-- statements can use it.  The psql session ends after this migration, so a
+-- normal temporary table remains isolated and is cleaned up automatically.
+create temp table _grp as
 select id, user_id, item_type, provider_tmdb_id, identity_key, match_status, release_year, poster_url, backdrop_url,
   row_number() over (partition by user_id, item_type, provider_tmdb_id
     order by (identity_key = 'tmdb:' || provider_tmdb_id) desc,
@@ -25,7 +29,7 @@ select id, user_id, item_type, provider_tmdb_id, identity_key, match_status, rel
 from cloud_titles
 where provider_tmdb_id is not null and provider_tmdb_id not in ('0', '');
 
-create temp table _map on commit drop as
+create temp table _map as
 select d.id as dup_id, c.id as canon_id
 from _grp d
 join _grp c using (user_id, item_type, provider_tmdb_id)
