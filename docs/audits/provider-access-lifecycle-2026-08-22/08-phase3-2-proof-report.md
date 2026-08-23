@@ -280,6 +280,23 @@ la compatibilité des clients pendant rollout et les courses deux-sessions. En
 l'absence de ces éléments, retirer ou contourner le garde serait une régression
 de sécurité ; aucun flag n'a été modifié.
 
+## État exact du lot 82782/82783
+
+Les fichiers présents confirment la chaîne locale suivante :
+
+```text
+82780–82783  schéma, fonctions, guards et contrat provider/account-delete
+82784        adaptateur durable `norva_begin_account_deletion_workflow`
+82785–82789  purge analytics, archive légale, orchestrateur, reaper produit,
+             puis finalisation Auth
+```
+
+`82782` et `82783` ne constituent donc pas une activation autonome : ils restent
+indissociables de l'adaptateur et des purges durables qui suivent. Le flag
+`provider_access_visibility_v1_enabled` est encore refusé par la migration
+foundation avec `reason=global_visibility_epoch_v2_required`; aucune migration
+de ce lot ne contourne ce garde et aucun flag n'a été activé.
+
 ## Pré-requis d'intégration du lot gateway-stop
 
 Les migrations de ce lot supposent que le sous-graphe Phase 3 déjà développé
