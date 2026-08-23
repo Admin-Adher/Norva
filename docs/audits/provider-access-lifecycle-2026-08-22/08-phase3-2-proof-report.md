@@ -11,6 +11,10 @@ flag provider n'a été activé et aucun déploiement n'a été effectué.
 | Runner durable borné | workflow persistant non terminal | cron claim → advance CAS → un batch de purge au plus | CAS obsolète = no-op | aucune progression ne dépend de l'isolate Edge | `21adfc88`; migration `82791`; test Node 20/20 | PASS local |
 | Course scheduler durable | workflow `PURGING_PRODUCT` | deux connexions `dblink`, A garde son verrou, B claim | A = révision 1 ; B = aucune ligne | `SKIP LOCKED` interdit une seconde autorité de batch ; teardown par finalizer gardé | `c9a6c217`; `account_deletion_workflow_claim_concurrency_smoke.sql` | PASS local |
 | Crash après claim scheduler | claim durable sans RPC suivante | B reclaim la révision supérieure ; A reprend tardivement | A = `40001 STALE`; B continue | aucune reprise ne dépend d'une lease ou mémoire du premier worker | `598ed2d9`; `account_deletion_workflow_claim_smoke.sql` | PASS local |
+| Transport stop normal | workflow DRAINING, action pending | claim → revalidation durable → gateway opaque → receipt → settle CAS | un seul owner | le gateway ne reçoit que des hashes d'affinité ; aucun passage à READY sans preuve SQL | `3466e56b`, `e2290280`, `fe295228` | PASS contrat/local |
+| Claim transport concurrent | action transport pending | deux sessions PostgreSQL réelles, A claim puis B claim | A = processing ; B = `40001 STALE` | B ne reçoit aucune autorité pour appeler le gateway | `c6af7799`; `account_deletion_transport_stop_concurrency_smoke.sql` | PASS local |
+| Fence juste avant gateway | action A processing puis workflow bump | A revalide ; changement durable d'état ; A revalide tardivement | A tardif = `40001 STALE` | epoch, état, lease owner/séquence, révision et expiration sont vérifiés avant tout `fetch` | migration `20260823182793`; test SQL deux sessions + Node 4/4 | PASS local |
+| Gateway absent / non conforme | action processing | settle `retry`, sans receipt | n/a | le workflow reste DRAINING ; aucune progression mensongère | `fe295228`; contrat Edge ciblé | PASS structurel |
 | Purge analytics | provider ready, deux raws | deux batches keyset | n/a | rollups anonymes exacts, raws absents | `account_deletion_paywall_analytics_smoke.sql` | PASS |
 | Archive légale | workflow ARCHIVING_LEGAL | archive idempotente sous politique | n/a | aucune FK Auth/identifiant produit | `5f1ce722`; contrôle catalogue local | PASS structurel |
 | Purge produit | workflow PURGING_PRODUCT | relation FK puis batch | n/a | aucune FK publique directe résiduelle avant READY | `account_deletion_product_reaper_smoke.sql` | PASS |
@@ -35,6 +39,11 @@ flag provider n'a été activé et aucun déploiement n'a été effectué.
 - Le cron ne possède pas d'autorité implicite : il réclame une révision, appelle
   une RPC CAS, puis exécute au plus un batch analytics ou produit. Une collision
   `40001` est `STALE/no-op`.
+- Le stop gateway est un effet externe opaque : le claim est revalidé dans
+  PostgreSQL juste avant le `fetch`, sur l'epoch, l'état DRAINING, le propriétaire
+  de lease, sa séquence, la révision et son expiration. Un `40001` interdit
+  l'appel au gateway. Le settle réutilise les mêmes fences et exige l'absence de
+  capability active avant de produire le reçu durable.
 
 ## Bloquants NO-GO
 
@@ -43,7 +52,17 @@ flag provider n'a été activé et aucun déploiement n'a été effectué.
    désormais couvert par la reprise cron.
 3. Produire les lignes de résultat complètes pour toutes les courses provider,
    source, compte et snapshot demandées par le contrat.
-4. Relier l'exécuteur versionné du **transport stop** à son protocole
-   `claim/receipt`. Le runner account-delete ne peut volontairement pas
-   synthétiser ce reçu ni lancer un appel fournisseur ; sans reçu, le workflow
-   reste correctement bloqué en `DRAINING`.
+4. Compléter les scénarios runtime du transport stop : crash après l'effet
+   gateway avant settle, retry idempotent, expiry de lease versus settle, et
+   suppression source/compte répétée. Le claim/revalidation/settle est maintenant
+   livré localement ; ces scénarios restent à rejouer avec un gateway contrôlé.
+
+## Pré-requis d'intégration du lot gateway-stop
+
+Les migrations de ce lot supposent que le sous-graphe Phase 3 déjà développé
+est présent avant elles, notamment `cloud_provider_transport_stop_actions`,
+`cloud_provider_account_delete_preparations` et
+`cloud_source_provider_account_affinities`. Ce dernier est fourni par le lot
+Phase 3 non commité dans le worktree utilisateur ; il n'a pas été copié dans
+cette branche isolée. Le test local a matérialisé la même définition pour
+exécuter la course, et l'ordre de cherry-pick devra donc conserver ce prérequis.
