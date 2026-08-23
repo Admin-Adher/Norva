@@ -102,10 +102,14 @@ docker run -d \
     -c maintenance_work_mem=256MB -c max_connections=75 -c max_wal_size=2GB \
     -c archive_mode=off > "$REPORT_DIR/container-id.txt"
 
-for attempt in {1..30}; do
-  docker exec "$CONTAINER" pg_isready -U supabase_admin -d postgres >/dev/null 2>&1 && break
+for attempt in {1..60}; do
+  if docker logs "$CONTAINER" 2>&1 | grep -q 'PostgreSQL init process complete; ready for start up.' \
+    && docker exec "$CONTAINER" pg_isready -U supabase_admin -d postgres >/dev/null 2>&1; then
+    break
+  fi
   sleep 1
 done
+docker logs "$CONTAINER" 2>&1 | grep -q 'PostgreSQL init process complete; ready for start up.'
 docker exec "$CONTAINER" pg_isready -U supabase_admin -d postgres >/dev/null
 
 psql_file() {
