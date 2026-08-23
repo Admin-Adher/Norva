@@ -484,9 +484,6 @@ async function drainProviderTransportStop(db: SupabaseClient, userId: string) {
   }
   const claim = (data && typeof data === "object" ? data : {}) as JsonRecord;
   if (claim.state === "completed") return "completed";
-  const affinities = Array.isArray(claim.affinityHashes)
-    ? claim.affinityHashes.filter((value): value is string => typeof value === "string" && /^[a-f0-9]{64}$/.test(value))
-    : [];
   const leaseSequence = typeof claim.leaseSequence === "number" ? claim.leaseSequence : -1;
   const revision = typeof claim.revision === "number" ? claim.revision : -1;
   const epoch = typeof claim.deletionEpoch === "number" ? claim.deletionEpoch : -1;
@@ -498,9 +495,43 @@ async function drainProviderTransportStop(db: SupabaseClient, userId: string) {
     });
     return "deferred";
   }
+  // Claiming only grants permission to try. Revalidate under the durable
+  // account/transport fences immediately before the gateway effect so an old
+  // worker cannot stop anything after an epoch, lease, revision, or state bump.
+  const { data: revalidatedData, error: revalidateError } = await db.rpc(
+    "norva_revalidate_account_deletion_transport_stop",
+    {
+      p_user_id: userId, p_worker: worker, p_expected_deletion_epoch: epoch,
+      p_expected_lease_sequence: leaseSequence, p_expected_revision: revision,
+    },
+  );
+  if (revalidateError?.code === "40001") return "stale";
+  if (revalidateError) throw new Error(`account_deletion_transport_revalidate_failed:${revalidateError.message}`);
+  const revalidated = (revalidatedData && typeof revalidatedData === "object" ? revalidatedData : {}) as JsonRecord;
+  const revalidatedAffinities = Array.isArray(revalidated.affinityHashes)
+    ? revalidated.affinityHashes.filter((value): value is string => typeof value === "string" && /^[a-f0-9]{64}$/.test(value))
+    : [];
+  if (revalidated.state !== "processing"
+      || revalidated.deletionEpoch !== epoch
+      || revalidated.leaseSequence !== leaseSequence
+      || revalidated.revision !== revision) return "stale";
+  // No persisted affinity means this account owns no gateway-addressable
+  // provider transport. The SQL settle still proves that no live capability
+  // exists before completing; do not send an invalid empty gateway request.
+  if (revalidatedAffinities.length === 0) {
+    const receipt = await sha256Hex(`provider-transport-stop:v1:${userId}:${epoch}:${leaseSequence}:${revision}`);
+    const { error: settleError } = await db.rpc("norva_settle_provider_transport_stop_action", {
+      p_user_id: userId, p_worker: worker, p_expected_lease_sequence: leaseSequence,
+      p_expected_revision: revision, p_outcome: "completed", p_transport_stop_receipt_hash: receipt,
+      p_error_code: null, p_retry_after_seconds: 0,
+    });
+    if (settleError?.code === "40001") return "stale";
+    if (settleError) throw new Error(`account_deletion_transport_settle_failed:${settleError.message}`);
+    return "completed";
+  }
   const response = await fetch(`${MEDIA_GATEWAY_URL}/sessions/stop-provider-affinities`, {
     method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${MEDIA_GATEWAY_TOKEN}` },
-    body: JSON.stringify({ affinityHashes: affinities }),
+    body: JSON.stringify({ affinityHashes: revalidatedAffinities }),
   });
   const result = await response.json().catch(() => ({})) as JsonRecord;
   if (!response.ok || result.providerDrained !== true) {
