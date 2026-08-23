@@ -19,6 +19,7 @@ flag provider n'a été activé et aucun déploiement n'a été effectué.
 | Frontière gateway opaque | gateway isolé | sans bearer ; hash invalide ; stop valide | 401 ; 400 ; 200 | aucune URL, credential ou action destructive non authentifiée ne traverse la route | gateway local port 18111, processus arrêté après preuve | PASS local |
 | Suppression compte répétée | compte actif, préparation/action absentes | deux appels `norva_begin_account_deletion_workflow` | n/a | une préparation, une action transport et un epoch unique ; le second appel est une reprise | `account_deletion_transport_stop_concurrency_smoke.sql` | PASS local |
 | Stop transport ↔ suppression source | action claimée avec une affinité, puis ligne source supprimée | revalidation après suppression de l'affinité vivante | n/a | le scope opaque snapshoté avec l'epoch reste inchangé ; aucun reçu vide ne contourne le gateway | migration `20260823182794`; smoke transport | PASS local |
+| Reaper ↔ transport stop non terminé | workflow `stopping`, action transport `pending` | advance/reaper avant le stop | n/a | le workflow reste `draining` avec `nextAction=provider_drain`, sans atteindre une purge | `account_deletion_transport_stop_concurrency_smoke.sql` | PASS local |
 | Gateway absent / non conforme / indisponible | action processing | settle `retry` CAS, sans receipt | `STALE` si la lease a changé | le workflow reste DRAINING ; aucun retry ne dépend de l'expiration seule | adaptateur Edge ; test ciblé `account-deletion-transport-stop-edge.test.js` | PASS contrat |
 | Purge analytics | provider ready, deux raws | deux batches keyset | n/a | rollups anonymes exacts, raws absents | `account_deletion_paywall_analytics_smoke.sql` | PASS |
 | Archive légale | workflow ARCHIVING_LEGAL | archive idempotente sous politique | n/a | aucune FK Auth/identifiant produit | `5f1ce722`; contrôle catalogue local | PASS structurel |
@@ -57,6 +58,7 @@ flag provider n'a été activé et aucun déploiement n'a été effectué.
 | après claim scheduler | nouvelle révision, ancien runner `STALE` | `account_deletion_workflow_claim_smoke.sql` | PASS local |
 | après claim transport | lease expirée, nouvelle séquence/révision, ancien settle refusé | `account_deletion_transport_stop_concurrency_smoke.sql` | PASS local |
 | après stop gateway, avant settle | action reste `processing`, retry stop idempotent puis settle unique | retry gateway local et reclaim SQL prouvés séparément ; crash Edge non injecté | PENDING |
+| reaper pendant transport stop pending | le reaper conserve `DRAINING` et redemande `provider_drain` | `account_deletion_transport_stop_concurrency_smoke.sql` | PASS local |
 | avant/après `READY_TO_SWITCH` | candidate version/HMAC et transition déterminent la reprise | harness provider Phase 3 | PASS sous-graphe provider |
 | avant/après COMMIT swap | génération N/N+1 et état transition déterminent l'unique continuation | harness provider Phase 3 | PASS sous-graphe provider |
 | pendant premier sync post-swap | aucun prune destructif avant preuve | contrat provider ; injection exhaustive non enregistrée | PENDING |
