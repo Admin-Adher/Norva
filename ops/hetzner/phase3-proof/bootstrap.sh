@@ -72,6 +72,11 @@ docker compose --project-name norva-phase3-proof --env-file "$ENV_FILE" -f "$COM
 docker compose --project-name norva-phase3-proof --env-file "$ENV_FILE" -f "$COMPOSE" exec -T \
   -e PGPASSWORD="$(sed -n 's/^POSTGRES_PASSWORD=//p' "$ENV_FILE")" db \
   psql -v ON_ERROR_STOP=1 -h localhost -U supabase_admin -d postgres \
+    -f '/workspace/ops/hetzner/phase3-proof/storage-schema-grant.sql' \
+  || die 'proof Storage schema grant failed'
+
+docker compose --project-name norva-phase3-proof --env-file "$ENV_FILE" -f "$COMPOSE" exec -T db \
+  psql -v ON_ERROR_STOP=1 -U postgres -d postgres \
     -f '/workspace/ops/hetzner/phase3-proof/storage-compat.sql' \
   || die 'proof Storage compatibility bootstrap failed'
 
