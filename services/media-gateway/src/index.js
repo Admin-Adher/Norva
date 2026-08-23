@@ -14388,6 +14388,22 @@ async function stopConflictingProviderSessions(providerSlotKey) {
     return conflicts.length;
 }
 
+async function stopConflictingOwnerSessions(ownerKey) {
+    const normalizedOwnerKey = normalizeSessionKey(ownerKey);
+    if (!normalizedOwnerKey) return 0;
+
+    const conflicts = Array.from(sessions.values()).filter((session) => {
+        if (session.ownerKey !== normalizedOwnerKey) return false;
+        return isSessionBlockingProviderSlot(session);
+    });
+
+    await Promise.allSettled(conflicts.map(async (session) => {
+        console.log(`[media-gateway] stopping previous session for same owner: ${session.id}`);
+        await stopSession(session, { reason: 'viewer-preempted' });
+    }));
+    return conflicts.length;
+}
+
 function providerAffinityHashForGatewayKey(key) {
     return key ? sha256Hex(String(key)) : '';
 }
@@ -14422,22 +14438,6 @@ async function stopProviderAffinities(affinityHashes) {
     ));
     return { stoppedSessions: sessionsToStop.length, abortedRawPumps: rawPumpsAborted,
         stoppedExtractions: extractionsStopped, providerDrained: !remaining };
-}
-
-async function stopConflictingOwnerSessions(ownerKey) {
-    const normalizedOwnerKey = normalizeSessionKey(ownerKey);
-    if (!normalizedOwnerKey) return 0;
-
-    const conflicts = Array.from(sessions.values()).filter((session) => {
-        if (session.ownerKey !== normalizedOwnerKey) return false;
-        return isSessionBlockingProviderSlot(session);
-    });
-
-    await Promise.allSettled(conflicts.map(async (session) => {
-        console.log(`[media-gateway] stopping previous session for same owner: ${session.id}`);
-        await stopSession(session, { reason: 'viewer-preempted' });
-    }));
-    return conflicts.length;
 }
 
 function activeSessionCount() {

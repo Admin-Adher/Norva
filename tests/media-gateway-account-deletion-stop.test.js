@@ -7,7 +7,7 @@ const source = fs.readFileSync(path.join(__dirname, '..', 'services', 'media-gat
 
 test('account deletion stop endpoint is authenticated and drains every provider lane', () => {
   const route = source.slice(source.indexOf("app.post('/sessions/stop-provider-affinities'"), source.indexOf("app.get('/sessions/:id'", source.indexOf("app.post('/sessions/stop-provider-affinities'")));
-  const helper = source.slice(source.indexOf('async function stopProviderAffinities'), source.indexOf('async function stopConflictingOwnerSessions'));
+  const helper = source.slice(source.indexOf('async function stopProviderAffinities'), source.indexOf('async function activeSessionCount'));
   assert.match(route, /requireGatewayAuth/);
   assert.match(route, /affinityHashes/);
   assert.match(route, /providerDrained/);
