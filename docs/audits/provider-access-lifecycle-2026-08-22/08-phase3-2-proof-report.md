@@ -98,6 +98,11 @@ Cette preuve concerne uniquement l'instance PostgreSQL isolée. Elle ne change
 pas le statut de production : le flag provider reste désactivé et la Phase 2
 reste bloquée par `global_visibility_epoch_v2_required`.
 
+Après le correctif de FK de purge de la preuve de remplacement, le harness
+complet `provider_credential_transition.sql` a été rejoué sur ce même schéma
+isolé : **72/72**, suivi de son `ROLLBACK` transactionnel. L'assertion finale
+confirme à nouveau que `provider_credential_transition_v1_enabled` est OFF.
+
 ## Matrice deux-sessions rejouée 2026-08-23
 
 Les harnesses ont été rendus portables entre une installation `dblink` dans le
