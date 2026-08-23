@@ -562,31 +562,32 @@ Deno.serve(async (req) => {
     return json(req, { error: "Deletion preparation failed" }, 500);
   }
 
-  // Deletes auth.users; ordinary user-owned rows cascade, the Partners guard
-  // verifies the preparation, and the email activation trigger shares the
-  // Auth deletion transaction.
-  const { error: delErr } = await admin.auth.admin.deleteUser(user.id);
-  if (delErr) {
-    console.error("[norva-account-delete] account deletion failed", delErr.message);
-    if (deliveryKey) {
-      const { error: cancelError } = await admin.rpc("cancel_prepared_account_deletion_email", {
-        p_delivery_key: deliveryKey,
-      });
-      if (cancelError) console.error("[norva-account-delete] prepared confirmation cleanup failed", cancelError.message);
-    }
-    return json(req, { error: "Deletion failed" }, 500);
+  // The Auth row is deliberately retained here.  This request only enters the
+  // durable deletion machine: it raises the account/source provider fences and
+  // creates the transport-stop action.  A later bounded worker must prove
+  // drain, analytics purge, legal archival and product purge before the final
+  // Auth delete can be attempted.
+  const { data: deletionData, error: deletionError } = await admin.rpc(
+    "norva_begin_account_deletion_workflow",
+    { p_user_id: user.id },
+  );
+  if (deletionError || !deletionData || typeof deletionData !== "object") {
+    console.error(
+      "[norva-account-delete] durable deletion begin failed",
+      deletionError?.message ?? "invalid_begin_envelope",
+    );
+    return json(req, { error: "Deletion preparation failed" }, 500);
   }
 
-  let confirmation: "queued" | "unavailable" = "unavailable";
-  if (deliveryKey) {
-    const { data: confirmed, error: confirmError } = await admin.rpc("confirm_account_deletion_email", {
-      p_delivery_key: deliveryKey,
-      p_deleted_user_id: user.id,
-    });
-    if (!confirmError && confirmed === true) confirmation = "queued";
-    else console.error("[norva-account-delete] confirmation activation unavailable", confirmError?.message ?? "not_confirmed");
-  }
-
-  // No deleted UUID/email is echoed or retained in the API response.
-  return json(req, { ok: true, deleted: true, emailConfirmation: confirmation });
+  const deletion = deletionData as JsonRecord;
+  // No deleted UUID/email is echoed or retained in the API response.  The
+  // client can safely retry this request: begin is idempotent for one account.
+  return json(req, {
+    ok: true,
+    deletionPending: true,
+    state: deletion.state,
+    providerState: deletion.providerState,
+    providerPhase: deletion.providerPhase,
+    readyToFinalize: deletion.readyToFinalize === true,
+  }, 202);
 });

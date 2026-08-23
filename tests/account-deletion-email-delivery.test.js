@@ -48,23 +48,23 @@ test('a prepared confirmation becomes deliverable only with the real auth deleti
   assert.match(migration, /after delete on auth\.users/);
 });
 
-test('Edge freezes the exact request before deletion and activates it only after success', () => {
+test('Edge records a durable deletion request and never performs the Auth delete inline', () => {
   const prepare = source.indexOf('prepare_account_deletion_email');
   const partnersPrepare = source.indexOf('partners_service_prepare_account_deletion');
-  const deletion = source.indexOf('admin.auth.admin.deleteUser(user.id)');
-  const confirm = source.indexOf('confirm_account_deletion_email');
+  const begin = source.indexOf('norva_begin_account_deletion_workflow');
   assert.ok(
     prepare >= 0
     && prepare < partnersPrepare
-    && partnersPrepare < deletion
-    && deletion < confirm,
+    && partnersPrepare < begin,
   );
   assert.match(source, /p_request_html: rendered\.html/);
   assert.match(source, /p_request_text: rendered\.text/);
   assert.match(source, /p_request_tags: rendered\.tags/);
   assert.match(source, /p_request_reply_to: REPLY_TO/);
   assert.match(source, /cancel_prepared_account_deletion_email/);
-  assert.match(source, /p_deleted_user_id: user\.id/);
+  assert.match(source, /deletionPending: true/);
+  assert.match(source, /\}, 202\)/);
+  assert.doesNotMatch(source, /admin\.auth\.admin\.deleteUser\(/);
   assert.doesNotMatch(source, /email is best-effort|Best-effort closure email/);
 });
 
@@ -100,7 +100,7 @@ test('Partners deletion preparation is service-only, idempotent and fail-closed'
   const edgePrepare = source.indexOf(
     'admin.rpc("partners_service_prepare_account_deletion"',
   );
-  const edgeDelete = source.indexOf('admin.auth.admin.deleteUser(user.id)');
+  const edgeBegin = source.indexOf('norva_begin_account_deletion_workflow');
   const failure = source.indexOf(
     'return json(req, { error: "Deletion preparation failed" }, 500)',
   );
@@ -111,7 +111,7 @@ test('Partners deletion preparation is service-only, idempotent and fail-closed'
     edgePrepare >= 0
     && financialClosure > edgePrepare
     && failure > financialClosure
-    && edgeDelete > failure,
+    && edgeBegin > failure,
   );
   assert.match(source, /partnersPreparation\.ready !== true/);
   assert.match(source, /partnersPreparation\.action !== "partners_account_deletion_prepared"/);
@@ -187,14 +187,15 @@ test('the Edge fallback independently proves the exact auth identity is gone', (
   assert.match(migration, /revoke all on function public\.confirm_account_deletion_email\(text, uuid\)/);
 });
 
-test('account deletion remains primary and public response contains no deleted identifier', () => {
+test('account deletion returns a non-identifying durable pending response', () => {
   assert.match(source, /confirmation preparation unavailable/);
-  assert.ok(source.indexOf('confirmation preparation unavailable') < source.indexOf('admin.auth.admin.deleteUser(user.id)'));
-  assert.match(source, /return json\(req, \{ ok: true, deleted: true, emailConfirmation: confirmation \}\)/);
+  assert.ok(source.indexOf('confirmation preparation unavailable') < source.indexOf('norva_begin_account_deletion_workflow'));
+  assert.match(source, /deletionPending: true/);
+  assert.match(source, /\}, 202\)/);
   const success = source.slice(source.lastIndexOf('// No deleted UUID/email'), source.length);
   assert.doesNotMatch(success, /userId|user\.id|email[,}]/);
-  assert.match(source, /return json\(req, \{ error: "Deletion failed" \}, 500\)/);
-  assert.doesNotMatch(source, /details: delErr\.message/);
+  assert.match(source, /return json\(req, \{ error: "Deletion preparation failed" \}, 500\)/);
+  assert.doesNotMatch(source, /details: deletionError\.message/);
 });
 
 test('account deletion requires fresh interactive auth and the session MFA level', () => {
@@ -209,7 +210,7 @@ test('account deletion requires fresh interactive auth and the session MFA level
   assert.match(source, /const RECENT_AUTH_MAX_AGE_SECONDS = 15 \* 60/);
   assert.match(source, /code: "reauthentication_required"/);
   assert.match(source, /code: "mfa_verification_required"/);
-  assert.ok(source.indexOf('deletionAuthenticationGuard(token)') < source.indexOf('admin.auth.admin.deleteUser(user.id)'));
+  assert.ok(source.indexOf('deletionAuthenticationGuard(token)') < source.indexOf('norva_begin_account_deletion_workflow'));
   assert.match(deletePage, /code === 'reauthentication_required'/);
   assert.match(deletePage, /returnTo=' \+ encodeURIComponent\('\/delete-account\.html'\)/);
 });
