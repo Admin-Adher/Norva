@@ -81,7 +81,12 @@ test('phone Home opens the in-place Pair TV sheet instead of navigating to Setti
 test('devices and pairing are permanent cloud-account destinations, not an Advanced tab', () => {
   const appHtml = read('public/app.html');
   const appJs = read('public/js/app.js');
+  const devicesIcon = read('public/img/icons/norva-devices.svg');
   assert.match(appHtml, /class="tab" data-tab="screens" id="screens-tab"[^>]*>[\s\S]*?<span>Devices<\/span>[\s\S]*?<\/button>/);
+  assert.match(appHtml, /data-tab="screens"[\s\S]*?src="\/img\/icons\/norva-devices\.svg\?v=sharp-core-1"/);
+  assert.match(devicesIcon, /linearGradient id="norva-devices-g"/);
+  assert.match(devicesIcon, /stop-color="#6ff3ff"/);
+  assert.match(devicesIcon, /stop-color="#d65bff"/);
   assert.doesNotMatch(appHtml, /class="tab tab-advanced" data-tab="screens"/);
   assert.match(appHtml, /Add another screen/);
   assert.match(appHtml, /Your devices &amp; screens/);

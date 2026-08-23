@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" role="img" aria-label="Devices">
+  <defs>
+    <linearGradient id="norva-devices-g" x1="16" y1="18" x2="83" y2="81" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#6ff3ff"/>
+      <stop offset="0.5" stop-color="#708aff"/>
+      <stop offset="1" stop-color="#d65bff"/>
+    </linearGradient>
+  </defs>
+  <path d="M67 35V25a7 7 0 0 0-7-7H20a7 7 0 0 0-7 7v28a7 7 0 0 0 7 7h28" fill="none" stroke="url(#norva-devices-g)" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M36 60v13M25 73h27" fill="none" stroke="url(#norva-devices-g)" stroke-width="7" stroke-linecap="round"/>
+  <rect x="58" y="37" width="25" height="43" rx="7" fill="none" stroke="url(#norva-devices-g)" stroke-width="7"/>
+</svg>
