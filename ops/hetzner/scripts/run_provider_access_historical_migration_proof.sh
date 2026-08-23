@@ -116,7 +116,10 @@ psql_file() {
 psql_file "$WORKSPACE/ops/hetzner/scripts/phase3-proof-bootstrap-compat.sql" "$REPORT_DIR/bootstrap.txt"
 
 apply_range() {
-  local lower="$1" upper="$2" log="$REPORT_DIR/migrations-${upper}.log" list="$REPORT_DIR/migrations-${upper}.txt"
+  local lower="$1"
+  local upper="$2"
+  local log="$REPORT_DIR/migrations-${upper}.log"
+  local list="$REPORT_DIR/migrations-${upper}.txt"
   find "$WORKSPACE/supabase/migrations" -maxdepth 1 -type f -name '*.sql' -printf '%f\n' | sort |
     awk -v lower="$lower" -v upper="$upper" '$0 > lower && $0 <= upper' > "$list"
   grep -qx "$upper" "$list"
