@@ -1,0 +1,33 @@
+begin;
+set local lock_timeout = '2s';
+set local statement_timeout = '15s';
+
+do $install$
+begin
+  if not public.norva_catalog_generation_flags_all_off()
+     or not public.norva_catalog_generation_indexes_online_ready()
+     or exists (
+       select 1 from public.cloud_catalog_generation_rollout rollout
+       where rollout.singleton and rollout.contracted_at is not null
+     ) then
+    raise exception 'catalog generation composite FK expand gate failed'
+      using errcode = '55000';
+  end if;
+  if not exists (
+    select 1 from pg_catalog.pg_constraint constraint_state
+    where constraint_state.conrelid = 'public.cloud_live_variants'::regclass
+      and constraint_state.conname = 'cloud_live_variants_generation_logical_channel_fk'
+  ) then
+    alter table public.cloud_live_variants
+      add constraint cloud_live_variants_generation_logical_channel_fk
+      foreign key (source_id, generation_id, logical_channel_id)
+      references public.cloud_live_logical_channels(source_id, generation_id, id)
+      on update cascade on delete cascade not valid;
+  end if;
+  perform public.norva_assert_catalog_generation_contract_constraint(
+    'cloud_live_variants_generation_logical_channel_fk', false
+  );
+end
+$install$;
+
+commit;
