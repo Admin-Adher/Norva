@@ -27,6 +27,9 @@ af9e038f  docs(account-delete): align caller with durable deletion
 d0ad7d76  test(gateway): preserve provider handoff extraction boundary
 3e998a81  docs(provider): record consolidated local suite
 a314694c  fix(account-delete): snapshot gateway stop scope durably
+0890f113  test(account-delete): make transport smoke rerunnable
+0e3f4946  docs(provider): refresh phase 3 local proof run
+f530b782  test(account-delete): fence reaper behind transport stop
 ```
 
 ## Fichiers à conflit potentiel
@@ -35,7 +38,7 @@ a314694c  fix(account-delete): snapshot gateway stop scope durably
 |---|---|---|---|---|
 | `services/media-gateway/src/index.js` | validation Xtream, spool catalogue, egress DNS et proxy | route stop opaque près de `8179`; helper près de `14373` sur la base | textuel : non | cherry-pick normal attendu ; vérifier que `proxyKeyFromUrl()` reste `providerAccountAffinityKey()` |
 | `supabase/functions/norva-account-delete/index.ts` | aucune modification non commitée observée | claim, revalidation, retry/receipt gateway | non observé | cherry-pick normal, puis test Edge ciblé |
-| `supabase/migrations/` | migrations Phase 3 non commitées, dont affinities et sous-graphe `82780/82783` | `20260823182792`, `20260823182793`, `20260823182794` | dépendance, non conflit textuel | appliquer le sous-graphe fournisseur en premier ; ne pas appliquer `82792`–`82794` seul |
+| `supabase/migrations/` | migrations Phase 3 non commitées, dont affinities et sous-graphe `82780/82783` | `20260823182792`–`20260823182796` | dépendance, non conflit textuel | appliquer le sous-graphe fournisseur et l'archive légale en premier ; ne pas appliquer `82792`–`82796` seul |
 | `tests/` | nombreux tests VOD/provider non commités | deux tests transport stop | aucun même chemin observé | cherry-pick normal, puis suites ciblées |
 
 ## Vérification sémantique obligatoire lors du troisième worktree
@@ -61,8 +64,8 @@ ni élargir, ni vider le périmètre qui a été autorisé.
 
 1. Créer un troisième worktree propre depuis le commit qui contient les
    modifications utilisateur validées.
-2. Vérifier la présence des migrations d’affinité et `82780`/`82781`, puis
-   appliquer `82792`, `82793` et `82794` dans cet ordre.
+2. Vérifier la présence des migrations d’affinité, de l'archive légale et
+   `82780`/`82781`, puis appliquer `82792` à `82796` dans cet ordre.
 3. Cherry-pick les commits ci-dessus dans cet ordre.
 4. Résoudre seulement si la vérification sémantique de clé l’exige.
 5. Exécuter `node --test tests/account-deletion-transport-stop-edge.test.js tests/media-gateway-account-deletion-stop.test.js` et les smokes PostgreSQL transport/provider.

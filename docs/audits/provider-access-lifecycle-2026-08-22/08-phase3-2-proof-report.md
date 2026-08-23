@@ -22,7 +22,8 @@ flag provider n'a été activé et aucun déploiement n'a été effectué.
 | Reaper ↔ transport stop non terminé | workflow `stopping`, action transport `pending` | advance/reaper avant le stop | n/a | le workflow reste `draining` avec `nextAction=provider_drain`, sans atteindre une purge | `account_deletion_transport_stop_concurrency_smoke.sql` | PASS local |
 | Gateway absent / non conforme / indisponible | action processing | settle `retry` CAS, sans receipt | `STALE` si la lease a changé | le workflow reste DRAINING ; aucun retry ne dépend de l'expiration seule | adaptateur Edge ; test ciblé `account-deletion-transport-stop-edge.test.js` | PASS contrat |
 | Purge analytics | provider ready, deux raws | deux batches keyset | n/a | rollups anonymes exacts, raws absents | `account_deletion_paywall_analytics_smoke.sql` | PASS |
-| Archive légale | workflow ARCHIVING_LEGAL | archive idempotente sous politique | n/a | aucune FK Auth/identifiant produit | `5f1ce722`; contrôle catalogue local | PASS structurel |
+| Archive légale fail-closed + batch | ledger non vide, politique absente puis fixture | refus `55000`, copie/déliage premier batch, reprise | n/a | aucune progression sans politique ; `INSERT ... RETURNING` lie la copie au déliage sans retry intermédiaire | migration `20260823182796`; `account_deletion_legal_billing_retention_smoke.sql` | PASS local |
+| Purge archive légale échue | archive expirée + archive encore retenue | deux reapers séquentiels bornés | premier supprime 1 ; second 0 | seul `retention_until <= now()` est purgé, reprise idempotente | migration `20260823182795`; `account_deletion_legal_billing_retention_smoke.sql` | PASS local |
 | Purge produit | workflow PURGING_PRODUCT | relation FK puis batch | n/a | aucune FK publique directe résiduelle avant READY | `account_deletion_product_reaper_smoke.sql` | PASS |
 | Delete Auth final | READY_TO_FINALIZE | claim, delete Auth, ack | n/a | guard revalide provider + produit; tombstone completed | `account_deletion_finalization_smoke.sql` | PASS |
 | Double finalisation + crash ack | READY_TO_FINALIZE | deux connexions dblink; Auth delete sans ack; cron reconcile | un claim; un no-op | tombstone CLAIMED puis COMPLETED, aucune fixture résiduelle | `836c4fa8`; `account_deletion_finalization_concurrency_smoke.sql` | PASS |
@@ -65,7 +66,7 @@ flag provider n'a été activé et aucun déploiement n'a été effectué.
 | avant/après rollback | rollback N+1 vers N+2 ; N et N+1 `STALE` | harness provider Phase 3 | PASS sous-graphe provider |
 | pendant drain de suppression | provider permits actifs bloquent la finalisation | `provider_account_delete_concurrency_smoke.sql` | PASS local |
 | pendant purge analytics | checkpoint keyset/rollups repris sans double comptage | `account_deletion_paywall_analytics_smoke.sql` | PASS local |
-| pendant archive légale | archive idempotente et minimale | test structurel, politique runtime absente | PENDING external config |
+| pendant archive légale | archive/déliage atomiques et replanifiables | `account_deletion_legal_billing_retention_smoke.sql` ; politique runtime absente | PENDING external config |
 | pendant purge produit | batch FK borné et reprise vers `READY_TO_FINALIZE` | `account_deletion_product_reaper_smoke.sql` | PASS local |
 | après DELETE Auth, avant ack | tombstone CLAIMED devient COMPLETED sans second delete | `account_deletion_finalization_concurrency_smoke.sql` | PASS local |
 
@@ -86,6 +87,7 @@ account_deletion_finalization_concurrency_smoke.sql
 account_deletion_paywall_analytics_smoke.sql
 provider_account_delete_concurrency_smoke.sql
 account_deletion_transport_stop_concurrency_smoke.sql
+account_deletion_legal_billing_retention_smoke.sql
 ```
 
 Le dernier smoke a été exécuté une seconde fois avec succès après son correctif
