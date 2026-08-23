@@ -166,6 +166,42 @@ exception when others then
 end
 $crash_reclaim$;
 
+-- Duplicate DELETE/begin calls are retries, not a second transport operation.
+begin;
+set local "request.jwt.claim.role" = 'service_role';
+set local session_replication_role = replica;
+delete from auth.users where id='d0000000-0000-0000-0000-000000000095';
+set local session_replication_role = origin;
+delete from public.cloud_account_deletion_workflows where user_id='d0000000-0000-0000-0000-000000000095';
+insert into auth.users(id,instance_id,aud,role,email,encrypted_password,email_confirmed_at,
+  raw_app_meta_data,raw_user_meta_data,created_at,updated_at)
+values ('d0000000-0000-0000-0000-000000000095',
+  '00000000-0000-0000-0000-000000000000','authenticated','authenticated',
+  'account-delete-repeat-095@invalid.test','not-used',clock_timestamp(),
+  '{}'::jsonb,'{}'::jsonb,clock_timestamp(),clock_timestamp());
+do $duplicate_begin$
+declare v_first jsonb; v_second jsonb; v_preparations integer; v_actions integer; v_epoch bigint;
+begin
+  v_first := public.norva_begin_account_deletion_workflow('d0000000-0000-0000-0000-000000000095');
+  v_second := public.norva_begin_account_deletion_workflow('d0000000-0000-0000-0000-000000000095');
+  select count(*)::integer into v_preparations from public.cloud_provider_account_delete_preparations
+  where user_id='d0000000-0000-0000-0000-000000000095';
+  select count(*)::integer into v_actions from public.cloud_provider_transport_stop_actions
+  where user_id='d0000000-0000-0000-0000-000000000095';
+  select deletion_epoch into v_epoch from public.cloud_provider_account_delete_preparations
+  where user_id='d0000000-0000-0000-0000-000000000095';
+  if v_first->>'state' <> 'stopping' or v_second->>'state' <> 'stopping'
+     or v_preparations <> 1 or v_actions <> 1 or v_epoch <> 1 then
+    raise exception 'duplicate account deletion begin produced multiple stop operations';
+  end if;
+end
+$duplicate_begin$;
+set local session_replication_role = replica;
+delete from auth.users where id='d0000000-0000-0000-0000-000000000095';
+set local session_replication_role = origin;
+delete from public.cloud_account_deletion_workflows where user_id='d0000000-0000-0000-0000-000000000095';
+commit;
+
 -- Fixture teardown intentionally bypasses the Auth trigger only after all
 -- assertions. It is test hygiene, not a production deletion path.
 begin;
