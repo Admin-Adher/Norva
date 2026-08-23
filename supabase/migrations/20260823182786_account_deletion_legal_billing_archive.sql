@@ -63,6 +63,14 @@ begin
      or v_workflow.revision <> p_expected_revision then
     raise exception 'account deletion legal archive batch is stale' using errcode = '40001';
   end if;
+  if not exists (select 1 from public.cloud_billing_ledger where user_id=p_user_id) then
+    update public.cloud_account_deletion_workflows
+    set state='purging_product',revision=revision + 1,updated_at=clock_timestamp()
+    where user_id=p_user_id returning * into v_workflow;
+    return jsonb_build_object('contract','account-deletion-legal-archive-v1',
+      'state',v_workflow.state,'revision',v_workflow.revision,
+      'archivedRows',0,'complete',true);
+  end if;
   select * into v_policy from public.legal_billing_archive_retention_policy
   where record_kind = 'billing_ledger';
   if not found then
