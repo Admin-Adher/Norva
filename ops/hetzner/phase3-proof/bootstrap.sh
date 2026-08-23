@@ -63,6 +63,10 @@ for _ in $(seq 1 60); do
 done
 docker compose --project-name norva-phase3-proof --env-file "$ENV_FILE" -f "$COMPOSE" exec -T db pg_isready -U postgres -h localhost >/dev/null || die 'database did not become ready'
 
+docker compose --project-name norva-phase3-proof --env-file "$ENV_FILE" -f "$COMPOSE" exec -T db \
+  psql -v ON_ERROR_STOP=1 -U postgres -d postgres -f '/workspace/ops/hetzner/phase3-proof/auth-compat.sql' \
+  || die 'proof Auth compatibility bootstrap failed'
+
 # Do not feed the migration list through the loop's stdin: docker compose exec
 # can inherit and consume that descriptor, silently stopping after the first file.
 mapfile -t migrations < <(find "$HERE/../../../supabase/migrations" -maxdepth 1 -type f -name '*.sql' -printf '%f\n' | LC_ALL=C sort)
