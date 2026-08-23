@@ -167,6 +167,30 @@ dans un processus enfant isolé, tue A dès que le gateway local confirme le sto
 puis vérifie que B seul settle la reprise. Les clés, URL et RPC sont des fixtures
 locales ; aucun Edge, provider ou secret de production n'est appelé.
 
+## Course de promotion de remplacement et purge 2026-08-23
+
+Une transition de remplacement réelle a été amenée jusqu'à
+`READY_TO_SWITCH` dans `norva-phase3-proof-db`, puis deux sessions PostgreSQL
+ont appelé `norva_promote_source_replacement_v2` simultanément avec les mêmes
+CAS de source (`0`), transition (`3`) et tête candidate (`0`). Une seule a
+produit `COMPLETED`, avec une tête candidate `0 → 1`. L'autre a été refusée
+après la clôture parce que ses entrées de promotion ne correspondaient plus au
+replay terminal : elle n'a effectué aucune écriture supplémentaire.
+
+L'état durable observé après la course était `transition=completed`, ancienne
+source `replaced/hidden`, candidate `active/visible`, et une seule preuve v2
+liant la génération candidate à la révision `0 → 1`.
+
+Cette preuve a révélé un défaut du chemin de suppression de compte : sa FK
+`RESTRICT` vers la génération candidate empêchait le reaper borné de supprimer
+la génération. La migration
+`20260823194000_replacement_promotion_proof_account_delete.sql` remplace cette
+FK par `ON DELETE CASCADE`. Après application sur la base isolée, le même
+workflow réel de suppression (`begin → stop → drain → purges → finalisation`)
+a convergé : l'utilisateur fixture et sa preuve v2 étaient tous deux absents,
+et le flag temporaire de remplacement de la base isolée a été rétabli à
+`false`.
+
 ## Suite JavaScript consolidée
 
 Exécution locale : `node --test tests/*.test.js` avec les dépendances locales
