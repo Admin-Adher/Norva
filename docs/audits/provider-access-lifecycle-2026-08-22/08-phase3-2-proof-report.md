@@ -48,6 +48,26 @@ flag provider n'a été activé et aucun déploiement n'a été effectué.
   l'appel au gateway. Le settle réutilise les mêmes fences et exige l'absence de
   capability active avant de produire le reçu durable.
 
+## Crash matrix — état exact de la preuve
+
+| Frontière | Reprise attendue depuis PostgreSQL | Évidence actuelle | État |
+|---|---|---|---|
+| après claim scheduler | nouvelle révision, ancien runner `STALE` | `account_deletion_workflow_claim_smoke.sql` | PASS local |
+| après claim transport | lease expirée, nouvelle séquence/révision, ancien settle refusé | `account_deletion_transport_stop_concurrency_smoke.sql` | PASS local |
+| après stop gateway, avant settle | action reste `processing`, retry stop idempotent puis settle unique | retry gateway local et reclaim SQL prouvés séparément ; crash Edge non injecté | PENDING |
+| avant/après `READY_TO_SWITCH` | candidate version/HMAC et transition déterminent la reprise | harness provider Phase 3 | PASS sous-graphe provider |
+| avant/après COMMIT swap | génération N/N+1 et état transition déterminent l'unique continuation | harness provider Phase 3 | PASS sous-graphe provider |
+| pendant premier sync post-swap | aucun prune destructif avant preuve | contrat provider ; injection exhaustive non enregistrée | PENDING |
+| avant/après rollback | rollback N+1 vers N+2 ; N et N+1 `STALE` | harness provider Phase 3 | PASS sous-graphe provider |
+| pendant drain de suppression | provider permits actifs bloquent la finalisation | `provider_account_delete_concurrency_smoke.sql` | PASS local |
+| pendant purge analytics | checkpoint keyset/rollups repris sans double comptage | `account_deletion_paywall_analytics_smoke.sql` | PASS local |
+| pendant archive légale | archive idempotente et minimale | test structurel, politique runtime absente | PENDING external config |
+| pendant purge produit | batch FK borné et reprise vers `READY_TO_FINALIZE` | `account_deletion_product_reaper_smoke.sql` | PASS local |
+| après DELETE Auth, avant ack | tombstone CLAIMED devient COMPLETED sans second delete | `account_deletion_finalization_concurrency_smoke.sql` | PASS local |
+
+Les lignes `PENDING` ne peuvent pas être assimilées à une couverture par les
+tests voisins. Elles maintiennent le statut **NO-GO**.
+
 ## Bloquants NO-GO
 
 1. Configurer et valider la politique de conservation légale réelle.
