@@ -12,12 +12,13 @@ flag provider n'a été activé et aucun déploiement n'a été effectué.
 | Archive légale | workflow ARCHIVING_LEGAL | archive idempotente sous politique | n/a | aucune FK Auth/identifiant produit | `5f1ce722`; contrôle catalogue local | PASS structurel |
 | Purge produit | workflow PURGING_PRODUCT | relation FK puis batch | n/a | aucune FK publique directe résiduelle avant READY | `account_deletion_product_reaper_smoke.sql` | PASS |
 | Delete Auth final | READY_TO_FINALIZE | claim, delete Auth, ack | n/a | guard revalide provider + produit; tombstone completed | `account_deletion_finalization_smoke.sql` | PASS |
-| Double finalisation | READY_TO_FINALIZE | deux connexions dblink | un claim; un no-op | un seul tombstone, aucune fixture résiduelle | `1337fd83`; `account_deletion_finalization_concurrency_smoke.sql` | PASS |
+| Double finalisation + crash ack | READY_TO_FINALIZE | deux connexions dblink; Auth delete sans ack; cron reconcile | un claim; un no-op | tombstone CLAIMED puis COMPLETED, aucune fixture résiduelle | `836c4fa8`; `account_deletion_finalization_concurrency_smoke.sql` | PASS |
 | Promotion / cancel | candidate classifié | deux sessions | — | CAS candidat/version/HMAC | harness provider existant | PASS sous-graphe provider |
 | Swap / rollback | READY_TO_SWITCH | deux sessions | — | génération monotone, worker stale | harness provider existant | PASS sous-graphe provider |
 | Snapshot I/U/D | owner snapshot | deux sessions | — | snapshot avant/après writer seulement | harness snapshot existant | PASS |
 | Archive légale réelle | politique juridique opérationnelle | configuration contrôlée | — | durée/base légale réellement approuvées | politique non configurée dans le dépôt | PENDING external config |
-| Crash matrix complète | tous points listés dans le contrat | interruption/reprise | — | convergence PostgreSQL seule | non exécuté exhaustivement | PENDING |
+| Crash après Auth delete avant ack | Auth absent, tombstone CLAIMED | cron reconcile | n/a | tombstone COMPLETED sans second delete | `836c4fa8`; `account_deletion_finalization_concurrency_smoke.sql` | PASS |
+| Crash matrix complète | autres points listés dans le contrat | interruption/reprise | — | convergence PostgreSQL seule | non exécuté exhaustivement | PENDING |
 | Reaper source x transition | source active / transition active | deux sessions | — | deferred/replanifiable sans deadlock | harness existant signalé incomplet par audit | PENDING |
 
 ## Invariants actuellement matérialisés
@@ -32,8 +33,8 @@ flag provider n'a été activé et aucun déploiement n'a été effectué.
 ## Bloquants NO-GO
 
 1. Configurer et valider la politique de conservation légale réelle.
-2. Exécuter la crash matrix complète, en particulier crash après Auth delete
-   avant l'ack tombstone et reprise cron.
+2. Exécuter la crash matrix complète hors crash après Auth delete avant l'ack,
+   désormais couvert par la reprise cron.
 3. Corriger/renforcer le harnais reaper-transition selon l'audit adversarial.
 4. Produire les lignes de résultat complètes pour toutes les courses provider,
    source, compte et snapshot demandées par le contrat.
