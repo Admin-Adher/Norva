@@ -34,17 +34,26 @@ where user_id='d0000000-0000-0000-0000-000000000085';
 update public.cloud_provider_account_delete_preparations
 set state='ready',phase='ready',ready_at=clock_timestamp(),lease_owner=null,lease_until=null
 where user_id='d0000000-0000-0000-0000-000000000085';
-select public.norva_purge_account_deletion_paywall_batch(
+select public.norva_advance_account_deletion_workflow(
   'd0000000-0000-0000-0000-000000000085',0,1
 );
 select public.norva_purge_account_deletion_paywall_batch(
+  'd0000000-0000-0000-0000-000000000085',1,1
+);
+select public.norva_purge_account_deletion_paywall_batch(
   'd0000000-0000-0000-0000-000000000085',2,1
+);
+select public.norva_advance_account_deletion_workflow(
+  'd0000000-0000-0000-0000-000000000085',3,1
 );
 do $assert$
 begin
   if exists (select 1 from public.paywall_funnel_events where user_id='d0000000-0000-0000-0000-000000000085')
      or (select coalesce(sum(event_count),0) from public.account_deletion_paywall_daily_rollups
          where experiment_key='delete_test') <> 2
+     or not exists (select 1 from public.cloud_account_deletion_workflows
+                    where user_id='d0000000-0000-0000-0000-000000000085'
+                      and state='archiving_legal' and revision=4)
      or (select count(*) from pg_constraint where conname in (
        'paywall_funnel_events_user_id_fkey','paywall_experiment_assignments_user_id_fkey'
      ) and confdeltype <> 'r') <> 0 then
