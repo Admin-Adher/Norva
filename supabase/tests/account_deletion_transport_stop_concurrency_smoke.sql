@@ -17,7 +17,11 @@ begin
   where user_id='d0000000-0000-0000-0000-000000000094';
   delete from public.cloud_account_deletion_workflows
   where user_id='d0000000-0000-0000-0000-000000000094';
+  -- A previous interrupted fixture is not a product deletion: bypass its
+  -- terminal Auth guard only after the dependent test rows were removed.
+  perform set_config('session_replication_role','replica',true);
   delete from auth.users where id='d0000000-0000-0000-0000-000000000094';
+  perform set_config('session_replication_role','origin',true);
   insert into auth.users(id,instance_id,aud,role,email,encrypted_password,email_confirmed_at,
     raw_app_meta_data,raw_user_meta_data,created_at,updated_at)
   values ('d0000000-0000-0000-0000-000000000094',
@@ -206,10 +210,13 @@ commit;
 -- cleanup), but it must not erase the already-authorized gateway stop scope.
 begin;
 set local "request.jwt.claim.role" = 'service_role';
+delete from public.cloud_provider_transport_stop_actions where user_id='d0000000-0000-0000-0000-000000000096';
+delete from public.cloud_provider_account_delete_preparations where user_id='d0000000-0000-0000-0000-000000000096';
+delete from public.cloud_source_provider_account_affinities where user_id='d0000000-0000-0000-0000-000000000096';
+delete from public.cloud_account_deletion_workflows where user_id='d0000000-0000-0000-0000-000000000096';
 set local session_replication_role = replica;
 delete from auth.users where id='d0000000-0000-0000-0000-000000000096';
 set local session_replication_role = origin;
-delete from public.cloud_account_deletion_workflows where user_id='d0000000-0000-0000-0000-000000000096';
 insert into auth.users(id,instance_id,aud,role,email,encrypted_password,email_confirmed_at,
   raw_app_meta_data,raw_user_meta_data,created_at,updated_at)
 values ('d0000000-0000-0000-0000-000000000096',
@@ -243,10 +250,13 @@ begin
   end if;
 end
 $scope_snapshot$;
+delete from public.cloud_provider_transport_stop_actions where user_id='d0000000-0000-0000-0000-000000000096';
+delete from public.cloud_provider_account_delete_preparations where user_id='d0000000-0000-0000-0000-000000000096';
+delete from public.cloud_source_provider_account_affinities where user_id='d0000000-0000-0000-0000-000000000096';
+delete from public.cloud_account_deletion_workflows where user_id='d0000000-0000-0000-0000-000000000096';
 set local session_replication_role = replica;
 delete from auth.users where id='d0000000-0000-0000-0000-000000000096';
 set local session_replication_role = origin;
-delete from public.cloud_account_deletion_workflows where user_id='d0000000-0000-0000-0000-000000000096';
 commit;
 
 -- Fixture teardown intentionally bypasses the Auth trigger only after all

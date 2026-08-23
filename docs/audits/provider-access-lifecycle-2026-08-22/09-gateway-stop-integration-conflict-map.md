@@ -19,6 +19,14 @@ b6ca04c4  test(account-delete): recover expired transport stop claim
 616f2bf4  docs(gateway): record idempotent transport stop retry
 23c81d7e  test(account-delete): make duplicate begin one transport action
 993ca3c4  fix(account-delete): persist gateway transport retry
+57941399  docs(provider): map isolated gateway stop integration
+61071ae9  docs(provider): distinguish phase 3 crash evidence
+673cb67f  docs(gateway): record authenticated stop boundary
+f290ca23  test(account-delete): fence direct Auth deletion
+af9e038f  docs(account-delete): align caller with durable deletion
+d0ad7d76  test(gateway): preserve provider handoff extraction boundary
+3e998a81  docs(provider): record consolidated local suite
+a314694c  fix(account-delete): snapshot gateway stop scope durably
 ```
 
 ## Fichiers à conflit potentiel
@@ -27,7 +35,7 @@ b6ca04c4  test(account-delete): recover expired transport stop claim
 |---|---|---|---|---|
 | `services/media-gateway/src/index.js` | validation Xtream, spool catalogue, egress DNS et proxy | route stop opaque près de `8179`; helper près de `14373` sur la base | textuel : non | cherry-pick normal attendu ; vérifier que `proxyKeyFromUrl()` reste `providerAccountAffinityKey()` |
 | `supabase/functions/norva-account-delete/index.ts` | aucune modification non commitée observée | claim, revalidation, retry/receipt gateway | non observé | cherry-pick normal, puis test Edge ciblé |
-| `supabase/migrations/` | migrations Phase 3 non commitées, dont affinities et sous-graphe `82780/82783` | `20260823182792`, `20260823182793` | dépendance, non conflit textuel | appliquer le sous-graphe fournisseur en premier ; ne pas appliquer `82792/82793` seul |
+| `supabase/migrations/` | migrations Phase 3 non commitées, dont affinities et sous-graphe `82780/82783` | `20260823182792`, `20260823182793`, `20260823182794` | dépendance, non conflit textuel | appliquer le sous-graphe fournisseur en premier ; ne pas appliquer `82792`–`82794` seul |
 | `tests/` | nombreux tests VOD/provider non commités | deux tests transport stop | aucun même chemin observé | cherry-pick normal, puis suites ciblées |
 
 ## Vérification sémantique obligatoire lors du troisième worktree
@@ -44,11 +52,17 @@ l’analyse ; cette distinction doit être recontrôlée après résolution de c
 Ne remplacer ni le hash d’affinité par un slot incluant le mot de passe, ni par
 une valeur exposant une URL ou un identifiant de compte.
 
+Après le claim, `82794` fige ce périmètre opaque dans l'action durable avec son
+epoch. La revalidation et l'appel gateway utilisent exclusivement ce snapshot :
+la disparition en parallèle d'une source ou d'une ligne d'affinité ne peut donc
+ni élargir, ni vider le périmètre qui a été autorisé.
+
 ## Procédure d’intégration ultérieure
 
 1. Créer un troisième worktree propre depuis le commit qui contient les
    modifications utilisateur validées.
-2. Vérifier la présence des migrations d’affinité et `82780`/`82781`.
+2. Vérifier la présence des migrations d’affinité et `82780`/`82781`, puis
+   appliquer `82792`, `82793` et `82794` dans cet ordre.
 3. Cherry-pick les commits ci-dessus dans cet ordre.
 4. Résoudre seulement si la vérification sémantique de clé l’exige.
 5. Exécuter `node --test tests/account-deletion-transport-stop-edge.test.js tests/media-gateway-account-deletion-stop.test.js` et les smokes PostgreSQL transport/provider.
