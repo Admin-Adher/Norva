@@ -181,6 +181,17 @@ provenance : ne pas la contourner par une capability artificielle. Une base
 vierge appliquant le graphe versionné complet, avec historique fiable, reste
 nécessaire avant les courses provider finales.
 
+Après application des prérequis oubliés `74100` à `74400`, le même smoke a
+fait passer les assertions 1 à 21 et 23 à 24. L'assertion 22 reste négative
+parce que le clone conserve une ancienne
+`refresh_cloud_title_rollup(uuid)` : `pg_get_functiondef` ne contient ni le
+guard `pg_trigger_depth() <= 2` ni la référence au miroir `catalog_titles`,
+alors que ces deux éléments sont présents dans le fichier versionné
+`20260823120000_provider_credential_transition_v1.sql`. Ce n'est donc pas une
+régression attribuable au code de migration actuel ; c'est un deuxième symptôme
+mesurable du snapshot SQL antérieur. Le flag activé par le smoke est ensuite
+refusé par le gate V3, comme attendu.
+
 Une tentative de reconstruction intégrale depuis une base locale nouvellement
 créée a aussi échoué dès `001_ecosystem.sql` : ce serveur crée ses bases depuis
 un `template1` déjà partiellement peuplé (relations `hubs`, `pair_requests`,
