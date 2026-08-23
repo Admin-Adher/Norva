@@ -25,6 +25,8 @@ const DELIVERY_BATCH = 5;
 const DELIVERY_SPACING_MS = 250;
 const RECENT_AUTH_MAX_AGE_SECONDS = 15 * 60;
 const AUTH_CLOCK_SKEW_SECONDS = 60;
+const MEDIA_GATEWAY_URL = (Deno.env.get("NORVA_MEDIA_GATEWAY_URL") ?? "").replace(/\/+$/, "");
+const MEDIA_GATEWAY_TOKEN = Deno.env.get("NORVA_MEDIA_GATEWAY_TOKEN") ?? "";
 
 const DEFAULT_ALLOWED_ORIGINS = [
   "https://norva.tv",
@@ -465,6 +467,60 @@ async function drainAccountDeletionFinalizations(db: SupabaseClient) {
   return { reconciled, claimed: claims.length, completed, deferred };
 }
 
+async function sha256Hex(value: string) {
+  const bytes = new TextEncoder().encode(value);
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function drainProviderTransportStop(db: SupabaseClient, userId: string) {
+  const worker = "norva-account-delete-cron-v1";
+  const { data, error } = await db.rpc("norva_claim_account_deletion_transport_stop", {
+    p_user_id: userId, p_worker: worker, p_lease_seconds: 120,
+  });
+  if (error) {
+    if (error.code === "40001") return "stale";
+    throw new Error(`account_deletion_transport_claim_failed:${error.message}`);
+  }
+  const claim = (data && typeof data === "object" ? data : {}) as JsonRecord;
+  if (claim.state === "completed") return "completed";
+  const affinities = Array.isArray(claim.affinityHashes)
+    ? claim.affinityHashes.filter((value): value is string => typeof value === "string" && /^[a-f0-9]{64}$/.test(value))
+    : [];
+  const leaseSequence = typeof claim.leaseSequence === "number" ? claim.leaseSequence : -1;
+  const revision = typeof claim.revision === "number" ? claim.revision : -1;
+  const epoch = typeof claim.deletionEpoch === "number" ? claim.deletionEpoch : -1;
+  if (claim.state !== "processing" || leaseSequence < 0 || revision < 0 || epoch < 0) return "stale";
+  if (!MEDIA_GATEWAY_URL || !MEDIA_GATEWAY_TOKEN) {
+    await db.rpc("norva_settle_provider_transport_stop_action", {
+      p_user_id: userId, p_worker: worker, p_expected_lease_sequence: leaseSequence,
+      p_expected_revision: revision, p_outcome: "retry", p_error_code: "gateway_unconfigured", p_retry_after_seconds: 60,
+    });
+    return "deferred";
+  }
+  const response = await fetch(`${MEDIA_GATEWAY_URL}/sessions/stop-provider-affinities`, {
+    method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${MEDIA_GATEWAY_TOKEN}` },
+    body: JSON.stringify({ affinityHashes: affinities }),
+  });
+  const result = await response.json().catch(() => ({})) as JsonRecord;
+  if (!response.ok || result.providerDrained !== true) {
+    await db.rpc("norva_settle_provider_transport_stop_action", {
+      p_user_id: userId, p_worker: worker, p_expected_lease_sequence: leaseSequence,
+      p_expected_revision: revision, p_outcome: "retry", p_error_code: "gateway_stop_deferred", p_retry_after_seconds: 15,
+    });
+    return "deferred";
+  }
+  const receipt = await sha256Hex(`provider-transport-stop:v1:${userId}:${epoch}:${leaseSequence}:${revision}`);
+  const { error: settleError } = await db.rpc("norva_settle_provider_transport_stop_action", {
+    p_user_id: userId, p_worker: worker, p_expected_lease_sequence: leaseSequence,
+    p_expected_revision: revision, p_outcome: "completed", p_transport_stop_receipt_hash: receipt,
+    p_error_code: null, p_retry_after_seconds: 0,
+  });
+  if (settleError?.code === "40001") return "stale";
+  if (settleError) throw new Error(`account_deletion_transport_settle_failed:${settleError.message}`);
+  return "completed";
+}
+
 // Drive exactly one durable, bounded DB step for each account.  Provider
 // transport-stop execution intentionally remains outside this adapter: it is
 // an external effect with its own claim/receipt protocol.  Until its durable
@@ -481,6 +537,7 @@ async function drainAccountDeletionWorkflows(db: SupabaseClient) {
   }>;
   let advanced = 0;
   let batches = 0;
+  let transportStops = 0;
   let stale = 0;
   for (const claim of claims) {
     const userId = typeof claim.user_id === "string" ? claim.user_id : "";
@@ -503,6 +560,10 @@ async function drainAccountDeletionWorkflows(db: SupabaseClient) {
     if (!nextData || typeof nextData !== "object") {
       stale++;
       continue;
+    }
+    if ((nextData as JsonRecord).nextAction === "provider_drain") {
+      const transport = await drainProviderTransportStop(db, userId);
+      if (transport === "completed") transportStops++;
     }
     advanced++;
     const next = nextData as JsonRecord;
@@ -532,7 +593,7 @@ async function drainAccountDeletionWorkflows(db: SupabaseClient) {
       } else batches++;
     }
   }
-  return { claimed: claims.length, advanced, batches, stale };
+  return { claimed: claims.length, advanced, batches, transportStops, stale };
 }
 
 async function cronAuthorized(req: Request): Promise<boolean> {
