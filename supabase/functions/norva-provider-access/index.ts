@@ -1622,15 +1622,31 @@ async function runActivePostSwitchRefresh(job, workerId, runtime, candidateConfi
         p_catalog_version: state.catalogVersion,
         p_limit: 200,
       }));
+      const visibilityEpoch = activeVisibilityEpoch(
+        pruned,
+        fence.p_user_visibility_epoch,
+      );
       if (pruned.complete !== true) {
-        await checkpointActiveRefresh(fence, run.checkpointRevision, state, true, 1);
+        await checkpointActiveRefresh(
+          { ...fence, p_user_visibility_epoch: visibilityEpoch },
+          run.checkpointRevision,
+          state,
+          true,
+          1,
+        );
         return { complete: false };
       }
     }
     const next = actionIndex === ACTIVE_REFRESH_ACTIONS.length - 1
       ? { ...state, action: "complete", actionComplete: true, cursor: "", spoolToken: "" }
       : emptyActiveRefreshProgress(ACTIVE_REFRESH_ACTIONS[actionIndex + 1].action, state.catalogVersion);
-    const checkpoint = await checkpointActiveRefresh(fence, run.checkpointRevision, next, true, 1);
+    const checkpoint = await checkpointActiveRefresh(
+      { ...fence, p_user_visibility_epoch: visibilityEpoch },
+      run.checkpointRevision,
+      next,
+      true,
+      1,
+    );
     if (next.action !== "complete") return { complete: false };
     // The complete checkpoint can only be persisted after all three action
     // proofs are current.  A new lease will perform the final marker.
