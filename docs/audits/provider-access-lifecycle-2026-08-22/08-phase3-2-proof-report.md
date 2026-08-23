@@ -117,6 +117,17 @@ bypass de teardown explicitement limité (`session_replication_role=replica`)
 que les autres smokes de fixtures. Aucune donnée ou test utilisateur n'a été
 modifié ici.
 
+Le smoke `provider_credential_transition.sql` ne peut pas être exécuté sur la
+même base locale : il demande
+`norva_create_credential_transition(..., text)` à neuf paramètres, tandis que
+PostgreSQL ne possède que l'ancienne surcharge à huit paramètres. La table
+`cloud_source_direct_fallback_leases` est déjà présente mais les routines
+d'affinité correspondantes et l'entrée `20260823174000` de l'historique local
+sont absentes. La base est donc partiellement migrée ; cette preuve provider est
+**PENDING**, et il serait dangereux de rejouer une migration utilisateur non
+idempotente par fragments pour la faire passer. Le troisième worktree doit
+appliquer le graphe Phase 3 complet à une base de test propre avant ce smoke.
+
 ## Suite JavaScript consolidée
 
 Exécution locale : `node --test tests/*.test.js` avec les dépendances locales
@@ -144,6 +155,9 @@ complète en verte et le statut global reste **NO-GO**.
 5. Adapter le teardown historique de
    `catalog_background_owner_snapshot_concurrency_smoke.sql` avant de considérer
    ses six courses snapshot comme une preuve finale verte.
+6. Reconstituer une base PostgreSQL de test avec le graphe provider Phase 3
+   complet (dont `20260823174000`) avant de rejouer
+   `provider_credential_transition.sql` et ses courses promotion/swap/rollback.
 
 ## Pré-requis d'intégration du lot gateway-stop
 

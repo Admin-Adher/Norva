@@ -68,6 +68,9 @@ ni élargir, ni vider le périmètre qui a été autorisé.
    modifications utilisateur validées.
 2. Vérifier la présence des migrations d’affinité, de l'archive légale et
    `82780`/`82781`, puis appliquer `82792` à `82796` dans cet ordre.
+   La base locale actuelle n'est pas suffisante : elle possède une partie de
+   `20260823174000`, mais pas sa surcharge de création de transition à neuf
+   paramètres ; repartir d'une base Phase 3 propre est requis.
 3. Cherry-pick les commits ci-dessus dans cet ordre.
 4. Résoudre seulement si la vérification sémantique de clé l’exige.
 5. Exécuter les contrats Node, les smokes PostgreSQL transport/provider et `deno test --config supabase/functions/deno.partners.json --allow-env --allow-net --allow-read --allow-write --allow-run supabase/tests/account_deletion_transport_stop_crash_runtime_test.ts`.
