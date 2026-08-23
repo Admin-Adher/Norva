@@ -128,6 +128,15 @@ sont absentes. La base est donc partiellement migrée ; cette preuve provider es
 idempotente par fragments pour la faire passer. Le troisième worktree doit
 appliquer le graphe Phase 3 complet à une base de test propre avant ce smoke.
 
+Une autre base locale (`norva_phase3_fullproof_0823`) possède la signature v9,
+mais ne valide pas non plus ce smoke : les assertions pgTAP 7, 15 et 22 échouent
+(projection terminale, échantillon d'identité borné, rollup variant), puis le
+guard refuse l'activation avec
+`provider_account_affinity_backfill_incomplete`. Cette base est donc elle aussi
+un état de migration antérieur/incomplet, et confirme que la couverture
+promotion/swap/rollback reste **PENDING**, sans masquer les défauts par un flag
+ou un backfill forcé.
+
 ## Suite JavaScript consolidée
 
 Exécution locale : `node --test tests/*.test.js` avec les dépendances locales
@@ -158,6 +167,9 @@ complète en verte et le statut global reste **NO-GO**.
 6. Reconstituer une base PostgreSQL de test avec le graphe provider Phase 3
    complet (dont `20260823174000`) avant de rejouer
    `provider_credential_transition.sql` et ses courses promotion/swap/rollback.
+   Les bases partielles actuelles ne sont pas une substitution :
+   `norva_phase3_fullproof_0823` échoue déjà des assertions de contrat et le
+   guard de backfill.
 
 ## Pré-requis d'intégration du lot gateway-stop
 
