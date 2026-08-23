@@ -15,6 +15,7 @@ flag provider n'a été activé et aucun déploiement n'a été effectué.
 | Claim transport concurrent | action transport pending | deux sessions PostgreSQL réelles, A claim puis B claim | A = processing ; B = `40001 STALE` | B ne reçoit aucune autorité pour appeler le gateway | `c6af7799`; `account_deletion_transport_stop_concurrency_smoke.sql` | PASS local |
 | Fence juste avant gateway | action A processing puis workflow bump | A revalide ; changement durable d'état ; A revalide tardivement | A tardif = `40001 STALE` | epoch, état, lease owner/séquence, révision et expiration sont vérifiés avant tout `fetch` | migration `20260823182793`; test SQL deux sessions + Node 4/4 | PASS local |
 | Crash après claim transport | A claim, puis lease expirée dans une transaction commitée | B reprend depuis PostgreSQL ; A tente un settle tardif | B = nouvelle leaseSequence/révision ; A = `40001 STALE` | aucune mémoire ni lease A ne peut compléter l'action ; B revalide et settle seul | `account_deletion_transport_stop_concurrency_smoke.sql` | PASS local |
+| Retry gateway déjà drainé | endpoint gateway isolé, aucune session active | deux POST identiques avec le même hash opaque | deux réponses `providerDrained=true`, protocole 1 | un retry après arrêt ne ressuscite aucun transport ni ne rend un reçu incompatible | gateway local port 18111, processus arrêté après preuve | PASS local |
 | Gateway absent / non conforme | action processing | settle `retry`, sans receipt | n/a | le workflow reste DRAINING ; aucune progression mensongère | `fe295228`; contrat Edge ciblé | PASS structurel |
 | Purge analytics | provider ready, deux raws | deux batches keyset | n/a | rollups anonymes exacts, raws absents | `account_deletion_paywall_analytics_smoke.sql` | PASS |
 | Archive légale | workflow ARCHIVING_LEGAL | archive idempotente sous politique | n/a | aucune FK Auth/identifiant produit | `5f1ce722`; contrôle catalogue local | PASS structurel |
@@ -54,9 +55,9 @@ flag provider n'a été activé et aucun déploiement n'a été effectué.
 3. Produire les lignes de résultat complètes pour toutes les courses provider,
    source, compte et snapshot demandées par le contrat.
 4. Compléter les scénarios runtime du transport stop : crash après l'effet
-   gateway avant settle, retry idempotent du gateway déjà drainé, et suppression
-   source/compte répétée. L'expiry de lease versus settle est couvert localement ;
-   ces effets restent à rejouer avec un gateway contrôlé.
+   gateway avant settle (le retry endpoint est idempotent, mais le crash Edge
+   complet n'est pas encore injecté) et suppression source/compte répétée.
+   L'expiry de lease versus settle est couvert localement.
 
 ## Pré-requis d'intégration du lot gateway-stop
 
