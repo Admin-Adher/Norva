@@ -145,6 +145,21 @@ relation n'a pas l'historique de migration attendu. Le clone sans connexion a
 été supprimé juste après l'essai. Il faut une base provisionnée depuis une
 chaîne de migrations cohérente, non un patch d'objets déjà présents.
 
+Le 23 août, une reconstruction supplémentaire
+`norva_phase3_provider_validation_0823` depuis le snapshot local
+`durable_compile` a appliqué, sans flag activé, les prérequis d'affinité
+(`72800` à `74000`), de génération (`79800` à `80000`), de projection titre
+(`22000` à `22040`) et de seal (`22100` à `22120`). Elle fait passer les
+assertions 10 et 15, mais conserve des versions antérieures sous les mêmes
+signatures SQL : le gate V3 constate que
+`norva_claim_credential_transition_jobs(text,integer,integer,text)` et
+`norva_begin_credential_swap(...,text,text)` n'ont pas les corps attendus.
+`82800_active_catalog_refresh_worker_v3_gate.sql` refuse donc avec
+`active catalog refresh worker v3 gate drift`. C'est une preuve négative de
+provenance : ne pas la contourner par une capability artificielle. Une base
+vierge appliquant le graphe versionné complet, avec historique fiable, reste
+nécessaire avant les courses provider finales.
+
 ## Suite JavaScript consolidée
 
 Exécution locale : `node --test tests/*.test.js` avec les dépendances locales
