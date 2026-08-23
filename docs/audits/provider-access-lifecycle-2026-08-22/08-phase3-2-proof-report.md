@@ -28,13 +28,14 @@ flag provider n'a été activé et aucun déploiement n'a été effectué.
 | Purge produit | workflow PURGING_PRODUCT | relation FK puis batch | n/a | aucune FK publique directe résiduelle avant READY | `account_deletion_product_reaper_smoke.sql` | PASS |
 | Delete Auth final | READY_TO_FINALIZE | claim, delete Auth, ack | n/a | guard revalide provider + produit; tombstone completed | `account_deletion_finalization_smoke.sql` | PASS |
 | Double finalisation + crash ack | READY_TO_FINALIZE | deux connexions dblink; Auth delete sans ack; cron reconcile | un claim; un no-op | tombstone CLAIMED puis COMPLETED, aucune fixture résiduelle | `836c4fa8`; `account_deletion_finalization_concurrency_smoke.sql` | PASS |
-| Promotion / cancel | candidate classifié | deux sessions | — | CAS candidat/version/HMAC | `94f2c301`; harness provider rejoué localement | PASS sous-graphe provider |
-| Swap / rollback | READY_TO_SWITCH | deux sessions | — | génération monotone, worker stale | `94f2c301`; harness provider rejoué localement | PASS sous-graphe provider |
-| Snapshot I/U/D | owner snapshot | deux sessions | — | snapshot avant/après writer seulement | harness snapshot existant | PASS |
+| Permit ↔ suppression compte | permit direct fallback / compte actif | deux sessions dans les deux ordres | permit-first puis `begin`, ou `begin` puis permit refusé | aucune capacité ne subsiste ; revalidation après begin = `account_deletion_pending` | `provider_account_delete_concurrency_smoke.sql`, SHA-256 `D35C3FC2…1E7C`, replay 2026-08-23 | PASS local |
+| Promotion / cancel | candidate classifié | deux sessions | — | CAS candidat/version/HMAC | le smoke `provider_credential_transition.sql` n'est pas vert sur une base de provenance cohérente | PENDING |
+| Swap / rollback | READY_TO_SWITCH | deux sessions | — | génération monotone, worker stale | le smoke `provider_credential_transition.sql` n'est pas vert sur une base de provenance cohérente | PENDING |
+| Snapshot I/U/D | owner snapshot | deux sessions | — | snapshot avant/après writer seulement | course atteinte, mais teardown Auth historique refusé par le guard durable | PENDING fixture |
 | Archive légale réelle | politique juridique opérationnelle | configuration contrôlée | — | durée/base légale réellement approuvées | politique non configurée dans le dépôt | PENDING external config |
 | Crash après Auth delete avant ack | Auth absent, tombstone CLAIMED | cron reconcile | n/a | tombstone COMPLETED sans second delete | `836c4fa8`; `account_deletion_finalization_concurrency_smoke.sql` | PASS |
 | Crash matrix complète | autres points listés dans le contrat | interruption/reprise | — | convergence PostgreSQL seule | non exécuté exhaustivement | PENDING |
-| Reaper source x transition | source active / transition active | deux sessions | — | overlap, source fence et reprise reaper | `94f2c301`; harness provider rejoué localement | PASS sous-graphe provider |
+| Reaper source x transition | source active / transition active | deux sessions dblink, dans les deux ordres | source verrouillée puis concurrent bloqué ; perdant = `55000` | overlap observé, aucune transition créée après fence ; rollback reaper libère le verrou | `provider_account_delete_concurrency_smoke.sql`, SHA-256 `D35C3FC2…1E7C`, replay 2026-08-23 | PASS local |
 
 ## Invariants actuellement matérialisés
 
@@ -76,7 +77,7 @@ tests voisins. Elles maintiennent le statut **NO-GO**.
 
 ## Consolidation PostgreSQL 2026-08-23
 
-Les huit smokes suivants ont été rejoués consécutivement sur
+Les neuf smokes suivants ont été rejoués consécutivement sur
 `norva_phase3_owner_matrix_0823` et se sont tous terminés avec succès :
 
 ```text
@@ -91,6 +92,9 @@ account_deletion_transport_stop_concurrency_smoke.sql
 account_deletion_legal_billing_retention_smoke.sql
 ```
 
+Le harness actuel `provider_account_delete_concurrency_smoke.sql` a de nouveau
+été rejoué avec succès le 23 août (SHA-256 `D35C3FC2…1E7C`) : helpers,
+triggers, tables de fixture et connexions dblink étaient ensuite tous à zéro.
 Le dernier smoke a été exécuté une seconde fois avec succès après son correctif
 de teardown (`0890f113`), ce qui prouve aussi sa reprise de fixture. Les
 avertissements `Norva signup Telegram immediate wake failed (SQLSTATE 42P01)`
