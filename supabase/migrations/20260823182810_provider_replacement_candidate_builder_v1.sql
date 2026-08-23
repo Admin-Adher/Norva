@@ -11,6 +11,13 @@ alter table public.cloud_source_transitions
   references public.cloud_source_catalog_generations(user_id, id)
   on update cascade on delete restrict not valid;
 
+-- This FK is part of the contracted catalog-generation metadata inventory.
+-- Recreating it for the replacement builder must not leave a contracted
+-- rollout permanently non-canonical, otherwise an idempotent replay of the
+-- rollout contract would fail after this migration has been applied.
+alter table public.cloud_source_transitions
+  validate constraint cloud_source_transitions_candidate_generation_fk;
+
 create or replace function public.norva_catalog_generation_guard_begin_statement()
 returns trigger language plpgsql security definer set search_path = '' as $function$
 declare v_nonce uuid := gen_random_uuid(); v_enabled boolean := false; v_contracted boolean := false;
