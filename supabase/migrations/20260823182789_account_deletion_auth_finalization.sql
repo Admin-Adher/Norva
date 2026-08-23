@@ -59,10 +59,11 @@ begin
     on conflict (account_key) do update
       set finalization_key=excluded.finalization_key,state='claimed',
           claimed_at=excluded.claimed_at,lease_until=excluded.lease_until,completed_at=null
-    returning finalization_key
+    returning public.cloud_account_deletion_finalizations.finalization_key as claimed_key
   )
   select claimed.user_id,claimed.finalization_key
-  from claimed join tombstoned using (finalization_key);
+  from claimed join tombstoned
+    on tombstoned.claimed_key=claimed.finalization_key;
 end
 $function$;
 
