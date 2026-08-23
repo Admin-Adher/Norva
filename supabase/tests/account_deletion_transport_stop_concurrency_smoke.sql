@@ -230,6 +230,7 @@ delete from public.cloud_provider_account_delete_preparations where user_id='d00
 delete from public.cloud_source_provider_account_affinities where user_id='d0000000-0000-0000-0000-000000000096';
 delete from public.cloud_account_deletion_workflows where user_id='d0000000-0000-0000-0000-000000000096';
 set local session_replication_role = replica;
+delete from public.cloud_sources where id='d0000000-0000-0000-0000-000000000196';
 delete from auth.users where id='d0000000-0000-0000-0000-000000000096';
 set local session_replication_role = origin;
 insert into auth.users(id,instance_id,aud,role,email,encrypted_password,email_confirmed_at,
@@ -276,6 +277,7 @@ delete from public.cloud_provider_account_delete_preparations where user_id='d00
 delete from public.cloud_source_provider_account_affinities where user_id='d0000000-0000-0000-0000-000000000096';
 delete from public.cloud_account_deletion_workflows where user_id='d0000000-0000-0000-0000-000000000096';
 set local session_replication_role = replica;
+delete from public.cloud_sources where id='d0000000-0000-0000-0000-000000000196';
 delete from auth.users where id='d0000000-0000-0000-0000-000000000096';
 set local session_replication_role = origin;
 commit;
