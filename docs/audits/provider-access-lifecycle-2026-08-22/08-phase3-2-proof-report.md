@@ -297,6 +297,13 @@ indissociables de l'adaptateur et des purges durables qui suivent. Le flag
 foundation avec `reason=global_visibility_epoch_v2_required`; aucune migration
 de ce lot ne contourne ce garde et aucun flag n'a été activé.
 
+Le harness historique `provider_access_lifecycle.sql` ne peut pas être rejoué
+sur l'instance isolée déjà `contracted` : ses seeds raw sont volontairement
+refusés par `norva_catalog_generation_write_guard` avant les assertions de
+migration. Ce refus est correct; adapter le test avec un bypass rendrait la
+preuve invalide. Sa validation doit être exécutée sur une base reconstruite à
+l'étape pré-contraction, en plus des harnesses post-contraction déjà verts.
+
 ## Pré-requis d'intégration du lot gateway-stop
 
 Les migrations de ce lot supposent que le sous-graphe Phase 3 déjà développé
