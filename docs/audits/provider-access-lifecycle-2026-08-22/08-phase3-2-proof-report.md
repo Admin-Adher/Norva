@@ -19,6 +19,7 @@ flag provider n'a été activé et aucun déploiement n'a été effectué.
 | Frontière gateway opaque | gateway isolé | sans bearer ; hash invalide ; stop valide | 401 ; 400 ; 200 | aucune URL, credential ou action destructive non authentifiée ne traverse la route | gateway local port 18111, processus arrêté après preuve | PASS local |
 | Suppression compte répétée | compte actif, préparation/action absentes | deux appels `norva_begin_account_deletion_workflow` | n/a | une préparation, une action transport et un epoch unique ; le second appel est une reprise | `account_deletion_transport_stop_concurrency_smoke.sql` | PASS local |
 | Stop transport ↔ suppression source | action claimée avec une affinité, puis ligne source supprimée | revalidation après suppression de l'affinité vivante | n/a | le scope opaque snapshoté avec l'epoch reste inchangé ; aucun reçu vide ne contourne le gateway | migration `20260823182794`; smoke transport | PASS local |
+| Reaper ↔ transport stop non terminé | workflow `stopping`, action transport `pending` | advance/reaper avant le stop | n/a | le workflow reste `draining` avec `nextAction=provider_drain`, sans atteindre une purge | `account_deletion_transport_stop_concurrency_smoke.sql` | PASS local |
 | Gateway absent / non conforme / indisponible | action processing | settle `retry` CAS, sans receipt | `STALE` si la lease a changé | le workflow reste DRAINING ; aucun retry ne dépend de l'expiration seule | adaptateur Edge ; test ciblé `account-deletion-transport-stop-edge.test.js` | PASS contrat |
 | Purge analytics | provider ready, deux raws | deux batches keyset | n/a | rollups anonymes exacts, raws absents | `account_deletion_paywall_analytics_smoke.sql` | PASS |
 | Archive légale | workflow ARCHIVING_LEGAL | archive idempotente sous politique | n/a | aucune FK Auth/identifiant produit | `5f1ce722`; contrôle catalogue local | PASS structurel |
@@ -44,6 +45,67 @@ flag provider n'a été activé et aucun déploiement n'a été effectué.
 - Le cron ne possède pas d'autorité implicite : il réclame une révision, appelle
   une RPC CAS, puis exécute au plus un batch analytics ou produit. Une collision
   `40001` est `STALE/no-op`.
+- Le stop gateway est un effet externe opaque : le claim est revalidé dans
+  PostgreSQL juste avant le `fetch`, sur l'epoch, l'état DRAINING, le propriétaire
+  de lease, sa séquence, la révision et son expiration. Un `40001` interdit
+  l'appel au gateway. Le settle réutilise les mêmes fences et exige l'absence de
+  capability active avant de produire le reçu durable.
+
+## Crash matrix — état exact de la preuve
+
+| Frontière | Reprise attendue depuis PostgreSQL | Évidence actuelle | État |
+|---|---|---|---|
+| après claim scheduler | nouvelle révision, ancien runner `STALE` | `account_deletion_workflow_claim_smoke.sql` | PASS local |
+| après claim transport | lease expirée, nouvelle séquence/révision, ancien settle refusé | `account_deletion_transport_stop_concurrency_smoke.sql` | PASS local |
+| après stop gateway, avant settle | action reste `processing`, retry stop idempotent puis settle unique | retry gateway local et reclaim SQL prouvés séparément ; crash Edge non injecté | PENDING |
+| reaper pendant transport stop pending | le reaper conserve `DRAINING` et redemande `provider_drain` | `account_deletion_transport_stop_concurrency_smoke.sql` | PASS local |
+| avant/après `READY_TO_SWITCH` | candidate version/HMAC et transition déterminent la reprise | harness provider Phase 3 | PASS sous-graphe provider |
+| avant/après COMMIT swap | génération N/N+1 et état transition déterminent l'unique continuation | harness provider Phase 3 | PASS sous-graphe provider |
+| pendant premier sync post-swap | aucun prune destructif avant preuve | contrat provider ; injection exhaustive non enregistrée | PENDING |
+| avant/après rollback | rollback N+1 vers N+2 ; N et N+1 `STALE` | harness provider Phase 3 | PASS sous-graphe provider |
+| pendant drain de suppression | provider permits actifs bloquent la finalisation | `provider_account_delete_concurrency_smoke.sql` | PASS local |
+| pendant purge analytics | checkpoint keyset/rollups repris sans double comptage | `account_deletion_paywall_analytics_smoke.sql` | PASS local |
+| pendant archive légale | archive idempotente et minimale | test structurel, politique runtime absente | PENDING external config |
+| pendant purge produit | batch FK borné et reprise vers `READY_TO_FINALIZE` | `account_deletion_product_reaper_smoke.sql` | PASS local |
+| après DELETE Auth, avant ack | tombstone CLAIMED devient COMPLETED sans second delete | `account_deletion_finalization_concurrency_smoke.sql` | PASS local |
+
+Les lignes `PENDING` ne peuvent pas être assimilées à une couverture par les
+tests voisins. Elles maintiennent le statut **NO-GO**.
+
+## Consolidation PostgreSQL 2026-08-23
+
+Les huit smokes suivants ont été rejoués consécutivement sur
+`norva_phase3_owner_matrix_0823` et se sont tous terminés avec succès :
+
+```text
+account_deletion_workflow_claim_smoke.sql
+account_deletion_workflow_claim_concurrency_smoke.sql
+account_deletion_product_reaper_smoke.sql
+account_deletion_finalization_smoke.sql
+account_deletion_finalization_concurrency_smoke.sql
+account_deletion_paywall_analytics_smoke.sql
+provider_account_delete_concurrency_smoke.sql
+account_deletion_transport_stop_concurrency_smoke.sql
+```
+
+Le dernier smoke a été exécuté une seconde fois avec succès après son correctif
+de teardown (`0890f113`), ce qui prouve aussi sa reprise de fixture. Les
+avertissements `Norva signup Telegram immediate wake failed (SQLSTATE 42P01)`
+proviennent de l'infrastructure locale absente du fixture ; aucun script n'a
+échoué ni continué après une erreur.
+
+## Suite JavaScript consolidée
+
+Exécution locale : `node --test tests/*.test.js` avec les dépendances locales
+déjà disponibles. Résultat : **2371 passés, 2 ignorés, 1 échec**, en 26,7 s.
+
+L'échec est hors périmètre gateway/account-delete :
+`norva-partners-revolut-payout.test.js` attend un JSON de son helper sandbox,
+mais Node 24 renvoie une chaîne `node:internal…` que le test tente de parser.
+Le même lancement valide les contrats account-delete, transport stop et le test
+historique `media-gateway-mkv-bounded-reconnect` après correction de sa
+frontière d'extraction. Cet échec externe ne transforme toutefois pas la suite
+complète en verte et le statut global reste **NO-GO**.
 
 ## Bloquants NO-GO
 

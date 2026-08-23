@@ -38,6 +38,25 @@ end
 $setup$;
 commit;
 
+-- The durable reaper must remain in DRAINING while transport stop is pending:
+-- it may schedule the provider action, but it cannot reach any purge state.
+begin;
+set local "request.jwt.claim.role" = 'service_role';
+do $reaper_waits_for_transport$
+declare v_advance jsonb; v_state text;
+begin
+  v_advance := public.norva_advance_account_deletion_workflow(
+    'd0000000-0000-0000-0000-000000000094',0,50);
+  select state into v_state from public.cloud_account_deletion_workflows
+  where user_id='d0000000-0000-0000-0000-000000000094';
+  if v_advance->>'state' <> 'draining' or v_advance->>'nextAction' <> 'provider_drain'
+     or v_state <> 'draining' then
+    raise exception 'reaper advanced while transport stop was unfinished';
+  end if;
+end
+$reaper_waits_for_transport$;
+commit;
+
 do $two_sessions$
 declare
   v_claim jsonb;
