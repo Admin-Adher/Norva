@@ -63,10 +63,15 @@ for _ in $(seq 1 60); do
 done
 docker compose --project-name norva-phase3-proof --env-file "$ENV_FILE" -f "$COMPOSE" exec -T db pg_isready -U postgres -h localhost >/dev/null || die 'database did not become ready'
 
-while IFS= read -r migration; do
+# Do not feed the migration list through the loop's stdin: docker compose exec
+# can inherit and consume that descriptor, silently stopping after the first file.
+mapfile -t migrations < <(find "$HERE/../../../supabase/migrations" -maxdepth 1 -type f -name '*.sql' -printf '%f\n' | LC_ALL=C sort)
+(( ${#migrations[@]} > 0 )) || die 'no migrations found in the isolated checkout'
+
+for migration in "${migrations[@]}"; do
   docker compose --project-name norva-phase3-proof --env-file "$ENV_FILE" -f "$COMPOSE" exec -T db \
     psql -v ON_ERROR_STOP=1 -U postgres -d postgres -f "/workspace/supabase/migrations/${migration}" \
     || die "migration failed: ${migration}"
-done < <(find "$HERE/../../../supabase/migrations" -maxdepth 1 -type f -name '*.sql' -printf '%f\n' | LC_ALL=C sort)
+done
 
 printf 'phase3-proof bootstrap PASS: synthetic database migrated; no production dump was used\n'
