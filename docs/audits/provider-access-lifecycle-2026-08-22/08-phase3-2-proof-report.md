@@ -69,6 +69,19 @@ flag provider n'a été activé et aucun déploiement n'a été effectué.
 Les lignes `PENDING` ne peuvent pas être assimilées à une couverture par les
 tests voisins. Elles maintiennent le statut **NO-GO**.
 
+## Suite JavaScript consolidée
+
+Exécution locale : `node --test tests/*.test.js` avec les dépendances locales
+déjà disponibles. Résultat : **2371 passés, 2 ignorés, 1 échec**, en 26,7 s.
+
+L'échec est hors périmètre gateway/account-delete :
+`norva-partners-revolut-payout.test.js` attend un JSON de son helper sandbox,
+mais Node 24 renvoie une chaîne `node:internal…` que le test tente de parser.
+Le même lancement valide les contrats account-delete, transport stop et le test
+historique `media-gateway-mkv-bounded-reconnect` après correction de sa
+frontière d'extraction. Cet échec externe ne transforme toutefois pas la suite
+complète en verte et le statut global reste **NO-GO**.
+
 ## Bloquants NO-GO
 
 1. Configurer et valider la politique de conservation légale réelle.
