@@ -127,6 +127,14 @@ avant acknowledgement. La configuration métier réelle de conservation reste
 cependant un prérequis externe distinct : ces fixtures ne peuvent pas la
 remplacer.
 
+`provider_account_delete_concurrency_smoke.sql` a également été rejoué sur la
+base isolée. Les deux sessions PostgreSQL réelles ont confirmé : le permit
+revalidé est refusé après `account_deletion_pending`, le reaper diffère une
+source sous transition active, et les reprises W1 → W2 → W3 font passer la
+lease/révision à `1/1`, `2/2`, `3/3`. Les tentatives tardives de W1 sur run,
+settle et checkpoint retournent toutes `40001`; aucun ancien worker ne peut
+committer après reprise.
+
 ## Matrice deux-sessions rejouée 2026-08-23
 
 Les harnesses ont été rendus portables entre une installation `dblink` dans le
