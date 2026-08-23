@@ -8,6 +8,7 @@ flag provider n'a été activé et aucun déploiement n'a été effectué.
 |---|---|---|---|---|---|---|
 | Index historique projection | index quatre clés homonyme | renommage conservateur + création concurrente | n/a | index canonique cinq clés, ancien préservé | `993118a6`; trois formes exécutées localement | PASS |
 | Demande de suppression | compte Auth actif | Edge appelle `norva_begin_account_deletion_workflow` | n/a | réponse 202, aucun delete Auth inline | `15acc3a0`; `account-deletion-email-delivery.test.js` | PASS |
+| Runner durable borné | workflow persistant non terminal | cron claim → advance CAS → un batch de purge au plus | CAS obsolète = no-op | aucune progression ne dépend de l'isolate Edge | `21adfc88`; migration `82791`; test Node 20/20 | PASS local |
 | Purge analytics | provider ready, deux raws | deux batches keyset | n/a | rollups anonymes exacts, raws absents | `account_deletion_paywall_analytics_smoke.sql` | PASS |
 | Archive légale | workflow ARCHIVING_LEGAL | archive idempotente sous politique | n/a | aucune FK Auth/identifiant produit | `5f1ce722`; contrôle catalogue local | PASS structurel |
 | Purge produit | workflow PURGING_PRODUCT | relation FK puis batch | n/a | aucune FK publique directe résiduelle avant READY | `account_deletion_product_reaper_smoke.sql` | PASS |
@@ -29,6 +30,9 @@ flag provider n'a été activé et aucun déploiement n'a été effectué.
   la preuve provider et l'absence recalculée de résidu produit.
 - Le tombstone de finalisation ne possède pas de FK ni d'UUID utilisateur : il
   permet de reprendre l'ack après l'absence Auth sans réémettre le delete.
+- Le cron ne possède pas d'autorité implicite : il réclame une révision, appelle
+  une RPC CAS, puis exécute au plus un batch analytics ou produit. Une collision
+  `40001` est `STALE/no-op`.
 
 ## Bloquants NO-GO
 
@@ -37,3 +41,7 @@ flag provider n'a été activé et aucun déploiement n'a été effectué.
    désormais couvert par la reprise cron.
 3. Produire les lignes de résultat complètes pour toutes les courses provider,
    source, compte et snapshot demandées par le contrat.
+4. Relier l'exécuteur versionné du **transport stop** à son protocole
+   `claim/receipt`. Le runner account-delete ne peut volontairement pas
+   synthétiser ce reçu ni lancer un appel fournisseur ; sans reçu, le workflow
+   reste correctement bloqué en `DRAINING`.
