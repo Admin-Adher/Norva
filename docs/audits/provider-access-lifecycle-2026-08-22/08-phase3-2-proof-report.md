@@ -31,10 +31,13 @@ flag provider n'a été activé et aucun déploiement n'a été effectué.
 | Promotion / cancel | candidate classifié | deux sessions | — | CAS candidat/version/HMAC | `94f2c301`; harness provider rejoué localement | PASS sous-graphe provider |
 | Swap / rollback | READY_TO_SWITCH | deux sessions | — | génération monotone, worker stale | `94f2c301`; harness provider rejoué localement | PASS sous-graphe provider |
 | Snapshot I/U/D | owner snapshot | deux sessions | — | snapshot avant/après writer seulement | harness snapshot existant | PASS |
+| Snapshot I/U/D réel | 6 comptes isolés, generation active et baseline owner | deux backends `dblink` : writer-first / activation-first pour INSERT, UPDATE, DELETE | publication ou writer sérialise ; writer-first rejoue `40001` lorsque nécessaire | chaque snapshot contient soit l'écriture commise, soit son absence durable ; aucun troisième état | `catalog_background_owner_snapshot_concurrency_smoke.sql`, 6/6 sur PostgreSQL isolé | PASS isolé |
 | Archive légale réelle | politique juridique opérationnelle | configuration contrôlée | — | durée/base légale réellement approuvées | politique non configurée dans le dépôt | PENDING external config |
 | Crash après Auth delete avant ack | Auth absent, tombstone CLAIMED | cron reconcile | n/a | tombstone COMPLETED sans second delete | `836c4fa8`; `account_deletion_finalization_concurrency_smoke.sql` | PASS |
 | Crash matrix complète | autres points listés dans le contrat | interruption/reprise | — | convergence PostgreSQL seule | non exécuté exhaustivement | PENDING |
 | Reaper source x transition | source active / transition active | deux sessions | — | overlap, source fence et reprise reaper | `94f2c301`; harness provider rejoué localement | PASS sous-graphe provider |
+| Refresh actif post-swap complet | `COMMITTING`, génération B active, job `post_switch_verify` | refresh → checkpoints bornés → catégories/média/titres/variants → prune/réconciliation → clôture | n/a | aucune écriture sans snapshot/génération active ; prune seulement après la preuve complète | `provider_credential_transition.sql`, 72/72 sur PostgreSQL isolé | PASS isolé |
+| Crash/reclaim entre pages refresh | job post-switch, checkpoint page `live_categories` | W2 checkpoint puis requeue durable ; W3 reclaim | W3 = lease 3 ; W2 = `40001 credential_job_lease_changed` | W2 ne peut plus écrire ; W3 reprend le même run et produit le checkpoint 3 | preuve PostgreSQL isolée du 2026-08-23, run `ea9f4135-8511-4767-908e-45989c5ec197` | PASS isolé |
 
 ## Invariants actuellement matérialisés
 
@@ -63,7 +66,7 @@ flag provider n'a été activé et aucun déploiement n'a été effectué.
 | reaper pendant transport stop pending | le reaper conserve `DRAINING` et redemande `provider_drain` | `account_deletion_transport_stop_concurrency_smoke.sql` | PASS local |
 | avant/après `READY_TO_SWITCH` | candidate version/HMAC et transition déterminent la reprise | harness provider Phase 3 | PASS sous-graphe provider |
 | avant/après COMMIT swap | génération N/N+1 et état transition déterminent l'unique continuation | harness provider Phase 3 | PASS sous-graphe provider |
-| pendant premier sync post-swap | aucun prune destructif avant preuve | contrat provider ; injection exhaustive non enregistrée | PENDING |
+| pendant premier sync post-swap | aucun prune destructif avant preuve ; reprise sur checkpoint durable | `provider_credential_transition.sql` 72/72 ; W2 → W3 avec lease 2 → 3 et checkpoint 2 → 3 | PASS isolé |
 | avant/après rollback | rollback N+1 vers N+2 ; N et N+1 `STALE` | harness provider Phase 3 | PASS sous-graphe provider |
 | pendant drain de suppression | provider permits actifs bloquent la finalisation | `provider_account_delete_concurrency_smoke.sql` | PASS local |
 | pendant purge analytics | checkpoint keyset/rollups repris sans double comptage | `account_deletion_paywall_analytics_smoke.sql` | PASS local |
@@ -73,6 +76,67 @@ flag provider n'a été activé et aucun déploiement n'a été effectué.
 
 Les lignes `PENDING` ne peuvent pas être assimilées à une couverture par les
 tests voisins. Elles maintiennent le statut **NO-GO**.
+
+## Preuve complémentaire refresh/reclaim 2026-08-23
+
+Le harness `provider_credential_transition.sql` a terminé à **72/72** sur le
+PostgreSQL isolé. Il couvre maintenant le chemin post-swap réel : bind du run,
+checkpoints avant chaque écriture, writers catégories/média/titres/variants,
+prune après réconciliation, preuve durable et état terminal `COMPLETED`.
+
+Une exécution inter-transactions a ensuite simulé une interruption entre deux
+pages. W2 a écrit le checkpoint 2 et libéré sa lease (`requeued=true`). W3 a
+réclamé le même job avec `lease_sequence=3`, puis a écrit le checkpoint 3. Une
+tentative tardive de W2 avec sa séquence 2 a échoué avec SQLSTATE `40001` et la
+raison `credential_job_lease_changed`. Cette preuve confirme que la lease
+autorise la tentative, tandis que le fence de génération/snapshot et la
+séquence durable autorisent le commit.
+
+Cette preuve concerne uniquement l'instance PostgreSQL isolée. Elle ne change
+pas le statut de production : le flag provider reste désactivé et la Phase 2
+reste bloquée par `global_visibility_epoch_v2_required`.
+
+## Matrice deux-sessions rejouée 2026-08-23
+
+Les harnesses ont été rendus portables entre une installation `dblink` dans le
+schéma `public` et une installation dans `extensions`: les appels de test
+résolvent désormais les fonctions `dblink_*` via le `search_path`, sans modifier
+la machine de production.
+
+`catalog_background_owner_snapshot_concurrency_smoke.sql` a passé les six
+courses suivantes sur PostgreSQL isolé : INSERT, UPDATE et DELETE, chacun avec
+`writer_first` et `activation_first`. Les courses writer-first ont soit observé
+la sérialisation puis inclus l'écriture, soit reçu `40001` avant retry durable;
+les courses activation-first ont observé le writer bloqué derrière l'activation.
+Le tableau final contient six snapshots actifs, les epochs finals attendus et
+aucun membership résurrecté.
+
+`provider_account_delete_concurrency_smoke.sql` a aussi passé dans le même
+environnement : suppression compte contre writer, permit contre begin,
+transition contre reaper, rollback de reaper, et reclaim W1 → W2 → W3. Dans le
+dernier scénario, les opérations tardives de W1 (run, settle et checkpoint) ont
+toutes retourné SQLSTATE `40001`; W3 a laissé un état durable `dead`, révision
+4, sans lease active. Ces résultats sont des preuves d'absence de double
+autorité, pas une activation de flag ou un déploiement.
+
+## Correctif de purge de génération 2026-08-23
+
+La reprise d'un fixture post-swap a détecté que le reaper account-delete ne
+pouvait pas effacer les projections de titres d'une génération `READY`: le
+trigger de révision de génération refusait le batch, même lorsque le worker de
+suppression détenait la lease durable. La migration
+`20260823193000_account_delete_generation_revision_guard.sql` traite ce seul
+cas : l'exception est limitée à un `DELETE` dont les lignes appartiennent au
+compte porteur d'un contexte account-delete encore valide. Les writers, les
+seals et les purges hors workflow restent strictement refusés.
+
+Le fixture a ensuite convergé par le protocole réel `begin → stop → drain →
+analytics → product purge → finalization`, et l'utilisateur de fixture a été
+confirmé absent. Enfin, `provider_credential_transition.sql` a été rejoué sur
+le schéma déjà contracté et s'est terminé à **72/72**. Son assertion historique
+sur l'ancienne unicité est désormais explicitement portée par le test de
+migration online ; le harness Phase 3.2 vérifie à la place que cette contrainte
+historique est bien absente, ce qui le rend réexécutable sur une base modernisée.
 
 ## Consolidation PostgreSQL 2026-08-23
 

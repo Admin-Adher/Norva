@@ -10,7 +10,7 @@ set lock_timeout = '2s';
 
 do $prerequisite$
 begin
-  if to_regprocedure('extensions.dblink_connect(text,text)') is null then
+  if to_regprocedure('dblink_connect(text,text)') is null then
     raise exception 'provider account-delete concurrency smoke requires dblink'
       using errcode = '55000';
   end if;
@@ -541,14 +541,14 @@ begin
   select user_id,title_id into strict v_begin_user,v_begin_title
   from provider_account_delete_race_fixtures where scenario = 'begin_first';
 
-  perform extensions.dblink_connect(
+  perform dblink_connect(
     'norva_adk_writer',
     pg_catalog.format(
       'host=127.0.0.1 port=%s dbname=%s user=%s connect_timeout=2 options=''-c statement_timeout=15000''',
       current_setting('port'),current_database(),current_user
     )
   );
-  perform extensions.dblink_connect(
+  perform dblink_connect(
     'norva_adk_begin',
     pg_catalog.format(
       'host=127.0.0.1 port=%s dbname=%s user=%s connect_timeout=2 options=''-c statement_timeout=15000''',
@@ -556,10 +556,10 @@ begin
     )
   );
   select remote.pid into strict v_writer_pid
-  from extensions.dblink('norva_adk_writer','select pg_backend_pid()')
+  from dblink('norva_adk_writer','select pg_backend_pid()')
     as remote(pid integer);
   select remote.pid into strict v_begin_pid
-  from extensions.dblink('norva_adk_begin','select pg_backend_pid()')
+  from dblink('norva_adk_begin','select pg_backend_pid()')
     as remote(pid integer);
   insert into provider_account_delete_race_pids values
     ('writer',v_writer_pid),('begin',v_begin_pid);
@@ -568,19 +568,19 @@ begin
   -- in aab.  begin_prepare waits account-first.  The writer is rolled back,
   -- so begin wins without a deadlock or an unobserved late catalog row.
   perform pg_catalog.pg_advisory_lock(82783001::bigint);
-  perform extensions.dblink_exec('norva_adk_writer','begin');
-  perform extensions.dblink_exec(
+  perform dblink_exec('norva_adk_writer','begin');
+  perform dblink_exec(
     'norva_adk_writer','set local statement_timeout = ''15s'''
   );
-  perform extensions.dblink_exec(
+  perform dblink_exec(
     'norva_adk_writer',
     'set local "request.jwt.claim.role" = ''service_role'''
   );
-  perform extensions.dblink_exec(
+  perform dblink_exec(
     'norva_adk_writer',
     'set local "norva.test_account_delete_pause" = ''82783001'''
   );
-  perform extensions.dblink_send_query(
+  perform dblink_send_query(
     'norva_adk_writer',
     pg_catalog.format(
       'select public.norva_test_account_delete_insert_title(%L::uuid,%L::uuid)',
@@ -598,15 +598,15 @@ begin
     raise exception 'writer did not reach the post-guard advisory pause';
   end if;
 
-  perform extensions.dblink_exec('norva_adk_begin','begin');
-  perform extensions.dblink_exec(
+  perform dblink_exec('norva_adk_begin','begin');
+  perform dblink_exec(
     'norva_adk_begin','set local statement_timeout = ''15s'''
   );
-  perform extensions.dblink_exec(
+  perform dblink_exec(
     'norva_adk_begin',
     'set local "request.jwt.claim.role" = ''service_role'''
   );
-  perform extensions.dblink_send_query(
+  perform dblink_send_query(
     'norva_adk_begin',
     pg_catalog.format(
       'select public.norva_begin_provider_account_deletion_prepare(%L::uuid)',
@@ -621,41 +621,41 @@ begin
     perform pg_catalog.pg_sleep(0.01); v_waited := v_waited + 1;
   end loop;
   if v_waited >= 200
-     or extensions.dblink_is_busy('norva_adk_writer') <> 1
-     or extensions.dblink_is_busy('norva_adk_begin') <> 1 then
+     or dblink_is_busy('norva_adk_writer') <> 1
+     or dblink_is_busy('norva_adk_begin') <> 1 then
     raise exception 'begin_prepare did not serialize behind the guarded writer';
   end if;
   perform pg_catalog.pg_advisory_unlock(82783001::bigint);
 
   select remote.result into strict v_write_result
-  from extensions.dblink_get_result('norva_adk_writer')
+  from dblink_get_result('norva_adk_writer')
     as remote(result text);
   -- libpq async mode has a terminal empty result that must be consumed.
-  perform count(*) from extensions.dblink_get_result('norva_adk_writer')
+  perform count(*) from dblink_get_result('norva_adk_writer')
     as remote(result text);
-  perform extensions.dblink_exec('norva_adk_writer','rollback');
+  perform dblink_exec('norva_adk_writer','rollback');
   select remote.payload into strict v_begin_result
-  from extensions.dblink_get_result('norva_adk_begin')
+  from dblink_get_result('norva_adk_begin')
     as remote(payload jsonb);
-  perform count(*) from extensions.dblink_get_result('norva_adk_begin')
+  perform count(*) from dblink_get_result('norva_adk_begin')
     as remote(payload jsonb);
-  perform extensions.dblink_exec('norva_adk_begin','commit');
+  perform dblink_exec('norva_adk_begin','commit');
   insert into provider_account_delete_race_results
     (scenario,write_result,begin_result)
   values ('guard_first',v_write_result,v_begin_result);
 
   -- Race B: begin_prepare owns auth UPDATE first.  The direct-DML guard uses
   -- NOWAIT and maps 55P03 to the retryable contract SQLSTATE 40001.
-  perform extensions.dblink_exec('norva_adk_begin','begin');
-  perform extensions.dblink_exec(
+  perform dblink_exec('norva_adk_begin','begin');
+  perform dblink_exec(
     'norva_adk_begin','set local statement_timeout = ''15s'''
   );
-  perform extensions.dblink_exec(
+  perform dblink_exec(
     'norva_adk_begin',
     'set local "request.jwt.claim.role" = ''service_role'''
   );
   select remote.payload into strict v_begin_result
-  from extensions.dblink(
+  from dblink(
     'norva_adk_begin',
     pg_catalog.format(
       'select public.norva_begin_provider_account_deletion_prepare(%L::uuid)',
@@ -663,45 +663,45 @@ begin
     )
   ) as remote(payload jsonb);
 
-  perform extensions.dblink_exec('norva_adk_writer','begin');
-  perform extensions.dblink_exec(
+  perform dblink_exec('norva_adk_writer','begin');
+  perform dblink_exec(
     'norva_adk_writer','set local statement_timeout = ''15s'''
   );
-  perform extensions.dblink_exec(
+  perform dblink_exec(
     'norva_adk_writer',
     'set local "request.jwt.claim.role" = ''service_role'''
   );
   select remote.result into strict v_write_result
-  from extensions.dblink(
+  from dblink(
     'norva_adk_writer',
     pg_catalog.format(
       'select public.norva_test_account_delete_insert_title(%L::uuid,%L::uuid)',
       v_begin_user,v_begin_title
     )
   ) as remote(result text);
-  perform extensions.dblink_exec('norva_adk_writer','rollback');
-  perform extensions.dblink_exec('norva_adk_begin','commit');
+  perform dblink_exec('norva_adk_writer','rollback');
+  perform dblink_exec('norva_adk_begin','commit');
   insert into provider_account_delete_race_results
     (scenario,write_result,begin_result)
   values ('begin_first',v_write_result,v_begin_result);
 
-  perform extensions.dblink_disconnect('norva_adk_writer');
-  perform extensions.dblink_disconnect('norva_adk_begin');
+  perform dblink_disconnect('norva_adk_writer');
+  perform dblink_disconnect('norva_adk_begin');
 exception when others then
   -- Session advisory locks survive transaction abort, so release it first.
   perform pg_catalog.pg_advisory_unlock(82783001::bigint);
   foreach v_connection in array coalesce(
-    extensions.dblink_get_connections(),array[]::text[]
+    dblink_get_connections(),array[]::text[]
   ) loop
     if v_connection in ('norva_adk_writer','norva_adk_begin') then
       begin
-        if extensions.dblink_is_busy(v_connection) = 1 then
-          perform extensions.dblink_cancel_query(v_connection);
+        if dblink_is_busy(v_connection) = 1 then
+          perform dblink_cancel_query(v_connection);
         end if;
       exception when others then null;
       end;
       begin
-        perform extensions.dblink_disconnect(v_connection);
+        perform dblink_disconnect(v_connection);
       exception when others then null;
       end;
     end if;
@@ -765,39 +765,39 @@ begin
   where scenario = 'permit_first';
   select * into strict v_second from provider_account_delete_race_fixtures
   where scenario = 'permit_begin_first';
-  perform extensions.dblink_connect(
+  perform dblink_connect(
     'norva_adk_permit',pg_catalog.format(
       'host=127.0.0.1 port=%s dbname=%s user=%s connect_timeout=2 options=''-c statement_timeout=15000''',
       current_setting('port'),current_database(),current_user
     )
   );
-  perform extensions.dblink_connect(
+  perform dblink_connect(
     'norva_adk_permit_begin',pg_catalog.format(
       'host=127.0.0.1 port=%s dbname=%s user=%s connect_timeout=2 options=''-c statement_timeout=15000''',
       current_setting('port'),current_database(),current_user
     )
   );
   select remote.pid into strict v_permit_pid
-  from extensions.dblink('norva_adk_permit','select pg_backend_pid()')
+  from dblink('norva_adk_permit','select pg_backend_pid()')
     as remote(pid integer);
   select remote.pid into strict v_begin_pid
-  from extensions.dblink('norva_adk_permit_begin','select pg_backend_pid()')
+  from dblink('norva_adk_permit_begin','select pg_backend_pid()')
     as remote(pid integer);
 
   perform pg_catalog.pg_advisory_lock(82783002::bigint);
-  perform extensions.dblink_exec('norva_adk_permit','begin');
-  perform extensions.dblink_exec(
+  perform dblink_exec('norva_adk_permit','begin');
+  perform dblink_exec(
     'norva_adk_permit','set local statement_timeout = ''15s'''
   );
-  perform extensions.dblink_exec(
+  perform dblink_exec(
     'norva_adk_permit',
     'set local "request.jwt.claim.role" = ''service_role'''
   );
-  perform extensions.dblink_exec(
+  perform dblink_exec(
     'norva_adk_permit',
     'set local "norva.test_account_delete_permit_pause" = ''82783002'''
   );
-  perform extensions.dblink_send_query(
+  perform dblink_send_query(
     'norva_adk_permit',pg_catalog.format(
       'select public.norva_test_account_delete_acquire_permit(%L::uuid,%L::uuid,%L::uuid,%L)',
       v_first.user_id,v_first.source_id,v_first.authority_token,
@@ -815,15 +815,15 @@ begin
     raise exception 'permit did not reach its post-insert advisory pause';
   end if;
 
-  perform extensions.dblink_exec('norva_adk_permit_begin','begin');
-  perform extensions.dblink_exec(
+  perform dblink_exec('norva_adk_permit_begin','begin');
+  perform dblink_exec(
     'norva_adk_permit_begin','set local statement_timeout = ''15s'''
   );
-  perform extensions.dblink_exec(
+  perform dblink_exec(
     'norva_adk_permit_begin',
     'set local "request.jwt.claim.role" = ''service_role'''
   );
-  perform extensions.dblink_send_query(
+  perform dblink_send_query(
     'norva_adk_permit_begin',pg_catalog.format(
       'select public.norva_begin_provider_account_deletion_prepare(%L::uuid)',
       v_first.user_id
@@ -837,24 +837,24 @@ begin
     perform pg_catalog.pg_sleep(0.01); v_waited := v_waited + 1;
   end loop;
   if v_waited >= 200
-     or extensions.dblink_is_busy('norva_adk_permit') <> 1
-     or extensions.dblink_is_busy('norva_adk_permit_begin') <> 1 then
+     or dblink_is_busy('norva_adk_permit') <> 1
+     or dblink_is_busy('norva_adk_permit_begin') <> 1 then
     raise exception 'begin_prepare did not wait behind the active permit';
   end if;
   perform pg_catalog.pg_advisory_unlock(82783002::bigint);
   select remote.payload into strict v_permit_result
-  from extensions.dblink_get_result('norva_adk_permit')
+  from dblink_get_result('norva_adk_permit')
     as remote(payload jsonb);
-  perform count(*) from extensions.dblink_get_result('norva_adk_permit')
+  perform count(*) from dblink_get_result('norva_adk_permit')
     as remote(payload jsonb);
-  perform extensions.dblink_exec('norva_adk_permit','commit');
+  perform dblink_exec('norva_adk_permit','commit');
   select remote.payload into strict v_begin_result
-  from extensions.dblink_get_result('norva_adk_permit_begin')
+  from dblink_get_result('norva_adk_permit_begin')
     as remote(payload jsonb);
   perform count(*)
-  from extensions.dblink_get_result('norva_adk_permit_begin')
+  from dblink_get_result('norva_adk_permit_begin')
     as remote(payload jsonb);
-  perform extensions.dblink_exec('norva_adk_permit_begin','commit');
+  perform dblink_exec('norva_adk_permit_begin','commit');
   insert into provider_account_delete_extended_results values (
     'permit_first',jsonb_build_object(
       'permitEnvelope',v_permit_result,'begin',v_begin_result
@@ -863,30 +863,30 @@ begin
 
   -- Begin owns auth UPDATE.  Permit acquisition blocks (it is not NOWAIT),
   -- then observes the committed preparation and returns the contract 40001.
-  perform extensions.dblink_exec('norva_adk_permit_begin','begin');
-  perform extensions.dblink_exec(
+  perform dblink_exec('norva_adk_permit_begin','begin');
+  perform dblink_exec(
     'norva_adk_permit_begin','set local statement_timeout = ''15s'''
   );
-  perform extensions.dblink_exec(
+  perform dblink_exec(
     'norva_adk_permit_begin',
     'set local "request.jwt.claim.role" = ''service_role'''
   );
   select remote.payload into strict v_begin_result
-  from extensions.dblink(
+  from dblink(
     'norva_adk_permit_begin',pg_catalog.format(
       'select public.norva_begin_provider_account_deletion_prepare(%L::uuid)',
       v_second.user_id
     )
   ) as remote(payload jsonb);
-  perform extensions.dblink_exec('norva_adk_permit','begin');
-  perform extensions.dblink_exec(
+  perform dblink_exec('norva_adk_permit','begin');
+  perform dblink_exec(
     'norva_adk_permit','set local statement_timeout = ''15s'''
   );
-  perform extensions.dblink_exec(
+  perform dblink_exec(
     'norva_adk_permit',
     'set local "request.jwt.claim.role" = ''service_role'''
   );
-  perform extensions.dblink_send_query(
+  perform dblink_send_query(
     'norva_adk_permit',pg_catalog.format(
       'select public.norva_test_account_delete_acquire_permit(%L::uuid,%L::uuid,%L::uuid,%L)',
       v_second.user_id,v_second.source_id,v_second.authority_token,
@@ -900,36 +900,36 @@ begin
   ) loop
     perform pg_catalog.pg_sleep(0.01); v_waited := v_waited + 1;
   end loop;
-  if v_waited >= 200 or extensions.dblink_is_busy('norva_adk_permit') <> 1 then
+  if v_waited >= 200 or dblink_is_busy('norva_adk_permit') <> 1 then
     raise exception 'permit did not serialize behind begin_prepare';
   end if;
-  perform extensions.dblink_exec('norva_adk_permit_begin','commit');
+  perform dblink_exec('norva_adk_permit_begin','commit');
   select remote.payload into strict v_permit_result
-  from extensions.dblink_get_result('norva_adk_permit')
+  from dblink_get_result('norva_adk_permit')
     as remote(payload jsonb);
-  perform count(*) from extensions.dblink_get_result('norva_adk_permit')
+  perform count(*) from dblink_get_result('norva_adk_permit')
     as remote(payload jsonb);
-  perform extensions.dblink_exec('norva_adk_permit','commit');
+  perform dblink_exec('norva_adk_permit','commit');
   insert into provider_account_delete_extended_results values (
     'permit_begin_first',jsonb_build_object(
       'permitEnvelope',v_permit_result,'begin',v_begin_result
     )
   );
-  perform extensions.dblink_disconnect('norva_adk_permit');
-  perform extensions.dblink_disconnect('norva_adk_permit_begin');
+  perform dblink_disconnect('norva_adk_permit');
+  perform dblink_disconnect('norva_adk_permit_begin');
 exception when others then
   perform pg_catalog.pg_advisory_unlock(82783002::bigint);
   foreach v_connection in array coalesce(
-    extensions.dblink_get_connections(),array[]::text[]
+    dblink_get_connections(),array[]::text[]
   ) loop
     if v_connection in ('norva_adk_permit','norva_adk_permit_begin') then
       begin
-        if extensions.dblink_is_busy(v_connection) = 1 then
-          perform extensions.dblink_cancel_query(v_connection);
+        if dblink_is_busy(v_connection) = 1 then
+          perform dblink_cancel_query(v_connection);
         end if;
       exception when others then null;
       end;
-      begin perform extensions.dblink_disconnect(v_connection);
+      begin perform dblink_disconnect(v_connection);
       exception when others then null;
       end;
     end if;
@@ -1052,46 +1052,46 @@ begin
   where scenario = 'reaper_first';
   select * into strict v_fault from provider_account_delete_race_fixtures
   where scenario = 'reaper_fault';
-  perform extensions.dblink_connect(
+  perform dblink_connect(
     'norva_adk_transition',pg_catalog.format(
       'host=127.0.0.1 port=%s dbname=%s user=%s connect_timeout=2 options=''-c statement_timeout=15000''',
       current_setting('port'),current_database(),current_user
     )
   );
-  perform extensions.dblink_connect(
+  perform dblink_connect(
     'norva_adk_reaper',pg_catalog.format(
       'host=127.0.0.1 port=%s dbname=%s user=%s connect_timeout=2 options=''-c statement_timeout=15000''',
       current_setting('port'),current_database(),current_user
     )
   );
   select remote.pid into strict v_transition_pid
-  from extensions.dblink('norva_adk_transition','select pg_backend_pid()')
+  from dblink('norva_adk_transition','select pg_backend_pid()')
     as remote(pid integer);
   select remote.pid into strict v_reaper_pid
-  from extensions.dblink('norva_adk_reaper','select pg_backend_pid()')
+  from dblink('norva_adk_reaper','select pg_backend_pid()')
     as remote(pid integer);
 
   -- Transition wins but remains uncommitted.  The competing tombstone UPDATE
   -- reaches the same source row and demonstrably waits before the reaper can
   -- select anything.
-  perform extensions.dblink_exec('norva_adk_transition','begin');
-  perform extensions.dblink_exec(
+  perform dblink_exec('norva_adk_transition','begin');
+  perform dblink_exec(
     'norva_adk_transition',
     'set local "request.jwt.claim.role" = ''service_role'''
   );
-  perform extensions.dblink_exec(
+  perform dblink_exec(
     'norva_adk_transition','set local session_replication_role = ''replica'''
   );
-  perform extensions.dblink_exec(
+  perform dblink_exec(
     'norva_adk_transition',
     $$update public.admin_feature_flags set enabled=true
       where key='provider_credential_transition_v1_enabled'$$
   );
-  perform extensions.dblink_exec(
+  perform dblink_exec(
     'norva_adk_transition','set local session_replication_role = ''origin'''
   );
   select remote.result into strict v_transition_result
-  from extensions.dblink(
+  from dblink(
     'norva_adk_transition',pg_catalog.format(
       'select public.norva_test_account_delete_create_transition(%L::uuid,%L::uuid,%L::uuid)',
       v_first.user_id,v_first.source_id,v_first.authority_token
@@ -1101,8 +1101,8 @@ begin
     raise exception 'transition-first overlap fixture failed: %',
       v_transition_result;
   end if;
-  perform extensions.dblink_exec('norva_adk_reaper','begin');
-  perform extensions.dblink_send_query(
+  perform dblink_exec('norva_adk_reaper','begin');
+  perform dblink_send_query(
     'norva_adk_reaper',pg_catalog.format(
       'select public.norva_test_account_delete_tombstone_reap(%L::uuid)',
       v_first.source_id
@@ -1116,24 +1116,24 @@ begin
     perform pg_catalog.pg_sleep(0.01); v_waited := v_waited + 1;
   end loop;
   if v_waited >= 200
-     or extensions.dblink_is_busy('norva_adk_reaper') <> 1 then
+     or dblink_is_busy('norva_adk_reaper') <> 1 then
     raise exception 'reaper did not overlap the uncommitted transition';
   end if;
-  perform extensions.dblink_exec(
+  perform dblink_exec(
     'norva_adk_transition','set local session_replication_role = ''replica'''
   );
-  perform extensions.dblink_exec(
+  perform dblink_exec(
     'norva_adk_transition',
     $$update public.admin_feature_flags set enabled=false
       where key='provider_credential_transition_v1_enabled'$$
   );
-  perform extensions.dblink_exec('norva_adk_transition','commit');
+  perform dblink_exec('norva_adk_transition','commit');
   select remote.payload into strict v_reaper_result
-  from extensions.dblink_get_result('norva_adk_reaper')
+  from dblink_get_result('norva_adk_reaper')
     as remote(payload jsonb);
-  perform count(*) from extensions.dblink_get_result('norva_adk_reaper')
+  perform count(*) from dblink_get_result('norva_adk_reaper')
     as remote(payload jsonb);
-  perform extensions.dblink_exec('norva_adk_reaper','commit');
+  perform dblink_exec('norva_adk_reaper','commit');
   insert into provider_account_delete_extended_results values (
     'transition_first',jsonb_build_object(
       'overlapObserved',true,
@@ -1152,31 +1152,31 @@ begin
 
   -- Reaper wins and returns while its transaction intentionally remains open,
   -- proving the later transition is blocked on the uncommitted source fence.
-  perform extensions.dblink_exec('norva_adk_reaper','begin');
+  perform dblink_exec('norva_adk_reaper','begin');
   select remote.payload into strict v_reaper_result
-  from extensions.dblink(
+  from dblink(
     'norva_adk_reaper',pg_catalog.format(
       'select public.norva_test_account_delete_tombstone_reap(%L::uuid)',
       v_second.source_id
     )
   ) as remote(payload jsonb);
-  perform extensions.dblink_exec('norva_adk_transition','begin');
-  perform extensions.dblink_exec(
+  perform dblink_exec('norva_adk_transition','begin');
+  perform dblink_exec(
     'norva_adk_transition',
     'set local "request.jwt.claim.role" = ''service_role'''
   );
-  perform extensions.dblink_exec(
+  perform dblink_exec(
     'norva_adk_transition','set local session_replication_role = ''replica'''
   );
-  perform extensions.dblink_exec(
+  perform dblink_exec(
     'norva_adk_transition',
     $$update public.admin_feature_flags set enabled=true
       where key='provider_credential_transition_v1_enabled'$$
   );
-  perform extensions.dblink_exec(
+  perform dblink_exec(
     'norva_adk_transition','set local session_replication_role = ''origin'''
   );
-  perform extensions.dblink_send_query(
+  perform dblink_send_query(
     'norva_adk_transition',pg_catalog.format(
       'select public.norva_test_account_delete_create_transition(%L::uuid,%L::uuid,%L::uuid)',
       v_second.user_id,v_second.source_id,v_second.authority_token
@@ -1190,24 +1190,24 @@ begin
     perform pg_catalog.pg_sleep(0.01); v_waited := v_waited + 1;
   end loop;
   if v_waited >= 200
-     or extensions.dblink_is_busy('norva_adk_transition') <> 1 then
+     or dblink_is_busy('norva_adk_transition') <> 1 then
     raise exception 'transition did not overlap the uncommitted reaper fence';
   end if;
-  perform extensions.dblink_exec('norva_adk_reaper','commit');
+  perform dblink_exec('norva_adk_reaper','commit');
   select remote.result into strict v_transition_result
-  from extensions.dblink_get_result('norva_adk_transition')
+  from dblink_get_result('norva_adk_transition')
     as remote(result text);
-  perform count(*) from extensions.dblink_get_result('norva_adk_transition')
+  perform count(*) from dblink_get_result('norva_adk_transition')
     as remote(result text);
-  perform extensions.dblink_exec(
+  perform dblink_exec(
     'norva_adk_transition','set local session_replication_role = ''replica'''
   );
-  perform extensions.dblink_exec(
+  perform dblink_exec(
     'norva_adk_transition',
     $$update public.admin_feature_flags set enabled=false
       where key='provider_credential_transition_v1_enabled'$$
   );
-  perform extensions.dblink_exec('norva_adk_transition','commit');
+  perform dblink_exec('norva_adk_transition','commit');
   insert into provider_account_delete_extended_results values (
     'reaper_first',jsonb_build_object(
       'overlapObserved',true,
@@ -1227,8 +1227,8 @@ begin
   -- Fault injection: session A acquires the reaper singleton and then raises
   -- from the source fence UPDATE.  Rolling that transaction back must release
   -- the xact advisory key, allowing session B to fence the same fixture.
-  perform extensions.dblink_exec('norva_adk_transition','begin');
-  perform extensions.dblink_exec(
+  perform dblink_exec('norva_adk_transition','begin');
+  perform dblink_exec(
     'norva_adk_transition',$sql$
       create function public.norva_test_reaper_fault_guard()
       returns trigger language plpgsql set search_path = '' as $body$
@@ -1243,19 +1243,19 @@ begin
       $body$
     $sql$
   );
-  perform extensions.dblink_exec(
+  perform dblink_exec(
     'norva_adk_transition',$sql$
       create trigger trg_zzzz_test_reaper_fault
       before update on public.cloud_sources
       for each row execute function public.norva_test_reaper_fault_guard()
     $sql$
   );
-  perform extensions.dblink_exec(
+  perform dblink_exec(
     'norva_adk_transition',pg_catalog.format(
       'set local "norva.test_reaper_fault_source" = %L',v_fault.source_id
     )
   );
-  perform extensions.dblink_exec(
+  perform dblink_exec(
     'norva_adk_transition',pg_catalog.format(
       $$update public.cloud_sources
         set deleted_at='2000-01-01 00:00:00+00'::timestamptz,enabled=false
@@ -1263,7 +1263,7 @@ begin
     )
   );
   begin
-    perform extensions.dblink_exec(
+    perform dblink_exec(
       'norva_adk_transition','call public.reap_deleted_sources()'
     );
   exception when others then
@@ -1272,16 +1272,16 @@ begin
   if not v_fault_observed then
     raise exception 'reaper fault injection unexpectedly completed';
   end if;
-  perform extensions.dblink_exec('norva_adk_transition','rollback');
-  perform extensions.dblink_exec('norva_adk_reaper','begin');
+  perform dblink_exec('norva_adk_transition','rollback');
+  perform dblink_exec('norva_adk_reaper','begin');
   select remote.payload into strict v_reaper_result
-  from extensions.dblink(
+  from dblink(
     'norva_adk_reaper',pg_catalog.format(
       'select public.norva_test_account_delete_tombstone_reap(%L::uuid)',
       v_fault.source_id
     )
   ) as remote(payload jsonb);
-  perform extensions.dblink_exec('norva_adk_reaper','commit');
+  perform dblink_exec('norva_adk_reaper','commit');
   insert into provider_account_delete_extended_results values (
     'reaper_fault',jsonb_build_object(
       'faultObserved',v_fault_observed,
@@ -1289,23 +1289,23 @@ begin
         (v_reaper_result->>'sourceDeletionPending')::boolean
     )
   );
-  perform extensions.dblink_disconnect('norva_adk_transition');
-  perform extensions.dblink_disconnect('norva_adk_reaper');
+  perform dblink_disconnect('norva_adk_transition');
+  perform dblink_disconnect('norva_adk_reaper');
 exception when others then
   foreach v_connection in array coalesce(
-    extensions.dblink_get_connections(),array[]::text[]
+    dblink_get_connections(),array[]::text[]
   ) loop
     if v_connection in ('norva_adk_transition','norva_adk_reaper') then
       begin
-        if extensions.dblink_is_busy(v_connection) = 1 then
-          perform extensions.dblink_cancel_query(v_connection);
+        if dblink_is_busy(v_connection) = 1 then
+          perform dblink_cancel_query(v_connection);
         end if;
       exception when others then null;
       end;
-      begin perform extensions.dblink_exec(v_connection,'rollback');
+      begin perform dblink_exec(v_connection,'rollback');
       exception when others then null;
       end;
-      begin perform extensions.dblink_disconnect(v_connection);
+      begin perform dblink_disconnect(v_connection);
       exception when others then null;
       end;
     end if;
@@ -1379,7 +1379,7 @@ begin
   select * into strict v_fixture from provider_account_delete_race_fixtures
   where scenario = 'reclaim_dead';
   select remote.payload into strict v_w1
-  from extensions.dblink(v_connection,pg_catalog.format(
+  from dblink(v_connection,pg_catalog.format(
     'select public.norva_test_account_delete_claim(%L::uuid,%L)',
     v_fixture.user_id,'account-delete-race-w1'
   )) as remote(payload jsonb);
@@ -1415,24 +1415,24 @@ begin
   from provider_account_delete_extended_results where scenario = 'reclaim_dead';
   v_w1 := v_result->'w1';
   select remote.payload into strict v_w2
-  from extensions.dblink(v_connection,pg_catalog.format(
+  from dblink(v_connection,pg_catalog.format(
     'select public.norva_test_account_delete_claim(%L::uuid,%L)',
     v_fixture.user_id,'account-delete-race-w2'
   )) as remote(payload jsonb);
   select remote.payload into strict v_stale
-  from extensions.dblink(v_connection,pg_catalog.format(
+  from dblink(v_connection,pg_catalog.format(
     'select public.norva_test_account_delete_run_batch(%L::uuid,%L,%s,%s)',
     v_fixture.user_id,'account-delete-race-w1',
     (v_w1->>'leaseSequence')::integer,(v_w1->>'revision')::bigint
   )) as remote(payload jsonb);
   select remote.payload into strict v_stale_checkpoint
-  from extensions.dblink(v_connection,pg_catalog.format(
+  from dblink(v_connection,pg_catalog.format(
     'select public.norva_test_account_delete_checkpoint(%L::uuid,%L,%s,%s)',
     v_fixture.user_id,'account-delete-race-w1',
     (v_w1->>'leaseSequence')::integer,(v_w1->>'revision')::bigint
   )) as remote(payload jsonb);
   select remote.payload into strict v_stale_settle
-  from extensions.dblink(v_connection,pg_catalog.format(
+  from dblink(v_connection,pg_catalog.format(
     'select public.norva_test_account_delete_settle_failure(%L::uuid,%L,%s,%s)',
     v_fixture.user_id,'account-delete-race-w1',
     (v_w1->>'leaseSequence')::integer,(v_w1->>'revision')::bigint
@@ -1465,7 +1465,7 @@ begin
   select * into strict v_fixture from provider_account_delete_race_fixtures
   where scenario = 'reclaim_dead';
   select remote.payload into strict v_w3
-  from extensions.dblink(v_connection,pg_catalog.format(
+  from dblink(v_connection,pg_catalog.format(
     'select public.norva_test_account_delete_claim(%L::uuid,%L)',
     v_fixture.user_id,'account-delete-race-w3'
   )) as remote(payload jsonb);
@@ -1493,7 +1493,7 @@ begin
   select * into strict v_fixture from provider_account_delete_race_fixtures
   where scenario = 'reclaim_dead';
   select remote.payload into strict v_dead
-  from extensions.dblink(v_connection,pg_catalog.format(
+  from dblink(v_connection,pg_catalog.format(
     'select public.norva_test_account_delete_claim(%L::uuid,%L)',
     v_fixture.user_id,'account-delete-race-w4'
   )) as remote(payload jsonb);
@@ -1715,7 +1715,7 @@ begin
   if exists (
     select 1
     from unnest(coalesce(
-      extensions.dblink_get_connections(),array[]::text[]
+      dblink_get_connections(),array[]::text[]
     )) connection_name
     where connection_name like 'norva_adk_%'
   ) then

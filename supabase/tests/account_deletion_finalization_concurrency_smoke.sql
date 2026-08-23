@@ -38,18 +38,18 @@ set local "request.jwt.claim.role" = 'service_role';
 do $race$
 declare v_a record; v_b record; v_key uuid; v_connection text;
 begin
-  perform extensions.dblink_connect('norva_final_a',format(
+  perform dblink_connect('norva_final_a',format(
     'host=127.0.0.1 port=%s dbname=%s user=%s connect_timeout=2',current_setting('port'),current_database(),current_user));
-  perform extensions.dblink_connect('norva_final_b',format(
+  perform dblink_connect('norva_final_b',format(
     'host=127.0.0.1 port=%s dbname=%s user=%s connect_timeout=2',current_setting('port'),current_database(),current_user));
-  perform extensions.dblink_exec('norva_final_a','set "request.jwt.claim.role"=''service_role''');
-  perform extensions.dblink_exec('norva_final_b','set "request.jwt.claim.role"=''service_role''');
-  perform extensions.dblink_send_query('norva_final_a',
+  perform dblink_exec('norva_final_a','set "request.jwt.claim.role"=''service_role''');
+  perform dblink_exec('norva_final_b','set "request.jwt.claim.role"=''service_role''');
+  perform dblink_send_query('norva_final_a',
     'select * from public.norva_claim_account_deletion_finalizations(1,120)');
-  perform extensions.dblink_send_query('norva_final_b',
+  perform dblink_send_query('norva_final_b',
     'select * from public.norva_claim_account_deletion_finalizations(1,120)');
-  select * into v_a from extensions.dblink_get_result('norva_final_a') as t(user_id uuid,finalization_key uuid);
-  select * into v_b from extensions.dblink_get_result('norva_final_b') as t(user_id uuid,finalization_key uuid);
+  select * into v_a from dblink_get_result('norva_final_a') as t(user_id uuid,finalization_key uuid);
+  select * into v_b from dblink_get_result('norva_final_b') as t(user_id uuid,finalization_key uuid);
   if (v_a.finalization_key is null and v_b.finalization_key is null)
      or (v_a.finalization_key is not null and v_b.finalization_key is not null) then
     raise exception 'finalization race did not have exactly one winner';
@@ -60,12 +60,12 @@ begin
                  where finalization_key=v_key and state='claimed') then
     raise exception 'crash fixture did not retain claimed tombstone';
   end if;
-  perform extensions.dblink_disconnect('norva_final_a');
-  perform extensions.dblink_disconnect('norva_final_b');
+  perform dblink_disconnect('norva_final_a');
+  perform dblink_disconnect('norva_final_b');
 exception when others then
-  foreach v_connection in array coalesce(extensions.dblink_get_connections(),array[]::text[]) loop
+  foreach v_connection in array coalesce(dblink_get_connections(),array[]::text[]) loop
     if v_connection in ('norva_final_a','norva_final_b') then
-      begin perform extensions.dblink_disconnect(v_connection); exception when others then null; end;
+      begin perform dblink_disconnect(v_connection); exception when others then null; end;
     end if;
   end loop;
   raise;

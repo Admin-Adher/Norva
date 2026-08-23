@@ -57,45 +57,45 @@ declare
   v_b record;
   v_connection text;
 begin
-  perform extensions.dblink_connect('norva_workflow_claim_a',format(
+  perform dblink_connect('norva_workflow_claim_a',format(
     'host=127.0.0.1 port=%s dbname=%s user=%s connect_timeout=2',
     current_setting('port'),current_database(),current_user));
-  perform extensions.dblink_connect('norva_workflow_claim_b',format(
+  perform dblink_connect('norva_workflow_claim_b',format(
     'host=127.0.0.1 port=%s dbname=%s user=%s connect_timeout=2',
     current_setting('port'),current_database(),current_user));
-  perform extensions.dblink_exec('norva_workflow_claim_a','begin');
-  perform extensions.dblink_exec('norva_workflow_claim_a',
+  perform dblink_exec('norva_workflow_claim_a','begin');
+  perform dblink_exec('norva_workflow_claim_a',
     'set local "request.jwt.claim.role"=''service_role''');
-  perform extensions.dblink_exec('norva_workflow_claim_b',
+  perform dblink_exec('norva_workflow_claim_b',
     'set "request.jwt.claim.role"=''service_role''');
-  perform extensions.dblink_send_query('norva_workflow_claim_a',
+  perform dblink_send_query('norva_workflow_claim_a',
     'select * from public.norva_claim_account_deletion_workflows(1) where user_id=''d0000000-0000-0000-0000-000000000093''');
-  select * into v_a from extensions.dblink_get_result('norva_workflow_claim_a')
+  select * into v_a from dblink_get_result('norva_workflow_claim_a')
     as t(user_id uuid,state text,revision bigint);
-  perform 1 from extensions.dblink_get_result('norva_workflow_claim_a')
+  perform 1 from dblink_get_result('norva_workflow_claim_a')
     as t(user_id uuid,state text,revision bigint);
   if v_a.user_id is null or v_a.revision <> 1 then
     raise exception 'first scheduler did not claim expected workflow revision';
   end if;
   -- A remains uncommitted, retaining the row lock. B must not wait and then
   -- claim a second revision; SKIP LOCKED makes it an explicit no-op.
-  perform extensions.dblink_send_query('norva_workflow_claim_b',
+  perform dblink_send_query('norva_workflow_claim_b',
     'select * from public.norva_claim_account_deletion_workflows(1) where user_id=''d0000000-0000-0000-0000-000000000093''');
-  select * into v_b from extensions.dblink_get_result('norva_workflow_claim_b')
+  select * into v_b from dblink_get_result('norva_workflow_claim_b')
     as t(user_id uuid,state text,revision bigint);
-  perform 1 from extensions.dblink_get_result('norva_workflow_claim_b')
+  perform 1 from dblink_get_result('norva_workflow_claim_b')
     as t(user_id uuid,state text,revision bigint);
   if v_b.user_id is not null then
     raise exception 'second scheduler claimed a locked workflow';
   end if;
-  perform extensions.dblink_exec('norva_workflow_claim_a','commit');
-  perform extensions.dblink_disconnect('norva_workflow_claim_a');
-  perform extensions.dblink_disconnect('norva_workflow_claim_b');
+  perform dblink_exec('norva_workflow_claim_a','commit');
+  perform dblink_disconnect('norva_workflow_claim_a');
+  perform dblink_disconnect('norva_workflow_claim_b');
 exception when others then
-  foreach v_connection in array coalesce(extensions.dblink_get_connections(),array[]::text[]) loop
+  foreach v_connection in array coalesce(dblink_get_connections(),array[]::text[]) loop
     if v_connection in ('norva_workflow_claim_a','norva_workflow_claim_b') then
-      begin perform extensions.dblink_exec(v_connection,'rollback'); exception when others then null; end;
-      begin perform extensions.dblink_disconnect(v_connection); exception when others then null; end;
+      begin perform dblink_exec(v_connection,'rollback'); exception when others then null; end;
+      begin perform dblink_disconnect(v_connection); exception when others then null; end;
     end if;
   end loop;
   raise;
