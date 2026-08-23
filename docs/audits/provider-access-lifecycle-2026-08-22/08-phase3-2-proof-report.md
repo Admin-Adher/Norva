@@ -135,6 +135,13 @@ lease/révision à `1/1`, `2/2`, `3/3`. Les tentatives tardives de W1 sur run,
 settle et checkpoint retournent toutes `40001`; aucun ancien worker ne peut
 committer après reprise.
 
+La matrice `catalog_background_owner_snapshot_concurrency_smoke.sql` a été
+rejouée également : les six courses INSERT/UPDATE/DELETE × writer-first /
+activation-first ont convergé. Les writers sont soit bloqués derrière
+l'activation, soit rejetés `40001` avant leur retry durable; les snapshots
+retournent alors exactement 0 ou 1 titre suivant le DELETE ou INSERT, et le
+UPDATE expose toujours le titre V2. Aucun état intermédiaire n'a été observé.
+
 ## Matrice deux-sessions rejouée 2026-08-23
 
 Les harnesses ont été rendus portables entre une installation `dblink` dans le
