@@ -103,6 +103,13 @@ complet `provider_credential_transition.sql` a été rejoué sur ce même schém
 isolé : **72/72**, suivi de son `ROLLBACK` transactionnel. L'assertion finale
 confirme à nouveau que `provider_credential_transition_v1_enabled` est OFF.
 
+Le contrat applicatif de l'adaptateur `norva-account-delete` a aussi été rejoué
+localement via `node --test tests/account-deletion-email-delivery.test.js` :
+**20/20**. Il confirme notamment que la requête utilisateur persiste la demande
+et retourne un état durable, que le cron avance au plus un batch borné avec CAS,
+et que le seul `auth.admin.deleteUser()` est dans le finaliseur après son claim
+et ses préconditions PostgreSQL — jamais dans le chemin de demande initiale.
+
 ## Matrice deux-sessions rejouée 2026-08-23
 
 Les harnesses ont été rendus portables entre une installation `dblink` dans le
