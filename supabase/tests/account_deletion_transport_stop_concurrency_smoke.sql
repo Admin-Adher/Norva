@@ -230,6 +230,7 @@ delete from public.cloud_provider_account_delete_preparations where user_id='d00
 delete from public.cloud_source_provider_account_affinities where user_id='d0000000-0000-0000-0000-000000000096';
 delete from public.cloud_account_deletion_workflows where user_id='d0000000-0000-0000-0000-000000000096';
 set local session_replication_role = replica;
+delete from public.cloud_source_lifecycle where source_id='d0000000-0000-0000-0000-000000000196';
 delete from public.cloud_sources where id='d0000000-0000-0000-0000-000000000196';
 delete from auth.users where id='d0000000-0000-0000-0000-000000000096';
 set local session_replication_role = origin;
@@ -239,12 +240,14 @@ values ('d0000000-0000-0000-0000-000000000096',
   '00000000-0000-0000-0000-000000000000','authenticated','authenticated',
   'account-delete-scope-096@invalid.test','not-used',clock_timestamp(),
   '{}'::jsonb,'{}'::jsonb,clock_timestamp(),clock_timestamp());
+set local session_replication_role = replica;
 insert into public.cloud_sources(
   id,user_id,source_type,display_name,config_hint
 ) values (
   'd0000000-0000-0000-0000-000000000196',
   'd0000000-0000-0000-0000-000000000096','custom','transport-scope-fixture','{}'::jsonb
 );
+set local session_replication_role = origin;
 insert into public.cloud_source_provider_account_affinities(source_id,user_id,affinity_hash)
 values ('d0000000-0000-0000-0000-000000000196','d0000000-0000-0000-0000-000000000096',repeat('e',64));
 insert into public.cloud_account_deletion_workflows(user_id,state,revision)
@@ -277,6 +280,7 @@ delete from public.cloud_provider_account_delete_preparations where user_id='d00
 delete from public.cloud_source_provider_account_affinities where user_id='d0000000-0000-0000-0000-000000000096';
 delete from public.cloud_account_deletion_workflows where user_id='d0000000-0000-0000-0000-000000000096';
 set local session_replication_role = replica;
+delete from public.cloud_source_lifecycle where source_id='d0000000-0000-0000-0000-000000000196';
 delete from public.cloud_sources where id='d0000000-0000-0000-0000-000000000196';
 delete from auth.users where id='d0000000-0000-0000-0000-000000000096';
 set local session_replication_role = origin;
