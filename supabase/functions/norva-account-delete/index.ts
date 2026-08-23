@@ -488,12 +488,18 @@ async function drainProviderTransportStop(db: SupabaseClient, userId: string) {
   const revision = typeof claim.revision === "number" ? claim.revision : -1;
   const epoch = typeof claim.deletionEpoch === "number" ? claim.deletionEpoch : -1;
   if (claim.state !== "processing" || leaseSequence < 0 || revision < 0 || epoch < 0) return "stale";
-  if (!MEDIA_GATEWAY_URL || !MEDIA_GATEWAY_TOKEN) {
-    await db.rpc("norva_settle_provider_transport_stop_action", {
+  const settleRetry = async (errorCode: string, retryAfterSeconds: number) => {
+    const { error: settleError } = await db.rpc("norva_settle_provider_transport_stop_action", {
       p_user_id: userId, p_worker: worker, p_expected_lease_sequence: leaseSequence,
-      p_expected_revision: revision, p_outcome: "retry", p_error_code: "gateway_unconfigured", p_retry_after_seconds: 60,
+      p_expected_revision: revision, p_outcome: "retry", p_error_code: errorCode,
+      p_retry_after_seconds: retryAfterSeconds,
     });
-    return "deferred";
+    if (settleError?.code === "40001") return "stale" as const;
+    if (settleError) throw new Error(`account_deletion_transport_retry_failed:${settleError.message}`);
+    return "deferred" as const;
+  };
+  if (!MEDIA_GATEWAY_URL || !MEDIA_GATEWAY_TOKEN) {
+    return settleRetry("gateway_unconfigured", 60);
   }
   // Claiming only grants permission to try. Revalidate under the durable
   // account/transport fences immediately before the gateway effect so an old
@@ -529,17 +535,20 @@ async function drainProviderTransportStop(db: SupabaseClient, userId: string) {
     if (settleError) throw new Error(`account_deletion_transport_settle_failed:${settleError.message}`);
     return "completed";
   }
-  const response = await fetch(`${MEDIA_GATEWAY_URL}/sessions/stop-provider-affinities`, {
-    method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${MEDIA_GATEWAY_TOKEN}` },
-    body: JSON.stringify({ affinityHashes: revalidatedAffinities }),
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${MEDIA_GATEWAY_URL}/sessions/stop-provider-affinities`, {
+      method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${MEDIA_GATEWAY_TOKEN}` },
+      body: JSON.stringify({ affinityHashes: revalidatedAffinities }),
+    });
+  } catch {
+    // Network failure has no receipt. Persist a bounded retry under the same
+    // lease CAS; if it lost authority while waiting, it becomes STALE.
+    return settleRetry("gateway_stop_unavailable", 15);
+  }
   const result = await response.json().catch(() => ({})) as JsonRecord;
   if (!response.ok || result.providerDrained !== true) {
-    await db.rpc("norva_settle_provider_transport_stop_action", {
-      p_user_id: userId, p_worker: worker, p_expected_lease_sequence: leaseSequence,
-      p_expected_revision: revision, p_outcome: "retry", p_error_code: "gateway_stop_deferred", p_retry_after_seconds: 15,
-    });
-    return "deferred";
+    return settleRetry("gateway_stop_deferred", 15);
   }
   const receipt = await sha256Hex(`provider-transport-stop:v1:${userId}:${epoch}:${leaseSequence}:${revision}`);
   const { error: settleError } = await db.rpc("norva_settle_provider_transport_stop_action", {

@@ -19,6 +19,11 @@ test('transport stop revalidates every durable fence immediately before gateway 
   assert.match(worker, /revalidated\.leaseSequence !== leaseSequence/);
   assert.match(worker, /revalidated\.revision !== revision/);
   assert.match(worker, /body: JSON\.stringify\(\{ affinityHashes: revalidatedAffinities \}\)/);
+  assert.match(worker, /const settleRetry = async/);
+  assert.match(worker, /gateway_unconfigured/);
+  assert.match(worker, /gateway_stop_unavailable/);
+  assert.match(worker, /gateway_stop_deferred/);
+  assert.match(worker, /catch \{[\s\S]*return settleRetry\("gateway_stop_unavailable", 15\)/);
 });
 
 test('revalidation is a server-only CAS over account epoch, workflow state, lease, and revision', () => {
@@ -35,7 +40,7 @@ test('revalidation is a server-only CAS over account epoch, workflow state, leas
 
 test('an empty gateway scope can complete only through the existing SQL capability proof', () => {
   const start = edge.indexOf('if (revalidatedAffinities.length === 0)');
-  const end = edge.indexOf('const response = await fetch', start);
+  const end = edge.indexOf('let response: Response;', start);
   const noScope = edge.slice(start, end);
   assert.match(noScope, /norva_settle_provider_transport_stop_action/);
   assert.match(noScope, /p_outcome: "completed"/);
