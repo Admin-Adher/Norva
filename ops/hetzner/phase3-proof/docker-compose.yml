@@ -1,0 +1,219 @@
+name: norva-phase3-proof
+
+services:
+  db:
+    container_name: norva-phase3-proof-db
+    image: supabase/postgres:17.6.1.136
+    restart: 'no'
+    environment:
+      POSTGRES_HOST: /var/run/postgresql
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?run bootstrap.sh first}
+      POSTGRES_DB: postgres
+      JWT_SECRET: ${JWT_SECRET:?run bootstrap.sh first}
+      JWT_EXP: '3600'
+    volumes:
+      - ../volumes/db/realtime.sql:/docker-entrypoint-initdb.d/migrations/99-realtime.sql:ro
+      - ../volumes/db/webhooks.sql:/docker-entrypoint-initdb.d/init-scripts/98-webhooks.sql:ro
+      - ../volumes/db/roles.sql:/docker-entrypoint-initdb.d/init-scripts/99-roles.sql:ro
+      - ../volumes/db/jwt.sql:/docker-entrypoint-initdb.d/init-scripts/99-jwt.sql:ro
+      - ../volumes/db/_supabase.sql:/docker-entrypoint-initdb.d/migrations/97-_supabase.sql:ro
+      - ../volumes/db/logs.sql:/docker-entrypoint-initdb.d/migrations/99-logs.sql:ro
+      - ../volumes/db/pooler.sql:/docker-entrypoint-initdb.d/migrations/99-pooler.sql:ro
+      - /var/lib/norva-phase3-proof/db:/var/lib/postgresql/data
+      - /var/lib/norva-phase3-proof/wal-archive:/wal-archive
+      - phase3-proof-db-config:/etc/postgresql-custom
+      - ../../../:/workspace:ro
+    ports:
+      - '127.0.0.1:55432:5432'
+    healthcheck:
+      test: ['CMD', 'pg_isready', '-U', 'postgres', '-h', 'localhost']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    command:
+      - postgres
+      - -c
+      - config_file=/etc/postgresql/postgresql.conf
+      - -c
+      - shared_buffers=512MB
+      - -c
+      - effective_cache_size=2GB
+      - -c
+      - work_mem=8MB
+      - -c
+      - maintenance_work_mem=256MB
+      - -c
+      - max_connections=75
+      - -c
+      - max_wal_size=2GB
+      - -c
+      - archive_mode=off
+    mem_limit: 2g
+    cpus: '1.50'
+    networks: [phase3-proof]
+
+  auth:
+    container_name: norva-phase3-proof-auth
+    image: supabase/gotrue:v2.189.0
+    restart: 'no'
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      GOTRUE_API_HOST: 0.0.0.0
+      GOTRUE_API_PORT: '9999'
+      GOTRUE_DB_DRIVER: postgres
+      GOTRUE_DB_DATABASE_URL: postgresql://supabase_auth_admin:${POSTGRES_PASSWORD}@db:5432/postgres
+      GOTRUE_SITE_URL: http://127.0.0.1:58000
+      GOTRUE_URI_ALLOW_LIST: http://127.0.0.1:58000
+      GOTRUE_DISABLE_SIGNUP: 'false'
+      GOTRUE_JWT_ADMIN_ROLES: service_role
+      GOTRUE_JWT_AUD: authenticated
+      GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
+      GOTRUE_JWT_EXP: '3600'
+      GOTRUE_JWT_SECRET: ${JWT_SECRET}
+      GOTRUE_JWT_ISSUER: http://127.0.0.1:58000/auth/v1
+      GOTRUE_EXTERNAL_EMAIL_ENABLED: 'false'
+      GOTRUE_EXTERNAL_PHONE_ENABLED: 'false'
+      GOTRUE_MAILER_AUTOCONFIRM: 'true'
+    mem_limit: 512m
+    cpus: '0.50'
+    networks: [phase3-proof]
+
+  rest:
+    container_name: norva-phase3-proof-rest
+    image: postgrest/postgrest:v14.12
+    restart: 'no'
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGRST_DB_URI: postgresql://authenticator:${POSTGRES_PASSWORD}@db:5432/postgres
+      PGRST_DB_SCHEMAS: public,storage,graphql_public
+      PGRST_DB_ANON_ROLE: anon
+      PGRST_DB_POOL: '10'
+      PGRST_DB_EXTRA_SEARCH_PATH: public
+      PGRST_JWT_SECRET: ${JWT_SECRET}
+      PGRST_APP_SETTINGS_JWT_SECRET: ${JWT_SECRET}
+      PGRST_APP_SETTINGS_JWT_EXP: '3600'
+    command: ['postgrest']
+    mem_limit: 512m
+    cpus: '0.50'
+    networks: [phase3-proof]
+
+  realtime:
+    container_name: norva-phase3-proof-realtime
+    image: supabase/realtime:v2.102.3
+    restart: 'no'
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PORT: '4000'
+      DB_HOST: db
+      DB_PORT: '5432'
+      DB_USER: supabase_admin
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      DB_NAME: postgres
+      DB_AFTER_CONNECT_QUERY: SET search_path TO _realtime
+      DB_ENC_KEY: ${REALTIME_DB_ENC_KEY}
+      API_JWT_SECRET: ${JWT_SECRET}
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE}
+      METRICS_JWT_SECRET: ${JWT_SECRET}
+      ERL_AFLAGS: -proto_dist inet_tcp
+      DNS_NODES: "''"
+      SEED_SELF_HOST: 'true'
+      RUN_JANITOR: 'true'
+    mem_limit: 768m
+    cpus: '0.75'
+    networks: [phase3-proof]
+
+  functions:
+    container_name: norva-phase3-proof-functions
+    image: supabase/edge-runtime:v1.74.0
+    restart: 'no'
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ../../../supabase/functions:/home/deno/functions:ro
+      - phase3-proof-deno-cache:/root/.cache/deno
+    environment:
+      JWT_SECRET: ${JWT_SECRET}
+      SUPABASE_URL: http://kong:8000
+      SUPABASE_PUBLIC_URL: http://127.0.0.1:58000
+      SUPABASE_ANON_KEY: ${ANON_KEY}
+      SUPABASE_SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY}
+      SUPABASE_DB_URL: postgresql://postgres:${POSTGRES_PASSWORD}@db:5432/postgres
+      VERIFY_JWT: 'false'
+      NORVA_MEDIA_GATEWAY_URL: http://fake-gateway:8080
+      NORVA_MEDIA_GATEWAY_TOKEN: ${FAKE_GATEWAY_TOKEN}
+      NORVA_CRON_SHARED_SECRET: ${PROOF_CRON_SECRET}
+      NORVA_BACKFILL_TOKEN: ${PROOF_BACKFILL_TOKEN}
+      NORVA_PARTNERS_ACCESS_REQUESTS_ENABLED: 'false'
+      NORVA_PARTNERS_REVOLUT_API_ENABLED: 'false'
+      NORVA_LIFECYCLE_BILLING_LIVE: 'false'
+      NORVA_ABUSE_ENFORCEMENT_ENABLED: 'false'
+      REVOLUT_SECRET_KEY: ''
+      RESEND_API_KEY: ''
+      FCM_SERVICE_ACCOUNT: ''
+      TELEGRAM_BOT_TOKEN: ''
+      TMDB_API_KEY: ''
+    command: ['start', '--main-service', '/home/deno/functions/main']
+    mem_limit: 1g
+    cpus: '1.00'
+    networks: [phase3-proof]
+
+  kong:
+    container_name: norva-phase3-proof-kong
+    image: kong/kong:3.9.1
+    restart: 'no'
+    depends_on:
+      auth:
+        condition: service_started
+      rest:
+        condition: service_started
+      realtime:
+        condition: service_started
+      functions:
+        condition: service_started
+    environment:
+      KONG_DATABASE: 'off'
+      KONG_DECLARATIVE_CONFIG: /etc/kong/kong.yml
+      KONG_ROUTER_FLAVOR: expressions
+      KONG_PLUGINS: cors,key-auth,acl,request-transformer
+      SUPABASE_ANON_KEY: ${ANON_KEY}
+      SUPABASE_SERVICE_KEY: ${SERVICE_ROLE_KEY}
+      JWT_SECRET: ${JWT_SECRET}
+    volumes:
+      - ./kong.yml:/etc/kong/kong.yml:ro
+    ports:
+      - '127.0.0.1:58000:8000'
+    mem_limit: 512m
+    cpus: '0.50'
+    networks: [phase3-proof]
+
+  fake-gateway:
+    container_name: norva-phase3-proof-fake-gateway
+    image: node:22.16.0-alpine
+    restart: 'no'
+    working_dir: /app
+    volumes:
+      - ./fake-gateway.mjs:/app/fake-gateway.mjs:ro
+    environment:
+      FAKE_GATEWAY_TOKEN: ${FAKE_GATEWAY_TOKEN}
+    command: ['node', '/app/fake-gateway.mjs']
+    mem_limit: 128m
+    cpus: '0.25'
+    networks: [phase3-proof]
+
+networks:
+  phase3-proof:
+    name: norva-phase3-proof-net
+    internal: true
+
+volumes:
+  phase3-proof-db-config:
+    name: norva-phase3-proof-db-config
+  phase3-proof-deno-cache:
+    name: norva-phase3-proof-deno-cache
