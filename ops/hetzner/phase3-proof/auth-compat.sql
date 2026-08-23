@@ -3,7 +3,12 @@
 -- This is schema-only compatibility for the empty synthetic proof database:
 -- no production Auth schema or user data is imported.
 alter table auth.users
-  add column if not exists email_confirmed_at timestamptz;
+  add column if not exists email_confirmed_at timestamptz,
+  add column if not exists phone_confirmed_at timestamptz,
+  add column if not exists banned_until timestamptz,
+  add column if not exists deleted_at timestamptz,
+  add column if not exists is_sso_user boolean not null default false,
+  add column if not exists is_anonymous boolean not null default false;
 
 update auth.users
 set email_confirmed_at = confirmed_at
