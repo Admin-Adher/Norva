@@ -103,6 +103,20 @@ dans un processus enfant isolé, tue A dès que le gateway local confirme le sto
 puis vérifie que B seul settle la reprise. Les clés, URL et RPC sont des fixtures
 locales ; aucun Edge, provider ou secret de production n'est appelé.
 
+## Rejeu lecture seule des courses utilisateur
+
+`catalog_background_owner_snapshot_concurrency_smoke.sql` a été rejoué depuis
+le worktree utilisateur sans modifier ce worktree. Les six courses
+INSERT/UPDATE/DELETE × writer-first/activation-first ont atteint leur phase de
+course, mais le script n'est **pas vert** : son teardown historique exécute
+`DELETE FROM auth.users` directement à la ligne 681. Le guard durable le refuse
+avec `account_deletion_not_ready_to_finalize`. Ceci est une incompatibilité de
+fixture, non une preuve de snapshot valide : elle doit être corrigée dans le
+troisième worktree d'intégration, après toutes les assertions, par le même
+bypass de teardown explicitement limité (`session_replication_role=replica`)
+que les autres smokes de fixtures. Aucune donnée ou test utilisateur n'a été
+modifié ici.
+
 ## Suite JavaScript consolidée
 
 Exécution locale : `node --test tests/*.test.js` avec les dépendances locales
@@ -127,6 +141,9 @@ complète en verte et le statut global reste **NO-GO**.
    sync post-swap sans prune destructif. Le crash runtime transport après gateway
    est couvert, ainsi que l'expiry de lease versus settle, la suppression source
    post-claim et la suppression compte répétée.
+5. Adapter le teardown historique de
+   `catalog_background_owner_snapshot_concurrency_smoke.sql` avant de considérer
+   ses six courses snapshot comme une preuve finale verte.
 
 ## Pré-requis d'intégration du lot gateway-stop
 

@@ -41,6 +41,7 @@ f530b782  test(account-delete): fence reaper behind transport stop
 | `supabase/functions/norva-account-delete/index.ts` | aucune modification non commitée observée | claim, revalidation, retry/receipt gateway | non observé | cherry-pick normal, puis test Edge ciblé |
 | `supabase/migrations/` | migrations Phase 3 non commitées, dont affinities et sous-graphe `82780/82783` | `20260823182792`–`20260823182796` | dépendance, non conflit textuel | appliquer le sous-graphe fournisseur et l'archive légale en premier ; ne pas appliquer `82792`–`82796` seul |
 | `tests/` | nombreux tests VOD/provider non commités | tests Node, SQL et Deno du transport stop | aucun même chemin observé | cherry-pick normal, puis suites ciblées |
+| `supabase/tests/catalog_background_owner_snapshot_concurrency_smoke.sql` | nouveau smoke utilisateur non commité | aucun changement isolé au même chemin | non textuel | son teardown direct `auth.users` est désormais refusé par le guard durable ; le corriger seulement dans le troisième worktree par un bypass de fixture post-assertions |
 
 ## Vérification sémantique obligatoire lors du troisième worktree
 
