@@ -15,6 +15,7 @@ flag provider n'a été activé et aucun déploiement n'a été effectué.
 | Claim transport concurrent | action transport pending | deux sessions PostgreSQL réelles, A claim puis B claim | A = processing ; B = `40001 STALE` | B ne reçoit aucune autorité pour appeler le gateway | `c6af7799`; `account_deletion_transport_stop_concurrency_smoke.sql` | PASS local |
 | Fence juste avant gateway | action A processing puis workflow bump | A revalide ; changement durable d'état ; A revalide tardivement | A tardif = `40001 STALE` | epoch, état, lease owner/séquence, révision et expiration sont vérifiés avant tout `fetch` | migration `20260823182793`; test SQL deux sessions + Node 4/4 | PASS local |
 | Crash après claim transport | A claim, puis lease expirée dans une transaction commitée | B reprend depuis PostgreSQL ; A tente un settle tardif | B = nouvelle leaseSequence/révision ; A = `40001 STALE` | aucune mémoire ni lease A ne peut compléter l'action ; B revalide et settle seul | `account_deletion_transport_stop_concurrency_smoke.sql` | PASS local |
+| Crash Deno après stop gateway | worker Deno A, stop gateway accepté, aucune écriture settle | A est tué ; B réclame lease/révision 2, refait le stop et settle | A = aucun settle ; B = unique settle | l'effet externe peut être rejoué sans résurrection ; seul le worker récupéré commit | `account_deletion_transport_stop_crash_runtime_test.ts`, deux exécutions | PASS local runtime |
 | Retry gateway déjà drainé | endpoint gateway isolé, aucune session active | deux POST identiques avec le même hash opaque | deux réponses `providerDrained=true`, protocole 1 | un retry après arrêt ne ressuscite aucun transport ni ne rend un reçu incompatible | gateway local port 18111, processus arrêté après preuve | PASS local |
 | Frontière gateway opaque | gateway isolé | sans bearer ; hash invalide ; stop valide | 401 ; 400 ; 200 | aucune URL, credential ou action destructive non authentifiée ne traverse la route | gateway local port 18111, processus arrêté après preuve | PASS local |
 | Suppression compte répétée | compte actif, préparation/action absentes | deux appels `norva_begin_account_deletion_workflow` | n/a | une préparation, une action transport et un epoch unique ; le second appel est une reprise | `account_deletion_transport_stop_concurrency_smoke.sql` | PASS local |
@@ -58,7 +59,7 @@ flag provider n'a été activé et aucun déploiement n'a été effectué.
 |---|---|---|---|
 | après claim scheduler | nouvelle révision, ancien runner `STALE` | `account_deletion_workflow_claim_smoke.sql` | PASS local |
 | après claim transport | lease expirée, nouvelle séquence/révision, ancien settle refusé | `account_deletion_transport_stop_concurrency_smoke.sql` | PASS local |
-| après stop gateway, avant settle | action reste `processing`, retry stop idempotent puis settle unique | retry gateway local et reclaim SQL prouvés séparément ; crash Edge non injecté | PENDING |
+| après stop gateway, avant settle | action reste `processing`, retry stop idempotent puis settle unique | processus Deno A tué après réponse gateway ; B lease/révision 2 refait le stop et settle seul | PASS local runtime |
 | reaper pendant transport stop pending | le reaper conserve `DRAINING` et redemande `provider_drain` | `account_deletion_transport_stop_concurrency_smoke.sql` | PASS local |
 | avant/après `READY_TO_SWITCH` | candidate version/HMAC et transition déterminent la reprise | harness provider Phase 3 | PASS sous-graphe provider |
 | avant/après COMMIT swap | génération N/N+1 et état transition déterminent l'unique continuation | harness provider Phase 3 | PASS sous-graphe provider |
@@ -96,6 +97,12 @@ avertissements `Norva signup Telegram immediate wake failed (SQLSTATE 42P01)`
 proviennent de l'infrastructure locale absente du fixture ; aucun script n'a
 échoué ni continué après une erreur.
 
+Le test Deno `account_deletion_transport_stop_crash_runtime_test.ts` a aussi été
+exécuté deux fois avec Deno portable 2.9.5. Il lance la routine TypeScript réelle
+dans un processus enfant isolé, tue A dès que le gateway local confirme le stop,
+puis vérifie que B seul settle la reprise. Les clés, URL et RPC sont des fixtures
+locales ; aucun Edge, provider ou secret de production n'est appelé.
+
 ## Suite JavaScript consolidée
 
 Exécution locale : `node --test tests/*.test.js` avec les dépendances locales
@@ -116,7 +123,17 @@ complète en verte et le statut global reste **NO-GO**.
    désormais couvert par la reprise cron.
 3. Produire les lignes de résultat complètes pour toutes les courses provider,
    source, compte et snapshot demandées par le contrat.
-4. Relier l'exécuteur versionné du **transport stop** à son protocole
-   `claim/receipt`. Le runner account-delete ne peut volontairement pas
-   synthétiser ce reçu ni lancer un appel fournisseur ; sans reçu, le workflow
-   reste correctement bloqué en `DRAINING`.
+4. Compléter les autres points de la crash matrix provider, notamment le premier
+   sync post-swap sans prune destructif. Le crash runtime transport après gateway
+   est couvert, ainsi que l'expiry de lease versus settle, la suppression source
+   post-claim et la suppression compte répétée.
+
+## Pré-requis d'intégration du lot gateway-stop
+
+Les migrations de ce lot supposent que le sous-graphe Phase 3 déjà développé
+est présent avant elles, notamment `cloud_provider_transport_stop_actions`,
+`cloud_provider_account_delete_preparations` et
+`cloud_source_provider_account_affinities`. Ce dernier est fourni par le lot
+Phase 3 non commité dans le worktree utilisateur ; il n'a pas été copié dans
+cette branche isolée. Le test local a matérialisé la même définition pour
+exécuter la course, et l'ordre de cherry-pick devra donc conserver ce prérequis.
