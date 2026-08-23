@@ -145,6 +145,23 @@ relation n'a pas l'historique de migration attendu. Le clone sans connexion a
 été supprimé juste après l'essai. Il faut une base provisionnée depuis une
 chaîne de migrations cohérente, non un patch d'objets déjà présents.
 
+## Réparation de l'index historique de projection
+
+La migration indépendante
+`20260823121950_cloud_titles_projection_selector_index_online.sql` a été
+exécutée contre deux clones PostgreSQL jetables de
+`norva_phase3_durable_compile`, avec les six flags provider toujours à `false`.
+
+| Forme initiale | Résultat constaté | Statut |
+|---|---|---|
+| index historique `idx_cloud_titles_projection_verified` à quatre clés `(user_id,item_type,synced_at DESC,updated_at DESC)` et prédicat `provider_verified` | renommé en `idx_cloud_titles_projection_verified_legacy_without_id`, puis création concurrente de l'index canonique à cinq clés, avec `id` terminal ; second passage idempotent | PASS |
+| même nom mais prédicat volontairement erroné `match_status='manual'` | arrêt fail-closed : `title projection selector index homonym has wrong shape` | PASS |
+
+Les définitions ont été vérifiées dans `pg_indexes`, pas seulement par nom. Les
+deux clones ont été contrôlés sans connexion puis supprimés. Cette migration
+préserve donc l'index vivant historique et prouve bien la forme finale exacte ;
+elle ne rend pas pour autant le graphe provider complet vert.
+
 Le 23 août, une reconstruction supplémentaire
 `norva_phase3_provider_validation_0823` depuis le snapshot local
 `durable_compile` a appliqué, sans flag activé, les prérequis d'affinité
