@@ -6,6 +6,7 @@ const path = require('node:path');
 const read = (...parts) => fs.readFileSync(path.join(__dirname, '..', ...parts), 'utf8');
 const edge = read('supabase', 'functions', 'norva-account-delete', 'index.ts');
 const migration = read('supabase', 'migrations', '20260823182793_account_deletion_transport_stop_revalidate.sql');
+const scopeMigration = read('supabase', 'migrations', '20260823182794_account_deletion_transport_stop_scope.sql');
 
 test('transport stop revalidates every durable fence immediately before gateway fetch', () => {
   const start = edge.indexOf('async function drainProviderTransportStop');
@@ -36,6 +37,14 @@ test('revalidation is a server-only CAS over account epoch, workflow state, leas
   assert.match(migration, /v_action\.lease_until <= clock_timestamp\(\)/);
   assert.match(migration, /using errcode = '40001'/);
   assert.match(migration, /revoke all on function[\s\S]*from public,anon,authenticated/);
+  assert.match(scopeMigration, /gateway_affinity_hashes jsonb/);
+  assert.match(scopeMigration, /gateway_affinity_epoch bigint/);
+  assert.match(scopeMigration, /v_action\.gateway_affinity_epoch <> v_action\.deletion_epoch/);
+  assert.match(scopeMigration, /'affinityHashes',v_action\.gateway_affinity_hashes/);
+  assert.doesNotMatch(
+    scopeMigration.slice(scopeMigration.indexOf('create or replace function public.norva_revalidate_account_deletion_transport_stop')),
+    /cloud_source_provider_account_affinities affinity/,
+  );
 });
 
 test('an empty gateway scope can complete only through the existing SQL capability proof', () => {

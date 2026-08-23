@@ -202,6 +202,53 @@ set local session_replication_role = origin;
 delete from public.cloud_account_deletion_workflows where user_id='d0000000-0000-0000-0000-000000000095';
 commit;
 
+-- A source-affinity row may disappear after claim (for example during source
+-- cleanup), but it must not erase the already-authorized gateway stop scope.
+begin;
+set local "request.jwt.claim.role" = 'service_role';
+set local session_replication_role = replica;
+delete from auth.users where id='d0000000-0000-0000-0000-000000000096';
+set local session_replication_role = origin;
+delete from public.cloud_account_deletion_workflows where user_id='d0000000-0000-0000-0000-000000000096';
+insert into auth.users(id,instance_id,aud,role,email,encrypted_password,email_confirmed_at,
+  raw_app_meta_data,raw_user_meta_data,created_at,updated_at)
+values ('d0000000-0000-0000-0000-000000000096',
+  '00000000-0000-0000-0000-000000000000','authenticated','authenticated',
+  'account-delete-scope-096@invalid.test','not-used',clock_timestamp(),
+  '{}'::jsonb,'{}'::jsonb,clock_timestamp(),clock_timestamp());
+insert into public.cloud_account_deletion_workflows(user_id,state,revision)
+values ('d0000000-0000-0000-0000-000000000096','draining',0);
+insert into public.cloud_provider_account_delete_preparations(user_id,state,phase,deletion_epoch)
+values ('d0000000-0000-0000-0000-000000000096','pending','drain',9);
+insert into public.cloud_provider_transport_stop_actions(user_id,deletion_epoch,state)
+values ('d0000000-0000-0000-0000-000000000096',9,'pending');
+insert into public.cloud_source_provider_account_affinities(source_id,user_id,affinity_hash)
+values ('d0000000-0000-0000-0000-000000000196','d0000000-0000-0000-0000-000000000096',repeat('e',64));
+do $scope_snapshot$
+declare v_claim jsonb; v_revalidated jsonb;
+begin
+  v_claim:=public.norva_claim_account_deletion_transport_stop(
+    'd0000000-0000-0000-0000-000000000096','transport-scope',120);
+  if v_claim->'affinityHashes' <> jsonb_build_array(repeat('e',64)) then
+    raise exception 'claim did not persist immutable gateway scope';
+  end if;
+  delete from public.cloud_source_provider_account_affinities
+  where user_id='d0000000-0000-0000-0000-000000000096';
+  v_revalidated:=public.norva_revalidate_account_deletion_transport_stop(
+    'd0000000-0000-0000-0000-000000000096','transport-scope',
+    (v_claim->>'deletionEpoch')::bigint,(v_claim->>'leaseSequence')::integer,
+    (v_claim->>'revision')::bigint);
+  if v_revalidated->'affinityHashes' <> jsonb_build_array(repeat('e',64)) then
+    raise exception 'source deletion erased claimed gateway scope';
+  end if;
+end
+$scope_snapshot$;
+set local session_replication_role = replica;
+delete from auth.users where id='d0000000-0000-0000-0000-000000000096';
+set local session_replication_role = origin;
+delete from public.cloud_account_deletion_workflows where user_id='d0000000-0000-0000-0000-000000000096';
+commit;
+
 -- Fixture teardown intentionally bypasses the Auth trigger only after all
 -- assertions. It is test hygiene, not a production deletion path.
 begin;
