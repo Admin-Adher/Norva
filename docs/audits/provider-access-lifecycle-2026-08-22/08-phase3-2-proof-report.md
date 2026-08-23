@@ -192,6 +192,24 @@ complète en verte et le statut global reste **NO-GO**.
    est couvert, ainsi que l'expiry de lease versus settle, la suppression source
    post-claim et la suppression compte répétée.
 
+## Audit epoch cache global v2
+
+Le garde SQL `norva_provider_access_flag_visibility_changed` bloque toute
+activation de `provider_access_visibility_v1_enabled` avec
+`global_visibility_epoch_v2_required`. Cette décision reste correcte : les
+caches client et Edge actuels sont seulement scellés par
+`cloud_user_catalog_visibility_epochs` (scope utilisateur). Le dépôt ne
+contient ni table, ni RPC, ni contrat de réponse, ni test de cohérence nommé
+« global cache epoch v2 ». Les caches `catalog_titles` globaux ne peuvent donc
+pas être assimilés à ce contrat sur la base de leur nom ou de leur existence.
+
+Avant toute proposition de levée du garde, il faut spécifier et prouver : la
+source d'autorité globale, les lecteurs/écrivains concernés, la monotonie, les
+clés de cache affectées, les invalidations lors d'un changement de visibilité,
+la compatibilité des clients pendant rollout et les courses deux-sessions. En
+l'absence de ces éléments, retirer ou contourner le garde serait une régression
+de sécurité ; aucun flag n'a été modifié.
+
 ## Pré-requis d'intégration du lot gateway-stop
 
 Les migrations de ce lot supposent que le sous-graphe Phase 3 déjà développé
