@@ -76,6 +76,25 @@ test('Edge records a durable deletion request and never performs the Auth delete
   assert.doesNotMatch(source, /email is best-effort|Best-effort closure email/);
 });
 
+test('cron advances only bounded durable deletion steps with revision CAS', () => {
+  const workflowClaim = read(
+    'supabase/migrations/20260823182791_account_deletion_workflow_claims.sql',
+  );
+  const runner = source.slice(
+    source.indexOf('async function drainAccountDeletionWorkflows'),
+    source.indexOf('async function cronAuthorized'),
+  );
+  assert.match(workflowClaim, /for update skip locked/);
+  assert.match(workflowClaim, /revision = workflow\.revision \+ 1/);
+  assert.match(workflowClaim, /norva_credential_require_service_role/);
+  assert.match(runner, /norva_claim_account_deletion_workflows/);
+  assert.match(runner, /norva_advance_account_deletion_workflow/);
+  assert.match(runner, /norva_purge_account_deletion_paywall_batch/);
+  assert.match(runner, /norva_purge_account_deletion_product_batch/);
+  assert.match(runner, /nextError\.code === "40001"/);
+  assert.doesNotMatch(runner, /auth\.admin\.deleteUser/);
+});
+
 test('Partners deletion preparation is service-only, idempotent and fail-closed', () => {
   const rpc = partners.slice(
     partners.indexOf(
