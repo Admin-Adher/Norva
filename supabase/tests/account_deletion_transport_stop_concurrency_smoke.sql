@@ -65,15 +65,15 @@ declare
   v_connection text;
 begin
   perform set_config('request.jwt.claim.role','service_role',true);
-  perform extensions.dblink_connect('norva_transport_a',format(
+  perform public.dblink_connect('norva_transport_a',format(
     'host=127.0.0.1 port=%s dbname=%s user=%s connect_timeout=2',
     current_setting('port'),current_database(),current_user));
-  perform extensions.dblink_connect('norva_transport_b',format(
+  perform public.dblink_connect('norva_transport_b',format(
     'host=127.0.0.1 port=%s dbname=%s user=%s connect_timeout=2',
     current_setting('port'),current_database(),current_user));
-  perform extensions.dblink_exec('norva_transport_a','set "request.jwt.claim.role"=''service_role''');
-  perform extensions.dblink_exec('norva_transport_b','set "request.jwt.claim.role"=''service_role''');
-  select remote.payload into strict v_claim from extensions.dblink(
+  perform public.dblink_exec('norva_transport_a','set "request.jwt.claim.role"=''service_role''');
+  perform public.dblink_exec('norva_transport_b','set "request.jwt.claim.role"=''service_role''');
+  select remote.payload into strict v_claim from public.dblink(
     'norva_transport_a',$sql$
       select public.norva_claim_account_deletion_transport_stop(
         'd0000000-0000-0000-0000-000000000094'::uuid,'transport-race-a',120)
@@ -83,7 +83,7 @@ begin
     raise exception 'transport claim A did not acquire processing state';
   end if;
   begin
-    perform * from extensions.dblink('norva_transport_b',$sql$
+    perform * from public.dblink('norva_transport_b',$sql$
       select public.norva_claim_account_deletion_transport_stop(
         'd0000000-0000-0000-0000-000000000094'::uuid,'transport-race-b',120)
     $sql$) as remote(payload jsonb);
@@ -115,13 +115,11 @@ begin
   if not v_stale then
     raise exception 'transport worker survived a workflow fence bump';
   end if;
-  perform extensions.dblink_disconnect('norva_transport_a');
-  perform extensions.dblink_disconnect('norva_transport_b');
+  perform public.dblink_disconnect('norva_transport_a');
+  perform public.dblink_disconnect('norva_transport_b');
 exception when others then
-  foreach v_connection in array coalesce(extensions.dblink_get_connections(),array[]::text[]) loop
-    if v_connection in ('norva_transport_a','norva_transport_b') then
-      begin perform extensions.dblink_disconnect(v_connection); exception when others then null; end;
-    end if;
+  foreach v_connection in array array['norva_transport_a','norva_transport_b'] loop
+    begin perform public.dblink_disconnect(v_connection); exception when others then null; end;
   end loop;
   raise;
 end
@@ -144,11 +142,11 @@ do $crash_reclaim$
 declare v_reclaim jsonb; v_stale boolean := false; v_connection text;
 begin
   perform set_config('request.jwt.claim.role','service_role',true);
-  perform extensions.dblink_connect('norva_transport_reclaim',format(
+  perform public.dblink_connect('norva_transport_reclaim',format(
     'host=127.0.0.1 port=%s dbname=%s user=%s connect_timeout=2',
     current_setting('port'),current_database(),current_user));
-  perform extensions.dblink_exec('norva_transport_reclaim','set "request.jwt.claim.role"=''service_role''');
-  select remote.payload into strict v_reclaim from extensions.dblink(
+  perform public.dblink_exec('norva_transport_reclaim','set "request.jwt.claim.role"=''service_role''');
+  select remote.payload into strict v_reclaim from public.dblink(
     'norva_transport_reclaim',$sql$
       select public.norva_claim_account_deletion_transport_stop(
         'd0000000-0000-0000-0000-000000000094'::uuid,'transport-race-b',120)
@@ -178,12 +176,10 @@ begin
     (v_reclaim->>'leaseSequence')::integer,(v_reclaim->>'revision')::bigint,
     'completed',repeat('b',64),null,0
   );
-  perform extensions.dblink_disconnect('norva_transport_reclaim');
+  perform public.dblink_disconnect('norva_transport_reclaim');
 exception when others then
-  foreach v_connection in array coalesce(extensions.dblink_get_connections(),array[]::text[]) loop
-    if v_connection='norva_transport_reclaim' then
-      begin perform extensions.dblink_disconnect(v_connection); exception when others then null; end;
-    end if;
+  foreach v_connection in array array['norva_transport_reclaim'] loop
+    begin perform public.dblink_disconnect(v_connection); exception when others then null; end;
   end loop;
   raise;
 end
@@ -242,14 +238,20 @@ values ('d0000000-0000-0000-0000-000000000096',
   '00000000-0000-0000-0000-000000000000','authenticated','authenticated',
   'account-delete-scope-096@invalid.test','not-used',clock_timestamp(),
   '{}'::jsonb,'{}'::jsonb,clock_timestamp(),clock_timestamp());
+insert into public.cloud_sources(
+  id,user_id,source_type,display_name,config_hint
+) values (
+  'd0000000-0000-0000-0000-000000000196',
+  'd0000000-0000-0000-0000-000000000096','custom','transport-scope-fixture','{}'::jsonb
+);
+insert into public.cloud_source_provider_account_affinities(source_id,user_id,affinity_hash)
+values ('d0000000-0000-0000-0000-000000000196','d0000000-0000-0000-0000-000000000096',repeat('e',64));
 insert into public.cloud_account_deletion_workflows(user_id,state,revision)
 values ('d0000000-0000-0000-0000-000000000096','draining',0);
 insert into public.cloud_provider_account_delete_preparations(user_id,state,phase,deletion_epoch)
 values ('d0000000-0000-0000-0000-000000000096','pending','drain',9);
 insert into public.cloud_provider_transport_stop_actions(user_id,deletion_epoch,state)
 values ('d0000000-0000-0000-0000-000000000096',9,'pending');
-insert into public.cloud_source_provider_account_affinities(source_id,user_id,affinity_hash)
-values ('d0000000-0000-0000-0000-000000000196','d0000000-0000-0000-0000-000000000096',repeat('e',64));
 do $scope_snapshot$
 declare v_claim jsonb; v_revalidated jsonb;
 begin
