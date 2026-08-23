@@ -458,6 +458,18 @@ insert into public.cloud_sources (
   'cipher-delete-race-' || fixture.scenario,'{}'::jsonb,
   'ready',1,true,now()
 from provider_account_delete_race_fixtures fixture;
+-- The transition race exercises the post-affinity rollout contract.  Do not
+-- depend on a historical source INSERT trigger here: the fixture must also be
+-- valid when testing an upgraded database whose backfill has not populated
+-- this synthetic ciphertext.
+insert into public.cloud_source_provider_account_affinities(
+  source_id,user_id,affinity_hash,updated_at
+)
+select fixture.source_id,fixture.user_id,fixture.affinity_hash,clock_timestamp()
+from provider_account_delete_race_fixtures fixture
+on conflict(source_id) do update set
+  user_id=excluded.user_id,affinity_hash=excluded.affinity_hash,
+  updated_at=excluded.updated_at;
 insert into public.cloud_source_direct_fallback_leases(
   affinity_hash,source_id,user_id,lease_token,lease_owner,lease_until
 )
