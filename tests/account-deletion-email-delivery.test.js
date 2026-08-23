@@ -64,7 +64,15 @@ test('Edge records a durable deletion request and never performs the Auth delete
   assert.match(source, /cancel_prepared_account_deletion_email/);
   assert.match(source, /deletionPending: true/);
   assert.match(source, /\}, 202\)/);
-  assert.doesNotMatch(source, /admin\.auth\.admin\.deleteUser\(/);
+  const finalizer = source.slice(
+    source.indexOf('async function drainAccountDeletionFinalizations'),
+    source.indexOf('async function cronAuthorized'),
+  );
+  assert.match(finalizer, /norva_claim_account_deletion_finalizations/);
+  assert.match(finalizer, /db\.auth\.admin\.deleteUser\(userId\)/);
+  assert.match(finalizer, /norva_complete_account_deletion_finalization/);
+  const requestHandler = source.slice(source.indexOf('Deno.serve'));
+  assert.doesNotMatch(requestHandler, /admin\.auth\.admin\.deleteUser\(/);
   assert.doesNotMatch(source, /email is best-effort|Best-effort closure email/);
 });
 

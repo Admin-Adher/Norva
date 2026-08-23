@@ -230,6 +230,7 @@ function sleep(milliseconds: number): Promise<void> {
 }
 
 type AuthenticationMethod = { method?: unknown; timestamp?: unknown };
+type AccountDeletionFinalizationClaim = { user_id?: unknown; finalization_key?: unknown };
 
 async function deletionAuthenticationGuard(token: string): Promise<
   | { ok: true }
@@ -418,6 +419,46 @@ async function drainDeletionEmailOutbox(db: SupabaseClient): Promise<Record<stri
   return result;
 }
 
+async function drainAccountDeletionFinalizations(db: SupabaseClient) {
+  const { data, error } = await db.rpc("norva_claim_account_deletion_finalizations", {
+    p_batch: 5,
+    p_lease_seconds: 120,
+  });
+  if (error) throw new Error(`account_deletion_finalization_claim_failed:${error.message}`);
+  const claims = (Array.isArray(data) ? data : []) as AccountDeletionFinalizationClaim[];
+  let completed = 0;
+  let deferred = 0;
+  for (const claim of claims) {
+    const userId = typeof claim.user_id === "string" ? claim.user_id : "";
+    const finalizationKey = typeof claim.finalization_key === "string" ? claim.finalization_key : "";
+    if (!userId || !finalizationKey) {
+      deferred++;
+      continue;
+    }
+    // This is the sole Auth delete path.  The SQL claim has already checked
+    // READY_TO_FINALIZE and the BEFORE DELETE guard rechecks FINALIZING.
+    const { error: deletionError } = await db.auth.admin.deleteUser(userId);
+    if (deletionError) {
+      console.error("[norva-account-delete] finalization Auth delete deferred", deletionError.message);
+      deferred++;
+      continue;
+    }
+    const { data: complete, error: completeError } = await db.rpc(
+      "norva_complete_account_deletion_finalization",
+      { p_finalization_key: finalizationKey },
+    );
+    if (completeError || complete !== true) {
+      // Auth is already absent. A later reconciliation can complete the
+      // tombstone, but must never issue another delete to repair this ack gap.
+      console.error("[norva-account-delete] finalization acknowledgement deferred", completeError?.message ?? "not_completed");
+      deferred++;
+      continue;
+    }
+    completed++;
+  }
+  return { claimed: claims.length, completed, deferred };
+}
+
 async function cronAuthorized(req: Request): Promise<boolean> {
   const token = (req.headers.get("Authorization") ?? "").match(/^Bearer\s+(.+)$/i)?.[1] ?? "";
   if (!token) return false;
@@ -437,8 +478,11 @@ Deno.serve(async (req) => {
   if (isCron) {
     if (!(await cronAuthorized(req))) return json(req, { error: "Unauthorized" }, 403);
     try {
-      const result = await drainDeletionEmailOutbox(admin);
-      return json(req, { ok: true, ...result });
+      const [email, finalization] = await Promise.all([
+        drainDeletionEmailOutbox(admin),
+        drainAccountDeletionFinalizations(admin),
+      ]);
+      return json(req, { ok: true, email, finalization });
     } catch (error) {
       console.error("[norva-account-delete] delivery worker failed", errorText(error));
       return json(req, { error: "Delivery worker failed" }, 500);
