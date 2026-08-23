@@ -420,6 +420,12 @@ async function drainDeletionEmailOutbox(db: SupabaseClient): Promise<Record<stri
 }
 
 async function drainAccountDeletionFinalizations(db: SupabaseClient) {
+  const { data: reconciledData, error: reconciledError } = await db.rpc(
+    "norva_reconcile_account_deletion_finalizations",
+    { p_batch: 25 },
+  );
+  if (reconciledError) throw new Error(`account_deletion_finalization_reconcile_failed:${reconciledError.message}`);
+  const reconciled = typeof reconciledData === "number" ? reconciledData : 0;
   const { data, error } = await db.rpc("norva_claim_account_deletion_finalizations", {
     p_batch: 5,
     p_lease_seconds: 120,
@@ -456,7 +462,7 @@ async function drainAccountDeletionFinalizations(db: SupabaseClient) {
     }
     completed++;
   }
-  return { claimed: claims.length, completed, deferred };
+  return { reconciled, claimed: claims.length, completed, deferred };
 }
 
 async function cronAuthorized(req: Request): Promise<boolean> {

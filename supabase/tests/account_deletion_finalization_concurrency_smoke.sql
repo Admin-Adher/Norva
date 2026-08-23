@@ -56,10 +56,9 @@ begin
   end if;
   v_key:=coalesce(v_a.finalization_key,v_b.finalization_key);
   delete from auth.users where id='d0000000-0000-0000-0000-000000000091';
-  perform public.norva_complete_account_deletion_finalization(v_key);
   if not exists (select 1 from public.cloud_account_deletion_finalizations
-                 where finalization_key=v_key and state='completed') then
-    raise exception 'finalization winner did not converge to completed';
+                 where finalization_key=v_key and state='claimed') then
+    raise exception 'crash fixture did not retain claimed tombstone';
   end if;
   perform extensions.dblink_disconnect('norva_final_a');
   perform extensions.dblink_disconnect('norva_final_b');
@@ -72,7 +71,19 @@ exception when others then
   raise;
 end
 $race$;
-
+commit;
+begin;
+set local "request.jwt.claim.role" = 'service_role';
+select public.norva_reconcile_account_deletion_finalizations(25);
+do $reconciled$
+begin
+  if exists (select 1 from public.cloud_account_deletion_finalizations
+             where account_key=encode(extensions.digest('d0000000-0000-0000-0000-000000000091','sha256'),'hex')
+               and state <> 'completed') then
+    raise exception 'Auth-absent finalization tombstone did not converge';
+  end if;
+end
+$reconciled$;
 delete from public.cloud_account_deletion_finalizations
 where account_key=encode(extensions.digest('d0000000-0000-0000-0000-000000000091','sha256'),'hex');
 commit;
