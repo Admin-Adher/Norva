@@ -137,6 +137,14 @@ un état de migration antérieur/incomplet, et confirme que la couverture
 promotion/swap/rollback reste **PENDING**, sans masquer les défauts par un flag
 ou un backfill forcé.
 
+Un clone temporaire de cette base a confirmé que la parité ne peut pas être
+réparée en rejouant un seul fichier :
+`20260823180000_provider_catalog_generation_online_rollout.sql` rollback sur
+`cloud_catalog_generation_contract_indexes already exists`, alors que cette
+relation n'a pas l'historique de migration attendu. Le clone sans connexion a
+été supprimé juste après l'essai. Il faut une base provisionnée depuis une
+chaîne de migrations cohérente, non un patch d'objets déjà présents.
+
 ## Suite JavaScript consolidée
 
 Exécution locale : `node --test tests/*.test.js` avec les dépendances locales
