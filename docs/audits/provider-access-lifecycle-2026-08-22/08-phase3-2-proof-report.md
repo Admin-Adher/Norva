@@ -70,6 +70,28 @@ flag provider n'a été activé et aucun déploiement n'a été effectué.
 Les lignes `PENDING` ne peuvent pas être assimilées à une couverture par les
 tests voisins. Elles maintiennent le statut **NO-GO**.
 
+## Consolidation PostgreSQL 2026-08-23
+
+Les huit smokes suivants ont été rejoués consécutivement sur
+`norva_phase3_owner_matrix_0823` et se sont tous terminés avec succès :
+
+```text
+account_deletion_workflow_claim_smoke.sql
+account_deletion_workflow_claim_concurrency_smoke.sql
+account_deletion_product_reaper_smoke.sql
+account_deletion_finalization_smoke.sql
+account_deletion_finalization_concurrency_smoke.sql
+account_deletion_paywall_analytics_smoke.sql
+provider_account_delete_concurrency_smoke.sql
+account_deletion_transport_stop_concurrency_smoke.sql
+```
+
+Le dernier smoke a été exécuté une seconde fois avec succès après son correctif
+de teardown (`0890f113`), ce qui prouve aussi sa reprise de fixture. Les
+avertissements `Norva signup Telegram immediate wake failed (SQLSTATE 42P01)`
+proviennent de l'infrastructure locale absente du fixture ; aucun script n'a
+échoué ni continué après une erreur.
+
 ## Suite JavaScript consolidée
 
 Exécution locale : `node --test tests/*.test.js` avec les dépendances locales
@@ -92,8 +114,9 @@ complète en verte et le statut global reste **NO-GO**.
    source, compte et snapshot demandées par le contrat.
 4. Compléter les scénarios runtime du transport stop : crash après l'effet
    gateway avant settle (le retry endpoint est idempotent, mais le crash Edge
-   complet n'est pas encore injecté) et suppression source/compte répétée.
-   L'expiry de lease versus settle est couvert localement.
+   complet n'est pas encore injecté). L'expiry de lease versus settle, la
+   suppression source post-claim et la suppression compte répétée sont couverts
+   localement.
 
 ## Pré-requis d'intégration du lot gateway-stop
 
