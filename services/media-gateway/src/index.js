@@ -8177,6 +8177,23 @@ app.delete('/raw-pumps', requireGatewayAuth, (req, res) => {
     res.json({ ok: true, aborted });
 });
 
+app.post('/sessions/stop-provider-affinities', requireGatewayAuth, async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    const values = Array.isArray(req.body?.affinityHashes) ? req.body.affinityHashes : [];
+    const affinityHashes = [...new Set(values.map((value) => String(value || '').trim().toLowerCase()))];
+    if (!affinityHashes.length || affinityHashes.length > 64
+        || affinityHashes.some((value) => !/^[a-f0-9]{64}$/.test(value))) {
+        return res.status(400).json({ error: 'affinityHashes must contain 1-64 SHA-256 values' });
+    }
+    const outcome = await stopProviderAffinities(affinityHashes);
+    if (!outcome.providerDrained) {
+        return res.status(409).json({ error: 'Provider transport remains active', providerDrained: false });
+    }
+    return res.status(200).json({ ok: true, protocol: 1, providerDrained: true,
+        stoppedSessions: outcome.stoppedSessions, abortedRawPumps: outcome.abortedRawPumps,
+        stoppedExtractions: outcome.stoppedExtractions });
+});
+
 app.get('/sessions/:id', requireGatewayAuth, (req, res) => {
     const session = sessions.get(req.params.id);
     if (!session) return res.status(404).json({ error: 'Session not found' });
@@ -14369,6 +14386,42 @@ async function stopConflictingProviderSessions(providerSlotKey) {
         await stopSession(session, { reason: 'viewer-preempted' });
     }));
     return conflicts.length;
+}
+
+function providerAffinityHashForGatewayKey(key) {
+    return key ? sha256Hex(String(key)) : '';
+}
+
+async function stopProviderAffinities(affinityHashes) {
+    const requested = new Set(affinityHashes);
+    const matches = (key) => requested.has(providerAffinityHashForGatewayKey(key));
+    const sessionsToStop = Array.from(sessions.values()).filter((session) => (
+        matches(proxyKeyFromUrl(session?.sourceUrl || '')) && isSessionBlockingProviderSlot(session)
+    ));
+    await Promise.allSettled(sessionsToStop.map((session) => (
+        stopSession(session, { reason: 'account-deletion' })
+    )));
+    const rawPumpsAborted = abortRawPumps((pump) => matches(pump?.proxyKey || ''), null, 'account deletion');
+    let extractionsStopped = 0;
+    const extractionStops = [];
+    for (const [proxyKey, entries] of accountExtractions) {
+        if (!matches(proxyKey)) continue;
+        for (const entry of [...entries]) {
+            if (entry?.preempted) continue;
+            entry.preempted = true;
+            extractionsStopped += 1;
+            extractionStops.push(stopChildProcess(entry.child));
+        }
+    }
+    await Promise.allSettled(extractionStops);
+    const remaining = Array.from(sessions.values()).some((session) => (
+        matches(proxyKeyFromUrl(session?.sourceUrl || '')) && isSessionBlockingProviderSlot(session)
+    )) || Array.from(rawPumps).some((pump) => matches(pump?.proxyKey || ''))
+      || Array.from(accountExtractions).some(([proxyKey, entries]) => (
+        matches(proxyKey) && Array.from(entries).some((entry) => !entry?.preempted)
+    ));
+    return { stoppedSessions: sessionsToStop.length, abortedRawPumps: rawPumpsAborted,
+        stoppedExtractions: extractionsStopped, providerDrained: !remaining };
 }
 
 async function stopConflictingOwnerSessions(ownerKey) {
