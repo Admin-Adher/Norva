@@ -160,6 +160,14 @@ provenance : ne pas la contourner par une capability artificielle. Une base
 vierge appliquant le graphe versionné complet, avec historique fiable, reste
 nécessaire avant les courses provider finales.
 
+Une tentative de reconstruction intégrale depuis une base locale nouvellement
+créée a aussi échoué dès `001_ecosystem.sql` : ce serveur crée ses bases depuis
+un `template1` déjà partiellement peuplé (relations `hubs`, `pair_requests`,
+etc.) mais sans la publication `supabase_realtime` exigée par cette migration.
+La base temporaire `norva_phase3_fresh_0823`, vérifiée sans connexion, a été
+supprimée. Le prochain essai doit donc partir d'un bootstrap Supabase cohérent
+(rôles, schémas et publication), et non du `template1` local contaminé.
+
 ## Suite JavaScript consolidée
 
 Exécution locale : `node --test tests/*.test.js` avec les dépendances locales
