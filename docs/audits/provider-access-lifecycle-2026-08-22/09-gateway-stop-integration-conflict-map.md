@@ -38,6 +38,9 @@ baf1350a  docs(provider): record local migration parity gap
 c0763640  docs(provider): record rebuilt database parity check
 a7eef755  docs(provider): record rebuild provenance gate
 64191b24  docs(provider): record local bootstrap gap
+35fb0b2a  docs(provider): prove projection index repair
+4ec3da9e  docs(provider): refresh current delete race evidence
+fb6a1b5a  docs(provider): trace residual smoke provenance
 ```
 
 ## Fichiers à conflit potentiel
