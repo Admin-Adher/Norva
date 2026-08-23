@@ -2,7 +2,9 @@
 
 Statut : **NO-GO**. Ce document est un état de preuve, pas une approbation de
 déploiement. Toutes les exécutions ci-dessous utilisent PostgreSQL local ; aucun
-flag provider n'a été activé et aucun déploiement n'a été effectué.
+flag de production n'a été activé et aucun déploiement n'a été effectué. Le
+seul flag temporaire employé par un fixture isolé de promotion est signalé plus
+bas et rétabli à `false` avant le nettoyage du fixture.
 
 | Scenario | Initial state | Sessions / action | Winner / loser | Final invariant | Evidence | Status |
 |---|---|---|---|---|---|---|
