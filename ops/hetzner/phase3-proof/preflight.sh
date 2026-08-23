@@ -47,12 +47,11 @@ if [[ -f .env ]]; then
   if grep -Eqi '(api\.norva\.tv|norva\.tv|resend|firebase|revenuecat|telegram|revolut|cloudflare)' .env; then
     die '.env contains a prohibited production/external integration marker'
   fi
+  docker compose --project-name "$PROJECT" --env-file .env -f "$COMPOSE_FILE" config >/dev/null \
+    || die 'dedicated compose does not validate'
+elif [[ "${PHASE3_PROOF_REQUIRE_ENV:-0}" == '1' ]]; then
+  die 'proof .env is required at this stage'
 fi
-
-docker compose --project-name "$PROJECT" --env-file .env -f "$COMPOSE_FILE" config >/dev/null 2>&1 || {
-  [[ -f .env ]] || die 'run bootstrap.sh first to generate local proof secrets'
-  die 'dedicated compose does not validate'
-}
 
 printf 'phase3-proof preflight PASS: available=%sMiB disk=%sGiB ports=%s,%s project=%s root=%s\n' \
   "$available_mib" "$available_gib" "${PORTS[0]}" "${PORTS[1]}" "$PROJECT" "$ROOT"
