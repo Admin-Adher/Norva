@@ -849,9 +849,10 @@
     async function deleteAccount(confirm) {
         const token = await getAccessToken();
         if (!token) throw new Error('Not signed in');
-        // Calls the norva-account-delete edge function, which re-verifies this
-        // JWT server-side and deletes the auth user. Every user-owned table
-        // references auth.users(id) ON DELETE CASCADE, so all data goes with it.
+        // Calls the durable account-deletion adapter, which re-verifies this
+        // JWT server-side and returns deletion_pending while PostgreSQL drains
+        // provider work and runs bounded purges. Auth deletion is finalizer-only;
+        // this caller must never rely on a synchronous cascade.
         const result = await request('/functions/v1/norva-account-delete', {
             method: 'POST',
             token,

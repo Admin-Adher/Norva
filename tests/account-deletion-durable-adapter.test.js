@@ -7,6 +7,7 @@ const edge = fs.readFileSync(
   path.join(__dirname, '..', 'supabase', 'functions', 'norva-account-delete', 'index.ts'),
   'utf8',
 );
+const client = fs.readFileSync(path.join(__dirname, '..', 'public', 'js', 'authApi.js'), 'utf8');
 
 test('the public account-delete adapter begins durable work and never deletes Auth inline', () => {
   const route = edge.slice(edge.indexOf('Deno.serve(async (req) => {'));
@@ -24,4 +25,13 @@ test('the sole Auth deletion is a claimed, acknowledged durable finalizer', () =
   const acknowledgeAt = finalizer.indexOf('norva_complete_account_deletion_finalization');
   assert.ok(claimAt >= 0 && claimAt < deleteAt && deleteAt < acknowledgeAt);
   assert.match(finalizer, /norva_reconcile_account_deletion_finalizations/);
+});
+
+test('the only user-facing caller targets the durable adapter and never promises a cascade', () => {
+  const start = client.indexOf('async function deleteAccount(confirm)');
+  const end = client.indexOf('\n    function captureSessionFromUrl', start);
+  const caller = client.slice(start, end);
+  assert.match(caller, /\/functions\/v1\/norva-account-delete/);
+  assert.match(caller, /deletion_pending/);
+  assert.doesNotMatch(caller, /ON DELETE CASCADE|deletes the auth user/);
 });
