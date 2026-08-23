@@ -104,6 +104,68 @@ exception when others then
 end
 $two_sessions$;
 
+-- Crash after the first claim. Commit the expired lease as a separate durable
+-- boundary before a second session attempts recovery; otherwise the test would
+-- incorrectly retain a row lock that a real crashed worker cannot retain.
+begin;
+set local "request.jwt.claim.role" = 'service_role';
+update public.cloud_account_deletion_workflows
+set state='draining',revision=revision+1,updated_at=clock_timestamp()
+where user_id='d0000000-0000-0000-0000-000000000094';
+update public.cloud_provider_transport_stop_actions
+set lease_until=clock_timestamp() - interval '1 second',updated_at=clock_timestamp()
+where user_id='d0000000-0000-0000-0000-000000000094';
+commit;
+
+do $crash_reclaim$
+declare v_reclaim jsonb; v_stale boolean := false; v_connection text;
+begin
+  perform set_config('request.jwt.claim.role','service_role',true);
+  perform extensions.dblink_connect('norva_transport_reclaim',format(
+    'host=127.0.0.1 port=%s dbname=%s user=%s connect_timeout=2',
+    current_setting('port'),current_database(),current_user));
+  perform extensions.dblink_exec('norva_transport_reclaim','set "request.jwt.claim.role"=''service_role''');
+  select remote.payload into strict v_reclaim from extensions.dblink(
+    'norva_transport_reclaim',$sql$
+      select public.norva_claim_account_deletion_transport_stop(
+        'd0000000-0000-0000-0000-000000000094'::uuid,'transport-race-b',120)
+    $sql$
+  ) as remote(payload jsonb);
+  if v_reclaim->>'state' <> 'processing'
+     or (v_reclaim->>'leaseSequence')::integer <= 1
+     or (v_reclaim->>'revision')::bigint <= 1 then
+    raise exception 'transport crash reclaim did not bump its durable authority';
+  end if;
+  -- Old worker A cannot settle after B's durable reclaim.
+  begin
+    perform public.norva_settle_provider_transport_stop_action(
+      'd0000000-0000-0000-0000-000000000094','transport-race-a',1,1,
+      'completed',repeat('a',64),null,0
+    );
+  exception when sqlstate '40001' then v_stale := true;
+  end;
+  if not v_stale then raise exception 'expired worker A settled a transport stop'; end if;
+  perform public.norva_revalidate_account_deletion_transport_stop(
+    'd0000000-0000-0000-0000-000000000094','transport-race-b',
+    (v_reclaim->>'deletionEpoch')::bigint,(v_reclaim->>'leaseSequence')::integer,
+    (v_reclaim->>'revision')::bigint
+  );
+  perform public.norva_settle_provider_transport_stop_action(
+    'd0000000-0000-0000-0000-000000000094','transport-race-b',
+    (v_reclaim->>'leaseSequence')::integer,(v_reclaim->>'revision')::bigint,
+    'completed',repeat('b',64),null,0
+  );
+  perform extensions.dblink_disconnect('norva_transport_reclaim');
+exception when others then
+  foreach v_connection in array coalesce(extensions.dblink_get_connections(),array[]::text[]) loop
+    if v_connection='norva_transport_reclaim' then
+      begin perform extensions.dblink_disconnect(v_connection); exception when others then null; end;
+    end if;
+  end loop;
+  raise;
+end
+$crash_reclaim$;
+
 -- Fixture teardown intentionally bypasses the Auth trigger only after all
 -- assertions. It is test hygiene, not a production deletion path.
 begin;
