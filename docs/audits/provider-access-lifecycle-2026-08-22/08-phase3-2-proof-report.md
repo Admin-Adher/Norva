@@ -110,6 +110,23 @@ et retourne un état durable, que le cron avance au plus un batch borné avec CA
 et que le seul `auth.admin.deleteUser()` est dans le finaliseur après son claim
 et ses préconditions PostgreSQL — jamais dans le chemin de demande initiale.
 
+Les smokes SQL suivants ont enfin été rejoués consécutivement sur
+`norva-phase3-proof-db`, tous avec `ON_ERROR_STOP=1` et sans erreur :
+
+```text
+account_deletion_paywall_analytics_smoke.sql
+account_deletion_legal_billing_retention_smoke.sql
+account_deletion_product_reaper_smoke.sql
+account_deletion_finalization_concurrency_smoke.sql
+```
+
+Ils confirment respectivement le checkpoint keyset et les rollups sans double
+compte, la copie/déliage légal idempotent et la purge à échéance, la purge
+produit bornée, puis le claim final concurrent et la reprise après Auth delete
+avant acknowledgement. La configuration métier réelle de conservation reste
+cependant un prérequis externe distinct : ces fixtures ne peuvent pas la
+remplacer.
+
 ## Matrice deux-sessions rejouée 2026-08-23
 
 Les harnesses ont été rendus portables entre une installation `dblink` dans le
