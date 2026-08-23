@@ -1,0 +1,55 @@
+# Cartographie d’intégration — gateway-stop isolé
+
+Date : 2026-08-23. Cette analyse a été réalisée en lecture seule contre le
+worktree utilisateur ; aucun de ses fichiers n’a été modifié, stashé ou indexé.
+
+## Base et ordre des commits
+
+- Base isolée : `2e74a9fd`.
+- Branche : `codex/gateway-stop-isolated`.
+- À appliquer après le lot Phase 3 qui fournit les tables/routines provider :
+
+```text
+3466e56b  feat(gateway): stop provider transport for account deletion
+e2290280  feat(account-delete): expose opaque transport stop scope
+fe295228  feat(account-delete): execute transport stop receipts
+c6af7799  fix(account-delete): revalidate transport stop before gateway
+1d316088  docs(provider): record transport stop fence proof
+b6ca04c4  test(account-delete): recover expired transport stop claim
+616f2bf4  docs(gateway): record idempotent transport stop retry
+23c81d7e  test(account-delete): make duplicate begin one transport action
+993ca3c4  fix(account-delete): persist gateway transport retry
+```
+
+## Fichiers à conflit potentiel
+
+| Fichier | Modifications utilisateur observées | Lot isolé | Chevauchement | Intégration |
+|---|---|---|---|---|
+| `services/media-gateway/src/index.js` | validation Xtream, spool catalogue, egress DNS et proxy | route stop opaque près de `8179`; helper près de `14373` sur la base | textuel : non | cherry-pick normal attendu ; vérifier que `proxyKeyFromUrl()` reste `providerAccountAffinityKey()` |
+| `supabase/functions/norva-account-delete/index.ts` | aucune modification non commitée observée | claim, revalidation, retry/receipt gateway | non observé | cherry-pick normal, puis test Edge ciblé |
+| `supabase/migrations/` | migrations Phase 3 non commitées, dont affinities et sous-graphe `82780/82783` | `20260823182792`, `20260823182793` | dépendance, non conflit textuel | appliquer le sous-graphe fournisseur en premier ; ne pas appliquer `82792/82793` seul |
+| `tests/` | nombreux tests VOD/provider non commités | deux tests transport stop | aucun même chemin observé | cherry-pick normal, puis suites ciblées |
+
+## Vérification sémantique obligatoire lors du troisième worktree
+
+Le hash transmis au gateway doit rester :
+
+```text
+SHA-256(providerAccountAffinityKey(source URL))
+```
+
+Le gateway compare ce hash à `proxyKeyFromUrl(session.sourceUrl)`. La révision
+utilisateur modifie `providerSlotKeyFromUrl`, mais pas `proxyKeyFromUrl` lors de
+l’analyse ; cette distinction doit être recontrôlée après résolution de conflit.
+Ne remplacer ni le hash d’affinité par un slot incluant le mot de passe, ni par
+une valeur exposant une URL ou un identifiant de compte.
+
+## Procédure d’intégration ultérieure
+
+1. Créer un troisième worktree propre depuis le commit qui contient les
+   modifications utilisateur validées.
+2. Vérifier la présence des migrations d’affinité et `82780`/`82781`.
+3. Cherry-pick les commits ci-dessus dans cet ordre.
+4. Résoudre seulement si la vérification sémantique de clé l’exige.
+5. Exécuter `node --test tests/account-deletion-transport-stop-edge.test.js tests/media-gateway-account-deletion-stop.test.js` et les smokes PostgreSQL transport/provider.
+6. Ne pas activer de flag, déployer Edge v3 ou publier le gateway dans cette étape.
