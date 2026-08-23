@@ -73,12 +73,17 @@ ni élargir, ni vider le périmètre qui a été autorisé.
 
 1. Créer un troisième worktree propre depuis le commit qui contient les
    modifications utilisateur validées.
-2. Vérifier la présence des migrations d’affinité, de l'archive légale et
-   `82780`/`82781`, puis appliquer `82792` à `82796` dans cet ordre.
-   La base locale actuelle n'est pas suffisante : elle possède une partie de
-   `20260823174000`, mais pas sa surcharge de création de transition à neuf
-   paramètres ; repartir d'une base Phase 3 propre est requis.
-3. Cherry-pick les commits ci-dessus dans cet ordre.
-4. Résoudre seulement si la vérification sémantique de clé l’exige.
-5. Exécuter les contrats Node, les smokes PostgreSQL transport/provider et `deno test --config supabase/functions/deno.partners.json --allow-env --allow-net --allow-read --allow-write --allow-run supabase/tests/account_deletion_transport_stop_crash_runtime_test.ts`.
-6. Ne pas activer de flag, déployer Edge v3 ou publier le gateway dans cette étape.
+2. Provisionner une base de test depuis le bootstrap Supabase cohérent, pas
+   depuis le `template1` portable : avant la première migration, vérifier
+   l'existence de `auth.users`, des rôles `anon`/`authenticated`/`service_role`,
+   des extensions exigées et de la publication `supabase_realtime`. Le compose
+   Hetzner est une référence de bootstrap, non une autorisation de démarrer ou
+   de déployer le stack de production.
+3. Vérifier la présence des migrations d’affinité, de l'archive légale et
+   `82780`/`82781`, puis appliquer `82792` à `82796` dans cet ordre. Les bases
+   locales actuelles sont complémentaires mais incomplètes : l'une a V9 sans
+   worker V3, une autre V3 sans V9 ; aucune ne vaut un replay de migration.
+4. Cherry-pick les commits ci-dessus dans cet ordre.
+5. Résoudre seulement si la vérification sémantique de clé l’exige.
+6. Exécuter les contrats Node, les smokes PostgreSQL transport/provider et `deno test --config supabase/functions/deno.partners.json --allow-env --allow-net --allow-read --allow-write --allow-run supabase/tests/account_deletion_transport_stop_crash_runtime_test.ts`.
+7. Ne pas activer de flag, déployer Edge v3 ou publier le gateway dans cette étape.
