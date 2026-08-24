@@ -182,8 +182,11 @@ docker exec "$TARGET_CONTAINER" pg_isready -U supabase_admin -d postgres >/dev/n
 # invokes work explicitly.
 docker exec "$TARGET_CONTAINER" psql -X -At -v ON_ERROR_STOP=1 \
   -U supabase_admin -d postgres \
-  -c "alter system set cron.launch_active_jobs='off'; select pg_reload_conf()" \
+  -c "alter system set cron.launch_active_jobs='off'" \
   >"$REPORT_DIR/cron-disable.log" 2>&1
+docker exec "$TARGET_CONTAINER" psql -X -At -v ON_ERROR_STOP=1 \
+  -U supabase_admin -d postgres -c "select pg_reload_conf()" \
+  >>"$REPORT_DIR/cron-disable.log" 2>&1
 test "$(docker exec "$TARGET_CONTAINER" psql -X -At -U supabase_admin -d postgres -c 'show cron.launch_active_jobs')" = off \
   || fail "pg_cron launch could not be disabled before restore"
 
