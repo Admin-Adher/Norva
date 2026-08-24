@@ -2,7 +2,9 @@
 
 Date: 2026-08-24
 
-Published source: `57af9f761c65676864acc74f665dffeb570877cc`
+Initial published source: `57af9f761c65676864acc74f665dffeb570877cc`
+
+Current dormant production source: `d7d8725bec5d9c4a5e64efd1ea2feeb39d1bf26f`
 
 Status:
 
@@ -11,6 +13,7 @@ PHASE_1_3_PRODUCTION_CORE_INSTALLED
 PHASE_4_16_PRODUCTION_SCHEMA_INSTALLED
 PHASE_4_16_PRODUCTION_EDGE_INSTALLED
 PHASE_9_16_PRODUCTION_WEB_INSTALLED
+PHASE_16_EXTERNAL_CHANNEL_GATES_PRODUCTION_INSTALLED
 PROVIDER_ACCESS_ROLLOUT_OFF
 PRODUCTION_USER_ACTIVATION_BLOCKED_UNTIL_CACHE_GATE
 ```
@@ -67,6 +70,50 @@ SHA-256 0d2293cec596a8933271ca32429a1024eae61916a9db9a4e3f596c26ac75022d
 
 All ten migration logs are retained in the same directory with individual SHA-256 hashes.
 
+### Independent external-channel gate follow-up
+
+On 2026-08-25, migration
+`20260824170000_provider_access_rollout_channel_gates_v1.sql` was installed
+after its `33/33` PostgreSQL acceptance and real two-session CAS proof. Its
+installation only forced automatic detection, email and push to `false`; it did
+not activate a cohort or create work.
+
+```text
+migration SHA-256
+e2c54199501086b8a92d6b211d1fb61b25affa4a1e4144dabc5585dd2cea7e83
+
+pre-deployment dump
+/var/lib/norva-phase3-proof/production-deploy-d7d8725b/predeploy.dump
+size 909699445 bytes
+mode 0600
+SHA-256 45c9d2ee6352df08137b54c0b4856887d03d9b393b4f202467453c4159e59d9c
+
+migration log SHA-256
+86f918ce129d61542b16452cd9eb14f78b743c979bf66a3c1b1c1d662245098d
+
+post-install invariant artifact
+/var/lib/norva-phase3-proof/production-deploy-d7d8725b/post-db-invariants.tsv
+SHA-256 f8079e9342dd330bc02a502c6fa07ffef3dc6b4fe9911326029078fa7776ef12
+```
+
+The post-install production snapshot was:
+
+```text
+cache|installed|manifest NULL|completed_at NULL
+rollout|off|1|0
+flags|9|0
+external_flags|3|0
+channel_table|present
+channel_rpc|present
+channel_events|0
+replacement_origins|0
+replacement_cleanup|0
+notification_rows|0
+check_jobs|0
+nonterminal_transitions|0
+p0_assert|safe=true, stagingVisibilityViolation=0
+```
+
 ## Edge installation
 
 The clean production worktree was fast-forwarded to the published commit. Both Edge replicas were recreated from the existing reviewed compose definition and reached `healthy`:
@@ -112,9 +159,8 @@ The Web UI remains hidden for every user because the authenticated rollout statu
 3. Explicitly select the internal production account and activate only `INTERNAL`.
 4. Observe real metrics with zero P0/invariant breach before each manual promotion.
 5. Build and publish the signed Android Phone release before enabling push, because the WebView UI is already delivered but the new native FCM routing is not yet in a Play Store release.
-6. Install the independently proved Phase 16 external-channel gate migration.
-   Cohort activation must then leave automatic checks, email and push OFF until
+6. Cohort activation must leave automatic checks, email and push OFF until
    their secrets, bounded workers/cron and individual readiness evidence are
-   approved through the channel CAS RPC.
+   approved through the now-installed channel CAS RPC.
 
 No direct feature-flag edit is an authorized substitute for the Phase 16 RPC and its gates.
