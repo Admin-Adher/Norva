@@ -176,6 +176,35 @@ for _ in $(seq 1 90); do
 done
 docker exec "$TARGET_CONTAINER" pg_isready -U supabase_admin -d postgres >/dev/null || fail "clone database did not become ready"
 
+# A database-format dump contains ACLs but not cluster roles. Mirror any
+# production-only role identity before restore so ACL replay is exact. Passwords
+# and role-level secrets are intentionally never copied into the disposable
+# clone. Standard roles already created by the Supabase bootstrap are left as-is.
+ROLE_SQL="select rolname,rolsuper,rolinherit,rolcreaterole,rolcreatedb,rolcanlogin,rolreplication,rolbypassrls,rolconnlimit from pg_roles order by rolname;"
+docker exec "$PRODUCTION_CONTAINER" psql -X -At -U supabase_admin -d postgres -c "$ROLE_SQL" >"$REPORT_DIR/production-roles.tsv"
+docker exec "$TARGET_CONTAINER" psql -X -At -U supabase_admin -d postgres -c "$ROLE_SQL" >"$REPORT_DIR/clone-roles-before.tsv"
+while IFS='|' read -r role super inherit create_role create_db login replication bypass_rls conn_limit; do
+  case "$role" in pg_*) continue ;; esac
+  case "$role" in ''|*[!a-zA-Z0-9_]*) fail "unsafe production role name $role" ;; esac
+  grep -q "^${role}|" "$REPORT_DIR/clone-roles-before.tsv" && continue
+  options=""
+  test "$super" = t && options+=" SUPERUSER" || options+=" NOSUPERUSER"
+  test "$inherit" = t && options+=" INHERIT" || options+=" NOINHERIT"
+  test "$create_role" = t && options+=" CREATEROLE" || options+=" NOCREATEROLE"
+  test "$create_db" = t && options+=" CREATEDB" || options+=" NOCREATEDB"
+  test "$login" = t && options+=" LOGIN" || options+=" NOLOGIN"
+  test "$replication" = t && options+=" REPLICATION" || options+=" NOREPLICATION"
+  test "$bypass_rls" = t && options+=" BYPASSRLS" || options+=" NOBYPASSRLS"
+  case "$conn_limit" in -1|[0-9]*) ;; *) fail "unsafe connection limit for role $role" ;; esac
+  docker exec "$TARGET_CONTAINER" psql -X -v ON_ERROR_STOP=1 -U supabase_admin -d postgres \
+    -c "create role \"$role\" with$options connection limit $conn_limit" >>"$REPORT_DIR/role-sync.log" 2>&1
+done <"$REPORT_DIR/production-roles.tsv"
+docker exec "$TARGET_CONTAINER" psql -X -At -U supabase_admin -d postgres -c "$ROLE_SQL" >"$REPORT_DIR/clone-roles-after.tsv"
+while IFS='|' read -r role _; do
+  case "$role" in pg_*) continue ;; esac
+  grep -q "^${role}|" "$REPORT_DIR/clone-roles-after.tsv" || fail "production role $role is missing from clone"
+done <"$REPORT_DIR/production-roles.tsv"
+
 printf 'RESTORE_BEGIN %s\n' "$(date -u +%FT%TZ)" | tee -a "$REPORT_DIR/timeline.log"
 docker exec -i "$TARGET_CONTAINER" pg_restore \
   -U supabase_admin -d postgres --clean --if-exists --no-owner --exit-on-error \
