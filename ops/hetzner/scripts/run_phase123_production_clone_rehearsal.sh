@@ -406,6 +406,7 @@ run_test() {
   docker exec -i "$TARGET_CONTAINER" psql -X -v ON_ERROR_STOP=1 -U supabase_admin -d postgres \
     <"$WORKSPACE/supabase/tests/$test_name" >"$output" 2>&1
   grep -Eq '(^|[[:space:]])not ok([[:space:]]|$)' "$output" && fail "pgTAP failure in $test_name"
+  return 0
 }
 
 TESTS=(
