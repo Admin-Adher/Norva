@@ -223,6 +223,10 @@ select public.norva_mark_replacement_transition_ready(
   (select revision from public.cloud_source_transitions
    where id = '93000000-0000-4000-8000-000000000601')
 );
+\if :{?phase4_prepare_ready_fixture}
+commit;
+\quit
+\endif
 select extensions.throws_ok(
   format($sql$select public.norva_promote_source_replacement_v2(
     %L,%L,%L,%s,%s,%s
@@ -404,6 +408,18 @@ select extensions.ok(
    where transition_id=(select (value->>'rollbackTransitionId')::uuid
      from phase4_builder_ctx where key='rollback')),
   'rollback cancels A cleanup and schedules B cleanup');
+-- The cleanup worker is a global oldest-due claimant. Keep this harness
+-- deterministic even on an intentionally dirty proof database by deferring
+-- unrelated pending fixtures inside this transaction only.
+update public.cloud_source_replacement_cleanup_jobs
+set available_at=clock_timestamp()+interval '1 hour'
+where state='pending'
+  and transition_id<>(select (value->>'rollbackTransitionId')::uuid
+    from phase4_builder_ctx where key='rollback');
+update public.cloud_source_replacement_cleanup_jobs
+set available_at=clock_timestamp()
+where transition_id=(select (value->>'rollbackTransitionId')::uuid
+  from phase4_builder_ctx where key='rollback');
 set local role service_role;
 insert into phase4_builder_ctx values ('cleanupPrepare',
   public.norva_run_replacement_cleanup_batch('phase4-cleanup-test',200));
