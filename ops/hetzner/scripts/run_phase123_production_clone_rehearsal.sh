@@ -1,0 +1,323 @@
+#!/usr/bin/env bash
+# Rehearses the complete Phase 1-3 database rollout against a consistent,
+# disposable logical clone of the current production database. Production is
+# read only: the sole production operation is pg_dump plus baseline queries.
+set -Eeuo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage:
+  run_phase123_production_clone_rehearsal.sh \
+    --workspace /home/adrien/norva-phase3-proof/source-SHA \
+    --run-id a
+
+The run id must contain only lowercase ASCII letters, digits, or hyphens. The
+script refuses an existing target container, data directory, or artifact
+directory. It never publishes a port and never connects the clone to the
+production Docker network.
+EOF
+}
+
+WORKSPACE=""
+RUN_ID=""
+PRODUCTION_CONTAINER="norva-db"
+PROOF_ROOT="/var/lib/norva-phase3-proof"
+PROOF_HOME="/home/adrien/norva-phase3-proof"
+PROOF_NETWORK="norva-phase3-proof-net"
+DB_CONFIG_VOLUME="norva-phase3-proof-db-config"
+IMAGE="supabase/postgres:17.6.1.136"
+
+while (($#)); do
+  case "$1" in
+    --workspace) WORKSPACE="${2:-}"; shift 2 ;;
+    --run-id) RUN_ID="${2:-}"; shift 2 ;;
+    --production-container) PRODUCTION_CONTAINER="${2:-}"; shift 2 ;;
+    --proof-root) PROOF_ROOT="${2:-}"; shift 2 ;;
+    --proof-home) PROOF_HOME="${2:-}"; shift 2 ;;
+    --image) IMAGE="${2:-}"; shift 2 ;;
+    -h|--help) usage; exit 0 ;;
+    *) usage >&2; exit 64 ;;
+  esac
+done
+
+fail() { printf 'PHASE123_PRODUCTION_CLONE_REHEARSAL_FAIL: %s\n' "$*" >&2; exit 1; }
+
+test -n "$WORKSPACE" || { usage >&2; exit 64; }
+case "$RUN_ID" in
+  ''|*[!a-z0-9-]*) usage >&2; exit 64 ;;
+esac
+case "$WORKSPACE" in
+  "$PROOF_HOME"/source-*) ;;
+  *) fail "workspace is outside the frozen proof area" ;;
+esac
+case "$PROOF_ROOT" in
+  /var/lib/norva-phase3-proof) ;;
+  *) fail "proof root must be /var/lib/norva-phase3-proof" ;;
+esac
+test "$PRODUCTION_CONTAINER" = "norva-db" || fail "unexpected production container"
+test -d "$WORKSPACE/.git" || fail "workspace is not a Git checkout"
+test -z "$(git -C "$WORKSPACE" status --porcelain --untracked-files=all)" || fail "workspace is not clean"
+docker inspect "$PRODUCTION_CONTAINER" >/dev/null 2>&1 || fail "production database container is unavailable"
+test "$(docker inspect -f '{{.State.Running}}' "$PRODUCTION_CONTAINER")" = true || fail "production database is not running"
+docker network inspect "$PROOF_NETWORK" >/dev/null 2>&1 || fail "proof network is missing"
+docker volume inspect "$DB_CONFIG_VOLUME" >/dev/null 2>&1 || fail "proof DB config volume is missing"
+
+TARGET_CONTAINER="norva-phase123-prod-clone-${RUN_ID}-db"
+DATA_ROOT="$PROOF_ROOT/prod-clone-${RUN_ID}"
+DATA_DIR="$DATA_ROOT/db"
+REPORT_DIR="$PROOF_HOME/artifacts/prod-clone-${RUN_ID}"
+DUMP_DIR="$PROOF_HOME/private-dumps"
+DUMP_FILE="$DUMP_DIR/production-phase123-${RUN_ID}.dump"
+OPS_DB="$PROOF_HOME/ops/hetzner/volumes/db"
+
+case "$TARGET_CONTAINER" in norva-phase123-prod-clone-*-db) ;; *) fail "unsafe target container name" ;; esac
+test "$TARGET_CONTAINER" != "$PRODUCTION_CONTAINER" || fail "target aliases production"
+test -z "$(docker ps -aq --filter "name=^/${TARGET_CONTAINER}$")" || fail "target container already exists"
+test ! -e "$DATA_ROOT" || fail "target data directory already exists"
+test ! -e "$REPORT_DIR" || fail "target report directory already exists"
+test ! -e "$DUMP_FILE" || fail "target dump already exists"
+for file in jwt.sql webhooks.sql roles.sql _supabase.sql logs.sql pooler.sql realtime.sql; do
+  test -f "$OPS_DB/$file" || fail "missing proof bootstrap file $file"
+done
+
+umask 077
+mkdir -p "$REPORT_DIR" "$DUMP_DIR"
+chmod 700 "$REPORT_DIR" "$DUMP_DIR"
+
+HEAD="$(git -C "$WORKSPACE" rev-parse HEAD)"
+MIGRATION_TREE_SHA="$(find "$WORKSPACE/supabase/migrations" -maxdepth 1 -type f -name '*.sql' -print0 | sort -z | xargs -0 sha256sum | sha256sum | awk '{print $1}')"
+PROD_IMAGE="$(docker inspect -f '{{.Config.Image}}' "$PRODUCTION_CONTAINER")"
+PROD_DATA_MOUNT="$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/var/lib/postgresql/data"}}{{.Source}}{{end}}{{end}}' "$PRODUCTION_CONTAINER")"
+test "$PROD_IMAGE" = "$IMAGE" || fail "production image differs from rehearsal image"
+test "$PROD_DATA_MOUNT" = "/var/lib/norva/db" || fail "production data mount identity is unexpected"
+
+cat >"$REPORT_DIR/manifest.txt" <<EOF
+proof_commit=$HEAD
+migration_tree_sha256=$MIGRATION_TREE_SHA
+production_container=$PRODUCTION_CONTAINER
+production_image=$PROD_IMAGE
+production_data_mount=$PROD_DATA_MOUNT
+target_container=$TARGET_CONTAINER
+target_data_root=$DATA_ROOT
+first_phase123_migration=20260822220000_cloud_sources_owner_index_online.sql
+pre_contraction_head=20260823179920_catalog_generation_flag_gate.sql
+contraction_definition=20260823180000_provider_catalog_generation_online_rollout.sql
+online_index_head=20260823182700_series_inventory_generation_parent_natural_fk.sql
+phase3_database_head=20260823194000_replacement_promotion_proof_account_delete.sql
+cache_epoch_head=20260824100000_catalog_cache_epoch_v2.sql
+EOF
+
+baseline_sql() {
+  cat <<'SQL'
+select 'server_version',current_setting('server_version');
+select 'database_size_bytes',pg_database_size(current_database());
+select 'auth_users',count(*) from auth.users;
+select 'cloud_sources',count(*) from public.cloud_sources;
+select 'cloud_media_items',count(*) from public.cloud_media_items;
+select 'cloud_titles',count(*) from public.cloud_titles;
+select 'cloud_title_variants',count(*) from public.cloud_title_variants;
+select 'cloud_live_logical_channels',count(*) from public.cloud_live_logical_channels;
+select 'cloud_live_variants',count(*) from public.cloud_live_variants;
+select 'catalog_series_episode_memberships',count(*) from public.catalog_series_episode_memberships;
+select 'catalog_series_inventory_state',count(*) from public.catalog_series_inventory_state;
+select 'phase123_objects',count(*) from pg_class where relnamespace='public'::regnamespace and relname in ('cloud_global_catalog_visibility_epoch','cloud_catalog_generation_rollout','cloud_source_catalog_generations','cloud_source_credential_candidates');
+select 'phase123_flags',count(*),count(*) filter(where enabled) from public.admin_feature_flags where key in ('provider_access_v1_enabled','provider_access_auto_detection_v1_enabled','provider_access_notifications_v1_enabled','provider_access_visibility_v1_enabled','provider_credential_transition_v1_enabled','provider_replacement_v1_enabled');
+SQL
+}
+
+baseline_sql | docker exec -i "$PRODUCTION_CONTAINER" psql -X -At -F $'\t' -v ON_ERROR_STOP=1 -U supabase_admin -d postgres >"$REPORT_DIR/production-baseline.tsv"
+grep -qx $'phase123_objects\t0' "$REPORT_DIR/production-baseline.tsv" || fail "production already contains part of the Phase 1-3 schema"
+
+printf 'DUMP_BEGIN %s\n' "$(date -u +%FT%TZ)" | tee "$REPORT_DIR/timeline.log"
+PARTIAL_DUMP="$DUMP_FILE.partial"
+trap 'rm -f -- "$PARTIAL_DUMP"' EXIT
+docker exec "$PRODUCTION_CONTAINER" pg_dump \
+  -U supabase_admin -d postgres -Fc --no-owner \
+  --file=- >"$PARTIAL_DUMP"
+test -s "$PARTIAL_DUMP" || fail "production dump is empty"
+mv "$PARTIAL_DUMP" "$DUMP_FILE"
+chmod 600 "$DUMP_FILE"
+trap - EXIT
+sha256sum "$DUMP_FILE" >"$REPORT_DIR/production-dump.sha256"
+printf 'DUMP_COMPLETE %s bytes=%s\n' "$(date -u +%FT%TZ)" "$(stat -c %s "$DUMP_FILE")" | tee -a "$REPORT_DIR/timeline.log"
+
+password="norva_phase123_prod_clone_${RUN_ID}_only"
+docker run -d \
+  --name "$TARGET_CONTAINER" \
+  --network "$PROOF_NETWORK" \
+  --label norva.phase123.production-clone=true \
+  --label "norva.phase123.run=$RUN_ID" \
+  -e POSTGRES_DB=postgres \
+  -e POSTGRES_USER=supabase_admin \
+  -e POSTGRES_PASSWORD="$password" \
+  -e JWT_SECRET="norva_phase123_prod_clone_${RUN_ID}_jwt_only" \
+  -e JWT_EXP=3600 \
+  -v "$DATA_DIR":/var/lib/postgresql/data \
+  -v "$WORKSPACE":/workspace:ro \
+  -v "$OPS_DB/jwt.sql":/docker-entrypoint-initdb.d/init-scripts/99-jwt.sql:ro \
+  -v "$OPS_DB/webhooks.sql":/docker-entrypoint-initdb.d/init-scripts/98-webhooks.sql:ro \
+  -v "$OPS_DB/roles.sql":/docker-entrypoint-initdb.d/init-scripts/99-roles.sql:ro \
+  -v "$OPS_DB/_supabase.sql":/docker-entrypoint-initdb.d/migrations/97-_supabase.sql:ro \
+  -v "$OPS_DB/logs.sql":/docker-entrypoint-initdb.d/migrations/99-logs.sql:ro \
+  -v "$OPS_DB/pooler.sql":/docker-entrypoint-initdb.d/migrations/99-pooler.sql:ro \
+  -v "$OPS_DB/realtime.sql":/docker-entrypoint-initdb.d/migrations/99-realtime.sql:ro \
+  -v "$DB_CONFIG_VOLUME":/etc/postgresql-custom:ro \
+  "$IMAGE" postgres \
+    -c config_file=/etc/postgresql/postgresql.conf \
+    -c shared_buffers=1GB -c effective_cache_size=4GB -c work_mem=16MB \
+    -c maintenance_work_mem=1GB -c max_connections=75 -c max_wal_size=8GB \
+    -c archive_mode=off >"$REPORT_DIR/container-id.txt"
+
+for _ in $(seq 1 90); do
+  if docker logs "$TARGET_CONTAINER" 2>&1 | grep -q 'PostgreSQL init process complete; ready for start up.' \
+     && docker exec "$TARGET_CONTAINER" pg_isready -U supabase_admin -d postgres >/dev/null 2>&1; then
+    break
+  fi
+  sleep 1
+done
+docker exec "$TARGET_CONTAINER" pg_isready -U supabase_admin -d postgres >/dev/null || fail "clone database did not become ready"
+
+printf 'RESTORE_BEGIN %s\n' "$(date -u +%FT%TZ)" | tee -a "$REPORT_DIR/timeline.log"
+docker exec -i "$TARGET_CONTAINER" pg_restore \
+  -U supabase_admin -d postgres --clean --if-exists --no-owner --exit-on-error \
+  <"$DUMP_FILE" >"$REPORT_DIR/restore.log" 2>&1
+printf 'RESTORE_COMPLETE %s\n' "$(date -u +%FT%TZ)" | tee -a "$REPORT_DIR/timeline.log"
+
+baseline_sql | docker exec -i "$TARGET_CONTAINER" psql -X -At -F $'\t' -v ON_ERROR_STOP=1 -U supabase_admin -d postgres >"$REPORT_DIR/clone-baseline.tsv"
+diff -u <(grep -v '^database_size_bytes' "$REPORT_DIR/production-baseline.tsv") <(grep -v '^database_size_bytes' "$REPORT_DIR/clone-baseline.tsv") >"$REPORT_DIR/baseline-diff.txt" || fail "clone row-count baseline differs from production"
+docker exec "$TARGET_CONTAINER" psql -X -v ON_ERROR_STOP=1 -U supabase_admin -d postgres -c 'vacuum analyze' >"$REPORT_DIR/vacuum-analyze.log" 2>&1
+
+apply_range() {
+  local lower="$1" upper="$2" label="$3"
+  local list="$REPORT_DIR/migrations-${label}.txt" log="$REPORT_DIR/migrations-${label}.log"
+  find "$WORKSPACE/supabase/migrations" -maxdepth 1 -type f -name '*.sql' -printf '%f\n' | sort |
+    awk -v lower="$lower" -v upper="$upper" '$0 > lower && $0 <= upper' >"$list"
+  grep -qx "$upper" "$list" || fail "migration range $label does not reach $upper"
+  while IFS= read -r migration; do
+    local started finished
+    started="$(date +%s)"
+    printf 'APPLY %s %s\n' "$(date -u +%FT%TZ)" "$migration" | tee -a "$log"
+    if grep -Eiq '^[[:space:]]*(create|drop)[[:space:]]+(unique[[:space:]]+)?index[[:space:]]+concurrently' "$WORKSPACE/supabase/migrations/$migration"; then
+      docker exec -i "$TARGET_CONTAINER" psql -X -v ON_ERROR_STOP=1 -U supabase_admin -d postgres <"$WORKSPACE/supabase/migrations/$migration" >>"$log" 2>&1
+    else
+      docker exec -i "$TARGET_CONTAINER" psql -X -1 -v ON_ERROR_STOP=1 -U supabase_admin -d postgres <"$WORKSPACE/supabase/migrations/$migration" >>"$log" 2>&1
+    fi
+    finished="$(date +%s)"
+    printf 'APPLIED %s duration_seconds=%s\n' "$migration" "$((finished-started))" | tee -a "$log"
+  done <"$list"
+}
+
+FIRST="20260822220000_cloud_sources_owner_index_online.sql"
+PRE_HEAD="20260823179920_catalog_generation_flag_gate.sql"
+CONTRACTION="20260823180000_provider_catalog_generation_online_rollout.sql"
+ONLINE_HEAD="20260823182700_series_inventory_generation_parent_natural_fk.sql"
+CURRENT_HEAD="20260823194000_replacement_promotion_proof_account_delete.sql"
+CACHE_HEAD="20260824100000_catalog_cache_epoch_v2.sql"
+
+apply_range "20260822219999" "$PRE_HEAD" pre-contraction
+apply_range "$PRE_HEAD" "$CONTRACTION" contraction-definition
+apply_range "$CONTRACTION" "$ONLINE_HEAD" online-indexes
+
+printf 'BACKFILL_BEGIN %s\n' "$(date -u +%FT%TZ)" | tee -a "$REPORT_DIR/timeline.log"
+docker exec -i "$TARGET_CONTAINER" psql -X -v ON_ERROR_STOP=1 -U supabase_admin -d postgres <<'SQL' >"$REPORT_DIR/contraction.log" 2>&1
+set statement_timeout = '4h';
+set lock_timeout = '5s';
+do $discovery$
+declare result jsonb;
+begin
+  for iteration in 1..256 loop
+    result := public.norva_discover_catalog_generation_backfill_sources(100);
+    exit when coalesce((result ->> 'discoveryComplete')::boolean,false);
+  end loop;
+  if not coalesce((result ->> 'discoveryComplete')::boolean,false) then raise exception 'discovery did not converge'; end if;
+end $discovery$;
+do $backfill$
+declare result jsonb;
+begin
+  for iteration in 1..4096 loop
+    result := public.norva_backfill_catalog_generation_batch('production-clone-rehearsal',500,120);
+    exit when not coalesce((result ->> 'claimed')::boolean,false);
+  end loop;
+  if exists (select 1 from public.cloud_catalog_generation_backfill_sources where state <> 'complete') then raise exception 'backfill did not converge'; end if;
+end $backfill$;
+do $validation$
+declare result jsonb;
+begin
+  for iteration in 1..256 loop
+    result := public.norva_validate_catalog_generation_constraints(2);
+    exit when coalesce((result ->> 'remaining')::integer,1) = 0;
+  end loop;
+  if coalesce((result ->> 'remaining')::integer,1) <> 0 then raise exception 'validation did not converge'; end if;
+end $validation$;
+select public.norva_contract_catalog_generation_rollout('catalog-generation-writer-v2-live-clear-batch');
+select public.norva_contract_catalog_generation_rollout('catalog-generation-writer-v2-live-clear-batch');
+SQL
+printf 'BACKFILL_CONTRACTION_COMPLETE %s\n' "$(date -u +%FT%TZ)" | tee -a "$REPORT_DIR/timeline.log"
+
+apply_range "$ONLINE_HEAD" "$CURRENT_HEAD" phase3-head
+apply_range "$CURRENT_HEAD" "$CACHE_HEAD" cache-epoch-v2
+
+run_test() {
+  local test_name="$1" output="$REPORT_DIR/test-${test_name%.sql}.log"
+  printf 'TEST %s %s\n' "$(date -u +%FT%TZ)" "$test_name" | tee -a "$REPORT_DIR/timeline.log"
+  docker exec -i "$TARGET_CONTAINER" psql -X -v ON_ERROR_STOP=1 -U supabase_admin -d postgres \
+    <"$WORKSPACE/supabase/tests/$test_name" >"$output" 2>&1
+  grep -Eq '(^|[[:space:]])not ok([[:space:]]|$)' "$output" && fail "pgTAP failure in $test_name"
+}
+
+TESTS=(
+  provider_access_lifecycle_post_contraction.sql
+  provider_credential_transition.sql
+  catalog_background_owner_snapshot_concurrency_smoke.sql
+  catalog_background_owner_workflow_smoke.sql
+  provider_account_delete_concurrency_smoke.sql
+  provider_account_delete_prepare_smoke.sql
+  account_deletion_workflow_claim_concurrency_smoke.sql
+  account_deletion_transport_stop_concurrency_smoke.sql
+  account_deletion_product_reaper_smoke.sql
+  account_deletion_finalization_concurrency_smoke.sql
+  account_deletion_legal_billing_retention_smoke.sql
+  account_deletion_paywall_analytics_smoke.sql
+  provider_credential_promotion_cancel_concurrency.sql
+  provider_credential_swap_account_delete_concurrency.sql
+  provider_credential_rollback_account_delete_concurrency.sql
+  provider_credential_transaction_crash_matrix.sql
+  provider_replacement_candidate_builder.sql
+  provider_access_expiry_visibility.sql
+  catalog_cache_epoch_v2.sql
+)
+for test_name in "${TESTS[@]}"; do run_test "$test_name"; done
+
+docker exec -i "$TARGET_CONTAINER" psql -X -At -F $'\t' -v ON_ERROR_STOP=1 -U supabase_admin -d postgres <<'SQL' >"$REPORT_DIR/final-invariants.tsv"
+select 'rollout',phase,contracted_at is not null,discovery_complete,discovered_sources,completed_sources,validation_completed_count from public.cloud_catalog_generation_rollout where singleton;
+select 'flags',count(*),count(*) filter(where enabled) from public.admin_feature_flags where key in ('provider_access_v1_enabled','provider_access_auto_detection_v1_enabled','provider_access_notifications_v1_enabled','provider_access_visibility_v1_enabled','provider_credential_transition_v1_enabled','provider_replacement_v1_enabled');
+select 'global_epoch_rows',count(*) from public.cloud_global_catalog_visibility_epoch;
+select 'missing_media_generation',count(*) from public.cloud_media_items where generation_id is null;
+select 'missing_title_variant_generation',count(*) from public.cloud_title_variants where generation_id is null;
+select 'missing_live_logical_generation',count(*) from public.cloud_live_logical_channels where generation_id is null;
+select 'missing_live_variant_generation',count(*) from public.cloud_live_variants where generation_id is null;
+select 'missing_membership_generation',count(*) from public.catalog_series_episode_memberships where generation_id is null;
+select 'missing_inventory_generation',count(*) from public.catalog_series_inventory_state where generation_id is null;
+select 'nonterminal_transitions',count(*) from public.cloud_source_transitions where state not in ('completed','failed','cancelled');
+select 'nonterminal_credential_jobs',count(*) from public.cloud_source_credential_transition_jobs where state in ('pending','processing');
+select 'open_generations',count(*) from public.cloud_source_catalog_generations where state in ('building','ready','purging');
+select 'catalog_cache_epoch',public.norva_catalog_cache_epoch_v2(null);
+SQL
+
+grep -qx $'flags\t6\t0' "$REPORT_DIR/final-invariants.tsv" || fail "provider-access flags are not all OFF"
+grep -qx $'global_epoch_rows\t1' "$REPORT_DIR/final-invariants.tsv" || fail "global cache epoch singleton is missing"
+grep -Eq $'^rollout\tcontracted\tt\t' "$REPORT_DIR/final-invariants.tsv" || fail "catalog generation rollout is not contracted"
+for invariant in missing_media_generation missing_title_variant_generation missing_live_logical_generation missing_live_variant_generation missing_membership_generation missing_inventory_generation nonterminal_transitions nonterminal_credential_jobs open_generations; do
+  grep -qx "$invariant"$'\t0' "$REPORT_DIR/final-invariants.tsv" || fail "$invariant is non-zero"
+done
+
+baseline_sql | docker exec -i "$TARGET_CONTAINER" psql -X -At -F $'\t' -v ON_ERROR_STOP=1 -U supabase_admin -d postgres >"$REPORT_DIR/clone-final-counts.tsv"
+for relation in auth_users cloud_sources cloud_media_items cloud_titles cloud_title_variants cloud_live_logical_channels cloud_live_variants catalog_series_episode_memberships catalog_series_inventory_state; do
+  before="$(awk -F '\t' -v key="$relation" '$1==key{print $2}' "$REPORT_DIR/clone-baseline.tsv")"
+  after="$(awk -F '\t' -v key="$relation" '$1==key{print $2}' "$REPORT_DIR/clone-final-counts.tsv")"
+  test "$before" = "$after" || fail "row count changed for $relation: $before -> $after"
+done
+
+sha256sum "$REPORT_DIR"/*.tsv "$REPORT_DIR"/*.txt "$REPORT_DIR"/*.log >"$REPORT_DIR/artifact-sha256.txt"
+printf 'REHEARSAL_COMPLETE %s\n' "$(date -u +%FT%TZ)" | tee -a "$REPORT_DIR/timeline.log"
+printf 'PHASE123_PRODUCTION_CLONE_REHEARSAL_PASS\ncommit=%s\ncontainer=%s\nreport=%s\n' "$HEAD" "$TARGET_CONTAINER" "$REPORT_DIR"
