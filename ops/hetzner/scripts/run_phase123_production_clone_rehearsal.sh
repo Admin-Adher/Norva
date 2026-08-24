@@ -55,7 +55,8 @@ case "$PROOF_ROOT" in
   *) fail "proof root must be /var/lib/norva-phase3-proof" ;;
 esac
 test "$PRODUCTION_CONTAINER" = "norva-db" || fail "unexpected production container"
-test -d "$WORKSPACE/.git" || fail "workspace is not a Git checkout"
+test "$(git -C "$WORKSPACE" rev-parse --is-inside-work-tree 2>/dev/null)" = true \
+  || fail "workspace is not a Git checkout"
 test -z "$(git -C "$WORKSPACE" status --porcelain --untracked-files=all)" || fail "workspace is not clean"
 docker inspect "$PRODUCTION_CONTAINER" >/dev/null 2>&1 || fail "production database container is unavailable"
 test "$(docker inspect -f '{{.State.Running}}' "$PRODUCTION_CONTAINER")" = true || fail "production database is not running"
