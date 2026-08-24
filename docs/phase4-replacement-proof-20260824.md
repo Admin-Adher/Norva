@@ -19,6 +19,7 @@ Hetzner.
 | Provider Edge and visibility contracts | 44/44 PASS |
 | Fresh `20260824113000_provider_replacement_cleanup_v1.sql` application on proof B | PASS |
 | Bundled `norva-provider-access` Edge function | PASS (912.4 KiB) |
+| Transaction crash matrix | 8/8 boundaries PASS |
 
 The cleanup proof includes:
 
@@ -56,9 +57,42 @@ Final database snapshot:
 
 All temporary barrier triggers/functions were dropped after the snapshot.
 
+## Reproducible transaction crash evidence
+
+`provider_replacement_transaction_crash_matrix.sql` was run against a new
+`READY_TO_SWITCH` fixture (`952...`) in the disposable proof B database. The
+harness uses independent PostgreSQL backends, real `pg_terminate_backend`
+crashes and explicit post-COMMIT acknowledgement barriers.
+
+| Boundary | Recovery evidence |
+|---|---|
+| cancel before COMMIT | transition remains `READY_TO_SWITCH` |
+| promotion before COMMIT | A remains the only visible source |
+| promotion after COMMIT / lost acknowledgement | exact replay returns `replayed=true`; B is visible |
+| rollback before COMMIT | no compensating transition survives; B remains visible |
+| rollback after COMMIT / lost acknowledgement | one reversal survives; exact replay returns it with `replayed=true`; A is visible |
+| cleanup preparation before/after COMMIT | pre-COMMIT crash leaves no tombstone; committed state is durably resumable as `PURGE_PENDING` |
+| bounded reaper during catalogue drain | deleted rows roll back with the crash; restart reaches `provider_deletion_pending=true` and zero catalogue rows |
+| final credential sanitization before COMMIT | restart clears ciphertext/config hints, reaches `PURGED` and completes the cleanup job |
+
+Terminal marker:
+
+```text
+PHASE4_REPLACEMENT_TRANSACTION_CRASH_MATRIX_PASS
+boundaries=8 visible_sources=1 reversals=1
+```
+
+The harness separates cutover, reaper and final sanitization into distinct
+transactions. This is required because the production reaper deliberately uses
+`FOR UPDATE SKIP LOCKED`; the proof must not retain an orchestrator row lock
+while asking a new worker to claim the tombstone. Reaper singleton claims are
+retried for a bounded 15-second window, while every non-singleton error remains
+terminal.
+
 ## Remaining Phase 4 gate
 
-The deterministic and concurrent state-machine core is proved. Formal Phase 4
-closure still requires the exhaustive crash-boundary matrix and a clean replay
-of this concurrency harness from new disposable fixtures. Production rollout is
-separate and remains forbidden while the relevant feature flags are OFF.
+The deterministic core and the eight transaction crash boundaries are proved.
+Formal Phase 4 closure still requires a committed, cleanly replayable two-session
+concurrency harness for the six race orders above, followed by a second clean
+determinism run and the signed closure snapshot. Production rollout is separate
+and remains forbidden while the relevant feature flags are OFF.
