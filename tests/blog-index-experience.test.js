@@ -57,6 +57,8 @@ test('blog index adapter and styles preserve progressive enhancement safeguards'
   assert.match(css, /\.blog-index \[hidden\] \{ display: none !important; \}/);
   assert.match(css, /\.topic-chip \{[\s\S]*?min-height: 44px/);
   assert.match(css, /content-visibility: auto/);
+  assert.match(css, /body::before \{[\s\S]*?blog-stars-drift/);
+  assert.match(css, /@media \(max-width: 980px\) \{[\s\S]*?body::before \{ opacity: \.3; animation: none; \}/);
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)/);
   assert.match(css, /@media \(max-width: 620px\)/);
 });
