@@ -14,6 +14,7 @@ PHASE_4_16_PRODUCTION_SCHEMA_INSTALLED
 PHASE_4_16_PRODUCTION_EDGE_INSTALLED
 PHASE_9_16_PRODUCTION_WEB_INSTALLED
 PHASE_16_EXTERNAL_CHANNEL_GATES_PRODUCTION_INSTALLED
+CACHE_EPOCH_V2_SEVEN_DAY_DB_GATE_PRODUCTION_INSTALLED
 PROVIDER_ACCESS_ROLLOUT_OFF
 PRODUCTION_USER_ACTIVATION_BLOCKED_UNTIL_CACHE_GATE
 ```
@@ -114,6 +115,22 @@ nonterminal_transitions|0
 p0_assert|safe=true, stagingVisibilityViolation=0
 ```
 
+### Database-enforced cache observation follow-up
+
+Source `6e5a21c49aa7a741372a28a35383c00f7ae1a3e7` installed the
+seven-day minimum directly in
+`norva_complete_catalog_cache_epoch_v2_rollout(...)`. Production derives the
+exact boundary from its real row:
+
+```text
+installed_at 2026-08-24 10:12:57.166559+00
+not_before   2026-08-31 10:12:57.166559+00
+```
+
+Both the read-only production preflight and a direct transaction-scoped
+service-role call refused early completion. Backup and evidence are recorded in
+`23-cache-epoch-v2-observation-gate-proof.md`.
+
 ## Edge installation
 
 The clean production worktree was fast-forwarded to the published commit. Both Edge replicas were recreated from the existing reviewed compose definition and reached `healthy`:
@@ -154,7 +171,9 @@ The Web UI remains hidden for every user because the authenticated rollout statu
 
 ## Remaining real-production gates
 
-1. Wait for the incompatible cache observation window to end around 2026-08-31 and explicitly complete cache epoch v2 with the reviewed manifest.
+1. Wait until the database-enforced boundary
+   `2026-08-31 10:12:57.166559+00`, then explicitly complete cache epoch v2
+   with the reviewed manifest.
 2. Record real legal-policy and operational approval references; test fixtures do not count.
 3. Explicitly select the internal production account and activate only `INTERNAL`.
 4. Observe real metrics with zero P0/invariant breach before each manual promotion.
