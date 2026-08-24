@@ -28,7 +28,7 @@ test -z "$(git -C "$WORKSPACE" status --porcelain)" || fail 'workspace is dirty'
 git -C "$WORKSPACE" cat-file -e "${EXPECTED_COMMIT}^{commit}"
 test "$(docker inspect -f '{{.State.Running}}' "$DB_CONTAINER")" = true || fail 'database is not running'
 test "$(docker inspect -f '{{.Config.Image}}' "$DB_CONTAINER")" = 'supabase/postgres:17.6.1.136' || fail 'database image mismatch'
-test "$(docker inspect -f '{{range .Mounts}}{{if eq .Destination \"/var/lib/postgresql/data\"}}{{.Source}}{{end}}{{end}}' "$DB_CONTAINER")" = '/var/lib/norva/db' || fail 'database mount mismatch'
+test "$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/var/lib/postgresql/data"}}{{.Source}}{{end}}{{end}}' "$DB_CONTAINER")" = '/var/lib/norva/db' || fail 'database mount mismatch'
 
 psql_scalar() {
   docker exec -e PGOPTIONS='-c statement_timeout=1800000 -c lock_timeout=5000' \
