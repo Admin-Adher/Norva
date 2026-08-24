@@ -959,6 +959,15 @@ select public.norva_mark_credential_transition_ready(
   '93000000-0000-4000-8000-000000000001','93000000-0000-4000-8000-000000000901',
    (select revision from public.cloud_source_transitions where id=(select (value->>'transitionId')::uuid from phase3_ctx where key='create2'))
 );
+
+-- The transaction-crash matrix starts from the durable IMPORTING state where
+-- owner proof is still pending.  Its independent backend is then terminated
+-- exactly while the owner workflow attempts READY_TO_SWITCH.
+\if :{?phase3_prepare_pre_ready_crash_fixture}
+commit;
+\quit
+\endif
+
 do $owner_transition$
 declare
   v_claim record;
@@ -1008,6 +1017,15 @@ begin
   end if;
 end
 $owner_transition$;
+-- The formal-concurrency harness needs this exact, production-built state to
+-- be visible to independent PostgreSQL sessions.  It is opt-in and only used
+-- on a disposable proof database.  Keep the already-claimed identity worker
+-- alive so cancel_wins can also prove that a pre-cancel worker wakes stale.
+-- The ordinary pgTAP path remains one rollback-only transaction.
+\if :{?phase3_prepare_concurrency_fixture}
+commit;
+\quit
+\endif
 select public.norva_settle_credential_transition_job(
   (select (value->>'job_id')::uuid from phase3_ctx where key='identityclaim2'),'phase3-identity-2',
   (select (value->>'lease_sequence')::integer from phase3_ctx where key='identityclaim2'),'completed',null,1
@@ -1387,6 +1405,16 @@ select extensions.ok(
          and identity_key='provider:phase3-candidate-title'),
   'rolled-back terminal probe leaves A overlay and candidate metadata byte-stable'
 );
+
+-- Formal rollback/deletion concurrency tests need the production-built state
+-- after the N -> N+1 swap, with the post-switch verification job still leased,
+-- but before compensation mutates any durable row.  The default pgTAP run does
+-- not set this variable and continues to the rollback assertions below.
+\if :{?phase3_prepare_rollback_concurrency_fixture}
+commit;
+\quit
+\endif
+
 set local role service_role;
 select public.norva_restore_previous_credential_config(
   (select (value->>'transitionId')::uuid from phase3_ctx where key='create2'),
