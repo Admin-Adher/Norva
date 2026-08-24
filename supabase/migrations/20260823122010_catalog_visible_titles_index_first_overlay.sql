@@ -203,7 +203,8 @@ as
     runtime.file_audio_languages,
     runtime.file_subtitle_languages,
     runtime.file_audio_verified_languages,
-    runtime.visible_source_ids
+    runtime.visible_source_ids,
+    (projection.poster_url is not null) as has_poster
   from public.cloud_source_catalog_generation_candidate_titles projection
   join public.cloud_titles title
     on title.id = projection.title_id and title.user_id = projection.user_id
@@ -256,7 +257,8 @@ union all
     runtime.file_audio_languages,
     runtime.file_subtitle_languages,
     runtime.file_audio_verified_languages,
-    runtime.visible_source_ids
+    runtime.visible_source_ids,
+    (title.poster_url is not null) as has_poster
   from public.cloud_titles title
   cross join lateral public.norva_visible_catalog_title_runtime(
     title.id, title.user_id

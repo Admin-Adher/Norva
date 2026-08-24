@@ -1938,7 +1938,7 @@ function genreTitleSortColumn(sort: string): string {
     sort === "added" ? "created_at" :
     sort === "name" ? "title" :
     sort === "year" ? "release_year" :
-    "poster_url";
+    "has_poster";
 }
 
 function applyGenreTitleOrder(q: any, sort: string) {

@@ -41,7 +41,7 @@ create index if not exists cloud_source_candidate_titles_generation_recent_idx
 
 create index if not exists cloud_source_candidate_titles_poster_idx
   on public.cloud_source_catalog_generation_candidate_titles (
-    user_id, item_type, poster_url desc nulls last,
+    user_id, item_type, (poster_url is not null) desc nulls last,
     catalog_created_at desc, title_id
   );
 
@@ -145,7 +145,7 @@ as $function$
     and public.norva_catalog_title_projection_index_is_exact(
       'cloud_source_candidate_titles_poster_idx',
       'public.cloud_source_catalog_generation_candidate_titles',
-      array['user_id','item_type','poster_url','catalog_created_at','title_id'],
+      array['user_id','item_type','@poster_present','catalog_created_at','title_id'],
       array[0,0,1,3,0]::smallint[],
       null,
       true
@@ -241,7 +241,8 @@ select
     as file_subtitle_languages,
   coalesce(file_languages.file_audio_verified_languages, '{}'::text[])
     as file_audio_verified_languages,
-  visible_rollup.visible_source_ids
+  visible_rollup.visible_source_ids,
+  (effective_title.poster_url is not null) as has_poster
 from (
   -- A durable generation payload is visible only when its generation supplies the
   -- best currently-visible variant.  The equality is applied below after the

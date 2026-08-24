@@ -35,7 +35,20 @@ as $function$
     )
     and index_catalog.indnkeyatts = cardinality(p_columns)
     and index_catalog.indnatts = cardinality(p_columns)
-    and index_catalog.indexprs is null
+    and (
+      (
+        expected.poster_presence_markers = 0
+        and index_catalog.indexprs is null
+      )
+      or (
+        expected.poster_presence_markers = 1
+        and index_catalog.indexprs is not null
+        and regexp_replace(
+          lower(pg_get_expr(index_catalog.indexprs, index_catalog.indrelid)),
+          '[[:space:]()]', '', 'g'
+        ) = 'poster_urlisnotnull'
+      )
+    )
     and coalesce(cardinality(index_class.reloptions), 0) = 0
     and array(select unnest(index_catalog.indkey)) = expected.attnums
     and array(select unnest(index_catalog.indcollation)) = expected.collations
@@ -65,12 +78,26 @@ as $function$
   join pg_am access_method on access_method.oid = index_class.relam
   cross join lateral (
     select
-      array_agg(attribute.attnum order by requested.ordinality)::smallint[]
+      array_agg(
+        case when requested.column_name = '@poster_present'
+          then 0 else attribute.attnum end
+        order by requested.ordinality
+      )::smallint[]
         as attnums,
-      array_agg(attribute.attcollation order by requested.ordinality)::oid[]
-        as collations
+      array_agg(
+        case when requested.column_name = '@poster_present'
+          then 0::oid else attribute.attcollation end
+        order by requested.ordinality
+      )::oid[] as collations,
+      count(*) filter (
+        where requested.column_name = '@poster_present'
+      )::integer as poster_presence_markers,
+      bool_and(
+        requested.column_name = '@poster_present'
+        or attribute.attnum is not null
+      ) as resolved
     from unnest(p_columns) with ordinality requested(column_name, ordinality)
-    join pg_attribute attribute
+    left join pg_attribute attribute
       on attribute.attrelid = p_table
      and attribute.attname = requested.column_name
      and attribute.attnum > 0
@@ -80,6 +107,8 @@ as $function$
     and index_class.relname = p_index_name
     and cardinality(p_columns) = cardinality(p_indoptions)
     and cardinality(expected.attnums) = cardinality(p_columns)
+    and expected.resolved
+    and expected.poster_presence_markers between 0 and 1
 $function$;
 
 revoke all on function public.norva_catalog_title_projection_index_is_exact(

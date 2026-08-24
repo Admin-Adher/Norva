@@ -179,7 +179,7 @@ test('API adapter retains Newest, French, and Added to catalog parameters', asyn
   assert.equal(captured.addedDays, '30');
 });
 
-test('genre-items respects explicit Newest/Recently Added ordering instead of poster-first order', () => {
+test('genre-items respects explicit Newest/Recently Added ordering instead of poster-presence-first order', () => {
   const src = read('supabase/functions/norva-catalog/index.ts');
   assert.match(src, /const sort = \(url\.searchParams\.get\("sort"\) \|\| "default"\)/);
   assert.match(src, /sort === "year" \? "release_year"/);
@@ -189,10 +189,10 @@ test('genre-items respects explicit Newest/Recently Added ordering instead of po
     src.indexOf('function genreTitleSortColumn('),
     src.indexOf('function compareGenreTitleValues('),
   );
-  const posterOrder = orderBlock.indexOf('"poster_url"');
+  const posterOrder = orderBlock.indexOf('"has_poster"');
   const sortOrder = orderBlock.indexOf('sort === "year-asc" ? "release_year"');
   assert.ok(sortOrder !== -1 && posterOrder !== -1 && sortOrder < posterOrder,
-    'explicit sort selection must be evaluated before falling back to poster_url');
+    'explicit sort selection must be evaluated before falling back to poster presence');
   assert.match(orderBlock, /\.order\(sort === "default" \? "created_at" : "id", \{ ascending: sort !== "default" \}\)/);
 });
 

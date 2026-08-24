@@ -28,6 +28,10 @@ select public.norva_backfill_provider_access_foundation(100);
 select public.norva_backfill_provider_access_foundation(100);
 select public.norva_backfill_source_provider_account_affinities(100);
 select public.norva_backfill_source_provider_account_affinities(100);
+select (phase <> 'contracted') as provider_access_expiry_needs_rollout
+from public.cloud_catalog_generation_rollout where singleton
+\gset
+\if :provider_access_expiry_needs_rollout
 select public.norva_discover_catalog_generation_backfill_sources(100);
 do $generation_backfill$
 declare v_result jsonb;
@@ -58,6 +62,7 @@ $generation_validate$;
 select public.norva_contract_catalog_generation_rollout(
   'catalog-generation-writer-v2-live-clear-batch'
 );
+\endif
 reset role;
 alter table public.provider_account_activity
   validate constraint provider_account_activity_opaque_key_ck;

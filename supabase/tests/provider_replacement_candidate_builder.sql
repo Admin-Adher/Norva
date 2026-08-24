@@ -25,17 +25,49 @@ insert into public.cloud_sources (
    '93000000-0000-4000-8000-000000000001', 'xtream', 'B', 'cipher-b',
    '{"serverHost":"b.builder.invalid","username":"builder-b"}'::jsonb, 'ready', 1);
 
--- A has historical data before the online generation contract. B remains
--- empty until it is hidden/staged, which is the only legal starting point.
-insert into public.cloud_media_items (
-  id, user_id, source_id, item_type, external_id, title, dedup_key,
-  is_dedup_primary, metadata, rating_num
-) values (
-  '93000000-0000-4000-8000-000000000401',
-  '93000000-0000-4000-8000-000000000001',
-  '93000000-0000-4000-8000-000000000101', 'movie', 'a-history', 'A history',
-  'tmdb:930001', true, '{"providerTmdbId":"930001"}'::jsonb, 8
-);
+-- On a fresh rollout, A carries a historical pre-generation row so this test
+-- still proves the online backfill.  On an already-contracted production clone
+-- the same fixture must enter through the current active-generation write
+-- fence; never weaken the guard merely to make a post-contraction smoke pass.
+do $active_fixture$
+begin
+  if exists (
+    select 1 from public.cloud_catalog_generation_rollout rollout
+    where rollout.singleton and rollout.phase='contracted'
+  ) then
+    insert into public.cloud_media_items (
+      id,user_id,source_id,item_type,external_id,title,dedup_key,
+      is_dedup_primary,metadata,rating_num,generation_id,
+      write_head_revision,write_config_revision,
+      write_source_visibility_epoch,write_user_visibility_epoch
+    )
+    select
+      '93000000-0000-4000-8000-000000000401',
+      '93000000-0000-4000-8000-000000000001',
+      '93000000-0000-4000-8000-000000000101','movie','a-history','A history',
+      'tmdb:930001',true,'{"providerTmdbId":"930001"}'::jsonb,8,
+      head.active_generation_id,head.head_revision,lifecycle.config_revision,
+      lifecycle.visibility_epoch,epoch.visibility_epoch
+    from public.cloud_source_catalog_heads head
+    join public.cloud_source_lifecycle lifecycle
+      on lifecycle.source_id=head.source_id and lifecycle.user_id=head.user_id
+    join public.cloud_user_catalog_visibility_epochs epoch
+      on epoch.user_id=head.user_id
+    where head.source_id='93000000-0000-4000-8000-000000000101'
+      and head.user_id='93000000-0000-4000-8000-000000000001';
+  else
+    insert into public.cloud_media_items (
+      id,user_id,source_id,item_type,external_id,title,dedup_key,
+      is_dedup_primary,metadata,rating_num
+    ) values (
+      '93000000-0000-4000-8000-000000000401',
+      '93000000-0000-4000-8000-000000000001',
+      '93000000-0000-4000-8000-000000000101','movie','a-history','A history',
+      'tmdb:930001',true,'{"providerTmdbId":"930001"}'::jsonb,8
+    );
+  end if;
+end
+$active_fixture$;
 
 set local role service_role;
 select public.norva_backfill_provider_access_foundation(100);
@@ -47,6 +79,10 @@ set lifecycle_state = 'staging', catalog_visibility = 'hidden',
 where source_id = '93000000-0000-4000-8000-000000000102';
 select public.norva_backfill_source_provider_account_affinities(100);
 select public.norva_backfill_source_provider_account_affinities(100);
+select (phase <> 'contracted') as replacement_builder_needs_rollout
+from public.cloud_catalog_generation_rollout where singleton
+\gset
+\if :replacement_builder_needs_rollout
 select public.norva_discover_catalog_generation_backfill_sources(100);
 do $backfill$
 declare v_result jsonb;
@@ -75,6 +111,7 @@ begin
 end
 $validate$;
 select public.norva_contract_catalog_generation_rollout('catalog-generation-writer-v2-live-clear-batch');
+\endif
 reset role;
 alter table public.provider_account_activity validate constraint provider_account_activity_opaque_key_ck;
 set local role service_role;

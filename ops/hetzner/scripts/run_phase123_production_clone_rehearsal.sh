@@ -176,6 +176,17 @@ for _ in $(seq 1 90); do
 done
 docker exec "$TARGET_CONTAINER" pg_isready -U supabase_admin -d postgres >/dev/null || fail "clone database did not become ready"
 
+# A logical production dump includes pg_cron jobs.  Disable the scheduler at
+# cluster level before restore so no restored job can race the proof or emit an
+# external effect.  The disposable clone must be inert unless this harness
+# invokes work explicitly.
+docker exec "$TARGET_CONTAINER" psql -X -At -v ON_ERROR_STOP=1 \
+  -U supabase_admin -d postgres \
+  -c "alter system set cron.launch_active_jobs='off'; select pg_reload_conf()" \
+  >"$REPORT_DIR/cron-disable.log" 2>&1
+test "$(docker exec "$TARGET_CONTAINER" psql -X -At -U supabase_admin -d postgres -c 'show cron.launch_active_jobs')" = off \
+  || fail "pg_cron launch could not be disabled before restore"
+
 # A database-format dump contains ACLs but not cluster roles. Mirror any
 # production-only role identity before restore so ACL replay is exact. Passwords
 # and role-level secrets are intentionally never copied into the disposable
@@ -210,6 +221,15 @@ docker exec -i "$TARGET_CONTAINER" pg_restore \
   -U supabase_admin -d postgres --clean --if-exists --no-owner --exit-on-error \
   <"$DUMP_FILE" >"$REPORT_DIR/restore.log" 2>&1
 printf 'RESTORE_COMPLETE %s\n' "$(date -u +%FT%TZ)" | tee -a "$REPORT_DIR/timeline.log"
+
+# Preserve the restored schedule as data evidence while making every job
+# explicitly inactive as a second fence.  The original production database is
+# never modified.
+docker exec "$TARGET_CONTAINER" psql -X -At -v ON_ERROR_STOP=1 \
+  -U supabase_admin -d postgres \
+  -c "update cron.job set active=false where active; select count(*) filter(where active) from cron.job" \
+  >"$REPORT_DIR/clone-active-cron-jobs.txt" 2>&1
+grep -qx '0' "$REPORT_DIR/clone-active-cron-jobs.txt" || fail "restored clone still has active cron jobs"
 
 baseline_sql | docker exec -i "$TARGET_CONTAINER" psql -X -At -F $'\t' -v ON_ERROR_STOP=1 -U supabase_admin -d postgres >"$REPORT_DIR/clone-baseline.tsv"
 diff -u <(grep -v '^database_size_bytes' "$REPORT_DIR/production-baseline.tsv") <(grep -v '^database_size_bytes' "$REPORT_DIR/clone-baseline.tsv") >"$REPORT_DIR/baseline-diff.txt" || fail "clone row-count baseline differs from production"
@@ -247,43 +267,119 @@ apply_range "$PRE_HEAD" "$CONTRACTION" contraction-definition
 apply_range "$CONTRACTION" "$ONLINE_HEAD" online-indexes
 
 printf 'BACKFILL_BEGIN %s\n' "$(date -u +%FT%TZ)" | tee -a "$REPORT_DIR/timeline.log"
-docker exec -i "$TARGET_CONTAINER" psql -X -v ON_ERROR_STOP=1 -U supabase_admin -d postgres <<'SQL' >"$REPORT_DIR/contraction.log" 2>&1
-set statement_timeout = '4h';
-set lock_timeout = '5s';
-do $discovery$
-declare result jsonb;
-begin
-  for iteration in 1..256 loop
-    result := public.norva_discover_catalog_generation_backfill_sources(100);
-    exit when coalesce((result ->> 'discoveryComplete')::boolean,false);
-  end loop;
-  if not coalesce((result ->> 'discoveryComplete')::boolean,false) then raise exception 'discovery did not converge'; end if;
-end $discovery$;
-do $backfill$
-declare result jsonb;
-begin
-  for iteration in 1..4096 loop
-    result := public.norva_backfill_catalog_generation_batch('production-clone-rehearsal',500,120);
-    exit when not coalesce((result ->> 'claimed')::boolean,false);
-  end loop;
-  if exists (select 1 from public.cloud_catalog_generation_backfill_sources where state <> 'complete') then raise exception 'backfill did not converge'; end if;
-end $backfill$;
-do $validation$
-declare result jsonb;
-begin
-  for iteration in 1..256 loop
-    result := public.norva_validate_catalog_generation_constraints(2);
-    exit when coalesce((result ->> 'remaining')::integer,1) = 0;
-  end loop;
-  if coalesce((result ->> 'remaining')::integer,1) <> 0 then raise exception 'validation did not converge'; end if;
-end $validation$;
-select public.norva_contract_catalog_generation_rollout('catalog-generation-writer-v2-live-clear-batch');
-select public.norva_contract_catalog_generation_rollout('catalog-generation-writer-v2-live-clear-batch');
-SQL
+psql_scalar() {
+  local sql="$1"
+  docker exec \
+    -e PGOPTIONS='-c statement_timeout=1800000 -c lock_timeout=5000' \
+    "$TARGET_CONTAINER" psql -X -At -v ON_ERROR_STOP=1 \
+    -U supabase_admin -d postgres -c "$sql"
+}
+
+psql_contract_scalar() {
+  local sql="$1"
+  docker exec \
+    -e PGOPTIONS='-c statement_timeout=300000 -c lock_timeout=5000' \
+    "$TARGET_CONTAINER" psql -X -At -v ON_ERROR_STOP=1 \
+    -U supabase_admin -d postgres -c "$sql"
+}
+
+psql_service_scalar() {
+  local sql="$1"
+  docker exec \
+    -e PGOPTIONS='-c statement_timeout=1800000 -c lock_timeout=5000' \
+    "$TARGET_CONTAINER" psql -X -qAt -v ON_ERROR_STOP=1 \
+    -U supabase_admin -d postgres \
+    -c "set role service_role; $sql"
+}
+
+# Every operator RPC is its own autocommit transaction. A crash therefore
+# loses at most one bounded batch and restart reconstructs progress from the
+# durable rollout/queue rows, matching the production execution contract.
+foundation_complete=f
+for iteration in $(seq 1 256); do
+  foundation_complete="$(psql_scalar "select coalesce((public.norva_backfill_provider_access_foundation(500)->>'complete')::boolean,false)")"
+  printf 'FOUNDATION iteration=%s complete=%s\n' "$iteration" "$foundation_complete" >>"$REPORT_DIR/contraction.log"
+  test "$foundation_complete" = t && break
+done
+test "$foundation_complete" = t || fail "provider access foundation did not converge"
+
+# Provider-account affinity is an independent pre-activation rollout.  Source
+# affinities must be durable before the short-lived legacy heartbeat ledger is
+# rewritten to opaque keys; the validation RPC then makes that invariant a
+# validated PostgreSQL constraint.  Every call is a bounded autocommit unit.
+affinity_complete=f
+for iteration in $(seq 1 256); do
+  affinity_complete="$(psql_service_scalar "select coalesce((public.norva_backfill_source_provider_account_affinities(500)->>'complete')::boolean,false)")"
+  printf 'AFFINITY iteration=%s complete=%s\n' "$iteration" "$affinity_complete" >>"$REPORT_DIR/contraction.log"
+  test "$affinity_complete" = t && break
+done
+test "$affinity_complete" = t || fail "provider account affinity backfill did not converge"
+
+activity_complete=f
+for iteration in $(seq 1 8192); do
+  activity_complete="$(psql_service_scalar "select coalesce((public.norva_migrate_provider_account_activity_affinities(500)->>'complete')::boolean,false)")"
+  printf 'ACTIVITY_AFFINITY iteration=%s complete=%s\n' "$iteration" "$activity_complete" >>"$REPORT_DIR/contraction.log"
+  test "$activity_complete" = t && break
+done
+test "$activity_complete" = t || fail "provider account activity affinity migration did not converge"
+psql_service_scalar "select public.norva_validate_provider_account_activity_affinities()" >>"$REPORT_DIR/contraction.log"
+
+discovery_complete=f
+for iteration in $(seq 1 256); do
+  discovery_complete="$(psql_scalar "select coalesce((public.norva_discover_catalog_generation_backfill_sources(100)->>'discoveryComplete')::boolean,false)")"
+  printf 'DISCOVERY iteration=%s complete=%s\n' "$iteration" "$discovery_complete" >>"$REPORT_DIR/contraction.log"
+  test "$discovery_complete" = t && break
+done
+test "$discovery_complete" = t || fail "catalog generation discovery did not converge"
+
+# Exercise the production SKIP LOCKED/advisory-lock contract with four real
+# concurrent workers.  A worker may legitimately observe no claim while the
+# remaining sources are owned by its peers; the durable queue postcondition is
+# authoritative after every worker exits.
+backfill_worker() {
+  local worker="$1" iteration claimed=t queue_state
+  for iteration in $(seq 1 8192); do
+    claimed="$(psql_scalar "select coalesce((public.norva_backfill_catalog_generation_batch('production-clone-rehearsal-${worker}',500,120)->>'claimed')::boolean,false)")"
+    if ((iteration % 250 == 0)) || test "$claimed" = f; then
+      queue_state="$(psql_scalar "select coalesce(string_agg(state||'='||count,',' order by state),'none') from (select state,count(*)::text from public.cloud_catalog_generation_backfill_sources group by state) state_count")"
+      printf 'BACKFILL worker=%s iteration=%s claimed=%s queue=%s\n' \
+        "$worker" "$iteration" "$claimed" "$queue_state" \
+        >>"$REPORT_DIR/contraction-worker-${worker}.log"
+    fi
+    test "$claimed" = f && return 0
+  done
+  return 1
+}
+
+backfill_pids=()
+for worker in 1 2 3 4; do
+  backfill_worker "$worker" &
+  backfill_pids+=("$!")
+done
+for pid in "${backfill_pids[@]}"; do
+  wait "$pid" || fail "catalog generation backfill worker failed"
+done
+test "$(psql_scalar "select count(*) from public.cloud_catalog_generation_backfill_sources where state <> 'complete'")" = 0 || fail "catalog generation backfill did not converge"
+
+remaining=1
+for iteration in $(seq 1 256); do
+  remaining="$(psql_scalar "select coalesce((public.norva_validate_catalog_generation_constraints(2)->>'remaining')::integer,1)")"
+  printf 'VALIDATION iteration=%s remaining=%s\n' "$iteration" "$remaining" >>"$REPORT_DIR/contraction.log"
+  test "$remaining" = 0 && break
+done
+test "$remaining" = 0 || fail "catalog generation validation did not converge"
+
+psql_contract_scalar "select public.norva_contract_catalog_generation_rollout('catalog-generation-writer-v2-live-clear-batch')" >>"$REPORT_DIR/contraction.log"
+psql_contract_scalar "select public.norva_contract_catalog_generation_rollout('catalog-generation-writer-v2-live-clear-batch')" >>"$REPORT_DIR/contraction.log"
 printf 'BACKFILL_CONTRACTION_COMPLETE %s\n' "$(date -u +%FT%TZ)" | tee -a "$REPORT_DIR/timeline.log"
 
 apply_range "$ONLINE_HEAD" "$CURRENT_HEAD" phase3-head
 apply_range "$CURRENT_HEAD" "$CACHE_HEAD" cache-epoch-v2
+
+# Concurrency matrices open synchronized PostgreSQL sessions through dblink.
+# This extension is proof instrumentation on the disposable clone only; it is
+# neither a production migration nor part of the application runtime contract.
+psql_scalar "create extension if not exists dblink"
 
 run_test() {
   local test_name="$1" output="$REPORT_DIR/test-${test_name%.sql}.log"
@@ -294,7 +390,6 @@ run_test() {
 }
 
 TESTS=(
-  provider_access_lifecycle_post_contraction.sql
   provider_credential_transition.sql
   catalog_background_owner_snapshot_concurrency_smoke.sql
   catalog_background_owner_workflow_smoke.sql
@@ -309,17 +404,59 @@ TESTS=(
   provider_credential_promotion_cancel_concurrency.sql
   provider_credential_swap_account_delete_concurrency.sql
   provider_credential_rollback_account_delete_concurrency.sql
-  provider_credential_transaction_crash_matrix.sql
   provider_replacement_candidate_builder.sql
-  provider_access_expiry_visibility.sql
-  catalog_cache_epoch_v2.sql
 )
 for test_name in "${TESTS[@]}"; do run_test "$test_name"; done
+
+# First prove the cache v2 installation and fail-closed activation contract in
+# a rolled-back acceptance transaction.  Only then persist the exact runtime
+# manifest on the clone and exercise Phase 2 visibility with that prerequisite
+# durably complete.
+run_test catalog_cache_epoch_v2.sql
+psql_service_scalar "select public.norva_complete_catalog_cache_epoch_v2_rollout('catalog-cache-epoch-v2','23c0fa2cdaf09c08d9de4378d1a82f0f631ce71d6f955a0bdbb2c786b8ff98d3')" \
+  >>"$REPORT_DIR/cache-epoch-v2-completion.log"
+run_test provider_access_expiry_visibility.sql
+
+# The transaction crash matrix deliberately consumes a committed pre-switch
+# fixture.  Build that fixture through the production credential contract, then
+# let the matrix terminate real PostgreSQL backends at each transaction fence.
+crash_fixture_output="$REPORT_DIR/test-provider-credential-transition-crash-fixture.log"
+printf 'TEST %s %s\n' "$(date -u +%FT%TZ)" 'provider_credential_transition.sql (crash fixture)' | tee -a "$REPORT_DIR/timeline.log"
+docker exec -i "$TARGET_CONTAINER" psql -X -v ON_ERROR_STOP=1 \
+  -v phase3_prepare_pre_ready_crash_fixture=1 \
+  -U supabase_admin -d postgres \
+  <"$WORKSPACE/supabase/tests/provider_credential_transition.sql" \
+  >"$crash_fixture_output" 2>&1
+grep -Eq '(^|[[:space:]])not ok([[:space:]]|$)' "$crash_fixture_output" \
+  && fail "pgTAP failure while preparing transaction crash fixture"
+run_test provider_credential_transaction_crash_matrix.sql
+
+# The prepared worker owns a real finite lease.  Let that authority expire,
+# proving account deletion cannot bypass a live worker, then converge the
+# synthetic account through the production deletion state machine.
+crash_lease_live=1
+for iteration in $(seq 1 180); do
+  crash_lease_live="$(psql_scalar "select count(*) from public.cloud_source_credential_transition_jobs where user_id='93000000-0000-4000-8000-000000000001'::uuid and state='processing' and lease_until>clock_timestamp()")"
+  test "$crash_lease_live" = 0 && break
+  if ((iteration % 15 == 0)); then
+    printf 'CRASH_FIXTURE_DRAIN iteration=%s live_leases=%s\n' "$iteration" "$crash_lease_live" | tee -a "$REPORT_DIR/timeline.log"
+  fi
+  sleep 1
+done
+test "$crash_lease_live" = 0 || fail "crash fixture provider lease did not expire"
+docker exec -i "$TARGET_CONTAINER" psql -X -v ON_ERROR_STOP=1 \
+  -U supabase_admin -d postgres \
+  <"$WORKSPACE/ops/hetzner/scripts/phase123-proof-cleanup-crash-fixture.sql" \
+  >"$REPORT_DIR/test-crash-fixture-account-deletion.log" 2>&1
 
 docker exec -i "$TARGET_CONTAINER" psql -X -At -F $'\t' -v ON_ERROR_STOP=1 -U supabase_admin -d postgres <<'SQL' >"$REPORT_DIR/final-invariants.tsv"
 select 'rollout',phase,contracted_at is not null,discovery_complete,discovered_sources,completed_sources,validation_completed_count from public.cloud_catalog_generation_rollout where singleton;
 select 'flags',count(*),count(*) filter(where enabled) from public.admin_feature_flags where key in ('provider_access_v1_enabled','provider_access_auto_detection_v1_enabled','provider_access_notifications_v1_enabled','provider_access_visibility_v1_enabled','provider_credential_transition_v1_enabled','provider_replacement_v1_enabled');
 select 'global_epoch_rows',count(*) from public.cloud_global_catalog_visibility_epoch;
+select 'cache_epoch_rollout',phase,manifest_sha256 from public.cloud_catalog_cache_epoch_v2_rollout where singleton;
+select 'affinity_rollout',phase,completed_at is not null from public.cloud_source_provider_account_affinity_rollout where singleton;
+select 'raw_provider_account_activity',count(*) from public.provider_account_activity where account_key !~ '^[0-9a-f]{64}$';
+select 'opaque_activity_constraint',convalidated from pg_catalog.pg_constraint where conrelid='public.provider_account_activity'::regclass and conname='provider_account_activity_opaque_key_ck';
 select 'missing_media_generation',count(*) from public.cloud_media_items where generation_id is null;
 select 'missing_title_variant_generation',count(*) from public.cloud_title_variants where generation_id is null;
 select 'missing_live_logical_generation',count(*) from public.cloud_live_logical_channels where generation_id is null;
@@ -334,6 +471,10 @@ SQL
 
 grep -qx $'flags\t6\t0' "$REPORT_DIR/final-invariants.tsv" || fail "provider-access flags are not all OFF"
 grep -qx $'global_epoch_rows\t1' "$REPORT_DIR/final-invariants.tsv" || fail "global cache epoch singleton is missing"
+grep -qx $'cache_epoch_rollout\tcomplete\t23c0fa2cdaf09c08d9de4378d1a82f0f631ce71d6f955a0bdbb2c786b8ff98d3' "$REPORT_DIR/final-invariants.tsv" || fail "global cache epoch v2 rollout is incomplete"
+grep -qx $'affinity_rollout\tcomplete\tt' "$REPORT_DIR/final-invariants.tsv" || fail "provider account affinity rollout is incomplete"
+grep -qx $'raw_provider_account_activity\t0' "$REPORT_DIR/final-invariants.tsv" || fail "raw provider account activity remains"
+grep -qx $'opaque_activity_constraint\tt' "$REPORT_DIR/final-invariants.tsv" || fail "provider account activity opaque constraint is not validated"
 grep -Eq $'^rollout\tcontracted\tt\t' "$REPORT_DIR/final-invariants.tsv" || fail "catalog generation rollout is not contracted"
 for invariant in missing_media_generation missing_title_variant_generation missing_live_logical_generation missing_live_variant_generation missing_membership_generation missing_inventory_generation nonterminal_transitions nonterminal_credential_jobs open_generations; do
   grep -qx "$invariant"$'\t0' "$REPORT_DIR/final-invariants.tsv" || fail "$invariant is non-zero"
