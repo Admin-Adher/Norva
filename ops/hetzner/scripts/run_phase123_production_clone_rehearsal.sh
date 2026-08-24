@@ -132,8 +132,7 @@ printf 'DUMP_BEGIN %s\n' "$(date -u +%FT%TZ)" | tee "$REPORT_DIR/timeline.log"
 PARTIAL_DUMP="$DUMP_FILE.partial"
 trap 'rm -f -- "$PARTIAL_DUMP"' EXIT
 docker exec "$PRODUCTION_CONTAINER" pg_dump \
-  -U supabase_admin -d postgres -Fc --no-owner \
-  --file=- >"$PARTIAL_DUMP"
+  -U supabase_admin -d postgres -Fc --no-owner >"$PARTIAL_DUMP"
 test -s "$PARTIAL_DUMP" || fail "production dump is empty"
 mv "$PARTIAL_DUMP" "$DUMP_FILE"
 chmod 600 "$DUMP_FILE"
