@@ -203,6 +203,73 @@ ${footer()}
 `;
 }
 
+const BLOG_TOPICS = [
+  {
+    id: 'start',
+    label: 'Getting started',
+    keywords: ['norva', 'fundamental', 'glossary', 'evaluation', 'subscription', 'account management', 'maintenance'],
+  },
+  {
+    id: 'organise',
+    label: 'Organise & discover',
+    keywords: ['library', 'catalog', 'collection', 'metadata', 'search', 'filter', 'favorite', 'watchlist', 'recommendation', 'continue watching', 'import', 'category', 'movie', 'series'],
+  },
+  {
+    id: 'anywhere',
+    label: 'Watch anywhere',
+    keywords: ['cross-device', 'handoff', 'mobile', 'tablet', 'browser', 'tv interface', 'smart tv', 'remote', 'd-pad', 'travel', 'offline', 'live guide', 'tv guide'],
+  },
+  {
+    id: 'playback',
+    label: 'Playback & quality',
+    keywords: ['playback', 'buffer', 'video quality', 'audio quality', 'network'],
+  },
+  {
+    id: 'accessibility',
+    label: 'Audio & accessibility',
+    keywords: ['accessibility', 'caption', 'subtitle', 'audio track', 'language', 'visual comfort'],
+  },
+  {
+    id: 'privacy',
+    label: 'Privacy & security',
+    keywords: ['privacy', 'security', 'household', 'profile', 'governance', 'device security'],
+  },
+];
+
+function topicForCluster(cluster) {
+  const normalised = String(cluster || '').toLowerCase();
+  const ordered = [
+    BLOG_TOPICS[4],
+    BLOG_TOPICS[5],
+    BLOG_TOPICS[2],
+    BLOG_TOPICS[3],
+    BLOG_TOPICS[1],
+    BLOG_TOPICS[0],
+  ];
+  return ordered.find((topic) => topic.keywords.some((keyword) => normalised.includes(keyword))) || BLOG_TOPICS[0];
+}
+
+const arrowIcon = `<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10h11m-4-4 4 4-4 4" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.6"/></svg>`;
+
+function renderLibraryCard(article, index) {
+  const topic = topicForCluster(article.cluster);
+  const summary = article.excerpt || article.metaDescription;
+  return `<article class="library-card" data-library-item data-topic="${escapeAttr(topic.id)}" data-highlighted="${index < 5 ? 'true' : 'false'}">
+          <a href="/blog/${escapeAttr(article.slug)}/">
+            <div class="library-card-topline">
+              <span class="topic-label">${escapeHtml(topic.label)}</span>
+              <span class="cluster-label">${escapeHtml(article.cluster || 'Norva guide')}</span>
+            </div>
+            <h3>${escapeHtml(article.title)}</h3>
+            <p>${escapeHtml(summary)}</p>
+            <div class="library-card-meta">
+              <span><time datetime="${escapeAttr(article.publishedAtISO)}">${escapeHtml(article.displayDate)}</time> · ${article.readingMinutes} min</span>
+              ${arrowIcon}
+            </div>
+          </a>
+        </article>`;
+}
+
 /** Render the blog index page listing published articles (newest first). */
 function renderIndexPage(articles) {
   const canonical = `${SITE}/blog/`;
@@ -234,15 +301,83 @@ function renderIndexPage(articles) {
     })),
   });
 
-  const cards = articles.length
-    ? `<div class="post-grid">
-      ${articles.map((a) => `<a class="card post-card" href="/blog/${escapeAttr(a.slug)}/">
-        ${a.cluster ? `<span class="tag">${escapeHtml(a.cluster)}</span>` : ''}
-        <div class="card-title">${escapeHtml(a.title)}</div>
-        <p>${escapeHtml(a.excerpt || a.metaDescription)}</p>
-        <div class="card-meta"><time datetime="${escapeAttr(a.publishedAtISO)}">${escapeHtml(a.displayDate)}</time> · ${a.readingMinutes} min read</div>
-      </a>`).join('\n      ')}
-    </div>`
+  const featured = articles[0] || null;
+  const recent = articles.slice(1, 5);
+  const archiveCount = Math.max(articles.length - 5, 0);
+
+  const featuredStory = featured
+    ? `<article class="hero-feature">
+        <a href="/blog/${escapeAttr(featured.slug)}/" aria-label="Read the latest guide: ${escapeAttr(featured.title)}">
+          <img src="/img/devices/norva-device-tv.webp" width="1280" height="720" alt="Norva media library interface displayed on a television" decoding="async" fetchpriority="high">
+          <span class="hero-feature-scrim" aria-hidden="true"></span>
+          <div class="hero-feature-copy">
+            <div class="hero-feature-labels">
+              <span class="latest-label">Latest guide</span>
+              ${featured.cluster ? `<span>${escapeHtml(featured.cluster)}</span>` : ''}
+            </div>
+            <h2>${escapeHtml(featured.title)}</h2>
+            <div class="hero-feature-meta"><time datetime="${escapeAttr(featured.publishedAtISO)}">${escapeHtml(featured.displayDate)}</time><span>·</span><span>${featured.readingMinutes} min read</span></div>
+          </div>
+        </a>
+      </article>`
+    : '<div class="hero-feature hero-feature-empty"><p>New guides are on the way.</p></div>';
+
+  const recentStories = recent.length
+    ? `<section class="recent-section" aria-labelledby="recent-heading">
+        <div class="section-heading compact-heading">
+          <div><span class="section-number" aria-hidden="true">01</span><h2 id="recent-heading">Recently published</h2></div>
+          <p>Fresh field notes from the Norva editorial desk.</p>
+        </div>
+        <ol class="recent-list">
+          ${recent.map((article, index) => `<li>
+            <a href="/blog/${escapeAttr(article.slug)}/">
+              <span class="recent-index" aria-hidden="true">${String(index + 1).padStart(2, '0')}</span>
+              <span class="recent-copy">
+                <span>${escapeHtml(article.cluster || 'Norva guide')}</span>
+                <strong>${escapeHtml(article.title)}</strong>
+              </span>
+              ${arrowIcon}
+            </a>
+          </li>`).join('\n          ')}
+        </ol>
+      </section>`
+    : '';
+
+  const topicButtons = BLOG_TOPICS.map((topic) => `<button type="button" class="topic-chip" data-topic-filter="${escapeAttr(topic.id)}" aria-pressed="false">${escapeHtml(topic.label)}</button>`).join('\n              ');
+
+  const library = articles.length
+    ? `<section class="library-section" id="library" aria-labelledby="library-heading">
+        <div class="section-heading library-heading">
+          <div><span class="section-number" aria-hidden="true">02</span><h2 id="library-heading">Explore the full library</h2></div>
+          <p>Search by problem, workflow, device or topic.</p>
+        </div>
+        <form class="library-search" role="search" data-library-search>
+          <label for="blog-search">What do you want to solve?</label>
+          <div class="search-field">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="m16 16 4 4" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.7"/></svg>
+            <input id="blog-search" type="search" inputmode="search" autocomplete="off" placeholder="Try “subtitles”, “TV”, or “privacy”" aria-describedby="blog-search-hint" data-library-query>
+            <button type="button" class="search-clear" aria-label="Clear search" data-library-clear hidden>Clear</button>
+          </div>
+          <span id="blog-search-hint">Results update as you type. Choose a focus to narrow the library.</span>
+        </form>
+        <div class="topic-filters" aria-label="Filter guides by focus">
+          <button type="button" class="topic-chip is-active" data-topic-filter="all" aria-pressed="true">All guides</button>
+          ${topicButtons}
+        </div>
+        <div class="library-status-row">
+          <p class="library-status" role="status" aria-live="polite" data-library-status>${archiveCount} more guide${archiveCount === 1 ? '' : 's'} · newest first</p>
+          <button type="button" class="reset-filters" data-library-reset hidden>Reset filters</button>
+        </div>
+        <div class="library-grid" data-library-grid>
+          ${articles.map(renderLibraryCard).join('\n          ')}
+        </div>
+        <div class="no-results" data-library-empty hidden>
+          <h3>No guide matches that search yet.</h3>
+          <p>Try a device name, a shorter phrase, or browse all guides.</p>
+          <button type="button" data-library-empty-reset>Browse all guides</button>
+        </div>
+        <button type="button" class="load-more" data-library-more hidden>Show more guides</button>
+      </section>`
     : '<p class="empty">Articles are on the way. Check back soon.</p>';
 
   return `<!DOCTYPE html>
@@ -257,17 +392,29 @@ ${commonHead({
     ogImage: null,
     jsonLdBlocks: [blogJsonLd, breadcrumbJsonLd(crumbs)],
   })}
+  <script defer src="/js/blog-index.js?v=1"></script>
 </head>
 <body>
 ${header()}
-  <main id="main-content" class="wide">
+  <main id="main-content" class="wide blog-index" data-blog-index data-guide-count="${articles.length}">
     ${breadcrumb(crumbs)}
-    <div class="blog-hero">
-      <span class="eyebrow">Norva Blog</span>
-      <h1 class="page-title">Guides for a calmer, better-organised media library</h1>
-      <p>${escapeHtml(description)}</p>
+    <div data-index-highlights>
+      <section class="blog-hero" aria-labelledby="blog-title">
+        <div class="blog-hero-copy">
+          <span class="eyebrow">Norva knowledge library</span>
+          <h1 class="page-title" id="blog-title">A practical operating manual for your <span>media library</span></h1>
+          <p>${escapeHtml(description)}</p>
+          <div class="hero-facts" aria-label="Blog publishing details">
+            <span><strong>${articles.length}</strong> published guide${articles.length === 1 ? '' : 's'}</span>
+            <span>New every morning and evening</span>
+          </div>
+          <a class="hero-jump" href="#library">Explore the library ${arrowIcon}</a>
+        </div>
+        ${featuredStory}
+      </section>
+      ${recentStories}
     </div>
-    ${cards}
+    ${library}
   </main>
 ${footer()}
 </body>
