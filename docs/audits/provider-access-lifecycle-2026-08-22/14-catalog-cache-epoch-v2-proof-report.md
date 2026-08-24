@@ -137,3 +137,8 @@ Core proof is not production rollout. The required order remains:
 
 Until those steps are evidenced, `provider_access_visibility_v1_enabled` and
 all other Provider Access flags remain OFF.
+
+The additive proof in `23-cache-epoch-v2-observation-gate-proof.md` strengthens
+step 6: PostgreSQL now rejects the exact service-role completion RPC until
+`installed_at + 7 days`. The documented window is therefore a database
+invariant, not only an operator runbook condition.

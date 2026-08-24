@@ -2,7 +2,7 @@ begin;
 set local lock_timeout='3s';
 set local statement_timeout='30s';
 
-select extensions.plan(29);
+select extensions.plan(30);
 
 create temporary table cache_epoch_v2_ctx(
   key text primary key,
@@ -173,7 +173,22 @@ select extensions.throws_ok(
   'catalog cache epoch v2 manifest mismatch',
   'rollout completion rejects a different manifest'
 );
+select extensions.throws_ok(
+  $sql$select public.norva_complete_catalog_cache_epoch_v2_rollout(
+    'catalog-cache-epoch-v2',
+    '23c0fa2cdaf09c08d9de4378d1a82f0f631ce71d6f955a0bdbb2c786b8ff98d3'
+  )$sql$,
+  '55000',
+  'catalog cache epoch v2 observation window is incomplete',
+  'even service role cannot complete before the seven-day observation window'
+);
 reset role;
+
+-- Proof databases backdate only their rolled-back fixture. Production derives
+-- the deadline from its immutable real installed_at value.
+update public.cloud_catalog_cache_epoch_v2_rollout
+set installed_at=installed_at-interval '8 days'
+where singleton and phase='installed';
 
 insert into cache_epoch_v2_ctx(key,value)
 select 'before_complete',global_epoch from public.cloud_global_catalog_visibility_epoch where singleton;

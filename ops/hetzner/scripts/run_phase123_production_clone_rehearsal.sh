@@ -263,7 +263,7 @@ PRE_HEAD="20260823179920_catalog_generation_flag_gate.sql"
 CONTRACTION="20260823180000_provider_catalog_generation_online_rollout.sql"
 ONLINE_HEAD="20260823182700_series_inventory_generation_parent_natural_fk.sql"
 CURRENT_HEAD="20260823194000_replacement_promotion_proof_account_delete.sql"
-CACHE_HEAD="20260824100000_catalog_cache_epoch_v2.sql"
+CURRENT_PROVIDER_ACCESS_HEAD="20260824171000_catalog_cache_epoch_v2_minimum_observation_gate.sql"
 
 apply_range "20260822219999" "$PRE_HEAD" pre-contraction
 apply_range "$PRE_HEAD" "$CONTRACTION" contraction-definition
@@ -393,7 +393,7 @@ psql_contract_scalar "select public.norva_contract_catalog_generation_rollout('c
 printf 'BACKFILL_CONTRACTION_COMPLETE %s\n' "$(date -u +%FT%TZ)" | tee -a "$REPORT_DIR/timeline.log"
 
 apply_range "$ONLINE_HEAD" "$CURRENT_HEAD" phase3-head
-apply_range "$CURRENT_HEAD" "$CACHE_HEAD" cache-epoch-v2
+apply_range "$CURRENT_HEAD" "$CURRENT_PROVIDER_ACCESS_HEAD" current-provider-access
 
 # Concurrency matrices open synchronized PostgreSQL sessions through dblink;
 # SQL acceptance suites use pgTAP.  Both extensions are proof instrumentation
@@ -434,6 +434,8 @@ for test_name in "${TESTS[@]}"; do run_test "$test_name"; done
 # manifest on the clone and exercise Phase 2 visibility with that prerequisite
 # durably complete.
 run_test catalog_cache_epoch_v2.sql
+psql_scalar "update public.cloud_catalog_cache_epoch_v2_rollout set installed_at=installed_at-interval '8 days' where singleton and phase='installed' returning installed_at" \
+  >"$ARTIFACT_DIR/cache-epoch-v2-proof-backdate.txt"
 psql_service_scalar "select public.norva_complete_catalog_cache_epoch_v2_rollout('catalog-cache-epoch-v2','23c0fa2cdaf09c08d9de4378d1a82f0f631ce71d6f955a0bdbb2c786b8ff98d3')" \
   >>"$REPORT_DIR/cache-epoch-v2-completion.log"
 run_test provider_access_expiry_visibility.sql

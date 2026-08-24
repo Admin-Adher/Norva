@@ -54,6 +54,9 @@ update public.cloud_source_provider_account_affinity_rollout
 set phase = 'complete', completed_at = coalesce(completed_at, clock_timestamp()), updated_at = clock_timestamp()
 where singleton;
 alter table public.provider_account_activity validate constraint provider_account_activity_opaque_key_ck;
+update public.cloud_catalog_cache_epoch_v2_rollout
+set installed_at=installed_at-interval '8 days'
+where singleton and phase='installed';
 set local role service_role;
 select public.norva_complete_catalog_cache_epoch_v2_rollout(
   'catalog-cache-epoch-v2',

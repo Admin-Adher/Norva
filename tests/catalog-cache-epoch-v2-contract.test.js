@@ -9,6 +9,8 @@ const path = require('node:path');
 const ROOT = path.resolve(__dirname, '..');
 const read = (file) => fs.readFileSync(path.join(ROOT, file), 'utf8').replace(/\r\n?/g, '\n');
 const migration = read('supabase/migrations/20260824100000_catalog_cache_epoch_v2.sql');
+const observationGateMigration = read('supabase/migrations/20260824171000_catalog_cache_epoch_v2_minimum_observation_gate.sql');
+const productionGate = read('ops/hetzner/scripts/run_provider_access_production_activation_gate.sh');
 const manifest = read('docs/audits/provider-access-lifecycle-2026-08-22/13-catalog-cache-epoch-v2-manifest.md');
 const manifestHash = crypto.createHash('sha256').update(manifest, 'utf8').digest('hex');
 
@@ -49,4 +51,23 @@ test('installation is additive and leaves visibility OFF', () => {
   assert.match(migration, /phase text not null default 'installed'/);
   assert.match(migration, /coalesce\(\(select enabled from public\.admin_feature_flags[\s\S]*provider_access_visibility_v1_enabled[\s\S]*true\)/);
   assert.doesNotMatch(migration, /set enabled\s*=\s*true/i);
+});
+
+test('completion is database-gated by the full incompatible-cache lifetime', () => {
+  assert.match(observationGateMigration, /installed_at \+ interval '7 days'/);
+  assert.match(observationGateMigration, /clock_timestamp\(\) < v_not_before/);
+  assert.match(observationGateMigration, /catalog cache epoch v2 observation window is incomplete/);
+  assert.match(observationGateMigration, /errcode='55000'/);
+  assert.match(observationGateMigration, /reason=observation_window;not_before=/);
+  assert.match(observationGateMigration, /perform public\.norva_bump_global_catalog_visibility_epoch\(\)/);
+});
+
+test('the production operator path is read-only by default and needs exact confirmation', () => {
+  assert.match(productionGate, /ACTION="\$\{1:-preflight\}"/);
+  assert.match(productionGate, /DB_CONTAINER" != 'norva-db'/);
+  assert.match(productionGate, /installed_at \+ interval '7 days'/);
+  assert.match(productionGate, /WAIT_OBSERVATION_WINDOW/);
+  assert.match(productionGate, /CONFIRM_PRODUCTION_ACTIVATION:-/);
+  assert.match(productionGate, /COMPLETE_CACHE_EPOCH_V2_AFTER_7D/);
+  assert.match(productionGate, new RegExp(manifestHash));
 });
