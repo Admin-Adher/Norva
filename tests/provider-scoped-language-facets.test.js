@@ -29,7 +29,7 @@ test('catalog facets route scopes RPC, memo and labels to provider plus media ty
     assert.match(catalog, /url\.searchParams\.get\("source"\)/);
     assert.match(catalog, /cloud_exact_language_counts_by_source/);
     assert.match(catalog, /p_source_id: sourceId/);
-    assert.match(catalog, /`\$\{userId\}:\$\{itemType\}:\$\{sourceId \|\| "all"\}`/);
+    assert.match(catalog, /`\$\{userId\}:\$\{cacheEpoch\}:\$\{itemType\}:\$\{sourceId \|\| "all"\}`/);
     assert.match(catalog, /itemType === "series" \? "series" : "movies"/);
     assert.match(catalog, /`\$\{name\} · \$\{FACET_NUMBER\.format\(count\)\} \$\{noun\}`/);
     assert.match(catalog, /else if \(!sourceId\)/);

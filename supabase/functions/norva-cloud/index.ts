@@ -3,6 +3,53 @@ import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { playbackTransportExpiresAt } from "../_shared/playback-expiry.mjs";
 import { formatSourceSyncError } from "../_shared/source-sync-error.mjs";
 import {
+  buildProviderDirectFallbackSnapshot,
+  directFallbackLeaseTtlSeconds,
+  ProviderDirectFallbackLeaseError,
+  providerDirectFallbackLeaseOwner,
+  withSourceDirectFallbackLease,
+} from "../_shared/provider-direct-fallback-lease.mjs";
+import {
+  BoundedProviderResponseError,
+  fetchBoundedProviderJson,
+  fetchBoundedProviderText,
+} from "../_shared/bounded-provider-response.mjs";
+import {
+  publicSourceSyncError,
+  sanitizeCatalogSource,
+  sanitizeSource,
+  sanitizeSourceConnectionResult,
+  sanitizeSourceValidation,
+  SOURCE_CATALOG_PUBLIC_SELECT,
+  SOURCE_MANAGEMENT_PUBLIC_SELECT,
+} from "../_shared/source-public-view.mjs";
+import {
+  CAST_COMMAND_PUBLIC_SELECT,
+  CONTENT_EVENT_PUBLIC_SELECT,
+  DEVICE_PUBLIC_SELECT,
+  FAVORITE_PUBLIC_SELECT,
+  MEDIA_ITEM_PUBLIC_SELECT,
+  PAIRING_PUBLIC_SELECT,
+  PLAYBACK_EVENT_PUBLIC_SELECT,
+  PLAYBACK_SESSION_PUBLIC_SELECT,
+  PROFILE_PUBLIC_SELECT,
+  sanitizeCloudErrorDetails,
+  sanitizeCastCommand,
+  sanitizeCloudDevice,
+  sanitizeCloudProfile,
+  sanitizeContentEvent,
+  sanitizeFavorite,
+  sanitizeHistoryData,
+  sanitizeMediaItem,
+  sanitizePairing,
+  sanitizePlaybackEvent,
+  sanitizePlaybackSession,
+  sanitizeXtreamSeriesInfo,
+  sanitizeXtreamShortEpg,
+  sanitizeWatchHistory,
+  WATCH_HISTORY_PUBLIC_SELECT,
+} from "../_shared/cloud-public-view.mjs";
+import {
   buildLiveMaterializationPlan,
   clearLiveMaterialization,
   fetchLiveChannelIdMap,
@@ -15,7 +62,22 @@ import { refreshVodTitleProjection } from "../_shared/vod-title-projection.ts";
 import type { LiveCatalogItem } from "../_shared/live-catalog.ts";
 import { featuresForDecision, getBillingMode, getEntitlementDecision, getEntitlementRuntime, hasConsumedTrial, isAdminUser, limitNumber, realPlanCode, recordEntitlementSignal } from "../_shared/entitlements.ts";
 import { driveXtreamSyncToReady, freshSyncCursor } from "../_shared/xtream-sync.ts";
+import {
+  assertActiveCatalogGenerationCurrent,
+  type ActiveCatalogGeneration,
+  catalogGenerationFields,
+  catalogGenerationRpcFence,
+  isCatalogGenerationSuperseded,
+  readActiveCatalogGenerationSnapshot,
+  withCatalogGenerationRows,
+} from "../_shared/catalog-generation.ts";
 import { verifyUserJwtLocally } from "../_shared/local-auth.ts";
+import {
+  acknowledgeCatalogVisibilityEpochMutation,
+  bindCatalogVisibilityEpoch as bindCatalogVisibilityEpochShared,
+  catalogVisibilityEpochHeaders,
+  finalizeCatalogVisibilityResponse,
+} from "../_shared/catalog-visibility-response.mjs";
 import {
   claimPaywallExperiment,
   normalizePaywallSurface,
@@ -38,6 +100,15 @@ type RuntimeConfig = {
   mediaGatewayUrl: string;
   mediaGatewayToken: string;
   sourceConfigKey: string;
+};
+type DirectFallbackLeaseContext = {
+  db: SupabaseClient;
+  sourceId: string;
+  userId: string;
+  expectedProviderAccountAffinityHash: string;
+  expectedConfigRevision: string;
+  expectedConfigCiphertextHash: string;
+  assertSourceCurrent?: () => Promise<void>;
 };
 
 class HttpError extends Error {
@@ -71,8 +142,6 @@ const ENV_RELAY_TOKEN_SECRET = Deno.env.get("RELAY_TOKEN_SECRET") ?? "";
 const ENV_MEDIA_GATEWAY_URL = trimTrailingSlash(Deno.env.get("NORVA_MEDIA_GATEWAY_URL") ?? "");
 const ENV_MEDIA_GATEWAY_TOKEN = Deno.env.get("NORVA_MEDIA_GATEWAY_TOKEN") ?? "";
 const ENV_SOURCE_CONFIG_KEY = Deno.env.get("NORVA_SOURCE_CONFIG_KEY") ?? "";
-const DEVICE_PUBLIC_SELECT =
-  "id, user_id, device_type, device_name, platform, app_version, public_key, capabilities, trusted, revoked, last_seen_at, created_at, updated_at";
 const RUNTIME_CONFIG_KEYS = [
   "NORVA_RELAY_BASE_URL",
   "RELAY_TOKEN_SECRET",
@@ -150,6 +219,15 @@ Deno.serve(async (req) => {
     return new Response(null, { status: 204, headers: corsHeaders(req) });
   }
 
+  return await finalizeCatalogVisibilityResponse(
+    req,
+    await handleRequest(req),
+    supabase,
+    { service: "norva-cloud", corsHeaders },
+  );
+});
+
+async function handleRequest(req: Request): Promise<Response> {
   try {
     const url = new URL(req.url);
     const segments = routeSegments(url.pathname);
@@ -167,12 +245,11 @@ Deno.serve(async (req) => {
     return res;
   } catch (error) {
     const status = error instanceof HttpError ? error.status : 500;
-    const message = error instanceof Error ? error.message : "Unexpected error";
-    const details = error instanceof HttpError ? error.details : undefined;
-    console.error("[norva-cloud]", status, message, details ?? "");
-    return json(req, { error: message, details }, status);
+    const payload = publicErrorPayload(error, status);
+    console.error("[norva-cloud]", publicErrorLog(error, status, payload));
+    return json(req, payload, status);
   }
-});
+}
 
 // Whether the signed-in account may still start a free trial. Trial eligibility
 // is account-level (keyed to trial_consumed_at), so it follows the user across
@@ -380,7 +457,7 @@ async function route(
     // Presence gate: any real device activity (not the idle heartbeat keepalive)
     // stands the user's probes down before their first play of the session.
     if (id !== "heartbeat") touchUserPresence(db, device.user_id);
-    if (req.method === "GET" && id === "me") return { body: { device } };
+    if (req.method === "GET" && id === "me") return { body: { device: sanitizeCloudDevice(device) } };
     // Self-unpair: the paired screen (e.g. a TV) revokes ITS OWN device token on
     // logout, so the account drops this screen and the token can't silently
     // resume the session. Authenticated by the device token (requireDevice), so
@@ -390,7 +467,7 @@ async function route(
       return { body: await heartbeatDeviceToken(device, db) };
     }
     if (req.method === "GET" && id === "sources" && !action) {
-      return { body: await listSources(device.user_id, db) };
+      return { body: await listVisibleSources(device.user_id, db) };
     }
     if (req.method === "GET" && id === "sources" && action && segments[3] === "series-info") {
       return { body: await getXtreamSeriesInfo(url, action, device.user_id, db) };
@@ -402,6 +479,7 @@ async function route(
       return { body: await getSourceEpg(url, action, device.user_id, db) };
     }
     if (req.method === "POST" && id === "sources" && action && segments[3] === "test") {
+      await assertVisibleSource(action, device.user_id, db);
       return { body: await testSourceConnection(action, device.user_id, db) };
     }
     if (req.method === "GET" && id === "media-items") {
@@ -483,29 +561,7 @@ async function route(
     // Notification / new-content feed (same cloud_content_events table).
     if (id === "content-events") {
       if (req.method === "GET") {
-        const all = url.searchParams.get("all") === "1";
-        if (all) {
-          const [feedRes, unreadRes] = await Promise.all([
-            db.from("cloud_content_events")
-              .select("id,source_id,kind,summary,payload,created_at,seen_at")
-              .eq("user_id", device.user_id)
-              .order("created_at", { ascending: false })
-              .limit(40),
-            db.from("cloud_content_events")
-              .select("id", { count: "exact", head: true })
-              .eq("user_id", device.user_id)
-              .is("seen_at", null),
-          ]);
-          return { body: { events: feedRes.data ?? [], unread: unreadRes.count ?? 0 } };
-        }
-        const { data } = await db
-          .from("cloud_content_events")
-          .select("id,source_id,kind,summary,payload,created_at")
-          .eq("user_id", device.user_id)
-          .is("seen_at", null)
-          .order("created_at", { ascending: false })
-          .limit(20);
-        return { body: { events: data ?? [] } };
+        return { body: await listVisibleContentEvents(url, device.user_id, db) };
       }
       if (req.method === "POST" && action === "seen") {
         const body = await req.json().catch(() => ({})) as JsonRecord;
@@ -601,29 +657,7 @@ async function route(
       // ?all=1 → the inbox feed: seen + unseen (recent history) plus an unread
       // count, and does NOT mark anything seen. Default (no flag) keeps the legacy
       // "unseen only" behavior for the one-shot launch toast.
-      const all = url.searchParams.get("all") === "1";
-      if (all) {
-        const [feedRes, unreadRes] = await Promise.all([
-          db.from("cloud_content_events")
-            .select("id,source_id,kind,summary,payload,created_at,seen_at")
-            .eq("user_id", user.id)
-            .order("created_at", { ascending: false })
-            .limit(40),
-          db.from("cloud_content_events")
-            .select("id", { count: "exact", head: true })
-            .eq("user_id", user.id)
-            .is("seen_at", null),
-        ]);
-        return { body: { events: feedRes.data ?? [], unread: unreadRes.count ?? 0 } };
-      }
-      const { data } = await db
-        .from("cloud_content_events")
-        .select("id,source_id,kind,summary,payload,created_at")
-        .eq("user_id", user.id)
-        .is("seen_at", null)
-        .order("created_at", { ascending: false })
-        .limit(20);
-      return { body: { events: data ?? [] } };
+      return { body: await listVisibleContentEvents(url, user.id, db) };
     }
     if (req.method === "POST" && id === "seen") {
       const body = await req.json().catch(() => ({})) as JsonRecord;
@@ -685,7 +719,9 @@ async function route(
     if (req.method === "POST" && id === "estimate" && !action) return { body: await estimateSourceByUrl(req) };
     if (req.method === "POST" && !id) {
       await requirePlanCapacity(user.id, db, "sources", "cloud_sources", { notDeleted: true });
-      return { status: 201, body: await createSource(req, user.id, db) };
+      const body = await createSource(req, user.id, db);
+      await acknowledgeCatalogVisibilityEpochMutation(req, db);
+      return { status: 201, body };
     }
     if (req.method === "GET" && id && action === "series-info") {
       return { body: await getXtreamSeriesInfo(url, id, user.id, db) };
@@ -705,7 +741,9 @@ async function route(
       return { body: await hardSyncSource(id, user.id, db) };
     }
     if (req.method === "POST" && id && action === "toggle") {
-      return { body: await toggleSourceEnabled(id, user.id, db) };
+      const body = await toggleSourceEnabled(id, user.id, db);
+      await acknowledgeCatalogVisibilityEpochMutation(req, db);
+      return { body };
     }
     if (req.method === "POST" && id && action === "test") {
       return { body: await testSourceConnection(id, user.id, db) };
@@ -729,7 +767,13 @@ async function route(
     if ((req.method === "PATCH" || req.method === "PUT") && id) {
       return { body: await updateSource(req, id, user.id, db) };
     }
-    if (req.method === "DELETE" && id) return { body: await deleteSource(id, user.id, db) };
+    if (req.method === "DELETE" && id) {
+      const result = await deleteSource(id, user.id, db);
+      if (result.visibilityChanged) {
+        await acknowledgeCatalogVisibilityEpochMutation(req, db);
+      }
+      return { body: result.body };
+    }
   }
 
   if (scope === "media-items") {
@@ -824,10 +868,14 @@ async function requireUser(req: Request, db: SupabaseClient): Promise<CloudUser>
   // que si le verdict est indécidable localement (alg asymétrique, secret absent).
   const local = await verifyUserJwtLocally(token);
   if (local === "invalid") throw new HttpError(401, "Invalid bearer token");
-  if (local !== "fallback") return local;
+  if (local !== "fallback") {
+    await bindCatalogVisibilityEpoch(req, local.id, db);
+    return local;
+  }
 
   const { data, error } = await db.auth.getUser(token);
   if (error || !data.user) throw new HttpError(401, "Invalid bearer token", error?.message);
+  await bindCatalogVisibilityEpoch(req, data.user.id, db);
   return { id: data.user.id, email: data.user.email ?? undefined };
 }
 
@@ -845,6 +893,7 @@ async function requireDevice(req: Request, db: SupabaseClient): Promise<CloudDev
     .maybeSingle();
   if (error) throwDb(error, "Unable to verify device token");
   if (!data) throw new HttpError(401, "Invalid device token");
+  await bindCatalogVisibilityEpoch(req, data.user_id, db);
   return {
     id: data.id,
     user_id: data.user_id,
@@ -852,6 +901,15 @@ async function requireDevice(req: Request, db: SupabaseClient): Promise<CloudDev
     device_name: data.device_name,
     capabilities: recordOrEmpty(data.capabilities),
   };
+}
+
+async function bindCatalogVisibilityEpoch(req: Request, userId: string, db: SupabaseClient) {
+  try {
+    await bindCatalogVisibilityEpochShared(req, userId, db);
+  } catch (_) {
+    console.warn("[norva-cloud] catalog visibility epoch unavailable");
+    throw new HttpError(503, "Catalog visibility is temporarily unavailable");
+  }
 }
 
 async function requireCloudAccess(userId: string, db: SupabaseClient, feature: string) {
@@ -1161,18 +1219,18 @@ function normalizeGenres(value: unknown): string[] {
 async function getProfile(userId: string, db: SupabaseClient) {
   const { data, error } = await db
     .from("cloud_profiles")
-    .select("*")
+    .select(PROFILE_PUBLIC_SELECT)
     .eq("id", userId)
     .maybeSingle();
   if (error) throwDb(error, "Unable to load profile");
-  return data ?? { id: userId };
+  return sanitizeCloudProfile(data);
 }
 
 async function upsertProfile(req: Request, userId: string, db: SupabaseClient) {
   const body = await readJson(req);
   const { data: existing, error: existingError } = await db
     .from("cloud_profiles")
-    .select("*")
+    .select("display_name,avatar_url,locale")
     .eq("id", userId)
     .maybeSingle();
   if (existingError) throwDb(existingError, "Unable to load profile");
@@ -1208,10 +1266,10 @@ async function upsertProfile(req: Request, userId: string, db: SupabaseClient) {
   const { data, error } = await db
     .from("cloud_profiles")
     .upsert(row, { onConflict: "id" })
-    .select("*")
+    .select(PROFILE_PUBLIC_SELECT)
     .single();
   if (error) throwDb(error, "Unable to save profile");
-  return data;
+  return sanitizeCloudProfile(data);
 }
 
 function hasExplicitContentRegionConfirmation(body: JsonRecord) {
@@ -1242,7 +1300,7 @@ async function listDevices(userId: string, db: SupabaseClient) {
     .eq("user_id", userId)
     .order("created_at", { ascending: false });
   if (error) throwDb(error, "Unable to list devices");
-  return { devices: data ?? [] };
+  return { devices: (data ?? []).map(sanitizeCloudDevice) };
 }
 
 async function createDevice(req: Request, userId: string, db: SupabaseClient) {
@@ -1265,7 +1323,7 @@ async function createDevice(req: Request, userId: string, db: SupabaseClient) {
 
   const { data, error } = await db.from("cloud_devices").insert(row).select(DEVICE_PUBLIC_SELECT).single();
   if (error) throwDb(error, "Unable to register device");
-  return { device: data, deviceToken: deviceToken || undefined };
+  return { device: sanitizeCloudDevice(data), deviceToken: deviceToken || undefined };
 }
 
 async function heartbeatDevice(id: string, userId: string, db: SupabaseClient) {
@@ -1277,7 +1335,7 @@ async function heartbeatDevice(id: string, userId: string, db: SupabaseClient) {
     .select(DEVICE_PUBLIC_SELECT)
     .single();
   if (error) throwDb(error, "Unable to update device heartbeat");
-  return { device: data };
+  return { device: sanitizeCloudDevice(data) };
 }
 
 async function revokeDevice(id: string, userId: string, db: SupabaseClient) {
@@ -1305,13 +1363,91 @@ async function revokeSelfDevice(device: CloudDevice, db: SupabaseClient) {
 
 async function listSources(userId: string, db: SupabaseClient) {
   const { data, error } = await db
-    .from("cloud_sources")
-    .select("*")
+    .from("cloud_source_management_sources")
+    .select(SOURCE_MANAGEMENT_PUBLIC_SELECT)
     .eq("user_id", userId)
     .is("deleted_at", null) // hide soft-deleted sources awaiting the reaper
     .order("created_at", { ascending: false });
   if (error) throwDb(error, "Unable to list sources");
   return { sources: (data ?? []).map(sanitizeSource) };
+}
+
+async function listVisibleSources(userId: string, db: SupabaseClient) {
+  const { data, error } = await db
+    .from("cloud_catalog_visible_sources")
+    .select(SOURCE_CATALOG_PUBLIC_SELECT)
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false });
+  if (error) throwDb(error, "Unable to list visible sources");
+  return { sources: (data ?? []).map(sanitizeCatalogSource) };
+}
+
+async function listVisibleSourceIds(userId: string, db: SupabaseClient): Promise<Set<string>> {
+  const { data, error } = await db
+    .from("cloud_catalog_visible_sources")
+    .select("id")
+    .eq("user_id", userId);
+  if (error) throwDb(error, "Unable to load visible sources");
+  return new Set(
+    (data ?? [])
+      .map((source: Record<string, unknown>) => stringOr(source.id, ""))
+      .filter((sourceId: string) => UUID_PATTERN.test(sourceId)),
+  );
+}
+
+function visibleContentEventFilter(visibleSourceIds: Set<string>) {
+  const ids = [...visibleSourceIds];
+  return ids.length
+    ? `source_id.is.null,source_id.in.(${ids.join(",")})`
+    : "source_id.is.null";
+}
+
+async function listVisibleContentEvents(url: URL, userId: string, db: SupabaseClient) {
+  const all = url.searchParams.get("all") === "1";
+  const sourceFilter = visibleContentEventFilter(await listVisibleSourceIds(userId, db));
+  let feedQuery = db
+    .from("cloud_content_events")
+    .select(CONTENT_EVENT_PUBLIC_SELECT)
+    .eq("user_id", userId)
+    .or(sourceFilter);
+  if (!all) feedQuery = feedQuery.is("seen_at", null);
+  const feedPromise = feedQuery
+    .order("created_at", { ascending: false })
+    .limit(all ? 40 : 20);
+
+  if (!all) {
+    const { data, error } = await feedPromise;
+    if (error) throwDb(error, "Unable to list content events");
+    return { events: (data ?? []).map(sanitizeContentEvent).filter(Boolean) };
+  }
+
+  const [feedRes, unreadRes] = await Promise.all([
+    feedPromise,
+    db.from("cloud_content_events")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", userId)
+      .is("seen_at", null)
+      .or(sourceFilter),
+  ]);
+  if (feedRes.error) throwDb(feedRes.error, "Unable to list content events");
+  if (unreadRes.error) throwDb(unreadRes.error, "Unable to count content events");
+  return {
+    events: (feedRes.data ?? []).map(sanitizeContentEvent).filter(Boolean),
+    unread: unreadRes.count ?? 0,
+  };
+}
+
+async function managedSourceSnapshot(id: string, userId: string, db: SupabaseClient) {
+  const { data, error } = await db
+    .from("cloud_source_management_sources")
+    .select(SOURCE_MANAGEMENT_PUBLIC_SELECT)
+    .eq("id", id)
+    .eq("user_id", userId)
+    .is("deleted_at", null)
+    .maybeSingle();
+  if (error) throwDb(error, "Unable to load source");
+  if (!data) throw new HttpError(404, "Source not found");
+  return sanitizeSource(data);
 }
 
 async function createSource(req: Request, userId: string, db: SupabaseClient) {
@@ -1344,91 +1480,84 @@ async function createSource(req: Request, userId: string, db: SupabaseClient) {
     sync_status: syncNow ? "syncing" : stringOr(body.syncStatus ?? body.sync_status, "idle"),
   };
 
-  const { data, error } = await db.from("cloud_sources").insert(row).select("*").single();
+  const { data, error } = await db.from("cloud_sources").insert(row).select("id").single();
   if (error) throwDb(error, "Unable to create source");
 
   if (syncNow) {
     waitUntil(syncCloudSource(data.id, userId, db));
   }
 
-  return { source: sanitizeSource(data), validation, syncStarted: syncNow };
+  return {
+    source: await managedSourceSnapshot(data.id, userId, db),
+    validation: sanitizeSourceValidation(validation),
+    syncStarted: syncNow,
+  };
 }
 
 async function updateSource(req: Request, id: string, userId: string, db: SupabaseClient) {
   const body = await readJson(req);
-  const { data: existing, error: existingError } = await db
-    .from("cloud_sources")
-    .select("*")
-    .eq("id", id)
-    .eq("user_id", userId)
-    .maybeSingle();
-  if (existingError) throwDb(existingError, "Unable to load source");
-  if (!existing) throw new HttpError(404, "Source not found");
-
-  const patch: JsonRecord = {};
-  copyString(body, patch, "displayName", "display_name");
-  copyString(body, patch, "display_name", "display_name");
-  copyString(body, patch, "configCiphertext", "config_ciphertext");
-  copyString(body, patch, "config_ciphertext", "config_ciphertext");
-  copyString(body, patch, "syncStatus", "sync_status");
-  copyString(body, patch, "sync_status", "sync_status");
-  copyString(body, patch, "syncError", "sync_error");
-  copyString(body, patch, "sync_error", "sync_error");
-  if (isRecord(body.configHint)) patch.config_hint = body.configHint;
-  if (isRecord(body.config_hint)) patch.config_hint = body.config_hint;
-  if (body.lastSyncedAt || body.last_synced_at) {
-    patch.last_synced_at = stringOrNull(body.lastSyncedAt ?? body.last_synced_at);
-  }
-
-  const requestedSourceType = stringOr(body.sourceType ?? body.source_type ?? body.type, "");
-  const sourceType = requestedSourceType || stringOr(existing.source_type, "");
-  if (!["xtream", "m3u", "epg"].includes(sourceType)) throw new HttpError(400, "Unsupported source type");
-
-  const rawConfig = buildSourceConfig(sourceType, body);
-  const hasManagedConfig = Object.keys(rawConfig).length > 0;
-  if (hasManagedConfig) {
-    const runtimeConfig = await getRuntimeConfig(db);
-    const validation = await validateCloudSource(sourceType, rawConfig, runtimeConfig);
-    patch.source_type = sourceType;
-    patch.config_ciphertext = await encryptSourceConfig(rawConfig, runtimeConfig);
-    patch.config_hint = compactRecord({
-      ...recordOrEmpty(existing.config_hint),
-      ...recordOrEmpty(body.configHint ?? body.config_hint),
-      ...buildSourceHint(sourceType, rawConfig, validation),
-      managedBy: "norva-cloud",
-    });
-    patch.sync_status = body.syncNow === false || body.sync_now === false ? "idle" : "syncing";
-    patch.sync_error = null;
+  assertLegacySourcePatchAllowlisted(body);
+  const displayName = stringOr(body.displayName ?? body.display_name, "");
+  if (!displayName || displayName.length > 160) {
+    throw new HttpError(400, "Invalid source display name", { code: "INVALID_REQUEST" });
   }
 
   const { data, error } = await db
     .from("cloud_sources")
-    .update(patch)
+    .update({ display_name: displayName })
     .eq("id", id)
     .eq("user_id", userId)
-    .select("*")
-    .single();
+    .is("deleted_at", null)
+    .select("id")
+    .maybeSingle();
   if (error) throwDb(error, "Unable to update source");
+  if (!data) throw new HttpError(404, "Source not found");
 
-  if (hasManagedConfig && body.syncNow !== false && body.sync_now !== false) {
-    waitUntil(syncCloudSource(id, userId, db));
+  return { source: await managedSourceSnapshot(data.id, userId, db) };
+}
+
+const LEGACY_SOURCE_CREDENTIAL_FIELDS = new Set([
+  "serverUrl",
+  "server_url",
+  "username",
+  "password",
+  "playlistUrl",
+  "playlist_url",
+  "epgUrl",
+  "epg_url",
+  "url",
+  "config",
+  "configCiphertext",
+  "config_ciphertext",
+]);
+
+const LEGACY_SOURCE_PATCH_FIELDS = new Set(["displayName", "display_name"]);
+
+function assertLegacySourcePatchAllowlisted(body: JsonRecord) {
+  const keys = Object.keys(body);
+  if (keys.some((key) => LEGACY_SOURCE_CREDENTIAL_FIELDS.has(key))) {
+    throw new HttpError(409, "Use the credential transition workflow", {
+      code: "DIRECT_CREDENTIAL_MUTATION_FORBIDDEN",
+    });
   }
-
-  return { source: sanitizeSource(data) };
+  if (keys.length === 0 || keys.some((key) => !LEGACY_SOURCE_PATCH_FIELDS.has(key))) {
+    throw new HttpError(400, "Only the source display name can be updated", { code: "INVALID_REQUEST" });
+  }
 }
 
 async function syncExistingSource(id: string, userId: string, db: SupabaseClient) {
   await assertOwnedSource(id, userId, db);
+  await assertVisibleSource(id, userId, db);
   const { data, error } = await db
     .from("cloud_sources")
     .update({ sync_status: "syncing", sync_error: null })
     .eq("id", id)
     .eq("user_id", userId)
-    .select("*")
+    .select("id")
     .single();
   if (error) throwDb(error, "Unable to start source sync");
   waitUntil(syncCloudSource(id, userId, db));
-  return { source: sanitizeSource(data), syncStarted: true };
+  return { source: await managedSourceSnapshot(data.id, userId, db), syncStarted: true };
 }
 
 // Disable/Enable a source. Disabled = paused: excluded from auto-refresh/resume and hidden from the
@@ -1440,9 +1569,9 @@ async function toggleSourceEnabled(id: string, userId: string, db: SupabaseClien
   if (readErr) throwDb(readErr, "Unable to read source");
   const next = !((cur as JsonRecord | null)?.enabled ?? true);
   const { data, error } = await db
-    .from("cloud_sources").update({ enabled: next }).eq("id", id).eq("user_id", userId).select("*").single();
+    .from("cloud_sources").update({ enabled: next }).eq("id", id).eq("user_id", userId).select("id").single();
   if (error) throwDb(error, "Unable to toggle source");
-  return { success: true, enabled: next, source: sanitizeSource(data) };
+  return { success: true, enabled: next, source: await managedSourceSnapshot(data.id, userId, db) };
 }
 
 // Check a source's connection on demand (the "Check service" button). Reuses the same validation
@@ -1453,58 +1582,61 @@ async function testSourceConnection(id: string, userId: string, db: SupabaseClie
     .from("cloud_sources").select("source_type").eq("id", id).eq("user_id", userId).maybeSingle();
   const type = stringOr((src as JsonRecord | null)?.source_type, "");
   try {
-    const config = await loadSourceConfig(id, userId, db);
-    const validation = await validateCloudSource(type, config, await getRuntimeConfig(db));
-    return {
+    const configRevision = await sourceConfigRevisionSnapshot(id, userId, db);
+    const loaded = await loadSourceConfigEnvelope(id, userId, db);
+    const assertSourceCurrent = () => assertSourceConfigRevisionCurrent(id, userId, configRevision, db);
+    const directFallback = type === "xtream"
+      ? {
+        db,
+        sourceId: id,
+        userId,
+        ...await buildProviderDirectFallbackSnapshot({
+          serverUrl: loaded.config.serverUrl,
+          username: loaded.config.username,
+          configCiphertext: loaded.configCiphertext,
+          configRevision,
+        }),
+        assertSourceCurrent,
+      }
+      : null;
+    await validateCloudSource(type, loaded.config, await getRuntimeConfig(db), directFallback);
+    await assertSourceCurrent();
+    return sanitizeSourceConnectionResult({
       success: true,
-      status: stringOrNull(validation.status) ?? "reachable",
       checkedAt: new Date().toISOString(),
-    };
+    });
   } catch (err) {
     const status = err instanceof HttpError ? err.status : 502;
     const details = err instanceof HttpError ? recordOrEmpty(err.details) : {};
-    const code = stringOr(
-      details.code,
-      status === 504 ? "PROVIDER_RESPONSE_TIMEOUT" : "PROVIDER_REQUEST_FAILED",
-    );
-    return {
+    return sanitizeSourceConnectionResult({
       success: false,
-      code,
+      code: details.code,
       status,
-      error: sourceConnectionPublicMessage(code, status),
       checkedAt: new Date().toISOString(),
-    };
+    });
   }
-}
-
-function sourceConnectionPublicMessage(code: string, status: number): string {
-  if (code === "PROVIDER_BUSY" || status === 458) {
-    return "This TV service is busy. Wait a few seconds, then try again.";
-  }
-  if (code === "PROVIDER_CONNECT_TIMEOUT" || code === "PROVIDER_RESPONSE_TIMEOUT" || status === 504) {
-    return "The TV service did not respond before the connection timed out.";
-  }
-  if (code === "PROVIDER_DNS_FAILURE") return "The TV service address could not be resolved.";
-  if (code === "PROVIDER_TLS_FAILURE") return "The TV service could not establish a secure connection.";
-  if (code === "PROVIDER_CONNECTION_RESET") return "The TV service closed the network connection unexpectedly.";
-  if (code === "PROVIDER_NETWORK_UNREACHABLE") return "The network route to the TV service is unavailable.";
-  if (status === 401 || status === 403) return "The TV service refused these login details.";
-  return "Norva could not reach this TV service.";
 }
 
 // Per-source sync status for the client's post-"Sync now" poll. Shape matches what refreshSource
 // looks for: an entry with { source_id, type: 'all', status } where status is success|error|syncing.
 async function listSourceStatuses(userId: string, db: SupabaseClient) {
   const { data, error } = await db
-    .from("cloud_sources").select("id, sync_status, sync_error").eq("user_id", userId).is("deleted_at", null);
+    .from("cloud_source_management_sources")
+    .select("id,sync_status,sync_error,catalog_visible,user_visibility_epoch")
+    .eq("user_id", userId)
+    .is("deleted_at", null);
   if (error) throwDb(error, "Unable to list source statuses");
   return (data ?? []).map((s) => {
     const raw = stringOr((s as JsonRecord).sync_status, "");
+    const publicError = publicSourceSyncError((s as JsonRecord).sync_error);
     return {
       source_id: String((s as JsonRecord).id),
       type: "all",
       status: raw === "ready" ? "success" : raw === "error" ? "error" : "syncing",
-      error: stringOrNull((s as JsonRecord).sync_error),
+      error: publicError.message,
+      error_code: publicError.code,
+      catalog_visible: (s as JsonRecord).catalog_visible === true,
+      user_visibility_epoch: stringOrNull((s as JsonRecord).user_visibility_epoch),
     };
   });
 }
@@ -1539,6 +1671,7 @@ async function estimateSourceByUrl(req: Request) {
 // the request timeout (the bug the Remove button had); the full re-sync overwrites items in place.
 async function hardSyncSource(id: string, userId: string, db: SupabaseClient) {
   await assertOwnedSource(id, userId, db);
+  await assertVisibleSource(id, userId, db);
   const { data: cur } = await db
     .from("cloud_sources").select("config_hint").eq("id", id).eq("user_id", userId).maybeSingle();
   const hint = recordOrEmpty((cur as JsonRecord | null)?.config_hint);
@@ -1546,15 +1679,10 @@ async function hardSyncSource(id: string, userId: string, db: SupabaseClient) {
   const { data, error } = await db
     .from("cloud_sources")
     .update({ sync_status: "syncing", sync_error: null, config_hint: compactRecord(hint) })
-    .eq("id", id).eq("user_id", userId).select("*").single();
+    .eq("id", id).eq("user_id", userId).select("id").single();
   if (error) throwDb(error, "Unable to start rebuild");
   waitUntil(syncCloudSource(id, userId, db));
-  return { source: sanitizeSource(data), syncStarted: true, hard: true };
-}
-
-function sanitizeSource(source: JsonRecord) {
-  const { config_ciphertext: _configCiphertext, ...safeSource } = source;
-  return safeSource;
+  return { source: await managedSourceSnapshot(data.id, userId, db), syncStarted: true, hard: true };
 }
 
 function buildSourceConfig(sourceType: string, body: JsonRecord): JsonRecord {
@@ -1563,8 +1691,8 @@ function buildSourceConfig(sourceType: string, body: JsonRecord): JsonRecord {
 
   if (sourceType === "xtream") {
     const serverUrl = stringOr(body.serverUrl ?? body.server_url ?? body.url, "");
-    const username = stringOr(body.username, "");
-    const password = stringOr(body.password, "");
+    const username = typeof body.username === "string" && body.username.trim() ? body.username : "";
+    const password = typeof body.password === "string" && body.password.length ? body.password : "";
     return serverUrl || username || password ? { serverUrl, username, password } : {};
   }
 
@@ -1586,29 +1714,73 @@ function buildSourceConfig(sourceType: string, body: JsonRecord): JsonRecord {
 // this edge runtime's datacenter IP. A direct edge fetch is used only when no gateway
 // is configured. Once the gateway path is selected, every provider or network verdict
 // is surfaced as-is and is never retried through a second route.
+async function withExistingXtreamDirectFallback<T>(
+  context: DirectFallbackLeaseContext,
+  ownerScope: string,
+  timeoutMs: number,
+  operation: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await withSourceDirectFallbackLease({
+      ...context,
+      owner: providerDirectFallbackLeaseOwner(ownerScope),
+      ttlSeconds: directFallbackLeaseTtlSeconds(timeoutMs),
+    }, operation);
+  } catch (error) {
+    if (error instanceof ProviderDirectFallbackLeaseError) {
+      throw new HttpError(error.status, error.message, error.details);
+    }
+    throw error;
+  }
+}
+
 async function validateXtreamAccount(
   runtimeConfig: RuntimeConfig,
   creds: { serverUrl: string; username: string; password: string },
+  directFallback: DirectFallbackLeaseContext | null = null,
 ): Promise<JsonRecord> {
   const { serverUrl, username, password } = creds;
   if (runtimeConfig.mediaGatewayUrl && runtimeConfig.mediaGatewayToken) {
-    return recordOrEmpty(
+    const payload = recordOrEmpty(
       await requestGatewayMetadata(runtimeConfig, { serverUrl, username, password, action: "account_info" }, 20000),
     );
+    await directFallback?.assertSourceCurrent?.();
+    return payload;
   }
-  return recordOrEmpty(await fetchJson(xtreamApiUrl({ serverUrl, username, password }), 12000));
+  const directFetch = async () => {
+    const payload = await fetchJson(xtreamApiUrl({ serverUrl, username, password }), 12000);
+    await directFallback?.assertSourceCurrent?.();
+    return payload;
+  };
+  if (!directFallback) {
+    // Creation validates a source that does not exist yet and therefore cannot
+    // have an in-flight transition. Existing-source checks always pass the
+    // atomic lease context above.
+    return recordOrEmpty(await directFetch());
+  }
+  return recordOrEmpty(await withExistingXtreamDirectFallback(
+    directFallback,
+    "cloud-source-test",
+    12_000,
+    directFetch,
+  ));
 }
 
-async function validateCloudSource(sourceType: string, config: JsonRecord, runtimeConfig: RuntimeConfig) {
+async function validateCloudSource(
+  sourceType: string,
+  config: JsonRecord,
+  runtimeConfig: RuntimeConfig,
+  directFallback: DirectFallbackLeaseContext | null = null,
+) {
   if (sourceType === "xtream") {
     const serverUrl = normalizeBaseUrl(stringOr(config.serverUrl, ""));
-    const username = stringOr(config.username, "");
-    const password = stringOr(config.password, "");
+    const username = typeof config.username === "string" && config.username.trim() ? config.username : "";
+    const password = typeof config.password === "string" && config.password.length ? config.password : "";
     if (!serverUrl || !username || !password) {
       throw new HttpError(400, "Xtream requires server URL, username and password");
     }
 
-    const payload = await validateXtreamAccount(runtimeConfig, { serverUrl, username, password });
+    const payload = await validateXtreamAccount(runtimeConfig, { serverUrl, username, password }, directFallback);
     const userInfo = recordOrEmpty(payload.user_info);
     const auth = String(userInfo.auth ?? "");
     if (auth !== "1" && auth.toLowerCase() !== "true") {
@@ -1640,7 +1812,10 @@ function buildSourceHint(sourceType: string, config: JsonRecord, validation: Jso
     const serverUrl = stringOr(validation.serverUrl ?? config.serverUrl, "");
     return {
       serverHost: safeHost(serverUrl),
-      username: stringOr(validation.username ?? config.username, ""),
+      username: typeof (validation.username ?? config.username) === "string"
+        && String(validation.username ?? config.username).trim()
+        ? String(validation.username ?? config.username)
+        : "",
       status: stringOrNull(validation.status),
       hasPassword: Boolean(config.password),
     };
@@ -1777,6 +1952,7 @@ async function writeSourceSyncProgress(
 async function syncCloudSource(sourceId: string, userId: string, db: SupabaseClient) {
   let baseHint: JsonRecord = {};
   let progress: JsonRecord = {};
+  let generation: ActiveCatalogGeneration | null = null;
 
   try {
     const { data: source, error } = await db
@@ -1788,6 +1964,7 @@ async function syncCloudSource(sourceId: string, userId: string, db: SupabaseCli
     if (error) throwDb(error, "Unable to load source");
     if (!source) throw new HttpError(404, "Source not found");
     if (!source.config_ciphertext) throw new HttpError(400, "Source has no managed cloud configuration");
+    generation = await readActiveCatalogGenerationSnapshot(db, sourceId, userId);
 
     const startedAt = new Date().toISOString();
     baseHint = recordOrEmpty(source.config_hint);
@@ -1825,6 +2002,7 @@ async function syncCloudSource(sourceId: string, userId: string, db: SupabaseCli
       // the raw catalogue is imported; the existing finalize stepper (driven by
       // the client poll / cron) then materializes it to "ready".
       const cursor = freshSyncCursor(startedAt);
+      await assertActiveCatalogGenerationCurrent(db, sourceId, userId, generation);
       await db
         .from("cloud_sources")
         .update({
@@ -1840,6 +2018,7 @@ async function syncCloudSource(sourceId: string, userId: string, db: SupabaseCli
     }
 
     // m3u / other source types stay on the single-isolate path (bounded size).
+    await assertActiveCatalogGenerationCurrent(db, sourceId, userId, generation);
     await db
       .from("cloud_sources")
       .update({
@@ -1852,19 +2031,22 @@ async function syncCloudSource(sourceId: string, userId: string, db: SupabaseCli
       .eq("user_id", userId);
 
     const config = await decryptSourceConfig(source.config_ciphertext, await getRuntimeConfig(db));
+    await assertActiveCatalogGenerationCurrent(db, sourceId, userId, generation);
     const reportProgress: SyncProgressReporter = async (patch: JsonRecord) => {
       progress = mergeSyncProgress(progress, compactRecord({ ...patch, status: "syncing", updatedAt: new Date().toISOString() }));
+      await assertActiveCatalogGenerationCurrent(db, sourceId, userId, generation!);
       await writeSourceSyncProgress(db, sourceId, userId, baseHint, progress);
     };
 
     const result = source.source_type === "m3u"
-      ? await syncM3uSource(sourceId, userId, config, db, reportProgress)
+      ? await syncM3uSource(sourceId, userId, config, db, generation, reportProgress)
       : { total: 0 };
 
     if (source.source_type === "m3u" && Number(result.total ?? 0) <= 0) {
       throw new HttpError(422, "No playable catalog items were imported from this source");
     }
 
+    await assertActiveCatalogGenerationCurrent(db, sourceId, userId, generation);
     const syncedAt = new Date().toISOString();
     await db
       .from("cloud_sources")
@@ -1881,6 +2063,14 @@ async function syncCloudSource(sourceId: string, userId: string, db: SupabaseCli
       .eq("id", sourceId)
       .eq("user_id", userId);
   } catch (error) {
+    if (isCatalogGenerationSuperseded(error)) return;
+    if (generation) {
+      try {
+        await assertActiveCatalogGenerationCurrent(db, sourceId, userId, generation);
+      } catch (_) {
+        return;
+      }
+    }
     const message = formatSourceSyncError(error, "Source sync failed");
     console.error("[norva-cloud] source sync failed", sourceId, message);
     const failedAt = new Date().toISOString();
@@ -1923,6 +2113,7 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
     .maybeSingle();
   if (error) throwDb(error, "Unable to load source");
   if (!source) throw new HttpError(404, "Source not found");
+  const generation = await readActiveCatalogGenerationSnapshot(db, sourceId, userId);
 
   const baseHint = recordOrEmpty(source.config_hint);
   const existingProgress = recordOrEmpty(baseHint.syncProgress);
@@ -1931,7 +2122,7 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
   const batchLimit = Math.max(1, Math.min(2000, options.limit || 1000));
   const batchOffset = Math.max(0, options.offset || 0);
   const batchAfterId = stringOr(options.afterId, "");
-  const counts = await countSourceItems(sourceId, userId, db, existingProgress);
+  const counts = await countSourceItems(sourceId, userId, db, generation, existingProgress);
   let progress: JsonRecord = compactRecord({
     ...existingProgress,
     status: "syncing",
@@ -1942,9 +2133,11 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
   });
   const reportProgress: SyncProgressReporter = async (patch: JsonRecord) => {
     progress = mergeSyncProgress(progress, compactRecord({ ...patch, status: "syncing", updatedAt: new Date().toISOString() }));
+    await assertActiveCatalogGenerationCurrent(db, sourceId, userId, generation);
     await writeSourceSyncProgress(db, sourceId, userId, baseHint, progress);
   };
 
+  await assertActiveCatalogGenerationCurrent(db, sourceId, userId, generation);
   await db
     .from("cloud_sources")
     .update({ sync_status: "syncing", sync_error: null })
@@ -1991,6 +2184,23 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
 
     if (phase === "live" || phase === "live_channels" || phase === "live_variants") {
       const totalVod = counts.movies + counts.series;
+      const LIVE_CHUNK = 4000;
+      if (batchOffset === 0) {
+        await assertActiveCatalogGenerationCurrent(db, sourceId, userId, generation);
+        const cleared = await clearLiveMaterialization(db, sourceId, userId, generation);
+        if (!cleared.complete) {
+          return {
+            sourceId, status: "syncing", phase: "live",
+            nextPhase: "live", nextOffset: 0, limit: LIVE_CHUNK, totalVod, ...result,
+            liveCatalog: {
+              rawLive: counts.live,
+              clearing: true,
+              deletedRows: cleared.deletedRows,
+              callerProtocol: cleared.callerProtocol,
+            },
+          };
+        }
+      }
       if (counts.live <= 0) {
         await reportProgress({
           liveReady: true,
@@ -2009,9 +2219,9 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
       // can't be loaded + name-parsed whole in one isolate (it exceeds the edge
       // compute limit). Walk live rows by offset, clearing once at the start;
       // channels/variants merge across chunks by their logical/stream keys.
-      const LIVE_CHUNK = 4000;
-      if (batchOffset === 0) await clearLiveMaterialization(db, sourceId, userId);
-      const liveChunk = await loadSourceItems(sourceId, userId, db, { itemTypes: ["live"], offset: batchOffset, limit: LIVE_CHUNK });
+      const liveChunk = await loadSourceItems(sourceId, userId, db, generation, {
+        itemTypes: ["live"], offset: batchOffset, limit: LIVE_CHUNK,
+      });
       if (!liveChunk.length) {
         await reportProgress({
           stage: "building_titles",
@@ -2032,6 +2242,7 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
       const mat = await materializeLiveChunk(db, {
         sourceId, userId, rows: liveChunk,
         country: options.country || stringOr(config.country, "FR"),
+        generation,
       });
       const nextOffset = batchOffset + liveChunk.length;
       await reportProgress({
@@ -2049,7 +2260,7 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
 
     if (phase === "titles") {
       const totalVod = counts.movies + counts.series;
-      const rows = await loadSourceItems(sourceId, userId, db, {
+      const rows = await loadSourceItems(sourceId, userId, db, generation, {
         itemTypes: ["movie", "series"],
         afterId: batchAfterId,
         limit: batchLimit,
@@ -2061,20 +2272,30 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
         userId,
         rows,
         db,
+        generation,
         xtreamConfig: sourceType === "xtream" && config.serverUrl && config.username && config.password
           ? {
             serverUrl: normalizeBaseUrl(stringOr(config.serverUrl, "")),
-            username: stringOr(config.username, ""),
-            password: stringOr(config.password, ""),
+            username: typeof config.username === "string" && config.username.trim() ? config.username : "",
+            password: typeof config.password === "string" && config.password.length ? config.password : "",
           }
           : null,
         mediaGatewayUrl: rcTitles.mediaGatewayUrl,
         mediaGatewayToken: rcTitles.mediaGatewayToken,
+        directFallbackLease: {
+          db,
+          sourceId,
+          userId,
+          ownerScope: "cloud-title-projection",
+          configCiphertext: String(source.config_ciphertext ?? ""),
+          configRevision: generation.configRevision,
+        },
         vodInfoLimit: boundedInt(Deno.env.get("NORVA_VOD_INFO_FINALIZE_LIMIT"), 0, 0, 1000),
         // Onboarding B: small inline enrichment → fast release; crons + reuse + bar fill the rest.
         // Defer TMDB validation to the background crons — at huge-catalogue scale
         // it's hundreds of inline lookups; titles still appear from provider data.
         tmdbValidateLimit: boundedInt(Deno.env.get("NORVA_TMDB_VALIDATE_FINALIZE_LIMIT"), 0, 0, 1000),
+        assertSourceCurrent: () => assertActiveCatalogGenerationCurrent(db, sourceId, userId, generation),
       });
       const nextOffset = Math.min(totalVod, batchOffset + rows.length);
       const nextAfterId = rows.length ? String((rows[rows.length - 1] as { id?: unknown }).id ?? batchAfterId) : batchAfterId;
@@ -2125,11 +2346,17 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
     // genre rails). Heal them before marking ready, so this fallback engine never
     // declares a partial catalog "ready" with missing variants.
     try {
-      await db.rpc("heal_cloud_title_variants", { p_user_id: userId, p_source_id: sourceId });
+      await db.rpc("heal_cloud_title_variants", {
+        p_user_id: userId,
+        p_source_id: sourceId,
+        ...catalogGenerationRpcFence(generation),
+      });
     } catch (healError) {
+      if (isCatalogGenerationSuperseded(healError)) throw healError;
       console.warn("[norva-cloud] variant heal failed:", healError instanceof Error ? healError.message : healError);
     }
 
+    await assertActiveCatalogGenerationCurrent(db, sourceId, userId, generation);
     const syncedAt = new Date().toISOString();
     const { error: updateError } = await db
       .from("cloud_sources")
@@ -2149,6 +2376,14 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
 
     return { sourceId, status: "ready", ...result };
   } catch (error) {
+    if (isCatalogGenerationSuperseded(error)) {
+      return { sourceId, status: "superseded", generationId: generation.generationId };
+    }
+    try {
+      await assertActiveCatalogGenerationCurrent(db, sourceId, userId, generation);
+    } catch (_) {
+      return { sourceId, status: "superseded", generationId: generation.generationId };
+    }
     const message = formatSourceSyncError(error, "Source finalization failed");
     const failedAt = new Date().toISOString();
     await db
@@ -2225,36 +2460,61 @@ function titleFinalizePercent(offset: number, totalVod: number) {
   return Math.max(86, Math.min(99, Math.round(86 + ratio * 13)));
 }
 
-async function countRowsByType(sourceId: string, userId: string, db: SupabaseClient, itemType: string) {
+async function countRowsByType(
+  sourceId: string,
+  userId: string,
+  db: SupabaseClient,
+  generation: ActiveCatalogGeneration,
+  itemType: string,
+) {
   const { count, error } = await db
     .from("cloud_media_items")
     .select("id", { count: "exact", head: true })
     .eq("source_id", sourceId)
     .eq("user_id", userId)
+    .eq("generation_id", generation.generationId)
     .eq("item_type", itemType);
   if (error) throwDb(error, `Unable to count ${itemType} catalog items`);
   return count ?? 0;
 }
 
-async function countRowsInTable(table: string, sourceId: string, userId: string, db: SupabaseClient) {
+async function countRowsInTable(
+  table: string,
+  sourceId: string,
+  userId: string,
+  db: SupabaseClient,
+  generation: ActiveCatalogGeneration,
+) {
   const { count, error } = await db
     .from(table)
     .select("id", { count: "exact", head: true })
     .eq("source_id", sourceId)
-    .eq("user_id", userId);
+    .eq("user_id", userId)
+    .eq("generation_id", generation.generationId);
   if (error) throwDb(error, `Unable to count ${table}`);
   return count ?? 0;
 }
 
-async function existingLiveMaterializationCounts(sourceId: string, userId: string, db: SupabaseClient) {
+async function existingLiveMaterializationCounts(
+  sourceId: string,
+  userId: string,
+  db: SupabaseClient,
+  generation: ActiveCatalogGeneration,
+) {
   const [logicalChannels, liveVariants] = await Promise.all([
-    countRowsInTable("cloud_live_logical_channels", sourceId, userId, db),
-    countRowsInTable("cloud_live_variants", sourceId, userId, db),
+    countRowsInTable("cloud_live_logical_channels", sourceId, userId, db, generation),
+    countRowsInTable("cloud_live_variants", sourceId, userId, db, generation),
   ]);
   return { logicalChannels, liveVariants };
 }
 
-async function countSourceItems(sourceId: string, userId: string, db: SupabaseClient, progress: JsonRecord = {}) {
+async function countSourceItems(
+  sourceId: string,
+  userId: string,
+  db: SupabaseClient,
+  generation: ActiveCatalogGeneration,
+  progress: JsonRecord = {},
+) {
   // Prefer the counts the import already persisted (instant): an exact count(*)
   // over a huge source can exceed the 8s statement budget on a busy DB. Fall back
   // to counting only when no trustworthy persisted total exists (e.g. legacy rows).
@@ -2265,9 +2525,9 @@ async function countSourceItems(sourceId: string, userId: string, db: SupabaseCl
     live = pLive || 0; movies = pMovies || 0; series = pSeries || 0;
   } else {
     [live, movies, series] = await Promise.all([
-      countRowsByType(sourceId, userId, db, "live"),
-      countRowsByType(sourceId, userId, db, "movie"),
-      countRowsByType(sourceId, userId, db, "series"),
+      countRowsByType(sourceId, userId, db, generation, "live"),
+      countRowsByType(sourceId, userId, db, generation, "movie"),
+      countRowsByType(sourceId, userId, db, generation, "series"),
     ]);
   }
   const categories = recordOrEmpty(progress.categories);
@@ -2296,6 +2556,7 @@ async function loadSourceItems(
   sourceId: string,
   userId: string,
   db: SupabaseClient,
+  generation: ActiveCatalogGeneration,
   options: LoadSourceItemsOptions = {},
 ): Promise<LiveCatalogItem[]> {
   const rows: LiveCatalogItem[] = [];
@@ -2310,9 +2571,10 @@ async function loadSourceItems(
   for (let offset = Math.max(0, options.offset ?? 0); rows.length < maxRows; offset += pageSize) {
     let query = db
       .from("cloud_media_items")
-      .select("id,source_id,item_type,external_id,parent_external_id,title,subtitle,poster_url,metadata,playback_hint,available")
+      .select("id,source_id,generation_id,item_type,external_id,parent_external_id,title,subtitle,poster_url,metadata,playback_hint,available")
       .eq("source_id", sourceId)
-      .eq("user_id", userId);
+      .eq("user_id", userId)
+      .eq("generation_id", generation.generationId);
     const itemTypes = (options.itemTypes || []).filter(Boolean);
     if (itemTypes.length === 1) query = query.eq("item_type", itemTypes[0]);
     else if (itemTypes.length > 1) query = query.in("item_type", itemTypes);
@@ -2343,6 +2605,7 @@ async function syncM3uSource(
   userId: string,
   config: JsonRecord,
   db: SupabaseClient,
+  generation: ActiveCatalogGeneration,
   reportProgress: SyncProgressReporter = async () => {},
 ) {
   const playlistUrl = stringOr(config.playlistUrl, "");
@@ -2351,7 +2614,9 @@ async function syncM3uSource(
     percent: 10,
     steps: { connect: { status: "running" } },
   });
+  await assertActiveCatalogGenerationCurrent(db, sourceId, userId, generation);
   const playlist = await fetchText(playlistUrl, 30000, 20_000_000);
+  await assertActiveCatalogGenerationCurrent(db, sourceId, userId, generation);
   await reportProgress({
     stage: "discovered",
     percent: 42,
@@ -2391,30 +2656,58 @@ async function syncM3uSource(
       import: { status: "running", count: rows.length },
     },
   });
-  const savedRows = await replaceSourceItems(sourceId, userId, rows, db);
+  const savedRows = await replaceSourceItems(sourceId, userId, rows, db, generation);
   await reportProgress({
     stage: "finalizing",
     percent: 86,
     steps: { import: { status: "done", count: savedRows.length }, finalize: { status: "running" } },
   });
-  const liveCatalog = await refreshMaterializedLiveCatalog(db, { sourceId, userId, rows: savedRows });
+  const liveCatalog = await refreshMaterializedLiveCatalog(db, {
+    sourceId, userId, rows: savedRows, generation,
+  });
   return { live: rows.length, total: rows.length, liveCatalog };
 }
 
-async function replaceSourceItems(sourceId: string, userId: string, rows: JsonRecord[], db: SupabaseClient): Promise<LiveCatalogItem[]> {
+async function replaceSourceItems(
+  sourceId: string,
+  userId: string,
+  rows: JsonRecord[],
+  db: SupabaseClient,
+  generation: ActiveCatalogGeneration,
+): Promise<LiveCatalogItem[]> {
   const savedRows: LiveCatalogItem[] = [];
-  await db.from("cloud_media_items").delete().eq("source_id", sourceId).eq("user_id", userId);
+  await clearCatalogGenerationMediaItems(db, sourceId, userId, generation);
   for (let index = 0; index < rows.length; index += 500) {
-    const chunk = rows.slice(index, index + 500);
+    const chunk = withCatalogGenerationRows(rows.slice(index, index + 500), generation);
     if (!chunk.length) continue;
     const { data, error } = await db
       .from("cloud_media_items")
-      .upsert(chunk, { onConflict: "source_id,item_type,external_id" })
-      .select("id,source_id,item_type,external_id,parent_external_id,title,subtitle,poster_url,metadata,playback_hint,available");
+      .upsert(chunk, { onConflict: "source_id,generation_id,item_type,external_id" })
+      .select("id,source_id,generation_id,item_type,external_id,parent_external_id,title,subtitle,poster_url,metadata,playback_hint,available");
     if (error) throwDb(error, "Unable to save cloud media items");
     if (Array.isArray(data)) savedRows.push(...data as LiveCatalogItem[]);
   }
   return savedRows;
+}
+
+async function clearCatalogGenerationMediaItems(
+  db: SupabaseClient,
+  sourceId: string,
+  userId: string,
+  generation: ActiveCatalogGeneration,
+) {
+  for (let guard = 0; guard < 100; guard += 1) {
+    const { data, error } = await db.rpc("norva_delete_catalog_generation_items_batch", {
+      p_source_id: sourceId,
+      p_user_id: userId,
+      ...catalogGenerationRpcFence(generation),
+      p_limit: 2000,
+    });
+    if (error) throwDb(error, "Unable to clear old catalog items");
+    const removed = Number(Array.isArray(data) ? data[0] : data) || 0;
+    if (removed < 2000) return;
+  }
+  throw new Error("Catalog generation clear exceeded its bounded batch budget");
 }
 
 async function listMediaItems(url: URL, userId: string, db: SupabaseClient) {
@@ -2425,8 +2718,8 @@ async function listMediaItems(url: URL, userId: string, db: SupabaseClient) {
   const offset = boundedInt(url.searchParams.get("offset"), 0, 0, 100000);
 
   let query = db
-    .from("cloud_media_items")
-    .select("*")
+    .from("cloud_catalog_visible_media_items")
+    .select(MEDIA_ITEM_PUBLIC_SELECT)
     .eq("user_id", userId)
     .range(offset, offset + limit - 1)
     .order("title", { ascending: true });
@@ -2437,18 +2730,22 @@ async function listMediaItems(url: URL, userId: string, db: SupabaseClient) {
 
   const { data, error } = await query;
   if (error) throwDb(error, "Unable to list media items");
-  return { items: data ?? [] };
+  return { items: (data ?? []).map(sanitizeMediaItem) };
 }
 
 async function getXtreamSeriesInfo(url: URL, sourceId: string, userId: string, db: SupabaseClient) {
-  await assertOwnedSource(sourceId, userId, db);
+  const visibleSource = await visibleSourceSnapshot(sourceId, userId, db);
+  const configRevision = sourceSnapshotConfigRevision(visibleSource);
   const seriesId = url.searchParams.get("series_id") ?? url.searchParams.get("seriesId") ?? "";
   if (!seriesId) throw new HttpError(400, "series_id is required");
 
-  const sourceConfig = await loadSourceConfig(sourceId, userId, db);
+  const loadedSource = await loadSourceConfigEnvelope(sourceId, userId, db);
+  const sourceConfig = loadedSource.config;
   const serverUrl = normalizeBaseUrl(stringOr(sourceConfig.serverUrl, ""));
-  const username = stringOr(sourceConfig.username, "");
-  const password = stringOr(sourceConfig.password, "");
+  const username = typeof sourceConfig.username === "string" && sourceConfig.username.trim()
+    ? sourceConfig.username : "";
+  const password = typeof sourceConfig.password === "string" && sourceConfig.password.length
+    ? sourceConfig.password : "";
   if (!serverUrl || !username || !password) {
     throw new HttpError(400, "Series details require an Xtream source");
   }
@@ -2461,9 +2758,12 @@ async function getXtreamSeriesInfo(url: URL, sourceId: string, userId: string, d
   const runtimeConfig = await getRuntimeConfig(db);
   if (runtimeConfig.mediaGatewayUrl && runtimeConfig.mediaGatewayToken) {
     try {
-      return recordOrEmpty(
+      const info = sanitizeXtreamSeriesInfo(
         await requestGatewaySeriesInfo(runtimeConfig, { serverUrl, username, password, seriesId }),
-      );
+        { knownSecrets: [username, password] },
+      ) as JsonRecord;
+      await assertVisibleSourceSnapshotCurrent(sourceId, userId, visibleSource, db);
+      return info;
     } catch (error) {
       const status = error instanceof HttpError ? error.status : 502;
       if (![404, 405, 502, 503, 504].includes(status)) throw error;
@@ -2471,53 +2771,99 @@ async function getXtreamSeriesInfo(url: URL, sourceId: string, userId: string, d
     }
   }
 
-  const info = recordOrEmpty(await fetchJson(
-    xtreamApiUrl({ serverUrl, username, password, action: "get_series_info" }, { series_id: seriesId }),
-    20000,
-  ));
+  const info = sanitizeXtreamSeriesInfo(await withExistingXtreamDirectFallback(
+    {
+      db,
+      sourceId,
+      userId,
+      ...await buildProviderDirectFallbackSnapshot({
+        serverUrl,
+        username,
+        configCiphertext: loadedSource.configCiphertext,
+        configRevision,
+      }),
+    },
+    "cloud-series-info",
+    20_000,
+    async () => {
+      const payload = await fetchJson(
+        xtreamApiUrl({ serverUrl, username, password, action: "get_series_info" }, { series_id: seriesId }),
+        20_000,
+      );
+      // Keep A's lease until the final snapshot check: a transition must not
+      // commit between the last provider byte and our ABA verdict.
+      await assertVisibleSourceSnapshotCurrent(sourceId, userId, visibleSource, db);
+      return payload;
+    },
+  ), { knownSecrets: [username, password] }) as JsonRecord;
 
+  await assertVisibleSourceSnapshotCurrent(sourceId, userId, visibleSource, db);
   return info;
 }
 
 async function getXtreamShortEpg(url: URL, sourceId: string, userId: string, db: SupabaseClient) {
-  await assertOwnedSource(sourceId, userId, db);
+  const visibleSource = await visibleSourceSnapshot(sourceId, userId, db);
+  const configRevision = sourceSnapshotConfigRevision(visibleSource);
   const streamId = url.searchParams.get("stream_id") ?? url.searchParams.get("streamId") ?? "";
   const limit = String(boundedInt(url.searchParams.get("limit"), 8, 1, 24));
   if (!streamId) throw new HttpError(400, "stream_id is required");
 
-  const sourceConfig = await loadSourceConfig(sourceId, userId, db);
+  const loadedSource = await loadSourceConfigEnvelope(sourceId, userId, db);
+  const sourceConfig = loadedSource.config;
   const serverUrl = normalizeBaseUrl(stringOr(sourceConfig.serverUrl, ""));
-  const username = stringOr(sourceConfig.username, "");
-  const password = stringOr(sourceConfig.password, "");
+  const username = typeof sourceConfig.username === "string" && sourceConfig.username.trim()
+    ? sourceConfig.username : "";
+  const password = typeof sourceConfig.password === "string" && sourceConfig.password.length
+    ? sourceConfig.password : "";
   if (!serverUrl || !username || !password) {
     throw new HttpError(400, "Short EPG requires an Xtream source");
   }
 
   const runtimeConfig = await getRuntimeConfig(db);
   const gatewayRequest = { serverUrl, username, password, streamId, limit };
+  const cleanShortEpg = (payload: unknown) => sanitizeXtreamShortEpg(
+    payload,
+    { knownSecrets: [username, password] },
+  ) as JsonRecord;
+  const directFallbackSnapshot = await buildProviderDirectFallbackSnapshot({
+    serverUrl,
+    username,
+    configCiphertext: loadedSource.configCiphertext,
+    configRevision,
+  });
+  const directEpg = (action: string, timeoutMs: number, params: Record<string, string>) =>
+    withExistingXtreamDirectFallback(
+      { db, sourceId, userId, ...directFallbackSnapshot },
+      "cloud-short-epg",
+      timeoutMs,
+      async () => {
+        const payload = await fetchJson(
+          xtreamApiUrl({ serverUrl, username, password, action }, params),
+          timeoutMs,
+        );
+        await assertVisibleSourceSnapshotCurrent(sourceId, userId, visibleSource, db);
+        return payload;
+      },
+    );
   const shortEpg = runtimeConfig.mediaGatewayUrl && runtimeConfig.mediaGatewayToken
-    ? await requestGatewayXtreamEpg(runtimeConfig, { ...gatewayRequest, action: "get_short_epg" }).catch(async (error) => {
+    ? cleanShortEpg(await requestGatewayXtreamEpg(runtimeConfig, { ...gatewayRequest, action: "get_short_epg" }).catch(async (error) => {
       if (error instanceof HttpError && (error.status === 404 || error.status === 405 || error.status === 503)) {
-        return recordOrEmpty(await fetchJson(
-          xtreamApiUrl({ serverUrl, username, password, action: "get_short_epg" }, { stream_id: streamId, limit }),
-          12000,
-        ));
+        return await directEpg("get_short_epg", 12_000, { stream_id: streamId, limit });
       }
       throw error;
-    })
-    : recordOrEmpty(await fetchJson(
-      xtreamApiUrl({ serverUrl, username, password, action: "get_short_epg" }, { stream_id: streamId, limit }),
-      12000,
-    ));
-  if (epgPayloadHasCurrentOrFuture(shortEpg)) return shortEpg;
+    }))
+    : cleanShortEpg(await directEpg("get_short_epg", 12_000, { stream_id: streamId, limit }));
+  if (epgPayloadHasCurrentOrFuture(shortEpg)) {
+    await assertVisibleSourceSnapshotCurrent(sourceId, userId, visibleSource, db);
+    return shortEpg;
+  }
 
   const simpleTable = runtimeConfig.mediaGatewayUrl && runtimeConfig.mediaGatewayToken
-    ? await requestGatewayXtreamEpg(runtimeConfig, { ...gatewayRequest, action: "get_simple_data_table" }).catch(() => shortEpg)
-    : recordOrEmpty(await fetchJson(
-      xtreamApiUrl({ serverUrl, username, password, action: "get_simple_data_table" }, { stream_id: streamId }),
-      15000,
-    ).catch(() => shortEpg));
-  return epgPayloadHasListings(simpleTable) ? simpleTable : shortEpg;
+    ? cleanShortEpg(await requestGatewayXtreamEpg(runtimeConfig, { ...gatewayRequest, action: "get_simple_data_table" }).catch(() => shortEpg))
+    : cleanShortEpg(await directEpg("get_simple_data_table", 15_000, { stream_id: streamId }).catch(() => shortEpg));
+  const result = epgPayloadHasListings(simpleTable) ? simpleTable : shortEpg;
+  await assertVisibleSourceSnapshotCurrent(sourceId, userId, visibleSource, db);
+  return result;
 }
 
 function epgPayloadHasListings(payload: JsonRecord) {
@@ -2535,6 +2881,9 @@ function epgPayloadHasCurrentOrFuture(payload: JsonRecord) {
 }
 
 async function getSourceEpg(url: URL, sourceId: string, userId: string, db: SupabaseClient) {
+  // Check before consulting the in-memory EPG cache: a source hidden after the
+  // cache was filled must stop returning listings immediately.
+  const visibleSource = await visibleSourceSnapshot(sourceId, userId, db);
   const beforeHours = boundedInt(url.searchParams.get("beforeHours") ?? url.searchParams.get("windowBeforeHours"), 2, 0, 24);
   const afterHours = boundedInt(url.searchParams.get("afterHours") ?? url.searchParams.get("windowAfterHours"), 8, 1, 48);
   const refresh = url.searchParams.get("refresh") === "1";
@@ -2543,9 +2892,16 @@ async function getSourceEpg(url: URL, sourceId: string, userId: string, db: Supa
   const windowEndMs = now + afterHours * 60 * 60 * 1000;
   const bucketStart = Math.floor(windowStartMs / EPG_WINDOW_BUCKET_MS) * EPG_WINDOW_BUCKET_MS;
   const bucketEnd = Math.ceil(windowEndMs / EPG_WINDOW_BUCKET_MS) * EPG_WINDOW_BUCKET_MS;
-  const cacheKey = `${userId}:${sourceId}:${bucketStart}:${bucketEnd}`;
+  // A same-source credential transition increments config_revision. Keeping it
+  // in the key prevents the new login from inheriting XMLTV cached under the
+  // previous provider configuration.
+  const configRevision = sourceSnapshotConfigRevision(visibleSource);
+  const cacheKey = `${userId}:${sourceId}:config:${configRevision}:${bucketStart}:${bucketEnd}`;
   const cached = epgCache.get(cacheKey);
-  if (!refresh && cached && cached.expiresAt > now) return cached.data;
+  if (!refresh && cached && cached.expiresAt > now) {
+    await assertVisibleSourceSnapshotCurrent(sourceId, userId, visibleSource, db);
+    return cached.data;
+  }
 
   const { data: source, error } = await db
     .from("cloud_sources")
@@ -2560,22 +2916,56 @@ async function getSourceEpg(url: URL, sourceId: string, userId: string, db: Supa
   const sourceType = stringOr(source.source_type, "");
   const sourceConfig = await decryptSourceConfig(source.config_ciphertext, await getRuntimeConfig(db));
   let epgUrl = "";
+  let xtreamDirectEpg = false;
+  let xtreamDirectFallback: DirectFallbackLeaseContext | null = null;
   if (sourceType === "xtream") {
     const serverUrl = normalizeBaseUrl(stringOr(sourceConfig.serverUrl, ""));
-    const username = stringOr(sourceConfig.username, "");
-    const password = stringOr(sourceConfig.password, "");
+    const username = typeof sourceConfig.username === "string" && sourceConfig.username.trim()
+      ? sourceConfig.username : "";
+    const password = typeof sourceConfig.password === "string" && sourceConfig.password.length
+      ? sourceConfig.password : "";
     if (!serverUrl || !username || !password) {
       throw new HttpError(400, "Xtream EPG requires server URL, username and password");
     }
     epgUrl = xtreamXmltvUrl({ serverUrl, username, password });
+    xtreamDirectEpg = true;
+    xtreamDirectFallback = {
+      db,
+      sourceId,
+      userId,
+      ...await buildProviderDirectFallbackSnapshot({
+        serverUrl,
+        username,
+        configCiphertext: String(source.config_ciphertext),
+        configRevision,
+      }),
+    };
   } else if (sourceType === "epg") {
     epgUrl = stringOr(sourceConfig.epgUrl, "");
     assertHttpUrl(epgUrl);
   } else {
+    await assertVisibleSourceSnapshotCurrent(sourceId, userId, visibleSource, db);
     return { channels: [], programmes: [], sourceId, generatedAt: new Date().toISOString(), cloud: true };
   }
 
-  const xml = await fetchText(epgUrl, 45000, EPG_MAX_XML_BYTES, providerHeaders("VLC/3.0.20 LibVLC/3.0.20"));
+  const fetchEpgXml = () => fetchText(
+    epgUrl,
+    45_000,
+    EPG_MAX_XML_BYTES,
+    providerHeaders("VLC/3.0.20 LibVLC/3.0.20"),
+  );
+  const xml = xtreamDirectEpg
+    ? await withExistingXtreamDirectFallback(
+      xtreamDirectFallback!,
+      "cloud-xmltv-epg",
+      45_000,
+      async () => {
+        const payload = await fetchEpgXml();
+        await assertVisibleSourceSnapshotCurrent(sourceId, userId, visibleSource, db);
+        return payload;
+      },
+    )
+    : await fetchEpgXml();
   const data = {
     ...parseXmltvWindow(xml, { windowStartMs, windowEndMs, maxProgrammes: EPG_MAX_PROGRAMMES }),
     sourceId,
@@ -2584,6 +2974,7 @@ async function getSourceEpg(url: URL, sourceId: string, userId: string, db: Supa
     windowEnd: new Date(windowEndMs).toISOString(),
     cloud: true,
   };
+  await assertVisibleSourceSnapshotCurrent(sourceId, userId, visibleSource, db);
   epgCache.set(cacheKey, { expiresAt: Date.now() + EPG_CACHE_TTL_MS, data });
   return data;
 }
@@ -2705,7 +3096,8 @@ async function upsertMediaItems(req: Request, userId: string, db: SupabaseClient
   const body = await readJson(req);
   const sourceId = stringOr(body.sourceId ?? body.source_id, "");
   if (!sourceId) throw new HttpError(400, "sourceId is required");
-  await assertOwnedSource(sourceId, userId, db);
+  await assertVisibleSource(sourceId, userId, db);
+  const generation = await readActiveCatalogGenerationSnapshot(db, sourceId, userId);
 
   const rawItems = Array.isArray(body.items) ? body.items : [body];
   const rows = rawItems.map((item) => {
@@ -2734,17 +3126,20 @@ async function upsertMediaItems(req: Request, userId: string, db: SupabaseClient
 
   const { data, error } = await db
     .from("cloud_media_items")
-    .upsert(rows, { onConflict: "source_id,item_type,external_id" })
-    .select("*");
+    .upsert(withCatalogGenerationRows(rows, generation), {
+      onConflict: "source_id,generation_id,item_type,external_id",
+    })
+    .select(MEDIA_ITEM_PUBLIC_SELECT);
   if (error) throwDb(error, "Unable to upsert media items");
-  return { items: data ?? [] };
+  await assertActiveCatalogGenerationCurrent(db, sourceId, userId, generation);
+  return { items: (data ?? []).map(sanitizeMediaItem) };
 }
 
 async function listFavorites(req: Request, url: URL, userId: string, db: SupabaseClient) {
   const profileId = await resolveProfileId(req, userId, db);
   let query = db
-    .from("cloud_favorites")
-    .select("*")
+    .from("cloud_catalog_visible_favorites")
+    .select(FAVORITE_PUBLIC_SELECT)
     .eq("user_id", userId)
     .eq("profile_id", profileId)
     .order("created_at", { ascending: false });
@@ -2756,7 +3151,7 @@ async function listFavorites(req: Request, url: URL, userId: string, db: Supabas
 
   const { data, error } = await query;
   if (error) throwDb(error, "Unable to list favorites");
-  return { favorites: data ?? [] };
+  return { favorites: (data ?? []).map(sanitizeFavorite) };
 }
 
 async function addFavorite(req: Request, userId: string, db: SupabaseClient) {
@@ -2765,26 +3160,27 @@ async function addFavorite(req: Request, userId: string, db: SupabaseClient) {
   const itemType = stringOr(body.itemType ?? body.item_type, "live");
   const itemId = stringOr(body.itemId ?? body.item_id, "");
   if (!sourceId || !itemId) throw new HttpError(400, "sourceId and itemId are required");
-  await assertOwnedSource(sourceId, userId, db);
   const profileId = await resolveProfileId(req, userId, db);
 
-  const row = {
-    user_id: userId,
-    profile_id: profileId,
-    source_id: sourceId,
-    item_type: itemType,
-    item_id: itemId,
-    item_name: stringOrNull(body.itemName ?? body.item_name),
-    item_meta: recordOrEmpty(body.itemMeta ?? body.item_meta),
-  };
-
   const { data, error } = await db
-    .from("cloud_favorites")
-    .upsert(row, { onConflict: "profile_id,source_id,item_type,item_id" })
-    .select("*")
+    .rpc("upsert_cloud_favorite_visible", {
+      p_user_id: userId,
+      p_profile_id: profileId,
+      p_source_id: sourceId,
+      p_item_type: itemType,
+      p_item_id: itemId,
+      p_item_name: stringOrNull(body.itemName ?? body.item_name),
+      p_item_meta: recordOrEmpty(body.itemMeta ?? body.item_meta),
+    })
+    .select(FAVORITE_PUBLIC_SELECT)
     .single();
+  if (error?.code === "55000") {
+    throw new HttpError(409, "This catalog is not currently available", {
+      code: "SOURCE_CATALOG_NOT_VISIBLE",
+    });
+  }
   if (error) throwDb(error, "Unable to save favorite");
-  return { favorite: data };
+  return { favorite: sanitizeFavorite(data) };
 }
 
 // Delete a favorite by its logical KEYS (source_id, item_type, item_id) for the
@@ -2900,8 +3296,7 @@ function rethrowSanitizedRatingError(
     correlationId,
     operation,
     databaseCode: databaseCode || undefined,
-    message: error instanceof Error ? error.message : String(error),
-    details: error instanceof HttpError ? error.details : undefined,
+    name: error instanceof Error ? error.name.slice(0, 80) : "UnknownError",
   });
 
   if (databaseCode === "23503") {
@@ -3008,7 +3403,7 @@ async function resolveRatingTitleIdentity(
   sourceId: string | null,
 ): Promise<RatingTitleIdentity | null> {
   let query = db
-    .from("cloud_title_variants")
+    .from("cloud_catalog_visible_title_variants")
     .select("title_id,item_type,source_id")
     .eq("user_id", userId)
     .eq("item_type", itemType)
@@ -3253,11 +3648,10 @@ async function setRating(req: Request, userId: string, db: SupabaseClient) {
       );
 
     const { data: source, error: sourceError } = await db
-      .from("cloud_sources")
+      .from("cloud_catalog_visible_sources")
       .select("id")
       .eq("id", sourceId)
       .eq("user_id", userId)
-      .is("deleted_at", null)
       .maybeSingle();
     if (sourceError) throwDb(sourceError, "Unable to verify rating source");
     if (!source) {
@@ -3334,6 +3728,94 @@ async function setRating(req: Request, userId: string, db: SupabaseClient) {
   }
 }
 
+function strictOptionalSourceReference(
+  primary: unknown,
+  secondary: unknown,
+  label: string,
+): string | null {
+  const supplied = [primary, secondary].filter((value) => value !== undefined && value !== null && value !== "");
+  if (!supplied.length) return null;
+  if (supplied.some((value) => typeof value !== "string")) {
+    throw new HttpError(400, `${label} must be a valid UUID`);
+  }
+  const normalized = supplied.map((value) => String(value).trim()).filter(Boolean);
+  if (!normalized.length) return null;
+  if (new Set(normalized).size !== 1 || !UUID_PATTERN.test(normalized[0])) {
+    throw new HttpError(400, `${label} must be one exact source UUID`);
+  }
+  return normalized[0];
+}
+
+function storedHistoryDataSourceReference(value: unknown): { sourceId: string | null; invalid: boolean } {
+  if (!isRecord(value)) return { sourceId: null, invalid: false };
+  const supplied = [value.sourceId, value.source_id]
+    .filter((entry) => entry !== undefined && entry !== null && entry !== "");
+  if (!supplied.length) return { sourceId: null, invalid: false };
+  if (supplied.some((entry) => typeof entry !== "string")) return { sourceId: null, invalid: true };
+  const normalized = supplied.map((entry) => String(entry).trim()).filter(Boolean);
+  if (!normalized.length) return { sourceId: null, invalid: false };
+  if (new Set(normalized).size !== 1 || !UUID_PATTERN.test(normalized[0])) {
+    return { sourceId: null, invalid: true };
+  }
+  return { sourceId: normalized[0], invalid: false };
+}
+
+function normalizeHistoryRowForVisibility(
+  value: unknown,
+  visibleSourceIds: Set<string>,
+): JsonRecord | null {
+  if (!isRecord(value)) return null;
+  const row = { ...value } as JsonRecord;
+  const topLevelSourceId = stringOrNull(row.source_id);
+  const embedded = storedHistoryDataSourceReference(row.data);
+  if (topLevelSourceId) {
+    if (!visibleSourceIds.has(topLevelSourceId)) return null;
+    const data = { ...recordOrEmpty(row.data), sourceId: topLevelSourceId };
+    delete data.source_id;
+    row.data = data;
+    return row;
+  }
+  if (embedded.invalid) return null;
+  if (embedded.sourceId) {
+    if (!visibleSourceIds.has(embedded.sourceId)) return null;
+    const data = { ...recordOrEmpty(row.data), sourceId: embedded.sourceId };
+    delete data.source_id;
+    row.source_id = embedded.sourceId;
+    row.data = data;
+    return row;
+  }
+  const data = { ...recordOrEmpty(row.data) };
+  delete data.sourceId;
+  delete data.source_id;
+  row.data = data;
+  return row;
+}
+
+async function loadLegacyNullHistoryData(
+  userId: string,
+  profileId: string,
+  itemType: string,
+  itemId: string,
+  updatedAt: unknown,
+  db: SupabaseClient,
+) {
+  let query = db
+    .from("cloud_watch_history")
+    .select("data,updated_at")
+    .eq("user_id", userId)
+    .eq("profile_id", profileId)
+    .eq("item_type", itemType)
+    .eq("item_id", itemId)
+    .is("source_id", null);
+  if (typeof updatedAt === "string" && updatedAt) query = query.eq("updated_at", updatedAt);
+  const { data, error } = await query
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throwDb(error, "Unable to validate legacy history source");
+  return data ? recordOrEmpty(data.data) : null;
+}
+
 async function getHistoryItem(req: Request, url: URL, userId: string, db: SupabaseClient) {
   const profileId = await resolveProfileId(req, userId, db);
   const itemId = stringOr(url.searchParams.get("itemId") ?? url.searchParams.get("item_id"), "");
@@ -3343,56 +3825,66 @@ async function getHistoryItem(req: Request, url: URL, userId: string, db: Supaba
   );
   const sourceId = stringOrNull(url.searchParams.get("sourceId") ?? url.searchParams.get("source_id"));
   if (!itemId || !itemType) throw new HttpError(400, "itemId and itemType are required");
+  if (sourceId && !UUID_PATTERN.test(sourceId)) throw new HttpError(400, "invalid sourceId");
 
   const cols = "source_id,item_type,item_id,progress_seconds,duration_seconds,completed,updated_at";
-  const base = () => db
-    .from("cloud_watch_history")
+  // The requested source visibility and the exact/null-source fallback are
+  // evaluated by one database statement. A hidden source therefore returns no
+  // row instead of accidentally borrowing an orphaned legacy resume position.
+  const { data, error } = await db
+    .rpc("get_cloud_watch_history_item_visible", {
+      p_user_id: userId,
+      p_profile_id: profileId,
+      p_source_id: sourceId,
+      p_item_type: itemType,
+      p_item_id: itemId,
+    })
     .select(cols)
-    .eq("profile_id", profileId)
-    .eq("item_type", itemType)
-    .eq("item_id", itemId);
-
-  // 1) Preferred: the row saved under the requested source.
-  if (sourceId) {
-    const { data, error } = await base().eq("source_id", sourceId).maybeSingle();
-    if (error) throwDb(error, "Unable to load history item");
-    if (data) return { item: data };
-  }
-
-  // 2) Renewal fallback: only source-less legacy rows are eligible. Xtream item
-  //    cross-device resume working when the physical source id changes — a user
-  //    ids are provider-local, so another source with the same id can be a
-  //    completely unrelated title.
-  let fallback = base();
-  if (sourceId) fallback = fallback.is("source_id", null);
-  const { data, error } = await fallback
-    .order("updated_at", { ascending: false })
-    .limit(1)
     .maybeSingle();
   if (error) throwDb(error, "Unable to load history item");
-  return { item: data ?? null };
+  if (!data) return { item: null };
+
+  const visibleSourceIds = await listVisibleSourceIds(userId, db);
+  const candidate = { ...(data as JsonRecord) };
+  if (!candidate.source_id) {
+    const legacyData = await loadLegacyNullHistoryData(
+      userId,
+      profileId,
+      itemType,
+      itemId,
+      candidate.updated_at,
+      db,
+    );
+    if (!legacyData) return { item: null };
+    candidate.data = legacyData;
+  }
+  const visible = normalizeHistoryRowForVisibility(candidate, visibleSourceIds);
+  if (!visible || (sourceId && visible.source_id && visible.source_id !== sourceId)) return { item: null };
+  // The targeted resume contract intentionally returns progress only. The raw
+  // legacy data was loaded solely to validate its embedded source reference.
+  visible.data = {};
+  return { item: sanitizeWatchHistory(visible) };
 }
 
 async function listHistory(req: Request, url: URL, userId: string, db: SupabaseClient) {
   const profileId = await resolveProfileId(req, userId, db);
   const limit = boundedInt(url.searchParams.get("limit"), 100, 1, 5_000);
   const itemType = stringOrNull(url.searchParams.get("itemType") ?? url.searchParams.get("item_type"));
-  const sources = await listHistorySources(userId, db);
-  if (!sources.length) return { history: [] };
-  const readySourceIds = sources.map((s) => s.id);
+  const visibleSourceIds = await listVisibleSourceIds(userId, db);
 
   // PostgREST commonly caps one response at 1,000 rows. Walk bounded 500-row
   // windows inside the edge function so old cards keep their true watch state.
+  // Every page is selected from the visibility projection itself: no separate
+  // source-id snapshot can race a Provider Access hide/promotion.
   const data: JsonRecord[] = [];
   const pageSize = 500;
-  for (let offset = 0; data.length < limit; offset += pageSize) {
-    const take = Math.min(pageSize, limit - data.length);
+  const maxRowsToInspect = Math.max(pageSize, Math.min(20_000, limit * 4));
+  for (let offset = 0; data.length < limit && offset < maxRowsToInspect; offset += pageSize) {
     let query = db
-      .from("cloud_watch_history")
-      .select("*")
+      .from("cloud_catalog_visible_watch_history")
+      .select(WATCH_HISTORY_PUBLIC_SELECT)
       .eq("user_id", userId)
-      .eq("profile_id", profileId)
-      .in("source_id", readySourceIds);
+      .eq("profile_id", profileId);
   // Cross-device "recent live channels" reuse this table with item_type='live'.
   // A default history read (Continue Watching) must NOT surface those as resumable
   // titles — so exclude 'live' unless it is explicitly requested (?itemType=live).
@@ -3400,10 +3892,14 @@ async function listHistory(req: Request, url: URL, userId: string, db: SupabaseC
     else query = query.neq("item_type", "live");
     const { data: page, error } = await query
       .order("updated_at", { ascending: false })
-      .range(offset, offset + take - 1);
+      .range(offset, offset + pageSize - 1);
     if (error) throwDb(error, "Unable to list history");
-    data.push(...((page ?? []) as JsonRecord[]));
-    if ((page?.length ?? 0) < take) break;
+    data.push(
+      ...((page ?? []) as JsonRecord[])
+        .map((row) => normalizeHistoryRowForVisibility(row, visibleSourceIds))
+        .filter((row): row is JsonRecord => Boolean(row)),
+    );
+    if ((page?.length ?? 0) < pageSize) break;
   }
 
   // Orphan handling (Layer 1): hide resume cards for movies the provider has since dropped
@@ -3413,16 +3909,17 @@ async function listHistory(req: Request, url: URL, userId: string, db: SupabaseC
   // so the card returns automatically if the title comes back. Scoped to movies, whose
   // history item_id maps 1:1 to cloud_media_items.external_id (series history is not keyed the
   // same way, so it is left untouched). Fail-safe: any error keeps every item.
+  const sources = await listHistorySources(userId, db);
   const stableSourceIds = new Set(
     sources.filter((s) => s.status === "ready" || s.status === "completed").map((s) => s.id),
   );
-  const history = await pruneUnavailableHistory(data, userId, stableSourceIds, db);
-  return { history };
+  const history = await pruneUnavailableHistory(data.slice(0, limit), userId, stableSourceIds, db);
+  return { history: history.map(sanitizeWatchHistory) };
 }
 
 async function listHistorySources(userId: string, db: SupabaseClient) {
   const { data, error } = await db
-    .from("cloud_sources")
+    .from("cloud_catalog_visible_sources")
     .select("id,sync_status,sync_error,last_synced_at")
     .eq("user_id", userId);
   if (error) throwDb(error, "Unable to list history sources");
@@ -3473,7 +3970,7 @@ async function pruneUnavailableHistory(
     for (let i = 0; i < ids.length; i += 500) {
       const chunk = ids.slice(i, i + 500);
       const { data, error } = await db
-        .from("cloud_media_items")
+        .from("cloud_catalog_visible_media_items")
         .select("external_id")
         .eq("user_id", userId)
         .eq("source_id", sid)
@@ -3492,12 +3989,24 @@ async function pruneUnavailableHistory(
 
 async function saveHistory(req: Request, userId: string, db: SupabaseClient) {
   const body = await readJson(req);
-  const sourceId = stringOrNull(body.sourceId ?? body.source_id);
+  let sourceId = strictOptionalSourceReference(body.sourceId, body.source_id, "sourceId");
+  const rawHistoryData = recordOrEmpty(body.data);
+  if (!sourceId) {
+    sourceId = strictOptionalSourceReference(
+      rawHistoryData.sourceId,
+      rawHistoryData.source_id,
+      "data.sourceId",
+    );
+  }
   const itemType = stringOr(body.itemType ?? body.item_type ?? body.type, "");
   const itemId = stringOr(body.itemId ?? body.item_id ?? body.id, "");
   if (!itemType || !itemId) throw new HttpError(400, "itemType and itemId are required");
-  if (sourceId) await assertOwnedSource(sourceId, userId, db);
+  if (sourceId) await assertVisibleSource(sourceId, userId, db);
   const profileId = await resolveProfileId(req, userId, db);
+  const historyData = sanitizeHistoryData(rawHistoryData) as JsonRecord;
+  delete historyData.source_id;
+  if (sourceId) historyData.sourceId = sourceId;
+  else delete historyData.sourceId;
 
   const incomingDuration = boundedInt(body.durationSeconds ?? body.duration_seconds ?? body.duration, 0, 0, 10_000_000);
   const incomingProgress = boundedInt(body.progressSeconds ?? body.progress_seconds ?? body.progress, 0, 0, 10_000_000);
@@ -3533,7 +4042,7 @@ async function saveHistory(req: Request, userId: string, db: SupabaseClient) {
     // Zero means "not supplied"; the RPC keeps the existing known duration.
     duration_seconds: incomingDuration,
     completed,
-    data: recordOrEmpty(body.data),
+    data: historyData,
     watched_at: capturedAt,
   };
 
@@ -3551,6 +4060,7 @@ async function saveHistory(req: Request, userId: string, db: SupabaseClient) {
     p_data: row.data,
     p_watched_at: row.watched_at,
   })
+    .select(WATCH_HISTORY_PUBLIC_SELECT)
     .single();
   if (error) throwDb(error, "Unable to save history");
 
@@ -3562,7 +4072,7 @@ async function saveHistory(req: Request, userId: string, db: SupabaseClient) {
     if (sourceId) await db.rpc("provider_account_touch_by_source", { p_source_id: sourceId, p_kind: "history" });
   } catch (_) { /* best-effort */ }
 
-  return { item: data };
+  return { item: sanitizeWatchHistory(data) };
 }
 
 async function recordPlaybackEvent(
@@ -3627,7 +4137,7 @@ async function recordPlaybackEvent(
   const { data, error } = await db
     .from("cloud_playback_events")
     .insert(row)
-    .select("*")
+    .select(PLAYBACK_EVENT_PUBLIC_SELECT)
     .single();
   if (error) throwDb(error, "Unable to record playback event");
 
@@ -3640,7 +4150,7 @@ async function recordPlaybackEvent(
     await recordPlaybackStartupObservation(db, { userId, sourceId, itemType, itemId, startupMs: ttff });
   }
 
-  return { event: data };
+  return { event: sanitizePlaybackEvent(data) };
 }
 
 async function startPairing(req: Request, db: SupabaseClient) {
@@ -3661,7 +4171,11 @@ async function startPairing(req: Request, db: SupabaseClient) {
     expires_at: new Date(Date.now() + ttlSeconds * 1000).toISOString(),
   };
 
-  const { data, error } = await db.from("cloud_pairing_sessions").insert(row).select("*").single();
+  const { data, error } = await db
+    .from("cloud_pairing_sessions")
+    .insert(row)
+    .select("id,code,status,expires_at")
+    .single();
   if (error) throwDb(error, "Unable to start pairing");
   return {
     id: data.id,
@@ -3710,7 +4224,7 @@ async function approvePairing(req: Request, userId: string, db: SupabaseClient) 
 
   const { data: pair, error: pairError } = await db
     .from("cloud_pairing_sessions")
-    .select("*")
+    .select("id,status,expires_at,device_type,device_name,platform,app_version,device_public_key,device_capabilities,pairing_secret_hash")
     .eq("code", code)
     .maybeSingle();
   if (pairError) throwDb(pairError, "Unable to load pairing session");
@@ -3746,24 +4260,24 @@ async function approvePairing(req: Request, userId: string, db: SupabaseClient) 
       approved_at: new Date().toISOString(),
     })
     .eq("id", pair.id)
-    .select("*")
+    .select(PAIRING_PUBLIC_SELECT)
     .single();
   if (error) throwDb(error, "Unable to approve pairing");
-  return { pairing: data, device };
+  return { pairing: sanitizePairing(data), device: sanitizeCloudDevice(device) };
 }
 
 async function listCommands(url: URL, userId: string, db: SupabaseClient) {
   const deviceId = url.searchParams.get("deviceId");
   let query = db
     .from("cloud_cast_commands")
-    .select("*")
+    .select(CAST_COMMAND_PUBLIC_SELECT)
     .eq("user_id", userId)
     .order("created_at", { ascending: false })
     .limit(100);
   if (deviceId) query = query.eq("target_device_id", deviceId);
   const { data, error } = await query;
   if (error) throwDb(error, "Unable to list commands");
-  return { commands: data ?? [] };
+  return { commands: (data ?? []).map(sanitizeCastCommand) };
 }
 
 async function queueCommand(req: Request, userId: string, db: SupabaseClient) {
@@ -3788,10 +4302,10 @@ async function queueCommand(req: Request, userId: string, db: SupabaseClient) {
       status: "queued",
       expires_at: new Date(Date.now() + ttlSeconds * 1000).toISOString(),
     })
-    .select("*")
+    .select(CAST_COMMAND_PUBLIC_SELECT)
     .single();
   if (error) throwDb(error, "Unable to queue command");
-  return { command: data };
+  return { command: sanitizeCastCommand(data) };
 }
 
 async function updateCommand(req: Request, id: string, userId: string, db: SupabaseClient) {
@@ -3807,10 +4321,10 @@ async function updateCommand(req: Request, id: string, userId: string, db: Supab
     .update(patch)
     .eq("id", id)
     .eq("user_id", userId)
-    .select("*")
+    .select(CAST_COMMAND_PUBLIC_SELECT)
     .single();
   if (error) throwDb(error, "Unable to update command");
-  return { command: data };
+  return { command: sanitizeCastCommand(data) };
 }
 
 async function heartbeatDeviceToken(device: CloudDevice, db: SupabaseClient) {
@@ -3823,7 +4337,7 @@ async function heartbeatDeviceToken(device: CloudDevice, db: SupabaseClient) {
     .select(DEVICE_PUBLIC_SELECT)
     .single();
   if (error) throwDb(error, "Unable to update device heartbeat");
-  return { device: data };
+  return { device: sanitizeCloudDevice(data) };
 }
 
 async function listDeviceCommands(url: URL, device: CloudDevice, db: SupabaseClient) {
@@ -3840,7 +4354,7 @@ async function listDeviceCommands(url: URL, device: CloudDevice, db: SupabaseCli
 
   const { data, error } = await db
     .from("cloud_cast_commands")
-    .select("*")
+    .select(CAST_COMMAND_PUBLIC_SELECT)
     .eq("target_device_id", device.id)
     .eq("user_id", device.user_id)
     .eq("status", "queued")
@@ -3857,7 +4371,7 @@ async function listDeviceCommands(url: URL, device: CloudDevice, db: SupabaseCli
       .eq("target_device_id", device.id)
       .eq("user_id", device.user_id);
   }
-  return { commands: data ?? [] };
+  return { commands: (data ?? []).map(sanitizeCastCommand) };
 }
 
 async function updateDeviceCommand(req: Request, id: string, device: CloudDevice, db: SupabaseClient) {
@@ -3877,10 +4391,10 @@ async function updateDeviceCommand(req: Request, id: string, device: CloudDevice
     .eq("id", id)
     .eq("target_device_id", device.id)
     .eq("user_id", device.user_id)
-    .select("*")
+    .select(CAST_COMMAND_PUBLIC_SELECT)
     .single();
   if (error) throwDb(error, "Unable to update device command");
-  return { command: data };
+  return { command: sanitizeCastCommand(data) };
 }
 
 async function createPlaybackSession(
@@ -3899,7 +4413,7 @@ async function createPlaybackSession(
 async function getPlaybackSession(id: string, userId: string, db: SupabaseClient) {
   const { data, error } = await db
     .from("cloud_playback_sessions")
-    .select("*, cloud_gateway_sessions(*)")
+    .select(`${PLAYBACK_SESSION_PUBLIC_SELECT},cloud_gateway_sessions(id,playback_session_id,mode,status,hls_url,expires_at,created_at,updated_at)`)
     .eq("id", id)
     .eq("user_id", userId)
     .maybeSingle();
@@ -3909,15 +4423,7 @@ async function getPlaybackSession(id: string, userId: string, db: SupabaseClient
 }
 
 function publicPlaybackSession(value: unknown): JsonRecord {
-  const session = recordOrEmpty(value);
-  const {
-    provider_account_hash: _providerAccountHash,
-    // Rolling-deployment compatibility for databases that have not dropped the
-    // historical cross-user replacement identifier yet.
-    superseded_by: _supersededBy,
-    ...safe
-  } = session;
-  return safe;
+  return sanitizePlaybackSession(value);
 }
 
 async function expirePlaybackSession(id: string, userId: string, db: SupabaseClient) {
@@ -3926,7 +4432,7 @@ async function expirePlaybackSession(id: string, userId: string, db: SupabaseCli
   // never accept caller-provided gateway IDs.
   const { data: session, error } = await db
     .from("cloud_playback_sessions")
-    .select("*, cloud_gateway_sessions(*)")
+    .select("id,source_id,cloud_gateway_sessions(id,external_session_id)")
     .eq("id", id)
     .eq("user_id", userId)
     .maybeSingle();
@@ -4012,7 +4518,7 @@ async function expirePlaybackSession(id: string, userId: string, db: SupabaseCli
     .update({ status: "expired", expires_at: new Date().toISOString() })
     .eq("id", id)
     .eq("user_id", userId)
-    .select("*")
+    .select(PLAYBACK_SESSION_PUBLIC_SELECT)
     .single();
   if (updateError) throwDb(updateError, "Unable to expire playback session");
 
@@ -4317,19 +4823,37 @@ async function recordPlaybackStartupObservation(
   const itemType = options.itemType === "series" ? "series" : options.itemType === "movie" ? "movie" : "";
   if (!itemType || !options.itemId || !Number.isFinite(options.startupMs) || options.startupMs <= 0) return;
 
-  const cost = Math.max(1, Math.min(999, Math.round(options.startupMs / 10)));
-  const { error } = await db
-    .from("cloud_title_variants")
-    .update({
-      last_observed_ttff_ms: Math.round(options.startupMs),
-      playback_cost_score: cost,
-    })
-    .eq("user_id", options.userId)
-    .eq("source_id", options.sourceId)
-    .eq("item_type", itemType)
-    .eq("external_id", options.itemId);
-  if (error && !isProjectionMissing(error)) {
-    console.warn("[norva-cloud] unable to record playback startup observation", error.message);
+  try {
+    const generation = await readActiveCatalogGenerationSnapshot(db, options.sourceId, options.userId);
+    await assertActiveCatalogGenerationCurrent(db, options.sourceId, options.userId, generation);
+    const cost = Math.max(1, Math.min(999, Math.round(options.startupMs / 10)));
+    const { error } = await db
+      .from("cloud_title_variants")
+      .update({
+        last_observed_ttff_ms: Math.round(options.startupMs),
+        playback_cost_score: cost,
+        ...catalogGenerationFields(generation),
+      })
+      .eq("user_id", options.userId)
+      .eq("source_id", options.sourceId)
+      .eq("generation_id", generation.generationId)
+      .eq("item_type", itemType)
+      .eq("external_id", options.itemId);
+    if (error) {
+      if (isCatalogGenerationSuperseded(error)) return;
+      if (!isProjectionMissing(error)) {
+        console.warn("[norva-cloud] unable to record playback startup observation", error.message);
+      }
+      return;
+    }
+    await assertActiveCatalogGenerationCurrent(db, options.sourceId, options.userId, generation);
+  } catch (error) {
+    if (!isCatalogGenerationSuperseded(error)) {
+      console.warn(
+        "[norva-cloud] unable to record playback startup observation",
+        error instanceof Error ? error.message : "catalog observation write failed",
+      );
+    }
   }
 }
 
@@ -4488,19 +5012,22 @@ async function resolvePlaybackTarget(
   requestHint: JsonRecord = {},
   exactEpisodeCoordinates: JsonRecord | null = null,
 ) {
+  await assertVisibleSource(sourceId, userId, db);
   if (exactEpisodeCoordinates) {
     const sourceConfig = await loadSourceConfig(sourceId, userId, db);
     return xtreamStreamUrl({
       serverUrl: stringOr(sourceConfig.serverUrl, ""),
-      username: stringOr(sourceConfig.username, ""),
-      password: stringOr(sourceConfig.password, ""),
+      username: typeof sourceConfig.username === "string" && sourceConfig.username.trim()
+        ? sourceConfig.username : "",
+      password: typeof sourceConfig.password === "string" && sourceConfig.password.length
+        ? sourceConfig.password : "",
       streamType: "series",
       streamId: stringOr(exactEpisodeCoordinates.episode_id, ""),
       container: stringOr(exactEpisodeCoordinates.container_extension, "mp4"),
     });
   }
   const { data: item, error } = await db
-    .from("cloud_media_items")
+    .from("cloud_catalog_visible_media_items")
     .select("playback_hint")
     .eq("source_id", sourceId)
     .eq("user_id", userId)
@@ -4513,8 +5040,10 @@ async function resolvePlaybackTarget(
       const sourceConfig = await loadSourceConfig(sourceId, userId, db);
       return xtreamStreamUrl({
         serverUrl: stringOr(sourceConfig.serverUrl, ""),
-        username: stringOr(sourceConfig.username, ""),
-        password: stringOr(sourceConfig.password, ""),
+        username: typeof sourceConfig.username === "string" && sourceConfig.username.trim()
+          ? sourceConfig.username : "",
+        password: typeof sourceConfig.password === "string" && sourceConfig.password.length
+          ? sourceConfig.password : "",
         streamType: "series",
         streamId: itemId,
         container: stringOr(requestHint.container, "mp4"),
@@ -4531,8 +5060,10 @@ async function resolvePlaybackTarget(
     const streamType = stringOr(hint.streamType, "live");
     return xtreamStreamUrl({
       serverUrl: stringOr(sourceConfig.serverUrl, ""),
-      username: stringOr(sourceConfig.username, ""),
-      password: stringOr(sourceConfig.password, ""),
+      username: typeof sourceConfig.username === "string" && sourceConfig.username.trim()
+        ? sourceConfig.username : "",
+      password: typeof sourceConfig.password === "string" && sourceConfig.password.length
+        ? sourceConfig.password : "",
       streamType,
       streamId: stringOr(hint.streamId, ""),
       container: xtreamPlaybackContainer(hint, streamType),
@@ -4543,6 +5074,10 @@ async function resolvePlaybackTarget(
 }
 
 async function loadSourceConfig(sourceId: string, userId: string, db: SupabaseClient) {
+  return (await loadSourceConfigEnvelope(sourceId, userId, db)).config;
+}
+
+async function loadSourceConfigEnvelope(sourceId: string, userId: string, db: SupabaseClient) {
   const { data: source, error } = await db
     .from("cloud_sources")
     .select("config_ciphertext")
@@ -4551,7 +5086,11 @@ async function loadSourceConfig(sourceId: string, userId: string, db: SupabaseCl
     .maybeSingle();
   if (error) throwDb(error, "Unable to load source config");
   if (!source?.config_ciphertext) throw new HttpError(404, "Source config not found");
-  return decryptSourceConfig(source.config_ciphertext, await getRuntimeConfig(db));
+  const configCiphertext = String(source.config_ciphertext);
+  return {
+    config: await decryptSourceConfig(configCiphertext, await getRuntimeConfig(db)),
+    configCiphertext,
+  };
 }
 
 async function encryptSourceConfig(config: JsonRecord, runtimeConfig: RuntimeConfig) {
@@ -4595,11 +5134,19 @@ async function aesKey(secret: string) {
   return crypto.subtle.importKey("raw", material, { name: "AES-GCM" }, false, ["encrypt", "decrypt"]);
 }
 
-async function fetchJson(url: string, timeoutMs: number) {
-  const response = await fetchWithTimeout(url, timeoutMs);
-  const payload = await response.json().catch(() => null);
-  if (!response.ok) throw new HttpError(response.status, "IPTV provider request failed", payload);
-  return payload;
+async function fetchJson(url: string, timeoutMs: number, maxBytes = 8 * 1024 * 1024) {
+  try {
+    const { response, value: payload } = await fetchBoundedProviderJson(url, {
+      timeoutMs,
+      maxBytes,
+      headers: providerHeaders(),
+    });
+    if (!response.ok) throw new HttpError(response.status, "IPTV provider request failed");
+    return payload;
+  } catch (error) {
+    if (error instanceof HttpError) throw error;
+    throw boundedProviderHttpError(error, "JSON");
+  }
 }
 
 async function requestGatewayMetadata(
@@ -4693,15 +5240,28 @@ function classifyGatewayNetworkFailure(error: unknown): { code: string; networkC
 }
 
 async function fetchText(url: string, timeoutMs: number, maxBytes: number, headers = providerHeaders()) {
-  const response = await fetchWithTimeout(url, timeoutMs, headers);
-  if (!response.ok) throw new HttpError(response.status, "IPTV provider request failed");
-  const contentLength = Number.parseInt(response.headers.get("content-length") ?? "", 10);
-  if (Number.isFinite(contentLength) && contentLength > maxBytes) {
-    throw new HttpError(413, "Provider payload is too large for this cloud request");
+  try {
+    const { response, value: text } = await fetchBoundedProviderText(url, {
+      timeoutMs,
+      maxBytes,
+      headers,
+    });
+    if (!response.ok) throw new HttpError(response.status, "IPTV provider request failed");
+    return text;
+  } catch (error) {
+    if (error instanceof HttpError) throw error;
+    throw boundedProviderHttpError(error, "text");
   }
-  const text = await response.text();
-  if (text.length > maxBytes) throw new HttpError(413, "Provider payload is too large for this cloud request");
-  return text;
+}
+
+function boundedProviderHttpError(error: unknown, payloadType: string) {
+  if (error instanceof BoundedProviderResponseError && error.kind === "too_large") {
+    return new HttpError(413, `Provider ${payloadType} payload is too large for this cloud request`);
+  }
+  if (error instanceof BoundedProviderResponseError && error.kind === "timeout") {
+    return new HttpError(504, "IPTV provider response deadline exceeded");
+  }
+  return new HttpError(502, "Unable to reach IPTV provider");
 }
 
 async function proxyImage(req: Request, url: URL) {
@@ -4796,21 +5356,6 @@ function providerHeaders(userAgent = "NorvaCloud/1.0") {
   };
 }
 
-async function fetchWithTimeout(url: string, timeoutMs: number, headers = providerHeaders()) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    return await fetch(url, {
-      signal: controller.signal,
-      headers,
-    });
-  } catch (error) {
-    throw new HttpError(502, "Unable to reach IPTV provider", error instanceof Error ? error.message : undefined);
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
 function parseM3u(playlist: string) {
   const lines = playlist.split(/\r?\n/);
   const items: Array<{ title: string; url: string; tvgId: string; logo: string; group: string }> = [];
@@ -4902,6 +5447,99 @@ function waitUntil(promise: Promise<unknown>) {
   else promise.catch((error) => console.error("[norva-cloud] background task failed", error));
 }
 
+async function sourceCatalogVisible(sourceId: string, userId: string, db: SupabaseClient) {
+  const { data, error } = await db.rpc("norva_source_catalog_visible", {
+    p_source_id: sourceId,
+    p_user_id: userId,
+  });
+  if (error) throwDb(error, "Unable to verify catalog visibility");
+  return data === true;
+}
+
+async function visibleSourceSnapshot(sourceId: string, userId: string, db: SupabaseClient) {
+  const { data, error } = await db
+    .from("cloud_catalog_visible_sources")
+    .select("id,config_revision")
+    .eq("id", sourceId)
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (error) throwDb(error, "Unable to verify catalog visibility");
+  if (data) return data as JsonRecord;
+  throw new HttpError(409, "This catalog is not currently available", {
+    code: "SOURCE_CATALOG_NOT_VISIBLE",
+  });
+}
+
+function sourceSnapshotConfigRevision(snapshot: JsonRecord) {
+  const revision = stringOr(snapshot.config_revision, "");
+  if (!/^\d+$/.test(revision)) {
+    throw new HttpError(503, "Source configuration revision is unavailable");
+  }
+  return revision.replace(/^0+(?=\d)/, "");
+}
+
+async function assertVisibleSourceSnapshotCurrent(
+  sourceId: string,
+  userId: string,
+  expected: JsonRecord,
+  db: SupabaseClient,
+) {
+  let current: JsonRecord;
+  try {
+    current = await visibleSourceSnapshot(sourceId, userId, db);
+  } catch (error) {
+    if (error instanceof HttpError && recordOrEmpty(error.details).code === "SOURCE_CATALOG_NOT_VISIBLE") {
+      throw cloudCatalogChanged();
+    }
+    throw error;
+  }
+  if (sourceSnapshotConfigRevision(current) !== sourceSnapshotConfigRevision(expected)) {
+    throw cloudCatalogChanged();
+  }
+}
+
+function cloudCatalogChanged() {
+  return new HttpError(409, "Catalog access changed while provider metadata was loading", {
+    code: "SOURCE_CATALOG_CHANGED",
+  });
+}
+
+async function sourceConfigRevisionSnapshot(sourceId: string, userId: string, db: SupabaseClient) {
+  const { data, error } = await db
+    .from("cloud_source_lifecycle")
+    .select("config_revision")
+    .eq("source_id", sourceId)
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (error) throwDb(error, "Unable to verify source configuration revision");
+  const revision = stringOr(data?.config_revision, "");
+  if (!revision || !/^\d+$/.test(revision)) {
+    throw new HttpError(503, "Source configuration revision is unavailable");
+  }
+  return revision;
+}
+
+async function assertSourceConfigRevisionCurrent(
+  sourceId: string,
+  userId: string,
+  expectedRevision: string,
+  db: SupabaseClient,
+) {
+  const currentRevision = await sourceConfigRevisionSnapshot(sourceId, userId, db);
+  if (currentRevision !== expectedRevision) {
+    throw new HttpError(409, "Source configuration changed while the connection was being checked", {
+      code: "SOURCE_CONFIG_REVISION_CHANGED",
+    });
+  }
+}
+
+async function assertVisibleSource(sourceId: string, userId: string, db: SupabaseClient) {
+  if (await sourceCatalogVisible(sourceId, userId, db)) return;
+  throw new HttpError(409, "This catalog is not currently available", {
+    code: "SOURCE_CATALOG_NOT_VISIBLE",
+  });
+}
+
 async function assertOwnedSource(sourceId: string, userId: string, db: SupabaseClient) {
   const { data, error } = await db
     .from("cloud_sources")
@@ -4922,15 +5560,22 @@ async function deleteSource(sourceId: string, userId: string, db: SupabaseClient
   // exceeded the request timeout and left the account un-removable. The GLOBAL scan cache
   // (catalog_titles / catalog_file_tracks, keyed by tmdb id / host, no user_id) is never touched:
   // only this user's per-user copy is removed, and a re-added same-host source reuses the cache.
-  const { error } = await db
+  const { data, error } = await db
     .from("cloud_sources")
     .update({ deleted_at: new Date().toISOString(), auto_refresh_next_at: null })
     .eq("id", sourceId)
     .eq("user_id", userId)
-    .is("deleted_at", null);
+    .is("deleted_at", null)
+    .select("id")
+    .maybeSingle();
   if (error) throwDb(error, "Unable to delete provider account");
 
-  return { success: true, sourceId };
+  return {
+    body: { success: true, sourceId },
+    // A repeated idempotent DELETE updates no row and therefore owns no epoch
+    // advance; do not acknowledge a concurrent cutover on its behalf.
+    visibilityChanged: Boolean(data?.id),
+  };
 }
 
 async function assertOwnedDevice(deviceId: string, userId: string, db: SupabaseClient) {
@@ -4949,130 +5594,6 @@ async function deleteOwned(table: string, id: string, userId: string, db: Supaba
   const { error } = await db.from(table).delete().eq("id", id).eq("user_id", userId);
   if (error) throwDb(error, "Unable to delete row");
   return { success: true };
-}
-
-async function listSourceTitleIds(sourceId: string, userId: string, db: SupabaseClient) {
-  const ids = new Set<string>();
-  const pageSize = 1000;
-  for (let from = 0; ; from += pageSize) {
-    const { data, error } = await db
-      .from("cloud_title_variants")
-      .select("title_id")
-      .eq("source_id", sourceId)
-      .eq("user_id", userId)
-      .range(from, from + pageSize - 1);
-    if (error) {
-      if (isMissingRelation(error)) return [];
-      throwDb(error, "Unable to inspect provider variants");
-    }
-    const rows = Array.isArray(data) ? data : [];
-    for (const row of rows) {
-      const titleId = stringOrNull((row as JsonRecord).title_id);
-      if (titleId) ids.add(titleId);
-    }
-    if (rows.length < pageSize) break;
-  }
-  return Array.from(ids);
-}
-
-async function deleteRowsBySource(
-  db: SupabaseClient,
-  table: string,
-  sourceId: string,
-  userId: string,
-) {
-  for (;;) {
-    const ids = await listRowIdsBySource(db, table, sourceId, userId);
-    if (!ids.length) return;
-
-    const { error } = await db
-      .from(table)
-      .delete()
-      .eq("source_id", sourceId)
-      .eq("user_id", userId)
-      .in("id", ids);
-    if (error) {
-      if (isMissingRelation(error)) return;
-      throwDb(error, `Unable to clear ${table}`);
-    }
-  }
-}
-
-async function clearSourceReference(
-  db: SupabaseClient,
-  table: string,
-  sourceId: string,
-  userId: string,
-) {
-  for (;;) {
-    const ids = await listRowIdsBySource(db, table, sourceId, userId);
-    if (!ids.length) return;
-
-    const { error } = await db
-      .from(table)
-      .update({ source_id: null })
-      .eq("source_id", sourceId)
-      .eq("user_id", userId)
-      .in("id", ids);
-    if (error) {
-      if (isMissingRelation(error)) return;
-      throwDb(error, `Unable to detach ${table}`);
-    }
-  }
-}
-
-async function listRowIdsBySource(
-  db: SupabaseClient,
-  table: string,
-  sourceId: string,
-  userId: string,
-  batchSize = 500,
-) {
-  const { data, error } = await db
-    .from(table)
-    .select("id")
-    .eq("source_id", sourceId)
-    .eq("user_id", userId)
-    .limit(batchSize);
-  if (error) {
-    if (isMissingRelation(error)) return [];
-    throwDb(error, `Unable to inspect ${table}`);
-  }
-  return (Array.isArray(data) ? data : [])
-    .map((row) => stringOrNull((row as JsonRecord).id))
-    .filter((id): id is string => Boolean(id));
-}
-
-async function deleteOrphanTitles(titleIds: string[], userId: string, db: SupabaseClient) {
-  for (const chunk of chunkArray(Array.from(new Set(titleIds)), 500)) {
-    const { data, error } = await db
-      .from("cloud_title_variants")
-      .select("title_id")
-      .eq("user_id", userId)
-      .in("title_id", chunk);
-    if (error) {
-      if (isMissingRelation(error)) return;
-      throwDb(error, "Unable to inspect remaining title variants");
-    }
-
-    const remaining = new Set(
-      (Array.isArray(data) ? data : [])
-        .map((row) => stringOrNull((row as JsonRecord).title_id))
-        .filter((id): id is string => Boolean(id)),
-    );
-    const orphanIds = chunk.filter((id) => !remaining.has(id));
-    if (!orphanIds.length) continue;
-
-    const { error: deleteError } = await db
-      .from("cloud_titles")
-      .delete()
-      .eq("user_id", userId)
-      .in("id", orphanIds);
-    if (deleteError) {
-      if (isMissingRelation(deleteError)) return;
-      throwDb(deleteError, "Unable to clear orphan titles");
-    }
-  }
 }
 
 function chunkArray<T>(items: T[], size: number) {
@@ -5167,6 +5688,7 @@ function json(req: Request, data: unknown, status = 200) {
     status,
     headers: {
       ...corsHeaders(req),
+      ...catalogVisibilityEpochHeaders(req),
       "Content-Type": "application/json; charset=utf-8",
       "Cache-Control": "no-store",
     },
@@ -5185,6 +5707,7 @@ function jsonCached(req: Request, data: unknown, cacheSeconds: number, status = 
     status,
     headers: {
       ...corsHeaders(req),
+      ...catalogVisibilityEpochHeaders(req),
       "Content-Type": "application/json; charset=utf-8",
       "Cache-Control": s > 0 ? `private, max-age=${s}, stale-while-revalidate=${s * 2}` : "no-store",
       Vary: "Origin, Authorization, x-norva-profile-id",
@@ -5207,7 +5730,7 @@ function corsHeaders(req: Request) {
     "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-norva-profile-id",
     "Access-Control-Allow-Methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
     // Lets browser JS read the locked-profile fallback signal (resolveProfileId).
-    "Access-Control-Expose-Headers": "x-norva-profile-fallback",
+    "Access-Control-Expose-Headers": "x-norva-profile-fallback, x-norva-visibility-epoch, x-norva-user-visibility-epoch, x-norva-global-visibility-epoch, x-norva-catalog-cache-contract, retry-after",
     "Access-Control-Max-Age": "86400",
     Vary: "Origin",
   };
@@ -5356,6 +5879,29 @@ function isRecord(value: unknown): value is JsonRecord {
 
 function recordOrEmpty(value: unknown): JsonRecord {
   return isRecord(value) ? value : {};
+}
+
+function publicErrorPayload(error: unknown, status: number): JsonRecord {
+  const detailRecord = error instanceof HttpError ? recordOrEmpty(error.details) : {};
+  const details = sanitizeCloudErrorDetails(detailRecord);
+  const message = status >= 500
+    ? "Norva Cloud is temporarily unavailable"
+    : error instanceof HttpError
+      ? error.message
+      : "Request failed";
+  return compactRecord({ error: message, details: Object.keys(details).length ? details : undefined });
+}
+
+function publicErrorLog(error: unknown, status: number, payload: JsonRecord): JsonRecord {
+  const rawDetails = error instanceof HttpError ? recordOrEmpty(error.details) : {};
+  const safeDetails = sanitizeCloudErrorDetails(rawDetails);
+  return compactRecord({
+    status,
+    name: error instanceof Error ? error.name.slice(0, 80) : "UnknownError",
+    code: safeDetails.code,
+    publicCode: stringOr(recordOrEmpty(payload.details).code, "") || undefined,
+    correlationId: stringOr(recordOrEmpty(payload.details).correlationId, "") || undefined,
+  });
 }
 
 function copyString(source: JsonRecord, target: JsonRecord, from: string, to: string) {

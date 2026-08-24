@@ -12,9 +12,30 @@ import {
 import { refreshVodTitleProjection, validateTmdbCandidate, searchTmdbMatch } from "../_shared/vod-title-projection.ts";
 import { backfillProviderOverviews } from "../_shared/provider-overview-backfill.ts";
 import { formatSourceSyncError } from "../_shared/source-sync-error.mjs";
+import {
+  buildProviderDirectFallbackSnapshot,
+  createSourceDirectFallbackLeaseRunner,
+  directFallbackLeaseTtlSeconds,
+  ProviderDirectFallbackLeaseError,
+  providerDirectFallbackLeaseOwner,
+  withSourceDirectFallbackLease,
+} from "../_shared/provider-direct-fallback-lease.mjs";
+import {
+  BoundedProviderResponseError,
+  fetchBoundedProviderJson,
+  fetchBoundedProviderText,
+} from "../_shared/bounded-provider-response.mjs";
 import type { LiveCatalogItem } from "../_shared/live-catalog.ts";
 import { getEntitlementDecision, planFeatureEntitled, realPlanCode } from "../_shared/entitlements.ts";
 import { driveXtreamSyncToReady, freshSyncCursor, detectXtreamChange, enqueueImportNotification } from "../_shared/xtream-sync.ts";
+import {
+  assertActiveCatalogGenerationCurrent,
+  type ActiveCatalogGeneration,
+  catalogGenerationRpcFence,
+  isCatalogGenerationSuperseded,
+  readActiveCatalogGenerationSnapshot,
+  withCatalogGenerationRows,
+} from "../_shared/catalog-generation.ts";
 
 type JsonRecord = Record<string, unknown>;
 type RuntimeConfig = {
@@ -28,6 +49,10 @@ type SeriesInventoryTransport = "gateway" | "relay" | "direct";
 type SeriesInventoryMetadataResult = {
   payload: unknown;
   transport: SeriesInventoryTransport;
+};
+type CatalogAccessSnapshot = ActiveCatalogGeneration;
+type DirectFallbackLeaseContext = {
+  runDirectFallback: <T>(timeoutMs: number, operation: () => Promise<T>) => Promise<T>;
 };
 
 class HttpError extends Error {
@@ -70,6 +95,7 @@ if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
   auth: { autoRefreshToken: false, persistSession: false },
 });
+const catalogVisibilityEpochs = new WeakMap<Request, string>();
 
 let runtimeConfigCache: { value: RuntimeConfig; expiresAt: number } | null = null;
 
@@ -146,8 +172,9 @@ Deno.serve(async (req) => {
         return json(req, await cronFinalizeSource(supabase, segments[2], url.searchParams.get("country")));
       }
       if (segments[1] === "finalize-step" && segments[2]) {
-        const { data: src } = await supabase.from("cloud_sources").select("user_id").eq("id", segments[2]).maybeSingle();
+        const { data: src } = await supabase.from("cloud_catalog_visible_sources").select("user_id").eq("id", segments[2]).maybeSingle();
         if (!src) return json(req, { error: "source not found" }, 404);
+        const responseSnapshot = await readCatalogAccessSnapshot(segments[2], String(src.user_id), supabase, false);
         const result = await finalizeCloudSource(segments[2], String(src.user_id), supabase, {
           country: url.searchParams.get("country"),
           phase: stringOr(url.searchParams.get("phase"), "live"),
@@ -155,13 +182,15 @@ Deno.serve(async (req) => {
           afterId: stringOr(url.searchParams.get("afterId"), ""),
           limit: Math.max(1, Math.min(2000, Number(url.searchParams.get("limit")) || 1500)),
         });
+        await assertCatalogSnapshotCurrent(segments[2], String(src.user_id), responseSnapshot, supabase);
+        catalogVisibilityEpochs.set(req, responseSnapshot.userVisibilityEpoch);
         return json(req, result);
       }
       // Resumable-discovery continuation. driveXtreamSyncToReady self-invokes this
       // between isolates to import an "8K"-scale catalogue across several short
       // background runs; kicks the next step and returns immediately.
       if (segments[1] === "sync-step" && segments[2]) {
-        const { data: src } = await supabase.from("cloud_sources").select("user_id, source_type").eq("id", segments[2]).maybeSingle();
+        const { data: src } = await supabase.from("cloud_catalog_visible_sources").select("user_id, source_type").eq("id", segments[2]).maybeSingle();
         if (!src) return json(req, { error: "source not found" }, 404);
         if (String(src.source_type) === "xtream") {
           runInBackground(driveXtreamSyncToReady(segments[2], String(src.user_id), supabase));
@@ -216,11 +245,15 @@ Deno.serve(async (req) => {
     if (req.method === "POST" && segments[0] === "sources" && segments[2] === "sync") {
       const user = await requireUser(req, supabase);
       const force = url.searchParams.get("force") === "1";
+      const responseSnapshot = await readCatalogAccessSnapshot(segments[1], user.id, supabase, false);
       const result = await syncCloudSource(segments[1], user.id, supabase, url.searchParams.get("country"), { force });
+      await assertCatalogSnapshotCurrent(segments[1], user.id, responseSnapshot, supabase);
+      catalogVisibilityEpochs.set(req, responseSnapshot.userVisibilityEpoch);
       return json(req, result);
     }
     if (req.method === "POST" && segments[0] === "sources" && segments[2] === "finalize") {
       const user = await requireUser(req, supabase);
+      const responseSnapshot = await readCatalogAccessSnapshot(segments[1], user.id, supabase, false);
       const result = await finalizeCloudSource(segments[1], user.id, supabase, {
         country: url.searchParams.get("country"),
         phase: stringOr(url.searchParams.get("phase"), "live"),
@@ -231,6 +264,8 @@ Deno.serve(async (req) => {
         afterId: stringOr(url.searchParams.get("afterId"), ""),
         limit: boundedInt(url.searchParams.get("limit"), 1000, 1, 2000),
       });
+      await assertCatalogSnapshotCurrent(segments[1], user.id, responseSnapshot, supabase);
+      catalogVisibilityEpochs.set(req, responseSnapshot.userVisibilityEpoch);
       return json(req, result);
     }
     // Admin/service re-sync: force a full re-sync of ANY source by id (service-token auth,
@@ -253,18 +288,38 @@ Deno.serve(async (req) => {
       if (!sourceId) throw new HttpError(400, "Missing source id");
       const { data: src } = await supabase.from("cloud_sources").select("user_id").eq("id", sourceId).maybeSingle();
       if (!src) throw new HttpError(404, "Source not found");
+      const responseSnapshot = await readCatalogAccessSnapshot(sourceId, String(src.user_id), supabase, false);
       const result = await syncCloudSource(sourceId, String(src.user_id), supabase, url.searchParams.get("country"), { force: true });
+      await assertCatalogSnapshotCurrent(sourceId, String(src.user_id), responseSnapshot, supabase);
+      catalogVisibilityEpochs.set(req, responseSnapshot.userVisibilityEpoch);
       return json(req, { adminResync: true, sourceId, ...(result as JsonRecord) });
     }
     throw new HttpError(404, "Route not found");
   } catch (error) {
     const status = error instanceof HttpError ? error.status : 500;
-    const message = error instanceof Error ? error.message : "Unexpected error";
-    const details = error instanceof HttpError ? error.details : undefined;
-    console.error("[norva-source-sync]", status, message, details ?? "");
-    return json(req, { error: message, details }, status);
+    const code = publicErrorCode(error);
+    const message = status >= 500
+      ? "Catalog synchronization is temporarily unavailable"
+      : error instanceof Error ? error.message : "Unexpected error";
+    // Never return or log arbitrary provider/gateway/SQL payloads carried by
+    // HttpError.details. Only the stable machine code may cross this boundary.
+    console.error("[norva-source-sync]", status, code ?? "UNCLASSIFIED");
+    return json(req, { error: message, ...(code ? { code } : {}) }, status);
   }
 });
+
+const SOURCE_SYNC_PUBLIC_ERROR_CODES = new Set([
+  "SOURCE_CATALOG_NOT_VISIBLE",
+  "SOURCE_CATALOG_CHANGED",
+  "CATALOG_VISIBILITY_UNAVAILABLE",
+  "PROVIDER_DIRECT_FALLBACK_RETRYABLE",
+]);
+
+function publicErrorCode(error: unknown): string | null {
+  if (!(error instanceof HttpError) || !isRecord(error.details)) return null;
+  const code = error.details.code;
+  return typeof code === "string" && SOURCE_SYNC_PUBLIC_ERROR_CODES.has(code) ? code : null;
+}
 
 async function requireUser(req: Request, db: SupabaseClient) {
   const authHeader = req.headers.get("Authorization") ?? "";
@@ -273,6 +328,70 @@ async function requireUser(req: Request, db: SupabaseClient) {
   const { data, error } = await db.auth.getUser(token);
   if (error || !data.user) throw new HttpError(401, "Invalid bearer token", error?.message);
   return { id: data.user.id, email: data.user.email ?? undefined };
+}
+
+async function sourceCatalogVisible(sourceId: string, userId: string, db: SupabaseClient): Promise<boolean> {
+  const { data, error } = await db.rpc("norva_source_catalog_visible", {
+    p_source_id: sourceId,
+    p_user_id: userId,
+  });
+  if (error) {
+    throw new HttpError(503, "Catalog visibility is temporarily unavailable", {
+      code: "CATALOG_VISIBILITY_UNAVAILABLE",
+    });
+  }
+  return data === true;
+}
+
+async function assertCatalogVisible(sourceId: string, userId: string, db: SupabaseClient): Promise<void> {
+  if (!(await sourceCatalogVisible(sourceId, userId, db))) {
+    throw new HttpError(409, "This catalog is not currently available", {
+      code: "SOURCE_CATALOG_NOT_VISIBLE",
+    });
+  }
+}
+
+async function readCatalogAccessSnapshot(
+  sourceId: string,
+  userId: string,
+  db: SupabaseClient,
+  changedDuringOperation: boolean,
+): Promise<CatalogAccessSnapshot> {
+  try {
+    return await readActiveCatalogGenerationSnapshot(db, sourceId, userId);
+  } catch (error) {
+    throw new HttpError(409, changedDuringOperation
+      ? "Catalog access changed while background work was running"
+      : "This catalog is not currently available", {
+      code: changedDuringOperation ? "SOURCE_CATALOG_CHANGED" : "SOURCE_CATALOG_NOT_VISIBLE",
+      cause: isCatalogGenerationSuperseded(error) ? "generation_superseded" : "snapshot_unavailable",
+    });
+  }
+}
+
+async function assertCatalogSnapshotCurrent(
+  sourceId: string,
+  userId: string,
+  expected: CatalogAccessSnapshot,
+  db: SupabaseClient,
+): Promise<void> {
+  try {
+    await assertActiveCatalogGenerationCurrent(db, sourceId, userId, expected);
+  } catch (_) {
+    throw new HttpError(409, "Catalog access changed while background work was running", {
+      code: "SOURCE_CATALOG_CHANGED",
+    });
+  }
+}
+
+function isCatalogAccessGuardError(error: unknown): boolean {
+  if (isCatalogGenerationSuperseded(error)) return true;
+  if (!(error instanceof HttpError) || !isRecord(error.details)) return false;
+  return [
+    "SOURCE_CATALOG_NOT_VISIBLE",
+    "SOURCE_CATALOG_CHANGED",
+    "CATALOG_VISIBILITY_UNAVAILABLE",
+  ].includes(stringOr(error.details.code, ""));
 }
 
 type SyncProgressReporter = (progress: JsonRecord) => Promise<void>;
@@ -401,6 +520,8 @@ async function syncCloudSource(sourceId: string, userId: string, db: SupabaseCli
     .maybeSingle();
   if (error) throwDb(error, "Unable to load source");
   if (!source) throw new HttpError(404, "Source not found");
+  await assertCatalogVisible(sourceId, userId, db);
+  const accessSnapshot = await readCatalogAccessSnapshot(sourceId, userId, db, false);
   if (!source.config_ciphertext) throw new HttpError(400, "Source has no managed cloud configuration");
 
   // Previously-imported catalogue fingerprint, for change-detection.
@@ -414,21 +535,40 @@ async function syncCloudSource(sourceId: string, userId: string, db: SupabaseCli
   // Memory-safe (only the running fingerprint is held, never the rows).
   if (opts.rawOnly) {
     const config = await decryptSourceConfig(source.config_ciphertext, await getRuntimeConfig(db));
+    await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
     let result: JsonRecord | null = null;
     if (source.source_type === "xtream") {
-      result = await detectXtreamChange(sourceId, userId, config, db, previousSignature);
+      result = await detectXtreamChange(sourceId, userId, config, db, previousSignature, {
+        configCiphertext: String(source.config_ciphertext),
+        configRevision: accessSnapshot.configRevision,
+      });
     } else if (source.source_type === "m3u") {
-      result = await syncM3uSource(sourceId, userId, config, db, country, async () => {}, { previousSignature, force: false, rawOnly: true }) as unknown as JsonRecord;
+      result = await syncM3uSource(
+        sourceId,
+        userId,
+        config,
+        db,
+        country,
+        accessSnapshot,
+        async () => {},
+        { previousSignature, force: false, rawOnly: true },
+      ) as unknown as JsonRecord;
     }
+    await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
     if (!result) return { sourceId, status: "detected", changed: false };
-    if (result.changed) await maybeRecordContentEvent(db, userId, sourceId, previousSignature, result);
+    if (result.changed) {
+      await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
+      await maybeRecordContentEvent(db, userId, sourceId, previousSignature, result);
+    }
     // Persist the provider identity (additive). Existing sources acquire providerKey on
     // the next detect tick — no full re-sync needed — so the cross-user dedup activates
     // on its own. Read-merge-write to avoid clobbering a concurrent syncProgress writer.
     const detectedKey = stringOr(result.providerKey, "");
     if (detectedKey && detectedKey !== stringOr(recordOrEmpty(source.config_hint).providerKey, "")) {
+      await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
       await patchSourceConfigHint(db, sourceId, (hint) => ({ ...hint, providerKey: detectedKey }));
     }
+    await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
     return { sourceId, status: "detected", changed: Boolean(result.changed), ...result };
   }
 
@@ -455,9 +595,11 @@ async function syncCloudSource(sourceId: string, userId: string, db: SupabaseCli
     const inDiscovery = cur.active === true && stringOr(cur.phase, "") === "discover";
     if (!opts.force && inDiscovery && String(source.sync_status) === "syncing") {
       if (Date.now() - heartbeat < 75_000) {
+        await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
         return { sourceId, status: "syncing", started: false, joined: true };
       }
       // Heartbeat went stale → the chain died mid-run; resume without wiping.
+      await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
       runInBackground(driveXtreamSyncToReady(sourceId, userId, db));
       return { sourceId, status: "syncing", started: true, resumed: true };
     }
@@ -467,6 +609,7 @@ async function syncCloudSource(sourceId: string, userId: string, db: SupabaseCli
     // background (it self-continues across isolates to the finalize-pending
     // handoff). Return immediately so the caller/route isn't held open.
     const cursor = freshSyncCursor(startedAt, { country, force: Boolean(opts.force), previousSignature });
+    await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
     await db
       .from("cloud_sources")
       .update({
@@ -477,6 +620,7 @@ async function syncCloudSource(sourceId: string, userId: string, db: SupabaseCli
       })
       .eq("id", sourceId)
       .eq("user_id", userId);
+    await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
     runInBackground(driveXtreamSyncToReady(sourceId, userId, db));
     return { sourceId, status: "syncing", started: true };
   }
@@ -491,25 +635,30 @@ async function syncCloudSource(sourceId: string, userId: string, db: SupabaseCli
     })
     .eq("id", sourceId)
     .eq("user_id", userId);
+  await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
 
   const reportProgress: SyncProgressReporter = async (patch: JsonRecord) => {
     progress = mergeSyncProgress(progress, compactRecord({ ...patch, status: "syncing", updatedAt: new Date().toISOString() }));
+    await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
     await writeSourceSyncProgress(db, sourceId, userId, baseHint, progress);
   };
 
   try {
     const config = await decryptSourceConfig(source.config_ciphertext, await getRuntimeConfig(db));
+    await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
     const syncOpts = { previousSignature, force: opts.force, rawOnly: false };
     const result = source.source_type === "m3u"
-      ? await syncM3uSource(sourceId, userId, config, db, country, reportProgress, syncOpts)
+      ? await syncM3uSource(sourceId, userId, config, db, country, accessSnapshot, reportProgress, syncOpts)
       : { total: 0 };
     const resultRecord = result as JsonRecord;
+    await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
 
     if (source.source_type === "m3u" && Number(result.total ?? 0) <= 0) {
       throw new HttpError(422, "No playable catalog items were imported from this source");
     }
 
     const syncedAt = new Date().toISOString();
+    await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
     const { error: updateError } = await db
       .from("cloud_sources")
       .update({
@@ -527,9 +676,15 @@ async function syncCloudSource(sourceId: string, userId: string, db: SupabaseCli
       .eq("user_id", userId);
     if (updateError) throwDb(updateError, "Unable to update source sync status");
 
+    await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
     await maybeRecordContentEvent(db, userId, sourceId, previousSignature, resultRecord);
+    await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
     return { sourceId, status: "ready", ...result };
   } catch (error) {
+    if (isCatalogAccessGuardError(error)) throw error;
+    // Provider/DB errors can themselves be the observable side of a cutover.
+    // Re-check before writing an error status against the superseded source.
+    await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
     const message = formatSourceSyncError(error, "Source sync failed");
     await db
       .from("cloud_sources")
@@ -567,6 +722,315 @@ function runInBackground(task: Promise<unknown>) {
 }
 
 // ── Release-year backfill ────────────────────────────────────────────────────
+
+const CATALOG_BACKGROUND_PAGE_MAX = 64;
+const CATALOG_BACKGROUND_PAGE_DEADLINE_MS = 45_000;
+
+type CatalogBackgroundPage = {
+  items: JsonRecord[];
+  complete: boolean;
+  nextCursor: JsonRecord | null;
+};
+
+type CatalogBackgroundMode = "year_pending" | "revalidate_pending" | "search_pending";
+type CatalogBackgroundItem = {
+  id: string;
+  userId: string;
+  itemType: "movie" | "series";
+  providerTmdbId: string | null;
+  title: string;
+  originalTitle: string | null;
+  releaseYear: number | null;
+  metadata: JsonRecord;
+  posterUrl: string | null;
+  backdropUrl: string | null;
+  storageKind: "global" | "projection";
+  visibilityEpoch: string;
+  payloadUpdatedAt: string;
+  bestGenerationId: string | null;
+  displayGenerationId: string | null;
+};
+
+type CatalogBackgroundWalk = {
+  items: CatalogBackgroundItem[];
+  complete: boolean;
+  nextCursor: JsonRecord | null;
+  pages: number;
+};
+
+// SQL selectors may inspect a stale shared shell without returning an effective
+// P/G payload on that page. An empty `items` array is therefore progress, not
+// completion: only the explicit `complete` bit terminates the walk. The caller
+// persists `nextCursor` when this bounded window exhausts its quota/deadline.
+async function walkCatalogTitleBackgroundPages(
+  fetchPage: (cursor: JsonRecord | null, remaining: number) => Promise<CatalogBackgroundPage>,
+  maxItems: number,
+  options: {
+    maxPages?: number;
+    deadlineMs?: number;
+    now?: () => number;
+    initialCursor?: JsonRecord | null;
+  } = {},
+): Promise<{ items: JsonRecord[]; complete: boolean; nextCursor: JsonRecord | null; pages: number }> {
+  if (!Number.isInteger(maxItems) || maxItems < 1 || maxItems > 10_000) {
+    throw new Error("invalid catalog background item bound");
+  }
+  const maxPages = Math.min(
+    CATALOG_BACKGROUND_PAGE_MAX,
+    Math.max(1, Number.isInteger(options.maxPages) ? Number(options.maxPages) : CATALOG_BACKGROUND_PAGE_MAX),
+  );
+  const deadlineMs = Math.min(
+    CATALOG_BACKGROUND_PAGE_DEADLINE_MS,
+    Math.max(1_000, Number.isFinite(options.deadlineMs) ? Number(options.deadlineMs) : CATALOG_BACKGROUND_PAGE_DEADLINE_MS),
+  );
+  const now = options.now ?? (() => Date.now());
+  const startedAt = now();
+  const items: JsonRecord[] = [];
+  let cursor: JsonRecord | null = options.initialCursor ?? null;
+  let pages = 0;
+
+  while (pages < maxPages && items.length < maxItems && now() - startedAt < deadlineMs) {
+    const remaining = maxItems - items.length;
+    const page = await fetchPage(cursor, remaining);
+    if (
+      !page || !Array.isArray(page.items) || typeof page.complete !== "boolean"
+      || (page.nextCursor !== null && (!isRecord(page.nextCursor) || page.complete))
+      || page.items.length > remaining
+    ) throw new Error("invalid catalog background selector page");
+    pages += 1;
+    items.push(...page.items);
+    if (page.complete) return { items, complete: true, nextCursor: null, pages };
+    if (!page.nextCursor || JSON.stringify(page.nextCursor) === JSON.stringify(cursor)) {
+      throw new Error("catalog background selector made no cursor progress");
+    }
+    cursor = page.nextCursor;
+  }
+  return { items, complete: false, nextCursor: cursor, pages };
+}
+
+const UUID_TEXT = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function uuidOrThrow(value: unknown, label: string): string {
+  const text = typeof value === "string" ? value : "";
+  if (!UUID_TEXT.test(text)) throw new HttpError(503, `Invalid ${label} from catalog background selector`);
+  return text.toLowerCase();
+}
+
+function nullableUuidOrThrow(value: unknown, label: string): string | null {
+  return value === null || value === undefined || value === "" ? null : uuidOrThrow(value, label);
+}
+
+function bigintProofOrThrow(value: unknown, label: string): string {
+  const text = typeof value === "number" && Number.isSafeInteger(value)
+    ? String(value)
+    : typeof value === "string" ? value : "";
+  if (!/^(?:0|[1-9][0-9]{0,18})$/.test(text)) {
+    throw new HttpError(503, `Invalid ${label} from catalog background selector`);
+  }
+  return text;
+}
+
+function backgroundProjectionUnavailable(): HttpError {
+  return new HttpError(503, "Catalog background projection is temporarily unavailable", {
+    code: "CATALOG_VISIBILITY_UNAVAILABLE",
+  });
+}
+
+function normalizeCatalogBackgroundItem(value: unknown): CatalogBackgroundItem {
+  if (!isRecord(value)) throw backgroundProjectionUnavailable();
+  const storageKind = value.storageKind;
+  const itemType = value.itemType;
+  if (storageKind !== "global" && storageKind !== "projection") throw backgroundProjectionUnavailable();
+  if (itemType !== "movie" && itemType !== "series") throw backgroundProjectionUnavailable();
+  const displayGenerationId = nullableUuidOrThrow(value.displayGenerationId, "display generation proof");
+  if (storageKind === "projection" && !displayGenerationId) throw backgroundProjectionUnavailable();
+  const releaseYear = value.releaseYear === null || value.releaseYear === undefined
+    ? null
+    : Number(value.releaseYear);
+  if (releaseYear !== null && (!Number.isInteger(releaseYear) || releaseYear < 1900 || releaseYear > 2100)) {
+    throw backgroundProjectionUnavailable();
+  }
+  const payloadUpdatedAt = typeof value.payloadUpdatedAt === "string" ? value.payloadUpdatedAt : "";
+  if (!payloadUpdatedAt || !Number.isFinite(Date.parse(payloadUpdatedAt))) throw backgroundProjectionUnavailable();
+  return {
+    id: uuidOrThrow(value.id, "title id"),
+    userId: uuidOrThrow(value.userId, "title owner"),
+    itemType,
+    providerTmdbId: stringOrNull(value.providerTmdbId),
+    title: stringOr(value.title, ""),
+    originalTitle: stringOrNull(value.originalTitle),
+    releaseYear,
+    metadata: recordOrEmpty(value.metadata),
+    posterUrl: stringOrNull(value.posterUrl),
+    backdropUrl: stringOrNull(value.backdropUrl),
+    storageKind,
+    visibilityEpoch: bigintProofOrThrow(value.visibilityEpoch, "visibility epoch"),
+    payloadUpdatedAt,
+    bestGenerationId: nullableUuidOrThrow(value.bestGenerationId, "best generation proof"),
+    displayGenerationId,
+  };
+}
+
+function normalizeCatalogBackgroundPage(
+  value: unknown,
+  mode: CatalogBackgroundMode,
+  requestedLimit: number,
+  userId: string | null,
+): CatalogBackgroundPage {
+  if (!isRecord(value) || value.contract !== "catalog-title-background-selector-v3"
+      || value.mode !== mode || !Array.isArray(value.items)
+      || typeof value.complete !== "boolean") throw backgroundProjectionUnavailable();
+  const returnedTitles = Number(value.returnedTitles);
+  const inspectedTitles = Number(value.inspectedTitles);
+  const scanLimit = Number(value.scanLimit);
+  if (!Number.isInteger(returnedTitles) || returnedTitles !== value.items.length
+      || returnedTitles < 0 || returnedTitles > requestedLimit
+      || !Number.isInteger(inspectedTitles) || inspectedTitles < returnedTitles
+      || !Number.isInteger(scanLimit) || scanLimit < requestedLimit || scanLimit > 1000) {
+    throw backgroundProjectionUnavailable();
+  }
+  const nextCursor = value.nextCursor === null || value.nextCursor === undefined
+    ? null
+    : recordOrEmpty(value.nextCursor);
+  if (value.complete ? nextCursor !== null : !nextCursor) throw backgroundProjectionUnavailable();
+  if (nextCursor) {
+    if (nextCursor.mode !== mode
+        || String(nextCursor.userId ?? "") !== String(userId ?? "")) throw backgroundProjectionUnavailable();
+    uuidOrThrow(nextCursor.lastId, "background cursor");
+  }
+  return {
+    items: value.items.map((item) => normalizeCatalogBackgroundItem(item)),
+    complete: value.complete,
+    nextCursor,
+  };
+}
+
+function catalogBackgroundCursor(
+  mode: CatalogBackgroundMode,
+  userId: string | null,
+  lastId: string | null,
+): JsonRecord | null {
+  if (!lastId) return null;
+  return { mode, userId, lastId: uuidOrThrow(lastId, "stored background cursor") };
+}
+
+function lastIdFromCatalogBackgroundCursor(cursor: JsonRecord | null): string | null {
+  return cursor ? uuidOrThrow(cursor.lastId, "background cursor") : null;
+}
+
+async function selectCatalogBackgroundBatch(
+  db: SupabaseClient,
+  mode: CatalogBackgroundMode,
+  maxItems: number,
+  retryBefore: string,
+  initialLastId: string | null,
+  userId: string | null = null,
+): Promise<CatalogBackgroundWalk> {
+  const initialCursor = catalogBackgroundCursor(mode, userId, initialLastId);
+  const walked = await walkCatalogTitleBackgroundPages(async (cursor, remaining) => {
+    const pageLimit = Math.min(500, remaining);
+    const scanLimit = Math.min(1000, Math.max(pageLimit, pageLimit * 2));
+    const { data, error } = await db.rpc("norva_select_catalog_title_background_page", {
+      p_mode: mode,
+      p_limit: pageLimit,
+      p_scan_limit: scanLimit,
+      p_retry_before: retryBefore,
+      p_cursor: cursor,
+      p_user_id: userId,
+    });
+    if (error) throw backgroundProjectionUnavailable();
+    return normalizeCatalogBackgroundPage(data, mode, pageLimit, userId);
+  }, maxItems, { initialCursor });
+  return {
+    items: walked.items as CatalogBackgroundItem[],
+    complete: walked.complete,
+    nextCursor: walked.nextCursor,
+    pages: walked.pages,
+  };
+}
+
+function isCatalogBackgroundCasConflict(error: unknown): boolean {
+  return isRecord(error) && String(error.code ?? "") === "40001";
+}
+
+async function applyCatalogBackgroundResult(
+  db: SupabaseClient,
+  mode: CatalogBackgroundMode,
+  item: CatalogBackgroundItem,
+  expectedVisibilityEpoch: string,
+  result: JsonRecord,
+): Promise<{ visibilityEpoch: string; matched: boolean; visibleChanged: boolean } | null> {
+  const { data, error } = await db.rpc("norva_apply_catalog_title_background_result", {
+    p_mode: mode,
+    p_user_id: item.userId,
+    p_title_id: item.id,
+    p_storage_kind: item.storageKind,
+    p_expected_visibility_epoch: expectedVisibilityEpoch,
+    p_expected_payload_updated_at: item.payloadUpdatedAt,
+    p_expected_display_generation_id: item.displayGenerationId,
+    p_result: result,
+  });
+  if (error) {
+    if (isCatalogBackgroundCasConflict(error)) return null;
+    throw backgroundProjectionUnavailable();
+  }
+  if (!isRecord(data) || data.contract !== "catalog-title-background-writer-v3"
+      || data.mode !== mode || data.titleId !== item.id
+      || data.storageKind !== item.storageKind || data.applied !== true
+      || typeof data.matched !== "boolean" || typeof data.visibleChanged !== "boolean") {
+    throw backgroundProjectionUnavailable();
+  }
+  return {
+    visibilityEpoch: bigintProofOrThrow(data.visibilityEpoch, "writer visibility epoch"),
+    matched: data.matched,
+    visibleChanged: data.visibleChanged,
+  };
+}
+
+async function applyCatalogBackgroundOutcomes(
+  db: SupabaseClient,
+  mode: CatalogBackgroundMode,
+  items: CatalogBackgroundItem[],
+  outcomes: Array<JsonRecord | null>,
+  concurrency: number,
+): Promise<{ applied: number; matched: number; visibleChanged: number; stale: number }> {
+  const groups = new Map<string, Array<{ item: CatalogBackgroundItem; outcome: JsonRecord | null }>>();
+  for (let index = 0; index < items.length; index += 1) {
+    const group = groups.get(items[index].userId) ?? [];
+    group.push({ item: items[index], outcome: outcomes[index] ?? null });
+    groups.set(items[index].userId, group);
+  }
+  const queues = [...groups.values()];
+  const summary = { applied: 0, matched: 0, visibleChanged: 0, stale: 0 };
+  let next = 0;
+  const worker = async () => {
+    while (next < queues.length) {
+      const queue = queues[next++];
+      let rollingEpoch: string | null = null;
+      for (const entry of queue) {
+        if (!entry.outcome) continue;
+        const written = await applyCatalogBackgroundResult(
+          db,
+          mode,
+          entry.item,
+          rollingEpoch ?? entry.item.visibilityEpoch,
+          entry.outcome,
+        );
+        if (!written) {
+          summary.stale += 1;
+          continue;
+        }
+        rollingEpoch = written.visibilityEpoch;
+        summary.applied += 1;
+        if (written.matched) summary.matched += 1;
+        if (written.visibleChanged) summary.visibleChanged += 1;
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(Math.max(1, concurrency), queues.length) }, worker));
+  return summary;
+}
+
 // Provider VOD/series lists carry no release year, and many cloud_titles rows are
 // "provider_unverified" (TMDB id known, details never fetched) so their
 // release_year is null — leaving blanks on the browse grid even after the
@@ -627,81 +1091,76 @@ async function cronBackfillYears(db: SupabaseClient, limit: number, reset: boole
   // known TMDB no-date failures stop re-burning API calls on every pass, and each pass converges
   // on NEW/retryable candidates only.
   const retryBefore = new Date(Date.now() - 90 * 24 * 3600 * 1000).toISOString();
-  let q = db
-    .from("cloud_titles")
-    .select("id, item_type, provider_tmdb_id")
-    .is("release_year", null)
-    .not("provider_tmdb_id", "is", null)
-    .or(`year_backfill_attempted_at.is.null,year_backfill_attempted_at.lt.${retryBefore}`)
-    .order("id", { ascending: true })
-    .limit(limit);
-  if (cursor) q = q.gt("id", cursor);
+  const selected = await selectCatalogBackgroundBatch(
+    db,
+    "year_pending",
+    limit,
+    retryBefore,
+    cursor,
+  );
+  const rows = selected.items;
+  const scanned = rows.length;
 
-  const { data: rows, error } = await q;
-  if (error) throw new HttpError(500, "backfill select failed", error.message);
-
-  const scanned = rows?.length ?? 0;
-  if (!scanned) {
-    await db.from("norva_year_backfill_state")
-      .update({ last_id: null, done: true, last_run: { scanned: 0, done: true, wrapped: true, at: new Date().toISOString() }, updated_at: new Date().toISOString() })
-      .eq("id", 1);
-    return { scanned: 0, distinct: 0, found: 0, updated: 0, done: true, wrapped: true };
-  }
-
-  // One fetch per distinct (item_type, tmdbId); remember the cursor end.
-  const distinct = new Map<string, { itemType: string; tmdbId: string }>();
-  let maxId = cursor;
-  for (const row of rows!) {
-    maxId = String(row.id);
-    const itemType = String(row.item_type);
-    const tmdbId = stringOr(row.provider_tmdb_id, "");
+  // One provider fetch per distinct semantic identity, followed by one fenced
+  // writer call per selected P/G payload. No base-table attempt marker is ever
+  // stamped after a rejected CAS.
+  const distinct = new Map<string, { itemType: "movie" | "series"; tmdbId: string }>();
+  for (const row of rows) {
+    const itemType = row.itemType;
+    const tmdbId = stringOr(row.providerTmdbId, "");
     if (!tmdbId) continue;
-    distinct.set(`${itemType}:${tmdbId}`, { itemType, tmdbId });
+    const key = `${itemType}:${tmdbId}`;
+    if (!distinct.has(key)) distinct.set(key, { itemType, tmdbId });
   }
 
   // Fetch years with bounded concurrency (TMDB tolerates ~40 in flight).
   const entries = [...distinct.values()];
-  const yearByKey = new Map<string, number>();
+  const yearByKey = new Map<string, number | null | "error">();
   let next = 0;
   const worker = async () => {
     while (next < entries.length) {
       const entry = entries[next++];
       const year = await fetchTmdbYear(apiKey, entry.itemType, entry.tmdbId);
-      if (typeof year === "number") yearByKey.set(`${entry.itemType}:${entry.tmdbId}`, year);
+      yearByKey.set(`${entry.itemType}:${entry.tmdbId}`, year);
     }
   };
   await Promise.all(Array.from({ length: Math.min(Math.max(1, concurrency), entries.length) }, worker));
 
-  // Write each found year to every row that shares the id and is still null.
-  let updated = 0;
-  for (const entry of entries) {
-    const year = yearByKey.get(`${entry.itemType}:${entry.tmdbId}`);
-    if (!year) continue;
-    const { count } = await db
-      .from("cloud_titles")
-      .update({ release_year: year }, { count: "exact" })
-      .eq("item_type", entry.itemType)
-      .eq("provider_tmdb_id", entry.tmdbId)
-      .is("release_year", null);
-    updated += count ?? 0;
-  }
+  const outcomes = rows.map((row): JsonRecord | null => {
+    const key = `${row.itemType}:${stringOr(row.providerTmdbId, "")}`;
+    const year = yearByKey.get(key);
+    // Transient provider failures remain unstamped and retryable. A definitive
+    // no-date result is written as null so SQL records the bounded attempt.
+    if (year === undefined || year === "error") return null;
+    return { releaseYear: year };
+  });
+  const applied = await applyCatalogBackgroundOutcomes(
+    db,
+    "year_pending",
+    rows,
+    outcomes,
+    concurrency,
+  );
 
-  // Mark EVERY scanned row as attempted (found or not) — successes leave the candidate set via
-  // release_year anyway; failures stop being re-fetched for 90 days. Chunked (URL-length safety).
-  const scannedIds = rows!.map((r) => String(r.id));
-  const attemptedAt = new Date().toISOString();
-  for (let i = 0; i < scannedIds.length; i += 200) {
-    await db.from("cloud_titles").update({ year_backfill_attempted_at: attemptedAt })
-      .in("id", scannedIds.slice(i, i + 200));
-  }
-
-  const passEnded = scanned < limit;
+  const passEnded = selected.complete;
   const done = priorDone || passEnded;              // latched: never flips back to false
-  const summary = { scanned, distinct: distinct.size, found: yearByKey.size, updated, done };
+  const summary = {
+    scanned,
+    distinct: distinct.size,
+    found: [...yearByKey.values()].filter((year) => typeof year === "number").length,
+    updated: applied.matched,
+    stale: applied.stale,
+    done,
+  };
   await db.from("norva_year_backfill_state")
-    .update({ last_id: passEnded ? null : maxId, done, last_run: { ...summary, wrapped: passEnded, at: new Date().toISOString() }, updated_at: new Date().toISOString() })
+    .update({
+      last_id: passEnded ? null : lastIdFromCatalogBackgroundCursor(selected.nextCursor),
+      done,
+      last_run: { ...summary, wrapped: passEnded, at: new Date().toISOString() },
+      updated_at: new Date().toISOString(),
+    })
     .eq("id", 1);
-  return summary;
+  return { ...summary, wrapped: passEnded };
 }
 
 // Re-validate titles that have a provider TMDB id but didn't pass the original
@@ -723,104 +1182,79 @@ async function cronRevalidate(db: SupabaseClient, limit: number, reset: boolean,
   }
 
   const retryBefore = new Date(Date.now() - 90 * 24 * 3600 * 1000).toISOString();
-  let q = db
-    .from("cloud_titles")
-    .select("id, item_type, provider_tmdb_id, title, original_title, release_year, metadata, poster_url, backdrop_url")
-    .in("match_status", ["provider_unverified", "weak"])
-    .not("provider_tmdb_id", "is", null)
-    .neq("provider_tmdb_id", "0")
-    .or(`revalidate_attempted_at.is.null,revalidate_attempted_at.lt.${retryBefore}`)
-    .order("id", { ascending: true })
-    .limit(limit);
-  if (cursor) q = q.gt("id", cursor);
-
-  const { data: rows, error } = await q;
-  if (error) throw new HttpError(500, "revalidate select failed", error.message);
-
-  const scanned = rows?.length ?? 0;
-  if (!scanned) {
-    await db.from("norva_revalidate_state")
-      .update({ last_id: null, done: true, last_run: { scanned: 0, revalidated: 0, done: true, wrapped: true, at: new Date().toISOString() }, updated_at: new Date().toISOString() })
-      .eq("id", 1);
-    return { scanned: 0, revalidated: 0, done: true, wrapped: true };
-  }
-
-  const maxId = String(rows![rows!.length - 1].id);
+  const selected = await selectCatalogBackgroundBatch(
+    db,
+    "revalidate_pending",
+    limit,
+    retryBefore,
+    cursor,
+  );
+  const rows = selected.items;
+  const scanned = rows.length;
+  const outcomes: Array<JsonRecord | null> = Array.from({ length: rows.length }, () => null);
   let next = 0;
-  let revalidated = 0;
   const worker = async () => {
-    while (next < rows!.length) {
-      const row = rows![next++];
-      const tmdbId = stringOr(row.provider_tmdb_id, "");
+    while (next < rows.length) {
+      const index = next++;
+      const row = rows[index];
+      const tmdbId = stringOr(row.providerTmdbId, "");
       if (!tmdbId) continue;
-      const itemType = row.item_type === "series" ? "series" : "movie";
       try {
         const validation = await validateTmdbCandidate(apiKey, {
-          itemType,
+          itemType: row.itemType,
           tmdbId,
-          title: stringOr(row.original_title ?? row.title, ""),
-          year: row.release_year != null ? String(row.release_year) : null,
+          title: stringOr(row.originalTitle ?? row.title, ""),
+          year: row.releaseYear != null ? String(row.releaseYear) : null,
         });
-        if (!validation.valid) continue;
-        const metadata = isRecord(row.metadata) ? row.metadata : {};
-        const { error: upErr } = await db.from("cloud_titles").update({
-          match_status: "provider_verified",
+        if (!validation.valid) {
+          outcomes[index] = { matched: false };
+          continue;
+        }
+        outcomes[index] = {
+          matched: true,
           title: validation.title || row.title,
-          poster_url: stringOr(row.poster_url, "") || validation.posterUrl,
-          backdrop_url: stringOr(row.backdrop_url, "") || validation.backdropUrl,
-          release_year: row.release_year ?? (validation.year ? Number(validation.year) : null),
+          originalTitle: row.originalTitle,
+          releaseYear: row.releaseYear ?? (validation.year ? Number(validation.year) : null),
+          posterUrl: row.posterUrl || validation.posterUrl,
+          backdropUrl: row.backdropUrl || validation.backdropUrl,
           metadata: {
-            ...metadata,
+            ...row.metadata,
             tmdb: validation.details,
             i18n: validation.i18n,
-            tmdbValidation: { valid: true, title: validation.title, year: validation.year, confidence: validation.confidence, reason: validation.reason },
+            tmdbValidation: {
+              valid: true,
+              title: validation.title,
+              year: validation.year,
+              confidence: validation.confidence,
+              reason: validation.reason,
+            },
             revalidatedAt: new Date().toISOString(),
           },
-        }).eq("id", row.id);
-        if (!upErr) revalidated += 1;
-        // Dual-write the validation into the GLOBAL catalog_titles cache so it is shared
-        // cross-user and durable against re-sync: cloud_enrich_titles_from_catalog then fans it
-        // out to every other user's copy of this title, and the projection reuses it on re-sync
-        // instead of reverting to the raw provider title. audio_languages is intentionally omitted
-        // so PostgREST preserves the crawled value (never clobber it — same rule as the projection).
-        try {
-          const nowIso = new Date().toISOString();
-          await db.from("catalog_titles").upsert({
-            item_type: itemType,
-            provider_tmdb_id: tmdbId,
-            title: validation.title,
-            original_title: stringOr(row.original_title, "") || null,
-            release_year: validation.year ? Number(validation.year) : (row.release_year ?? null),
-            poster_url: validation.posterUrl,
-            backdrop_url: validation.backdropUrl,
-            metadata: {
-              tmdb: validation.details,
-              i18n: validation.i18n,
-              tmdbValidation: { valid: true, title: validation.title, year: validation.year, confidence: validation.confidence, reason: validation.reason },
-            },
-            enriched_at: nowIso,
-            updated_at: nowIso,
-          }, { onConflict: "item_type,provider_tmdb_id" });
-        } catch (_) { /* global cache write is best-effort */ }
+        };
       } catch (_) { /* a TMDB hiccup must not abort the batch */ }
     }
   };
-  await Promise.all(Array.from({ length: Math.min(Math.max(1, concurrency), rows!.length) }, worker));
+  await Promise.all(Array.from({ length: Math.min(Math.max(1, concurrency), rows.length) }, worker));
+  const applied = await applyCatalogBackgroundOutcomes(
+    db,
+    "revalidate_pending",
+    rows,
+    outcomes,
+    concurrency,
+  );
 
-  const scannedIds = rows!.map((r) => String(r.id));
-  const attemptedAt = new Date().toISOString();
-  for (let i = 0; i < scannedIds.length; i += 200) {
-    await db.from("cloud_titles").update({ revalidate_attempted_at: attemptedAt })
-      .in("id", scannedIds.slice(i, i + 200));
-  }
-
-  const passEnded = scanned < limit;
+  const passEnded = selected.complete;
   const done = priorDone || passEnded;
-  const summary = { scanned, revalidated, done };
+  const summary = { scanned, revalidated: applied.matched, stale: applied.stale, done };
   await db.from("norva_revalidate_state")
-    .update({ last_id: passEnded ? null : maxId, done, last_run: { ...summary, wrapped: passEnded, at: new Date().toISOString() }, updated_at: new Date().toISOString() })
+    .update({
+      last_id: passEnded ? null : lastIdFromCatalogBackgroundCursor(selected.nextCursor),
+      done,
+      last_run: { ...summary, wrapped: passEnded, at: new Date().toISOString() },
+      updated_at: new Date().toISOString(),
+    })
     .eq("id", 1);
-  return summary;
+  return { ...summary, wrapped: passEnded };
 }
 
 // Pre-warm the GLOBAL catalog_titles.i18n for validated matches that still lack any
@@ -913,63 +1347,69 @@ async function cronSearchMatch(db: SupabaseClient, limit: number, reset: boolean
   }
 
   const retryBefore = new Date(Date.now() - 90 * 24 * 3600 * 1000).toISOString();
-  let q = db
-    .from("cloud_titles")
-    .select("id, item_type, title, original_title, release_year, metadata, poster_url, backdrop_url")
-    .eq("match_status", "unmatched")
-    .gt("variant_count", 0) // only spend TMDB calls on titles a user can actually browse/play
-    .or(`search_match_attempted_at.is.null,search_match_attempted_at.lt.${retryBefore}`)
-    .order("id", { ascending: true })
-    .limit(limit);
-  if (focused) q = q.eq("user_id", userId);
-  if (cursor) q = q.gt("id", cursor);
-
-  const { data: rows, error } = await q;
-  if (error) throw new HttpError(500, "search-match select failed", error.message);
-
-  const scanned = rows?.length ?? 0;
-  if (!scanned) {
-    if (!focused) {
-      await db.from("norva_search_match_state")
-        .update({ last_id: null, done: true, last_run: { scanned: 0, matched: 0, done: true, wrapped: true, at: new Date().toISOString() }, updated_at: new Date().toISOString() })
-        .eq("id", 1);
-    }
-    return { scanned: 0, matched: 0, done: true, wrapped: true, focused };
-  }
-
-  const maxId = String(rows![rows!.length - 1].id);
+  const selected = await selectCatalogBackgroundBatch(
+    db,
+    "search_pending",
+    limit,
+    retryBefore,
+    cursor,
+    userId,
+  );
+  const rows = selected.items;
+  const scanned = rows.length;
+  const outcomes: Array<JsonRecord | null> = Array.from({ length: rows.length }, () => null);
   let next = 0;
-  let matched = 0;
   const worker = async () => {
-    while (next < rows!.length) {
-      const row = rows![next++];
-      const itemType = row.item_type === "series" ? "series" : "movie";
-      const title = stringOr(row.original_title ?? row.title, "");
+    while (next < rows.length) {
+      const index = next++;
+      const row = rows[index];
+      const title = stringOr(row.originalTitle ?? row.title, "");
       if (!title) continue;
       try {
-        const match = await searchTmdbMatch(apiKey, itemType, title, row.release_year != null ? String(row.release_year) : null, stringOr(row.poster_url, "") || null);
-        if (!match) continue;
-        const metadata = isRecord(row.metadata) ? row.metadata : {};
-        const { error: upErr } = await db.from("cloud_titles").update({
-          provider_tmdb_id: match.tmdbId,
-          match_status: "provider_verified",
+        const match = await searchTmdbMatch(
+          apiKey,
+          row.itemType,
+          title,
+          row.releaseYear != null ? String(row.releaseYear) : null,
+          row.posterUrl,
+        );
+        if (!match) {
+          outcomes[index] = { matched: false };
+          continue;
+        }
+        outcomes[index] = {
+          matched: true,
+          providerTmdbId: match.tmdbId,
           title: match.title || row.title,
-          poster_url: match.posterUrl || stringOr(row.poster_url, "") || null,
-          backdrop_url: match.backdropUrl || stringOr(row.backdrop_url, "") || null,
-          release_year: match.year ? Number(match.year) : row.release_year,
+          originalTitle: row.originalTitle,
+          posterUrl: match.posterUrl || row.posterUrl,
+          backdropUrl: match.backdropUrl || row.backdropUrl,
+          releaseYear: match.year ? Number(match.year) : row.releaseYear,
           metadata: {
-            ...metadata,
+            ...row.metadata,
             tmdb: match.details,
             i18n: match.i18n,
-            tmdbValidation: { valid: true, title: match.title, year: match.year, confidence: match.confidence, reason: match.reason },
+            tmdbValidation: {
+              valid: true,
+              title: match.title,
+              year: match.year,
+              confidence: match.confidence,
+              reason: match.reason,
+            },
             searchMatchedAt: new Date().toISOString(),
           },
-        }).eq("id", row.id);
-        if (!upErr) matched += 1;
+        };
       } catch (_) { /* a TMDB hiccup must not abort the batch */ }
     }
   };
-  await Promise.all(Array.from({ length: Math.min(Math.max(1, concurrency), rows!.length) }, worker));
+  await Promise.all(Array.from({ length: Math.min(Math.max(1, concurrency), rows.length) }, worker));
+  const applied = await applyCatalogBackgroundOutcomes(
+    db,
+    "search_pending",
+    rows,
+    outcomes,
+    concurrency,
+  );
 
   // Note: match-driven merge + grid propagation are NOT done here. Once a title gains
   // a provider_tmdb_id, the reconcile pipeline folds it in: norva_canonicalize_titles_for_user
@@ -978,23 +1418,21 @@ async function cronSearchMatch(db: SupabaseClient, limit: number, reset: boolean
   // norva-catalog-reconcile cron (0-6h). Keeping search-match single-purpose avoids the
   // grid-layer coupling and the per-user RPC fan-out that would risk the 120s cron timeout.
 
-  const scannedIds = rows!.map((r) => String(r.id));
-  const attemptedAt = new Date().toISOString();
-  for (let i = 0; i < scannedIds.length; i += 200) {
-    await db.from("cloud_titles").update({ search_match_attempted_at: attemptedAt })
-      .in("id", scannedIds.slice(i, i + 200));
-  }
-
-  const passEnded = scanned < limit;
+  const passEnded = selected.complete;
   const done = priorDone || passEnded;
-  const summary = { scanned, matched, done };
+  const summary = { scanned, matched: applied.matched, stale: applied.stale, done };
   // Focused per-user passes never touch the global cursor/state.
   if (!focused) {
     await db.from("norva_search_match_state")
-      .update({ last_id: passEnded ? null : maxId, done, last_run: { ...summary, wrapped: passEnded, at: new Date().toISOString() }, updated_at: new Date().toISOString() })
+      .update({
+        last_id: passEnded ? null : lastIdFromCatalogBackgroundCursor(selected.nextCursor),
+        done,
+        last_run: { ...summary, wrapped: passEnded, at: new Date().toISOString() },
+        updated_at: new Date().toISOString(),
+      })
       .eq("id", 1);
   }
-  return { ...summary, focused };
+  return { ...summary, focused, wrapped: passEnded };
 }
 
 // Dynamic, source-backed catalogue/audio maintenance fleet. Claims are durable
@@ -1117,6 +1555,7 @@ async function runProviderOverviewFleetLane(
   db: SupabaseClient,
   claim: EnrichmentFleetClaim,
 ) {
+  const accessSnapshot = await readCatalogAccessSnapshot(claim.source_id, claim.user_id, db, false);
   const { data: source, error } = await db
     .from("cloud_sources")
     .select("source_type,config_ciphertext")
@@ -1160,31 +1599,60 @@ async function runProviderOverviewFleetLane(
   if (!source.config_ciphertext) throw new Error("Xtream source has no managed cloud configuration");
   const runtimeConfig = await getRuntimeConfig(db);
   const config = await decryptSourceConfig(String(source.config_ciphertext), runtimeConfig);
+  await assertCatalogSnapshotCurrent(claim.source_id, claim.user_id, accessSnapshot, db);
   const serverUrl = normalizeBaseUrl(stringOr(config.serverUrl, ""));
-  const username = stringOr(config.username, "");
-  const password = stringOr(config.password, "");
+  const username = typeof config.username === "string" && config.username.trim() ? config.username : "";
+  const password = typeof config.password === "string" && config.password.length ? config.password : "";
   if (!username || !password) throw new Error("Xtream source credentials are incomplete");
+  const directFallbackSnapshot = await buildProviderDirectFallbackSnapshot({
+    serverUrl,
+    username,
+    configCiphertext: String(source.config_ciphertext),
+    configRevision: accessSnapshot.configRevision,
+  });
+  const runDirectFallback = createSourceDirectFallbackLeaseRunner({
+    db,
+    sourceId: claim.source_id,
+    userId: claim.user_id,
+    ownerScope: "provider-overview",
+    ...directFallbackSnapshot,
+  });
 
-  return await backfillProviderOverviews({
+  const result = await backfillProviderOverviews({
     db,
     userId: claim.user_id,
     sourceId: claim.source_id,
+    generation: accessSnapshot,
     limit: 4,
     concurrency: 2,
-    fetchVodInfo: (externalId) => fetchProviderMetadata(runtimeConfig, {
-      serverUrl,
-      username,
-      password,
-      action: "get_vod_info",
-      params: { vod_id: externalId },
-      timeoutMs: 12_000,
-    }),
+    assertSourceCurrent: () => assertCatalogSnapshotCurrent(
+      claim.source_id,
+      claim.user_id,
+      accessSnapshot,
+      db,
+    ),
+    fetchVodInfo: async (externalId) => {
+      await assertCatalogSnapshotCurrent(claim.source_id, claim.user_id, accessSnapshot, db);
+      const payload = await fetchProviderMetadata(runtimeConfig, {
+        serverUrl,
+        username,
+        password,
+        action: "get_vod_info",
+        params: { vod_id: externalId },
+        timeoutMs: 12_000,
+      }, { runDirectFallback });
+      await assertCatalogSnapshotCurrent(claim.source_id, claim.user_id, accessSnapshot, db);
+      return payload;
+    },
   });
+  await assertCatalogSnapshotCurrent(claim.source_id, claim.user_id, accessSnapshot, db);
+  return result;
 }
 
 async function recordSeriesInventoryOutcome(
   db: SupabaseClient,
   claim: EnrichmentFleetClaim,
+  generation: CatalogAccessSnapshot,
   parentSeriesId: string,
   success: boolean,
   episodeCount: number | null,
@@ -1194,6 +1662,7 @@ async function recordSeriesInventoryOutcome(
   const { error } = await db.rpc("record_catalog_series_inventory_outcome", {
     p_user: claim.user_id,
     p_source: claim.source_id,
+    ...catalogGenerationRpcFence(generation),
     p_parent_series_id: parentSeriesId,
     p_success: success,
     p_episode_count: episodeCount,
@@ -1201,6 +1670,7 @@ async function recordSeriesInventoryOutcome(
     p_details: details,
   });
   if (error) {
+    if (isCatalogGenerationSuperseded(error)) throw error;
     console.warn(
       "[enrichment-fleet] unable to record series inventory outcome",
       claim.source_id,
@@ -1263,6 +1733,25 @@ async function recordProviderInventoryOutcome(
   } catch (_) { /* best-effort provider-specific retry state */ }
 }
 
+async function discardEnrichmentSeriesInfoCacheWrite(
+  db: SupabaseClient,
+  serverHost: string,
+  seriesId: string,
+  writeMarker: string,
+): Promise<void> {
+  try {
+    await db
+      .from("cloud_series_info_cache")
+      .delete()
+      .eq("server_host", serverHost)
+      .eq("series_id", seriesId)
+      .eq("fetched_at", writeMarker)
+      .eq("updated_at", writeMarker);
+  } catch (_) {
+    // Best effort. Visibility guards still prevent any subsequent user-facing use.
+  }
+}
+
 async function runSeriesInventoryFleetLane(
   db: SupabaseClient,
   claim: EnrichmentFleetClaim,
@@ -1289,6 +1778,8 @@ async function runSeriesInventoryFleetLane(
       hasMore: false,
     };
   }
+
+  const accessSnapshot = await readCatalogAccessSnapshot(claim.source_id, claim.user_id, db, false);
 
   const { data: source, error: sourceError } = await db
     .from("cloud_sources")
@@ -1323,9 +1814,10 @@ async function runSeriesInventoryFleetLane(
     };
   }
   const config = await decryptSourceConfig(String(source.config_ciphertext), runtimeConfig);
+  await assertCatalogSnapshotCurrent(claim.source_id, claim.user_id, accessSnapshot, db);
   const serverUrl = normalizeBaseUrl(stringOr(config.serverUrl, ""));
-  const username = stringOr(config.username, "");
-  const password = stringOr(config.password, "");
+  const username = typeof config.username === "string" && config.username.trim() ? config.username : "";
+  const password = typeof config.password === "string" && config.password.length ? config.password : "";
   if (!serverUrl || !username || !password) {
     throw new Error("Xtream source credentials are incomplete");
   }
@@ -1336,6 +1828,12 @@ async function runSeriesInventoryFleetLane(
     throw new Error("Xtream source host is invalid");
   }
   const accountKey = `${serverHost}/${username}`;
+  const directFallbackSnapshot = await buildProviderDirectFallbackSnapshot({
+    serverUrl,
+    username,
+    configCiphertext: String(source.config_ciphertext),
+    configRevision: accessSnapshot.configRevision,
+  });
   const providerBusy = async (): Promise<"busy" | "idle" | "unavailable"> => {
     try {
       const { data, error } = await db.rpc("provider_account_busy", {
@@ -1395,6 +1893,7 @@ async function runSeriesInventoryFleetLane(
   let skipped: string | null = null;
 
   for (const parentSeriesId of candidates) {
+    await assertCatalogSnapshotCurrent(claim.source_id, claim.user_id, accessSnapshot, db);
     const availability = await providerBusy();
     if (availability !== "idle") {
       skipped = availability === "busy"
@@ -1404,6 +1903,7 @@ async function runSeriesInventoryFleetLane(
     }
     processed += 1;
     try {
+      await assertCatalogSnapshotCurrent(claim.source_id, claim.user_id, accessSnapshot, db);
       const inventoryResult = await fetchSeriesInventoryMetadata(
         runtimeConfig,
         {
@@ -1412,8 +1912,12 @@ async function runSeriesInventoryFleetLane(
           password,
           parentSeriesId,
           userId: claim.user_id,
+          sourceId: claim.source_id,
+          db,
+          ...directFallbackSnapshot,
         },
       );
+      await assertCatalogSnapshotCurrent(claim.source_id, claim.user_id, accessSnapshot, db);
       const payload = recordOrEmpty(stripSeriesInventoryCredentials(
         inventoryResult.payload,
       ));
@@ -1421,11 +1925,13 @@ async function runSeriesInventoryFleetLane(
       if (!Array.isArray(episodes) && !isRecord(episodes)) {
         throw new Error("Provider returned no authoritative episode inventory");
       }
+      await assertCatalogSnapshotCurrent(claim.source_id, claim.user_id, accessSnapshot, db);
       const { data: episodeCount, error: registerError } = await db.rpc(
         "register_catalog_series_episodes",
         {
           p_user_id: claim.user_id,
           p_source_id: claim.source_id,
+          ...catalogGenerationRpcFence(accessSnapshot),
           p_parent_series_id: parentSeriesId,
           p_payload: payload,
         },
@@ -1437,6 +1943,7 @@ async function runSeriesInventoryFleetLane(
       if (count <= 0) {
         throw new Error("Provider returned an empty or non-authoritative episode inventory");
       }
+      await assertCatalogSnapshotCurrent(claim.source_id, claim.user_id, accessSnapshot, db);
       const nowIso = new Date().toISOString();
       const { error: cacheError } = await db.from("cloud_series_info_cache").upsert(
         {
@@ -1450,18 +1957,29 @@ async function runSeriesInventoryFleetLane(
       );
       if (cacheError) {
         console.warn("[enrichment-fleet] series-info cache write deferred", cacheError.message);
+      } else {
+        try {
+          await assertCatalogSnapshotCurrent(claim.source_id, claim.user_id, accessSnapshot, db);
+        } catch (guardError) {
+          await discardEnrichmentSeriesInfoCacheWrite(db, serverHost, parentSeriesId, nowIso);
+          throw guardError;
+        }
       }
       try {
+        await assertCatalogSnapshotCurrent(claim.source_id, claim.user_id, accessSnapshot, db);
         await db.rpc("hydrate_catalog_episode_file_tracks", {
           p_user_id: claim.user_id,
           p_source_id: claim.source_id,
+          ...catalogGenerationRpcFence(accessSnapshot),
           p_parent_series_id: parentSeriesId,
           p_episode_ids: null,
         });
       } catch (_) { /* best-effort cache reuse */ }
+      await assertCatalogSnapshotCurrent(claim.source_id, claim.user_id, accessSnapshot, db);
       await recordSeriesInventoryOutcome(
         db,
         claim,
+        accessSnapshot,
         parentSeriesId,
         true,
         count,
@@ -1478,6 +1996,19 @@ async function runSeriesInventoryFleetLane(
       });
       registeredEpisodes += count;
     } catch (error) {
+      if (isCatalogAccessGuardError(error)) {
+        skipped = "source-catalog-changed";
+        break;
+      }
+      try {
+        await assertCatalogSnapshotCurrent(claim.source_id, claim.user_id, accessSnapshot, db);
+      } catch (guardError) {
+        if (isCatalogAccessGuardError(guardError)) {
+          skipped = "source-catalog-changed";
+          break;
+        }
+        throw guardError;
+      }
       const failure = classifySeriesInventoryFailure(error);
       // Viewer and local background work always outrank inventory. A race can
       // happen after provider_account_busy() and must rotate the lane without
@@ -1518,6 +2049,7 @@ async function runSeriesInventoryFleetLane(
       await recordSeriesInventoryOutcome(
         db,
         claim,
+        accessSnapshot,
         parentSeriesId,
         false,
         null,
@@ -1600,7 +2132,23 @@ async function runEnrichmentFleetClaim(
     : undefined;
   let responseReceived = false;
   let localLane = false;
+  let accessSnapshot: CatalogAccessSnapshot | null = null;
   try {
+    // The legacy SQL claim queue predates replacement staging. Re-check the
+    // centralized predicate under the lease before any local provider call or
+    // playback-worker dispatch. Hidden claims are released normally and delayed
+    // so they cannot monopolize the bounded fleet batch.
+    if (!(await sourceCatalogVisible(claim.source_id, claim.user_id, db))) {
+      await finishEnrichmentFleetClaim(
+        db,
+        claim,
+        true,
+        24 * 60 * 60,
+        { skipped: "source_not_catalog_visible" },
+      );
+      return;
+    }
+    accessSnapshot = await readCatalogAccessSnapshot(claim.source_id, claim.user_id, db, false);
     if (seriesInventory) {
       localLane = true;
       const result = await runSeriesInventoryFleetLane(db, claim);
@@ -1628,6 +2176,7 @@ async function runEnrichmentFleetClaim(
       return;
     }
 
+    await assertCatalogSnapshotCurrent(claim.source_id, claim.user_id, accessSnapshot, db);
     const response = await fetch(
       `${trimTrailingSlash(SUPABASE_URL)}/functions/v1/norva-playback/audio-backfill`,
       {
@@ -1662,6 +2211,7 @@ async function runEnrichmentFleetClaim(
     );
     responseReceived = true;
     const payload = await response.json().catch(() => ({}));
+    await assertCatalogSnapshotCurrent(claim.source_id, claim.user_id, accessSnapshot, db);
     if (!response.ok) {
       throw new Error(`audio-backfill ${response.status}: ${stringOr(recordOrEmpty(payload).error, "request failed")}`);
     }
@@ -1674,6 +2224,35 @@ async function runEnrichmentFleetClaim(
       summary,
     );
   } catch (error) {
+    if (!isCatalogAccessGuardError(error) && accessSnapshot) {
+      try {
+        await assertCatalogSnapshotCurrent(claim.source_id, claim.user_id, accessSnapshot, db);
+      } catch (guardError) {
+        if (isCatalogAccessGuardError(guardError)) {
+          await finishEnrichmentFleetClaim(
+            db,
+            claim,
+            true,
+            24 * 60 * 60,
+            { skipped: "source_not_catalog_visible" },
+            localLane || responseReceived,
+          );
+          return;
+        }
+        throw guardError;
+      }
+    }
+    if (isCatalogAccessGuardError(error)) {
+      await finishEnrichmentFleetClaim(
+        db,
+        claim,
+        true,
+        24 * 60 * 60,
+        { skipped: "source_not_catalog_visible" },
+        localLane || responseReceived,
+      );
+      return;
+    }
     const failures = Math.max(0, Number(claim.failure_count) || 0) + 1;
     const retrySeconds = Math.min(6 * 60 * 60, 5 * 60 * Math.pow(2, Math.min(failures - 1, 6)));
     const message = error instanceof Error ? error.message : "audio-backfill failed";
@@ -1779,7 +2358,7 @@ async function cronRefreshDue(db: SupabaseClient) {
   const asMs = (v: unknown) => { const m = new Date(String(v ?? "")).getTime(); return Number.isFinite(m) ? m : 0; };
 
   const { data: due, error } = await db
-    .from("cloud_sources")
+    .from("cloud_catalog_visible_sources")
     .select("id,user_id,source_type,auto_refresh_state,auto_refresh_next_at")
     .in("source_type", ["xtream", "m3u"])
     .is("deleted_at", null) // never auto-refresh a removed (soft-deleted) source (null next_at reads as "due")
@@ -1876,7 +2455,7 @@ async function cronResumeStuck(db: SupabaseClient) {
   // (finalizeCloudSource resets sync_status back to "syncing" on its first batch). A 60s
   // staleness gate keeps this to ~one retry/min for a genuinely broken source.
   const { data, error } = await db
-    .from("cloud_sources")
+    .from("cloud_catalog_visible_sources")
     .select("id,user_id,sync_status,config_hint")
     .in("sync_status", ["syncing", "error"])
     .eq("source_type", "xtream")
@@ -1934,7 +2513,7 @@ async function cronResumeStuck(db: SupabaseClient) {
 // the background, returning immediately.
 async function cronFinalizeSource(db: SupabaseClient, sourceId: string, country: string | null) {
   const { data: source, error } = await db
-    .from("cloud_sources")
+    .from("cloud_catalog_visible_sources")
     .select("id,user_id")
     .eq("id", sourceId)
     .maybeSingle();
@@ -1965,7 +2544,7 @@ async function admitHeavyImport(db: SupabaseClient, sourceId: string, createdAt:
   if (max <= 0) return true;     // cap disabled (env 0)
   if (!createdAt) return true;   // no ordering key (shouldn't happen) → don't strand it
   try {
-    const { count, error } = await db.from("cloud_sources")
+    const { count, error } = await db.from("cloud_catalog_visible_sources")
       .select("id", { count: "exact", head: true })
       .eq("sync_status", "syncing")
       .eq("source_type", "xtream")
@@ -1985,6 +2564,8 @@ async function admitHeavyImport(db: SupabaseClient, sourceId: string, createdAt:
 // next isolate at the budget — a huge catalogue (~200 batches) finishes
 // hands-off, app-closed, without the client's ~160-call ceiling.
 async function driveFinalizeToReady(db: SupabaseClient, sourceId: string, userId: string, country: string | null) {
+  if (!(await sourceCatalogVisible(sourceId, userId, db))) return;
+  const accessSnapshot = await readCatalogAccessSnapshot(sourceId, userId, db, false);
   const deadline = Date.now() + 90_000;
   const { data: src0 } = await db.from("cloud_sources").select("config_hint,sync_status,created_at").eq("id", sourceId).maybeSingle();
   if (src0 && String(src0.sync_status) === "ready") return; // already done
@@ -2003,6 +2584,7 @@ async function driveFinalizeToReady(db: SupabaseClient, sourceId: string, userId
   // lease is still fresh, and the lease auto-expires if this isolate dies, so a
   // genuinely-dead finalize is still revived after the TTL.
   const leaseTtlMs = boundedInt(Deno.env.get("NORVA_FINALIZE_LEASE_TTL_MS"), 240_000, 30_000, 900_000);
+  await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
   await stampFinalizeLease(db, sourceId, leaseTtlMs); // cover the first batch immediately
 
   const fc = recordOrEmpty(recordOrEmpty(src0?.config_hint).finalizeCursor);
@@ -2021,6 +2603,12 @@ async function driveFinalizeToReady(db: SupabaseClient, sourceId: string, userId
   let firstSliceReady = recordOrEmpty(recordOrEmpty(src0?.config_hint).syncProgress).browseReady === true
     || recordOrEmpty(recordOrEmpty(src0?.config_hint).syncProgress).usable === true;
   while (Date.now() < deadline && guard++ < 400) {
+    try {
+      await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
+    } catch (guardError) {
+      if (isCatalogAccessGuardError(guardError)) return;
+      throw guardError;
+    }
     let result: JsonRecord;
     try {
       // Smaller titles batch: the per-batch cloud_titles/title_variant upserts must finish
@@ -2031,6 +2619,7 @@ async function driveFinalizeToReady(db: SupabaseClient, sourceId: string, userId
       const batchLimit = phase === "titles" ? 300 : 1500;
       result = await finalizeCloudSource(sourceId, userId, db, { country, phase, offset, afterId, limit: batchLimit }) as unknown as JsonRecord;
     } catch (e) {
+      if (isCatalogAccessGuardError(e)) return;
       // Transient contention/compute spike → continue in a fresh isolate; a real
       // error (e.g. 422 no items) surfaces and stops the chain. A statement timeout
       // surfaces as a PLAIN Error (not HttpError), so match the message regardless of
@@ -2042,6 +2631,7 @@ async function driveFinalizeToReady(db: SupabaseClient, sourceId: string, userId
       if (transient) await selfInvokeFinalize(sourceId, country);
       return;
     }
+    await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
     if (String(result.status) === "ready") {
       await patchSourceConfigHint(db, sourceId, (hint) => { delete hint.finalizeCursor; delete hint.finalizeLease; return hint; });
       return;
@@ -2049,6 +2639,7 @@ async function driveFinalizeToReady(db: SupabaseClient, sourceId: string, userId
     phase = stringOr(result.nextPhase, "complete");
     offset = Number(result.nextOffset) || 0;
     afterId = stringOr(result.nextAfterId, afterId);
+    await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
     await patchSourceConfigHint(db, sourceId, (hint) => {
       hint.finalizeCursor = { phase, offset, afterId };
       // Refresh the single-flight lease before the next batch (folded into the cursor
@@ -2065,6 +2656,7 @@ async function driveFinalizeToReady(db: SupabaseClient, sourceId: string, userId
     if (throttleMs > 0 && Date.now() < deadline) await new Promise((r) => setTimeout(r, throttleMs));
   }
   // Budget/guard hit before ready → continue in a fresh isolate.
+  await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
   await selfInvokeFinalize(sourceId, country);
 }
 
@@ -2119,6 +2711,8 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
     .maybeSingle();
   if (error) throwDb(error, "Unable to load source");
   if (!source) throw new HttpError(404, "Source not found");
+  await assertCatalogVisible(sourceId, userId, db);
+  const accessSnapshot = await readCatalogAccessSnapshot(sourceId, userId, db, false);
 
   const baseHint = recordOrEmpty(source.config_hint);
   const existingProgress = recordOrEmpty(baseHint.syncProgress);
@@ -2127,7 +2721,8 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
   const batchLimit = Math.max(1, Math.min(2000, options.limit || 1000));
   const batchOffset = Math.max(0, options.offset || 0);
   const batchAfterId = stringOr(options.afterId, "");
-  const counts = await countSourceItems(sourceId, userId, db, existingProgress);
+  const counts = await countSourceItems(sourceId, userId, db, accessSnapshot, existingProgress);
+  await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
   let progress: JsonRecord = compactRecord({
     ...existingProgress,
     status: "syncing",
@@ -2138,9 +2733,11 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
   });
   const reportProgress: SyncProgressReporter = async (patch: JsonRecord) => {
     progress = mergeSyncProgress(progress, compactRecord({ ...patch, status: "syncing", updatedAt: new Date().toISOString() }));
+    await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
     await writeSourceSyncProgress(db, sourceId, userId, baseHint, progress);
   };
 
+  await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
   await db
     .from("cloud_sources")
     .update({ sync_status: "syncing", sync_error: null })
@@ -2173,6 +2770,7 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
     const config: JsonRecord = source.config_ciphertext
       ? await decryptSourceConfig(String(source.config_ciphertext), await getRuntimeConfig(db)).catch(() => ({} as JsonRecord))
       : {};
+    await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
 
     const result = {
       live: counts.live,
@@ -2187,6 +2785,23 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
 
     if (phase === "live" || phase === "live_channels" || phase === "live_variants") {
       const totalVod = counts.movies + counts.series;
+      const LIVE_CHUNK = 4000;
+      if (batchOffset === 0) {
+        await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
+        const cleared = await clearLiveMaterialization(db, sourceId, userId, accessSnapshot);
+        if (!cleared.complete) {
+          return {
+            sourceId, status: "syncing", phase: "live",
+            nextPhase: "live", nextOffset: 0, limit: LIVE_CHUNK, totalVod, ...result,
+            liveCatalog: {
+              rawLive: counts.live,
+              clearing: true,
+              deletedRows: cleared.deletedRows,
+              callerProtocol: cleared.callerProtocol,
+            },
+          };
+        }
+      }
       if (counts.live <= 0) {
         await reportProgress({
           liveReady: true,
@@ -2205,9 +2820,10 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
       // can't be loaded + name-parsed whole in one isolate (it exceeds the edge
       // compute limit). Walk live rows by offset, clearing once at the start;
       // channels/variants merge across chunks by their logical/stream keys.
-      const LIVE_CHUNK = 4000;
-      if (batchOffset === 0) await clearLiveMaterialization(db, sourceId, userId);
-      const liveChunk = await loadSourceItems(sourceId, userId, db, { itemTypes: ["live"], offset: batchOffset, limit: LIVE_CHUNK });
+      const liveChunk = await loadSourceItems(sourceId, userId, db, accessSnapshot, {
+        itemTypes: ["live"], offset: batchOffset, limit: LIVE_CHUNK,
+      });
+      await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
       if (!liveChunk.length) {
         await reportProgress({
           stage: "building_titles",
@@ -2228,7 +2844,9 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
       const mat = await materializeLiveChunk(db, {
         sourceId, userId, rows: liveChunk,
         country: options.country || stringOr(config.country, "FR"),
+        generation: accessSnapshot,
       });
+      await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
       const nextOffset = batchOffset + liveChunk.length;
       await reportProgress({
         stage: "building_live_channels",
@@ -2245,34 +2863,47 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
 
     if (phase === "titles") {
       const totalVod = counts.movies + counts.series;
-      const rows = await loadSourceItems(sourceId, userId, db, {
+      const rows = await loadSourceItems(sourceId, userId, db, accessSnapshot, {
         itemTypes: ["movie", "series"],
         afterId: batchAfterId,
         limit: batchLimit,
       });
+      await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
       const sourceType = stringOr(source.source_type, "");
       const rcTitles = await getRuntimeConfig(db);
+      await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
       const titleProjection = await refreshVodTitleProjection({
         sourceId,
         userId,
         rows,
         db,
+        generation: accessSnapshot,
         xtreamConfig: sourceType === "xtream" && config.serverUrl && config.username && config.password
           ? {
             serverUrl: normalizeBaseUrl(stringOr(config.serverUrl, "")),
-            username: stringOr(config.username, ""),
-            password: stringOr(config.password, ""),
+            username: typeof config.username === "string" && config.username.trim() ? config.username : "",
+            password: typeof config.password === "string" && config.password.length ? config.password : "",
           }
           : null,
         mediaGatewayUrl: rcTitles.mediaGatewayUrl,
         mediaGatewayToken: rcTitles.mediaGatewayToken,
+        directFallbackLease: {
+          db,
+          sourceId,
+          userId,
+          ownerScope: "source-sync-title-projection",
+          configCiphertext: String(source.config_ciphertext ?? ""),
+          configRevision: accessSnapshot.configRevision,
+        },
         vodInfoLimit: boundedInt(Deno.env.get("NORVA_VOD_INFO_FINALIZE_LIMIT"), 0, 0, 1000),
         // Onboarding B: keep inline enrichment small so the user is released fast; the
         // scheduled enrichment crons + the cross-user reuse + the header bar fill the rest.
         // Defer TMDB validation to the background crons — at huge-catalogue scale
         // it's hundreds of inline lookups; titles still appear from provider data.
         tmdbValidateLimit: boundedInt(Deno.env.get("NORVA_TMDB_VALIDATE_FINALIZE_LIMIT"), 0, 0, 1000),
+        assertSourceCurrent: () => assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db),
       });
+      await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
       const nextOffset = Math.min(totalVod, batchOffset + rows.length);
       const nextAfterId = rows.length ? String((rows[rows.length - 1] as { id?: unknown }).id ?? batchAfterId) : batchAfterId;
       // Keyset done: a page shorter than the effective page size is the last one.
@@ -2327,12 +2958,20 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
     // verified titles without playable variants (vanishing from genre rails).
     // Deterministically materialise any missing variants before marking ready.
     try {
-      await db.rpc("heal_cloud_title_variants", { p_user_id: userId, p_source_id: sourceId });
+      await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
+      await db.rpc("heal_cloud_title_variants", {
+        p_user_id: userId,
+        p_source_id: sourceId,
+        ...catalogGenerationRpcFence(accessSnapshot),
+      });
+      await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
     } catch (healError) {
+      if (isCatalogAccessGuardError(healError)) throw healError;
       console.warn("[norva-source-sync] variant heal failed:", healError instanceof Error ? healError.message : healError);
     }
 
     const syncedAt = new Date().toISOString();
+    await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
     const { error: updateError } = await db
       .from("cloud_sources")
       .update({
@@ -2351,10 +2990,14 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
 
     // Import reached READY → notify once (first import only; the queue's unique(source_id,kind)
     // makes a later refresh's completion a no-op). The digest cron resolves name + counts at send time.
+    await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
     await enqueueImportNotification(db, userId, sourceId, "import_completed");
 
+    await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
     return { sourceId, status: "ready", ...result };
   } catch (error) {
+    if (isCatalogAccessGuardError(error)) throw error;
+    await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
     const message = formatSourceSyncError(error, "Source finalization failed");
     // Default to RESUMABLE: the titles grind is long and a mid-finalize source has a lot
     // built (cursor + tens of thousands of variants). Keep it "syncing" for ANY non-terminal
@@ -2448,36 +3091,61 @@ function titleFinalizePercent(built: number, totalVod: number) {
   return Math.max(86, Math.min(99, Math.round(86 + ratio * 13)));
 }
 
-async function countRowsByType(sourceId: string, userId: string, db: SupabaseClient, itemType: string) {
+async function countRowsByType(
+  sourceId: string,
+  userId: string,
+  db: SupabaseClient,
+  generation: CatalogAccessSnapshot,
+  itemType: string,
+) {
   const { count, error } = await db
     .from("cloud_media_items")
     .select("id", { count: "exact", head: true })
     .eq("source_id", sourceId)
     .eq("user_id", userId)
+    .eq("generation_id", generation.generationId)
     .eq("item_type", itemType);
   if (error) throwDb(error, `Unable to count ${itemType} catalog items`);
   return count ?? 0;
 }
 
-async function countRowsInTable(table: string, sourceId: string, userId: string, db: SupabaseClient) {
+async function countRowsInTable(
+  table: string,
+  sourceId: string,
+  userId: string,
+  db: SupabaseClient,
+  generation: CatalogAccessSnapshot,
+) {
   const { count, error } = await db
     .from(table)
     .select("id", { count: "exact", head: true })
     .eq("source_id", sourceId)
-    .eq("user_id", userId);
+    .eq("user_id", userId)
+    .eq("generation_id", generation.generationId);
   if (error) throwDb(error, `Unable to count ${table}`);
   return count ?? 0;
 }
 
-async function existingLiveMaterializationCounts(sourceId: string, userId: string, db: SupabaseClient) {
+async function existingLiveMaterializationCounts(
+  sourceId: string,
+  userId: string,
+  db: SupabaseClient,
+  generation: CatalogAccessSnapshot,
+) {
   const [logicalChannels, liveVariants] = await Promise.all([
-    countRowsInTable("cloud_live_logical_channels", sourceId, userId, db),
-    countRowsInTable("cloud_live_variants", sourceId, userId, db),
+    countRowsInTable("cloud_live_logical_channels", sourceId, userId, db, generation),
+    countRowsInTable("cloud_live_variants", sourceId, userId, db, generation),
   ]);
   return { logicalChannels, liveVariants };
 }
 
-async function countSourceItems(sourceId: string, userId: string, db: SupabaseClient, progress: JsonRecord = {}) {
+async function countSourceItems(
+  sourceId: string,
+  userId: string,
+  db: SupabaseClient,
+  generation: CatalogAccessSnapshot,
+  progress: JsonRecord = {},
+) {
   // Prefer the counts the import already persisted (instant): an exact count(*)
   // over a huge source can exceed the 8s statement budget on a busy DB. Fall back
   // to counting only when no trustworthy persisted total exists (e.g. legacy rows).
@@ -2488,9 +3156,9 @@ async function countSourceItems(sourceId: string, userId: string, db: SupabaseCl
     live = pLive || 0; movies = pMovies || 0; series = pSeries || 0;
   } else {
     [live, movies, series] = await Promise.all([
-      countRowsByType(sourceId, userId, db, "live"),
-      countRowsByType(sourceId, userId, db, "movie"),
-      countRowsByType(sourceId, userId, db, "series"),
+      countRowsByType(sourceId, userId, db, generation, "live"),
+      countRowsByType(sourceId, userId, db, generation, "movie"),
+      countRowsByType(sourceId, userId, db, generation, "series"),
     ]);
   }
   const categories = recordOrEmpty(progress.categories);
@@ -2519,6 +3187,7 @@ async function loadSourceItems(
   sourceId: string,
   userId: string,
   db: SupabaseClient,
+  generation: CatalogAccessSnapshot,
   options: LoadSourceItemsOptions = {},
 ): Promise<LiveCatalogItem[]> {
   const rows: LiveCatalogItem[] = [];
@@ -2532,9 +3201,10 @@ async function loadSourceItems(
   for (let offset = Math.max(0, options.offset ?? 0); rows.length < maxRows; offset += pageSize) {
     let query = db
       .from("cloud_media_items")
-      .select("id,source_id,item_type,external_id,parent_external_id,title,subtitle,poster_url,metadata,playback_hint,available")
+      .select("id,source_id,generation_id,item_type,external_id,parent_external_id,title,subtitle,poster_url,metadata,playback_hint,available")
       .eq("source_id", sourceId)
-      .eq("user_id", userId);
+      .eq("user_id", userId)
+      .eq("generation_id", generation.generationId);
     const itemTypes = (options.itemTypes || []).filter(Boolean);
     if (itemTypes.length === 1) query = query.eq("item_type", itemTypes[0]);
     else if (itemTypes.length > 1) query = query.in("item_type", itemTypes);
@@ -2706,7 +3376,8 @@ async function syncM3uSource(
   userId: string,
   config: JsonRecord,
   db: SupabaseClient,
-  country: string | null = null,
+  country: string | null,
+  expectedSnapshot: CatalogAccessSnapshot,
   reportProgress: SyncProgressReporter = async () => {},
   opts: { previousSignature?: unknown; force?: boolean; rawOnly?: boolean } = {},
 ) {
@@ -2716,7 +3387,9 @@ async function syncM3uSource(
     percent: 10,
     steps: { connect: { status: "running" } },
   });
+  await assertCatalogSnapshotCurrent(sourceId, userId, expectedSnapshot, db);
   const playlist = await fetchText(playlistUrl, 30000, 20_000_000);
+  await assertCatalogSnapshotCurrent(sourceId, userId, expectedSnapshot, db);
   await reportProgress({
     stage: "discovered",
     percent: 42,
@@ -2753,6 +3426,7 @@ async function syncM3uSource(
   if (opts.rawOnly) {
     // Detection-only (cron) path — see the matching note in syncXtreamSource.
     const changed = Boolean(opts.previousSignature) && !contentSignatureEquals(contentSignature, opts.previousSignature);
+    await assertCatalogSnapshotCurrent(sourceId, userId, expectedSnapshot, db);
     return { live: rows.length, total: rows.length, contentSignature, changed, detectOnly: true };
   }
 
@@ -2763,6 +3437,7 @@ async function syncM3uSource(
       counts: { live: rows.length, movies: 0, series: 0, total: rows.length },
       steps: { import: { status: "done", count: rows.length }, finalize: { status: "done" } },
     });
+    await assertCatalogSnapshotCurrent(sourceId, userId, expectedSnapshot, db);
     return { live: rows.length, total: rows.length, contentSignature, skipped: true };
   }
 
@@ -2777,29 +3452,58 @@ async function syncM3uSource(
       import: { status: "running", count: rows.length },
     },
   });
-  const savedRows = await replaceSourceItems(sourceId, userId, rows, db);
+  await assertCatalogSnapshotCurrent(sourceId, userId, expectedSnapshot, db);
+  const savedRows = await replaceSourceItems(sourceId, userId, rows, db, expectedSnapshot);
   await reportProgress({
     stage: "finalizing",
     percent: 86,
     steps: { import: { status: "done", count: savedRows.length }, finalize: { status: "running" } },
   });
-  const liveCatalog = await refreshMaterializedLiveCatalog(db, { sourceId, userId, rows: savedRows, country: country || stringOr(config.country, "FR") });
+  await assertCatalogSnapshotCurrent(sourceId, userId, expectedSnapshot, db);
+  const liveCatalog = await refreshMaterializedLiveCatalog(db, {
+    sourceId,
+    userId,
+    rows: savedRows,
+    country: country || stringOr(config.country, "FR"),
+    generation: expectedSnapshot,
+  });
+  await assertCatalogSnapshotCurrent(sourceId, userId, expectedSnapshot, db);
   return { live: rows.length, total: rows.length, liveCatalog, contentSignature };
 }
 
-async function replaceSourceItems(sourceId: string, userId: string, rows: JsonRecord[], db: SupabaseClient): Promise<LiveCatalogItem[]> {
+async function replaceSourceItems(
+  sourceId: string,
+  userId: string,
+  rows: JsonRecord[],
+  db: SupabaseClient,
+  expectedSnapshot: CatalogAccessSnapshot,
+): Promise<LiveCatalogItem[]> {
   const savedRows: LiveCatalogItem[] = [];
-  await db.from("cloud_media_items").delete().eq("source_id", sourceId).eq("user_id", userId);
+  await assertCatalogSnapshotCurrent(sourceId, userId, expectedSnapshot, db);
+  for (let guard = 0; guard < 100; guard += 1) {
+    const { data, error } = await db.rpc("norva_delete_catalog_generation_items_batch", {
+      p_source_id: sourceId,
+      p_user_id: userId,
+      ...catalogGenerationRpcFence(expectedSnapshot),
+      p_limit: 2000,
+    });
+    if (error) throwDb(error, "Unable to clear old catalog items");
+    const removed = Number(Array.isArray(data) ? data[0] : data) || 0;
+    if (removed < 2000) break;
+    if (guard === 99) throw new Error("Catalog generation clear exceeded its bounded batch budget");
+  }
   for (let index = 0; index < rows.length; index += 500) {
-    const chunk = rows.slice(index, index + 500);
+    await assertCatalogSnapshotCurrent(sourceId, userId, expectedSnapshot, db);
+    const chunk = withCatalogGenerationRows(rows.slice(index, index + 500), expectedSnapshot);
     if (!chunk.length) continue;
     const { data, error } = await db
       .from("cloud_media_items")
-      .upsert(chunk, { onConflict: "source_id,item_type,external_id" })
-      .select("id,source_id,item_type,external_id,parent_external_id,title,subtitle,poster_url,metadata,playback_hint,available");
+      .upsert(chunk, { onConflict: "source_id,generation_id,item_type,external_id" })
+      .select("id,source_id,generation_id,item_type,external_id,parent_external_id,title,subtitle,poster_url,metadata,playback_hint,available");
     if (error) throwDb(error, "Unable to save cloud catalog items");
     if (Array.isArray(data)) savedRows.push(...data as LiveCatalogItem[]);
   }
+  await assertCatalogSnapshotCurrent(sourceId, userId, expectedSnapshot, db);
   return savedRows;
 }
 
@@ -2874,10 +3578,18 @@ async function aesKey(secret: string) {
 }
 
 async function fetchJson(url: string, timeoutMs: number) {
-  const response = await fetchWithTimeout(url, timeoutMs);
-  const payload = await response.json().catch(() => null);
-  if (!response.ok) throw new HttpError(response.status, "IPTV provider request failed", payload);
-  return payload;
+  try {
+    const { response, value: payload } = await fetchBoundedProviderJson(url, {
+      timeoutMs,
+      maxBytes: 32 * 1024 * 1024,
+      headers: { "User-Agent": "NorvaCloud/1.0" },
+    });
+    if (!response.ok) throw new HttpError(response.status, "IPTV provider request failed");
+    return payload;
+  } catch (error) {
+    if (error instanceof HttpError) throw error;
+    throw boundedProviderHttpError(error, "JSON");
+  }
 }
 
 function stripSeriesInventoryCredentials(value: unknown): unknown {
@@ -2982,6 +3694,11 @@ async function fetchSeriesInventoryMetadata(
     password: string;
     parentSeriesId: string;
     userId: string;
+    sourceId: string;
+    db: SupabaseClient;
+    expectedProviderAccountAffinityHash: string;
+    expectedConfigRevision: string;
+    expectedConfigCiphertextHash: string;
   },
 ): Promise<SeriesInventoryMetadataResult> {
   const providerUrl = xtreamApiUrl(
@@ -3030,13 +3747,16 @@ async function fetchSeriesInventoryMetadata(
         url: providerUrl,
         ttlSeconds: 120,
       });
-      const response = await fetchWithTimeout(
+      const { response, value: payload } = await fetchBoundedProviderJson(
         `${runtimeConfig.relayBaseUrl}/series-info/${token}`,
-        30_000,
+        {
+          timeoutMs: 30_000,
+          maxBytes: 32 * 1024 * 1024,
+          headers: { "User-Agent": "NorvaCloud/1.0" },
+        },
       );
-      const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
-        throw new HttpError(response.status, "Relay refused the series inventory request", payload);
+        throw new HttpError(response.status, "Relay refused the series inventory request");
       }
       return { payload, transport: "relay" };
     } catch (error) {
@@ -3050,10 +3770,25 @@ async function fetchSeriesInventoryMetadata(
   }
   try {
     return {
-      payload: await fetchJson(providerUrl, 20_000),
+      payload: await withSourceDirectFallbackLease({
+        db: args.db,
+        sourceId: args.sourceId,
+        userId: args.userId,
+        owner: providerDirectFallbackLeaseOwner("series-inventory"),
+        ttlSeconds: directFallbackLeaseTtlSeconds(20_000),
+        expectedProviderAccountAffinityHash: args.expectedProviderAccountAffinityHash,
+        expectedConfigRevision: args.expectedConfigRevision,
+        expectedConfigCiphertextHash: args.expectedConfigCiphertextHash,
+      }, () => fetchJson(providerUrl, 20_000)),
       transport: "direct",
     };
   } catch (error) {
+    if (error instanceof ProviderDirectFallbackLeaseError) {
+      throw seriesInventoryTransportError(
+        new HttpError(error.status, error.message, error.details),
+        "direct",
+      );
+    }
     throw seriesInventoryTransportError(error, "direct");
   }
 }
@@ -3093,6 +3828,7 @@ async function signSeriesInventoryRelayToken(
 async function fetchProviderMetadata(
   runtimeConfig: RuntimeConfig,
   args: { serverUrl: string; username: string; password: string; action: string; params?: Record<string, string>; timeoutMs?: number },
+  directFallback: DirectFallbackLeaseContext,
 ): Promise<any> {
   const timeoutMs = args.timeoutMs ?? 25000;
   if (runtimeConfig.mediaGatewayUrl && runtimeConfig.mediaGatewayToken) {
@@ -3104,10 +3840,17 @@ async function fetchProviderMetadata(
       console.warn("[norva-source-sync] gateway metadata unavailable, falling back to direct", args.action, status);
     }
   }
-  return fetchJson(
-    xtreamApiUrl({ serverUrl: args.serverUrl, username: args.username, password: args.password, action: args.action }, args.params ?? {}),
-    timeoutMs,
-  );
+  try {
+    return await directFallback.runDirectFallback(timeoutMs, () => fetchJson(
+      xtreamApiUrl({ serverUrl: args.serverUrl, username: args.username, password: args.password, action: args.action }, args.params ?? {}),
+      timeoutMs,
+    ));
+  } catch (error) {
+    if (error instanceof ProviderDirectFallbackLeaseError) {
+      throw new HttpError(error.status, error.message, error.details);
+    }
+    throw error;
+  }
 }
 
 async function requestGatewayMetadata(
@@ -3135,7 +3878,7 @@ async function requestGatewayMetadata(
       }),
     });
     const payload = await response.json().catch(() => null);
-    if (!response.ok) throw new HttpError(response.status, "Media gateway refused the metadata request", payload);
+    if (!response.ok) throw new HttpError(response.status, "Media gateway refused the metadata request");
     return payload;
   } catch (error) {
     if (error instanceof HttpError) throw error;
@@ -3147,26 +3890,28 @@ async function requestGatewayMetadata(
 }
 
 async function fetchText(url: string, timeoutMs: number, maxBytes: number) {
-  const response = await fetchWithTimeout(url, timeoutMs);
-  if (!response.ok) throw new HttpError(response.status, "IPTV provider request failed");
-  const text = await response.text();
-  if (text.length > maxBytes) throw new HttpError(413, "Playlist is too large for this cloud import");
-  return text;
-}
-
-async function fetchWithTimeout(url: string, timeoutMs: number) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await fetch(url, {
-      signal: controller.signal,
+    const { response, value: text } = await fetchBoundedProviderText(url, {
+      timeoutMs,
+      maxBytes,
       headers: { "User-Agent": "NorvaCloud/1.0" },
     });
+    if (!response.ok) throw new HttpError(response.status, "IPTV provider request failed");
+    return text;
   } catch (error) {
-    throw new HttpError(502, "Unable to reach IPTV provider", error instanceof Error ? error.message : undefined);
-  } finally {
-    clearTimeout(timer);
+    if (error instanceof HttpError) throw error;
+    throw boundedProviderHttpError(error, "playlist");
   }
+}
+
+function boundedProviderHttpError(error: unknown, payloadType: string) {
+  if (error instanceof BoundedProviderResponseError && error.kind === "too_large") {
+    return new HttpError(413, `Provider ${payloadType} payload is too large`);
+  }
+  if (error instanceof BoundedProviderResponseError && error.kind === "timeout") {
+    return new HttpError(504, "IPTV provider response deadline exceeded");
+  }
+  return new HttpError(502, "Unable to reach IPTV provider");
 }
 
 function parseM3u(playlist: string) {
@@ -3252,6 +3997,7 @@ function corsHeaders(req: Request) {
     "Access-Control-Allow-Origin": allowOrigin,
     "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-norva-profile-id",
     "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+    "Access-Control-Expose-Headers": "x-norva-visibility-epoch",
     "Access-Control-Max-Age": "86400",
     Vary: "Origin",
   };
@@ -3277,10 +4023,16 @@ function json(req: Request, data: unknown, status = 200) {
     status,
     headers: {
       ...corsHeaders(req),
+      ...catalogVisibilityEpochHeaders(req),
       "Content-Type": "application/json; charset=utf-8",
       "Cache-Control": "no-store",
     },
   });
+}
+
+function catalogVisibilityEpochHeaders(req: Request) {
+  const epoch = catalogVisibilityEpochs.get(req);
+  return epoch ? { "X-Norva-Visibility-Epoch": epoch } : {};
 }
 
 function compactRecord(value: JsonRecord) {

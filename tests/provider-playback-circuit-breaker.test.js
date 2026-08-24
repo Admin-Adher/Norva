@@ -33,11 +33,13 @@ test('Edge and gateway derive the same provider identity for prefixed Xtream URL
   const prefixed = 'https://PANEL.EXAMPLE/prefix/movie/alice%2Btv/secret/42.mkv';
   const literalPercent = 'https://panel.example/prefix/series/plus%252Buser/secret/7.mp4';
   const metadata = 'https://panel.example/prefix/player_api.php?username=plus%252Buser';
+  const spaced = 'https://panel.example:8443/prefix/movie/%20%20alice%20%20/secret/42.mkv';
 
   assert.equal(edgeProviderAccountKey(prefixed), 'panel.example/alice+tv');
   assert.equal(edgeProviderAccountKey(literalPercent), 'panel.example/plus%2Buser');
   assert.equal(edgeProviderAccountKey(metadata), 'panel.example/plus%2Buser');
-  for (const url of [prefixed, literalPercent, metadata]) {
+  assert.equal(edgeProviderAccountKey(spaced), 'panel.example:8443/  alice  ');
+  for (const url of [prefixed, literalPercent, metadata, spaced]) {
     assert.equal(
       gatewayProxyPool.providerAccountAffinityKey(url),
       edgeProviderAccountKey(url),

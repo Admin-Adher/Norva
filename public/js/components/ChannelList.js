@@ -2268,6 +2268,13 @@ class ChannelList {
         return `norva-live:${sourceType}:${sourceId}:v5`;
     }
 
+    liveCatalogVisibilityEpoch(value = null) {
+        const stamped = String(value?._norvaVisibilityEpoch || '').trim();
+        if (value !== null) return /^v2\.[1-9]\d*\.[1-9]\d*$/.test(stamped) ? stamped : '';
+        const current = String(window.API?.catalogVisibilityEpoch?.() || '').trim();
+        return /^v2\.[1-9]\d*\.[1-9]\d*$/.test(current) ? current : '';
+    }
+
     openLiveCacheDb() {
         if (typeof indexedDB === 'undefined') return Promise.resolve(null);
         if (this.liveCacheDbPromise) return this.liveCacheDbPromise;
@@ -2287,6 +2294,8 @@ class ChannelList {
 
     async readLiveCatalogCache(sourceId, sourceType) {
         if (!window.API?.isCloudMode?.()) return null;
+        const visibilityEpoch = this.liveCatalogVisibilityEpoch();
+        if (!visibilityEpoch) return null;
         const db = await this.openLiveCacheDb();
         if (!db) return null;
         const key = this.liveCacheKey(sourceId, sourceType);
@@ -2296,7 +2305,12 @@ class ChannelList {
             request.onsuccess = () => {
                 const entry = request.result;
                 const fresh = entry?.savedAt && Date.now() - Number(entry.savedAt) < LIVE_CATALOG_CACHE_TTL_MS;
-                resolve(fresh && Array.isArray(entry.channels) ? entry : null);
+                resolve(
+                    fresh && this.liveCatalogVisibilityEpoch() === visibilityEpoch
+                        && entry?.visibilityEpoch === visibilityEpoch && Array.isArray(entry.channels)
+                        ? entry
+                        : null
+                );
             };
             request.onerror = () => resolve(null);
         });
@@ -2305,17 +2319,21 @@ class ChannelList {
     async writeLiveCatalogCache(
         sourceId,
         sourceType,
-        loadRunId = this.liveHydrationRunId
+        loadRunId = this.liveHydrationRunId,
+        expectedVisibilityEpoch = ''
     ) {
         if (!window.API?.isCloudMode?.() || !this.isLiveLoadCurrent(loadRunId)) return false;
+        if (!expectedVisibilityEpoch || this.liveCatalogVisibilityEpoch() !== expectedVisibilityEpoch) return false;
         const db = await this.openLiveCacheDb();
-        if (!db || !this.isLiveLoadCurrent(loadRunId)) return false;
+        if (!db || !this.isLiveLoadCurrent(loadRunId)
+            || this.liveCatalogVisibilityEpoch() !== expectedVisibilityEpoch) return false;
         const sourceKey = String(sourceId);
         const entry = {
             key: this.liveCacheKey(sourceId, sourceType),
             savedAt: Date.now(),
             sourceId,
             sourceType,
+            visibilityEpoch: expectedVisibilityEpoch,
             groups: this.groups.filter(group =>
                 String(group.sourceId) === sourceKey && group.sourceType === sourceType
             ),
@@ -2380,7 +2398,7 @@ class ChannelList {
         });
     }
 
-    hydrateRemainingLivePages(sourceId, categories, sourceType, loadRunId) {
+    hydrateRemainingLivePages(sourceId, categories, sourceType, loadRunId, expectedVisibilityEpoch) {
         if (!window.API?.isCloudMode?.()) return;
         const pageSize = this.livePageSize();
         const residentCap = this.liveResidentCap();
@@ -2388,7 +2406,8 @@ class ChannelList {
         (async () => {
             let addedSinceHydrationStart = 0;
             for (let offset = pageSize; offset < residentCap; offset += pageSize) {
-                if (loadRunId !== this.liveHydrationRunId) return;
+                if (loadRunId !== this.liveHydrationRunId
+                    || this.liveCatalogVisibilityEpoch() !== expectedVisibilityEpoch) return;
                 if (this._isTvMode()
                     && !document.getElementById('page-live')?.classList.contains('active')) return;
                 const room = residentCap - this.channels.length;
@@ -2405,7 +2424,9 @@ class ChannelList {
                         offset,
                         includeVariants: true
                     });
-                if (loadRunId !== this.liveHydrationRunId) return;
+                if (loadRunId !== this.liveHydrationRunId
+                    || this.liveCatalogVisibilityEpoch(streams) !== expectedVisibilityEpoch
+                    || this.liveCatalogVisibilityEpoch() !== expectedVisibilityEpoch) return;
                 if (!Array.isArray(streams) || !streams.length) break;
 
                 const channelList = this.mapLiveStreamsToChannels(sourceId, categories, streams, sourceType);
@@ -2425,7 +2446,12 @@ class ChannelList {
                 this.resumeLivePlaybackIfPending();
             }
             if (loadRunId === this.liveHydrationRunId) {
-                await this.writeLiveCatalogCache(sourceId, sourceType, loadRunId);
+                await this.writeLiveCatalogCache(
+                    sourceId,
+                    sourceType,
+                    loadRunId,
+                    expectedVisibilityEpoch
+                );
             }
         })().catch(err => {
             console.warn('[ChannelList] Background live hydration failed:', err);
@@ -2746,8 +2772,12 @@ class ChannelList {
 
         const categories = await API.proxy.xtream.liveCategories(sourceId);
         if (!this.isLiveLoadCurrent(loadRunId)) return false;
+        const visibilityEpoch = this.liveCatalogVisibilityEpoch(categories);
+        if (!visibilityEpoch) return false;
         const streams = await this.loadFirstLivePage(sourceId);
-        if (!this.isLiveLoadCurrent(loadRunId)) return false;
+        if (!this.isLiveLoadCurrent(loadRunId)
+            || this.liveCatalogVisibilityEpoch(streams) !== visibilityEpoch
+            || this.liveCatalogVisibilityEpoch() !== visibilityEpoch) return false;
 
         // Map categories to groups
         const categoryGroups = categories.map(cat => ({
@@ -2766,11 +2796,11 @@ class ChannelList {
         // In All Sources, keep one fair first page per provider on TV. A selected
         // provider may hydrate further up to the resident cap.
         if (!this._isTvMode() || !append) {
-            this.hydrateRemainingLivePages(sourceId, categories, 'xtream', loadRunId);
+            this.hydrateRemainingLivePages(sourceId, categories, 'xtream', loadRunId, visibilityEpoch);
         }
         if ((streams || []).length < this.livePageSize()) {
             if (!this.isLiveLoadCurrent(loadRunId)) return false;
-            await this.writeLiveCatalogCache(sourceId, 'xtream', loadRunId);
+            await this.writeLiveCatalogCache(sourceId, 'xtream', loadRunId, visibilityEpoch);
             if (!this.isLiveLoadCurrent(loadRunId)) return false;
         }
         return true;
@@ -2797,8 +2827,12 @@ class ChannelList {
 
         const categories = await API.proxy.xtream.liveCategories(sourceId);
         if (!this.isLiveLoadCurrent(loadRunId)) return false;
+        const visibilityEpoch = this.liveCatalogVisibilityEpoch(categories);
+        if (!visibilityEpoch) return false;
         const streams = await this.loadFirstLivePage(sourceId);
-        if (!this.isLiveLoadCurrent(loadRunId)) return false;
+        if (!this.isLiveLoadCurrent(loadRunId)
+            || this.liveCatalogVisibilityEpoch(streams) !== visibilityEpoch
+            || this.liveCatalogVisibilityEpoch() !== visibilityEpoch) return false;
 
         // Map categories to groups (keeping m3u sourceType for downstream compatibility)
         const m3uGroups = categories.map(cat => ({
@@ -2815,11 +2849,11 @@ class ChannelList {
         const room = Math.max(0, this.liveResidentCap() - this.channels.length);
         this.channels = this.channels.concat(channelList.slice(0, room));
         if (!this._isTvMode() || !append) {
-            this.hydrateRemainingLivePages(sourceId, categories, 'm3u', loadRunId);
+            this.hydrateRemainingLivePages(sourceId, categories, 'm3u', loadRunId, visibilityEpoch);
         }
         if ((streams || []).length < this.livePageSize()) {
             if (!this.isLiveLoadCurrent(loadRunId)) return false;
-            await this.writeLiveCatalogCache(sourceId, 'm3u', loadRunId);
+            await this.writeLiveCatalogCache(sourceId, 'm3u', loadRunId, visibilityEpoch);
             if (!this.isLiveLoadCurrent(loadRunId)) return false;
         }
         return true;

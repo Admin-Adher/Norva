@@ -19,7 +19,9 @@ test('cross-device progress is ordered atomically by capture time', () => {
     assert.ok(migration.includes('when p_completed is not null then p_completed'));
     assert.ok(migration.includes('when excluded.progress_seconds >= 60 then false'));
     assert.ok(edge.includes('db.rpc("upsert_cloud_watch_history_causal"'));
-    assert.ok(edge.includes('data: recordOrEmpty(body.data)'));
+    assert.ok(edge.includes('const historyData = sanitizeHistoryData(rawHistoryData)')
+        && edge.includes('data: historyData'),
+        'history metadata must be allowlisted before the atomic RPC');
     assert.ok(!edge.includes('existingQuery'),
         'pre-conflict scalar/JSON snapshots must not overwrite fresher concurrent data');
     assert.ok(!edge.includes('body.force !== true'),
@@ -76,8 +78,10 @@ test('targeted resume never borrows a provider-local item id from another source
     const edge = read('supabase/functions/norva-cloud/index.ts');
     const start = edge.indexOf('async function getHistoryItem(');
     const body = edge.slice(start, edge.indexOf('\nasync function listHistory(', start));
-    assert.ok(body.includes('fallback = fallback.is("source_id", null)'),
-        'source renewal may only inherit explicitly orphaned legacy history');
-    assert.ok(!body.includes('base().order("updated_at"'),
-        'an exact-source lookup must not fall back to another provider');
+    assert.ok(body.includes('.rpc("get_cloud_watch_history_item_visible"'),
+        'one database statement must bind source visibility to the exact/orphan fallback');
+    assert.ok(body.includes('UUID_PATTERN.test(sourceId)'),
+        'the requested source id must be a validated UUID');
+    assert.ok(!body.includes('.from("cloud_watch_history")'),
+        'targeted resume must not bypass the atomic visibility RPC');
 });

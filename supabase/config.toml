@@ -14,6 +14,13 @@ verify_jwt = false
 [functions.norva-source-sync]
 verify_jwt = false
 
+# Provider Access v1 validates browser JWTs in-function and also hosts a durable
+# internal worker authenticated by the shared platform bearer plus a dedicated
+# worker token. The platform JWT gate must therefore let both request classes
+# reach the handler; every non-OPTIONS route still fails closed in-function.
+[functions.norva-provider-access]
+verify_jwt = false
+
 # Service-gated (NORVA_BACKFILL_TOKEN, verified in-function) series-info pre-warm crawler,
 # driven by pg_cron. Fills cloud_series_info_cache from the gateway's single stable IP so the
 # web never makes a live provider call for series-info. See docs/SERIES-INFO-CACHE.md.

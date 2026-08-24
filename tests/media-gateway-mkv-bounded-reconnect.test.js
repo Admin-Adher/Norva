@@ -2594,6 +2594,22 @@ test('provider slot identity preserves mono-account handoff without cross-tenant
     );
     assert.notEqual(canonicalA, sameUsernameDifferentPassword,
         'a username alone must never grant a destructive cross-owner slot collision');
+    const spacedCredentials = providerSlotKeyFromUrl(
+        'https://shared.example:8443/movie/%20%20account-a%20%20/%20password%20/404.mkv',
+        ownerB,
+    );
+    const trimmedCredentials = providerSlotKeyFromUrl(
+        'https://shared.example:8443/movie/account-a/password/404.mkv',
+        ownerB,
+    );
+    assert.notEqual(spacedCredentials, trimmedCredentials,
+        'significant Xtream credential whitespace must remain part of the destructive slot identity');
+    const whitespaceOnlyPassword = providerSlotKeyFromUrl(
+        'https://shared.example:8443/movie/account-a/%20%20/405.mkv',
+        ownerB,
+    );
+    assert.match(whitespaceOnlyPassword, /^account:/,
+        'a non-empty whitespace password remains exact credential data, not an absent capability');
 
     const opaqueA = providerSlotKeyFromUrl('https://shared.example/media/title-a.mkv', ownerA);
     const opaqueASibling = providerSlotKeyFromUrl('https://shared.example/media/title-b.mkv', ownerA);

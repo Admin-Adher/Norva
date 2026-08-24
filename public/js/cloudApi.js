@@ -623,15 +623,121 @@
     // invalidated the moment its data is mutated.
     const _getCache = new Map();      // key -> { at, data }
     const _getInFlight = new Map();   // key -> promise
+    const _responseVisibilityEpoch = new WeakMap();
+    let _visibilityEpoch = '';
+
+    function normalizeVisibilityEpoch(value) {
+        if (value === undefined || value === null) return '';
+        const normalized = String(value).trim();
+        return /^\d+$/.test(normalized) || /^v2\.[1-9]\d*\.[1-9]\d*$/.test(normalized)
+            ? normalized
+            : '';
+    }
+
+    function visibilityEpochFromPayload(payload) {
+        if (!payload || typeof payload !== 'object') return '';
+        const remembered = _responseVisibilityEpoch.get(payload);
+        if (remembered) return remembered;
+        for (const candidate of [
+            payload.visibilityEpoch,
+            payload.visibility_epoch,
+            payload.meta?.visibilityEpoch,
+            payload.meta?.visibility_epoch,
+            payload.catalog?.visibilityEpoch,
+            payload.catalog?.visibility_epoch,
+            payload.sources?.visibilityEpoch,
+            payload.sources?.visibility_epoch
+        ]) {
+            const normalized = normalizeVisibilityEpoch(candidate);
+            if (normalized) return normalized;
+        }
+        return '';
+    }
+
+    function visibilityEpochFromResponse(response) {
+        try {
+            return normalizeVisibilityEpoch(
+                response?.headers?.get?.('x-norva-visibility-epoch')
+                || response?.headers?.get?.('x-visibility-epoch')
+            );
+        } catch (_) {
+            return '';
+        }
+    }
+
+    function parsedVisibilityEpoch(value) {
+        if (/^\d+$/.test(value)) return { version: 1, global: 0n, user: BigInt(value) };
+        const match = /^v2\.([1-9]\d*)\.([1-9]\d*)$/.exec(value);
+        return match ? { version: 2, global: BigInt(match[1]), user: BigInt(match[2]) } : null;
+    }
+
+    function isOlderVisibilityEpoch(next, current) {
+        const nextEpoch = parsedVisibilityEpoch(next);
+        const currentEpoch = parsedVisibilityEpoch(current);
+        if (!nextEpoch || !currentEpoch) return false;
+        if (nextEpoch.version !== currentEpoch.version) return nextEpoch.version < currentEpoch.version;
+        return nextEpoch.global < currentEpoch.global || nextEpoch.user < currentEpoch.user;
+    }
+
+    function observeVisibilityEpoch(payloadOrEpoch, response = null) {
+        const fromPayload = payloadOrEpoch && typeof payloadOrEpoch === 'object'
+            ? visibilityEpochFromPayload(payloadOrEpoch)
+            : normalizeVisibilityEpoch(payloadOrEpoch);
+        const next = fromPayload || visibilityEpochFromResponse(response);
+        if (!next || next === _visibilityEpoch || isOlderVisibilityEpoch(next, _visibilityEpoch)) {
+            if (next && payloadOrEpoch && typeof payloadOrEpoch === 'object') {
+                try { _responseVisibilityEpoch.set(payloadOrEpoch, next); } catch (_) { /* noop */ }
+            }
+            return _visibilityEpoch || next || null;
+        }
+
+        _visibilityEpoch = next;
+        // Every short-lived GET cache can indirectly contain source-scoped data
+        // (boot seeds sources; favorites/history carry source ids). Drop all entries
+        // when the server advances visibility so an older generation is never joined.
+        _getCache.clear();
+        _getInFlight.clear();
+        if (payloadOrEpoch && typeof payloadOrEpoch === 'object') {
+            try { _responseVisibilityEpoch.set(payloadOrEpoch, next); } catch (_) { /* noop */ }
+        }
+        return _visibilityEpoch;
+    }
+
+    function visibilityScopedCacheKey(cacheKey, epoch = _visibilityEpoch) {
+        const normalized = normalizeVisibilityEpoch(epoch);
+        return normalized ? `${cacheKey}:visibility=${encodeURIComponent(normalized)}` : cacheKey;
+    }
+
+    function visibilityVersionedPath(path, epoch = _visibilityEpoch) {
+        const normalized = normalizeVisibilityEpoch(epoch);
+        if (!normalized) return path;
+        const separator = String(path).includes('?') ? '&' : '?';
+        return `${path}${separator}__norva_visibility_epoch=${encodeURIComponent(normalized)}`;
+    }
+
     function cachedGet(cacheKey, ttlMs, fetchFn) {
-        const hit = _getCache.get(cacheKey);
-        if (hit && (Date.now() - hit.at) < ttlMs) { NorvaTrace.log('cache HIT (in-memory)', cacheKey + ' · age ' + Math.round((Date.now() - hit.at) / 1000) + 's'); return Promise.resolve(cloneJson(hit.data)); }
-        if (_getInFlight.has(cacheKey)) { NorvaTrace.log('cache JOIN in-flight', cacheKey); return _getInFlight.get(cacheKey).then(cloneJson); }
-        NorvaTrace.log('cache MISS → network', cacheKey);
+        const startEpoch = _visibilityEpoch;
+        const scopedKey = visibilityScopedCacheKey(cacheKey, startEpoch);
+        const hit = _getCache.get(scopedKey);
+        if (hit && (Date.now() - hit.at) < ttlMs) { NorvaTrace.log('cache HIT (in-memory)', scopedKey + ' · age ' + Math.round((Date.now() - hit.at) / 1000) + 's'); return Promise.resolve(cloneJson(hit.data)); }
+        if (_getInFlight.has(scopedKey)) { NorvaTrace.log('cache JOIN in-flight', scopedKey); return _getInFlight.get(scopedKey).then(cloneJson); }
+        NorvaTrace.log('cache MISS → network', scopedKey);
         const p = Promise.resolve(fetchFn())
-            .then((data) => { _getCache.set(cacheKey, { at: Date.now(), data }); return data; })
-            .finally(() => { _getInFlight.delete(cacheKey); });
-        _getInFlight.set(cacheKey, p);
+            .then((data) => {
+                const responseEpoch = visibilityEpochFromPayload(data);
+                const epochChangedWithoutProof = !responseEpoch && _visibilityEpoch !== startEpoch;
+                if (!epochChangedWithoutProof) {
+                    _getCache.set(visibilityScopedCacheKey(cacheKey, responseEpoch || startEpoch), {
+                        at: Date.now(),
+                        data
+                    });
+                }
+                return data;
+            })
+            .finally(() => {
+                if (_getInFlight.get(scopedKey) === p) _getInFlight.delete(scopedKey);
+            });
+        _getInFlight.set(scopedKey, p);
         return p.then(cloneJson);
     }
     function invalidateCache(prefix) {
@@ -671,16 +777,17 @@
         const _bootDone = NorvaTrace.time('boot() — 1 call seeds sources+entitlements+profiles+profile+trial');
         const p = request('GET', '/boot');
         const seedSection = (cacheKey, pick, individualFetch) => {
-            if (_getInFlight.has(cacheKey)) return; // a getter already owns this fetch
+            const scopedKey = visibilityScopedCacheKey(cacheKey);
+            if (_getInFlight.has(scopedKey)) return; // a getter already owns this fetch
             const sp = p.then((bundle) => (bundle ? pick(bundle) : null), () => null)
                 .then(async (value) => {
-                    if (value != null) { _getCache.set(cacheKey, { at: Date.now(), data: value }); return value; }
+                    if (value != null) { _getCache.set(visibilityScopedCacheKey(cacheKey), { at: Date.now(), data: value }); return value; }
                     const fresh = await individualFetch();
-                    _getCache.set(cacheKey, { at: Date.now(), data: fresh });
+                    _getCache.set(visibilityScopedCacheKey(cacheKey), { at: Date.now(), data: fresh });
                     return fresh;
                 })
-                .finally(() => { if (_getInFlight.get(cacheKey) === sp) _getInFlight.delete(cacheKey); });
-            _getInFlight.set(cacheKey, sp);
+                .finally(() => { if (_getInFlight.get(scopedKey) === sp) _getInFlight.delete(scopedKey); });
+            _getInFlight.set(scopedKey, sp);
         };
         seedSection('sources', (b) => b.sources, () => request('GET', '/sources'));
         seedSection('entitlements', (b) => b.entitlements, () => request('GET', '/entitlements'));
@@ -688,7 +795,7 @@
         seedSection('profile', (b) => b.profile, () => request('GET', '/profile'));
         return p.then((bundle) => {
             if (bundle && bundle.trialEligibility != null) {
-                _getCache.set('trialEligibility', { at: Date.now(), data: bundle.trialEligibility });
+                _getCache.set(visibilityScopedCacheKey('trialEligibility'), { at: Date.now(), data: bundle.trialEligibility });
             }
             _bootDone(bundle ? 'bundle received' : 'null → sections fall back to individual fetches');
             return bundle;
@@ -746,11 +853,17 @@
 
     async function catalogRequest(path, params = {}, options = {}) {
         const route = `${path}${query({ country: resolveCountry(), lang: resolveLang(), ...params })}`;
+        // A catalog can change while this tab is idle (for example, an atomic
+        // provider replacement completed on another device). Never let the
+        // browser satisfy an authenticated catalog GET from its HTTP cache: that
+        // would hide the new response epoch from this process. The application
+        // still keeps its short-lived, epoch-scoped in-memory caches.
+        const catalogOptions = { ...options, _visibilityForceNoStore: true };
         try {
-            return await requestToBase(catalogBase(), 'GET', route, null, options);
+            return await requestToBase(catalogBase(), 'GET', route, null, catalogOptions);
         } catch (error) {
             if (error.status === 404 || error.status === 405) {
-                return request('GET', route, null, options);
+                return request('GET', route, null, catalogOptions);
             }
             throw error;
         }
@@ -768,13 +881,15 @@
         }
     }
 
-    async function seriesInfoRequest(id, seriesId, options = {}) {
+    async function seriesInfoRequest(id, seriesId, options = {}, fallbackPrefix = '/sources') {
         const route = `/sources/${encodeURIComponent(id)}/series-info?series_id=${encodeURIComponent(seriesId)}`;
         try {
             return await requestToBase(seriesInfoBase(), 'GET', route, null, options);
         } catch (error) {
             if (error.status === 404 || error.status === 405) {
-                return request('GET', route, null, options);
+                const safePrefix = fallbackPrefix === '/device/sources' ? '/device/sources' : '/sources';
+                const fallbackRoute = `${safePrefix}/${encodeURIComponent(id)}/series-info?series_id=${encodeURIComponent(seriesId)}`;
+                return request('GET', fallbackRoute, null, options);
             }
             throw error;
         }
@@ -905,16 +1020,26 @@
         const _trLabel = method + ' ' + String(path).split('?')[0];
         const _trT0 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : 0;
         NorvaTrace.log('net → ' + _trLabel);
-        const send = () => fetch(`${baseUrl}${path}`, {
+        const send = () => {
+            const authenticatedGet = method === 'GET' && Boolean(token);
+            // Once an epoch is known, make it part of the browser-cache URL. On
+            // the first authenticated read there is no trustworthy generation
+            // yet, so bypass the HTTP cache and learn it from the server.
+            const requestPath = authenticatedGet ? visibilityVersionedPath(path) : path;
+            return fetch(`${baseUrl}${requestPath}`, {
             method,
             headers,
             body: body === undefined || body === null ? undefined : JSON.stringify(body),
+            ...(authenticatedGet && (!_visibilityEpoch || options._visibilityForceNoStore)
+                ? { cache: 'no-store' }
+                : {}),
             ...(options.signal ? { signal: options.signal } : {}),
             // keepalive lets a small write (the history exit flush on pagehide /
             // backgrounding) outlive the page instead of being cancelled with it.
             // Scoped to callers that opt in; history payloads are ~1-2 KB (<<64 KB cap).
             ...(options.keepalive ? { keepalive: true } : {})
-        });
+            });
+        };
 
         let response = await send();
         let _trRefreshed = false;
@@ -937,6 +1062,51 @@
         const payload = contentType.includes('application/json')
             ? await response.json().catch(() => ({}))
             : { error: await response.text().catch(() => '') };
+
+        const responseVisibilityEpoch = visibilityEpochFromResponse(response)
+            || visibilityEpochFromPayload(payload);
+        if (token && responseVisibilityEpoch && isOlderVisibilityEpoch(responseVisibilityEpoch, _visibilityEpoch)) {
+            // A private HTTP-cache entry or an already in-flight request from the
+            // previous generation must never be handed to a caller after another
+            // response has advanced the account epoch. Retry once against the
+            // versioned URL with cache bypass; fail closed if the server still
+            // returns an older generation.
+            if (method === 'GET' && !options._visibilityEpochRetry) {
+                return requestToBase(baseUrl, method, path, body, {
+                    ...options,
+                    _visibilityEpochRetry: true,
+                    _visibilityForceNoStore: true
+                });
+            }
+            const stale = new Error('Stale catalog visibility generation');
+            stale.code = 'STALE_CATALOG_VISIBILITY_EPOCH';
+            throw stale;
+        }
+
+        // Visibility is a server-owned generation. Remember it before any caller
+        // can consult an in-memory cache; a response header is accepted for routes
+        // whose legacy JSON body cannot yet carry metadata.
+        observeVisibilityEpoch(payload, response);
+
+        const visibilityErrorCode = payload && typeof payload === 'object'
+            ? String(payload?.details?.code || payload?.code || '')
+            : '';
+        if (
+            token
+            && method === 'GET'
+            && response.status === 409
+            && visibilityErrorCode === 'CATALOG_VISIBILITY_EPOCH_CHANGED'
+            && !options._visibilityEpochRetry
+        ) {
+            // The server discarded a body assembled across an atomic cutover.
+            // It has already supplied the authoritative new epoch above; rebuild
+            // the GET once on that versioned URL and bypass intermediary caches.
+            return requestToBase(baseUrl, method, path, body, {
+                ...options,
+                _visibilityEpochRetry: true,
+                _visibilityForceNoStore: true
+            });
+        }
 
         // The server silently served the DEFAULT profile because the requested one is LOCKED by
         // the plan (post-downgrade). Surface it once — without this, the displayed profile and
@@ -4123,6 +4293,17 @@
         isConfigured: () => Boolean(apiBase()),
         imageUrl: proxyImageUrl,
 
+        catalogVisibility: Object.freeze({
+            epoch: () => _visibilityEpoch || null,
+            epochFor: (payload) => visibilityEpochFromPayload(payload) || null,
+            invalidate: (epoch = null) => {
+                if (epoch !== null && epoch !== undefined && epoch !== '') observeVisibilityEpoch(epoch);
+                _getCache.clear();
+                _getInFlight.clear();
+                return _visibilityEpoch || null;
+            }
+        }),
+
         health: () => request('GET', '/health', null, { token: '' }),
 
         // Keep the edge functions warm so the next real call after a lull doesn't
@@ -4458,7 +4639,12 @@
                     null,
                     { token: getDeviceToken() }
                 ),
-                seriesInfo: (id, seriesId) => seriesInfoRequest(id, seriesId, { token: getDeviceToken() }),
+                seriesInfo: (id, seriesId) => seriesInfoRequest(
+                    id,
+                    seriesId,
+                    { token: getDeviceToken() },
+                    '/device/sources'
+                ),
                 shortEpg: (id, streamId, limit = 8) => request(
                     'GET',
                     `/device/sources/${encodeURIComponent(id)}/short-epg?stream_id=${encodeURIComponent(streamId)}&limit=${encodeURIComponent(limit)}`,

@@ -22,7 +22,7 @@ test('MKV codec backfill is service-gated, exact-owner scoped and bounded to ten
   assert.match(route, /uniqueVariantIds\.slice\(0, 10\)/);
   assert.match(route, /PLAYBACK_SESSION_UUID_PATTERN\.test/);
   assert.match(route, /uniqueVariantIds\.length > 10/);
-  assert.match(route, /\.from\("cloud_title_variants"\)[\s\S]*\.eq\("user_id", userId\)[\s\S]*\.eq\("item_type", "movie"\)[\s\S]*\.in\("id", variantIds\)/);
+  assert.match(route, /\.from\("cloud_catalog_visible_title_variants"\)[\s\S]*\.eq\("user_id", userId\)[\s\S]*\.eq\("item_type", "movie"\)[\s\S]*\.in\("id", variantIds\)/);
   assert.match(route, /variants\.length !== variantIds\.length/);
   assert.match(route, /resolvePlaybackTarget\(sourceId, "movie", externalId, userId, db\)/);
   assert.doesNotMatch(route, /targetUrl\s*[:=]\s*body|body\.url|ignoreLiveSession/);

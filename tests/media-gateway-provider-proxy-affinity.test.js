@@ -69,6 +69,31 @@ test('literal percent sequences are decoded exactly once across path, query, and
   }
 });
 
+test('significant username whitespace and non-default ports stay in the canonical affinity key', () => {
+  const username = '  spaced-user  ';
+  const encoded = encodeURIComponent(username);
+  const expected = `panel.example:8443/${username}`;
+  assert.equal(
+    proxyPool.providerAccountAffinityKey(
+      `https://panel.example:8443/movie/${encoded}/secret/42.mkv`,
+    ),
+    expected,
+  );
+  assert.equal(
+    proxyPool.providerAccountAffinityKey(
+      `https://panel.example:8443/player_api.php?username=${encoded}&password=secret`,
+    ),
+    expected,
+  );
+  assert.equal(
+    proxyPool.providerAccountAffinityKeyFromCredentials(
+      'https://PANEL.EXAMPLE:8443/base',
+      username,
+    ),
+    expected,
+  );
+});
+
 test('the static pool accepts backward-compatible one-slot or the complete five-slot shape only', () => {
   assert.deepEqual(
     proxyPool.parseProviderProxyUrls('http://u:p@proxy-one.example:1000'),
@@ -268,8 +293,13 @@ test('gateway uses the canonical provider key on every provider network lane', (
   );
   assert.match(
     gateway,
-    /dispatcher: pickProxyAgent\(proxyKeyFromUrl\(url\)\) \|\| undefined/,
-    'metadata must use the provider-account key',
+    /const proxyIndex = providerProxyUrls\.length \? poolIndexForKey\(proxyKeyFromUrl\(url\)\) : -1;/,
+    'pinned metadata must select its proxy with the canonical provider-account key',
+  );
+  assert.match(
+    gateway,
+    /new ProxyAgent\(\{[\s\S]{0,120}uri: providerProxyUrls\[proxyIndex\]/,
+    'pinned metadata must retain the selected sticky proxy while enforcing request-time DNS pinning',
   );
   assert.match(
     gateway,

@@ -22,7 +22,7 @@ function sourceBetween(startMarker, endMarker) {
 test('home rails pass the request through and place liked recommendations before watched', () => {
   assert.match(
     CATALOG,
-    /jsonCached\(req,\s*await listHomeRails\(req,\s*url,\s*userId\),\s*60\)/,
+    /jsonCached\(req,\s*sanitizeCatalogMediaPayload\(await listHomeRails\(req,\s*url,\s*userId\)\),\s*60\)/,
   );
 
   const home = sourceBetween(
@@ -42,7 +42,8 @@ test('home rails pass the request through and place liked recommendations before
     'function jsonCached(',
     '\nfunction corsHeaders(',
   );
-  assert.match(cache, /private, max-age=/);
+  assert.match(cache, /private, no-store, max-age=0/);
+  assert.doesNotMatch(cache, /stale-while-revalidate/);
   assert.match(cache, /"Vary": "Origin, Authorization, x-norva-profile-id"/);
   assert.match(home, /optionalRail\("because_you_liked"/);
   assert.match(home, /optionalRail\("because_you_watched"/);

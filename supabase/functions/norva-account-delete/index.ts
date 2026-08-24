@@ -25,6 +25,8 @@ const DELIVERY_BATCH = 5;
 const DELIVERY_SPACING_MS = 250;
 const RECENT_AUTH_MAX_AGE_SECONDS = 15 * 60;
 const AUTH_CLOCK_SKEW_SECONDS = 60;
+const MEDIA_GATEWAY_URL = (Deno.env.get("NORVA_MEDIA_GATEWAY_URL") ?? "").replace(/\/+$/, "");
+const MEDIA_GATEWAY_TOKEN = Deno.env.get("NORVA_MEDIA_GATEWAY_TOKEN") ?? "";
 
 const DEFAULT_ALLOWED_ORIGINS = [
   "https://norva.tv",
@@ -230,6 +232,7 @@ function sleep(milliseconds: number): Promise<void> {
 }
 
 type AuthenticationMethod = { method?: unknown; timestamp?: unknown };
+type AccountDeletionFinalizationClaim = { user_id?: unknown; finalization_key?: unknown };
 
 async function deletionAuthenticationGuard(token: string): Promise<
   | { ok: true }
@@ -418,6 +421,212 @@ async function drainDeletionEmailOutbox(db: SupabaseClient): Promise<Record<stri
   return result;
 }
 
+async function drainAccountDeletionFinalizations(db: SupabaseClient) {
+  const { data: reconciledData, error: reconciledError } = await db.rpc(
+    "norva_reconcile_account_deletion_finalizations",
+    { p_batch: 25 },
+  );
+  if (reconciledError) throw new Error(`account_deletion_finalization_reconcile_failed:${reconciledError.message}`);
+  const reconciled = typeof reconciledData === "number" ? reconciledData : 0;
+  const { data, error } = await db.rpc("norva_claim_account_deletion_finalizations", {
+    p_batch: 5,
+    p_lease_seconds: 120,
+  });
+  if (error) throw new Error(`account_deletion_finalization_claim_failed:${error.message}`);
+  const claims = (Array.isArray(data) ? data : []) as AccountDeletionFinalizationClaim[];
+  let completed = 0;
+  let deferred = 0;
+  for (const claim of claims) {
+    const userId = typeof claim.user_id === "string" ? claim.user_id : "";
+    const finalizationKey = typeof claim.finalization_key === "string" ? claim.finalization_key : "";
+    if (!userId || !finalizationKey) {
+      deferred++;
+      continue;
+    }
+    // This is the sole Auth delete path.  The SQL claim has already checked
+    // READY_TO_FINALIZE and the BEFORE DELETE guard rechecks FINALIZING.
+    const { error: deletionError } = await db.auth.admin.deleteUser(userId);
+    if (deletionError) {
+      console.error("[norva-account-delete] finalization Auth delete deferred", deletionError.message);
+      deferred++;
+      continue;
+    }
+    const { data: complete, error: completeError } = await db.rpc(
+      "norva_complete_account_deletion_finalization",
+      { p_finalization_key: finalizationKey },
+    );
+    if (completeError || complete !== true) {
+      // Auth is already absent. A later reconciliation can complete the
+      // tombstone, but must never issue another delete to repair this ack gap.
+      console.error("[norva-account-delete] finalization acknowledgement deferred", completeError?.message ?? "not_completed");
+      deferred++;
+      continue;
+    }
+    completed++;
+  }
+  return { reconciled, claimed: claims.length, completed, deferred };
+}
+
+async function sha256Hex(value: string) {
+  const bytes = new TextEncoder().encode(value);
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function drainProviderTransportStop(db: SupabaseClient, userId: string) {
+  const worker = "norva-account-delete-cron-v1";
+  const { data, error } = await db.rpc("norva_claim_account_deletion_transport_stop", {
+    p_user_id: userId, p_worker: worker, p_lease_seconds: 120,
+  });
+  if (error) {
+    if (error.code === "40001") return "stale";
+    throw new Error(`account_deletion_transport_claim_failed:${error.message}`);
+  }
+  const claim = (data && typeof data === "object" ? data : {}) as JsonRecord;
+  if (claim.state === "completed") return "completed";
+  const leaseSequence = typeof claim.leaseSequence === "number" ? claim.leaseSequence : -1;
+  const revision = typeof claim.revision === "number" ? claim.revision : -1;
+  const epoch = typeof claim.deletionEpoch === "number" ? claim.deletionEpoch : -1;
+  if (claim.state !== "processing" || leaseSequence < 0 || revision < 0 || epoch < 0) return "stale";
+  if (!MEDIA_GATEWAY_URL || !MEDIA_GATEWAY_TOKEN) {
+    await db.rpc("norva_settle_provider_transport_stop_action", {
+      p_user_id: userId, p_worker: worker, p_expected_lease_sequence: leaseSequence,
+      p_expected_revision: revision, p_outcome: "retry", p_error_code: "gateway_unconfigured", p_retry_after_seconds: 60,
+    });
+    return "deferred";
+  }
+  // Claiming only grants permission to try. Revalidate under the durable
+  // account/transport fences immediately before the gateway effect so an old
+  // worker cannot stop anything after an epoch, lease, revision, or state bump.
+  const { data: revalidatedData, error: revalidateError } = await db.rpc(
+    "norva_revalidate_account_deletion_transport_stop",
+    {
+      p_user_id: userId, p_worker: worker, p_expected_deletion_epoch: epoch,
+      p_expected_lease_sequence: leaseSequence, p_expected_revision: revision,
+    },
+  );
+  if (revalidateError?.code === "40001") return "stale";
+  if (revalidateError) throw new Error(`account_deletion_transport_revalidate_failed:${revalidateError.message}`);
+  const revalidated = (revalidatedData && typeof revalidatedData === "object" ? revalidatedData : {}) as JsonRecord;
+  const revalidatedAffinities = Array.isArray(revalidated.affinityHashes)
+    ? revalidated.affinityHashes.filter((value): value is string => typeof value === "string" && /^[a-f0-9]{64}$/.test(value))
+    : [];
+  if (revalidated.state !== "processing"
+      || revalidated.deletionEpoch !== epoch
+      || revalidated.leaseSequence !== leaseSequence
+      || revalidated.revision !== revision) return "stale";
+  // No persisted affinity means this account owns no gateway-addressable
+  // provider transport. The SQL settle still proves that no live capability
+  // exists before completing; do not send an invalid empty gateway request.
+  if (revalidatedAffinities.length === 0) {
+    const receipt = await sha256Hex(`provider-transport-stop:v1:${userId}:${epoch}:${leaseSequence}:${revision}`);
+    const { error: settleError } = await db.rpc("norva_settle_provider_transport_stop_action", {
+      p_user_id: userId, p_worker: worker, p_expected_lease_sequence: leaseSequence,
+      p_expected_revision: revision, p_outcome: "completed", p_transport_stop_receipt_hash: receipt,
+      p_error_code: null, p_retry_after_seconds: 0,
+    });
+    if (settleError?.code === "40001") return "stale";
+    if (settleError) throw new Error(`account_deletion_transport_settle_failed:${settleError.message}`);
+    return "completed";
+  }
+  const response = await fetch(`${MEDIA_GATEWAY_URL}/sessions/stop-provider-affinities`, {
+    method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${MEDIA_GATEWAY_TOKEN}` },
+    body: JSON.stringify({ affinityHashes: revalidatedAffinities }),
+  });
+  const result = await response.json().catch(() => ({})) as JsonRecord;
+  if (!response.ok || result.providerDrained !== true) {
+    await db.rpc("norva_settle_provider_transport_stop_action", {
+      p_user_id: userId, p_worker: worker, p_expected_lease_sequence: leaseSequence,
+      p_expected_revision: revision, p_outcome: "retry", p_error_code: "gateway_stop_deferred", p_retry_after_seconds: 15,
+    });
+    return "deferred";
+  }
+  const receipt = await sha256Hex(`provider-transport-stop:v1:${userId}:${epoch}:${leaseSequence}:${revision}`);
+  const { error: settleError } = await db.rpc("norva_settle_provider_transport_stop_action", {
+    p_user_id: userId, p_worker: worker, p_expected_lease_sequence: leaseSequence,
+    p_expected_revision: revision, p_outcome: "completed", p_transport_stop_receipt_hash: receipt,
+    p_error_code: null, p_retry_after_seconds: 0,
+  });
+  if (settleError?.code === "40001") return "stale";
+  if (settleError) throw new Error(`account_deletion_transport_settle_failed:${settleError.message}`);
+  return "completed";
+}
+
+// Drive exactly one durable, bounded DB step for each account.  Provider
+// transport-stop execution intentionally remains outside this adapter: it is
+// an external effect with its own claim/receipt protocol.  Until its durable
+// receipt exists the provider preparation stays in DRAINING and this worker
+// cannot advance the account to any purge or Auth-finalization step.
+async function drainAccountDeletionWorkflows(db: SupabaseClient) {
+  const { data, error } = await db.rpc("norva_claim_account_deletion_workflows", {
+    p_batch: 10,
+  });
+  if (error) throw new Error(`account_deletion_workflow_claim_failed:${error.message}`);
+  const claims = (Array.isArray(data) ? data : []) as Array<{
+    user_id?: unknown;
+    revision?: unknown;
+  }>;
+  let advanced = 0;
+  let batches = 0;
+  let transportStops = 0;
+  let stale = 0;
+  for (const claim of claims) {
+    const userId = typeof claim.user_id === "string" ? claim.user_id : "";
+    const revision = typeof claim.revision === "number" ? claim.revision : -1;
+    if (!userId || !Number.isSafeInteger(revision) || revision < 0) {
+      stale++;
+      continue;
+    }
+    const { data: nextData, error: nextError } = await db.rpc(
+      "norva_advance_account_deletion_workflow",
+      { p_user_id: userId, p_expected_revision: revision, p_batch_size: 500 },
+    );
+    // Revision CAS failures are expected under duplicate schedulers. They are
+    // STALE/no-op, never an invitation to retry with a guessed revision.
+    if (nextError) {
+      if (nextError.code === "40001") stale++;
+      else throw new Error(`account_deletion_workflow_advance_failed:${nextError.message}`);
+      continue;
+    }
+    if (!nextData || typeof nextData !== "object") {
+      stale++;
+      continue;
+    }
+    if ((nextData as JsonRecord).nextAction === "provider_drain") {
+      const transport = await drainProviderTransportStop(db, userId);
+      if (transport === "completed") transportStops++;
+    }
+    advanced++;
+    const next = nextData as JsonRecord;
+    const nextRevision = typeof next.revision === "number" ? next.revision : -1;
+    const action = typeof next.nextAction === "string" ? next.nextAction : "";
+    if (!Number.isSafeInteger(nextRevision) || nextRevision < 0) {
+      stale++;
+      continue;
+    }
+    if (action === "purge_paywall_events") {
+      const { error: batchError } = await db.rpc(
+        "norva_purge_account_deletion_paywall_batch",
+        { p_user_id: userId, p_expected_revision: nextRevision, p_limit: 500 },
+      );
+      if (batchError) {
+        if (batchError.code === "40001") stale++;
+        else throw new Error(`account_deletion_paywall_batch_failed:${batchError.message}`);
+      } else batches++;
+    } else if (action === "purge_product") {
+      const { error: batchError } = await db.rpc(
+        "norva_purge_account_deletion_product_batch",
+        { p_user_id: userId, p_expected_revision: nextRevision, p_limit: 500 },
+      );
+      if (batchError) {
+        if (batchError.code === "40001") stale++;
+        else throw new Error(`account_deletion_product_batch_failed:${batchError.message}`);
+      } else batches++;
+    }
+  }
+  return { claimed: claims.length, advanced, batches, transportStops, stale };
+}
+
 async function cronAuthorized(req: Request): Promise<boolean> {
   const token = (req.headers.get("Authorization") ?? "").match(/^Bearer\s+(.+)$/i)?.[1] ?? "";
   if (!token) return false;
@@ -437,8 +646,12 @@ Deno.serve(async (req) => {
   if (isCron) {
     if (!(await cronAuthorized(req))) return json(req, { error: "Unauthorized" }, 403);
     try {
-      const result = await drainDeletionEmailOutbox(admin);
-      return json(req, { ok: true, ...result });
+      const [email, finalization] = await Promise.all([
+        drainDeletionEmailOutbox(admin),
+        drainAccountDeletionFinalizations(admin),
+      ]);
+      const workflow = await drainAccountDeletionWorkflows(admin);
+      return json(req, { ok: true, email, workflow, finalization });
     } catch (error) {
       console.error("[norva-account-delete] delivery worker failed", errorText(error));
       return json(req, { error: "Delivery worker failed" }, 500);
@@ -562,31 +775,32 @@ Deno.serve(async (req) => {
     return json(req, { error: "Deletion preparation failed" }, 500);
   }
 
-  // Deletes auth.users; ordinary user-owned rows cascade, the Partners guard
-  // verifies the preparation, and the email activation trigger shares the
-  // Auth deletion transaction.
-  const { error: delErr } = await admin.auth.admin.deleteUser(user.id);
-  if (delErr) {
-    console.error("[norva-account-delete] account deletion failed", delErr.message);
-    if (deliveryKey) {
-      const { error: cancelError } = await admin.rpc("cancel_prepared_account_deletion_email", {
-        p_delivery_key: deliveryKey,
-      });
-      if (cancelError) console.error("[norva-account-delete] prepared confirmation cleanup failed", cancelError.message);
-    }
-    return json(req, { error: "Deletion failed" }, 500);
+  // The Auth row is deliberately retained here.  This request only enters the
+  // durable deletion machine: it raises the account/source provider fences and
+  // creates the transport-stop action.  A later bounded worker must prove
+  // drain, analytics purge, legal archival and product purge before the final
+  // Auth delete can be attempted.
+  const { data: deletionData, error: deletionError } = await admin.rpc(
+    "norva_begin_account_deletion_workflow",
+    { p_user_id: user.id },
+  );
+  if (deletionError || !deletionData || typeof deletionData !== "object") {
+    console.error(
+      "[norva-account-delete] durable deletion begin failed",
+      deletionError?.message ?? "invalid_begin_envelope",
+    );
+    return json(req, { error: "Deletion preparation failed" }, 500);
   }
 
-  let confirmation: "queued" | "unavailable" = "unavailable";
-  if (deliveryKey) {
-    const { data: confirmed, error: confirmError } = await admin.rpc("confirm_account_deletion_email", {
-      p_delivery_key: deliveryKey,
-      p_deleted_user_id: user.id,
-    });
-    if (!confirmError && confirmed === true) confirmation = "queued";
-    else console.error("[norva-account-delete] confirmation activation unavailable", confirmError?.message ?? "not_confirmed");
-  }
-
-  // No deleted UUID/email is echoed or retained in the API response.
-  return json(req, { ok: true, deleted: true, emailConfirmation: confirmation });
+  const deletion = deletionData as JsonRecord;
+  // No deleted UUID/email is echoed or retained in the API response.  The
+  // client can safely retry this request: begin is idempotent for one account.
+  return json(req, {
+    ok: true,
+    deletionPending: true,
+    state: deletion.state,
+    providerState: deletion.providerState,
+    providerPhase: deletion.providerPhase,
+    readyToFinalize: deletion.readyToFinalize === true,
+  }, 202);
 });

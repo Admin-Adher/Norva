@@ -220,8 +220,8 @@ class SourceManager {
         container.innerHTML = sources.map(source => {
             const sourceView = this.sourceWithStatus(source);
             const health = window.NorvaSourceHealth?.classifySource(sourceView, this.sourceStatuses || []) || {
-                state: source.enabled === false ? 'degraded' : 'ready',
-                label: source.enabled === false ? 'Disabled' : 'Ready',
+                state: this.isSourceManagementEnabled(source) ? 'ready' : 'degraded',
+                label: this.isSourceManagementEnabled(source) ? 'Ready' : 'Disabled',
                 message: ''
             };
             const progressButton = health.state === 'syncing'
@@ -239,7 +239,7 @@ class SourceManager {
                 ? { action: 'edit', label: 'Repair', cls: 'btn-repair' }
                 : { action: 'refresh', label: 'Sync', cls: '' };
             return `
-      <div class="source-item ${source.enabled ? '' : 'disabled'} ${health.needsAttention ? 'needs-attention' : ''}" data-id="${this.escapeHtml(source.id)}">
+      <div class="source-item ${this.isSourceManagementEnabled(source) ? '' : 'disabled'} ${health.needsAttention ? 'needs-attention' : ''}" data-id="${this.escapeHtml(source.id)}">
         <span class="source-icon">${icons[type]}</span>
         <div class="source-info">
           <div class="source-name-row">
@@ -259,7 +259,7 @@ class SourceManager {
             <button class="source-menu-item" data-action="refresh" role="menuitem" type="button">Sync now</button>
             <button class="source-menu-item" data-action="hard-refresh" role="menuitem" type="button">Rebuild catalog</button>
             <button class="source-menu-item" data-action="edit" role="menuitem" type="button">${needsRepair ? 'Repair login' : 'Edit login'}</button>
-            <button class="source-menu-item" data-action="toggle" role="menuitem" type="button">${source.enabled ? 'Disable service' : 'Enable service'}</button>
+            <button class="source-menu-item" data-action="toggle" role="menuitem" type="button">${this.isSourceManagementEnabled(source) ? 'Disable service' : 'Enable service'}</button>
             <button class="source-menu-item source-menu-danger" data-action="delete" role="menuitem" type="button">Remove</button>
           </div>
         </div>
@@ -420,6 +420,12 @@ class SourceManager {
         return '';
     }
 
+    isSourceManagementEnabled(source = {}) {
+        if (typeof source.managementEnabled === 'boolean') return source.managementEnabled;
+        if (typeof source.sourceEnabled === 'boolean') return source.sourceEnabled;
+        return source.enabled !== false;
+    }
+
     editableSourceUrl(type, source = {}) {
         const raw = String(source.url || source.serverUrl || source.server_url || '').trim();
         if (/^https?:\/\//i.test(raw)) return raw;
@@ -438,7 +444,6 @@ class SourceManager {
         if (!isExisting) return '';
 
         const host = this.sourceHost(source);
-        const username = source.username || (source.configHint || source.config_hint || {}).username || '';
         const hasPassword = type === 'xtream' && this.hasSavedPassword(source);
 
         return `
@@ -448,8 +453,8 @@ class SourceManager {
           <span>Server</span>
           <strong>${this.escapeHtml(host || 'Saved privately')}</strong>
           ${type === 'xtream' ? `
-          <span>Username</span>
-          <strong>${this.escapeHtml(username || 'Saved privately')}</strong>
+          <span>Login</span>
+          <strong>Saved privately</strong>
           <span>Password</span>
           <strong><span class="source-secret-mask">${hasPassword ? '&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;' : 'Not saved'}</span></strong>
           ` : ''}
@@ -649,7 +654,7 @@ class SourceManager {
             ? (this.looksLikePlaylistLink(rawUrl) && !username && !password ? 'm3u' : 'xtream')
             : requestedType;
 
-        if (!url && !(existing && type === 'xtream' && !password)) {
+        if (!url && !existing) {
             throw new Error('Provider URL is required.');
         }
 
@@ -659,13 +664,33 @@ class SourceManager {
             name = hostName ? hostName.replace(/^www\./i, '') : fallbackName;
         }
 
-        if (type === 'xtream' && (!username || (!password && !existing))) {
-            throw new Error(existing
-                ? 'Username is required. Enter the password too only when repairing the login.'
-                : 'Provider URL, username and password are required.');
+        let credentialsProvided = !existing;
+        if (type === 'xtream') {
+            if (!existing && (!url || !username || !password)) {
+                throw new Error('Provider URL, username and password are required.');
+            }
+            if (existing) {
+                const credentialUpdateRequested = Boolean(username || password);
+                if (credentialUpdateRequested && (!url || !username || !password)) {
+                    throw new Error('Enter the complete server URL, username and password to replace the saved login.');
+                }
+                credentialsProvided = Boolean(credentialUpdateRequested && url && username && password);
+            }
+        } else if (existing) {
+            // Stored M3U/EPG URLs stay private. The edit form receives only a
+            // host hint, so a metadata-only save must not overwrite the secret
+            // resource URL. A new absolute URL is an explicit replacement.
+            credentialsProvided = /^https?:\/\//i.test(rawUrl);
         }
 
-        return { type, name, url: type === 'm3u' ? rawUrl : url, username, password };
+        return {
+            type,
+            name,
+            url: type === 'm3u' ? rawUrl : url,
+            username,
+            password,
+            credentialsProvided
+        };
     }
 
     async confirmLargePlaylistIfNeeded(connection = {}) {
@@ -701,7 +726,7 @@ class SourceManager {
         const message = String(error?.message || '');
         const allowed = new Set([
             'Provider URL is required.',
-            'Username is required. Enter the password too only when repairing the login.',
+            'Enter the complete server URL, username and password to replace the saved login.',
             'Provider URL, username and password are required.'
         ]);
         return allowed.has(message)
@@ -1563,10 +1588,17 @@ class SourceManager {
         const { name, url, username, password } = form;
 
         try {
-            const data = { type, name, url };
-            if (type === 'xtream') {
+            // Renaming or changing other Settings metadata never resubmits the
+            // provider secret. Credential replacement is opt-in and requires a
+            // complete set captured in this form submission.
+            const data = { displayName: name };
+            if (form.credentialsProvided) {
+                data.type = type;
+                data.url = url;
+            }
+            if (type === 'xtream' && form.credentialsProvided) {
                 data.username = username;
-                if (password) data.password = password;
+                data.password = password;
             }
 
             await this.releasePlaybackForSourceChange();

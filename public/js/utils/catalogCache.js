@@ -33,7 +33,9 @@
         // the stored entry carry a version and they differ, the entry is treated as
         // a miss (and evicted) — so a completed re-sync or a background title
         // correction never paints pre-change content on a cold load. Omitting the
-        // version keeps the old time-only behaviour, so existing callers are unaffected.
+        // version keeps the old time-only behaviour only outside Cloud mode. A
+        // Cloud cache without a current server epoch could briefly repaint a
+        // hidden/staging source on cold start, so it is rejected fail-closed.
         read(k, opts) {
             try {
                 const raw = localStorage.getItem(fullKey(k));
@@ -42,7 +44,9 @@
                 if (!rec || typeof rec.at !== 'number') return null;
                 if (Date.now() - rec.at > MAX_AGE_MS) { localStorage.removeItem(fullKey(k)); return null; }
                 const wantV = opts && opts.version != null ? String(opts.version) : null;
-                if (wantV !== null && rec.v != null && String(rec.v) !== wantV) {
+                const cloudMode = window.API?.isCloudMode?.() === true;
+                if ((cloudMode && (wantV === null || rec.v == null))
+                    || (wantV !== null && String(rec.v) !== wantV)) {
                     localStorage.removeItem(fullKey(k));
                     return null;
                 }
@@ -54,6 +58,7 @@
         write(k, data, opts) {
             const rec = { at: Date.now(), data };
             if (opts && opts.version != null) rec.v = String(opts.version);
+            if (window.API?.isCloudMode?.() === true && rec.v == null) return;
             const payload = JSON.stringify(rec);
             try {
                 localStorage.setItem(fullKey(k), payload);

@@ -561,9 +561,33 @@ function loadEdgeHarness() {
     )) || {},
     mergeCodecProfileAnnotations: (existing, observed) => compactRecord({ ...recordOrEmpty(existing), ...recordOrEmpty(observed) }),
     mergePlaybackHints: (base, override) => compactRecord({ ...recordOrEmpty(base), ...recordOrEmpty(override) }),
+    // Public-field allowlisting is exercised by playback-public-payload-contract;
+    // this extracted harness isolates the proof-stripping/CAS behavior.
+    sanitizePlaybackSession: (value) => value,
     compatibilityTierForCodecProfile: () => 'gateway',
     playbackCostScoreForObservation: () => 1,
     isProjectionMissing: () => false,
+    isCatalogGenerationSuperseded: () => false,
+    readActiveCatalogGenerationSnapshot: async (_db, sourceId, userId) => ({
+      sourceId,
+      userId,
+      generationId: '90000000-0000-4000-8000-000000000001',
+      headRevision: 1,
+      sourceCatalogEpoch: 1,
+      sourceConfigRevision: 1,
+    }),
+    patchActiveCatalogMediaItems: async (db, options) => {
+      let update = db.from('cloud_media_items')
+        .update(options.patch)
+        .eq('user_id', options.userId)
+        .eq('source_id', options.sourceId)
+        .eq('generation_id', options.generation.generationId)
+        .eq('id', options.id);
+      if (options.updatedAt) update = update.eq('updated_at', options.updatedAt);
+      const { data, error } = await update.select('id');
+      return { data, error, superseded: false };
+    },
+    patchActiveCatalogTitleVariants: async () => ({ data: [], error: null, superseded: false }),
     throwDb: (error) => { throw error; },
     PLAYBACK_SESSION_UUID_PATTERN: /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
     getRuntimeConfig: async () => runtimeConfig,
@@ -651,7 +675,7 @@ function completeCacheCallbackDb({ gatewaySession, playbackSession, item }) {
               playbackSession.user_id === filters.user_id;
             return Promise.resolve({ data: matches ? playbackSession : null, error: null });
           }
-          if (table === 'cloud_media_items') {
+          if (table === 'cloud_catalog_visible_media_items') {
             return Promise.resolve({ data: item, error: null });
           }
           throw new Error(`unexpected table ${table}`);

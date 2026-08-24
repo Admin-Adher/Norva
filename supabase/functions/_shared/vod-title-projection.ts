@@ -1,4 +1,18 @@
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
+import {
+  type ActiveCatalogGeneration,
+  type BuildingCatalogGeneration,
+  catalogGenerationRpcFence,
+  withCatalogGenerationRows,
+} from "./catalog-generation.ts";
+import {
+  buildProviderDirectFallbackSnapshot,
+  directFallbackLeaseTtlSeconds,
+  ProviderDirectFallbackLeaseError,
+  providerDirectFallbackLeaseOwner,
+  withSourceDirectFallbackLease,
+} from "./provider-direct-fallback-lease.mjs";
+import { fetchBoundedProviderJson } from "./bounded-provider-response.mjs";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -6,6 +20,7 @@ type ProjectionRow = {
   id?: string;
   user_id?: string;
   source_id?: string;
+  generation_id?: string;
   item_type?: string;
   external_id?: string;
   title?: string;
@@ -22,11 +37,21 @@ type XtreamConfig = {
   password: string;
 };
 
+type DirectFallbackLeaseContext = {
+  db: SupabaseClient;
+  sourceId: string;
+  userId: string;
+  ownerScope: string;
+  configCiphertext: string;
+  configRevision: string;
+};
+
 type ProjectionOptions = {
   sourceId: string;
   userId: string;
   rows: ProjectionRow[];
   db: SupabaseClient;
+  generation: ActiveCatalogGeneration;
   xtreamConfig?: XtreamConfig | null;
   vodInfoLimit?: number;
   tmdbValidateLimit?: number;
@@ -36,6 +61,13 @@ type ProjectionOptions = {
   // rather than falling back to the blocked IP.
   mediaGatewayUrl?: string | null;
   mediaGatewayToken?: string | null;
+  // Required before this active-source projector may use its legacy direct
+  // provider fallback. The isolated building-generation projector has no such
+  // option and performs no provider I/O.
+  directFallbackLease?: DirectFallbackLeaseContext | null;
+  // Optional continuation fence supplied by callers that captured an exact
+  // config/visibility epoch. It is deliberately not a staging bypass.
+  assertSourceCurrent?: () => Promise<void>;
 };
 
 const encoder = new TextEncoder();
@@ -80,12 +112,39 @@ function boundedProviderOverview(...values: unknown[]): string | null {
 }
 
 export async function refreshVodTitleProjection(options: ProjectionOptions) {
-  const rows = options.rows.filter((row) =>
+  const eligibleRows = options.rows.filter((row) =>
     (row.item_type === "movie" || row.item_type === "series") &&
-    stringOr(row.external_id, "") &&
-    stringOr(row.title, "")
+    stringOr(row.external_id, "") && stringOr(row.title, "")
   );
+  if (eligibleRows.some((row) =>
+    row.generation_id !== options.generation.generationId || row.source_id !== options.sourceId
+  )) {
+    throw new Error("VOD projection rows do not belong to the snapshotted catalog generation");
+  }
+  const rows = eligibleRows;
   if (!rows.length) return { titles: 0, variants: 0, providerTmdbIds: 0, vodInfoFetched: 0 };
+
+  // cloud_titles is shared by every source owned by a user and catalog_titles is
+  // global. Projecting an invisible replacement candidate into either table can
+  // therefore mutate metadata that the still-active source A is serving, even
+  // though B's source-scoped media rows remain hidden. Keep staging/hidden data
+  // raw and source-scoped until promotion; identity/readiness checks use those
+  // raw rows and the normal finalizer can project them after the atomic switch.
+  const { data: catalogVisible, error: visibilityError } = await options.db.rpc(
+    "norva_source_catalog_visible",
+    { p_source_id: options.sourceId, p_user_id: options.userId },
+  );
+  if (visibilityError) throw new Error("Unable to verify catalog visibility before title projection");
+  if (catalogVisible !== true) {
+    return {
+      titles: 0,
+      variants: 0,
+      providerTmdbIds: 0,
+      vodInfoFetched: 0,
+      skipped: "source_not_catalog_visible",
+    };
+  }
+  await options.assertSourceCurrent?.();
 
   const gateway = options.mediaGatewayUrl && options.mediaGatewayToken
     ? { url: options.mediaGatewayUrl.replace(/\/+$/, ""), token: options.mediaGatewayToken }
@@ -94,10 +153,21 @@ export async function refreshVodTitleProjection(options: ProjectionOptions) {
     ? await resolveProjectionCacheKey(options.db, options.sourceId, options.userId, options.xtreamConfig.serverUrl)
     : "";
   const vodInfoByExternalId = options.xtreamConfig
-    ? await loadVodInfoIds(options.xtreamConfig, rows, boundedInt(options.vodInfoLimit, DEFAULT_VOD_INFO_LIMIT, 0, 1000), gateway, options.db, projectionServerHost)
+    ? await loadVodInfoIds(
+      options.xtreamConfig,
+      rows,
+      boundedInt(options.vodInfoLimit, DEFAULT_VOD_INFO_LIMIT, 0, 1000),
+      gateway,
+      options.db,
+      projectionServerHost,
+      options.assertSourceCurrent,
+      options.directFallbackLease ?? null,
+    )
     : new Map<string, ProviderIds>();
+  await options.assertSourceCurrent?.();
   const providerIdsByExternalId = collectProviderIds(rows, vodInfoByExternalId);
   const tmdbValidationById = await validateProviderTmdbIds(rows, providerIdsByExternalId, options.tmdbValidateLimit, options.db);
+  await options.assertSourceCurrent?.();
 
   const titleRowsByKey = new Map<string, JsonRecord>();
   const variantRows: JsonRecord[] = [];
@@ -230,12 +300,14 @@ export async function refreshVodTitleProjection(options: ProjectionOptions) {
   const titleRows = [...titleRowsByKey.values()];
   const titleIdByKey = new Map<string, string>();
   for (let index = 0; index < titleRows.length; index += 500) {
+    await options.assertSourceCurrent?.();
     const chunk = titleRows.slice(index, index + 500);
     const { data, error } = await options.db
       .from("cloud_titles")
       .upsert(chunk, { onConflict: "user_id,item_type,identity_key" })
       .select("id,identity_key");
     if (error) throw error;
+    await options.assertSourceCurrent?.();
     for (const title of data ?? []) {
       if (typeof title.identity_key === "string" && typeof title.id === "string") {
         titleIdByKey.set(title.identity_key, title.id);
@@ -251,11 +323,13 @@ export async function refreshVodTitleProjection(options: ProjectionOptions) {
 
   const savedVariants = variantRows.filter((variant) => variant.title_id);
   for (let index = 0; index < savedVariants.length; index += 500) {
-    const chunk = savedVariants.slice(index, index + 500);
+    await options.assertSourceCurrent?.();
+    const chunk = withCatalogGenerationRows(savedVariants.slice(index, index + 500), options.generation);
     const { error } = await options.db
       .from("cloud_title_variants")
-      .upsert(chunk, { onConflict: "source_id,item_type,external_id" });
+      .upsert(chunk, { onConflict: "source_id,generation_id,item_type,external_id" });
     if (error) throw error;
+    await options.assertSourceCurrent?.();
   }
 
   // Exact per-file track caches are shared across accounts by provider identity.
@@ -270,10 +344,12 @@ export async function refreshVodTitleProjection(options: ProjectionOptions) {
   )];
   if (projectionServerHost && movieExternalIds.length) {
     for (let index = 0; index < movieExternalIds.length; index += 500) {
+      await options.assertSourceCurrent?.();
       try {
         await options.db.rpc("hydrate_cloud_title_file_languages", {
           p_user_id: options.userId,
           p_source_id: options.sourceId,
+          ...catalogGenerationRpcFence(options.generation),
           p_server_key: projectionServerHost,
           p_item_type: "movie",
           p_external_ids: movieExternalIds.slice(index, index + 500),
@@ -281,6 +357,7 @@ export async function refreshVodTitleProjection(options: ProjectionOptions) {
       } catch (error) {
         console.warn("[vod-title-projection] exact file-language hydration skipped:", error instanceof Error ? error.message : error);
       }
+      await options.assertSourceCurrent?.();
     }
   }
 
@@ -295,37 +372,40 @@ export async function refreshVodTitleProjection(options: ProjectionOptions) {
   // Including it in this bulk upsert (even as []) would clobber crawled values, since the
   // upsert REPLACES every column it lists. Leave it out and PostgREST preserves it.
   const catalogTmdbIds: string[] = [];
-  try {
-    const catalogRows: JsonRecord[] = [];
-    const seenCatalog = new Set<string>();
-    for (const titleRow of titleRows) {
-      const tmdbId = stringOrNull(titleRow.provider_tmdb_id);
-      if (!tmdbId || /^(tt)?0+$/i.test(tmdbId)) continue;
-      const catalogKey = `${titleRow.item_type}:${tmdbId}`;
-      if (seenCatalog.has(catalogKey)) continue;
-      seenCatalog.add(catalogKey);
-      catalogTmdbIds.push(tmdbId);
-      catalogRows.push({
-        item_type: titleRow.item_type,
-        provider_tmdb_id: tmdbId,
-        title: titleRow.title ?? null,
-        original_title: titleRow.original_title ?? null,
-        release_year: titleRow.release_year ?? null,
-        poster_url: titleRow.poster_url ?? null,
-        backdrop_url: titleRow.backdrop_url ?? null,
-        metadata: titleRow.metadata ?? {},
-        enriched_at: syncedAt,
-        updated_at: syncedAt,
-      });
-    }
-    for (let index = 0; index < catalogRows.length; index += 500) {
+  const catalogRows: JsonRecord[] = [];
+  const seenCatalog = new Set<string>();
+  for (const titleRow of titleRows) {
+    const tmdbId = stringOrNull(titleRow.provider_tmdb_id);
+    if (!tmdbId || /^(tt)?0+$/i.test(tmdbId)) continue;
+    const catalogKey = `${titleRow.item_type}:${tmdbId}`;
+    if (seenCatalog.has(catalogKey)) continue;
+    seenCatalog.add(catalogKey);
+    catalogTmdbIds.push(tmdbId);
+    catalogRows.push({
+      item_type: titleRow.item_type,
+      provider_tmdb_id: tmdbId,
+      title: titleRow.title ?? null,
+      original_title: titleRow.original_title ?? null,
+      release_year: titleRow.release_year ?? null,
+      poster_url: titleRow.poster_url ?? null,
+      backdrop_url: titleRow.backdrop_url ?? null,
+      metadata: titleRow.metadata ?? {},
+      enriched_at: syncedAt,
+      updated_at: syncedAt,
+    });
+  }
+  for (let index = 0; index < catalogRows.length; index += 500) {
+    await options.assertSourceCurrent?.();
+    try {
       const { error } = await options.db
         .from("catalog_titles")
         .upsert(catalogRows.slice(index, index + 500), { onConflict: "item_type,provider_tmdb_id" });
       if (error) throw error;
+    } catch (error) {
+      console.warn("[vod-title-projection] catalog_titles dual-write skipped:", error instanceof Error ? error.message : error);
+      break;
     }
-  } catch (error) {
-    console.warn("[vod-title-projection] catalog_titles dual-write skipped:", error instanceof Error ? error.message : error);
+    await options.assertSourceCurrent?.();
   }
 
   // Catalog-first fill (scale): inherit already-known audio languages from the global
@@ -333,11 +413,13 @@ export async function refreshVodTitleProjection(options: ProjectionOptions) {
   // another user already crawled gets languages INSTANTLY instead of waiting ~days for the
   // crawl. Scoped to this batch's tmdb ids so the sync stays fast. Best-effort.
   if (catalogTmdbIds.length) {
+    await options.assertSourceCurrent?.();
     try {
       await options.db.rpc("fill_user_audio_for_titles", { p_user_id: options.userId, p_tmdb_ids: catalogTmdbIds });
     } catch (error) {
       console.warn("[vod-title-projection] catalog audio fill skipped:", error instanceof Error ? error.message : error);
     }
+    await options.assertSourceCurrent?.();
   }
 
   // Push the resolved release_year onto the grid rows (cloud_media_items) so the
@@ -351,15 +433,18 @@ export async function refreshVodTitleProjection(options: ProjectionOptions) {
   const yearItemIds = rows
     .map((row) => row.id)
     .filter((id): id is string => typeof id === "string" && id.length > 0);
+  await options.assertSourceCurrent?.();
   try {
     await options.db.rpc("propagate_media_item_years", {
       p_user: options.userId,
       p_source: options.sourceId,
+      ...catalogGenerationRpcFence(options.generation),
       p_item_ids: yearItemIds.length ? yearItemIds : null,
     });
   } catch (error) {
     console.warn("[vod-title-projection] year propagation skipped:", error instanceof Error ? error.message : error);
   }
+  await options.assertSourceCurrent?.();
 
   return {
     titles: titleRows.length,
@@ -367,6 +452,165 @@ export async function refreshVodTitleProjection(options: ProjectionOptions) {
     providerTmdbIds,
     vodInfoFetched: vodInfoByExternalId.size,
   };
+}
+
+// Deliberately separate from refreshVodTitleProjection: callers cannot reach
+// this BUILDING-generation path by toggling an optional flag on the active
+// projector. It performs exactly two writes: insert-missing logical titles via
+// a lease-checked SQL RPC, then generation-scoped variants carrying the same
+// durable ingest lease. It never enriches or updates shared title metadata.
+export async function projectVodTitleGenerationIsolated(options: {
+  mode: "building-generation";
+  sourceId: string;
+  userId: string;
+  transitionId: string;
+  rows: ProjectionRow[];
+  db: SupabaseClient;
+  generation: BuildingCatalogGeneration;
+}) {
+  if (
+    options.mode !== "building-generation" || options.generation.kind !== "building" ||
+    options.transitionId !== options.generation.transitionId
+  ) {
+    throw new Error("Explicit BUILDING generation projection context is required");
+  }
+  const eligibleRows = options.rows.filter((row) =>
+    (row.item_type === "movie" || row.item_type === "series") &&
+    stringOr(row.external_id, "") && stringOr(row.title, "")
+  );
+  if (eligibleRows.some((row) =>
+    row.generation_id !== options.generation.generationId ||
+    row.source_id !== options.sourceId || row.user_id !== options.userId
+  )) {
+    throw new Error("Candidate projection rows do not belong to the leased BUILDING generation");
+  }
+  const rows = eligibleRows;
+  if (!rows.length) return { titlesEnsured: 0, variants: 0 };
+
+  const titleByTypedKey = new Map<string, JsonRecord>();
+  const variants: Array<{ typedKey: string; row: JsonRecord }> = [];
+  const syncedAt = new Date().toISOString();
+  for (const row of rows) {
+    const itemType = row.item_type === "series" ? "series" : "movie";
+    const title = stringOr(row.title, "Norva");
+    const metadata = recordOrEmpty(row.metadata);
+    const playbackHint = recordOrEmpty(row.playback_hint);
+    const releaseYear = extractYear(title, metadata.year ?? metadata.releaseYear ?? metadata.release_date);
+    const providerIds = {
+      tmdbId: cleanId(metadata.providerTmdbId ?? metadata.provider_tmdb_id ?? playbackHint.providerTmdbId),
+      imdbId: cleanId(metadata.providerImdbId ?? metadata.provider_imdb_id ?? playbackHint.providerImdbId),
+    };
+    const identity = identityForTitle(itemType, title, releaseYear, providerIds);
+    const typedKey = `${itemType}:${identity.key}`;
+    if (!titleByTypedKey.has(typedKey)) {
+      titleByTypedKey.set(typedKey, {
+        user_id: options.userId,
+        item_type: itemType,
+        identity_key: identity.key,
+        identity_source: identity.source,
+        provider_tmdb_id: providerIds.tmdbId,
+        provider_imdb_id: providerIds.imdbId,
+        match_status: "provider_unverified",
+        title: cleanDisplayTitle(title),
+        original_title: title,
+        release_year: releaseYear ? Number(releaseYear) : null,
+        poster_url: stringOrNull(row.poster_url),
+        backdrop_url: stringOrNull(row.backdrop_url),
+        metadata: compactRecord({
+          categoryName: row.subtitle || metadata.categoryName,
+          overview: boundedProviderOverview(metadata.overview, metadata.description, metadata.plot),
+          providerIds,
+          projectionVersion: 3,
+          staged: true,
+        }),
+      });
+    }
+
+    const version = parseVersionInfo(title, metadata);
+    const compatibility = compatibilitySeed(playbackHint, metadata, title);
+    const observedTtff = observedTtffMs(metadata, playbackHint);
+    variants.push({
+      typedKey,
+      row: {
+        user_id: options.userId,
+        source_id: options.sourceId,
+        media_item_id: row.id || null,
+        item_type: itemType,
+        external_id: stringOr(row.external_id, ""),
+        raw_title: title,
+        label: variantLabel(version),
+        language: version.language,
+        quality: version.quality,
+        resolution: version.resolution,
+        container_extension: stringOr(playbackHint.container ?? metadata.container, itemType === "movie" ? "mp4" : ""),
+        poster_url: stringOrNull(row.poster_url),
+        playback_hint: playbackHint,
+        codec_profile: recordOrEmpty(metadata.codecProfile ?? metadata.codec_profile),
+        compatibility_tier: compatibility.tier,
+        playback_cost_score: playbackCostScore(compatibility.tier, observedTtff),
+        last_observed_ttff_ms: observedTtff,
+        metadata: compactRecord({
+          ...metadata,
+          categoryName: row.subtitle || metadata.categoryName,
+          identityKey: recordOrEmpty(titleByTypedKey.get(typedKey)).identity_key,
+          identitySource: recordOrEmpty(titleByTypedKey.get(typedKey)).identity_source,
+          providerTmdbId: providerIds.tmdbId || undefined,
+          providerImdbId: providerIds.imdbId || undefined,
+          staged: true,
+        }),
+      },
+    });
+  }
+
+  const titleRows = [...titleByTypedKey.values()];
+  for (let index = 0; index < titleRows.length; index += 200) {
+    const { error } = await options.db.rpc("norva_ensure_credential_generation_titles", {
+      p_transition_id: options.transitionId,
+      p_user_id: options.userId,
+      p_generation_id: options.generation.generationId,
+      p_job_id: options.generation.jobId,
+      p_worker: options.generation.leaseOwner,
+      p_expected_attempt: options.generation.attempt,
+      p_titles: titleRows.slice(index, index + 200),
+    });
+    if (error) throw error;
+  }
+
+  const titleIdByTypedKey = new Map<string, string>();
+  for (let index = 0; index < titleRows.length; index += 200) {
+    const chunk = titleRows.slice(index, index + 200);
+    const identityKeys = [...new Set(chunk.map((row) => stringOr(row.identity_key, "")).filter(Boolean))];
+    const { data, error } = await options.db
+      .from("cloud_titles")
+      .select("id,item_type,identity_key")
+      .eq("user_id", options.userId)
+      .in("item_type", ["movie", "series"])
+      .in("identity_key", identityKeys);
+    if (error) throw error;
+    for (const title of data ?? []) {
+      const id = stringOr(title.id, "");
+      const itemType = stringOr(title.item_type, "");
+      const identityKey = stringOr(title.identity_key, "");
+      if (id && itemType && identityKey) titleIdByTypedKey.set(`${itemType}:${identityKey}`, id);
+    }
+  }
+
+  const saved = withCatalogGenerationRows(
+    variants.flatMap(({ typedKey, row }) => {
+      const titleId = titleIdByTypedKey.get(typedKey);
+      return titleId ? [{ ...row, title_id: titleId, synced_at: syncedAt }] : [];
+    }),
+    options.generation,
+  );
+  for (let index = 0; index < saved.length; index += 250) {
+    const { error } = await options.db
+      .from("cloud_title_variants")
+      .upsert(saved.slice(index, index + 250), {
+        onConflict: "source_id,generation_id,item_type,external_id",
+      });
+    if (error) throw error;
+  }
+  return { titlesEnsured: titleRows.length, variants: saved.length };
 }
 
 type ProviderIds = { tmdbId: string | null; imdbId: string | null };
@@ -433,6 +677,8 @@ async function loadVodInfoIds(
   gateway: { url: string; token: string } | null = null,
   db: SupabaseClient | null = null,
   serverHost = "",
+  assertSourceCurrent?: () => Promise<void>,
+  directFallbackLease: DirectFallbackLeaseContext | null = null,
 ) {
   const result = new Map<string, ProviderIds>();
   // Reuse is a database read, not a provider call. Scan the whole sync batch even
@@ -473,6 +719,33 @@ async function loadVodInfoIds(
   const toFetch = limit > 0 ? unresolved.slice(0, limit) : [];
   const concurrency = 4;
   let cursor = 0;
+  const directFallbackSnapshot = directFallbackLease
+    ? await buildProviderDirectFallbackSnapshot({
+      serverUrl: config.serverUrl,
+      username: config.username,
+      configCiphertext: directFallbackLease.configCiphertext,
+      configRevision: directFallbackLease.configRevision,
+    })
+    : null;
+  // Gateway failures can happen concurrently, but direct provider reads must
+  // serialize locally before claiming the database lease or sibling workers
+  // would reject one another as lease_busy.
+  let directFallbackTail: Promise<unknown> = Promise.resolve();
+  const runDirectFallback = <T>(timeoutMs: number, operation: () => Promise<T>): Promise<T> => {
+    if (!directFallbackLease) {
+      return Promise.reject(new ProviderDirectFallbackLeaseError("lease_required"));
+    }
+    const pending = directFallbackTail.then(() => withSourceDirectFallbackLease({
+      db: directFallbackLease.db,
+      sourceId: directFallbackLease.sourceId,
+      userId: directFallbackLease.userId,
+      owner: providerDirectFallbackLeaseOwner(directFallbackLease.ownerScope),
+      ttlSeconds: directFallbackLeaseTtlSeconds(timeoutMs),
+      ...directFallbackSnapshot!,
+    }, operation)) as Promise<T>;
+    directFallbackTail = pending.then(() => undefined, () => undefined);
+    return pending;
+  };
   async function worker() {
     for (;;) {
       const index = cursor++;
@@ -480,21 +753,28 @@ async function loadVodInfoIds(
       if (!row) return;
       const externalId = stringOr(row.external_id, "");
       if (!externalId) continue;
+      await assertSourceCurrent?.();
+      let payload: unknown;
       try {
-        const payload = await fetchVodInfo(config, gateway, externalId, 8000);
-        const ids = extractProviderIds(payload);
-        if (ids.tmdbId || ids.imdbId) result.set(externalId, ids);
-        // Share to the global cache (mark resolved even when there's no id) so the next user reuses it.
-        if (db && serverHost) {
-          try {
-            await db.rpc("upsert_catalog_file_ids", {
-              p_server_host: serverHost, p_item_type: "movie", p_external_id: externalId,
-              p_tmdb_id: ids.tmdbId ?? "", p_imdb_id: ids.imdbId ?? "",
-            });
-          } catch (_) { /* best-effort global cache */ }
-        }
-      } catch (_) {
+        payload = await fetchVodInfo(config, gateway, externalId, 8000, runDirectFallback);
+      } catch (error) {
+        if (error instanceof ProviderDirectFallbackLeaseError) throw error;
         // Provider metadata is an optimization. The raw item still imports.
+        continue;
+      }
+      await assertSourceCurrent?.();
+      const ids = extractProviderIds(payload);
+      if (ids.tmdbId || ids.imdbId) result.set(externalId, ids);
+      // Share to the global cache (mark resolved even when there's no id) so the next user reuses it.
+      if (db && serverHost) {
+        await assertSourceCurrent?.();
+        try {
+          await db.rpc("upsert_catalog_file_ids", {
+            p_server_host: serverHost, p_item_type: "movie", p_external_id: externalId,
+            p_tmdb_id: ids.tmdbId ?? "", p_imdb_id: ids.imdbId ?? "",
+          });
+        } catch (_) { /* best-effort global cache */ }
+        await assertSourceCurrent?.();
       }
     }
   }
@@ -514,15 +794,15 @@ async function fetchVodInfo(
   gateway: { url: string; token: string } | null,
   vodId: string,
   timeoutMs: number,
+  runDirectFallback: <T>(timeoutMs: number, operation: () => Promise<T>) => Promise<T>,
 ): Promise<any> {
   if (gateway) {
-    let response: Response | null = null;
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    let gatewayResult: Awaited<ReturnType<typeof fetchBoundedProviderJson>> | null = null;
     try {
-      response = await fetch(`${gateway.url}/xtream/metadata`, {
+      gatewayResult = await fetchBoundedProviderJson(`${gateway.url}/xtream/metadata`, {
+        timeoutMs,
+        maxBytes: 8 * 1024 * 1024,
         method: "POST",
-        signal: controller.signal,
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${gateway.token}`,
@@ -537,20 +817,21 @@ async function fetchVodInfo(
         }),
       });
     } catch (_) {
-      response = null; // gateway unreachable → fall through to a direct fetch
-    } finally {
-      clearTimeout(timer);
+      gatewayResult = null; // gateway unreachable → fall through to a direct fetch
     }
-    if (response) {
-      if (response.ok) return await response.json().catch(() => null);
+    if (gatewayResult) {
+      if (gatewayResult.response.ok) return gatewayResult.value;
       // Provider-origin error (e.g. 401/403/429): skip, don't fall back to the
       // blocked Supabase IP. Only gateway-side problems fall through to direct.
-      if (![404, 405, 502, 503, 504].includes(response.status)) {
-        throw new Error(`Provider vod_info refused ${response.status}`);
+      if (![404, 405, 502, 503, 504].includes(gatewayResult.response.status)) {
+        throw new Error(`Provider vod_info refused ${gatewayResult.response.status}`);
       }
     }
   }
-  return fetchJson(xtreamApiUrl(config, "get_vod_info", { vod_id: vodId }), timeoutMs);
+  return runDirectFallback(
+    timeoutMs,
+    () => fetchJson(xtreamApiUrl(config, "get_vod_info", { vod_id: vodId }), timeoutMs),
+  );
 }
 
 async function validateProviderTmdbIds(rows: ProjectionRow[], idsByExternalId: Map<string, ProviderIds>, limitOverride?: number, db: SupabaseClient | null = null) {
@@ -1165,19 +1446,13 @@ async function fetchJson(url: string, timeoutMs: number) {
 }
 
 async function fetchJsonWithHeaders(url: string, timeoutMs: number, headers: Record<string, string> = {}) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const response = await fetch(url, {
-      signal: controller.signal,
-      headers,
-    });
-    const payload = await response.json().catch(() => null);
-    if (!response.ok) throw new Error(`Provider metadata refused ${response.status}`);
-    return payload;
-  } finally {
-    clearTimeout(timer);
-  }
+  const { response, value: payload } = await fetchBoundedProviderJson(url, {
+    timeoutMs,
+    maxBytes: 8 * 1024 * 1024,
+    headers,
+  });
+  if (!response.ok) throw new Error(`Provider metadata refused ${response.status}`);
+  return payload;
 }
 
 function xtreamApiUrl(config: XtreamConfig, action: string, extra: Record<string, string>) {
@@ -1209,7 +1484,7 @@ function stringOrNull(value: unknown) {
 }
 
 function hostFromUrl(url: unknown): string {
-  try { return new URL(stringOr(url, "")).hostname; } catch { return ""; }
+  try { return new URL(stringOr(url, "")).host; } catch { return ""; }
 }
 
 function cleanId(value: unknown) {

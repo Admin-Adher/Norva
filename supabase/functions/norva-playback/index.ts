@@ -3,6 +3,21 @@ import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { getEntitlementDecision, getEntitlementRuntime, limitNumber } from "../_shared/entitlements.ts";
 import { verifyUserJwtLocally } from "../_shared/local-auth.ts";
 import {
+  bindCatalogVisibilityEpoch as bindCatalogVisibilityEpochShared,
+  catalogVisibilityEpochHeaders,
+  finalizeCatalogVisibilityResponse,
+  latestBoundCatalogVisibilityEpoch,
+  publicEdgeErrorLog,
+  publicEdgeErrorPayload,
+} from "../_shared/catalog-visibility-response.mjs";
+import {
+  PLAYBACK_EVENT_PUBLIC_SELECT,
+  PLAYBACK_SESSION_PUBLIC_SELECT,
+  sanitizeGatewaySession,
+  sanitizePlaybackEvent,
+  sanitizePlaybackSession,
+} from "../_shared/cloud-public-view.mjs";
+import {
   engineRawTokenExpiresAt,
   playbackTransportExpiresAt,
 } from "../_shared/playback-expiry.mjs";
@@ -28,6 +43,27 @@ import {
   selectMediaGatewayRouteForGatewayId,
   selectMediaGatewayRouteForUserHash,
 } from "../_shared/media-gateway-canary-routing.mjs";
+import {
+  type ActiveCatalogGeneration,
+  assertActiveCatalogGenerationCurrent,
+  callActiveCatalogGenerationRpc,
+  catalogGenerationFields,
+  catalogGenerationRpcFence,
+  isRollingRpcUnavailable,
+  isCatalogGenerationSuperseded,
+  readActiveCatalogGenerationSnapshot,
+} from "../_shared/catalog-generation.ts";
+import {
+  buildProviderDirectFallbackSnapshot,
+  directFallbackLeaseTtlSeconds,
+  ProviderDirectFallbackLeaseError,
+  providerDirectFallbackLeaseOwner,
+  withSourceDirectFallbackLease,
+} from "../_shared/provider-direct-fallback-lease.mjs";
+import {
+  BoundedProviderResponseError,
+  fetchBoundedProviderJson,
+} from "../_shared/bounded-provider-response.mjs";
 
 type JsonRecord = Record<string, unknown>;
 type MediaGatewayRoute = {
@@ -216,6 +252,15 @@ Deno.serve(async (req) => {
     return new Response(null, { status: 204, headers: corsHeaders(req) });
   }
 
+  return await finalizeCatalogVisibilityResponse(
+    req,
+    await handleRequest(req),
+    supabase,
+    { service: "norva-playback", corsHeaders },
+  );
+});
+
+async function handleRequest(req: Request): Promise<Response> {
   try {
     const url = new URL(req.url);
     const segments = routeSegments(url.pathname);
@@ -424,12 +469,114 @@ Deno.serve(async (req) => {
     throw new HttpError(404, "Route not found");
   } catch (error) {
     const status = error instanceof HttpError ? error.status : 500;
-    const message = error instanceof Error ? error.message : "Unexpected error";
-    const details = error instanceof HttpError ? error.details : undefined;
-    console.error("[norva-playback]", status, message, details ?? "");
-    return json(req, { error: message, details }, status);
+    const payload = publicEdgeErrorPayload(error, status, {
+      unavailableMessage: "Norva Playback is temporarily unavailable",
+    });
+    console.error("[norva-playback]", publicEdgeErrorLog(error, status, payload));
+    return json(req, payload, status);
   }
-});
+}
+
+type ActiveCatalogPatchResult = {
+  data: JsonRecord[];
+  error: unknown;
+  superseded: boolean;
+};
+
+// Catalog observations are mutable metadata on a physical generation row. The
+// transient proof fields are validated and cleared atomically by the database
+// trigger, so a head/config/visibility ABA cannot authorize a late playback
+// writer. A superseded observation is successful cancellation: playback and
+// source health must never be failed because its former generation disappeared.
+async function patchActiveCatalogTitleVariants(
+  db: SupabaseClient,
+  options: {
+    userId: string;
+    sourceId: string;
+    patch: JsonRecord;
+    generation?: ActiveCatalogGeneration;
+    id?: string | null;
+    itemType?: string | null;
+    externalId?: string | null;
+  },
+): Promise<ActiveCatalogPatchResult> {
+  try {
+    const generation = options.generation ?? await readActiveCatalogGenerationSnapshot(
+      db,
+      options.sourceId,
+      options.userId,
+    );
+    await assertActiveCatalogGenerationCurrent(db, options.sourceId, options.userId, generation);
+    let query = db
+      .from("cloud_title_variants")
+      .update({ ...options.patch, ...catalogGenerationFields(generation) })
+      .eq("user_id", options.userId)
+      .eq("source_id", options.sourceId)
+      .eq("generation_id", generation.generationId);
+    if (options.id) query = query.eq("id", options.id);
+    if (options.itemType) query = query.eq("item_type", options.itemType);
+    if (options.externalId) query = query.eq("external_id", options.externalId);
+    const { data, error } = await query.select("id");
+    if (error) {
+      if (isCatalogGenerationSuperseded(error)) return { data: [], error: null, superseded: true };
+      return { data: [], error, superseded: false };
+    }
+    try {
+      await assertActiveCatalogGenerationCurrent(db, options.sourceId, options.userId, generation);
+    } catch (error) {
+      if (isCatalogGenerationSuperseded(error)) return { data: [], error: null, superseded: true };
+      throw error;
+    }
+    return { data: (data ?? []) as JsonRecord[], error: null, superseded: false };
+  } catch (error) {
+    if (isCatalogGenerationSuperseded(error)) return { data: [], error: null, superseded: true };
+    return { data: [], error, superseded: false };
+  }
+}
+
+async function patchActiveCatalogMediaItems(
+  db: SupabaseClient,
+  options: {
+    userId: string;
+    sourceId: string;
+    patch: JsonRecord;
+    generation?: ActiveCatalogGeneration;
+    id: string;
+    updatedAt?: string | null;
+  },
+): Promise<ActiveCatalogPatchResult> {
+  try {
+    const generation = options.generation ?? await readActiveCatalogGenerationSnapshot(
+      db,
+      options.sourceId,
+      options.userId,
+    );
+    await assertActiveCatalogGenerationCurrent(db, options.sourceId, options.userId, generation);
+    let query = db
+      .from("cloud_media_items")
+      .update({ ...options.patch, ...catalogGenerationFields(generation) })
+      .eq("id", options.id)
+      .eq("user_id", options.userId)
+      .eq("source_id", options.sourceId)
+      .eq("generation_id", generation.generationId);
+    if (options.updatedAt) query = query.eq("updated_at", options.updatedAt);
+    const { data, error } = await query.select("id");
+    if (error) {
+      if (isCatalogGenerationSuperseded(error)) return { data: [], error: null, superseded: true };
+      return { data: [], error, superseded: false };
+    }
+    try {
+      await assertActiveCatalogGenerationCurrent(db, options.sourceId, options.userId, generation);
+    } catch (error) {
+      if (isCatalogGenerationSuperseded(error)) return { data: [], error: null, superseded: true };
+      throw error;
+    }
+    return { data: (data ?? []) as JsonRecord[], error: null, superseded: false };
+  } catch (error) {
+    if (isCatalogGenerationSuperseded(error)) return { data: [], error: null, superseded: true };
+    return { data: [], error, superseded: false };
+  }
+}
 
 async function requireIdentity(req: Request, db: SupabaseClient): Promise<CloudIdentity> {
   const authHeader = req.headers.get("Authorization") ?? "";
@@ -439,10 +586,16 @@ async function requireIdentity(req: Request, db: SupabaseClient): Promise<CloudI
   // Vérif locale d'abord (voir _shared/local-auth.ts) — GoTrue n'est consulté
   // que si le verdict est indécidable localement (alg asymétrique, secret absent).
   const local = await verifyUserJwtLocally(token);
-  if (local !== "invalid" && local !== "fallback") return { userId: local.id };
+  if (local !== "invalid" && local !== "fallback") {
+    await bindCatalogVisibilityEpoch(req, local.id, db);
+    return { userId: local.id };
+  }
   if (local === "fallback") {
     const { data, error } = await db.auth.getUser(token);
-    if (!error && data.user) return { userId: data.user.id };
+    if (!error && data.user) {
+      await bindCatalogVisibilityEpoch(req, data.user.id, db);
+      return { userId: data.user.id };
+    }
   }
 
   const tokenHash = await sha256Hex(token);
@@ -454,7 +607,17 @@ async function requireIdentity(req: Request, db: SupabaseClient): Promise<CloudI
     .maybeSingle();
   if (deviceError) throwDb(deviceError, "Unable to verify device token");
   if (!device) throw new HttpError(401, "Invalid bearer token");
+  await bindCatalogVisibilityEpoch(req, device.user_id, db);
   return { userId: device.user_id, deviceId: device.id };
+}
+
+async function bindCatalogVisibilityEpoch(req: Request, userId: string, db: SupabaseClient) {
+  try {
+    await bindCatalogVisibilityEpochShared(req, userId, db);
+  } catch (_) {
+    console.warn("[norva-playback] catalog visibility epoch unavailable");
+    throw new HttpError(503, "Catalog visibility is temporarily unavailable");
+  }
 }
 
 async function requirePlaybackCapacity(
@@ -500,13 +663,7 @@ function throwEntitlementRequired(feature: string, decision: unknown, usage?: un
 }
 
 function publicPlaybackSession(value: unknown): JsonRecord {
-  const session = recordOrEmpty(stripMkvH264FastStartProofDeep(value));
-  const {
-    provider_account_hash: _providerAccountHash,
-    superseded_by: _supersededBy,
-    ...safe
-  } = session;
-  return safe;
+  return sanitizePlaybackSession(stripMkvH264FastStartProofDeep(value)) as JsonRecord;
 }
 
 function stripMkvH264FastStartProofDeep(value: unknown, depth = 0): unknown {
@@ -749,6 +906,8 @@ async function createPlaybackSession(
   // The source ownership check must happen before any provider target is
   // resolved or hashed. Client-provided URLs are deliberately ignored.
   await assertOwnedSource(sourceId, userId, db);
+  await assertSourceCatalogVisible(sourceId, userId, db);
+  const playbackGeneration = await readActiveCatalogGenerationSnapshot(db, sourceId, userId);
   if (deviceId) await assertOwnedDevice(deviceId, userId, db);
 
   const requestedMode = stringOr(body.mode, "auto");
@@ -800,6 +959,7 @@ async function createPlaybackSession(
       db,
       requestedPlaybackHint,
     );
+  await assertActiveCatalogGenerationCurrent(db, sourceId, userId, playbackGeneration);
   const targetUrl = resolved.targetUrl;
   const resolvedContainerObservation = "containerObservation" in resolved
     ? recordOrEmpty(resolved.containerObservation)
@@ -1193,7 +1353,7 @@ async function createPlaybackSession(
           const rc = await getRuntimeConfig(db);
           if (rc.whisperDetect && rc.mediaGatewayUrl && rc.mediaGatewayToken) {
             runBackground(detectUntaggedAudioLanguages({
-              db, runtimeConfig: rc, userId, targetUrl, userAgent,
+              db, runtimeConfig: rc, userId, sourceId, targetUrl, userAgent,
               audioTracks, titleId: titleRow.id, tmdbId: stringOrNull(titleRow.provider_tmdb_id),
               serverHost, itemType: fileCacheItemType, fileExternalId, sessionId: session.id, expiresAt,
               variantId: stringOrNull(titleRow.variant_id) || undefined,
@@ -1335,6 +1495,7 @@ async function createPlaybackSession(
         // caller playback hints are never authority for proof scope.
         variantId: null,
       },
+      playbackGeneration,
       gatewayVideoTranscodeExplicit,
       releasedSuperseded,
       resolvedContainerObservation,
@@ -1440,7 +1601,7 @@ async function createPlaybackSession(
   ));
   const gatewaySessionResponse = gateway.session && typeof gateway.session === "object"
     ? {
-      ...gateway.session,
+      ...sanitizeGatewaySession(gateway.session),
       audioStreamIndex: gateway.audioStreamIndex ?? null,
       audio_stream_index: gateway.audioStreamIndex ?? null,
       requestedAudioStreamIndex: gateway.requestedAudioStreamIndex ?? null,
@@ -2980,7 +3141,7 @@ async function loadExactLanguageValidationProfile(
   itemId: string,
 ) {
   const { data, error } = await db
-    .from("cloud_title_variants")
+    .from("cloud_catalog_visible_title_variants")
     .select("id,codec_profile")
     .eq("user_id", userId)
     .eq("source_id", sourceId)
@@ -3596,7 +3757,7 @@ async function expirePlaybackSession(id: string, userId: string, db: SupabaseCli
     .update({ status: "expired", expires_at: new Date().toISOString() })
     .eq("id", id)
     .eq("user_id", userId)
-    .select("*")
+    .select(PLAYBACK_SESSION_PUBLIC_SELECT)
     .single();
   if (updateError) throwDb(updateError, "Unable to expire playback session");
 
@@ -3686,7 +3847,7 @@ async function recordPlaybackEvent(
       error_message: scrub(stringOrNull(body.errorMessage ?? body.error_message)),
       metadata: scrub(compactRecord(recordOrEmpty(body.metadata))),
     })
-    .select("*")
+    .select(PLAYBACK_EVENT_PUBLIC_SELECT)
     .single();
   if (error) throwDb(error, "Unable to record playback event");
 
@@ -3697,7 +3858,7 @@ async function recordPlaybackEvent(
   if (sourceId && ttff && (eventType === "first_frame" || eventType === "play_started")) {
     await recordPlaybackStartupObservation(db, { userId, sourceId, itemType, itemId, startupMs: ttff });
   }
-  return { event: data };
+  return { event: sanitizePlaybackEvent(data) };
 }
 
 async function recordPlaybackSessionFailure(
@@ -4205,17 +4366,28 @@ function mediaReadFromCatalog(): boolean {
 //          both. An unresolved source falls back to a source-scoped key, never
 //          another tenant's providerKey/host cache row.
 //  - fingerprint: server-written provider fingerprint when available.
-const sourceIdentityCache = new Map<string, { host: string; key: string; fingerprint: string }>();
+const sourceIdentityCache = new Map<string, {
+  host: string;
+  key: string;
+  fingerprint: string;
+  configRevision: string;
+}>();
 async function resolveSourceIdentity(sourceId: string, userId: string, db: SupabaseClient): Promise<{ host: string; key: string; fingerprint: string }> {
   const cacheKey = `${userId}:${sourceId}`;
-  const cached = sourceIdentityCache.get(cacheKey);
-  if (cached !== undefined) return cached;
   const { data } = await db
-    .from("cloud_sources")
-    .select("config_hint")
+    .from("cloud_catalog_visible_sources")
+    .select("config_hint,config_revision")
     .eq("id", sourceId)
     .eq("user_id", userId)
     .maybeSingle();
+  if (!data) {
+    sourceIdentityCache.delete(cacheKey);
+    const key = `source:${sourceId}`;
+    return { host: "", key, fingerprint: key };
+  }
+  const configRevision = String(data.config_revision ?? "");
+  const cached = sourceIdentityCache.get(cacheKey);
+  if (cached !== undefined && cached.configRevision === configRevision) return cached;
   const hint = recordOrEmpty(data?.config_hint);
   const host = stringOr(hint.serverHost, "");
   let identityId = "";
@@ -4231,8 +4403,9 @@ async function resolveSourceIdentity(sourceId: string, userId: string, db: Supab
     providerKey = stringOr((verifiedLink as JsonRecord | null)?.provider_key, "");
   } catch (_) { /* rolling migration: use the tenant-scoped fallback */ }
   const key = identityId || `source:${sourceId}`;
-  const identity = { host, key, fingerprint: providerKey || key };
-  sourceIdentityCache.set(cacheKey, identity);
+  const identity = { host, key, fingerprint: providerKey || key, configRevision };
+  if (identityId) sourceIdentityCache.set(cacheKey, identity);
+  else sourceIdentityCache.delete(cacheKey);
   return identity;
 }
 // catalog_media_items keying stays on the hostname (its writer writes the hostname;
@@ -4370,8 +4543,10 @@ async function resolveExactEpisodePlaybackTarget(
   return {
     targetUrl: xtreamStreamUrl({
       serverUrl: stringOr(sourceConfig.serverUrl, ""),
-      username: stringOr(sourceConfig.username, ""),
-      password: stringOr(sourceConfig.password, ""),
+      username: typeof sourceConfig.username === "string" && sourceConfig.username.trim()
+        ? sourceConfig.username : "",
+      password: typeof sourceConfig.password === "string" && sourceConfig.password.length
+        ? sourceConfig.password : "",
       streamType: "series",
       streamId: episodeId,
       container,
@@ -4428,7 +4603,7 @@ async function resolvePlaybackTarget(
   }
   if (!item || mediaReadFromCatalog()) {
     const { data, error } = await db
-      .from("cloud_media_items")
+      .from("cloud_catalog_visible_media_items")
       .select("id,updated_at,playback_hint,metadata")
       .eq("source_id", sourceId)
       .eq("user_id", userId)
@@ -4446,8 +4621,10 @@ async function resolvePlaybackTarget(
       return {
         targetUrl: xtreamStreamUrl({
           serverUrl: stringOr(sourceConfig.serverUrl, ""),
-          username: stringOr(sourceConfig.username, ""),
-          password: stringOr(sourceConfig.password, ""),
+          username: typeof sourceConfig.username === "string" && sourceConfig.username.trim()
+            ? sourceConfig.username : "",
+          password: typeof sourceConfig.password === "string" && sourceConfig.password.length
+            ? sourceConfig.password : "",
           streamType: "series",
           streamId: itemId,
           container: requestContainer,
@@ -4493,7 +4670,7 @@ async function resolvePlaybackTarget(
   let exactVariantCodecProfile: JsonRecord = {};
   if (itemType === "movie") {
     const { data: variants, error: variantError } = await db
-      .from("cloud_title_variants")
+      .from("cloud_catalog_visible_title_variants")
       .select("codec_profile")
       .eq("user_id", userId)
       .eq("source_id", sourceId)
@@ -4541,8 +4718,10 @@ async function resolvePlaybackTarget(
     return {
       targetUrl: xtreamStreamUrl({
         serverUrl: stringOr(sourceConfig.serverUrl, ""),
-        username: stringOr(sourceConfig.username, ""),
-        password: stringOr(sourceConfig.password, ""),
+        username: typeof sourceConfig.username === "string" && sourceConfig.username.trim()
+          ? sourceConfig.username : "",
+        password: typeof sourceConfig.password === "string" && sourceConfig.password.length
+          ? sourceConfig.password : "",
         streamType,
         streamId: stringOr(hint.streamId, ""),
         container,
@@ -4591,11 +4770,22 @@ async function resolvePlaybackTarget(
 // (could be stale) — a transient failure must stay indistinguishable from "retry next tick".
 async function resolveSeriesEpisode(sourceId: string, seriesId: string, userId: string, db: SupabaseClient): Promise<{ url: string | null; emptySeries: boolean }> {
   const miss = { url: null, emptySeries: false };
-  const cfg = await loadSourceConfig(sourceId, userId, db).catch(() => null);
-  if (!cfg) return miss;
+  const loadedSource = await loadSourceConfigEnvelope(sourceId, userId, db).catch(() => null);
+  if (!loadedSource) return miss;
+  const assertLoadedSourceCurrent = () => assertPlaybackSourceConfigCurrent(
+    sourceId,
+    userId,
+    loadedSource.configRevision,
+    db,
+  );
+  const cfg = loadedSource.config;
   const serverUrl = stringOr((cfg as JsonRecord).serverUrl, "");
-  const username = stringOr((cfg as JsonRecord).username, "");
-  const password = stringOr((cfg as JsonRecord).password, "");
+  const username = typeof (cfg as JsonRecord).username === "string"
+    && String((cfg as JsonRecord).username).trim()
+    ? String((cfg as JsonRecord).username) : "";
+  const password = typeof (cfg as JsonRecord).password === "string"
+    && String((cfg as JsonRecord).password).length
+    ? String((cfg as JsonRecord).password) : "";
   if (!serverUrl || !username || !password) return miss;
   let base: string;
   try { base = normalizeBaseUrl(serverUrl); } catch { return miss; }
@@ -4619,44 +4809,101 @@ async function resolveSeriesEpisode(sourceId: string, seriesId: string, userId: 
   };
 
   // 1) Series-info cache (keyed server_host + series_id, PK-indexed) — no provider hit at all.
+  let cachedEpisodeUrl: string | null = null;
   try {
     const host = new URL(base).host;
     const { data: row } = await db.from("cloud_series_info_cache")
       .select("payload").eq("server_host", host).eq("series_id", seriesId).maybeSingle();
-    const cached = episodeUrlFrom(recordOrEmpty((row as JsonRecord | null)?.payload));
-    if (cached) return { url: cached, emptySeries: false };
+    cachedEpisodeUrl = episodeUrlFrom(recordOrEmpty((row as JsonRecord | null)?.payload));
   } catch (_) { /* cache unavailable → fall through */ }
+  if (cachedEpisodeUrl) {
+    await assertLoadedSourceCurrent();
+    return { url: cachedEpisodeUrl, emptySeries: false };
+  }
 
   // 2) Media gateway (residential IP): the only path Ninja/Ferran accept.
   try {
     const rc = await getRuntimeConfig(db);
     if (rc.mediaGatewayUrl && rc.mediaGatewayToken) {
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 12000);
-      try {
-        const resp = await fetch(`${rc.mediaGatewayUrl}/xtream/series-info`, {
+      const { response, value } = await fetchBoundedProviderJson(
+        `${rc.mediaGatewayUrl}/xtream/series-info`,
+        {
           method: "POST",
-          signal: ctrl.signal,
+          timeoutMs: 12_000,
+          maxBytes: 8 * 1024 * 1024,
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${rc.mediaGatewayToken}` },
           body: JSON.stringify({ serverUrl, username, password, seriesId, userAgent: "VLC/3.0.20 LibVLC/3.0.20" }),
-        });
-        if (resp.ok) {
-          const body = recordOrEmpty(await resp.json().catch(() => null));
-          const viaGateway = episodeUrlFrom(body);
-          if (viaGateway) return { url: viaGateway, emptySeries: false };
-          // Authoritative fiche with no episode → empty shell; skip the direct call (same
-          // panel would give the same answer — one provider hit saved).
-          if (isRecord(body.info)) return { url: null, emptySeries: true };
+        },
+      );
+      if (response.ok) {
+        const body = recordOrEmpty(value);
+        const viaGateway = episodeUrlFrom(body);
+        if (viaGateway) {
+          await assertLoadedSourceCurrent();
+          return { url: viaGateway, emptySeries: false };
         }
-      } finally { clearTimeout(timer); }
+        // Authoritative fiche with no episode → empty shell; skip the direct call (same
+        // panel would give the same answer — one provider hit saved).
+        if (isRecord(body.info)) {
+          await assertLoadedSourceCurrent();
+          return { url: null, emptySeries: true };
+        }
+      }
     }
-  } catch (_) { /* gateway hiccup → fall through to direct */ }
+  } catch (error) {
+    if (isPlaybackSourceSnapshotError(error)) throw error;
+    // Gateway hiccup/oversize/timeout → fall through to the fenced direct leg.
+  }
 
   // 3) Historical direct call (works on panels that tolerate datacenter IPs).
   const api = `${base}/player_api.php?username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}&action=get_series_info&series_id=${encodeURIComponent(seriesId)}`;
-  const res = await fetch(api, { headers: { "user-agent": "NorvaCloud/1.0", accept: "application/json" } }).catch(() => null);
-  if (!res || !res.ok) return miss;
-  return { url: episodeUrlFrom((await res.json().catch(() => null)) as JsonRecord | null), emptySeries: false };
+  let directInfo: JsonRecord | null;
+  try {
+    directInfo = await withSourceDirectFallbackLease({
+      db,
+      sourceId,
+      userId,
+      owner: providerDirectFallbackLeaseOwner("playback-series-resolution"),
+      ttlSeconds: directFallbackLeaseTtlSeconds(12_000),
+      ...await buildProviderDirectFallbackSnapshot({
+        serverUrl,
+        username,
+        configCiphertext: loadedSource.configCiphertext,
+        configRevision: loadedSource.configRevision,
+      }),
+    }, async () => {
+      try {
+        const { response, value } = await fetchBoundedProviderJson(api, {
+          timeoutMs: 12_000,
+          maxBytes: 8 * 1024 * 1024,
+          headers: { "user-agent": "NorvaCloud/1.0", accept: "application/json" },
+        });
+        if (!response.ok) {
+          await assertLoadedSourceCurrent();
+          return null;
+        }
+        const payload = recordOrEmpty(value);
+        // The source-transition trigger shares this lease's affinity mutex, so
+        // this exact revision verdict is linearized before release.
+        await assertLoadedSourceCurrent();
+        return payload;
+      } catch (error) {
+        if (error instanceof BoundedProviderResponseError) {
+          await assertLoadedSourceCurrent();
+          return null;
+        }
+        throw error;
+      }
+    });
+  } catch (error) {
+    if (error instanceof ProviderDirectFallbackLeaseError) {
+      throw new HttpError(error.status, error.message, error.details);
+    }
+    throw error;
+  }
+  await assertLoadedSourceCurrent();
+  if (!directInfo) return miss;
+  return { url: episodeUrlFrom(directInfo), emptySeries: false };
 }
 
 async function resolveSeriesEpisodeUrl(sourceId: string, seriesId: string, userId: string, db: SupabaseClient): Promise<string | null> {
@@ -5015,10 +5262,12 @@ async function persistGatewaySourceContainerMismatch(
     playbackHint: JsonRecord;
     expectedTargetUrlHash: string;
     mismatch: JsonRecord;
+    generation: ActiveCatalogGeneration;
   },
 ) {
   const itemCas = containerObservationItemCas(options.playbackHint, options.expectedTargetUrlHash);
-  const { data, error } = await db.rpc("record_catalog_file_container_observation", {
+  if (!itemCas) return false;
+  const { data, error } = await callActiveCatalogGenerationRpc(db, "record_catalog_file_container_observation", {
     p_playback_session_id: options.playbackSessionId,
     p_user_id: options.userId,
     p_source_id: options.sourceId,
@@ -5027,11 +5276,16 @@ async function persistGatewaySourceContainerMismatch(
     p_declared_container: options.mismatch.declaredContainer,
     p_observed_container: options.mismatch.observedContainer,
     p_evidence: options.mismatch.evidence,
-    p_expected_media_item_id: itemCas?.id ?? null,
-    p_expected_media_item_updated_at: itemCas?.updatedAt ?? null,
-  });
+    p_expected_media_item_id: itemCas.id,
+    p_expected_media_item_updated_at: itemCas.updatedAt,
+  }, options.generation);
   if (error || recordOrEmpty(data).ok !== true) {
     console.warn("[norva-playback] unable to persist provider container correction", error?.message || "invalid RPC result");
+    return false;
+  }
+  try {
+    await assertActiveCatalogGenerationCurrent(db, options.sourceId, options.userId, options.generation);
+  } catch (_) {
     return false;
   }
   return true;
@@ -5053,6 +5307,7 @@ async function createGatewaySession(
     itemId: string;
     variantId: string | null;
   },
+  playbackGeneration: ActiveCatalogGeneration,
   forceVideoTranscode: boolean,
   releasedSuperseded = 0,
   sourceContainerObservation: JsonRecord = {},
@@ -5138,6 +5393,7 @@ async function createGatewaySession(
         playbackHint,
         expectedTargetUrlHash: originalTargetUrlHash,
         mismatch,
+        generation: playbackGeneration,
       });
       if (PROVIDER_SLOT_RELEASE_DELAY_MS > 0) await sleep(PROVIDER_SLOT_RELEASE_DELAY_MS);
       const correctedTargetUrl = rewriteVodContainerUrl(
@@ -5463,18 +5719,21 @@ async function recordPlaybackStartupObservation(
   if (!itemType || !options.itemId || !Number.isFinite(options.startupMs) || options.startupMs <= 0) return;
 
   const cost = Math.max(1, Math.min(999, Math.round(options.startupMs / 10)));
-  const { error } = await db
-    .from("cloud_title_variants")
-    .update({
+  const { error } = await patchActiveCatalogTitleVariants(db, {
+    userId: options.userId,
+    sourceId: options.sourceId,
+    itemType,
+    externalId: options.itemId,
+    patch: {
       last_observed_ttff_ms: Math.round(options.startupMs),
       playback_cost_score: cost,
-    })
-    .eq("user_id", options.userId)
-    .eq("source_id", options.sourceId)
-    .eq("item_type", itemType)
-    .eq("external_id", options.itemId);
+    },
+  });
   if (error && !isProjectionMissing(error)) {
-    console.warn("[norva-playback] unable to record playback startup observation", error.message);
+    console.warn(
+      "[norva-playback] unable to record playback startup observation",
+      error instanceof Error ? error.message : "catalog observation write failed",
+    );
   }
 }
 
@@ -5510,13 +5769,22 @@ async function persistObservedCodecProfile(
     return false;
   }
 
+  let generation: ActiveCatalogGeneration;
+  try {
+    generation = await readActiveCatalogGenerationSnapshot(db, options.sourceId, options.userId);
+  } catch (snapshotError) {
+    if (isCatalogGenerationSuperseded(snapshotError)) return true;
+    if (options.strict) throw snapshotError;
+    return false;
+  }
+
   const observedAt = new Date().toISOString();
   if (options.requireItemCas && !options.expectedItemCas) {
     if (options.strict) throw new HttpError(409, "Exact media item CAS snapshot is unavailable");
     return false;
   }
   const { data: item, error } = await db
-    .from("cloud_media_items")
+    .from("cloud_catalog_visible_media_items")
     .select("id,metadata,playback_hint,updated_at")
     .eq("user_id", options.userId)
     .eq("source_id", options.sourceId)
@@ -5550,26 +5818,32 @@ async function persistObservedCodecProfile(
     return false;
   }
   if (item?.id) {
-    let itemUpdate = db
-      .from("cloud_media_items")
-      .update({
+    const itemUpdateResult = await patchActiveCatalogMediaItems(db, {
+      userId: options.userId,
+      sourceId: options.sourceId,
+      generation,
+      id: options.requireItemCas ? options.expectedItemCas!.id : String(item.id),
+      updatedAt: options.requireItemCas ? options.expectedItemCas!.updatedAt : null,
+      patch: {
         metadata: compactRecord({
           ...metadata,
           codecProfile,
           codecProfileObservedAt: observedAt,
         }),
         playback_hint: mergedPlaybackHint,
-      })
-      .eq("id", options.requireItemCas ? options.expectedItemCas!.id : item.id);
-    if (options.requireItemCas) itemUpdate = itemUpdate.eq("updated_at", options.expectedItemCas!.updatedAt);
-    const itemUpdateResult = options.requireItemCas
-      ? await itemUpdate.select("id")
-      : await itemUpdate;
-    const updatedItems = options.requireItemCas ? itemUpdateResult.data : null;
+      },
+    });
+    if (itemUpdateResult.superseded) return true;
+    const updatedItems = itemUpdateResult.data;
     const itemUpdateError = itemUpdateResult.error;
     if (itemUpdateError) {
-      if (options.strict) throwDb(itemUpdateError, "Unable to persist media codec profile");
-      console.warn("[norva-playback] unable to persist media codec profile", itemUpdateError.message);
+      if (options.strict) {
+        throwDb(itemUpdateError as { message?: string; details?: string; hint?: string }, "Unable to persist media codec profile");
+      }
+      console.warn(
+        "[norva-playback] unable to persist media codec profile",
+        itemUpdateError instanceof Error ? itemUpdateError.message : "catalog observation write failed",
+      );
     }
     if (options.requireItemCas && (!Array.isArray(updatedItems) || updatedItems.length !== 1)) {
       if (options.strict) throw new HttpError(409, "Media codec profile changed before CAS persistence");
@@ -5585,20 +5859,28 @@ async function persistObservedCodecProfile(
     compatibility_tier: tier,
     playback_cost_score: playbackCostScoreForObservation(tier, options.startupMs),
   });
-  let variantUpdate = db
-    .from("cloud_title_variants")
-    .update(variantPatch)
-    .eq("user_id", options.userId)
-    .eq("source_id", options.sourceId)
-    .eq("item_type", itemType)
-    .eq("external_id", options.itemId);
-  if (options.variantId) variantUpdate = variantUpdate.eq("id", options.variantId);
-  const { data: updatedVariants, error: variantError } = options.strict
-    ? await variantUpdate.select("id")
-    : await variantUpdate;
+  const {
+    data: updatedVariants,
+    error: variantError,
+    superseded: variantSuperseded,
+  } = await patchActiveCatalogTitleVariants(db, {
+    userId: options.userId,
+    sourceId: options.sourceId,
+    generation,
+    patch: variantPatch,
+    id: options.variantId,
+    itemType,
+    externalId: options.itemId,
+  });
+  if (variantSuperseded) return true;
   if (variantError && !isProjectionMissing(variantError)) {
-    if (options.strict) throwDb(variantError, "Unable to persist exact variant codec profile");
-    console.warn("[norva-playback] unable to persist variant codec profile", variantError.message);
+    if (options.strict) {
+      throwDb(variantError as { message?: string; details?: string; hint?: string }, "Unable to persist exact variant codec profile");
+    }
+    console.warn(
+      "[norva-playback] unable to persist variant codec profile",
+      variantError instanceof Error ? variantError.message : "catalog observation write failed",
+    );
     return false;
   }
   if (options.strict && (!Array.isArray(updatedVariants) || updatedVariants.length !== 1)) {
@@ -6101,32 +6383,132 @@ function isProjectionMissing(error: unknown) {
   return record.code === "42P01" || String(record.message || "").includes("cloud_title");
 }
 
-// Short-TTL memo (cron audit, Lot 3): the enrichment sweeps call this PER TITLE via
-// resolvePlaybackTarget/resolveSeriesEpisodeUrl — 1 PostgREST round-trip + 1 AES-GCM decrypt per
-// probed title (~45k/day) for a config that changes only when the user edits credentials. 60s TTL
-// covers a whole tick (25 sequential lookups → 1); the same runtimeConfigCache pattern as above.
-// Config edits propagate within ≤60s — enrichment tolerates that; playback paths were already
-// per-request. Errors/misses are NOT cached (a 404 keeps its original semantics).
-const sourceConfigCache = new Map<string, { value: JsonRecord; expiresAt: number }>();
+// Short-TTL memo for decrypted source configuration. Visibility is checked on
+// every load and the cache is keyed by the lifecycle config revision, so a
+// candidate swap cannot reuse credentials from the previous revision for 60s.
+// Errors/misses are never cached.
+const sourceConfigCache = new Map<string, {
+  value: JsonRecord;
+  configRevision: string;
+  configCiphertext: string;
+  expiresAt: number;
+}>();
 
-async function loadSourceConfig(sourceId: string, userId: string, db: SupabaseClient) {
-  const cacheKey = `${userId}:${sourceId}`;
-  const cached = sourceConfigCache.get(cacheKey);
-  if (cached && cached.expiresAt > Date.now()) return cached.value;
-  const { data: source, error } = await db
-    .from("cloud_sources")
-    .select("config_ciphertext")
-    .eq("id", sourceId)
+async function loadSourceConfigRevision(sourceId: string, userId: string, db: SupabaseClient): Promise<string> {
+  const { data, error } = await db
+    .from("cloud_source_lifecycle")
+    .select("config_revision")
+    .eq("source_id", sourceId)
     .eq("user_id", userId)
     .maybeSingle();
-  if (error) throwDb(error, "Unable to load source config");
-  if (!source?.config_ciphertext) throw new HttpError(404, "Source config not found");
-  const value = await decryptSourceConfig(source.config_ciphertext, await getRuntimeConfig(db));
-  sourceConfigCache.set(cacheKey, { value, expiresAt: Date.now() + 60_000 });
-  if (sourceConfigCache.size > 500) {                 // bound the isolate's memory (multi-tenant)
-    for (const [k, v] of sourceConfigCache) { if (v.expiresAt <= Date.now()) sourceConfigCache.delete(k); }
+  if (error) throwDb(error, "Unable to load source lifecycle revision");
+  const revision = data?.config_revision;
+  if ((typeof revision !== "number" && typeof revision !== "string") || !/^\d+$/.test(String(revision))) {
+    throw new HttpError(409, "Source catalog is not available", {
+      code: "SOURCE_CATALOG_NOT_VISIBLE",
+    });
   }
-  return value;
+  return String(revision);
+}
+
+async function assertPlaybackSourceConfigCurrent(
+  sourceId: string,
+  userId: string,
+  expectedRevision: string,
+  db: SupabaseClient,
+) {
+  await assertSourceCatalogVisible(sourceId, userId, db);
+  const currentRevision = await loadSourceConfigRevision(sourceId, userId, db);
+  if (currentRevision !== expectedRevision) {
+    sourceConfigCache.delete(`${userId}:${sourceId}`);
+    throw new HttpError(409, "Source configuration changed; retry", {
+      code: "SOURCE_CONFIG_REVISION_CHANGED",
+    });
+  }
+}
+
+function isPlaybackSourceSnapshotError(error: unknown) {
+  if (!(error instanceof HttpError) || !isRecord(error.details)) return false;
+  return ["SOURCE_CATALOG_NOT_VISIBLE", "SOURCE_CONFIG_REVISION_CHANGED"].includes(
+    stringOr(error.details.code, ""),
+  );
+}
+
+async function loadSourceConfig(sourceId: string, userId: string, db: SupabaseClient) {
+  return (await loadSourceConfigEnvelope(sourceId, userId, db)).config;
+}
+
+async function loadSourceConfigEnvelope(sourceId: string, userId: string, db: SupabaseClient) {
+  const cacheKey = `${userId}:${sourceId}`;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await assertSourceCatalogVisible(sourceId, userId, db);
+    const configRevision = await loadSourceConfigRevision(sourceId, userId, db);
+    const cached = sourceConfigCache.get(cacheKey);
+    if (
+      cached &&
+      cached.configRevision === configRevision &&
+      cached.expiresAt > Date.now()
+    ) {
+      return {
+        config: cached.value,
+        configRevision: cached.configRevision,
+        configCiphertext: cached.configCiphertext,
+      };
+    }
+
+    const { data: source, error } = await db
+      .from("cloud_sources")
+      .select("config_ciphertext")
+      .eq("id", sourceId)
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (error) throwDb(error, "Unable to load source config");
+    if (!source?.config_ciphertext) throw new HttpError(404, "Source config not found");
+    const configCiphertext = String(source.config_ciphertext);
+    const value = await decryptSourceConfig(configCiphertext, await getRuntimeConfig(db));
+
+    // Re-check after the ciphertext read/decrypt. If a concurrent credential
+    // transition committed, retry against the new revision instead of caching
+    // a value under stale lifecycle state.
+    await assertSourceCatalogVisible(sourceId, userId, db);
+    const confirmedRevision = await loadSourceConfigRevision(sourceId, userId, db);
+    if (confirmedRevision !== configRevision) {
+      sourceConfigCache.delete(cacheKey);
+      continue;
+    }
+    sourceConfigCache.set(cacheKey, {
+      value,
+      configRevision,
+      configCiphertext,
+      expiresAt: Date.now() + 60_000,
+    });
+    if (sourceConfigCache.size > 500) {               // bound the isolate's memory (multi-tenant)
+      for (const [k, v] of sourceConfigCache) {
+        if (v.expiresAt <= Date.now()) sourceConfigCache.delete(k);
+      }
+    }
+    return { config: value, configRevision, configCiphertext };
+  }
+  throw new HttpError(409, "Source configuration changed; retry", {
+    code: "SOURCE_CONFIG_REVISION_CHANGED",
+  });
+}
+
+async function sourceCatalogVisible(sourceId: string, userId: string, db: SupabaseClient): Promise<boolean> {
+  const { data, error } = await db.rpc("norva_source_catalog_visible", {
+    p_source_id: sourceId,
+    p_user_id: userId,
+  });
+  if (error) throwDb(error, "Unable to verify source catalog visibility");
+  return data === true;
+}
+
+async function assertSourceCatalogVisible(sourceId: string, userId: string, db: SupabaseClient) {
+  if (await sourceCatalogVisible(sourceId, userId, db)) return;
+  sourceConfigCache.delete(`${userId}:${sourceId}`);
+  throw new HttpError(409, "Source catalog is not available", {
+    code: "SOURCE_CATALOG_NOT_VISIBLE",
+  });
 }
 
 async function assertOwnedSource(id: string, userId: string, db: SupabaseClient) {
@@ -7204,7 +7586,7 @@ async function probeEngineTracks(
 }
 
 function hostFromUrl(url: string): string {
-  try { return new URL(url).hostname; } catch { return ""; }
+  try { return new URL(url).host; } catch { return ""; }
 }
 
 // Cross-user track-map sharing: store the file's map in the global per-file cache AND fan it
@@ -7275,8 +7657,15 @@ async function shareFileTracks(
       ? "fanout_episode_file_tracks_to_users"
       : audioDetectionWrite
       ? "fanout_detected_file_tracks_to_users"
-      : "fanout_file_tracks_to_users";
-    const { data, error } = await db.rpc(fanoutRpc, canonicalArgs);
+      : "norva_fanout_file_tracks_to_users_fenced";
+    let { data, error } = await db.rpc(fanoutRpc, canonicalArgs);
+    if (
+      fanoutRpc === "norva_fanout_file_tracks_to_users_fenced" &&
+      error &&
+      isRollingRpcUnavailable(error)
+    ) {
+      ({ data, error } = await db.rpc("fanout_file_tracks_to_users", canonicalArgs));
+    }
     const persisted = !error && Number(data) > 0;
     if (persisted && itemType === "movie" && audioDetectionWrite && canonicalArgs.p_has_audio) {
       try {
@@ -7361,6 +7750,7 @@ async function detectUntaggedAudioLanguages(opts: {
   db: SupabaseClient;
   runtimeConfig: RuntimeConfig;
   userId: string;
+  sourceId: string;
   targetUrl: string;
   userAgent: string | null;
   audioTracks: Array<{
@@ -7384,11 +7774,20 @@ async function detectUntaggedAudioLanguages(opts: {
   fileScoped?: boolean;
 }): Promise<void> {
   const {
-    db, runtimeConfig, userId, targetUrl, userAgent, audioTracks, titleId, tmdbId,
+    db, runtimeConfig, userId, sourceId, targetUrl, userAgent, audioTracks, titleId, tmdbId,
     serverHost, itemType, fileExternalId, sessionId, expiresAt, variantId,
     fileScoped = false,
   } = opts;
   if (!runtimeConfig.mediaGatewayUrl || !runtimeConfig.mediaGatewayToken) return;
+  let catalogGeneration: ActiveCatalogGeneration | null = null;
+  if (fileScoped && variantId) {
+    try {
+      catalogGeneration = await readActiveCatalogGenerationSnapshot(db, sourceId, userId);
+    } catch (error) {
+      if (isCatalogGenerationSuperseded(error)) return;
+      throw error;
+    }
+  }
   const lidPolicy = await getLidDetectionPolicy(db);
   if (!lidPolicy.enabled) return;
   const unknownTracks = audioTracks.filter((t) =>
@@ -7575,6 +7974,7 @@ async function detectUntaggedAudioLanguages(opts: {
   if (fileScoped && variantId) {
     try {
       const { data, error } = await db.rpc("record_catalog_file_audio_whisper_outcome", {
+        ...(catalogGeneration ? catalogGenerationRpcFence(catalogGeneration) : {}),
         p_server_host: serverHost,
         p_item_type: itemType,
         p_external_id: fileExternalId,
@@ -7597,12 +7997,16 @@ async function detectUntaggedAudioLanguages(opts: {
           attemptedAt: nowIso,
         },
       });
-      if ((error || data !== true) && itemType === "movie") {
-        await db.from("cloud_title_variants")
-          .update(completed
+      if ((error || data !== true) && itemType === "movie" && catalogGeneration) {
+        await patchActiveCatalogTitleVariants(db, {
+          userId,
+          sourceId,
+          generation: catalogGeneration,
+          id: variantId,
+          patch: completed
             ? { audio_whisper_attempted_at: nowIso, audio_whisper_retry_at: null }
-            : { audio_whisper_retry_at: retryAt })
-          .eq("user_id", userId).eq("id", variantId);
+            : { audio_whisper_retry_at: retryAt },
+        });
       }
     } catch (_) { /* rolling migration fallback retries naturally */ }
   }
@@ -7621,6 +8025,7 @@ async function verifyTaggedAudioLanguages(opts: {
   db: SupabaseClient;
   runtimeConfig: RuntimeConfig;
   userId: string;
+  sourceId: string;
   targetUrl: string;
   audioTracks: Array<{
     index: number;
@@ -7639,11 +8044,20 @@ async function verifyTaggedAudioLanguages(opts: {
   fileScoped?: boolean;
 }): Promise<"corrected" | "detected" | "pending" | "partial" | null> {
   const {
-    db, runtimeConfig, userId, targetUrl, audioTracks, suspectLangs, titleId,
+    db, runtimeConfig, userId, sourceId, targetUrl, audioTracks, suspectLangs, titleId,
     tmdbId, serverHost, itemType, fileExternalId, expiresAt, variantId,
     fileScoped = false,
   } = opts;
   if (!runtimeConfig.mediaGatewayUrl || !runtimeConfig.mediaGatewayToken) return null;
+  let catalogGeneration: ActiveCatalogGeneration | null = null;
+  if (fileScoped && variantId) {
+    try {
+      catalogGeneration = await readActiveCatalogGenerationSnapshot(db, sourceId, userId);
+    } catch (error) {
+      if (isCatalogGenerationSuperseded(error)) return null;
+      throw error;
+    }
+  }
   const lidPolicy = await getLidDetectionPolicy(db);
   if (!lidPolicy.enabled) return null;
   const nowIso = new Date().toISOString();
@@ -7660,6 +8074,7 @@ async function verifyTaggedAudioLanguages(opts: {
     try {
       if (fileScoped && variantId) {
         const { data, error } = await db.rpc("record_catalog_file_audio_whisper_outcome", {
+          ...(catalogGeneration ? catalogGenerationRpcFence(catalogGeneration) : {}),
           p_server_host: serverHost,
           p_item_type: itemType,
           p_external_id: fileExternalId,
@@ -7673,12 +8088,16 @@ async function verifyTaggedAudioLanguages(opts: {
         // Rolling-migration/cache-miss fallback remains exact-tenant scoped
         // and only advances the basic-detector cursor. In particular it must
         // never null audio_lang_verified_at from a stronger historical proof.
-        if ((error || data !== true) && itemType === "movie") {
-          await db.from("cloud_title_variants")
-            .update(completed
+        if ((error || data !== true) && itemType === "movie" && catalogGeneration) {
+          await patchActiveCatalogTitleVariants(db, {
+            userId,
+            sourceId,
+            generation: catalogGeneration,
+            id: variantId,
+            patch: completed
               ? { audio_whisper_attempted_at: nowIso, audio_whisper_retry_at: retryAt }
-              : { audio_whisper_retry_at: retryAt })
-            .eq("user_id", userId).eq("id", variantId);
+              : { audio_whisper_retry_at: retryAt },
+          });
         }
       } else {
         await db.from("cloud_titles").update({
@@ -7833,6 +8252,55 @@ async function verifyTaggedAudioLanguages(opts: {
 // used only for single-version backwards compatibility; all multi-version track
 // indices come from the exact file cache/profile. A series episode id is still
 // distinct from its parent series title id.
+const PLAYBACK_CATALOG_TITLE_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+async function hydrateVisiblePlaybackTitles(
+  db: SupabaseClient,
+  userId: string,
+  titleIds: string[],
+  requireAll = false,
+): Promise<JsonRecord[]> {
+  const visibilityEpoch = latestBoundCatalogVisibilityEpoch(userId);
+  if (!visibilityEpoch || !/^[1-9][0-9]*$/.test(visibilityEpoch)) {
+    throw new HttpError(503, "Catalog visibility is temporarily unavailable");
+  }
+  const orderedIds = [...new Set(titleIds.map((value) => {
+    const id = String(value ?? "");
+    if (!PLAYBACK_CATALOG_TITLE_UUID.test(id)) throw new HttpError(400, "Invalid title id");
+    return id.toLowerCase();
+  }))];
+  if (!orderedIds.length) return [];
+  const byId = new Map<string, JsonRecord>();
+  for (let index = 0; index < orderedIds.length; index += 500) {
+    const chunk = orderedIds.slice(index, index + 500);
+    const { data, error } = await db.rpc("norva_get_visible_catalog_titles_by_ids", {
+      p_user_id: userId,
+      p_title_ids: chunk,
+      p_expected_visibility_epoch: visibilityEpoch,
+    });
+    const epoch = isRecord(data) && (typeof data.visibilityEpoch === "number"
+        || typeof data.visibilityEpoch === "string")
+      ? String(data.visibilityEpoch)
+      : "";
+    if (error || !isRecord(data) || data.contract !== "catalog-title-hydration-v3"
+        || epoch !== visibilityEpoch || !Array.isArray(data.items)) {
+      throw new HttpError(503, "Catalog visibility is temporarily unavailable");
+    }
+    for (const value of data.items) {
+      if (!isRecord(value)) throw new HttpError(503, "Catalog visibility is temporarily unavailable");
+      const id = String(value.id ?? "").toLowerCase();
+      if (!chunk.includes(id) || byId.has(id) || String(value.user_id ?? "") !== userId) {
+        throw new HttpError(503, "Catalog visibility is temporarily unavailable");
+      }
+      if (Number(value.variant_count ?? 0) > 0) byId.set(id, value);
+    }
+  }
+  if (requireAll && orderedIds.some((id) => !byId.has(id))) {
+    throw new HttpError(409, "Catalog changed while playback work was running");
+  }
+  return orderedIds.map((id) => byId.get(id)).filter((row): row is JsonRecord => !!row);
+}
+
 async function resolveEngineAudioTitleRow(
   db: SupabaseClient,
   userId: string,
@@ -7847,7 +8315,7 @@ async function resolveEngineAudioTitleRow(
     : itemId;
   if (!externalId) return null;
   const { data: variant } = await db
-    .from("cloud_title_variants")
+    .from("cloud_catalog_visible_title_variants")
     .select("id,title_id,external_id,codec_profile")
     .eq("user_id", userId)
     .eq("source_id", sourceId)
@@ -7857,12 +8325,7 @@ async function resolveEngineAudioTitleRow(
     .maybeSingle();
   const titleId = variant ? stringOrNull((variant as JsonRecord).title_id) : null;
   if (!titleId) return null;
-  const { data: row } = await db
-    .from("cloud_titles")
-    .select("id, variant_count, audio_tracks, subtitle_tracks, subtitle_probed_at, provider_tmdb_id")
-    .eq("user_id", userId)
-    .eq("id", titleId)
-    .maybeSingle();
+  const row = (await hydrateVisiblePlaybackTitles(db, userId, [titleId]))[0] ?? null;
   return row
     ? {
       ...(row as EngineTitleRow),
@@ -7892,11 +8355,10 @@ async function resolveTitleVariant(
   userId: string,
   titleId: string,
 ): Promise<{ sourceId: string; externalId: string; itemType: string }> {
-  const { data: trow } = await db.from("cloud_titles")
-    .select("default_variant_id").eq("user_id", userId).eq("id", titleId).maybeSingle();
+  const trow = (await hydrateVisiblePlaybackTitles(db, userId, [titleId]))[0] ?? null;
   const variantId = stringOr((trow as JsonRecord | null)?.default_variant_id, "");
   if (!variantId) throw new HttpError(404, "title or variant not found");
-  const { data: variant } = await db.from("cloud_title_variants")
+  const { data: variant } = await db.from("cloud_catalog_visible_title_variants")
     .select("source_id, external_id, item_type").eq("id", variantId).maybeSingle();
   const vrec = variant as JsonRecord | null;
   const sourceId = stringOr(vrec?.source_id, ""), externalId = stringOr(vrec?.external_id, ""), itemType = stringOr(vrec?.item_type, "movie");
@@ -7952,7 +8414,7 @@ async function resolveVariantUrl(
     }
   }
   if (!isSeriesId) {
-    const { data } = await db.from("cloud_media_items").select("external_id")
+    const { data } = await db.from("cloud_catalog_visible_media_items").select("external_id")
       .eq("source_id", sourceId).eq("user_id", userId).eq("item_type", "series").eq("external_id", externalId).maybeSingle();
     isSeriesId = Boolean(data);
   }
@@ -9259,7 +9721,7 @@ function providerAccountKeyFromUrl(url: string): string {
     const queryUser = u.searchParams.get("username");
     // URLSearchParams has already decoded the query value once. Decoding it again would mutate
     // a literal `%2B`, `%20` or `%2F` in the provider username.
-    if (queryUser) return u.host + "/" + queryUser.trim();
+    if (queryUser !== null && queryUser.trim()) return u.host + "/" + queryUser;
 
     const segs = u.pathname.split("/").filter(Boolean);
     const streamTypeIndex = segs.findIndex((segment) =>
@@ -9272,7 +9734,7 @@ function providerAccountKeyFromUrl(url: string): string {
     // URL-special char (@, +, space…) writes/reads mismatched keys and the lock goes blind.
     let user = segs[streamTypeIndex + 1];
     try { user = decodeURIComponent(user); } catch { /* keep raw on malformed % */ }
-    return u.host + "/" + user.trim();
+    return user.trim() ? u.host + "/" + user : u.host;
   } catch {
     return "";
   }
@@ -9745,7 +10207,7 @@ async function runCodecProfileBackfill(
   }
 
   const { data: rawVariants, error: variantsError } = await db
-    .from("cloud_title_variants")
+    .from("cloud_catalog_visible_title_variants")
     .select("id,source_id,external_id,item_type")
     .eq("user_id", userId)
     .eq("item_type", "movie")
@@ -10010,7 +10472,7 @@ async function runLidBenchmark(
   }
 
   const { data: rawVariant, error: variantError } = await db
-    .from("cloud_title_variants")
+    .from("cloud_catalog_visible_title_variants")
     .select("id,title_id,source_id,external_id,item_type,label,language,container_extension")
     .eq("id", variantId)
     .eq("user_id", userId)
@@ -10174,7 +10636,26 @@ async function runAudioBackfill(req: Request, db: SupabaseClient) {
     userId: stringOr(body.userId, "") || null,
     sourceId: stringOr(body.sourceId, "") || null,
   };
+  if (auditMeta.userId) {
+    try {
+      await bindCatalogVisibilityEpochShared(req, auditMeta.userId, db);
+    } catch (_) {
+      throw new HttpError(503, "Catalog visibility is temporarily unavailable");
+    }
+  }
   const withAuditMeta = (payload: JsonRecord): JsonRecord => ({ ...payload, audit: auditMeta });
+  if (
+    auditMeta.userId &&
+    auditMeta.sourceId &&
+    !await sourceCatalogVisible(auditMeta.sourceId, auditMeta.userId, db)
+  ) {
+    return withAuditMeta({
+      processed: 0,
+      updated: 0,
+      skipped: "source-catalog-not-visible",
+      code: "SOURCE_CATALOG_NOT_VISIBLE",
+    });
+  }
 
   // Global kill switch (admin feature flag): when enrichment_paused is ON, skip all backfill work so
   // NO provider connection is opened this tick — an ops pause (incident, provider protection). One
@@ -10424,6 +10905,17 @@ async function runEpisodeAudioBackfill(
   if (!userId || !sourceId) {
     throw new HttpError(400, "Episode audio backfill requires userId and sourceId");
   }
+  if (!await sourceCatalogVisible(sourceId, userId, db)) {
+    return {
+      mode,
+      itemType: "episode",
+      processed: 0,
+      updated: 0,
+      skipped: "source-catalog-not-visible",
+      code: "SOURCE_CATALOG_NOT_VISIBLE",
+      hasMore: false,
+    };
+  }
 
   try {
     const { data: enabled, error } = await db.rpc("feature_flag", {
@@ -10436,7 +10928,7 @@ async function runEpisodeAudioBackfill(
     return { mode, itemType: "episode", processed: 0, skipped: "episode-audio-scan-disabled" };
   }
 
-  const { data: source, error: sourceError } = await db.from("cloud_sources")
+  const { data: source, error: sourceError } = await db.from("cloud_catalog_visible_sources")
     .select("source_type")
     .eq("id", sourceId)
     .eq("user_id", userId)
@@ -10481,8 +10973,10 @@ async function runEpisodeAudioBackfill(
 
   const sourceConfig = await loadSourceConfig(sourceId, userId, db);
   const serverUrl = stringOr(sourceConfig.serverUrl, "");
-  const username = stringOr(sourceConfig.username, "");
-  const password = stringOr(sourceConfig.password, "");
+  const username = typeof sourceConfig.username === "string" && sourceConfig.username.trim()
+    ? sourceConfig.username : "";
+  const password = typeof sourceConfig.password === "string" && sourceConfig.password.length
+    ? sourceConfig.password : "";
   if (!serverUrl || !username || !password) {
     throw new HttpError(400, "Xtream source credentials are incomplete");
   }
@@ -10804,6 +11298,7 @@ async function runEpisodeAudioBackfill(
           db,
           runtimeConfig,
           userId,
+          sourceId,
           targetUrl,
           userAgent: null,
           audioTracks,
@@ -10916,6 +11411,17 @@ async function runEpisodeAudioBackfill(
 
 async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
   const userId = stringOr(body.userId, "");
+  const sourceId = stringOr(body.sourceId, "");
+  if (!userId) throw new HttpError(400, "Missing userId");
+  if (sourceId && !await sourceCatalogVisible(sourceId, userId, db)) {
+    return {
+      processed: 0,
+      updated: 0,
+      skipped: "source-catalog-not-visible",
+      code: "SOURCE_CATALOG_NOT_VISIBLE",
+      sourceId,
+    };
+  }
   if (stringOr(body.type, "") === "episode") {
     return await runEpisodeAudioBackfill(db, body);
   }
@@ -10930,7 +11436,6 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
   // AÎRO's 5 panels). With sourceId set, every candidate query is scoped to that one source so
   // each host gets its own cron/connection slot and they enrich in PARALLEL — without raising any
   // single host's per-connection load (distinct hosts → no user_multi_ip). Empty = account-wide.
-  const sourceId = stringOr(body.sourceId, "");
   // mode 'vod' = get_vod_info default track (cheap); 'probe' = container header-probe
   // for ALL tracks (heavier — Range-reads the moov/Tracks). requireTag narrows to a
   // version tag (e.g. 'multi') so the heavy probe only runs where it helps.
@@ -10942,8 +11447,6 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
   // real audio language is unknown & valuable: 'multi' (many tracks), 'vostfr'/'vo'
   // (original audio — JP for anime, etc., not encoded in the tag). Empty = all unresolved.
   const requireTags = stringOr(body.requireTag, "").toLowerCase().split(",").map((t) => t.trim()).filter((t) => /^[a-z_]{1,12}$/.test(t));
-  if (!userId) throw new HttpError(400, "Missing userId");
-
   // mode 'catalog' = fill this user's unresolved audio_languages from the GLOBAL cache
   // (no provider hit). The scale dedup: a title probed by ANY user is shared to all
   // others for free here, instead of re-probing the same provider file once per user.
@@ -10978,12 +11481,11 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
     ? ((body as JsonRecord).orderedTitleIds as unknown[]).filter((x): x is string => typeof x === "string" && /^[0-9a-f-]{36}$/i.test(x)).slice(0, 200)
     : null;
   if (orderedIds && orderedIds.length) {
-    const { data: ts } = await db.from("cloud_titles")
-      .select("id, default_variant_id").eq("user_id", userId).in("id", orderedIds);
+    const ts = await hydrateVisiblePlaybackTitles(db, userId, orderedIds);
     const vIds = (ts ?? []).map((t) => stringOrNull((t as JsonRecord).default_variant_id)).filter(Boolean) as string[];
     const vById = new Map<string, JsonRecord>();
     if (vIds.length) {
-      const { data: vs } = await db.from("cloud_title_variants").select("id, source_id, external_id, item_type").in("id", vIds);
+      const { data: vs } = await db.from("cloud_catalog_visible_title_variants").select("id, source_id, external_id, item_type").in("id", vIds);
       for (const v of vs ?? []) vById.set(String(v.id), v as JsonRecord);
     }
     let stored = 0;
@@ -11003,13 +11505,11 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
     ? ((body as JsonRecord).titleIds as unknown[]).filter((x): x is string => typeof x === "string" && /^[0-9a-f-]{36}$/i.test(x)).slice(0, 60)
     : null;
   if (diagIds && diagIds.length) {
-    const { data: dt } = await db.from("cloud_titles")
-      .select("id, title, default_variant_id, version_languages, audio_languages")
-      .eq("user_id", userId).in("id", diagIds);
+    const dt = await hydrateVisiblePlaybackTitles(db, userId, diagIds);
     const dvIds = (dt ?? []).map((t) => t.default_variant_id).filter(Boolean) as string[];
     const dvById = new Map<string, JsonRecord>();
     if (dvIds.length) {
-      const { data: dvs } = await db.from("cloud_title_variants").select("id, source_id, external_id, item_type").in("id", dvIds);
+      const { data: dvs } = await db.from("cloud_catalog_visible_title_variants").select("id, source_id, external_id, item_type").in("id", dvIds);
       for (const v of dvs ?? []) dvById.set(String(v.id), v as JsonRecord);
     }
     const diag: JsonRecord[] = [];
@@ -11044,11 +11544,10 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
     if (!runtimeConfig.mediaGatewayUrl || !runtimeConfig.mediaGatewayToken) throw new HttpError(503, "Media gateway is not configured");
     const titleId = stringOr(body.titleId, "");
     if (!titleId) throw new HttpError(400, "titleId is required");
-    const { data: trow } = await db.from("cloud_titles")
-      .select("default_variant_id").eq("user_id", userId).eq("id", titleId).maybeSingle();
+    const trow = (await hydrateVisiblePlaybackTitles(db, userId, [titleId]))[0] ?? null;
     const variantId = stringOr((trow as JsonRecord | null)?.default_variant_id, "");
     if (!variantId) throw new HttpError(404, "title or variant not found");
-    const { data: variant } = await db.from("cloud_title_variants")
+    const { data: variant } = await db.from("cloud_catalog_visible_title_variants")
       .select("source_id, external_id, item_type").eq("id", variantId).maybeSingle();
     const vrec = variant as JsonRecord | null;
     const vSource = stringOr(vrec?.source_id, ""), vExternal = stringOr(vrec?.external_id, ""), vItem = stringOr(vrec?.item_type, "movie");
@@ -11223,7 +11722,7 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
         const svIds = suspectsAll.map((t) => stringOrNull(t.default_variant_id)).filter(Boolean) as string[];
         const svById = new Map<string, JsonRecord>();
         if (svIds.length) {
-          const { data: vs } = await db.from("cloud_title_variants").select("id, source_id, external_id, item_type").in("id", svIds);
+          const { data: vs } = await db.from("cloud_catalog_visible_title_variants").select("id, source_id, external_id, item_type").in("id", svIds);
           for (const v of vs ?? []) svById.set(String(v.id), v as JsonRecord);
         }
         const vExp = new Date(Date.now() + 10 * 60 * 1000).toISOString();
@@ -11262,7 +11761,7 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
           let outcome: "corrected" | "detected" | "pending" | "partial" | null = null;
           try {
             outcome = await verifyTaggedAudioLanguages({
-              db, runtimeConfig, userId, targetUrl, audioTracks: tracks,
+              db, runtimeConfig, userId, sourceId: vSourceId, targetUrl, audioTracks: tracks,
               // Every tagged language is eligible: a provider tag saying French
               // can itself be wrong (the user's concrete French→Italian case).
               suspectLangs: [...new Set(tracks.map((x) => x.lang).filter((l): l is string => Boolean(l)))],
@@ -11336,7 +11835,7 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
     const wvIds = candidates.map((t: JsonRecord) => stringOrNull(t.default_variant_id)).filter(Boolean) as string[];
     const wvById = new Map<string, JsonRecord>();
     if (wvIds.length) {
-      const { data: vs } = await db.from("cloud_title_variants").select("id, source_id, external_id, item_type").in("id", wvIds);
+      const { data: vs } = await db.from("cloud_catalog_visible_title_variants").select("id, source_id, external_id, item_type").in("id", wvIds);
       for (const v of vs ?? []) wvById.set(String(v.id), v as JsonRecord);
     }
 
@@ -11348,15 +11847,26 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
     // they leave the candidate set and can't clog the cursor-less front-of-queue forever. TRANSIENT
     // failures (URL won't resolve, thrown errors) are NOT marked: a provider outage must not defer a
     // whole provider's untagged tracks for the 30-day retry window — they retry next run.
-    const markWhisperAttempted = (titleId: string, variantId: string) =>
-      (fileWhisperScope
-        ? db.from("cloud_title_variants")
-            .update({ audio_whisper_attempted_at: new Date().toISOString() })
-            .eq("id", variantId).eq("user_id", userId)
-        : db.from("cloud_titles")
-            .update({ whisper_attempted_at: new Date().toISOString() })
-            .eq("id", titleId).eq("user_id", userId)
-      ).then(() => {}, () => {});
+    const markWhisperAttempted = async (
+      titleId: string,
+      variantId: string,
+      variantSourceId = "",
+    ) => {
+      if (fileWhisperScope) {
+        if (!variantId || !variantSourceId) return;
+        await patchActiveCatalogTitleVariants(db, {
+          userId,
+          sourceId: variantSourceId,
+          id: variantId,
+          patch: { audio_whisper_attempted_at: new Date().toISOString() },
+        });
+        return;
+      }
+      await db.from("cloud_titles")
+        .update({ whisper_attempted_at: new Date().toISOString() })
+        .eq("id", titleId).eq("user_id", userId)
+        .then(() => {}, () => {});
+    };
     const runOne = async (t: JsonRecord) => {
       const titleId = String(t.id);
       const variantId = stringOr(t.default_variant_id, "");
@@ -11367,7 +11877,7 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
         const externalId = stringOr(variant.external_id, "");
         const vit = stringOr(variant.item_type, itemType);
         if (!variantSourceId || !externalId) {
-          await markWhisperAttempted(titleId, variantId);
+          await markWhisperAttempted(titleId, variantId, variantSourceId);
           return;
         }
         const targetUrl = vit === "series"
@@ -11425,7 +11935,7 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
           // multi-track file was still being sampled.
           const fileExpiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
           await detectUntaggedAudioLanguages({
-            db, runtimeConfig, userId, targetUrl, userAgent: null,
+            db, runtimeConfig, userId, sourceId: variantSourceId, targetUrl, userAgent: null,
             audioTracks, titleId: String(t.id), tmdbId: stringOrNull(t.provider_tmdb_id),
             serverHost: await resolveFileTracksKey(variantSourceId, userId, db, targetUrl),
             itemType: vit, fileExternalId: externalId,
@@ -11534,7 +12044,7 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
         })
       : await (() => {
         let q = db
-          .from("cloud_titles")
+          .from("cloud_catalog_visible_titles")
           .select("id, default_variant_id, provider_tmdb_id")
           .eq("user_id", userId)
           .eq("item_type", itemType)
@@ -11566,9 +12076,17 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
           : q.order("release_year", { ascending: false, nullsFirst: false }).order("id", { ascending: true })
         ).limit(limit);
       })();
-  const titles = titlesResult.data as { id: string; default_variant_id: string | null; provider_tmdb_id: string | null }[] | null;
+  let titles = titlesResult.data as { id: string; default_variant_id: string | null; provider_tmdb_id: string | null }[] | null;
   const error = titlesResult.error;
   if (error) throwDb(error, "Unable to list titles for backfill");
+  if (!exactFileScope && !sourceId && titles?.length) {
+    titles = await hydrateVisiblePlaybackTitles(
+      db,
+      userId,
+      titles.map((title) => title.id),
+      true,
+    ) as { id: string; default_variant_id: string | null; provider_tmdb_id: string | null }[];
+  }
   if (!titles || !titles.length) {
     return {
       mode, scope: exactFileScope ? "file" : "title",
@@ -11580,7 +12098,7 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
   const variantById = new Map<string, JsonRecord>();
   if (variantIds.length) {
     const { data: variants } = await db
-      .from("cloud_title_variants")
+      .from("cloud_catalog_visible_title_variants")
       .select("id, source_id, external_id, item_type")
       .in("id", variantIds);
     for (const v of variants ?? []) variantById.set(String(v.id), v as JsonRecord);
@@ -12265,12 +12783,12 @@ async function runProviderPlaybackCheck(req: Request, db: SupabaseClient) {
   const runtimeConfig = await getRuntimeConfig(db);
   if (!runtimeConfig.relayBaseUrl || !runtimeConfig.relayTokenSecret) throw new HttpError(503, "Norva Relay is not configured");
 
-  const { data: sources } = await db.from("cloud_sources").select("id, config_hint").eq("user_id", userId);
+  const { data: sources } = await db.from("cloud_catalog_visible_sources").select("id, config_hint").eq("user_id", userId);
   const results: JsonRecord[] = [];
   for (const src of sources ?? []) {
     const sourceId = String((src as JsonRecord).id);
     const serverHost = stringOrNull((recordOrEmpty((src as JsonRecord).config_hint) as JsonRecord).serverHost) ?? "?";
-    const { data: variants } = await db.from("cloud_title_variants")
+    const { data: variants } = await db.from("cloud_catalog_visible_title_variants")
       .select("external_id, item_type").eq("source_id", sourceId).eq("item_type", "movie").limit(1);
     const v = (variants ?? [])[0] as JsonRecord | undefined;
     if (!v) { results.push({ serverHost, ok: false, reason: "no movie variant" }); continue; }
@@ -12336,6 +12854,7 @@ function corsHeaders(req: Request) {
     "Access-Control-Allow-Origin": allowOrigin,
     "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-norva-profile-id",
     "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+    "Access-Control-Expose-Headers": "x-norva-visibility-epoch, x-norva-user-visibility-epoch, x-norva-global-visibility-epoch, x-norva-catalog-cache-contract, retry-after",
     "Access-Control-Max-Age": "86400",
     Vary: "Origin",
   };
@@ -12361,6 +12880,7 @@ function json(req: Request, data: unknown, status = 200) {
     status,
     headers: {
       ...corsHeaders(req),
+      ...catalogVisibilityEpochHeaders(req),
       "Content-Type": "application/json; charset=utf-8",
       "Cache-Control": "no-store",
     },

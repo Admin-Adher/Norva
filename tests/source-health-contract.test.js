@@ -353,6 +353,39 @@ test('SourceManager shares one connection parser for Home and Settings', () => {
   assert.equal(xtream.password, 'secret');
 });
 
+test('SourceManager keeps existing credentials private on metadata-only edits', () => {
+  const { manager } = sourceManagerHarness();
+  const metadataOnly = manager.buildSourceConnection({
+    existing: true,
+    type: 'xtream',
+    name: 'Living room',
+    url: 'https://provider.example',
+    username: '',
+    password: '',
+  });
+  assert.equal(metadataOnly.credentialsProvided, false);
+
+  assert.throws(
+    () => manager.buildSourceConnection({
+      existing: true,
+      type: 'xtream',
+      url: 'https://provider.example',
+      username: 'replacement-user',
+      password: '',
+    }),
+    /complete server URL, username and password/,
+  );
+
+  const replacement = manager.buildSourceConnection({
+    existing: true,
+    type: 'xtream',
+    url: 'https://provider.example',
+    username: 'replacement-user',
+    password: 'replacement-password',
+  });
+  assert.equal(replacement.credentialsProvided, true);
+});
+
 test('terminal provider errors render a truthful recovery state', () => {
   const { manager } = sourceManagerHarness();
   const html = manager.catalogPreparationView({
