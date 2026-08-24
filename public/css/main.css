@@ -3687,6 +3687,273 @@ video::cue {
   gap: var(--space-lg);
 }
 
+/* Provider Access lifecycle — shared web/phone Settings surface. The TV shell
+   keeps its existing handoff card and never asks for provider credentials. */
+.provider-access-inline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs) var(--space-sm);
+  margin-top: var(--space-xs);
+  color: var(--color-text-secondary);
+  font-size: 0.78rem;
+}
+
+.provider-access-inline>span:first-child {
+  color: var(--color-text-primary);
+  font-weight: 700;
+}
+
+.provider-access-inline.provider-access-positive>span:first-child {
+  color: var(--color-success);
+}
+
+.provider-access-inline.provider-access-warning>span:first-child {
+  color: var(--color-warning);
+}
+
+.provider-access-inline.provider-access-danger>span:first-child {
+  color: var(--color-error-text);
+}
+
+.provider-access-terms {
+  min-width: 0;
+  margin: var(--space-lg) 0 0;
+  padding: var(--space-md);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-tertiary);
+}
+
+.provider-access-terms legend {
+  padding: 0 var(--space-sm);
+  color: var(--color-text-primary);
+  font-weight: 750;
+}
+
+.provider-access-explainer,
+.provider-access-policy-note {
+  max-width: 68ch;
+  margin: 0 0 var(--space-md);
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+}
+
+.provider-access-field-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--space-md);
+}
+
+.provider-access-mode[hidden],
+.provider-access-reminder[hidden] {
+  display: none;
+}
+
+.provider-access-reminder {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-sm);
+  min-height: 44px;
+  margin-top: var(--space-sm);
+  cursor: pointer;
+}
+
+.provider-access-reminder input {
+  width: 20px;
+  height: 20px;
+  margin-top: 2px;
+  accent-color: var(--color-accent);
+}
+
+.provider-access-reminder span {
+  display: grid;
+  gap: 2px;
+}
+
+.provider-access-reminder small {
+  color: var(--color-text-secondary);
+  line-height: 1.4;
+}
+
+.provider-access-overview,
+.provider-transition-status,
+.provider-access-terminal {
+  padding: var(--space-md);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-tertiary);
+}
+
+.provider-access-overview>div {
+  display: grid;
+  gap: var(--space-xs);
+}
+
+.provider-access-eyebrow,
+.provider-transition-step {
+  color: var(--color-text-secondary);
+  font-size: 0.75rem;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.provider-access-overview>p,
+.provider-transition-status>p,
+.provider-access-terminal>p {
+  margin: var(--space-sm) 0 0;
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+}
+
+.provider-access-overview.provider-access-positive {
+  border-color: color-mix(in srgb, var(--color-success) 45%, var(--color-border));
+}
+
+.provider-access-overview.provider-access-warning {
+  border-color: color-mix(in srgb, var(--color-warning) 45%, var(--color-border));
+}
+
+.provider-access-overview.provider-access-danger {
+  border-color: color-mix(in srgb, var(--color-error) 45%, var(--color-border));
+}
+
+.provider-access-actions,
+.provider-transition-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+  margin-top: var(--space-md);
+}
+
+.provider-access-actions .btn,
+.provider-transition-actions .btn {
+  min-height: 44px;
+}
+
+.provider-access-paths {
+  display: grid;
+  gap: var(--space-sm);
+  margin-top: var(--space-lg);
+}
+
+.provider-access-paths h3,
+.provider-transition-status h3 {
+  margin: 0;
+  color: var(--color-text-primary);
+  font-size: 1rem;
+}
+
+.provider-access-path {
+  display: grid;
+  gap: var(--space-xs);
+  width: 100%;
+  min-height: 54px;
+  padding: var(--space-md);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-primary);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+
+.provider-access-path:hover,
+.provider-access-path:focus-visible {
+  border-color: var(--color-accent);
+  background: var(--color-bg-hover);
+}
+
+.provider-access-path:active {
+  background: var(--color-bg-active);
+}
+
+.provider-access-path:disabled {
+  cursor: wait;
+  opacity: 0.58;
+}
+
+.provider-access-path span,
+.provider-access-feedback {
+  color: var(--color-text-secondary);
+  line-height: 1.45;
+}
+
+.provider-access-feedback {
+  min-height: 1.4em;
+  margin: var(--space-sm) 0 0;
+}
+
+.provider-access-loading {
+  display: grid;
+  gap: var(--space-sm);
+}
+
+.provider-access-skeleton {
+  display: block;
+  min-height: 48px;
+  border-radius: var(--radius-md);
+  background: linear-gradient(90deg, var(--color-bg-tertiary), var(--color-bg-hover), var(--color-bg-tertiary));
+  background-size: 220% 100%;
+  animation: provider-access-skeleton 1.2s ease-in-out infinite;
+}
+
+.provider-access-skeleton-short {
+  width: 64%;
+  min-height: 22px;
+}
+
+.provider-access-progress {
+  height: 4px;
+  margin-top: var(--space-md);
+  overflow: hidden;
+  border-radius: var(--radius-full);
+  background: var(--color-bg-tertiary);
+}
+
+.provider-access-progress span {
+  display: block;
+  width: 42%;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--color-accent);
+  animation: provider-access-progress 1.4s ease-in-out infinite alternate;
+}
+
+@keyframes provider-access-skeleton {
+  to { background-position: -220% 0; }
+}
+
+@keyframes provider-access-progress {
+  from { transform: translateX(-10%); }
+  to { transform: translateX(150%); }
+}
+
+@media (max-width: 640px) {
+  .provider-access-field-row {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+
+  .provider-access-actions,
+  .provider-transition-actions {
+    display: grid;
+  }
+
+  .provider-access-actions .btn,
+  .provider-transition-actions .btn {
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .provider-access-skeleton,
+  .provider-access-progress span {
+    animation: none;
+  }
+}
+
 .source-sync-announcement {
   position: absolute;
   width: 1px;

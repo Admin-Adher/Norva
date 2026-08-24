@@ -2802,6 +2802,55 @@ const API = {
         estimateByUrl: (url, type) => API.request('POST', '/sources/estimate', { url, type }), // Estimate by URL (before creation)
     },
 
+    // Provider Access is a separate fail-closed Edge contract. It is cloud-user
+    // only: paired TV tokens and local hubs never receive provider credentials or
+    // mutation authority through this namespace.
+    providerAccess: {
+        available: () => _shouldUseCloud() && Boolean(window.NorvaCloud?.providerAccess),
+        get: async (sourceId, options = {}) => window.NorvaCloud.providerAccess.get(
+            await CloudAdapter.resolveSourceId(sourceId), options
+        ),
+        createCycle: async (sourceId, terms, options = {}) => window.NorvaCloud.providerAccess.createCycle(
+            await CloudAdapter.resolveSourceId(sourceId), terms, options
+        ),
+        updateCycle: async (sourceId, cycleId, terms, options = {}) => window.NorvaCloud.providerAccess.updateCycle(
+            await CloudAdapter.resolveSourceId(sourceId), cycleId, terms, options
+        ),
+        endCycle: async (sourceId, cycleId, options = {}) => window.NorvaCloud.providerAccess.endCycle(
+            await CloudAdapter.resolveSourceId(sourceId), cycleId, options
+        ),
+        createCandidate: async (sourceId, credentials, options = {}) => window.NorvaCloud.providerAccess.createCandidate(
+            await CloudAdapter.resolveSourceId(sourceId), credentials, options
+        ),
+        getCandidate: async (sourceId, candidateId, options = {}) => window.NorvaCloud.providerAccess.getCandidate(
+            await CloudAdapter.resolveSourceId(sourceId), candidateId, options
+        ),
+        decideCandidate: async (sourceId, candidateId, decision, options = {}) => window.NorvaCloud.providerAccess.decideCandidate(
+            await CloudAdapter.resolveSourceId(sourceId), candidateId, decision, options
+        ),
+        applyCandidate: async (sourceId, candidateId, revision, options = {}) => window.NorvaCloud.providerAccess.applyCandidate(
+            await CloudAdapter.resolveSourceId(sourceId), candidateId, revision, options
+        ),
+        cancelCandidate: async (sourceId, candidateId, options = {}) => window.NorvaCloud.providerAccess.cancelCandidate(
+            await CloudAdapter.resolveSourceId(sourceId), candidateId, options
+        ),
+        createReplacement: async (sourceId, body, options = {}) => window.NorvaCloud.providerAccess.createReplacement(
+            await CloudAdapter.resolveSourceId(sourceId), body, options
+        ),
+        getReplacement: async (sourceId, replacementId, options = {}) => window.NorvaCloud.providerAccess.getReplacement(
+            await CloudAdapter.resolveSourceId(sourceId), replacementId, options
+        ),
+        promoteReplacement: async (sourceId, replacementId, revision, options = {}) => window.NorvaCloud.providerAccess.promoteReplacement(
+            await CloudAdapter.resolveSourceId(sourceId), replacementId, revision, options
+        ),
+        cancelReplacement: async (sourceId, replacementId, options = {}) => window.NorvaCloud.providerAccess.cancelReplacement(
+            await CloudAdapter.resolveSourceId(sourceId), replacementId, options
+        ),
+        rollbackReplacement: async (sourceId, replacementId, options = {}) => window.NorvaCloud.providerAccess.rollbackReplacement(
+            await CloudAdapter.resolveSourceId(sourceId), replacementId, options
+        )
+    },
+
     // Channels (hidden items)
     channels: {
         getHidden: (sourceId = null) => API.request('GET', `/channels/hidden${sourceId ? `?sourceId=${sourceId}` : ''}`),

@@ -17,6 +17,7 @@ class SourceManager {
         this.expandedGroups = new Set(); // Set of expanded group IDs
         this.searchQuery = ''; // Search filter for content browser
         this.warningModalFlight = null; // one shared confirmation per open modal
+        this.providerAccessOperations = new Map(); // stable retry identities per source/action
 
         this.init();
     }
@@ -231,6 +232,9 @@ class SourceManager {
             // remaining VOD long-tail is still materialising in the background. Surface it as
             // a quiet line here in Settings only — never as a blocking onboarding bar.
             const backgrounding = this.sourceSyncState(sourceView).backgrounding === true;
+            const accessSummary = type === 'xtream' && this.providerAccessUiEnabled()
+                ? this.providerAccessSummary(sourceView)
+                : null;
             // One clear primary action (Repair when the service needs attention, else
             // Sync); everything else lives in a labelled ⋯ menu instead of a row of
             // tooltip-only icons that are illegible on touch and TV.
@@ -248,6 +252,7 @@ class SourceManager {
           </div>
           <div class="source-url">${this.escapeHtml(source.url || 'Managed by Norva Cloud')}</div>
           ${health.message && health.state !== 'ready' ? `<div class="source-health-message">${this.escapeHtml(health.message)}</div>` : ''}
+          ${accessSummary ? `<div class="provider-access-inline provider-access-${this.escapeHtml(accessSummary.tone)}"><span>${this.escapeHtml(accessSummary.label)}</span>${accessSummary.detail ? `<span>${this.escapeHtml(accessSummary.detail)}</span>` : ''}</div>` : ''}
           ${backgrounding ? `<div class="source-backgrounding"><span class="source-backgrounding-dot" aria-hidden="true"></span>Adding the rest of your library in the background…</div>` : ''}
         </div>
         <div class="source-actions">
@@ -259,6 +264,7 @@ class SourceManager {
             <button class="source-menu-item" data-action="refresh" role="menuitem" type="button">Sync now</button>
             <button class="source-menu-item" data-action="hard-refresh" role="menuitem" type="button">Rebuild catalog</button>
             <button class="source-menu-item" data-action="edit" role="menuitem" type="button">${needsRepair ? 'Repair login' : 'Edit login'}</button>
+            ${type === 'xtream' && this.providerAccessUiEnabled() ? '<button class="source-menu-item" data-action="provider-access" role="menuitem" type="button">Provider access</button>' : ''}
             <button class="source-menu-item" data-action="toggle" role="menuitem" type="button">${this.isSourceManagementEnabled(source) ? 'Disable service' : 'Enable service'}</button>
             <button class="source-menu-item source-menu-danger" data-action="delete" role="menuitem" type="button">Remove</button>
           </div>
@@ -285,6 +291,7 @@ class SourceManager {
                     case 'test': this.testSource(id); break;
                     case 'toggle': this.toggleSource(id); break;
                     case 'edit': this.showEditModal(id, type); break;
+                    case 'provider-access': this.showProviderAccess(id); break;
                     case 'delete': this.deleteSource(id); break;
                 }
             });
@@ -426,6 +433,43 @@ class SourceManager {
         return source.enabled !== false;
     }
 
+    providerAccessUiEnabled() {
+        return window.NORVA_PROVIDER_ACCESS_UI_V1 === true
+            && window.API?.providerAccess?.available?.() === true;
+    }
+
+    providerAccessSummary(source = {}) {
+        const status = String(source.provider_access_status || source.providerAccessStatus || 'unknown').toLowerCase();
+        const expiresOn = source.provider_access_expires_on || source.providerAccessExpiresOn || null;
+        const labels = {
+            active: ['Access active', 'positive'],
+            expiring: ['Access ending soon', 'warning'],
+            expected_expired: ['Renewal date passed', 'warning'],
+            expired_confirmed: ['Provider access expired', 'danger'],
+            access_unavailable_confirmed: ['Provider access unavailable', 'danger'],
+            check_failed_temporary: ['Access check delayed', 'neutral'],
+            restoring: ['Restoring provider access', 'warning'],
+            unknown: ['Access dates not added', 'neutral']
+        };
+        const [label, tone] = labels[status] || labels.unknown;
+        return {
+            status,
+            label,
+            tone,
+            detail: expiresOn ? `Until ${this.formatAccessDate(expiresOn)}` : ''
+        };
+    }
+
+    formatAccessDate(value) {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value || ''))) return '';
+        try {
+            return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeZone: 'UTC' })
+                .format(new Date(`${value}T00:00:00Z`));
+        } catch (_) {
+            return String(value);
+        }
+    }
+
     editableSourceUrl(type, source = {}) {
         const raw = String(source.url || source.serverUrl || source.server_url || '').trim();
         if (/^https?:\/\//i.test(raw)) return raw;
@@ -463,6 +507,103 @@ class SourceManager {
     `;
     }
 
+    getProviderAccessTermsFields({ prefix = 'source-access', access = null, onboarding = false } = {}) {
+        if (!this.providerAccessUiEnabled()) return '';
+        const cycle = access?.activeCycle || null;
+        const initialMode = cycle?.termValue ? 'duration' : (access?.expiresOn ? 'dates' : 'skip');
+        const startedOn = access?.startedOn || '';
+        const expiresOn = access?.expiresOn || '';
+        const termValue = cycle?.termValue || 1;
+        const termUnit = String(cycle?.termUnit || 'MONTH').toUpperCase();
+        const reminders = access?.remindersEnabled === true;
+        return `
+          <fieldset class="provider-access-terms" data-provider-access-terms="${this.escapeHtml(prefix)}">
+            <legend>${onboarding ? 'Provider access period' : 'Access dates and reminders'}</legend>
+            <p class="provider-access-explainer">Your TV provider access is separate from your Norva plan. Norva can remember the period you bought; it never renews or sells that access.</p>
+            <div class="form-group">
+              <label for="${this.escapeHtml(prefix)}-mode">What do you know?</label>
+              <select id="${this.escapeHtml(prefix)}-mode" class="form-input" data-access-mode>
+                <option value="skip"${initialMode === 'skip' ? ' selected' : ''}>Add this later</option>
+                <option value="duration"${initialMode === 'duration' ? ' selected' : ''}>Duration bought</option>
+                <option value="dates"${initialMode === 'dates' ? ' selected' : ''}>Start and end dates</option>
+              </select>
+            </div>
+            <div class="provider-access-mode" data-access-panel="duration"${initialMode === 'duration' ? '' : ' hidden'}>
+              <div class="provider-access-field-row">
+                <div class="form-group">
+                  <label for="${this.escapeHtml(prefix)}-term-value">Duration</label>
+                  <input id="${this.escapeHtml(prefix)}-term-value" class="form-input" type="number" inputmode="numeric" min="1" max="10000" value="${this.escapeHtml(termValue)}" data-access-term-value>
+                </div>
+                <div class="form-group">
+                  <label for="${this.escapeHtml(prefix)}-term-unit">Unit</label>
+                  <select id="${this.escapeHtml(prefix)}-term-unit" class="form-input" data-access-term-unit>
+                    ${['DAY', 'WEEK', 'MONTH', 'YEAR'].map((unit) => `<option value="${unit}"${termUnit === unit ? ' selected' : ''}>${unit.charAt(0) + unit.slice(1).toLowerCase()}${termValue === 1 ? '' : 's'}</option>`).join('')}
+                  </select>
+                </div>
+              </div>
+              <p class="hint">The start date defaults to today. PostgreSQL calculates the calendar end date.</p>
+            </div>
+            <div class="provider-access-mode" data-access-panel="dates"${initialMode === 'dates' ? '' : ' hidden'}>
+              <div class="provider-access-field-row">
+                <div class="form-group">
+                  <label for="${this.escapeHtml(prefix)}-started-on">Start date</label>
+                  <input id="${this.escapeHtml(prefix)}-started-on" class="form-input" type="date" value="${this.escapeHtml(startedOn)}" data-access-started-on>
+                </div>
+                <div class="form-group">
+                  <label for="${this.escapeHtml(prefix)}-expires-on">End date</label>
+                  <input id="${this.escapeHtml(prefix)}-expires-on" class="form-input" type="date" value="${this.escapeHtml(expiresOn)}" data-access-expires-on>
+                </div>
+              </div>
+            </div>
+            <label class="provider-access-reminder" data-access-reminder-row${initialMode === 'skip' ? ' hidden' : ''}>
+              <input type="checkbox" data-access-reminders${reminders ? ' checked' : ''}>
+              <span><strong>Remind me before it ends</strong><small>Explicit opt-in. No reminder is queued until the notification phase is enabled.</small></span>
+            </label>
+            <p class="form-error provider-access-form-error" data-access-error role="alert" hidden></p>
+          </fieldset>
+        `;
+    }
+
+    bindProviderAccessTerms(root = document) {
+        root.querySelectorAll?.('[data-provider-access-terms]').forEach((fieldset) => {
+            const mode = fieldset.querySelector('[data-access-mode]');
+            const update = () => {
+                const selected = mode?.value || 'skip';
+                fieldset.querySelectorAll('[data-access-panel]').forEach((panel) => {
+                    panel.hidden = panel.dataset.accessPanel !== selected;
+                });
+                const reminders = fieldset.querySelector('[data-access-reminder-row]');
+                if (reminders) reminders.hidden = selected === 'skip';
+                const error = fieldset.querySelector('[data-access-error]');
+                if (error) error.hidden = true;
+            };
+            mode?.addEventListener('change', update);
+            update();
+        });
+    }
+
+    readProviderAccessTerms(root = document) {
+        const fieldset = root.querySelector?.('[data-provider-access-terms]');
+        if (!fieldset) return null;
+        const mode = fieldset.querySelector('[data-access-mode]')?.value || 'skip';
+        if (mode === 'skip') return null;
+        const remindersEnabled = fieldset.querySelector('[data-access-reminders]')?.checked === true;
+        if (mode === 'duration') {
+            const termValue = Number(fieldset.querySelector('[data-access-term-value]')?.value);
+            const termUnit = String(fieldset.querySelector('[data-access-term-unit]')?.value || '');
+            if (!Number.isInteger(termValue) || termValue < 1 || termValue > 10000 || !['DAY', 'WEEK', 'MONTH', 'YEAR'].includes(termUnit)) {
+                throw new Error('Enter a valid provider access duration.');
+            }
+            return { startedOn: null, expiresOn: null, termValue, termUnit, remindersEnabled };
+        }
+        const startedOn = String(fieldset.querySelector('[data-access-started-on]')?.value || '');
+        const expiresOn = String(fieldset.querySelector('[data-access-expires-on]')?.value || '');
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(startedOn) || !/^\d{4}-\d{2}-\d{2}$/.test(expiresOn) || expiresOn < startedOn) {
+            throw new Error('Enter a valid provider access start and end date.');
+        }
+        return { startedOn, expiresOn, termValue: null, termUnit: null, remindersEnabled };
+    }
+
     getSourceForm(type, source = {}) {
         const intros = {
             xtream: 'Paste the complete link from your TV service, or enter the server URL, username and password separately.',
@@ -472,6 +613,9 @@ class SourceManager {
         const isExisting = Boolean(source.id || source.cloudId || source.cloud_id);
         const urlValue = this.editableSourceUrl(type, source);
         const savedConnectionCard = this.getSavedConnectionCard(type, source);
+        const accessFields = type === 'xtream' && !isExisting
+            ? this.getProviderAccessTermsFields({ prefix: 'source-access-onboarding', onboarding: true })
+            : '';
         const introField = `
       <p class="source-form-intro">${this.escapeHtml(intros[type] || 'Connect a TV service to Norva.')}</p>
     `;
@@ -500,6 +644,7 @@ class SourceManager {
         ${savedConnectionCard}
         ${urlField}
         ${nameField}
+        ${accessFields}
         <details class="source-advanced-login" id="source-advanced-login"${advancedOpen}>
           <summary>Enter server login manually</summary>
           <div class="form-group">
@@ -521,6 +666,7 @@ class SourceManager {
     }
 
     bindSourceForm(type) {
+        this.bindProviderAccessTerms(document.getElementById('modal') || document);
         if (type !== 'xtream') return;
         const urlInput = document.getElementById('source-url');
         const nameInput = document.getElementById('source-name');
@@ -1527,11 +1673,18 @@ class SourceManager {
      */
     async saveNewSource(type) {
         let form;
+        let accessTerms = null;
         try {
             form = this.readSourceForm(type);
+            if (type === 'xtream' && this.providerAccessUiEnabled()) {
+                accessTerms = this.readProviderAccessTerms(document.getElementById('modal'));
+            }
         } catch (err) {
             if (type === 'xtream') this.openAdvancedSourceLogin();
-            NorvaModal.toast(this.sourceFormErrorMessage(err), 'error');
+            const safeMessage = /^Enter a valid provider access/.test(String(err?.message || ''))
+                ? err.message
+                : this.sourceFormErrorMessage(err);
+            NorvaModal.toast(safeMessage, 'error');
             return;
         }
         const { name, url, username, password } = form;
@@ -1540,10 +1693,25 @@ class SourceManager {
             if (!await this.confirmLargePlaylistIfNeeded(form)) return;
 
             const createdSource = await API.sources.create({ type, name, url, username, password });
+            let accessSaveFailed = false;
+            if (accessTerms) {
+                const sourceId = createdSource.cloudId || createdSource.cloud_id || createdSource.id;
+                const operationKey = this.providerAccessIdempotency(sourceId, 'onboarding-cycle');
+                try {
+                    await API.providerAccess.createCycle(sourceId, accessTerms, { idempotencyKey: operationKey });
+                    this.clearProviderAccessIdempotency(sourceId, 'onboarding-cycle');
+                } catch (error) {
+                    accessSaveFailed = true;
+                    console.warn('[SourceManager] Source created but Provider Access terms remain retryable:', error?.code || 'request_failed');
+                }
+            }
             await this.loadSources();
             this.notifySourceHealthChanged();
             try { window.app?.startImportWatcher?.(); } catch (_) { /* noop */ } // toast when this import finishes
             this.showCatalogPreparation(createdSource, type);
+            if (accessSaveFailed) {
+                NorvaModal.toast('The service was added, but its access period was not saved. Add it from Provider access in Settings.', 'error');
+            }
 
             // Refresh the watch surfaces in the background. The onboarding progress
             // step must appear immediately, even when a provider catalog is large.
@@ -1556,6 +1724,19 @@ class SourceManager {
             console.warn('[SourceManager] Source creation failed:', err);
             NorvaModal.toast('Could not add this source. Check the details and try again.', 'error');
         }
+    }
+
+    providerAccessIdempotency(sourceId, action) {
+        const operation = `${sourceId}:${action}`;
+        if (!this.providerAccessOperations.has(operation)) {
+            const random = window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+            this.providerAccessOperations.set(operation, `ui-${action}-${random}`.slice(0, 180));
+        }
+        return this.providerAccessOperations.get(operation);
+    }
+
+    clearProviderAccessIdempotency(sourceId, action) {
+        this.providerAccessOperations.delete(`${sourceId}:${action}`);
     }
 
     async releasePlaybackForSourceChange() {
@@ -1588,20 +1769,50 @@ class SourceManager {
         const { name, url, username, password } = form;
 
         try {
+            if (type === 'xtream' && form.credentialsProvided && !this.providerAccessUiEnabled()) {
+                NorvaModal.toast('Secure login replacement is not available yet. Your saved login was not changed.', 'error');
+                return;
+            }
+
+            // Any accepted source mutation must first release the provider
+            // playback lane. Candidate creation is preceded by the display-name
+            // mutation below, so it follows the same mono-account handoff rule.
+            await this.releasePlaybackForSourceChange();
+
+            if (type === 'xtream' && form.credentialsProvided && this.providerAccessUiEnabled()) {
+                const source = await API.sources.getById(id);
+                const sourceRevision = Number(source?.config_revision ?? source?.configRevision);
+                if (!Number.isSafeInteger(sourceRevision) || sourceRevision < 0) {
+                    throw new Error('SOURCE_REVISION_UNAVAILABLE');
+                }
+                // Display-name edits remain the only legacy source PATCH. The
+                // credentials enter the immutable candidate machine instead.
+                await API.sources.update(id, { displayName: name });
+                const operationKey = this.providerAccessIdempotency(id, 'credential-candidate');
+                const candidate = await API.providerAccess.createCandidate(id, {
+                    serverUrl: url,
+                    username,
+                    password
+                }, {
+                    idempotencyKey: operationKey,
+                    ifMatch: `"source-rev-${sourceRevision}"`
+                });
+                this.clearProviderAccessIdempotency(id, 'credential-candidate');
+                document.getElementById('modal').classList.remove('active');
+                await this.loadSources();
+                this.notifySourceHealthChanged();
+                this.showCredentialCandidate(id, candidate);
+                return;
+            }
             // Renaming or changing other Settings metadata never resubmits the
             // provider secret. Credential replacement is opt-in and requires a
             // complete set captured in this form submission.
             const data = { displayName: name };
-            if (form.credentialsProvided) {
+            if (type !== 'xtream' && form.credentialsProvided) {
                 data.type = type;
                 data.url = url;
             }
-            if (type === 'xtream' && form.credentialsProvided) {
-                data.username = username;
-                data.password = password;
-            }
 
-            await this.releasePlaybackForSourceChange();
             await API.sources.update(id, data);
             document.getElementById('modal').classList.remove('active');
             await this.loadSources();
@@ -1609,6 +1820,321 @@ class SourceManager {
         } catch (err) {
             console.warn('[SourceManager] Source update failed:', err);
             NorvaModal.toast('Could not update this source. Try again.', 'error');
+        }
+    }
+
+    openProviderAccessModal(titleText, bodyHtml) {
+        const modal = document.getElementById('modal');
+        const title = document.getElementById('modal-title');
+        const body = document.getElementById('modal-body');
+        const footer = document.getElementById('modal-footer');
+        if (!modal || !title || !body || !footer) return null;
+        this.providerAccessViewToken = (this.providerAccessViewToken || 0) + 1;
+        const token = this.providerAccessViewToken;
+        title.textContent = titleText;
+        body.innerHTML = bodyHtml;
+        footer.innerHTML = '<button class="btn btn-secondary" type="button" data-provider-close>Close</button>';
+        const close = () => {
+            if (this.providerAccessViewToken === token) this.providerAccessViewToken += 1;
+            modal.classList.remove('active');
+        };
+        modal.querySelector('.modal-close').onclick = close;
+        footer.querySelector('[data-provider-close]').onclick = close;
+        modal.classList.add('active');
+        if (window.NorvaModal?.installHygiene) {
+            NorvaModal.installHygiene(modal, { onClose: close, initialFocus: body.querySelector('button,select,input') || footer.querySelector('button') });
+        }
+        return { modal, body, footer, token, close };
+    }
+
+    providerAccessErrorMessage(error) {
+        const code = String(error?.code || error?.payload?.code || '').toUpperCase();
+        const messages = {
+            FEATURE_DISABLED: 'Provider access management is not available yet.',
+            REVISION_MISMATCH: 'These details changed on another device. Reload and try again.',
+            SOURCE_REVISION_MISMATCH: 'The service changed on another device. Reload and try again.',
+            TRANSITION_REVISION_MISMATCH: 'This operation already moved forward. Reload its status.',
+            PROVIDER_CHECK_TEMPORARY_FAILURE: 'The provider could not be checked right now. Your current catalog was not changed.',
+            CANDIDATE_CREDENTIALS_REJECTED: 'The provider rejected these login details.',
+            DIFFERENT_CATALOG_REQUIRES_REPLACEMENT: 'These details belong to a different catalog. Use the replacement path.',
+            INVALID_TRANSITION_STATE: 'This operation is no longer available in its current state.'
+        };
+        return messages[code] || 'Norva could not complete this provider access operation safely. Try again.';
+    }
+
+    async showProviderAccess(id) {
+        const view = this.openProviderAccessModal('Provider access', `
+          <div class="provider-access-loading" role="status" aria-live="polite">
+            <span class="provider-access-skeleton"></span>
+            <span class="provider-access-skeleton provider-access-skeleton-short"></span>
+            <span class="provider-access-skeleton"></span>
+            <span class="sr-only">Loading provider access</span>
+          </div>
+        `);
+        if (!view) return;
+        try {
+            const access = await API.providerAccess.get(id);
+            if (this.providerAccessViewToken !== view.token) return;
+            this.renderProviderAccessDetails(id, access, view);
+        } catch (error) {
+            if (this.providerAccessViewToken !== view.token) return;
+            view.body.innerHTML = `<div class="provider-access-terminal" role="alert"><strong>Provider access unavailable</strong><p>${this.escapeHtml(this.providerAccessErrorMessage(error))}</p><button class="btn btn-secondary" type="button" data-access-retry>Try again</button></div>`;
+            view.body.querySelector('[data-access-retry]')?.addEventListener('click', () => this.showProviderAccess(id));
+        }
+    }
+
+    renderProviderAccessDetails(id, access, view) {
+        const summary = this.providerAccessSummary({
+            provider_access_status: access.status,
+            provider_access_expires_on: access.expiresOn
+        });
+        const confirmedHidden = ['EXPIRED_CONFIRMED', 'ACCESS_UNAVAILABLE_CONFIRMED'].includes(access.status);
+        view.body.innerHTML = `
+          <div class="provider-access-panel" data-access-status="${this.escapeHtml(String(access.status).toLowerCase())}">
+            <div class="provider-access-overview provider-access-${this.escapeHtml(summary.tone)}">
+              <div><span class="provider-access-eyebrow">Current status</span><strong>${this.escapeHtml(summary.label)}</strong></div>
+              <p>${access.expiresOn ? `Recorded until ${this.escapeHtml(this.formatAccessDate(access.expiresOn))}.` : 'No provider access end date is recorded.'}</p>
+              ${confirmedHidden ? '<p class="provider-access-policy-note">Your catalogue is retained but hidden. A future date starts restoration; only a successful provider check makes it visible again.</p>' : ''}
+            </div>
+            ${this.getProviderAccessTermsFields({ prefix: 'provider-access-settings', access })}
+            <div class="provider-access-actions" aria-label="Provider access actions">
+              <button class="btn btn-primary" type="button" data-access-save>${access.activeCycle ? 'Save period' : 'Add period'}</button>
+              ${access.activeCycle ? '<button class="btn btn-secondary" type="button" data-access-end>Remove recorded period</button>' : ''}
+            </div>
+            <div class="provider-access-paths">
+              <h3>Restore or change this service</h3>
+              <button class="provider-access-path" type="button" data-access-path="renew">
+                <strong>Provider renewed the same login</strong><span>Update the period above. Norva will verify access without rebuilding the catalogue.</span>
+              </button>
+              <button class="provider-access-path" type="button" data-access-path="credentials">
+                <strong>I received new login details</strong><span>Validate them as an immutable candidate before changing the active service.</span>
+              </button>
+              <button class="provider-access-path" type="button" data-access-path="provider">
+                <strong>I changed provider or catalogue</strong><span>Use the same safe candidate check; a different catalogue is staged before any switch.</span>
+              </button>
+            </div>
+            <p class="provider-access-feedback" data-access-feedback role="status" aria-live="polite"></p>
+          </div>
+        `;
+        this.bindProviderAccessTerms(view.body);
+        const feedback = view.body.querySelector('[data-access-feedback]');
+        const setBusy = (busy, message = '') => {
+            view.body.querySelectorAll('button,select,input').forEach((control) => { control.disabled = busy; });
+            view.body.closest('.modal-content')?.setAttribute('aria-busy', busy ? 'true' : 'false');
+            if (feedback) feedback.textContent = message;
+        };
+        view.body.querySelector('[data-access-save]')?.addEventListener('click', async () => {
+            let terms;
+            try {
+                terms = this.readProviderAccessTerms(view.body);
+                if (!terms) throw new Error('Choose a duration or dates before saving.');
+            } catch (error) {
+                if (feedback) feedback.textContent = error.message;
+                return;
+            }
+            const action = access.activeCycle ? `cycle-update-${access.revision}` : 'cycle-create';
+            setBusy(true, 'Saving provider access…');
+            try {
+                const options = { idempotencyKey: this.providerAccessIdempotency(id, action) };
+                const next = access.activeCycle
+                    ? await API.providerAccess.updateCycle(id, access.activeCycle.cycleId, terms, { ...options, ifMatch: `"provider-access-rev-${access.revision}"` })
+                    : await API.providerAccess.createCycle(id, terms, options);
+                this.clearProviderAccessIdempotency(id, action);
+                await this.loadSources();
+                if (this.providerAccessViewToken === view.token) this.renderProviderAccessDetails(id, next, view);
+            } catch (error) {
+                setBusy(false, this.providerAccessErrorMessage(error));
+            }
+        });
+        view.body.querySelector('[data-access-end]')?.addEventListener('click', async () => {
+            const action = `cycle-end-${access.revision}`;
+            setBusy(true, 'Removing the recorded period…');
+            try {
+                const next = await API.providerAccess.endCycle(id, access.activeCycle.cycleId, {
+                    idempotencyKey: this.providerAccessIdempotency(id, action),
+                    ifMatch: `"provider-access-rev-${access.revision}"`
+                });
+                this.clearProviderAccessIdempotency(id, action);
+                await this.loadSources();
+                if (this.providerAccessViewToken === view.token) this.renderProviderAccessDetails(id, next, view);
+            } catch (error) {
+                setBusy(false, this.providerAccessErrorMessage(error));
+            }
+        });
+        view.body.querySelector('[data-access-path="renew"]')?.addEventListener('click', () => {
+            view.body.querySelector('[data-access-mode]')?.focus();
+        });
+        for (const path of ['credentials', 'provider']) {
+            view.body.querySelector(`[data-access-path="${path}"]`)?.addEventListener('click', () => {
+                view.close();
+                this.showEditModal(id, 'xtream');
+            });
+        }
+    }
+
+    showCredentialCandidate(id, candidate) {
+        const view = this.openProviderAccessModal('Checking new login', '<div class="provider-transition" data-provider-transition></div>');
+        if (!view) return;
+        this.renderCredentialCandidate(id, candidate, view);
+        this.pollCredentialCandidate(id, candidate.candidateId, view);
+    }
+
+    credentialCandidateCopy(candidate) {
+        if (candidate.state === 'COMPLETED') return ['Login changed', 'The new login is active and the catalogue check completed.'];
+        if (candidate.state === 'FAILED') return ['Login not changed', 'Norva stopped safely. The previous login and catalogue remain authoritative.'];
+        if (candidate.state === 'CANCELLED') return ['Check cancelled', 'The candidate was discarded without changing the active service.'];
+        if (candidate.comparison === 'AMBIGUOUS') return ['Confirmation needed', 'Norva could not safely tell whether these details belong to the current catalogue.'];
+        if (candidate.comparison === 'DIFFERENT_CATALOG') return ['Different catalogue detected', 'The new catalogue must be prepared separately before a switch.'];
+        if (candidate.actions?.canApply) return ['Same catalogue confirmed', 'The new login can be activated with a rollback-safe refresh.'];
+        return ['Checking safely', 'Norva is validating the login and comparing a staged catalogue. The active catalogue is unchanged.'];
+    }
+
+    renderCredentialCandidate(id, candidate, view) {
+        if (this.providerAccessViewToken !== view.token) return;
+        const root = view.body.querySelector('[data-provider-transition]');
+        if (!root) return;
+        const [title, copy] = this.credentialCandidateCopy(candidate);
+        const working = ['VALIDATING', 'STAGING', 'IMPORTING', 'COMMITTING'].includes(candidate.state)
+            && !candidate.actions?.canDecide;
+        root.innerHTML = `
+          <div class="provider-transition-status" role="status" aria-live="polite">
+            <span class="provider-transition-step">${this.escapeHtml(candidate.state.replaceAll('_', ' '))}</span>
+            <h3>${this.escapeHtml(title)}</h3><p>${this.escapeHtml(copy)}</p>
+          </div>
+          ${working ? '<div class="provider-access-progress" aria-hidden="true"><span></span></div>' : ''}
+          <div class="provider-transition-actions">
+            ${candidate.actions?.canDecide ? '<button class="btn btn-primary" type="button" data-candidate-decision="KEEP_AS_SAME_CATALOG">These details are for the same catalogue</button><button class="btn btn-secondary" type="button" data-candidate-decision="REPLACE_WITH_NEW_CATALOG">This is a different provider or catalogue</button>' : ''}
+            ${candidate.actions?.canApply ? '<button class="btn btn-primary" type="button" data-candidate-apply>Activate new login</button>' : ''}
+            ${candidate.actions?.requiresReplacement ? '<button class="btn btn-primary" type="button" data-candidate-replacement>Prepare replacement catalogue</button>' : ''}
+            ${candidate.actions?.canCancel ? '<button class="btn btn-secondary" type="button" data-candidate-cancel>Cancel safely</button>' : ''}
+          </div>
+          <p class="provider-access-feedback" data-transition-feedback role="status" aria-live="polite"></p>
+        `;
+        const feedback = root.querySelector('[data-transition-feedback]');
+        const mutate = async (action, callback) => {
+            root.querySelectorAll('button').forEach((button) => { button.disabled = true; });
+            if (feedback) feedback.textContent = 'Saving this decision…';
+            try {
+                const next = await callback(this.providerAccessIdempotency(id, action));
+                this.clearProviderAccessIdempotency(id, action);
+                this.renderCredentialCandidate(id, next, view);
+            } catch (error) {
+                root.querySelectorAll('button').forEach((button) => { button.disabled = false; });
+                if (feedback) feedback.textContent = this.providerAccessErrorMessage(error);
+            }
+        };
+        root.querySelectorAll('[data-candidate-decision]').forEach((button) => button.addEventListener('click', () => {
+            const decision = button.dataset.candidateDecision;
+            mutate(`candidate-decision-${candidate.revision}-${decision}`, (key) => API.providerAccess.decideCandidate(id, candidate.candidateId, decision, {
+                idempotencyKey: key, ifMatch: `"transition-rev-${candidate.revision}"`
+            }));
+        }));
+        root.querySelector('[data-candidate-apply]')?.addEventListener('click', () => mutate(
+            `candidate-apply-${candidate.revision}`,
+            (key) => API.providerAccess.applyCandidate(id, candidate.candidateId, candidate.revision, {
+                idempotencyKey: key, ifMatch: `"source-rev-${candidate.sourceRevision}"`
+            })
+        ));
+        root.querySelector('[data-candidate-cancel]')?.addEventListener('click', () => mutate(
+            `candidate-cancel-${candidate.revision}`,
+            (key) => API.providerAccess.cancelCandidate(id, candidate.candidateId, {
+                idempotencyKey: key, ifMatch: `"transition-rev-${candidate.revision}"`
+            })
+        ));
+        root.querySelector('[data-candidate-replacement]')?.addEventListener('click', () => mutate(
+            `replacement-create-${candidate.revision}`,
+            async (key) => {
+                const replacement = await API.providerAccess.createReplacement(id, {
+                    credentialCandidateId: candidate.candidateId,
+                    displayName: 'Replacement TV service'
+                }, { idempotencyKey: key, ifMatch: `"source-rev-${candidate.sourceRevision}"` });
+                this.showSourceReplacement(id, replacement);
+                return candidate;
+            }
+        ));
+    }
+
+    async pollCredentialCandidate(id, candidateId, view) {
+        for (let attempt = 0; attempt < 300 && this.providerAccessViewToken === view.token; attempt += 1) {
+            await new Promise((resolve) => setTimeout(resolve, attempt < 30 ? 2000 : 10000));
+            if (this.providerAccessViewToken !== view.token) return;
+            try {
+                const candidate = await API.providerAccess.getCandidate(id, candidateId);
+                this.renderCredentialCandidate(id, candidate, view);
+                if (['COMPLETED', 'FAILED', 'CANCELLED'].includes(candidate.state) || candidate.actions?.canDecide || candidate.actions?.canApply || candidate.actions?.requiresReplacement) return;
+            } catch (_) { /* keep the durable operation pollable */ }
+        }
+    }
+
+    showSourceReplacement(id, replacement) {
+        const view = this.openProviderAccessModal('Preparing replacement catalogue', '<div class="provider-transition" data-replacement-transition></div>');
+        if (!view) return;
+        this.renderSourceReplacement(id, replacement, view);
+        this.pollSourceReplacement(id, replacement.replacementId, view);
+    }
+
+    renderSourceReplacement(id, replacement, view) {
+        if (this.providerAccessViewToken !== view.token) return;
+        const root = view.body.querySelector('[data-replacement-transition]');
+        if (!root) return;
+        const terminal = ['COMPLETED', 'FAILED', 'CANCELLED'].includes(replacement.state);
+        root.innerHTML = `
+          <div class="provider-transition-status" role="status" aria-live="polite">
+            <span class="provider-transition-step">${this.escapeHtml(replacement.state.replaceAll('_', ' '))}</span>
+            <h3>${replacement.state === 'READY_TO_SWITCH' ? 'Replacement ready' : replacement.state === 'COMPLETED' ? 'Catalogue switched' : terminal ? 'Replacement stopped' : 'Preparing in the background'}</h3>
+            <p>${replacement.state === 'READY_TO_SWITCH' ? 'The staged catalogue passed its checks. The final switch is atomic.' : replacement.state === 'COMPLETED' ? 'The new catalogue is active. Your previous catalogue remains recoverable during the rollback window.' : terminal ? 'The active catalogue was not mixed with the candidate.' : 'Your current catalogue stays active while Norva imports and checks the candidate.'}</p>
+          </div>
+          ${!terminal && replacement.state !== 'READY_TO_SWITCH' ? '<div class="provider-access-progress" aria-hidden="true"><span></span></div>' : ''}
+          <div class="provider-transition-actions">
+            ${replacement.actions?.canPromote ? '<button class="btn btn-primary" type="button" data-replacement-promote>Switch catalogues</button>' : ''}
+            ${replacement.actions?.canCancel ? '<button class="btn btn-secondary" type="button" data-replacement-cancel>Cancel safely</button>' : ''}
+            ${replacement.actions?.canRollback ? '<button class="btn btn-secondary" type="button" data-replacement-rollback>Restore previous catalogue</button>' : ''}
+          </div>
+          <p class="provider-access-feedback" data-transition-feedback role="status" aria-live="polite"></p>
+        `;
+        const run = async (action, callback) => {
+            root.querySelectorAll('button').forEach((button) => { button.disabled = true; });
+            const feedback = root.querySelector('[data-transition-feedback]');
+            if (feedback) feedback.textContent = 'Committing the durable transition…';
+            try {
+                const next = await callback(this.providerAccessIdempotency(id, action));
+                this.clearProviderAccessIdempotency(id, action);
+                this.renderSourceReplacement(id, next, view);
+                await this.loadSources();
+            } catch (error) {
+                root.querySelectorAll('button').forEach((button) => { button.disabled = false; });
+                if (feedback) feedback.textContent = this.providerAccessErrorMessage(error);
+            }
+        };
+        root.querySelector('[data-replacement-promote]')?.addEventListener('click', () => run(
+            `replacement-promote-${replacement.revision}`,
+            (key) => API.providerAccess.promoteReplacement(id, replacement.replacementId, replacement.revision, {
+                idempotencyKey: key, ifMatch: `"source-rev-${replacement.sourceRevision}"`
+            })
+        ));
+        root.querySelector('[data-replacement-cancel]')?.addEventListener('click', () => run(
+            `replacement-cancel-${replacement.revision}`,
+            (key) => API.providerAccess.cancelReplacement(id, replacement.replacementId, {
+                idempotencyKey: key, ifMatch: `"transition-rev-${replacement.revision}"`
+            })
+        ));
+        root.querySelector('[data-replacement-rollback]')?.addEventListener('click', () => run(
+            `replacement-rollback-${replacement.revision}`,
+            (key) => API.providerAccess.rollbackReplacement(id, replacement.replacementId, {
+                idempotencyKey: key, ifMatch: `"transition-rev-${replacement.revision}"`
+            })
+        ));
+    }
+
+    async pollSourceReplacement(id, replacementId, view) {
+        for (let attempt = 0; attempt < 600 && this.providerAccessViewToken === view.token; attempt += 1) {
+            await new Promise((resolve) => setTimeout(resolve, attempt < 30 ? 2000 : 10000));
+            if (this.providerAccessViewToken !== view.token) return;
+            try {
+                const replacement = await API.providerAccess.getReplacement(id, replacementId);
+                this.renderSourceReplacement(id, replacement, view);
+                if (['COMPLETED', 'FAILED', 'CANCELLED', 'READY_TO_SWITCH'].includes(replacement.state)) return;
+            } catch (_) { /* durable operation remains resumable */ }
         }
     }
 

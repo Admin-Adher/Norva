@@ -59,6 +59,7 @@
     const DEFAULT_CATALOG_URL = 'https://api.norva.tv/functions/v1/norva-catalog';
     const DEFAULT_SERIES_INFO_URL = 'https://api.norva.tv/functions/v1/norva-series-info';
     const DEFAULT_PLAYBACK_URL = 'https://api.norva.tv/functions/v1/norva-playback';
+    const DEFAULT_PROVIDER_ACCESS_URL = 'https://api.norva.tv/functions/v1/norva-provider-access';
     const DEFAULT_PARTNERS_API_URL = 'https://api.norva.tv/functions/v1/norva-partners';
     const DEFAULT_PARTNERS_DEVICE_API_URL = 'https://api.norva.tv/functions/v1/norva-partners-device';
     const DEFAULT_EDGE_URL = 'https://edge.norva.tv';
@@ -117,6 +118,11 @@
 
     function playbackBase() {
         const configured = localStorage.getItem(KEY_PLAYBACK_URL) || window.NORVA_PLAYBACK_URL || DEFAULT_PLAYBACK_URL;
+        return configured.replace(/\/+$/, '');
+    }
+
+    function providerAccessBase() {
+        const configured = window.NORVA_PROVIDER_ACCESS_API_URL || DEFAULT_PROVIDER_ACCESS_URL;
         return configured.replace(/\/+$/, '');
     }
 
@@ -607,6 +613,32 @@
         // Delegates to requestToBase so the session refresh-and-retry on 401
         // (see below) applies uniformly to every cloud call.
         return requestToBase(apiBase(), method, path, body, options);
+    }
+
+    function providerAccessData(payload) {
+        if (!payload || typeof payload !== 'object' || !payload.data || typeof payload.data !== 'object') {
+            const error = new Error('Unexpected Provider Access response');
+            error.code = 'INVARIANT_VIOLATION';
+            throw error;
+        }
+        return payload.data;
+    }
+
+    function providerAccessHeaders(options = {}) {
+        const headers = {};
+        if (options.mutate) headers['Norva-Contract-Version'] = 'provider-access.norva/v1';
+        if (options.idempotencyKey) headers['Idempotency-Key'] = String(options.idempotencyKey);
+        if (options.ifMatch) headers['If-Match'] = String(options.ifMatch);
+        return headers;
+    }
+
+    async function providerAccessRequest(method, path, body, options = {}) {
+        const payload = await requestToBase(providerAccessBase(), method, path, body, {
+            headers: providerAccessHeaders(options),
+            skipProfile: true,
+            signal: options.signal
+        });
+        return providerAccessData(payload);
     }
 
     // The source LIST rarely changes within a session, yet several pages re-fetch
@@ -4499,6 +4531,64 @@
             sync: (id, opts = {}) => sourceSyncRequest(id, opts).then((r) => { invalidateSourcesCache(); return r; }),
             finalize: (id, params = {}) => sourceFinalizeRequest(id, params).then((r) => { invalidateSourcesCache(); return r; }),
             remove: (id) => request('DELETE', `/sources/${encodeURIComponent(id)}`).then((r) => { invalidateSourcesCache(); return r; })
+        },
+
+        providerAccess: {
+            get: (sourceId, options = {}) => providerAccessRequest(
+                'GET', `/v1/sources/${encodeURIComponent(sourceId)}/access`, null, options
+            ),
+            createCycle: (sourceId, terms, options = {}) => providerAccessRequest(
+                'POST', `/v1/sources/${encodeURIComponent(sourceId)}/access/cycles`, terms,
+                { ...options, mutate: true }
+            ),
+            updateCycle: (sourceId, cycleId, terms, options = {}) => providerAccessRequest(
+                'PATCH', `/v1/sources/${encodeURIComponent(sourceId)}/access/cycles/${encodeURIComponent(cycleId)}`,
+                terms, { ...options, mutate: true }
+            ),
+            endCycle: (sourceId, cycleId, options = {}) => providerAccessRequest(
+                'DELETE', `/v1/sources/${encodeURIComponent(sourceId)}/access/cycles/${encodeURIComponent(cycleId)}`,
+                {}, { ...options, mutate: true }
+            ),
+            createCandidate: (sourceId, credentials, options = {}) => providerAccessRequest(
+                'POST', `/v1/sources/${encodeURIComponent(sourceId)}/credential-candidates`, credentials,
+                { ...options, mutate: true }
+            ),
+            getCandidate: (sourceId, candidateId, options = {}) => providerAccessRequest(
+                'GET', `/v1/sources/${encodeURIComponent(sourceId)}/credential-candidates/${encodeURIComponent(candidateId)}`,
+                null, options
+            ),
+            decideCandidate: (sourceId, candidateId, decision, options = {}) => providerAccessRequest(
+                'POST', `/v1/sources/${encodeURIComponent(sourceId)}/credential-candidates/${encodeURIComponent(candidateId)}/decision`,
+                { decision }, { ...options, mutate: true }
+            ),
+            applyCandidate: (sourceId, candidateId, transitionRevision, options = {}) => providerAccessRequest(
+                'POST', `/v1/sources/${encodeURIComponent(sourceId)}/credential-candidates/${encodeURIComponent(candidateId)}/apply`,
+                { transitionRevision }, { ...options, mutate: true }
+            ),
+            cancelCandidate: (sourceId, candidateId, options = {}) => providerAccessRequest(
+                'POST', `/v1/sources/${encodeURIComponent(sourceId)}/credential-candidates/${encodeURIComponent(candidateId)}/cancel`,
+                {}, { ...options, mutate: true }
+            ),
+            createReplacement: (sourceId, body, options = {}) => providerAccessRequest(
+                'POST', `/v1/sources/${encodeURIComponent(sourceId)}/replacements`, body,
+                { ...options, mutate: true }
+            ),
+            getReplacement: (sourceId, replacementId, options = {}) => providerAccessRequest(
+                'GET', `/v1/sources/${encodeURIComponent(sourceId)}/replacements/${encodeURIComponent(replacementId)}`,
+                null, options
+            ),
+            promoteReplacement: (sourceId, replacementId, transitionRevision, options = {}) => providerAccessRequest(
+                'POST', `/v1/sources/${encodeURIComponent(sourceId)}/replacements/${encodeURIComponent(replacementId)}/promote`,
+                { transitionRevision }, { ...options, mutate: true }
+            ),
+            cancelReplacement: (sourceId, replacementId, options = {}) => providerAccessRequest(
+                'POST', `/v1/sources/${encodeURIComponent(sourceId)}/replacements/${encodeURIComponent(replacementId)}/cancel`,
+                {}, { ...options, mutate: true }
+            ),
+            rollbackReplacement: (sourceId, replacementId, options = {}) => providerAccessRequest(
+                'POST', `/v1/sources/${encodeURIComponent(sourceId)}/replacements/${encodeURIComponent(replacementId)}/rollback`,
+                {}, { ...options, mutate: true }
+            )
         },
 
         mediaItems: {

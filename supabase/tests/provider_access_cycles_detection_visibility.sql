@@ -3,7 +3,7 @@ set local lock_timeout = '3s';
 set local statement_timeout = '45s';
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select extensions.plan(37);
+select extensions.plan(39);
 
 insert into auth.users (
   id, instance_id, aud, role, email, encrypted_password, email_confirmed_at,
@@ -127,8 +127,20 @@ select extensions.is(
 select public.norva_create_provider_access_cycle(
   '98500000-0000-4000-8000-000000000001',
   '98500000-0000-4000-8000-000000000101',
-  current_date, current_date + 30, 1, 'month', true,
+  current_date, null, 1, 'month', true,
   'cycle-985-first', repeat('a', 64), 'test:phase6'
+);
+select extensions.is(
+  (select expires_on from public.cloud_source_access_cycles
+   where source_id = '98500000-0000-4000-8000-000000000101' and status = 'active'),
+  (current_date + interval '1 month')::date,
+  'calendar month duration is resolved by PostgreSQL rather than the client'
+);
+select extensions.is(
+  (select term_value::text || ':' || term_unit from public.cloud_source_access_cycles
+   where source_id = '98500000-0000-4000-8000-000000000101' and status = 'active'),
+  '1:month',
+  'the original semantic duration is retained with the calculated dates'
 );
 select extensions.is(
   (select count(*)::integer from public.cloud_source_access_cycles
@@ -165,7 +177,7 @@ select extensions.is(
   public.norva_create_provider_access_cycle(
     '98500000-0000-4000-8000-000000000001',
     '98500000-0000-4000-8000-000000000101',
-    current_date, current_date + 30, 1, 'month', true,
+    current_date, null, 1, 'month', true,
     'cycle-985-first', repeat('a', 64), 'test:phase6'
   )->>'replayed',
   'true',
@@ -181,7 +193,7 @@ select extensions.throws_ok(
   $sql$select public.norva_create_provider_access_cycle(
     '98500000-0000-4000-8000-000000000001',
     '98500000-0000-4000-8000-000000000101',
-    current_date, current_date + 365, 1, 'year', true,
+    current_date, null, 1, 'year', true,
     'cycle-985-first', repeat('b', 64), 'test:phase6'
   )$sql$,
   '22023',
@@ -192,7 +204,7 @@ select extensions.throws_ok(
 select public.norva_create_provider_access_cycle(
   '98500000-0000-4000-8000-000000000001',
   '98500000-0000-4000-8000-000000000101',
-  current_date + 31, current_date + 396, 1, 'year', true,
+  current_date + 31, null, 1, 'year', true,
   'cycle-985-second', repeat('c', 64), 'test:phase6'
 );
 select extensions.is(
@@ -215,12 +227,12 @@ select extensions.ok(
 
 select extensions.throws_ok(
   format(
-    'select public.norva_update_provider_access_cycle(%L,%L,%L,%s,current_date-2,current_date-1,1,%L,false,%L,%L,%L)',
+    'select public.norva_update_provider_access_cycle(%L,%L,%L,%s,current_date-2,current_date-1,null,null,false,%L,%L,%L)',
     '98500000-0000-4000-8000-000000000001',
     '98500000-0000-4000-8000-000000000101',
     (select id from public.cloud_source_access_cycles where source_id='98500000-0000-4000-8000-000000000101' and status='active'),
     (select revision - 1 from public.cloud_source_provider_access where source_id='98500000-0000-4000-8000-000000000101'),
-    'day','update-985-stale',repeat('d',64),'test:phase6'
+    'update-985-stale',repeat('d',64),'test:phase6'
   ),
   '40001',
   'provider access revision CAS failed',
@@ -232,7 +244,7 @@ select public.norva_update_provider_access_cycle(
   '98500000-0000-4000-8000-000000000101',
   (select id from public.cloud_source_access_cycles where source_id='98500000-0000-4000-8000-000000000101' and status='active'),
   (select revision from public.cloud_source_provider_access where source_id='98500000-0000-4000-8000-000000000101'),
-  current_date - 31, current_date - 1, 30, 'day', false,
+  current_date - 31, current_date - 1, null, null, false,
   'update-985-past', repeat('e',64), 'test:phase6'
 );
 select extensions.is(
@@ -358,7 +370,7 @@ select public.norva_update_provider_access_cycle(
   '98500000-0000-4000-8000-000000000101',
   (select id from public.cloud_source_access_cycles where source_id='98500000-0000-4000-8000-000000000101' and status='active'),
   (select revision from public.cloud_source_provider_access where source_id='98500000-0000-4000-8000-000000000101'),
-  current_date, current_date+365, 1, 'year', true,
+  current_date, null, 1, 'year', true,
   'update-985-restore-pending', repeat('f',64), 'test:phase6'
 );
 select extensions.is(

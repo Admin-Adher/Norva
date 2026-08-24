@@ -128,8 +128,10 @@ test('SourceManager update/delete/toggle release playback before the API mutatio
   assert.ok(update.indexOf('await this.releasePlaybackForSourceChange()') < update.indexOf('await API.sources.update'),
     'updateSource must release playback before API.sources.update');
   assert.match(update, /const data = \{ displayName: name \}/);
-  assert.match(update, /if \(form\.credentialsProvided\)[\s\S]*data\.url = url/);
-  assert.match(update, /type === 'xtream' && form\.credentialsProvided[\s\S]*data\.username = username[\s\S]*data\.password = password/);
+  assert.match(update, /type !== 'xtream' && form\.credentialsProvided[\s\S]*data\.url = url/);
+  assert.match(update, /type === 'xtream' && form\.credentialsProvided[\s\S]*API\.providerAccess\.createCandidate/);
+  assert.doesNotMatch(update, /data\.username\s*=|data\.password\s*=/,
+    'Xtream credentials must never return to the legacy source PATCH');
   assert.ok(deleteSrc.includes('if (!ok) return;'));
   assert.ok(
     deleteSrc.indexOf('if (!ok) return;') < deleteSrc.indexOf('await this.releasePlaybackForSourceChange()')

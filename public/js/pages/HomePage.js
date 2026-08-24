@@ -1077,6 +1077,7 @@ class HomePage {
     }
 
     renderSetupConnectionGate(container, summary = {}, steps = []) {
+        const manager = this.app?.sourceManager || window.app?.sourceManager;
         document.getElementById('page-home')?.classList.add('home-setup-connect-active');
         container.innerHTML = `
             <section class="norva-setup-gate norva-setup-connect" data-setup-state="not_configured" data-paired-screen="false">
@@ -1118,6 +1119,7 @@ class HomePage {
                                 </div>
                             </div>
                         </details>
+                        ${manager?.getProviderAccessTermsFields?.({ prefix: 'home-provider-access', onboarding: true }) || ''}
                         <div class="norva-setup-error hidden" id="home-tv-service-error" role="alert" aria-atomic="true" tabindex="-1"></div>
                         <button class="btn btn-primary norva-setup-submit" id="home-tv-service-submit" type="submit">Connect</button>
                     </form>
@@ -1164,6 +1166,7 @@ class HomePage {
         const submit = container.querySelector('#home-tv-service-submit');
         const manager = this.app?.sourceManager || window.app?.sourceManager;
         if (!form || !urlInput || !usernameInput || !passwordInput || !submit) return;
+        manager?.bindProviderAccessTerms?.(form);
 
         const fieldErrors = new Map([
             [urlInput, container.querySelector('#home-source-url-error')],
@@ -1213,6 +1216,18 @@ class HomePage {
 
         const applyParsedLink = (force = false) => {
             const parsed = manager?.parseXtreamLink?.(urlInput.value);
+            const accessTerms = form.querySelector('[data-provider-access-terms]');
+            const playlistLink = manager?.looksLikePlaylistLink?.(urlInput.value) === true;
+            if (accessTerms) {
+                accessTerms.hidden = playlistLink;
+                if (playlistLink) {
+                    const mode = accessTerms.querySelector('[data-access-mode]');
+                    if (mode) {
+                        mode.value = 'skip';
+                        mode.dispatchEvent(new Event('change'));
+                    }
+                }
+            }
             if (!parsed) {
                 if (hint) {
                     hint.textContent = manager?.looksLikePlaylistLink?.(urlInput.value)
@@ -1261,9 +1276,27 @@ class HomePage {
             clearErrors();
 
             let payload;
+            let accessTerms = null;
             try {
                 payload = this.readSetupConnectionForm(container);
-            } catch (_) {
+                if (payload.type === 'xtream' && manager?.providerAccessUiEnabled?.()) {
+                    accessTerms = manager.readProviderAccessTerms(form);
+                }
+            } catch (validationError) {
+                if (/^Enter a valid provider access /.test(String(validationError?.message || ''))) {
+                    const fieldset = form.querySelector('[data-provider-access-terms]');
+                    const accessError = fieldset?.querySelector('[data-access-error]');
+                    const message = String(validationError.message);
+                    if (accessError) {
+                        accessError.textContent = message;
+                        accessError.hidden = false;
+                    }
+                    const target = fieldset?.querySelector('[data-access-panel]:not([hidden]) input, [data-access-panel]:not([hidden]) select');
+                    target?.setAttribute('aria-invalid', 'true');
+                    showSummaryError(message);
+                    try { target?.focus({ preventScroll: true }); } catch (_) { /* noop */ }
+                    return;
+                }
                 const hasAddress = Boolean(urlInput.value.trim());
                 const playlist = manager?.looksLikePlaylistLink?.(urlInput.value) === true;
                 let firstInvalid = null;
@@ -1298,9 +1331,26 @@ class HomePage {
                     try { submit.focus({ preventScroll: true }); } catch (_) { /* noop */ }
                     return;
                 }
-                await window.API.sources.create(payload);
+                const created = await window.API.sources.create(payload);
+                let accessSaveFailed = false;
+                if (accessTerms) {
+                    const sourceId = created.cloudId || created.cloud_id || created.id;
+                    const action = 'home-onboarding-cycle';
+                    try {
+                        await window.API.providerAccess.createCycle(sourceId, accessTerms, {
+                            idempotencyKey: manager.providerAccessIdempotency(sourceId, action)
+                        });
+                        manager.clearProviderAccessIdempotency(sourceId, action);
+                    } catch (error) {
+                        accessSaveFailed = true;
+                        console.warn('[Dashboard] TV service connected but Provider Access terms remain retryable:', error?.code || 'request_failed');
+                    }
+                }
                 await this.app?.sourceManager?.loadSources?.();
                 document.dispatchEvent(new CustomEvent('norva:source-health-changed'));
+                if (accessSaveFailed) {
+                    NorvaModal.toast('Your service is connected. Add its access period later from Settings → TV Service.', 'error');
+                }
                 submit.textContent = 'Preparing catalog…';
                 this.lastLoadedAt = 0;
                 await this.app?.refreshSourceHealth?.();
