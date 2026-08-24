@@ -4,7 +4,9 @@
 
 Private integration branch: `codex/phase123-production-integration`
 
-Implementation checkpoint: `2fb832f5`
+Crash proof checkpoint: `ab9af426`
+
+Deterministic concurrency harness: `e57759722642f08e936d802669d4e1f85b5df465`
 
 Production flags remained OFF. No real customer source or credential was used.
 All SQL evidence below ran against disposable PostgreSQL proof containers on
@@ -57,6 +59,32 @@ Final database snapshot:
 
 All temporary barrier triggers/functions were dropped after the snapshot.
 
+The six orders are now encoded in
+`supabase/tests/provider_replacement_concurrency_matrix.sql`. Each execution
+uses two independent `dblink` sessions. The first winner pauses after entering
+its critical transition while the second is mechanically observed waiting on a
+PostgreSQL lock owned by that transaction. The harness then releases the
+winner, collects both durable results and checks the final database snapshot.
+
+Two complete series passed on distinct committed fixtures:
+
+```text
+series A: 960, 961, 966, 967, 968, 969
+series B: 970, 971, 972, 973, 974, 975
+```
+
+| Race mode | Winner | Loser/continuation | Durable result |
+|---|---|---|---|
+| `promotion_cancel_promotion` | promotion | cancel `40001` | B visible, transition `completed` |
+| `promotion_cancel_cancel` | cancel | promotion `40001` | A visible, transition `cancelled` |
+| `promotion_delete_promotion` | promotion | deletion succeeds after serialization | deletion observes B visible |
+| `promotion_delete_deletion` | deletion | promotion `40001` | A visible, transition remains `ready_to_switch` |
+| `rollback_delete_rollback` | rollback | deletion succeeds after serialization | A visible, exactly one reversal |
+| `rollback_delete_deletion` | deletion | rollback `40001` | B visible, zero reversal |
+
+Both series produced `visibleCount=1` for every fixture. No race produced two
+visible sources, a double reversal or a transition resurrection.
+
 ## Reproducible transaction crash evidence
 
 `provider_replacement_transaction_crash_matrix.sql` was run against a new
@@ -82,6 +110,18 @@ PHASE4_REPLACEMENT_TRANSACTION_CRASH_MATRIX_PASS
 boundaries=8 visible_sources=1 reversals=1
 ```
 
+The complete eight-boundary matrix was replayed on a second new fixture
+(`976...`) and produced the same terminal marker. Its final snapshot was:
+
+```text
+transition=completed
+visibleCount=1
+visibleSource=A
+reversals=1
+candidateLifecycle=purged
+candidateCredentialsCleared=true
+```
+
 The harness separates cutover, reaper and final sanitization into distinct
 transactions. This is required because the production reaper deliberately uses
 `FOR UPDATE SKIP LOCKED`; the proof must not retain an orchestrator row lock
@@ -89,10 +129,21 @@ while asking a new worker to claim the tombstone. Reaper singleton claims are
 retried for a bounded 15-second window, while every non-singleton error remains
 terminal.
 
-## Remaining Phase 4 gate
+## Phase 4 core closure
 
-The deterministic core and the eight transaction crash boundaries are proved.
-Formal Phase 4 closure still requires a committed, cleanly replayable two-session
-concurrency harness for the six race orders above, followed by a second clean
-determinism run and the signed closure snapshot. Production rollout is separate
-and remains forbidden while the relevant feature flags are OFF.
+```text
+PHASE_4_DURABLE_STATE_MACHINE_FORMALLY_CLOSED
+PHASE_5_CROSS_SURFACE_E2E_PENDING
+PRODUCTION_ROLLOUT_NO_GO
+```
+
+The durable replacement state machine, its cancellation/rollback/deletion
+serialization, bounded cleanup and crash recovery are formally proved at the
+PostgreSQL and Edge-contract layers. Phase 5 must now prove the complete A→B
+journey across every product surface and cache; that separate E2E gate is not
+implied by this database closure.
+
+After the proof snapshot, all Provider Access, credential-transition and
+replacement flags in the disposable database were restored to `false`.
+Production rollout remains forbidden until the later visibility, legal-policy,
+canary and rollout gates are satisfied.
