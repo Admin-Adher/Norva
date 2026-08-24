@@ -395,13 +395,14 @@ printf 'BACKFILL_CONTRACTION_COMPLETE %s\n' "$(date -u +%FT%TZ)" | tee -a "$REPO
 apply_range "$ONLINE_HEAD" "$CURRENT_HEAD" phase3-head
 apply_range "$CURRENT_HEAD" "$CACHE_HEAD" cache-epoch-v2
 
-# Concurrency matrices open synchronized PostgreSQL sessions through dblink.
-# This extension is proof instrumentation on the disposable clone only; it is
-# neither a production migration nor part of the application runtime contract.
-psql_scalar "create extension if not exists dblink"
+# Concurrency matrices open synchronized PostgreSQL sessions through dblink;
+# SQL acceptance suites use pgTAP.  Both extensions are proof instrumentation
+# on the disposable clone only, never production migrations or runtime state.
+psql_scalar "create extension if not exists dblink; create extension if not exists pgtap with schema extensions"
 
 run_test() {
-  local test_name="$1" output="$REPORT_DIR/test-${test_name%.sql}.log"
+  local test_name="$1"
+  local output="$REPORT_DIR/test-${test_name%.sql}.log"
   printf 'TEST %s %s\n' "$(date -u +%FT%TZ)" "$test_name" | tee -a "$REPORT_DIR/timeline.log"
   docker exec -i "$TARGET_CONTAINER" psql -X -v ON_ERROR_STOP=1 -U supabase_admin -d postgres \
     <"$WORKSPACE/supabase/tests/$test_name" >"$output" 2>&1
