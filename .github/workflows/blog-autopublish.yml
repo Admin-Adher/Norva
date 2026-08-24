@@ -20,11 +20,11 @@ on:
         required: false
         default: '4'
   schedule:
-    # Editorial slots are 06:00 and 20:00 Europe/Paris. Run shortly after each
-    # slot in both possible UTC offsets — CEST (UTC+2, summer) and CET (UTC+1,
-    # winter) — so a newly-due article publishes promptly all year. Idempotent,
-    # so the off-by-one hour that does not match a slot simply commits nothing.
-    - cron: '5 4,5,18,19 * * *'
+    # Run once shortly after each 06:00 and 20:00 editorial slot. GitHub applies
+    # Europe/Paris daylight-saving changes, so no duplicate UTC fallback run is
+    # needed in either the morning or the evening.
+    - cron: '5 6,20 * * *'
+      timezone: 'Europe/Paris'
 
 concurrency:
   group: blog-autopublish
