@@ -57,16 +57,47 @@ begin
       on epoch.user_id=head.user_id
     where head.source_id='93000000-0000-4000-8000-000000000101'
       and head.user_id='93000000-0000-4000-8000-000000000001';
+    insert into public.cloud_media_items (
+      id,user_id,source_id,item_type,external_id,title,dedup_key,
+      is_dedup_primary,metadata,rating_num,generation_id,
+      write_head_revision,write_config_revision,
+      write_source_visibility_epoch,write_user_visibility_epoch
+    )
+    select marker.id,'93000000-0000-4000-8000-000000000001',
+      '93000000-0000-4000-8000-000000000101',marker.item_type,
+      marker.external_id,marker.title,marker.dedup_key,true,'{}'::jsonb,8,
+      head.active_generation_id,head.head_revision,lifecycle.config_revision,
+      lifecycle.visibility_epoch,epoch.visibility_epoch
+    from public.cloud_source_catalog_heads head
+    join public.cloud_source_lifecycle lifecycle
+      on lifecycle.source_id=head.source_id and lifecycle.user_id=head.user_id
+    join public.cloud_user_catalog_visibility_epochs epoch
+      on epoch.user_id=head.user_id
+    cross join (values
+      ('93000000-0000-4000-8000-000000000404'::uuid,'series','a-series','A series','series:930004'),
+      ('93000000-0000-4000-8000-000000000405'::uuid,'live','a-live','A live','live:930005')
+    ) marker(id,item_type,external_id,title,dedup_key)
+    where head.source_id='93000000-0000-4000-8000-000000000101'
+      and head.user_id='93000000-0000-4000-8000-000000000001';
   else
     insert into public.cloud_media_items (
       id,user_id,source_id,item_type,external_id,title,dedup_key,
       is_dedup_primary,metadata,rating_num
-    ) values (
+    ) values
+    (
       '93000000-0000-4000-8000-000000000401',
       '93000000-0000-4000-8000-000000000001',
       '93000000-0000-4000-8000-000000000101','movie','a-history','A history',
       'tmdb:930001',true,'{"providerTmdbId":"930001"}'::jsonb,8
-    );
+    ),
+    ('93000000-0000-4000-8000-000000000404',
+     '93000000-0000-4000-8000-000000000001',
+     '93000000-0000-4000-8000-000000000101','series','a-series','A series',
+     'series:930004',true,'{}'::jsonb,8),
+    ('93000000-0000-4000-8000-000000000405',
+     '93000000-0000-4000-8000-000000000001',
+     '93000000-0000-4000-8000-000000000101','live','a-live','A live',
+     'live:930005',true,'{}'::jsonb,8);
   end if;
 end
 $active_fixture$;
@@ -154,12 +185,21 @@ begin
   insert into public.cloud_media_items (
     id,user_id,source_id,item_type,external_id,title,dedup_key,is_dedup_primary,metadata,rating_num,
     generation_id,ingest_job_id,ingest_attempt,ingest_lease_owner
-  ) values (
+  ) values
+  (
     '93000000-0000-4000-8000-000000000403', v_claim.user_id, v_claim.source_id,
     'movie','b-fenced','B fenced','tmdb:930003',true,'{}'::jsonb,9,
     (v_allocation ->> 'generationId')::uuid, v_claim.job_id,
     v_claim.lease_sequence, 'replacement-builder-test-worker'
-  );
+  ),
+  ('93000000-0000-4000-8000-000000000406',v_claim.user_id,v_claim.source_id,
+   'series','b-series','B series','series:930006',true,'{}'::jsonb,9,
+   (v_allocation ->> 'generationId')::uuid,v_claim.job_id,
+   v_claim.lease_sequence,'replacement-builder-test-worker'),
+  ('93000000-0000-4000-8000-000000000407',v_claim.user_id,v_claim.source_id,
+   'live','b-live','B live','live:930007',true,'{}'::jsonb,9,
+   (v_allocation ->> 'generationId')::uuid,v_claim.job_id,
+   v_claim.lease_sequence,'replacement-builder-test-worker');
 end
 $builder$;
 
