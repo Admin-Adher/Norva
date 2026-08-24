@@ -34,6 +34,10 @@ candidate version/HMAC, credential generation, owner snapshot, jobs and
 checkpoints, provider-effect authorization, winner, loser result, and the
 exact final invariant query.
 
-`PHASE_3_2_FORMALLY_CLOSED` is prohibited until every row is green.  The
-Provider Access visibility flag and production rollout remain independently
-blocked.
+All rows were proved green on isolated PostgreSQL runs on 2026-08-24. The
+authoritative results, artifact hashes and source commits are recorded in
+`12-phase3-2-formal-closure-report.md`; the durable core status is now
+`PHASE_3_2_FORMALLY_CLOSED`.
+
+The Provider Access visibility flag, public Edge v3 adapter and production
+rollout remain independently blocked until their own gates are green.
