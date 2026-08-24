@@ -340,9 +340,25 @@ test "$discovery_complete" = t || fail "catalog generation discovery did not con
 # remaining sources are owned by its peers; the durable queue postcondition is
 # authoritative after every worker exits.
 backfill_worker() {
-  local worker="$1" iteration claimed=t queue_state
+  local worker="$1" iteration claimed=t queue_state response
+  local deadlock_retries=0
   for iteration in $(seq 1 8192); do
-    claimed="$(psql_scalar "select coalesce((public.norva_backfill_catalog_generation_batch('production-clone-rehearsal-${worker}',500,120)->>'claimed')::boolean,false)")"
+    if ! response="$(psql_scalar "select coalesce((public.norva_backfill_catalog_generation_batch('production-clone-rehearsal-${worker}',500,120)->>'claimed')::boolean,false)" 2>&1)"; then
+      if grep -q 'deadlock detected' <<<"$response"; then
+        deadlock_retries=$((deadlock_retries+1))
+        printf 'BACKFILL worker=%s iteration=%s transient=deadlock retry=%s\n' \
+          "$worker" "$iteration" "$deadlock_retries" \
+          >>"$REPORT_DIR/contraction-worker-${worker}.log"
+        sleep 0.25
+        continue
+      fi
+      printf 'BACKFILL worker=%s iteration=%s fatal=%s\n' \
+        "$worker" "$iteration" "$response" \
+        >>"$REPORT_DIR/contraction-worker-${worker}.log"
+      return 1
+    fi
+    claimed="$response"
+    case "$claimed" in t|f) ;; *) return 1 ;; esac
     if ((iteration % 250 == 0)) || test "$claimed" = f; then
       queue_state="$(psql_scalar "select coalesce(string_agg(state||'='||count,',' order by state),'none') from (select state,count(*)::text from public.cloud_catalog_generation_backfill_sources group by state) state_count")"
       printf 'BACKFILL worker=%s iteration=%s claimed=%s queue=%s\n' \
