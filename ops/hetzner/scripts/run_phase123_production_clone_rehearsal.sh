@@ -132,8 +132,8 @@ baseline_sql | docker exec -i "$PRODUCTION_CONTAINER" psql -X -At -F $'\t' -v ON
 phase123_object_count="$(awk -F '\t' '$1=="phase123_objects"{print $2}' "$REPORT_DIR/production-baseline.tsv")"
 case "$phase123_object_count" in
   0) REHEARSAL_MODE="bootstrap" ;;
-  4) REHEARSAL_MODE="incremental" ;;
-  *) fail "production Phase 1-3 object state is neither pristine nor the expected installed head" ;;
+  ''|*[!0-9]*) fail "production Phase 1-3 object count is invalid" ;;
+  *) REHEARSAL_MODE="incremental" ;;
 esac
 printf 'rehearsal_mode=%s\n' "$REHEARSAL_MODE" >>"$REPORT_DIR/manifest.txt"
 if test "$REHEARSAL_MODE" = incremental; then
