@@ -5,6 +5,10 @@ import {
   PROVIDER_CATALOG_IDENTITY_DECISIONS,
 } from "../_shared/provider-catalog-identity.mjs";
 import { stageXtreamCredentialCatalogGeneration } from "../_shared/xtream-sync.ts";
+import {
+  extractProviderAccessState,
+  PROVIDER_ACCESS_DETECTION_VERSION,
+} from "../_shared/provider-access-state.mjs";
 
 // Provider Access v1 is intentionally a service-mediated API.  Browser/user
 // requests are authenticated with a Supabase user JWT, while the durable job
@@ -15,6 +19,8 @@ const API_VERSION = "provider-access.norva/v1";
 const CONTRACT_HEADER = "Norva-Contract-Version";
 const FEATURE_FLAG = "provider_credential_transition_v1_enabled";
 const REPLACEMENT_FEATURE_FLAG = "provider_replacement_v1_enabled";
+const ACCESS_FEATURE_FLAG = "provider_access_v1_enabled";
+const ACCESS_DETECTION_FEATURE_FLAG = "provider_access_auto_detection_v1_enabled";
 const FUNCTION_NAME = "norva-provider-access";
 const MAX_JSON_BYTES = 32_768;
 const MAX_GATEWAY_ACCOUNT_BYTES = 256 * 1024;
@@ -86,6 +92,7 @@ const ERROR_DEFINITIONS = Object.freeze({
   TRANSITION_NOT_FOUND: [404, "The credential candidate was not found.", false],
   REPLACEMENT_NOT_FOUND: [404, "The catalog replacement was not found.", false],
   SOURCE_REVISION_MISMATCH: [409, "The source changed. Refresh and try again.", false],
+  ACCESS_REVISION_MISMATCH: [409, "Provider access changed. Refresh and try again.", false],
   TRANSITION_REVISION_MISMATCH: [409, "The candidate changed. Refresh and try again.", false],
   IDEMPOTENCY_KEY_REUSED: [409, "This idempotency key was already used.", false],
   TRANSITION_ALREADY_PENDING: [409, "Another provider transition is already pending.", false],
@@ -142,11 +149,17 @@ async function routeRequest(req, requestId) {
   if (req.method === "POST" && segments.join("/") === "internal/worker/drain") {
     return handleWorkerDrain(req, requestId);
   }
+  if (req.method === "POST" && segments.join("/") === "internal/access-check/drain") {
+    return handleProviderAccessCheckDrain(req, requestId);
+  }
 
   const match = matchProviderRoute(segments);
   if (!match) throw new ContractError("INVALID_REQUEST", { status: 404 });
 
-  if (req.method === "POST") {
+  if (match.resource === "access") {
+    await requireAccessFeatureFlag();
+    if (req.method !== "GET") requireContractVersion(req);
+  } else if (req.method === "POST") {
     // The flag is deliberately read before authentication and every other
     // business precondition. A missing/unreadable row is OFF.
     if (match.resource === "replacement") await requireReplacementFeatureFlag();
@@ -158,6 +171,22 @@ async function routeRequest(req, requestId) {
   const source = match.resource === "replacement" && match.kind !== "collection"
     ? await requireOwnedReplacementSource(match.sourceId, user.id)
     : await requireOwnedSource(match.sourceId, user.id);
+
+  if (match.resource === "access") {
+    if (req.method === "GET" && match.kind === "access") {
+      return getProviderAccess(req, requestId, user, source);
+    }
+    if (req.method === "POST" && match.kind === "access-cycles") {
+      return createProviderAccessCycle(req, requestId, user, source);
+    }
+    if (req.method === "PATCH" && match.kind === "access-cycle") {
+      return updateProviderAccessCycle(req, requestId, user, source, match.cycleId);
+    }
+    if (req.method === "DELETE" && match.kind === "access-cycle") {
+      return endProviderAccessCycle(req, requestId, user, source, match.cycleId);
+    }
+    throw new ContractError("INVALID_REQUEST", { status: 404 });
+  }
 
   if (match.resource === "replacement") {
     if (req.method === "POST" && match.kind === "collection") {
@@ -208,6 +237,16 @@ function routeSegments(pathname) {
 function matchProviderRoute(parts) {
   if (parts.length < 4 || parts[0] !== "v1" || parts[1] !== "sources") return null;
   if (!UUID_RE.test(parts[2])) return null;
+  if (parts[3] === "access") {
+    if (parts.length === 4) return { resource: "access", kind: "access", sourceId: parts[2] };
+    if (parts.length === 5 && parts[4] === "cycles") {
+      return { resource: "access", kind: "access-cycles", sourceId: parts[2] };
+    }
+    if (parts.length === 6 && parts[4] === "cycles" && UUID_RE.test(parts[5])) {
+      return { resource: "access", kind: "access-cycle", sourceId: parts[2], cycleId: parts[5] };
+    }
+    return null;
+  }
   if (parts[3] === "replacements") {
     if (parts.length === 4) return { resource: "replacement", kind: "collection", sourceId: parts[2] };
     if (!UUID_RE.test(parts[4])) return null;
@@ -246,6 +285,20 @@ async function credentialFeatureFlagEnabled() {
 
 async function requireReplacementFeatureFlag() {
   if (!await replacementFeatureFlagEnabled()) throw new ContractError("FEATURE_DISABLED");
+}
+
+async function requireAccessFeatureFlag() {
+  if (!await accessFeatureFlagEnabled()) throw new ContractError("FEATURE_DISABLED");
+}
+
+async function accessFeatureFlagEnabled() {
+  const { data, error } = await admin.rpc("feature_flag", { p_key: ACCESS_FEATURE_FLAG });
+  return !error && data === true;
+}
+
+async function accessDetectionFeatureFlagEnabled() {
+  const { data, error } = await admin.rpc("feature_flag", { p_key: ACCESS_DETECTION_FEATURE_FLAG });
+  return !error && data === true;
 }
 
 async function replacementFeatureFlagEnabled() {
@@ -510,6 +563,219 @@ async function requireOwnedReplacementSource(sourceId, userId) {
     configCiphertext: data.config_ciphertext,
     revision: nonNegativeInteger(lifecycle.config_revision, "SOURCE_REVISION_MISMATCH"),
   };
+}
+
+async function getProviderAccess(req, requestId, user, source) {
+  const value = await rpc("norva_get_provider_access", {
+    p_user_id: user.id,
+    p_source_id: source.id,
+  }, { resource: "source" });
+  const access = sanitizeProviderAccess(value, source.id);
+  return successResponse(req, requestId, "ProviderAccess", access, 200, {
+    ETag: providerAccessTag(access.revision),
+  });
+}
+
+async function createProviderAccessCycle(req, requestId, user, source) {
+  const idempotencyKey = requireIdempotencyKey(req);
+  const body = normalizeAccessCycleBody(await readJsonObject(req), false);
+  const runtime = await getRuntimeConfig();
+  const requestFingerprint = await keyedFingerprint(runtime.sourceConfigKey, {
+    operation: "create_provider_access_cycle",
+    sourceId: source.id,
+    ...body,
+  });
+  const value = await rpc("norva_create_provider_access_cycle", {
+    p_user_id: user.id,
+    p_source_id: source.id,
+    p_started_on: body.startedOn,
+    p_expires_on: body.expiresOn,
+    p_term_value: body.termValue,
+    p_term_unit: body.termUnit,
+    p_reminders_enabled: body.remindersEnabled,
+    p_idempotency_key: idempotencyKey,
+    p_request_fingerprint: requestFingerprint,
+    p_actor: user.actor,
+  }, { resource: "source", cas: "access" });
+  const access = sanitizeProviderAccess(value, source.id);
+  const cycleId = access.activeCycle?.cycleId;
+  if (!cycleId) throw new ContractError("INVARIANT_VIOLATION");
+  return successResponse(req, requestId, "ProviderAccess", access, value?.replayed === true ? 200 : 201, {
+    ETag: providerAccessTag(access.revision),
+    Location: `/v1/sources/${source.id}/access/cycles/${cycleId}`,
+  });
+}
+
+async function updateProviderAccessCycle(req, requestId, user, source, cycleId) {
+  const idempotencyKey = requireIdempotencyKey(req);
+  const expectedRevision = parseEntityTag(req, "provider-access");
+  const body = normalizeAccessCycleBody(await readJsonObject(req), true);
+  const runtime = await getRuntimeConfig();
+  const requestFingerprint = await keyedFingerprint(runtime.sourceConfigKey, {
+    operation: "update_provider_access_cycle",
+    sourceId: source.id,
+    cycleId,
+    expectedRevision,
+    ...body,
+  });
+  const value = await rpc("norva_update_provider_access_cycle", {
+    p_user_id: user.id,
+    p_source_id: source.id,
+    p_cycle_id: cycleId,
+    p_expected_revision: expectedRevision,
+    p_started_on: body.startedOn,
+    p_expires_on: body.expiresOn,
+    p_term_value: body.termValue,
+    p_term_unit: body.termUnit,
+    p_reminders_enabled: body.remindersEnabled,
+    p_idempotency_key: idempotencyKey,
+    p_request_fingerprint: requestFingerprint,
+    p_actor: user.actor,
+  }, { resource: "source", cas: "access" });
+  const access = sanitizeProviderAccess(value, source.id);
+  return successResponse(req, requestId, "ProviderAccess", access, 200, {
+    ETag: providerAccessTag(access.revision),
+  });
+}
+
+async function endProviderAccessCycle(req, requestId, user, source, cycleId) {
+  const idempotencyKey = requireIdempotencyKey(req);
+  const expectedRevision = parseEntityTag(req, "provider-access");
+  const runtime = await getRuntimeConfig();
+  const requestFingerprint = await keyedFingerprint(runtime.sourceConfigKey, {
+    operation: "end_provider_access_cycle",
+    sourceId: source.id,
+    cycleId,
+    expectedRevision,
+  });
+  const value = await rpc("norva_end_provider_access_cycle", {
+    p_user_id: user.id,
+    p_source_id: source.id,
+    p_cycle_id: cycleId,
+    p_expected_revision: expectedRevision,
+    p_idempotency_key: idempotencyKey,
+    p_request_fingerprint: requestFingerprint,
+    p_actor: user.actor,
+  }, { resource: "source", cas: "access" });
+  const access = sanitizeProviderAccess(value, source.id);
+  return successResponse(req, requestId, "ProviderAccess", access, 200, {
+    ETag: providerAccessTag(access.revision),
+  });
+}
+
+function normalizeAccessCycleBody(body, requireComplete) {
+  const fields = ["startedOn", "expiresOn", "termValue", "termUnit", "remindersEnabled"];
+  if (requireComplete && fields.some((field) => !Object.hasOwn(body, field))) {
+    throw new ContractError("INVALID_REQUEST");
+  }
+  const startedOn = nullableDateKey(body.startedOn);
+  const expiresOn = nullableDateKey(body.expiresOn);
+  if (startedOn && expiresOn && expiresOn < startedOn) throw new ContractError("INVALID_REQUEST");
+  const termValue = body.termValue === null || body.termValue === undefined
+    ? null
+    : positiveInteger(body.termValue, 10_000);
+  const termUnit = body.termUnit === null || body.termUnit === undefined
+    ? null
+    : enumValue(String(body.termUnit), ["DAY", "WEEK", "MONTH", "YEAR"], "INVALID_REQUEST").toLowerCase();
+  if ((termValue === null) !== (termUnit === null)) throw new ContractError("INVALID_REQUEST");
+  const remindersEnabled = body.remindersEnabled === undefined ? false : body.remindersEnabled;
+  if (typeof remindersEnabled !== "boolean") throw new ContractError("INVALID_REQUEST");
+  return Object.freeze({ startedOn, expiresOn, termValue, termUnit, remindersEnabled });
+}
+
+function sanitizeProviderAccess(value, expectedSourceId) {
+  if (!isRecord(value)) throw new ContractError("INVARIANT_VIOLATION");
+  const sourceId = uuidValue(value.sourceId ?? value.source_id);
+  if (sourceId !== expectedSourceId) throw new ContractError("SOURCE_NOT_FOUND");
+  const cyclesRaw = Array.isArray(value.cycles) ? value.cycles : [];
+  if (cyclesRaw.length > 100) throw new ContractError("INVARIANT_VIOLATION");
+  const cycles = cyclesRaw.map(sanitizeProviderAccessCycle);
+  const activeCycle = value.activeCycle === null || value.active_cycle === null
+    ? null
+    : sanitizeProviderAccessCycle(value.activeCycle ?? value.active_cycle);
+  if (activeCycle && !cycles.some((cycle) => cycle.cycleId === activeCycle.cycleId)) {
+    throw new ContractError("INVARIANT_VIOLATION");
+  }
+  return Object.freeze({
+    sourceId,
+    revision: positiveInteger(value.revision, Number.MAX_SAFE_INTEGER, "INVARIANT_VIOLATION"),
+    status: enumValue(String(value.status ?? "").toUpperCase(), [
+      "UNKNOWN", "ACTIVE", "EXPIRING", "EXPECTED_EXPIRED", "EXPIRED_CONFIRMED",
+      "ACCESS_UNAVAILABLE_CONFIRMED", "CHECK_FAILED_TEMPORARY", "RESTORING",
+    ], "INVARIANT_VIOLATION"),
+    startedOn: nullableDateKey(value.startedOn ?? value.started_on),
+    expiresOn: nullableDateKey(value.expiresOn ?? value.expires_on),
+    expirySource: nullableEnum(
+      String(value.expirySource ?? value.expiry_source ?? "").toUpperCase() || null,
+      ["USER_ENTERED", "PROVIDER_REPORTED", "INFERRED"],
+    ),
+    manualOverride: value.manualOverride === true || value.manual_override === true,
+    remindersEnabled: value.remindersEnabled === true || value.reminders_enabled === true,
+    lastCheckedAt: isoOrNull(value.lastCheckedAt ?? value.last_checked_at),
+    lastConfirmedActiveAt: isoOrNull(value.lastConfirmedActiveAt ?? value.last_confirmed_active_at),
+    lastDetectedAt: isoOrNull(value.lastDetectedAt ?? value.last_detected_at),
+    hiddenAt: isoOrNull(value.hiddenAt ?? value.hidden_at),
+    restoredAt: isoOrNull(value.restoredAt ?? value.restored_at),
+    detectionVersion: nullablePositiveInteger(value.detectionVersion ?? value.detection_version),
+    lastDetectionCode: safeMachineCode(value.lastDetectionCode ?? value.last_detection_code),
+    lastContradictionCount: nonNegativeInteger(
+      value.lastContradictionCount ?? value.last_contradiction_count ?? 0,
+      "INVARIANT_VIOLATION",
+    ),
+    activeCycle,
+    cycles: Object.freeze(cycles),
+  });
+}
+
+function sanitizeProviderAccessCycle(value) {
+  if (!isRecord(value)) throw new ContractError("INVARIANT_VIOLATION");
+  const termValue = nullablePositiveInteger(value.termValue ?? value.term_value);
+  const termUnit = nullableEnum(
+    String(value.termUnit ?? value.term_unit ?? "").toUpperCase() || null,
+    ["DAY", "WEEK", "MONTH", "YEAR"],
+  );
+  if ((termValue === null) !== (termUnit === null)) throw new ContractError("INVARIANT_VIOLATION");
+  return Object.freeze({
+    cycleId: uuidValue(value.cycleId ?? value.cycle_id),
+    revision: positiveInteger(value.revision, Number.MAX_SAFE_INTEGER, "INVARIANT_VIOLATION"),
+    startedOn: nullableDateKey(value.startedOn ?? value.started_on),
+    expiresOn: nullableDateKey(value.expiresOn ?? value.expires_on),
+    termValue,
+    termUnit,
+    origin: enumValue(String(value.origin ?? "").toUpperCase(), ["USER_ENTERED", "PROVIDER_REPORTED"], "INVARIANT_VIOLATION"),
+    status: enumValue(String(value.status ?? "").toUpperCase(), ["ACTIVE", "SUPERSEDED", "ENDED"], "INVARIANT_VIOLATION"),
+    createdAt: isoOrNull(value.createdAt ?? value.created_at),
+    updatedAt: isoOrNull(value.updatedAt ?? value.updated_at),
+  });
+}
+
+function providerAccessTag(revision) {
+  return `"provider-access-rev-${positiveInteger(revision, Number.MAX_SAFE_INTEGER)}"`;
+}
+
+function nullableDateKey(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const text = String(value);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) throw new ContractError("INVALID_REQUEST");
+  const parsed = new Date(`${text}T00:00:00.000Z`);
+  if (!Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== text) {
+    throw new ContractError("INVALID_REQUEST");
+  }
+  return text;
+}
+
+function positiveInteger(value, maximum, code = "INVALID_REQUEST") {
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > maximum) {
+    throw new ContractError(code);
+  }
+  return parsed;
+}
+
+function nullablePositiveInteger(value) {
+  return value === null || value === undefined || value === ""
+    ? null
+    : positiveInteger(value, Number.MAX_SAFE_INTEGER, "INVARIANT_VIOLATION");
 }
 
 async function createSourceReplacement(req, requestId, user, source) {
@@ -970,7 +1236,13 @@ function mapRpcError(error, context = {}) {
     );
   }
   if (sqlstate === "40001" || message.includes(" cas failed") || message.includes("stale source revision")) {
-    return new ContractError(context.cas === "source" ? "SOURCE_REVISION_MISMATCH" : "TRANSITION_REVISION_MISMATCH");
+    return new ContractError(
+      context.cas === "source"
+        ? "SOURCE_REVISION_MISMATCH"
+        : context.cas === "access"
+          ? "ACCESS_REVISION_MISMATCH"
+          : "TRANSITION_REVISION_MISMATCH",
+    );
   }
   if (message.includes("different_catalog") || message.includes("different catalog")) {
     return new ContractError("DIFFERENT_CATALOG_REQUIRES_REPLACEMENT");
@@ -1057,6 +1329,147 @@ async function keyedFingerprint(secret, value) {
   );
   const signature = await crypto.subtle.sign("HMAC", key, encoder.encode(canonicalJson(value)));
   return bytesToHex(new Uint8Array(signature));
+}
+
+async function handleProviderAccessCheckDrain(req, requestId) {
+  await requireWorkerAuthorization(req);
+  if (!await accessFeatureFlagEnabled() || !await accessDetectionFeatureFlagEnabled()) {
+    throw new ContractError("FEATURE_DISABLED");
+  }
+  const body = await readJsonObject(req);
+  if (Object.keys(body).some((key) => key !== "scheduleLimit")) {
+    throw new ContractError("INVALID_REQUEST");
+  }
+  const scheduleLimit = body.scheduleLimit === undefined ? 100 : positiveInteger(body.scheduleLimit, 500);
+  const workerId = `provider-access-check:${crypto.randomUUID()}`;
+  await rpc("norva_schedule_provider_access_checks", {
+    p_limit: scheduleLimit,
+    p_now: new Date().toISOString(),
+  });
+  const claimed = await rpc("norva_claim_provider_access_check_jobs", {
+    p_worker: workerId,
+    p_limit: 1,
+    p_lease_seconds: WORKER_LEASE_SECONDS,
+  });
+  const row = Array.isArray(claimed) ? claimed[0] : claimed;
+  if (!isRecord(row)) {
+    return successResponse(req, requestId, "ProviderAccessCheckDrain", Object.freeze({
+      claimed: 0, completed: 0, retried: 0, dead: 0,
+    }));
+  }
+  const job = Object.freeze({
+    jobId: uuidValue(row.job_id ?? row.jobId, true),
+    userId: uuidValue(row.user_id ?? row.userId, true),
+    sourceId: uuidValue(row.source_id ?? row.sourceId, true),
+    leaseSequence: positiveInteger(row.lease_sequence ?? row.leaseSequence, Number.MAX_SAFE_INTEGER, "INVARIANT_VIOLATION"),
+    attemptCount: positiveInteger(row.attempt_count ?? row.attemptCount, 20, "INVARIANT_VIOLATION"),
+  });
+  try {
+    const result = await executeClaimedProviderAccessCheck(job, workerId);
+    return successResponse(req, requestId, "ProviderAccessCheckDrain", Object.freeze({
+      claimed: 1,
+      completed: result.jobState === "COMPLETED" ? 1 : 0,
+      retried: result.jobState === "RETRY" ? 1 : 0,
+      dead: 0,
+      status: result.status,
+      reasonCode: result.reasonCode,
+    }), result.jobState === "RETRY" ? 202 : 200);
+  } catch (error) {
+    const safe = normalizeWorkerFault(error);
+    const settled = await settleProviderAccessCheckFailure(job, workerId, safe);
+    return successResponse(req, requestId, "ProviderAccessCheckDrain", Object.freeze({
+      claimed: 1,
+      completed: 0,
+      retried: settled === "RETRY" ? 1 : 0,
+      dead: settled === "DEAD" ? 1 : 0,
+    }), settled === "RETRY" ? 202 : 200);
+  }
+}
+
+async function executeClaimedProviderAccessCheck(job, workerId) {
+  const { data: source, error: sourceError } = await admin
+    .from("cloud_sources")
+    .select("id,user_id,source_type,config_ciphertext,deleted_at,enabled")
+    .eq("id", job.sourceId)
+    .eq("user_id", job.userId)
+    .maybeSingle();
+  if (sourceError) throw new WorkerFault("internal_error", true);
+  if (!source || source.deleted_at || !source.enabled || String(source.source_type).toLowerCase() !== "xtream") {
+    throw new WorkerFault("source_inactive", false);
+  }
+  const runtime = await getRuntimeConfig();
+  let config;
+  try {
+    config = await decryptSourceConfig(source.config_ciphertext, runtime.sourceConfigKey);
+  } catch (_) {
+    throw new WorkerFault("invalid_payload", false);
+  }
+  const checkedAt = new Date().toISOString();
+  let detection;
+  let retryable = false;
+  try {
+    await assertProviderReadAllowed(job, config);
+    detection = extractProviderAccessState(await gatewayAccountInfo(runtime, config), { now: checkedAt });
+  } catch (error) {
+    const fault = normalizeWorkerFault(error);
+    retryable = fault.retryable;
+    detection = providerAccessDetectionForFault(fault);
+  }
+  const value = await workerRpc("norva_apply_claimed_provider_access_detection", {
+    p_job_id: job.jobId,
+    p_worker: workerId,
+    p_expected_lease_sequence: job.leaseSequence,
+    p_detection: detection,
+    p_checked_at: checkedAt,
+    p_retry_after_seconds: retryable ? retryDelaySeconds(job.attemptCount) : null,
+  });
+  const sanitized = sanitizeProviderAccess(value, job.sourceId);
+  return Object.freeze({
+    status: sanitized.status,
+    reasonCode: safeMachineCode(detection.reasonCode),
+    jobState: enumValue(value.jobState ?? value.job_state, ["COMPLETED", "RETRY"], "INVARIANT_VIOLATION"),
+  });
+}
+
+function providerAccessDetectionForFault(fault) {
+  if (!fault.retryable && fault.queueCode === "auth_rejected") {
+    return Object.freeze({
+      detectionVersion: PROVIDER_ACCESS_DETECTION_VERSION,
+      status: "access_unavailable_confirmed",
+      reasonCode: "PROVIDER_CREDENTIALS_REJECTED",
+      expiresOn: null,
+      hideEligible: true,
+      restorationConfirmed: false,
+      contradictions: [],
+    });
+  }
+  return Object.freeze({
+    detectionVersion: PROVIDER_ACCESS_DETECTION_VERSION,
+    status: "check_failed_temporary",
+    reasonCode: fault.retryable ? "PROVIDER_CHECK_TEMPORARY_FAILURE" : "PROVIDER_RESPONSE_INCONSISTENT",
+    expiresOn: null,
+    hideEligible: false,
+    restorationConfirmed: false,
+    contradictions: fault.retryable ? [] : ["PROVIDER_RESPONSE_INVALID"],
+  });
+}
+
+async function settleProviderAccessCheckFailure(job, workerId, fault) {
+  try {
+    const value = await workerRpc("norva_fail_provider_access_check_job", {
+      p_job_id: job.jobId,
+      p_worker: workerId,
+      p_expected_lease_sequence: job.leaseSequence,
+      p_error_code: safeMachineCode(fault.queueCode) ?? "INTERNAL_ERROR",
+      p_retryable: fault.retryable,
+      p_retry_after_seconds: retryDelaySeconds(job.attemptCount),
+    });
+    return enumValue(value.state, ["RETRY", "DEAD"], "INVARIANT_VIOLATION");
+  } catch (_) {
+    // A lost lease is already durable evidence that another worker owns the
+    // continuation. Never attempt to repair or overwrite it from Edge.
+    return "RETRY";
+  }
 }
 
 function canonicalJson(value) {
