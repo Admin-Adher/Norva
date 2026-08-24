@@ -30,6 +30,23 @@ begin
 end
 $retention_reaper$;
 
+do $fiscal_boundaries$
+begin
+  if public.norva_legal_billing_fiscal_close('2026-12-31',12,31) <> '2026-12-31'
+     or public.norva_legal_billing_fiscal_close('2027-01-01',12,31) <> '2027-12-31'
+     or public.norva_legal_billing_fiscal_close('2026-06-30',6,30) <> '2026-06-30'
+     or public.norva_legal_billing_fiscal_close('2026-07-01',6,30) <> '2027-06-30'
+     or public.norva_legal_billing_retention_until(
+          '2026-12-31 23:59:59+00',10,12,31
+        ) <> '2037-01-01 00:00:00+00'::timestamptz
+     or public.norva_legal_billing_retention_until(
+          '2027-01-01 00:00:00+00',10,12,31
+        ) <> '2038-01-01 00:00:00+00'::timestamptz then
+    raise exception 'fiscal-close retention boundary contract failed';
+  end if;
+end
+$fiscal_boundaries$;
+
 -- A non-empty ledger cannot silently bypass the explicitly provisioned policy.
 -- The policy below is a transaction-local fixture, not a product legal rule.
 delete from public.legal_billing_archive_retention_policy where record_kind='billing_ledger';
@@ -51,7 +68,14 @@ insert into public.cloud_billing_ledger(
   'renewal',100,'EUR','paid','web',repeat('f',64));
 
 do $policy_and_archive$
-declare v_missing boolean := false; v_archive jsonb; v_complete jsonb;
+declare
+  v_missing boolean := false;
+  v_stale boolean := false;
+  v_append_only boolean := false;
+  v_integrity_refusal boolean := false;
+  v_policy jsonb;
+  v_archive jsonb;
+  v_complete jsonb;
 begin
   begin
     perform public.norva_archive_account_deletion_legal_billing(
@@ -61,22 +85,75 @@ begin
   if not v_missing then
     raise exception 'legal archive advanced without an explicit retention policy';
   end if;
-  insert into public.legal_billing_archive_retention_policy(
-    record_kind,legal_basis,retention_interval,configured_by
-  ) values ('billing_ledger','fixture-policy','400 days','account-deletion-retention-smoke');
+  v_policy := public.norva_configure_legal_billing_archive_policy(
+    0,
+    'fixture-accounting-obligation',
+    'fixture://reviewed-policy/accounting-records-v2',
+    10,
+    12,
+    31,
+    'account-deletion-retention-smoke'
+  );
+  begin
+    perform public.norva_configure_legal_billing_archive_policy(
+      0,'fixture-accounting-obligation',
+      'fixture://reviewed-policy/accounting-records-v2',10,12,31,
+      'account-deletion-retention-smoke'
+    );
+  exception when sqlstate '40001' then v_stale := true;
+  end;
+  begin
+    update public.legal_billing_archive_policy_events
+    set actor='forbidden-event-rewrite'
+    where revision=1;
+  exception when sqlstate '55000' then v_append_only := true;
+  end;
+  update public.legal_billing_archive_retention_policy
+  set config_hash=repeat('0',64)
+  where record_kind='billing_ledger';
+  begin
+    perform public.norva_archive_account_deletion_legal_billing(
+      'd0000000-0000-0000-0000-000000000097',0,1);
+  exception when sqlstate '55000' then v_integrity_refusal := true;
+  end;
+  update public.legal_billing_archive_retention_policy
+  set config_hash=v_policy->>'configHash'
+  where record_kind='billing_ledger';
   v_archive := public.norva_archive_account_deletion_legal_billing(
     'd0000000-0000-0000-0000-000000000097',0,1);
   v_complete := public.norva_archive_account_deletion_legal_billing(
     'd0000000-0000-0000-0000-000000000097',1,1);
-  if (v_archive->>'archivedRows')::integer <> 1
+  if (v_policy->>'revision')::bigint <> 1
+     or not v_stale
+     or not v_append_only
+     or not v_integrity_refusal
+     or has_function_privilege(
+          'authenticated',
+          'public.norva_configure_legal_billing_archive_policy(bigint,text,text,integer,integer,integer,text)',
+          'execute'
+        )
+     or has_table_privilege('service_role','public.legal_billing_archive','select')
+     or has_table_privilege('service_role','public.legal_billing_archive_policy_events','select')
+     or (v_archive->>'archivedRows')::integer <> 1
      or (v_complete->>'state') <> 'purging_product'
      or exists (select 1 from public.cloud_billing_ledger
                 where pi_id='account-delete-legal-ledger' and user_id is not null)
      or not exists (select 1 from public.legal_billing_archive
                     where source_ledger_id='account-delete-legal-ledger'
-                      and legal_basis='fixture-policy') then
+                      and legal_basis='fixture-accounting-obligation'
+                      and retention_policy_revision=1
+                      and retention_calculation_version=2
+                      and retention_policy_reference=
+                        'fixture://reviewed-policy/accounting-records-v2'
+                      and retention_policy_config_hash ~ '^[0-9a-f]{64}$'
+                      and retention_basis_date =
+                        public.norva_legal_billing_fiscal_close(issued_at::date,12,31)
+                      and retention_until =
+                        public.norva_legal_billing_retention_until(issued_at,10,12,31))
+     or (select count(*) from public.legal_billing_archive_policy_events
+         where revision=1 and previous_revision=0) <> 1 then
     raise exception 'legal archive fixture did not remain minimal and idempotent'
-      using detail=format('archive=%s complete=%s',v_archive,v_complete);
+      using detail=format('policy=%s archive=%s complete=%s',v_policy,v_archive,v_complete);
   end if;
 end
 $policy_and_archive$;

@@ -263,7 +263,7 @@ PRE_HEAD="20260823179920_catalog_generation_flag_gate.sql"
 CONTRACTION="20260823180000_provider_catalog_generation_online_rollout.sql"
 ONLINE_HEAD="20260823182700_series_inventory_generation_parent_natural_fk.sql"
 CURRENT_HEAD="20260823194000_replacement_promotion_proof_account_delete.sql"
-CURRENT_PROVIDER_ACCESS_HEAD="20260824171000_catalog_cache_epoch_v2_minimum_observation_gate.sql"
+CURRENT_PROVIDER_ACCESS_HEAD="20260824173000_legal_billing_archive_audited_access_v1.sql"
 
 apply_range "20260822219999" "$PRE_HEAD" pre-contraction
 apply_range "$PRE_HEAD" "$CONTRACTION" contraction-definition
@@ -421,6 +421,7 @@ TESTS=(
   account_deletion_product_reaper_smoke.sql
   account_deletion_finalization_concurrency_smoke.sql
   account_deletion_legal_billing_retention_smoke.sql
+  legal_billing_archive_access_smoke.sql
   account_deletion_paywall_analytics_smoke.sql
   provider_credential_promotion_cancel_concurrency.sql
   provider_credential_swap_account_delete_concurrency.sql
