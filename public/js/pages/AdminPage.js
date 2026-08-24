@@ -1184,6 +1184,7 @@ class AdminPage {
             const actBtn = e.target.closest('.act-btn');
             if (actBtn) { this._userAction(actBtn); return; }
             if (e.target.closest('#sys-infra-refresh') || e.target.closest('#sys-billing-refresh')) { this._loadInfra(); return; }
+            if (e.target.closest('#sys-provider-access-refresh')) { this._loadProviderAccessAnalytics(); return; }
             if (e.target.closest('#sys-audit-more')) { this._loadAudit(false); return; }
             if (e.target.closest('#bulk-apply-btn')) { this._bulkTag('apply'); return; }
             if (e.target.closest('#bulk-remove-btn')) { this._bulkTag('remove'); return; }
@@ -13080,6 +13081,7 @@ class AdminPage {
             <div class="admin-block"><h2>💳 État billing / go-live <button id="sys-billing-refresh" class="mini-btn" aria-label="Re-vérifier l'état billing" title="Re-check">↻</button></h2><div id="sys-billing" class="admin-cards"><div class="ssub">Vérification…</div></div>
                 <details class="sys-gl-details"><summary>📋 Voir la checklist go-live prod</summary><p class="ssub" style="margin:0">Bascule prod = poser les secrets Supabase (clé Revolut <code>sk_</code> prod, <code>REVOLUT_API_BASE=https://merchant.revolut.com</code>, <code>NORVA_BILLING_MODE=revenuecat</code>, <code>NORVA_ENTITLEMENTS_MODE=enforce</code>). Ce panneau doit alors passer tout au vert.</p></details>
             </div>
+            <div class="admin-block"><h2>📡 Provider Access · rollout 30 jours <button id="sys-provider-access-refresh" class="mini-btn" aria-label="Actualiser le dashboard Provider Access" title="Actualiser">↻</button></h2><div id="sys-provider-access" aria-live="polite"><div class="ssub">Chargement des métriques agrégées…</div></div></div>
             <div class="admin-block"><h2>🚩 Feature flags</h2><div id="sys-flags"><div class="ssub">Chargement…</div></div></div>
         </div>`;
         // Audit filters (client-side over the loaded feed).
@@ -13112,7 +13114,88 @@ class AdminPage {
         if (this._nav !== nav) return;
         this._loadAudit(true);
         this._loadInfra();
+        this._loadProviderAccessAnalytics();
         this._loadFlags();
+    }
+
+    async _loadProviderAccessAnalytics() {
+        const el = document.getElementById('sys-provider-access');
+        if (!el) return;
+        el.setAttribute('aria-busy', 'true');
+        try {
+            const res = await fetch(`${this._sbUrl()}/functions/v1/norva-admin/provider-access-analytics`, {
+                method: 'POST',
+                headers: { apikey: this._sbKey(), Authorization: `Bearer ${this._token()}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ windowDays: 30 })
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.error || String(res.status));
+            this._renderProviderAccessAnalytics(data);
+        } catch (error) {
+            el.innerHTML = `<div class="admin-err" role="alert">Provider Access indisponible : ${AdminPage.esc(error.message)}</div>`;
+        } finally {
+            el.removeAttribute('aria-busy');
+        }
+    }
+
+    _renderProviderAccessAnalytics(data) {
+        const el = document.getElementById('sys-provider-access');
+        if (!el) return;
+        const metric = (value, label, alert = false) => `<div class="partners-ops-row${alert ? ' is-alert' : ''}"><span>${AdminPage.esc(label)}</span><strong>${AdminPage.n(Number(value) || 0)}</strong></div>`;
+        const group = (title, body) => `<section class="partners-analytics-section"><h3>${AdminPage.esc(title)}</h3><div class="partners-ops-stats">${body}</div></section>`;
+        const access = data.access || {};
+        const restoration = data.restoration || {};
+        const replacement = data.replacement || {};
+        const notifications = data.notifications || {};
+        const p0 = data.p0 || {};
+        const p0Active = p0.active === true || Number(p0.count) > 0;
+        const flags = data.flags && typeof data.flags === 'object' ? data.flags : {};
+        const enabled = Object.values(flags).filter(Boolean).length;
+        const totalFlags = Object.keys(flags).length;
+        el.innerHTML = `
+          <div class="mot-inc ${p0Active ? '' : 'is-clear'}" style="margin-bottom:12px">
+            <div class="mot-inc-row ${p0Active ? '' : 'gray'}" role="${p0Active ? 'alert' : 'status'}">
+              <span class="mi-t">${p0Active ? '🔴 P0 · staging visible' : '✓ Aucune violation de visibilité staging'}</span>
+              <span class="mi-d">— ${p0Active ? `${AdminPage.n(Number(p0.count) || 0)} source(s), rollout bloqué` : 'gate SQL vert'}</span>
+            </div>
+          </div>
+          <div class="partners-analytics-grid">
+            ${group('Accès', [
+                metric(access.sources_with_access_date, 'sources avec échéance'),
+                metric(access.provider_reported_expiry, 'échéances provider'),
+                metric(access.user_entered_expiry, 'échéances utilisateur'),
+                metric(access.expected_expired, 'expiration attendue'),
+                metric(access.confirmed_expired, 'expiration confirmée', Number(access.confirmed_expired) > 0),
+                metric(access.access_restored, 'accès restaurés')
+            ].join(''))}
+            ${group('Restauration', [
+                metric(restoration.current_access_extended, 'accès prolongés'),
+                metric(restoration.new_credentials_submitted, 'credentials soumis'),
+                metric(restoration.same_catalog_detected, 'même catalogue'),
+                metric(restoration.different_catalog_detected, 'catalogue différent'),
+                metric(restoration.ambiguous_catalog, 'ambiguïtés'),
+                metric(restoration.credential_swaps_completed, 'swaps terminés'),
+                metric(restoration.credential_swaps_rolled_back, 'rollbacks')
+            ].join(''))}
+            ${group('Remplacement', [
+                metric(replacement.replacements_started, 'démarrés'),
+                metric(replacement.completed, 'terminés'),
+                metric(replacement.failed, 'échoués', Number(replacement.failed) > 0),
+                metric(replacement.cancelled, 'annulés'),
+                metric(replacement.cleanup_pending, 'cleanup en attente', Number(replacement.cleanup_pending) > 0),
+                metric(replacement.staging_visibility_violation, 'violations staging', Number(replacement.staging_visibility_violation) > 0)
+            ].join(''))}
+            ${group('Notifications', [
+                metric(notifications['7d_sent'], 'rappels J-7'),
+                metric(notifications['1d_sent'], 'rappels J-1'),
+                metric(notifications.today_sent, 'rappels jour J'),
+                metric(notifications.superseded, 'superseded'),
+                metric(notifications.dead_letter, 'dead letter', Number(notifications.dead_letter) > 0),
+                metric(notifications.push_delivered, 'push livrés'),
+                metric(notifications.email_delivered, 'emails livrés')
+            ].join(''))}
+          </div>
+          <p class="partners-analytics-note">Fenêtre ${AdminPage.n(Number(data.windowDays) || 30)} jours · ${AdminPage.n(enabled)}/${AdminPage.n(totalFlags)} flags actifs · agrégats uniquement, aucun identifiant utilisateur ou credential.</p>`;
     }
 
     // Consolidated system incidents (service down / cron KO / source en erreur / snapshot ancien /

@@ -100,7 +100,7 @@ test('Play Subscribe in Settings is limited to the customer-success test account
   assert.match(settings, /isPlayBillingTestAccount/);
   assert.match(settings, /nativePlayBillingChannelReady/);
   assert.match(settings, /NorvaBillingNative/);
-  assert.match(read('public/app.html'), /Settings\.js\?v=54/);
+  assert.match(read('public/app.html'), /Settings\.js\?v=55/);
 });
 
 test('Android TV delegates purchases to the web and ships no native billing surface', () => {

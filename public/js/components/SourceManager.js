@@ -483,6 +483,111 @@ class SourceManager {
         return Boolean(source.hasPassword || config.hasPassword || (source.cloud && source.username));
     }
 
+    providerAccessTodayKey() {
+        const today = new Date();
+        const year = today.getFullYear();
+        const month = String(today.getMonth() + 1).padStart(2, '0');
+        const day = String(today.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    }
+
+    providerAccessDateFromKey(value) {
+        const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || ''));
+        if (!match) return null;
+        const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+        return date.getUTCFullYear() === Number(match[1])
+            && date.getUTCMonth() === Number(match[2]) - 1
+            && date.getUTCDate() === Number(match[3])
+            ? date
+            : null;
+    }
+
+    providerAccessDateKey(date) {
+        return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-${String(date.getUTCDate()).padStart(2, '0')}`;
+    }
+
+    providerAccessAddTerm(startKey, value, unit) {
+        const start = this.providerAccessDateFromKey(startKey);
+        const amount = Number(value);
+        if (!start || !Number.isInteger(amount) || amount < 1) return null;
+        const normalizedUnit = String(unit || '').toUpperCase();
+        if (normalizedUnit === 'DAY' || normalizedUnit === 'WEEK') {
+            const result = new Date(start.getTime());
+            result.setUTCDate(result.getUTCDate() + amount * (normalizedUnit === 'WEEK' ? 7 : 1));
+            return result;
+        }
+        if (normalizedUnit !== 'MONTH' && normalizedUnit !== 'YEAR') return null;
+        const monthDelta = amount * (normalizedUnit === 'YEAR' ? 12 : 1);
+        const targetMonthIndex = start.getUTCMonth() + monthDelta;
+        const targetYear = start.getUTCFullYear() + Math.floor(targetMonthIndex / 12);
+        const targetMonth = ((targetMonthIndex % 12) + 12) % 12;
+        const lastDay = new Date(Date.UTC(targetYear, targetMonth + 1, 0)).getUTCDate();
+        return new Date(Date.UTC(targetYear, targetMonth, Math.min(start.getUTCDate(), lastDay)));
+    }
+
+    renderProviderAccessCalendar(fieldset, { resetMonth = false } = {}) {
+        const calendar = fieldset?.querySelector?.('[data-access-calendar]');
+        if (!calendar) return;
+        const activationInput = fieldset.querySelector('[data-access-activation-on]');
+        const termInput = fieldset.querySelector('[data-access-term-value]');
+        const unitInput = fieldset.querySelector('[data-access-term-unit]');
+        const startKey = activationInput?.value || this.providerAccessTodayKey();
+        const termValue = Number(termInput?.value);
+        const termUnit = String(unitInput?.value || '').toUpperCase();
+        const start = this.providerAccessDateFromKey(startKey);
+        const end = this.providerAccessAddTerm(startKey, termValue, termUnit);
+        const summary = calendar.querySelector('[data-access-calendar-summary]');
+        const badge = calendar.querySelector('[data-access-calendar-badge]');
+        const grid = calendar.querySelector('[data-access-calendar-grid]');
+        const title = calendar.querySelector('[data-access-calendar-title]');
+        if (!start || !end || !grid || !title) {
+            if (summary) summary.textContent = 'Enter a valid duration to preview its end date.';
+            if (badge) badge.textContent = 'End date unavailable';
+            if (grid) grid.innerHTML = '';
+            return;
+        }
+
+        const formatLong = (date) => new Intl.DateTimeFormat('en', {
+            year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC'
+        }).format(date);
+        const unitLabel = `${termUnit.charAt(0)}${termUnit.slice(1).toLowerCase()}${termValue === 1 ? '' : 's'}`;
+        if (summary) summary.textContent = `${termValue} ${unitLabel.toLowerCase()} from ${formatLong(start)} · ends ${formatLong(end)}`;
+        if (badge) badge.textContent = `Ends ${formatLong(end)}`;
+
+        const endMonthKey = this.providerAccessDateKey(end).slice(0, 7);
+        if (resetMonth || !/^\d{4}-\d{2}$/.test(calendar.dataset.displayMonth || '')) {
+            calendar.dataset.displayMonth = endMonthKey;
+        }
+        const [displayYear, displayMonthNumber] = calendar.dataset.displayMonth.split('-').map(Number);
+        const displayMonth = displayMonthNumber - 1;
+        const first = new Date(Date.UTC(displayYear, displayMonth, 1));
+        title.textContent = new Intl.DateTimeFormat('en', { year: 'numeric', month: 'long', timeZone: 'UTC' }).format(first);
+        const mondayOffset = (first.getUTCDay() + 6) % 7;
+        const gridStart = new Date(Date.UTC(displayYear, displayMonth, 1 - mondayOffset));
+        const maxEnd = new Date(start.getTime());
+        maxEnd.setUTCDate(maxEnd.getUTCDate() + 10000);
+        const cells = [];
+        for (let index = 0; index < 42; index += 1) {
+            const day = new Date(gridStart.getTime());
+            day.setUTCDate(day.getUTCDate() + index);
+            const key = this.providerAccessDateKey(day);
+            const outside = day.getUTCMonth() !== displayMonth;
+            const selectable = !outside && day > start && day <= maxEnd;
+            const classes = [
+                'provider-access-calendar-day',
+                outside ? 'is-outside' : '',
+                day >= start && day <= end ? 'is-in-period' : '',
+                key === startKey ? 'is-start' : '',
+                key === this.providerAccessDateKey(end) ? 'is-end' : ''
+            ].filter(Boolean).join(' ');
+            const label = `${formatLong(day)}${key === this.providerAccessDateKey(end) ? ', current end date' : ''}`;
+            cells.push(selectable
+                ? `<button type="button" class="${classes}" data-access-calendar-day="${key}" aria-label="${this.escapeHtml(label)}"${key === this.providerAccessDateKey(end) ? ' aria-pressed="true"' : ' aria-pressed="false"'}>${day.getUTCDate()}</button>`
+                : `<span class="${classes}" aria-hidden="true">${day.getUTCDate()}</span>`);
+        }
+        grid.innerHTML = cells.join('');
+    }
+
     getSavedConnectionCard(type, source = {}) {
         const isExisting = Boolean(source.id || source.cloudId || source.cloud_id);
         if (!isExisting) return '';
@@ -512,6 +617,7 @@ class SourceManager {
         const cycle = access?.activeCycle || null;
         const initialMode = cycle?.termValue ? 'duration' : (access?.expiresOn ? 'dates' : 'skip');
         const startedOn = access?.startedOn || '';
+        const activationOn = startedOn || this.providerAccessTodayKey();
         const expiresOn = access?.expiresOn || '';
         const termValue = cycle?.termValue || 1;
         const termUnit = String(cycle?.termUnit || 'MONTH').toUpperCase();
@@ -529,7 +635,11 @@ class SourceManager {
               </select>
             </div>
             <div class="provider-access-mode" data-access-panel="duration"${initialMode === 'duration' ? '' : ' hidden'}>
-              <div class="provider-access-field-row">
+              <div class="form-group provider-access-activation-field">
+                <label for="${this.escapeHtml(prefix)}-activation-on">Activation or purchase date</label>
+                <input id="${this.escapeHtml(prefix)}-activation-on" class="form-input" type="date" value="${this.escapeHtml(activationOn)}" data-access-activation-on>
+              </div>
+              <div class="provider-access-field-row provider-access-duration-row">
                 <div class="form-group">
                   <label for="${this.escapeHtml(prefix)}-term-value">Duration</label>
                   <input id="${this.escapeHtml(prefix)}-term-value" class="form-input" type="number" inputmode="numeric" min="1" max="10000" value="${this.escapeHtml(termValue)}" data-access-term-value>
@@ -541,7 +651,26 @@ class SourceManager {
                   </select>
                 </div>
               </div>
-              <p class="hint">The start date defaults to today. PostgreSQL calculates the calendar end date.</p>
+              <p class="hint">Norva calculates the end date from this activation date. Your provider access remains separate from your Norva plan.</p>
+              <section class="provider-access-calendar" data-access-calendar aria-label="Provider access end-date preview">
+                <div class="provider-access-calendar-summary">
+                  <div>
+                    <span class="provider-access-calendar-kicker">Access preview</span>
+                    <strong data-access-calendar-summary aria-live="polite"></strong>
+                  </div>
+                  <span class="provider-access-calendar-badge" data-access-calendar-badge></span>
+                </div>
+                <div class="provider-access-calendar-header">
+                  <button type="button" class="provider-access-calendar-nav" data-access-calendar-prev aria-label="Previous month">&#8249;</button>
+                  <strong data-access-calendar-title></strong>
+                  <button type="button" class="provider-access-calendar-nav" data-access-calendar-next aria-label="Next month">&#8250;</button>
+                </div>
+                <div class="provider-access-calendar-weekdays" aria-hidden="true">
+                  ${['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day) => `<span>${day}</span>`).join('')}
+                </div>
+                <div class="provider-access-calendar-grid" data-access-calendar-grid></div>
+                <p class="provider-access-calendar-caption">Choose another end date to update the duration above. Norva will switch it to an exact number of days.</p>
+              </section>
             </div>
             <div class="provider-access-mode" data-access-panel="dates"${initialMode === 'dates' ? '' : ' hidden'}>
               <div class="provider-access-field-row">
@@ -567,6 +696,10 @@ class SourceManager {
     bindProviderAccessTerms(root = document) {
         root.querySelectorAll?.('[data-provider-access-terms]').forEach((fieldset) => {
             const mode = fieldset.querySelector('[data-access-mode]');
+            const activation = fieldset.querySelector('[data-access-activation-on]');
+            const termValue = fieldset.querySelector('[data-access-term-value]');
+            const termUnit = fieldset.querySelector('[data-access-term-unit]');
+            const calendar = fieldset.querySelector('[data-access-calendar]');
             const update = () => {
                 const selected = mode?.value || 'skip';
                 fieldset.querySelectorAll('[data-access-panel]').forEach((panel) => {
@@ -576,8 +709,38 @@ class SourceManager {
                 if (reminders) reminders.hidden = selected === 'skip';
                 const error = fieldset.querySelector('[data-access-error]');
                 if (error) error.hidden = true;
+                if (selected === 'duration') this.renderProviderAccessCalendar(fieldset, { resetMonth: true });
             };
+            const updateCalendar = () => this.renderProviderAccessCalendar(fieldset, { resetMonth: true });
             mode?.addEventListener('change', update);
+            activation?.addEventListener('change', updateCalendar);
+            termValue?.addEventListener('input', updateCalendar);
+            termUnit?.addEventListener('change', updateCalendar);
+            calendar?.querySelector('[data-access-calendar-prev]')?.addEventListener('click', () => {
+                const [year, month] = String(calendar.dataset.displayMonth || '').split('-').map(Number);
+                const previous = new Date(Date.UTC(year, month - 2, 1));
+                calendar.dataset.displayMonth = this.providerAccessDateKey(previous).slice(0, 7);
+                this.renderProviderAccessCalendar(fieldset);
+            });
+            calendar?.querySelector('[data-access-calendar-next]')?.addEventListener('click', () => {
+                const [year, month] = String(calendar.dataset.displayMonth || '').split('-').map(Number);
+                const next = new Date(Date.UTC(year, month, 1));
+                calendar.dataset.displayMonth = this.providerAccessDateKey(next).slice(0, 7);
+                this.renderProviderAccessCalendar(fieldset);
+            });
+            calendar?.querySelector('[data-access-calendar-grid]')?.addEventListener('click', (event) => {
+                const dayButton = event.target.closest?.('[data-access-calendar-day]');
+                if (!dayButton) return;
+                const start = this.providerAccessDateFromKey(activation?.value);
+                const end = this.providerAccessDateFromKey(dayButton.dataset.accessCalendarDay);
+                if (!start || !end) return;
+                const exactDays = Math.round((end.getTime() - start.getTime()) / 86400000);
+                if (exactDays < 1 || exactDays > 10000) return;
+                termValue.value = String(exactDays);
+                termUnit.value = 'DAY';
+                this.renderProviderAccessCalendar(fieldset);
+                termValue.focus({ preventScroll: true });
+            });
             update();
         });
     }
@@ -589,12 +752,14 @@ class SourceManager {
         if (mode === 'skip') return null;
         const remindersEnabled = fieldset.querySelector('[data-access-reminders]')?.checked === true;
         if (mode === 'duration') {
+            const startedOn = String(fieldset.querySelector('[data-access-activation-on]')?.value || '');
             const termValue = Number(fieldset.querySelector('[data-access-term-value]')?.value);
             const termUnit = String(fieldset.querySelector('[data-access-term-unit]')?.value || '');
-            if (!Number.isInteger(termValue) || termValue < 1 || termValue > 10000 || !['DAY', 'WEEK', 'MONTH', 'YEAR'].includes(termUnit)) {
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(startedOn) || !this.providerAccessDateFromKey(startedOn)
+                || !Number.isInteger(termValue) || termValue < 1 || termValue > 10000 || !['DAY', 'WEEK', 'MONTH', 'YEAR'].includes(termUnit)) {
                 throw new Error('Enter a valid provider access duration.');
             }
-            return { startedOn: null, expiresOn: null, termValue, termUnit, remindersEnabled };
+            return { startedOn, expiresOn: null, termValue, termUnit, remindersEnabled };
         }
         const startedOn = String(fieldset.querySelector('[data-access-started-on]')?.value || '');
         const expiresOn = String(fieldset.querySelector('[data-access-expires-on]')?.value || '');

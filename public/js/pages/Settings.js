@@ -1961,6 +1961,8 @@ class SettingsPage {
     }
 
     async show() {
+        const requestedSubRoute = this.app?._settingsSubRoute === 'sources' ? 'sources' : '';
+        if (this.app) this.app._settingsSubRoute = '';
         // TV Settings uses a fixed header/tab shell with only the active panel
         // scrolling. Reset synchronously before any network request so entry can
         // never reveal a clipped title or a stale lower section.
@@ -1974,6 +1976,8 @@ class SettingsPage {
             if (activePanel) activePanel.scrollTop = 0;
             this.switchTab('account');
         }
+
+        if (requestedSubRoute) this.switchTab(requestedSubRoute);
 
         // Local hub user management stays available to local admins only.
         const usersTab = document.getElementById('users-tab');

@@ -21,6 +21,8 @@ const FEATURE_FLAG = "provider_credential_transition_v1_enabled";
 const REPLACEMENT_FEATURE_FLAG = "provider_replacement_v1_enabled";
 const ACCESS_FEATURE_FLAG = "provider_access_v1_enabled";
 const ACCESS_DETECTION_FEATURE_FLAG = "provider_access_auto_detection_v1_enabled";
+const NOTIFICATION_FEATURE_FLAG = "provider_access_notifications_v1_enabled";
+const IN_APP_NOTIFICATION_FEATURE_FLAG = "provider_access_in_app_v1_enabled";
 const FUNCTION_NAME = "norva-provider-access";
 const MAX_JSON_BYTES = 32_768;
 const MAX_GATEWAY_ACCOUNT_BYTES = 256 * 1024;
@@ -28,6 +30,11 @@ const MAX_GATEWAY_PAGE_BYTES = 5 * 1024 * 1024;
 // One claim per invocation prevents later jobs from sitting behind a slow
 // gateway request until their lease is already stale.
 const WORKER_MAX_CLAIMS = 1;
+
+type NotificationRoute =
+  | { kind: "collection" }
+  | { kind: "dismiss"; notificationId: string };
+type AuthenticatedUser = { id: string; actor: string };
 const WORKER_LEASE_SECONDS = 300;
 const WORKER_PROTOCOL = "credential-transition-worker-v2-title-cleanup";
 const GATEWAY_REQUEST_TIMEOUT_MS = 120_000;
@@ -153,6 +160,27 @@ async function routeRequest(req, requestId) {
     return handleProviderAccessCheckDrain(req, requestId);
   }
 
+  if (req.method === "GET" && segments.join("/") === "v1/rollout") {
+    const user = await requireUserJwt(req);
+    const status = await providerAccessRolloutStatus(user.id);
+    return successResponse(req, requestId, "ProviderAccessRollout", status, 200);
+  }
+
+  const notificationRoute = matchNotificationRoute(segments);
+  if (notificationRoute) {
+    await requireInAppNotificationFeatureFlag();
+    if (req.method !== "GET") requireContractVersion(req);
+    const user = await requireUserJwt(req);
+    await requireProviderAccessRolloutEligibility(user.id);
+    if (req.method === "GET" && notificationRoute.kind === "collection") {
+      return listInAppNotifications(req, requestId, user);
+    }
+    if (req.method === "POST" && notificationRoute.kind === "dismiss") {
+      return dismissInAppNotification(req, requestId, user, notificationRoute.notificationId);
+    }
+    throw new ContractError("INVALID_REQUEST", { status: 404 });
+  }
+
   const match = matchProviderRoute(segments);
   if (!match) throw new ContractError("INVALID_REQUEST", { status: 404 });
 
@@ -168,6 +196,7 @@ async function routeRequest(req, requestId) {
   }
 
   const user = await requireUserJwt(req);
+  await requireProviderAccessRolloutEligibility(user.id);
   const source = match.resource === "replacement" && match.kind !== "collection"
     ? await requireOwnedReplacementSource(match.sourceId, user.id)
     : await requireOwnedSource(match.sourceId, user.id);
@@ -283,6 +312,32 @@ async function credentialFeatureFlagEnabled() {
   return !error && data === true;
 }
 
+async function providerAccessRolloutStatus(userId: string) {
+  const { data, error } = await admin.rpc("norva_provider_access_rollout_status", {
+    p_user_id: userId,
+  });
+  if (error || !data || typeof data !== "object") {
+    throw new ContractError("FEATURE_DISABLED");
+  }
+  return data;
+}
+
+async function requireProviderAccessRolloutEligibility(userId: string) {
+  const status = await providerAccessRolloutStatus(userId);
+  if (status.eligible !== true) throw new ContractError("FEATURE_DISABLED");
+}
+
+function matchNotificationRoute(parts: string[]): NotificationRoute | null {
+  if (parts.length === 2 && parts[0] === "v1" && parts[1] === "notifications") {
+    return { kind: "collection" };
+  }
+  if (parts.length === 4 && parts[0] === "v1" && parts[1] === "notifications"
+      && UUID_RE.test(parts[2]) && parts[3] === "dismiss") {
+    return { kind: "dismiss", notificationId: parts[2] };
+  }
+  return null;
+}
+
 async function requireReplacementFeatureFlag() {
   if (!await replacementFeatureFlagEnabled()) throw new ContractError("FEATURE_DISABLED");
 }
@@ -299,6 +354,16 @@ async function accessFeatureFlagEnabled() {
 async function accessDetectionFeatureFlagEnabled() {
   const { data, error } = await admin.rpc("feature_flag", { p_key: ACCESS_DETECTION_FEATURE_FLAG });
   return !error && data === true;
+}
+
+async function requireInAppNotificationFeatureFlag() {
+  const [master, channel] = await Promise.all([
+    admin.rpc("feature_flag", { p_key: NOTIFICATION_FEATURE_FLAG }),
+    admin.rpc("feature_flag", { p_key: IN_APP_NOTIFICATION_FEATURE_FLAG }),
+  ]);
+  if (master.error || channel.error || master.data !== true || channel.data !== true) {
+    throw new ContractError("FEATURE_DISABLED");
+  }
 }
 
 async function replacementFeatureFlagEnabled() {
@@ -532,6 +597,65 @@ async function cancelCredentialCandidateWith(req, requestId, user, source, candi
   return successResponse(req, requestId, "CredentialCandidate", candidate, 200, {
     ETag: transitionTag(candidate.revision),
   });
+}
+
+function userRpcClient(req: Request) {
+  return createClient(SUPABASE_URL, SERVICE_KEY, {
+    auth: { autoRefreshToken: false, persistSession: false },
+    global: { headers: { Authorization: req.headers.get("Authorization") ?? "" } },
+  });
+}
+
+async function listInAppNotifications(req: Request, requestId: string, _user: AuthenticatedUser) {
+  const rawLimit = new URL(req.url).searchParams.get("limit");
+  const limit = rawLimit === null ? 20 : Number(rawLimit);
+  if (!Number.isInteger(limit) || limit < 1 || limit > 50) throw new ContractError("INVALID_REQUEST");
+  const { data, error } = await userRpcClient(req).rpc("norva_list_provider_access_in_app_notifications", {
+    p_limit: limit,
+  });
+  if (error) throw new ContractError("INVARIANT_VIOLATION");
+  const notifications = Array.isArray(data) ? data.map(sanitizeInAppNotification) : [];
+  return successResponse(req, requestId, "ProviderAccessNotifications", { notifications }, 200);
+}
+
+async function dismissInAppNotification(
+  req: Request,
+  requestId: string,
+  _user: AuthenticatedUser,
+  notificationId: string,
+) {
+  const body = await readJsonObject(req);
+  if (Object.keys(body).length) throw new ContractError("INVALID_REQUEST");
+  const { data, error } = await userRpcClient(req).rpc("norva_dismiss_provider_access_in_app_notification", {
+    p_notification_id: notificationId,
+  });
+  if (error) throw new ContractError("INVARIANT_VIOLATION");
+  return successResponse(req, requestId, "ProviderAccessNotificationDismissal", {
+    notificationId,
+    dismissed: data === true,
+  }, 200);
+}
+
+function sanitizeInAppNotification(value: unknown) {
+  const item: Record<string, unknown> = value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+  const kind = ["expiry_7d", "expiry_1d", "expiry_today", "access_hidden", "access_restored"]
+    .includes(String(item.kind)) ? String(item.kind) : "";
+  if (!UUID_RE.test(String(item.notificationId ?? ""))
+      || !UUID_RE.test(String(item.sourceId ?? "")) || !kind) {
+    throw new ContractError("INVARIANT_VIOLATION");
+  }
+  const scheduledAt = isoOrNull(item.scheduledAt);
+  if (!scheduledAt) throw new ContractError("INVARIANT_VIOLATION");
+  return {
+    notificationId: String(item.notificationId),
+    sourceId: String(item.sourceId),
+    kind,
+    sourceName: String(item.sourceName ?? "").trim().slice(0, 120) || "TV service",
+    expiresOn: nullableDateKey(item.expiresOn),
+    scheduledAt,
+  };
 }
 
 async function requireOwnedReplacementSource(sourceId, userId) {
@@ -1365,6 +1489,8 @@ async function handleProviderAccessCheckDrain(req, requestId) {
     attemptCount: positiveInteger(row.attempt_count ?? row.attemptCount, 20, "INVARIANT_VIOLATION"),
   });
   try {
+    const rollout = await providerAccessRolloutStatus(job.userId);
+    if (rollout.eligible !== true) throw new WorkerFault("rollout_ineligible", false);
     const result = await executeClaimedProviderAccessCheck(job, workerId);
     return successResponse(req, requestId, "ProviderAccessCheckDrain", Object.freeze({
       claimed: 1,

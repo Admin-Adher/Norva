@@ -753,6 +753,23 @@ Deno.serve(async (req) => {
       });
     }
 
+    // ── route: /provider-access-analytics — aggregate-only rollout cockpit. ──
+    // The SQL RPC is service-role-only and returns no owner/source/transition
+    // identifiers. The browser still has to pass the normal server-verified
+    // admin JWT gate above; it never receives service credentials.
+    if (segments[segments.length - 1] === "provider-access-analytics") {
+      const body = await req.json().catch(() => ({})) as JsonRecord;
+      const windowDays = Number(body.windowDays ?? 30);
+      if (!Number.isInteger(windowDays) || windowDays < 1 || windowDays > 90) {
+        return json(req, { error: "windowDays must be between 1 and 90" }, 400);
+      }
+      const { data, error } = await admin.rpc("norva_provider_access_analytics_dashboard", {
+        p_window_days: windowDays,
+      });
+      if (error) return json(req, { error: "Provider Access analytics unavailable" }, 503);
+      return json(req, data ?? {});
+    }
+
     // ── route: /marketing-push — envoi d'une notification marketing à un SEGMENT
     // d'appareils (cloud_push_tokens × cloud_entitlement_projection via la fonction
     // marketing_push_targets), avec purge des tokens morts et journalisation dans

@@ -16,6 +16,7 @@ const css = read('public/css/main.css');
 const shell = read('public/app.html');
 const config = read('public/js/provider-access-config.js');
 const lifecycle = read('supabase/migrations/20260824120000_provider_access_cycles_detection_v1.sql');
+const calendarTerms = read('supabase/migrations/20260824120200_provider_access_calendar_terms_v1.sql');
 
 test('Provider Access UI has an independent default-off rollout gate', () => {
   assert.match(config, /NORVA_PROVIDER_ACCESS_UI_V1 = window\.NORVA_PROVIDER_ACCESS_UI_V1 === true/);
@@ -50,10 +51,13 @@ test('onboarding collects an optional duration or explicit dates plus reminder o
 });
 
 test('calendar durations are resolved server-side and cannot be mixed with an explicit end date', () => {
-  assert.match(lifecycle, /p_expires_on is not null and p_term_value is not null/);
-  assert.match(lifecycle, /when 'month' then \(v_started_on \+ make_interval\(months => p_term_value\)\)::date/);
-  assert.match(lifecycle, /when 'year' then \(v_started_on \+ make_interval\(years => p_term_value\)\)::date/);
-  assert.match(lifecycle, /provider_access_expires_on = v_expires_on/);
+  // Calendar authority was moved to a forward-only migration so an already
+  // applied 1200 migration is never silently rewritten.
+  assert.doesNotMatch(lifecycle, /p_expires_on is not null and p_term_value is not null/);
+  assert.match(calendarTerms, /p_expires_on is not null and p_term_value is not null/);
+  assert.match(calendarTerms, /when 'month' then \(v_started_on \+ make_interval\(months => p_term_value\)\)::date/);
+  assert.match(calendarTerms, /when 'year' then \(v_started_on \+ make_interval\(years => p_term_value\)\)::date/);
+  assert.match(calendarTerms, /provider_access_expires_on = v_expires_on/);
 });
 
 test('Settings exposes renewal, candidate login and replacement paths without a credential PATCH', () => {
@@ -104,9 +108,9 @@ test('Provider Access controls use Norva tokens and remain touch, mobile and mot
 });
 
 test('all changed Provider Access UI assets are cache-busted', () => {
-  assert.match(shell, /main\.css\?v=117/);
-  assert.match(shell, /cloudApi\.js\?v=67/);
-  assert.match(shell, /api\.js\?v=85/);
-  assert.match(shell, /SourceManager\.js\?v=44/);
+  assert.match(shell, /main\.css\?v=118/);
+  assert.match(shell, /cloudApi\.js\?v=69/);
+  assert.match(shell, /api\.js\?v=87/);
+  assert.match(shell, /SourceManager\.js\?v=45/);
   assert.match(shell, /HomePage\.js\?v=64/);
 });

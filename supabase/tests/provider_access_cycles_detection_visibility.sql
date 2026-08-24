@@ -3,7 +3,7 @@ set local lock_timeout = '3s';
 set local statement_timeout = '45s';
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select extensions.plan(39);
+select extensions.plan(40);
 
 insert into auth.users (
   id, instance_id, aud, role, email, encrypted_password, email_confirmed_at,
@@ -378,6 +378,13 @@ select extensions.is(
    where source_id='98500000-0000-4000-8000-000000000101'),
   'restoring',
   'future manual date puts a hidden source into RESTORING'
+);
+select extensions.is(
+  (select count(*)::integer from public.cloud_source_lifecycle_events
+   where source_id='98500000-0000-4000-8000-000000000101'
+     and event_kind='provider_access_cycle_extended'),
+  1,
+  'a later end date emits the exact aggregate extension event'
 );
 select extensions.ok(
   not public.norva_source_catalog_visible(

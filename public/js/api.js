@@ -2807,6 +2807,13 @@ const API = {
     // mutation authority through this namespace.
     providerAccess: {
         available: () => _shouldUseCloud() && Boolean(window.NorvaCloud?.providerAccess),
+        rolloutStatus: async (options = {}) => window.NorvaCloud.providerAccess.rolloutStatus(options),
+        listNotifications: async (limit = 20, options = {}) => window.NorvaCloud.providerAccess.listNotifications(
+            limit, options
+        ),
+        dismissNotification: async (notificationId, options = {}) => window.NorvaCloud.providerAccess.dismissNotification(
+            notificationId, options
+        ),
         get: async (sourceId, options = {}) => window.NorvaCloud.providerAccess.get(
             await CloudAdapter.resolveSourceId(sourceId), options
         ),

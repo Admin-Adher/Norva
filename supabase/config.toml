@@ -70,6 +70,12 @@ verify_jwt = false
 [functions.norva-branded-email-worker]
 verify_jwt = false
 
+# Provider Access reminder worker. PostgreSQL owns scheduling, independent
+# email/push leases and final authorization; this endpoint accepts only the
+# shared cron secret and leaves every channel disabled by default.
+[functions.norva-provider-access-notify]
+verify_jwt = false
+
 # New-signup Telegram worker. PostgreSQL owns the durable outbox and wakes this
 # endpoint with NORVA_CRON_SHARED_SECRET; the function verifies that secret itself.
 [functions.norva-signup-notify]

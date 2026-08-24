@@ -212,8 +212,6 @@ declare
   v_existing public.cloud_source_access_cycles%rowtype;
   v_cycle_id uuid;
   v_status text;
-  v_started_on date;
-  v_expires_on date;
 begin
   perform public.norva_provider_access_capability_required('provider_access_v1_enabled');
   if p_user_id is null or p_source_id is null
@@ -222,19 +220,9 @@ begin
      or p_actor is null or btrim(p_actor) = '' or length(p_actor) > 200
      or (p_started_on is not null and p_expires_on is not null and p_expires_on < p_started_on)
      or ((p_term_value is null) <> (p_term_unit is null))
-     or (p_expires_on is not null and p_term_value is not null)
      or (p_term_value is not null and (p_term_value <= 0 or p_term_unit not in ('day','week','month','year'))) then
     raise exception 'invalid provider access cycle request' using errcode = '22023';
   end if;
-
-  v_started_on := case when p_term_value is null then p_started_on else coalesce(p_started_on, current_date) end;
-  v_expires_on := case p_term_unit
-    when 'day' then (v_started_on + make_interval(days => p_term_value))::date
-    when 'week' then (v_started_on + make_interval(days => p_term_value * 7))::date
-    when 'month' then (v_started_on + make_interval(months => p_term_value))::date
-    when 'year' then (v_started_on + make_interval(years => p_term_value))::date
-    else p_expires_on
-  end;
 
   perform 1 from public.cloud_sources source
   join public.cloud_source_lifecycle lifecycle
@@ -269,19 +257,19 @@ begin
     user_id, source_id, started_on, expires_on, term_value, term_unit,
     origin, status, idempotency_key, request_fingerprint
   ) values (
-    p_user_id, p_source_id, v_started_on, v_expires_on, p_term_value, p_term_unit,
+    p_user_id, p_source_id, p_started_on, p_expires_on, p_term_value, p_term_unit,
     'user_entered', 'active', p_idempotency_key, p_request_fingerprint
   ) returning id into v_cycle_id;
 
-  v_status := public.norva_provider_access_status_for_dates(v_expires_on, current_date);
+  v_status := public.norva_provider_access_status_for_dates(p_expires_on, current_date);
   update public.cloud_source_provider_access access
   set provider_access_status = case
         when access.provider_access_hidden_at is not null then 'restoring'
         else v_status
       end,
-      provider_access_started_on = v_started_on,
-      provider_access_expires_on = v_expires_on,
-      provider_access_expiry_source = case when v_expires_on is null then null else 'user_entered' end,
+      provider_access_started_on = p_started_on,
+      provider_access_expires_on = p_expires_on,
+      provider_access_expiry_source = case when p_expires_on is null then null else 'user_entered' end,
       provider_access_manual_override = true,
       provider_access_reminders_enabled = coalesce(p_reminders_enabled, false),
       revision = access.revision + 1,
@@ -325,8 +313,6 @@ declare
   v_cycle public.cloud_source_access_cycles%rowtype;
   v_event public.cloud_source_lifecycle_events%rowtype;
   v_status text;
-  v_started_on date;
-  v_expires_on date;
 begin
   perform public.norva_provider_access_capability_required('provider_access_v1_enabled');
   if p_user_id is null or p_source_id is null or p_cycle_id is null or p_expected_revision is null
@@ -335,19 +321,9 @@ begin
      or p_actor is null or btrim(p_actor) = '' or length(p_actor) > 200
      or (p_started_on is not null and p_expires_on is not null and p_expires_on < p_started_on)
      or ((p_term_value is null) <> (p_term_unit is null))
-     or (p_expires_on is not null and p_term_value is not null)
      or (p_term_value is not null and (p_term_value <= 0 or p_term_unit not in ('day','week','month','year'))) then
     raise exception 'invalid provider access update request' using errcode = '22023';
   end if;
-
-  v_started_on := case when p_term_value is null then p_started_on else coalesce(p_started_on, current_date) end;
-  v_expires_on := case p_term_unit
-    when 'day' then (v_started_on + make_interval(days => p_term_value))::date
-    when 'week' then (v_started_on + make_interval(days => p_term_value * 7))::date
-    when 'month' then (v_started_on + make_interval(months => p_term_value))::date
-    when 'year' then (v_started_on + make_interval(years => p_term_value))::date
-    else p_expires_on
-  end;
 
   select event.* into v_event from public.cloud_source_lifecycle_events event
   where event.user_id = p_user_id and event.idempotency_key = 'provider-access-update:' || p_idempotency_key;
@@ -376,21 +352,21 @@ begin
   if not found then raise exception 'active access cycle not found' using errcode = 'P0002'; end if;
 
   update public.cloud_source_access_cycles cycle
-  set started_on = v_started_on, expires_on = v_expires_on,
+  set started_on = p_started_on, expires_on = p_expires_on,
       term_value = p_term_value, term_unit = p_term_unit,
       revision = cycle.revision + 1, updated_at = now()
   where cycle.id = p_cycle_id and cycle.revision = v_cycle.revision;
   if not found then raise exception 'provider cycle revision CAS failed' using errcode = '40001'; end if;
 
-  v_status := public.norva_provider_access_status_for_dates(v_expires_on, current_date);
+  v_status := public.norva_provider_access_status_for_dates(p_expires_on, current_date);
   update public.cloud_source_provider_access access
   set provider_access_status = case
         when access.provider_access_hidden_at is not null then 'restoring'
         else v_status
       end,
-      provider_access_started_on = v_started_on,
-      provider_access_expires_on = v_expires_on,
-      provider_access_expiry_source = case when v_expires_on is null then null else 'user_entered' end,
+      provider_access_started_on = p_started_on,
+      provider_access_expires_on = p_expires_on,
+      provider_access_expiry_source = case when p_expires_on is null then null else 'user_entered' end,
       provider_access_manual_override = true,
       provider_access_reminders_enabled = coalesce(p_reminders_enabled, false),
       revision = access.revision + 1,

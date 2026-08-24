@@ -86,6 +86,12 @@ class App {
         }
         this.installNativeContinuityListeners();
 
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState !== 'visible') return;
+            const elapsed = Date.now() - (this._providerAccessNotificationCheckedAt || 0);
+            if (elapsed >= 5 * 60 * 1000) this.refreshProviderAccessNotifications();
+        });
+
         this.init();
     }
 
@@ -797,6 +803,10 @@ class App {
         // "#page/sub" (e.g. #admin/client:<id>): the page key is the first segment.
         const hash = window.location.hash.slice(1); // Remove #
         const hashKey = hash.split('/')[0];
+        // Provider Access notifications deep-link to the Sources tab. Preserve
+        // only this allow-listed Settings sub-route before navigateTo normalizes
+        // the URL back to #settings.
+        this._settingsSubRoute = hash === 'settings/sources' ? 'sources' : '';
         // Stash the admin sub-route BEFORE navigateTo rewrites the hash to "#admin" —
         // AdminPage.show() consumes it to restore the exact CRM view (fiche, ticket…).
         this._adminSubRoute = hashKey === 'admin' ? hash.slice('admin/'.length) : '';
@@ -825,6 +835,7 @@ class App {
         this.restoreOpenFiche(initialPage, pendingFiche);
         this.openFicheFromRoute(initialPage);
         requestAnimationFrame(() => this.consumePendingPairCode());
+        requestAnimationFrame(() => this.refreshProviderAccessNotifications());
         // The destination controller has synchronously painted either real content or
         // its route skeleton by now. Fade the launch surface only at this point.
         requestAnimationFrame(() => this.finishTvLaunchScreen());
@@ -1549,6 +1560,7 @@ class App {
                     device: !user
                 };
                 this.addLogoutButton();
+                if (user?.id) await this.refreshProviderAccessRollout();
                 if (user?.id) this.claimPendingPartnerReferral();
                 // Identify the RevenueCat App User ID as the Supabase user id at boot,
                 // so a store purchase is attributed to THIS account. Doing it here
@@ -1585,6 +1597,7 @@ class App {
                         device: !cachedUser
                     };
                     this.addLogoutButton();
+                    if (cachedUser?.id) await this.refreshProviderAccessRollout();
                     if (cachedUser?.id) this.claimPendingPartnerReferral();
                     if (cachedUser?.id) { try { window.NorvaBilling?.login?.(cachedUser.id); } catch (_) { /* noop */ } }
                     return;
@@ -3499,6 +3512,106 @@ class App {
         }
     }
 
+    async refreshProviderAccessRollout() {
+        window.NORVA_PROVIDER_ACCESS_UI_V1 = false;
+        if (!window.API?.providerAccess?.available?.()) return false;
+        try {
+            const status = await window.API.providerAccess.rolloutStatus();
+            const eligible = status?.eligible === true;
+            window.NORVA_PROVIDER_ACCESS_UI_V1 = eligible;
+            window.dispatchEvent(new CustomEvent('norva:provider-access-rollout', {
+                detail: { eligible, stage: String(status?.stage || 'off'), revision: Number(status?.revision || 0) }
+            }));
+            return eligible;
+        } catch (_) {
+            window.NORVA_PROVIDER_ACCESS_UI_V1 = false;
+            return false;
+        }
+    }
+
+    async refreshProviderAccessNotifications() {
+        this._providerAccessNotificationCheckedAt = Date.now();
+        if (!this.currentUser?.cloud || !window.API?.providerAccess?.available?.()) return;
+        try {
+            const payload = await window.API.providerAccess.listNotifications(20);
+            const notifications = Array.isArray(payload?.notifications) ? payload.notifications : [];
+            if (!notifications.length) {
+                this.clearProviderAccessNotice();
+                return;
+            }
+            let connectedSourceCount = null;
+            if (notifications.some((item) => item?.kind === 'access_hidden')) {
+                try {
+                    const sources = await window.API.sources.getAll();
+                    connectedSourceCount = Array.isArray(sources)
+                        ? sources.filter((source) => ['xtream', 'm3u'].includes(String(source?.type || '').toLowerCase())).length
+                        : null;
+                } catch (_) { /* keep the non-blocking presentation */ }
+            }
+            this.renderProviderAccessNotice(notifications[0], {
+                count: notifications.length,
+                fullAttention: notifications[0]?.kind === 'access_hidden' && connectedSourceCount === 1,
+            });
+        } catch (_) {
+            // Temporary fetch/auth/flag failures must never produce an access
+            // warning. The durable row remains available for the next refresh.
+        }
+    }
+
+    providerAccessNoticeCopy(kind) {
+        return ({
+            expiry_7d: ['Catalog access reminder', 'Your external provider access expires in 7 days. Your Norva plan is not affected.'],
+            expiry_1d: ['Catalog access reminder', 'Your external provider access expires tomorrow. Your Norva plan is not affected.'],
+            expiry_today: ['Catalog access reminder', 'Your external provider access expires today. Your Norva plan is not affected.'],
+            access_hidden: ['Your catalog needs attention', 'Norva confirmed that your external provider access is unavailable. Your Norva plan is not affected.'],
+            access_restored: ['Catalog access restored', 'Your external provider access is available again.'],
+        })[kind] || null;
+    }
+
+    renderProviderAccessNotice(notification, { count = 1, fullAttention = false } = {}) {
+        const copy = this.providerAccessNoticeCopy(notification?.kind);
+        if (!copy || !notification?.notificationId) return;
+        this.clearProviderAccessNotice();
+        const host = document.createElement('section');
+        host.id = 'provider-access-in-app-notice';
+        host.className = `provider-access-in-app-notice${fullAttention ? ' is-full-attention' : ''}`;
+        host.setAttribute('role', notification.kind === 'access_hidden' ? 'alert' : 'status');
+        host.setAttribute('aria-live', notification.kind === 'access_hidden' ? 'assertive' : 'polite');
+        host.setAttribute('aria-label', 'External provider access');
+        host.innerHTML = `<div class="provider-access-in-app-card">
+            <div class="provider-access-in-app-mark" aria-hidden="true"></div>
+            <div class="provider-access-in-app-copy"><span>External provider access</span><strong></strong><p></p><small></small></div>
+            <div class="provider-access-in-app-actions">
+              <button type="button" class="btn btn-primary" data-provider-access-review>Review access</button>
+              <button type="button" class="provider-access-in-app-dismiss" data-provider-access-dismiss aria-label="Dismiss this reminder">Dismiss</button>
+            </div>
+          </div>`;
+        host.querySelector('strong').textContent = copy[0];
+        host.querySelector('p').textContent = copy[1];
+        const source = String(notification.sourceName || '').trim();
+        host.querySelector('small').textContent = count > 1
+            ? `${count} provider access notices need review.`
+            : (source ? `Service: ${source}` : 'Open Settings to review this access.');
+        const dismiss = async () => {
+            host.querySelectorAll('button').forEach((button) => { button.disabled = true; });
+            try { await window.API.providerAccess.dismissNotification(notification.notificationId); } catch (_) { /* durable row remains */ }
+            host.remove();
+            if (count > 1) this.refreshProviderAccessNotifications();
+        };
+        host.querySelector('[data-provider-access-dismiss]')?.addEventListener('click', dismiss);
+        host.querySelector('[data-provider-access-review]')?.addEventListener('click', () => {
+            this._settingsSubRoute = 'sources';
+            this.navigateTo('settings');
+            requestAnimationFrame(() => this.pages.settings?.switchTab?.('sources'));
+            dismiss();
+        });
+        document.body.appendChild(host);
+    }
+
+    clearProviderAccessNotice() {
+        document.getElementById('provider-access-in-app-notice')?.remove();
+    }
+
     /**
      * Lightweight toast with an optional action button (used for undo, etc.).
      * Auto-dismisses after `duration` ms; clicking the action fires `onAction`
@@ -3560,7 +3673,7 @@ class App {
                 // rewrite it. Keep this value equal to the first 10 characters of the
                 // file's canonical-LF SHA-256; the contract test fails if they drift apart.
                 // Using the content hash here also gives the immutable CDN cache a new URL.
-                s.src = '/js/pages/AdminPage.js?v=cff2779ad7';
+                s.src = '/js/pages/AdminPage.js?v=892adb93ca';
                 s.onload = () => resolve();
                 s.onerror = () => { this._adminPageLoading = null; reject(new Error('AdminPage.js failed to load')); };
                 document.head.appendChild(s);

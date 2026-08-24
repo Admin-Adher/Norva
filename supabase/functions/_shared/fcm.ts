@@ -68,25 +68,39 @@ export function fcmConfigured(): boolean { return serviceAccount() !== null; }
 
 export async function sendFcmPush(
   token: string,
-  msg: { title: string; body: string; data?: Record<string, string> },
-): Promise<{ ok: boolean; status: number; error?: string; unregistered?: boolean }> {
+  msg: {
+    title: string;
+    body: string;
+    data?: Record<string, string>;
+    dataOnly?: boolean;
+  },
+): Promise<{ ok: boolean; status: number; messageId?: string; error?: string; unregistered?: boolean }> {
   const sa = serviceAccount();
   if (!sa) return { ok: false, status: 0, error: "FCM not configured" };
   const at = await accessToken(sa);
   if (!at) return { ok: false, status: 0, error: "token exchange failed" };
+  const message = msg.dataOnly
+    ? {
+      token,
+      data: { title: msg.title, body: msg.body, ...(msg.data ?? {}) },
+      android: { priority: "high" },
+    }
+    : {
+      token,
+      notification: { title: msg.title, body: msg.body },
+      data: msg.data ?? {},
+      android: { priority: "high", notification: { default_sound: true } },
+    };
   const res = await fetch(`https://fcm.googleapis.com/v1/projects/${sa.project_id}/messages:send`, {
     method: "POST",
     headers: { Authorization: `Bearer ${at}`, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      message: {
-        token,
-        notification: { title: msg.title, body: msg.body },
-        data: msg.data ?? {},
-        android: { priority: "high", notification: { default_sound: true } },
-      },
-    }),
+    body: JSON.stringify({ message }),
   });
-  if (res.ok) return { ok: true, status: res.status };
+  if (res.ok) {
+    const payload = await res.json().catch(() => ({})) as { name?: unknown };
+    const messageId = typeof payload.name === "string" ? payload.name.slice(0, 240) : undefined;
+    return { ok: true, status: res.status, ...(messageId ? { messageId } : {}) };
+  }
   const text = await res.text().catch(() => "");
   // A dead token surfaces as 404 UNREGISTERED or 400 with INVALID_ARGUMENT on the token.
   const unregistered = res.status === 404 || /UNREGISTERED|NOT_FOUND/i.test(text);

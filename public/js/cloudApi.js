@@ -4534,6 +4534,16 @@
         },
 
         providerAccess: {
+            rolloutStatus: (options = {}) => providerAccessRequest(
+                'GET', '/v1/rollout', null, options
+            ),
+            listNotifications: (limit = 20, options = {}) => providerAccessRequest(
+                'GET', `/v1/notifications?limit=${encodeURIComponent(limit)}`, null, options
+            ),
+            dismissNotification: (notificationId, options = {}) => providerAccessRequest(
+                'POST', `/v1/notifications/${encodeURIComponent(notificationId)}/dismiss`, {},
+                { ...options, mutate: true }
+            ),
             get: (sourceId, options = {}) => providerAccessRequest(
                 'GET', `/v1/sources/${encodeURIComponent(sourceId)}/access`, null, options
             ),
