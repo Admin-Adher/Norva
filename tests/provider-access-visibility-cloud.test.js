@@ -291,6 +291,18 @@ test('management reads exclude staging in DB while retaining provider-hidden Set
   assert.doesNotMatch(statuses, /\.from\("cloud_sources"\)|\.eq\("catalog_visible", true\)/);
 });
 
+test('source plan capacity counts only commercially visible logical sources', () => {
+  const route = section('if (scope === "sources") {', 'if (scope === "media-items") {');
+  assert.match(
+    route,
+    /requirePlanCapacity\(user\.id, db, "sources", "cloud_catalog_visible_sources"\)/,
+  );
+  assert.doesNotMatch(
+    route,
+    /requirePlanCapacity\(user\.id, db, "sources", "cloud_sources"/,
+  );
+});
+
 test('source payload sanitizer exposes only host-level connection hints and bounded progress', async () => {
   const {
     sanitizeSource,

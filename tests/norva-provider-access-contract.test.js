@@ -35,12 +35,16 @@ function functionExpression(name, nextName) {
   return declaration.replace(new RegExp(`^(async\\s+)?function\\s+${name}`), (_all, asyncPrefix) => `${asyncPrefix || ''}function`);
 }
 
-test('Provider Access Edge surface is versioned and exposes only the five credential-candidate routes', () => {
+test('Provider Access Edge surface exposes credential candidates and durable catalog replacements', () => {
   assert.match(EDGE, /const API_VERSION = "provider-access\.norva\/v1"/);
   assert.match(EDGE, /parts\[0\] !== "v1"/);
+  assert.match(EDGE, /parts\[3\] === "replacements"/);
   assert.match(EDGE, /parts\[3\] !== "credential-candidates"/);
   for (const action of ['decision', 'apply', 'cancel']) assert.ok(EDGE.includes(`"${action}"`));
-  assert.doesNotMatch(EDGE, /replacements\/promote|provider-access\/terms/);
+  assert.ok(EDGE.includes('"promote"'));
+  assert.match(EDGE, /norva_create_source_replacement_from_candidate/);
+  assert.match(EDGE, /norva_promote_source_replacement_v2/);
+  assert.doesNotMatch(EDGE, /provider-access\/terms/);
 });
 
 test('every mutation fails closed on the feature flag and contract version before user business work', () => {
@@ -615,6 +619,7 @@ test('retry exhaustion finalizes pre-commit validation or starts compensation wi
       requireWorkerAuthorization: async () => {},
       readJsonObject: async () => ({}),
       credentialFeatureFlagEnabled: async () => true,
+      replacementFeatureFlagEnabled: async () => false,
       admin: { rpc: async () => ({ data: [{ job_kind: kind }], error: null }) },
       normalizeClaimedJob: () => ({ kind, failureAttemptCount: 4 }),
       processWorkerJobUnderGuards: async () => { throw new WorkerFault('provider_unavailable', true); },
@@ -869,6 +874,7 @@ test('one malformed claimed row is dead-settled without aborting the rest of the
     requireWorkerAuthorization: async () => {},
     readJsonObject: async () => ({ limit: 2 }),
     credentialFeatureFlagEnabled: async () => false,
+    replacementFeatureFlagEnabled: async () => false,
     admin: { rpc: async () => ({ data: [{ malformed: true }, { malformed: false }], error: null }) },
     normalizeClaimedJob: (raw) => {
       if (raw.malformed) throw new Error('schema drift');

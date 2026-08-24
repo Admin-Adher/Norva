@@ -718,7 +718,9 @@ async function route(
     if (req.method === "GET" && id === "status" && !action) return { body: await listSourceStatuses(user.id, db) };
     if (req.method === "POST" && id === "estimate" && !action) return { body: await estimateSourceByUrl(req) };
     if (req.method === "POST" && !id) {
-      await requirePlanCapacity(user.id, db, "sources", "cloud_sources", { notDeleted: true });
+      // A hidden Phase-4 staging source is part of the same logical provider
+      // replacement and must never consume a second commercial source slot.
+      await requirePlanCapacity(user.id, db, "sources", "cloud_catalog_visible_sources");
       const body = await createSource(req, user.id, db);
       await acknowledgeCatalogVisibilityEpochMutation(req, db);
       return { status: 201, body };

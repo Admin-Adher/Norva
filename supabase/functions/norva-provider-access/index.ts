@@ -14,6 +14,7 @@ import { stageXtreamCredentialCatalogGeneration } from "../_shared/xtream-sync.t
 const API_VERSION = "provider-access.norva/v1";
 const CONTRACT_HEADER = "Norva-Contract-Version";
 const FEATURE_FLAG = "provider_credential_transition_v1_enabled";
+const REPLACEMENT_FEATURE_FLAG = "provider_replacement_v1_enabled";
 const FUNCTION_NAME = "norva-provider-access";
 const MAX_JSON_BYTES = 32_768;
 const MAX_GATEWAY_ACCOUNT_BYTES = 256 * 1024;
@@ -83,6 +84,7 @@ const ERROR_DEFINITIONS = Object.freeze({
   AUTHENTICATION_REQUIRED: [401, "Authentication is required.", false],
   SOURCE_NOT_FOUND: [404, "The source was not found.", false],
   TRANSITION_NOT_FOUND: [404, "The credential candidate was not found.", false],
+  REPLACEMENT_NOT_FOUND: [404, "The catalog replacement was not found.", false],
   SOURCE_REVISION_MISMATCH: [409, "The source changed. Refresh and try again.", false],
   TRANSITION_REVISION_MISMATCH: [409, "The candidate changed. Refresh and try again.", false],
   IDEMPOTENCY_KEY_REUSED: [409, "This idempotency key was already used.", false],
@@ -141,19 +143,37 @@ async function routeRequest(req, requestId) {
     return handleWorkerDrain(req, requestId);
   }
 
-  const match = matchCandidateRoute(segments);
+  const match = matchProviderRoute(segments);
   if (!match) throw new ContractError("INVALID_REQUEST", { status: 404 });
 
   if (req.method === "POST") {
     // The flag is deliberately read before authentication and every other
     // business precondition. A missing/unreadable row is OFF.
-    await requireCredentialFeatureFlag();
+    if (match.resource === "replacement") await requireReplacementFeatureFlag();
+    else await requireCredentialFeatureFlag();
     requireContractVersion(req);
   }
 
   const user = await requireUserJwt(req);
   const source = await requireOwnedSource(match.sourceId, user.id);
 
+  if (match.resource === "replacement") {
+    if (req.method === "POST" && match.kind === "collection") {
+      return createSourceReplacement(req, requestId, user, source);
+    }
+    if (req.method === "GET" && match.kind === "replacement") {
+      return getSourceReplacement(req, requestId, user, source, match.replacementId);
+    }
+    if (req.method === "POST" && match.kind === "action") {
+      if (match.action === "promote") {
+        return promoteSourceReplacement(req, requestId, user, source, match.replacementId);
+      }
+      if (match.action === "cancel") {
+        return cancelSourceReplacement(req, requestId, user, source, match.replacementId);
+      }
+    }
+    throw new ContractError("INVALID_REQUEST", { status: 404 });
+  }
   if (req.method === "POST" && match.kind === "collection") {
     return createCredentialCandidate(req, requestId, user, source);
   }
@@ -180,14 +200,32 @@ function routeSegments(pathname) {
   return functionIndex >= 0 ? parts.slice(functionIndex + 1) : parts;
 }
 
-function matchCandidateRoute(parts) {
+function matchProviderRoute(parts) {
   if (parts.length < 4 || parts[0] !== "v1" || parts[1] !== "sources") return null;
-  if (!UUID_RE.test(parts[2]) || parts[3] !== "credential-candidates") return null;
-  if (parts.length === 4) return { kind: "collection", sourceId: parts[2] };
+  if (!UUID_RE.test(parts[2])) return null;
+  if (parts[3] === "replacements") {
+    if (parts.length === 4) return { resource: "replacement", kind: "collection", sourceId: parts[2] };
+    if (!UUID_RE.test(parts[4])) return null;
+    if (parts.length === 5) {
+      return { resource: "replacement", kind: "replacement", sourceId: parts[2], replacementId: parts[4] };
+    }
+    if (parts.length === 6 && ["promote", "cancel"].includes(parts[5])) {
+      return {
+        resource: "replacement",
+        kind: "action",
+        sourceId: parts[2],
+        replacementId: parts[4],
+        action: parts[5],
+      };
+    }
+    return null;
+  }
+  if (parts[3] !== "credential-candidates") return null;
+  if (parts.length === 4) return { resource: "credential", kind: "collection", sourceId: parts[2] };
   if (!UUID_RE.test(parts[4])) return null;
-  if (parts.length === 5) return { kind: "candidate", sourceId: parts[2], candidateId: parts[4] };
+  if (parts.length === 5) return { resource: "credential", kind: "candidate", sourceId: parts[2], candidateId: parts[4] };
   if (parts.length === 6 && ["decision", "apply", "cancel"].includes(parts[5])) {
-    return { kind: "action", sourceId: parts[2], candidateId: parts[4], action: parts[5] };
+    return { resource: "credential", kind: "action", sourceId: parts[2], candidateId: parts[4], action: parts[5] };
   }
   return null;
 }
@@ -198,6 +236,15 @@ async function requireCredentialFeatureFlag() {
 
 async function credentialFeatureFlagEnabled() {
   const { data, error } = await admin.rpc("feature_flag", { p_key: FEATURE_FLAG });
+  return !error && data === true;
+}
+
+async function requireReplacementFeatureFlag() {
+  if (!await replacementFeatureFlagEnabled()) throw new ContractError("FEATURE_DISABLED");
+}
+
+async function replacementFeatureFlagEnabled() {
+  const { data, error } = await admin.rpc("feature_flag", { p_key: REPLACEMENT_FEATURE_FLAG });
   return !error && data === true;
 }
 
@@ -429,6 +476,125 @@ async function cancelCredentialCandidateWith(req, requestId, user, source, candi
   });
 }
 
+async function createSourceReplacement(req, requestId, user, source) {
+  const idempotencyKey = requireIdempotencyKey(req);
+  const expectedSourceRevision = parseEntityTag(req, "source");
+  const body = await readJsonObject(req);
+  const credentialCandidateId = requestUuid(body.credentialCandidateId);
+  const displayName = boundedDisplayName(body.displayName);
+  const runtime = await getRuntimeConfig();
+  const fingerprint = await keyedFingerprint(runtime.sourceConfigKey, {
+    operation: "create_source_replacement",
+    sourceId: source.id,
+    credentialCandidateId,
+    expectedSourceRevision,
+    displayName,
+  });
+  const result = await rpc("norva_create_source_replacement_from_candidate", {
+    p_user_id: user.id,
+    p_source_id: source.id,
+    p_credential_transition_id: credentialCandidateId,
+    p_idempotency_key: idempotencyKey,
+    p_request_fingerprint: fingerprint,
+    p_expected_source_revision: expectedSourceRevision,
+    p_display_name: displayName,
+    p_actor: user.actor,
+  }, { cas: "source", atomicCreate: true });
+  const replacement = sanitizeSourceReplacement(result, source.id);
+  scheduleWorkerAcceleration();
+  return successResponse(req, requestId, "SourceReplacement", replacement, 202, {
+    ETag: transitionTag(replacement.revision),
+    Location: replacementLocation(source.id, replacement.replacementId),
+  });
+}
+
+async function getSourceReplacement(req, requestId, user, source, replacementId) {
+  const result = await rpc("norva_get_source_replacement", {
+    p_transition_id: replacementId,
+    p_user_id: user.id,
+  }, { resource: "replacement" });
+  const replacement = sanitizeSourceReplacement(result, source.id);
+  return successResponse(req, requestId, "SourceReplacement", replacement, 200, {
+    ETag: transitionTag(replacement.revision),
+  });
+}
+
+async function promoteSourceReplacement(req, requestId, user, source, replacementId) {
+  const idempotencyKey = requireIdempotencyKey(req);
+  const expectedSourceRevision = parseEntityTag(req, "source");
+  const body = await readJsonObject(req);
+  const expectedTransitionRevision = nonNegativeInteger(body.transitionRevision, "PRECONDITION_REQUIRED");
+  const snapshot = sanitizeSourceReplacement(await rpc("norva_get_source_replacement", {
+    p_transition_id: replacementId,
+    p_user_id: user.id,
+  }, { resource: "replacement" }), source.id);
+  if (snapshot.state !== "READY_TO_SWITCH" || snapshot.comparison !== "DIFFERENT_CATALOG") {
+    throw new ContractError("INVALID_TRANSITION_STATE");
+  }
+  if (snapshot.revision !== expectedTransitionRevision) {
+    throw new ContractError("TRANSITION_REVISION_MISMATCH");
+  }
+  const generation = normalizeCredentialGeneration(await rpc("norva_get_replacement_catalog_generation", {
+    p_transition_id: replacementId,
+    p_user_id: user.id,
+  }, { resource: "replacement" }));
+  if (generation.state !== "READY" || generation.isActiveHead) {
+    throw new ContractError("INVALID_TRANSITION_STATE");
+  }
+  const result = await rpc("norva_promote_source_replacement_v2", {
+    p_transition_id: replacementId,
+    p_user_id: user.id,
+    p_idempotency_key: idempotencyKey,
+    p_expected_source_revision: expectedSourceRevision,
+    p_expected_transition_revision: expectedTransitionRevision,
+    p_expected_candidate_head_revision: generation.headRevision,
+  }, { cas: "source" });
+  const replacement = sanitizeSourceReplacement(result, source.id);
+  return successResponse(req, requestId, "SourceReplacement", replacement, 200, {
+    ETag: transitionTag(replacement.revision),
+    Location: replacementLocation(source.id, replacement.replacementId),
+  });
+}
+
+async function cancelSourceReplacement(req, requestId, user, source, replacementId) {
+  const idempotencyKey = requireIdempotencyKey(req);
+  const expectedTransitionRevision = parseEntityTag(req, "transition");
+  await readJsonObject(req);
+  const runtime = await getRuntimeConfig();
+  const fingerprint = await keyedFingerprint(runtime.sourceConfigKey, {
+    operation: "cancel_source_replacement",
+    sourceId: source.id,
+    replacementId,
+    expectedTransitionRevision,
+  });
+  const result = await rpc("norva_cancel_source_replacement", {
+    p_transition_id: replacementId,
+    p_user_id: user.id,
+    p_actor: user.actor,
+    p_expected_transition_revision: expectedTransitionRevision,
+    p_idempotency_key: idempotencyKey,
+    p_request_fingerprint: fingerprint,
+  }, { cas: "transition" });
+  const replacement = sanitizeSourceReplacement(result, source.id);
+  return successResponse(req, requestId, "SourceReplacement", replacement, 200, {
+    ETag: transitionTag(replacement.revision),
+  });
+}
+
+function boundedDisplayName(value) {
+  const displayName = String(value ?? "").normalize("NFC").trim();
+  if (!displayName || displayName.length > 160 || /[\u0000-\u001f\u007f]/u.test(displayName)) {
+    throw new ContractError("INVALID_REQUEST");
+  }
+  return displayName;
+}
+
+function requestUuid(value) {
+  const id = String(value ?? "").toLowerCase();
+  if (!UUID_RE.test(id)) throw new ContractError("INVALID_REQUEST");
+  return id;
+}
+
 function normalizeCandidateConfig(body) {
   const credentials = isRecord(body.credentials) ? body.credentials : body;
   const serverUrl = normalizeServerUrl(credentials.serverUrl);
@@ -501,6 +667,62 @@ function transitionTag(revision) {
 
 function candidateLocation(sourceId, candidateId) {
   return `/v1/sources/${sourceId}/credential-candidates/${candidateId}`;
+}
+
+function replacementLocation(sourceId, replacementId) {
+  return `/v1/sources/${sourceId}/replacements/${replacementId}`;
+}
+
+function sanitizeSourceReplacement(value, expectedSourceId) {
+  if (!isRecord(value)) throw new ContractError("INVARIANT_VIOLATION");
+  const replacementId = uuidValue(value.replacementId ?? value.replacement_id);
+  const oldSourceId = uuidValue(value.oldSourceId ?? value.old_source_id);
+  const candidateSourceId = uuidValue(value.candidateSourceId ?? value.candidate_source_id);
+  if (oldSourceId !== expectedSourceId || candidateSourceId === oldSourceId) {
+    throw new ContractError("REPLACEMENT_NOT_FOUND");
+  }
+  const state = enumValue(value.state, [
+    "VALIDATING", "STAGING", "IMPORTING", "READY_TO_SWITCH",
+    "COMMITTING", "COMPLETED", "FAILED", "CANCELLED",
+  ], "INVARIANT_VIOLATION");
+  const comparison = nullableEnum(value.comparison ?? value.identityDecision ?? value.identity_decision, [
+    "SAME_CATALOG", "DIFFERENT_CATALOG", "AMBIGUOUS",
+  ]);
+  const revision = nonNegativeInteger(value.revision, "INVARIANT_VIOLATION");
+  return Object.freeze({
+    replacementId,
+    oldSourceId,
+    candidateSourceId,
+    state,
+    comparison,
+    decisionOrigin: nullableEnum(value.decisionOrigin ?? value.decision_origin, ["AUTOMATIC", "MANUAL"]),
+    revision,
+    sourceRevision: nonNegativeInteger(
+      value.expectedSourceRevision ?? value.expected_source_revision,
+      "INVARIANT_VIOLATION",
+    ),
+    candidateRevision: nonNegativeInteger(
+      value.expectedCandidateRevision ?? value.expected_candidate_revision,
+      "INVARIANT_VIOLATION",
+    ),
+    candidateGenerationId: nullableApiUuid(value.candidateGenerationId ?? value.candidate_generation_id),
+    readinessCheckId: nullableApiUuid(value.readinessCheckId ?? value.readiness_check_id),
+    startedAt: isoOrNull(value.startedAt ?? value.started_at),
+    readyAt: isoOrNull(value.readyAt ?? value.ready_at),
+    completedAt: isoOrNull(value.completedAt ?? value.completed_at),
+    rollbackUntil: isoOrNull(value.rollbackUntil ?? value.rollback_until),
+    failureCode: safeMachineCode(value.failureCode ?? value.failure_code),
+    actions: Object.freeze({
+      canPromote: state === "READY_TO_SWITCH" && comparison === "DIFFERENT_CATALOG",
+      canCancel: ["VALIDATING", "STAGING", "IMPORTING", "READY_TO_SWITCH"].includes(state),
+      canRollback: state === "COMPLETED" && isoOrNull(value.rollbackUntil ?? value.rollback_until) !== null,
+    }),
+  });
+}
+
+function nullableApiUuid(value) {
+  if (value === null || value === undefined || value === "") return null;
+  return uuidValue(value);
 }
 
 function sanitizeCredentialCandidate(value, expectedSourceId) {
@@ -619,7 +841,13 @@ function mapRpcError(error, context = {}) {
     return new ContractError("TRANSITION_ALREADY_PENDING");
   }
   if (sqlstate === "P0002" || message.includes("not found")) {
-    return new ContractError(context.resource === "source" ? "SOURCE_NOT_FOUND" : "TRANSITION_NOT_FOUND");
+    return new ContractError(
+      context.resource === "source"
+        ? "SOURCE_NOT_FOUND"
+        : context.resource === "replacement"
+          ? "REPLACEMENT_NOT_FOUND"
+          : "TRANSITION_NOT_FOUND",
+    );
   }
   if (sqlstate === "40001" || message.includes(" cas failed") || message.includes("stale source revision")) {
     return new ContractError(context.cas === "source" ? "SOURCE_REVISION_MISMATCH" : "TRANSITION_REVISION_MISMATCH");
@@ -722,9 +950,22 @@ async function handleWorkerDrain(req, requestId) {
   await requireWorkerAuthorization(req);
   const body = await readJsonObject(req);
   const limit = Math.min(WORKER_MAX_CLAIMS, Math.max(1, Number.isInteger(body.limit) ? body.limit : WORKER_MAX_CLAIMS));
-  const featureEnabled = await credentialFeatureFlagEnabled();
+  const [credentialEnabled, replacementEnabled] = await Promise.all([
+    credentialFeatureFlagEnabled(),
+    replacementFeatureFlagEnabled(),
+  ]);
   const workerId = `provider-access:${crypto.randomUUID()}`;
-  const { data, error } = await claimCredentialTransitionJobs(workerId, limit);
+  // Replacement claims run first so the legacy credential claimant can never
+  // accidentally consume a replacement build while both rollout flags are ON.
+  // PostgreSQL still owns the lease; this ordering is only a compatibility
+  // fence during the rolling DB/Edge upgrade.
+  let claim = replacementEnabled
+    ? await claimReplacementCatalogBuildJobs(workerId, limit)
+    : { data: [], error: null };
+  if (!claim.error && (!Array.isArray(claim.data) || claim.data.length === 0)) {
+    claim = await claimCredentialTransitionJobs(workerId, limit);
+  }
+  const { data, error } = claim;
   if (error) throw new ContractError("INVARIANT_VIOLATION");
   const jobs = Array.isArray(data) ? data.slice(0, limit) : [];
   const summary = {
@@ -764,6 +1005,9 @@ async function handleWorkerDrain(req, requestId) {
       continue;
     }
     try {
+      const featureEnabled = job.transitionKind === "replacement"
+        ? replacementEnabled
+        : credentialEnabled;
       const disposition = await processWorkerJobUnderGuards(job, workerId, featureEnabled);
       if (disposition === "checkpointed") summary.checkpointed += 1;
       else if (disposition === "feature_blocked") summary.featureBlocked += 1;
@@ -842,6 +1086,14 @@ async function claimCredentialTransitionJobs(workerId, limit) {
   return admin.rpc("norva_claim_credential_transition_jobs", common);
 }
 
+async function claimReplacementCatalogBuildJobs(workerId, limit) {
+  return admin.rpc("norva_claim_replacement_catalog_build_jobs_v2", {
+    p_worker: workerId,
+    p_limit: limit,
+    p_lease_seconds: WORKER_LEASE_SECONDS,
+  });
+}
+
 function rpcOverloadMissing(error) {
   if (!isRecord(error)) return false;
   const code = String(error.code ?? "");
@@ -888,8 +1140,12 @@ function normalizeClaimedJob(value) {
     userId: uuidValue(value.user_id ?? value.userId, true),
     transitionId: uuidValue(value.transition_id ?? value.transitionId, true),
     sourceId: uuidValue(value.source_id ?? value.sourceId, true),
+    comparisonSourceId: nullableWorkerUuid(value.comparison_source_id ?? value.comparisonSourceId),
     catalogGenerationId: nullableWorkerUuid(value.catalog_generation_id ?? value.catalogGenerationId),
     kind,
+    transitionKind: String(value.transition_kind ?? value.transitionKind ?? "credential").toLowerCase() === "replacement"
+      ? "replacement"
+      : "credential",
     leaseSequence: nonNegativeInteger(value.lease_sequence ?? value.leaseSequence, "INVARIANT_VIOLATION"),
     failureAttemptCount: nonNegativeInteger(
       value.failure_attempt_count ?? value.failureAttemptCount,
@@ -1283,14 +1539,23 @@ async function buildCandidateGenerationJob(job, workerId) {
   let generationId = job.catalogGenerationId;
   let transitionRevision = job.transitionRevision;
   if (!generationId) {
-    const allocation = await workerRpc("norva_allocate_credential_catalog_generation", {
-      p_transition_id: job.transitionId,
-      p_user_id: job.userId,
-      p_job_id: job.jobId,
-      p_worker: workerId,
-      p_expected_attempt: job.leaseSequence,
-      p_expected_transition_revision: transitionRevision,
-    });
+    const allocation = job.transitionKind === "replacement"
+      ? await workerRpc("norva_allocate_replacement_catalog_generation", {
+        p_transition_id: job.transitionId,
+        p_user_id: job.userId,
+        p_job_id: job.jobId,
+        p_worker: workerId,
+        p_expected_lease_sequence: job.leaseSequence,
+        p_expected_transition_revision: transitionRevision,
+      })
+      : await workerRpc("norva_allocate_credential_catalog_generation", {
+        p_transition_id: job.transitionId,
+        p_user_id: job.userId,
+        p_job_id: job.jobId,
+        p_worker: workerId,
+        p_expected_attempt: job.leaseSequence,
+        p_expected_transition_revision: transitionRevision,
+      });
     generationId = uuidValue(allocation.generationId ?? allocation.generation_id, true);
     transitionRevision = nonNegativeInteger(
       allocation.transitionRevision ?? allocation.transition_revision,
@@ -1298,7 +1563,10 @@ async function buildCandidateGenerationJob(job, workerId) {
     );
   }
 
-  let generation = normalizeCredentialGeneration(await workerRpc("norva_get_credential_catalog_generation", {
+  let generation = normalizeCredentialGeneration(await workerRpc(
+    job.transitionKind === "replacement"
+      ? "norva_get_replacement_catalog_generation"
+      : "norva_get_credential_catalog_generation", {
     p_transition_id: job.transitionId,
     p_user_id: job.userId,
   }));
@@ -1376,6 +1644,16 @@ async function buildCandidateGenerationJob(job, workerId) {
   }
   if (generation.state !== "READY" || generation.isActiveHead) {
     throw new WorkerFault("catalog_unhealthy", false);
+  }
+
+  if (job.transitionKind === "replacement") {
+    await workerRpc("norva_mark_replacement_transition_ready", {
+      p_transition_id: job.transitionId,
+      p_user_id: job.userId,
+      p_readiness_check_id: crypto.randomUUID(),
+      p_expected_transition_revision: transitionRevision,
+    });
+    return "settle";
   }
 
   try {
