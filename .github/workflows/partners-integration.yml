@@ -357,10 +357,34 @@ jobs:
         with:
           version: 2.110.0
 
+      - name: Stage the Partners migration prefix
+        shell: bash
+        run: |
+          set -euo pipefail
+          phase123_dir="$RUNNER_TEMP/phase123-online-migrations"
+          mkdir -p "$phase123_dir"
+          mapfile -t phase123_migrations < <(
+            find supabase/migrations -maxdepth 1 -type f -name '*.sql' -printf '%f\n' |
+              sort |
+              awk '$0 >= "20260822220000_cloud_sources_owner_index_online.sql"'
+          )
+          test "${#phase123_migrations[@]}" -gt 0
+          test "${phase123_migrations[0]}" = \
+            '20260822220000_cloud_sources_owner_index_online.sql'
+          printf '%s\n' "${phase123_migrations[@]}" > \
+            "$phase123_dir/manifest.txt"
+          for migration in "${phase123_migrations[@]}"; do
+            mv "supabase/migrations/$migration" "$phase123_dir/$migration"
+          done
+          test ! -e \
+            supabase/migrations/20260822220000_cloud_sources_owner_index_online.sql
+          test -e \
+            "$phase123_dir/20260824100000_catalog_cache_epoch_v2.sql"
+
       - name: Start a fresh database-only Supabase container
         run: supabase db start
 
-      - name: Replay every migration from a blank database
+      - name: Replay the complete Partners migration prefix from a blank database
         run: supabase db reset --local --no-seed
 
       - name: Verify restored Partners security invariants
