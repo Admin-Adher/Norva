@@ -45,6 +45,7 @@ function createHarness() {
   const window = {
     API: {
       isCloudMode: () => true,
+      catalogVisibilityEpoch: () => 'v2.1.1',
     },
     app: {
       liveGuideFusion: {
@@ -342,13 +343,16 @@ async function assertLoadCancelledAt(methodName, stage) {
   } else {
     list.loadLiveCatalogFromCache = async () => false;
   }
+  const stampedRows = rows => Object.assign(rows, {
+    _norvaVisibilityEpoch: 'v2.1.1',
+  });
   API.proxy.xtream.liveCategories = () => {
     categoriesCalls += 1;
     if (stage === 'categories') {
       reached.resolve();
       return gate.promise;
     }
-    return Promise.resolve([{ category_id: '1', category_name: 'News' }]);
+    return Promise.resolve(stampedRows([{ category_id: '1', category_name: 'News' }]));
   };
   list.loadFirstLivePage = () => {
     firstPageCalls += 1;
@@ -364,9 +368,9 @@ async function assertLoadCancelledAt(methodName, stage) {
   list.liveHydrationRunId = 2;
   if (stage === 'cache') gate.resolve(false);
   else if (stage === 'categories') {
-    gate.resolve([{ category_id: '1', category_name: 'News' }]);
+    gate.resolve(stampedRows([{ category_id: '1', category_name: 'News' }]));
   } else {
-    gate.resolve([{ stream_id: '42', category_id: '1' }]);
+    gate.resolve(stampedRows([{ stream_id: '42', category_id: '1' }]));
   }
 
   assert.equal(await loading, false, `${methodName}:${stage}`);
