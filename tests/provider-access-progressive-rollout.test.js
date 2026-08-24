@@ -6,6 +6,7 @@ const path = require('node:path');
 const ROOT = path.resolve(__dirname, '..');
 const read = (file) => fs.readFileSync(path.join(ROOT, file), 'utf8');
 const migration = read('supabase/migrations/20260824160000_provider_access_progressive_rollout_v1.sql');
+const channelGateMigration = read('supabase/migrations/20260824170000_provider_access_rollout_channel_gates_v1.sql');
 const edge = read('supabase/functions/norva-provider-access/index.ts');
 const notifyEdge = read('supabase/functions/norva-provider-access-notify/index.ts');
 const app = read('public/js/app.js');
@@ -25,6 +26,17 @@ test('phase16 upward movement is approval, P0 and sequentially gated', () => {
   assert.match(migration, /if v_next_rank > v_current_rank \+ 1 then/);
   assert.match(migration, /rollout stage cannot be skipped/);
   assert.match(migration, /where singleton and revision=p_expected_revision/);
+});
+
+test('phase16 keeps external channels independently fail-closed at every cohort transition', () => {
+  assert.match(channelGateMigration, /norva_set_provider_access_rollout_channels/);
+  assert.match(channelGateMigration, /provider_access_auto_detection_v1_enabled[\s\S]*then false/);
+  assert.match(channelGateMigration, /provider_access_email_v1_enabled/);
+  assert.match(channelGateMigration, /provider_access_push_v1_enabled/);
+  assert.match(channelGateMigration, /externalChannelsReset',true/);
+  assert.match(channelGateMigration, /where singleton and revision=p_expected_revision/);
+  assert.match(channelGateMigration, /perform public\.norva_assert_provider_access_rollout_safe\(\)/);
+  assert.match(channelGateMigration, /cloud_provider_access_rollout_channel_events/);
 });
 
 test('phase16 cohort assignment is durable, deterministic and server-only', () => {

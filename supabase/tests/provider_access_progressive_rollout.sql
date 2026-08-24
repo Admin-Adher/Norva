@@ -3,7 +3,7 @@ set local lock_timeout='3s';
 set local statement_timeout='45s';
 create extension if not exists pgtap with schema extensions;
 set local search_path=public,extensions;
-select extensions.plan(25);
+select extensions.plan(33);
 
 insert into auth.users(
   id,instance_id,aud,role,email,encrypted_password,email_confirmed_at,
@@ -71,7 +71,10 @@ select extensions.is((select count(*)::integer from public.admin_feature_flags w
   'provider_access_v1_enabled','provider_access_auto_detection_v1_enabled','provider_access_notifications_v1_enabled',
   'provider_access_email_v1_enabled','provider_access_push_v1_enabled','provider_access_in_app_v1_enabled',
   'provider_access_visibility_v1_enabled','provider_credential_transition_v1_enabled','provider_replacement_v1_enabled'
-) and enabled),9,'INTERNAL opens capabilities only behind the cohort predicate');
+) and enabled),6,'INTERNAL opens only the durable core and in-app capabilities');
+select extensions.is((select count(*)::integer from public.admin_feature_flags where key in (
+  'provider_access_auto_detection_v1_enabled','provider_access_email_v1_enabled','provider_access_push_v1_enabled'
+) and enabled),0,'INTERNAL leaves automatic provider calls, email and push OFF');
 insert into public.cloud_provider_access_check_jobs(user_id,source_id,idempotency_key)
 values ('98600000-0000-4000-8000-000000000002','98600000-0000-4000-8000-000000000102','phase16-outsider-job');
 insert into public.cloud_provider_access_notifications(
@@ -100,21 +103,45 @@ select extensions.throws_ok(
   $$select public.norva_set_provider_access_rollout_stage(3,'5_percent','Skipping a mandatory observation stage is forbidden.','acceptance-service')$$,
   '55000','rollout stage cannot be skipped','an upward stage cannot be skipped'
 );
+select public.norva_set_provider_access_rollout_channels(
+  3,true,true,true,
+  'channel-readiness:acceptance-secrets-and-worker-proof',
+  'acceptance-service'
+);
+select extensions.is((select revision::integer from public.cloud_provider_access_rollout where singleton),4,'channel approval advances the rollout CAS revision');
+select extensions.is((select count(*)::integer from public.admin_feature_flags where key in (
+  'provider_access_auto_detection_v1_enabled','provider_access_email_v1_enabled','provider_access_push_v1_enabled'
+) and enabled),3,'separate channel approval enables the three requested external channels');
+select extensions.is((select count(*)::integer from public.admin_feature_flags where key in (
+  'provider_access_v1_enabled','provider_access_notifications_v1_enabled','provider_access_in_app_v1_enabled',
+  'provider_access_visibility_v1_enabled','provider_credential_transition_v1_enabled','provider_replacement_v1_enabled'
+) and enabled),6,'channel approval cannot disable the active core capability set');
+select extensions.throws_ok(
+  $$select public.norva_set_provider_access_rollout_channels(3,false,false,false,'channel-readiness:stale-proof','acceptance-service')$$,
+  '40001','stale rollout revision','stale channel approval loses cleanly'
+);
 select public.norva_set_provider_access_rollout_stage(
-  3,'1_percent','Explicit acceptance promotion after internal observation.','acceptance-service'
+  4,'1_percent','Explicit acceptance promotion after internal observation.','acceptance-service'
 );
 select extensions.is((select cohort_basis_points from public.cloud_provider_access_rollout where singleton),100,'1 percent is represented as exactly 100 basis points');
+select extensions.is((select count(*)::integer from public.admin_feature_flags where key in (
+  'provider_access_auto_detection_v1_enabled','provider_access_email_v1_enabled','provider_access_push_v1_enabled'
+) and enabled),0,'every stage transition resets external channels OFF');
 select extensions.is(
   public.norva_provider_access_rollout_eligible_internal('98600000-0000-4000-8000-000000000002'),
   public.norva_provider_access_rollout_eligible_internal('98600000-0000-4000-8000-000000000002'),
   'percentage assignment is deterministic'
 );
 select extensions.throws_ok(
-  $$select public.norva_set_provider_access_rollout_stage(3,'5_percent','A stale concurrent promotion must lose cleanly.','acceptance-service')$$,
+  $$select public.norva_set_provider_access_rollout_stage(4,'5_percent','A stale concurrent promotion must lose cleanly.','acceptance-service')$$,
   '40001','stale rollout revision','concurrent promotion is fenced by revision CAS'
 );
 select public.norva_set_provider_access_rollout_stage(
-  4,'off','Emergency rollback to OFF remains available immediately.','acceptance-service'
+  5,'off','Emergency rollback to OFF remains available immediately.','acceptance-service'
+);
+select extensions.throws_ok(
+  $$select public.norva_set_provider_access_rollout_channels(6,true,false,false,'channel-readiness:off-refusal','acceptance-service')$$,
+  '55000','rollout channels require an active cohort','OFF refuses every external channel activation'
 );
 select extensions.ok(not public.norva_provider_access_rollout_eligible_internal('98600000-0000-4000-8000-000000000001'),'OFF overrides the retained internal allowlist');
 reset role;
@@ -125,6 +152,7 @@ select extensions.is((select count(*)::integer from public.admin_feature_flags w
 ) and enabled),0,'emergency OFF closes every capability flag');
 select extensions.is((select count(*)::integer from public.cloud_provider_access_rollout_events),3,'every stage transition is durably audited');
 select extensions.is((select string_agg(stage,',' order by revision) from public.cloud_provider_access_rollout_events),'internal,1_percent,off','audit preserves the exact transition order');
+select extensions.is((select count(*)::integer from public.cloud_provider_access_rollout_channel_events),1,'channel approval is durably and separately audited');
 select extensions.ok((select legal_policy_approved_at is not null and operational_approved_at is not null from public.cloud_provider_access_rollout where singleton),'approval evidence remains durable after rollback');
 
 set local role authenticated;

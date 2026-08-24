@@ -112,6 +112,9 @@ The Web UI remains hidden for every user because the authenticated rollout statu
 3. Explicitly select the internal production account and activate only `INTERNAL`.
 4. Observe real metrics with zero P0/invariant breach before each manual promotion.
 5. Build and publish the signed Android Phone release before enabling push, because the WebView UI is already delivered but the new native FCM routing is not yet in a Play Store release.
-6. Configure Resend/FCM secrets and the bounded notification cron only when their individual channels are approved; until then they stay OFF.
+6. Install the independently proved Phase 16 external-channel gate migration.
+   Cohort activation must then leave automatic checks, email and push OFF until
+   their secrets, bounded workers/cron and individual readiness evidence are
+   approved through the channel CAS RPC.
 
 No direct feature-flag edit is an authorized substitute for the Phase 16 RPC and its gates.

@@ -26,6 +26,7 @@ where key in (
   'provider_replacement_v1_enabled'
 );
 delete from public.cloud_provider_access_rollout_events;
+delete from public.cloud_provider_access_rollout_channel_events;
 delete from public.cloud_provider_access_rollout_internal_users where user_id='$USER_ID';
 update public.cloud_provider_access_rollout set
   revision=1,stage='off',cohort_basis_points=0,
@@ -111,7 +112,55 @@ if [[ "$FINAL" != 'internal:3:1' ]]; then
   exit 1
 fi
 
+channel_sql() {
+  local actor="$1"
+  cat <<SQL
+begin;
+set local role service_role;
+select public.norva_set_provider_access_rollout_channels(
+  3,true,false,false,
+  'channel-readiness:concurrent-auto-detection-proof',
+  '$actor'
+);
+commit;
+SQL
+}
+
+set +e
+channel_sql 'channel-race-session-a' | psql_admin -Atq >"$WORK_DIR/channel-a.out" 2>"$WORK_DIR/channel-a.err" &
+readonly CHANNEL_PID_A=$!
+channel_sql 'channel-race-session-b' | psql_admin -Atq >"$WORK_DIR/channel-b.out" 2>"$WORK_DIR/channel-b.err" &
+readonly CHANNEL_PID_B=$!
+wait "$CHANNEL_PID_A"; readonly CHANNEL_EXIT_A=$?
+wait "$CHANNEL_PID_B"; readonly CHANNEL_EXIT_B=$?
+set -e
+
+if [[ $(( (CHANNEL_EXIT_A == 0) + (CHANNEL_EXIT_B == 0) )) -ne 1 ]]; then
+  echo "FAIL rollout channel race exits: A=$CHANNEL_EXIT_A B=$CHANNEL_EXIT_B" >&2
+  exit 1
+fi
+if ! grep -q 'stale rollout revision' "$WORK_DIR/channel-a.err" "$WORK_DIR/channel-b.err"; then
+  echo 'FAIL losing channel session did not report stale rollout revision' >&2
+  exit 1
+fi
+
+readonly CHANNEL_FINAL="$(psql_admin -Atq <<SQL
+select rollout.stage || ':' || rollout.revision || ':' ||
+  (select count(*) from public.cloud_provider_access_rollout_channel_events) || ':' ||
+  (select count(*) from public.admin_feature_flags
+   where key='provider_access_auto_detection_v1_enabled' and enabled)
+from public.cloud_provider_access_rollout rollout where singleton;
+SQL
+)"
+if [[ "$CHANNEL_FINAL" != 'internal:4:1:1' ]]; then
+  echo "FAIL unexpected final rollout channel state: $CHANNEL_FINAL" >&2
+  exit 1
+fi
+
 printf 'PASS provider access rollout promotion race\n'
 printf 'session_a_exit=%s\n' "$EXIT_A"
 printf 'session_b_exit=%s\n' "$EXIT_B"
 printf 'final_state=%s\n' "$FINAL"
+printf 'channel_session_a_exit=%s\n' "$CHANNEL_EXIT_A"
+printf 'channel_session_b_exit=%s\n' "$CHANNEL_EXIT_B"
+printf 'channel_final_state=%s\n' "$CHANNEL_FINAL"

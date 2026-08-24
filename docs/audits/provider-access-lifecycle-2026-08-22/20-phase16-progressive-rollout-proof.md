@@ -10,6 +10,9 @@ Status: `PHASE_16_CONTROL_PLANE_PROVED`, production activation still blocked by 
   `OFF → INTERNAL → 1% → 5% → 20% → 50% → 100%`.
 - Upward stages cannot be skipped. Every upward transition requires both legal-policy and operational evidence plus a P0-safe analytics snapshot.
 - Every stage transition is explicit and durably audited; there is no timer or automatic promotion.
+- Cohort promotion enables only the six durable core/in-app capabilities.
+  Automatic provider checks, email and push use an independent revision CAS,
+  readiness evidence and audit event, and are reset OFF at every stage change.
 - Any lower stage, including emergency `OFF`, remains directly reachable without a down-migration.
 - Internal rollout uses a server-only allowlist. Percentage rollout uses a stable SHA-256 user cohort in basis points.
 - Browser users can read only their own sanitized `{stage, revision, eligible}` status.
@@ -21,7 +24,7 @@ Status: `PHASE_16_CONTROL_PLANE_PROVED`, production activation still blocked by 
 
 Disposable current-head database: `norva-phase3-proof-b-db`.
 
-pgTap result:
+Original pgTap result:
 
 ```text
 1..25
@@ -44,6 +47,12 @@ post-cleanup=off:1
 ```
 
 Exactly one session created the `INTERNAL` event. The loser did not mutate the stage. The harness cleanup restored OFF and all capability flags to false.
+
+The additive external-channel gate proof in
+`22-phase16-external-channel-gates-proof.md` supersedes the aggregate flag
+behavior while preserving the stage ladder. Its current PostgreSQL result is
+`33/33`; a second real two-session race proves one channel CAS winner and one
+`STALE` loser. Cleanup again restores OFF and zero enabled flags.
 
 ## Regression evidence
 
