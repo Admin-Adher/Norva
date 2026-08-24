@@ -178,7 +178,9 @@ test('tagged-language verification keeps the historical transcript verdict varia
   assert.ok(suspects.includes('variant.audio_whisper_retry_at'));
   assert.ok(playback.includes('db.rpc("file_audio_tag_suspect_variants"'));
   assert.ok(verifier.includes('if (fileScoped && variantId)'));
-  assert.ok(verifier.includes('.from("cloud_title_variants")'));
+  assert.ok(verifier.includes('catalogGeneration = await readActiveCatalogGenerationSnapshot('));
+  assert.ok(verifier.includes('await patchActiveCatalogTitleVariants(db, {'));
+  assert.ok(verifier.includes('generation: catalogGeneration'));
   assert.ok(verifier.includes('const persisted = await shareFileTracks('));
   assert.ok(verifier.includes('db.rpc("record_catalog_file_audio_whisper_outcome"'));
   assert.ok(!verifier.includes('record_catalog_file_audio_verification'));

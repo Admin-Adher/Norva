@@ -17,12 +17,15 @@ test('genre-items ORs every selected curated category', () => {
 
 test('genre-items keeps title and returned versions scoped to the selected source', () => {
   const src = read('supabase/functions/norva-catalog/index.ts');
-  assert.match(src, /cloud_title_variants!inner\(source_id\)/);
-  assert.match(src, /out = out\.eq\("cloud_title_variants\.source_id", sourceId\)/);
-  assert.match(src, /cloud_title_file_language_observations\$\{hasStrictLanguageFilter \? "!inner" : ""\}/);
-  assert.match(src, /cloud_title_variants\.cloud_title_file_language_observations\.audio_languages/);
-  assert.match(src, /cloud_title_variants\.cloud_title_file_language_observations\.subtitle_languages/);
+  assert.match(src, /\.from\("cloud_catalog_visible_titles"\)/);
+  assert.match(src, /out = out\.contains\("visible_source_ids", \[sourceId\]\)/);
+  assert.match(src, /db\.rpc\("cloud_catalog_visible_title_ids_by_source_languages"/);
+  assert.match(src, /p_source_id: sourceId/);
+  assert.match(src, /p_audio_language: audioIso/);
+  assert.match(src, /p_subtitle_language: subtitleIso/);
+  assert.match(src, /attachSourceObservationLanguages\(rows, userId, sourceId\)/);
   assert.match(src, /titleSourceObservationLanguages\(title, "audio_languages"\)/);
+  assert.doesNotMatch(src, /cloud_title_variants!inner/);
   assert.match(src, /if \(sourceId\) query = query\.eq\("source_id", sourceId\)/);
 
   const migration = read('supabase/migrations/20260721100000_genre_items_source_index.sql');
@@ -54,8 +57,8 @@ test('sync repairs blank category names from verified provider mirrors only', ()
   assert.match(migration, /revoke all on function public\.norva_hydrate_source_category_names/);
 
   const sync = read('supabase/functions/_shared/xtream-sync.ts');
-  assert.match(sync, /await recordProviderIdentity\(db, sourceId, userId, providerKey\);[\s\S]*runCategoryHydrationInBackground\(hydrateMirrorCategoryNames\(db, sourceId\)\);/);
+  assert.match(sync, /await recordProviderIdentity\(db, sourceId, userId, providerKey\);[\s\S]*await assertCatalogSnapshotCurrent\(db, sourceId, userId, accessSnapshot\);[\s\S]*runCategoryHydrationInBackground\(hydrateMirrorCategoryNames\(db, sourceId, userId, accessSnapshot\)\);/);
   assert.match(sync, /EdgeRuntime\?: \{ waitUntil\?:/);
-  assert.doesNotMatch(sync, /await hydrateMirrorCategoryNames\(db, sourceId\)/);
+  assert.doesNotMatch(sync, /await hydrateMirrorCategoryNames\(db, sourceId, userId, accessSnapshot\)/);
   assert.match(sync, /p_limit: 2000/);
 });

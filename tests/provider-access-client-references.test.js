@@ -380,6 +380,44 @@ test('cloud GET caches are visibility-epoch scoped and invalidate when a respons
     assert.equal(sourceFetches, 2);
 });
 
+test('a v2 cache token is monotone and cannot be downgraded by a rolling v1 endpoint', async () => {
+    const epochs = ['9', 'v2.3.9', '10', 'v2.2.99', 'v2.4.10'];
+    let requestIndex = 0;
+    const cloud = loadCloudApi(async () => response(
+        { ok: true },
+        { 'x-norva-visibility-epoch': epochs[requestIndex++] }
+    ));
+
+    await cloud.health();
+    assert.equal(cloud.catalogVisibility.epoch(), '9');
+    await cloud.health();
+    assert.equal(cloud.catalogVisibility.epoch(), 'v2.3.9');
+
+    await cloud.health();
+    assert.equal(cloud.catalogVisibility.epoch(), 'v2.3.9', 'numeric v1 cannot replace v2');
+    await cloud.health();
+    assert.equal(cloud.catalogVisibility.epoch(), 'v2.3.9', 'an older global component cannot replace v2');
+
+    await cloud.health();
+    assert.equal(cloud.catalogVisibility.epoch(), 'v2.4.10');
+});
+
+test('Live IndexedDB entries and multi-page hydration are fenced by one exact v2 token', () => {
+    const cloudApi = read('public/js/cloudApi.js');
+    const api = read('public/js/api.js');
+    const channelList = read('public/js/components/ChannelList.js');
+
+    assert.match(cloudApi, /epochFor: \(payload\) => visibilityEpochFromPayload\(payload\) \|\| null/);
+    assert.match(api, /Object\.defineProperty\(value, '_norvaVisibilityEpoch'/);
+    assert.match(api, /catalogVisibilityEpoch: \(\) => \(_shouldUseCloud\(\) \? CloudAdapter\.visibilityEpoch\(\) : null\)/);
+    assert.match(channelList, /entry\?\.visibilityEpoch === visibilityEpoch/);
+    assert.match(channelList, /visibilityEpoch: expectedVisibilityEpoch/);
+    assert.match(channelList, /this\.liveCatalogVisibilityEpoch\(streams\) !== expectedVisibilityEpoch/);
+    assert.match(channelList, /this\.liveCatalogVisibilityEpoch\(streams\) !== visibilityEpoch/);
+    assert.match(channelList, /writeLiveCatalogCache\(sourceId, 'xtream', loadRunId, visibilityEpoch\)/);
+    assert.match(channelList, /writeLiveCatalogCache\(sourceId, 'm3u', loadRunId, visibilityEpoch\)/);
+});
+
 test('authenticated GETs version the browser-cache URL and retry an older epoch fail-closed', async () => {
     const requests = [];
     let sourceFetches = 0;

@@ -185,12 +185,15 @@ test('genre-items respects explicit Newest/Recently Added ordering instead of po
   assert.match(src, /sort === "year" \? "release_year"/);
   assert.match(src, /sort === "added" \? "created_at"/);
   assert.match(src, /sort === "name" \? "title"/);
-  assert.match(src, /Only the default grid prioritises artwork before recency/);
-  const orderBlock = src.slice(src.indexOf('const { data, count, error }'), src.indexOf('.range(offset, offset + limit - 1);'));
+  const orderBlock = src.slice(
+    src.indexOf('function genreTitleSortColumn('),
+    src.indexOf('function compareGenreTitleValues('),
+  );
   const posterOrder = orderBlock.indexOf('"poster_url"');
   const sortOrder = orderBlock.indexOf('sort === "year-asc" ? "release_year"');
   assert.ok(sortOrder !== -1 && posterOrder !== -1 && sortOrder < posterOrder,
     'explicit sort selection must be evaluated before falling back to poster_url');
+  assert.match(orderBlock, /\.order\(sort === "default" \? "created_at" : "id", \{ ascending: sort !== "default" \}\)/);
 });
 
 test('self-host deploy recreates every configured edge-runtime replica', () => {

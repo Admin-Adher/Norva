@@ -64,15 +64,18 @@ test('the shared response guard owns the request binding and final recheck', () 
   assert.match(responseGuard, /const bindings = new WeakMap\(\)/);
   assert.match(responseGuard, /const PUBLIC_EDGE_ERROR_CODES = new Set\(\[/);
   assert.match(responseGuard, /PUBLIC_EDGE_ERROR_CODES\.has\(code\)/);
-  assert.match(responseGuard, /db\.rpc\("norva_user_catalog_visibility_epoch",\s*\{/);
+  assert.match(responseGuard, /db\.rpc\("norva_catalog_cache_epoch_v2",\s*\{/);
+  assert.match(responseGuard, /cacheEpoch !== `v2\.\$\{globalEpoch\}\.\$\{userEpoch\}`/);
+  assert.match(responseGuard, /boundCatalogCacheEpoch/);
   assert.match(responseGuard, /p_user_id: userId/);
-  assert.match(responseGuard, /String\(data \?\? 1\)\.trim\(\)/);
-  assert.match(responseGuard, /!\/\^\[1-9\]\\d\*\$\/\.test\(epoch\)/);
+  assert.match(responseGuard, /String\(record\?\.globalEpoch \?\? ""\)\.trim\(\)/);
+  assert.match(responseGuard, /!\/\^\[1-9\]\\d\*\$\/\.test\(globalEpoch\)/);
+  assert.match(responseGuard, /!\/\^\[1-9\]\\d\*\$\/\.test\(userEpoch\)/);
   assert.match(
     responseGuard,
     /const publicResponse = await sanitizeAuthenticatedErrorResponse\(response\);[\s\S]*currentEpoch = await readCatalogVisibilityEpoch/,
   );
-  assert.match(responseGuard, /currentEpoch !== binding\.boundEpoch/);
+  assert.match(responseGuard, /currentEpoch\.cacheEpoch !== binding\.cacheEpoch/);
   assert.match(responseGuard, /status,\s*payload,\s*epoch = null,\s*retryable = false/);
 });
 

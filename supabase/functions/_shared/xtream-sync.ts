@@ -19,9 +19,35 @@
 // ─────────────────────────────────────────────────────────────────────────────
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { formatSourceSyncError } from "./source-sync-error.mjs";
+import {
+  assertActiveCatalogGenerationCurrent,
+  type ActiveCatalogGeneration,
+  type BuildingCatalogGeneration,
+  catalogGenerationFields,
+  catalogGenerationRpcFence,
+  isCatalogGenerationSuperseded,
+  readActiveCatalogGenerationSnapshot,
+  withCatalogGenerationRows,
+} from "./catalog-generation.ts";
+import { materializeLiveChunk } from "./live-materialization.ts";
+import type { LiveCatalogItem } from "./live-catalog.ts";
+import { projectVodTitleGenerationIsolated } from "./vod-title-projection.ts";
+import {
+  buildProviderDirectFallbackSnapshot,
+  createSourceDirectFallbackLeaseRunner,
+  ProviderDirectFallbackLeaseError,
+} from "./provider-direct-fallback-lease.mjs";
+import {
+  BoundedProviderResponseError,
+  fetchBoundedProviderJson,
+} from "./bounded-provider-response.mjs";
 
 type JsonRecord = Record<string, unknown>;
 type RuntimeConfig = { sourceConfigKey: string; mediaGatewayUrl: string; mediaGatewayToken: string };
+type CatalogAccessSnapshot = ActiveCatalogGeneration;
+type DirectFallbackLeaseContext = {
+  runDirectFallback: <T>(timeoutMs: number, operation: () => Promise<T>) => Promise<T>;
+};
 
 class HttpError extends Error {
   status: number;
@@ -66,6 +92,49 @@ const SYNC_MAX_CONTINUATIONS = 160;
 // (provider outage / soft-expiry returning a thin list) and KEEP the prior items instead.
 const PRUNE_MAX_REMOVE_FRACTION = 0.5;
 
+async function readCatalogAccessSnapshot(
+  db: SupabaseClient,
+  sourceId: string,
+  userId: string,
+  changedDuringOperation: boolean,
+): Promise<CatalogAccessSnapshot> {
+  try {
+    return await readActiveCatalogGenerationSnapshot(db, sourceId, userId);
+  } catch (error) {
+    throw new HttpError(409, changedDuringOperation
+      ? "Catalog access changed while catalog discovery was running"
+      : "This catalog is not currently available", {
+      code: changedDuringOperation ? "SOURCE_CATALOG_CHANGED" : "SOURCE_CATALOG_NOT_VISIBLE",
+      cause: isCatalogGenerationSuperseded(error) ? "generation_superseded" : "snapshot_unavailable",
+    });
+  }
+}
+
+async function assertCatalogSnapshotCurrent(
+  db: SupabaseClient,
+  sourceId: string,
+  userId: string,
+  expected: CatalogAccessSnapshot,
+): Promise<void> {
+  try {
+    await assertActiveCatalogGenerationCurrent(db, sourceId, userId, expected);
+  } catch (_) {
+    throw new HttpError(409, "Catalog access changed while catalog discovery was running", {
+      code: "SOURCE_CATALOG_CHANGED",
+    });
+  }
+}
+
+function isCatalogAccessGuardError(error: unknown): boolean {
+  if (isCatalogGenerationSuperseded(error)) return true;
+  if (!(error instanceof HttpError) || !isRecord(error.details)) return false;
+  return [
+    "SOURCE_CATALOG_NOT_VISIBLE",
+    "SOURCE_CATALOG_CHANGED",
+    "CATALOG_VISIBILITY_UNAVAILABLE",
+  ].includes(stringOr(error.details.code, ""));
+}
+
 // Import-lifecycle notification queue (Phase 1). The engine only ENQUEUES events here; a separate
 // digest cron groups + sends them. unique(source_id, kind) is the idempotency guard, so even though
 // the engine self-invokes across dozens of isolates this fires exactly once per source per kind —
@@ -79,6 +148,17 @@ export async function enqueueImportNotification(
   payload: JsonRecord = {},
 ): Promise<void> {
   try {
+    // A replacement candidate is intentionally imported while hidden. Import
+    // lifecycle mail/push/admin-feed rows are user-facing, so do not enqueue
+    // them until the source is the active visible catalog. Treat a visibility
+    // lookup failure as hidden (fail closed); notification loss is safer than
+    // leaking staging activity and the sync itself must remain best-effort.
+    const { data: catalogVisible, error: visibilityError } = await db.rpc(
+      "norva_source_catalog_visible",
+      { p_source_id: sourceId, p_user_id: userId },
+    );
+    if (visibilityError || catalogVisible !== true) return;
+
     // .select() → ignoreDuplicates returns ONLY newly-inserted rows (DO NOTHING doesn't return
     // conflicts), so we can mirror this exact-once lifecycle event into the admin CRM timeline
     // without duplicating it across the engine's self-invocations.
@@ -152,15 +232,20 @@ export async function recordProviderIdentity(
 async function hydrateMirrorCategoryNames(
   db: SupabaseClient,
   sourceId: string,
+  userId: string,
+  generation: CatalogAccessSnapshot,
 ): Promise<void> {
   try {
     await Promise.all((["movie", "series"] as const).map(async (itemType) => {
       const { error } = await db.rpc("norva_hydrate_source_category_names", {
         p_source_id: sourceId,
+        p_user_id: userId,
+        ...catalogGenerationRpcFence(generation),
         p_item_type: itemType,
         p_limit: 2000,
       });
       if (error) {
+        if (isCatalogGenerationSuperseded(error)) return;
         console.warn("[category-hydration] mirror repair failed", sourceId, itemType, error.code ?? error.message);
       }
     }));
@@ -297,7 +382,14 @@ async function withDbRetry<T extends { error: unknown }>(op: () => PromiseLike<T
 // so peak memory stays tiny). Legacy runs delete the catalogue upfront so these are pure inserts;
 // Layer 3 runs keep the catalogue and additionally stamp each row's catalog_version (see below).
 // Small batches keep each statement well under the edge connection's 8s budget.
-async function appendSourceItems(sourceId: string, userId: string, rows: JsonRecord[], db: SupabaseClient, runVersion: number | null = null): Promise<number> {
+async function appendSourceItems(
+  sourceId: string,
+  userId: string,
+  rows: JsonRecord[],
+  db: SupabaseClient,
+  generation: CatalogAccessSnapshot,
+  runVersion: number | null = null,
+): Promise<number> {
   // Returns rows ACTUALLY inserted. `ignoreDuplicates` => INSERT ... ON CONFLICT DO NOTHING, so a
   // stream already present (re-import or a cross-category dup) is skipped; `count:'exact'` counts
   // only real inserts (small batch, no row data back — peak memory stays tiny). Used for the cosmetic
@@ -312,9 +404,16 @@ async function appendSourceItems(sourceId: string, userId: string, rows: JsonRec
   for (let index = 0; index < rows.length; index += IMPORT_BATCH_SIZE) {
     const chunk = rows.slice(index, index + IMPORT_BATCH_SIZE);
     if (!chunk.length) continue;
-    const payload = runVersion == null ? chunk : chunk.map((r) => ({ ...r, catalog_version: runVersion }));
+    const payload = withCatalogGenerationRows(
+      runVersion == null ? chunk : chunk.map((r) => ({ ...r, catalog_version: runVersion })),
+      generation,
+    );
     const res = await withDbRetry(
-      () => db.from("cloud_media_items").upsert(payload, { onConflict: "source_id,item_type,external_id", ignoreDuplicates: true, count: "exact" }),
+      () => db.from("cloud_media_items").upsert(payload, {
+        onConflict: "source_id,generation_id,item_type,external_id",
+        ignoreDuplicates: true,
+        count: "exact",
+      }),
       "Unable to save cloud catalog items",
     );
     const c = (res as { count?: number | null }).count;
@@ -328,8 +427,13 @@ async function appendSourceItems(sourceId: string, userId: string, rows: JsonRec
       const ids = chunk.map((r) => stringOr(r.external_id, "")).filter(Boolean);
       if (itemType && ids.length) {
         await withDbRetry(
-          () => db.from("cloud_media_items").update({ catalog_version: runVersion })
-            .eq("source_id", sourceId).eq("user_id", userId).eq("item_type", itemType).in("external_id", ids),
+          () => db.from("cloud_media_items").update({
+            catalog_version: runVersion,
+            ...catalogGenerationFields(generation),
+          })
+            .eq("source_id", sourceId).eq("user_id", userId)
+            .eq("generation_id", generation.generationId)
+            .eq("item_type", itemType).in("external_id", ids),
           "Unable to mark seen catalog items",
         );
       }
@@ -341,13 +445,21 @@ async function appendSourceItems(sourceId: string, userId: string, rows: JsonRec
 // Layer 3 completion helpers. Count the rows THIS run re-saw (catalog_version=runVersion), per type
 // — the authoritative catalogue totals (DO UPDATE inflates the running count via cross-category
 // touches, so we recompute from the table).
-async function countSeenByType(sourceId: string, userId: string, version: number, db: SupabaseClient) {
+async function countSeenByType(
+  sourceId: string,
+  userId: string,
+  version: number,
+  db: SupabaseClient,
+  generation: CatalogAccessSnapshot,
+) {
   const out: Record<string, number> = { live: 0, movie: 0, series: 0 };
   for (const t of ["live", "movie", "series"]) {
     const { count, error } = await db
       .from("cloud_media_items")
       .select("id", { count: "exact", head: true })
-      .eq("source_id", sourceId).eq("user_id", userId).eq("item_type", t).eq("catalog_version", version);
+      .eq("source_id", sourceId).eq("user_id", userId)
+      .eq("generation_id", generation.generationId)
+      .eq("item_type", t).eq("catalog_version", version);
     if (error) throwDb(error, "Unable to count discovered catalog items");
     out[t] = count || 0;
   }
@@ -358,21 +470,35 @@ async function countSeenByType(sourceId: string, userId: string, version: number
 // count that WOULD be pruned — used to refuse an implausibly-large removal. NB: named distinctly from
 // the finalize-side countSourceItems(…, progress) above — a duplicate top-level `function` name is a
 // SyntaxError in a Deno ES module (boots the whole function to 503), which esbuild does NOT flag.
-async function countSourceItemsTotal(sourceId: string, userId: string, db: SupabaseClient): Promise<number> {
+async function countSourceItemsTotal(
+  sourceId: string,
+  userId: string,
+  db: SupabaseClient,
+  generation: CatalogAccessSnapshot,
+): Promise<number> {
   const { count, error } = await db
     .from("cloud_media_items")
     .select("id", { count: "exact", head: true })
-    .eq("source_id", sourceId).eq("user_id", userId);
+    .eq("source_id", sourceId).eq("user_id", userId)
+    .eq("generation_id", generation.generationId);
   if (error) throwDb(error, "Unable to count catalog items");
   return count || 0;
 }
 
 // Delete the rows a healthy run did NOT re-see (provider-removed titles), via the batched RPC.
-async function pruneStaleSourceItems(sourceId: string, userId: string, version: number, db: SupabaseClient): Promise<number> {
+async function pruneStaleSourceItems(
+  sourceId: string,
+  userId: string,
+  version: number,
+  db: SupabaseClient,
+  generation: CatalogAccessSnapshot,
+): Promise<number> {
   let removed = 0;
   for (let guard = 0; guard < 5000; guard++) {
-    const { data, error } = await db.rpc("prune_stale_source_items", {
-      p_source: sourceId, p_user: userId, p_version: version, p_limit: 2000,
+    const { data, error } = await db.rpc("norva_prune_stale_catalog_generation_items", {
+      p_source_id: sourceId, p_user_id: userId,
+      ...catalogGenerationRpcFence(generation),
+      p_catalog_version: version, p_limit: 2000,
     });
     if (error) throwDb(error, "Unable to prune removed catalog items");
     const n = Number(Array.isArray(data) ? data[0] : data) || 0;
@@ -386,10 +512,17 @@ async function pruneStaleSourceItems(sourceId: string, userId: string, version: 
 // rather than SELECT-ids → .delete().in('id', [...]): a 2000-element IN list builds a ~74KB request
 // URL that PostgREST/proxy rejects, which made clearing a large catalogue (100k+ rows) fail
 // deterministically and strand the whole sync. The RPC deletes a chunk in ~0.7s incl. FK cascades.
-async function deleteSourceItems(sourceId: string, userId: string, db: SupabaseClient) {
+async function deleteSourceItems(
+  sourceId: string,
+  userId: string,
+  db: SupabaseClient,
+  generation: CatalogAccessSnapshot,
+) {
   for (let guard = 0; guard < 5000; guard++) {
-    const { data, error } = await db.rpc("delete_source_items_batch", {
-      p_source: sourceId, p_user: userId, p_limit: 2000,
+    const { data, error } = await db.rpc("norva_delete_catalog_generation_items_batch", {
+      p_source_id: sourceId, p_user_id: userId,
+      ...catalogGenerationRpcFence(generation),
+      p_limit: 2000,
     });
     if (error) throwDb(error, "Unable to clear old catalog items");
     const n = Number(Array.isArray(data) ? data[0] : data) || 0;
@@ -475,14 +608,44 @@ export async function detectXtreamChange(
   config: JsonRecord,
   db: SupabaseClient,
   previousSignature: unknown,
+  sourceSnapshot: { configCiphertext: string; configRevision: string },
 ): Promise<JsonRecord> {
+  const accessSnapshot = await readCatalogAccessSnapshot(db, sourceId, userId, false);
   const runtimeConfig = await getRuntimeConfig(db);
   const serverUrl = normalizeBaseUrl(stringOr(config.serverUrl, ""));
-  const username = stringOr(config.username, "");
-  const password = stringOr(config.password, "");
+  const username = typeof config.username === "string" && config.username.trim() ? config.username : "";
+  const password = typeof config.password === "string" && config.password.length ? config.password : "";
   if (!username || !password) throw new HttpError(400, "Xtream credentials are incomplete");
-  const fetchCatalog = (action: string, params?: Record<string, string>) =>
-    fetchProviderMetadata(runtimeConfig, { serverUrl, username, password, action, params, timeoutMs: 25000 });
+  const directFallbackSnapshot = await buildProviderDirectFallbackSnapshot({
+    serverUrl,
+    username,
+    configCiphertext: sourceSnapshot.configCiphertext,
+    configRevision: sourceSnapshot.configRevision,
+  });
+  const runDirectFallback = createSourceDirectFallbackLeaseRunner({
+    db,
+    sourceId,
+    userId,
+    ownerScope: "xtream-detect",
+    ...directFallbackSnapshot,
+  });
+  await assertCatalogSnapshotCurrent(db, sourceId, userId, accessSnapshot);
+  const fetchCatalog = async (action: string, params?: Record<string, string>) => {
+    await assertCatalogSnapshotCurrent(db, sourceId, userId, accessSnapshot);
+    let payload: unknown;
+    try {
+      payload = await fetchProviderMetadata(
+        runtimeConfig,
+        { serverUrl, username, password, action, params, timeoutMs: 25000 },
+        { runDirectFallback },
+      );
+    } catch (error) {
+      await assertCatalogSnapshotCurrent(db, sourceId, userId, accessSnapshot);
+      throw error;
+    }
+    await assertCatalogSnapshotCurrent(db, sourceId, userId, accessSnapshot);
+    return payload;
+  };
   const liveCats = await fetchCatalog("get_live_categories");
   const vodCats = await fetchCatalog("get_vod_categories");
   const seriesCats = await fetchCatalog("get_series_categories");
@@ -514,7 +677,9 @@ export async function detectXtreamChange(
   }
   const contentSignature = finalizeSig(sig);
   const providerKey = await providerKeyFromCategoryMaps(maps);
+  await assertCatalogSnapshotCurrent(db, sourceId, userId, accessSnapshot);
   await recordProviderIdentity(db, sourceId, userId, providerKey);
+  await assertCatalogSnapshotCurrent(db, sourceId, userId, accessSnapshot);
   const changed = Boolean(previousSignature) && !contentSignatureEquals(contentSignature, previousSignature);
   return { live: liveCount, movies: movieCount, series: seriesCount, total: liveCount + movieCount + seriesCount, contentSignature, changed, detectOnly: true, providerKey };
 }
@@ -526,6 +691,13 @@ export async function detectXtreamChange(
 // On completion it writes the new signature, records the "what's new" event and
 // leaves the finalize-pending handoff state the client/cron stepper materializes.
 export async function driveXtreamSyncToReady(sourceId: string, userId: string, db: SupabaseClient) {
+  let accessSnapshot: CatalogAccessSnapshot;
+  try {
+    accessSnapshot = await readCatalogAccessSnapshot(db, sourceId, userId, false);
+  } catch (error) {
+    if (isCatalogAccessGuardError(error)) return;
+    throw error;
+  }
   const deadline = Date.now() + SYNC_DRIVE_BUDGET_MS;
   const { data: source, error } = await db
     .from("cloud_sources")
@@ -535,6 +707,7 @@ export async function driveXtreamSyncToReady(sourceId: string, userId: string, d
     .maybeSingle();
   if (error) { console.error("[xtream-sync] sync driver load failed", sourceId, error.message); return; }
   if (!source) return;
+  await assertCatalogSnapshotCurrent(db, sourceId, userId, accessSnapshot);
   if (String(source.sync_status) === "ready") return; // a stale continuation raced past completion
 
   const baseHint = recordOrEmpty(source.config_hint);
@@ -559,6 +732,7 @@ export async function driveXtreamSyncToReady(sourceId: string, userId: string, d
       .from("cloud_sources").select("config_hint").eq("id", sourceId).eq("user_id", userId).maybeSingle();
     const freshHint = recordOrEmpty(fresh?.config_hint);
     if (stringOr(recordOrEmpty(freshHint.syncCursor).startedAt, myRun) !== myRun) { superseded = true; return; }
+    await assertCatalogSnapshotCurrent(db, sourceId, userId, accessSnapshot);
     cursor.heartbeatAt = new Date().toISOString();
     await db
       .from("cloud_sources")
@@ -571,6 +745,7 @@ export async function driveXtreamSyncToReady(sourceId: string, userId: string, d
       })
       .eq("id", sourceId)
       .eq("user_id", userId);
+    await assertCatalogSnapshotCurrent(db, sourceId, userId, accessSnapshot);
   };
 
   try {
@@ -581,6 +756,7 @@ export async function driveXtreamSyncToReady(sourceId: string, userId: string, d
     // re-tripping the cap just below.
     if (String(source.sync_status) !== "syncing") {
       cursor.attempts = 0;
+      await assertCatalogSnapshotCurrent(db, sourceId, userId, accessSnapshot);
       await db.from("cloud_sources").update({ sync_status: "syncing", sync_error: null }).eq("id", sourceId).eq("user_id", userId);
     }
     // Global admission control: cap concurrent heavy imports (see admitHeavyImport). The
@@ -596,17 +772,40 @@ export async function driveXtreamSyncToReady(sourceId: string, userId: string, d
 
     const runtimeConfig = await getRuntimeConfig(db);
     const config = await decryptSourceConfig(String(source.config_ciphertext), runtimeConfig);
+    await assertCatalogSnapshotCurrent(db, sourceId, userId, accessSnapshot);
     const serverUrl = normalizeBaseUrl(stringOr(config.serverUrl, ""));
-    const username = stringOr(config.username, "");
-    const password = stringOr(config.password, "");
+    const username = typeof config.username === "string" && config.username.trim() ? config.username : "";
+    const password = typeof config.password === "string" && config.password.length ? config.password : "";
     if (!username || !password) throw new HttpError(400, "Xtream credentials are incomplete");
+    const directFallbackSnapshot = await buildProviderDirectFallbackSnapshot({
+      serverUrl,
+      username,
+      configCiphertext: String(source.config_ciphertext),
+      configRevision: accessSnapshot.configRevision,
+    });
+    const runDirectFallback = createSourceDirectFallbackLeaseRunner({
+      db,
+      sourceId,
+      userId,
+      ownerScope: "xtream-drive",
+      ...directFallbackSnapshot,
+    });
     // A provider error here used to be silently swallowed to [] — which let a rate-limited /
     // expired account look like a legitimately-empty catalogue and decimate it. Count the failures
     // so the Layer 3 prune can refuse to run on an unhealthy discovery (cursor.fetchErrors).
     const fetchCatalog = async (action: string, params?: Record<string, string>) => {
       try {
-        return await fetchProviderMetadata(runtimeConfig, { serverUrl, username, password, action, params, timeoutMs: 25000 });
+        await assertCatalogSnapshotCurrent(db, sourceId, userId, accessSnapshot);
+        const payload = await fetchProviderMetadata(
+          runtimeConfig,
+          { serverUrl, username, password, action, params, timeoutMs: 25000 },
+          { runDirectFallback },
+        );
+        await assertCatalogSnapshotCurrent(db, sourceId, userId, accessSnapshot);
+        return payload;
       } catch (error) {
+        if (isCatalogAccessGuardError(error)) throw error;
+        await assertCatalogSnapshotCurrent(db, sourceId, userId, accessSnapshot);
         cursor.fetchErrors = (Number(cursor.fetchErrors) || 0) + 1;
         throw error;
       }
@@ -660,7 +859,8 @@ export async function driveXtreamSyncToReady(sourceId: string, userId: string, d
       }
     } else if (!cursor.deleted) {
       // Legacy path (pre-Layer-3 cursors, e.g. a sync already in flight at deploy time).
-      await deleteSourceItems(sourceId, userId, db);
+      await assertCatalogSnapshotCurrent(db, sourceId, userId, accessSnapshot);
+      await deleteSourceItems(sourceId, userId, db, accessSnapshot);
       cursor.deleted = true;
       await enqueueImportNotification(db, userId, sourceId, "import_started");
       await persist(discoverStartedPatch);
@@ -717,7 +917,16 @@ export async function driveXtreamSyncToReady(sourceId: string, userId: string, d
         // Count only rows the upsert ACTUALLY inserted — a stream already imported
         // from another category in a prior iteration is dropped (ignoreDuplicates),
         // so cross-category duplicates no longer inflate the "found" counts/totalVod.
-        const insertedNow = await appendSourceItems(sourceId, userId, batchRows, db, cursor.runVersion ? Number(cursor.runVersion) : null);
+        await assertCatalogSnapshotCurrent(db, sourceId, userId, accessSnapshot);
+        const insertedNow = await appendSourceItems(
+          sourceId,
+          userId,
+          batchRows,
+          db,
+          accessSnapshot,
+          cursor.runVersion ? Number(cursor.runVersion) : null,
+        );
+        await assertCatalogSnapshotCurrent(db, sourceId, userId, accessSnapshot);
         if (def.type === "live") liveCount += insertedNow;
         else if (def.type === "movie") movieCount += insertedNow;
         else seriesCount += insertedNow;
@@ -754,6 +963,7 @@ export async function driveXtreamSyncToReady(sourceId: string, userId: string, d
     if (typeIdx < DISCOVER_TYPES.length) {
       await persist(null);
       if (superseded) return;
+      await assertCatalogSnapshotCurrent(db, sourceId, userId, accessSnapshot);
       await selfInvokeSyncStep(sourceId);
       return;
     }
@@ -767,7 +977,7 @@ export async function driveXtreamSyncToReady(sourceId: string, userId: string, d
     // Layer 3: recompute authoritative per-type totals from the table (DO UPDATE inflates the
     // running counts via cross-category re-touches), then decide whether it's safe to prune.
     if (cursor.runVersion) {
-      const seen = await countSeenByType(sourceId, userId, Number(cursor.runVersion), db);
+      const seen = await countSeenByType(sourceId, userId, Number(cursor.runVersion), db, accessSnapshot);
       liveCount = seen.live; movieCount = seen.movie; seriesCount = seen.series;
     }
     const total = liveCount + movieCount + seriesCount;
@@ -778,7 +988,7 @@ export async function driveXtreamSyncToReady(sourceId: string, userId: string, d
       // hold items from a previous run, keep serving them and finish quietly without touching the
       // signature. Only a genuinely empty FIRST sync (no prior items) is a real failure.
       if (cursor.runVersion) {
-        const existing = await countSourceItemsTotal(sourceId, userId, db);
+        const existing = await countSourceItemsTotal(sourceId, userId, db, accessSnapshot);
         if (existing > 0) {
           console.warn("[xtream-sync] Layer3 refresh re-saw 0 items; kept prior catalogue", sourceId, "fetchErrors", Number(cursor.fetchErrors) || 0);
           const { data: keepFresh } = await db
@@ -806,7 +1016,7 @@ export async function driveXtreamSyncToReady(sourceId: string, userId: string, d
       // Second jalon avant le prune (le DELETE des titres disparus peut être long).
       await persist({ stage: "importing", percent: 71 });
       if (superseded) return;
-      const totalHeld = await countSourceItemsTotal(sourceId, userId, db);
+      const totalHeld = await countSourceItemsTotal(sourceId, userId, db, accessSnapshot);
       const wouldRemove = Math.max(0, totalHeld - total);
       const fetchErrors = Number(cursor.fetchErrors) || 0;
       const removeFraction = wouldRemove / Math.max(1, totalHeld);
@@ -820,7 +1030,15 @@ export async function driveXtreamSyncToReady(sourceId: string, userId: string, d
           const { data: guardFresh } = await db
             .from("cloud_sources").select("config_hint").eq("id", sourceId).eq("user_id", userId).maybeSingle();
           if (stringOr(recordOrEmpty(recordOrEmpty(guardFresh?.config_hint).syncCursor).startedAt, myRun) !== myRun) return;
-          const removed = await pruneStaleSourceItems(sourceId, userId, Number(cursor.runVersion), db);
+          await assertCatalogSnapshotCurrent(db, sourceId, userId, accessSnapshot);
+          const removed = await pruneStaleSourceItems(
+            sourceId,
+            userId,
+            Number(cursor.runVersion),
+            db,
+            accessSnapshot,
+          );
+          await assertCatalogSnapshotCurrent(db, sourceId, userId, accessSnapshot);
           console.log("[xtream-sync] Layer3 pruned removed titles", sourceId, "removed", removed);
         }
       } else {
@@ -873,7 +1091,9 @@ export async function driveXtreamSyncToReady(sourceId: string, userId: string, d
     const providerKey = await providerKeyFromCategoryMaps(nameMaps);
     const finalHint: JsonRecord = { ...freshHint, contentSignature, syncProgress: progress, syncCursor: undefined };
     if (providerKey) finalHint.providerKey = providerKey;
+    await assertCatalogSnapshotCurrent(db, sourceId, userId, accessSnapshot);
     await recordProviderIdentity(db, sourceId, userId, providerKey);
+    await assertCatalogSnapshotCurrent(db, sourceId, userId, accessSnapshot);
     await db
       .from("cloud_sources")
       .update({
@@ -881,9 +1101,11 @@ export async function driveXtreamSyncToReady(sourceId: string, userId: string, d
       })
       .eq("id", sourceId)
       .eq("user_id", userId);
-    runCategoryHydrationInBackground(hydrateMirrorCategoryNames(db, sourceId));
+    await assertCatalogSnapshotCurrent(db, sourceId, userId, accessSnapshot);
+    runCategoryHydrationInBackground(hydrateMirrorCategoryNames(db, sourceId, userId, accessSnapshot));
 
     // "What's new" feed: record a capped event when the catalogue grew.
+    await assertCatalogSnapshotCurrent(db, sourceId, userId, accessSnapshot);
     await maybeRecordContentEvent(db, userId, sourceId, previousSignature, {
       contentSignature,
       live: liveCount,
@@ -891,11 +1113,22 @@ export async function driveXtreamSyncToReady(sourceId: string, userId: string, d
       series: seriesCount,
       total,
     });
+    await assertCatalogSnapshotCurrent(db, sourceId, userId, accessSnapshot);
     // Discovery done → kick the self-continuing finalize driver so a huge
     // catalogue materialises to "ready" hands-off (the client's ~160-call loop
     // can't finish one); idempotent with the client poll if the app is open.
+    await assertCatalogSnapshotCurrent(db, sourceId, userId, accessSnapshot);
     await selfInvokeFinalize(sourceId, stringOrNull(cursor.country));
   } catch (err) {
+    // A promotion/config change is a successful stop condition for the stale
+    // continuation. Never convert it into a source sync error or notification.
+    if (isCatalogAccessGuardError(err)) return;
+    try {
+      await assertCatalogSnapshotCurrent(db, sourceId, userId, accessSnapshot);
+    } catch (guardError) {
+      if (isCatalogAccessGuardError(guardError)) return;
+      throw guardError;
+    }
     // Transient DB contention (timeout/lock/resource): don't fail the sync — the
     // cursor is checkpointed, so hand off to a fresh isolate where the DB may have
     // recovered. Bounded by the continuation cap so a real outage still surfaces.
@@ -1109,6 +1342,733 @@ function xtreamRows(
   return rows;
 }
 
+type StagedCatalogItemType = "live" | "movie" | "series";
+type StagedCatalogAction =
+  | "get_live_categories"
+  | "get_vod_categories"
+  | "get_series_categories"
+  | "get_live_streams"
+  | "get_vod_streams"
+  | "get_series";
+
+export type XtreamMetadataPageRequest = {
+  action: StagedCatalogAction;
+  categoryId: null;
+  cursor: string | null;
+  spoolToken: string | null;
+  maxItems: number;
+};
+
+export type XtreamMetadataPage = {
+  items: unknown[];
+  nextCursor: string | null;
+  done: boolean;
+  spoolToken?: string | null;
+  pending?: boolean;
+  retryAfterSeconds?: number;
+};
+
+type StagedCategory = { id: string; name: string; ordinal: number };
+type StagedGenerationCursor = {
+  version: 1;
+  actionIndex: number;
+  pageCursor: string | null;
+  spoolToken: string | null;
+  registeredCategoryCount: number;
+  currentItemCount: number;
+  processedCategories: number;
+  processedItems: number;
+  copyRevision: number;
+};
+
+const STAGED_CATEGORY_PAGE_SIZE = 100;
+const STAGED_ITEM_PAGE_SIZE = 250;
+const STAGED_CURSOR_TOKEN_MAX = 1024;
+const STAGED_PACKED_CURSOR_MAX = 1024;
+const STAGED_ACTIONS: Array<{
+  action: StagedCatalogAction;
+  progressAction: "live_categories" | "vod_categories" | "series_categories" |
+    "live_streams" | "vod_streams" | "series_streams";
+  kind: "categories" | "items";
+  itemType: StagedCatalogItemType;
+}> = [
+  { action: "get_live_categories", progressAction: "live_categories", kind: "categories", itemType: "live" },
+  { action: "get_vod_categories", progressAction: "vod_categories", kind: "categories", itemType: "movie" },
+  { action: "get_series_categories", progressAction: "series_categories", kind: "categories", itemType: "series" },
+  { action: "get_live_streams", progressAction: "live_streams", kind: "items", itemType: "live" },
+  { action: "get_vod_streams", progressAction: "vod_streams", kind: "items", itemType: "movie" },
+  { action: "get_series", progressAction: "series_streams", kind: "items", itemType: "series" },
+];
+
+// Every one of the six Xtream list actions is consumed exactly once as a
+// gateway-owned bounded spool. Content actions are intentionally UNFILTERED:
+// category endpoints are metadata only and cannot prove that orphaned or
+// uncategorized provider rows do not exist.
+export async function stageXtreamCredentialCatalogGeneration(input: {
+  db: SupabaseClient;
+  userId: string;
+  sourceId: string;
+  transitionId: string;
+  generationId: string;
+  jobId: string;
+  leaseSequence: number;
+  leaseOwner: string;
+  cursor?: unknown;
+  fetchMetadataPage: (request: XtreamMetadataPageRequest) => Promise<XtreamMetadataPage>;
+  maxSlices?: number;
+  deadlineMs?: number;
+}) {
+  const generation: BuildingCatalogGeneration = {
+    kind: "building",
+    generationId: input.generationId,
+    transitionId: input.transitionId,
+    jobId: input.jobId,
+    attempt: input.leaseSequence,
+    leaseOwner: input.leaseOwner,
+  };
+  catalogGenerationFields(generation);
+  const cursor = stagedGenerationCursor(input.cursor);
+  const maxSlices = boundedInt(input.maxSlices, 1, 1, 8);
+  const deadline = Date.now() + boundedInt(input.deadlineMs, 20_000, 1_000, 60_000);
+  let slices = 0;
+
+  while (cursor.actionIndex < STAGED_ACTIONS.length && slices < maxSlices && Date.now() < deadline) {
+    const action = STAGED_ACTIONS[cursor.actionIndex];
+    const maxItems = action.kind === "categories" ? STAGED_CATEGORY_PAGE_SIZE : STAGED_ITEM_PAGE_SIZE;
+    const page = validateXtreamMetadataPage(
+      await input.fetchMetadataPage({
+        action: action.action,
+        categoryId: null,
+        cursor: cursor.pageCursor,
+        spoolToken: cursor.spoolToken,
+        maxItems,
+      }),
+      maxItems,
+    );
+    if (page.pending) {
+      const checkpoint = stagedGenerationCheckpoint(cursor, false);
+      return {
+        done: false,
+        pending: true,
+        retryAfterSeconds: page.retryAfterSeconds ?? 2,
+        nextCursor: checkpoint,
+        checkpoint,
+        counts: await stagedGenerationCounts(input.db, input.sourceId, input.userId, input.generationId),
+        contentSignature: null,
+      };
+    }
+    slices += 1;
+
+    if (action.kind === "categories") {
+      const categories = normalizeStagedCategories(page.items, cursor.registeredCategoryCount);
+      const previousCategoryCount = cursor.registeredCategoryCount;
+      await registerStagedCategories(input, generation, action.itemType, categories);
+      cursor.registeredCategoryCount = await stagedCategoryCount(
+        input,
+        action.itemType,
+        previousCategoryCount,
+      );
+      cursor.processedCategories += cursor.registeredCategoryCount - previousCategoryCount;
+      if (page.done) {
+        await markStagedCategoryListComplete(
+          input,
+          generation,
+          action.itemType,
+          cursor.registeredCategoryCount,
+        );
+      }
+    } else {
+      const rawItems = page.items.filter(isRecord) as JsonRecord[];
+      if (rawItems.length !== page.items.length) throw new Error("Gateway metadata page contains invalid rows");
+      const categoryNames = await stagedCategoryNames(input, action.itemType, rawItems);
+      const rows = dedupeByConflictKey(
+        xtreamRows(input.sourceId, input.userId, rawItems, action.itemType, categoryNames),
+      );
+      if (rows.length) {
+        const { error } = await input.db
+          .from("cloud_media_items")
+          .upsert(withCatalogGenerationRows(rows, generation), {
+            onConflict: "source_id,generation_id,item_type,external_id",
+            ignoreDuplicates: true,
+          });
+        if (error) throw error;
+        const externalIds = rows.map((row) => stringOr(row.external_id, "")).filter(Boolean);
+        const { data: savedData, error: savedError } = await input.db
+          .from("cloud_media_items")
+          .select("id,user_id,source_id,generation_id,item_type,external_id,parent_external_id,title,subtitle,poster_url,backdrop_url,metadata,playback_hint,available")
+          .eq("source_id", input.sourceId)
+          .eq("user_id", input.userId)
+          .eq("generation_id", input.generationId)
+          .eq("item_type", action.itemType)
+          .in("external_id", externalIds);
+        if (savedError) throw savedError;
+        const savedRows = Array.isArray(savedData) ? savedData as LiveCatalogItem[] : [];
+        if (action.itemType === "live") {
+          await materializeLiveChunk(input.db, {
+            userId: input.userId,
+            sourceId: input.sourceId,
+            rows: savedRows,
+            generation,
+          });
+        } else {
+          await projectVodTitleGenerationIsolated({
+            mode: "building-generation",
+            sourceId: input.sourceId,
+            userId: input.userId,
+            transitionId: input.transitionId,
+            rows: savedRows,
+            db: input.db,
+            generation,
+          });
+        }
+      }
+      cursor.currentItemCount = await stagedTypeCount(
+        input.db,
+        input.sourceId,
+        input.userId,
+        input.generationId,
+        action.itemType,
+      );
+      cursor.processedItems = (await stagedGenerationCounts(
+        input.db,
+        input.sourceId,
+        input.userId,
+        input.generationId,
+      )).total;
+      if (page.done) {
+        await markStagedParentActionComplete(
+          input,
+          generation,
+          action.itemType,
+          cursor.currentItemCount,
+        );
+      }
+    }
+
+    cursor.pageCursor = page.nextCursor;
+    if (page.spoolToken !== undefined) {
+      const nextSpoolToken = cleanCursorToken(page.spoolToken);
+      if (nextSpoolToken && cursor.spoolToken && nextSpoolToken !== cursor.spoolToken) {
+        const previousDigest = gatewaySpoolContentDigest(cursor.spoolToken);
+        const nextDigest = gatewaySpoolContentDigest(nextSpoolToken);
+        if (!previousDigest || !nextDigest || previousDigest !== nextDigest) {
+          throw new Error("Gateway spool identity changed while paging an action");
+        }
+      }
+      // A null/omitted token never clears a durable build identity. The gateway
+      // emits one page-zero token for every page of a signed manifest. A safe
+      // exact-content rebuild may rotate buildId/expiry, so persist its newer
+      // token only after the signed payload's content digest matched above.
+      if (nextSpoolToken) cursor.spoolToken = nextSpoolToken;
+    }
+    if (page.done) advanceStagedAction(cursor);
+  }
+
+  // Lazy episode caches are copied mechanically from the previous active
+  // generation after the six provider lists. The SQL RPC is bounded and
+  // lease-fenced; cloned rows are excluded from catalog identity evidence.
+  if (cursor.actionIndex === STAGED_ACTIONS.length && slices < maxSlices && Date.now() < deadline) {
+    const clone = await copyStagedLazySeriesCache(input, generation, cursor.copyRevision);
+    cursor.copyRevision = clone.copyRevision;
+    if (clone.done) cursor.actionIndex += 1;
+    slices += 1;
+  }
+
+  const done = cursor.actionIndex > STAGED_ACTIONS.length;
+  const counts = await stagedGenerationCounts(input.db, input.sourceId, input.userId, input.generationId);
+  const checkpoint = stagedGenerationCheckpoint(cursor, done);
+  return {
+    done,
+    nextCursor: done ? null : checkpoint,
+    checkpoint,
+    counts,
+    contentSignature: null,
+  };
+}
+
+function stagedGenerationCursor(value: unknown): StagedGenerationCursor {
+  if (value === undefined || value === null) {
+    return {
+      version: 1,
+      actionIndex: 0,
+      pageCursor: null,
+      spoolToken: null,
+      registeredCategoryCount: 0,
+      currentItemCount: 0,
+      processedCategories: 0,
+      processedItems: 0,
+      copyRevision: 0,
+    };
+  }
+  if (!isRecord(value) || value.version !== 1) throw new Error("Invalid staged catalog cursor");
+  const actionIndex = strictCheckpointInteger(value.typeIndex, STAGED_ACTIONS.length + 1);
+  const expectedAction = stagedProgressAction(actionIndex);
+  if (value.action !== expectedAction) throw new Error("Staged catalog progress action is inconsistent");
+  const registeredCategoryCount = strictCheckpointInteger(value.categoryOrdinal, 999_999_999);
+  const currentItemCount = strictCheckpointInteger(value.itemOffset, 999_999_999_999);
+  const processedCategories = strictCheckpointInteger(value.processedCategories, 999_999_999);
+  const processedItems = strictCheckpointInteger(value.processedItems, 999_999_999_999_999);
+  if (
+    actionIndex < 0 || registeredCategoryCount < 0 || currentItemCount < 0 ||
+    processedCategories < 0 || processedItems < 0 || typeof value.categoriesDone !== "boolean"
+  ) {
+    throw new Error("Invalid staged catalog cursor position");
+  }
+  const expectsCategoriesDone = actionIndex >= 3;
+  if (value.categoriesDone !== expectsCategoriesDone) {
+    throw new Error("Staged catalog category completion is inconsistent");
+  }
+  const packedCursor = actionIndex < 3 ? value.categoryPageCursor : value.itemCursor;
+  const gatewayCursor = actionIndex < STAGED_ACTIONS.length
+    ? unpackStagedGatewayCursor(packedCursor)
+    : { pageCursor: null, spoolToken: null };
+  return {
+    version: 1,
+    actionIndex,
+    pageCursor: gatewayCursor.pageCursor,
+    spoolToken: gatewayCursor.spoolToken,
+    registeredCategoryCount,
+    currentItemCount: actionIndex === STAGED_ACTIONS.length ? 0 : currentItemCount,
+    processedCategories,
+    processedItems,
+    copyRevision: actionIndex === STAGED_ACTIONS.length ? currentItemCount : 0,
+  };
+}
+
+function validateXtreamMetadataPage(value: unknown, maxItems: number): XtreamMetadataPage {
+  if (!isRecord(value) || !Array.isArray(value.items) || typeof value.done !== "boolean") {
+    throw new Error("Gateway must return an explicit bounded metadata page");
+  }
+  if (value.items.length > maxItems) throw new Error("Gateway metadata page exceeds requested bound");
+  if (value.pending === true) {
+    if (value.items.length || value.done !== false || cleanCursorToken(value.nextCursor)) {
+      throw new Error("Pending gateway metadata page must be empty and cursorless");
+    }
+    if (
+      Object.prototype.hasOwnProperty.call(value, "spoolToken") &&
+      cleanCursorToken(value.spoolToken)
+    ) {
+      throw new Error("Pending gateway metadata page must not replace the durable cursor");
+    }
+    const retryAfterSeconds = value.retryAfterSeconds === undefined
+      ? undefined
+      : strictCheckpointInteger(value.retryAfterSeconds, 60);
+    if (retryAfterSeconds !== undefined && retryAfterSeconds < 1) {
+      throw new Error("Pending gateway retry delay is invalid");
+    }
+    return {
+      items: [],
+      done: false,
+      nextCursor: null,
+      pending: true,
+      ...(retryAfterSeconds === undefined ? {} : { retryAfterSeconds }),
+    };
+  }
+  if (value.pending !== undefined && value.pending !== false) {
+    throw new Error("Gateway metadata pending marker is invalid");
+  }
+  const nextCursor = cleanCursorToken(value.nextCursor);
+  const hasSpoolToken = Object.prototype.hasOwnProperty.call(value, "spoolToken");
+  const spoolToken = hasSpoolToken ? cleanCursorToken(value.spoolToken) : undefined;
+  if (!value.done && !nextCursor) throw new Error("Incomplete gateway page is missing a continuation cursor");
+  if (value.done && nextCursor) throw new Error("Complete gateway page must not expose a continuation cursor");
+  return {
+    items: value.items,
+    done: value.done,
+    nextCursor,
+    ...(hasSpoolToken ? { spoolToken } : {}),
+    ...(value.pending === false ? { pending: false } : {}),
+  };
+}
+
+function strictCheckpointInteger(value: unknown, max: number) {
+  const parsed = typeof value === "number" && Number.isSafeInteger(value)
+    ? value
+    : typeof value === "string" && /^\d+$/.test(value)
+      ? Number(value)
+      : Number.NaN;
+  return Number.isSafeInteger(parsed) && parsed >= 0 && parsed <= max ? parsed : -1;
+}
+
+function normalizeStagedCategories(items: unknown[], ordinalBase: number): StagedCategory[] {
+  const seen = new Set<string>();
+  const categories: StagedCategory[] = [];
+  for (const item of items) {
+    const category = normalizeStagedCategory(item, ordinalBase + categories.length);
+    if (!category.id || seen.has(category.id)) continue;
+    seen.add(category.id);
+    categories.push(category);
+  }
+  return categories;
+}
+
+function normalizeStagedCategory(value: unknown, ordinal: number): StagedCategory {
+  if (!isRecord(value)) throw new Error("Gateway category row is invalid");
+  const id = stringOr(value.id ?? value.category_id ?? value.categoryId, "").normalize("NFC").trim();
+  const name = stringOr(value.name ?? value.category_name ?? value.categoryName, "").normalize("NFC").trim();
+  if (!id || id.length > 128 || !name || name.length > 160 || /\p{Cc}/u.test(id + name)) {
+    throw new Error("Gateway category row is invalid");
+  }
+  return { id, name, ordinal };
+}
+
+function cleanCursorToken(value: unknown): string | null {
+  if (value === undefined || value === null || value === "") return null;
+  if (typeof value !== "string") throw new Error("Gateway cursor token is invalid");
+  const token = value.trim();
+  if (!token || token.length > STAGED_CURSOR_TOKEN_MAX || /[\u0000-\u001f\u007f]/.test(token)) {
+    throw new Error("Gateway cursor token is invalid");
+  }
+  return token;
+}
+
+function gatewaySpoolContentDigest(value: unknown) {
+  const token = cleanCursorToken(value);
+  if (!token) return null;
+  try {
+    const [payload, signature, extra] = token.split(".");
+    if (!payload || !signature || extra) return null;
+    const base64 = payload.replace(/-/g, "+").replace(/_/g, "/")
+      .padEnd(Math.ceil(payload.length / 4) * 4, "=");
+    const decoded = JSON.parse(atob(base64));
+    const digest = isRecord(decoded) ? String(decoded.d ?? "").toLowerCase() : "";
+    return /^[a-f0-9]{64}$/.test(digest) ? digest : null;
+  } catch {
+    return null;
+  }
+}
+
+function stagedProgressAction(actionIndex: number) {
+  if (actionIndex < STAGED_ACTIONS.length) return STAGED_ACTIONS[actionIndex].progressAction;
+  if (actionIndex === STAGED_ACTIONS.length) return "episode_state_copy";
+  return "complete";
+}
+
+function packStagedGatewayCursor(pageCursor: string | null, spoolToken: string | null) {
+  if (!pageCursor && !spoolToken) return "";
+  const bytes = new TextEncoder().encode(JSON.stringify([spoolToken, pageCursor]));
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  const encoded = btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+  // SQL rejects credential-looking cursor text. A delimiter every four base64url
+  // characters makes those >=7-character words structurally impossible while
+  // retaining a compact, reversible opaque checkpoint.
+  const packed = encoded.match(/.{1,4}/g)?.join(".") ?? "";
+  if (packed.length > STAGED_PACKED_CURSOR_MAX) throw new Error("Gateway continuation state exceeds checkpoint bound");
+  return packed;
+}
+
+function unpackStagedGatewayCursor(value: unknown) {
+  if (value === undefined || value === null || value === "") {
+    return { pageCursor: null, spoolToken: null };
+  }
+  const packed = cleanCursorToken(value);
+  if (!packed || !/^[A-Za-z0-9_.-]+$/.test(packed)) throw new Error("Staged gateway checkpoint is invalid");
+  try {
+    const encoded = packed.replace(/\./g, "");
+    const base64 = encoded.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(encoded.length / 4) * 4, "=");
+    const binary = atob(base64);
+    const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+    const decoded = JSON.parse(new TextDecoder().decode(bytes));
+    if (!Array.isArray(decoded) || decoded.length !== 2) throw new Error("invalid shape");
+    return {
+      spoolToken: cleanCursorToken(decoded[0]),
+      pageCursor: cleanCursorToken(decoded[1]),
+    };
+  } catch {
+    throw new Error("Staged gateway checkpoint is invalid");
+  }
+}
+
+function advanceStagedAction(cursor: StagedGenerationCursor) {
+  cursor.actionIndex += 1;
+  cursor.pageCursor = null;
+  cursor.spoolToken = null;
+  cursor.registeredCategoryCount = 0;
+  cursor.currentItemCount = 0;
+}
+
+function stagedCategoryKind(itemType: StagedCatalogItemType): "live" | "vod" | "series" {
+  return itemType === "movie" ? "vod" : itemType;
+}
+
+async function registerStagedCategories(
+  input: {
+    db: SupabaseClient;
+    userId: string;
+    transitionId: string;
+    generationId: string;
+    jobId: string;
+  },
+  generation: BuildingCatalogGeneration,
+  itemType: StagedCatalogItemType,
+  categories: StagedCategory[],
+) {
+  if (!categories.length) return;
+  const categoryKind = stagedCategoryKind(itemType);
+  const { error } = await input.db.rpc("norva_register_credential_generation_categories", {
+    p_transition_id: input.transitionId,
+    p_user_id: input.userId,
+    p_generation_id: input.generationId,
+    p_job_id: input.jobId,
+    p_worker: generation.leaseOwner,
+    p_expected_lease_sequence: generation.attempt,
+    p_category_kind: categoryKind,
+    // The fenced SQL writer owns idempotence and ordinal allocation. The
+    // service role deliberately has no raw-table SELECT privilege here.
+    p_categories: categories.map((category) => ({
+      category_ordinal: category.ordinal,
+      provider_category_id: category.id,
+      category_name: category.name,
+    })),
+  });
+  if (error) throw error;
+}
+
+async function markStagedCategoryListComplete(
+  input: {
+    db: SupabaseClient;
+    userId: string;
+    transitionId: string;
+    generationId: string;
+    jobId: string;
+  },
+  generation: BuildingCatalogGeneration,
+  itemType: StagedCatalogItemType,
+  expectedCount: number,
+) {
+  const { error } = await input.db.rpc("norva_mark_credential_category_list_complete", {
+    p_transition_id: input.transitionId,
+    p_user_id: input.userId,
+    p_generation_id: input.generationId,
+    p_job_id: input.jobId,
+    p_worker: generation.leaseOwner,
+    p_expected_lease_sequence: generation.attempt,
+    p_category_kind: stagedCategoryKind(itemType),
+    p_expected_category_count: expectedCount,
+  });
+  if (error) throw error;
+}
+
+async function markStagedParentActionComplete(
+  input: {
+    db: SupabaseClient;
+    userId: string;
+    transitionId: string;
+    generationId: string;
+    jobId: string;
+  },
+  generation: BuildingCatalogGeneration,
+  itemType: StagedCatalogItemType,
+  stagedItemCount: number,
+) {
+  const { error } = await input.db.rpc("norva_mark_credential_parent_action_complete", {
+    p_transition_id: input.transitionId,
+    p_user_id: input.userId,
+    p_generation_id: input.generationId,
+    p_job_id: input.jobId,
+    p_worker: generation.leaseOwner,
+    p_expected_lease_sequence: generation.attempt,
+    p_category_kind: stagedCategoryKind(itemType),
+    p_action: STAGED_ACTIONS.find((entry) => entry.kind === "items" && entry.itemType === itemType)?.action,
+    p_staged_item_count: stagedItemCount,
+  });
+  if (error) throw error;
+}
+
+async function stagedTypeCount(
+  db: SupabaseClient,
+  sourceId: string,
+  userId: string,
+  generationId: string,
+  itemType: StagedCatalogItemType,
+) {
+  const { count, error } = await db
+    .from("cloud_media_items")
+    .select("id", { count: "exact", head: true })
+    .eq("source_id", sourceId)
+    .eq("user_id", userId)
+    .eq("generation_id", generationId)
+    .eq("item_type", itemType);
+  if (error) throw error;
+  return count ?? 0;
+}
+
+type StagedCategoryReadScope = {
+  db: SupabaseClient;
+  userId: string;
+  transitionId: string;
+  generationId: string;
+};
+
+const STAGED_CATEGORY_READ_PAGE_SIZE = 500;
+const STAGED_CATEGORY_READ_MAX_ROWS = 1_000_000;
+
+type StoredStagedCategory = {
+  ordinal: number;
+  id: string;
+  name: string;
+};
+
+async function visitStagedCategories(
+  input: StagedCategoryReadScope,
+  itemType: StagedCatalogItemType,
+  visitor?: (rows: StoredStagedCategory[]) => boolean | void,
+  startOffset = 0,
+) {
+  if (!Number.isSafeInteger(startOffset) || startOffset < 0 || startOffset > STAGED_CATEGORY_READ_MAX_ROWS) {
+    throw new Error("Stored generation category offset is invalid");
+  }
+  let offset = startOffset;
+  while (offset <= STAGED_CATEGORY_READ_MAX_ROWS) {
+    const { data, error } = await input.db.rpc("norva_get_credential_generation_categories", {
+      p_transition_id: input.transitionId,
+      p_user_id: input.userId,
+      p_generation_id: input.generationId,
+      p_category_kind: stagedCategoryKind(itemType),
+      p_offset: offset,
+      p_limit: STAGED_CATEGORY_READ_PAGE_SIZE,
+    });
+    if (error) throw error;
+    if (!Array.isArray(data) || data.length > STAGED_CATEGORY_READ_PAGE_SIZE) {
+      throw new Error("Stored generation category page is invalid");
+    }
+    const rows = data.map((row) => {
+      if (!isRecord(row)) throw new Error("Stored generation category row is invalid");
+      const ordinal = strictCheckpointInteger(row.category_ordinal, STAGED_CATEGORY_READ_MAX_ROWS - 1);
+      const id = stringOr(row.provider_category_id, "");
+      const name = stringOr(row.category_name, "");
+      if (ordinal < 0 || !id || id.length > 128 || !name || name.length > 160 || /\p{Cc}/u.test(id + name)) {
+        throw new Error("Stored generation category row is invalid");
+      }
+      return { ordinal, id, name };
+    });
+    if (offset + rows.length > STAGED_CATEGORY_READ_MAX_ROWS) {
+      throw new Error("Stored generation categories exceed the supported bound");
+    }
+    const keepReading = visitor?.(rows);
+    offset += rows.length;
+    if (keepReading === false || rows.length < STAGED_CATEGORY_READ_PAGE_SIZE) return offset;
+    if (offset === STAGED_CATEGORY_READ_MAX_ROWS) {
+      // One final empty page distinguishes an exactly-full bounded inventory
+      // from an over-limit provider inventory without materializing it.
+      continue;
+    }
+  }
+  throw new Error("Stored generation categories exceed the supported bound");
+}
+
+async function stagedCategoryCount(
+  input: StagedCategoryReadScope,
+  itemType: StagedCatalogItemType,
+  knownPrefixCount = 0,
+) {
+  // The checkpoint is an already-committed prefix. Resume at that offset so a
+  // million-category inventory remains O(new rows), including register-before-
+  // checkpoint crash replay. The fenced completion RPC verifies the final count.
+  return await visitStagedCategories(input, itemType, undefined, knownPrefixCount);
+}
+
+async function stagedCategoryNames(
+  input: StagedCategoryReadScope,
+  itemType: StagedCatalogItemType,
+  rawItems: JsonRecord[],
+) {
+  const ids = [...new Set(rawItems
+    .map((item) => stringOr(item.category_id ?? item.categoryId, ""))
+    .filter(Boolean))];
+  if (!ids.length) return new Map<string, string>();
+  const wanted = new Set(ids);
+  const names = new Map<string, string>();
+  await visitStagedCategories(input, itemType, (rows) => {
+    for (const row of rows) {
+      if (wanted.has(row.id)) names.set(row.id, row.name);
+    }
+    return names.size < wanted.size;
+  });
+  return names;
+}
+
+async function copyStagedLazySeriesCache(
+  input: {
+    db: SupabaseClient;
+    userId: string;
+    transitionId: string;
+    generationId: string;
+    jobId: string;
+  },
+  generation: BuildingCatalogGeneration,
+  copyRevision: number,
+) {
+  const { data, error } = await input.db.rpc("norva_copy_credential_generation_episode_state", {
+    p_transition_id: input.transitionId,
+    p_user_id: input.userId,
+    p_generation_id: input.generationId,
+    p_job_id: input.jobId,
+    p_worker: generation.leaseOwner,
+    p_expected_lease_sequence: generation.attempt,
+    p_expected_copy_revision: copyRevision,
+    p_limit: 200,
+  });
+  if (error) throw error;
+  const result = recordOrEmpty(Array.isArray(data) ? data[0] : data);
+  const nextRevision = strictCheckpointInteger(result.copyRevision, Number.MAX_SAFE_INTEGER);
+  if (typeof result.complete !== "boolean" || nextRevision !== copyRevision + 1) {
+    throw new Error("Invalid lazy series cache copy result");
+  }
+  return { done: result.complete, copyRevision: nextRevision };
+}
+
+function stagedGenerationCheckpoint(cursor: StagedGenerationCursor, done: boolean) {
+  const action = done ? "complete" : stagedProgressAction(cursor.actionIndex);
+  const current = cursor.actionIndex < STAGED_ACTIONS.length ? STAGED_ACTIONS[cursor.actionIndex] : null;
+  const packedCursor = current
+    ? packStagedGatewayCursor(cursor.pageCursor, cursor.spoolToken)
+    : "";
+  return {
+    version: 1,
+    action,
+    typeIndex: cursor.actionIndex,
+    categoryOrdinal: current?.kind === "categories" ? cursor.registeredCategoryCount : 0,
+    itemOffset: cursor.actionIndex === STAGED_ACTIONS.length
+      ? cursor.copyRevision
+      : current?.kind === "items"
+        ? cursor.currentItemCount
+        : 0,
+    categoryPageCursor: current?.kind === "categories" ? packedCursor : "",
+    categoriesDone: cursor.actionIndex >= 3,
+    itemCursor: current?.kind === "items" ? packedCursor : "",
+    processedCategories: cursor.processedCategories,
+    processedItems: cursor.processedItems,
+  };
+}
+
+async function stagedGenerationCounts(
+  db: SupabaseClient,
+  sourceId: string,
+  userId: string,
+  generationId: string,
+) {
+  const counts: Record<StagedCatalogItemType, number> = { live: 0, movie: 0, series: 0 };
+  for (const itemType of ["live", "movie", "series"] as const) {
+    const { count, error } = await db
+      .from("cloud_media_items")
+      .select("id", { count: "exact", head: true })
+      .eq("source_id", sourceId)
+      .eq("user_id", userId)
+      .eq("generation_id", generationId)
+      .eq("item_type", itemType);
+    if (error) throw error;
+    counts[itemType] = count ?? 0;
+  }
+  return {
+    live: counts.live,
+    movies: counts.movie,
+    series: counts.series,
+    total: counts.live + counts.movie + counts.series,
+  };
+}
+
 // ── Provider-helper copies (verbatim from norva-source-sync) ─────────────────
 
 async function getRuntimeConfig(db: SupabaseClient): Promise<RuntimeConfig> {
@@ -1160,10 +2120,24 @@ async function aesKey(secret: string) {
 }
 
 async function fetchJson(url: string, timeoutMs: number) {
-  const response = await fetchWithTimeout(url, timeoutMs);
-  const payload = await response.json().catch(() => null);
-  if (!response.ok) throw new HttpError(response.status, "IPTV provider request failed", payload);
-  return payload;
+  try {
+    const { response, value: payload } = await fetchBoundedProviderJson(url, {
+      timeoutMs,
+      maxBytes: 32 * 1024 * 1024,
+      headers: { "User-Agent": "NorvaCloud/1.0" },
+    });
+    if (!response.ok) throw new HttpError(response.status, "IPTV provider request failed");
+    return payload;
+  } catch (error) {
+    if (error instanceof HttpError) throw error;
+    if (error instanceof BoundedProviderResponseError && error.kind === "too_large") {
+      throw new HttpError(413, "Provider JSON payload is too large");
+    }
+    if (error instanceof BoundedProviderResponseError && error.kind === "timeout") {
+      throw new HttpError(504, "IPTV provider response deadline exceeded");
+    }
+    throw new HttpError(502, "Unable to reach IPTV provider");
+  }
 }
 
 // Fetch Xtream catalogue/VOD metadata, preferring the media gateway so the crawl
@@ -1176,6 +2150,7 @@ async function fetchJson(url: string, timeoutMs: number) {
 async function fetchProviderMetadata(
   runtimeConfig: RuntimeConfig,
   args: { serverUrl: string; username: string; password: string; action: string; params?: Record<string, string>; timeoutMs?: number },
+  directFallback: DirectFallbackLeaseContext,
 ): Promise<any> {
   const timeoutMs = args.timeoutMs ?? 25000;
   if (runtimeConfig.mediaGatewayUrl && runtimeConfig.mediaGatewayToken) {
@@ -1197,10 +2172,17 @@ async function fetchProviderMetadata(
       }
     }
   }
-  return fetchJson(
-    xtreamApiUrl({ serverUrl: args.serverUrl, username: args.username, password: args.password, action: args.action }, args.params ?? {}),
-    timeoutMs,
-  );
+  try {
+    return await directFallback.runDirectFallback(timeoutMs, () => fetchJson(
+      xtreamApiUrl({ serverUrl: args.serverUrl, username: args.username, password: args.password, action: args.action }, args.params ?? {}),
+      timeoutMs,
+    ));
+  } catch (error) {
+    if (error instanceof ProviderDirectFallbackLeaseError) {
+      throw new HttpError(error.status, error.message, error.details);
+    }
+    throw error;
+  }
 }
 
 function isGatewayBackgroundBusy(error: unknown) {
@@ -1241,21 +2223,6 @@ async function requestGatewayMetadata(
     if (error instanceof HttpError) throw error;
     const aborted = error instanceof Error && error.name === "AbortError";
     throw new HttpError(aborted ? 504 : 502, "Unable to reach media gateway", error instanceof Error ? error.message : undefined);
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-async function fetchWithTimeout(url: string, timeoutMs: number) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    return await fetch(url, {
-      signal: controller.signal,
-      headers: { "User-Agent": "NorvaCloud/1.0" },
-    });
-  } catch (error) {
-    throw new HttpError(502, "Unable to reach IPTV provider", error instanceof Error ? error.message : undefined);
   } finally {
     clearTimeout(timer);
   }

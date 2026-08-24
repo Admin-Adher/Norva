@@ -81,6 +81,36 @@ function containerUrlRewriter() {
   );
 }
 
+function containerMismatchPersister() {
+  const edge = read(EDGE_PATH);
+  const source = sourceBetween(
+    edge,
+    'function containerObservationItemCas(',
+    '\nasync function createGatewaySession(',
+  );
+  const executable = stripTypeScriptTypes(source, { mode: 'strip' });
+  return vm.runInNewContext(
+    `(() => { ${executable}; return persistGatewaySourceContainerMismatch; })()`,
+    {
+      Date,
+      Number,
+      console: { warn() {} },
+      recordOrEmpty: (value) => value && typeof value === 'object' && !Array.isArray(value) ? value : {},
+      stringOr: (value, fallback) => typeof value === 'string' && value.trim() ? value.trim() : fallback,
+      stringOrNull: (value) => typeof value === 'string' && value.trim() ? value.trim() : null,
+      callActiveCatalogGenerationRpc: async (db, name, args, generation) => db.rpc(name, {
+        ...args,
+        p_generation_id: generation.generationId,
+        p_head_revision: generation.headRevision,
+        p_config_revision: generation.configRevision,
+        p_source_visibility_epoch: generation.sourceVisibilityEpoch,
+        p_user_visibility_epoch: generation.userVisibilityEpoch,
+      }),
+      assertActiveCatalogGenerationCurrent: async () => {},
+    },
+  );
+}
+
 test('Gateway container mismatch evidence is exact, typed, and bound to the requested source', () => {
   const normalize = mismatchNormalizer();
   const valid = validMismatch();
@@ -140,7 +170,7 @@ test('a persisted observation overrides client and provider extensions for curre
 test('the exact owner variant profile outranks lagging item and global catalogue mirrors', () => {
   const edge = read(EDGE_PATH);
   const resolver = sourceBetween(edge, 'async function resolvePlaybackTarget(', '\n// Series have no directly-playable');
-  assert.match(resolver, /from\("cloud_title_variants"\)[\s\S]*select\("codec_profile"\)/);
+  assert.match(resolver, /from\("cloud_catalog_visible_title_variants"\)[\s\S]*select\("codec_profile"\)/);
   assert.match(resolver, /eq\("user_id", userId\)[\s\S]*eq\("source_id", sourceId\)[\s\S]*eq\("item_type", "movie"\)[\s\S]*eq\("external_id", itemId\)[\s\S]*limit\(2\)/);
   assert.match(resolver, /variants\.length === 1[\s\S]*hasReliableVodCodecProfile\(candidate\)/);
   assert.match(resolver, /const storedCodecProfile = hasReliableVodCodecProfile\(exactVariantCodecProfile\)[\s\S]*\? exactVariantCodecProfile/);
@@ -175,6 +205,71 @@ test('only a Norva-built Xtream URL has its terminal container rewritten', () =>
     rewrite('https://cdn.example/files/title.mkv', 'mkv', 'mp4', 'xtream'),
     'https://cdn.example/files/title.mkv',
   );
+});
+
+test('container persistence keeps the playback-resolution generation and requires an exact item CAS', async () => {
+  const persist = containerMismatchPersister();
+  const generationA = {
+    kind: 'active',
+    generationId: '11111111-1111-4111-8111-111111111111',
+    headRevision: '7',
+    configRevision: '8',
+    sourceVisibilityEpoch: '9',
+    userVisibilityEpoch: '10',
+  };
+  const sourceId = '22222222-2222-4222-8222-222222222222';
+  const userId = '33333333-3333-4333-8333-333333333333';
+  const expectedTargetUrlHash = 'a'.repeat(64);
+  const base = {
+    playbackSessionId: '44444444-4444-4444-8444-444444444444',
+    userId,
+    sourceId,
+    itemType: 'movie',
+    itemId: '42',
+    expectedTargetUrlHash,
+    mismatch: validMismatch(),
+    generation: generationA,
+  };
+
+  let rpcCalls = 0;
+  assert.equal(await persist({
+    async rpc() { rpcCalls += 1; throw new Error('must not run'); },
+  }, { ...base, playbackHint: {} }), false);
+  assert.equal(rpcCalls, 0, 'missing item CAS must make zero persistence RPCs');
+
+  let mutatedGenerationB = false;
+  const calls = [];
+  const result = await persist({
+    async rpc(name, args) {
+      calls.push({ name, args });
+      // Simulate an A -> B promotion after playback resolution. The SQL ABA
+      // overload rejects A's proof before any physical B row can be changed.
+      mutatedGenerationB = false;
+      return { data: null, error: { code: '40001', message: 'catalog generation changed' } };
+    },
+  }, {
+    ...base,
+    playbackHint: {
+      __norvaMkvH264FastStartItemCasV2: {
+        id: '55555555-5555-4555-8555-555555555555',
+        updatedAt: '2026-08-23T10:00:00.000Z',
+        targetUrlHash: expectedTargetUrlHash,
+      },
+    },
+  });
+  assert.equal(result, false);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].name, 'record_catalog_file_container_observation');
+  assert.equal(calls[0].args.p_generation_id, generationA.generationId);
+  assert.equal(calls[0].args.p_expected_media_item_id, '55555555-5555-4555-8555-555555555555');
+  assert.equal(calls[0].args.p_expected_media_item_updated_at, '2026-08-23T10:00:00.000Z');
+  assert.equal(mutatedGenerationB, false);
+
+  const edge = read(EDGE_PATH);
+  const create = sourceBetween(edge, 'async function createPlaybackSession(', '\nasync function getPlaybackSession(');
+  assert.match(create, /playbackGeneration = await readActiveCatalogGenerationSnapshot[\s\S]*const resolved = [\s\S]*assertActiveCatalogGenerationCurrent\([^)]*playbackGeneration\)[\s\S]*createGatewaySession\([\s\S]*playbackGeneration/);
+  const writer = sourceBetween(edge, 'async function persistGatewaySourceContainerMismatch(', '\nasync function createGatewaySession(');
+  assert.doesNotMatch(writer, /readActiveCatalogGenerationSnapshot/);
 });
 
 test('the database observation is service-only, playback-bound, atomic, and sync-resistant', () => {

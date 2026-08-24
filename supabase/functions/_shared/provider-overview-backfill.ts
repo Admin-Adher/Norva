@@ -1,4 +1,8 @@
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
+import {
+  type ActiveCatalogGeneration,
+  callActiveCatalogGenerationRpc,
+} from "./catalog-generation.ts";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -15,6 +19,8 @@ type ProviderOverviewBackfillOptions = {
   userId: string;
   sourceId: string;
   fetchVodInfo: ProviderOverviewFetch;
+  generation: ActiveCatalogGeneration;
+  assertSourceCurrent?: () => Promise<void>;
   limit?: number;
   concurrency?: number;
 };
@@ -120,9 +126,10 @@ async function recordProviderOverview(
     outcome: "resolved" | "missing" | "retry";
     retryAt: string | null;
     provenance: JsonRecord;
+    generation: ActiveCatalogGeneration;
   },
 ) {
-  const { data, error } = await db.rpc("record_provider_overview_outcome", {
+  const { data, error } = await callActiveCatalogGenerationRpc(db, "record_provider_overview_outcome", {
     p_user_id: input.userId,
     p_source_id: input.sourceId,
     p_external_id: input.externalId,
@@ -132,7 +139,7 @@ async function recordProviderOverview(
     p_outcome: input.outcome,
     p_retry_at: input.retryAt,
     p_provenance: input.provenance,
-  });
+  }, input.generation);
   if (error) throw new Error(`record_provider_overview_outcome failed: ${error.message}`);
   return recordOrEmpty(data);
 }
@@ -190,6 +197,7 @@ export async function backfillProviderOverviews(options: ProviderOverviewBackfil
 
       const cachedOverview = boundedProviderText(candidate.cached_overview);
       if (cachedOverview && stringOrNull(candidate.cached_status) === "resolved") {
+        await options.assertSourceCurrent?.();
         const result = await recordProviderOverview(options.db, {
           userId: options.userId,
           sourceId: options.sourceId,
@@ -200,16 +208,19 @@ export async function backfillProviderOverviews(options: ProviderOverviewBackfil
           outcome: "resolved",
           retryAt: null,
           provenance: { kind: "canonical-provider-cache", schemaVersion: 1 },
+          generation: options.generation,
         });
         processed += 1;
         cached += 1;
         resolved += 1;
         updated += Math.max(0, Number(result.titles_updated) || 0);
         lastId = externalId;
+        await options.assertSourceCurrent?.();
         continue;
       }
 
       let payload: unknown;
+      await options.assertSourceCurrent?.();
       try {
         payload = await options.fetchVodInfo(externalId);
       } catch (fetchError) {
@@ -220,6 +231,7 @@ export async function backfillProviderOverviews(options: ProviderOverviewBackfil
           : status === 429
           ? 60 * 60 * 1000
           : 30 * 60 * 1000;
+        await options.assertSourceCurrent?.();
         await recordProviderOverview(options.db, {
           userId: options.userId,
           sourceId: options.sourceId,
@@ -235,6 +247,7 @@ export async function backfillProviderOverviews(options: ProviderOverviewBackfil
             httpStatus: status || undefined,
             transient: true,
           },
+          generation: options.generation,
         });
         processed += 1;
         retried += 1;
@@ -247,10 +260,12 @@ export async function backfillProviderOverviews(options: ProviderOverviewBackfil
         }
         continue;
       }
+      await options.assertSourceCurrent?.();
 
       const overview = extractProviderOverview(payload);
       const ids = extractProviderOverviewIds(payload);
       const outcome = overview ? "resolved" : "missing";
+      await options.assertSourceCurrent?.();
       const result = await recordProviderOverview(options.db, {
         userId: options.userId,
         sourceId: options.sourceId,
@@ -269,18 +284,21 @@ export async function backfillProviderOverviews(options: ProviderOverviewBackfil
           hasTmdbId: Boolean(ids.tmdbId),
           hasImdbId: Boolean(ids.imdbId),
         },
+        generation: options.generation,
       });
       processed += 1;
       updated += Math.max(0, Number(result.titles_updated) || 0);
       lastId = externalId;
       if (overview) resolved += 1;
       else missing += 1;
+      await options.assertSourceCurrent?.();
     }
   };
 
   await Promise.all(
     Array.from({ length: Math.min(concurrency, candidates.length) }, () => worker()),
   );
+  await options.assertSourceCurrent?.();
 
   return {
     mode: "provider-overview",

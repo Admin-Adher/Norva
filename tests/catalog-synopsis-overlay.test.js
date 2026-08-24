@@ -12,7 +12,10 @@ test('synopsis overlay remains active while the risky full display cutover is of
   const end = src.indexOf('function titleRailItem(', start);
   const block = src.slice(start, end);
 
-  assert.match(block, /if \(!catalogReadEnabled\(\)\) \{\s*await applyCatalogTextOverlay\(rows, itemType, lang\);/);
+  assert.match(block, /const fullOverlayEnabled = catalogReadEnabled\(\)/);
+  assert.match(block, /if \(!fullOverlayEnabled\) \{\s*await applyCatalogTextOverlay\(globalRows, itemType, lang\);/);
+  assert.match(block, /applyGenerationCatalogMetadata\(row, lang, fullOverlayEnabled\)/);
+  assert.match(src, /Flag OFF must remain equivalent to the legacy thinned cloud_titles payload/);
   assert.match(src, /Permanent safe read path for title text removed by cloud_titles self-thinning/);
 });
 
@@ -44,8 +47,8 @@ test('all title rails forward the requested synopsis language', () => {
   const src = read('supabase/functions/norva-catalog/index.ts');
   assert.match(src, /applyCatalogOverlay\(selectedRows, itemType, lang\)/);
   assert.equal((src.match(/applyCatalogOverlay\(pageRows, itemType, lang\)/g) || []).length, 2);
-  assert.match(src, /applyCatalogOverlay\(\(titles \?\? \[\]\) as JsonRecord\[\], itemType, lang\)/);
-  assert.equal((src.match(/applyCatalogOverlay\(titles, itemType, lang\)/g) || []).length, 3);
+  assert.match(src, /applyCatalogOverlay\(titles, itemType, lang\)/);
+  assert.equal((src.match(/applyCatalogOverlay\(titles, itemType, lang\)/g) || []).length, 4);
   assert.match(src, /type TitleCandidatesFor = \(itemType: "movie" \| "series"\)/);
   assert.match(src, /const candidatePromises = new Map<"movie" \| "series", Promise<JsonRecord\[\]>>/);
   assert.ok(

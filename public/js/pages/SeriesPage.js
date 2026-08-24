@@ -853,7 +853,9 @@ class SeriesPage {
             if (typeof this.shouldShowRails === 'function' && this.shouldShowRails()) return; // rails owns the grid
             const ck = this.catalogCacheKey();
             if (!ck) return;
-            const cached = window.NorvaCatalogCache?.read?.(ck); // time-only; loadCloudSeries re-reads WITH the version
+            const version = window.API?.catalogSignature?.();
+            if (!version) return;
+            const cached = window.NorvaCatalogCache?.read?.(ck, { version });
             if (!cached?.data?.items?.length) return;
             this.seriesList = cached.data.items.slice();
             this.cloudHasMore = Boolean(cached.data.hasMore);

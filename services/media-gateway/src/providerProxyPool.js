@@ -6,8 +6,8 @@ const STATIC_PROXY_SLOT_COUNT = 5;
 const MAX_PROXY_SLOT_OVERRIDES = 64;
 
 function decodedProviderUsername(value) {
-    const raw = String(value || '').trim();
-    if (!raw) return '';
+    const raw = String(value || '');
+    if (!raw.trim()) return '';
     try { return decodeURIComponent(raw); } catch (_) { return raw; }
 }
 
@@ -24,7 +24,7 @@ function providerUsernameFromUrl(parsed) {
     // URLSearchParams has already percent-decoded the query value. Decoding it
     // again would turn a literal provider username such as "%20alice" into a
     // different identity than the same username embedded in an Xtream path.
-    if (queryUsername) return String(queryUsername).trim();
+    if (queryUsername !== null && String(queryUsername).trim()) return String(queryUsername);
 
     const segments = parsed.pathname.split('/').filter(Boolean);
     const streamTypeIndex = segments.findIndex((segment) =>
@@ -52,8 +52,8 @@ function providerAccountAffinityKeyFromCredentials(serverUrl, username) {
     // Credentials supplied by the source model are already logical values, not
     // URL components. Preserve literal percent sequences so every lane hashes
     // exactly the same provider-account identity.
-    const normalizedUsername = String(username || '').trim();
-    return host + (normalizedUsername ? `/${normalizedUsername}` : '');
+    const exactUsername = String(username || '');
+    return host + (exactUsername.trim() ? `/${exactUsername}` : '');
 }
 
 function stableProxySlotIndex(accountKey, slotCount) {

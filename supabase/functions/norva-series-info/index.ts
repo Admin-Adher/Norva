@@ -1,6 +1,24 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { verifyUserJwtLocally } from "../_shared/local-auth.ts";
+import {
+  type ActiveCatalogGeneration,
+  assertActiveCatalogGenerationCurrent,
+  catalogGenerationRpcFence,
+  isCatalogGenerationSuperseded,
+  readActiveCatalogGenerationSnapshot,
+} from "../_shared/catalog-generation.ts";
+import {
+  buildProviderDirectFallbackSnapshot,
+  directFallbackLeaseTtlSeconds,
+  ProviderDirectFallbackLeaseError,
+  providerDirectFallbackLeaseOwner,
+  withSourceDirectFallbackLease,
+} from "../_shared/provider-direct-fallback-lease.mjs";
+import {
+  BoundedProviderResponseError,
+  fetchBoundedProviderJson,
+} from "../_shared/bounded-provider-response.mjs";
 
 type JsonRecord = Record<string, unknown>;
 type RuntimeConfig = {
@@ -11,6 +29,7 @@ type RuntimeConfig = {
   relayTokenSecret: string;
 };
 type CloudIdentity = { userId: string; deviceId?: string };
+type SourceAccessSnapshot = ActiveCatalogGeneration;
 
 class HttpError extends Error {
   status: number;
@@ -51,6 +70,7 @@ if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
   auth: { autoRefreshToken: false, persistSession: false },
 });
+const catalogVisibilityEpochs = new WeakMap<Request, string>();
 
 let runtimeConfigCache: { value: RuntimeConfig; expiresAt: number } | null = null;
 
@@ -79,7 +99,14 @@ Deno.serve(async (req) => {
     if (req.method === "GET" && segments[0] === "sources" && segments[2] === "series-info") {
       const identity = await requireIdentity(req, supabase);
       const sourceId = segments[1];
-      const seriesInfoResult = await getXtreamSeriesInfo(url, sourceId, identity.userId, supabase);
+      const sourceSnapshot = await assertVisibleSource(sourceId, identity.userId, supabase);
+      const seriesInfoResult = await getXtreamSeriesInfo(
+        url,
+        sourceId,
+        identity.userId,
+        supabase,
+        sourceSnapshot,
+      );
       const seriesInfo = seriesInfoResult.payload;
       // Augment with the title's TMDB source language (global, from catalog_titles) so the player
       // can resolve a VOSTFR/VO ("original") audio track to its real language. Best-effort; it
@@ -91,20 +118,50 @@ Deno.serve(async (req) => {
       // playback/LID will stay fail-closed for cross-user episode sharing until
       // the corresponding inventory row exists.
       if (seriesInfoResult.exactInventorySafe) {
-        await registerSeriesEpisodes(supabase, identity.userId, sourceId, seriesId, seriesInfo);
+        await registerSeriesEpisodes(
+          supabase,
+          identity.userId,
+          sourceId,
+          seriesId,
+          seriesInfo,
+          sourceSnapshot,
+        );
       }
       const originalLanguage = await lookupSeriesOriginalLanguage(supabase, segments[1], seriesId);
+      // The provider/cache work above can take tens of seconds. A promotion that
+      // hid A during that work must win over this response, even if the payload
+      // itself was already fetched and sanitized.
+      await assertSourceSnapshotCurrent(sourceId, identity.userId, sourceSnapshot, supabase);
+      catalogVisibilityEpochs.set(req, sourceSnapshot.userVisibilityEpoch);
       return json(req, originalLanguage ? { ...seriesInfo, original_language: originalLanguage } : seriesInfo);
     }
     throw new HttpError(404, "Route not found");
   } catch (error) {
     const status = error instanceof HttpError ? error.status : 500;
-    const message = error instanceof Error ? error.message : "Unexpected error";
-    const details = error instanceof HttpError ? error.details : undefined;
-    console.error("[norva-series-info]", status, message, details ?? "");
-    return json(req, { error: message, details }, status);
+    const code = publicErrorCode(error);
+    const message = status >= 500
+      ? "Series details are temporarily unavailable"
+      : error instanceof Error ? error.message : "Unexpected error";
+    // Provider bodies, database diagnostics and transport exceptions can all be
+    // present in HttpError.details. Keep both the response and the log on a
+    // strict, stable allowlist.
+    console.error("[norva-series-info]", status, code ?? "UNCLASSIFIED");
+    return json(req, { error: message, ...(code ? { code } : {}) }, status);
   }
 });
+
+const SERIES_INFO_PUBLIC_ERROR_CODES = new Set([
+  "SOURCE_CATALOG_NOT_VISIBLE",
+  "SOURCE_CATALOG_CHANGED",
+  "CATALOG_VISIBILITY_UNAVAILABLE",
+  "PROVIDER_DIRECT_FALLBACK_RETRYABLE",
+]);
+
+function publicErrorCode(error: unknown): string | null {
+  if (!(error instanceof HttpError) || !isRecord(error.details)) return null;
+  const code = error.details.code;
+  return typeof code === "string" && SERIES_INFO_PUBLIC_ERROR_CODES.has(code) ? code : null;
+}
 
 async function requireIdentity(req: Request, db: SupabaseClient): Promise<CloudIdentity> {
   const authHeader = req.headers.get("Authorization") ?? "";
@@ -138,43 +195,53 @@ async function registerSeriesEpisodes(
   sourceId: string,
   parentSeriesId: string,
   payload: JsonRecord,
+  expectedSnapshot: SourceAccessSnapshot,
 ): Promise<void> {
   if (!userId || !sourceId || !parentSeriesId || !isRecord(payload)) return;
   try {
+    await assertSourceSnapshotCurrent(sourceId, userId, expectedSnapshot, db);
     const { data: episodeCount, error } = await db.rpc("register_catalog_series_episodes", {
       p_user_id: userId,
       p_source_id: sourceId,
+      ...catalogGenerationRpcFence(expectedSnapshot),
       p_parent_series_id: parentSeriesId,
       p_payload: payload,
     });
+    await assertSourceSnapshotCurrent(sourceId, userId, expectedSnapshot, db);
     if (error) {
       console.warn("[norva-series-info] episode inventory deferred", error.message);
       return;
     }
     const count = Math.max(0, Number(episodeCount) || 0);
     if (count <= 0) return;
+    await assertSourceSnapshotCurrent(sourceId, userId, expectedSnapshot, db);
     const { error: hydrateError } = await db.rpc("hydrate_catalog_episode_file_tracks", {
       p_user_id: userId,
       p_source_id: sourceId,
+      ...catalogGenerationRpcFence(expectedSnapshot),
       p_parent_series_id: parentSeriesId,
       p_episode_ids: null,
     });
+    await assertSourceSnapshotCurrent(sourceId, userId, expectedSnapshot, db);
     if (hydrateError) {
       console.warn("[norva-series-info] episode cache hydration deferred", hydrateError.message);
     }
     const { error: outcomeError } = await db.rpc("record_catalog_series_inventory_outcome", {
       p_user: userId,
       p_source: sourceId,
+      ...catalogGenerationRpcFence(expectedSnapshot),
       p_parent_series_id: parentSeriesId,
       p_success: true,
       p_episode_count: count,
       p_retry_at: new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString(),
       p_details: { method: "interactive-series-info-v1", status: "registered" },
     });
+    await assertSourceSnapshotCurrent(sourceId, userId, expectedSnapshot, db);
     if (outcomeError) {
       console.warn("[norva-series-info] episode inventory outcome deferred", outcomeError.message);
     }
   } catch (error) {
+    if (isCatalogAccessGuardError(error) || isCatalogGenerationSuperseded(error)) throw error;
     console.warn(
       "[norva-series-info] episode inventory deferred",
       error instanceof Error ? error.message : error,
@@ -193,7 +260,7 @@ async function lookupSeriesOriginalLanguage(
   try {
     if (!sourceId || !seriesId) return null;
     const { data: item } = await db
-      .from("cloud_media_items")
+      .from("cloud_catalog_visible_media_items")
       .select("metadata")
       .eq("source_id", sourceId)
       .eq("item_type", "series")
@@ -218,14 +285,99 @@ async function lookupSeriesOriginalLanguage(
   }
 }
 
-async function getXtreamSeriesInfo(url: URL, sourceId: string, userId: string, db: SupabaseClient) {
+async function assertVisibleSource(
+  sourceId: string,
+  userId: string,
+  db: SupabaseClient,
+): Promise<SourceAccessSnapshot> {
+  const { data, error } = await db.rpc("norva_source_catalog_visible", {
+    p_source_id: sourceId,
+    p_user_id: userId,
+  });
+  if (error) throw catalogVisibilityUnavailable();
+  if (data !== true) {
+    throw new HttpError(409, "This catalog is not currently available", {
+      code: "SOURCE_CATALOG_NOT_VISIBLE",
+    });
+  }
+  return await readVisibleSourceSnapshot(sourceId, userId, db, false);
+}
+
+async function readVisibleSourceSnapshot(
+  sourceId: string,
+  userId: string,
+  db: SupabaseClient,
+  changedDuringOperation: boolean,
+): Promise<SourceAccessSnapshot> {
+  try {
+    return await readActiveCatalogGenerationSnapshot(db, sourceId, userId);
+  } catch (error) {
+    if (isCatalogGenerationSuperseded(error)) {
+      throw new HttpError(409, changedDuringOperation
+        ? "Catalog access changed while series details were loading"
+        : "This catalog is not currently available", {
+        code: changedDuringOperation ? "SOURCE_CATALOG_CHANGED" : "SOURCE_CATALOG_NOT_VISIBLE",
+      });
+    }
+    throw catalogVisibilityUnavailable();
+  }
+}
+
+async function assertSourceSnapshotCurrent(
+  sourceId: string,
+  userId: string,
+  expected: SourceAccessSnapshot,
+  db: SupabaseClient,
+): Promise<void> {
+  try {
+    await assertActiveCatalogGenerationCurrent(db, sourceId, userId, expected);
+  } catch (error) {
+    if (!isCatalogGenerationSuperseded(error)) throw error;
+    throw new HttpError(409, "Catalog access changed while series details were loading", {
+      code: "SOURCE_CATALOG_CHANGED",
+    });
+  }
+}
+
+function catalogVisibilityUnavailable(): HttpError {
+  return new HttpError(503, "Catalog visibility is temporarily unavailable", {
+    code: "CATALOG_VISIBILITY_UNAVAILABLE",
+  });
+}
+
+function isCatalogAccessGuardError(error: unknown): boolean {
+  if (!(error instanceof HttpError) || !isRecord(error.details)) return false;
+  return [
+    "SOURCE_CATALOG_NOT_VISIBLE",
+    "SOURCE_CATALOG_CHANGED",
+    "CATALOG_VISIBILITY_UNAVAILABLE",
+  ].includes(stringOr(error.details.code, ""));
+}
+
+function revisionToken(value: unknown): string {
+  if (typeof value === "bigint") return value >= 0n ? value.toString() : "";
+  if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) return String(value);
+  if (typeof value === "string" && /^\d+$/.test(value.trim())) {
+    return value.trim().replace(/^0+(?=\d)/, "");
+  }
+  return "";
+}
+
+async function getXtreamSeriesInfo(
+  url: URL,
+  sourceId: string,
+  userId: string,
+  db: SupabaseClient,
+  expectedSnapshot: SourceAccessSnapshot,
+) {
   const seriesId = url.searchParams.get("series_id") ?? url.searchParams.get("seriesId") ?? "";
   if (!seriesId) throw new HttpError(400, "series_id is required");
 
-  const config = await loadSourceConfig(sourceId, userId, db);
+  const loadedSource = await loadSourceConfig(sourceId, userId, db, expectedSnapshot);
+  const config = loadedSource.config;
   const serverUrl = stringOr(config.serverUrl, "");
-  const username = stringOr(config.username, "");
-  const password = stringOr(config.password, "");
+  const username = typeof config.username === "string" && config.username.trim() ? config.username : "";
+  const password = typeof config.password === "string" && config.password.length ? config.password : "";
   if (!serverUrl || !username || !password) {
     throw new HttpError(400, "Series details require a managed Xtream source");
   }
@@ -240,15 +392,19 @@ async function getXtreamSeriesInfo(url: URL, sourceId: string, userId: string, d
     // This legacy cache is keyed by raw host, not canonical provider identity.
     // It is safe to display, but it cannot prove episode ownership for exact
     // cross-account audio sharing.
+    await assertSourceSnapshotCurrent(sourceId, userId, expectedSnapshot, db);
     return { payload: cached.payload, exactInventorySafe: false };
   }
 
   let payload: JsonRecord;
   try {
     payload = await fetchSeriesInfoFromProvider(db, {
-      serverUrl, username, password, seriesId, userId, serverHost,
+      serverUrl, username, password, seriesId, userId, sourceId, serverHost, expectedSnapshot,
     });
   } catch (error) {
+    // A lifecycle/config guard is terminal for this request. It must never be
+    // disguised as a provider outage and replaced with an A-era stale cache.
+    if (isCatalogAccessGuardError(error)) throw error;
     // Provider failed (most often user_multi_ip / 429). If we hold ANY cached copy — even a
     // stale one — serve it rather than failing the fiche; only surface the error when the
     // cache is empty (the unavoidable cold-miss case the client-side retry handles).
@@ -257,6 +413,7 @@ async function getXtreamSeriesInfo(url: URL, sourceId: string, userId: string, d
         "[norva-series-info] provider fetch failed, serving stale cache",
         error instanceof Error ? error.message : error,
       );
+      await assertSourceSnapshotCurrent(sourceId, userId, expectedSnapshot, db);
       return { payload: cached.payload, exactInventorySafe: false };
     }
     throw error;
@@ -267,17 +424,28 @@ async function getXtreamSeriesInfo(url: URL, sourceId: string, userId: string, d
   // never reads it, and this cache is cross-user, so dropping it means one account's
   // credentials can never leak to another via a shared cache entry (or even the response body).
   payload = stripCredentials(payload) as JsonRecord;
+  await assertSourceSnapshotCurrent(sourceId, userId, expectedSnapshot, db);
 
   // Cache ONLY a real series-info (episodes or info present). The provider returns {} on a
   // soft block — caching that would poison the entry, so we skip it and keep any prior copy.
   if (serverHost && isCacheableSeriesInfo(payload)) {
-    await writeSeriesInfoCache(db, serverHost, seriesId, payload);
+    const writeMarker = await writeSeriesInfoCache(db, serverHost, seriesId, payload);
+    try {
+      await assertSourceSnapshotCurrent(sourceId, userId, expectedSnapshot, db);
+    } catch (error) {
+      if (writeMarker) await discardSeriesInfoCacheWrite(db, serverHost, seriesId, writeMarker);
+      throw error;
+    }
   }
+  await assertSourceSnapshotCurrent(sourceId, userId, expectedSnapshot, db);
   return { payload, exactInventorySafe: true };
 }
 
 function providerAccountKey(serverHost: string, username: string): string {
-  return `${String(serverHost || "").trim().toLowerCase()}/${String(username || "").trim()}`;
+  const exactUsername = String(username || "");
+  return exactUsername.trim()
+    ? `${String(serverHost || "").trim().toLowerCase()}/${exactUsername}`
+    : String(serverHost || "").trim().toLowerCase();
 }
 
 function isProviderSlotBusyError(error: unknown): boolean {
@@ -317,19 +485,37 @@ async function fetchSeriesInfoFromProvider(
     password: string;
     seriesId: string;
     userId: string;
+    sourceId: string;
     serverHost?: string;
+    expectedSnapshot: SourceAccessSnapshot;
   },
 ): Promise<JsonRecord> {
-  const { serverUrl, username, password, seriesId, userId, serverHost } = params;
+  const { serverUrl, username, password, seriesId, userId, sourceId, serverHost, expectedSnapshot } = params;
   const accountKey = providerAccountKey(serverHost || providerHost(serverUrl), username);
   await waitWhileBackgroundBusy(db, accountKey);
+  await assertSourceSnapshotCurrent(sourceId, userId, expectedSnapshot, db);
 
   let lastError: unknown;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      return await requestSeriesInfoOnce(db, { serverUrl, username, password, seriesId, userId });
+      await assertSourceSnapshotCurrent(sourceId, userId, expectedSnapshot, db);
+      const payload = await requestSeriesInfoOnce(db, {
+        serverUrl,
+        username,
+        password,
+        seriesId,
+        userId,
+        sourceId,
+        expectedSnapshot,
+      });
+      await assertSourceSnapshotCurrent(sourceId, userId, expectedSnapshot, db);
+      return payload;
     } catch (error) {
       lastError = error;
+      if (isCatalogAccessGuardError(error)) throw error;
+      // A provider/network failure can race the cutover just as a success can.
+      // Re-check before classifying it or falling back to an A-era cache.
+      await assertSourceSnapshotCurrent(sourceId, userId, expectedSnapshot, db);
       if (!isProviderSlotBusyError(error) || attempt === 2) throw error;
       await sleep(8000);
     }
@@ -339,10 +525,19 @@ async function fetchSeriesInfoFromProvider(
 
 async function requestSeriesInfoOnce(
   db: SupabaseClient,
-  params: { serverUrl: string; username: string; password: string; seriesId: string; userId: string },
+  params: {
+    serverUrl: string;
+    username: string;
+    password: string;
+    seriesId: string;
+    userId: string;
+    sourceId: string;
+    expectedSnapshot: SourceAccessSnapshot;
+  },
 ): Promise<JsonRecord> {
-  const { serverUrl, username, password, seriesId, userId } = params;
+  const { serverUrl, username, password, seriesId, userId, sourceId, expectedSnapshot } = params;
   const runtimeConfig = await getRuntimeConfig(db);
+  await assertSourceSnapshotCurrent(sourceId, userId, expectedSnapshot, db);
 
   // PRIMARY: the Cloudflare relay. The provider user_multi_ip-blocks datacenter IPs — both the
   // Railway media gateway AND this Supabase edge runtime — but accepts Cloudflare, the same
@@ -365,6 +560,7 @@ async function requestSeriesInfoOnce(
   // FALLBACK: the media gateway (Railway). Kept for when the relay is unconfigured/unreachable
   // or hasn't yet learned this route. Same provider-error semantics as the relay branch.
   if (runtimeConfig.mediaGatewayUrl && runtimeConfig.mediaGatewayToken) {
+    await assertSourceSnapshotCurrent(sourceId, userId, expectedSnapshot, db);
     try {
       return recordOrEmpty(
         await requestGatewaySeriesInfo(runtimeConfig, { serverUrl, username, password, seriesId }),
@@ -378,10 +574,30 @@ async function requestSeriesInfoOnce(
 
   // LAST RESORT: a direct fetch from this edge runtime (also a datacenter IP — usually
   // user_multi_ip-blocked, but the cheapest thing left to try).
-  return recordOrEmpty(await fetchJson(
-    xtreamApiUrl({ serverUrl, username, password, action: "get_series_info" }, { series_id: seriesId }),
-    20000,
-  ));
+  await assertSourceSnapshotCurrent(sourceId, userId, expectedSnapshot, db);
+  try {
+    return recordOrEmpty(await withSourceDirectFallbackLease({
+      db,
+      sourceId,
+      userId,
+      owner: providerDirectFallbackLeaseOwner("series-info"),
+      ttlSeconds: directFallbackLeaseTtlSeconds(20_000),
+      ...await buildProviderDirectFallbackSnapshot({
+        serverUrl,
+        username,
+        configCiphertext: loadedSource.configCiphertext,
+        configRevision: expectedSnapshot.configRevision,
+      }),
+    }, () => fetchJson(
+      xtreamApiUrl({ serverUrl, username, password, action: "get_series_info" }, { series_id: seriesId }),
+      20_000,
+    )));
+  } catch (error) {
+    if (error instanceof ProviderDirectFallbackLeaseError) {
+      throw new HttpError(error.status, error.message, error.details);
+    }
+    throw error;
+  }
 }
 
 // Mint a short-lived signed relay token whose `url` claim is the full get_series_info
@@ -403,28 +619,28 @@ async function requestRelaySeriesInfo(
     ua: "VLC/3.0.20 LibVLC/3.0.20",
     ttlSeconds: 120,
   });
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 20000);
   try {
-    const response = await fetch(`${runtimeConfig.relayBaseUrl}/series-info/${token}`, {
-      signal: controller.signal,
-      headers: { accept: "application/json" },
-    });
-    const payload = await response.json().catch(() => ({}));
+    const { response, value: payload } = await fetchBoundedProviderJson(
+      `${runtimeConfig.relayBaseUrl}/series-info/${token}`,
+      {
+        timeoutMs: 20_000,
+        maxBytes: 8 * 1024 * 1024,
+        headers: { accept: "application/json" },
+      },
+    );
     if (!response.ok) {
-      throw new HttpError(response.status, "Relay refused the series-info request", payload);
+      throw new HttpError(response.status, "Relay refused the series-info request");
     }
     return recordOrEmpty(payload);
   } catch (error) {
     if (error instanceof HttpError) throw error;
-    const aborted = error instanceof Error && error.name === "AbortError";
-    throw new HttpError(
-      aborted ? 504 : 502,
-      "Unable to reach Norva relay",
-      error instanceof Error ? error.message : undefined,
-    );
-  } finally {
-    clearTimeout(timer);
+    if (error instanceof BoundedProviderResponseError && error.kind === "timeout") {
+      throw new HttpError(504, "Unable to reach Norva relay");
+    }
+    if (error instanceof BoundedProviderResponseError && error.kind === "too_large") {
+      throw new HttpError(502, "Norva relay returned an invalid series-info response");
+    }
+    throw new HttpError(502, "Unable to reach Norva relay");
   }
 }
 
@@ -487,7 +703,7 @@ async function writeSeriesInfoCache(
   serverHost: string,
   seriesId: string,
   payload: JsonRecord,
-): Promise<void> {
+): Promise<string | null> {
   try {
     const nowIso = new Date().toISOString();
     const { error } = await db.from("cloud_series_info_cache").upsert(
@@ -496,12 +712,36 @@ async function writeSeriesInfoCache(
     );
     if (error) {
       console.warn("[norva-series-info] failed to write series-info cache", error.message);
+      return null;
     }
+    return nowIso;
   } catch (error) {
     console.warn(
       "[norva-series-info] failed to write series-info cache",
       error instanceof Error ? error.message : error,
     );
+    return null;
+  }
+}
+
+async function discardSeriesInfoCacheWrite(
+  db: SupabaseClient,
+  serverHost: string,
+  seriesId: string,
+  writeMarker: string,
+): Promise<void> {
+  try {
+    // Delete only the exact upsert from this request. A concurrent valid writer
+    // changes these timestamps and is therefore preserved.
+    await db
+      .from("cloud_series_info_cache")
+      .delete()
+      .eq("server_host", serverHost)
+      .eq("series_id", seriesId)
+      .eq("fetched_at", writeMarker)
+      .eq("updated_at", writeMarker);
+  } catch (_) {
+    // Best effort: the final response guard still prevents serving this payload.
   }
 }
 
@@ -543,33 +783,42 @@ async function requestGatewaySeriesInfo(
   runtimeConfig: RuntimeConfig,
   body: { serverUrl: string; username: string; password: string; seriesId: string },
 ): Promise<JsonRecord> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 20000);
   try {
-    const response = await fetch(`${runtimeConfig.mediaGatewayUrl}/xtream/series-info`, {
-      method: "POST",
-      signal: controller.signal,
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${runtimeConfig.mediaGatewayToken}`,
+    const { response, value: payload } = await fetchBoundedProviderJson(
+      `${runtimeConfig.mediaGatewayUrl}/xtream/series-info`,
+      {
+        method: "POST",
+        timeoutMs: 20_000,
+        maxBytes: 8 * 1024 * 1024,
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${runtimeConfig.mediaGatewayToken}`,
+        },
+        body: JSON.stringify({ ...body, userAgent: "VLC/3.0.20 LibVLC/3.0.20" }),
       },
-      body: JSON.stringify({ ...body, userAgent: "VLC/3.0.20 LibVLC/3.0.20" }),
-    });
-    const payload = await response.json().catch(() => ({}));
+    );
     if (!response.ok) {
-      throw new HttpError(response.status, "Media gateway refused the series-info request", payload);
+      throw new HttpError(response.status, "Media gateway refused the series-info request");
     }
     return recordOrEmpty(payload);
   } catch (error) {
     if (error instanceof HttpError) throw error;
-    const aborted = error instanceof Error && error.name === "AbortError";
-    throw new HttpError(aborted ? 504 : 502, "Unable to reach media gateway", error instanceof Error ? error.message : undefined);
-  } finally {
-    clearTimeout(timer);
+    if (error instanceof BoundedProviderResponseError && error.kind === "timeout") {
+      throw new HttpError(504, "Unable to reach media gateway");
+    }
+    if (error instanceof BoundedProviderResponseError && error.kind === "too_large") {
+      throw new HttpError(502, "Media gateway returned an invalid series-info response");
+    }
+    throw new HttpError(502, "Unable to reach media gateway");
   }
 }
 
-async function loadSourceConfig(sourceId: string, userId: string, db: SupabaseClient) {
+async function loadSourceConfig(
+  sourceId: string,
+  userId: string,
+  db: SupabaseClient,
+  expectedSnapshot: SourceAccessSnapshot,
+) {
   const { data: source, error } = await db
     .from("cloud_sources")
     .select("config_ciphertext, source_type")
@@ -579,7 +828,9 @@ async function loadSourceConfig(sourceId: string, userId: string, db: SupabaseCl
   if (error) throwDb(error, "Unable to load source config");
   if (!source?.config_ciphertext) throw new HttpError(404, "Source config not found");
   if (source.source_type !== "xtream") throw new HttpError(400, "Series details require an Xtream source");
-  return decryptSourceConfig(source.config_ciphertext, await getRuntimeConfig(db));
+  const config = await decryptSourceConfig(source.config_ciphertext, await getRuntimeConfig(db));
+  await assertSourceSnapshotCurrent(sourceId, userId, expectedSnapshot, db);
+  return { config, configCiphertext: String(source.config_ciphertext) };
 }
 
 async function getRuntimeConfig(db: SupabaseClient): Promise<RuntimeConfig> {
@@ -641,24 +892,23 @@ async function aesKey(secret: string) {
 }
 
 async function fetchJson(url: string, timeoutMs: number) {
-  const response = await fetchWithTimeout(url, timeoutMs);
-  const payload = await response.json().catch(() => null);
-  if (!response.ok) throw new HttpError(response.status, "IPTV provider request failed", payload);
-  return payload;
-}
-
-async function fetchWithTimeout(url: string, timeoutMs: number) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await fetch(url, {
-      signal: controller.signal,
+    const { response, value: payload } = await fetchBoundedProviderJson(url, {
+      timeoutMs,
+      maxBytes: 8 * 1024 * 1024,
       headers: { "User-Agent": "NorvaCloud/1.0" },
     });
+    if (!response.ok) throw new HttpError(response.status, "IPTV provider request failed");
+    return payload;
   } catch (error) {
-    throw new HttpError(502, "Unable to reach IPTV provider", error instanceof Error ? error.message : undefined);
-  } finally {
-    clearTimeout(timer);
+    if (error instanceof HttpError) throw error;
+    if (error instanceof BoundedProviderResponseError && error.kind === "too_large") {
+      throw new HttpError(413, "Provider JSON payload is too large");
+    }
+    if (error instanceof BoundedProviderResponseError && error.kind === "timeout") {
+      throw new HttpError(504, "IPTV provider response deadline exceeded");
+    }
+    throw new HttpError(502, "Unable to reach IPTV provider");
   }
 }
 
@@ -706,6 +956,7 @@ function corsHeaders(req: Request) {
     "Access-Control-Allow-Origin": allowOrigin,
     "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-norva-profile-id",
     "Access-Control-Allow-Methods": "GET,OPTIONS",
+    "Access-Control-Expose-Headers": "x-norva-visibility-epoch",
     "Access-Control-Max-Age": "86400",
     Vary: "Origin",
   };
@@ -731,10 +982,16 @@ function json(req: Request, data: unknown, status = 200) {
     status,
     headers: {
       ...corsHeaders(req),
+      ...catalogVisibilityEpochHeaders(req),
       "Content-Type": "application/json; charset=utf-8",
       "Cache-Control": "no-store",
     },
   });
+}
+
+function catalogVisibilityEpochHeaders(req: Request) {
+  const epoch = catalogVisibilityEpochs.get(req);
+  return epoch ? { "X-Norva-Visibility-Epoch": epoch } : {};
 }
 
 function recordOrEmpty(value: unknown): JsonRecord {

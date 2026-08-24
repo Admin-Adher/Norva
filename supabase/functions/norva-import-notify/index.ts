@@ -82,16 +82,19 @@ function firstNameOf(user: { user_metadata?: Record<string, unknown>; email?: st
 async function providerStats(db: SupabaseClient, sourceIds: string[], withCounts: boolean): Promise<ProviderStat[]> {
   const out: ProviderStat[] = [];
   for (const sourceId of sourceIds) {
-    const { data: src } = await db.from("cloud_sources").select("display_name").eq("id", sourceId).maybeSingle();
+    const { data: src } = await db.from("cloud_catalog_visible_sources").select("display_name").eq("id", sourceId).maybeSingle();
+    // Import lifecycle notifications are user-facing. A staging/replaced/hidden
+    // source must not leak through a digest even if an old worker enqueued it.
+    if (!src) continue;
     const name = String((src as { display_name?: string } | null)?.display_name ?? "Your provider");
     const stat: ProviderStat = { name };
     if (withCounts) {
       for (const [key, type] of [["movies", "movie"], ["series", "series"]] as const) {
-        const { count } = await db.from("cloud_media_items").select("id", { count: "exact", head: true })
+        const { count } = await db.from("cloud_catalog_visible_media_items").select("id", { count: "exact", head: true })
           .eq("source_id", sourceId).eq("item_type", type);
         stat[key] = count ?? 0;
       }
-      const { count: live } = await db.from("cloud_media_items").select("id", { count: "exact", head: true })
+      const { count: live } = await db.from("cloud_catalog_visible_media_items").select("id", { count: "exact", head: true })
         .eq("source_id", sourceId).not("item_type", "in", "(movie,series)");
       stat.channels = live ?? 0;
     }
@@ -348,6 +351,10 @@ async function runDigest(db: SupabaseClient): Promise<Record<string, number>> {
 
       const sourceIds = [...new Set(claim.source_ids.map(String).filter(Boolean))];
       const providers = await providerStats(db, sourceIds, claim.kind === "import_completed");
+      if (providers.length === 0) {
+        await skipDelivery(claim, "source is no longer catalog-visible", email);
+        continue;
+      }
       const rendered = renderFor(claim.kind, firstNameOf(u?.user ?? null), providers);
       if (!rendered) {
         await skipDelivery(claim, `unsupported notification kind: ${claim.kind}`, email);

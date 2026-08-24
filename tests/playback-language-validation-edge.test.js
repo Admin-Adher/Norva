@@ -551,7 +551,7 @@ test('exact Gateway VOD profile, signed size and index fingerprint fail closed',
     '\nasync function assertLanguageValidationIdle(',
   );
 
-  assert.match(profile, /from\("cloud_title_variants"\)/);
+  assert.match(profile, /from\("cloud_catalog_visible_title_variants"\)/);
   assert.match(profile, /eq\("user_id", userId\)/);
   assert.match(profile, /eq\("source_id", sourceId\)/);
   assert.match(profile, /eq\("external_id", itemId\)/);

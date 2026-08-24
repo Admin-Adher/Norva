@@ -253,6 +253,8 @@ function sourceErrorText(source: JsonRecord): string {
 
 async function collectOpsSourceErrors(): Promise<{ count: number; detail: string } | null> {
   const { data: sources, error } = await admin
+    // Operator health must include hidden/staging/replaced sources. This is an
+    // internal service-role diagnostic, not a user-facing catalog projection.
     .from("cloud_sources")
     .select("display_name, sync_status, sync_error, user_id, config_hint")
     .is("deleted_at", null);

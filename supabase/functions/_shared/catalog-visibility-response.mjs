@@ -4,6 +4,9 @@ const latestBoundEpochsByUser = new Map();
 const LATEST_BOUND_EPOCHS_MAX = 1_024;
 
 export const CATALOG_VISIBILITY_EPOCH_HEADER = "X-Norva-Visibility-Epoch";
+export const CATALOG_USER_VISIBILITY_EPOCH_HEADER = "X-Norva-User-Visibility-Epoch";
+export const CATALOG_GLOBAL_VISIBILITY_EPOCH_HEADER = "X-Norva-Global-Visibility-Epoch";
+export const CATALOG_CACHE_EPOCH_CONTRACT_HEADER = "X-Norva-Catalog-Cache-Contract";
 export const CATALOG_VISIBILITY_EPOCH_CHANGED = "CATALOG_VISIBILITY_EPOCH_CHANGED";
 export const CATALOG_VISIBILITY_MUTATION_OUTCOME_UNKNOWN =
   "CATALOG_VISIBILITY_MUTATION_OUTCOME_UNKNOWN";
@@ -83,18 +86,18 @@ const PUBLIC_EDGE_ERROR_CODES = new Set([
 export async function bindCatalogVisibilityEpoch(req, userId, db) {
   const normalizedUserId = String(userId ?? "").trim();
   if (!normalizedUserId) throw new Error("Catalog visibility user is missing");
-  const epoch = await readCatalogVisibilityEpoch(db, normalizedUserId);
-  bindings.set(req, { userId: normalizedUserId, boundEpoch: epoch });
+  const snapshot = await readCatalogVisibilityEpoch(db, normalizedUserId);
+  bindings.set(req, { userId: normalizedUserId, ...snapshot });
   const previous = latestBoundEpochsByUser.get(normalizedUserId);
-  if (!previous || BigInt(epoch) >= BigInt(previous)) {
+  if (!previous || cacheSnapshotAtLeast(snapshot, previous)) {
     latestBoundEpochsByUser.delete(normalizedUserId);
-    latestBoundEpochsByUser.set(normalizedUserId, epoch);
+    latestBoundEpochsByUser.set(normalizedUserId, snapshot);
     if (latestBoundEpochsByUser.size > LATEST_BOUND_EPOCHS_MAX) {
       const oldest = latestBoundEpochsByUser.keys().next().value;
       if (oldest !== undefined) latestBoundEpochsByUser.delete(oldest);
     }
   }
-  return epoch;
+  return snapshot.userEpoch;
 }
 
 /**
@@ -107,16 +110,19 @@ export async function bindCatalogVisibilityEpoch(req, userId, db) {
 export async function acknowledgeCatalogVisibilityEpochMutation(req, db) {
   const binding = bindings.get(req);
   if (!binding) throw new Error("Catalog visibility request is not bound");
-  const epoch = await readCatalogVisibilityEpoch(db, binding.userId);
+  const snapshot = await readCatalogVisibilityEpoch(db, binding.userId);
   // Source create/toggle/delete each commit exactly one synchronous epoch bump.
   // A larger jump proves another cutover raced the mutation before this read;
   // never bless that later generation as if it belonged to this request.
-  if (BigInt(epoch) !== BigInt(binding.boundEpoch) + 1n) {
+  if (
+    BigInt(snapshot.userEpoch) !== BigInt(binding.userEpoch) + 1n ||
+    snapshot.globalEpoch !== binding.globalEpoch
+  ) {
     acknowledgedMutationEpochs.delete(req);
     return null;
   }
-  acknowledgedMutationEpochs.set(req, epoch);
-  return epoch;
+  acknowledgedMutationEpochs.set(req, snapshot);
+  return snapshot.userEpoch;
 }
 
 /**
@@ -151,9 +157,9 @@ export async function finalizeCatalogVisibilityResponse(
     }, null, true);
   }
 
-  if (currentEpoch !== binding.boundEpoch) {
+  if (currentEpoch.cacheEpoch !== binding.cacheEpoch) {
     const acknowledgedEpoch = acknowledgedMutationEpochs.get(req);
-    if (acknowledgedEpoch === currentEpoch) {
+    if (acknowledgedEpoch?.cacheEpoch === currentEpoch.cacheEpoch) {
       return responseWithVisibilityEpoch(publicResponse, currentEpoch);
     }
 
@@ -174,15 +180,19 @@ export async function finalizeCatalogVisibilityResponse(
 }
 
 export function catalogVisibilityEpochHeaders(req) {
-  const epoch = acknowledgedMutationEpochs.get(req) ?? bindings.get(req)?.boundEpoch;
-  return epoch ? { [CATALOG_VISIBILITY_EPOCH_HEADER]: epoch } : {};
+  const epoch = acknowledgedMutationEpochs.get(req) ?? bindings.get(req);
+  return epoch ? catalogCacheEpochHeaders(epoch) : {};
 }
 
 // Internal cache keys must be scoped to the same visibility generation as the
 // request. A cache populated before a cutover is otherwise stale even when the
 // request's start/end epoch checks both observe the new generation.
 export function boundCatalogVisibilityEpoch(req) {
-  return bindings.get(req)?.boundEpoch ?? null;
+  return bindings.get(req)?.userEpoch ?? null;
+}
+
+export function boundCatalogCacheEpoch(req) {
+  return bindings.get(req)?.cacheEpoch ?? null;
 }
 
 // Deep catalog builders do not all carry the Request object. They may use the
@@ -190,7 +200,11 @@ export function boundCatalogVisibilityEpoch(req) {
 // Epochs are monotone per user; an older concurrent request can never move this
 // value backwards, and its final response is still rejected by the end guard.
 export function latestBoundCatalogVisibilityEpoch(userId) {
-  return latestBoundEpochsByUser.get(String(userId ?? "").trim()) ?? null;
+  return latestBoundEpochsByUser.get(String(userId ?? "").trim())?.userEpoch ?? null;
+}
+
+export function latestBoundCatalogCacheEpoch(userId) {
+  return latestBoundEpochsByUser.get(String(userId ?? "").trim())?.cacheEpoch ?? null;
 }
 
 /** Build a bounded public envelope before a handler catch creates a Response. */
@@ -233,26 +247,52 @@ export function publicEdgeErrorLog(error, status, payload) {
 }
 
 async function readCatalogVisibilityEpoch(db, userId) {
-  const { data, error } = await db.rpc("norva_user_catalog_visibility_epoch", {
+  const { data, error } = await db.rpc("norva_catalog_cache_epoch_v2", {
     p_user_id: userId,
   });
   if (error) throw new Error(String(error.message ?? "Catalog visibility epoch lookup failed"));
 
-  // The migration creates a row on the first lifecycle write. Before then, the
-  // database function returns generation 1 as the immutable empty baseline.
-  const epoch = String(data ?? 1).trim();
-  if (!/^[1-9]\d*$/.test(epoch)) throw new Error("Invalid catalog visibility epoch");
-  return epoch;
+  const record = data && typeof data === "object" && !Array.isArray(data) ? data : null;
+  const globalEpoch = String(record?.globalEpoch ?? "").trim();
+  const userEpoch = String(record?.userEpoch ?? "").trim();
+  const cacheEpoch = String(record?.cacheEpoch ?? "").trim();
+  if (
+    record?.contract !== "catalog-cache-epoch-v2" ||
+    !/^[1-9]\d*$/.test(globalEpoch) ||
+    !/^[1-9]\d*$/.test(userEpoch) ||
+    cacheEpoch !== `v2.${globalEpoch}.${userEpoch}`
+  ) throw new Error("Invalid catalog visibility epoch");
+  return { globalEpoch, userEpoch, cacheEpoch };
 }
 
 function responseWithVisibilityEpoch(response, epoch) {
   const headers = new Headers(response.headers);
-  headers.set(CATALOG_VISIBILITY_EPOCH_HEADER, epoch);
+  for (const [name, value] of Object.entries(catalogCacheEpochHeaders(epoch))) {
+    headers.set(name, value);
+  }
   return new Response(response.body, {
     status: response.status,
     statusText: response.statusText,
     headers,
   });
+}
+
+function catalogCacheEpochHeaders(snapshot) {
+  return {
+    [CATALOG_VISIBILITY_EPOCH_HEADER]: snapshot.cacheEpoch,
+    [CATALOG_USER_VISIBILITY_EPOCH_HEADER]: snapshot.userEpoch,
+    [CATALOG_GLOBAL_VISIBILITY_EPOCH_HEADER]: snapshot.globalEpoch,
+    [CATALOG_CACHE_EPOCH_CONTRACT_HEADER]: "v2",
+  };
+}
+
+function cacheSnapshotAtLeast(next, current) {
+  try {
+    return BigInt(next.globalEpoch) >= BigInt(current.globalEpoch) &&
+      BigInt(next.userEpoch) >= BigInt(current.userEpoch);
+  } catch (_) {
+    return false;
+  }
 }
 
 async function sanitizeAuthenticatedErrorResponse(response) {
@@ -313,8 +353,16 @@ function catalogVisibilityErrorResponse(
   const headers = new Headers(corsHeaders(req));
   headers.set("Content-Type", "application/json; charset=utf-8");
   headers.set("Cache-Control", "no-store");
-  if (epoch) headers.set(CATALOG_VISIBILITY_EPOCH_HEADER, epoch);
-  else headers.delete(CATALOG_VISIBILITY_EPOCH_HEADER);
+  if (epoch) {
+    for (const [name, value] of Object.entries(catalogCacheEpochHeaders(epoch))) {
+      headers.set(name, value);
+    }
+  } else {
+    headers.delete(CATALOG_VISIBILITY_EPOCH_HEADER);
+    headers.delete(CATALOG_USER_VISIBILITY_EPOCH_HEADER);
+    headers.delete(CATALOG_GLOBAL_VISIBILITY_EPOCH_HEADER);
+    headers.delete(CATALOG_CACHE_EPOCH_CONTRACT_HEADER);
+  }
   if (retryable) headers.set("Retry-After", "0");
   return new Response(JSON.stringify(payload), { status, headers });
 }

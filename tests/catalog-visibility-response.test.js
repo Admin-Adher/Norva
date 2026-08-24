@@ -31,14 +31,23 @@ function sequencedDb(...outcomes) {
       const outcome = outcomes[Math.min(index, outcomes.length - 1)];
       index += 1;
       if (outcome instanceof Error) return { data: null, error: { message: outcome.message } };
-      return { data: outcome, error: null };
+      return { data: typeof outcome === 'object' ? outcome : epoch(1, outcome), error: null };
     },
+  };
+}
+
+function epoch(globalEpoch, userEpoch) {
+  return {
+    contract: 'catalog-cache-epoch-v2',
+    globalEpoch: String(globalEpoch),
+    userEpoch: String(userEpoch),
+    cacheEpoch: `v2.${globalEpoch}.${userEpoch}`,
   };
 }
 
 const corsHeaders = () => ({
   'Access-Control-Allow-Origin': 'https://norva.tv',
-  'Access-Control-Expose-Headers': 'x-norva-visibility-epoch',
+  'Access-Control-Expose-Headers': 'x-norva-visibility-epoch, x-norva-user-visibility-epoch, x-norva-global-visibility-epoch, x-norva-catalog-cache-contract',
 });
 
 async function jsonBody(response) {
@@ -54,15 +63,19 @@ test('deep cache scopes track the latest bound epoch without moving backwards', 
 
   await api.bindCatalogVisibilityEpoch(first, userId, sequencedDb(7));
   assert.equal(api.boundCatalogVisibilityEpoch(first), '7');
+  assert.equal(api.boundCatalogCacheEpoch(first), 'v2.1.7');
   assert.equal(api.latestBoundCatalogVisibilityEpoch(userId), '7');
+  assert.equal(api.latestBoundCatalogCacheEpoch(userId), 'v2.1.7');
 
   await api.bindCatalogVisibilityEpoch(newest, userId, sequencedDb(9));
   assert.equal(api.boundCatalogVisibilityEpoch(newest), '9');
   assert.equal(api.latestBoundCatalogVisibilityEpoch(userId), '9');
+  assert.equal(api.latestBoundCatalogCacheEpoch(userId), 'v2.1.9');
 
   await api.bindCatalogVisibilityEpoch(olderRace, userId, sequencedDb(8));
   assert.equal(api.boundCatalogVisibilityEpoch(olderRace), '8');
   assert.equal(api.latestBoundCatalogVisibilityEpoch(userId), '9');
+  assert.equal(api.latestBoundCatalogCacheEpoch(userId), 'v2.1.9');
 });
 
 test('stable authenticated reads are rechecked immediately and retain their cache contract', async () => {
@@ -82,13 +95,16 @@ test('stable authenticated reads are rechecked immediately and retain their cach
   );
 
   assert.equal(response.status, 200);
-  assert.equal(response.headers.get('x-norva-visibility-epoch'), '7');
+  assert.equal(response.headers.get('x-norva-visibility-epoch'), 'v2.1.7');
+  assert.equal(response.headers.get('x-norva-user-visibility-epoch'), '7');
+  assert.equal(response.headers.get('x-norva-global-visibility-epoch'), '1');
+  assert.equal(response.headers.get('x-norva-catalog-cache-contract'), 'v2');
   assert.equal(response.headers.get('cache-control'), 'private, max-age=30');
   assert.deepEqual(await jsonBody(response), { items: [1] });
   assert.equal(db.calls.length, 2);
   assert.deepEqual(db.calls.map((call) => call.name), [
-    'norva_user_catalog_visibility_epoch',
-    'norva_user_catalog_visibility_epoch',
+    'norva_catalog_cache_epoch_v2',
+    'norva_catalog_cache_epoch_v2',
   ]);
 });
 
@@ -107,11 +123,31 @@ test('a read spanning a cutover drops the stale body and returns a retryable cur
   const payload = await jsonBody(response);
 
   assert.equal(response.status, 409);
-  assert.equal(response.headers.get('x-norva-visibility-epoch'), '13');
+  assert.equal(response.headers.get('x-norva-visibility-epoch'), 'v2.1.13');
   assert.equal(response.headers.get('retry-after'), '0');
   assert.equal(response.headers.get('cache-control'), 'no-store');
   assert.equal(payload.details.code, api.CATALOG_VISIBILITY_EPOCH_CHANGED);
   assert.doesNotMatch(JSON.stringify(payload), /secretOldCatalogBody/);
+});
+
+test('a global policy cutover invalidates a response even when the account epoch is unchanged', async () => {
+  const api = await helper();
+  const req = new Request('https://edge.test/home/rails', { method: 'GET' });
+  const db = sequencedDb(epoch(4, 12), epoch(5, 12));
+  await api.bindCatalogVisibilityEpoch(req, 'user-global-cutover', db);
+
+  const response = await api.finalizeCatalogVisibilityResponse(
+    req,
+    new Response(JSON.stringify({ oldPolicyBody: true }), { status: 200 }),
+    db,
+    { service: 'test', corsHeaders },
+  );
+  const payload = await jsonBody(response);
+
+  assert.equal(response.status, 409);
+  assert.equal(response.headers.get('x-norva-visibility-epoch'), 'v2.5.12');
+  assert.equal(payload.details.code, api.CATALOG_VISIBILITY_EPOCH_CHANGED);
+  assert.doesNotMatch(JSON.stringify(payload), /oldPolicyBody/);
 });
 
 test('an unacknowledged mutation spanning a cutover reports an ambiguous outcome without retry permission', async () => {
@@ -132,7 +168,7 @@ test('an unacknowledged mutation spanning a cutover reports an ambiguous outcome
 
   assert.equal(mutationExecutions, 1, 'the response guard must never execute or retry a mutation');
   assert.equal(response.status, 409);
-  assert.equal(response.headers.get('x-norva-visibility-epoch'), '22');
+  assert.equal(response.headers.get('x-norva-visibility-epoch'), 'v2.1.22');
   assert.equal(response.headers.has('retry-after'), false);
   assert.equal(payload.details.code, api.CATALOG_VISIBILITY_MUTATION_OUTCOME_UNKNOWN);
   assert.doesNotMatch(JSON.stringify(payload), /already-committed/);
@@ -153,7 +189,7 @@ test('an explicitly acknowledged source visibility mutation returns once at its 
   );
 
   assert.equal(response.status, 200);
-  assert.equal(response.headers.get('x-norva-visibility-epoch'), '31');
+  assert.equal(response.headers.get('x-norva-visibility-epoch'), 'v2.1.31');
   assert.deepEqual(await jsonBody(response), { success: true });
   assert.equal(db.calls.length, 3);
 });
@@ -174,7 +210,7 @@ test('a cutover after mutation acknowledgement is still rejected as an ambiguous
   const payload = await jsonBody(response);
 
   assert.equal(response.status, 409);
-  assert.equal(response.headers.get('x-norva-visibility-epoch'), '42');
+  assert.equal(response.headers.get('x-norva-visibility-epoch'), 'v2.1.42');
   assert.equal(response.headers.has('retry-after'), false);
   assert.equal(payload.details.code, api.CATALOG_VISIBILITY_MUTATION_OUTCOME_UNKNOWN);
 });
@@ -196,10 +232,32 @@ test('a plus-two jump before acknowledgement cannot be mistaken for the mutation
 
   assert.equal(acknowledged, null);
   assert.equal(response.status, 409);
-  assert.equal(response.headers.get('x-norva-visibility-epoch'), '82');
+  assert.equal(response.headers.get('x-norva-visibility-epoch'), 'v2.1.82');
   assert.equal(response.headers.has('retry-after'), false);
   assert.equal(payload.details.code, api.CATALOG_VISIBILITY_MUTATION_OUTCOME_UNKNOWN);
   assert.doesNotMatch(JSON.stringify(payload), /stale/);
+});
+
+test('a global cutover racing mutation acknowledgement is never blessed as that mutation', async () => {
+  const api = await helper();
+  const req = new Request('https://edge.test/sources/source-a/toggle', { method: 'POST' });
+  const db = sequencedDb(epoch(2, 30), epoch(3, 31), epoch(3, 31));
+  await api.bindCatalogVisibilityEpoch(req, 'user-global-mutation-race', db);
+  const acknowledged = await api.acknowledgeCatalogVisibilityEpochMutation(req, db);
+
+  const response = await api.finalizeCatalogVisibilityResponse(
+    req,
+    new Response(JSON.stringify({ success: true, stalePolicy: true }), { status: 200 }),
+    db,
+    { service: 'test', corsHeaders },
+  );
+  const payload = await jsonBody(response);
+
+  assert.equal(acknowledged, null);
+  assert.equal(response.status, 409);
+  assert.equal(response.headers.get('x-norva-visibility-epoch'), 'v2.3.31');
+  assert.equal(payload.details.code, api.CATALOG_VISIBILITY_MUTATION_OUTCOME_UNKNOWN);
+  assert.doesNotMatch(JSON.stringify(payload), /stalePolicy/);
 });
 
 test('a failed final lookup fails closed without reusing the stale bound epoch', async () => {
@@ -250,7 +308,7 @@ test('authenticated error envelopes strip provider, gateway, and database payloa
   const serialized = JSON.stringify(payload);
 
   assert.equal(response.status, 502);
-  assert.equal(response.headers.get('x-norva-visibility-epoch'), '60');
+  assert.equal(response.headers.get('x-norva-visibility-epoch'), 'v2.1.60');
   assert.deepEqual(payload, {
     error: 'Service temporarily unavailable',
     details: {

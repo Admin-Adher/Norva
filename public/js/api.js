@@ -252,6 +252,96 @@ const CloudAdapter = (() => {
     let pageCache = new Map();
     let liveCatalogCache = new Map();
     let homeRailCache = new Map();
+    let lastVisibilityEpoch = '';
+
+    function normalizeVisibilityEpoch(value) {
+        if (value === undefined || value === null) return '';
+        const normalized = String(value).trim();
+        return /^\d+$/.test(normalized) || /^v2\.[1-9]\d*\.[1-9]\d*$/.test(normalized)
+            ? normalized
+            : '';
+    }
+
+    function visibilityEpochFromPayload(payload) {
+        if (!payload || typeof payload !== 'object') return '';
+        for (const candidate of [
+            payload.visibilityEpoch,
+            payload.visibility_epoch,
+            payload.meta?.visibilityEpoch,
+            payload.meta?.visibility_epoch,
+            payload.catalog?.visibilityEpoch,
+            payload.catalog?.visibility_epoch,
+            payload.sources?.visibilityEpoch,
+            payload.sources?.visibility_epoch
+        ]) {
+            const normalized = normalizeVisibilityEpoch(candidate);
+            if (normalized) return normalized;
+        }
+        return '';
+    }
+
+    function parsedVisibilityEpoch(value) {
+        if (/^\d+$/.test(value)) return { version: 1, global: 0n, user: BigInt(value) };
+        const match = /^v2\.([1-9]\d*)\.([1-9]\d*)$/.exec(value);
+        return match ? { version: 2, global: BigInt(match[1]), user: BigInt(match[2]) } : null;
+    }
+
+    function isOlderVisibilityEpoch(next, current) {
+        const nextEpoch = parsedVisibilityEpoch(next);
+        const currentEpoch = parsedVisibilityEpoch(current);
+        if (!nextEpoch || !currentEpoch) return false;
+        if (nextEpoch.version !== currentEpoch.version) return nextEpoch.version < currentEpoch.version;
+        return nextEpoch.global < currentEpoch.global || nextEpoch.user < currentEpoch.user;
+    }
+
+    function clearPersistentCatalogCaches() {
+        try {
+            if (window.NorvaCatalogCache?.clearAll) {
+                window.NorvaCatalogCache.clearAll();
+                return;
+            }
+            storageKeys(localStorage)
+                .filter(key => key.indexOf('norva-cc:') === 0)
+                .forEach(key => localStorage.removeItem(key));
+        } catch (_) { /* best-effort */ }
+    }
+
+    function syncVisibilityEpoch(payload = null) {
+        let cloudEpoch = '';
+        try { cloudEpoch = normalizeVisibilityEpoch(window.NorvaCloud?.catalogVisibility?.epoch?.()); } catch (_) { /* noop */ }
+        // cloudApi has already applied the monotonicity guard to response/header
+        // epochs, so prefer its resolved generation over a stale caller payload.
+        const next = cloudEpoch || visibilityEpochFromPayload(payload);
+        if (!next || next === lastVisibilityEpoch || isOlderVisibilityEpoch(next, lastVisibilityEpoch)) {
+            return lastVisibilityEpoch || next || '';
+        }
+        lastVisibilityEpoch = next;
+        sourcesCache = [];
+        clearMediaCaches();
+        clearPersistentCatalogCaches();
+        return lastVisibilityEpoch;
+    }
+
+    function visibilityCacheEpoch(payload = null) {
+        return syncVisibilityEpoch(payload) || '';
+    }
+
+    function stampVisibilityEpoch(value, payload) {
+        const epoch = normalizeVisibilityEpoch(
+            window.NorvaCloud?.catalogVisibility?.epochFor?.(payload)
+        ) || visibilityEpochFromPayload(payload);
+        if (value && typeof value === 'object' && epoch) {
+            try {
+                Object.defineProperty(value, '_norvaVisibilityEpoch', {
+                    value: epoch,
+                    configurable: false,
+                    enumerable: false,
+                    writable: false
+                });
+            } catch (_) { /* fail closed at the persistent-cache boundary */ }
+        }
+        return value;
+    }
 
     function readAliases() {
         try {
@@ -303,6 +393,11 @@ const CloudAdapter = (() => {
         const cloudId = source.id;
         const id = localSourceId(cloudId);
         const providerHost = config.serverHost || config.playlistHost || '';
+        const visibilityEpoch = normalizeVisibilityEpoch(source.visibility_epoch ?? source.visibilityEpoch);
+        const managementEnabled = typeof source.enabled === 'boolean'
+            ? source.enabled
+            : source.revoked !== true;
+        const catalogVisible = source.catalog_visible !== false && source.catalogVisible !== false;
         return {
             ...source,
             id,
@@ -317,9 +412,19 @@ const CloudAdapter = (() => {
             providerHost,
             serverHost: config.serverHost || '',
             playlistHost: config.playlistHost || '',
-            username: config.username || source.username || '',
+            // Provider account identifiers remain server-side. Settings only
+            // needs to know that a password is stored, never the login value.
+            username: '',
             hasPassword: Boolean(config.hasPassword),
-            enabled: source.revoked !== true,
+            // Keep the owner's pause bit separate from catalog eligibility.
+            // Generic catalog surfaces consume `enabled`; Settings can still
+            // inspect `managementEnabled` for a provider-hidden source.
+            managementEnabled,
+            sourceEnabled: managementEnabled,
+            catalogVisible,
+            catalog_visible: catalogVisible,
+            enabled: managementEnabled && catalogVisible,
+            ...(visibilityEpoch ? { visibility_epoch: visibilityEpoch, visibilityEpoch } : {}),
             sync_status: source.sync_status || source.syncStatus || 'idle',
             sync_error: source.sync_error || source.syncError || '',
             last_sync: source.last_synced_at || source.lastSyncedAt || null,
@@ -341,6 +446,7 @@ const CloudAdapter = (() => {
         if (!payload || !Array.isArray(payload.sources)) {
             throw new Error('Unexpected /sources response shape');
         }
+        syncVisibilityEpoch(payload);
         sourcesCache = payload.sources.map(normalizeSource);
         return sourcesCache;
     }
@@ -350,6 +456,248 @@ const CloudAdapter = (() => {
         pageCache.clear();
         liveCatalogCache.clear();
         homeRailCache.clear();
+    }
+
+    function sourceReference(value) {
+        if (value === undefined || value === null) return '';
+        return String(value).trim();
+    }
+
+    function storageKeys(storage) {
+        const keys = [];
+        try {
+            for (let index = 0; index < Number(storage?.length || 0); index += 1) {
+                const key = storage.key(index);
+                if (key != null) keys.push(String(key));
+            }
+            if (!keys.length) {
+                Object.keys(storage || {}).forEach(key => {
+                    if (typeof storage[key] !== 'function') keys.push(key);
+                });
+            }
+        } catch (_) { /* storage unavailable */ }
+        return [...new Set(keys)];
+    }
+
+    function findAliasCloudId(aliases, reference) {
+        const ref = sourceReference(reference);
+        if (!ref) return '';
+        if (Object.prototype.hasOwnProperty.call(aliases, ref)) return ref;
+        const match = Object.entries(aliases).find(([, localId]) => sourceReference(localId) === ref);
+        if (match) return match[0];
+        return ref.includes('-') ? ref : '';
+    }
+
+    function nextLocalAlias(aliases) {
+        const used = Object.values(aliases).map(Number).filter(Number.isFinite);
+        return Math.max(900000, ...used) + 1;
+    }
+
+    function updateJsonStorage(storage, key, transform) {
+        try {
+            const raw = storage.getItem(key);
+            if (raw == null) return false;
+            let parsed;
+            try { parsed = JSON.parse(raw); } catch (_) {
+                storage.removeItem(key);
+                return true;
+            }
+            const next = transform(parsed);
+            if (next === undefined || next === null) storage.removeItem(key);
+            else storage.setItem(key, JSON.stringify(next));
+            return true;
+        } catch (_) {
+            return false;
+        }
+    }
+
+    function clearMapEntriesForReferences(storageKey, references) {
+        updateJsonStorage(localStorage, storageKey, (value) => {
+            const map = value && typeof value === 'object' && !Array.isArray(value) ? { ...value } : {};
+            references.forEach(reference => { delete map[reference]; });
+            return map;
+        });
+    }
+
+    function clearLiveIndexedDbReferences(references, clearAll = false) {
+        if (typeof indexedDB === 'undefined' || !indexedDB?.open) return Promise.resolve(false);
+        return new Promise((resolve) => {
+            let settled = false;
+            const finish = (value) => {
+                if (settled) return;
+                settled = true;
+                resolve(value);
+            };
+            let request;
+            try { request = indexedDB.open('norva-live-cache'); } catch (_) { finish(false); return; }
+            request.onerror = () => finish(false);
+            request.onsuccess = () => {
+                const db = request.result;
+                try {
+                    if (!db?.objectStoreNames?.contains?.('catalogs')) {
+                        try { db?.close?.(); } catch (_) { /* noop */ }
+                        finish(false);
+                        return;
+                    }
+                    const tx = db.transaction('catalogs', 'readwrite');
+                    const store = tx.objectStore('catalogs');
+                    if (clearAll) {
+                        store.clear();
+                    } else {
+                        const cursorRequest = store.openCursor();
+                        cursorRequest.onsuccess = () => {
+                            const cursor = cursorRequest.result;
+                            if (!cursor) return;
+                            const entry = cursor.value || {};
+                            const sourceId = sourceReference(entry.sourceId ?? entry.source_id);
+                            const key = sourceReference(entry.key);
+                            const matches = references.has(sourceId)
+                                || [...references].some(reference => key.includes(`:${reference}:`));
+                            if (matches) cursor.delete();
+                            cursor.continue();
+                        };
+                    }
+                    tx.oncomplete = () => { try { db.close(); } catch (_) { /* noop */ } finish(true); };
+                    tx.onerror = () => { try { db.close(); } catch (_) { /* noop */ } finish(false); };
+                    tx.onabort = () => { try { db.close(); } catch (_) { /* noop */ } finish(false); };
+                } catch (_) {
+                    try { db?.close?.(); } catch (__) { /* noop */ }
+                    finish(false);
+                }
+            };
+        });
+    }
+
+    async function replaceSourceReferences(oldSourceId, newSourceId, visibilityEpoch = null) {
+        const oldReference = sourceReference(oldSourceId);
+        const newReference = sourceReference(newSourceId);
+        const aliases = readAliases();
+        const oldCloudId = findAliasCloudId(aliases, oldReference);
+        const newCloudId = findAliasCloudId(aliases, newReference);
+        const alreadyRemapped = Boolean(oldReference && newReference && oldCloudId && oldCloudId === newCloudId);
+        const oldAlias = sourceReference(oldCloudId ? aliases[oldCloudId] : (/^\d+$/.test(oldReference) ? oldReference : ''));
+        const existingNewAlias = sourceReference(newCloudId ? aliases[newCloudId] : (/^\d+$/.test(newReference) ? newReference : ''));
+        let targetAlias = oldAlias || existingNewAlias;
+        let exactRemap = Boolean(oldReference && newReference);
+
+        if (newCloudId) {
+            if (!targetAlias) targetAlias = sourceReference(nextLocalAlias(aliases));
+            if (oldCloudId && oldCloudId !== newCloudId) delete aliases[oldCloudId];
+            aliases[newCloudId] = /^\d+$/.test(targetAlias) ? Number(targetAlias) : targetAlias;
+            try { writeAliases(aliases); } catch (_) { exactRemap = false; }
+        } else if (!targetAlias && /^\d+$/.test(newReference)) {
+            targetAlias = newReference;
+        } else if (!newCloudId && !/^\d+$/.test(newReference)) {
+            exactRemap = false;
+        }
+
+        if (!exactRemap && oldCloudId) {
+            delete aliases[oldCloudId];
+            try { writeAliases(aliases); } catch (_) { /* filters and caches still fail closed below */ }
+        }
+
+        const oldReferences = new Set((alreadyRemapped ? [] : [oldReference, oldCloudId, oldAlias]).filter(Boolean));
+        const newReferences = new Set([newReference, newCloudId, targetAlias, existingNewAlias].filter(Boolean));
+        const cacheReferences = new Set([...oldReferences, ...newReferences]);
+        const displacedNewAlias = existingNewAlias && existingNewAlias !== targetAlias ? existingNewAlias : '';
+        const staleItemReferences = new Set([...oldReferences, displacedNewAlias].filter(Boolean));
+        const sourceSelectionsToRemap = new Set([...staleItemReferences, newCloudId, newReference].filter(Boolean));
+        const matchesStaleItem = (value) => staleItemReferences.has(sourceReference(value));
+        const matchesSourceSelection = (value) => sourceSelectionsToRemap.has(sourceReference(value));
+        const replacementReference = targetAlias || newCloudId || newReference;
+
+        // Source/category filters are durable and account-scoped. Preserve an exact
+        // source selection through the stable local alias, but drop category ids:
+        // category identity cannot be proven equivalent across providers.
+        for (const key of storageKeys(localStorage)) {
+            if (key.startsWith('norva-filters-v2-') || key === 'norva-filters-movies' || key === 'norva-filters-series') {
+                updateJsonStorage(localStorage, key, (value) => {
+                    const filters = value && typeof value === 'object' && !Array.isArray(value) ? { ...value } : {};
+                    const selectedSource = sourceReference(filters.source);
+                    const sourceSelectionChanged = !exactRemap || !selectedSource || matchesSourceSelection(selectedSource);
+                    if (!exactRemap) filters.source = '';
+                    else if (matchesSourceSelection(selectedSource)) filters.source = replacementReference;
+                    if (sourceSelectionChanged) {
+                        if (Array.isArray(filters.categories)) filters.categories = [];
+                        if (Object.prototype.hasOwnProperty.call(filters, 'category')) filters.category = '';
+                        if (Object.prototype.hasOwnProperty.call(filters, 'categoryId')) filters.categoryId = '';
+                    }
+                    return filters;
+                });
+            }
+        }
+
+        // Item ids are provider-scoped, so recents/resume/version choices cannot be
+        // remapped safely from A to B. Remove only A when identified; malformed calls
+        // clear the whole structure rather than risk relaunching stale playback.
+        updateJsonStorage(localStorage, 'norva-recent-channels', (value) => {
+            if (!exactRemap) return [];
+            return (Array.isArray(value) ? value : []).filter(item => !matchesStaleItem(item?.sourceId ?? item?.source_id));
+        });
+        updateJsonStorage(localStorage, 'norva_last_live_channel_v1', (value) => {
+            if (!exactRemap || matchesStaleItem(value?.sourceId ?? value?.source_id)) return null;
+            return value;
+        });
+        updateJsonStorage(localStorage, 'norva.series.versionChoice', (value) => {
+            if (!exactRemap) return {};
+            const choices = value && typeof value === 'object' && !Array.isArray(value) ? { ...value } : {};
+            Object.entries(choices).forEach(([key, choice]) => {
+                if (matchesStaleItem(choice?.sourceId ?? choice?.source_id)) delete choices[key];
+            });
+            return choices;
+        });
+        updateJsonStorage(localStorage, 'norva-resume-pos-v1', (value) => {
+            if (!exactRemap) return {};
+            const positions = value && typeof value === 'object' && !Array.isArray(value) ? { ...value } : {};
+            Object.keys(positions).forEach(key => {
+                if ([...staleItemReferences].some(reference => key.startsWith(`${reference}:`))) delete positions[key];
+            });
+            return positions;
+        });
+        updateJsonStorage(sessionStorage, 'norva-watch-resume-v1', (value) => {
+            if (!exactRemap || matchesStaleItem(value?.content?.sourceId ?? value?.content?.source_id)) return null;
+            return value;
+        });
+        updateJsonStorage(sessionStorage, 'norva-watch-error-refresh-v1', (value) => {
+            const key = sourceReference(value?.key);
+            if (!exactRemap || [...staleItemReferences].some(reference => key.startsWith(`${reference}:`))) return null;
+            return value;
+        });
+
+        try { localStorage.removeItem('norva_live_guide_group'); } catch (_) { /* best-effort */ }
+        for (const key of storageKeys(localStorage)) {
+            if (key.startsWith('norva-subtitle-offset:')
+                && [...staleItemReferences].some(reference => key.startsWith(`norva-subtitle-offset:${reference}:`))) {
+                try { localStorage.removeItem(key); } catch (_) { /* best-effort */ }
+            }
+            if (key.startsWith('norva-facets4-') || key.startsWith('norva-cc:')) {
+                try { localStorage.removeItem(key); } catch (_) { /* best-effort */ }
+            }
+        }
+
+        clearMapEntriesForReferences(CLOUD_BLOCK_KEY, cacheReferences);
+        clearMapEntriesForReferences(LIVE_BLOCK_KEY, cacheReferences);
+        _recentLiveFails = _recentLiveFails.filter(failure => !cacheReferences.has(sourceReference(failure?.src)));
+
+        sourcesCache = [];
+        clearMediaCaches();
+        clearPersistentCatalogCaches();
+        try { API?._seriesInfoCache?.clear?.(); } catch (_) { /* noop */ }
+        try { API?._seriesInfoInflight?.clear?.(); } catch (_) { /* noop */ }
+        try { API?._shortEpgCooldown?.clear?.(); } catch (_) { /* noop */ }
+
+        try { window.NorvaCloud?.catalogVisibility?.invalidate?.(visibilityEpoch); } catch (_) { /* noop */ }
+        const resolvedEpoch = syncVisibilityEpoch({ visibilityEpoch });
+        await clearLiveIndexedDbReferences(staleItemReferences, !exactRemap);
+
+        return {
+            success: true,
+            remapped: exactRemap,
+            oldSourceId: oldReference || null,
+            newSourceId: newReference || null,
+            localSourceId: replacementReference || null,
+            visibilityEpoch: resolvedEpoch || null
+        };
     }
 
     // Resolved synopsis language — folded into the catalog cache keys so a language change
@@ -458,7 +806,14 @@ const CloudAdapter = (() => {
 
     async function listAllMedia({ sourceId, type, q } = {}) {
         const cloudSourceId = sourceId ? await resolveSourceId(sourceId) : '';
-        const cacheKey = JSON.stringify({ cloudSourceId, type, q: q || '', lang: contentLang() });
+        const mediaCacheKey = () => JSON.stringify({
+            cloudSourceId,
+            type,
+            q: q || '',
+            lang: contentLang(),
+            visibilityEpoch: visibilityCacheEpoch()
+        });
+        const cacheKey = mediaCacheKey();
         if (mediaCache.has(cacheKey)) return mediaCache.get(cacheKey);
 
         const pageSize = 1000;
@@ -474,6 +829,7 @@ const CloudAdapter = (() => {
                 limit: pageSize,
                 offset
             });
+            syncVisibilityEpoch(payload);
             const items = payload.items || [];
             let added = 0;
             for (const item of items) {
@@ -490,7 +846,7 @@ const CloudAdapter = (() => {
         }
 
         const mapped = all.map(item => normalizeMediaItem(item, localSourceId(item.source_id || item.sourceId || cloudSourceId)));
-        mediaCache.set(cacheKey, mapped);
+        mediaCache.set(mediaCacheKey(), mapped);
         return mapped;
     }
 
@@ -498,7 +854,7 @@ const CloudAdapter = (() => {
         const cloudSourceId = sourceId ? await resolveSourceId(sourceId) : '';
         const normalizedLimit = Math.max(1, Math.min(1000, Number.parseInt(limit, 10) || 50));
         const normalizedOffset = Math.max(0, Number.parseInt(offset, 10) || 0);
-        const cacheKey = JSON.stringify({
+        const pageCacheKey = () => JSON.stringify({
             cloudSourceId,
             type: type || '',
             q: q || '',
@@ -509,8 +865,10 @@ const CloudAdapter = (() => {
             addedDays: addedDays || '',
             lang: contentLang(),
             limit: normalizedLimit,
-            offset: normalizedOffset
+            offset: normalizedOffset,
+            visibilityEpoch: visibilityCacheEpoch()
         });
+        const cacheKey = pageCacheKey();
         const cached = pageCache.get(cacheKey);
         if (cached && cached.expiresAt > Date.now()) return cached.page;
 
@@ -527,6 +885,7 @@ const CloudAdapter = (() => {
             limit: normalizedLimit,
             offset: normalizedOffset
         });
+        syncVisibilityEpoch(payload);
         const items = (payload.items || []).map(item => normalizeMediaItem(item, localSourceId(item.source_id || item.sourceId || cloudSourceId)));
         const page = {
             items,
@@ -539,7 +898,7 @@ const CloudAdapter = (() => {
             offset: payload.offset ?? normalizedOffset,
             hasMore: payload.hasMore ?? items.length === normalizedLimit
         };
-        pageCache.set(cacheKey, {
+        pageCache.set(pageCacheKey(), {
             expiresAt: Date.now() + PAGE_CACHE_TTL_MS,
             page
         });
@@ -564,7 +923,7 @@ const CloudAdapter = (() => {
     async function getLiveLogicalCatalog({ sourceId, categoryId, country = '', q = '', limit = '', offset = '', includeVariants = true } = {}) {
         country = String(country || activeContentRegion()).toUpperCase();
         const cloudSourceId = sourceId ? await resolveSourceId(sourceId) : '';
-        const cacheKey = JSON.stringify({
+        const liveCacheKey = () => JSON.stringify({
             cloudSourceId,
             categoryId: categoryId || '',
             country,
@@ -572,8 +931,10 @@ const CloudAdapter = (() => {
             q: q || '',
             limit: limit || '',
             offset: offset || '',
-            includeVariants: includeVariants ? 1 : 0
+            includeVariants: includeVariants ? 1 : 0,
+            visibilityEpoch: visibilityCacheEpoch()
         });
+        const cacheKey = liveCacheKey();
         const cached = liveCatalogCache.get(cacheKey);
         if (cached && cached.expiresAt > Date.now()) return cached.payload;
 
@@ -586,7 +947,8 @@ const CloudAdapter = (() => {
             offset: offset || '',
             includeVariants: includeVariants ? '1' : '0'
         });
-        liveCatalogCache.set(cacheKey, {
+        syncVisibilityEpoch(payload);
+        liveCatalogCache.set(liveCacheKey(), {
             expiresAt: Date.now() + PAGE_CACHE_TTL_MS,
             payload
         });
@@ -596,12 +958,12 @@ const CloudAdapter = (() => {
     async function listLiveLogicalCategories({ sourceId, country = '' } = {}) {
         country = String(country || activeContentRegion()).toUpperCase();
         const payload = await getLiveLogicalCatalog({ sourceId, country, includeVariants: false });
-        return (payload.groups || []).map(group => ({
+        return stampVisibilityEpoch((payload.groups || []).map(group => ({
             category_id: String(group.category_id || group.id || 'uncategorized'),
             category_name: group.category_name || group.name || 'Uncategorized',
             name: group.category_name || group.name || 'Uncategorized',
             sourceId
-        }));
+        })), payload);
     }
 
     async function listLiveLogicalChannels({
@@ -623,20 +985,22 @@ const CloudAdapter = (() => {
             offset,
             includeVariants
         });
-        return (payload.channels || []).map(channel =>
+        return stampVisibilityEpoch((payload.channels || []).map(channel =>
             normalizeLogicalLiveChannel(channel, sourceId, { includeVariants })
-        );
+        ), payload);
     }
 
     async function getHomeRails({ type = '', limit = 12, fresh = '' } = {}) {
         const normalizedType = type ? cloudTypeFromLocal(type) : '';
         const normalizedLimit = Math.max(1, Math.min(50, Number.parseInt(limit, 10) || 12));
-        const cacheKey = JSON.stringify({
+        const railCacheKey = () => JSON.stringify({
             profile: profileCacheScope(),
             type: normalizedType,
             limit: normalizedLimit,
-            lang: contentLang()
+            lang: contentLang(),
+            visibilityEpoch: visibilityCacheEpoch()
         });
+        const cacheKey = railCacheKey();
         const freshToken = String(fresh || '').trim();
         if (!freshToken) {
             const cached = homeRailCache.get(cacheKey);
@@ -648,7 +1012,8 @@ const CloudAdapter = (() => {
             limit: normalizedLimit,
             ...(freshToken ? { fresh: freshToken } : {})
         });
-        homeRailCache.set(cacheKey, {
+        syncVisibilityEpoch(payload);
+        homeRailCache.set(railCacheKey(), {
             expiresAt: Date.now() + PAGE_CACHE_TTL_MS,
             payload
         });
@@ -658,13 +1023,15 @@ const CloudAdapter = (() => {
     async function getGenreRails({ type = '', limit = 18 } = {}) {
         const normalizedType = type ? cloudTypeFromLocal(type) : 'movie';
         const normalizedLimit = Math.max(1, Math.min(50, Number.parseInt(limit, 10) || 18));
-        const cacheKey = JSON.stringify({
+        const genreRailCacheKey = () => JSON.stringify({
             profile: profileCacheScope(),
             genre: true,
             type: normalizedType,
             limit: normalizedLimit,
-            lang: contentLang()
+            lang: contentLang(),
+            visibilityEpoch: visibilityCacheEpoch()
         });
+        const cacheKey = genreRailCacheKey();
         const cached = homeRailCache.get(cacheKey);
         if (cached && cached.expiresAt > Date.now()) return cached.payload;
 
@@ -672,7 +1039,8 @@ const CloudAdapter = (() => {
             type: normalizedType,
             limit: normalizedLimit
         });
-        homeRailCache.set(cacheKey, {
+        syncVisibilityEpoch(payload);
+        homeRailCache.set(genreRailCacheKey(), {
             expiresAt: Date.now() + PAGE_CACHE_TTL_MS,
             payload
         });
@@ -2281,24 +2649,28 @@ const CloudAdapter = (() => {
         cloudLiveApi,
         cloudHomeApi,
         cloudPlaybackApi,
+        replaceSourceReferences,
+        visibilityEpoch: () => visibilityCacheEpoch() || null,
         // Cache invalidators — exposed so the file-scope API.media wrappers can reach the
         // IIFE-internal caches (otherwise they'd throw a swallowed ReferenceError).
         clearMediaCaches,
         clearRailCache: () => { try { homeRailCache.clear(); } catch (_) { /* noop */ } },
         // A cheap, synchronous signature of the account's catalog state, used to version
-        // the persistent first-screen cache: the max catalog_version across the loaded
-        // sources (bumped server-side on each completed sync). A cache snapshot stamped
-        // with an older signature is dropped rather than painted, so a re-synced catalog
-        // never flashes pre-sync content on a cold load. Returns null when sources aren't
-        // loaded yet (cache then falls back to its time-only TTL — no invalidation).
+        // the persistent first-screen cache: max catalog_version plus the server-provided
+        // visibility epoch when available. A cache snapshot stamped with an older signature
+        // is dropped rather than painted after either a sync or an A→B switch.
         catalogSignature: () => {
             try {
-                if (!Array.isArray(sourcesCache) || !sourcesCache.length) return null;
+                const visibilityEpoch = visibilityCacheEpoch();
+                if (!Array.isArray(sourcesCache) || !sourcesCache.length) {
+                    return visibilityEpoch ? `visibility:${visibilityEpoch}` : null;
+                }
                 let max = 0;
                 for (const s of sourcesCache) {
                     const v = Number(s?.catalog_version ?? s?.catalogVersion ?? 0);
                     if (Number.isFinite(v) && v > max) max = v;
                 }
+                if (visibilityEpoch) return `catalog:${max || 0}|visibility:${visibilityEpoch}`;
                 return max || null;
             } catch (_) { return null; }
         }
@@ -2337,9 +2709,16 @@ const API = {
         return (_shouldUseCloud() && raw.includes('-')) ? CloudAdapter.localSourceId(raw) : cloudId;
     },
 
-    // Synchronous catalog signature (max catalog_version across loaded sources) used to
-    // version the persistent first-screen cache; null outside cloud mode / before load.
+    // Reconcile all browser-side physical-source references after an atomic A→B
+    // promotion. Safe to retry: exact source aliases stay stable while provider-
+    // scoped item/category references and stale caches are only removed.
+    replaceSourceReferences: (oldSourceId, newSourceId, visibilityEpoch = null) =>
+        CloudAdapter.replaceSourceReferences(oldSourceId, newSourceId, visibilityEpoch),
+
+    // Synchronous catalog signature (catalog version + visibility epoch when known) used
+    // to version the persistent first-screen cache; null outside cloud mode / before load.
     catalogSignature: () => (_shouldUseCloud() ? CloudAdapter.catalogSignature() : null),
+    catalogVisibilityEpoch: () => (_shouldUseCloud() ? CloudAdapter.visibilityEpoch() : null),
 
     /**
      * Make API request
@@ -2484,10 +2863,18 @@ const API = {
             const source = String(params?.source || params?.sourceId || '').trim().toLowerCase();
             const sourceScope = source || 'all';
             const scope = _catalogFacetCacheScope();
+            const facetCacheKey = () => {
+                let visibilityEpoch = '';
+                try { visibilityEpoch = String(CloudAdapter.visibilityEpoch?.() || ''); } catch (_) { /* legacy adapter */ }
+                return scope
+                    ? `norva-facets4-${scope}-${type}-${sourceScope}${visibilityEpoch ? `-visibility-${encodeURIComponent(visibilityEpoch)}` : ''}`
+                    : '';
+            };
             // v4 is account + media type + provider scoped. Without the provider in
             // the key, switching AtlasPro -> Ferran could show the previous
-            // provider's languages for up to 60 seconds.
-            const key = scope ? `norva-facets4-${scope}-${type}-${sourceScope}` : '';
+            // provider's languages for up to 60 seconds. A server-provided visibility
+            // epoch additionally prevents a pre-switch result from surviving promotion.
+            const key = facetCacheKey();
             const TTL = 60000; // 60s, aligned with the server-side facet memo
             const nonEmpty = (v) => v && ((Array.isArray(v.audio) && v.audio.length) || (Array.isArray(v.subtitles) && v.subtitles.length));
             try {
@@ -2511,8 +2898,9 @@ const API = {
                 try {
                     // Cache ONLY a non-empty result. An empty set is treated as "not ready" so the
                     // next call re-fetches instead of serving a stale blank menu.
-                    if (key && nonEmpty(value)) {
-                        localStorage.setItem(key, JSON.stringify({ exp: Date.now() + TTL, value }));
+                    const writeKey = facetCacheKey();
+                    if (writeKey && nonEmpty(value)) {
+                        localStorage.setItem(writeKey, JSON.stringify({ exp: Date.now() + TTL, value }));
                     }
                 } catch (_) { /* ignore quota */ }
                 return value;

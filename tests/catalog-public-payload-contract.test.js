@@ -676,16 +676,16 @@ test('authenticated catalog HTTP responses cannot remain browser-fresh across an
   assert.match(catalogRequest, /request\('GET', route, null, catalogOptions\)/);
 
   const facets = section(CATALOG, 'async function listLanguageFacets(', '\nasync function recordObservedLanguages(');
-  assert.match(facets, /boundCatalogVisibilityEpoch\(req\)/);
-  assert.match(facets, /`\$\{userId\}:\$\{visibilityEpoch\}:\$\{itemType\}:\$\{sourceId \|\| "all"\}`/);
+  assert.match(facets, /boundCatalogCacheEpoch\(req\)/);
+  assert.match(facets, /`\$\{userId\}:\$\{cacheEpoch\}:\$\{itemType\}:\$\{sourceId \|\| "all"\}`/);
 
   const progress = section(CATALOG, 'async function getEnrichmentProgress(', '\n// ==================== TMDB extras');
-  assert.match(progress, /boundCatalogVisibilityEpoch\(req\)/);
-  assert.match(progress, /`\$\{userId\}:\$\{visibilityEpoch\}`/);
+  assert.match(progress, /boundCatalogCacheEpoch\(req\)/);
+  assert.match(progress, /`\$\{userId\}:\$\{cacheEpoch\}`/);
 
   const sourceContext = section(CATALOG, 'async function sourceCatalogContextFor(', '\nasync function sourceHealthFor(');
-  assert.match(sourceContext, /latestBoundCatalogVisibilityEpoch\(userId\)/);
-  assert.match(sourceContext, /`\$\{userId\}:\$\{visibilityEpoch\}`/);
+  assert.match(sourceContext, /latestBoundCatalogCacheEpoch\(userId\)/);
+  assert.match(sourceContext, /`\$\{userId\}:\$\{cacheEpoch\}`/);
   assert.match(sourceContext, /key\.startsWith\(`\$\{userId\}:`\)/);
   assert.match(sourceContext, /SOURCE_CATALOG_CONTEXT_CACHE_MAX/);
 });

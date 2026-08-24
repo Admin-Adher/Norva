@@ -475,6 +475,16 @@ test('post-switch completion is fenced by a durable active refresh proof', () =>
   const checkpoint = section('async function checkpointActiveRefresh', '\nfunction cleanActiveSpoolToken');
   assert.match(checkpoint, /norva_checkpoint_active_catalog_title_refresh/);
   assert.match(checkpoint, /p_requeue: requeue/);
+  const digestBinding = refresh.indexOf('const boundCheckpoint = await checkpointActiveRefresh');
+  const firstActiveWriter = refresh.indexOf('norva_upsert_active_catalog_refresh_categories');
+  assert.ok(digestBinding >= 0 && firstActiveWriter >= 0 && digestBinding < firstActiveWriter,
+    'the signed spool digest is checkpointed before any active catalogue writer');
+  const pruneContinuation = refresh.slice(
+    refresh.indexOf('if (state.actionComplete)'),
+    refresh.indexOf('const page = await gatewayMetadataPage'),
+  );
+  assert.match(pruneContinuation, /let visibilityEpoch = fence\.p_user_visibility_epoch/);
+  assert.match(pruneContinuation, /visibilityEpoch = activeVisibilityEpoch\(\s*pruned/);
   const gateway = section('async function gatewayMetadataPage', '\nasync function gatewayRequestJson');
   assert.match(gateway, /assertProviderReadAllowed/);
   const rpc = section('async function workerRpc', '\nasync function settleJob');

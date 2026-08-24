@@ -8,6 +8,25 @@ import { BUCKET_ORDER, bucketLabel } from "../_shared/genre-taxonomy.ts";
 import { buildI18nFromTmdbTranslations } from "../_shared/vod-title-projection.ts";
 import { verifyUserJwtLocally } from "../_shared/local-auth.ts";
 import { getEntitlementDecision, limitNumber } from "../_shared/entitlements.ts";
+import {
+  bindCatalogVisibilityEpoch as bindCatalogVisibilityEpochShared,
+  boundCatalogCacheEpoch,
+  boundCatalogVisibilityEpoch,
+  catalogVisibilityEpochHeaders,
+  finalizeCatalogVisibilityResponse,
+  latestBoundCatalogCacheEpoch,
+  latestBoundCatalogVisibilityEpoch,
+  publicEdgeErrorLog,
+  publicEdgeErrorPayload,
+} from "../_shared/catalog-visibility-response.mjs";
+import {
+  sanitizeCatalogMediaItem,
+  sanitizeCatalogMediaPayload,
+  sanitizeCatalogVariant,
+  sanitizeLiveChannel,
+  sanitizeLiveCatalogPayload,
+  sanitizeLiveVariant,
+} from "../_shared/catalog-public-view.mjs";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -42,6 +61,7 @@ const HOME_RAIL_VARIANT_LIMIT = 10;
 // small prevents genre rails with many selected titles from exceeding proxy URL
 // limits before their variants can be materialized.
 const TITLE_VARIANT_QUERY_CHUNK = 50;
+const VISIBLE_TITLE_ID_PAGE_SIZE = 1_000;
 
 if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
   throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
@@ -60,6 +80,15 @@ Deno.serve(async (req) => {
     return new Response(null, { status: 204, headers: corsHeaders(req) });
   }
 
+  return await finalizeCatalogVisibilityResponse(
+    req,
+    await handleRequest(req),
+    db,
+    { service: "norva-catalog", corsHeaders },
+  );
+});
+
+async function handleRequest(req: Request): Promise<Response> {
   try {
     const url = new URL(req.url);
     const segments = routeSegments(url.pathname);
@@ -80,27 +109,32 @@ Deno.serve(async (req) => {
     // enrichment crons run; the client hides the bar once it's essentially complete.
     if (req.method === "GET" && segments[0] === "enrichment-progress") {
       const userId = await requireUserId(req);
-      return json(req, await getEnrichmentProgress(userId));
+      return json(req, await getEnrichmentProgress(req, userId));
     }
 
     if (req.method === "GET" && isLiveLogicalChannelsRoute(segments)) {
       const userId = await requireUserId(req);
-      return json(req, await listLiveLogicalChannels(url, userId));
+      return json(req, sanitizeLiveCatalogPayload(await listLiveLogicalChannels(url, userId)));
     }
 
     if (req.method === "GET" && isLiveChannelVariantsRoute(segments)) {
       const userId = await requireUserId(req);
-      return json(req, await listLiveChannelVariants(url, userId, liveChannelIdFromRoute(segments)));
+      return json(
+        req,
+        sanitizeLiveCatalogPayload(
+          await listLiveChannelVariants(url, userId, liveChannelIdFromRoute(segments)),
+        ),
+      );
     }
 
     if (req.method === "GET" && isHomeRailsRoute(segments)) {
       const userId = await requireUserId(req);
-      return jsonCached(req, await listHomeRails(req, url, userId), 60);
+      return jsonCached(req, sanitizeCatalogMediaPayload(await listHomeRails(req, url, userId)), 60);
     }
 
     if (req.method === "GET" && (segments[0] === "media-items" || (segments[0] === "device" && segments[1] === "media-items"))) {
       const userId = await requireUserId(req);
-      return jsonCached(req, await listMediaItems(url, userId), 30);
+      return jsonCached(req, sanitizeCatalogMediaPayload(await listMediaItems(url, userId)), 30);
     }
 
     if (req.method === "GET" && (segments[0] === "media-categories" || (segments[0] === "device" && segments[1] === "media-categories"))) {
@@ -110,12 +144,12 @@ Deno.serve(async (req) => {
 
     if (req.method === "GET" && (segments[0] === "media-genre-rails" || (segments[0] === "device" && segments[1] === "media-genre-rails"))) {
       const userId = await requireUserId(req);
-      return jsonCached(req, await listGenreRails(req, url, userId), 60);
+      return jsonCached(req, sanitizeCatalogMediaPayload(await listGenreRails(req, url, userId)), 60);
     }
 
     if (req.method === "GET" && (segments[0] === "media-genre-items" || (segments[0] === "device" && segments[1] === "media-genre-items"))) {
       const userId = await requireUserId(req);
-      return jsonCached(req, await listGenreItems(req, url, userId), 30);
+      return jsonCached(req, sanitizeCatalogMediaPayload(await listGenreItems(req, url, userId)), 30);
     }
 
     if (req.method === "GET" && (segments[0] === "media-genre-summary" || (segments[0] === "device" && segments[1] === "media-genre-summary"))) {
@@ -125,7 +159,7 @@ Deno.serve(async (req) => {
 
     if (req.method === "GET" && (segments[0] === "media-language-facets" || (segments[0] === "device" && segments[1] === "media-language-facets"))) {
       const userId = await requireUserId(req);
-      return jsonCached(req, await listLanguageFacets(url, userId), 60);
+      return jsonCached(req, await listLanguageFacets(req, url, userId), 60);
     }
 
     if (req.method === "POST" && (segments[0] === "media-observed-languages" || (segments[0] === "device" && segments[1] === "media-observed-languages"))) {
@@ -161,28 +195,31 @@ Deno.serve(async (req) => {
     throw new HttpError(404, "Route not found");
   } catch (error) {
     const status = error instanceof HttpError ? error.status : 500;
-    const message = error instanceof Error ? error.message : "Unexpected error";
-    const details = error instanceof HttpError ? error.details : undefined;
-    console.error("[norva-catalog]", status, message, details ?? "");
-    return json(req, { error: message, details }, status);
+    const payload = publicEdgeErrorPayload(error, status, {
+      unavailableMessage: "Norva Catalog is temporarily unavailable",
+    });
+    console.error("[norva-catalog]", publicEdgeErrorLog(error, status, payload));
+    return json(req, payload, status);
   }
-});
+}
 
 // Short in-isolate cache for the enrichment-progress aggregate. The onboarding /
 // enrichment bar polls this every ~2s; uncached that hammered the DB with the COUNT
-// below. Keyed by user, 30s TTL, bounded size.
+// below. Keyed by user + bound visibility epoch, 30s TTL, bounded size.
 type EnrichmentProgress = { total: number; enriched: number; percent: number; settled: boolean };
 const enrichmentProgressCache = new Map<string, { at: number; value: EnrichmentProgress }>();
 const ENRICHMENT_PROGRESS_TTL_MS = 30_000;
 
-async function getEnrichmentProgress(userId: string): Promise<EnrichmentProgress> {
-  const cached = enrichmentProgressCache.get(userId);
+async function getEnrichmentProgress(req: Request, userId: string): Promise<EnrichmentProgress> {
+  const cacheEpoch = boundCatalogCacheEpoch(req);
+  const cacheKey = cacheEpoch ? `${userId}:${cacheEpoch}` : null;
+  const cached = cacheKey ? enrichmentProgressCache.get(cacheKey) : null;
   if (cached && Date.now() - cached.at < ENRICHMENT_PROGRESS_TTL_MS) return cached.value;
   // ESTIMATED counts (planner row-estimate via EXPLAIN, ~ms) instead of exact full
   // scans. On a freshly churned cloud_titles an EXACT count of ~68k rows ran 80-100s and,
   // polled repeatedly, piled up until Postgres refused new connections and logins 504'd
   // (a real outage). An approximate % is fine for a progress bar.
-  const titlesBase = () => db.from("cloud_titles").select("id", { count: "estimated", head: true })
+  const titlesBase = () => db.from("cloud_catalog_visible_titles").select("id", { count: "estimated", head: true })
     .eq("user_id", userId).in("item_type", ["movie", "series"]).gt("variant_count", 0);
   const [totalRes, enrichedRes, searchState, revalState] = await Promise.all([
     titlesBase(),
@@ -212,14 +249,16 @@ async function getEnrichmentProgress(userId: string): Promise<EnrichmentProgress
   // per-user settle signal needs a per-user enrichment cursor — tracked as a follow-up.)
   const settled = searchDone && revalDone && (total === 0 || enriched > 0);
   const result: EnrichmentProgress = { total, enriched, percent, settled };
-  enrichmentProgressCache.set(userId, { at: Date.now(), value: result });
-  if (enrichmentProgressCache.size > 512) {
-    let oldestKey: string | null = null;
-    let oldestAt = Infinity;
-    for (const [k, v] of enrichmentProgressCache) {
-      if (v.at < oldestAt) { oldestAt = v.at; oldestKey = k; }
+  if (cacheKey) {
+    enrichmentProgressCache.set(cacheKey, { at: Date.now(), value: result });
+    if (enrichmentProgressCache.size > 512) {
+      let oldestKey: string | null = null;
+      let oldestAt = Infinity;
+      for (const [k, v] of enrichmentProgressCache) {
+        if (v.at < oldestAt) { oldestAt = v.at; oldestKey = k; }
+      }
+      if (oldestKey) enrichmentProgressCache.delete(oldestKey);
     }
-    if (oldestKey) enrichmentProgressCache.delete(oldestKey);
   }
   return result;
 }
@@ -587,19 +626,31 @@ async function requireUserId(req: Request) {
   if (!token) throw new HttpError(401, "Missing bearer token");
 
   if (token.startsWith("nv_dev_")) {
-    return requireDeviceUserId(token);
+    return await bindCatalogVisibilityEpoch(req, await requireDeviceUserId(token));
   }
 
   // Vérif locale d'abord (voir _shared/local-auth.ts) — GoTrue n'est consulté
   // que si le verdict est indécidable localement (alg asymétrique, secret absent).
   const local = await verifyUserJwtLocally(token);
-  if (local !== "invalid" && local !== "fallback") return local.id;
+  if (local !== "invalid" && local !== "fallback") {
+    return await bindCatalogVisibilityEpoch(req, local.id);
+  }
   if (local === "fallback") {
     const { data, error } = await db.auth.getUser(token);
-    if (!error && data.user?.id) return data.user.id;
+    if (!error && data.user?.id) return await bindCatalogVisibilityEpoch(req, data.user.id);
   }
 
-  return requireDeviceUserId(token);
+  return await bindCatalogVisibilityEpoch(req, await requireDeviceUserId(token));
+}
+
+async function bindCatalogVisibilityEpoch(req: Request, userId: string) {
+  try {
+    await bindCatalogVisibilityEpochShared(req, userId, db);
+  } catch (_) {
+    console.warn("[norva-catalog] catalog visibility epoch unavailable");
+    throw new HttpError(503, "Catalog visibility is temporarily unavailable");
+  }
+  return userId;
 }
 
 async function requireDeviceUserId(token: string) {
@@ -627,11 +678,15 @@ function mediaReadFromCatalog(): boolean {
 // is empty or partial. Lets the per-user cloud_media_items later drop poster/
 // backdrop/metadata/playback_hint while the grid still renders them from global.
 async function applyMediaCatalogOverlay(items: Array<Record<string, any>>, sourceId: string, userId: string) {
-  if (!items.length) return;
-  const { data: src } = await db.from("cloud_sources").select("config_hint").eq("id", sourceId).eq("user_id", userId).maybeSingle();
+  // A generation-owned row is already the exact active provider snapshot. The
+  // provider-global media cache is unversioned and may still contain A while B
+  // is the active generation, so only legacy/global rows may consult it.
+  const globalItems = items.filter((row) => !flatMediaBlocksGlobalTitleOverlay(row));
+  if (!globalItems.length) return;
+  const { data: src } = await db.from("cloud_catalog_visible_sources").select("config_hint").eq("id", sourceId).eq("user_id", userId).maybeSingle();
   const host = String((src as any)?.config_hint?.serverHost || "").trim();
   if (!host) return;
-  const ids = [...new Set(items.map((row) => String(row.external_id || "")).filter(Boolean))];
+  const ids = [...new Set(globalItems.map((row) => String(row.external_id || "")).filter(Boolean))];
   if (!ids.length) return;
   const byKey = new Map<string, Record<string, any>>();
   for (let i = 0; i < ids.length; i += 500) {
@@ -643,7 +698,7 @@ async function applyMediaCatalogOverlay(items: Array<Record<string, any>>, sourc
     for (const g of (data ?? []) as Array<Record<string, any>>) byKey.set(`${g.item_type}:${g.external_id}`, g);
   }
   if (!byKey.size) return;
-  for (const it of items) {
+  for (const it of globalItems) {
     const g = byKey.get(`${it.item_type}:${it.external_id}`);
     if (!g) continue;
     if (g.poster_url) it.poster_url = g.poster_url;
@@ -694,9 +749,15 @@ async function listMediaItems(url: URL, userId: string) {
           row.year = row.release_year ?? null;
           return row;
         });
-        await localizeMediaTitles(items, userId, lang, itemType);
         await attachMediaLanguages(items, userId, itemType, lang);
-        return { items, count: items.length, limit, offset: 0, hasMore: false };
+        await localizeMediaTitles(items, userId, lang, itemType);
+        return {
+          items: items.map(sanitizeCatalogMediaItem),
+          count: items.length,
+          limit,
+          offset: 0,
+          hasMore: false,
+        };
       }
       // RPC unavailable (pre-migration / error) → fall through to the deduped grid.
     }
@@ -741,11 +802,11 @@ async function listMediaItems(url: URL, userId: string) {
     await applyMediaCatalogOverlay(items, sourceId, userId);
   }
 
-  await localizeMediaTitles(items, userId, lang, itemType);
   await attachMediaLanguages(items, userId, itemType, lang);
+  await localizeMediaTitles(items, userId, lang, itemType);
 
   return {
-    items,
+    items: items.map(sanitizeCatalogMediaItem),
     count,
     films,
     limit,
@@ -754,13 +815,184 @@ async function listMediaItems(url: URL, userId: string) {
   };
 }
 
+// Flat media rows come directly from provider inventory and do not carry a
+// title_id. Keep the hydrated title proof out-of-band so neither provider JSON
+// nor an accidentally serialized database row can forge or expose it.
+const flatMediaGenerationTitleProof = new WeakMap<object, JsonRecord>();
+// attachMediaLanguages historically ran after localizeMediaTitles and therefore
+// let a validated catalogue translation win. The P proof must be bound first,
+// so remember that exact G outcome and keep the reordered calls byte-compatible.
+const flatMediaGlobalLocalizedTitle = new WeakSet<object>();
+
+function flatMediaGenerationId(row: Record<string, any>): string | null {
+  // Only the physical Postgres column is trusted. Provider metadata may contain
+  // arbitrary camelCase keys and must never opt a row into projection handling.
+  return stringOrNull(row.generation_id);
+}
+
+function flatMediaGenerationTitle(row: Record<string, any>): JsonRecord | null {
+  const proof = flatMediaGenerationTitleProof.get(row);
+  return proof && catalogTitleUsesGenerationPayload(proof) ? proof : null;
+}
+
+function flatMediaBlocksGlobalTitleOverlay(row: Record<string, any>): boolean {
+  // A physical generation fence is sufficient to fail closed even when the
+  // bounded title hydration RPC is unavailable or its visibility epoch moves.
+  return Boolean(flatMediaGenerationId(row) || flatMediaGenerationTitle(row));
+}
+
+function applyFlatMediaGenerationTitle(
+  row: Record<string, any>,
+  title: JsonRecord,
+  lang: string | null,
+): void {
+  const fullOverlayEnabled = catalogReadEnabled();
+  applyGenerationCatalogMetadata(title, lang, fullOverlayEnabled);
+
+  const titleMetadata = recordOrEmpty(title.metadata);
+  const itemMetadata = recordOrEmpty(row.metadata);
+  // Preserve exact provider routing/category facts, but let the active P
+  // projection own every overlapping display field.
+  row.metadata = { ...itemMetadata, ...titleMetadata };
+
+  const tmdb = recordOrEmpty(titleMetadata.tmdb);
+  const localized = lang ? recordOrEmpty(recordOrEmpty(titleMetadata.i18n)[lang]) : {};
+  const projectedTitle = stringOrNull(localized.title) ?? stringOrNull(title.title);
+  if (projectedTitle) {
+    row.title = projectedTitle;
+    row.name = projectedTitle;
+  }
+
+  const projectedOverview = boundedProviderOverview(
+    localized.overview,
+    tmdb.overview,
+    titleMetadata.overview,
+    title.__catalog_base_overview,
+  );
+  const existingOverview = boundedProviderOverview(row.overview, row.description, row.plot);
+  const resolvedOverview = stringOrNull(localized.overview)
+    ?? (fullOverlayEnabled ? projectedOverview ?? existingOverview : existingOverview ?? projectedOverview);
+  if (resolvedOverview) {
+    row.overview = resolvedOverview;
+    row.description = resolvedOverview;
+    row.plot = resolvedOverview;
+    row.tmdb = { ...recordOrEmpty(row.tmdb), ...tmdb, overview: resolvedOverview };
+  }
+
+  const poster = stringOrNull(title.poster_url);
+  const backdrop = stringOrNull(title.backdrop_url);
+  if (poster) {
+    row.poster_url = poster;
+    row.posterUrl = poster;
+    row.stream_icon = poster;
+    row.cover = poster;
+  }
+  if (backdrop) {
+    row.backdrop_url = backdrop;
+    row.backdropUrl = backdrop;
+  }
+
+  const releaseYear = title.release_year === null || title.release_year === undefined
+    ? null
+    : numberOrNull(title.release_year);
+  if (releaseYear !== null) {
+    row.release_year = releaseYear;
+    row.year = releaseYear;
+  }
+  const originalLanguage = stringOrNull(tmdb.original_language);
+  if (originalLanguage) {
+    row.original_language = originalLanguage;
+    row.originalLanguage = originalLanguage;
+  }
+  const rawRating = title.rating_num ?? tmdb.vote_average;
+  const rating = rawRating === null || rawRating === undefined ? null : numberOrNull(rawRating);
+  if (rating !== null) {
+    row.rating_num = rating;
+    row.rating = rating;
+    row.vote_average = rating;
+    row.voteAverage = rating;
+  }
+  const runtime = tmdb.runtime === null || tmdb.runtime === undefined
+    ? null
+    : numberOrNull(tmdb.runtime);
+  if (runtime !== null) {
+    row.runtime = runtime;
+    row.runtimeMinutes = runtime;
+  }
+}
+
+async function bindFlatMediaGenerationTitles(
+  items: Array<Record<string, any>>,
+  userId: string,
+  itemType: string | null,
+  visibleTitles: JsonRecord[],
+  lang: string | null,
+): Promise<void> {
+  if ((itemType !== "movie" && itemType !== "series") || !items.length || !visibleTitles.length) return;
+  const titleIds = [...new Set(visibleTitles
+    .map((title) => stringOrNull(title.id))
+    .filter((id): id is string => Boolean(id)))];
+  if (!titleIds.length) return;
+
+  let hydrated: JsonRecord[];
+  try {
+    const visibilityEpoch = requiredCatalogTitleVisibilityEpoch(userId);
+    hydrated = await hydrateVisibleCatalogTitlesByIds(userId, titleIds, visibilityEpoch, false);
+  } catch (_) {
+    // Generation-owned rows remain globally isolated by generation_id. Losing
+    // progressive title enrichment is safer than silently serving A over B.
+    return;
+  }
+
+  const candidatesByTmdb = new Map<string, JsonRecord[]>();
+  for (const title of hydrated) {
+    if (!catalogTitleUsesGenerationPayload(title)) continue;
+    const tmdbId = stringOrNull(title.provider_tmdb_id);
+    if (!tmdbId) continue;
+    const existing = candidatesByTmdb.get(tmdbId) ?? [];
+    existing.push(title);
+    candidatesByTmdb.set(tmdbId, existing);
+  }
+
+  for (const item of items) {
+    const metadata = recordOrEmpty(item.metadata);
+    const tmdbId = stringOrNull(metadata.providerTmdbId ?? metadata.provider_tmdb_id);
+    const sourceId = stringOrNull(item.source_id);
+    if (!tmdbId || !sourceId) continue;
+    const sourceCandidates = (candidatesByTmdb.get(tmdbId) ?? []).filter((title) => {
+      const visibleSourceIds = Array.isArray(title.visible_source_ids)
+        ? title.visible_source_ids.map(String)
+        : [];
+      return visibleSourceIds.includes(sourceId);
+    });
+    if (!sourceCandidates.length) continue;
+
+    const itemGenerationId = flatMediaGenerationId(item);
+    const exactGeneration = itemGenerationId
+      ? sourceCandidates.filter((title) => stringOrNull(
+        title.display_generation_id ?? title.displayGenerationId,
+      ) === itemGenerationId)
+      : [];
+    const selected = exactGeneration.length === 1
+      ? exactGeneration[0]
+      : sourceCandidates.length === 1 ? sourceCandidates[0] : null;
+    if (!selected) continue; // duplicate provider identities stay fail-closed
+    flatMediaGenerationTitleProof.set(item, selected);
+    applyFlatMediaGenerationTitle(item, selected, lang);
+  }
+}
+
 // Override each grid card's title with the user's-language title when we have one
 // (cloud_titles.metadata.i18n[lang].title) — fixes provider entries that are in a
 // different language than the user (mislabeled / multi-country providers). One
 // compact indexed lookup per page; only runs when a language is requested.
 async function localizeMediaTitles(items: Array<Record<string, any>>, userId: string, lang: string | null, itemType: string | null) {
   if (!lang || !items.length) return;
-  const tmdbIds = [...new Set(items
+  // P has already been localized from its exact hydrated projection. Only G is
+  // allowed to consult the unversioned global/per-user title lookup below.
+  const globalItems = items.filter((row) =>
+    !flatMediaBlocksGlobalTitleOverlay(row) && !flatMediaGlobalLocalizedTitle.has(row));
+  const tmdbIds = [...new Set(globalItems
     .map((row) => stringOrNull(isRecord(row.metadata) ? row.metadata.providerTmdbId : null))
     .filter((id): id is string => Boolean(id) && id !== "0"))];
   if (!tmdbIds.length) return;
@@ -772,7 +1004,7 @@ async function localizeMediaTitles(items: Array<Record<string, any>>, userId: st
   for (let i = 0; i < tmdbIds.length; i += 500) {
     const chunk = tmdbIds.slice(i, i + 500);
     let q = db
-      .from(useCatalog ? "catalog_titles" : "cloud_titles")
+      .from(useCatalog ? "catalog_titles" : "cloud_catalog_visible_titles")
       .select(`provider_tmdb_id, loc:metadata->i18n->${lang}->>title`)
       .in("provider_tmdb_id", chunk);
     q = useCatalog ? q.eq("item_type", itemType as string) : q.eq("user_id", userId);
@@ -784,7 +1016,7 @@ async function localizeMediaTitles(items: Array<Record<string, any>>, userId: st
       if (id && loc) locByTmdb.set(id, loc);
     }
   }
-  for (const row of items) {
+  for (const row of globalItems) {
     const tmdbId = stringOrNull(isRecord(row.metadata) ? row.metadata.providerTmdbId : null);
     const loc = tmdbId ? locByTmdb.get(tmdbId) : null;
     if (loc) { row.title = loc; row.name = loc; }
@@ -855,16 +1087,18 @@ async function attachMediaLanguages(
   // records tmdbValidation.valid=true. New imports reuse that validation inline.
   const catalogCandidateIds = new Set<string>();
   const weakCatalogIds = new Set<string>();
+  const visibleTitles: JsonRecord[] = [];
   for (let i = 0; i < tmdbIds.length; i += 500) {
     let query = db
-      .from("cloud_titles")
-      .select("provider_tmdb_id, audio_languages, version_languages, audio_tracks, poster_url, backdrop_url, match_status")
+      .from("cloud_catalog_visible_titles")
+      .select("id, provider_tmdb_id, audio_languages, version_languages, audio_tracks, poster_url, backdrop_url, match_status, visible_source_ids")
       .eq("user_id", userId)
       .in("provider_tmdb_id", tmdbIds.slice(i, i + 500));
     if (itemType === "movie" || itemType === "series") query = query.eq("item_type", itemType);
     const { data, error } = await query;
     if (error) return; // best-effort; never fail the grid over the badge
     for (const row of data ?? []) {
+      visibleTitles.push(row as JsonRecord);
       const id = stringOrNull((row as Record<string, unknown>).provider_tmdb_id);
       if (!id) continue;
       if (String((row as JsonRecord).match_status) === "weak") weakCatalogIds.add(id);
@@ -898,6 +1132,7 @@ async function attachMediaLanguages(
   // A duplicated provider id with even one failed title/year validation is
   // ambiguous for flat media rows (which carry no title_id). Fail closed.
   for (const id of weakCatalogIds) catalogCandidateIds.delete(id);
+  await bindFlatMediaGenerationTitles(items, userId, itemType, visibleTitles, lang);
   for (const row of items) {
     const id = stringOrNull(isRecord(row.metadata) ? row.metadata.providerTmdbId : null);
     if (!id) continue;
@@ -914,6 +1149,9 @@ async function attachMediaLanguages(
       // so titles without a crawled map fall through to the live-probe path unchanged.
       if (hit.tracks.length) { row.audio_tracks = hit.tracks; row.audioTracks = hit.tracks; }
     }
+    // P art was applied from its exact hydrated generation above. Only G may use
+    // the unmarked visible-title art map.
+    if (flatMediaBlocksGlobalTitleOverlay(row)) continue;
     // Overlay the fresh identity-table poster over the (possibly stale) grid poster.
     const art = artByTmdb.get(id);
     if (art?.poster) {
@@ -922,11 +1160,14 @@ async function attachMediaLanguages(
     }
   }
 
-  // original_language is a GLOBAL TMDB fact (not per-user, not gated by the read-cutover flag),
-  // so it's read straight from catalog_titles. The player uses it to resolve a VOSTFR/VO
-  // ("original") audio track to its real language ("Japanese"…) instead of a bare "Default".
+  // G can reuse GLOBAL TMDB facts. P derives them from its own generation-scoped
+  // catalog_metadata above and must never consult this unversioned cache.
   try {
-    const candidateIds = [...catalogCandidateIds];
+    const candidateIds = [...catalogCandidateIds].filter((candidateId) => items.some((row) => {
+      if (flatMediaBlocksGlobalTitleOverlay(row)) return false;
+      const id = stringOrNull(isRecord(row.metadata) ? row.metadata.providerTmdbId : null);
+      return id === candidateId;
+    }));
     if ((itemType !== "movie" && itemType !== "series") || !candidateIds.length) return;
     const catByTmdb = new Map<string, {
       lang: string | null;
@@ -964,13 +1205,18 @@ async function attachMediaLanguages(
       }
     }
     for (const row of items) {
+      if (flatMediaBlocksGlobalTitleOverlay(row)) continue;
       const id = stringOrNull(isRecord(row.metadata) ? row.metadata.providerTmdbId : null);
       const cat = id ? catByTmdb.get(id) : null;
       if (!cat) continue;
       if (cat.lang) { row.original_language = cat.lang; row.originalLanguage = cat.lang; }
       // Text-only global reuse remains active while the full display cutover is OFF:
       // cloud_titles.metadata is intentionally self-thinned after every new import.
-      if (cat.localizedTitle) { row.title = cat.localizedTitle; row.name = cat.localizedTitle; }
+      if (cat.localizedTitle) {
+        row.title = cat.localizedTitle;
+        row.name = cat.localizedTitle;
+        flatMediaGlobalLocalizedTitle.add(row);
+      }
       const rowTmdb = isRecord(row.tmdb) ? row.tmdb : {};
       const existingOverview = stringOrNull(rowTmdb.overview)
         ?? stringOrNull(row.overview)
@@ -1002,7 +1248,7 @@ async function listMediaCategories(url: URL, userId: string) {
   const itemType = url.searchParams.get("type");
 
   let query = db
-    .from("cloud_media_items")
+    .from("cloud_catalog_visible_media_items")
     .select("source_id,parent_external_id,subtitle,metadata")
     .eq("user_id", userId)
     .not("parent_external_id", "is", null)
@@ -1279,18 +1525,15 @@ async function listGenreSummary(req: Request, url: URL, userId: string) {
   // fallback bucket. That made a sizeable part of real provider catalogues
   // impossible to reach from the category picker ("Other" is ~10% for a typical
   // large account). Count it directly through the GIN-indexed genre_buckets
-  // column when it is absent. The optional child join keeps source-scoped counts
-  // aligned with the source selector.
+  // column when it is absent. visible_source_ids is computed only from visible
+  // variants, so source-scoped counts cannot pull staging catalogue rows in.
   if (!counts.has("autres")) {
-    const select = sourceId
-      ? "id,cloud_title_variants!inner(source_id)"
-      : "id";
-    let q: any = db.from("cloud_titles").select(select, { count: "exact", head: true })
+    let q: any = db.from("cloud_catalog_visible_titles").select("id", { count: "exact", head: true })
       .eq("user_id", userId)
       .eq("item_type", itemType)
       .gt("variant_count", 0)
       .contains("genre_buckets", ["autres"]);
-    if (sourceId) q = q.eq("cloud_title_variants.source_id", sourceId);
+    if (sourceId) q = q.contains("visible_source_ids", [sourceId]);
     const { count, error } = await q;
     if (!error && Number(count) > 0) counts.set("autres", Number(count));
   }
@@ -1304,16 +1547,13 @@ async function listGenreSummary(req: Request, url: URL, userId: string) {
     await Promise.all([...counts.keys()]
       .filter((bucketId) => !hidden.has(bucketId))
       .map(async (bucketId) => {
-        const select = sourceId
-          ? "id,cloud_title_variants!inner(source_id)"
-          : "id";
-        let q: any = db.from("cloud_titles").select(select, { count: "exact", head: true })
+        let q: any = db.from("cloud_catalog_visible_titles").select("id", { count: "exact", head: true })
           .eq("user_id", userId)
           .eq("item_type", itemType)
           .gt("variant_count", 0)
           .contains("genre_buckets", [bucketId])
           .not("genre_buckets", "ov", `{${[...hidden].join(",")}}`);
-        if (sourceId) q = q.eq("cloud_title_variants.source_id", sourceId);
+        if (sourceId) q = q.contains("visible_source_ids", [sourceId]);
         const { count, error } = await q;
         if (!error) counts.set(bucketId, Number(count) || 0);
       }));
@@ -1362,7 +1602,7 @@ async function listGenreRails(req: Request, url: URL, userId: string) {
   try {
     candidateSets = await Promise.all(candidateBuckets.map(async (bucket) => {
       let q = db
-        .from("cloud_titles")
+        .from("cloud_catalog_visible_titles")
         .select("id, genre_buckets, created_at")
         .eq("user_id", userId)
         .eq("item_type", itemType)
@@ -1443,13 +1683,12 @@ async function listGenreRails(req: Request, url: URL, userId: string) {
 
   // Batch-fetch the FULL rows only for the chosen ids (metadata detoast bounded).
   const selectedIds = [...new Set([...byBucket.values()].flat())];
-  const fullById = new Map<string, JsonRecord>();
-  for (let index = 0; index < selectedIds.length; index += TITLE_VARIANT_QUERY_CHUNK) {
-    const chunk = selectedIds.slice(index, index + TITLE_VARIANT_QUERY_CHUNK);
-    const { data, error } = await db.from("cloud_titles").select("*").eq("user_id", userId).in("id", chunk);
-    if (error) throwDb(error, "Unable to list genre rail titles");
-    for (const row of (data ?? []) as JsonRecord[]) fullById.set(String(row.id), row);
-  }
+  const fullRows = await hydrateVisibleCatalogTitlesByIds(
+    userId,
+    selectedIds,
+    requiredCatalogTitleVisibilityEpoch(userId),
+  );
+  const fullById = new Map(fullRows.map((row) => [String(row.id), row]));
   const selectedRows = selectedIds.map((id) => fullById.get(id)).filter((r): r is JsonRecord => !!r);
   const variantsByTitle = await listVariantsByTitleIds(selectedIds, userId);
   await applyCatalogOverlay(selectedRows, itemType, lang); // full or safe text-only overlay
@@ -1566,24 +1805,93 @@ function titleSubtitleLanguages(title: JsonRecord): string[] {
   return canonicalFileLanguages(raw);
 }
 // When the catalogue is scoped to one provider, the title-level arrays above
-// are too broad: they are the union of every owned variant. PostgREST embeds
-// the selected source's exact per-file observations so strict filters and the
-// language-preference sort cannot borrow a language from another provider.
+// are too broad: they are the union of every owned variant. Load exact per-file
+// observations through explicit visible-variant keys; views deliberately do
+// not rely on PostgREST embedded relationships.
 function titleSourceObservationLanguages(title: JsonRecord, key: "audio_languages" | "subtitle_languages"): string[] {
-  const variants = Array.isArray(title.cloud_title_variants)
-    ? title.cloud_title_variants as JsonRecord[]
-    : [];
-  const values: unknown[] = [];
-  for (const variant of variants) {
-    const observations = Array.isArray(variant.cloud_title_file_language_observations)
-      ? variant.cloud_title_file_language_observations as JsonRecord[]
-      : [];
-    for (const observation of observations) {
-      const languages = observation[key];
-      if (Array.isArray(languages)) values.push(...languages);
+  return canonicalFileLanguages(title[`__source_${key}`]);
+}
+
+async function attachSourceObservationLanguages(
+  titles: JsonRecord[],
+  userId: string,
+  sourceId: string,
+): Promise<void> {
+  const titleIds = [...new Set(titles.map((title) => String(title.id ?? "")).filter(Boolean))];
+  if (!titleIds.length) return;
+
+  const variantTitleById = new Map<string, string>();
+  for (let index = 0; index < titleIds.length; index += TITLE_VARIANT_QUERY_CHUNK) {
+    const { data, error } = await db
+      .from("cloud_catalog_visible_title_variants")
+      .select("id,title_id")
+      .eq("user_id", userId)
+      .eq("source_id", sourceId)
+      .in("title_id", titleIds.slice(index, index + TITLE_VARIANT_QUERY_CHUNK));
+    if (error) throwDb(error, "Unable to load source language variants");
+    for (const variant of (data ?? []) as JsonRecord[]) {
+      const variantId = String(variant.id ?? "");
+      const titleId = String(variant.title_id ?? "");
+      if (variantId && titleId) variantTitleById.set(variantId, titleId);
     }
   }
-  return canonicalFileLanguages(values);
+
+  const audioByTitle = new Map<string, unknown[]>();
+  const subtitlesByTitle = new Map<string, unknown[]>();
+  const variantIds = [...variantTitleById.keys()];
+  for (let index = 0; index < variantIds.length; index += TITLE_VARIANT_QUERY_CHUNK) {
+    const { data, error } = await db
+      .from("cloud_title_file_language_observations")
+      .select("variant_id,audio_languages,subtitle_languages")
+      .eq("user_id", userId)
+      .in("variant_id", variantIds.slice(index, index + TITLE_VARIANT_QUERY_CHUNK));
+    if (error) throwDb(error, "Unable to load source language observations");
+    for (const observation of (data ?? []) as JsonRecord[]) {
+      const titleId = variantTitleById.get(String(observation.variant_id ?? ""));
+      if (!titleId) continue;
+      const audio = audioByTitle.get(titleId) ?? [];
+      if (Array.isArray(observation.audio_languages)) audio.push(...observation.audio_languages);
+      audioByTitle.set(titleId, audio);
+      const subtitles = subtitlesByTitle.get(titleId) ?? [];
+      if (Array.isArray(observation.subtitle_languages)) subtitles.push(...observation.subtitle_languages);
+      subtitlesByTitle.set(titleId, subtitles);
+    }
+  }
+
+  for (const title of titles) {
+    const titleId = String(title.id ?? "");
+    title.__source_audio_languages = canonicalFileLanguages(audioByTitle.get(titleId) ?? []);
+    title.__source_subtitle_languages = canonicalFileLanguages(subtitlesByTitle.get(titleId) ?? []);
+  }
+}
+
+async function visibleTitleIdsBySourceLanguages(
+  userId: string,
+  itemType: "movie" | "series",
+  sourceId: string,
+  audioIso: string | null,
+  subtitleIso: string | null,
+): Promise<string[]> {
+  const titleIds = new Set<string>();
+  for (let offset = 0;; offset += VISIBLE_TITLE_ID_PAGE_SIZE) {
+    const { data, error } = await db.rpc("cloud_catalog_visible_title_ids_by_source_languages", {
+      p_user_id: userId,
+      p_item_type: itemType,
+      p_source_id: sourceId,
+      p_audio_language: audioIso,
+      p_subtitle_language: subtitleIso,
+    })
+      .order("title_id", { ascending: true })
+      .range(offset, offset + VISIBLE_TITLE_ID_PAGE_SIZE - 1);
+    if (error) throwDb(error, "Unable to filter visible source languages");
+    const rows = (data ?? []) as JsonRecord[];
+    for (const row of rows) {
+      const titleId = String(row.title_id ?? "");
+      if (titleId) titleIds.add(titleId);
+    }
+    if (rows.length < VISIBLE_TITLE_ID_PAGE_SIZE) break;
+  }
+  return [...titleIds];
 }
 // Distinct ISO-639 languages from a legacy title-level ordered map. Exact menus,
 // filters, and sorting use file_audio_languages instead.
@@ -1622,6 +1930,52 @@ function languageMatchRank(subtitleLangs: string[], audioLangs: string[], prefAu
   if (prefAudioIso && audioLangs.includes(prefAudioIso)) rank += 2;
   if (prefSubIso && subtitleLangs.includes(prefSubIso)) rank += 1;
   return rank;
+}
+
+function genreTitleSortColumn(sort: string): string {
+  return sort === "year-asc" ? "release_year" :
+    sort === "rating" ? "rating_num" :
+    sort === "added" ? "created_at" :
+    sort === "name" ? "title" :
+    sort === "year" ? "release_year" :
+    "poster_url";
+}
+
+function applyGenreTitleOrder(q: any, sort: string) {
+  return q
+    .order(genreTitleSortColumn(sort), {
+      ascending: sort === "year-asc" || sort === "name",
+      nullsFirst: false,
+    })
+    .order(sort === "default" ? "created_at" : "id", { ascending: sort !== "default" })
+    .order("id", { ascending: true });
+}
+
+function compareGenreTitleValues(left: unknown, right: unknown, ascending: boolean): number {
+  const leftMissing = left === null || left === undefined;
+  const rightMissing = right === null || right === undefined;
+  if (leftMissing || rightMissing) return leftMissing === rightMissing ? 0 : leftMissing ? 1 : -1;
+  const leftNumber = typeof left === "number" ? left : Number.NaN;
+  const rightNumber = typeof right === "number" ? right : Number.NaN;
+  const comparison = Number.isFinite(leftNumber) && Number.isFinite(rightNumber)
+    ? leftNumber - rightNumber
+    : String(left) < String(right) ? -1 : String(left) > String(right) ? 1 : 0;
+  return ascending ? comparison : -comparison;
+}
+
+function compareGenreTitles(left: JsonRecord, right: JsonRecord, sort: string): number {
+  const primaryAscending = sort === "year-asc" || sort === "name";
+  const primary = compareGenreTitleValues(
+    left[genreTitleSortColumn(sort)],
+    right[genreTitleSortColumn(sort)],
+    primaryAscending,
+  );
+  if (primary) return primary;
+  if (sort === "default") {
+    const created = compareGenreTitleValues(left.created_at, right.created_at, false);
+    if (created) return created;
+  }
+  return compareGenreTitleValues(left.id, right.id, true);
 }
 
 async function listGenreItems(req: Request, url: URL, userId: string) {
@@ -1672,11 +2026,6 @@ async function listGenreItems(req: Request, url: URL, userId: string) {
   const needsSourceLanguageEvidence = Boolean(
     sourceId && (hasStrictLanguageFilter || prefAudioIso || prefSubIso),
   );
-  const titleSelect = sourceId
-    ? needsSourceLanguageEvidence
-      ? `*,cloud_title_variants!inner(source_id,cloud_title_file_language_observations${hasStrictLanguageFilter ? "!inner" : ""}(audio_languages,subtitle_languages))`
-      : "*,cloud_title_variants!inner(source_id)"
-    : "*";
 
   const hidden = await getHiddenGenres(req, userId);
   // The bucket itself is hidden → nothing to show.
@@ -1695,7 +2044,7 @@ async function listGenreItems(req: Request, url: URL, userId: string) {
   const applyFilters = (q: any) => {
     let out = q.eq("user_id", userId).eq("item_type", itemType).gt("variant_count", 0);
     if (buckets.length) out = out.overlaps("genre_buckets", buckets);
-    if (sourceId) out = out.eq("cloud_title_variants.source_id", sourceId);
+    if (sourceId) out = out.contains("visible_source_ids", [sourceId]);
     if (hidden.size) out = out.not("genre_buckets", "ov", `{${[...hidden].join(",")}}`);
     if (search) out = out.ilike("title", `%${search}%`);
     if (yearRange) out = out.gte("release_year", yearRange.min).lte("release_year", yearRange.max);
@@ -1704,32 +2053,47 @@ async function listGenreItems(req: Request, url: URL, userId: string) {
     // Both filters use exact per-file evidence. With a selected provider, keep
     // the predicate inside that provider's variants instead of consulting the
     // title-wide union (which may contain languages owned by another source).
-    if (audioIso) {
-      out = sourceId
-        ? out.contains("cloud_title_variants.cloud_title_file_language_observations.audio_languages", [audioIso])
-        : out.contains("file_audio_languages", [audioIso]);
-    }
-    if (subIso) {
-      out = sourceId
-        ? out.contains("cloud_title_variants.cloud_title_file_language_observations.subtitle_languages", [subIso])
-        : out.contains("file_subtitle_languages", [subIso]);
-    }
+    if (audioIso && !sourceId) out = out.contains("file_audio_languages", [audioIso]);
+    if (subIso && !sourceId) out = out.contains("file_subtitle_languages", [subIso]);
     return out;
   };
 
   try {
+    const sourceLanguageTitleIds = sourceId && hasStrictLanguageFilter
+      ? await visibleTitleIdsBySourceLanguages(userId, itemType, sourceId, audioIso, subIso)
+      : null;
+    if (sourceLanguageTitleIds && !sourceLanguageTitleIds.length) {
+      return { items: [], count: 0, limit, offset, hasMore: false };
+    }
+
     // "Best for my languages" sort needs an in-memory rank over the filtered set;
     // it's bounded by the (usually language/genre-narrowed) filter. Every other
     // view uses exact SQL count + range pagination over the whole catalogue.
     if (langSort && (prefAudioIso || prefSubIso)) {
-      const { data, error } = await applyFilters(db.from("cloud_titles").select(titleSelect))
-        .order("created_at", { ascending: false })
-        .limit(candidateLimit);
-      if (error) {
-        if (isMissingMaterialization(error)) return { items: [], count: 0, limit, offset, hasMore: false };
-        throwDb(error, "Unable to list genre items");
+      let rows: JsonRecord[] = [];
+      const idBatches = sourceLanguageTitleIds
+        ? Array.from({ length: Math.ceil(sourceLanguageTitleIds.length / TITLE_VARIANT_QUERY_CHUNK) }, (_, index) =>
+          sourceLanguageTitleIds.slice(index * TITLE_VARIANT_QUERY_CHUNK, (index + 1) * TITLE_VARIANT_QUERY_CHUNK))
+        : [null];
+      for (const ids of idBatches) {
+        let query = applyFilters(db.from("cloud_catalog_visible_titles").select("*"));
+        if (ids) query = query.in("id", ids);
+        const { data, error } = await query
+          .order("created_at", { ascending: false })
+          .limit(candidateLimit);
+        if (error) {
+          if (isMissingMaterialization(error)) return { items: [], count: 0, limit, offset, hasMore: false };
+          throwDb(error, "Unable to list genre items");
+        }
+        rows.push(...((data ?? []) as JsonRecord[]));
       }
-      const ranked = ((data ?? []) as JsonRecord[])
+      rows = rows
+        .sort((left, right) => compareGenreTitleValues(left.created_at, right.created_at, false))
+        .slice(0, candidateLimit);
+      if (sourceId && needsSourceLanguageEvidence) {
+        await attachSourceObservationLanguages(rows, userId, sourceId);
+      }
+      const ranked = rows
         .map((title, index) => ({
           title,
           index,
@@ -1742,7 +2106,11 @@ async function listGenreItems(req: Request, url: URL, userId: string) {
         }))
         .sort((a, b) => b.rank - a.rank || a.index - b.index)
         .map((entry) => entry.title);
-      const pageRows = ranked.slice(offset, offset + limit);
+      const pageRows = await hydrateVisibleCatalogTitlesByIds(
+        userId,
+        ranked.slice(offset, offset + limit).map((row) => String(row.id)),
+        requiredCatalogTitleVisibilityEpoch(userId),
+      );
       const variantsByTitle = await listVariantsByTitleIds(
         pageRows.map((row) => String(row.id)),
         userId,
@@ -1759,28 +2127,46 @@ async function listGenreItems(req: Request, url: URL, userId: string) {
       };
     }
 
-    const { data, count, error } = await applyFilters(db.from("cloud_titles").select(titleSelect, { count: "exact" }))
-      .order(sort === "year-asc" ? "release_year" :
-        sort === "rating" ? "rating_num" :
-        sort === "added" ? "created_at" :
-        sort === "name" ? "title" :
-        sort === "year" ? "release_year" :
-        "poster_url", {
-        ascending: sort === "year-asc" || sort === "name",
-        nullsFirst: false,
-      })
-      // Only the default grid prioritises artwork before recency. Explicit user
-      // sorts (Newest, Recently Added, A→Z, Top Rated) must keep their requested
-      // order even inside language-filter buckets.
-      .order(sort === "default" ? "created_at" : "id", { ascending: sort !== "default" })
-      .order("id", { ascending: true })
-      .range(offset, offset + limit - 1);
-    if (error) {
-      if (isMissingMaterialization(error)) return { items: [], count: 0, limit, offset, hasMore: false };
-      throwDb(error, "Unable to list genre items");
+    let pageRows: JsonRecord[];
+    let total: number | null;
+    if (sourceLanguageTitleIds) {
+      const mergedRows: JsonRecord[] = [];
+      let exactTotal = 0;
+      const requiredRowsPerBatch = offset + limit;
+      for (let index = 0; index < sourceLanguageTitleIds.length; index += TITLE_VARIANT_QUERY_CHUNK) {
+        const ids = sourceLanguageTitleIds.slice(index, index + TITLE_VARIANT_QUERY_CHUNK);
+        const query = applyGenreTitleOrder(
+          applyFilters(db.from("cloud_catalog_visible_titles").select("*", { count: "exact" })).in("id", ids),
+          sort,
+        );
+        const { data, count, error } = await query.range(0, requiredRowsPerBatch - 1);
+        if (error) {
+          if (isMissingMaterialization(error)) return { items: [], count: 0, limit, offset, hasMore: false };
+          throwDb(error, "Unable to list genre items");
+        }
+        exactTotal += count ?? 0;
+        mergedRows.push(...((data ?? []) as JsonRecord[]));
+      }
+      mergedRows.sort((left, right) => compareGenreTitles(left, right, sort));
+      pageRows = mergedRows.slice(offset, offset + limit);
+      total = exactTotal;
+    } else {
+      const { data, count, error } = await applyGenreTitleOrder(
+        applyFilters(db.from("cloud_catalog_visible_titles").select("*", { count: "exact" })),
+        sort,
+      ).range(offset, offset + limit - 1);
+      if (error) {
+        if (isMissingMaterialization(error)) return { items: [], count: 0, limit, offset, hasMore: false };
+        throwDb(error, "Unable to list genre items");
+      }
+      pageRows = (data ?? []) as JsonRecord[];
+      total = count ?? null;
     }
-    const pageRows = (data ?? []) as JsonRecord[];
-    const total = count ?? null;
+    pageRows = await hydrateVisibleCatalogTitlesByIds(
+      userId,
+      pageRows.map((row) => String(row.id)),
+      requiredCatalogTitleVisibilityEpoch(userId),
+    );
     const variantsByTitle = await listVariantsByTitleIds(
       pageRows.map((row) => String(row.id)),
       userId,
@@ -1839,7 +2225,7 @@ function exactLanguageFacetItems(
     .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
 }
 
-async function listLanguageFacets(url: URL, userId: string) {
+async function listLanguageFacets(req: Request, url: URL, userId: string) {
   const itemType: "movie" | "series" = url.searchParams.get("type") === "series" ? "series" : "movie";
   const rawSource = (url.searchParams.get("source") || url.searchParams.get("sourceId") || "").trim();
   const sourceId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(rawSource)
@@ -1849,9 +2235,12 @@ async function listLanguageFacets(url: URL, userId: string) {
   // counts because its local/provider id was malformed or not mapped yet.
   if (rawSource && !sourceId) return { audio: [], subtitles: [] };
 
-  const cacheKey = `${userId}:${itemType}:${sourceId || "all"}`;
+  const cacheEpoch = boundCatalogCacheEpoch(req);
+  const cacheKey = cacheEpoch
+    ? `${userId}:${cacheEpoch}:${itemType}:${sourceId || "all"}`
+    : null;
   const nowMs = Date.now();
-  const hit = FACET_CACHE.get(cacheKey);
+  const hit = cacheKey ? FACET_CACHE.get(cacheKey) : null;
   if (hit && hit.exp > nowMs) {
     FACET_CACHE.delete(cacheKey); // LRU bump
     FACET_CACHE.set(cacheKey, hit);
@@ -1886,10 +2275,12 @@ async function listLanguageFacets(url: URL, userId: string) {
     }
   } catch (_) { /* leave the menus empty (falls back to the static <option>s) on any failure */ }
 
-  FACET_CACHE.set(cacheKey, { value, exp: nowMs + FACET_CACHE_TTL_MS });
-  if (FACET_CACHE.size > FACET_CACHE_MAX) {
-    const oldest = FACET_CACHE.keys().next().value; // oldest insertion = least-recently used
-    if (oldest !== undefined) FACET_CACHE.delete(oldest);
+  if (cacheKey) {
+    FACET_CACHE.set(cacheKey, { value, exp: nowMs + FACET_CACHE_TTL_MS });
+    if (FACET_CACHE.size > FACET_CACHE_MAX) {
+      const oldest = FACET_CACHE.keys().next().value; // oldest insertion = least-recently used
+      if (oldest !== undefined) FACET_CACHE.delete(oldest);
+    }
   }
   return value;
 }
@@ -1977,7 +2368,7 @@ async function recordObservedLanguages(req: Request, userId: string) {
   const hasLegacyAudioObservation = orderedTracks.length > 0 || observedCodes.length > 0;
   if (!hasLegacyAudioObservation && !hasExactSubtitleMap) return { ok: true, updated: false };
 
-  const { data: titleData, error: titleError } = await db.from("cloud_titles")
+  const { data: titleData, error: titleError } = await db.from("cloud_catalog_visible_titles")
     .select("id,item_type,variant_count,audio_languages,audio_tracks,audio_probed_at,subtitle_tracks,subtitle_probed_at")
     .eq("user_id", userId)
     .eq("id", titleId)
@@ -2002,7 +2393,7 @@ async function recordObservedLanguages(req: Request, userId: string) {
       throw new HttpError(400, "Invalid cloudSourceId");
     }
     const variantExternalId = itemType === "series" ? requestedParentExternalId : fileExternalId;
-    const { data, error } = await db.from("cloud_title_variants")
+    const { data, error } = await db.from("cloud_catalog_visible_title_variants")
       .select("id,user_id,title_id,source_id,item_type,external_id")
       .eq("user_id", userId)
       .eq("title_id", titleId)
@@ -2020,7 +2411,7 @@ async function recordObservedLanguages(req: Request, userId: string) {
     if (itemType !== "movie") {
       return { ok: true, updated: false, reason: "file_coordinates_required" };
     }
-    const { data, error } = await db.from("cloud_title_variants")
+    const { data, error } = await db.from("cloud_catalog_visible_title_variants")
       .select("id,user_id,title_id,source_id,item_type,external_id")
       .eq("user_id", userId)
       .eq("title_id", titleId)
@@ -2041,7 +2432,7 @@ async function recordObservedLanguages(req: Request, userId: string) {
   }
 
   // Check the real sibling count instead of trusting a potentially stale rollup.
-  const { data: siblingRows, error: siblingError } = await db.from("cloud_title_variants")
+  const { data: siblingRows, error: siblingError } = await db.from("cloud_catalog_visible_title_variants")
     .select("id")
     .eq("user_id", userId)
     .eq("title_id", titleId)
@@ -2108,7 +2499,11 @@ async function recordObservedLanguages(req: Request, userId: string) {
     }
   }
 
-  FACET_CACHE.delete(`${userId}:${itemType}`);
+  for (const key of FACET_CACHE.keys()) {
+    if (key.startsWith(`${userId}:`) && key.includes(`:${itemType}:`)) {
+      FACET_CACHE.delete(key);
+    }
+  }
   return {
     ok: true,
     updated: unionMerged || storedTracks || legacyLanguagesChanged,
@@ -2119,35 +2514,145 @@ async function recordObservedLanguages(req: Request, userId: string) {
   };
 }
 
+type CatalogTitleSelectorMode = "home_verified" | "home_recent";
+
+const CATALOG_TITLE_SELECTOR_MAX_PAGES = 64;
+const CATALOG_TITLE_SELECTOR_DEADLINE_MS = 45_000;
+const CATALOG_TITLE_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function catalogTitleReadUnavailable(): HttpError {
+  return new HttpError(503, "Catalog titles are temporarily unavailable");
+}
+
+function catalogTitleUuid(value: unknown): string {
+  const text = typeof value === "string" ? value : "";
+  if (!CATALOG_TITLE_UUID.test(text)) throw catalogTitleReadUnavailable();
+  return text.toLowerCase();
+}
+
+function requiredCatalogTitleVisibilityEpoch(userId: string): string {
+  const epoch = latestBoundCatalogVisibilityEpoch(userId);
+  if (!epoch || !/^[1-9][0-9]*$/.test(epoch)) throw catalogTitleReadUnavailable();
+  return epoch;
+}
+
+function catalogTitleVisibilityEpoch(value: unknown, expected: string): string {
+  const epoch = typeof value === "number" && Number.isSafeInteger(value)
+    ? String(value)
+    : typeof value === "string" ? value : "";
+  if (!/^[1-9][0-9]*$/.test(epoch) || epoch !== expected) throw catalogTitleReadUnavailable();
+  return epoch;
+}
+
+async function selectOrderedCatalogTitleIds(
+  userId: string,
+  itemType: "movie" | "series",
+  mode: CatalogTitleSelectorMode,
+  limit: number,
+  visibilityEpoch = requiredCatalogTitleVisibilityEpoch(userId),
+): Promise<string[]> {
+  if (!Number.isInteger(limit) || limit < 1 || limit > 8_000) throw catalogTitleReadUnavailable();
+  const ids: string[] = [];
+  const seen = new Set<string>();
+  let cursor: JsonRecord | null = null;
+  let pages = 0;
+  const startedAt = Date.now();
+
+  while (ids.length < limit && pages < CATALOG_TITLE_SELECTOR_MAX_PAGES
+      && Date.now() - startedAt < CATALOG_TITLE_SELECTOR_DEADLINE_MS) {
+    const pageLimit = Math.min(300, limit - ids.length);
+    const scanLimit = Math.min(1000, Math.max(pageLimit, pageLimit * 3));
+    const { data, error } = await db.rpc("norva_select_catalog_title_ordered_page", {
+      p_user_id: userId,
+      p_item_type: itemType,
+      p_mode: mode,
+      p_limit: pageLimit,
+      p_scan_limit: scanLimit,
+      p_cursor: cursor,
+      p_expected_visibility_epoch: visibilityEpoch,
+    });
+    if (error || !isRecord(data) || data.contract !== "catalog-title-selector-v2"
+        || data.mode !== mode || !Array.isArray(data.items)
+        || typeof data.complete !== "boolean") throw catalogTitleReadUnavailable();
+    catalogTitleVisibilityEpoch(data.visibilityEpoch, visibilityEpoch);
+    const returnedTitles = Number(data.returnedTitles);
+    const inspectedTitles = Number(data.inspectedTitles);
+    const returnedScanLimit = Number(data.scanLimit);
+    if (!Number.isInteger(returnedTitles) || returnedTitles !== data.items.length
+        || returnedTitles < 0 || returnedTitles > pageLimit
+        || !Number.isInteger(inspectedTitles) || inspectedTitles < returnedTitles
+        || !Number.isInteger(returnedScanLimit) || returnedScanLimit !== scanLimit) {
+      throw catalogTitleReadUnavailable();
+    }
+    for (const entry of data.items) {
+      if (!isRecord(entry)) throw catalogTitleReadUnavailable();
+      const titleId = catalogTitleUuid(entry.id);
+      if (seen.has(titleId)) throw catalogTitleReadUnavailable();
+      seen.add(titleId);
+      ids.push(titleId);
+    }
+    pages += 1;
+    if (data.complete) {
+      if (data.nextCursor !== null && data.nextCursor !== undefined) throw catalogTitleReadUnavailable();
+      return ids;
+    }
+    if (!isRecord(data.nextCursor)
+        || JSON.stringify(data.nextCursor) === JSON.stringify(cursor)) throw catalogTitleReadUnavailable();
+    cursor = data.nextCursor;
+  }
+  // Reaching the requested visible count is success. Hitting a resource bound
+  // first is fail-closed: a partial Home candidate pool would be silently biased.
+  if (ids.length >= limit) return ids.slice(0, limit);
+  throw catalogTitleReadUnavailable();
+}
+
+async function hydrateVisibleCatalogTitlesByIds(
+  userId: string,
+  titleIds: string[],
+  visibilityEpoch = requiredCatalogTitleVisibilityEpoch(userId),
+  requireAll = true,
+): Promise<JsonRecord[]> {
+  const orderedIds = [...new Set(titleIds.map(catalogTitleUuid))];
+  if (!orderedIds.length) return [];
+  const byId = new Map<string, JsonRecord>();
+  for (let index = 0; index < orderedIds.length; index += 500) {
+    const chunk = orderedIds.slice(index, index + 500);
+    const { data, error } = await db.rpc("norva_get_visible_catalog_titles_by_ids", {
+      p_user_id: userId,
+      p_title_ids: chunk,
+      p_expected_visibility_epoch: visibilityEpoch,
+    });
+    if (error || !isRecord(data) || data.contract !== "catalog-title-hydration-v3"
+        || !Array.isArray(data.items)) throw catalogTitleReadUnavailable();
+    catalogTitleVisibilityEpoch(data.visibilityEpoch, visibilityEpoch);
+    for (const value of data.items) {
+      if (!isRecord(value)) throw catalogTitleReadUnavailable();
+      const id = catalogTitleUuid(value.id);
+      if (!chunk.includes(id) || byId.has(id) || String(value.user_id ?? "") !== userId) {
+        throw catalogTitleReadUnavailable();
+      }
+      if (Number(value.variant_count ?? 0) > 0) byId.set(id, value);
+    }
+  }
+  if (requireAll && orderedIds.some((id) => !byId.has(id))) throw catalogTitleReadUnavailable();
+  return orderedIds.map((id) => byId.get(id)).filter((row): row is JsonRecord => !!row);
+}
+
 async function listTitleRail(userId: string, itemType: "movie" | "series", id: string, title: string, limit: number, lang: string | null) {
   try {
-    const { data: titles, error } = await db
-      .from("cloud_titles")
-      .select("*")
-      .eq("user_id", userId)
-      .eq("item_type", itemType)
-      .gt("variant_count", 0)
-      // created_at = when the title FIRST appeared in this catalog (immutable) — the honest
-      // "recently added" signal. synced_at is stamped on every resync, which used to reshuffle
-      // this rail into arbitrary old titles after each full refresh (home audit 2026-07-04).
-      .order("created_at", { ascending: false })
-      .order("synced_at", { ascending: false })
-      .limit(limit);
-    if (error) {
-      if (isMissingMaterialization(error)) return listRawMediaRail(userId, itemType, id, title, limit);
-      throwDb(error, "Unable to list title rail");
-    }
-    const variantsByTitle = await listVariantsByTitleIds((titles ?? []).map((row) => String(row.id)), userId);
-    await applyCatalogOverlay((titles ?? []) as JsonRecord[], itemType, lang); // full or safe text-only overlay
+    const visibilityEpoch = requiredCatalogTitleVisibilityEpoch(userId);
+    const titleIds = await selectOrderedCatalogTitleIds(userId, itemType, "home_recent", limit, visibilityEpoch);
+    const titles = await hydrateVisibleCatalogTitlesByIds(userId, titleIds, visibilityEpoch);
+    const variantsByTitle = await listVariantsByTitleIds(titleIds, userId);
+    await applyCatalogOverlay(titles, itemType, lang); // full or safe text-only overlay
     return {
       id,
       title,
       itemType,
       source: "titles",
-      items: (titles ?? []).map((row) => titleRailItem(row, variantsByTitle.get(String(row.id)) ?? [], lang)),
+      items: titles.map((row) => titleRailItem(row, variantsByTitle.get(String(row.id)) ?? [], lang)),
     };
   } catch (error) {
-    if (isMissingMaterialization(error)) return listRawMediaRail(userId, itemType, id, title, limit);
     throw error;
   }
 }
@@ -2466,7 +2971,7 @@ async function resolveWatchedTitle(userId: string, history: JsonRecord) {
   if (!sourceId || !itemType || !itemId) return null;
 
   const { data: variant, error } = await db
-    .from("cloud_title_variants")
+    .from("cloud_catalog_visible_title_variants")
     .select("title_id")
     .eq("user_id", userId)
     .eq("source_id", sourceId)
@@ -2482,17 +2987,14 @@ async function resolveWatchedTitle(userId: string, history: JsonRecord) {
 }
 
 async function loadTitleById(userId: string, titleId: string) {
-  const { data, error } = await db
-    .from("cloud_titles")
-    .select("*")
-    .eq("user_id", userId)
-    .eq("id", titleId)
-    .maybeSingle();
-  if (error) {
-    if (isMissingMaterialization(error)) return null;
-    throwDb(error, "Unable to load title");
-  }
-  return data ?? null;
+  const visibilityEpoch = requiredCatalogTitleVisibilityEpoch(userId);
+  const rows = await hydrateVisibleCatalogTitlesByIds(
+    userId,
+    [titleId],
+    visibilityEpoch,
+    false,
+  );
+  return rows[0] ?? null;
 }
 
 async function listVerifiedTitleCandidates(
@@ -2500,34 +3002,40 @@ async function listVerifiedTitleCandidates(
   itemType: "movie" | "series",
   candidateLimit = 300,
 ) {
-  const { data, error } = await db
-    .from("cloud_titles")
-    .select("*")
-    .eq("user_id", userId)
-    .eq("item_type", itemType)
-    .eq("match_status", "provider_verified")
-    .gt("variant_count", 0)
-    .order("synced_at", { ascending: false })
-    .order("updated_at", { ascending: false })
-    .limit(candidateLimit);
-  if (error) throwDb(error, "Unable to list verified title candidates");
-  return (data ?? []) as JsonRecord[];
+  const visibilityEpoch = requiredCatalogTitleVisibilityEpoch(userId);
+  const titleIds = await selectOrderedCatalogTitleIds(
+    userId,
+    itemType,
+    "home_verified",
+    candidateLimit,
+    visibilityEpoch,
+  );
+  return await hydrateVisibleCatalogTitlesByIds(userId, titleIds, visibilityEpoch);
 }
 
-// Source-health awareness for playable cards (home audit 2026-07-04): a card whose
-// defaultVariant lives on a DISABLED source plays nothing, and one on an errored source
-// (dead credentials — the IPTV reality) should only be picked when no healthy variant
-// exists. Cached briefly: every rail of one /home/rails call shares the lookup.
+// Source-health awareness for playable cards (home audit 2026-07-04). The visible
+// source projection already removes disabled/staging sources; among remaining
+// sources, an errored source should rank behind a healthy variant. Cached briefly:
+// every rail of one /home/rails call shares the lookup.
 type SourceCatalogContext = {
   disabled: Set<string>;
   errored: Set<string>;
   exactKeysBySource: Map<string, string[]>;
 };
 const sourceCatalogContextCache = new Map<string, { at: number; promise: Promise<SourceCatalogContext> }>();
+const SOURCE_CATALOG_CONTEXT_CACHE_TTL_MS = 30_000;
+const SOURCE_CATALOG_CONTEXT_CACHE_MAX = 512;
 
 async function sourceCatalogContextFor(userId: string): Promise<SourceCatalogContext> {
-  const hit = sourceCatalogContextCache.get(userId);
-  if (hit && Date.now() - hit.at < 30_000) return await hit.promise;
+  const cacheEpoch = latestBoundCatalogCacheEpoch(userId);
+  const cacheKey = cacheEpoch ? `${userId}:${cacheEpoch}` : null;
+  const hit = cacheKey ? sourceCatalogContextCache.get(cacheKey) : null;
+  if (hit && Date.now() - hit.at < SOURCE_CATALOG_CONTEXT_CACHE_TTL_MS) {
+    sourceCatalogContextCache.delete(cacheKey!);
+    sourceCatalogContextCache.set(cacheKey!, hit);
+    return await hit.promise;
+  }
+  if (cacheKey && hit) sourceCatalogContextCache.delete(cacheKey);
 
   const promise = (async (): Promise<SourceCatalogContext> => {
     const context: SourceCatalogContext = {
@@ -2536,9 +3044,10 @@ async function sourceCatalogContextFor(userId: string): Promise<SourceCatalogCon
       exactKeysBySource: new Map<string, string[]>(),
     };
     try {
-      const { data } = await db.from("cloud_sources")
+      const { data } = await db.from("cloud_catalog_visible_sources")
         .select("id,sync_status")
         .eq("user_id", userId);
+      const visibleSourceIds: string[] = [];
       for (const source of (data ?? []) as JsonRecord[]) {
         const sourceId = String(source.id ?? "");
         const status = String(source.sync_status ?? "");
@@ -2546,6 +3055,7 @@ async function sourceCatalogContextFor(userId: string): Promise<SourceCatalogCon
         // engine replaces this key below only after writing a verified identity
         // association.
         if (sourceId) {
+          visibleSourceIds.push(sourceId);
           context.exactKeysBySource.set(sourceId, [`source:${sourceId}`]);
         }
         if (status === "disabled") context.disabled.add(sourceId);
@@ -2554,22 +3064,38 @@ async function sourceCatalogContextFor(userId: string): Promise<SourceCatalogCon
       // Cross-tenant cache keys come only from the server-written identity
       // association. cloud_sources.config_hint is owner-editable and must never
       // authorize reads from another customer's canonical file cache.
-      const { data: verifiedLinks } = await db
-        .from("catalog_source_provider_identities")
-        .select("source_id,identity_id")
-        .eq("user_id", userId);
-      for (const link of (verifiedLinks ?? []) as JsonRecord[]) {
-        const sourceId = String(link.source_id ?? "");
-        const identityId = String(link.identity_id ?? "");
-        if (sourceId && identityId) {
-          context.exactKeysBySource.set(sourceId, [identityId]);
+      if (visibleSourceIds.length) {
+        const { data: verifiedLinks } = await db
+          .from("catalog_source_provider_identities")
+          .select("source_id,identity_id")
+          .eq("user_id", userId)
+          .in("source_id", visibleSourceIds);
+        for (const link of (verifiedLinks ?? []) as JsonRecord[]) {
+          const sourceId = String(link.source_id ?? "");
+          const identityId = String(link.identity_id ?? "");
+          if (sourceId && identityId) {
+            context.exactKeysBySource.set(sourceId, [identityId]);
+          }
         }
       }
     } catch (_) { /* fail-open: catalogue remains usable without enrichment */ }
     return context;
   })();
 
-  sourceCatalogContextCache.set(userId, { at: Date.now(), promise });
+  if (cacheKey) {
+    // Keep only the newest visibility generation for this account. Epochs are
+    // monotone, so older entries can never serve a future authenticated read.
+    for (const key of sourceCatalogContextCache.keys()) {
+      if (key.startsWith(`${userId}:`) && key !== cacheKey) {
+        sourceCatalogContextCache.delete(key);
+      }
+    }
+    sourceCatalogContextCache.set(cacheKey, { at: Date.now(), promise });
+    if (sourceCatalogContextCache.size > SOURCE_CATALOG_CONTEXT_CACHE_MAX) {
+      const oldest = sourceCatalogContextCache.keys().next().value;
+      if (oldest !== undefined) sourceCatalogContextCache.delete(oldest);
+    }
+  }
   return await promise;
 }
 
@@ -2744,7 +3270,7 @@ async function attachFlatMediaFileLanguages(
     if (!mediaIds.length) return;
     const variantByExactFile = new Map<string, JsonRecord>();
     for (let index = 0; index < mediaIds.length; index += 500) {
-      const { data, error } = await db.from("cloud_title_variants")
+      const { data, error } = await db.from("cloud_catalog_visible_title_variants")
         .select("id,user_id,source_id,media_item_id,item_type,external_id,playback_hint,codec_profile")
         .eq("user_id", userId)
         .eq("item_type", "movie")
@@ -2824,7 +3350,7 @@ async function listVariantsByTitleIds(
   for (let index = 0; index < titleIds.length; index += TITLE_VARIANT_QUERY_CHUNK) {
     const chunk = titleIds.slice(index, index + TITLE_VARIANT_QUERY_CHUNK);
     let query = db
-      .from("cloud_title_variants")
+      .from("cloud_catalog_visible_title_variants")
       .select("id,user_id,title_id,source_id,media_item_id,item_type,external_id,raw_title,label,language,quality,resolution,container_extension,poster_url,playback_hint,codec_profile,compatibility_tier,playback_cost_score,last_observed_ttff_ms,metadata,created_at")
       .in("title_id", chunk)
       .order("playback_cost_score", { ascending: true })
@@ -2982,45 +3508,146 @@ async function applyCatalogTextOverlay(
   }
 }
 
+// Selector/hydration RPCs retain these fields only long enough to decide which
+// display payload is authoritative. They are never part of a catalog response.
+const CATALOG_TITLE_INTERNAL_PROOF_FIELDS = Object.freeze([
+  "best_generation_id", "bestGenerationId",
+  "display_generation_id", "displayGenerationId",
+  "overlay_generation_id", "overlayGenerationId",
+  "overlay_catalog_metadata", "overlayCatalogMetadata",
+  "projection_generation_id", "projectionGenerationId",
+  "payload_generation_id", "payloadGenerationId",
+  "best_variant_id", "bestVariantId",
+  "base_updated_at", "baseUpdatedAt",
+  "payload_updated_at", "payloadUpdatedAt",
+  "storage_kind", "storageKind",
+  "visibility_epoch", "visibilityEpoch",
+] as const);
+
+function catalogTitleUsesGenerationPayload(row: JsonRecord): boolean {
+  const overlayGenerationId = stringOrNull(
+    row.overlay_generation_id ?? row.overlayGenerationId,
+  );
+  const displayGenerationId = stringOrNull(
+    row.display_generation_id ?? row.displayGenerationId,
+  );
+  return Boolean(
+    overlayGenerationId && displayGenerationId
+    && overlayGenerationId === displayGenerationId,
+  );
+}
+
+function applyGenerationCatalogMetadata(
+  row: JsonRecord,
+  lang: string | null,
+  fullOverlayEnabled: boolean,
+): void {
+  if (!catalogTitleUsesGenerationPayload(row)) return;
+  const candidate = row.overlay_catalog_metadata ?? row.overlayCatalogMetadata;
+  if (!isRecord(candidate)) return;
+  if (fullOverlayEnabled) {
+    row.metadata = candidate;
+    return;
+  }
+
+  // Flag OFF must remain equivalent to the legacy thinned cloud_titles payload.
+  // Rehydrate only the same trusted, fill-only synopsis/i18n subset as the
+  // permanent global text repair, but from this generation's own projection so
+  // a pre-head/global row can never bleed into the active display generation.
+  if (!catalogTextStatusEligible(row.match_status)) return;
+  const validation = recordOrEmpty(candidate.tmdbValidation);
+  if (validation.valid !== true) return;
+
+  const metadata = recordOrEmpty(row.metadata);
+  const tmdb = recordOrEmpty(metadata.tmdb);
+  const candidateTmdb = recordOrEmpty(candidate.tmdb);
+  const candidateI18n = recordOrEmpty(candidate.i18n);
+  const i18n = { ...recordOrEmpty(metadata.i18n) };
+  let changed = false;
+
+  const existingOverview = stringOrNull(tmdb.overview) ?? stringOrNull(metadata.overview);
+  const baseOverview = stringOrNull(candidateTmdb.overview)
+    ?? stringOrNull(candidate.overview)
+    ?? stringOrNull(recordOrEmpty(candidateI18n.en).overview);
+  if (!existingOverview && baseOverview) row.__catalog_base_overview = baseOverview;
+
+  if (lang) {
+    const projectedLocalized = recordOrEmpty(candidateI18n[lang]);
+    const localizedTitle = stringOrNull(projectedLocalized.title);
+    const localizedOverview = stringOrNull(projectedLocalized.overview);
+    if (localizedTitle || localizedOverview) {
+      const localized = { ...recordOrEmpty(i18n[lang]) };
+      if (!stringOrNull(localized.title) && localizedTitle) {
+        localized.title = localizedTitle;
+        changed = true;
+      }
+      if (!stringOrNull(localized.overview) && localizedOverview) {
+        localized.overview = localizedOverview;
+        changed = true;
+      }
+      i18n[lang] = localized;
+    }
+  }
+  if (changed) row.metadata = { ...metadata, i18n };
+}
+
+function stripCatalogTitleInternalProof(row: JsonRecord): void {
+  for (const field of CATALOG_TITLE_INTERNAL_PROOF_FIELDS) delete row[field];
+}
+
 // Full display overlay remains guarded by the quality-gated cutover flag. While
-// it stays OFF, only the validated text subset above is restored.
+// it stays OFF, only the validated text subset above is restored. A durable
+// generation payload is already the exact display owner and therefore bypasses
+// both global overlays under either flag; its own full catalog metadata is
+// supplied by the hydration RPC.
 async function applyCatalogOverlay(
   rows: JsonRecord[],
   itemType: string,
   lang: string | null = null,
 ): Promise<void> {
   if (!rows.length) return;
-  if (!catalogReadEnabled()) {
-    await applyCatalogTextOverlay(rows, itemType, lang);
-    return;
-  }
-  const ids = [...new Set(rows
-    .map((r) => stringOrNull(r.provider_tmdb_id))
-    .filter((v): v is string => !!v && !/^(tt)?0+$/i.test(v)))];
-  if (!ids.length) return;
-  const overlay = new Map<string, JsonRecord>();
-  for (let i = 0; i < ids.length; i += 500) {
-    const { data, error } = await db
-      .from("catalog_titles")
-      .select("provider_tmdb_id, title, original_title, release_year, poster_url, backdrop_url, metadata")
-      .eq("item_type", itemType)
-      .in("provider_tmdb_id", ids.slice(i, i + 500));
-    if (error) return;
-    for (const c of data ?? []) overlay.set(String((c as JsonRecord).provider_tmdb_id), c as JsonRecord);
-  }
-  for (const row of rows) {
-    const cat = overlay.get(String(row.provider_tmdb_id));
-    if (!cat) continue;
-    row.title = cat.title;
-    row.original_title = cat.original_title;
-    row.release_year = cat.release_year;
-    row.poster_url = cat.poster_url;
-    row.backdrop_url = cat.backdrop_url;
-    row.metadata = cat.metadata;
+  const fullOverlayEnabled = catalogReadEnabled();
+  for (const row of rows) applyGenerationCatalogMetadata(row, lang, fullOverlayEnabled);
+  const globalRows = rows.filter((row) => !catalogTitleUsesGenerationPayload(row));
+  try {
+    if (!globalRows.length) return;
+    if (!fullOverlayEnabled) {
+      await applyCatalogTextOverlay(globalRows, itemType, lang);
+      return;
+    }
+    const ids = [...new Set(globalRows
+      .map((r) => stringOrNull(r.provider_tmdb_id))
+      .filter((v): v is string => !!v && !/^(tt)?0+$/i.test(v)))];
+    if (!ids.length) return;
+    const overlay = new Map<string, JsonRecord>();
+    for (let i = 0; i < ids.length; i += 500) {
+      const { data, error } = await db
+        .from("catalog_titles")
+        .select("provider_tmdb_id, title, original_title, release_year, poster_url, backdrop_url, metadata")
+        .eq("item_type", itemType)
+        .in("provider_tmdb_id", ids.slice(i, i + 500));
+      if (error) return;
+      for (const c of data ?? []) overlay.set(String((c as JsonRecord).provider_tmdb_id), c as JsonRecord);
+    }
+    for (const row of globalRows) {
+      const cat = overlay.get(String(row.provider_tmdb_id));
+      if (!cat) continue;
+      row.title = cat.title;
+      row.original_title = cat.original_title;
+      row.release_year = cat.release_year;
+      row.poster_url = cat.poster_url;
+      row.backdrop_url = cat.backdrop_url;
+      row.metadata = cat.metadata;
+    }
+  } finally {
+    for (const row of rows) stripCatalogTitleInternalProof(row);
   }
 }
 
 function titleRailItem(title: JsonRecord, variants: JsonRecord[], lang?: string | null) {
+  // Defense in depth for callers that do not need a global display overlay.
+  applyGenerationCatalogMetadata(title, lang ?? null, catalogReadEnabled());
+  stripCatalogTitleInternalProof(title);
   const defaultVariant = variants[0] ?? {};
   const variantMetadata = recordOrEmpty(defaultVariant.metadata);
   const metadata = recordOrEmpty(title.metadata);
@@ -3072,7 +3699,7 @@ function titleRailItem(title: JsonRecord, variants: JsonRecord[], lang?: string 
     ? "verified_union"
     : observedAudioLanguages.length ? "probed_union"
     : anyAudioObserved ? "pending" : "not_analyzed";
-  return {
+  return sanitizeCatalogMediaItem({
     id: title.id,
     title_id: title.id,
     titleId: title.id,
@@ -3163,7 +3790,7 @@ function titleRailItem(title: JsonRecord, variants: JsonRecord[], lang?: string 
       providerTmdbId: title.provider_tmdb_id ?? null,
       titleId: title.id,
     },
-  };
+  });
 }
 
 function titleTmdb(title: JsonRecord) {
@@ -3262,7 +3889,7 @@ function titleVariantItem(variant: JsonRecord) {
   const subtitleLanguages = variant.__file_subtitle_observed === true
     ? (Array.isArray(variant.__file_subtitle_languages) ? variant.__file_subtitle_languages : [])
     : undefined;
-  return {
+  return sanitizeCatalogVariant({
     id: variant.id,
     source_id: variant.source_id,
     sourceId: variant.source_id,
@@ -3330,12 +3957,12 @@ function titleVariantItem(variant: JsonRecord) {
     last_observed_ttff_ms: variant.last_observed_ttff_ms,
     lastObservedTtffMs: variant.last_observed_ttff_ms,
     metadata: recordOrEmpty(variant.metadata),
-  };
+  });
 }
 
 async function listRawMediaRail(userId: string, itemType: "movie" | "series", id: string, title: string, limit: number) {
   const { data, error } = await db
-    .from("cloud_media_items")
+    .from("cloud_catalog_visible_media_items")
     .select("*")
     .eq("user_id", userId)
     .eq("item_type", itemType)
@@ -3348,7 +3975,7 @@ async function listRawMediaRail(userId: string, itemType: "movie" | "series", id
     title,
     itemType,
     source: "raw",
-    items: (data ?? []).map((item) => ({
+    items: (data ?? []).map((item) => sanitizeCatalogMediaItem({
       ...item,
       type: item.item_type,
       item_id: item.external_id,
@@ -3413,7 +4040,7 @@ async function listLiveChannelVariants(url: URL, userId: string, logicalId: stri
 // per-user row (the lineup sorts on them). Fills only where global has a value.
 async function applyLiveCatalogOverlay(rows: Array<Record<string, any>>, sourceId: string, userId: string) {
   if (!rows.length) return;
-  const { data: src } = await db.from("cloud_sources").select("config_hint").eq("id", sourceId).eq("user_id", userId).maybeSingle();
+  const { data: src } = await db.from("cloud_catalog_visible_sources").select("config_hint").eq("id", sourceId).eq("user_id", userId).maybeSingle();
   const host = String((src as any)?.config_hint?.serverHost || "").trim();
   if (!host) return;
   const ids = [...new Set(rows.map((row) => String(row.logical_id || "")).filter(Boolean))];
@@ -3505,7 +4132,7 @@ async function listFilteredMaterializedLiveRows(
   offset: number,
 ) {
   let query = db
-    .from("cloud_live_logical_channels")
+    .from("cloud_catalog_visible_live_logical_channels")
     .select("*", { count: "exact" })
     .eq("user_id", userId)
     .order("section", { ascending: true })
@@ -3554,7 +4181,7 @@ async function listOrderedMaterializedLiveRows(
     }
 
     let query = db
-      .from("cloud_live_logical_channels")
+      .from("cloud_catalog_visible_live_logical_channels")
       .select("*")
       .eq("user_id", userId)
       .eq("section", section)
@@ -3582,7 +4209,7 @@ async function listOrderedMaterializedLiveRows(
 
 async function countMaterializedLiveSection(userId: string, sourceId: string | null, section: string) {
   let query = db
-    .from("cloud_live_logical_channels")
+    .from("cloud_catalog_visible_live_logical_channels")
     .select("id", { count: "exact", head: true })
     .eq("user_id", userId)
     .eq("section", section);
@@ -3638,7 +4265,7 @@ function escapePostgrestLike(value: string) {
 async function listMaterializedLiveChannelVariants(userId: string, logicalId: string, sourceId: string | null, country: string) {
   try {
     let query = db
-      .from("cloud_live_logical_channels")
+      .from("cloud_catalog_visible_live_logical_channels")
       .select("*")
       .eq("user_id", userId)
       .eq("logical_id", logicalId);
@@ -3657,7 +4284,7 @@ async function listMaterializedLiveChannelVariants(userId: string, logicalId: st
     }
 
     const { data: variants, error: variantsError } = await db
-      .from("cloud_live_variants")
+      .from("cloud_catalog_visible_live_variants")
       .select("*")
       .eq("user_id", userId)
       .eq("logical_channel_id", channel.id)
@@ -3686,7 +4313,7 @@ async function listMaterializedVariantsByChannelIds(channelIds: string[]) {
     const chunk = channelIds.slice(index, index + 200);
     if (!chunk.length) continue;
     const { data, error } = await db
-      .from("cloud_live_variants")
+      .from("cloud_catalog_visible_live_variants")
       .select("*")
       .in("logical_channel_id", chunk)
       .order("health_rank", { ascending: true })
@@ -3744,11 +4371,11 @@ function materializedChannel(row: JsonRecord, variantRows: JsonRecord[] | null =
     },
   };
   if (variants) channel.variants = variants;
-  return channel;
+  return sanitizeLiveChannel(channel);
 }
 
 function materializedVariant(row: JsonRecord) {
-  return {
+  return sanitizeLiveVariant({
     id: `${row.source_id}:${row.stream_id}`,
     media_item_id: row.media_item_id ?? null,
     mediaItemId: row.media_item_id ?? null,
@@ -3773,7 +4400,7 @@ function materializedVariant(row: JsonRecord) {
     playbackHint: recordOrEmpty(row.playback_hint),
     metadata: recordOrEmpty(row.metadata),
     container_extension: row.container_extension,
-  };
+  });
 }
 
 function materializedRowMatchesCountry(row: JsonRecord, country: string) {
@@ -3809,7 +4436,7 @@ async function listLiveRows(userId: string, sourceId: string | null, maxRows: nu
   const rows: LiveCatalogItem[] = [];
   for (let offset = 0; offset < maxRows; offset += LIVE_PAGE_SIZE) {
     let query = db
-      .from("cloud_media_items")
+      .from("cloud_catalog_visible_media_items")
       .select("id,source_id,item_type,external_id,parent_external_id,title,subtitle,poster_url,metadata,playback_hint,available")
       .eq("user_id", userId)
       .eq("item_type", "live")
@@ -3912,26 +4539,30 @@ function json(req: Request, data: unknown, status = 200) {
     status,
     headers: {
       ...corsHeaders(req),
+      ...catalogVisibilityEpochHeaders(req),
       "Content-Type": "application/json; charset=utf-8",
       "Cache-Control": "no-store",
     },
   });
 }
 
-// Like json(), but lets the browser's private cache serve the response for a short
-// window so repeat navigations (and rapid filter toggles) skip the DB entirely —
-// keeping the catalogue pages fast even while a background job works the DB. SAFE per
-// user/profile: Vary on Authorization (per-user token) + the profile header so one
-// user/profile never reads another's cached response. The window is short, so a freshly
-// crawled title shows within ~cacheSeconds; the data is not real-time anyway.
+// Historical call sites still pass a TTL, but authenticated catalog responses must
+// always revalidate with the server. A tab can sit idle while another device performs
+// an atomic source cutover; a browser-fresh response keyed to the old epoch would then
+// bypass both the server's final epoch check and the client's epoch observation. The
+// in-memory client cache remains short-lived and epoch-scoped, so this only disables
+// the independent browser HTTP cache.
 function jsonCached(req: Request, data: unknown, cacheSeconds: number, status = 200) {
-  const s = Math.max(0, Math.floor(cacheSeconds));
+  void cacheSeconds;
   return new Response(JSON.stringify(data), {
     status,
     headers: {
       ...corsHeaders(req),
+      ...catalogVisibilityEpochHeaders(req),
       "Content-Type": "application/json; charset=utf-8",
-      "Cache-Control": s > 0 ? `private, max-age=${s}, stale-while-revalidate=${s * 2}` : "no-store",
+      "Cache-Control": "private, no-store, max-age=0",
+      "Pragma": "no-cache",
+      "Expires": "0",
       "Vary": "Origin, Authorization, x-norva-profile-id",
     },
   });
@@ -3950,6 +4581,7 @@ function corsHeaders(req: Request) {
     "Access-Control-Allow-Origin": allowOrigin,
     "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-norva-profile-id",
     "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+    "Access-Control-Expose-Headers": "x-norva-visibility-epoch, x-norva-user-visibility-epoch, x-norva-global-visibility-epoch, x-norva-catalog-cache-contract, retry-after",
     "Access-Control-Max-Age": "86400",
     Vary: "Origin",
   };

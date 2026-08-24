@@ -1614,6 +1614,7 @@ async function runActivePostSwitchRefresh(job, workerId, runtime, candidateConfi
   if (actionIndex < 0) throw new WorkerFault("catalog_unhealthy", false);
   const action = ACTIVE_REFRESH_ACTIONS[actionIndex];
   if (state.actionComplete) {
+    let visibilityEpoch = fence.p_user_visibility_epoch;
     if (action.kind === "item") {
       const pruned = rpcObject(await workerRpc("norva_prune_active_catalog_refresh_action_batch", {
         ...fence,
@@ -1622,7 +1623,7 @@ async function runActivePostSwitchRefresh(job, workerId, runtime, candidateConfi
         p_catalog_version: state.catalogVersion,
         p_limit: 200,
       }));
-      const visibilityEpoch = activeVisibilityEpoch(
+      visibilityEpoch = activeVisibilityEpoch(
         pruned,
         fence.p_user_visibility_epoch,
       );
@@ -1670,6 +1671,22 @@ async function runActivePostSwitchRefresh(job, workerId, runtime, candidateConfi
   if (state.contentSha256 && state.contentSha256 !== contentSha256) {
     throw new WorkerFault("catalog_changed_during_build", false);
   }
+  // Bind the immutable Gateway spool digest into PostgreSQL before any payload
+  // writer runs.  Every writer independently requires this incomplete
+  // checkpoint, so a worker that loses its lease cannot write a fetched page.
+  const boundCheckpoint = await checkpointActiveRefresh(
+    fence,
+    run.checkpointRevision,
+    {
+      ...state,
+      contentSha256,
+      spoolToken,
+      actionComplete: false,
+    },
+    false,
+    0,
+  );
+  const boundCheckpointRevision = boundCheckpoint.checkpointRevision;
   if (action.kind === "category") {
     const categories = activeCategories(page.items, state.categoryCount);
     const categoryResult = rpcObject(await workerRpc("norva_upsert_active_catalog_refresh_categories", {
@@ -1684,7 +1701,7 @@ async function runActivePostSwitchRefresh(job, workerId, runtime, candidateConfi
       processedCategories: state.processedCategories + categories.length,
       categoryCount: state.categoryCount + categories.length,
     };
-    await checkpointActiveRefresh({ ...fence, p_user_visibility_epoch: visibilityEpoch }, run.checkpointRevision, next, true, 1);
+    await checkpointActiveRefresh({ ...fence, p_user_visibility_epoch: visibilityEpoch }, boundCheckpointRevision, next, true, 1);
     return { complete: false };
   }
 
@@ -1724,7 +1741,7 @@ async function runActivePostSwitchRefresh(job, workerId, runtime, candidateConfi
     processedItems: state.processedItems + media.length,
     observedItems: state.observedItems + media.length,
   };
-  await checkpointActiveRefresh({ ...fence, p_user_visibility_epoch: visibilityEpoch }, run.checkpointRevision, next, true, 1);
+  await checkpointActiveRefresh({ ...fence, p_user_visibility_epoch: visibilityEpoch }, boundCheckpointRevision, next, true, 1);
   return { complete: false };
 }
 

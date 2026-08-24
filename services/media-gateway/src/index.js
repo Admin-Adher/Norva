@@ -4,11 +4,13 @@ const fsp = require('fs/promises');
 const os = require('os');
 const path = require('path');
 const http = require('http');
+const dns = require('dns');
+const net = require('net');
 const { PassThrough } = require('stream');
 const { TextDecoder } = require('util');
 const { spawn, spawnSync } = require('child_process');
 const express = require('express');
-const { request: undiciRequest } = require('undici');
+const { Agent, ProxyAgent, request: undiciRequest } = require('undici');
 const { parseWhisperLid, runWhisperDetectOnly } = require('./whisper-lid');
 const {
     buildStrictLidExtractionObservability,
@@ -88,7 +90,6 @@ const providerProxySlotOverrides = parseProviderProxySlotOverrides(
 let providerProxyAgents = [];
 if (providerProxyUrls.length) {
     try {
-        const { ProxyAgent } = require('undici');
         providerProxyAgents = providerProxyUrls.map((u) => new ProxyAgent(u));
         // Fetch receives an explicit dispatcher and every provider-connected child receives
         // an explicit env. There is intentionally no process-wide "slot 1" fallback: it would
@@ -124,9 +125,9 @@ function providerSlotKeyFromUrl(url, ownerKey = '') {
         return `source:${sha256Hex(String(url || ''))}`;
     }
     const host = parsed.host.toLowerCase();
-    let username = String(parsed.searchParams.get('username') || '').trim();
-    let password = String(parsed.searchParams.get('password') || '').trim();
-    if (!username || !password) {
+    let username = String(parsed.searchParams.get('username') || '');
+    let password = String(parsed.searchParams.get('password') || '');
+    if (!username.trim() || !password.length) {
         const segments = parsed.pathname.split('/').filter(Boolean);
         const streamTypeIndex = segments.findIndex((segment) =>
             ['movie', 'series', 'live'].includes(String(segment || '').toLowerCase()));
@@ -134,11 +135,11 @@ function providerSlotKeyFromUrl(url, ownerKey = '') {
             const decoded = (value) => {
                 try { return decodeURIComponent(value); } catch (_) { return String(value || ''); }
             };
-            username = decoded(segments[streamTypeIndex + 1]).trim();
-            password = decoded(segments[streamTypeIndex + 2]).trim();
+            username = decoded(segments[streamTypeIndex + 1]);
+            password = decoded(segments[streamTypeIndex + 2]);
         }
     }
-    if (host && username && password) {
+    if (host && username.trim() && password.length) {
         return `account:${sha256Hex(`${host}\0${username}\0${password}`)}`;
     }
     const normalizedOwnerKey = normalizeSessionKey(ownerKey);
@@ -2170,6 +2171,26 @@ app.get('/debug/sessions', requireGatewayAuth, (req, res) => {
     });
 });
 
+app.post('/sessions/stop-provider-affinities', requireGatewayAuth, async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    const values = Array.isArray(req.body?.affinityHashes) ? req.body.affinityHashes : [];
+    const affinityHashes = [...new Set(values.map((value) => String(value || '').trim().toLowerCase()))];
+    if (!affinityHashes.length || affinityHashes.length > 64
+        || affinityHashes.some((value) => !/^[a-f0-9]{64}$/.test(value))) {
+        return res.status(400).json({ error: 'affinityHashes must contain 1-64 SHA-256 values' });
+    }
+    const outcome = await stopProviderAffinities(affinityHashes);
+    if (!outcome.providerDrained) {
+        return res.status(409).json({ error: 'Provider transport remains active', providerDrained: false });
+    }
+    return res.status(200).json({
+        ok: true, protocol: 1, providerDrained: true,
+        stoppedSessions: outcome.stoppedSessions,
+        abortedRawPumps: outcome.abortedRawPumps,
+        stoppedExtractions: outcome.stoppedExtractions,
+    });
+});
+
 app.post('/xtream/epg', requireGatewayAuth, async (req, res) => {
     try {
         const {
@@ -2261,12 +2282,144 @@ const XTREAM_METADATA_ACTIONS = new Set([
     'get_vod_info', 'get_series_info', 'get_short_epg', 'get_simple_data_table',
 ]);
 const XTREAM_METADATA_TIMEOUT_MS = clampInt(process.env.XTREAM_METADATA_TIMEOUT_MS, 45_000, 10_000, 120_000);
+const XTREAM_ACCOUNT_INFO_MAX_BYTES = clampInt(
+    process.env.XTREAM_ACCOUNT_INFO_MAX_BYTES,
+    256 * 1024,
+    64 * 1024,
+    1024 * 1024,
+);
+
+// Credential transitions consume catalogue arrays through a disk-backed page
+// contract.  The provider response is streamed exactly once into bounded page
+// files; later durable worker claims resume with an opaque HMAC cursor instead
+// of downloading (and buffering) the same category again.  Account validation
+// remains on /xtream/metadata because that response is a small object.
+const XTREAM_CATALOG_PAGE_ACTIONS = new Set([
+    'get_live_streams', 'get_vod_streams', 'get_series',
+    'get_live_categories', 'get_vod_categories', 'get_series_categories',
+]);
+const XTREAM_CATALOG_STREAM_ACTIONS = new Set([
+    'get_live_streams', 'get_vod_streams', 'get_series',
+]);
+const XTREAM_CATALOG_SPOOL_DIR = path.resolve(
+    process.env.XTREAM_CATALOG_SPOOL_DIR || path.join(OUTPUT_DIR, 'credential-catalog-spools'),
+);
+// Private panels are never enabled by an API request. An operator may opt in
+// exact hostnames/IPs for a controlled deployment; wildcards and CIDRs are not
+// accepted, and the resolved destination is still pinned for the request.
+const XTREAM_PRIVATE_EGRESS_ALLOWLIST = configuredXtreamPrivateEgressAllowlist(
+    process.env.XTREAM_PRIVATE_EGRESS_ALLOWLIST || '',
+);
+const XTREAM_CATALOG_SPOOL_TTL_MS = clampInt(
+    process.env.XTREAM_CATALOG_SPOOL_TTL_MS,
+    // At the enforced 1,000,000-item/spool maximum, 250 items/page and eight
+    // bounded pages per one-minute worker claim need 500 claims (~8h20m).
+    // Sixteen hours is the operational default; the twelve-hour floor keeps a
+    // >40% expiry margin while still bounding encrypted disk retention. Each
+    // action spool is created just-in-time, so this bound applies per action.
+    16 * 60 * 60 * 1000,
+    12 * 60 * 60 * 1000,
+    24 * 60 * 60 * 1000,
+);
+const XTREAM_CATALOG_BUILD_TIMEOUT_MS = clampInt(
+    process.env.XTREAM_CATALOG_BUILD_TIMEOUT_MS,
+    20 * 60 * 1000,
+    60 * 1000,
+    60 * 60 * 1000,
+);
+const XTREAM_CATALOG_FAILURE_RETRY_MS = clampInt(
+    process.env.XTREAM_CATALOG_FAILURE_RETRY_MS,
+    30 * 1000,
+    1000,
+    15 * 60 * 1000,
+);
+const XTREAM_CATALOG_PAGE_MAX_ITEMS = clampInt(
+    process.env.XTREAM_CATALOG_PAGE_MAX_ITEMS,
+    250,
+    1,
+    500,
+);
+const XTREAM_CATALOG_PAGE_MAX_BYTES = clampInt(
+    process.env.XTREAM_CATALOG_PAGE_MAX_BYTES,
+    4 * 1024 * 1024,
+    64 * 1024,
+    8 * 1024 * 1024,
+);
+const XTREAM_CATALOG_ITEM_MAX_BYTES = clampInt(
+    process.env.XTREAM_CATALOG_ITEM_MAX_BYTES,
+    512 * 1024,
+    16 * 1024,
+    XTREAM_CATALOG_PAGE_MAX_BYTES,
+);
+const XTREAM_CATALOG_SPOOL_MAX_BYTES = clampInt(
+    process.env.XTREAM_CATALOG_SPOOL_MAX_BYTES,
+    512 * 1024 * 1024,
+    XTREAM_CATALOG_PAGE_MAX_BYTES,
+    1024 * 1024 * 1024,
+);
+const XTREAM_CATALOG_SPOOL_MAX_ITEMS = clampInt(
+    process.env.XTREAM_CATALOG_SPOOL_MAX_ITEMS,
+    1_000_000,
+    1,
+    2_000_000,
+);
+
+app.post('/xtream/metadata-page', requireGatewayAuth, async (req, res) => {
+    try {
+        const {
+            serverUrl, username, password, action, params, userAgent,
+            cursor, spoolToken, spoolKey, maxItems,
+        } = req.body || {};
+        const normalizedAction = String(action || '');
+        const requestedMaxItems = Number(maxItems || XTREAM_CATALOG_PAGE_MAX_ITEMS);
+        if (!serverUrl || !isHttpUrl(serverUrl) || !username || !password
+            || !XTREAM_CATALOG_PAGE_ACTIONS.has(normalizedAction)
+            || !Number.isInteger(requestedMaxItems)
+            || requestedMaxItems < 1 || requestedMaxItems > XTREAM_CATALOG_PAGE_MAX_ITEMS
+            || typeof spoolKey !== 'string' || !/^[A-Za-z0-9_-]{16,160}$/.test(spoolKey)) {
+            return res.status(400).json({ error: 'Invalid bounded catalogue page request' });
+        }
+        await assertXtreamEgressTarget(serverUrl);
+        const categoryId = normalizeXtreamCatalogCategoryParam(normalizedAction, params);
+        const request = {
+            serverUrl,
+            username,
+            password,
+            action: normalizedAction,
+            categoryId,
+            maxItems: requestedMaxItems,
+            spoolKey,
+        };
+        const page = await readXtreamCatalogPage({
+            request,
+            cursor: typeof cursor === 'string' && cursor ? cursor : null,
+            spoolToken: typeof spoolToken === 'string' && spoolToken ? spoolToken : null,
+            userAgent: sanitizeUserAgent(userAgent) || FFMPEG_USER_AGENT,
+        });
+        res.setHeader('Cache-Control', 'no-store');
+        res.json(page);
+    } catch (err) {
+        const status = Number.isInteger(err.status) ? err.status : 502;
+        if (status === 202 || err.retryAfterSeconds) {
+            res.setHeader('Retry-After', String(err.retryAfterSeconds || 2));
+        }
+        res.status(status).json({
+            error: err.publicMessage || 'IPTV provider request failed',
+            code: err.code || undefined,
+            cursor: status === 202 ? err.cursor : undefined,
+            spoolToken: status === 202 ? err.spoolToken : undefined,
+            retryAfterSeconds: status === 202 ? (err.retryAfterSeconds || 2) : undefined,
+        });
+    }
+});
+
 app.post('/xtream/metadata', requireGatewayAuth, async (req, res) => {
     try {
         const { serverUrl, username, password, action, params, userAgent } = req.body || {};
         if (!serverUrl || !isHttpUrl(serverUrl) || !username || !password || !action) {
             return res.status(400).json({ error: 'serverUrl, username, password and action are required' });
         }
+        await assertXtreamEgressTarget(serverUrl);
         // `account_info` validates credentials: the bare player_api.php (no action)
         // returns { user_info, server_info }. Routed through the gateway so source
         // add/validate egresses the tolerated IP, not the provider-blocked Supabase
@@ -2286,14 +2439,21 @@ app.post('/xtream/metadata', requireGatewayAuth, async (req, res) => {
             url,
             sanitizeUserAgent(userAgent) || FFMPEG_USER_AGENT,
             XTREAM_METADATA_TIMEOUT_MS,
-            { backgroundAccountKey: providerAccountKeyFromCredentials(serverUrl, username) },
+            {
+                backgroundAccountKey: providerAccountKeyFromCredentials(serverUrl, username),
+                maxResponseBytes: isAccountInfo ? XTREAM_ACCOUNT_INFO_MAX_BYTES : undefined,
+            },
         );
         res.json(payload);
     } catch (err) {
         const status = Number.isInteger(err.status) ? err.status : 502;
+        const accountValidation = String(req.body?.action || '') === 'account_info';
         res.status(status).json({
             error: err.publicMessage || 'IPTV provider request failed',
-            details: err.details || undefined,
+            // Credential validation callers receive only the gateway's typed
+            // code. Raw provider bodies may contain account ids, usernames,
+            // URLs, tokens, or free-form messages and never cross this route.
+            details: accountValidation ? undefined : (err.details || undefined),
             code: err.code || undefined
         });
     }
@@ -14340,6 +14500,46 @@ async function stopSession(session, options = {}) {
     return session.stoppingPromise;
 }
 
+function providerAffinityHashForGatewayKey(key) {
+    return key ? sha256Hex(String(key)) : '';
+}
+
+async function stopProviderAffinities(affinityHashes) {
+    const requested = new Set(affinityHashes);
+    const matches = (key) => requested.has(providerAffinityHashForGatewayKey(key));
+    const sessionsToStop = Array.from(sessions.values()).filter((session) => (
+        matches(proxyKeyFromUrl(session?.sourceUrl || '')) && isSessionBlockingProviderSlot(session)
+    ));
+    await Promise.allSettled(sessionsToStop.map((session) => (
+        stopSession(session, { reason: 'account-deletion' })
+    )));
+    const rawPumpsAborted = abortRawPumps((pump) => matches(pump?.proxyKey || ''), null, 'account deletion');
+    let extractionsStopped = 0;
+    const extractionStops = [];
+    for (const [proxyKey, entries] of accountExtractions) {
+        if (!matches(proxyKey)) continue;
+        for (const entry of [...entries]) {
+            if (entry?.preempted) continue;
+            entry.preempted = true;
+            extractionsStopped += 1;
+            extractionStops.push(stopChildProcess(entry.child));
+        }
+    }
+    await Promise.allSettled(extractionStops);
+    const remaining = Array.from(sessions.values()).some((session) => (
+        matches(proxyKeyFromUrl(session?.sourceUrl || '')) && isSessionBlockingProviderSlot(session)
+    )) || Array.from(rawPumps).some((pump) => matches(pump?.proxyKey || ''))
+      || Array.from(accountExtractions).some(([proxyKey, entries]) => (
+        matches(proxyKey) && Array.from(entries).some((entry) => !entry?.preempted)
+    ));
+    return {
+        stoppedSessions: sessionsToStop.length,
+        abortedRawPumps: rawPumpsAborted,
+        stoppedExtractions: extractionsStopped,
+        providerDrained: !remaining,
+    };
+}
+
 async function stopConflictingSourceSessions(sourceUrl, providerSlotKey) {
     const sourceKey = sourceSessionKey(sourceUrl);
     if (!sourceKey || !providerSlotKey) return 0;
@@ -14645,6 +14845,166 @@ function isHttpUrl(value) {
     }
 }
 
+function configuredXtreamPrivateEgressAllowlist(value) {
+    const entries = String(value || '').split(/[\s,]+/).map(normalizeXtreamEgressHostname).filter(Boolean);
+    return new Set(entries.filter((entry) => {
+        if (entry.length > 253 || entry.includes('/') || entry.includes('@')
+            || (entry.includes(':') && net.isIP(entry) !== 6)) return false;
+        return net.isIP(entry) > 0 || /^[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?$/.test(entry);
+    }));
+}
+
+function normalizeXtreamEgressHostname(value) {
+    return String(value || '').trim().toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
+}
+
+function ipv4Octets(address) {
+    const parts = String(address || '').split('.');
+    if (parts.length !== 4 || parts.some((part) => !/^(?:0|[1-9][0-9]{0,2})$/.test(part))) return null;
+    const values = parts.map(Number);
+    return values.every((part) => part >= 0 && part <= 255) ? values : null;
+}
+
+function ipv6Words(address) {
+    let value = normalizeXtreamEgressHostname(address).split('%')[0];
+    if (!value || value.indexOf('::') !== value.lastIndexOf('::')) return null;
+    if (value.includes('.')) {
+        const lastColon = value.lastIndexOf(':');
+        const octets = ipv4Octets(value.slice(lastColon + 1));
+        if (!octets) return null;
+        value = `${value.slice(0, lastColon)}:${((octets[0] << 8) | octets[1]).toString(16)}:${((octets[2] << 8) | octets[3]).toString(16)}`;
+    }
+    const sides = value.split('::');
+    const left = sides[0] ? sides[0].split(':') : [];
+    const right = sides.length === 2 && sides[1] ? sides[1].split(':') : [];
+    if (sides.length === 1 && left.length !== 8) return null;
+    const missing = 8 - left.length - right.length;
+    if (missing < (sides.length === 2 ? 1 : 0)) return null;
+    const words = [...left, ...Array(missing).fill('0'), ...right];
+    if (words.length !== 8 || words.some((word) => !/^[0-9a-f]{1,4}$/i.test(word))) return null;
+    return words.map((word) => Number.parseInt(word, 16));
+}
+
+function isPublicXtreamEgressAddress(address) {
+    const normalizedAddress = normalizeXtreamEgressHostname(address);
+    const family = net.isIP(normalizedAddress);
+    if (family === 4) {
+        const octets = ipv4Octets(normalizedAddress);
+        if (!octets) return false;
+        const [a, b, c] = octets;
+        return !(
+            a === 0 || a === 10 || a === 127 ||
+            (a === 100 && b >= 64 && b <= 127) ||
+            (a === 169 && b === 254) ||
+            (a === 172 && b >= 16 && b <= 31) ||
+            (a === 192 && b === 0 && c === 0) ||
+            (a === 192 && b === 0 && c === 2) ||
+            (a === 192 && b === 88 && c === 99) ||
+            (a === 192 && b === 168) ||
+            (a === 198 && (b === 18 || b === 19)) ||
+            (a === 198 && b === 51 && c === 100) ||
+            (a === 203 && b === 0 && c === 113) ||
+            a >= 224
+        );
+    }
+    if (family !== 6) return false;
+    const words = ipv6Words(normalizedAddress);
+    if (!words) return false;
+    // IPv4-mapped IPv6 inherits the IPv4 decision.
+    if (words.slice(0, 5).every((word) => word === 0) && words[5] === 0xffff) {
+        const mapped = `${words[6] >> 8}.${words[6] & 255}.${words[7] >> 8}.${words[7] & 255}`;
+        return isPublicXtreamEgressAddress(mapped);
+    }
+    // Admit only global unicast 2000::/3, excluding documentation and 6to4
+    // transition addresses that can alias a non-public IPv4 destination.
+    if ((words[0] & 0xe000) !== 0x2000) return false;
+    if (words[0] === 0x2001 && words[1] === 0x0db8) return false;
+    if (words[0] === 0x2002) return false;
+    return true;
+}
+
+async function resolveXtreamEgressTarget(value) {
+    let endpoint;
+    try {
+        endpoint = new URL(String(value));
+    } catch (_) {
+        throw backgroundProbeError(400, 'invalid_egress_target', 'Provider endpoint is not allowed');
+    }
+    if (!['http:', 'https:'].includes(endpoint.protocol) || endpoint.username || endpoint.password) {
+        throw backgroundProbeError(400, 'invalid_egress_target', 'Provider endpoint is not allowed');
+    }
+    const hostname = normalizeXtreamEgressHostname(endpoint.hostname);
+    const allowPrivate = XTREAM_PRIVATE_EGRESS_ALLOWLIST.has(hostname);
+    let addresses;
+    try {
+        const literalFamily = net.isIP(hostname);
+        addresses = literalFamily
+            ? [{ address: hostname, family: literalFamily }]
+            : await dns.promises.lookup(hostname, { all: true, verbatim: true });
+    } catch (_) {
+        throw backgroundProbeError(502, 'PROVIDER_DNS_FAILURE', 'Unable to resolve IPTV provider');
+    }
+    const normalized = Array.isArray(addresses)
+        ? addresses.filter((entry) => entry && net.isIP(normalizeXtreamEgressHostname(entry.address)) > 0)
+        : [];
+    if (!hostname || normalized.length === 0
+        || (!allowPrivate && normalized.some((entry) => !isPublicXtreamEgressAddress(entry.address)))) {
+        throw backgroundProbeError(400, 'invalid_egress_target', 'Provider endpoint is not allowed');
+    }
+    const selected = normalized[0];
+    const selectedAddress = normalizeXtreamEgressHostname(selected.address);
+    const pinned = new URL(endpoint.href);
+    pinned.hostname = Number(selected.family) === 6 ? `[${selectedAddress}]` : selectedAddress;
+    return {
+        pinnedUrl: pinned.href,
+        hostname,
+        authority: endpoint.host,
+        protocol: endpoint.protocol,
+        address: selectedAddress,
+        family: Number(selected.family),
+    };
+}
+
+async function assertXtreamEgressTarget(value) {
+    await resolveXtreamEgressTarget(value);
+}
+
+async function openXtreamProviderResponse(url, options = {}) {
+    const target = await resolveXtreamEgressTarget(url);
+    const proxyIndex = providerProxyUrls.length ? poolIndexForKey(proxyKeyFromUrl(url)) : -1;
+    const dispatcher = proxyIndex >= 0
+        ? new ProxyAgent({
+            uri: providerProxyUrls[proxyIndex],
+            requestTls: target.protocol === 'https:' ? { servername: target.hostname } : undefined,
+        })
+        : new Agent({
+            connect: target.protocol === 'https:' ? { servername: target.hostname } : undefined,
+        });
+    try {
+        const response = await undiciRequest(target.pinnedUrl, {
+            method: 'GET',
+            signal: options.signal,
+            dispatcher,
+            maxRedirections: 0,
+            headers: {
+                ...(options.headers || {}),
+                host: target.authority,
+            },
+        });
+        return {
+            status: response.statusCode,
+            ok: response.statusCode >= 200 && response.statusCode < 300,
+            headers: response.headers,
+            body: response.body,
+            text: () => response.body.text(),
+            close: () => dispatcher.close(),
+        };
+    } catch (error) {
+        await dispatcher.close().catch(() => {});
+        throw error;
+    }
+}
+
 function xtreamPlayerApiUrl({ serverUrl, username, password, action, streamId, limit, params }) {
     const url = new URL(`${String(serverUrl).replace(/\/+$/, '')}/player_api.php`);
     url.searchParams.set('username', String(username));
@@ -14667,6 +15027,49 @@ function xtreamPlayerApiUrl({ serverUrl, username, password, action, streamId, l
     return url.href;
 }
 
+function providerResponseTooLargeError() {
+    return catalogSpoolError(
+        502,
+        'PROVIDER_RESPONSE_TOO_LARGE',
+        'IPTV provider response exceeds its safety limit',
+    );
+}
+
+async function readBoundedProviderText(response, maxBytes) {
+    const limit = Number(maxBytes);
+    if (!Number.isSafeInteger(limit) || limit < 1) {
+        throw catalogSpoolError(500, 'invalid_response_limit', 'Invalid provider response limit');
+    }
+    const declared = Number(
+        response?.headers?.['content-length']
+        ?? response?.headers?.['Content-Length']
+        ?? 0,
+    );
+    if (Number.isFinite(declared) && declared > limit) {
+        response?.body?.destroy?.();
+        throw providerResponseTooLargeError();
+    }
+    if (!response?.body) {
+        throw catalogSpoolError(502, 'invalid_payload', 'Invalid IPTV provider response');
+    }
+    const chunks = [];
+    let total = 0;
+    try {
+        for await (const rawChunk of response.body) {
+            const chunk = Buffer.isBuffer(rawChunk) ? rawChunk : Buffer.from(rawChunk);
+            total += chunk.byteLength;
+            if (total > limit) throw providerResponseTooLargeError();
+            chunks.push(chunk);
+        }
+    } catch (error) {
+        if (total > limit || error?.code === 'PROVIDER_RESPONSE_TOO_LARGE') {
+            response.body.destroy?.();
+        }
+        throw error;
+    }
+    return Buffer.concat(chunks, total).toString('utf8');
+}
+
 async function fetchProviderJson(url, userAgent, timeoutMs = XTREAM_REQUEST_TIMEOUT_MS, options = {}) {
     const controller = new AbortController();
     const backgroundKey = String(options.backgroundAccountKey || '');
@@ -14682,16 +15085,19 @@ async function fetchProviderJson(url, userAgent, timeoutMs = XTREAM_REQUEST_TIME
         ? registerAccountExtraction(backgroundKey, { kill: () => controller.abort() })
         : null;
     const timer = setTimeout(() => controller.abort(), timeoutMs);
+    let response = null;
     try {
-        const response = await fetch(url, {
+        response = await openXtreamProviderResponse(url, {
             signal: controller.signal,
-            dispatcher: pickProxyAgent(proxyKeyFromUrl(url)) || undefined,
             headers: {
                 'Accept': 'application/json,text/plain,*/*',
                 'User-Agent': userAgent
             }
         });
-        const text = await response.text();
+        const maxResponseBytes = Number(options.maxResponseBytes);
+        const text = Number.isSafeInteger(maxResponseBytes) && maxResponseBytes > 0
+            ? await readBoundedProviderText(response, maxResponseBytes)
+            : await response.text();
         const payload = text ? safeJson(text) : {};
         if (!response.ok) {
             const failure = classifyProviderResponseFailure(response.status, payload, {
@@ -14701,7 +15107,6 @@ async function fetchProviderJson(url, userAgent, timeoutMs = XTREAM_REQUEST_TIME
             error.status = failure.status;
             error.publicMessage = failure.publicMessage;
             error.code = failure.code;
-            error.details = payload;
             throw error;
         }
         return payload;
@@ -14723,8 +15128,778 @@ async function fetchProviderJson(url, userAgent, timeoutMs = XTREAM_REQUEST_TIME
         throw error;
     } finally {
         clearTimeout(timer);
+        await response?.close?.().catch(() => {});
         registration?.release?.();
     }
+}
+
+function normalizeXtreamCatalogCategoryParam(action, params) {
+    const values = params && typeof params === 'object' && !Array.isArray(params) ? params : {};
+    const keys = Object.keys(values).filter((key) => values[key] !== undefined && values[key] !== null);
+    if (keys.some((key) => key !== 'category_id')) {
+        throw catalogSpoolError(400, 'invalid_catalog_params', 'Invalid catalogue page parameters');
+    }
+    const categoryId = values.category_id === undefined || values.category_id === null
+        ? ''
+        : String(values.category_id).normalize('NFC').trim();
+    if (categoryId.length > 256 || /[\u0000-\u001f\u007f]/u.test(categoryId)) {
+        throw catalogSpoolError(400, 'invalid_catalog_params', 'Invalid catalogue page parameters');
+    }
+    if (!XTREAM_CATALOG_STREAM_ACTIONS.has(action) && categoryId) {
+        throw catalogSpoolError(400, 'invalid_catalog_params', 'Category listings do not accept a category filter');
+    }
+    return categoryId;
+}
+
+function catalogSpoolError(status, code, publicMessage) {
+    const error = new Error(publicMessage);
+    error.status = status;
+    error.code = code;
+    error.publicMessage = publicMessage;
+    return error;
+}
+
+function xtreamCatalogRequestBinding(request) {
+    const endpoint = new URL(String(request.serverUrl));
+    endpoint.hash = '';
+    endpoint.search = '';
+    endpoint.username = '';
+    endpoint.password = '';
+    const canonical = JSON.stringify({
+        endpoint: endpoint.href.replace(/\/+$/, ''),
+        username: String(request.username),
+        password: String(request.password),
+        action: String(request.action),
+        categoryId: String(request.categoryId || ''),
+        maxItems: Number(request.maxItems),
+        spoolKey: String(request.spoolKey),
+    });
+    return crypto.createHmac('sha256', GATEWAY_TOKEN)
+        .update('xtream-catalog-binding-v1\0')
+        .update(canonical)
+        .digest('hex');
+}
+
+function xtreamCatalogSpoolId(binding, spoolKey) {
+    return crypto.createHmac('sha256', GATEWAY_TOKEN)
+        .update('xtream-catalog-spool-id-v1\0')
+        .update(String(spoolKey))
+        .update('\0')
+        .update(binding)
+        .digest('hex')
+        .slice(0, 48);
+}
+
+function signXtreamCatalogCursor({
+    spoolId, pageIndex, expiresAt, binding, buildId = null, contentDigest = null,
+}) {
+    const payload = Buffer.from(JSON.stringify({
+        v: 2,
+        s: spoolId,
+        p: pageIndex,
+        e: Math.floor(expiresAt / 1000),
+        b: binding,
+        g: buildId,
+        d: contentDigest,
+    }), 'utf8').toString('base64url');
+    const signature = crypto.createHmac('sha256', GATEWAY_TOKEN)
+        .update('xtream-catalog-cursor-v1\0')
+        .update(payload)
+        .digest('base64url');
+    return `${payload}.${signature}`;
+}
+
+function verifyXtreamCatalogCursor(cursor) {
+    try {
+        const [payload, signature, extra] = String(cursor || '').split('.');
+        if (!payload || !signature || extra) return null;
+        const expected = crypto.createHmac('sha256', GATEWAY_TOKEN)
+            .update('xtream-catalog-cursor-v1\0')
+            .update(payload)
+            .digest('base64url');
+        if (!timingSafeEqual(signature, expected)) return null;
+        const claims = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+        if (!claims || claims.v !== 2
+            || !/^[a-f0-9]{48}$/.test(String(claims.s || ''))
+            || !Number.isSafeInteger(claims.p) || claims.p < 0
+            || !Number.isSafeInteger(claims.e) || claims.e * 1000 <= Date.now()
+            || !/^[a-f0-9]{64}$/.test(String(claims.b || ''))
+            || !(claims.g === null || /^[a-f0-9]{32}$/.test(String(claims.g || '')))
+            || !(claims.d === null || /^[a-f0-9]{64}$/.test(String(claims.d || '')))
+            || ((claims.g === null) !== (claims.d === null))
+            || (claims.p > 0 && (!claims.g || !claims.d))) return null;
+        return {
+            spoolId: claims.s,
+            pageIndex: claims.p,
+            expiresAt: claims.e * 1000,
+            binding: claims.b,
+            buildId: claims.g,
+            contentDigest: claims.d,
+        };
+    } catch (_) {
+        return null;
+    }
+}
+
+function xtreamCatalogSpoolPath(spoolId, suffix = '') {
+    const target = path.resolve(XTREAM_CATALOG_SPOOL_DIR, `${spoolId}${suffix}`);
+    if (!isWithin(XTREAM_CATALOG_SPOOL_DIR, target) || target === XTREAM_CATALOG_SPOOL_DIR) {
+        throw catalogSpoolError(400, 'invalid_catalog_cursor', 'Invalid catalogue cursor');
+    }
+    return target;
+}
+
+function xtreamCatalogPagePath(spoolDir, pageIndex) {
+    const target = path.resolve(spoolDir, `page-${String(pageIndex).padStart(8, '0')}.bin`);
+    if (!isWithin(spoolDir, target) || target === spoolDir) {
+        throw catalogSpoolError(400, 'invalid_catalog_cursor', 'Invalid catalogue cursor');
+    }
+    return target;
+}
+
+function signXtreamCatalogFailure(metadata) {
+    const canonical = JSON.stringify({
+        v: metadata.v,
+        spoolId: metadata.spoolId,
+        binding: metadata.binding,
+        attempt: metadata.attempt,
+        retryAt: metadata.retryAt,
+        code: metadata.code,
+    });
+    return crypto.createHmac('sha256', GATEWAY_TOKEN)
+        .update('xtream-catalog-failure-v1\0')
+        .update(canonical)
+        .digest('base64url');
+}
+
+async function readXtreamCatalogBuildFailure(spoolId, binding) {
+    const failurePath = xtreamCatalogSpoolPath(spoolId, '.failure.json');
+    try {
+        const stat = await fsp.stat(failurePath);
+        if (!stat.isFile() || stat.size > 4096) return null;
+        const value = JSON.parse(await fsp.readFile(failurePath, 'utf8'));
+        if (!value || value.v !== 1 || value.spoolId !== spoolId || value.binding !== binding
+            || value.code !== 'catalog_spool_build_failed'
+            || !Number.isSafeInteger(value.attempt) || value.attempt < 1 || value.attempt > 1000
+            || !Number.isSafeInteger(value.retryAt)
+            || typeof value.signature !== 'string'
+            || !timingSafeEqual(value.signature, signXtreamCatalogFailure(value))) return null;
+        return value;
+    } catch (_) {
+        return null;
+    }
+}
+
+async function persistXtreamCatalogBuildFailure(spoolId, binding) {
+    const previous = await readXtreamCatalogBuildFailure(spoolId, binding);
+    const failure = {
+        v: 1,
+        spoolId,
+        binding,
+        attempt: Math.min(1000, Number(previous?.attempt || 0) + 1),
+        retryAt: Date.now() + Math.min(
+            15 * 60 * 1000,
+            XTREAM_CATALOG_FAILURE_RETRY_MS * (2 ** Math.min(5, Number(previous?.attempt || 0))),
+        ),
+        code: 'catalog_spool_build_failed',
+    };
+    failure.signature = signXtreamCatalogFailure(failure);
+    const failurePath = xtreamCatalogSpoolPath(spoolId, '.failure.json');
+    const temporary = xtreamCatalogSpoolPath(spoolId, `.${crypto.randomUUID()}.failure.partial`);
+    await fsp.writeFile(temporary, JSON.stringify(failure), { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+    await fsp.unlink(failurePath).catch(() => {});
+    await fsp.rename(temporary, failurePath);
+}
+
+async function clearXtreamCatalogBuildFailure(spoolId) {
+    await fsp.unlink(xtreamCatalogSpoolPath(spoolId, '.failure.json')).catch(() => {});
+}
+
+function xtreamCatalogPendingError(spoolId, binding) {
+    const pending = catalogSpoolError(202, 'catalog_spool_building', 'Catalogue page is being prepared');
+    pending.retryAfterSeconds = 2;
+    pending.cursor = signXtreamCatalogCursor({
+        spoolId,
+        pageIndex: 0,
+        expiresAt: Date.now() + XTREAM_CATALOG_SPOOL_TTL_MS,
+        binding,
+        buildId: null,
+        contentDigest: null,
+    });
+    pending.spoolToken = pending.cursor;
+    return pending;
+}
+
+function assertXtreamCatalogCursorMatchesManifest(claims, metadata) {
+    if (!claims) return;
+    // A page-zero pending token is issued before a build identity exists and is
+    // safe against any completed build because no earlier page was consumed.
+    if (!claims.buildId && !claims.contentDigest && claims.pageIndex === 0) return;
+    // A rebuilt spool may resume an old page cursor only when the exact provider
+    // response bytes match. This prevents a generation from combining prefix A
+    // with suffix B after a corrupt/missing page triggers reconstruction.
+    if (claims.contentDigest !== metadata.contentDigest) {
+        throw catalogSpoolError(409, 'catalog_cursor_stale', 'Catalogue changed while paging');
+    }
+}
+
+function assertXtreamCatalogCursorPair(cursorClaims, spoolClaims) {
+    if (!cursorClaims || !spoolClaims) return;
+    if (spoolClaims.pageIndex !== 0
+        || cursorClaims.spoolId !== spoolClaims.spoolId
+        || cursorClaims.binding !== spoolClaims.binding
+        || cursorClaims.buildId !== spoolClaims.buildId
+        || cursorClaims.contentDigest !== spoolClaims.contentDigest) {
+        throw catalogSpoolError(400, 'invalid_catalog_cursor', 'Invalid catalogue cursor');
+    }
+}
+
+async function readXtreamCatalogPage({ request, cursor, spoolToken, userAgent }) {
+    const binding = xtreamCatalogRequestBinding(request);
+    const spoolId = xtreamCatalogSpoolId(binding, request.spoolKey);
+    let pageIndex = 0;
+    let cursorClaims = null;
+    if (cursor) {
+        cursorClaims = verifyXtreamCatalogCursor(cursor);
+        if (!cursorClaims || cursorClaims.spoolId !== spoolId || cursorClaims.binding !== binding) {
+            throw catalogSpoolError(400, 'invalid_catalog_cursor', 'Invalid catalogue cursor');
+        }
+        pageIndex = cursorClaims.pageIndex;
+    }
+    const spoolClaims = spoolToken ? verifyXtreamCatalogCursor(spoolToken) : null;
+    if (spoolToken && (!spoolClaims || spoolClaims.spoolId !== spoolId || spoolClaims.binding !== binding)) {
+        throw catalogSpoolError(400, 'invalid_catalog_cursor', 'Invalid catalogue cursor');
+    }
+    assertXtreamCatalogCursorPair(cursorClaims, spoolClaims);
+
+    await fsp.mkdir(XTREAM_CATALOG_SPOOL_DIR, { recursive: true });
+    scheduleXtreamCatalogSpoolPrune();
+    const spoolDir = xtreamCatalogSpoolPath(spoolId);
+    let metadata = await readXtreamCatalogSpoolMetadata(spoolDir);
+    if (!metadata) {
+        const failure = await readXtreamCatalogBuildFailure(spoolId, binding);
+        if (failure && failure.retryAt > Date.now()) {
+            const failed = catalogSpoolError(503, failure.code, 'Catalogue page preparation failed');
+            failed.retryAfterSeconds = Math.max(1, Math.ceil((failure.retryAt - Date.now()) / 1000));
+            throw failed;
+        }
+        if (failure) await clearXtreamCatalogBuildFailure(spoolId);
+        // Construction is intentionally detached from this request. A large
+        // provider array can take minutes; Edge receives an authenticated poll
+        // cursor and checkpoints the durable DB job instead of holding memory
+        // or an invocation open until the spool is complete.
+        void createXtreamCatalogSpool({
+            request,
+            binding,
+            spoolId,
+            userAgent,
+        }).catch(() => {});
+        throw xtreamCatalogPendingError(spoolId, binding);
+    }
+    assertXtreamCatalogSpoolMetadata(metadata, { binding, spoolId, maxItems: request.maxItems });
+    assertXtreamCatalogCursorMatchesManifest(cursorClaims, metadata);
+    assertXtreamCatalogCursorMatchesManifest(spoolClaims, metadata);
+    if (metadata.expiresAt <= Date.now()) {
+        void removeXtreamCatalogSpool(spoolDir);
+        throw catalogSpoolError(410, 'catalog_cursor_expired', 'Catalogue cursor expired');
+    }
+    if (pageIndex >= metadata.pageCount) {
+        throw catalogSpoolError(400, 'invalid_catalog_cursor', 'Invalid catalogue cursor');
+    }
+
+    const pagePath = xtreamCatalogPagePath(spoolDir, pageIndex);
+    const stat = await fsp.stat(pagePath).catch(() => null);
+    if (!stat || !stat.isFile() || stat.size > XTREAM_CATALOG_PAGE_MAX_BYTES + 64) {
+        return restartCorruptXtreamCatalogSpool({ request, binding, spoolId, userAgent });
+    }
+    let items;
+    try {
+        const encrypted = await fsp.readFile(pagePath);
+        const plaintext = decryptXtreamCatalogPage(encrypted, {
+            spoolId,
+            binding,
+            buildId: metadata.buildId,
+            pageIndex,
+        });
+        items = JSON.parse(plaintext.toString('utf8'));
+    } catch (_) {
+        return restartCorruptXtreamCatalogSpool({ request, binding, spoolId, userAgent });
+    }
+    if (!Array.isArray(items) || items.length > request.maxItems
+        || items.some((item) => !item || typeof item !== 'object' || Array.isArray(item))) {
+        return restartCorruptXtreamCatalogSpool({ request, binding, spoolId, userAgent });
+    }
+    const done = pageIndex + 1 >= metadata.pageCount;
+    return {
+        items,
+        nextCursor: done ? null : signXtreamCatalogCursor({
+            spoolId,
+            pageIndex: pageIndex + 1,
+            expiresAt: metadata.expiresAt,
+            binding,
+            buildId: metadata.buildId,
+            contentDigest: metadata.contentDigest,
+        }),
+        done,
+        spoolToken: signXtreamCatalogCursor({
+            spoolId,
+            pageIndex: 0,
+            expiresAt: metadata.expiresAt,
+            binding,
+            buildId: metadata.buildId,
+            contentDigest: metadata.contentDigest,
+        }),
+    };
+}
+
+function signXtreamCatalogSpoolMetadata(metadata) {
+    const canonical = JSON.stringify({
+        v: metadata.v,
+        spoolId: metadata.spoolId,
+        binding: metadata.binding,
+        buildId: metadata.buildId,
+        contentDigest: metadata.contentDigest,
+        maxItems: metadata.maxItems,
+        pageCount: metadata.pageCount,
+        itemCount: metadata.itemCount,
+        expiresAt: metadata.expiresAt,
+    });
+    return crypto.createHmac('sha256', GATEWAY_TOKEN)
+        .update('xtream-catalog-manifest-v2\0')
+        .update(canonical)
+        .digest('base64url');
+}
+
+function assertXtreamCatalogSpoolMetadata(metadata, expected) {
+    if (!metadata || metadata.v !== 2
+        || metadata.spoolId !== expected.spoolId
+        || metadata.binding !== expected.binding
+        || !/^[a-f0-9]{32}$/.test(String(metadata.buildId || ''))
+        || !/^[a-f0-9]{64}$/.test(String(metadata.contentDigest || ''))
+        || metadata.maxItems !== expected.maxItems
+        || !Number.isSafeInteger(metadata.pageCount) || metadata.pageCount < 1
+        || !Number.isSafeInteger(metadata.itemCount) || metadata.itemCount < 0
+        || metadata.itemCount > XTREAM_CATALOG_SPOOL_MAX_ITEMS
+        || !Number.isSafeInteger(metadata.expiresAt)
+        || typeof metadata.signature !== 'string'
+        || !timingSafeEqual(metadata.signature, signXtreamCatalogSpoolMetadata(metadata))) {
+        throw catalogSpoolError(502, 'catalog_spool_invalid', 'Catalogue page is unavailable');
+    }
+}
+
+async function readXtreamCatalogSpoolMetadata(spoolDir) {
+    try {
+        const stat = await fsp.stat(path.join(spoolDir, 'manifest.json'));
+        if (!stat.isFile() || stat.size > 16 * 1024) return null;
+        const metadata = JSON.parse(await fsp.readFile(path.join(spoolDir, 'manifest.json'), 'utf8'));
+        if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)
+            || typeof metadata.signature !== 'string'
+            || !timingSafeEqual(metadata.signature, signXtreamCatalogSpoolMetadata(metadata))) return null;
+        return metadata;
+    } catch (_) {
+        return null;
+    }
+}
+
+async function createXtreamCatalogSpool({ request, binding, spoolId, userAgent }) {
+    const spoolDir = xtreamCatalogSpoolPath(spoolId);
+    const lockPath = xtreamCatalogSpoolPath(spoolId, '.lock');
+    let lock = null;
+    try {
+        lock = await fsp.open(lockPath, 'wx', 0o600);
+    } catch (error) {
+        if (error?.code === 'EEXIST') {
+            throw catalogSpoolError(409, 'catalog_spool_busy', 'Catalogue page is being prepared');
+        }
+        throw catalogSpoolError(503, 'catalog_spool_unavailable', 'Catalogue page is unavailable');
+    }
+
+    const partialDir = xtreamCatalogSpoolPath(spoolId, `.${crypto.randomUUID()}.partial`);
+    try {
+        // Another request may have completed between the initial lookup and
+        // acquiring the deterministic lock.
+        const existing = await readXtreamCatalogSpoolMetadata(spoolDir);
+        if (existing) return existing;
+        // A crash may leave a final-looking directory without a valid signed
+        // manifest. Under the deterministic build lock it is safe to remove;
+        // otherwise rename(partial, existing) would poll forever.
+        await removeXtreamCatalogSpool(spoolDir);
+        await fsp.mkdir(partialDir, { recursive: false });
+        const buildId = crypto.randomBytes(16).toString('hex');
+        const url = xtreamPlayerApiUrl({
+            serverUrl: request.serverUrl,
+            username: request.username,
+            password: request.password,
+            action: request.action,
+            params: request.categoryId ? { category_id: request.categoryId } : undefined,
+        });
+        const result = await fetchProviderArrayToXtreamCatalogSpool({
+            url,
+            userAgent,
+            backgroundAccountKey: providerAccountKeyFromCredentials(request.serverUrl, request.username),
+            spoolDir: partialDir,
+            maxItems: request.maxItems,
+            spoolId,
+            binding,
+            buildId,
+        });
+        const metadata = {
+            v: 2,
+            spoolId,
+            binding,
+            buildId,
+            contentDigest: result.contentDigest,
+            maxItems: request.maxItems,
+            pageCount: result.pageCount,
+            itemCount: result.itemCount,
+            expiresAt: Date.now() + XTREAM_CATALOG_SPOOL_TTL_MS,
+        };
+        metadata.signature = signXtreamCatalogSpoolMetadata(metadata);
+        await fsp.writeFile(path.join(partialDir, 'manifest.json'), JSON.stringify(metadata), {
+            encoding: 'utf8',
+            mode: 0o600,
+            flag: 'wx',
+        });
+        await fsp.rename(partialDir, spoolDir);
+        await clearXtreamCatalogBuildFailure(spoolId);
+        return metadata;
+    } catch (error) {
+        await removeXtreamCatalogSpool(partialDir);
+        await persistXtreamCatalogBuildFailure(spoolId, binding).catch(() => {});
+        throw error;
+    } finally {
+        await lock?.close().catch(() => {});
+        await fsp.unlink(lockPath).catch(() => {});
+    }
+}
+
+async function invalidateXtreamCatalogSpool(spoolId, binding) {
+    const spoolDir = xtreamCatalogSpoolPath(spoolId);
+    const lockPath = xtreamCatalogSpoolPath(spoolId, '.lock');
+    let lock;
+    try {
+        lock = await fsp.open(lockPath, 'wx', 0o600);
+    } catch (error) {
+        if (error?.code === 'EEXIST') return false;
+        throw catalogSpoolError(503, 'catalog_spool_unavailable', 'Catalogue page is unavailable');
+    }
+    try {
+        const metadata = await readXtreamCatalogSpoolMetadata(spoolDir);
+        if (!metadata || (metadata.spoolId === spoolId && metadata.binding === binding)) {
+            await removeXtreamCatalogSpool(spoolDir);
+        }
+        await clearXtreamCatalogBuildFailure(spoolId);
+        return true;
+    } finally {
+        await lock.close().catch(() => {});
+        await fsp.unlink(lockPath).catch(() => {});
+    }
+}
+
+async function restartCorruptXtreamCatalogSpool({ request, binding, spoolId, userAgent }) {
+    await invalidateXtreamCatalogSpool(spoolId, binding);
+    void createXtreamCatalogSpool({ request, binding, spoolId, userAgent }).catch(() => {});
+    throw xtreamCatalogPendingError(spoolId, binding);
+}
+
+async function fetchProviderArrayToXtreamCatalogSpool({
+    url, userAgent, backgroundAccountKey, spoolDir, maxItems, spoolId, binding, buildId,
+}) {
+    const controller = new AbortController();
+    const backgroundKey = String(backgroundAccountKey || '');
+    if (backgroundKey && viewerPlaybackActiveLocally()) {
+        throw backgroundProbeError(409, 'account_busy', 'Account busy (active playback)');
+    }
+    if (backgroundKey && accountExtractions.get(backgroundKey)?.size) {
+        throw backgroundProbeError(429, 'background_busy', 'Account busy (background request)');
+    }
+    const registration = backgroundKey
+        ? registerAccountExtraction(backgroundKey, { kill: () => controller.abort() })
+        : null;
+    const timer = setTimeout(() => controller.abort(), XTREAM_CATALOG_BUILD_TIMEOUT_MS);
+    let response = null;
+    try {
+        response = await openXtreamProviderResponse(url, {
+            signal: controller.signal,
+            headers: {
+                Accept: 'application/json,text/plain,*/*',
+                'User-Agent': userAgent,
+            },
+        });
+        if (!response.ok) {
+            const text = await readBoundedProviderErrorBody(response.body, 64 * 1024);
+            const payload = text ? safeJson(text) : {};
+            const failure = classifyProviderResponseFailure(response.status, payload, {
+                proxyConfigured: providerProxyAgents.length > 0,
+            });
+            throw catalogSpoolError(failure.status, failure.code, failure.publicMessage);
+        }
+        if (!response.body) {
+            throw catalogSpoolError(502, 'invalid_payload', 'Invalid catalogue response');
+        }
+        return await spoolTopLevelJsonObjectArray(
+            response.body,
+            spoolDir,
+            maxItems,
+            { spoolId, binding, buildId },
+        );
+    } catch (err) {
+        if (registration?.preempted) {
+            throw backgroundProbeError(409, 'viewer_preempted', 'Provider metadata request preempted by active playback');
+        }
+        if (err.status) throw err;
+        const networkFailure = classifyProviderFetchFailure(err);
+        throw catalogSpoolError(
+            err?.name === 'AbortError' ? 504 : 502,
+            networkFailure.code,
+            'Unable to reach IPTV provider',
+        );
+    } finally {
+        clearTimeout(timer);
+        await response?.close?.().catch(() => {});
+        registration?.release?.();
+    }
+}
+
+async function readBoundedProviderErrorBody(body, maxBytes) {
+    if (!body) return '';
+    const decoder = new TextDecoder();
+    let text = '';
+    let bytes = 0;
+    for await (const chunk of body) {
+        bytes += chunk.byteLength;
+        if (bytes > maxBytes) break;
+        text += decoder.decode(chunk, { stream: true });
+    }
+    return text + decoder.decode();
+}
+
+function xtreamCatalogPageEncryptionKey(spoolId) {
+    return crypto.createHmac('sha256', GATEWAY_TOKEN)
+        .update('xtream-catalog-page-key-v2\0')
+        .update(String(spoolId))
+        .digest();
+}
+
+function xtreamCatalogPageAad({ spoolId, binding, buildId, pageIndex }) {
+    return Buffer.from(`xtream-catalog-page-v2\0${spoolId}\0${binding}\0${buildId}\0${pageIndex}`, 'utf8');
+}
+
+function encryptXtreamCatalogPage(plaintext, context) {
+    const iv = crypto.randomBytes(12);
+    const cipher = crypto.createCipheriv('aes-256-gcm', xtreamCatalogPageEncryptionKey(context.spoolId), iv);
+    cipher.setAAD(xtreamCatalogPageAad(context));
+    const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
+    const tag = cipher.getAuthTag();
+    return Buffer.concat([Buffer.from('NCSP2', 'ascii'), iv, tag, ciphertext]);
+}
+
+function decryptXtreamCatalogPage(encrypted, context) {
+    if (!Buffer.isBuffer(encrypted) || encrypted.length < 34
+        || encrypted.subarray(0, 5).toString('ascii') !== 'NCSP2') {
+        throw catalogSpoolError(502, 'catalog_spool_invalid', 'Catalogue page is unavailable');
+    }
+    try {
+        const iv = encrypted.subarray(5, 17);
+        const tag = encrypted.subarray(17, 33);
+        const ciphertext = encrypted.subarray(33);
+        const decipher = crypto.createDecipheriv(
+            'aes-256-gcm',
+            xtreamCatalogPageEncryptionKey(context.spoolId),
+            iv,
+        );
+        decipher.setAAD(xtreamCatalogPageAad(context));
+        decipher.setAuthTag(tag);
+        return Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+    } catch (_) {
+        throw catalogSpoolError(502, 'catalog_spool_invalid', 'Catalogue page is unavailable');
+    }
+}
+
+async function spoolTopLevelJsonObjectArray(body, spoolDir, maxItems, encryptionContext) {
+    const decoder = new TextDecoder();
+    const contentHash = crypto.createHash('sha256');
+    let mode = 'before-array';
+    let current = '';
+    let currentBytes = 0;
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    let allowArrayEnd = true;
+    let responseBytes = 0;
+    let itemCount = 0;
+    let pageIndex = 0;
+    let pageItems = [];
+    let pageBytes = 2;
+
+    const flushPage = async () => {
+        const payload = JSON.stringify(pageItems);
+        if (Buffer.byteLength(payload, 'utf8') > XTREAM_CATALOG_PAGE_MAX_BYTES) {
+            throw catalogSpoolError(502, 'catalog_page_too_large', 'Catalogue page exceeds its safety limit');
+        }
+        const encrypted = encryptXtreamCatalogPage(Buffer.from(payload, 'utf8'), {
+            ...encryptionContext,
+            pageIndex,
+        });
+        await fsp.writeFile(xtreamCatalogPagePath(spoolDir, pageIndex), encrypted, {
+            mode: 0o600,
+            flag: 'wx',
+        });
+        pageIndex += 1;
+        pageItems = [];
+        pageBytes = 2;
+    };
+
+    const acceptItem = async () => {
+        let item;
+        try {
+            item = JSON.parse(current);
+        } catch (_) {
+            throw catalogSpoolError(502, 'invalid_payload', 'Invalid catalogue response');
+        }
+        if (!item || typeof item !== 'object' || Array.isArray(item)) {
+            throw catalogSpoolError(502, 'invalid_payload', 'Invalid catalogue response');
+        }
+        const serialized = JSON.stringify(item);
+        const serializedBytes = Buffer.byteLength(serialized, 'utf8');
+        if (serializedBytes > XTREAM_CATALOG_ITEM_MAX_BYTES) {
+            throw catalogSpoolError(502, 'catalog_item_too_large', 'Catalogue item exceeds its safety limit');
+        }
+        if (pageItems.length > 0
+            && (pageItems.length >= maxItems
+                || pageBytes + serializedBytes + 1 > XTREAM_CATALOG_PAGE_MAX_BYTES)) {
+            await flushPage();
+        }
+        pageItems.push(item);
+        pageBytes += serializedBytes + (pageItems.length > 1 ? 1 : 0);
+        itemCount += 1;
+        if (itemCount > XTREAM_CATALOG_SPOOL_MAX_ITEMS) {
+            throw catalogSpoolError(502, 'catalog_too_many_items', 'Catalogue exceeds its safety limit');
+        }
+        current = '';
+        currentBytes = 0;
+    };
+
+    const consume = async (text) => {
+        for (const char of text) {
+            if (mode === 'before-array') {
+                if (/\s/u.test(char) || char === '\uFEFF') continue;
+                if (char !== '[') throw catalogSpoolError(502, 'invalid_payload', 'Invalid catalogue response');
+                mode = 'before-value';
+                continue;
+            }
+            if (mode === 'before-value') {
+                if (/\s/u.test(char)) continue;
+                if (char === ']') {
+                    if (!allowArrayEnd) {
+                        throw catalogSpoolError(502, 'invalid_payload', 'Invalid catalogue response');
+                    }
+                    mode = 'done';
+                    continue;
+                }
+                if (char !== '{') throw catalogSpoolError(502, 'invalid_payload', 'Invalid catalogue response');
+                mode = 'in-value';
+                current = char;
+                currentBytes = 1;
+                depth = 1;
+                inString = false;
+                escaped = false;
+                continue;
+            }
+            if (mode === 'after-value') {
+                if (/\s/u.test(char)) continue;
+                if (char === ',') {
+                    mode = 'before-value';
+                    allowArrayEnd = false;
+                    continue;
+                }
+                if (char === ']') {
+                    mode = 'done';
+                    continue;
+                }
+                throw catalogSpoolError(502, 'invalid_payload', 'Invalid catalogue response');
+            }
+            if (mode === 'done') {
+                if (!/\s/u.test(char)) throw catalogSpoolError(502, 'invalid_payload', 'Invalid catalogue response');
+                continue;
+            }
+
+            current += char;
+            currentBytes += Buffer.byteLength(char, 'utf8');
+            if (currentBytes > XTREAM_CATALOG_ITEM_MAX_BYTES) {
+                throw catalogSpoolError(502, 'catalog_item_too_large', 'Catalogue item exceeds its safety limit');
+            }
+            if (inString) {
+                if (escaped) escaped = false;
+                else if (char === '\\') escaped = true;
+                else if (char === '"') inString = false;
+                continue;
+            }
+            if (char === '"') {
+                inString = true;
+            } else if (char === '{' || char === '[') {
+                depth += 1;
+            } else if (char === '}' || char === ']') {
+                depth -= 1;
+                if (depth < 0) throw catalogSpoolError(502, 'invalid_payload', 'Invalid catalogue response');
+                if (depth === 0) {
+                    await acceptItem();
+                    mode = 'after-value';
+                }
+            }
+        }
+    };
+
+    for await (const chunk of body) {
+        contentHash.update(chunk);
+        responseBytes += chunk.byteLength;
+        if (responseBytes > XTREAM_CATALOG_SPOOL_MAX_BYTES) {
+            throw catalogSpoolError(502, 'catalog_too_large', 'Catalogue exceeds its safety limit');
+        }
+        await consume(decoder.decode(chunk, { stream: true }));
+    }
+    await consume(decoder.decode());
+    if (mode !== 'done') throw catalogSpoolError(502, 'invalid_payload', 'Invalid catalogue response');
+    if (pageItems.length > 0 || pageIndex === 0) await flushPage();
+    return { pageCount: pageIndex, itemCount, contentDigest: contentHash.digest('hex') };
+}
+
+async function removeXtreamCatalogSpool(spoolDir) {
+    const resolved = path.resolve(spoolDir);
+    if (!isWithin(XTREAM_CATALOG_SPOOL_DIR, resolved) || resolved === XTREAM_CATALOG_SPOOL_DIR) return;
+    await fsp.rm(resolved, { recursive: true, force: true });
+}
+
+let xtreamCatalogSpoolPruneDueAt = 0;
+function scheduleXtreamCatalogSpoolPrune() {
+    const now = Date.now();
+    if (xtreamCatalogSpoolPruneDueAt > now) return;
+    xtreamCatalogSpoolPruneDueAt = now + 60 * 1000;
+    setImmediate(async () => {
+        try {
+            const entries = await fsp.readdir(XTREAM_CATALOG_SPOOL_DIR, { withFileTypes: true });
+            let inspected = 0;
+            for (const entry of entries) {
+                if (inspected >= 100) break;
+                inspected += 1;
+                const target = path.resolve(XTREAM_CATALOG_SPOOL_DIR, entry.name);
+                if (!isWithin(XTREAM_CATALOG_SPOOL_DIR, target) || target === XTREAM_CATALOG_SPOOL_DIR) continue;
+                const stat = await fsp.stat(target).catch(() => null);
+                const staleAfterMs = entry.name.endsWith('.lock') || entry.name.endsWith('.partial')
+                    ? XTREAM_CATALOG_BUILD_TIMEOUT_MS + 60 * 1000
+                    : XTREAM_CATALOG_SPOOL_TTL_MS;
+                if (!stat || stat.mtimeMs + staleAfterMs > now) continue;
+                if (entry.isDirectory()) await removeXtreamCatalogSpool(target);
+                else if (entry.isFile() && (
+                    entry.name.endsWith('.lock')
+                    || entry.name.endsWith('.partial')
+                    || entry.name.endsWith('.failure.json')
+                )) await fsp.unlink(target).catch(() => {});
+            }
+        } catch (_) {
+            // Pruning is best effort. Read-time expiry remains authoritative.
+        }
+    });
 }
 
 function safeJson(text) {
