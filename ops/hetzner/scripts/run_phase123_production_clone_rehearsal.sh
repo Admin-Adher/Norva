@@ -105,6 +105,8 @@ contraction_definition=20260823180000_provider_catalog_generation_online_rollout
 online_index_head=20260823182700_series_inventory_generation_parent_natural_fk.sql
 phase3_database_head=20260823194000_replacement_promotion_proof_account_delete.sql
 cache_epoch_head=20260824100000_catalog_cache_epoch_v2.sql
+previous_provider_access_head=20260824171000_catalog_cache_epoch_v2_minimum_observation_gate.sql
+current_provider_access_head=20260824173000_legal_billing_archive_audited_access_v1.sql
 EOF
 
 baseline_sql() {
@@ -126,7 +128,29 @@ SQL
 }
 
 baseline_sql | docker exec -i "$PRODUCTION_CONTAINER" psql -X -At -F $'\t' -v ON_ERROR_STOP=1 -U supabase_admin -d postgres >"$REPORT_DIR/production-baseline.tsv"
-grep -qx $'phase123_objects\t0' "$REPORT_DIR/production-baseline.tsv" || fail "production already contains part of the Phase 1-3 schema"
+phase123_object_count="$(awk -F '\t' '$1=="phase123_objects"{print $2}' "$REPORT_DIR/production-baseline.tsv")"
+case "$phase123_object_count" in
+  0) REHEARSAL_MODE="bootstrap" ;;
+  4) REHEARSAL_MODE="incremental" ;;
+  *) fail "production Phase 1-3 object state is neither pristine nor the expected installed head" ;;
+esac
+printf 'rehearsal_mode=%s\n' "$REHEARSAL_MODE" >>"$REPORT_DIR/manifest.txt"
+if test "$REHEARSAL_MODE" = incremental; then
+  docker exec -i "$PRODUCTION_CONTAINER" psql -X -At -F $'\t' -v ON_ERROR_STOP=1 \
+    -U supabase_admin -d postgres <<'SQL' >"$REPORT_DIR/production-incremental-preconditions.tsv"
+select 'previous_cache_gate',to_regprocedure('public.norva_complete_catalog_cache_epoch_v2_rollout(text,text)') is not null;
+select 'legal_policy_v2',to_regprocedure('public.norva_configure_legal_billing_archive_policy(bigint,text,text,integer,integer,integer,text)') is not null;
+select 'legal_access_v1',to_regprocedure('public.norva_read_legal_billing_archive(text,text,text,text)') is not null;
+select 'policy_rows',count(*) from public.legal_billing_archive_retention_policy;
+select 'archive_rows',count(*) from public.legal_billing_archive;
+SQL
+  grep -qx $'previous_cache_gate\tt' "$REPORT_DIR/production-incremental-preconditions.tsv" \
+    || fail "production does not match the required cache-observation head"
+  grep -qx $'legal_policy_v2\tf' "$REPORT_DIR/production-incremental-preconditions.tsv" \
+    || fail "legal policy v2 is already present; choose a new incremental rehearsal boundary"
+  grep -qx $'legal_access_v1\tf' "$REPORT_DIR/production-incremental-preconditions.tsv" \
+    || fail "legal archive access v1 is already present; choose a new incremental rehearsal boundary"
+fi
 
 printf 'DUMP_BEGIN %s\n' "$(date -u +%FT%TZ)" | tee "$REPORT_DIR/timeline.log"
 PARTIAL_DUMP="$DUMP_FILE.partial"
@@ -263,7 +287,63 @@ PRE_HEAD="20260823179920_catalog_generation_flag_gate.sql"
 CONTRACTION="20260823180000_provider_catalog_generation_online_rollout.sql"
 ONLINE_HEAD="20260823182700_series_inventory_generation_parent_natural_fk.sql"
 CURRENT_HEAD="20260823194000_replacement_promotion_proof_account_delete.sql"
+PREVIOUS_PROVIDER_ACCESS_HEAD="20260824171000_catalog_cache_epoch_v2_minimum_observation_gate.sql"
 CURRENT_PROVIDER_ACCESS_HEAD="20260824173000_legal_billing_archive_audited_access_v1.sql"
+
+if test "$REHEARSAL_MODE" = incremental; then
+  apply_range "$PREVIOUS_PROVIDER_ACCESS_HEAD" "$CURRENT_PROVIDER_ACCESS_HEAD" legal-controls-incremental
+
+  for test_name in \
+    account_deletion_legal_billing_retention_smoke.sql \
+    legal_billing_archive_access_smoke.sql
+  do
+    output="$REPORT_DIR/test-${test_name%.sql}.log"
+    printf 'TEST %s %s\n' "$(date -u +%FT%TZ)" "$test_name" | tee -a "$REPORT_DIR/timeline.log"
+    docker exec -i "$TARGET_CONTAINER" psql -X -v ON_ERROR_STOP=1 \
+      -U supabase_admin -d postgres \
+      <"$WORKSPACE/supabase/tests/$test_name" >"$output" 2>&1
+  done
+
+  docker exec -i "$TARGET_CONTAINER" psql -X -At -F $'\t' -v ON_ERROR_STOP=1 \
+    -U supabase_admin -d postgres <<'SQL' >"$REPORT_DIR/final-invariants.tsv"
+select 'policy_v2',to_regprocedure('public.norva_configure_legal_billing_archive_policy(bigint,text,text,integer,integer,integer,text)') is not null;
+select 'access_v1',to_regprocedure('public.norva_read_legal_billing_archive(text,text,text,text)') is not null;
+select 'policy_rows',count(*) from public.legal_billing_archive_retention_policy;
+select 'archive_rows',count(*) from public.legal_billing_archive;
+select 'access_grants',count(*) from public.legal_billing_archive_access_grants;
+select 'access_events',count(*) from public.legal_billing_archive_access_events;
+select 'grant_events',count(*) from public.legal_billing_archive_access_grant_events;
+select 'rollout',stage,revision from public.cloud_provider_access_rollout where singleton;
+select 'flags',count(*),count(*) filter(where enabled) from public.admin_feature_flags where key in (
+  'provider_access_v1_enabled','provider_access_auto_detection_v1_enabled',
+  'provider_access_notifications_v1_enabled','provider_access_email_v1_enabled',
+  'provider_access_push_v1_enabled','provider_access_in_app_v1_enabled',
+  'provider_access_visibility_v1_enabled','provider_credential_transition_v1_enabled',
+  'provider_replacement_v1_enabled'
+);
+select 'cache_epoch',phase,completed_at is not null from public.cloud_catalog_cache_epoch_v2_rollout where singleton;
+SQL
+  grep -qx $'policy_v2\tt' "$REPORT_DIR/final-invariants.tsv" || fail "legal policy v2 is missing"
+  grep -qx $'access_v1\tt' "$REPORT_DIR/final-invariants.tsv" || fail "legal archive access v1 is missing"
+  grep -qx $'access_grants\t0' "$REPORT_DIR/final-invariants.tsv" || fail "rehearsal persisted a legal-reader grant"
+  grep -qx $'access_events\t0' "$REPORT_DIR/final-invariants.tsv" || fail "rehearsal persisted an access event"
+  grep -qx $'grant_events\t0' "$REPORT_DIR/final-invariants.tsv" || fail "rehearsal persisted a grant event"
+  grep -qx $'flags\t9\t0' "$REPORT_DIR/final-invariants.tsv" || fail "Provider Access flags are not all OFF"
+  grep -Eq $'^rollout\toff\t[0-9]+$' "$REPORT_DIR/final-invariants.tsv" || fail "Provider Access rollout is not OFF"
+  grep -qx $'cache_epoch\tinstalled\tf' "$REPORT_DIR/final-invariants.tsv" || fail "cache epoch observation gate changed"
+  before_policy="$(awk -F '\t' '$1=="policy_rows"{print $2}' "$REPORT_DIR/production-incremental-preconditions.tsv")"
+  before_archive="$(awk -F '\t' '$1=="archive_rows"{print $2}' "$REPORT_DIR/production-incremental-preconditions.tsv")"
+  after_policy="$(awk -F '\t' '$1=="policy_rows"{print $2}' "$REPORT_DIR/final-invariants.tsv")"
+  after_archive="$(awk -F '\t' '$1=="archive_rows"{print $2}' "$REPORT_DIR/final-invariants.tsv")"
+  test "$before_policy" = "$after_policy" || fail "policy row count changed: $before_policy -> $after_policy"
+  test "$before_archive" = "$after_archive" || fail "archive row count changed: $before_archive -> $after_archive"
+
+  sha256sum "$REPORT_DIR"/*.tsv "$REPORT_DIR"/*.txt "$REPORT_DIR"/*.log >"$REPORT_DIR/artifact-sha256.txt"
+  printf 'REHEARSAL_COMPLETE %s\n' "$(date -u +%FT%TZ)" | tee -a "$REPORT_DIR/timeline.log"
+  printf 'PHASE123_PRODUCTION_CLONE_REHEARSAL_PASS\nmode=%s\ncommit=%s\ncontainer=%s\nreport=%s\n' \
+    "$REHEARSAL_MODE" "$HEAD" "$TARGET_CONTAINER" "$REPORT_DIR"
+  exit 0
+fi
 
 apply_range "20260822219999" "$PRE_HEAD" pre-contraction
 apply_range "$PRE_HEAD" "$CONTRACTION" contraction-definition
