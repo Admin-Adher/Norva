@@ -59,6 +59,13 @@ jamais la valeur recherchée ni les données retournées. Les changements de gra
 sont eux aussi CAS et append-only. La réponse est limitée à vingt lignes et
 signale explicitement une troncature.
 
+Le premier clone de production a révélé que les tables v1 restaurées portaient
+encore des grants Supabase historiques directs pour `anon`, `authenticated` et
+`service_role`. Elles contenaient zéro ligne, mais le smoke a refusé la preuve.
+`20260824174000_legal_billing_archive_acl_hardening.sql` révoque désormais tous
+les droits de données sur les six tables et vérifie elle-même chaque couple
+`rôle × privilège` avant de committer.
+
 ## Preuves PostgreSQL réelles
 
 Environnement : `norva-phase3-proof-b-db`, image
@@ -92,8 +99,8 @@ Le smoke couvre :
 Suite Node complète après intégration :
 
 ```text
-tests     2634
-pass      2632
+tests     2637
+pass      2635
 fail      0
 skipped   2 (fixtures runtime documentées)
 ```
@@ -107,6 +114,9 @@ db8b75f8e5b10fa17ef242d709f4cb2ba15e368852dd5c02d464380efe18c038
 20260824173000_legal_billing_archive_audited_access_v1.sql
 acce40d4ea0a9c32b4766cc62fcf9e653c6e4633a4247a22d88709e5e0a04a9d
 
+20260824174000_legal_billing_archive_acl_hardening.sql
+8bd0673a7b47d7e3b51addce0a919eb568925ea0e0564d7d79c124c6581ae6cd
+
 account_deletion_legal_billing_retention_smoke.sql
 da92f8aa37f99ba761589b0345d2809ef83847fc8d580d8957553d207dc764ec
 
@@ -117,7 +127,7 @@ run_legal_billing_policy_v2_race.sh
 4214221dbc07e561bda13533bc76f213c6dec0ef3e9b04b1434c4fb871f25e03
 
 legal-billing-retention-policy-v2.test.js
-28d29587460b8ab6ec508f17f5e0d86b689f1c2a841242c715e7a1ae1eecfb9e
+b000bfd5e30f896394cb3730268b0d39de6e56f3d933eecab2deb17e69030742
 ```
 
 ## Gate de production restant

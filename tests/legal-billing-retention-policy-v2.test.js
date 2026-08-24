@@ -12,6 +12,7 @@ const smoke = read('supabase/tests/account_deletion_legal_billing_retention_smok
 const race = read('ops/hetzner/scripts/run_legal_billing_policy_v2_race.sh');
 const accessMigration = read('supabase/migrations/20260824173000_legal_billing_archive_audited_access_v1.sql');
 const accessSmoke = read('supabase/tests/legal_billing_archive_access_smoke.sql');
+const aclMigration = read('supabase/migrations/20260824174000_legal_billing_archive_acl_hardening.sql');
 
 test('legal retention v2 is calculated from a configured fiscal close', () => {
   assert.match(migration, /norva_legal_billing_fiscal_close/);
@@ -75,4 +76,11 @@ test('archive access is exact, bounded, data-minimised and atomically audited', 
   assert.match(accessMigration, /revoke all on table public\.legal_billing_archive_access_grants[\s\S]*service_role/);
   assert.match(accessMigration, /grant execute on function public\.norva_read_legal_billing_archive[\s\S]*to authenticated/);
   assert.match(accessSmoke, /lookup_digest !~ '\^\[0-9a-f\]\{64\}\$'/);
+});
+
+test('the final migration reasserts every archive ACL against production grant drift', () => {
+  assert.match(aclMigration, /revoke all on table[\s\S]*legal_billing_archive_retention_policy[\s\S]*legal_billing_archive_access_events[\s\S]*from public, anon, authenticated, service_role/);
+  assert.match(aclMigration, /has_table_privilege/);
+  assert.match(aclMigration, /'select','insert','update','delete','truncate','references','trigger'/);
+  assert.match(aclMigration, /legal billing archive direct table privilege remains/);
 });
