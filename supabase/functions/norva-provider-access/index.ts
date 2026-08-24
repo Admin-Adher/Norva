@@ -155,7 +155,9 @@ async function routeRequest(req, requestId) {
   }
 
   const user = await requireUserJwt(req);
-  const source = await requireOwnedSource(match.sourceId, user.id);
+  const source = match.resource === "replacement" && match.kind !== "collection"
+    ? await requireOwnedReplacementSource(match.sourceId, user.id)
+    : await requireOwnedSource(match.sourceId, user.id);
 
   if (match.resource === "replacement") {
     if (req.method === "POST" && match.kind === "collection") {
@@ -170,6 +172,9 @@ async function routeRequest(req, requestId) {
       }
       if (match.action === "cancel") {
         return cancelSourceReplacement(req, requestId, user, source, match.replacementId);
+      }
+      if (match.action === "rollback") {
+        return rollbackSourceReplacement(req, requestId, user, source, match.replacementId);
       }
     }
     throw new ContractError("INVALID_REQUEST", { status: 404 });
@@ -209,7 +214,7 @@ function matchProviderRoute(parts) {
     if (parts.length === 5) {
       return { resource: "replacement", kind: "replacement", sourceId: parts[2], replacementId: parts[4] };
     }
-    if (parts.length === 6 && ["promote", "cancel"].includes(parts[5])) {
+    if (parts.length === 6 && ["promote", "cancel", "rollback"].includes(parts[5])) {
       return {
         resource: "replacement",
         kind: "action",
@@ -476,6 +481,37 @@ async function cancelCredentialCandidateWith(req, requestId, user, source, candi
   });
 }
 
+async function requireOwnedReplacementSource(sourceId, userId) {
+  const { data, error } = await admin
+    .from("cloud_sources")
+    .select("id,user_id,source_type,config_ciphertext,deleted_at,enabled")
+    .eq("id", sourceId)
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (error) throw new ContractError("INVARIANT_VIOLATION");
+  if (!data || data.deleted_at) throw new ContractError("SOURCE_NOT_FOUND");
+  const { data: lifecycle, error: lifecycleError } = await admin
+    .from("cloud_source_lifecycle")
+    .select("config_revision,lifecycle_state,catalog_visibility")
+    .eq("source_id", sourceId)
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (lifecycleError) throw new ContractError("INVARIANT_VIOLATION");
+  if (!lifecycle || !["active", "replaced"].includes(String(lifecycle.lifecycle_state))) {
+    throw new ContractError("SOURCE_NOT_FOUND");
+  }
+  if (String(data.source_type ?? "").toLowerCase() !== "xtream") {
+    throw new ContractError("INVALID_REQUEST");
+  }
+  return {
+    id: data.id,
+    userId: data.user_id,
+    sourceType: String(data.source_type ?? ""),
+    configCiphertext: data.config_ciphertext,
+    revision: nonNegativeInteger(lifecycle.config_revision, "SOURCE_REVISION_MISMATCH"),
+  };
+}
+
 async function createSourceReplacement(req, requestId, user, source) {
   const idempotencyKey = requireIdempotencyKey(req);
   const expectedSourceRevision = parseEntityTag(req, "source");
@@ -541,7 +577,7 @@ async function promoteSourceReplacement(req, requestId, user, source, replacemen
   if (generation.state !== "READY" || generation.isActiveHead) {
     throw new ContractError("INVALID_TRANSITION_STATE");
   }
-  const result = await rpc("norva_promote_source_replacement_v2", {
+  const result = await rpc("norva_promote_source_replacement_v3", {
     p_transition_id: replacementId,
     p_user_id: user.id,
     p_idempotency_key: idempotencyKey,
@@ -578,6 +614,61 @@ async function cancelSourceReplacement(req, requestId, user, source, replacement
   const replacement = sanitizeSourceReplacement(result, source.id);
   return successResponse(req, requestId, "SourceReplacement", replacement, 200, {
     ETag: transitionTag(replacement.revision),
+  });
+}
+
+async function rollbackSourceReplacement(req, requestId, user, source, replacementId) {
+  const idempotencyKey = requireIdempotencyKey(req);
+  const expectedTransitionRevision = parseEntityTag(req, "transition");
+  await readJsonObject(req);
+  const snapshot = sanitizeSourceReplacement(await rpc("norva_get_source_replacement", {
+    p_transition_id: replacementId,
+    p_user_id: user.id,
+  }, { resource: "replacement" }), source.id);
+  if (snapshot.revision !== expectedTransitionRevision) {
+    throw new ContractError("TRANSITION_REVISION_MISMATCH");
+  }
+  if (snapshot.state !== "COMPLETED" || !snapshot.rollbackUntil
+      || Date.parse(snapshot.rollbackUntil) <= Date.now()) {
+    throw new ContractError("INVALID_TRANSITION_STATE");
+  }
+  const { data: activeLifecycle, error: lifecycleError } = await admin
+    .from("cloud_source_lifecycle")
+    .select("config_revision,lifecycle_state,catalog_visibility")
+    .eq("source_id", snapshot.candidateSourceId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (lifecycleError) throw new ContractError("INVARIANT_VIOLATION");
+  if (!activeLifecycle || activeLifecycle.lifecycle_state !== "active"
+      || activeLifecycle.catalog_visibility !== "visible") {
+    throw new ContractError("INVALID_TRANSITION_STATE");
+  }
+  const expectedActiveSourceRevision = nonNegativeInteger(
+    activeLifecycle.config_revision,
+    "SOURCE_REVISION_MISMATCH",
+  );
+  const runtime = await getRuntimeConfig();
+  const fingerprint = await keyedFingerprint(runtime.sourceConfigKey, {
+    operation: "rollback_source_replacement",
+    sourceId: source.id,
+    replacementId,
+    expectedTransitionRevision,
+    activeSourceId: snapshot.candidateSourceId,
+    expectedActiveSourceRevision,
+  });
+  const result = await rpc("norva_rollback_source_replacement", {
+    p_transition_id: replacementId,
+    p_user_id: user.id,
+    p_actor: user.actor,
+    p_idempotency_key: idempotencyKey,
+    p_request_fingerprint: fingerprint,
+    p_expected_transition_revision: expectedTransitionRevision,
+    p_expected_active_source_revision: expectedActiveSourceRevision,
+  }, { cas: "transition" });
+  const rollback = sanitizeSourceReplacementRollback(result, replacementId, source.id);
+  return successResponse(req, requestId, "SourceReplacementRollback", rollback, 200, {
+    ETag: transitionTag(expectedTransitionRevision),
+    Location: replacementLocation(source.id, replacementId),
   });
 }
 
@@ -689,6 +780,11 @@ function sanitizeSourceReplacement(value, expectedSourceId) {
     "SAME_CATALOG", "DIFFERENT_CATALOG", "AMBIGUOUS",
   ]);
   const revision = nonNegativeInteger(value.revision, "INVARIANT_VIOLATION");
+  const rollbackUntil = isoOrNull(value.rollbackUntil ?? value.rollback_until);
+  const rollbackTransitionId = nullableApiUuid(
+    value.rollbackTransitionId ?? value.rollback_transition_id,
+  );
+  const rolledBackAt = isoOrNull(value.rolledBackAt ?? value.rolled_back_at);
   return Object.freeze({
     replacementId,
     oldSourceId,
@@ -710,13 +806,37 @@ function sanitizeSourceReplacement(value, expectedSourceId) {
     startedAt: isoOrNull(value.startedAt ?? value.started_at),
     readyAt: isoOrNull(value.readyAt ?? value.ready_at),
     completedAt: isoOrNull(value.completedAt ?? value.completed_at),
-    rollbackUntil: isoOrNull(value.rollbackUntil ?? value.rollback_until),
+    rollbackUntil,
+    rollbackTransitionId,
+    rolledBackAt,
     failureCode: safeMachineCode(value.failureCode ?? value.failure_code),
     actions: Object.freeze({
       canPromote: state === "READY_TO_SWITCH" && comparison === "DIFFERENT_CATALOG",
       canCancel: ["VALIDATING", "STAGING", "IMPORTING", "READY_TO_SWITCH"].includes(state),
-      canRollback: state === "COMPLETED" && isoOrNull(value.rollbackUntil ?? value.rollback_until) !== null,
+      canRollback: state === "COMPLETED" && rollbackTransitionId === null
+        && rollbackUntil !== null && Date.parse(rollbackUntil) > Date.now(),
     }),
+  });
+}
+
+function sanitizeSourceReplacementRollback(value, expectedReplacementId, expectedActiveSourceId) {
+  if (!isRecord(value)) throw new ContractError("INVARIANT_VIOLATION");
+  const replacementId = uuidValue(value.replacementId ?? value.replacement_id);
+  const rollbackTransitionId = uuidValue(value.rollbackTransitionId ?? value.rollback_transition_id);
+  const activeSourceId = uuidValue(value.activeSourceId ?? value.active_source_id);
+  const retiredSourceId = uuidValue(value.retiredSourceId ?? value.retired_source_id);
+  if (replacementId !== expectedReplacementId || activeSourceId !== expectedActiveSourceId
+      || retiredSourceId === activeSourceId) {
+    throw new ContractError("REPLACEMENT_NOT_FOUND");
+  }
+  return Object.freeze({
+    replacementId,
+    rollbackTransitionId,
+    state: enumValue(value.state, ["COMPLETED"], "INVARIANT_VIOLATION"),
+    activeSourceId,
+    retiredSourceId,
+    visibilityEpoch: nonNegativeInteger(value.visibilityEpoch ?? value.visibility_epoch, "INVARIANT_VIOLATION"),
+    replayed: value.replayed === true,
   });
 }
 
@@ -976,6 +1096,7 @@ async function handleWorkerDrain(req, requestId) {
     dead: 0,
     featureBlocked: 0,
     leaseLost: 0,
+    replacementCleanup: null,
   };
   for (const rawJob of jobs) {
     let job;
@@ -1063,6 +1184,27 @@ async function handleWorkerDrain(req, requestId) {
         outcome,
       });
     }
+  }
+  // Terminal replacement cleanup is independent from rollout flags: once a
+  // rollback/cancellation has durably scheduled a purge, turning a feature flag
+  // OFF must not strand ciphertext or staging rows. Run one bounded batch only
+  // when the transition queues are idle so ordinary proof work stays dominant.
+  if (jobs.length === 0) {
+    const { data: cleanup, error: cleanupError } = await admin.rpc(
+      "norva_run_replacement_cleanup_batch",
+      { p_worker: workerId, p_limit: 200 },
+    );
+    if (cleanupError || !isRecord(cleanup)) {
+      throw new ContractError("INVARIANT_VIOLATION");
+    }
+    summary.replacementCleanup = {
+      claimed: cleanup.claimed === true,
+      complete: cleanup.complete === true,
+      deletedRows: nonNegativeInteger(
+        cleanup.deletedRows ?? cleanup.deleted_rows ?? 0,
+        "INVARIANT_VIOLATION",
+      ),
+    };
   }
   return successResponse(req, requestId, "CredentialTransitionWorkerRun", summary, 200);
 }
@@ -1348,6 +1490,28 @@ async function validateCredentialCandidateJob(job, workerId) {
 }
 
 async function failCredentialValidation(job, failureCode) {
+  if (job.transitionKind === "replacement") {
+    const snapshot = await workerRpc("norva_get_source_replacement", {
+      p_transition_id: job.transitionId,
+      p_user_id: job.userId,
+    });
+    const revision = nonNegativeInteger(snapshot.revision, "INVARIANT_VIOLATION");
+    const runtime = await getRuntimeConfig();
+    await workerRpc("norva_fail_source_replacement", {
+      p_transition_id: job.transitionId,
+      p_user_id: job.userId,
+      p_expected_transition_revision: revision,
+      p_failure_code: failureCode,
+      p_actor: "provider-access-worker",
+      p_idempotency_key: `worker:${job.jobId}:${failureCode}`,
+      p_request_fingerprint: await keyedFingerprint(runtime.sourceConfigKey, {
+        operation: "fail_source_replacement",
+        transitionId: job.transitionId,
+        failureCode,
+      }),
+    });
+    return;
+  }
   const snapshot = await workerRpc("norva_get_credential_transition", {
     p_transition_id: job.transitionId,
     p_user_id: job.userId,

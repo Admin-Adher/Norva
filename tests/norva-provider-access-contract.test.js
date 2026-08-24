@@ -42,9 +42,28 @@ test('Provider Access Edge surface exposes credential candidates and durable cat
   assert.match(EDGE, /parts\[3\] !== "credential-candidates"/);
   for (const action of ['decision', 'apply', 'cancel']) assert.ok(EDGE.includes(`"${action}"`));
   assert.ok(EDGE.includes('"promote"'));
+  assert.ok(EDGE.includes('"rollback"'));
   assert.match(EDGE, /norva_create_source_replacement_from_candidate/);
-  assert.match(EDGE, /norva_promote_source_replacement_v2/);
+  assert.match(EDGE, /norva_promote_source_replacement_v3/);
+  assert.match(EDGE, /norva_rollback_source_replacement/);
+  assert.match(EDGE, /norva_run_replacement_cleanup_batch/);
   assert.doesNotMatch(EDGE, /provider-access\/terms/);
+});
+
+test('replacement cleanup remains a bounded flag-independent terminal recovery lane', () => {
+  const worker = section('async function handleWorkerDrain', '\nasync function claimCredentialTransitionJobs');
+  const cleanup = worker.slice(worker.indexOf('if (jobs.length === 0)'));
+  assert.match(cleanup, /norva_run_replacement_cleanup_batch/);
+  assert.match(cleanup, /p_limit: 200/);
+  assert.doesNotMatch(cleanup, /replacementEnabled/);
+});
+
+test('replacement build failures terminate through the replacement state machine', () => {
+  const failure = section('async function failCredentialValidation', '\nconst MANIFEST_SEAL_BATCH_LIMIT');
+  assert.match(failure, /job\.transitionKind === "replacement"/);
+  assert.match(failure, /norva_get_source_replacement/);
+  assert.match(failure, /norva_fail_source_replacement/);
+  assert.match(failure, /operation: "fail_source_replacement"/);
 });
 
 test('every mutation fails closed on the feature flag and contract version before user business work', () => {
@@ -74,6 +93,19 @@ test('credential candidates are Xtream-only and a manually disabled nondeleted s
   assert.doesNotMatch(ownership, /data\.enabled\s*===\s*false|!data\.enabled/);
   assert.doesNotMatch(ownership, /lifecycle\.catalog_visibility\s*!==/);
   assert.match(ownership, /lifecycle\.lifecycle_state !== "active"/);
+});
+
+test('completed replacements remain manageable through rollback without exposing hidden catalog rows', () => {
+  const ownership = section('async function requireOwnedReplacementSource', '\nasync function createSourceReplacement');
+  assert.match(ownership, /\["active", "replaced"\]/);
+  assert.doesNotMatch(ownership, /cloud_media_items|cloud_title_variants|config_ciphertext.*return/);
+  const rollback = section('async function rollbackSourceReplacement', '\nfunction boundedDisplayName');
+  assert.match(rollback, /snapshot\.state !== "COMPLETED"/);
+  assert.match(rollback, /Date\.parse\(snapshot\.rollbackUntil\) <= Date\.now\(\)/);
+  assert.match(rollback, /lifecycle_state !== "active"/);
+  assert.match(rollback, /catalog_visibility !== "visible"/);
+  assert.match(rollback, /norva_rollback_source_replacement/);
+  assert.match(rollback, /p_expected_active_source_revision/);
 });
 
 test('POST preconditions use strict idempotency and quoted source/transition ETags', () => {

@@ -2,7 +2,9 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select extensions.plan(12);
+select extensions.plan(30);
+create temp table phase4_builder_ctx(key text primary key,value jsonb) on commit drop;
+grant all on phase4_builder_ctx to service_role;
 
 insert into auth.users (
   id, instance_id, aud, role, email, encrypted_password, email_confirmed_at,
@@ -236,7 +238,7 @@ select extensions.throws_ok(
   ), '40001', 'replacement candidate head CAS failed',
   'stale candidate head loses before the atomic replacement cutover'
 );
-select public.norva_promote_source_replacement_v2(
+insert into phase4_builder_ctx values ('promotion',public.norva_promote_source_replacement_v3(
   '93000000-0000-4000-8000-000000000601',
   '93000000-0000-4000-8000-000000000001','replacement-promotion-v2-fixture',
   (select expected_source_revision from public.cloud_source_transitions
@@ -245,8 +247,11 @@ select public.norva_promote_source_replacement_v2(
    where id = '93000000-0000-4000-8000-000000000601'),
   (select head_revision from public.cloud_source_catalog_heads
    where source_id = '93000000-0000-4000-8000-000000000102')
-);
+));
 reset role;
+select extensions.is((select value->>'candidateSourceId' from phase4_builder_ctx where key='promotion'),
+  '93000000-0000-4000-8000-000000000102',
+  'promotion v3 returns the normalized durable replacement projection');
 select extensions.is(
   (select state from public.cloud_source_transitions
    where id = '93000000-0000-4000-8000-000000000601'),
@@ -284,6 +289,10 @@ select extensions.is(
                 where id = '93000000-0000-4000-8000-000000000601')),
   'retained', 'promotion retains B genesis instead of leaving two active generations'
 );
+select extensions.ok((select purge_after=rollback_until and rollback_until>clock_timestamp()
+  from public.cloud_source_lifecycle
+  where source_id='93000000-0000-4000-8000-000000000101'),
+  'promotion schedules A cleanup no earlier than the rollback deadline');
 set local role service_role;
 select extensions.ok(
   (public.norva_promote_source_replacement_v2(
@@ -309,6 +318,141 @@ select extensions.throws_ok(
   'promotion replay rejects a mismatched candidate-head snapshot'
 );
 reset role;
+
+set local role service_role;
+insert into phase4_builder_ctx values ('rollback',public.norva_rollback_source_replacement(
+  '93000000-0000-4000-8000-000000000601',
+  '93000000-0000-4000-8000-000000000001','user:replacement-rollback-test',
+  'replacement-rollback-fixture',repeat('f',64),
+  (select revision from public.cloud_source_transitions
+    where id='93000000-0000-4000-8000-000000000601'),
+  (select config_revision from public.cloud_source_lifecycle
+    where source_id='93000000-0000-4000-8000-000000000102')
+));
+select extensions.is((select value->>'activeSourceId' from phase4_builder_ctx where key='rollback'),
+  '93000000-0000-4000-8000-000000000101',
+  'rollback restores A as the active source');
+select extensions.is(
+  public.norva_rollback_source_replacement(
+    '93000000-0000-4000-8000-000000000601',
+    '93000000-0000-4000-8000-000000000001','user:replacement-rollback-test',
+    'replacement-rollback-fixture',repeat('f',64),
+    (select revision from public.cloud_source_transitions
+      where id='93000000-0000-4000-8000-000000000601'),
+    1
+  )->>'rollbackTransitionId',
+  (select value->>'rollbackTransitionId' from phase4_builder_ctx where key='rollback'),
+  'exact rollback replay returns the same compensating transition');
+reset role;
+select extensions.ok(
+  (select lifecycle_state='active' and catalog_visibility='visible'
+   from public.cloud_source_lifecycle
+   where source_id='93000000-0000-4000-8000-000000000101')
+  and (select lifecycle_state='replaced' and catalog_visibility='hidden'
+   from public.cloud_source_lifecycle
+   where source_id='93000000-0000-4000-8000-000000000102'),
+  'rollback flips B hidden and A visible atomically');
+select extensions.is((select count(*)::integer
+  from public.cloud_catalog_visible_sources
+  where user_id='93000000-0000-4000-8000-000000000001'),1,
+  'rollback leaves exactly one commercially visible source');
+select extensions.ok(exists(
+  select 1 from public.cloud_source_transitions transition
+  where transition.id=(select (value->>'rollbackTransitionId')::uuid
+    from phase4_builder_ctx where key='rollback')
+    and transition.reversal_of_transition_id='93000000-0000-4000-8000-000000000601'
+    and transition.state='completed'),
+  'rollback persists one terminal compensating transition linked to the original');
+set local role service_role;
+select extensions.is(public.norva_get_source_replacement(
+    '93000000-0000-4000-8000-000000000601',
+    '93000000-0000-4000-8000-000000000001')->>'rollbackTransitionId',
+  (select value->>'rollbackTransitionId' from phase4_builder_ctx where key='rollback'),
+  'replacement status exposes the durable completed rollback');
+reset role;
+select extensions.ok((select purge_after<=clock_timestamp()
+  from public.cloud_source_lifecycle
+  where source_id='93000000-0000-4000-8000-000000000102'),
+  'rolled-back B becomes eligible for bounded cleanup');
+select extensions.ok(
+  (select state='completed' from public.cloud_source_transitions
+   where id='93000000-0000-4000-8000-000000000601')
+  and exists(
+    select 1 from public.cloud_source_catalog_heads head
+    join public.cloud_source_catalog_generations generation
+      on generation.id=head.active_generation_id
+    where head.source_id='93000000-0000-4000-8000-000000000101'
+      and generation.state='active'),
+  'rollback preserves the original audit record and A active catalog head');
+set local role service_role;
+select extensions.throws_ok(format($sql$select public.norva_rollback_source_replacement(
+  %L,%L,%L,%L,%L,%s,%s)$sql$,
+  '93000000-0000-4000-8000-000000000601',
+  '93000000-0000-4000-8000-000000000001','user:replacement-rollback-test',
+  'replacement-rollback-second',repeat('e',64),
+  (select revision from public.cloud_source_transitions
+    where id='93000000-0000-4000-8000-000000000601'),1),
+  '40001','replacement rollback endpoints changed',
+  'a second rollback cannot resurrect B after compensation');
+reset role;
+
+select extensions.ok(
+  (select state='cancelled' from public.cloud_source_replacement_cleanup_jobs
+   where transition_id='93000000-0000-4000-8000-000000000601')
+  and (select state='pending' and source_id='93000000-0000-4000-8000-000000000102'
+   from public.cloud_source_replacement_cleanup_jobs
+   where transition_id=(select (value->>'rollbackTransitionId')::uuid
+     from phase4_builder_ctx where key='rollback')),
+  'rollback cancels A cleanup and schedules B cleanup');
+set local role service_role;
+insert into phase4_builder_ctx values ('cleanupPrepare',
+  public.norva_run_replacement_cleanup_batch('phase4-cleanup-test',200));
+select extensions.is((select value->>'waitingForReaper'
+    from phase4_builder_ctx where key='cleanupPrepare'),'true',
+  'cleanup first soft-deletes B and waits for the bounded source reaper');
+reset role;
+select extensions.ok(
+  (select lifecycle_state='purge_pending' and catalog_visibility='hidden'
+   from public.cloud_source_lifecycle
+   where source_id='93000000-0000-4000-8000-000000000102')
+  and (select deleted_at is not null
+       from public.cloud_sources
+       where id='93000000-0000-4000-8000-000000000102'),
+  'cleanup durably enters hidden PURGE_PENDING before the source reaper');
+update public.cloud_source_replacement_cleanup_jobs
+set available_at=clock_timestamp()
+where transition_id=(select (value->>'rollbackTransitionId')::uuid
+  from phase4_builder_ctx where key='rollback');
+call public.reap_deleted_sources();
+select extensions.ok((select provider_deletion_pending
+  from public.cloud_sources
+  where id='93000000-0000-4000-8000-000000000102'),
+  'bounded source reaper drains B core rows and marks its tombstone');
+set local role service_role;
+insert into phase4_builder_ctx values ('cleanupFinal',
+  public.norva_run_replacement_cleanup_batch('phase4-cleanup-test',200));
+select extensions.is((select value->>'complete'
+    from phase4_builder_ctx where key='cleanupFinal'),'true',
+  'replacement cleanup converges to a terminal completed batch');
+reset role;
+select extensions.ok((select lifecycle.lifecycle_state='purged'
+    and lifecycle.catalog_visibility='hidden'
+    and source.config_ciphertext is null
+    and source.config_hint='{}'::jsonb
+    and source.deleted_at is not null and not source.enabled
+  from public.cloud_sources source
+  join public.cloud_source_lifecycle lifecycle on lifecycle.source_id=source.id
+  where source.id='93000000-0000-4000-8000-000000000102'),
+  'final cleanup irreversibly sanitizes B credentials and lifecycle');
+select extensions.ok(
+  exists(select 1 from public.cloud_source_transitions
+    where id='93000000-0000-4000-8000-000000000601' and state='completed')
+  and exists(select 1 from public.cloud_source_transitions
+    where id=(select (value->>'rollbackTransitionId')::uuid
+      from phase4_builder_ctx where key='rollback') and state='completed')
+  and exists(select 1 from public.cloud_source_catalog_generations
+    where source_id='93000000-0000-4000-8000-000000000102'),
+  'cleanup retains transition and generation metadata as audit evidence');
 
 select * from extensions.finish();
 rollback;
