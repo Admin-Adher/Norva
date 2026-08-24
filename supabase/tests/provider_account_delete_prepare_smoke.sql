@@ -88,6 +88,9 @@ declare
   v_preparation jsonb;
   v_run jsonb;
   v_iterations integer := 0;
+  v_workflow_revision bigint;
+  v_workflow_state text;
+  v_finalization_key uuid;
 begin
   select visibility_epoch into strict v_epoch
   from public.cloud_user_catalog_visibility_epochs where user_id = v_user;
@@ -212,11 +215,41 @@ begin
     raise exception 'account-delete terminal proof or owner pointer cleanup failed';
   end if;
 
+  insert into public.cloud_account_deletion_workflows(user_id,state,revision)
+  values (v_user,'purging_product',0);
+  v_iterations := 0;
+  loop
+    select workflow.revision,workflow.state
+      into strict v_workflow_revision,v_workflow_state
+    from public.cloud_account_deletion_workflows workflow
+    where workflow.user_id=v_user;
+    exit when v_workflow_state='ready_to_finalize';
+    perform public.norva_purge_account_deletion_product_batch(
+      v_user,v_workflow_revision,25
+    );
+    v_iterations := v_iterations + 1;
+    if v_iterations > 80 then
+      raise exception 'account-delete product purge did not reach finalization';
+    end if;
+  end loop;
+  select claim.finalization_key into strict v_finalization_key
+  from public.norva_claim_account_deletion_finalizations(1,120) claim
+  where claim.user_id=v_user;
   delete from auth.users where id = v_user;
+  if not public.norva_complete_account_deletion_finalization(v_finalization_key) then
+    raise exception 'account-delete finalization acknowledgement failed';
+  end if;
   if exists (select 1 from auth.users where id = v_user)
      or exists (
        select 1 from public.cloud_provider_account_delete_preparations
        where user_id = v_user
+     ) or exists (
+       select 1 from public.cloud_account_deletion_workflows
+       where user_id = v_user
+     ) or not exists (
+       select 1 from public.cloud_account_deletion_finalizations
+       where finalization_key=v_finalization_key
+         and state='completed' and completed_at is not null
      ) then
     raise exception 'terminal auth deletion did not finish constant-size cleanup';
   end if;
