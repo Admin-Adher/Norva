@@ -166,8 +166,8 @@ Partners, déploiement Web et déploiement Relay.
 Suite Node complète après intégration :
 
 ```text
-tests     2637
-pass      2635
+tests     2638
+pass      2636
 fail      0
 skipped   2 (fixtures runtime documentées)
 ```
@@ -194,8 +194,16 @@ run_legal_billing_policy_v2_race.sh
 4214221dbc07e561bda13533bc76f213c6dec0ef3e9b04b1434c4fb871f25e03
 
 legal-billing-retention-policy-v2.test.js
-b000bfd5e30f896394cb3730268b0d39de6e56f3d933eecab2deb17e69030742
+b1ce8c1be7821abca19e9f38cb5103b831692306ab9275e3d0b7320c96fd73ad
+
+run_provider_access_legal_policy_gate.sh
+72dcaa2b11faa97a887379cac61d672caee00f6c7db56bec4abd19251dd88ae5
 ```
+
+Le gate opérateur a été exécuté sur la production en mode `preflight` : politique
+non configurée, zéro lecteur, zéro archive, zéro flag actif et zéro privilège
+direct. Les deux appels mutateurs sans confirmation exacte ont été refusés avec
+exit `64`, puis un nouveau preflight a confirmé un état inchangé.
 
 ## Gate de production restant
 

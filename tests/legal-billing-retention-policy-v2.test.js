@@ -13,6 +13,7 @@ const race = read('ops/hetzner/scripts/run_legal_billing_policy_v2_race.sh');
 const accessMigration = read('supabase/migrations/20260824173000_legal_billing_archive_audited_access_v1.sql');
 const accessSmoke = read('supabase/tests/legal_billing_archive_access_smoke.sql');
 const aclMigration = read('supabase/migrations/20260824174000_legal_billing_archive_acl_hardening.sql');
+const productionGate = read('ops/hetzner/scripts/run_provider_access_legal_policy_gate.sh');
 
 test('legal retention v2 is calculated from a configured fiscal close', () => {
   assert.match(migration, /norva_legal_billing_fiscal_close/);
@@ -83,4 +84,17 @@ test('the final migration reasserts every archive ACL against production grant d
   assert.match(aclMigration, /has_table_privilege/);
   assert.match(aclMigration, /'select','insert','update','delete','truncate','references','trigger'/);
   assert.match(aclMigration, /legal billing archive direct table privilege remains/);
+});
+
+test('the production operator gate is read-only by default and confirmation-bound', () => {
+  assert.match(productionGate, /ACTION="\$\{1:-preflight\}"/);
+  assert.match(productionGate, /DB_CONTAINER" != 'norva-db'/);
+  assert.match(productionGate, /status=READ_ONLY_PREFLIGHT/);
+  assert.match(productionGate, /REFUSED_UNSAFE_PRODUCTION_STATE/);
+  assert.match(productionGate, /CONFIGURE_LEGAL_BILLING_POLICY_V2/);
+  assert.match(productionGate, /SET_LEGAL_BILLING_ARCHIVE_READER/);
+  assert.match(productionGate, /norva_configure_legal_billing_archive_policy/);
+  assert.match(productionGate, /norva_set_legal_billing_archive_access_grant/);
+  assert.match(productionGate, /-v legal_basis=/);
+  assert.doesNotMatch(productionGate, /eval /);
 });
