@@ -10,6 +10,13 @@ const migration = fs.readFileSync(path.join(
   'migrations',
   '20260825001459_provider_access_notification_cron_v1.sql',
 ), 'utf8');
+const sqlAcceptance = fs.readFileSync(path.join(
+  __dirname,
+  '..',
+  'supabase',
+  'tests',
+  'provider_access_notification_cron.sql',
+), 'utf8');
 
 test('notification cron migration is dormant and exposes only explicit lifecycle RPCs', () => {
   assert.match(migration, /create or replace function public\.norva_install_provider_access_notification_cron\(\)/);
@@ -37,4 +44,12 @@ test('emergency removal is bounded to the two Provider Access cron names', () =>
   assert.match(migration, /'norva-provider-access-checks'/);
   assert.match(migration, /where jobname in/);
   assert.doesNotMatch(migration, /delete\s+from\s+cron\.job/i);
+});
+
+test('SQL acceptance derives rollout revisions from the restored database state', () => {
+  assert.equal(
+    (sqlAcceptance.match(/select revision from public\.cloud_provider_access_rollout where singleton/g) || []).length,
+    3,
+  );
+  assert.doesNotMatch(sqlAcceptance, /norva_(?:configure_provider_access_rollout_gates|set_provider_access_rollout_stage)\(\s*[123],/);
 });

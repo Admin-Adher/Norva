@@ -53,7 +53,8 @@ select public.norva_complete_catalog_cache_epoch_v2_rollout(
   '23c0fa2cdaf09c08d9de4378d1a82f0f631ce71d6f955a0bdbb2c786b8ff98d3'
 );
 select public.norva_configure_provider_access_rollout_gates(
-  1,'legal-policy:notification-cron-proof','ops-proof:notification-cron-proof','cron-proof-service'
+  (select revision from public.cloud_provider_access_rollout where singleton),
+  'legal-policy:notification-cron-proof','ops-proof:notification-cron-proof','cron-proof-service'
 );
 select public.norva_register_active_catalog_refresh_worker(
   'phase16-cron-proof-worker',
@@ -61,7 +62,8 @@ select public.norva_register_active_catalog_refresh_worker(
   'active-catalog-refresh-checkpoint-prune-v1'
 );
 select public.norva_set_provider_access_rollout_stage(
-  2,'internal','Explicit rollback-scoped notification cron proof.','cron-proof-service'
+  (select revision from public.cloud_provider_access_rollout where singleton),
+  'internal','Explicit rollback-scoped notification cron proof.','cron-proof-service'
 );
 select extensions.is(
   (public.norva_install_provider_access_notification_cron()->>'installed')::boolean,
@@ -99,7 +101,8 @@ select extensions.is(
 
 set local role service_role;
 select public.norva_set_provider_access_rollout_stage(
-  3,'off','Emergency OFF must make the retained cron command inert.','cron-proof-service'
+  (select revision from public.cloud_provider_access_rollout where singleton),
+  'off','Emergency OFF must make the retained cron command inert.','cron-proof-service'
 );
 reset role;
 select extensions.is(
