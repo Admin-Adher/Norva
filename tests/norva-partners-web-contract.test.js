@@ -2513,7 +2513,7 @@ test('Partners route participates in bounded native continuity without storing p
   assert.match(htmlSource, /standalone\.js\?v=12/);
   assert.match(htmlSource, /Settings\.js\?v=55/);
   assert.match(htmlSource, /PartnersPage\.js\?v=10/);
-  assert.match(htmlSource, /app\.js\?v=2479544d89/);
+  assert.match(htmlSource, /app\.js\?v=1207157791/);
   assert.match(appSource, /AdminPage\.js\?v=[0-9a-f]{10}/);
 });
 

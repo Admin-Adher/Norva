@@ -158,6 +158,7 @@ test('Admin navigation keeps every route, alias, URL and page dispatch compatibl
     ['finance/vat', '_pageFinance', [], 'finance', '#admin/finance/vat'],
     ['finance/paiements', '_pageFinance', [], 'finance', '#admin/finance/paiements'],
     ['finance/analyse', '_pageFinance', [], 'finance', '#admin/finance/analyse'],
+    ['finance/archive', '_pageFinance', [], 'finance', '#admin/finance/archive'],
     ['finance/promos', '_pageMarketing', [], 'marketing', '#admin/marketing/promos'],
     ['marketing', '_pageMarketing', [], 'marketing', '#admin/marketing'],
     ['marketing/promos', '_pageMarketing', [], 'marketing', '#admin/marketing/promos'],

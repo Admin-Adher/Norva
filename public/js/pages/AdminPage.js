@@ -163,7 +163,7 @@ class AdminPage {
     // or the sanitized Finance-only partner-public:prt_<opaque> route.
     static validRoute(r) {
         r = String(r || '');
-        if (['cockpit', 'finance', 'finance/vat', 'finance/promos', 'finance/paiements', 'finance/analyse',
+        if (['cockpit', 'finance', 'finance/vat', 'finance/promos', 'finance/paiements', 'finance/analyse', 'finance/archive',
             'marketing', 'marketing/promos', 'marketing/notifs',
             'clients', 'partners', 'support', 'providers', 'identites', 'moteur', 'mkv-lab', 'systeme', 'telemetrie'].includes(r)) return r;
         const m = r.match(/^(client|ticket|partner):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i);
@@ -297,6 +297,48 @@ class AdminPage {
 /* Section block = framed panel */
 #page-admin .admin-block{margin-bottom:18px;background:var(--adm-panel);border:1px solid var(--adm-line);border-radius:16px;padding:17px 20px 18px;}
 #page-admin .admin-block h2{font-size:14px;font-weight:650;margin:0 0 13px;color:var(--adm-tx);letter-spacing:-.1px;}
+/* Legal archive reader: exact lookup only, no browse-all affordance. */
+#page-admin .legal-archive-shell{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(280px,.85fr);gap:16px;align-items:start;}
+#page-admin .legal-archive-intro{margin:0 0 16px;padding:13px 15px;border:1px solid var(--adm-line);border-radius:12px;background:linear-gradient(145deg,rgba(91,124,250,.08),var(--adm-card2));color:var(--adm-tx2);font-size:12px;line-height:1.55;}
+#page-admin .legal-archive-intro strong{display:block;margin-bottom:3px;color:var(--adm-tx);font-size:13px;}
+#page-admin .legal-archive-form{display:grid;gap:13px;}
+#page-admin .legal-archive-grid{display:grid;grid-template-columns:minmax(170px,.7fr) minmax(0,1.3fr);gap:12px;}
+#page-admin .legal-archive-field{display:grid;gap:6px;min-width:0;}
+#page-admin .legal-archive-field label{color:var(--adm-tx2);font-size:11px;font-weight:700;letter-spacing:.25px;}
+#page-admin .legal-archive-field input,#page-admin .legal-archive-field select{width:100%;min-height:44px;box-sizing:border-box;background:rgba(0,0,0,.25);border:1px solid var(--adm-line);border-radius:9px;color:var(--adm-tx);padding:9px 11px;font:inherit;font-size:13px;}
+#page-admin .legal-archive-field input:focus-visible,#page-admin .legal-archive-field select:focus-visible{outline:2px solid var(--adm-blue);outline-offset:2px;border-color:var(--adm-blue);}
+#page-admin .legal-archive-hint{color:var(--adm-tx3);font-size:10.5px;line-height:1.45;overflow-wrap:anywhere;}
+#page-admin .legal-archive-actions{display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
+#page-admin .legal-archive-submit{min-height:44px;border:1px solid rgba(120,150,255,.38);border-radius:10px;background:linear-gradient(135deg,rgba(91,124,250,.30),rgba(168,85,247,.22));color:var(--adm-tx);padding:9px 15px;font:inherit;font-size:13px;font-weight:700;cursor:pointer;transition:border-color .14s,filter .14s,opacity .14s;}
+#page-admin .legal-archive-submit:hover:not(:disabled){border-color:var(--adm-blue);filter:brightness(1.08);}
+#page-admin .legal-archive-submit:focus-visible{outline:2px solid var(--adm-blue);outline-offset:2px;}
+#page-admin .legal-archive-submit:disabled{opacity:.48;cursor:wait;}
+#page-admin .legal-archive-status{min-height:20px;color:var(--adm-tx2);font-size:12px;line-height:1.5;overflow-wrap:anywhere;}
+#page-admin .legal-archive-status.is-error{color:var(--adm-red);}
+#page-admin .legal-archive-status.is-ok{color:var(--adm-green);}
+#page-admin .legal-archive-results{min-height:180px;border:1px solid var(--adm-line);border-radius:12px;background:var(--adm-card);padding:14px;}
+#page-admin .legal-archive-empty{display:grid;align-content:center;min-height:150px;gap:5px;color:var(--adm-tx2);text-align:center;}
+#page-admin .legal-archive-empty strong{color:var(--adm-tx);font-size:13px;}
+#page-admin .legal-record{min-width:0;padding:12px;border:1px solid var(--adm-line2);border-radius:10px;background:rgba(255,255,255,.018);}
+#page-admin .legal-record+.legal-record{margin-top:10px;}
+#page-admin .legal-record-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;margin-bottom:9px;}
+#page-admin .legal-record-title{min-width:0;color:var(--adm-tx);font-size:13px;font-weight:700;overflow-wrap:anywhere;}
+#page-admin .legal-record-meta{color:var(--adm-tx3);font-size:10.5px;white-space:nowrap;}
+#page-admin .legal-record-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px 12px;}
+#page-admin .legal-record-kv{min-width:0;color:var(--adm-tx2);font-size:11px;line-height:1.4;overflow-wrap:anywhere;}
+#page-admin .legal-record-kv b{display:block;color:var(--adm-tx3);font-size:9.5px;text-transform:uppercase;letter-spacing:.35px;}
+@media(max-width:880px){#page-admin .legal-archive-shell{grid-template-columns:1fr;}#page-admin .legal-archive-results{min-height:130px;}}
+@media(max-width:560px){
+#page-admin .legal-archive-grid,#page-admin .legal-record-grid{grid-template-columns:1fr;}
+#page-admin .legal-archive-intro{font-size:13px;line-height:1.6;}
+#page-admin .legal-archive-intro strong{font-size:14px;}
+#page-admin .legal-archive-field label{font-size:12px;}
+#page-admin .legal-archive-field input,#page-admin .legal-archive-field select{min-height:48px;font-size:16px;}
+#page-admin .legal-archive-hint{font-size:12px;line-height:1.55;}
+#page-admin .legal-archive-submit{min-height:48px;font-size:14px;touch-action:manipulation;}
+#page-admin .legal-archive-status{font-size:13px;}
+#page-admin .legal-archive-empty{font-size:13px;line-height:1.55;}
+}
 #page-admin table{width:100%;border-collapse:collapse;font-size:13px;}
 #page-admin th,#page-admin td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--adm-line2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 #page-admin thead th{border-bottom:1px solid var(--adm-line);}
@@ -1698,7 +1740,7 @@ class AdminPage {
                 this._setActiveNav('marketing');
                 this._pageMarketing();
             } else {
-                this._financeTab = ['vat', 'paiements', 'analyse'].includes(finSub) ? finSub : 'overview';
+                this._financeTab = ['vat', 'paiements', 'analyse', 'archive'].includes(finSub) ? finSub : 'overview';
                 this._route = 'finance'; this._pageFinance();
             }
         }
@@ -2725,7 +2767,7 @@ class AdminPage {
         // vivent chacune dans leur onglet (même modèle que TVA). Chaque onglet est
         // deep-linkable : #admin/finance[/paiements|/analyse|/vat]. Les promotions
         // vivent désormais dans la page Marketing (#admin/marketing/promos).
-        const FIN_TABS = { overview: 'fin-tab-overview', paiements: 'fin-tab-pay', analyse: 'fin-tab-analyse', vat: 'fin-tab-vat' };
+        const FIN_TABS = { overview: 'fin-tab-overview', paiements: 'fin-tab-pay', analyse: 'fin-tab-analyse', vat: 'fin-tab-vat', archive: 'fin-tab-archive' };
         const finTab = FIN_TABS[this._financeTab] ? this._financeTab : 'overview';
         const finShow = t => (finTab === t ? '' : ' style="display:none"');
 
@@ -2735,6 +2777,7 @@ class AdminPage {
                 <button class="qv-chip ${finTab === 'paiements' ? 'active' : ''}" data-ftab="paiements" role="tab">🧾 Paiements</button>
                 <button class="qv-chip ${finTab === 'analyse' ? 'active' : ''}" data-ftab="analyse" role="tab">📊 Analyse</button>
                 <button class="qv-chip ${finTab === 'vat' ? 'active' : ''}" data-ftab="vat" role="tab">🇪🇺 TVA &amp; conformité${vatAttention ? ' <span style="color:#fbbf24">⚠</span>' : ''}</button>
+                <button class="qv-chip ${finTab === 'archive' ? 'active' : ''}" data-ftab="archive" role="tab">Archive légale</button>
             </div>
             <div id="fin-tab-overview"${finShow('overview')}>
             <!-- 1 ── Résumé financier : les 5 métriques dominantes, en tête ── -->
@@ -2802,12 +2845,65 @@ class AdminPage {
             <!-- 🇪🇺 Onglet TVA & conformité : le cockpit a sa propre page -->
             <div id="fin-tab-vat"${finShow('vat')}>
                 <div class="admin-block" id="fin-vat"><h2>🇪🇺 TVA — préparation OSS</h2><div id="fin-vat-body"><div class="ssub">Chargement…</div></div></div>
+            </div>
+            <!-- Archive légale : recherche exacte, bornée et auditée. Aucun listing global. -->
+            <div id="fin-tab-archive"${finShow('archive')}>
+                <div class="admin-block">
+                    <h2>Archive légale — consultation auditée</h2>
+                    <div class="legal-archive-intro">
+                        <strong>Accès exceptionnel et traçable</strong>
+                        Chaque consultation exige une session Admin renforcée par Authenticator, un rôle lecteur explicite, un dossier de référence et un motif légal. L’archive ne propose jamais de liste globale.
+                    </div>
+                    <div class="legal-archive-shell">
+                        <form id="legal-archive-form" class="legal-archive-form" novalidate>
+                            <div class="legal-archive-grid">
+                                <div class="legal-archive-field">
+                                    <label for="legal-archive-kind">Type d’identifiant</label>
+                                    <select id="legal-archive-kind" name="lookupKind" required>
+                                        <option value="order_id">Référence de commande</option>
+                                        <option value="provider_payment_id">Référence de paiement</option>
+                                        <option value="source_ledger_id">Référence ledger Norva</option>
+                                    </select>
+                                </div>
+                                <div class="legal-archive-field">
+                                    <label for="legal-archive-value">Identifiant exact</label>
+                                    <input id="legal-archive-value" name="lookupValue" type="text" maxlength="300" autocomplete="off" spellcheck="false" required aria-describedby="legal-archive-value-hint">
+                                    <span id="legal-archive-value-hint" class="legal-archive-hint">Recherche exacte uniquement. La valeur brute n’est jamais conservée dans le journal d’accès.</span>
+                                </div>
+                            </div>
+                            <div class="legal-archive-grid">
+                                <div class="legal-archive-field">
+                                    <label for="legal-archive-case">Référence du dossier</label>
+                                    <input id="legal-archive-case" name="caseReference" type="text" minlength="12" maxlength="120" pattern="[A-Za-z0-9][A-Za-z0-9._:/-]{11,119}" autocomplete="off" spellcheck="false" required aria-describedby="legal-archive-case-hint">
+                                    <span id="legal-archive-case-hint" class="legal-archive-hint">12 à 120 caractères : lettres, chiffres, point, tiret, soulignement, deux-points ou barre oblique.</span>
+                                </div>
+                                <div class="legal-archive-field">
+                                    <label for="legal-archive-reason">Motif autorisé</label>
+                                    <select id="legal-archive-reason" name="reason" required>
+                                        <option value="statutory_audit">Audit réglementaire</option>
+                                        <option value="accounting_reconciliation">Rapprochement comptable</option>
+                                        <option value="legal_defense">Défense en justice</option>
+                                        <option value="tax_authority_request">Demande de l’administration fiscale</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="legal-archive-actions">
+                                <button id="legal-archive-submit" class="legal-archive-submit" type="submit">Valider et consulter</button>
+                                <span class="legal-archive-hint">Maximum 20 pièces par consultation.</span>
+                            </div>
+                            <div id="legal-archive-status" class="legal-archive-status" role="status" aria-live="polite"></div>
+                        </form>
+                        <div id="legal-archive-results" class="legal-archive-results" aria-live="polite" tabindex="-1">
+                            <div class="legal-archive-empty"><strong>Aucune consultation lancée</strong><span>Renseignez une référence exacte et un dossier autorisé.</span></div>
+                        </div>
+                    </div>
+                </div>
             </div>`;
 
         // Bascule d'onglet : tous les conteneurs sont rendus, on ne fait que montrer/
         // cacher (l'état interne — trimestre TVA choisi, dépliant promo ouvert —
         // survit à la bascule). La sélection est reflétée dans l'URL
-        // (#admin/finance[/promos|/paiements|/analyse|/vat]) → F5 / favori / lien
+        // (#admin/finance[/promos|/paiements|/analyse|/vat|/archive]) → F5 / favori / lien
         // partagé restaurent l'onglet exact (this._route reste 'finance' pour les gardes).
         el.querySelectorAll('#fin-tabs .qv-chip').forEach(chip => chip.addEventListener('click', () => {
             const tab = FIN_TABS[chip.dataset.ftab] ? chip.dataset.ftab : 'overview';
@@ -2863,7 +2959,172 @@ class AdminPage {
             setTimeout(() => URL.revokeObjectURL(a.href), 5000);
         });
 
+        this._wireLegalArchiveReader();
         this._renderVatPanel(vat);
+    }
+
+    _normalizeLegalArchiveRequest(input = {}) {
+        const lookupKind = String(input.lookupKind || '').trim();
+        const lookupValue = String(input.lookupValue || '').trim();
+        const caseReference = String(input.caseReference || '').trim();
+        const reason = String(input.reason || '').trim();
+        const lookupKinds = new Set(['source_ledger_id', 'provider_payment_id', 'order_id']);
+        const reasons = new Set(['statutory_audit', 'accounting_reconciliation', 'legal_defense', 'tax_authority_request']);
+        const casePattern = /^[A-Za-z0-9][A-Za-z0-9._:/-]{11,119}$/;
+        const invalidField = !lookupKinds.has(lookupKind) ? 'lookupKind'
+            : (lookupValue.length < 1 || lookupValue.length > 300) ? 'lookupValue'
+                : !casePattern.test(caseReference) ? 'caseReference'
+                    : !reasons.has(reason) ? 'reason' : '';
+        if (invalidField) {
+            const error = new Error('Invalid legal archive lookup');
+            error.code = 'legal_archive_validation';
+            error.field = invalidField;
+            throw error;
+        }
+        return { lookupKind, lookupValue, caseReference, reason };
+    }
+
+    async _readLegalArchive(input) {
+        const request = this._normalizeLegalArchiveRequest(input);
+        // Reuse the established Authenticator flow. PostgreSQL repeats every
+        // Admin/AAL2/TOTP/grant check; this client gate is only interaction UX.
+        if (!(await this._partnersEnsureAal2())) {
+            const error = new Error('AAL2 required');
+            error.code = 'legal_archive_aal2_required';
+            throw error;
+        }
+        const response = await this._rpc('norva_read_legal_billing_archive', {
+            p_lookup_kind: request.lookupKind,
+            p_lookup_value: request.lookupValue,
+            p_case_reference: request.caseReference,
+            p_reason: request.reason,
+        });
+        const records = Array.isArray(response?.records) ? response.records : null;
+        const returnedRows = Number(response?.returnedRows);
+        if (response?.contract !== 'legal-billing-archive-read-v1'
+            || records === null || !Number.isInteger(returnedRows)
+            || returnedRows < 0 || returnedRows > 20 || records.length !== returnedRows) {
+            const error = new Error('Invalid legal archive response');
+            error.code = 'legal_archive_invalid_response';
+            throw error;
+        }
+        return {
+            contract: response.contract,
+            caseReference: request.caseReference,
+            records,
+            returnedRows,
+            truncated: response.truncated === true,
+        };
+    }
+
+    _legalArchiveErrorMessage(error) {
+        const message = String(error?.message || '');
+        if (error?.code === 'legal_archive_validation') {
+            if (error.field === 'lookupKind') return 'Sélectionnez un type d’identifiant autorisé.';
+            if (error.field === 'lookupValue') return 'Saisissez un identifiant exact de 1 à 300 caractères.';
+            if (error.field === 'caseReference') return 'La référence du dossier doit contenir 12 à 120 caractères autorisés.';
+            if (error.field === 'reason') return 'Sélectionnez un motif de consultation autorisé.';
+            return 'Vérifiez l’identifiant exact, la référence du dossier et le motif sélectionné.';
+        }
+        if (error?.code === 'legal_archive_aal2_required'
+            || /requires\s+AAL2|AAL2\s+required|aal2_required/i.test(message)) {
+            return 'La session renforcée n’a pas été validée. Relancez la consultation puis confirmez avec Authenticator.';
+        }
+        if (/reader grant required|admin required|not authorized|permission denied|403|42501/i.test(message)) {
+            return 'Ce compte n’est pas autorisé à consulter l’archive légale.';
+        }
+        if (/invalid legal archive access request|legal_archive_invalid_response/i.test(message)
+            || error?.code === 'legal_archive_invalid_response') {
+            return 'La consultation a été refusée car son contrat de sécurité est invalide.';
+        }
+        return 'La consultation n’a pas abouti. Aucun résultat n’a été affiché ; vous pouvez réessayer.';
+    }
+
+    _renderLegalArchiveRecords(payload) {
+        const esc = AdminPage.esc;
+        const date = (value) => {
+            const parsed = value ? new Date(value) : null;
+            return parsed && Number.isFinite(parsed.getTime())
+                ? parsed.toLocaleString('fr-FR', { dateStyle: 'medium', timeStyle: 'short' })
+                : '—';
+        };
+        if (!payload.records.length) {
+            return '<div class="legal-archive-empty"><strong>Aucune pièce correspondante</strong><span>La consultation à zéro résultat a tout de même été inscrite dans le journal d’accès.</span></div>';
+        }
+        const kv = (label, value) => `<div class="legal-record-kv"><b>${esc(label)}</b>${esc(value == null || value === '' ? '—' : String(value))}</div>`;
+        const records = payload.records.map((record) => {
+            const title = record.orderId || record.providerPaymentId || record.sourceLedgerId || record.legalRecordId || 'Pièce archivée';
+            const amount = record.amountMinor != null && Number.isSafeInteger(Number(record.amountMinor))
+                ? `${AdminPage.n(record.amountMinor)} unités mineures · ${String(record.currency || '—').toUpperCase()}`
+                : '—';
+            return `<article class="legal-record">
+                <div class="legal-record-head">
+                    <div class="legal-record-title">${esc(title)}</div>
+                    <div class="legal-record-meta">${esc(date(record.issuedAt))}</div>
+                </div>
+                <div class="legal-record-grid">
+                    ${kv('Nature', record.kind)}${kv('Statut', record.status)}
+                    ${kv('Montant exact', amount)}${kv('Provider', record.provider)}
+                    ${kv('Commande', record.orderId)}${kv('Paiement provider', record.providerPaymentId)}
+                    ${kv('Ledger Norva', record.sourceLedgerId)}${kv('Conservation jusqu’au', date(record.retentionUntil))}
+                    ${kv('Base légale', record.legalBasis)}${kv('Politique', record.policyReference)}
+                </div>
+            </article>`;
+        }).join('');
+        return records + (payload.truncated
+            ? '<div class="legal-archive-status is-error" role="status">Résultat limité aux 20 premières pièces. Affinez la référence exacte.</div>'
+            : '');
+    }
+
+    _wireLegalArchiveReader() {
+        const form = document.getElementById('legal-archive-form');
+        if (!form || form.dataset.wired === 'true') return;
+        const submit = document.getElementById('legal-archive-submit');
+        const status = document.getElementById('legal-archive-status');
+        const results = document.getElementById('legal-archive-results');
+        const lookup = document.getElementById('legal-archive-value');
+        const caseReference = document.getElementById('legal-archive-case');
+        const kind = document.getElementById('legal-archive-kind');
+        const reason = document.getElementById('legal-archive-reason');
+        if (!submit || !status || !results || !lookup || !caseReference || !kind || !reason) return;
+        form.dataset.wired = 'true';
+        form.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            if (submit.disabled) return;
+            [kind, lookup, caseReference, reason].forEach(field => field.removeAttribute('aria-invalid'));
+            status.className = 'legal-archive-status';
+            status.setAttribute('role', 'status');
+            status.textContent = 'Validation de la session et du dossier…';
+            submit.disabled = true;
+            submit.textContent = 'Consultation en cours…';
+            form.setAttribute('aria-busy', 'true');
+            try {
+                const payload = await this._readLegalArchive({
+                    lookupKind: kind.value,
+                    lookupValue: lookup.value,
+                    caseReference: caseReference.value,
+                    reason: reason.value,
+                });
+                results.innerHTML = this._renderLegalArchiveRecords(payload);
+                lookup.value = '';
+                status.className = 'legal-archive-status is-ok';
+                status.textContent = `${payload.returnedRows} pièce(s) retournée(s). Consultation auditée pour ${payload.caseReference}.`;
+                results.focus?.({ preventScroll: true });
+            } catch (error) {
+                status.className = 'legal-archive-status is-error';
+                status.setAttribute('role', 'alert');
+                status.textContent = this._legalArchiveErrorMessage(error);
+                if (error?.code === 'legal_archive_validation') {
+                    const invalidField = { lookupKind: kind, lookupValue: lookup, caseReference, reason }[error.field] || lookup;
+                    invalidField.setAttribute('aria-invalid', 'true');
+                    invalidField.focus();
+                }
+            } finally {
+                submit.disabled = false;
+                submit.textContent = 'Valider et consulter';
+                form.removeAttribute('aria-busy');
+            }
+        });
     }
 
     // ── Panneau TVA / OSS (page Finance) — cockpit de conformité ──
