@@ -129,6 +129,113 @@ SQL
 }
 
 baseline_sql | docker exec -i "$PRODUCTION_CONTAINER" psql -X -At -F $'\t' -v ON_ERROR_STOP=1 -U supabase_admin -d postgres >"$REPORT_DIR/production-baseline.tsv"
+
+# pg_dump replays object ACLs relative to the target cluster's default
+# privileges. Supabase bootstraps broad API-role defaults before pg_restore,
+# so a private production object can otherwise become broad only inside the
+# clone. Freeze and later replay the exact effective public-schema ACL for
+# PUBLIC plus the three API roles, then compare canonical snapshots.
+docker exec "$PRODUCTION_CONTAINER" psql -X -At -v ON_ERROR_STOP=1 \
+  -U supabase_admin -d postgres <<'SQL' >"$REPORT_DIR/production-api-acl-replay.sql"
+select 'begin;';
+select format(
+  'revoke all on table %I.%I from public,anon,authenticated,service_role;',
+  namespace.nspname,class.relname
+)
+from pg_catalog.pg_class class
+join pg_catalog.pg_namespace namespace on namespace.oid=class.relnamespace
+where namespace.nspname='public' and class.relkind in ('r','p','v','m','f')
+order by class.relname;
+select format(
+  'revoke all on sequence %I.%I from public,anon,authenticated,service_role;',
+  namespace.nspname,class.relname
+)
+from pg_catalog.pg_class class
+join pg_catalog.pg_namespace namespace on namespace.oid=class.relnamespace
+where namespace.nspname='public' and class.relkind='S'
+order by class.relname;
+select format(
+  'revoke all on %s %I.%I(%s) from public,anon,authenticated,service_role;',
+  case procedure_state.prokind when 'p' then 'procedure' else 'function' end,
+  namespace.nspname,procedure_state.proname,
+  pg_catalog.pg_get_function_identity_arguments(procedure_state.oid)
+)
+from pg_catalog.pg_proc procedure_state
+join pg_catalog.pg_namespace namespace on namespace.oid=procedure_state.pronamespace
+where namespace.nspname='public'
+order by procedure_state.proname,pg_catalog.pg_get_function_identity_arguments(procedure_state.oid);
+
+with grants as (
+  select class.oid,namespace.nspname,class.relname,
+    case acl.grantee when 0 then 'PUBLIC' else acl.grantee::regrole::text end as grantee,
+    acl.privilege_type,acl.is_grantable
+  from pg_catalog.pg_class class
+  join pg_catalog.pg_namespace namespace on namespace.oid=class.relnamespace
+  cross join lateral pg_catalog.aclexplode(coalesce(
+    class.relacl,pg_catalog.acldefault('r',class.relowner)
+  )) acl
+  where namespace.nspname='public' and class.relkind in ('r','p','v','m','f')
+    and (acl.grantee=0 or acl.grantee::regrole::text in ('anon','authenticated','service_role'))
+)
+select format(
+  'grant %s on table %I.%I to %s%s;',
+  string_agg(privilege_type,',' order by privilege_type),nspname,relname,
+  case grantee when 'PUBLIC' then 'public' else format('%I',grantee) end,
+  case when is_grantable then ' with grant option' else '' end
+)
+from grants group by oid,nspname,relname,grantee,is_grantable
+order by relname,grantee,is_grantable;
+
+with grants as (
+  select class.oid,namespace.nspname,class.relname,
+    case acl.grantee when 0 then 'PUBLIC' else acl.grantee::regrole::text end as grantee,
+    acl.privilege_type,acl.is_grantable
+  from pg_catalog.pg_class class
+  join pg_catalog.pg_namespace namespace on namespace.oid=class.relnamespace
+  cross join lateral pg_catalog.aclexplode(coalesce(
+    class.relacl,pg_catalog.acldefault('S',class.relowner)
+  )) acl
+  where namespace.nspname='public' and class.relkind='S'
+    and (acl.grantee=0 or acl.grantee::regrole::text in ('anon','authenticated','service_role'))
+)
+select format(
+  'grant %s on sequence %I.%I to %s%s;',
+  string_agg(privilege_type,',' order by privilege_type),nspname,relname,
+  case grantee when 'PUBLIC' then 'public' else format('%I',grantee) end,
+  case when is_grantable then ' with grant option' else '' end
+)
+from grants group by oid,nspname,relname,grantee,is_grantable
+order by relname,grantee,is_grantable;
+
+with grants as (
+  select procedure_state.oid,namespace.nspname,procedure_state.proname,
+    procedure_state.prokind,
+    pg_catalog.pg_get_function_identity_arguments(procedure_state.oid) as arguments,
+    case acl.grantee when 0 then 'PUBLIC' else acl.grantee::regrole::text end as grantee,
+    acl.privilege_type,acl.is_grantable
+  from pg_catalog.pg_proc procedure_state
+  join pg_catalog.pg_namespace namespace on namespace.oid=procedure_state.pronamespace
+  cross join lateral pg_catalog.aclexplode(coalesce(
+    procedure_state.proacl,pg_catalog.acldefault('f',procedure_state.proowner)
+  )) acl
+  where namespace.nspname='public'
+    and (acl.grantee=0 or acl.grantee::regrole::text in ('anon','authenticated','service_role'))
+)
+select format(
+  'grant %s on %s %I.%I(%s) to %s%s;',
+  string_agg(privilege_type,',' order by privilege_type),
+  case prokind when 'p' then 'procedure' else 'function' end,
+  nspname,proname,arguments,
+  case grantee when 'PUBLIC' then 'public' else format('%I',grantee) end,
+  case when is_grantable then ' with grant option' else '' end
+)
+from grants
+group by oid,nspname,proname,prokind,arguments,grantee,is_grantable
+order by proname,arguments,grantee,is_grantable;
+select 'commit;';
+SQL
+test -s "$REPORT_DIR/production-api-acl-replay.sql" || fail "production API ACL replay is empty"
+sha256sum "$REPORT_DIR/production-api-acl-replay.sql" >"$REPORT_DIR/production-api-acl-replay.sha256"
 phase123_object_count="$(awk -F '\t' '$1=="phase123_objects"{print $2}' "$REPORT_DIR/production-baseline.tsv")"
 case "$phase123_object_count" in
   0) REHEARSAL_MODE="bootstrap" ;;
@@ -252,6 +359,54 @@ docker exec -i "$TARGET_CONTAINER" pg_restore \
   -U supabase_admin -d postgres --clean --if-exists --no-owner --exit-on-error \
   <"$DUMP_FILE" >"$REPORT_DIR/restore.log" 2>&1
 printf 'RESTORE_COMPLETE %s\n' "$(date -u +%FT%TZ)" | tee -a "$REPORT_DIR/timeline.log"
+
+docker exec -i "$TARGET_CONTAINER" psql -X -v ON_ERROR_STOP=1 \
+  -U supabase_admin -d postgres \
+  <"$REPORT_DIR/production-api-acl-replay.sql" \
+  >"$REPORT_DIR/clone-api-acl-replay.log" 2>&1
+printf 'ACL_REPLAY_COMPLETE %s\n' "$(date -u +%FT%TZ)" | tee -a "$REPORT_DIR/timeline.log"
+
+cat >"$REPORT_DIR/api-acl-snapshot.sql" <<'SQL'
+with relation_acl as (
+  select case class.relkind when 'S' then 'sequence' else 'relation' end as kind,
+    format('%I.%I',namespace.nspname,class.relname) as identity,
+    case acl.grantee when 0 then 'PUBLIC' else acl.grantee::regrole::text end as grantee,
+    acl.privilege_type,acl.is_grantable
+  from pg_catalog.pg_class class
+  join pg_catalog.pg_namespace namespace on namespace.oid=class.relnamespace
+  cross join lateral pg_catalog.aclexplode(coalesce(
+    class.relacl,
+    pg_catalog.acldefault(case class.relkind when 'S' then 'S'::"char" else 'r'::"char" end,class.relowner)
+  )) acl
+  where namespace.nspname='public' and class.relkind in ('r','p','v','m','f','S')
+    and (acl.grantee=0 or acl.grantee::regrole::text in ('anon','authenticated','service_role'))
+), routine_acl as (
+  select case procedure_state.prokind when 'p' then 'procedure' else 'function' end as kind,
+    format('%I.%I(%s)',namespace.nspname,procedure_state.proname,
+      pg_catalog.pg_get_function_identity_arguments(procedure_state.oid)) as identity,
+    case acl.grantee when 0 then 'PUBLIC' else acl.grantee::regrole::text end as grantee,
+    acl.privilege_type,acl.is_grantable
+  from pg_catalog.pg_proc procedure_state
+  join pg_catalog.pg_namespace namespace on namespace.oid=procedure_state.pronamespace
+  cross join lateral pg_catalog.aclexplode(coalesce(
+    procedure_state.proacl,pg_catalog.acldefault('f',procedure_state.proowner)
+  )) acl
+  where namespace.nspname='public'
+    and (acl.grantee=0 or acl.grantee::regrole::text in ('anon','authenticated','service_role'))
+)
+select kind,identity,grantee,privilege_type,is_grantable from relation_acl
+union all
+select kind,identity,grantee,privilege_type,is_grantable from routine_acl
+order by 1,2,3,4,5;
+SQL
+docker exec -i "$PRODUCTION_CONTAINER" psql -X -AtF $'\t' -v ON_ERROR_STOP=1 \
+  -U supabase_admin -d postgres <"$REPORT_DIR/api-acl-snapshot.sql" \
+  >"$REPORT_DIR/production-api-acl.tsv"
+docker exec -i "$TARGET_CONTAINER" psql -X -AtF $'\t' -v ON_ERROR_STOP=1 \
+  -U supabase_admin -d postgres <"$REPORT_DIR/api-acl-snapshot.sql" \
+  >"$REPORT_DIR/clone-api-acl.tsv"
+diff -u "$REPORT_DIR/production-api-acl.tsv" "$REPORT_DIR/clone-api-acl.tsv" \
+  >"$REPORT_DIR/api-acl-diff.txt" || fail "clone API ACLs differ from production"
 
 # Preserve the restored schedule as data evidence while making every job
 # explicitly inactive as a second fence.  The original production database is
