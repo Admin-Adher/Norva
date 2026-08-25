@@ -17,6 +17,7 @@ test('production rollout operator gate is read-only by default and binds the exa
   assert.match(script, /if \[\[ "\$DB_CONTAINER" != 'norva-db' \]\]/);
   assert.match(script, /ACTION="\$\{1:-preflight\}"/);
   assert.match(script, /status=READ_ONLY_PREFLIGHT/);
+  assert.match(script, /provider_crons=%s/);
 });
 
 test('production rollout mutations require distinct literal confirmations', () => {
@@ -24,6 +25,9 @@ test('production rollout mutations require distinct literal confirmations', () =
   assert.match(script, /SET_PROVIDER_ACCESS_INTERNAL_USER/);
   assert.match(script, /SET_PROVIDER_ACCESS_STAGE_\$\{ROLLOUT_STAGE\}/);
   assert.match(script, /SET_PROVIDER_ACCESS_EXTERNAL_CHANNELS/);
+  assert.match(script, /INSTALL_PROVIDER_ACCESS_NOTIFICATION_CRON/);
+  assert.match(script, /INSTALL_PROVIDER_ACCESS_DETECTION_CRON/);
+  assert.match(script, /REMOVE_PROVIDER_ACCESS_CRONS/);
 });
 
 test('cohort activation refuses incomplete cache epoch and channels refuse OFF', () => {
@@ -36,6 +40,12 @@ test('rollout gate approval binds the exact configured legal policy reference', 
   assert.match(script, /LEGAL_POLICY_REVISION" == 'UNCONFIGURED'/);
   assert.match(script, /LEGAL_POLICY_REFERENCE" != "\$CURRENT_POLICY_REFERENCE/);
   assert.match(script, /norva_configure_provider_access_rollout_gates/);
+});
+
+test('provider network crons are armed and removed only through service RPCs', () => {
+  assert.match(script, /norva_install_provider_access_notification_cron/);
+  assert.match(script, /norva_install_provider_access_check_cron/);
+  assert.match(script, /norva_remove_provider_access_crons/);
 });
 
 test('operator values use psql variables rather than interpolated SQL', () => {

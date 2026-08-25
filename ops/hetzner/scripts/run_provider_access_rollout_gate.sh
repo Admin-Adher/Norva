@@ -9,9 +9,9 @@ if [[ "$DB_CONTAINER" != 'norva-db' ]]; then
   exit 64
 fi
 case "$ACTION" in
-  preflight|configure-gates|set-internal-user|set-stage|set-channels) ;;
+  preflight|configure-gates|set-internal-user|set-stage|set-channels|install-notification-cron|install-detection-cron|remove-provider-crons) ;;
   *)
-    echo 'usage: run_provider_access_rollout_gate.sh [preflight|configure-gates|set-internal-user|set-stage|set-channels]' >&2
+    echo 'usage: run_provider_access_rollout_gate.sh [preflight|configure-gates|set-internal-user|set-stage|set-channels|install-notification-cron|install-detection-cron|remove-provider-crons]' >&2
     exit 64
     ;;
 esac
@@ -56,7 +56,11 @@ select
       'provider_access_auto_detection_v1_enabled','provider_access_email_v1_enabled',
       'provider_access_push_v1_enabled'
     )),'NONE'),
-  (public.norva_assert_provider_access_rollout_safe()->>'safe')
+  (public.norva_assert_provider_access_rollout_safe()->>'safe'),
+  coalesce((select string_agg(jobname,',' order by jobname) from cron.job
+    where jobname in (
+      'norva-provider-access-notifications','norva-provider-access-checks'
+    )),'NONE')
 from public.cloud_provider_access_rollout rollout
 cross join public.cloud_catalog_cache_epoch_v2_rollout cache
 left join public.legal_billing_archive_retention_policy policy
@@ -69,18 +73,18 @@ print_state() {
   local snapshot="$1"
   local revision stage basis_points legal_gate operational_gate cache_phase
   local legal_policy_revision legal_policy_reference internal_users enabled_flags
-  local external_channels p0_safe
+  local external_channels p0_safe provider_crons
   IFS='|' read -r revision stage basis_points legal_gate operational_gate cache_phase \
     legal_policy_revision legal_policy_reference internal_users enabled_flags \
-    external_channels p0_safe <<<"$snapshot"
+    external_channels p0_safe provider_crons <<<"$snapshot"
   printf 'rollout_revision=%s\nrollout_stage=%s\ncohort_basis_points=%s\n' \
     "$revision" "$stage" "$basis_points"
   printf 'legal_gate_reference=%s\noperational_gate_reference=%s\n' \
     "$legal_gate" "$operational_gate"
   printf 'cache_phase=%s\nlegal_policy_revision=%s\nlegal_policy_reference=%s\n' \
     "$cache_phase" "$legal_policy_revision" "$legal_policy_reference"
-  printf 'internal_users=%s\nenabled_flags=%s\nexternal_channels=%s\np0_safe=%s\n' \
-    "$internal_users" "$enabled_flags" "$external_channels" "$p0_safe"
+  printf 'internal_users=%s\nenabled_flags=%s\nexternal_channels=%s\np0_safe=%s\nprovider_crons=%s\n' \
+    "$internal_users" "$enabled_flags" "$external_channels" "$p0_safe" "$provider_crons"
 }
 
 readonly BEFORE="$(state)"
@@ -91,7 +95,7 @@ if [[ "$ACTION" == 'preflight' ]]; then
 fi
 
 IFS='|' read -r CURRENT_REVISION CURRENT_STAGE _ CURRENT_LEGAL_GATE _ \
-  CACHE_PHASE LEGAL_POLICY_REVISION CURRENT_POLICY_REFERENCE _ _ _ P0_SAFE <<<"$BEFORE"
+  CACHE_PHASE LEGAL_POLICY_REVISION CURRENT_POLICY_REFERENCE _ _ _ P0_SAFE _ <<<"$BEFORE"
 
 if [[ "$P0_SAFE" != 'true' ]]; then
   echo 'status=REFUSED_P0_UNSAFE' >&2
@@ -214,6 +218,50 @@ select public.norva_set_provider_access_rollout_channels(
   :'expected_revision'::bigint,:'auto_detection'::boolean,:'email'::boolean,
   :'push'::boolean,:'readiness',:'actor'
 );
+commit;
+SQL
+    ;;
+  install-notification-cron)
+    if [[ "$CACHE_PHASE" != 'complete' || "$CURRENT_STAGE" == 'off' ]]; then
+      echo 'status=REFUSED_NO_ACTIVE_CACHE_SAFE_COHORT' >&2
+      exit 70
+    fi
+    if [[ "${CONFIRM_PROVIDER_CRON:-}" != 'INSTALL_PROVIDER_ACCESS_NOTIFICATION_CRON' ]]; then
+      echo 'status=REFUSED_MISSING_EXPLICIT_CRON_CONFIRMATION' >&2
+      exit 64
+    fi
+    psql_admin <<'SQL'
+begin;
+set local role service_role;
+select public.norva_install_provider_access_notification_cron();
+commit;
+SQL
+    ;;
+  install-detection-cron)
+    if [[ "$CACHE_PHASE" != 'complete' || "$CURRENT_STAGE" == 'off' ]]; then
+      echo 'status=REFUSED_NO_ACTIVE_CACHE_SAFE_COHORT' >&2
+      exit 70
+    fi
+    if [[ "${CONFIRM_PROVIDER_CRON:-}" != 'INSTALL_PROVIDER_ACCESS_DETECTION_CRON' ]]; then
+      echo 'status=REFUSED_MISSING_EXPLICIT_CRON_CONFIRMATION' >&2
+      exit 64
+    fi
+    psql_admin <<'SQL'
+begin;
+set local role service_role;
+select public.norva_install_provider_access_check_cron();
+commit;
+SQL
+    ;;
+  remove-provider-crons)
+    if [[ "${CONFIRM_PROVIDER_CRON:-}" != 'REMOVE_PROVIDER_ACCESS_CRONS' ]]; then
+      echo 'status=REFUSED_MISSING_EXPLICIT_CRON_CONFIRMATION' >&2
+      exit 64
+    fi
+    psql_admin <<'SQL'
+begin;
+set local role service_role;
+select public.norva_remove_provider_access_crons();
 commit;
 SQL
     ;;

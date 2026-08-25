@@ -106,3 +106,46 @@ suite was replayed:
 
 This proof does not approve secrets, schedule a cron, complete cache epoch v2,
 choose a production account or activate a cohort.
+
+## Explicit notification cron lifecycle
+
+Migration `20260825001459_provider_access_notification_cron_v1.sql` closes the
+remaining scheduling gap without arming production. It adds a service-only
+installer that requires an active cohort, completed cache epoch, notification
+capability, configured cron secret and a fresh P0-safe assertion. The stored
+command rechecks `provider_access_notifications_v1_enabled` and the non-`OFF`
+stage before every network wake-up, so emergency `OFF` is immediately
+authoritative even before the operator removes the job.
+
+The companion removal RPC is idempotent and bounded to exactly
+`norva-provider-access-notifications` and `norva-provider-access-checks`.
+The production rollout gate exposes separate literal confirmations for
+notification install, detection install and removal; migration installation
+itself creates no cron.
+
+Real PostgreSQL acceptance on the current proof database:
+
+```text
+provider_access_notification_cron.sql
+1..13
+13 PASS
+0 FAIL
+ROLLBACK
+
+post-rollback Provider Access crons = 0
+post-rollback fixture secrets = 0
+```
+
+```text
+notification cron migration SHA-256
+0d124dcc3601d5698c8f412de0ad4e5e15e6a4eae82e78ab70471153558735cc
+
+notification cron pgTAP SHA-256
+d47832ddb4c371429d73e1052680c34e83d97a03c50c2f72d89bdc4fe3cc5ac5
+
+rollout operator gate SHA-256
+38d3924b827522165154c6a3e5f2dea2505837f4ccec0a7000f1e0a21fb23f47
+
+repository regression
+2648 tests / 2646 passed / 0 failed / 2 expected skips
+```

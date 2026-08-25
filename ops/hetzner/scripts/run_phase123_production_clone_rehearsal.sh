@@ -106,8 +106,8 @@ contraction_definition=20260823180000_provider_catalog_generation_online_rollout
 online_index_head=20260823182700_series_inventory_generation_parent_natural_fk.sql
 phase3_database_head=20260823194000_replacement_promotion_proof_account_delete.sql
 cache_epoch_head=20260824100000_catalog_cache_epoch_v2.sql
-previous_provider_access_head=20260824171000_catalog_cache_epoch_v2_minimum_observation_gate.sql
-current_provider_access_head=20260824174000_legal_billing_archive_acl_hardening.sql
+previous_provider_access_head=20260824174000_legal_billing_archive_acl_hardening.sql
+current_provider_access_head=20260825001459_provider_access_notification_cron_v1.sql
 EOF
 
 baseline_sql() {
@@ -142,15 +142,18 @@ if test "$REHEARSAL_MODE" = incremental; then
 select 'previous_cache_gate',to_regprocedure('public.norva_complete_catalog_cache_epoch_v2_rollout(text,text)') is not null;
 select 'legal_policy_v2',to_regprocedure('public.norva_configure_legal_billing_archive_policy(bigint,text,text,integer,integer,integer,text)') is not null;
 select 'legal_access_v1',to_regprocedure('public.norva_read_legal_billing_archive(text,text,text,text)') is not null;
+select 'notification_cron_v1',to_regprocedure('public.norva_install_provider_access_notification_cron()') is not null;
 select 'policy_rows',count(*) from public.legal_billing_archive_retention_policy;
 select 'archive_rows',count(*) from public.legal_billing_archive;
 SQL
   grep -qx $'previous_cache_gate\tt' "$REPORT_DIR/production-incremental-preconditions.tsv" \
     || fail "production does not match the required cache-observation head"
-  grep -qx $'legal_policy_v2\tf' "$REPORT_DIR/production-incremental-preconditions.tsv" \
-    || fail "legal policy v2 is already present; choose a new incremental rehearsal boundary"
-  grep -qx $'legal_access_v1\tf' "$REPORT_DIR/production-incremental-preconditions.tsv" \
-    || fail "legal archive access v1 is already present; choose a new incremental rehearsal boundary"
+  grep -qx $'legal_policy_v2\tt' "$REPORT_DIR/production-incremental-preconditions.tsv" \
+    || fail "legal policy v2 is missing from the required incremental boundary"
+  grep -qx $'legal_access_v1\tt' "$REPORT_DIR/production-incremental-preconditions.tsv" \
+    || fail "legal archive access v1 is missing from the required incremental boundary"
+  grep -qx $'notification_cron_v1\tf' "$REPORT_DIR/production-incremental-preconditions.tsv" \
+    || fail "notification cron v1 is already present; choose a new incremental rehearsal boundary"
 fi
 
 printf 'DUMP_BEGIN %s\n' "$(date -u +%FT%TZ)" | tee "$REPORT_DIR/timeline.log"
@@ -288,15 +291,14 @@ PRE_HEAD="20260823179920_catalog_generation_flag_gate.sql"
 CONTRACTION="20260823180000_provider_catalog_generation_online_rollout.sql"
 ONLINE_HEAD="20260823182700_series_inventory_generation_parent_natural_fk.sql"
 CURRENT_HEAD="20260823194000_replacement_promotion_proof_account_delete.sql"
-PREVIOUS_PROVIDER_ACCESS_HEAD="20260824171000_catalog_cache_epoch_v2_minimum_observation_gate.sql"
-CURRENT_PROVIDER_ACCESS_HEAD="20260824174000_legal_billing_archive_acl_hardening.sql"
+PREVIOUS_PROVIDER_ACCESS_HEAD="20260824174000_legal_billing_archive_acl_hardening.sql"
+CURRENT_PROVIDER_ACCESS_HEAD="20260825001459_provider_access_notification_cron_v1.sql"
 
 if test "$REHEARSAL_MODE" = incremental; then
-  apply_range "$PREVIOUS_PROVIDER_ACCESS_HEAD" "$CURRENT_PROVIDER_ACCESS_HEAD" legal-controls-incremental
+  apply_range "$PREVIOUS_PROVIDER_ACCESS_HEAD" "$CURRENT_PROVIDER_ACCESS_HEAD" provider-cron-incremental
 
   for test_name in \
-    account_deletion_legal_billing_retention_smoke.sql \
-    legal_billing_archive_access_smoke.sql
+    provider_access_notification_cron.sql
   do
     output="$REPORT_DIR/test-${test_name%.sql}.log"
     printf 'TEST %s %s\n' "$(date -u +%FT%TZ)" "$test_name" | tee -a "$REPORT_DIR/timeline.log"
@@ -309,6 +311,8 @@ if test "$REHEARSAL_MODE" = incremental; then
     -U supabase_admin -d postgres <<'SQL' >"$REPORT_DIR/final-invariants.tsv"
 select 'policy_v2',to_regprocedure('public.norva_configure_legal_billing_archive_policy(bigint,text,text,integer,integer,integer,text)') is not null;
 select 'access_v1',to_regprocedure('public.norva_read_legal_billing_archive(text,text,text,text)') is not null;
+select 'notification_cron_v1',to_regprocedure('public.norva_install_provider_access_notification_cron()') is not null;
+select 'provider_crons',count(*) from cron.job where jobname in ('norva-provider-access-notifications','norva-provider-access-checks');
 select 'policy_rows',count(*) from public.legal_billing_archive_retention_policy;
 select 'archive_rows',count(*) from public.legal_billing_archive;
 select 'access_grants',count(*) from public.legal_billing_archive_access_grants;
@@ -326,6 +330,8 @@ select 'cache_epoch',phase,completed_at is not null from public.cloud_catalog_ca
 SQL
   grep -qx $'policy_v2\tt' "$REPORT_DIR/final-invariants.tsv" || fail "legal policy v2 is missing"
   grep -qx $'access_v1\tt' "$REPORT_DIR/final-invariants.tsv" || fail "legal archive access v1 is missing"
+  grep -qx $'notification_cron_v1\tt' "$REPORT_DIR/final-invariants.tsv" || fail "notification cron v1 is missing"
+  grep -qx $'provider_crons\t0' "$REPORT_DIR/final-invariants.tsv" || fail "rehearsal persisted a Provider Access cron"
   grep -qx $'access_grants\t0' "$REPORT_DIR/final-invariants.tsv" || fail "rehearsal persisted a legal-reader grant"
   grep -qx $'access_events\t0' "$REPORT_DIR/final-invariants.tsv" || fail "rehearsal persisted an access event"
   grep -qx $'grant_events\t0' "$REPORT_DIR/final-invariants.tsv" || fail "rehearsal persisted a grant event"
@@ -503,6 +509,7 @@ TESTS=(
   account_deletion_finalization_concurrency_smoke.sql
   account_deletion_legal_billing_retention_smoke.sql
   legal_billing_archive_access_smoke.sql
+  provider_access_notification_cron.sql
   account_deletion_paywall_analytics_smoke.sql
   provider_credential_promotion_cancel_concurrency.sql
   provider_credential_swap_account_delete_concurrency.sql
