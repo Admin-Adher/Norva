@@ -716,6 +716,8 @@ test('worker uses durable bounded lease/claim/settle CAS and waitUntil is only a
   assert.match(EDGE, /norva_checkpoint_credential_generation_job/);
   assert.match(EDGE_DEPLOY, /norva-provider-access\/index\.ts/);
   assert.match(EDGE_DEPLOY, /norva-provider-access source digest mismatch/);
+  assert.match(EDGE_DEPLOY, /_shared\/live-materialization\.ts/);
+  assert.match(EDGE_DEPLOY, /shared live-materialization source digest mismatch/);
   assert.match(EDGE, /p_retry_after_seconds: staged\.pending === true/);
   assert.match(EDGE, /maxSlices: 8/);
   assert.match(EDGE, /deadlineMs: 45_000/);

@@ -146,16 +146,19 @@ if command -v docker >/dev/null 2>&1 && [[ -f "$COMPOSE" ]]; then
     local cloud_path="/home/deno/functions/norva-cloud/index.ts"
     local catalog_path="/home/deno/functions/norva-catalog/index.ts"
     local provider_access_path="/home/deno/functions/norva-provider-access/index.ts"
+    local live_materialization_path="/home/deno/functions/_shared/live-materialization.ts"
     local expected_playback_digest
     local expected_main_digest
     local expected_cloud_digest
     local expected_catalog_digest
     local expected_provider_access_digest
+    local expected_live_materialization_digest
     local observed_playback_digest
     local observed_main_digest
     local observed_cloud_digest
     local observed_catalog_digest
     local observed_provider_access_digest
+    local observed_live_materialization_digest
     local playback_health
     local cloud_health
     local catalog_health
@@ -165,11 +168,13 @@ if command -v docker >/dev/null 2>&1 && [[ -f "$COMPOSE" ]]; then
     expected_cloud_digest="$(sha256sum "$FUNCS_DIR/norva-cloud/index.ts" | awk '{print $1}')"
     expected_catalog_digest="$(sha256sum "$FUNCS_DIR/norva-catalog/index.ts" | awk '{print $1}')"
     expected_provider_access_digest="$(sha256sum "$FUNCS_DIR/norva-provider-access/index.ts" | awk '{print $1}')"
+    expected_live_materialization_digest="$(sha256sum "$FUNCS_DIR/_shared/live-materialization.ts" | awk '{print $1}')"
     observed_playback_digest="$(file_digest_in_service "$service" "$playback_path")"
     observed_main_digest="$(file_digest_in_service "$service" "$main_path")"
     observed_cloud_digest="$(file_digest_in_service "$service" "$cloud_path")"
     observed_catalog_digest="$(file_digest_in_service "$service" "$catalog_path")"
     observed_provider_access_digest="$(file_digest_in_service "$service" "$provider_access_path")"
+    observed_live_materialization_digest="$(file_digest_in_service "$service" "$live_materialization_path")"
     [[ "$observed_playback_digest" == "$expected_playback_digest" ]] || {
       echo "ERROR: $service norva-playback source digest mismatch" >&2
       exit 1
@@ -188,6 +193,10 @@ if command -v docker >/dev/null 2>&1 && [[ -f "$COMPOSE" ]]; then
     }
     [[ "$observed_provider_access_digest" == "$expected_provider_access_digest" ]] || {
       echo "ERROR: $service norva-provider-access source digest mismatch" >&2
+      exit 1
+    }
+    [[ "$observed_live_materialization_digest" == "$expected_live_materialization_digest" ]] || {
+      echo "ERROR: $service shared live-materialization source digest mismatch" >&2
       exit 1
     }
 

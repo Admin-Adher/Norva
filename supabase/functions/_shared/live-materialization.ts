@@ -269,15 +269,20 @@ async function mergeExistingLiveChannelSummaries(
 ) {
   if (!rows.length) return rows;
   const ids = [...new Set(rows.map((row) => stringValue(row.logical_id)).filter(Boolean))];
+  const sourceId = exactSharedValue(rows, "source_id");
+  const userId = exactSharedValue(rows, "user_id");
   const existingByLogicalId = new Map<string, JsonRecord>();
-  for (let index = 0; index < ids.length; index += 250) {
-    const { data, error } = await db
-      .from("cloud_live_logical_channels")
-      .select("logical_id,variant_preview")
-      .eq("generation_id", generation.generationId)
-      .in("logical_id", ids.slice(index, index + 250));
+  for (let index = 0; index < ids.length; index += 500) {
+    const { data, error } = await db.rpc("norva_get_generation_live_channel_summaries", {
+      p_source_id: sourceId,
+      p_user_id: userId,
+      p_generation_id: generation.generationId,
+      p_logical_ids: ids.slice(index, index + 500),
+    });
     if (error) throwDb(error, "Unable to load generation live channel summaries");
-    for (const row of data ?? []) existingByLogicalId.set(stringValue(row.logical_id), row);
+    for (const row of Array.isArray(data) ? data : []) {
+      existingByLogicalId.set(stringValue(row.logical_id), row);
+    }
   }
   return rows.map((row) => {
     const existing = existingByLogicalId.get(stringValue(row.logical_id));
@@ -296,6 +301,14 @@ async function mergeExistingLiveChannelSummaries(
       stream_icon: stringOrNull(defaultVariant.stream_icon) ?? row.stream_icon,
     };
   });
+}
+
+function exactSharedValue(rows: JsonRecord[], field: string) {
+  const expected = stringValue(rows[0]?.[field]);
+  if (!expected || rows.some((row) => stringValue(row[field]) !== expected)) {
+    throw new Error(`Live materialization ${field} mismatch`);
+  }
+  return expected;
 }
 
 function mergeLiveVariantPreviews(existingValue: unknown, incomingValue: unknown) {

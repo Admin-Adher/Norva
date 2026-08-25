@@ -14,6 +14,12 @@ const ONLINE_ROLLOUT_PATH = path.join(
   'migrations',
   '20260823180000_provider_catalog_generation_online_rollout.sql',
 );
+const LIVE_SUMMARY_RPC_PATH = path.join(
+  ROOT,
+  'supabase',
+  'migrations',
+  '20260825024944_live_channel_summary_rpc_v1.sql',
+);
 const WRITER_PATHS = [
   path.join(SHARED, 'xtream-sync.ts'),
   path.join(SHARED, 'live-materialization.ts'),
@@ -223,6 +229,18 @@ class FakeDatabase {
           category_name: row.category_name,
         }));
       return { data: rows, error: null };
+    } else if (name === 'norva_get_generation_live_channel_summaries') {
+      const logicalIds = new Set(args.p_logical_ids);
+      const rows = this.tables.cloud_live_logical_channels
+        .filter((row) => row.source_id === args.p_source_id
+          && row.user_id === args.p_user_id
+          && row.generation_id === args.p_generation_id
+          && logicalIds.has(row.logical_id))
+        .map((row) => ({
+          logical_id: row.logical_id,
+          variant_preview: row.variant_preview,
+        }));
+      return { data: rows, error: null };
     }
     return { data: { complete: true }, error: null };
   }
@@ -375,6 +393,62 @@ test('active live materialization clears only through bounded resumable ABA-fenc
   assert.equal(liveProtocol, 'catalog-generation-writer-v2-live-clear-batch');
   assert.equal(liveProtocol, rolloutProtocol, 'Edge caller protocol must equal the SQL rollout gate');
   assert.match(liveSource, /\["42883", "PGRST202"\]/);
+});
+
+test('live summary merge uses bounded RPC bodies and never a logical-id URL filter', async () => {
+  const { upsertLiveChannelRows } = loadLiveMaterializationModule();
+  const database = new FakeDatabase();
+  const originalRpc = database.rpc.bind(database);
+  database.rpc = async (name, args) => {
+    if (name !== 'norva_get_generation_live_channel_summaries') {
+      return originalRpc(name, args);
+    }
+    database.rpcCalls.push({ name, args });
+    return { data: [], error: null };
+  };
+  const generation = {
+    kind: 'active',
+    generationId: '11111111-1111-4111-8111-111111111111',
+    headRevision: '7',
+    configRevision: '8',
+    sourceVisibilityEpoch: '9',
+    userVisibilityEpoch: '10',
+  };
+  const sourceId = '22222222-2222-4222-8222-222222222222';
+  const userId = '33333333-3333-4333-8333-333333333333';
+  const rows = Array.from({ length: 1001 }, (_unused, index) => ({
+    source_id: sourceId,
+    user_id: userId,
+    logical_id: `lc_${String(index).padStart(4, '0')}_${'x'.repeat(270)}`,
+    variant_preview: [],
+  }));
+
+  const inserted = await upsertLiveChannelRows(database, rows, generation);
+  assert.equal(inserted.length, 1001);
+  const lookups = database.rpcCalls.filter((call) =>
+    call.name === 'norva_get_generation_live_channel_summaries');
+  assert.deepEqual(lookups.map((call) => call.args.p_logical_ids.length), [500, 500, 1]);
+  for (const call of lookups) {
+    assert.equal(call.args.p_source_id, sourceId);
+    assert.equal(call.args.p_user_id, userId);
+    assert.equal(call.args.p_generation_id, generation.generationId);
+  }
+  assert.doesNotMatch(
+    source(path.join(SHARED, 'live-materialization.ts')),
+    /\.in\("logical_id"/,
+  );
+  await assert.rejects(
+    upsertLiveChannelRows(database, [rows[0], { ...rows[1], source_id: crypto.randomUUID() }], generation),
+    /Live materialization source_id mismatch/,
+  );
+
+  const migration = source(LIVE_SUMMARY_RPC_PATH);
+  assert.match(migration, /cardinality\(p_logical_ids\),0\) not between 1 and 500/);
+  assert.match(migration, /channel\.source_id = p_source_id/);
+  assert.match(migration, /channel\.user_id = p_user_id/);
+  assert.match(migration, /channel\.generation_id = p_generation_id/);
+  assert.match(migration, /revoke all on function[\s\S]*from public,anon,authenticated,service_role/);
+  assert.match(migration, /grant execute on function[\s\S]*to service_role/);
 });
 
 test('live clear budget checkpoints at live/0 and one-shot refresh writes only after a complete resume', async () => {
