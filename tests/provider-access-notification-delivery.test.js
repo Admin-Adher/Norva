@@ -14,6 +14,7 @@ const readinessSmoke = read('supabase/migrations/20260825203000_provider_access_
 const worker = read('supabase/functions/norva-provider-access-notify/index.ts');
 const fcm = read('supabase/functions/_shared/fcm.ts');
 const android = read('clients/android-phone/app/src/main/java/tv/norva/phone/NorvaMessagingService.java');
+const androidManifest = read('clients/android-phone/app/src/main/AndroidManifest.xml');
 const edge = read('supabase/functions/norva-provider-access/index.ts');
 const app = read('public/js/app.js');
 const cloudApi = read('public/js/cloudApi.js');
@@ -87,6 +88,8 @@ test('FCM readiness smoke is explicit, internal-only, revision-bound and does no
 });
 
 test('Android receives Provider Access in every process state without duplicate trays', () => {
+  assert.match(androidManifest, /android:name="\.NorvaMessagingService"[\s\S]*com\.google\.firebase\.MESSAGING_EVENT/);
+  assert.doesNotMatch(androidManifest, /com\.google\.firebase\.messaging\.MESSAGING_EVENT/);
   assert.match(android, /"provider_access"\.equals\(data\.get\("kind"\)\)/);
   assert.match(android, /KEY_PROVIDER_ACCESS_SEEN/);
   assert.match(android, /rememberProviderAccessNotification\(notificationId\)/);
