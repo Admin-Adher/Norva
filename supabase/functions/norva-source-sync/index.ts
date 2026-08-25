@@ -723,14 +723,10 @@ function runInBackground(task: Promise<unknown>) {
 
 // ── Release-year backfill ────────────────────────────────────────────────────
 
-const CATALOG_BACKGROUND_PAGE_MAX = 64;
-const CATALOG_BACKGROUND_PAGE_DEADLINE_MS = 45_000;
-
-type CatalogBackgroundPage = {
-  items: JsonRecord[];
-  complete: boolean;
-  nextCursor: JsonRecord | null;
-};
+const CATALOG_BACKGROUND_LEASE_SECONDS = 180;
+const CATALOG_BACKGROUND_EMPTY_PAGE_MAX = 16;
+const CATALOG_BACKGROUND_PAGE_LIMIT = 100;
+const CATALOG_BACKGROUND_DRAIN_DEADLINE_MS = 45_000;
 
 type CatalogBackgroundMode = "year_pending" | "revalidate_pending" | "search_pending";
 type CatalogBackgroundItem = {
@@ -751,62 +747,21 @@ type CatalogBackgroundItem = {
   displayGenerationId: string | null;
 };
 
-type CatalogBackgroundWalk = {
-  items: CatalogBackgroundItem[];
-  complete: boolean;
-  nextCursor: JsonRecord | null;
-  pages: number;
+type CatalogBackgroundClaim = {
+  worker: string;
+  leaseSequence: number;
+  checkpointRevision: string;
+  retryBefore: string;
 };
 
-// SQL selectors may inspect a stale shared shell without returning an effective
-// P/G payload on that page. An empty `items` array is therefore progress, not
-// completion: only the explicit `complete` bit terminates the walk. The caller
-// persists `nextCursor` when this bounded window exhausts its quota/deadline.
-async function walkCatalogTitleBackgroundPages(
-  fetchPage: (cursor: JsonRecord | null, remaining: number) => Promise<CatalogBackgroundPage>,
-  maxItems: number,
-  options: {
-    maxPages?: number;
-    deadlineMs?: number;
-    now?: () => number;
-    initialCursor?: JsonRecord | null;
-  } = {},
-): Promise<{ items: JsonRecord[]; complete: boolean; nextCursor: JsonRecord | null; pages: number }> {
-  if (!Number.isInteger(maxItems) || maxItems < 1 || maxItems > 10_000) {
-    throw new Error("invalid catalog background item bound");
-  }
-  const maxPages = Math.min(
-    CATALOG_BACKGROUND_PAGE_MAX,
-    Math.max(1, Number.isInteger(options.maxPages) ? Number(options.maxPages) : CATALOG_BACKGROUND_PAGE_MAX),
-  );
-  const deadlineMs = Math.min(
-    CATALOG_BACKGROUND_PAGE_DEADLINE_MS,
-    Math.max(1_000, Number.isFinite(options.deadlineMs) ? Number(options.deadlineMs) : CATALOG_BACKGROUND_PAGE_DEADLINE_MS),
-  );
-  const now = options.now ?? (() => Date.now());
-  const startedAt = now();
-  const items: JsonRecord[] = [];
-  let cursor: JsonRecord | null = options.initialCursor ?? null;
-  let pages = 0;
-
-  while (pages < maxPages && items.length < maxItems && now() - startedAt < deadlineMs) {
-    const remaining = maxItems - items.length;
-    const page = await fetchPage(cursor, remaining);
-    if (
-      !page || !Array.isArray(page.items) || typeof page.complete !== "boolean"
-      || (page.nextCursor !== null && (!isRecord(page.nextCursor) || page.complete))
-      || page.items.length > remaining
-    ) throw new Error("invalid catalog background selector page");
-    pages += 1;
-    items.push(...page.items);
-    if (page.complete) return { items, complete: true, nextCursor: null, pages };
-    if (!page.nextCursor || JSON.stringify(page.nextCursor) === JSON.stringify(cursor)) {
-      throw new Error("catalog background selector made no cursor progress");
-    }
-    cursor = page.nextCursor;
-  }
-  return { items, complete: false, nextCursor: cursor, pages };
-}
+type CatalogBackgroundBatch = {
+  items: CatalogBackgroundItem[];
+  complete: boolean;
+  ackRequired: boolean;
+  pageDigest: string | null;
+  checkpointRevision: string;
+  emptyTransitions: number;
+};
 
 const UUID_TEXT = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -871,81 +826,119 @@ function normalizeCatalogBackgroundItem(value: unknown): CatalogBackgroundItem {
   };
 }
 
-function normalizeCatalogBackgroundPage(
+function positiveIntegerOrThrow(value: unknown, label: string): number {
+  const number = Number(value);
+  if (!Number.isSafeInteger(number) || number < 1) {
+    throw new HttpError(503, `Invalid ${label} from catalog background selector`);
+  }
+  return number;
+}
+
+function normalizeCatalogBackgroundClaim(
+  value: unknown,
+  mode: CatalogBackgroundMode,
+  worker: string,
+): CatalogBackgroundClaim {
+  if (!isRecord(value) || value.contract !== "catalog-title-background-mode-v1"
+      || value.mode !== mode || value.worker !== worker) throw backgroundProjectionUnavailable();
+  const retryBefore = typeof value.retryBefore === "string" ? value.retryBefore : "";
+  if (!retryBefore || !Number.isFinite(Date.parse(retryBefore))) throw backgroundProjectionUnavailable();
+  return {
+    worker,
+    leaseSequence: positiveIntegerOrThrow(value.leaseSequence, "background lease sequence"),
+    checkpointRevision: bigintProofOrThrow(value.checkpointRevision, "background checkpoint revision"),
+    retryBefore,
+  };
+}
+
+function normalizeCatalogBackgroundClaimPage(
   value: unknown,
   mode: CatalogBackgroundMode,
   requestedLimit: number,
-  userId: string | null,
-): CatalogBackgroundPage {
-  if (!isRecord(value) || value.contract !== "catalog-title-background-selector-v3"
+): CatalogBackgroundBatch {
+  if (!isRecord(value) || value.contract !== "catalog-title-background-mode-v1"
       || value.mode !== mode || !Array.isArray(value.items)
       || typeof value.complete !== "boolean") throw backgroundProjectionUnavailable();
   const returnedTitles = Number(value.returnedTitles);
-  const inspectedTitles = Number(value.inspectedTitles);
-  const scanLimit = Number(value.scanLimit);
   if (!Number.isInteger(returnedTitles) || returnedTitles !== value.items.length
-      || returnedTitles < 0 || returnedTitles > requestedLimit
-      || !Number.isInteger(inspectedTitles) || inspectedTitles < returnedTitles
-      || !Number.isInteger(scanLimit) || scanLimit < requestedLimit || scanLimit > 1000) {
+      || returnedTitles < 0 || returnedTitles > requestedLimit) {
     throw backgroundProjectionUnavailable();
   }
-  const nextCursor = value.nextCursor === null || value.nextCursor === undefined
-    ? null
-    : recordOrEmpty(value.nextCursor);
-  if (value.complete ? nextCursor !== null : !nextCursor) throw backgroundProjectionUnavailable();
-  if (nextCursor) {
-    if (nextCursor.mode !== mode
-        || String(nextCursor.userId ?? "") !== String(userId ?? "")) throw backgroundProjectionUnavailable();
-    uuidOrThrow(nextCursor.lastId, "background cursor");
+  const ackRequired = value.ackRequired === true;
+  const pageDigest = typeof value.pageDigest === "string" ? value.pageDigest : null;
+  if (returnedTitles > 0 && (!ackRequired || !pageDigest || !/^[0-9a-f]{64}$/.test(pageDigest))) {
+    throw backgroundProjectionUnavailable();
+  }
+  if (returnedTitles === 0 && (ackRequired || pageDigest !== null)) {
+    throw backgroundProjectionUnavailable();
+  }
+  if (value.complete && returnedTitles > 0) throw backgroundProjectionUnavailable();
+  if (value.byteCount !== undefined) {
+    const byteCount = Number(value.byteCount);
+    if (!Number.isInteger(byteCount) || byteCount < 2 || byteCount > 2_097_152) {
+      throw backgroundProjectionUnavailable();
+    }
   }
   return {
     items: value.items.map((item) => normalizeCatalogBackgroundItem(item)),
     complete: value.complete,
-    nextCursor,
+    ackRequired,
+    pageDigest,
+    checkpointRevision: bigintProofOrThrow(value.checkpointRevision, "background checkpoint revision"),
+    emptyTransitions: 0,
   };
 }
 
-function catalogBackgroundCursor(
+async function claimCatalogBackgroundMode(
+  db: SupabaseClient,
   mode: CatalogBackgroundMode,
-  userId: string | null,
-  lastId: string | null,
-): JsonRecord | null {
-  if (!lastId) return null;
-  return { mode, userId, lastId: uuidOrThrow(lastId, "stored background cursor") };
-}
-
-function lastIdFromCatalogBackgroundCursor(cursor: JsonRecord | null): string | null {
-  return cursor ? uuidOrThrow(cursor.lastId, "background cursor") : null;
+  retryBefore: string,
+): Promise<CatalogBackgroundClaim | null> {
+  const worker = `edge-${mode}-${crypto.randomUUID()}`;
+  const { data, error } = await db.rpc("norva_claim_catalog_title_background_mode", {
+    p_mode: mode,
+    p_worker: worker,
+    p_lease_seconds: CATALOG_BACKGROUND_LEASE_SECONDS,
+    p_retry_before: retryBefore,
+  });
+  if (error) {
+    if (String(error.code ?? "") === "55P03") return null;
+    throw backgroundProjectionUnavailable();
+  }
+  return normalizeCatalogBackgroundClaim(data, mode, worker);
 }
 
 async function selectCatalogBackgroundBatch(
   db: SupabaseClient,
   mode: CatalogBackgroundMode,
   maxItems: number,
-  retryBefore: string,
-  initialLastId: string | null,
-  userId: string | null = null,
-): Promise<CatalogBackgroundWalk> {
-  const initialCursor = catalogBackgroundCursor(mode, userId, initialLastId);
-  const walked = await walkCatalogTitleBackgroundPages(async (cursor, remaining) => {
-    const pageLimit = Math.min(500, remaining);
-    const scanLimit = Math.min(1000, Math.max(pageLimit, pageLimit * 2));
-    const { data, error } = await db.rpc("norva_select_catalog_title_background_page", {
+  claim: CatalogBackgroundClaim,
+): Promise<CatalogBackgroundBatch> {
+  if (!Number.isInteger(maxItems) || maxItems < 1 || maxItems > 500) {
+    throw new Error("invalid catalog background item bound");
+  }
+  let checkpointRevision = claim.checkpointRevision;
+  for (let emptyTransitions = 0; emptyTransitions < CATALOG_BACKGROUND_EMPTY_PAGE_MAX; emptyTransitions += 1) {
+    const { data, error } = await db.rpc("norva_select_catalog_title_background_claim_page", {
       p_mode: mode,
-      p_limit: pageLimit,
-      p_scan_limit: scanLimit,
-      p_retry_before: retryBefore,
-      p_cursor: cursor,
-      p_user_id: userId,
+      p_worker: claim.worker,
+      p_expected_lease_sequence: claim.leaseSequence,
+      p_expected_revision: checkpointRevision,
+      p_limit: maxItems,
     });
     if (error) throw backgroundProjectionUnavailable();
-    return normalizeCatalogBackgroundPage(data, mode, pageLimit, userId);
-  }, maxItems, { initialCursor });
+    const page = normalizeCatalogBackgroundClaimPage(data, mode, maxItems);
+    page.emptyTransitions = emptyTransitions;
+    checkpointRevision = page.checkpointRevision;
+    if (page.items.length > 0 || page.complete) return page;
+  }
   return {
-    items: walked.items as CatalogBackgroundItem[],
-    complete: walked.complete,
-    nextCursor: walked.nextCursor,
-    pages: walked.pages,
+    items: [],
+    complete: false,
+    ackRequired: false,
+    pageDigest: null,
+    checkpointRevision,
+    emptyTransitions: CATALOG_BACKGROUND_EMPTY_PAGE_MAX,
   };
 }
 
@@ -993,7 +986,13 @@ async function applyCatalogBackgroundOutcomes(
   items: CatalogBackgroundItem[],
   outcomes: Array<JsonRecord | null>,
   concurrency: number,
-): Promise<{ applied: number; matched: number; visibleChanged: number; stale: number }> {
+): Promise<{
+  applied: number;
+  matched: number;
+  visibleChanged: number;
+  stale: number;
+  processedTitleIds: string[];
+}> {
   const groups = new Map<string, Array<{ item: CatalogBackgroundItem; outcome: JsonRecord | null }>>();
   for (let index = 0; index < items.length; index += 1) {
     const group = groups.get(items[index].userId) ?? [];
@@ -1001,7 +1000,13 @@ async function applyCatalogBackgroundOutcomes(
     groups.set(items[index].userId, group);
   }
   const queues = [...groups.values()];
-  const summary = { applied: 0, matched: 0, visibleChanged: 0, stale: 0 };
+  const summary = {
+    applied: 0,
+    matched: 0,
+    visibleChanged: 0,
+    stale: 0,
+    processedTitleIds: [] as string[],
+  };
   let next = 0;
   const worker = async () => {
     while (next < queues.length) {
@@ -1022,6 +1027,7 @@ async function applyCatalogBackgroundOutcomes(
         }
         rollingEpoch = written.visibilityEpoch;
         summary.applied += 1;
+        summary.processedTitleIds.push(entry.item.id);
         if (written.matched) summary.matched += 1;
         if (written.visibleChanged) summary.visibleChanged += 1;
       }
@@ -1031,14 +1037,65 @@ async function applyCatalogBackgroundOutcomes(
   return summary;
 }
 
+type CatalogBackgroundAck = {
+  complete: boolean;
+  checkpointRevision: string;
+  acknowledgedTitles: number;
+  remainingTitles: number;
+};
+
+function normalizeCatalogBackgroundAck(
+  value: unknown,
+  mode: CatalogBackgroundMode,
+  expectedAcknowledged: number,
+): CatalogBackgroundAck {
+  if (!isRecord(value) || value.contract !== "catalog-title-background-mode-v1"
+      || value.mode !== mode || typeof value.complete !== "boolean") {
+    throw backgroundProjectionUnavailable();
+  }
+  const acknowledgedTitles = Number(value.acknowledgedTitles);
+  const remainingTitles = Number(value.remainingTitles);
+  if (!Number.isInteger(acknowledgedTitles) || acknowledgedTitles !== expectedAcknowledged
+      || !Number.isInteger(remainingTitles) || remainingTitles < 0 || remainingTitles > 500) {
+    throw backgroundProjectionUnavailable();
+  }
+  return {
+    complete: value.complete,
+    checkpointRevision: bigintProofOrThrow(value.checkpointRevision, "background checkpoint revision"),
+    acknowledgedTitles,
+    remainingTitles,
+  };
+}
+
+async function ackCatalogBackgroundBatch(
+  db: SupabaseClient,
+  mode: CatalogBackgroundMode,
+  claim: CatalogBackgroundClaim,
+  batch: CatalogBackgroundBatch,
+  processedTitleIds: string[],
+): Promise<CatalogBackgroundAck> {
+  if (!batch.ackRequired || !batch.pageDigest || processedTitleIds.length < 1) {
+    throw new Error("invalid catalog background acknowledgement attempt");
+  }
+  const { data, error } = await db.rpc("norva_ack_catalog_title_background_claim_page", {
+    p_mode: mode,
+    p_worker: claim.worker,
+    p_expected_lease_sequence: claim.leaseSequence,
+    p_expected_revision: batch.checkpointRevision,
+    p_expected_page_digest: batch.pageDigest,
+    p_processed_title_ids: processedTitleIds,
+  });
+  if (error) throw backgroundProjectionUnavailable();
+  return normalizeCatalogBackgroundAck(data, mode, processedTitleIds.length);
+}
+
 // Provider VOD/series lists carry no release year, and many cloud_titles rows are
 // "provider_unverified" (TMDB id known, details never fetched) so their
 // release_year is null — leaving blanks on the browse grid even after the
-// read-time projection in norva-catalog. This walks those rows by id cursor and
-// fills release_year from TMDB: one fetch per distinct movie/series id, fanned out
-// to every row that shares it. Resumable + idempotent — the cursor in
-// norva_year_backfill_state only moves forward, and a found year is written only
-// where release_year is still null.
+// read-time projection in norva-catalog. The durable v4 mode checkpoint walks
+// those rows and fills release_year from TMDB: one fetch per distinct
+// movie/series id, fanned out to every row that shares it. Resumable +
+// idempotent — a found year is written only where release_year is still null.
 function tmdbApiKey() {
   return stringOr(
     Deno.env.get("NORVA_TMDB_API_KEY") ?? Deno.env.get("TMDB_API_KEY") ?? Deno.env.get("TMDB_READ_TOKEN"),
@@ -1073,94 +1130,103 @@ async function fetchTmdbYear(apiKey: string, itemType: string, tmdbId: string): 
 async function cronBackfillYears(db: SupabaseClient, limit: number, reset: boolean, concurrency: number) {
   const apiKey = tmdbApiKey();
   if (!apiKey) return { error: "tmdb_key_missing", done: true };
-
-  // Cursor is CYCLIC (cron audit fix): it previously latched at the catalogue's max id forever, so
-  // every title imported below it — 99.9994% of new UUIDv4 ids — was permanently invisible and the
-  // cron became a no-op (22.7k year-less titles accumulated). At each pass end the cursor resets to
-  // null; `done` is LATCHED true after the first full pass and never flips back (norva-catalog's
-  // onboarding `settled` flag reads it — a wrap must not un-settle the progress bar).
-  let cursor: string | null = null;
-  let priorDone = false;
-  if (!reset) {
-    const { data } = await db.from("norva_year_backfill_state").select("last_id, done").eq("id", 1).maybeSingle();
-    cursor = (data?.last_id as string | null) ?? null;
-    priorDone = data?.done === true;
-  }
-
-  // Skip titles attempted within 90 days (year_backfill_attempted_at, set on every scan below):
-  // known TMDB no-date failures stop re-burning API calls on every pass, and each pass converges
-  // on NEW/retryable candidates only.
   const retryBefore = new Date(Date.now() - 90 * 24 * 3600 * 1000).toISOString();
-  const selected = await selectCatalogBackgroundBatch(
-    db,
-    "year_pending",
-    limit,
-    retryBefore,
-    cursor,
-  );
-  const rows = selected.items;
-  const scanned = rows.length;
+  const claim = await claimCatalogBackgroundMode(db, "year_pending", retryBefore);
+  if (!claim) return { scanned: 0, distinct: 0, found: 0, updated: 0, stale: 0, busy: true, done: false };
+  const startedAt = Date.now();
+  let remaining = limit;
+  let checkpointRevision = claim.checkpointRevision;
+  let scanned = 0;
+  let distinctFetched = 0;
+  let found = 0;
+  let updated = 0;
+  let stale = 0;
+  let acknowledgedTitles = 0;
+  let retryPending = 0;
+  let emptyTransitions = 0;
+  let done = false;
 
-  // One provider fetch per distinct semantic identity, followed by one fenced
-  // writer call per selected P/G payload. No base-table attempt marker is ever
-  // stamped after a rejected CAS.
-  const distinct = new Map<string, { itemType: "movie" | "series"; tmdbId: string }>();
-  for (const row of rows) {
-    const itemType = row.itemType;
-    const tmdbId = stringOr(row.providerTmdbId, "");
-    if (!tmdbId) continue;
-    const key = `${itemType}:${tmdbId}`;
-    if (!distinct.has(key)) distinct.set(key, { itemType, tmdbId });
+  while (remaining > 0 && Date.now() - startedAt < CATALOG_BACKGROUND_DRAIN_DEADLINE_MS) {
+    claim.checkpointRevision = checkpointRevision;
+    const selected = await selectCatalogBackgroundBatch(
+      db,
+      "year_pending",
+      Math.min(CATALOG_BACKGROUND_PAGE_LIMIT, remaining),
+      claim,
+    );
+    checkpointRevision = selected.checkpointRevision;
+    emptyTransitions += selected.emptyTransitions;
+    const rows = selected.items;
+    if (!rows.length) {
+      done = selected.complete;
+      break;
+    }
+    scanned += rows.length;
+    remaining -= rows.length;
+
+    const distinct = new Map<string, { itemType: "movie" | "series"; tmdbId: string }>();
+    for (const row of rows) {
+      const tmdbId = stringOr(row.providerTmdbId, "");
+      if (!tmdbId) continue;
+      const key = `${row.itemType}:${tmdbId}`;
+      if (!distinct.has(key)) distinct.set(key, { itemType: row.itemType, tmdbId });
+    }
+    const entries = [...distinct.values()];
+    distinctFetched += entries.length;
+    const yearByKey = new Map<string, number | null | "error">();
+    let next = 0;
+    const worker = async () => {
+      while (next < entries.length) {
+        const entry = entries[next++];
+        const year = await fetchTmdbYear(apiKey, entry.itemType, entry.tmdbId);
+        yearByKey.set(`${entry.itemType}:${entry.tmdbId}`, year);
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(Math.max(1, concurrency), entries.length) }, worker));
+    found += [...yearByKey.values()].filter((year) => typeof year === "number").length;
+
+    const outcomes = rows.map((row): JsonRecord | null => {
+      const year = yearByKey.get(`${row.itemType}:${stringOr(row.providerTmdbId, "")}`);
+      return year === undefined || year === "error" ? null : { releaseYear: year };
+    });
+    const applied = await applyCatalogBackgroundOutcomes(
+      db, "year_pending", rows, outcomes, concurrency,
+    );
+    updated += applied.matched;
+    stale += applied.stale;
+    if (!applied.processedTitleIds.length) {
+      retryPending = rows.length;
+      break;
+    }
+    const acknowledged = await ackCatalogBackgroundBatch(
+      db, "year_pending", claim, selected, applied.processedTitleIds,
+    );
+    checkpointRevision = acknowledged.checkpointRevision;
+    acknowledgedTitles += acknowledged.acknowledgedTitles;
+    retryPending = acknowledged.remainingTitles;
+    if (acknowledged.complete) {
+      done = true;
+      break;
+    }
+    if (acknowledged.remainingTitles > 0) break;
   }
 
-  // Fetch years with bounded concurrency (TMDB tolerates ~40 in flight).
-  const entries = [...distinct.values()];
-  const yearByKey = new Map<string, number | null | "error">();
-  let next = 0;
-  const worker = async () => {
-    while (next < entries.length) {
-      const entry = entries[next++];
-      const year = await fetchTmdbYear(apiKey, entry.itemType, entry.tmdbId);
-      yearByKey.set(`${entry.itemType}:${entry.tmdbId}`, year);
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(Math.max(1, concurrency), entries.length) }, worker));
-
-  const outcomes = rows.map((row): JsonRecord | null => {
-    const key = `${row.itemType}:${stringOr(row.providerTmdbId, "")}`;
-    const year = yearByKey.get(key);
-    // Transient provider failures remain unstamped and retryable. A definitive
-    // no-date result is written as null so SQL records the bounded attempt.
-    if (year === undefined || year === "error") return null;
-    return { releaseYear: year };
-  });
-  const applied = await applyCatalogBackgroundOutcomes(
-    db,
-    "year_pending",
-    rows,
-    outcomes,
-    concurrency,
-  );
-
-  const passEnded = selected.complete;
-  const done = priorDone || passEnded;              // latched: never flips back to false
-  const summary = {
+  return {
     scanned,
-    distinct: distinct.size,
-    found: [...yearByKey.values()].filter((year) => typeof year === "number").length,
-    updated: applied.matched,
-    stale: applied.stale,
+    distinct: distinctFetched,
+    found,
+    updated,
+    stale,
+    acknowledged: acknowledgedTitles,
+    retryPending,
+    busy: false,
     done,
+    resetDeferred: reset,
+    checkpointRevision,
+    emptyTransitions,
+    budgetExhausted: !done && remaining > 0
+      && Date.now() - startedAt >= CATALOG_BACKGROUND_DRAIN_DEADLINE_MS,
   };
-  await db.from("norva_year_backfill_state")
-    .update({
-      last_id: passEnded ? null : lastIdFromCatalogBackgroundCursor(selected.nextCursor),
-      done,
-      last_run: { ...summary, wrapped: passEnded, at: new Date().toISOString() },
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", 1);
-  return { ...summary, wrapped: passEnded };
 }
 
 // Re-validate titles that have a provider TMDB id but didn't pass the original
@@ -1170,91 +1236,110 @@ async function cronBackfillYears(db: SupabaseClient, limit: number, reset: boole
 async function cronRevalidate(db: SupabaseClient, limit: number, reset: boolean, concurrency: number) {
   const apiKey = tmdbApiKey();
   if (!apiKey) return { error: "tmdb_key_missing", done: true };
+  const retryBefore = new Date(Date.now() - 90 * 24 * 3600 * 1000).toISOString();
+  const claim = await claimCatalogBackgroundMode(db, "revalidate_pending", retryBefore);
+  if (!claim) return { scanned: 0, revalidated: 0, stale: 0, busy: true, done: false };
+  const startedAt = Date.now();
+  let remaining = limit;
+  let checkpointRevision = claim.checkpointRevision;
+  let scanned = 0;
+  let revalidated = 0;
+  let stale = 0;
+  let acknowledgedTitles = 0;
+  let retryPending = 0;
+  let emptyTransitions = 0;
+  let done = false;
 
-  // Cyclic cursor + latched done + 90d attempt marker — same audit fix as cronBackfillYears
-  // (the cursor used to latch at max id forever, making this cron a permanent no-op).
-  let cursor: string | null = null;
-  let priorDone = false;
-  if (!reset) {
-    const { data } = await db.from("norva_revalidate_state").select("last_id, done").eq("id", 1).maybeSingle();
-    cursor = (data?.last_id as string | null) ?? null;
-    priorDone = data?.done === true;
+  while (remaining > 0 && Date.now() - startedAt < CATALOG_BACKGROUND_DRAIN_DEADLINE_MS) {
+    claim.checkpointRevision = checkpointRevision;
+    const selected = await selectCatalogBackgroundBatch(
+      db, "revalidate_pending", Math.min(CATALOG_BACKGROUND_PAGE_LIMIT, remaining), claim,
+    );
+    checkpointRevision = selected.checkpointRevision;
+    emptyTransitions += selected.emptyTransitions;
+    const rows = selected.items;
+    if (!rows.length) {
+      done = selected.complete;
+      break;
+    }
+    scanned += rows.length;
+    remaining -= rows.length;
+    const outcomes: Array<JsonRecord | null> = Array.from({ length: rows.length }, () => null);
+    let next = 0;
+    const worker = async () => {
+      while (next < rows.length) {
+        const index = next++;
+        const row = rows[index];
+        const tmdbId = stringOr(row.providerTmdbId, "");
+        if (!tmdbId) continue;
+        try {
+          const validation = await validateTmdbCandidate(apiKey, {
+            itemType: row.itemType,
+            tmdbId,
+            title: stringOr(row.originalTitle ?? row.title, ""),
+            year: row.releaseYear != null ? String(row.releaseYear) : null,
+          });
+          outcomes[index] = validation.valid ? {
+            matched: true,
+            title: validation.title || row.title,
+            originalTitle: row.originalTitle,
+            releaseYear: row.releaseYear ?? (validation.year ? Number(validation.year) : null),
+            posterUrl: row.posterUrl || validation.posterUrl,
+            backdropUrl: row.backdropUrl || validation.backdropUrl,
+            metadata: {
+              ...row.metadata,
+              tmdb: validation.details,
+              i18n: validation.i18n,
+              tmdbValidation: {
+                valid: true,
+                title: validation.title,
+                year: validation.year,
+                confidence: validation.confidence,
+                reason: validation.reason,
+              },
+              revalidatedAt: new Date().toISOString(),
+            },
+          } : { matched: false };
+        } catch (_) { /* transient TMDB failure remains durably inflight */ }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(Math.max(1, concurrency), rows.length) }, worker));
+    const applied = await applyCatalogBackgroundOutcomes(
+      db, "revalidate_pending", rows, outcomes, concurrency,
+    );
+    revalidated += applied.matched;
+    stale += applied.stale;
+    if (!applied.processedTitleIds.length) {
+      retryPending = rows.length;
+      break;
+    }
+    const acknowledged = await ackCatalogBackgroundBatch(
+      db, "revalidate_pending", claim, selected, applied.processedTitleIds,
+    );
+    checkpointRevision = acknowledged.checkpointRevision;
+    acknowledgedTitles += acknowledged.acknowledgedTitles;
+    retryPending = acknowledged.remainingTitles;
+    if (acknowledged.complete) {
+      done = true;
+      break;
+    }
+    if (acknowledged.remainingTitles > 0) break;
   }
 
-  const retryBefore = new Date(Date.now() - 90 * 24 * 3600 * 1000).toISOString();
-  const selected = await selectCatalogBackgroundBatch(
-    db,
-    "revalidate_pending",
-    limit,
-    retryBefore,
-    cursor,
-  );
-  const rows = selected.items;
-  const scanned = rows.length;
-  const outcomes: Array<JsonRecord | null> = Array.from({ length: rows.length }, () => null);
-  let next = 0;
-  const worker = async () => {
-    while (next < rows.length) {
-      const index = next++;
-      const row = rows[index];
-      const tmdbId = stringOr(row.providerTmdbId, "");
-      if (!tmdbId) continue;
-      try {
-        const validation = await validateTmdbCandidate(apiKey, {
-          itemType: row.itemType,
-          tmdbId,
-          title: stringOr(row.originalTitle ?? row.title, ""),
-          year: row.releaseYear != null ? String(row.releaseYear) : null,
-        });
-        if (!validation.valid) {
-          outcomes[index] = { matched: false };
-          continue;
-        }
-        outcomes[index] = {
-          matched: true,
-          title: validation.title || row.title,
-          originalTitle: row.originalTitle,
-          releaseYear: row.releaseYear ?? (validation.year ? Number(validation.year) : null),
-          posterUrl: row.posterUrl || validation.posterUrl,
-          backdropUrl: row.backdropUrl || validation.backdropUrl,
-          metadata: {
-            ...row.metadata,
-            tmdb: validation.details,
-            i18n: validation.i18n,
-            tmdbValidation: {
-              valid: true,
-              title: validation.title,
-              year: validation.year,
-              confidence: validation.confidence,
-              reason: validation.reason,
-            },
-            revalidatedAt: new Date().toISOString(),
-          },
-        };
-      } catch (_) { /* a TMDB hiccup must not abort the batch */ }
-    }
+  return {
+    scanned,
+    revalidated,
+    stale,
+    acknowledged: acknowledgedTitles,
+    retryPending,
+    busy: false,
+    done,
+    resetDeferred: reset,
+    checkpointRevision,
+    emptyTransitions,
+    budgetExhausted: !done && remaining > 0
+      && Date.now() - startedAt >= CATALOG_BACKGROUND_DRAIN_DEADLINE_MS,
   };
-  await Promise.all(Array.from({ length: Math.min(Math.max(1, concurrency), rows.length) }, worker));
-  const applied = await applyCatalogBackgroundOutcomes(
-    db,
-    "revalidate_pending",
-    rows,
-    outcomes,
-    concurrency,
-  );
-
-  const passEnded = selected.complete;
-  const done = priorDone || passEnded;
-  const summary = { scanned, revalidated: applied.matched, stale: applied.stale, done };
-  await db.from("norva_revalidate_state")
-    .update({
-      last_id: passEnded ? null : lastIdFromCatalogBackgroundCursor(selected.nextCursor),
-      done,
-      last_run: { ...summary, wrapped: passEnded, at: new Date().toISOString() },
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", 1);
-  return { ...summary, wrapped: passEnded };
 }
 
 // Pre-warm the GLOBAL catalog_titles.i18n for validated matches that still lack any
@@ -1330,109 +1415,129 @@ async function cronPrewarmI18n(db: SupabaseClient, limit: number, concurrency: n
 async function cronSearchMatch(db: SupabaseClient, limit: number, reset: boolean, concurrency: number, userId: string | null = null) {
   const apiKey = tmdbApiKey();
   if (!apiKey) return { error: "tmdb_key_missing", done: true };
-
-  // Focused mode (?user=<uuid>): re-enrich ONE account's backlog first, without
-  // touching the global cyclic cursor. No cursor needed — the 90d attempt marker
-  // makes repeated calls step through that user's unmatched set (each call marks
-  // its batch attempted, so the next call sees the following rows).
-  const focused = !!userId;
-
-  // Cyclic cursor + latched done + 90d attempt marker — same audit fix as cronBackfillYears.
-  let cursor: string | null = null;
-  let priorDone = false;
-  if (!reset && !focused) {
-    const { data } = await db.from("norva_search_match_state").select("last_id, done").eq("id", 1).maybeSingle();
-    cursor = (data?.last_id as string | null) ?? null;
-    priorDone = data?.done === true;
+  // The v4 checkpoint is intentionally global and durable. A one-off focused
+  // selector would bypass its pinned owner/snapshot proof, so focused requests
+  // fail closed until they have their own durable scheduling scope.
+  if (userId) {
+    return {
+      error: "focused_mode_requires_durable_scope",
+      focused: true,
+      scanned: 0,
+      matched: 0,
+      stale: 0,
+      done: false,
+    };
   }
 
   const retryBefore = new Date(Date.now() - 90 * 24 * 3600 * 1000).toISOString();
-  const selected = await selectCatalogBackgroundBatch(
-    db,
-    "search_pending",
-    limit,
-    retryBefore,
-    cursor,
-    userId,
-  );
-  const rows = selected.items;
-  const scanned = rows.length;
-  const outcomes: Array<JsonRecord | null> = Array.from({ length: rows.length }, () => null);
-  let next = 0;
-  const worker = async () => {
-    while (next < rows.length) {
-      const index = next++;
-      const row = rows[index];
-      const title = stringOr(row.originalTitle ?? row.title, "");
-      if (!title) continue;
-      try {
-        const match = await searchTmdbMatch(
-          apiKey,
-          row.itemType,
-          title,
-          row.releaseYear != null ? String(row.releaseYear) : null,
-          row.posterUrl,
-        );
-        if (!match) {
-          outcomes[index] = { matched: false };
-          continue;
-        }
-        outcomes[index] = {
-          matched: true,
-          providerTmdbId: match.tmdbId,
-          title: match.title || row.title,
-          originalTitle: row.originalTitle,
-          posterUrl: match.posterUrl || row.posterUrl,
-          backdropUrl: match.backdropUrl || row.backdropUrl,
-          releaseYear: match.year ? Number(match.year) : row.releaseYear,
-          metadata: {
-            ...row.metadata,
-            tmdb: match.details,
-            i18n: match.i18n,
-            tmdbValidation: {
-              valid: true,
-              title: match.title,
-              year: match.year,
-              confidence: match.confidence,
-              reason: match.reason,
-            },
-            searchMatchedAt: new Date().toISOString(),
-          },
-        };
-      } catch (_) { /* a TMDB hiccup must not abort the batch */ }
+  const claim = await claimCatalogBackgroundMode(db, "search_pending", retryBefore);
+  if (!claim) return { scanned: 0, matched: 0, stale: 0, busy: true, focused: false, done: false };
+  const startedAt = Date.now();
+  let remaining = limit;
+  let checkpointRevision = claim.checkpointRevision;
+  let scanned = 0;
+  let matched = 0;
+  let stale = 0;
+  let acknowledgedTitles = 0;
+  let retryPending = 0;
+  let emptyTransitions = 0;
+  let done = false;
+
+  while (remaining > 0 && Date.now() - startedAt < CATALOG_BACKGROUND_DRAIN_DEADLINE_MS) {
+    claim.checkpointRevision = checkpointRevision;
+    const selected = await selectCatalogBackgroundBatch(
+      db, "search_pending", Math.min(CATALOG_BACKGROUND_PAGE_LIMIT, remaining), claim,
+    );
+    checkpointRevision = selected.checkpointRevision;
+    emptyTransitions += selected.emptyTransitions;
+    const rows = selected.items;
+    if (!rows.length) {
+      done = selected.complete;
+      break;
     }
-  };
-  await Promise.all(Array.from({ length: Math.min(Math.max(1, concurrency), rows.length) }, worker));
-  const applied = await applyCatalogBackgroundOutcomes(
-    db,
-    "search_pending",
-    rows,
-    outcomes,
-    concurrency,
-  );
-
-  // Note: match-driven merge + grid propagation are NOT done here. Once a title gains
-  // a provider_tmdb_id, the reconcile pipeline folds it in: norva_canonicalize_titles_for_user
-  // merges the cloud_titles that share the tmdb, and norva_backfill_media_identity re-keys the
-  // raw cloud_media_items dedup_key so the Movies grid collapses. Both run in the
-  // norva-catalog-reconcile cron (0-6h). Keeping search-match single-purpose avoids the
-  // grid-layer coupling and the per-user RPC fan-out that would risk the 120s cron timeout.
-
-  const passEnded = selected.complete;
-  const done = priorDone || passEnded;
-  const summary = { scanned, matched: applied.matched, stale: applied.stale, done };
-  // Focused per-user passes never touch the global cursor/state.
-  if (!focused) {
-    await db.from("norva_search_match_state")
-      .update({
-        last_id: passEnded ? null : lastIdFromCatalogBackgroundCursor(selected.nextCursor),
-        done,
-        last_run: { ...summary, wrapped: passEnded, at: new Date().toISOString() },
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", 1);
+    scanned += rows.length;
+    remaining -= rows.length;
+    const outcomes: Array<JsonRecord | null> = Array.from({ length: rows.length }, () => null);
+    let next = 0;
+    const worker = async () => {
+      while (next < rows.length) {
+        const index = next++;
+        const row = rows[index];
+        const title = stringOr(row.originalTitle ?? row.title, "");
+        if (!title) continue;
+        try {
+          const match = await searchTmdbMatch(
+            apiKey,
+            row.itemType,
+            title,
+            row.releaseYear != null ? String(row.releaseYear) : null,
+            row.posterUrl,
+          );
+          outcomes[index] = match ? {
+            matched: true,
+            providerTmdbId: match.tmdbId,
+            title: match.title || row.title,
+            originalTitle: row.originalTitle,
+            posterUrl: match.posterUrl || row.posterUrl,
+            backdropUrl: match.backdropUrl || row.backdropUrl,
+            releaseYear: match.year ? Number(match.year) : row.releaseYear,
+            metadata: {
+              ...row.metadata,
+              tmdb: match.details,
+              i18n: match.i18n,
+              tmdbValidation: {
+                valid: true,
+                title: match.title,
+                year: match.year,
+                confidence: match.confidence,
+                reason: match.reason,
+              },
+              searchMatchedAt: new Date().toISOString(),
+            },
+          } : { matched: false };
+        } catch (_) { /* transient TMDB failure remains durably inflight */ }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(Math.max(1, concurrency), rows.length) }, worker));
+    const applied = await applyCatalogBackgroundOutcomes(
+      db, "search_pending", rows, outcomes, concurrency,
+    );
+    matched += applied.matched;
+    stale += applied.stale;
+    if (!applied.processedTitleIds.length) {
+      retryPending = rows.length;
+      break;
+    }
+    const acknowledged = await ackCatalogBackgroundBatch(
+      db, "search_pending", claim, selected, applied.processedTitleIds,
+    );
+    checkpointRevision = acknowledged.checkpointRevision;
+    acknowledgedTitles += acknowledged.acknowledgedTitles;
+    retryPending = acknowledged.remainingTitles;
+    if (acknowledged.complete) {
+      done = true;
+      break;
+    }
+    if (acknowledged.remainingTitles > 0) break;
   }
-  return { ...summary, focused, wrapped: passEnded };
+
+  // Match-driven merge and grid propagation remain in the separate reconcile
+  // pipeline; this worker commits only the durable matching outcome.
+  return {
+    scanned,
+    matched,
+    stale,
+    acknowledged: acknowledgedTitles,
+    retryPending,
+    busy: false,
+    done,
+    focused: false,
+    resetDeferred: reset,
+    checkpointRevision,
+    emptyTransitions,
+    budgetExhausted: !done && remaining > 0
+      && Date.now() - startedAt >= CATALOG_BACKGROUND_DRAIN_DEADLINE_MS,
+  };
 }
 
 // Dynamic, source-backed catalogue/audio maintenance fleet. Claims are durable

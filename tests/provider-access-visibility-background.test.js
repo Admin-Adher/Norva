@@ -62,7 +62,7 @@ test('background selectors and continuations use the centralized visible-source 
 test('background title enrichment uses the head-aware selector and fenced writer without direct fallback', () => {
   const source = read('supabase/functions/norva-source-sync/index.ts');
   const helpers = source.slice(
-    source.indexOf('type CatalogBackgroundPage'),
+    source.indexOf('const CATALOG_BACKGROUND_LEASE_SECONDS'),
     source.indexOf('// Provider VOD/series lists carry no release year'),
   );
   const blocks = {
@@ -80,8 +80,11 @@ test('background title enrichment uses the head-aware selector and fenced writer
     ),
   };
 
-  assert.match(helpers, /db\.rpc\("norva_select_catalog_title_background_page"/);
+  assert.match(helpers, /db\.rpc\("norva_claim_catalog_title_background_mode"/);
+  assert.match(helpers, /db\.rpc\("norva_select_catalog_title_background_claim_page"/);
+  assert.match(helpers, /db\.rpc\("norva_ack_catalog_title_background_claim_page"/);
   assert.match(helpers, /db\.rpc\("norva_apply_catalog_title_background_result"/);
+  assert.doesNotMatch(helpers, /norva_select_catalog_title_background_page"/);
   for (const [name, block] of Object.entries(blocks)) {
     assert.match(block, /selectCatalogBackgroundBatch\(/, `${name} must use the head-aware RPC selector`);
     assert.match(block, /applyCatalogBackgroundOutcomes\(/, `${name} must use the fenced RPC writer`);
@@ -93,72 +96,98 @@ test('background title enrichment uses the head-aware selector and fenced writer
   assert.match(helpers, /p_expected_payload_updated_at: item\.payloadUpdatedAt/);
   assert.match(helpers, /p_expected_display_generation_id: item\.displayGenerationId/);
   assert.match(helpers, /if \(isCatalogBackgroundCasConflict\(error\)\) return null/);
+  assert.match(helpers, /p_processed_title_ids: processedTitleIds/);
 });
 
-test('background selector walk continues across empty pages until explicit complete and stays bounded', async () => {
+test('durable background selector advances empty checkpoint transitions and stays bounded', async () => {
   const source = read('supabase/functions/norva-source-sync/index.ts');
-  const start = source.indexOf('const CATALOG_BACKGROUND_PAGE_MAX');
+  const start = source.indexOf('const CATALOG_BACKGROUND_LEASE_SECONDS');
   const end = source.indexOf('// Provider VOD/series lists carry no release year', start);
   assert.ok(start >= 0 && end > start);
   const compiled = transformSync(
-    `${source.slice(start, end)}\nmodule.exports = walkCatalogTitleBackgroundPages;`,
+    `${source.slice(start, end)}\nmodule.exports = selectCatalogBackgroundBatch;`,
     { loader: 'ts', format: 'cjs', target: 'es2022' },
   ).code;
+  class HttpError extends Error {
+    constructor(status, message, details) { super(message); this.status = status; this.details = details; }
+  }
   const sandbox = {
     module: { exports: {} },
     exports: {},
+    HttpError,
     isRecord: (value) => value !== null && typeof value === 'object' && !Array.isArray(value),
+    recordOrEmpty: (value) => value !== null && typeof value === 'object' && !Array.isArray(value) ? value : {},
+    stringOr: (value, fallback) => typeof value === 'string' && value ? value : fallback,
+    stringOrNull: (value) => typeof value === 'string' && value ? value : null,
+    crypto: { randomUUID: () => 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' },
   };
-  vm.runInNewContext(compiled, sandbox, { filename: 'norva-source-sync/background-page-walk.ts' });
-  const walk = sandbox.module.exports;
-
-  const cursors = [];
+  vm.runInNewContext(compiled, sandbox, { filename: 'norva-source-sync/background-claim-page.ts' });
+  const select = sandbox.module.exports;
+  const userId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  const titleId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+  const worker = 'edge-year-test';
+  const revisions = [];
   const pages = [
-    { items: [], complete: false, nextCursor: { lastId: 'shell-only' } },
-    { items: [{ id: 'effective-p' }], complete: false, nextCursor: { lastId: 'effective-p' } },
-    { items: [], complete: true, nextCursor: null },
+    {
+      contract: 'catalog-title-background-mode-v1', mode: 'year_pending',
+      items: [], returnedTitles: 0, complete: false, checkpointRevision: 2,
+    },
+    {
+      contract: 'catalog-title-background-mode-v1', mode: 'year_pending',
+      items: [{
+        id: titleId, userId, itemType: 'movie', providerTmdbId: '42', title: 'Title',
+        originalTitle: null, releaseYear: null, metadata: {}, posterUrl: null,
+        backdropUrl: null, storageKind: 'global', visibilityEpoch: 7,
+        payloadUpdatedAt: '2026-08-23T00:00:00.000Z', bestGenerationId: null,
+        displayGenerationId: null,
+      }],
+      returnedTitles: 1, byteCount: 512, complete: false, ackRequired: true,
+      pageDigest: 'a'.repeat(64), checkpointRevision: 3,
+    },
   ];
-  const completed = await walk(async (cursor, remaining) => {
-    cursors.push({ cursor: structuredClone(cursor), remaining });
-    return pages.shift();
-  }, 5, { now: () => 0 });
-  assert.deepEqual(structuredClone(completed), {
-    items: [{ id: 'effective-p' }], complete: true, nextCursor: null, pages: 3,
+  const db = { async rpc(name, args) {
+    assert.equal(name, 'norva_select_catalog_title_background_claim_page');
+    revisions.push(String(args.p_expected_revision));
+    return { data: pages.shift(), error: null };
+  } };
+  const completed = await select(db, 'year_pending', 5, {
+    worker, leaseSequence: 1, checkpointRevision: '1',
+    retryBefore: '2026-01-01T00:00:00.000Z',
   });
-  assert.deepEqual(cursors, [
-    { cursor: null, remaining: 5 },
-    { cursor: { lastId: 'shell-only' }, remaining: 5 },
-    { cursor: { lastId: 'effective-p' }, remaining: 4 },
-  ]);
+  assert.equal(completed.items.length, 1);
+  assert.equal(completed.items[0].id, titleId);
+  assert.equal(completed.checkpointRevision, '3');
+  assert.equal(completed.emptyTransitions, 1);
+  assert.deepEqual(revisions, ['1', '2']);
 
   let calls = 0;
-  const bounded = await walk(async (_cursor, remaining) => ({
-    items: [],
-    complete: false,
-    nextCursor: { lastId: String(++calls), remaining },
-  }), 5, { maxPages: 2, now: () => 0 });
-  assert.deepEqual(structuredClone(bounded), {
-    items: [], complete: false, nextCursor: { lastId: '2', remaining: 5 }, pages: 2,
+  const boundedDb = { async rpc() {
+    calls += 1;
+    return { data: {
+      contract: 'catalog-title-background-mode-v1', mode: 'year_pending',
+      items: [], returnedTitles: 0, complete: false, checkpointRevision: calls + 1,
+    }, error: null };
+  } };
+  const bounded = await select(boundedDb, 'year_pending', 5, {
+    worker, leaseSequence: 1, checkpointRevision: '1',
+    retryBefore: '2026-01-01T00:00:00.000Z',
   });
-  assert.equal(calls, 2);
-
-  await assert.rejects(
-    walk(async () => ({ items: [], complete: false, nextCursor: { lastId: 'same' } }), 1, {
-      maxPages: 2,
-      now: () => 0,
-    }),
-    /made no cursor progress/,
-  );
+  assert.equal(calls, 16);
+  assert.equal(bounded.items.length, 0);
+  assert.equal(bounded.complete, false);
+  assert.equal(bounded.checkpointRevision, '17');
+  assert.equal(bounded.emptyTransitions, 16);
 });
 
 test('background RPC path rolls its own epoch, rejects an interleaved transition, and never falls back', async () => {
   const source = read('supabase/functions/norva-source-sync/index.ts');
-  const start = source.indexOf('const CATALOG_BACKGROUND_PAGE_MAX');
+  const start = source.indexOf('const CATALOG_BACKGROUND_LEASE_SECONDS');
   const end = source.indexOf('// Provider VOD/series lists carry no release year', start);
   const compiled = transformSync(
     `${source.slice(start, end)}\nmodule.exports = {
       selectCatalogBackgroundBatch,
       applyCatalogBackgroundOutcomes,
+      ackCatalogBackgroundBatch,
     };`,
     { loader: 'ts', format: 'cjs', target: 'es2022' },
   ).code;
@@ -171,6 +200,7 @@ test('background RPC path rolls its own epoch, rejects an interleaved transition
     recordOrEmpty: (value) => value !== null && typeof value === 'object' && !Array.isArray(value) ? value : {},
     stringOr: (value, fallback) => typeof value === 'string' && value ? value : fallback,
     stringOrNull: (value) => typeof value === 'string' && value ? value : null,
+    crypto: { randomUUID: () => 'dddddddd-dddd-4ddd-8ddd-dddddddddddd' },
   };
   vm.runInNewContext(compiled, sandbox, { filename: 'norva-source-sync/background-rpc.ts' });
   const runtime = sandbox.module.exports;
@@ -197,6 +227,14 @@ test('background RPC path rolls its own epoch, rejects an interleaved transition
   const db = {
     from() { throw new Error('direct table fallback is forbidden'); },
     async rpc(name, args) {
+      if (name === 'norva_ack_catalog_title_background_claim_page') {
+        assert.deepEqual([...args.p_processed_title_ids], [items[0].id]);
+        return { data: {
+          contract: 'catalog-title-background-mode-v1', mode: 'year_pending',
+          complete: false, acknowledgedTitles: 1, remainingTitles: 1,
+          checkpointRevision: 4,
+        }, error: null };
+      }
       assert.equal(name, 'norva_apply_catalog_title_background_result');
       writerCalls.push(structuredClone(args));
       if (writerCalls.length === 2) {
@@ -215,10 +253,23 @@ test('background RPC path rolls its own epoch, rejects an interleaved transition
   const summary = await runtime.applyCatalogBackgroundOutcomes(
     db, 'year_pending', items, [{ releaseYear: 2020 }, { releaseYear: 2021 }], 4,
   );
-  assert.deepEqual({ ...summary }, { applied: 1, matched: 1, visibleChanged: 1, stale: 1 });
+  assert.deepEqual(JSON.parse(JSON.stringify(summary)), {
+    applied: 1, matched: 1, visibleChanged: 1, stale: 1,
+    processedTitleIds: [items[0].id],
+  });
   assert.equal(writerCalls[0].p_expected_visibility_epoch, '7');
   assert.equal(writerCalls[1].p_expected_visibility_epoch, '8', 'the writer-returned epoch must fence the next item');
   assert.equal(JSON.stringify(summary).includes('must stay private'), false);
+  const ack = await runtime.ackCatalogBackgroundBatch(
+    db,
+    'year_pending',
+    { worker: 'edge-year-test', leaseSequence: 2, checkpointRevision: '2', retryBefore: '2026-01-01T00:00:00.000Z' },
+    { items, complete: false, ackRequired: true, pageDigest: 'a'.repeat(64), checkpointRevision: '3', emptyTransitions: 0 },
+    summary.processedTitleIds,
+  );
+  assert.deepEqual({ ...ack }, {
+    complete: false, checkpointRevision: '4', acknowledgedTitles: 1, remainingTitles: 1,
+  });
 
   const missingDb = {
     from() { throw new Error('direct table fallback is forbidden'); },
@@ -226,7 +277,8 @@ test('background RPC path rolls its own epoch, rejects an interleaved transition
   };
   await assert.rejects(
     runtime.selectCatalogBackgroundBatch(
-      missingDb, 'year_pending', 1, '2026-01-01T00:00:00.000Z', null,
+      missingDb, 'year_pending', 1,
+      { worker: 'edge-year-test', leaseSequence: 1, checkpointRevision: '1', retryBefore: '2026-01-01T00:00:00.000Z' },
     ),
     (error) => error && error.status === 503 && !String(error.message).includes('schema'),
   );
@@ -256,47 +308,69 @@ test('year enrichment runtime sends only the selected P/G payload through the CA
     providerTmdbId: '42',
     visibilityEpoch: '7',
   };
-  const appliedItems = [];
-  const stateUpdates = [];
-  const db = {
-    from(table) {
-      const chain = {
-        update(payload) { stateUpdates.push({ table, payload }); return chain; },
-        eq() { return chain; },
-        then(resolve, reject) {
-          return Promise.resolve({ data: null, error: null }).then(resolve, reject);
-        },
-      };
-      return chain;
-    },
+  const activeC = {
+    id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+    userId: activeA.userId,
+    itemType: 'movie',
+    providerTmdbId: '43',
+    visibilityEpoch: '8',
   };
+  const appliedItems = [];
+  const db = {};
+  const claim = {
+    worker: 'edge-year-test', leaseSequence: 1, checkpointRevision: '1',
+    retryBefore: '2026-01-01T00:00:00.000Z',
+  };
+  let selectedCalls = 0;
+  let ackCalls = 0;
   const sandbox = {
     module: { exports: {} },
     exports: {},
     tmdbApiKey: () => 'tmdb-key',
     fetchTmdbYear: async () => 2024,
     stringOr: (value, fallback) => typeof value === 'string' && value ? value : fallback,
-    selectCatalogBackgroundBatch: async () => ({
-      items: [activeA], complete: true, nextCursor: null, pages: 1,
-    }),
+    claimCatalogBackgroundMode: async () => claim,
+    selectCatalogBackgroundBatch: async () => {
+      selectedCalls += 1;
+      return {
+        items: [selectedCalls === 1 ? activeA : activeC], complete: false, ackRequired: true,
+        pageDigest: String(selectedCalls).repeat(64), checkpointRevision: String(selectedCalls * 2),
+        emptyTransitions: 0,
+      };
+    },
     applyCatalogBackgroundOutcomes: async (_db, mode, items, outcomes) => {
       assert.equal(mode, 'year_pending');
       appliedItems.push(...items);
       assert.deepEqual(JSON.parse(JSON.stringify(outcomes)), [{ releaseYear: 2024 }]);
-      return { applied: 1, matched: 1, visibleChanged: 1, stale: 0 };
+      return { applied: 1, matched: 1, visibleChanged: 1, stale: 0, processedTitleIds: [items[0].id] };
     },
-    lastIdFromCatalogBackgroundCursor: () => null,
+    ackCatalogBackgroundBatch: async (_db, mode, actualClaim, batch, processedTitleIds) => {
+      ackCalls += 1;
+      assert.equal(mode, 'year_pending');
+      assert.equal(actualClaim, claim);
+      assert.equal(batch.checkpointRevision, String(ackCalls * 2));
+      assert.deepEqual(processedTitleIds, [ackCalls === 1 ? activeA.id : activeC.id]);
+      return {
+        complete: ackCalls === 2,
+        checkpointRevision: String(ackCalls * 2 + 1),
+        acknowledgedTitles: 1,
+        remainingTitles: 0,
+      };
+    },
+    CATALOG_BACKGROUND_DRAIN_DEADLINE_MS: 45_000,
+    CATALOG_BACKGROUND_PAGE_LIMIT: 100,
     HttpError: class HttpError extends Error {},
   };
   vm.runInNewContext(compiled, sandbox, { filename: 'norva-source-sync/year-visible-only.ts' });
-  const result = await sandbox.module.exports(db, 10, true, 2);
+  const result = await sandbox.module.exports(db, 2, true, 2);
 
-  assert.equal(result.scanned, 1);
-  assert.equal(result.updated, 1);
-  assert.deepEqual(appliedItems, [activeA]);
+  assert.equal(result.scanned, 2);
+  assert.equal(result.updated, 2);
+  assert.equal(result.acknowledged, 2);
+  assert.equal(result.checkpointRevision, '5');
+  assert.equal(result.done, true);
+  assert.deepEqual(appliedItems, [activeA, activeC]);
   assert.equal(appliedItems.some((item) => item.id === candidateB.id), false);
-  assert.equal(stateUpdates.length, 1);
-  assert.equal(stateUpdates[0].table, 'norva_year_backfill_state');
 });
 
 test('operator source-error reporting retains hidden and staging failures', () => {
