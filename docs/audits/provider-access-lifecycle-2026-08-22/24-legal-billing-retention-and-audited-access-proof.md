@@ -96,6 +96,73 @@ Le smoke couvre :
 - audit de lecture append-only ;
 - absence de lecture directe pour les rôles API.
 
+## Clone et installation production dormante
+
+Le rehearsal incrémental a été rejoué depuis un dump neuf de la production au
+commit `2533ba3bd9665ed6c01d35a23e0b56794fae420e` :
+
+```text
+mode       incremental
+container  norva-phase123-prod-clone-legal-v2-d-db
+report     /home/adrien/norva-phase3-proof/artifacts/prod-clone-legal-v2-d
+result     PHASE123_PRODUCTION_CLONE_REHEARSAL_PASS
+```
+
+Hashes principaux :
+
+```text
+manifest.txt
+e0957816b1b9fa3f43bb1527ad832cc82619a6df87706703ea0a54a78cccd97c
+
+final-invariants.tsv
+1eb3d891410106ca3fb45320608efb5c5043528b5a73793038f97c8643d59dbf
+
+artifact-sha256.txt
+eda93395e0701ee250eabb8365b3d345e1e9bec91a729e284ba743c34ac8bf2a
+```
+
+Après ce rehearsal, les trois migrations ont été installées sur PostgreSQL de
+production sans configurer de politique ni de lecteur. Backup préalable :
+
+```text
+/var/lib/norva-phase3-proof/production-deploy-2533ba3b/predeploy.dump
+bytes   909734993
+mode    600
+sha256  973437f5a372f9011e2697a0a028d251cd972fd30448809cff198cd6ecaf0227
+```
+
+État post-installation :
+
+```text
+policy_v2       true
+access_v1       true
+acl_hardened    true
+policy_rows     0
+archive_rows    0
+access_grants   0
+access_events   0
+grant_events    0
+rollout         off / revision 1
+flags           9 total / 0 enabled
+cache_epoch     installed / not completed
+```
+
+Preuve post-installation :
+
+```text
+post-invariants.tsv
+1f0fccb941b67c7621b377da90ba2dc6b1389494e9345566425591cce8b94ea7
+
+migrations.log
+a627b0a375bbdae5fe554891dd62cfb7ac0a4e4422679f19c906c3006a2eacd6
+
+timeline.log
+f7a4ea42161b428a201855332628c750aef2b2054cefb40273d81654a62d4b4c
+```
+
+Les quatre workflows GitHub du commit d'installation sont verts : Build,
+Partners, déploiement Web et déploiement Relay.
+
 Suite Node complète après intégration :
 
 ```text
