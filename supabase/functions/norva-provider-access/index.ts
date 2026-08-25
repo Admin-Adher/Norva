@@ -36,7 +36,8 @@ type NotificationRoute =
   | { kind: "dismiss"; notificationId: string };
 type AuthenticatedUser = { id: string; actor: string };
 const WORKER_LEASE_SECONDS = 300;
-const WORKER_PROTOCOL = "credential-transition-worker-v2-title-cleanup";
+const WORKER_PROTOCOL = "credential-transition-worker-v3-active-catalog-refresh";
+const ACTIVE_CATALOG_REFRESH_CONTRACT_ID = "active-catalog-refresh-checkpoint-prune-v1";
 const GATEWAY_REQUEST_TIMEOUT_MS = 120_000;
 const WORKER_MIN_START_LEASE_MS = GATEWAY_REQUEST_TIMEOUT_MS + 30_000;
 const GATEWAY_ACTIONS = Object.freeze([
@@ -1609,11 +1610,12 @@ async function handleWorkerDrain(req, requestId) {
   await requireWorkerAuthorization(req);
   const body = await readJsonObject(req);
   const limit = Math.min(WORKER_MAX_CLAIMS, Math.max(1, Number.isInteger(body.limit) ? body.limit : WORKER_MAX_CLAIMS));
+  const workerId = `provider-access:${crypto.randomUUID()}`;
+  await registerActiveCatalogRefreshWorker(workerId);
   const [credentialEnabled, replacementEnabled] = await Promise.all([
     credentialFeatureFlagEnabled(),
     replacementFeatureFlagEnabled(),
   ]);
-  const workerId = `provider-access:${crypto.randomUUID()}`;
   // Replacement claims run first so the legacy credential claimant can never
   // accidentally consume a replacement build while both rollout flags are ON.
   // PostgreSQL still owns the lease; this ordering is only a compatibility
@@ -1746,6 +1748,19 @@ async function handleWorkerDrain(req, requestId) {
     };
   }
   return successResponse(req, requestId, "CredentialTransitionWorkerRun", summary, 200);
+}
+
+async function registerActiveCatalogRefreshWorker(workerId) {
+  const { data, error } = await admin.rpc("norva_register_active_catalog_refresh_worker", {
+    p_worker: workerId,
+    p_worker_protocol: WORKER_PROTOCOL,
+    p_contract_id: ACTIVE_CATALOG_REFRESH_CONTRACT_ID,
+  });
+  if (error || !isRecord(data) || data.ready !== true
+      || data.workerProtocol !== WORKER_PROTOCOL
+      || data.refreshContractId !== ACTIVE_CATALOG_REFRESH_CONTRACT_ID) {
+    throw new ContractError("INVARIANT_VIOLATION");
+  }
 }
 
 async function claimCredentialTransitionJobs(workerId, limit) {

@@ -9,6 +9,9 @@ const ROOT = path.resolve(__dirname, '..');
 const EDGE_PATH = path.join(ROOT, 'supabase/functions/norva-provider-access/index.ts');
 const EDGE = fs.readFileSync(EDGE_PATH, 'utf8').replace(/\r\n?/g, '\n');
 const SUPABASE_CONFIG = fs.readFileSync(path.join(ROOT, 'supabase/config.toml'), 'utf8').replace(/\r\n?/g, '\n');
+const EDGE_DEPLOY = fs.readFileSync(path.join(
+  ROOT, 'ops/hetzner/scripts/04-deploy-edge-functions.sh',
+), 'utf8').replace(/\r\n?/g, '\n');
 const DIRECT_FALLBACK_MIGRATION = fs.readFileSync(path.join(
   ROOT,
   'supabase/migrations/20260823174000_provider_direct_fallback_source_lease.sql',
@@ -646,13 +649,20 @@ test('retry exhaustion finalizes pre-commit validation or starts compensation wi
     const handleWorkerDrain = vm.runInNewContext(`(() => { ${source}; return handleWorkerDrain; })()`, {
       WORKER_MAX_CLAIMS: 1,
       WORKER_LEASE_SECONDS: 300,
-      WORKER_PROTOCOL: 'credential-transition-worker-v2-title-cleanup',
+      WORKER_PROTOCOL: 'credential-transition-worker-v3-active-catalog-refresh',
+      ACTIVE_CATALOG_REFRESH_CONTRACT_ID: 'active-catalog-refresh-checkpoint-prune-v1',
       crypto: { randomUUID: () => 'worker-id' },
       requireWorkerAuthorization: async () => {},
       readJsonObject: async () => ({}),
       credentialFeatureFlagEnabled: async () => true,
       replacementFeatureFlagEnabled: async () => false,
-      admin: { rpc: async () => ({ data: [{ job_kind: kind }], error: null }) },
+      admin: { rpc: async (name) => name === 'norva_register_active_catalog_refresh_worker'
+        ? { data: {
+          ready: true,
+          workerProtocol: 'credential-transition-worker-v3-active-catalog-refresh',
+          refreshContractId: 'active-catalog-refresh-checkpoint-prune-v1',
+        }, error: null }
+        : { data: [{ job_kind: kind }], error: null } },
       normalizeClaimedJob: () => ({ kind, failureAttemptCount: 4 }),
       processWorkerJobUnderGuards: async () => { throw new WorkerFault('provider_unavailable', true); },
       normalizeWorkerFault: (error) => error,
@@ -690,7 +700,9 @@ test('worker uses durable bounded lease/claim/settle CAS and waitUntil is only a
   assert.match(EDGE, /const WORKER_MAX_CLAIMS = 1/);
   assert.match(worker, /p_lease_seconds/);
   assert.match(worker, /p_worker_protocol: WORKER_PROTOCOL/);
-  assert.match(EDGE, /const WORKER_PROTOCOL = "credential-transition-worker-v2-title-cleanup"/);
+  assert.match(EDGE, /const WORKER_PROTOCOL = "credential-transition-worker-v3-active-catalog-refresh"/);
+  assert.match(worker, /registerActiveCatalogRefreshWorker\(workerId\)/);
+  assert.match(worker, /norva_register_active_catalog_refresh_worker/);
   assert.match(TRANSITION_MIGRATION, /credential-transition-worker-v2-title-cleanup/);
   assert.match(worker, /settleJob/);
   assert.match(EDGE, /norva_settle_credential_transition_job/);
@@ -702,6 +714,8 @@ test('worker uses durable bounded lease/claim/settle CAS and waitUntil is only a
     assert.ok(EDGE.includes(`"${kind}"`));
   }
   assert.match(EDGE, /norva_checkpoint_credential_generation_job/);
+  assert.match(EDGE_DEPLOY, /norva-provider-access\/index\.ts/);
+  assert.match(EDGE_DEPLOY, /norva-provider-access source digest mismatch/);
   assert.match(EDGE, /p_retry_after_seconds: staged\.pending === true/);
   assert.match(EDGE, /maxSlices: 8/);
   assert.match(EDGE, /deadlineMs: 45_000/);
@@ -722,7 +736,7 @@ test('worker claim protocol is rolling-safe in both DB-first and Edge-first orde
     return claimCredentialTransitionJobs;
   })()`, {
     WORKER_LEASE_SECONDS: 300,
-    WORKER_PROTOCOL: 'credential-transition-worker-v2-title-cleanup',
+    WORKER_PROTOCOL: 'credential-transition-worker-v3-active-catalog-refresh',
     admin: {
       rpc: async (name, params) => {
         calls.push({ name, params: structuredClone(params) });
@@ -752,7 +766,7 @@ test('worker claim protocol is rolling-safe in both DB-first and Edge-first orde
   assert.equal(result.error, null);
   assert.equal(result.data[0].job_kind, 'promote_generation_titles');
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].params.p_worker_protocol, 'credential-transition-worker-v2-title-cleanup');
+  assert.equal(calls[0].params.p_worker_protocol, 'credential-transition-worker-v3-active-catalog-refresh');
 
   mode = 'db-old';
   calls.length = 0;
@@ -901,13 +915,20 @@ test('one malformed claimed row is dead-settled without aborting the rest of the
   const handleWorkerDrain = vm.runInNewContext(`(() => { ${source}; return handleWorkerDrain; })()`, {
     WORKER_MAX_CLAIMS: 2,
     WORKER_LEASE_SECONDS: 300,
-    WORKER_PROTOCOL: 'credential-transition-worker-v2-title-cleanup',
+    WORKER_PROTOCOL: 'credential-transition-worker-v3-active-catalog-refresh',
+    ACTIVE_CATALOG_REFRESH_CONTRACT_ID: 'active-catalog-refresh-checkpoint-prune-v1',
     crypto: { randomUUID: () => 'worker-id' },
     requireWorkerAuthorization: async () => {},
     readJsonObject: async () => ({ limit: 2 }),
     credentialFeatureFlagEnabled: async () => false,
     replacementFeatureFlagEnabled: async () => false,
-    admin: { rpc: async () => ({ data: [{ malformed: true }, { malformed: false }], error: null }) },
+    admin: { rpc: async (name) => name === 'norva_register_active_catalog_refresh_worker'
+      ? { data: {
+        ready: true,
+        workerProtocol: 'credential-transition-worker-v3-active-catalog-refresh',
+        refreshContractId: 'active-catalog-refresh-checkpoint-prune-v1',
+      }, error: null }
+      : { data: [{ malformed: true }, { malformed: false }], error: null } },
     normalizeClaimedJob: (raw) => {
       if (raw.malformed) throw new Error('schema drift');
       return { kind: 'promote_generation_titles', failureAttemptCount: 0 };
