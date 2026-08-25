@@ -223,7 +223,7 @@ grep -q 'permission denied for table cloud_provider_access_rollout' \
   "$REPORT_DIR/direct-service-dml-refusal.log" \
   || fail 'direct DML refusal was not the expected privilege fence'
 
-env DB_CONTAINER="$DB_CONTAINER" \
+env DB_CONTAINER="$DB_CONTAINER" bash \
   "$WORKSPACE/ops/hetzner/scripts/run_provider_access_rollout_gate.sh" observation-status \
   >"$REPORT_DIR/observation-status.txt"
 grep -qx 'observation=NONE' "$REPORT_DIR/observation-status.txt" \

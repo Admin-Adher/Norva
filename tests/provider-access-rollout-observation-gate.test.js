@@ -109,7 +109,7 @@ test('production installer is exact, backed up and dormant', () => {
   assert.match(installer, /RESUME_POSTINSTALL_VALIDATION/);
   assert.match(installer, /resume-current-state\.tsv/);
   assert.match(installer, /sha256sum -c/);
-  assert.match(installer, /env DB_CONTAINER="\$DB_CONTAINER"/);
+  assert.match(installer, /env DB_CONTAINER="\$DB_CONTAINER" bash/);
   assert.match(installer, /status=INSTALLED_DORMANT/);
   assert.match(installer, /INSTALL_PROVIDER_ACCESS_OBSERVATION_GATE_DORMANT/);
   assert.doesNotMatch(installer, /SET_PROVIDER_ACCESS_STAGE_internal/);
