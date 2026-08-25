@@ -199,6 +199,19 @@ test('service finalize-step adopts only its monotone response epoch before the f
   );
 });
 
+test('durable finalize driver adopts a successful batch epoch before persisting its cursor', () => {
+  const source = read('supabase/functions/norva-source-sync/index.ts');
+  const driver = section(
+    source,
+    'async function driveFinalizeToReady(',
+    '\nasync function pruneCatalogGenerationBeforeReady(',
+  );
+  assert.match(
+    driver,
+    /result = await finalizeCloudSource[\s\S]*await adoptActiveCatalogUserVisibilityEpoch\(db, sourceId, userId, accessSnapshot\)[\s\S]*await assertCatalogSnapshotCurrent[\s\S]*hint\.finalizeCursor = \{ phase, offset, afterId \}/,
+  );
+});
+
 test('series and source-sync response boundaries strip arbitrary provider and database details', () => {
   for (const [file, allowlistName] of [
     ['supabase/functions/norva-series-info/index.ts', 'SERIES_INFO_PUBLIC_ERROR_CODES'],

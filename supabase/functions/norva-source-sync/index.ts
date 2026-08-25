@@ -2747,6 +2747,11 @@ async function driveFinalizeToReady(db: SupabaseClient, sourceId: string, userId
       if (transient) await selfInvokeFinalize(sourceId, country);
       return;
     }
+    // finalizeCloudSource owns a fresh per-batch snapshot and may legitimately
+    // advance the account cache epoch through a fenced visible write or prune.
+    // Join that monotone epoch before continuing the long-lived driver, while
+    // the helper still rejects any generation/config/source-authority change.
+    await adoptActiveCatalogUserVisibilityEpoch(db, sourceId, userId, accessSnapshot);
     await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
     if (String(result.status) === "ready") {
       await patchSourceConfigHint(db, sourceId, (hint) => { delete hint.finalizeCursor; delete hint.finalizeLease; return hint; });
