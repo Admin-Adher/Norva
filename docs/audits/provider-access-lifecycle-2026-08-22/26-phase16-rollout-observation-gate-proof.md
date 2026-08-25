@@ -7,7 +7,8 @@ Status before the production-clone replay:
 ```text
 PHASE_16_DURABLE_OBSERVATION_GATE_DB_PROVED
 PHASE_16_REAL_CONCURRENCY_RACE_PROVED
-PRODUCTION_INSTALLATION_PENDING_FRESH_CLONE
+PHASE_16_DURABLE_OBSERVATION_GATE_PRODUCTION_INSTALLED
+PHASE_16_POSTINSTALL_CURRENT_STATE_CLONE_PROVED
 PRODUCTION_ACTIVATION_BLOCKED_UNTIL_CACHE_NOT_BEFORE
 ```
 
@@ -122,11 +123,100 @@ concurrency harness SHA-256
 16d3f0e20819652f9a347b9c0e3ecd06041603d9af7c011566fd8cb5dc57b3b0
 
 production installer SHA-256
-dbdbb34bd9fe09a47527403dafc1fc8a791b7b65fa641a27fc0c3a10b302239c
+3e510ea9c36bb217c8c51b13ff597e8350091bbea6513e7ce8d559495d5a01bc
 ```
 
-The commit SHA and production evidence paths will be appended only after the
-fresh clone, dormant installation and current-state replay succeed.
+## Fresh pre-installation clone
+
+The exact production state before installation was dumped and restored into a
+new isolated container. Both migrations were applied exactly once in the clone.
+
+```text
+result              PHASE123_PRODUCTION_CLONE_REHEARSAL_PASS
+mode                incremental
+commit              ef5c41fc979b911c1a06c3792b3b3132de621d5e
+report              /home/adrien/norva-phase3-proof/artifacts/prod-clone-observation-preinstall-ef5c41fc
+dump bytes          910287958
+dump SHA-256        87399fc906b82f31292d614fdbee6985aca40170927be1ca522c6e072517dc26
+migration tree SHA  c7948c368e49089cdf7cbf98fa8b19f103ab9a1528b3e61415d88e294f133142
+ACL diff SHA-256    e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+final invariant SHA b99683a3903ec36f30835b37b31455e9df57572e7d5cdd5a9d7b33b1fc97c7ad
+install test SHA    dd2b44a47075488a0650b7b9139da74c1b207e0a11fd0ff90674433b9f27030b
+analytics test SHA  8a26cabac02f9cdfeebb9fe29f7734a4e144f909f6a27ecaa446d04134c50ebf
+```
+
+## Dormant production installation
+
+The migrations committed successfully on production. The first installer
+process then exposed two shell invocation defects after all database writes had
+finished: a readonly environment assignment and direct execution of a tracked
+script without its executable bit. Production remained healthy and OFF. The
+installer was hardened to resume only when all original backup hashes and the
+captured post-install state still match exactly; it then completed the pending
+read-only verification without reapplying either migration.
+
+```text
+final verifier commit bfab5f564a3ba623a3ec1e9624f365c906b251f2
+report                /var/lib/norva-phase3-proof/provider-observation-production-ef5c41fc
+completed UTC         2026-08-25T02:06:57Z
+status                INSTALLED_DORMANT
+schema backup SHA     b23487c5b242cd165cca211a60235475eff727c8580b31bb33a5f85c5fb544a1
+control backup SHA    10b7e536fdbdb42553a3bde379f6338d8673cfe04b5b7a9887808777d2521a27
+pre-state SHA         c06189b865b96a185af4187e2c3c2a5b0ee382006c16216b7dd4c4ab26a49b8c
+post-state SHA        6171c5e198a37a97fc502ca8283e669c6937032639275beed782f0a41adc71cf
+contract SHA          56e4b2073e4d789a5a1d1e736e03d608b65044fc3918804d10414ed7a45de494
+observation status SHA 470f56732e873d9b3867f5de92d9943356a5242b68f52b8697131dcf925ea687
+```
+
+Verified production state:
+
+```text
+rollout               off, revision 2, cohort 0
+flags                 9 total, 0 enabled
+internal allowlist    1
+Provider Access crons 0
+observation rows      0
+cache epoch           installed, not completed
+P0 safe               true
+service direct DML    false
+browser RPC execute   false
+analytics delivered   true
+legacy completed      false
+database health       healthy
+```
+
+## Fresh post-installation clone
+
+A second independent dump and new volume proved the exact installed production
+state without replaying the migrations.
+
+```text
+result              PHASE123_PRODUCTION_CLONE_REHEARSAL_PASS
+mode                current-state
+commit              bfab5f564a3ba623a3ec1e9624f365c906b251f2
+report              /home/adrien/norva-phase3-proof/artifacts/prod-clone-observation-postinstall-bfab5f56
+dump bytes          910381364
+dump SHA-256        b599cb46498e5fb29b0ad916af81bc88016007ddad383a31961ccf2746924656
+migration tree SHA  cb11cb6889a49f4e7080252b2f96784e72e85ff888b453b4b1423371913ac63d
+ACL diff SHA-256    e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+final invariant SHA b99683a3903ec36f30835b37b31455e9df57572e7d5cdd5a9d7b33b1fc97c7ad
+install test SHA    15ec7f0ccc3a2e43699d514f9f397bfb6ef6178e4b685c3464a1d748680b5079
+analytics test SHA  8a26cabac02f9cdfeebb9fe29f7734a4e144f909f6a27ecaa446d04134c50ebf
+```
+
+The policy-state SHA and rollout-state SHA are identical before and after the
+clone test, and no legal-reader grant, audit event, flag, cron or observation
+was introduced.
+
+## Publication and CI
+
+GitHub `main` points to `bfab5f564a3ba623a3ec1e9624f365c906b251f2`.
+
+```text
+Build Norva                       run 32800133137 PASS
+Deploy Norva Web to Cloudflare   run 32800133158 PASS
+Deploy Norva Relay Worker        run 32800133194 PASS
+```
 
 ## Production boundary
 

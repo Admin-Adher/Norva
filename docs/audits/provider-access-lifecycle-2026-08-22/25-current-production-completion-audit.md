@@ -2,8 +2,8 @@
 
 Date: 2026-08-25
 
-Repository head used by the current-state clone proof:
-`bf130e4b2fdf7bfe2a918a6c26ef701e750a21bc`.
+Latest repository head used by the current-state clone proof:
+`bfab5f564a3ba623a3ec1e9624f365c906b251f2`.
 
 This document supersedes the implementation status in the original
 23-August progress report. It does not redefine completion: production is not
@@ -30,7 +30,7 @@ channels and progressive cohort observations have all passed.
 | 13 — push | Data-only FCM contract and fixed deep link proved. Signed Phone 1.3.9 AAB exists. | Upload/release through the authenticated Google Play Console, then real-device smoke. |
 | 14 — in-app | Owner-scoped route and explanatory calendar UX proved and deployed dormant. | Internal authenticated runtime observation. |
 | 15 — analytics | Aggregate-only analytics and P0 staging-visibility alarm proved. | Establish live internal baseline without P0 breach. |
-| 16 — rollout | Control plane, CAS races, channel independence, rollback/OFF and operator scripts proved and production-installed. A revision-bound durable observation gate is DB/concurrency-proved and pending fresh-clone installation proof. | Install the observation gate dormant, then execute `internal -> 1% -> 5% -> 20% -> 50% -> 100%` with the server-owned observation window and explicit approval at each rung. |
+| 16 — rollout | Control plane, CAS races, channel independence, rollback/OFF and operator scripts proved and production-installed. The revision-bound durable observation gate is DB/concurrency-proved, production-installed dormant and post-install clone-proved. | Execute `internal -> 1% -> 5% -> 20% -> 50% -> 100%` with the server-owned observation window and explicit approval at each rung. |
 
 ## Production legal policy
 
@@ -144,9 +144,22 @@ browser has no authenticated Play Console session.
 
 The durable Phase 16 observation gate and notification analytics correction are
 documented in `26-phase16-rollout-observation-gate-proof.md`. Their repository
-and disposable-PostgreSQL proofs are green; they are not yet represented as
-installed in the production state described above until a fresh clone, dormant
-installer and post-install clone all pass.
+and disposable-PostgreSQL proofs are green. The dormant production installer
+and an independent post-install `current-state` clone are also green; rollout
+remains OFF until the cache time boundary.
+
+Latest installed-state proof:
+
+```text
+commit       bfab5f564a3ba623a3ec1e9624f365c906b251f2
+install      /var/lib/norva-phase3-proof/provider-observation-production-ef5c41fc
+clone        /home/adrien/norva-phase3-proof/artifacts/prod-clone-observation-postinstall-bfab5f56
+clone mode   current-state
+flags        9 total / 0 enabled
+observations 0
+crons        0
+rollout      OFF revision 2
+```
 
 Until all five are evidenced, implementation and dormant production
 installation are proved, but the requested 100% production rollout is not.
