@@ -13,6 +13,9 @@ const migration = read(
 const analyticsFix = read(
   'supabase/migrations/20260825012611_provider_access_analytics_delivered_state_fix_v1.sql',
 );
+const observationV2 = read(
+  'supabase/migrations/20260825195500_provider_access_rollout_observation_contract_v2.sql',
+);
 const operator = read('ops/hetzner/scripts/run_provider_access_rollout_gate.sh');
 const race = read('ops/hetzner/scripts/run_provider_access_rollout_observation_race.sh');
 const installer = read(
@@ -73,6 +76,52 @@ test('observation decisions are service-only, CAS-bound and explicit', () => {
   assert.match(migration, /grant execute on function[\s\S]*to service_role/);
 });
 
+test('observation v2 counts the canonical access-cycle start without rewriting v1', () => {
+  assert.match(observationV2, /provider-access-rollout-observation:v1/);
+  assert.match(observationV2, /provider-access-rollout-observation:v2/);
+  assert.match(observationV2, /event\.event_kind = 'provider_access_cycle_started'/);
+  assert.match(observationV2, /norva_provider_access_rollout_observation_metrics_v2/);
+  assert.match(observationV2, /'\{schemaVersion\}', '2'::jsonb/);
+  assert.doesNotMatch(
+    observationV2,
+    /create or replace function public\.norva_provider_access_rollout_observation_metrics\(/,
+  );
+});
+
+test('v2 restart preserves old evidence and starts a fresh full observation window', () => {
+  assert.match(observationV2, /activity_started_at timestamptz/);
+  assert.match(observationV2, /supersedes_observation_id uuid/);
+  assert.match(observationV2, /activity_started_at <= started_at/);
+  assert.match(
+    observationV2,
+    /not_before >= started_at \+ make_interval\(secs => minimum_window_seconds\)/,
+  );
+  assert.match(observationV2, /v_predecessor\.activity_started_at/);
+  assert.match(observationV2, /THRESHOLD_CONTRACT_SUPERSEDED/);
+  assert.match(observationV2, /set state = 'stale'/);
+  assert.doesNotMatch(observationV2, /delete from public\.cloud_provider_access_rollout_observations/);
+});
+
+test('v2 completion and promotion fail closed on superseded contracts', () => {
+  assert.match(observationV2, /reason=threshold_contract_superseded/);
+  assert.match(
+    observationV2,
+    /v_snapshot := public\.norva_provider_access_rollout_observation_metrics_v2\([\s\S]*v_observation\.activity_started_at/,
+  );
+  assert.match(
+    observationV2,
+    /observation\.state = 'accepted'[\s\S]*observation\.threshold_contract = 'provider-access-rollout-observation:v2'/,
+  );
+  assert.match(
+    observationV2,
+    /revoke all on function[\s\S]*norva_restart_provider_access_rollout_observation_v2[\s\S]*from public, anon, authenticated, service_role/,
+  );
+  assert.match(
+    observationV2,
+    /grant execute on function[\s\S]*norva_restart_provider_access_rollout_observation_v2[\s\S]*to service_role/,
+  );
+});
+
 test('notification analytics use the canonical delivered terminal state', () => {
   assert.doesNotMatch(analyticsFix, /notification\.state = 'completed'/);
   assert.equal((analyticsFix.match(/notification\.state = 'delivered'/g) || []).length, 5);
@@ -82,8 +131,10 @@ test('operator gate exposes read-only status plus explicit observation mutations
   assert.match(operator, /observation-status/);
   assert.match(operator, /start-observation/);
   assert.match(operator, /complete-observation/);
+  assert.match(operator, /restart-observation-v2/);
   assert.match(operator, /START_PROVIDER_ACCESS_ROLLOUT_OBSERVATION/);
   assert.match(operator, /COMPLETE_PROVIDER_ACCESS_ROLLOUT_OBSERVATION/);
+  assert.match(operator, /RESTART_PROVIDER_ACCESS_ROLLOUT_OBSERVATION_V2/);
 });
 
 test('real PostgreSQL concurrency proof races start, completion and promotion', () => {

@@ -9,9 +9,9 @@ if [[ "$DB_CONTAINER" != 'norva-db' ]]; then
   exit 64
 fi
 case "$ACTION" in
-  preflight|observation-status|configure-gates|set-internal-user|set-stage|start-observation|complete-observation|set-channels|install-notification-cron|install-detection-cron|remove-provider-crons) ;;
+  preflight|observation-status|configure-gates|set-internal-user|set-stage|start-observation|restart-observation-v2|complete-observation|set-channels|install-notification-cron|install-detection-cron|remove-provider-crons) ;;
   *)
-    echo 'usage: run_provider_access_rollout_gate.sh [preflight|observation-status|configure-gates|set-internal-user|set-stage|start-observation|complete-observation|set-channels|install-notification-cron|install-detection-cron|remove-provider-crons]' >&2
+    echo 'usage: run_provider_access_rollout_gate.sh [preflight|observation-status|configure-gates|set-internal-user|set-stage|start-observation|restart-observation-v2|complete-observation|set-channels|install-notification-cron|install-detection-cron|remove-provider-crons]' >&2
     exit 64
     ;;
 esac
@@ -106,10 +106,12 @@ select coalesce((
     observation.stage,
     observation.state,
     observation.started_at::text,
+    observation.activity_started_at::text,
     observation.not_before::text,
     coalesce(observation.completed_at::text,'NULL'),
     observation.threshold_contract,
     observation.decision_reasons::text,
+    coalesce(observation.supersedes_observation_id::text,'NULL'),
     coalesce(observation.evidence_reference,'NULL')
   )
   from public.cloud_provider_access_rollout_observations observation
@@ -125,15 +127,16 @@ print_observation_state() {
     echo 'observation=NONE'
     return
   fi
-  local id revision stage status started_at not_before completed_at contract reasons evidence
-  IFS='|' read -r id revision stage status started_at not_before completed_at \
-    contract reasons evidence <<<"$snapshot"
+  local id revision stage status started_at activity_started_at not_before completed_at
+  local contract reasons supersedes evidence
+  IFS='|' read -r id revision stage status started_at activity_started_at not_before completed_at \
+    contract reasons supersedes evidence <<<"$snapshot"
   printf 'observation_id=%s\nobservation_revision=%s\nobservation_stage=%s\nobservation_state=%s\n' \
     "$id" "$revision" "$stage" "$status"
-  printf 'observation_started_at=%s\nobservation_not_before=%s\nobservation_completed_at=%s\n' \
-    "$started_at" "$not_before" "$completed_at"
-  printf 'observation_contract=%s\nobservation_reasons=%s\nobservation_evidence=%s\n' \
-    "$contract" "$reasons" "$evidence"
+  printf 'observation_started_at=%s\nobservation_activity_started_at=%s\nobservation_not_before=%s\nobservation_completed_at=%s\n' \
+    "$started_at" "$activity_started_at" "$not_before" "$completed_at"
+  printf 'observation_contract=%s\nobservation_reasons=%s\nobservation_supersedes=%s\nobservation_evidence=%s\n' \
+    "$contract" "$reasons" "$supersedes" "$evidence"
 }
 
 readonly BEFORE="$(state)"
@@ -269,6 +272,28 @@ select public.norva_start_provider_access_rollout_observation(
 commit;
 SQL
     ;;
+  restart-observation-v2)
+    : "${PREDECESSOR_OBSERVATION_ID:?PREDECESSOR_OBSERVATION_ID is required}"
+    : "${EXPECTED_ROLLOUT_REVISION:?EXPECTED_ROLLOUT_REVISION is required}"
+    : "${ROLLOUT_ACTOR:?ROLLOUT_ACTOR is required}"
+    [[ "$PREDECESSOR_OBSERVATION_ID" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$ ]]
+    [[ "$EXPECTED_ROLLOUT_REVISION" =~ ^[0-9]+$ ]]
+    valid_text "$ROLLOUT_ACTOR" 3 200
+    if [[ "${CONFIRM_ROLLOUT_OBSERVATION:-}" != 'RESTART_PROVIDER_ACCESS_ROLLOUT_OBSERVATION_V2' ]]; then
+      echo 'status=REFUSED_MISSING_EXPLICIT_OBSERVATION_RESTART_CONFIRMATION' >&2
+      exit 64
+    fi
+    psql_admin -v predecessor_observation_id="$PREDECESSOR_OBSERVATION_ID" \
+      -v expected_revision="$EXPECTED_ROLLOUT_REVISION" \
+      -v actor="$ROLLOUT_ACTOR" <<'SQL'
+begin;
+set local role service_role;
+select public.norva_restart_provider_access_rollout_observation_v2(
+  :'predecessor_observation_id'::uuid,:'expected_revision'::bigint,:'actor'
+);
+commit;
+SQL
+    ;;
   complete-observation)
     : "${OBSERVATION_ID:?OBSERVATION_ID is required}"
     : "${EXPECTED_ROLLOUT_REVISION:?EXPECTED_ROLLOUT_REVISION is required}"
@@ -380,7 +405,7 @@ esac
 
 readonly AFTER="$(state)"
 print_state "$AFTER"
-if [[ "$ACTION" == 'start-observation' || "$ACTION" == 'complete-observation' ]]; then
+if [[ "$ACTION" == 'start-observation' || "$ACTION" == 'restart-observation-v2' || "$ACTION" == 'complete-observation' ]]; then
   print_observation_state "$(observation_state)"
 fi
 echo 'status=COMPLETED'
