@@ -183,3 +183,30 @@ The Web UI remains hidden for every user because the authenticated rollout statu
    approved through the now-installed channel CAS RPC.
 
 No direct feature-flag edit is an authorized substitute for the Phase 16 RPC and its gates.
+
+## Incremental production-clone rehearsal after notification scheduling
+
+The current production database was replayed into a fresh disposable Supabase
+bootstrap, then advanced through the notification-cron migration. The harness
+now freezes and reapplies the exact effective API ACLs, preventing bootstrap
+default privileges from being mistaken for production grants.
+
+```text
+commit 84f8879f0aa3133b3f2877aa4350fc62dc8b8a2b
+result PHASE123_PRODUCTION_CLONE_REHEARSAL_PASS
+mode incremental
+artifact /home/adrien/norva-phase3-proof/artifacts/prod-clone-notify-cron-v4
+migration tree SHA-256
+35f40d803a8905f8fb08341d49c4056cf64e6f941b15da96297772e09f38af93
+
+production ACL snapshot SHA-256
+5f0843d893bf34db7033bc33e46becc05a83f981a309079bda7763c6dc18ff5e
+clone ACL snapshot SHA-256
+5f0843d893bf34db7033bc33e46becc05a83f981a309079bda7763c6dc18ff5e
+ACL diff SHA-256 (empty)
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+```
+
+Final clone state stayed dormant: policy/access migrations present, zero legal
+rows and grants, rollout `off`, nine flags with zero enabled, cache epoch still
+`installed`, and zero Provider Access cron jobs.

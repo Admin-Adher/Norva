@@ -149,3 +149,43 @@ rollout operator gate SHA-256
 repository regression
 2648 tests / 2646 passed / 0 failed / 2 expected skips
 ```
+
+## Production dormant installation and worker authentication
+
+The notification-cron migration was installed on production without invoking
+its installer. The pre/post snapshots remained `rollout=off`, zero enabled
+flags and zero Provider Access cron jobs:
+
+```text
+pre  f | 0 crons | off | 0 enabled flags
+post t | 0 crons | off | 0 enabled flags | P0 safe
+
+pre-deployment dump
+/var/lib/norva-phase3-proof/production-deploy-84f8879f/predeploy.dump
+size 909953597 bytes
+mode 0600
+SHA-256 c8d34d9763e520dabe18007c5c95140fe2927ed9b08b167de8e384d206bf53a7
+
+migration log SHA-256
+93e02a983aff0a14e832f24a7c35e06bc111b05fb9c2771b8297750b53202d62
+
+post-invariants SHA-256
+8918e0a3d74f37e90bf73ce02836439954324a9690eac65c509cf4719efdfa6e
+```
+
+A dedicated random worker token is now injected into both Edge replicas and
+stored separately in Vault for the cron command. Its value was never exported
+into the proof; only equality and a one-way fingerprint were recorded:
+
+```text
+functions runtime == functions2 runtime == Vault  true
+worker token SHA-256
+ebc295c609850569f923a18459d830d5c44c7f486eae4a77db7c8607b537fb4d
+
+wrong worker token  HTTP 401 AUTHENTICATION_REQUIRED
+correct worker token while flag OFF  HTTP 503 FEATURE_DISABLED
+before/after  0 enabled flags | 0 check jobs | 0 Provider Access crons
+```
+
+This proves authentication wiring only. It does not authorize scheduling or
+channel activation.

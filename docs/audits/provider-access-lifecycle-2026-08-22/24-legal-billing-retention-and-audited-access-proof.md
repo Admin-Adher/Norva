@@ -217,3 +217,17 @@ Avant toute activation :
 6. exécuter une lecture de contrôle avec AAL2/TOTP et vérifier son audit ;
 7. conserver Provider Access `OFF` tant que ce gate et le cache epoch v2 ne
    sont pas clos.
+
+## Revalidation sur clone de production courant
+
+La répétition incrémentale `prod-clone-notify-cron-v4` a également revalidé le
+contrat juridique sur une copie jetable de la production : migrations de
+politique et d'accès présentes, ACL production reproduites à l'identique,
+aucune politique fictive, aucune archive, aucun lecteur et aucun événement de
+grant. La preuve globale est
+`/home/adrien/norva-phase3-proof/artifacts/prod-clone-notify-cron-v4` et son
+résultat est `PHASE123_PRODUCTION_CLONE_REHEARSAL_PASS`.
+
+Cette preuve confirme la migration et l'isolation ; elle ne remplace toujours
+pas la date de clôture fiscale, la référence approuvée ni la désignation d'un
+lecteur réel.
