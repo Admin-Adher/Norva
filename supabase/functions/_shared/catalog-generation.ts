@@ -94,6 +94,33 @@ export async function assertActiveCatalogGenerationCurrent(
   }
 }
 
+// Some ACTIVE-generation writes (notably a newly-visible title variant) bump
+// the account-wide visibility epoch in the same PostgreSQL transaction that
+// commits the row.  That monotone cache fence is allowed to advance without
+// changing which source generation owns the write.  Re-read the complete
+// server snapshot and adopt only that one field; every authority-bearing field
+// must remain byte-for-byte equal.  A concurrent topology/config/generation
+// change therefore still fails closed, while an unrelated source's epoch bump
+// can safely be joined at its latest monotone value.
+export async function adoptActiveCatalogUserVisibilityEpoch(
+  db: SupabaseGenerationClient,
+  sourceId: string,
+  userId: string,
+  expected: ActiveCatalogGeneration,
+): Promise<void> {
+  const current = await readActiveCatalogGenerationSnapshot(db, sourceId, userId);
+  if (
+    current.generationId !== expected.generationId ||
+    current.headRevision !== expected.headRevision ||
+    current.configRevision !== expected.configRevision ||
+    current.sourceVisibilityEpoch !== expected.sourceVisibilityEpoch ||
+    BigInt(current.userVisibilityEpoch) < BigInt(expected.userVisibilityEpoch)
+  ) {
+    throw new CatalogGenerationSupersededError();
+  }
+  expected.userVisibilityEpoch = current.userVisibilityEpoch;
+}
+
 export function catalogGenerationFields(
   context: CatalogGenerationWriteContext,
 ): JsonRecord {

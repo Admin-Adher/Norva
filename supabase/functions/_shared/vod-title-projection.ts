@@ -2,6 +2,7 @@ import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import {
   type ActiveCatalogGeneration,
   type BuildingCatalogGeneration,
+  adoptActiveCatalogUserVisibilityEpoch,
   catalogGenerationRpcFence,
   withCatalogGenerationRows,
 } from "./catalog-generation.ts";
@@ -329,7 +330,17 @@ export async function refreshVodTitleProjection(options: ProjectionOptions) {
       .from("cloud_title_variants")
       .upsert(chunk, { onConflict: "source_id,generation_id,item_type,external_id" });
     if (error) throw error;
-    await options.assertSourceCurrent?.();
+    // INSERTing a newly-visible active variant bumps the account-wide cache
+    // epoch in the same DB transaction.  Adopt only that monotone field after
+    // re-proving generation/head/config/source authority; otherwise the first
+    // attempt of every new batch commits successfully and then reports itself
+    // stale, forcing a wasteful duplicate retry.
+    await adoptActiveCatalogUserVisibilityEpoch(
+      options.db,
+      options.sourceId,
+      options.userId,
+      options.generation,
+    );
   }
 
   // Exact per-file track caches are shared across accounts by provider identity.

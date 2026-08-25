@@ -617,6 +617,51 @@ test('legacy physical writers use exact ABA overloads and fallback only when the
   assert.match(playback, /"norva_fanout_file_tracks_to_users_fenced"[\s\S]{0,300}isRollingRpcUnavailable\(error\)[\s\S]{0,200}"fanout_file_tracks_to_users"/);
 });
 
+test('active projection adopts only a monotone user visibility epoch after its own visible write', async () => {
+  const { adoptActiveCatalogUserVisibilityEpoch } = loadCatalogGenerationModule();
+  const expected = {
+    kind: 'active',
+    generationId: '11111111-1111-4111-8111-111111111111',
+    headRevision: '7',
+    configRevision: '8',
+    sourceVisibilityEpoch: '9',
+    userVisibilityEpoch: '10',
+  };
+  const snapshot = (overrides = {}) => ({
+    generationId: expected.generationId,
+    headRevision: expected.headRevision,
+    configRevision: expected.configRevision,
+    sourceVisibilityEpoch: expected.sourceVisibilityEpoch,
+    userVisibilityEpoch: '12',
+    isCatalogVisible: true,
+    ...overrides,
+  });
+  const db = {
+    async rpc() { return { data: snapshot(), error: null }; },
+  };
+
+  await adoptActiveCatalogUserVisibilityEpoch(db, 'source', 'user', expected);
+  assert.equal(expected.userVisibilityEpoch, '12');
+
+  await assert.rejects(
+    adoptActiveCatalogUserVisibilityEpoch({
+      async rpc() { return { data: snapshot({ sourceVisibilityEpoch: '10' }), error: null }; },
+    }, 'source', 'user', { ...expected }),
+    /Catalog generation changed/,
+  );
+  await assert.rejects(
+    adoptActiveCatalogUserVisibilityEpoch({
+      async rpc() { return { data: snapshot({ userVisibilityEpoch: '11' }), error: null }; },
+    }, 'source', 'user', { ...expected, userVisibilityEpoch: '12' }),
+    /Catalog generation changed/,
+  );
+
+  const projection = source(path.join(SHARED, 'vod-title-projection.ts'));
+  const variantWrite = projection.indexOf('.from("cloud_title_variants")');
+  const adopt = projection.indexOf('await adoptActiveCatalogUserVisibilityEpoch(', variantWrite);
+  assert.ok(variantWrite >= 0 && adopt > variantWrite, 'visible variant upsert must adopt its post-write user epoch');
+});
+
 test('isolated projection cannot reach active/shared metadata mutations', () => {
   const projection = source(path.join(SHARED, 'vod-title-projection.ts'));
   const start = projection.indexOf('export async function projectVodTitleGenerationIsolated');
