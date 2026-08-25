@@ -185,6 +185,20 @@ test('long source-sync responses bind the same guarded epoch emitted in the head
   assert.match(source, /"Access-Control-Expose-Headers": "x-norva-visibility-epoch"/);
 });
 
+test('service finalize-step adopts only its monotone response epoch before the final fence', () => {
+  const source = read('supabase/functions/norva-source-sync/index.ts');
+  const route = section(
+    source,
+    'if (segments[1] === "finalize-step" && segments[2])',
+    '\n      // Resumable-discovery continuation',
+  );
+  assert.match(source, /adoptActiveCatalogUserVisibilityEpoch/);
+  assert.match(
+    route,
+    /const responseSnapshot = await readCatalogAccessSnapshot[\s\S]*await finalizeCloudSource[\s\S]*await adoptActiveCatalogUserVisibilityEpoch\([\s\S]*responseSnapshot[\s\S]*await assertCatalogSnapshotCurrent[\s\S]*catalogVisibilityEpochs\.set\(req, responseSnapshot\.userVisibilityEpoch\)/,
+  );
+});
+
 test('series and source-sync response boundaries strip arbitrary provider and database details', () => {
   for (const [file, allowlistName] of [
     ['supabase/functions/norva-series-info/index.ts', 'SERIES_INFO_PUBLIC_ERROR_CODES'],

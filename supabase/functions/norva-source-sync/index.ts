@@ -29,6 +29,7 @@ import type { LiveCatalogItem } from "../_shared/live-catalog.ts";
 import { getEntitlementDecision, planFeatureEntitled, realPlanCode } from "../_shared/entitlements.ts";
 import { driveXtreamSyncToReady, freshSyncCursor, detectXtreamChange, enqueueImportNotification } from "../_shared/xtream-sync.ts";
 import {
+  adoptActiveCatalogUserVisibilityEpoch,
   assertActiveCatalogGenerationCurrent,
   type ActiveCatalogGeneration,
   catalogGenerationRpcFence,
@@ -182,6 +183,16 @@ Deno.serve(async (req) => {
           afterId: stringOr(url.searchParams.get("afterId"), ""),
           limit: Math.max(1, Math.min(2000, Number(url.searchParams.get("limit")) || 1500)),
         });
+        // A successful finalize batch may itself advance the account-wide cache
+        // epoch (for example, a bounded stale-version prune). Re-adopt only that
+        // monotone field while proving generation/config/source authority stayed
+        // identical, then perform the exact response-boundary assertion.
+        await adoptActiveCatalogUserVisibilityEpoch(
+          supabase,
+          segments[2],
+          String(src.user_id),
+          responseSnapshot,
+        );
         await assertCatalogSnapshotCurrent(segments[2], String(src.user_id), responseSnapshot, supabase);
         catalogVisibilityEpochs.set(req, responseSnapshot.userVisibilityEpoch);
         return json(req, result);
