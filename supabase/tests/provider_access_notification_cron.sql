@@ -37,14 +37,14 @@ alter table public.provider_account_activity
 update public.cloud_catalog_cache_epoch_v2_rollout
 set installed_at=installed_at-interval '8 days'
 where singleton and phase='installed';
+-- A logical production clone deliberately has a different pgsodium root key,
+-- so restored Vault ciphertext must not be decrypted there. Remove only this
+-- transaction-local copy before creating the rollback-scoped fixture secret.
+delete from vault.secrets where name='norva_cron_shared_secret';
 select vault.create_secret(
   'provider-access-notification-cron-fixture',
   'norva_cron_shared_secret',
   'rollback-scoped Provider Access cron proof'
-)
-where not exists (
-  select 1 from vault.decrypted_secrets
-  where name='norva_cron_shared_secret' and decrypted_secret <> ''
 );
 
 set local role service_role;
