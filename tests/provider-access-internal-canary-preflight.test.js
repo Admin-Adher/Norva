@@ -27,6 +27,34 @@ test('internal canary preflight binds runtime, source, legal and durable-work in
   assert.match(script, /legal_policy_reference=policy\.policy_reference/);
   assert.match(script, /cloud_source_credential_transition_jobs/);
   assert.match(script, /cloud_source_transitions/);
+  assert.match(script, /norva_catalog_background_owner_baseline_current/);
+  assert.match(script, /cloud_catalog_background_owner_build_jobs/);
+  assert.match(script, /cloud_catalog_background_mode_checkpoints/);
+  assert.match(script, /CURRENT_OWNER_BASELINES" != "\$OWNER_POPULATION/);
+  assert.match(script, /NONTERMINAL_OWNER_JOBS" != '0'/);
+  assert.match(script, /DEAD_OWNER_JOBS" != '0'/);
   assert.match(script, /provider_network_crons/);
   assert.match(script, /REFUSED_INTERNAL_CANARY_PREFLIGHT/);
+});
+
+test('catalog background owner operator is read-only by default and bounded when confirmed', () => {
+  const ownerWorker = fs.readFileSync(path.join(
+    __dirname, '..', 'ops', 'hetzner', 'scripts',
+    'run_catalog_background_owner_workflow.sh',
+  ), 'utf8');
+  assert.match(ownerWorker, /ACTION="\$\{1:-preflight\}"/);
+  assert.match(ownerWorker, /CONFIRM_DISPOSABLE_PROOF_DB/);
+  assert.match(ownerWorker, /ALLOW_NORVA_DISPOSABLE_CLONE/);
+  assert.match(ownerWorker, /norva-phase123-prod-clone-\[a-z0-9-\]\+-db/);
+  assert.match(ownerWorker, /status=WAIT_OWNER_WORKFLOW/);
+  assert.match(ownerWorker, /DRAIN_CATALOG_BACKGROUND_OWNER_WORKFLOW/);
+  assert.match(ownerWorker, /MAX_SLICES < 1 \|\| MAX_SLICES > 500/);
+  assert.match(ownerWorker, /SLICE_LIMIT < 100 \|\| SLICE_LIMIT > 5000/);
+  assert.match(ownerWorker, /norva_claim_catalog_background_owner_build_jobs/);
+  assert.match(ownerWorker, /norva_run_catalog_background_owner_build_job_slice/);
+  assert.match(ownerWorker, /norva_checkpoint_catalog_background_owner_build_job/);
+  const preflightBody = ownerWorker.slice(0, ownerWorker.indexOf(
+    'if [[ "${CONFIRM_CATALOG_BACKGROUND_OWNER_WORKFLOW:-}"',
+  ));
+  assert.doesNotMatch(preflightBody, /norva_(claim|run|checkpoint)_catalog_background_owner/);
 });

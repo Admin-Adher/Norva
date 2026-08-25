@@ -67,6 +67,27 @@ select concat_ws('|',
     where state not in ('completed','dead'))::text,
   (select count(*) from public.cloud_source_transitions
     where state not in ('completed','failed','cancelled'))::text,
+  (select count(*) from (
+    select distinct source.user_id
+    from public.cloud_sources source
+    where exists (
+      select 1 from public.cloud_source_catalog_heads head
+      where head.source_id=source.id and head.user_id=source.user_id
+    )
+  ) population)::text,
+  (select count(*) from (
+    select distinct source.user_id
+    from public.cloud_sources source
+    where exists (
+      select 1 from public.cloud_source_catalog_heads head
+      where head.source_id=source.id and head.user_id=source.user_id
+    ) and public.norva_catalog_background_owner_baseline_current(source.user_id)
+  ) current_owner)::text,
+  (select count(*) from public.cloud_catalog_background_owner_build_jobs
+    where state not in ('completed','dead'))::text,
+  (select count(*) from public.cloud_catalog_background_owner_build_jobs
+    where state='dead')::text,
+  (select count(*) from public.cloud_catalog_background_mode_checkpoints)::text,
   (select count(*) from cron.job where jobname in (
     'norva-provider-access-notifications','norva-provider-access-checks'
   ))::text
@@ -83,7 +104,9 @@ IFS='|' read -r NOW CACHE_PHASE CACHE_COMPLETED ROLLOUT_STAGE ROLLOUT_REVISION \
   COHORT_BASIS_POINTS FLAG_COUNT ENABLED_FLAGS INTERNAL_USERS ACTIVE_SOURCES \
   READY_SOURCES ACTIVE_REFRESH_READY WORKER_CRON_READY HEARTBEAT_AGE_SECONDS \
   P0_SAFE LEGAL_POLICY_CONFIGURED APPROVALS_MATCH NONTERMINAL_JOBS \
-  ACTIVE_TRANSITIONS PROVIDER_NETWORK_CRONS <<<"$SNAPSHOT"
+  ACTIVE_TRANSITIONS OWNER_POPULATION CURRENT_OWNER_BASELINES \
+  NONTERMINAL_OWNER_JOBS DEAD_OWNER_JOBS BACKGROUND_MODE_CHECKPOINTS \
+  PROVIDER_NETWORK_CRONS <<<"$SNAPSHOT"
 
 printf 'checked_at=%s\ncache_phase=%s\ncache_completed=%s\n' \
   "$NOW" "$CACHE_PHASE" "$CACHE_COMPLETED"
@@ -99,6 +122,10 @@ printf 'p0_safe=%s\nlegal_policy_configured=%s\napprovals_match=%s\n' \
   "$P0_SAFE" "$LEGAL_POLICY_CONFIGURED" "$APPROVALS_MATCH"
 printf 'nonterminal_jobs=%s\nactive_transitions=%s\nprovider_network_crons=%s\n' \
   "$NONTERMINAL_JOBS" "$ACTIVE_TRANSITIONS" "$PROVIDER_NETWORK_CRONS"
+printf 'owner_population=%s\ncurrent_owner_baselines=%s\n' \
+  "$OWNER_POPULATION" "$CURRENT_OWNER_BASELINES"
+printf 'nonterminal_owner_jobs=%s\ndead_owner_jobs=%s\nbackground_mode_checkpoints=%s\n' \
+  "$NONTERMINAL_OWNER_JOBS" "$DEAD_OWNER_JOBS" "$BACKGROUND_MODE_CHECKPOINTS"
 
 if [[ "$CACHE_PHASE" != 'complete' || "$CACHE_COMPLETED" != 'true' ]]; then
   echo 'status=WAIT_CACHE_EPOCH_V2'
@@ -112,7 +139,11 @@ if [[ "$ROLLOUT_STAGE" != 'off' || "$ROLLOUT_REVISION" != '2' \
    || "$HEARTBEAT_AGE_SECONDS" == 'NULL' || "$HEARTBEAT_AGE_SECONDS" -gt 120 \
    || "$P0_SAFE" != 'true' || "$LEGAL_POLICY_CONFIGURED" != 'true' \
    || "$APPROVALS_MATCH" != 'true' || "$NONTERMINAL_JOBS" != '0' \
-   || "$ACTIVE_TRANSITIONS" != '0' || "$PROVIDER_NETWORK_CRONS" != '0' ]]; then
+   || "$ACTIVE_TRANSITIONS" != '0' \
+   || "$CURRENT_OWNER_BASELINES" != "$OWNER_POPULATION" \
+   || "$NONTERMINAL_OWNER_JOBS" != '0' || "$DEAD_OWNER_JOBS" != '0' \
+   || "$BACKGROUND_MODE_CHECKPOINTS" != '3' \
+   || "$PROVIDER_NETWORK_CRONS" != '0' ]]; then
   echo 'status=REFUSED_INTERNAL_CANARY_PREFLIGHT' >&2
   exit 70
 fi
