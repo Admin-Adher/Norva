@@ -10,7 +10,9 @@ const ROOT = path.resolve(__dirname, '..');
 const read = (file) => fs.readFileSync(path.join(ROOT, file), 'utf8').replace(/\r\n?/g, '\n');
 const migration = read('supabase/migrations/20260824100000_catalog_cache_epoch_v2.sql');
 const observationGateMigration = read('supabase/migrations/20260824171000_catalog_cache_epoch_v2_minimum_observation_gate.sql');
+const waiverMigration = read('supabase/migrations/20260825190000_catalog_cache_epoch_v2_break_glass_waiver.sql');
 const productionGate = read('ops/hetzner/scripts/run_provider_access_production_activation_gate.sh');
+const waiverGate = read('ops/hetzner/scripts/run_catalog_cache_epoch_v2_break_glass_waiver.sh');
 const manifest = read('docs/audits/provider-access-lifecycle-2026-08-22/13-catalog-cache-epoch-v2-manifest.md');
 const manifestHash = crypto.createHash('sha256').update(manifest, 'utf8').digest('hex');
 
@@ -70,4 +72,59 @@ test('the production operator path is read-only by default and needs exact confi
   assert.match(productionGate, /CONFIRM_PRODUCTION_ACTIVATION:-/);
   assert.match(productionGate, /COMPLETE_CACHE_EPOCH_V2_AFTER_7D/);
   assert.match(productionGate, new RegExp(manifestHash));
+});
+
+test('the normal seven-day database gate remains unchanged by the break-glass migration', () => {
+  assert.doesNotMatch(
+    waiverMigration,
+    /create or replace function public\.norva_complete_catalog_cache_epoch_v2_rollout/,
+    'the waiver must not weaken or replace the normal completion RPC',
+  );
+  assert.match(observationGateMigration, /clock_timestamp\(\) < v_not_before/);
+  assert.match(observationGateMigration, /reason=observation_window;not_before=/);
+});
+
+test('the break-glass path is a separate immutable and least-privilege contract', () => {
+  assert.match(waiverMigration, /create table public\.cloud_catalog_cache_epoch_v2_waivers/);
+  assert.match(waiverMigration, /enable row level security/);
+  assert.match(waiverMigration, /force row level security/);
+  assert.match(
+    waiverMigration,
+    /revoke all on table public\.cloud_catalog_cache_epoch_v2_waivers[\s\S]*public, anon, authenticated, service_role/,
+  );
+  assert.match(waiverMigration, /before update or delete[\s\S]*waiver_immutable/);
+  assert.match(
+    waiverMigration,
+    /revoke all on function public\.norva_waive_catalog_cache_epoch_v2_observation\([\s\S]*from public, anon, authenticated/,
+  );
+  assert.match(waiverMigration, /grant execute on function public\.norva_waive_catalog_cache_epoch_v2_observation\([\s\S]*to service_role/);
+});
+
+test('the break-glass RPC is CAS-bound, fail-closed and truthfully audited', () => {
+  assert.match(waiverMigration, /WAIVE_CACHE_EPOCH_V2_OBSERVATION_FOR_AD_LAUNCH/g);
+  assert.match(waiverMigration, /v_cohort\.revision <> p_expected_rollout_revision/);
+  assert.match(waiverMigration, /v_cohort\.stage <> 'off'/);
+  assert.match(waiverMigration, /v_flag_count <> 9 or v_enabled_flags <> 0/);
+  assert.match(waiverMigration, /v_provider_crons <> 0/);
+  assert.match(waiverMigration, /norva_assert_provider_access_rollout_safe\(\)/);
+  assert.match(waiverMigration, /for update;[\s\S]*v_not_before := v_cache\.installed_at \+ interval '7 days'/);
+  assert.match(waiverMigration, /waived_at < normal_not_before/);
+  assert.match(waiverMigration, /global_epoch_after = global_epoch_before \+ 1/);
+  assert.match(waiverMigration, /idempotentReplay', true/);
+  assert.match(waiverMigration, /reason=completion_conflict/);
+  assert.match(waiverMigration, /reason=normal_completion_required/);
+  assert.doesNotMatch(waiverMigration, /set\s+installed_at\s*=/i);
+});
+
+test('the break-glass operator is read-only by default and requires all literal approvals', () => {
+  assert.match(waiverGate, /ACTION="\$\{1:-preflight\}"/);
+  assert.match(waiverGate, /DB_CONTAINER" != 'norva-db'/);
+  assert.match(waiverGate, /READY_FOR_EXPLICIT_BREAK_GLASS_WAIVER/);
+  assert.match(waiverGate, /EXPECTED_ROLLOUT_REVISION/);
+  assert.match(waiverGate, /WAIVER_APPROVAL_REFERENCE/);
+  assert.match(waiverGate, /WAIVER_RISK_REASON/);
+  assert.match(waiverGate, /WAIVER_ACTOR/);
+  assert.match(waiverGate, /CONFIRM_CACHE_EPOCH_WAIVER/);
+  assert.match(waiverGate, /WAIVE_CACHE_EPOCH_V2_OBSERVATION_FOR_AD_LAUNCH/);
+  assert.match(waiverGate, new RegExp(manifestHash));
 });
