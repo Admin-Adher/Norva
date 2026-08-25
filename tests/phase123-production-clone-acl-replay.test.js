@@ -38,12 +38,18 @@ test('clone acceptance requires a canonical post-replay ACL diff', () => {
 });
 
 test('current production state is rehearsed without replaying an installed migration', () => {
+  assert.match(script, /observation_gate_present/);
   assert.match(script, /t\) REHEARSAL_MODE="current-state"/);
   assert.match(
     script,
-    /if test "\$REHEARSAL_MODE" = incremental; then\s+apply_range "\$PREVIOUS_PROVIDER_ACCESS_HEAD"/,
+    /if test "\$REHEARSAL_MODE" = incremental; then\s+apply_range "\$INCREMENTAL_LOWER_HEAD"/,
   );
+  assert.match(script, /20260825012611_provider_access_analytics_delivered_state_fix_v1\.sql/);
+  assert.match(script, /provider_access_rollout_observation_install\.sql/);
   assert.match(script, /policy_state_sha256/);
   assert.match(script, /rollout_state_sha256/);
   assert.match(script, /internal-user count changed/);
+  assert.match(script, /observation row count changed/);
+  assert.match(script, /cache epoch state changed/);
+  assert.match(script, /Provider Access flag state changed/);
 });

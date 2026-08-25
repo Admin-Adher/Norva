@@ -1,6 +1,6 @@
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(14);
+select plan(16);
 
 select has_function(
   'public', 'norva_provider_access_analytics_dashboard', array['integer'],
@@ -68,6 +68,39 @@ insert into public.cloud_sources (
   ('98800000-0000-4000-8000-000000000101','98800000-0000-4000-8000-000000000001','xtream','Analytics A','fixture-a','{"serverHost":"a.invalid"}'::jsonb,'ready',1),
   ('98800000-0000-4000-8000-000000000102','98800000-0000-4000-8000-000000000001','xtream','Analytics B','fixture-b','{"serverHost":"b.invalid"}'::jsonb,'ready',1)
 on conflict (id) do nothing;
+
+insert into public.cloud_source_access_cycles(
+  id,user_id,source_id,started_on,expires_on,origin,status,
+  idempotency_key,request_fingerprint
+) values (
+  '98800000-0000-4000-8000-000000000301',
+  '98800000-0000-4000-8000-000000000001',
+  '98800000-0000-4000-8000-000000000101',
+  current_date,current_date+7,'user_entered','active',
+  'analytics-delivered-cycle-988',repeat('8',64)
+);
+set local session_replication_role = replica;
+insert into public.cloud_provider_access_notifications(
+  id,user_id,source_id,access_cycle_id,event_kind,channel,state,
+  scheduled_at,delivery_key,next_attempt_at,completion_code,delivered_at
+) values (
+  '98800000-0000-4000-8000-000000000401',
+  '98800000-0000-4000-8000-000000000001',
+  '98800000-0000-4000-8000-000000000101',
+  '98800000-0000-4000-8000-000000000301',
+  'expiry_7d','email','delivered',clock_timestamp(),
+  'norva-provider-access-98800000-0000-4000-8000-000000000401',
+  clock_timestamp(),'RESEND_ACCEPTED',clock_timestamp()
+);
+set local session_replication_role = origin;
+select is(
+  (public.norva_provider_access_analytics_dashboard(30)#>>'{notifications,7d_sent}')::integer,
+  1,'a delivered 7-day reminder is counted'
+);
+select is(
+  (public.norva_provider_access_analytics_dashboard(30)#>>'{notifications,email_delivered}')::integer,
+  1,'a delivered email is counted'
+);
 
 set local session_replication_role = replica;
 insert into public.cloud_source_transitions (

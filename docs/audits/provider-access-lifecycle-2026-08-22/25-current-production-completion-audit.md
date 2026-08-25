@@ -30,7 +30,7 @@ channels and progressive cohort observations have all passed.
 | 13 — push | Data-only FCM contract and fixed deep link proved. Signed Phone 1.3.9 AAB exists. | Upload/release through the authenticated Google Play Console, then real-device smoke. |
 | 14 — in-app | Owner-scoped route and explanatory calendar UX proved and deployed dormant. | Internal authenticated runtime observation. |
 | 15 — analytics | Aggregate-only analytics and P0 staging-visibility alarm proved. | Establish live internal baseline without P0 breach. |
-| 16 — rollout | Control plane, CAS races, channel independence, rollback/OFF and operator scripts proved and production-installed. | Execute `internal -> 1% -> 5% -> 20% -> 50% -> 100%` with an observation/approval record at each rung. |
+| 16 — rollout | Control plane, CAS races, channel independence, rollback/OFF and operator scripts proved and production-installed. A revision-bound durable observation gate is DB/concurrency-proved and pending fresh-clone installation proof. | Install the observation gate dormant, then execute `internal -> 1% -> 5% -> 20% -> 50% -> 100%` with the server-owned observation window and explicit approval at each rung. |
 
 ## Production legal policy
 
@@ -141,6 +141,12 @@ browser has no authenticated Play Console session.
 4. Activate the internal cohort, keep external channels independently OFF,
    perform the real functional/caching/rollback canary and record metrics.
 5. Approve and observe every progressive rung before the next promotion.
+
+The durable Phase 16 observation gate and notification analytics correction are
+documented in `26-phase16-rollout-observation-gate-proof.md`. Their repository
+and disposable-PostgreSQL proofs are green; they are not yet represented as
+installed in the production state described above until a fresh clone, dormant
+installer and post-install clone all pass.
 
 Until all five are evidenced, implementation and dormant production
 installation are proved, but the requested 100% production rollout is not.

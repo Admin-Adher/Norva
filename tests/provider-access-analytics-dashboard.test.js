@@ -8,6 +8,7 @@ const path = require('node:path');
 const root = path.join(__dirname, '..');
 const read = (relativePath) => fs.readFileSync(path.join(root, relativePath), 'utf8');
 const migration = read('supabase/migrations/20260824150000_provider_access_analytics_dashboard_v1.sql');
+const deliveredStateFix = read('supabase/migrations/20260825012611_provider_access_analytics_delivered_state_fix_v1.sql');
 const adminEdge = read('supabase/functions/norva-admin/index.ts');
 const adminPage = read('public/js/pages/AdminPage.js');
 const app = read('public/js/app.js');
@@ -51,4 +52,9 @@ test('the internal dashboard is admin-JWT-gated and renders P0 distinctly', () =
   assert.match(adminPage, /p0Active[\s\S]*P0 · staging visible/);
   assert.match(adminPage, /agrégats uniquement, aucun identifiant utilisateur ou credential/);
   assert.match(app, /AdminPage\.js\?v=892adb93ca/);
+});
+
+test('notification delivery aggregates use the real outbox terminal state', () => {
+  assert.doesNotMatch(deliveredStateFix, /notification\.state = 'completed'/);
+  assert.match(deliveredStateFix, /notification\.state = 'delivered'/);
 });

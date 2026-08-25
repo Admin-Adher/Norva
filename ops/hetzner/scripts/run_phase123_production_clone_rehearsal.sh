@@ -107,7 +107,8 @@ online_index_head=20260823182700_series_inventory_generation_parent_natural_fk.s
 phase3_database_head=20260823194000_replacement_promotion_proof_account_delete.sql
 cache_epoch_head=20260824100000_catalog_cache_epoch_v2.sql
 previous_provider_access_head=20260824174000_legal_billing_archive_acl_hardening.sql
-current_provider_access_head=20260825001459_provider_access_notification_cron_v1.sql
+notification_provider_access_head=20260825001459_provider_access_notification_cron_v1.sql
+current_provider_access_head=20260825012611_provider_access_analytics_delivered_state_fix_v1.sql
 EOF
 
 baseline_sql() {
@@ -249,10 +250,20 @@ select 'previous_cache_gate',to_regprocedure('public.norva_complete_catalog_cach
 select 'legal_policy_v2',to_regprocedure('public.norva_configure_legal_billing_archive_policy(bigint,text,text,integer,integer,integer,text)') is not null;
 select 'legal_access_v1',to_regprocedure('public.norva_read_legal_billing_archive(text,text,text,text)') is not null;
 select 'notification_cron_v1',to_regprocedure('public.norva_install_provider_access_notification_cron()') is not null;
+select 'observation_gate_v1',to_regprocedure('public.norva_start_provider_access_rollout_observation(bigint,text)') is not null;
 select 'policy_rows',count(*) from public.legal_billing_archive_retention_policy;
 select 'archive_rows',count(*) from public.legal_billing_archive;
 select 'policy_events',count(*) from public.legal_billing_archive_policy_events;
 select 'internal_users',count(*) from public.cloud_provider_access_rollout_internal_users;
+select 'provider_crons',count(*) from cron.job where jobname in ('norva-provider-access-notifications','norva-provider-access-checks');
+select 'flags',count(*),count(*) filter(where enabled) from public.admin_feature_flags where key in (
+  'provider_access_v1_enabled','provider_access_auto_detection_v1_enabled',
+  'provider_access_notifications_v1_enabled','provider_access_email_v1_enabled',
+  'provider_access_push_v1_enabled','provider_access_in_app_v1_enabled',
+  'provider_access_visibility_v1_enabled','provider_credential_transition_v1_enabled',
+  'provider_replacement_v1_enabled'
+);
+select 'cache_state',phase,completed_at is not null from public.cloud_catalog_cache_epoch_v2_rollout where singleton;
 select 'policy_state_sha256',encode(extensions.digest(coalesce((
   select jsonb_build_object(
     'revision',revision,'reference',policy_reference,'years',retention_years,
@@ -275,9 +286,24 @@ SQL
   grep -qx $'legal_access_v1\tt' "$REPORT_DIR/production-incremental-preconditions.tsv" \
     || fail "legal archive access v1 is missing from the required incremental boundary"
   notification_cron_present="$(awk -F '\t' '$1=="notification_cron_v1"{print $2}' "$REPORT_DIR/production-incremental-preconditions.tsv")"
+  observation_gate_present="$(awk -F '\t' '$1=="observation_gate_v1"{print $2}' "$REPORT_DIR/production-incremental-preconditions.tsv")"
+  if test "$observation_gate_present" = t; then
+    docker exec -i "$PRODUCTION_CONTAINER" psql -X -At -F $'\t' -v ON_ERROR_STOP=1 \
+      -U supabase_admin -d postgres \
+      -c "select 'observation_rows',count(*) from public.cloud_provider_access_rollout_observations" \
+      >>"$REPORT_DIR/production-incremental-preconditions.tsv"
+  else
+    printf 'observation_rows\t0\n' >>"$REPORT_DIR/production-incremental-preconditions.tsv"
+  fi
   case "$notification_cron_present" in
-    f) ;;
-    t) REHEARSAL_MODE="current-state" ;;
+    f) INCREMENTAL_LOWER_HEAD="20260824174000_legal_billing_archive_acl_hardening.sql" ;;
+    t)
+      case "$observation_gate_present" in
+        f) INCREMENTAL_LOWER_HEAD="20260825001459_provider_access_notification_cron_v1.sql" ;;
+        t) REHEARSAL_MODE="current-state" ;;
+        *) fail "observation gate v1 precondition is invalid" ;;
+      esac
+      ;;
     *) fail "notification cron v1 precondition is invalid" ;;
   esac
 fi
@@ -467,15 +493,18 @@ CONTRACTION="20260823180000_provider_catalog_generation_online_rollout.sql"
 ONLINE_HEAD="20260823182700_series_inventory_generation_parent_natural_fk.sql"
 CURRENT_HEAD="20260823194000_replacement_promotion_proof_account_delete.sql"
 PREVIOUS_PROVIDER_ACCESS_HEAD="20260824174000_legal_billing_archive_acl_hardening.sql"
-CURRENT_PROVIDER_ACCESS_HEAD="20260825001459_provider_access_notification_cron_v1.sql"
+NOTIFICATION_PROVIDER_ACCESS_HEAD="20260825001459_provider_access_notification_cron_v1.sql"
+CURRENT_PROVIDER_ACCESS_HEAD="20260825012611_provider_access_analytics_delivered_state_fix_v1.sql"
 
 if test "$REHEARSAL_MODE" = incremental || test "$REHEARSAL_MODE" = current-state; then
   if test "$REHEARSAL_MODE" = incremental; then
-    apply_range "$PREVIOUS_PROVIDER_ACCESS_HEAD" "$CURRENT_PROVIDER_ACCESS_HEAD" provider-cron-incremental
+    apply_range "$INCREMENTAL_LOWER_HEAD" "$CURRENT_PROVIDER_ACCESS_HEAD" provider-access-incremental
   fi
 
   for test_name in \
-    provider_access_notification_cron.sql
+    provider_access_notification_cron.sql \
+    provider_access_rollout_observation_install.sql \
+    provider_access_analytics_dashboard.sql
   do
     output="$REPORT_DIR/test-${test_name%.sql}.log"
     printf 'TEST %s %s\n' "$(date -u +%FT%TZ)" "$test_name" | tee -a "$REPORT_DIR/timeline.log"
@@ -489,6 +518,7 @@ if test "$REHEARSAL_MODE" = incremental || test "$REHEARSAL_MODE" = current-stat
 select 'policy_v2',to_regprocedure('public.norva_configure_legal_billing_archive_policy(bigint,text,text,integer,integer,integer,text)') is not null;
 select 'access_v1',to_regprocedure('public.norva_read_legal_billing_archive(text,text,text,text)') is not null;
 select 'notification_cron_v1',to_regprocedure('public.norva_install_provider_access_notification_cron()') is not null;
+select 'observation_gate_v1',to_regprocedure('public.norva_start_provider_access_rollout_observation(bigint,text)') is not null;
 select 'provider_crons',count(*) from cron.job where jobname in ('norva-provider-access-notifications','norva-provider-access-checks');
 select 'policy_rows',count(*) from public.legal_billing_archive_retention_policy;
 select 'archive_rows',count(*) from public.legal_billing_archive;
@@ -497,6 +527,7 @@ select 'access_grants',count(*) from public.legal_billing_archive_access_grants;
 select 'access_events',count(*) from public.legal_billing_archive_access_events;
 select 'grant_events',count(*) from public.legal_billing_archive_access_grant_events;
 select 'internal_users',count(*) from public.cloud_provider_access_rollout_internal_users;
+select 'observation_rows',count(*) from public.cloud_provider_access_rollout_observations;
 select 'policy_state_sha256',encode(extensions.digest(coalesce((
   select jsonb_build_object(
     'revision',revision,'reference',policy_reference,'years',retention_years,
@@ -524,29 +555,38 @@ SQL
   grep -qx $'policy_v2\tt' "$REPORT_DIR/final-invariants.tsv" || fail "legal policy v2 is missing"
   grep -qx $'access_v1\tt' "$REPORT_DIR/final-invariants.tsv" || fail "legal archive access v1 is missing"
   grep -qx $'notification_cron_v1\tt' "$REPORT_DIR/final-invariants.tsv" || fail "notification cron v1 is missing"
-  grep -qx $'provider_crons\t0' "$REPORT_DIR/final-invariants.tsv" || fail "rehearsal persisted a Provider Access cron"
+  grep -qx $'observation_gate_v1\tt' "$REPORT_DIR/final-invariants.tsv" || fail "rollout observation gate v1 is missing"
   grep -qx $'access_grants\t0' "$REPORT_DIR/final-invariants.tsv" || fail "rehearsal persisted a legal-reader grant"
   grep -qx $'access_events\t0' "$REPORT_DIR/final-invariants.tsv" || fail "rehearsal persisted an access event"
   grep -qx $'grant_events\t0' "$REPORT_DIR/final-invariants.tsv" || fail "rehearsal persisted a grant event"
-  grep -qx $'flags\t9\t0' "$REPORT_DIR/final-invariants.tsv" || fail "Provider Access flags are not all OFF"
-  grep -Eq $'^rollout\toff\t[0-9]+$' "$REPORT_DIR/final-invariants.tsv" || fail "Provider Access rollout is not OFF"
-  grep -qx $'cache_epoch\tinstalled\tf' "$REPORT_DIR/final-invariants.tsv" || fail "cache epoch observation gate changed"
   before_policy="$(awk -F '\t' '$1=="policy_rows"{print $2}' "$REPORT_DIR/production-incremental-preconditions.tsv")"
   before_archive="$(awk -F '\t' '$1=="archive_rows"{print $2}' "$REPORT_DIR/production-incremental-preconditions.tsv")"
   before_policy_events="$(awk -F '\t' '$1=="policy_events"{print $2}' "$REPORT_DIR/production-incremental-preconditions.tsv")"
   before_internal_users="$(awk -F '\t' '$1=="internal_users"{print $2}' "$REPORT_DIR/production-incremental-preconditions.tsv")"
+  before_observation_rows="$(awk -F '\t' '$1=="observation_rows"{print $2}' "$REPORT_DIR/production-incremental-preconditions.tsv")"
+  before_provider_crons="$(awk -F '\t' '$1=="provider_crons"{print $2}' "$REPORT_DIR/production-incremental-preconditions.tsv")"
+  before_flags="$(awk -F '\t' '$1=="flags"{print $2"|"$3}' "$REPORT_DIR/production-incremental-preconditions.tsv")"
+  before_cache_state="$(awk -F '\t' '$1=="cache_state"{print $2"|"$3}' "$REPORT_DIR/production-incremental-preconditions.tsv")"
   before_policy_state="$(awk -F '\t' '$1=="policy_state_sha256"{print $2}' "$REPORT_DIR/production-incremental-preconditions.tsv")"
   before_rollout_state="$(awk -F '\t' '$1=="rollout_state_sha256"{print $2}' "$REPORT_DIR/production-incremental-preconditions.tsv")"
   after_policy="$(awk -F '\t' '$1=="policy_rows"{print $2}' "$REPORT_DIR/final-invariants.tsv")"
   after_archive="$(awk -F '\t' '$1=="archive_rows"{print $2}' "$REPORT_DIR/final-invariants.tsv")"
   after_policy_events="$(awk -F '\t' '$1=="policy_events"{print $2}' "$REPORT_DIR/final-invariants.tsv")"
   after_internal_users="$(awk -F '\t' '$1=="internal_users"{print $2}' "$REPORT_DIR/final-invariants.tsv")"
+  after_observation_rows="$(awk -F '\t' '$1=="observation_rows"{print $2}' "$REPORT_DIR/final-invariants.tsv")"
+  after_provider_crons="$(awk -F '\t' '$1=="provider_crons"{print $2}' "$REPORT_DIR/final-invariants.tsv")"
+  after_flags="$(awk -F '\t' '$1=="flags"{print $2"|"$3}' "$REPORT_DIR/final-invariants.tsv")"
+  after_cache_state="$(awk -F '\t' '$1=="cache_epoch"{print $2"|"$3}' "$REPORT_DIR/final-invariants.tsv")"
   after_policy_state="$(awk -F '\t' '$1=="policy_state_sha256"{print $2}' "$REPORT_DIR/final-invariants.tsv")"
   after_rollout_state="$(awk -F '\t' '$1=="rollout_state_sha256"{print $2}' "$REPORT_DIR/final-invariants.tsv")"
   test "$before_policy" = "$after_policy" || fail "policy row count changed: $before_policy -> $after_policy"
   test "$before_archive" = "$after_archive" || fail "archive row count changed: $before_archive -> $after_archive"
   test "$before_policy_events" = "$after_policy_events" || fail "policy event count changed: $before_policy_events -> $after_policy_events"
   test "$before_internal_users" = "$after_internal_users" || fail "internal-user count changed: $before_internal_users -> $after_internal_users"
+  test "$before_observation_rows" = "$after_observation_rows" || fail "observation row count changed: $before_observation_rows -> $after_observation_rows"
+  test "$before_provider_crons" = "$after_provider_crons" || fail "Provider Access cron count changed: $before_provider_crons -> $after_provider_crons"
+  test "$before_flags" = "$after_flags" || fail "Provider Access flag state changed: $before_flags -> $after_flags"
+  test "$before_cache_state" = "$after_cache_state" || fail "cache epoch state changed: $before_cache_state -> $after_cache_state"
   test "$before_policy_state" = "$after_policy_state" || fail "legal policy state differs from production"
   test "$before_rollout_state" = "$after_rollout_state" || fail "rollout state differs from production"
 
@@ -715,6 +755,9 @@ TESTS=(
   account_deletion_legal_billing_retention_smoke.sql
   legal_billing_archive_access_smoke.sql
   provider_access_notification_cron.sql
+  provider_access_progressive_rollout.sql
+  provider_access_rollout_observation_install.sql
+  provider_access_analytics_dashboard.sql
   account_deletion_paywall_analytics_smoke.sql
   provider_credential_promotion_cancel_concurrency.sql
   provider_credential_swap_account_delete_concurrency.sql

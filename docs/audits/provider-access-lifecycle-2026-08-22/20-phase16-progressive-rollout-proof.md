@@ -79,6 +79,20 @@ Real activation remains blocked until all of the following are true:
 
 No phase may bypass these gates by directly changing feature-flag booleans.
 
+## Durable observation addendum
+
+The original synchronous P0 preflight is now supplemented by a durable,
+revision-bound observation decision. Document
+`26-phase16-rollout-observation-gate-proof.md` records the server-owned windows,
+metric thresholds, direct-DML revocation, real two-session start/completion/
+promotion races and the analytics `delivered`-state correction. Its current
+database proofs are `43/43` for progressive rollout and `16/16` for analytics.
+
+Every upward transition after `OFF -> INTERNAL` now requires an accepted
+observation for the exact current revision and stage. Changing the revision or
+channel configuration invalidates a collecting observation. This closes the
+remaining scheduler/operator bypass without activating production.
+
 ## Production operator gate
 
 `ops/hetzner/scripts/run_provider_access_rollout_gate.sh` makes the production

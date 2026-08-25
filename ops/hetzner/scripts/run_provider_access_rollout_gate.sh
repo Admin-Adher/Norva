@@ -9,9 +9,9 @@ if [[ "$DB_CONTAINER" != 'norva-db' ]]; then
   exit 64
 fi
 case "$ACTION" in
-  preflight|configure-gates|set-internal-user|set-stage|set-channels|install-notification-cron|install-detection-cron|remove-provider-crons) ;;
+  preflight|observation-status|configure-gates|set-internal-user|set-stage|start-observation|complete-observation|set-channels|install-notification-cron|install-detection-cron|remove-provider-crons) ;;
   *)
-    echo 'usage: run_provider_access_rollout_gate.sh [preflight|configure-gates|set-internal-user|set-stage|set-channels|install-notification-cron|install-detection-cron|remove-provider-crons]' >&2
+    echo 'usage: run_provider_access_rollout_gate.sh [preflight|observation-status|configure-gates|set-internal-user|set-stage|start-observation|complete-observation|set-channels|install-notification-cron|install-detection-cron|remove-provider-crons]' >&2
     exit 64
     ;;
 esac
@@ -87,10 +87,54 @@ print_state() {
     "$internal_users" "$enabled_flags" "$external_channels" "$p0_safe" "$provider_crons"
 }
 
+observation_state() {
+  psql_admin -AtF '|' <<'SQL'
+select coalesce((
+  select concat_ws('|',
+    observation.id::text,
+    observation.rollout_revision::text,
+    observation.stage,
+    observation.state,
+    observation.started_at::text,
+    observation.not_before::text,
+    coalesce(observation.completed_at::text,'NULL'),
+    observation.threshold_contract,
+    observation.decision_reasons::text,
+    coalesce(observation.evidence_reference,'NULL')
+  )
+  from public.cloud_provider_access_rollout_observations observation
+  order by observation.created_at desc, observation.id desc
+  limit 1
+),'NONE');
+SQL
+}
+
+print_observation_state() {
+  local snapshot="$1"
+  if [[ "$snapshot" == 'NONE' ]]; then
+    echo 'observation=NONE'
+    return
+  fi
+  local id revision stage status started_at not_before completed_at contract reasons evidence
+  IFS='|' read -r id revision stage status started_at not_before completed_at \
+    contract reasons evidence <<<"$snapshot"
+  printf 'observation_id=%s\nobservation_revision=%s\nobservation_stage=%s\nobservation_state=%s\n' \
+    "$id" "$revision" "$stage" "$status"
+  printf 'observation_started_at=%s\nobservation_not_before=%s\nobservation_completed_at=%s\n' \
+    "$started_at" "$not_before" "$completed_at"
+  printf 'observation_contract=%s\nobservation_reasons=%s\nobservation_evidence=%s\n' \
+    "$contract" "$reasons" "$evidence"
+}
+
 readonly BEFORE="$(state)"
 print_state "$BEFORE"
 if [[ "$ACTION" == 'preflight' ]]; then
   echo 'status=READ_ONLY_PREFLIGHT'
+  exit 0
+fi
+if [[ "$ACTION" == 'observation-status' ]]; then
+  print_observation_state "$(observation_state)"
+  echo 'status=READ_ONLY_OBSERVATION_STATUS'
   exit 0
 fi
 
@@ -184,6 +228,54 @@ set local role service_role;
 select public.norva_set_provider_access_rollout_stage(
   :'expected_revision'::bigint,:'stage',:'note',:'actor'
 );
+    commit;
+SQL
+    ;;
+  start-observation)
+    : "${EXPECTED_ROLLOUT_REVISION:?EXPECTED_ROLLOUT_REVISION is required}"
+    : "${ROLLOUT_ACTOR:?ROLLOUT_ACTOR is required}"
+    [[ "$EXPECTED_ROLLOUT_REVISION" =~ ^[0-9]+$ ]]
+    valid_text "$ROLLOUT_ACTOR" 3 200
+    if [[ "${CONFIRM_ROLLOUT_OBSERVATION:-}" != 'START_PROVIDER_ACCESS_ROLLOUT_OBSERVATION' ]]; then
+      echo 'status=REFUSED_MISSING_EXPLICIT_OBSERVATION_CONFIRMATION' >&2
+      exit 64
+    fi
+    psql_admin -v expected_revision="$EXPECTED_ROLLOUT_REVISION" \
+      -v actor="$ROLLOUT_ACTOR" <<'SQL'
+begin;
+set local role service_role;
+select public.norva_start_provider_access_rollout_observation(
+  :'expected_revision'::bigint,:'actor'
+);
+commit;
+SQL
+    ;;
+  complete-observation)
+    : "${OBSERVATION_ID:?OBSERVATION_ID is required}"
+    : "${EXPECTED_ROLLOUT_REVISION:?EXPECTED_ROLLOUT_REVISION is required}"
+    : "${OBSERVATION_EVIDENCE_REFERENCE:?OBSERVATION_EVIDENCE_REFERENCE is required}"
+    : "${ROLLOUT_APPROVAL_NOTE:?ROLLOUT_APPROVAL_NOTE is required}"
+    : "${ROLLOUT_ACTOR:?ROLLOUT_ACTOR is required}"
+    [[ "$OBSERVATION_ID" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$ ]]
+    [[ "$EXPECTED_ROLLOUT_REVISION" =~ ^[0-9]+$ ]]
+    valid_text "$OBSERVATION_EVIDENCE_REFERENCE" 12 1000
+    valid_text "$ROLLOUT_APPROVAL_NOTE" 12 1000
+    valid_text "$ROLLOUT_ACTOR" 3 200
+    if [[ "${CONFIRM_ROLLOUT_OBSERVATION:-}" != 'COMPLETE_PROVIDER_ACCESS_ROLLOUT_OBSERVATION' ]]; then
+      echo 'status=REFUSED_MISSING_EXPLICIT_OBSERVATION_CONFIRMATION' >&2
+      exit 64
+    fi
+    psql_admin -v observation_id="$OBSERVATION_ID" \
+      -v expected_revision="$EXPECTED_ROLLOUT_REVISION" \
+      -v evidence_reference="$OBSERVATION_EVIDENCE_REFERENCE" \
+      -v approval_note="$ROLLOUT_APPROVAL_NOTE" \
+      -v actor="$ROLLOUT_ACTOR" <<'SQL'
+begin;
+set local role service_role;
+select public.norva_complete_provider_access_rollout_observation(
+  :'observation_id'::uuid,:'expected_revision'::bigint,
+  :'evidence_reference',:'approval_note',:'actor'
+);
 commit;
 SQL
     ;;
@@ -269,4 +361,7 @@ esac
 
 readonly AFTER="$(state)"
 print_state "$AFTER"
+if [[ "$ACTION" == 'start-observation' || "$ACTION" == 'complete-observation' ]]; then
+  print_observation_state "$(observation_state)"
+fi
 echo 'status=COMPLETED'
