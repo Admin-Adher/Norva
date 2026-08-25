@@ -135,7 +135,7 @@ baseline_sql | docker exec -i "$PRODUCTION_CONTAINER" psql -X -At -F $'\t' -v ON
 # so a private production object can otherwise become broad only inside the
 # clone. Freeze and later replay the exact effective public-schema ACL for
 # PUBLIC plus the three API roles, then compare canonical snapshots.
-docker exec "$PRODUCTION_CONTAINER" psql -X -At -v ON_ERROR_STOP=1 \
+docker exec -i "$PRODUCTION_CONTAINER" psql -X -At -v ON_ERROR_STOP=1 \
   -U supabase_admin -d postgres <<'SQL' >"$REPORT_DIR/production-api-acl-replay.sql"
 select 'begin;';
 select format(

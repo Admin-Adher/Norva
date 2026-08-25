@@ -27,6 +27,7 @@ test('ACL replay revokes inherited bootstrap defaults before exact grants', () =
   assert.match(script, /revoke all on %s %I\.%I\(%s\) from public,anon,authenticated,service_role/);
   assert.match(script, /pg_catalog\.aclexplode/);
   assert.match(script, /with grant option/);
+  assert.match(script, /docker exec -i "\$PRODUCTION_CONTAINER" psql[\s\S]*production-api-acl-replay\.sql/);
 });
 
 test('clone acceptance requires a canonical post-replay ACL diff', () => {
