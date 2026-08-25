@@ -660,6 +660,11 @@ test('active projection adopts only a monotone user visibility epoch after its o
   const variantWrite = projection.indexOf('.from("cloud_title_variants")');
   const adopt = projection.indexOf('await adoptActiveCatalogUserVisibilityEpoch(', variantWrite);
   assert.ok(variantWrite >= 0 && adopt > variantWrite, 'visible variant upsert must adopt its post-write user epoch');
+  assert.equal(
+    projection.match(/await adoptActiveCatalogUserVisibilityEpoch\(/g)?.length,
+    6,
+    'every projection write boundary must re-prove authority while adopting only the monotone user epoch',
+  );
 });
 
 test('isolated projection cannot reach active/shared metadata mutations', () => {

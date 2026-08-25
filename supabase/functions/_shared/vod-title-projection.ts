@@ -308,7 +308,12 @@ export async function refreshVodTitleProjection(options: ProjectionOptions) {
       .upsert(chunk, { onConflict: "user_id,item_type,identity_key" })
       .select("id,identity_key");
     if (error) throw error;
-    await options.assertSourceCurrent?.();
+    await adoptActiveCatalogUserVisibilityEpoch(
+      options.db,
+      options.sourceId,
+      options.userId,
+      options.generation,
+    );
     for (const title of data ?? []) {
       if (typeof title.identity_key === "string" && typeof title.id === "string") {
         titleIdByKey.set(title.identity_key, title.id);
@@ -368,7 +373,12 @@ export async function refreshVodTitleProjection(options: ProjectionOptions) {
       } catch (error) {
         console.warn("[vod-title-projection] exact file-language hydration skipped:", error instanceof Error ? error.message : error);
       }
-      await options.assertSourceCurrent?.();
+      await adoptActiveCatalogUserVisibilityEpoch(
+        options.db,
+        options.sourceId,
+        options.userId,
+        options.generation,
+      );
     }
   }
 
@@ -416,7 +426,12 @@ export async function refreshVodTitleProjection(options: ProjectionOptions) {
       console.warn("[vod-title-projection] catalog_titles dual-write skipped:", error instanceof Error ? error.message : error);
       break;
     }
-    await options.assertSourceCurrent?.();
+    await adoptActiveCatalogUserVisibilityEpoch(
+      options.db,
+      options.sourceId,
+      options.userId,
+      options.generation,
+    );
   }
 
   // Catalog-first fill (scale): inherit already-known audio languages from the global
@@ -430,7 +445,12 @@ export async function refreshVodTitleProjection(options: ProjectionOptions) {
     } catch (error) {
       console.warn("[vod-title-projection] catalog audio fill skipped:", error instanceof Error ? error.message : error);
     }
-    await options.assertSourceCurrent?.();
+    await adoptActiveCatalogUserVisibilityEpoch(
+      options.db,
+      options.sourceId,
+      options.userId,
+      options.generation,
+    );
   }
 
   // Push the resolved release_year onto the grid rows (cloud_media_items) so the
@@ -455,7 +475,12 @@ export async function refreshVodTitleProjection(options: ProjectionOptions) {
   } catch (error) {
     console.warn("[vod-title-projection] year propagation skipped:", error instanceof Error ? error.message : error);
   }
-  await options.assertSourceCurrent?.();
+  await adoptActiveCatalogUserVisibilityEpoch(
+    options.db,
+    options.sourceId,
+    options.userId,
+    options.generation,
+  );
 
   return {
     titles: titleRows.length,
