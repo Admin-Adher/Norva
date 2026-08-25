@@ -7,6 +7,7 @@ Status:
 ```text
 PHONE_1_3_9_SIGNED_AAB_VERIFIED
 PHONE_1_3_9_PLAY_SUBMISSION_ACCEPTED
+PHONE_1_3_9_PLAY_QUICK_CHECKS_PASSED
 PHONE_1_3_9_GOOGLE_REVIEW_PENDING
 PHYSICAL_FCM_DEEP_LINK_SMOKE_PENDING
 ```
@@ -105,6 +106,10 @@ change count   1
 track          Production
 state          En cours d'examen
 ```
+
+The post-submission quick checks then completed without introducing an error or
+an additional warning. The publication overview replaced the progress meter
+with the stable review message `Vos modifications sont en cours d'examen`.
 
 The release is not yet claimed as published. Completion requires Google to
 accept the submission and the Production release page to identify version 22 as
