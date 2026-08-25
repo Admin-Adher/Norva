@@ -78,3 +78,36 @@ Real activation remains blocked until all of the following are true:
 6. each later percentage stage receives a real observation window and explicit approval.
 
 No phase may bypass these gates by directly changing feature-flag booleans.
+
+## Production operator gate
+
+`ops/hetzner/scripts/run_provider_access_rollout_gate.sh` makes the production
+path explicit and read-only by default. It accepts only `norva-db` and exposes
+separate, literal confirmations for gate approval, internal membership, cohort
+stage and external-channel readiness. An upward cohort refuses an incomplete
+cache epoch; channel changes refuse `OFF`; every action uses the database RPC
+and revision CAS rather than editing feature flags directly.
+
+The gate-approval action additionally requires the supplied legal reference to
+match the exact configured `billing_ledger` retention-policy reference. This
+prevents a free-form rollout note from masquerading as the versioned legal
+policy. Production preflight remains non-mutating until the policy, cache and
+explicit user/operator decisions are present.
+
+The operator gate was exercised against the dormant production database on
+2026-08-25. Read-only preflight returned `off`, revision `1`, zero internal
+users, zero enabled flags, no external channels, cache `installed`, legal
+policy `UNCONFIGURED` and `p0_safe=true`. A syntactically valid internal-user
+request without the literal confirmation exited `64`; a second preflight
+proved that membership, rollout revision and flags were unchanged.
+
+```text
+operator script SHA-256
+a7836308ed016bfa098a9fb4c54635b0d9e3f40bd7a5aba1bb0478287f0ecb45
+
+operator contract SHA-256
+1bb0441bcc9edd495ed71c5a844b43c309e51300e1306f69a6166dbc46596cb5
+
+repository regression
+2643 tests / 2641 passed / 0 failed / 2 expected skips
+```
