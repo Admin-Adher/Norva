@@ -626,13 +626,28 @@ class SourceManager {
           <fieldset class="provider-access-terms" data-provider-access-terms="${this.escapeHtml(prefix)}">
             <legend>${onboarding ? 'Provider access period' : 'Access dates and reminders'}</legend>
             <p class="provider-access-explainer">Your TV provider access is separate from your Norva plan. Norva can remember the period you bought; it never renews or sells that access.</p>
-            <div class="form-group">
+            <div class="form-group provider-access-mode-field">
               <label for="${this.escapeHtml(prefix)}-mode">What do you know?</label>
-              <select id="${this.escapeHtml(prefix)}-mode" class="form-input" data-access-mode>
-                <option value="skip"${initialMode === 'skip' ? ' selected' : ''}>Add this later</option>
-                <option value="duration"${initialMode === 'duration' ? ' selected' : ''}>Duration bought</option>
-                <option value="dates"${initialMode === 'dates' ? ' selected' : ''}>Start and end dates</option>
-              </select>
+              <span class="provider-access-select-shell">
+                <select id="${this.escapeHtml(prefix)}-mode" class="form-input provider-access-native-select" data-access-mode>
+                  <option value="skip"${initialMode === 'skip' ? ' selected' : ''}>Add this later</option>
+                  <option value="duration"${initialMode === 'duration' ? ' selected' : ''}>Duration bought</option>
+                  <option value="dates"${initialMode === 'dates' ? ' selected' : ''}>Start and end dates</option>
+                </select>
+                <button type="button" class="form-input provider-access-select-trigger" data-provider-access-select-trigger aria-label="What do you know?: ${initialMode === 'duration' ? 'Duration bought' : (initialMode === 'dates' ? 'Start and end dates' : 'Add this later')}" aria-haspopup="listbox" aria-expanded="false" aria-controls="${this.escapeHtml(prefix)}-mode-listbox" hidden>
+                  <span data-provider-access-select-value>${initialMode === 'duration' ? 'Duration bought' : (initialMode === 'dates' ? 'Start and end dates' : 'Add this later')}</span>
+                  <svg class="provider-access-select-chevron" aria-hidden="true" viewBox="0 0 20 20" fill="none">
+                    <path d="M5.5 7.5 10 12l4.5-4.5" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/>
+                  </svg>
+                </button>
+                <span id="${this.escapeHtml(prefix)}-mode-listbox" class="provider-access-select-menu" data-provider-access-select-menu role="listbox" aria-label="What do you know?" hidden>
+                  ${[
+                    ['skip', 'Add this later'],
+                    ['duration', 'Duration bought'],
+                    ['dates', 'Start and end dates']
+                  ].map(([value, label]) => `<button type="button" class="provider-access-select-option" role="option" data-provider-access-select-option="${value}" aria-selected="${initialMode === value}">${label}</button>`).join('')}
+                </span>
+              </span>
             </div>
             <div class="provider-access-mode" data-access-panel="duration"${initialMode === 'duration' ? '' : ' hidden'}>
               <div class="form-group provider-access-activation-field">
@@ -646,19 +661,35 @@ class SourceManager {
                 </div>
                 <div class="form-group">
                   <label for="${this.escapeHtml(prefix)}-term-unit">Unit</label>
-                  <select id="${this.escapeHtml(prefix)}-term-unit" class="form-input" data-access-term-unit>
-                    ${['DAY', 'WEEK', 'MONTH', 'YEAR'].map((unit) => `<option value="${unit}"${termUnit === unit ? ' selected' : ''}>${unit.charAt(0) + unit.slice(1).toLowerCase()}${termValue === 1 ? '' : 's'}</option>`).join('')}
-                  </select>
+                  <span class="provider-access-select-shell">
+                    <select id="${this.escapeHtml(prefix)}-term-unit" class="form-input provider-access-native-select" data-access-term-unit>
+                      ${['DAY', 'WEEK', 'MONTH', 'YEAR'].map((unit) => `<option value="${unit}"${termUnit === unit ? ' selected' : ''}>${unit.charAt(0) + unit.slice(1).toLowerCase()}${termValue === 1 ? '' : 's'}</option>`).join('')}
+                    </select>
+                    <button type="button" class="form-input provider-access-select-trigger" data-provider-access-select-trigger aria-label="Unit: ${termUnit.charAt(0) + termUnit.slice(1).toLowerCase()}${termValue === 1 ? '' : 's'}" aria-haspopup="listbox" aria-expanded="false" aria-controls="${this.escapeHtml(prefix)}-term-unit-listbox" hidden>
+                      <span data-provider-access-select-value>${termUnit.charAt(0) + termUnit.slice(1).toLowerCase()}${termValue === 1 ? '' : 's'}</span>
+                      <svg class="provider-access-select-chevron" aria-hidden="true" viewBox="0 0 20 20" fill="none">
+                        <path d="M5.5 7.5 10 12l4.5-4.5" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/>
+                      </svg>
+                    </button>
+                    <span id="${this.escapeHtml(prefix)}-term-unit-listbox" class="provider-access-select-menu is-unit" data-provider-access-select-menu role="listbox" aria-label="Unit" hidden>
+                      ${['DAY', 'WEEK', 'MONTH', 'YEAR'].map((unit) => `<button type="button" class="provider-access-select-option" role="option" data-provider-access-select-option="${unit}" data-provider-access-unit-label="${unit.charAt(0) + unit.slice(1).toLowerCase()}" aria-selected="${termUnit === unit}">${unit.charAt(0) + unit.slice(1).toLowerCase()}${termValue === 1 ? '' : 's'}</button>`).join('')}
+                    </span>
+                  </span>
                 </div>
               </div>
-              <p class="hint">Norva calculates the end date from this activation date. Your provider access remains separate from your Norva plan.</p>
+              <p class="hint">The end date updates automatically from the activation date and duration.</p>
               <section class="provider-access-calendar" data-access-calendar aria-label="Provider access end-date preview">
                 <div class="provider-access-calendar-summary">
-                  <div>
+                  <div class="provider-access-calendar-copy">
                     <span class="provider-access-calendar-kicker">Access preview</span>
                     <strong data-access-calendar-summary aria-live="polite"></strong>
                   </div>
                   <span class="provider-access-calendar-badge" data-access-calendar-badge></span>
+                </div>
+                <div class="provider-access-calendar-timeline" aria-hidden="true">
+                  <span class="provider-access-calendar-timeline-point is-start"></span>
+                  <span class="provider-access-calendar-timeline-track"></span>
+                  <span class="provider-access-calendar-timeline-point is-end"></span>
                 </div>
                 <div class="provider-access-calendar-header">
                   <button type="button" class="provider-access-calendar-nav" data-access-calendar-prev aria-label="Previous month">&#8249;</button>
@@ -700,6 +731,122 @@ class SourceManager {
             const termValue = fieldset.querySelector('[data-access-term-value]');
             const termUnit = fieldset.querySelector('[data-access-term-unit]');
             const calendar = fieldset.querySelector('[data-access-calendar]');
+            const selectShells = [...fieldset.querySelectorAll('.provider-access-select-shell')];
+            const closeSelect = (shell, { restoreFocus = false } = {}) => {
+                const trigger = shell?.querySelector('[data-provider-access-select-trigger]');
+                const menu = shell?.querySelector('[data-provider-access-select-menu]');
+                if (!trigger || !menu) return;
+                menu.hidden = true;
+                trigger.setAttribute('aria-expanded', 'false');
+                shell.classList.remove('is-open');
+                fieldset.classList.remove('is-skip-select-open');
+                if (restoreFocus) trigger.focus({ preventScroll: true });
+            };
+            const closeOtherSelects = (currentShell) => {
+                selectShells.forEach((shell) => {
+                    if (shell !== currentShell) closeSelect(shell);
+                });
+            };
+            const syncSelect = (select) => {
+                const shell = select?.closest?.('.provider-access-select-shell');
+                const trigger = shell?.querySelector('[data-provider-access-select-trigger]');
+                const triggerValue = shell?.querySelector('[data-provider-access-select-value]');
+                const options = [...(shell?.querySelectorAll?.('[data-provider-access-select-option]') || [])];
+                if (!shell || !trigger || !triggerValue) return;
+                const isUnit = select.matches('[data-access-term-unit]');
+                const plural = Number(termValue?.value) === 1 ? '' : 's';
+                options.forEach((option) => {
+                    const selected = option.dataset.providerAccessSelectOption === select.value;
+                    const unitLabel = option.dataset.providerAccessUnitLabel;
+                    if (isUnit && unitLabel) option.textContent = `${unitLabel}${plural}`;
+                    option.setAttribute('aria-selected', String(selected));
+                    if (selected) triggerValue.textContent = option.textContent;
+                });
+                const fieldLabel = select.labels?.[0]?.textContent?.trim() || 'Select value';
+                trigger.setAttribute('aria-label', `${fieldLabel}: ${triggerValue.textContent}`);
+            };
+            const openSelect = (select, { focusEdge = 'selected' } = {}) => {
+                const shell = select?.closest?.('.provider-access-select-shell');
+                const trigger = shell?.querySelector('[data-provider-access-select-trigger]');
+                const menu = shell?.querySelector('[data-provider-access-select-menu]');
+                const options = [...(menu?.querySelectorAll?.('[data-provider-access-select-option]') || [])];
+                if (!shell || !trigger || !menu || options.length === 0) return;
+                closeOtherSelects(shell);
+                syncSelect(select);
+                menu.hidden = false;
+                trigger.setAttribute('aria-expanded', 'true');
+                shell.classList.add('is-open');
+                if (select.matches('[data-access-mode]') && select.value === 'skip') {
+                    fieldset.classList.add('is-skip-select-open');
+                }
+                if (focusEdge === 'none') return;
+                const target = focusEdge === 'first'
+                    ? options[0]
+                    : (focusEdge === 'last' ? options[options.length - 1] : options.find((option) => option.getAttribute('aria-selected') === 'true'));
+                (target || options[0]).focus({ preventScroll: true });
+            };
+            selectShells.forEach((shell) => {
+                const select = shell.querySelector('select');
+                const trigger = shell.querySelector('[data-provider-access-select-trigger]');
+                const menu = shell.querySelector('[data-provider-access-select-menu]');
+                const options = [...(menu?.querySelectorAll?.('[data-provider-access-select-option]') || [])];
+                if (!select || !trigger || !menu || options.length === 0) return;
+                select.hidden = true;
+                trigger.hidden = false;
+                syncSelect(select);
+                select.labels?.[0]?.addEventListener('click', (event) => {
+                    event.preventDefault();
+                    trigger.focus({ preventScroll: true });
+                });
+                trigger.addEventListener('click', () => {
+                    if (trigger.getAttribute('aria-expanded') === 'true') closeSelect(shell);
+                    else openSelect(select, { focusEdge: 'none' });
+                });
+                trigger.addEventListener('keydown', (event) => {
+                    if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+                    event.preventDefault();
+                    openSelect(select, { focusEdge: ['ArrowUp', 'End'].includes(event.key) ? 'last' : 'first' });
+                });
+                const choose = (option) => {
+                    select.value = option.dataset.providerAccessSelectOption || '';
+                    syncSelect(select);
+                    select.dispatchEvent(new Event('change', { bubbles: true }));
+                    closeSelect(shell, { restoreFocus: true });
+                };
+                options.forEach((option, index) => {
+                    option.addEventListener('click', () => choose(option));
+                    option.addEventListener('keydown', (event) => {
+                        if (['Enter', ' '].includes(event.key)) {
+                            event.preventDefault();
+                            choose(option);
+                            return;
+                        }
+                        if (event.key === 'Escape') {
+                            event.preventDefault();
+                            closeSelect(shell, { restoreFocus: true });
+                            return;
+                        }
+                        if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+                        event.preventDefault();
+                        const nextIndex = event.key === 'Home' ? 0
+                            : (event.key === 'End' ? options.length - 1
+                                : (index + (event.key === 'ArrowDown' ? 1 : -1) + options.length) % options.length);
+                        options[nextIndex].focus({ preventScroll: true });
+                    });
+                });
+            });
+            fieldset.addEventListener('pointerdown', (event) => {
+                selectShells.forEach((shell) => {
+                    if (!shell.contains(event.target)) closeSelect(shell);
+                });
+            });
+            fieldset.addEventListener('focusout', () => {
+                requestAnimationFrame(() => {
+                    selectShells.forEach((shell) => {
+                        if (!shell.contains(document.activeElement)) closeSelect(shell);
+                    });
+                });
+            });
             const update = () => {
                 const selected = mode?.value || 'skip';
                 fieldset.querySelectorAll('[data-access-panel]').forEach((panel) => {
@@ -709,9 +856,13 @@ class SourceManager {
                 if (reminders) reminders.hidden = selected === 'skip';
                 const error = fieldset.querySelector('[data-access-error]');
                 if (error) error.hidden = true;
+                closeOtherSelects(null);
                 if (selected === 'duration') this.renderProviderAccessCalendar(fieldset, { resetMonth: true });
             };
-            const updateCalendar = () => this.renderProviderAccessCalendar(fieldset, { resetMonth: true });
+            const updateCalendar = () => {
+                syncSelect(termUnit);
+                this.renderProviderAccessCalendar(fieldset, { resetMonth: true });
+            };
             mode?.addEventListener('change', update);
             activation?.addEventListener('change', updateCalendar);
             termValue?.addEventListener('input', updateCalendar);
@@ -738,7 +889,10 @@ class SourceManager {
                 if (exactDays < 1 || exactDays > 10000) return;
                 termValue.value = String(exactDays);
                 termUnit.value = 'DAY';
+                syncSelect(termUnit);
+                calendar.classList.remove('is-adjusted');
                 this.renderProviderAccessCalendar(fieldset);
+                requestAnimationFrame(() => calendar.classList.add('is-adjusted'));
                 termValue.focus({ preventScroll: true });
             });
             update();

@@ -95,7 +95,22 @@ test('in-app notifications are owner-scoped, fail-closed and route to Provider A
 
 test('the chosen mobile duration layout keeps Duration and Unit on one compact row', () => {
   assert.match(sourceManager, /provider-access-field-row provider-access-duration-row/);
+  assert.equal((sourceManager.match(/provider-access-select-shell/g) || []).length >= 2, true);
+  assert.equal((sourceManager.match(/provider-access-select-chevron/g) || []).length >= 2, true);
   assert.match(css, /provider-access-field-row\.provider-access-duration-row[\s\S]*grid-template-columns: minmax\(0, 3fr\) minmax\(112px, 2fr\)/);
+  assert.match(sourceManager, /aria-haspopup="listbox"/);
+  assert.match(sourceManager, /role="option"[\s\S]*aria-selected/);
+  assert.match(sourceManager, /select\.hidden = true[\s\S]*trigger\.hidden = false/);
+  assert.match(sourceManager, /trigger\.setAttribute\('aria-label', `\$\{fieldLabel\}: \$\{triggerValue\.textContent\}`\)/);
+  assert.match(sourceManager, /select\.labels\?\.\[0\]\?\.addEventListener\('click'/);
+  assert.match(sourceManager, /\['ArrowDown', 'ArrowUp', 'Home', 'End'\]/);
+  assert.match(sourceManager, /event\.key === 'Escape'/);
+  assert.match(sourceManager, /select\.value === 'skip'[\s\S]*fieldset\.classList\.add\('is-skip-select-open'\)/);
+  assert.match(sourceManager, /fieldset\.classList\.remove\('is-skip-select-open'\)/);
+  assert.match(css, /provider-access-select-menu[\s\S]*z-index: 10/);
+  assert.match(css, /provider-access-terms\.is-skip-select-open[\s\S]*padding-bottom: calc\(132px \+ var\(--space-lg\)\)/);
+  assert.match(css, /provider-access-select-option[\s\S]*min-height: 44px/);
+  assert.match(css, /provider-access-select-shell\.is-open \.provider-access-select-chevron/);
 });
 
 test('duration mode binds an activation date to an interactive accessible calendar', () => {
@@ -105,8 +120,13 @@ test('duration mode binds an activation date to an interactive accessible calend
   assert.match(sourceManager, /Math\.min\(start\.getUTCDate\(\), lastDay\)/);
   assert.match(sourceManager, /data-access-calendar-day/);
   assert.match(sourceManager, /termUnit\.value = 'DAY'/);
+  assert.match(sourceManager, /provider-access-calendar-timeline/);
+  assert.match(sourceManager, /calendar\.classList\.remove\('is-adjusted'\)/);
+  assert.match(sourceManager, /requestAnimationFrame\(\(\) => calendar\.classList\.add\('is-adjusted'\)\)/);
   assert.match(sourceManager, /return \{ startedOn, expiresOn: null, termValue, termUnit, remindersEnabled \}/);
   assert.match(css, /provider-access-calendar-day[\s\S]*min-width: 44px;[\s\S]*min-height: 44px/);
+  assert.match(css, /provider-access-calendar\.is-adjusted[\s\S]*animation: provider-access-calendar-adjust 260ms/);
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\)[\s\S]*provider-access-calendar\.is-adjusted[\s\S]*animation: none/);
 });
 
 test('calendar preview clamps month and year terms like PostgreSQL calendar intervals', () => {
