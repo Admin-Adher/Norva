@@ -61,6 +61,14 @@ select
     where jobname in (
       'norva-provider-access-notifications','norva-provider-access-checks'
     )),'NONE')
+  ,public.norva_active_catalog_refresh_contract_ready()
+  ,exists (
+    select 1 from cron.job
+    where jobname='norva-active-catalog-refresh-worker'
+      and active
+      and schedule='* * * * *'
+      and command like '%/norva-provider-access/internal/worker/drain%'
+  )
 from public.cloud_provider_access_rollout rollout
 cross join public.cloud_catalog_cache_epoch_v2_rollout cache
 left join public.legal_billing_archive_retention_policy policy
@@ -73,10 +81,10 @@ print_state() {
   local snapshot="$1"
   local revision stage basis_points legal_gate operational_gate cache_phase
   local legal_policy_revision legal_policy_reference internal_users enabled_flags
-  local external_channels p0_safe provider_crons
+  local external_channels p0_safe provider_crons active_refresh_ready worker_cron_ready
   IFS='|' read -r revision stage basis_points legal_gate operational_gate cache_phase \
     legal_policy_revision legal_policy_reference internal_users enabled_flags \
-    external_channels p0_safe provider_crons <<<"$snapshot"
+    external_channels p0_safe provider_crons active_refresh_ready worker_cron_ready <<<"$snapshot"
   printf 'rollout_revision=%s\nrollout_stage=%s\ncohort_basis_points=%s\n' \
     "$revision" "$stage" "$basis_points"
   printf 'legal_gate_reference=%s\noperational_gate_reference=%s\n' \
@@ -85,6 +93,8 @@ print_state() {
     "$cache_phase" "$legal_policy_revision" "$legal_policy_reference"
   printf 'internal_users=%s\nenabled_flags=%s\nexternal_channels=%s\np0_safe=%s\nprovider_crons=%s\n' \
     "$internal_users" "$enabled_flags" "$external_channels" "$p0_safe" "$provider_crons"
+  printf 'active_refresh_ready=%s\nactive_refresh_worker_cron_ready=%s\n' \
+    "$active_refresh_ready" "$worker_cron_ready"
 }
 
 observation_state() {
@@ -139,7 +149,8 @@ if [[ "$ACTION" == 'observation-status' ]]; then
 fi
 
 IFS='|' read -r CURRENT_REVISION CURRENT_STAGE _ CURRENT_LEGAL_GATE _ \
-  CACHE_PHASE LEGAL_POLICY_REVISION CURRENT_POLICY_REFERENCE _ _ _ P0_SAFE _ <<<"$BEFORE"
+  CACHE_PHASE LEGAL_POLICY_REVISION CURRENT_POLICY_REFERENCE _ _ _ P0_SAFE _ \
+  ACTIVE_REFRESH_READY ACTIVE_REFRESH_WORKER_CRON_READY <<<"$BEFORE"
 
 if [[ "$P0_SAFE" != 'true' ]]; then
   echo 'status=REFUSED_P0_UNSAFE' >&2
@@ -214,6 +225,14 @@ SQL
     valid_text "$ROLLOUT_ACTOR" 3 200
     if [[ "$ROLLOUT_STAGE" != 'off' && "$CACHE_PHASE" != 'complete' ]]; then
       echo 'status=REFUSED_CACHE_EPOCH_INCOMPLETE' >&2
+      exit 70
+    fi
+    if [[ "$ROLLOUT_STAGE" != 'off' && "$ACTIVE_REFRESH_READY" != 't' ]]; then
+      echo 'status=REFUSED_ACTIVE_REFRESH_WORKER_NOT_READY' >&2
+      exit 70
+    fi
+    if [[ "$ROLLOUT_STAGE" != 'off' && "$ACTIVE_REFRESH_WORKER_CRON_READY" != 't' ]]; then
+      echo 'status=REFUSED_ACTIVE_REFRESH_WORKER_CRON_NOT_READY' >&2
       exit 70
     fi
     if [[ "${CONFIRM_ROLLOUT_STAGE:-}" != "SET_PROVIDER_ACCESS_STAGE_${ROLLOUT_STAGE}" ]]; then

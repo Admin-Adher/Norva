@@ -18,6 +18,8 @@ test('production rollout operator gate is read-only by default and binds the exa
   assert.match(script, /ACTION="\$\{1:-preflight\}"/);
   assert.match(script, /status=READ_ONLY_PREFLIGHT/);
   assert.match(script, /provider_crons=%s/);
+  assert.match(script, /active_refresh_ready=%s/);
+  assert.match(script, /active_refresh_worker_cron_ready=%s/);
 });
 
 test('production rollout mutations require distinct literal confirmations', () => {
@@ -34,6 +36,9 @@ test('cohort activation refuses incomplete cache epoch and channels refuse OFF',
   assert.match(script, /ROLLOUT_STAGE" != 'off' && "\$CACHE_PHASE" != 'complete'/);
   assert.match(script, /CACHE_PHASE" != 'complete' \|\| "\$CURRENT_STAGE" == 'off'/);
   assert.match(script, /norva_assert_provider_access_rollout_safe/);
+  assert.match(script, /REFUSED_ACTIVE_REFRESH_WORKER_NOT_READY/);
+  assert.match(script, /REFUSED_ACTIVE_REFRESH_WORKER_CRON_NOT_READY/);
+  assert.match(script, /norva_active_catalog_refresh_contract_ready/);
 });
 
 test('rollout gate approval binds the exact configured legal policy reference', () => {
