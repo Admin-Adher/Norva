@@ -3,7 +3,7 @@ set local lock_timeout = '3s';
 set local statement_timeout = '45s';
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select extensions.plan(39);
+select extensions.plan(52);
 
 -- This acceptance harness must be deterministic on a reused disposable proof
 -- database. Reset only notification proof state inside this transaction; the
@@ -52,6 +52,14 @@ select extensions.throws_ok(
   'Provider Access notifications disabled',
   'scheduler fails closed while the master flag is OFF'
 );
+select extensions.throws_ok(
+  $$select public.norva_enqueue_provider_access_push_readiness_smoke(
+    '98600000-0000-4000-8000-000000000001',1,
+    'fcm-readiness:disabled-channel-proof','test:phase11'
+  )$$,
+  '55000','Provider Access notifications disabled',
+  'readiness smoke cannot bypass the default-off notification gate'
+);
 reset role;
 
 insert into auth.users (
@@ -72,6 +80,15 @@ insert into public.cloud_sources (
   'fixture-ciphertext', '{"serverHost":"provider-986.invalid"}'::jsonb,
   'ready', 1
 );
+update public.cloud_provider_access_rollout
+set stage='internal', revision=revision+1, updated_at=clock_timestamp()
+where singleton;
+insert into public.cloud_provider_access_rollout_internal_users(
+  user_id,reason,added_by
+) values (
+  '98600000-0000-4000-8000-000000000001',
+  'notification readiness smoke acceptance member','test:phase11'
+) on conflict (user_id) do nothing;
 update public.admin_feature_flags set enabled = true
 where key in (
   'provider_access_v1_enabled',
@@ -353,6 +370,23 @@ select extensions.is(
 set local request.jwt.claims = '{"role":"service_role"}';
 set local request.jwt.claim.sub = '';
 set local role service_role;
+select extensions.throws_ok(
+  $$select public.norva_enqueue_provider_access_push_readiness_smoke(
+    '98600000-0000-4000-8000-000000000099',
+    (select revision from public.cloud_provider_access_rollout where singleton),
+    'fcm-readiness:outsider-refusal-proof','test:phase11'
+  )$$,
+  '55000','push readiness smoke requires an internal rollout user',
+  'non-internal users can never receive a readiness smoke'
+);
+select extensions.throws_ok(
+  $$select public.norva_enqueue_provider_access_push_readiness_smoke(
+    '98600000-0000-4000-8000-000000000001',0,
+    'fcm-readiness:stale-revision-proof','test:phase11'
+  )$$,
+  '40001','stale rollout revision',
+  'readiness smoke is CAS-bound to the exact rollout revision'
+);
 select extensions.is(
   (select count(*)::integer from public.norva_claim_provider_access_notifications(
     'email', 'notify-worker-final', 4, 90, 12
@@ -360,7 +394,87 @@ select extensions.is(
   0,
   'opted-out cycle exposes no email work to a late worker'
 );
+
+select extensions.is(
+  public.norva_enqueue_provider_access_push_readiness_smoke(
+    '98600000-0000-4000-8000-000000000001',
+    (select revision from public.cloud_provider_access_rollout where singleton),
+    'fcm-readiness:phase11-physical-device-proof',
+    'test:phase11'
+  )->>'eventKind',
+  'readiness_smoke',
+  'service role enqueues an explicit readiness event instead of a fake expiry'
+);
+select extensions.is(
+  public.norva_enqueue_provider_access_push_readiness_smoke(
+    '98600000-0000-4000-8000-000000000001',
+    (select revision from public.cloud_provider_access_rollout where singleton),
+    'fcm-readiness:phase11-physical-device-proof',
+    'test:phase11'
+  )->>'notificationId',
+  (select id::text from public.cloud_provider_access_notifications
+   where event_kind='readiness_smoke'),
+  'same rollout revision replays the same durable smoke row'
+);
+select extensions.is(
+  (select count(*)::integer from public.cloud_provider_access_notifications
+   where event_kind='readiness_smoke' and channel='push' and state='pending'),
+  1,
+  'readiness smoke is push-only and unique for the rollout revision'
+);
+select public.norva_schedule_provider_access_notifications(now(),10);
+select extensions.is(
+  (select state from public.cloud_provider_access_notifications
+   where event_kind='readiness_smoke'),
+  'pending',
+  'scheduler preserves an internal readiness smoke after reminder opt-out'
+);
+select extensions.is(
+  (select count(*)::integer from public.norva_claim_provider_access_notifications(
+    'push','readiness-smoke-worker',4,90,12
+  ) where event_kind='readiness_smoke'),
+  1,
+  'push worker claims the internal smoke through the ordinary durable lease'
+);
+select extensions.is(
+  public.norva_authorize_provider_access_notification(
+    (select id from public.cloud_provider_access_notifications where event_kind='readiness_smoke'),
+    'push','readiness-smoke-worker',1,null
+  ),
+  true,
+  'readiness smoke revalidates rollout, source, cycle and lease before FCM'
+);
+select extensions.is(
+  public.norva_complete_provider_access_notification(
+    (select id from public.cloud_provider_access_notifications where event_kind='readiness_smoke'),
+    'push','readiness-smoke-worker',1,'FCM_ACCEPTED','projects/test/messages/readiness-smoke'
+  ),
+  true,
+  'FCM acknowledgement settles the same durable smoke row'
+);
+select extensions.ok(
+  (select state='delivered' and completion_code='FCM_ACCEPTED'
+   from public.cloud_provider_access_notifications where event_kind='readiness_smoke'),
+  'readiness smoke reaches the ordinary explicit delivered state'
+);
+select extensions.is(
+  (select count(*)::integer
+   from public.cloud_provider_access_notification_smoke_events smoke
+   join public.cloud_provider_access_notifications notification
+     on notification.id=smoke.notification_id
+   where notification.event_kind='readiness_smoke'
+     and smoke.readiness_reference='fcm-readiness:phase11-physical-device-proof'),
+  1,
+  'immutable smoke audit binds readiness reference and notification id'
+);
 reset role;
+select extensions.ok(
+  (select pg_get_constraintdef(constraint_row.oid) like '%ON DELETE CASCADE%'
+   from pg_constraint constraint_row
+   where constraint_row.conrelid='public.cloud_provider_access_notification_smoke_events'::regclass
+     and constraint_row.contype='f'),
+  'readiness audit follows the bounded outbox cascade instead of blocking deletion'
+);
 
 select * from extensions.finish();
 rollback;

@@ -10,6 +10,7 @@ const root = path.join(__dirname, '..');
 const read = (relativePath) => fs.readFileSync(path.join(root, relativePath), 'utf8');
 
 const migration = read('supabase/migrations/20260824130000_provider_access_notification_outbox_v1.sql');
+const readinessSmoke = read('supabase/migrations/20260825203000_provider_access_push_readiness_smoke_v1.sql');
 const worker = read('supabase/functions/norva-provider-access-notify/index.ts');
 const fcm = read('supabase/functions/_shared/fcm.ts');
 const android = read('clients/android-phone/app/src/main/java/tv/norva/phone/NorvaMessagingService.java');
@@ -65,6 +66,24 @@ test('push is data-only, independently durable and deduplicated by a stable row 
   assert.match(worker, /result\.unregistered[\s\S]*cloud_push_tokens/);
   assert.match(fcm, /msg\.dataOnly[\s\S]*android: \{ priority: "high" \}/);
   assert.match(fcm, /messageId/);
+});
+
+test('FCM readiness smoke is explicit, internal-only, revision-bound and does not alter access', () => {
+  assert.match(readinessSmoke, /event_kind = 'readiness_smoke' and channel = 'push'/);
+  assert.match(readinessSmoke, /readiness_rollout_revision/);
+  assert.match(readinessSmoke, /cloud_provider_access_notification_smoke_events/);
+  assert.match(readinessSmoke, /cloud_provider_access_rollout_internal_users/);
+  assert.match(readinessSmoke, /references public\.cloud_provider_access_notifications\(id\) on delete cascade/);
+  assert.match(readinessSmoke, /v_rollout\.revision <> p_expected_rollout_revision/);
+  assert.match(readinessSmoke, /norva_provider_access_notification_flag_required\('push'\)/);
+  assert.match(readinessSmoke, /provider_access_reminders_enabled\)[\s\S]*readiness_smoke/);
+  assert.match(readinessSmoke, /revoke all on function[\s\S]*from public, anon, authenticated, service_role/);
+  assert.match(readinessSmoke, /grant execute on function[\s\S]*to service_role/);
+  assert.doesNotMatch(readinessSmoke, /update public\.cloud_source_provider_access/);
+  assert.doesNotMatch(readinessSmoke, /update public\.cloud_source_access_cycles/);
+  assert.doesNotMatch(readinessSmoke, /update public\.cloud_sources/);
+  assert.match(worker, /case "readiness_smoke"/);
+  assert.match(worker, /one-time internal launch check did not change your provider access/);
 });
 
 test('Android receives Provider Access in every process state without duplicate trays', () => {

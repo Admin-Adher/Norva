@@ -20,7 +20,7 @@ const admin = createClient(SUPABASE_URL, SERVICE_KEY, {
 });
 
 type Channel = "email" | "push";
-type EventKind = "expiry_7d" | "expiry_1d" | "expiry_today" | "access_hidden" | "access_restored";
+type EventKind = "expiry_7d" | "expiry_1d" | "expiry_today" | "access_hidden" | "access_restored" | "readiness_smoke";
 
 interface Claim {
   notification_id: string;
@@ -88,6 +88,13 @@ function copyFor(kind: EventKind, expiresOn: string | null): Copy {
         title: "Catalog access restored",
         body: "Your external provider access is available again. Your Norva plan is not affected.",
         detail: "The catalog is available again in Norva.",
+      };
+    case "readiness_smoke":
+      return {
+        subject: "Norva notification readiness check",
+        title: "Provider access notifications are ready",
+        body: "This device can receive Provider access notifications from Norva.",
+        detail: "This one-time internal launch check did not change your provider access or your Norva plan.",
       };
   }
   throw new Error("unsupported_provider_access_event");

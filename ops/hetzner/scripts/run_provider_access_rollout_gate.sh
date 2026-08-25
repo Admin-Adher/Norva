@@ -9,9 +9,9 @@ if [[ "$DB_CONTAINER" != 'norva-db' ]]; then
   exit 64
 fi
 case "$ACTION" in
-  preflight|observation-status|configure-gates|set-internal-user|set-stage|start-observation|restart-observation-v2|complete-observation|set-channels|install-notification-cron|install-detection-cron|remove-provider-crons) ;;
+  preflight|observation-status|configure-gates|set-internal-user|set-stage|start-observation|restart-observation-v2|complete-observation|set-channels|enqueue-push-readiness-smoke|install-notification-cron|install-detection-cron|remove-provider-crons) ;;
   *)
-    echo 'usage: run_provider_access_rollout_gate.sh [preflight|observation-status|configure-gates|set-internal-user|set-stage|start-observation|restart-observation-v2|complete-observation|set-channels|install-notification-cron|install-detection-cron|remove-provider-crons]' >&2
+    echo 'usage: run_provider_access_rollout_gate.sh [preflight|observation-status|configure-gates|set-internal-user|set-stage|start-observation|restart-observation-v2|complete-observation|set-channels|enqueue-push-readiness-smoke|install-notification-cron|install-detection-cron|remove-provider-crons]' >&2
     exit 64
     ;;
 esac
@@ -353,6 +353,43 @@ set local role service_role;
 select public.norva_set_provider_access_rollout_channels(
   :'expected_revision'::bigint,:'auto_detection'::boolean,:'email'::boolean,
   :'push'::boolean,:'readiness',:'actor'
+);
+commit;
+SQL
+    ;;
+  enqueue-push-readiness-smoke)
+    : "${INTERNAL_USER_ID:?INTERNAL_USER_ID is required}"
+    : "${EXPECTED_ROLLOUT_REVISION:?EXPECTED_ROLLOUT_REVISION is required}"
+    : "${CHANNEL_READINESS_REFERENCE:?CHANNEL_READINESS_REFERENCE is required}"
+    : "${ROLLOUT_ACTOR:?ROLLOUT_ACTOR is required}"
+    [[ "$INTERNAL_USER_ID" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$ ]]
+    [[ "$EXPECTED_ROLLOUT_REVISION" =~ ^[0-9]+$ ]]
+    valid_text "$CHANNEL_READINESS_REFERENCE" 12 1000
+    valid_text "$ROLLOUT_ACTOR" 3 200
+    if [[ "$CACHE_PHASE" != 'complete' || "$CURRENT_STAGE" == 'off' ]]; then
+      echo 'status=REFUSED_NO_ACTIVE_CACHE_SAFE_COHORT' >&2
+      exit 70
+    fi
+    if [[ "$CURRENT_REVISION" != "$EXPECTED_ROLLOUT_REVISION" ]]; then
+      echo 'status=REFUSED_STALE_ROLLOUT_REVISION' >&2
+      exit 70
+    fi
+    if [[ "$CURRENT_STAGE" != 'internal' ]]; then
+      echo 'status=REFUSED_PUSH_READINESS_SMOKE_OUTSIDE_INTERNAL' >&2
+      exit 70
+    fi
+    if [[ "${CONFIRM_PUSH_READINESS_SMOKE:-}" != 'ENQUEUE_PROVIDER_ACCESS_PUSH_READINESS_SMOKE' ]]; then
+      echo 'status=REFUSED_MISSING_EXPLICIT_PUSH_READINESS_SMOKE_CONFIRMATION' >&2
+      exit 64
+    fi
+    psql_admin -v user_id="$INTERNAL_USER_ID" \
+      -v expected_revision="$EXPECTED_ROLLOUT_REVISION" \
+      -v readiness="$CHANNEL_READINESS_REFERENCE" \
+      -v actor="$ROLLOUT_ACTOR" <<'SQL'
+begin;
+set local role service_role;
+select public.norva_enqueue_provider_access_push_readiness_smoke(
+  :'user_id'::uuid,:'expected_revision'::bigint,:'readiness',:'actor'
 );
 commit;
 SQL

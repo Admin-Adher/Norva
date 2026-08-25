@@ -27,9 +27,18 @@ test('production rollout mutations require distinct literal confirmations', () =
   assert.match(script, /SET_PROVIDER_ACCESS_INTERNAL_USER/);
   assert.match(script, /SET_PROVIDER_ACCESS_STAGE_\$\{ROLLOUT_STAGE\}/);
   assert.match(script, /SET_PROVIDER_ACCESS_EXTERNAL_CHANNELS/);
+  assert.match(script, /ENQUEUE_PROVIDER_ACCESS_PUSH_READINESS_SMOKE/);
   assert.match(script, /INSTALL_PROVIDER_ACCESS_NOTIFICATION_CRON/);
   assert.match(script, /INSTALL_PROVIDER_ACCESS_DETECTION_CRON/);
   assert.match(script, /REMOVE_PROVIDER_ACCESS_CRONS/);
+});
+
+test('push readiness smoke is internal-only, revision-CAS and parameterized', () => {
+  assert.match(script, /enqueue-push-readiness-smoke/);
+  assert.match(script, /CURRENT_REVISION" != "\$EXPECTED_ROLLOUT_REVISION/);
+  assert.match(script, /CURRENT_STAGE" != 'internal'/);
+  assert.match(script, /norva_enqueue_provider_access_push_readiness_smoke/);
+  assert.match(script, /:'user_id'::uuid,:'expected_revision'::bigint,:'readiness',:'actor'/);
 });
 
 test('cohort activation refuses incomplete cache epoch and channels refuse OFF', () => {
