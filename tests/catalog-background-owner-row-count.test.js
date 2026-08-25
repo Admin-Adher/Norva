@@ -27,6 +27,7 @@ test('building snapshots remain builder-owned while live snapshots receive delta
 });
 
 test('the migration repairs and then verifies exact present-row counts', () => {
+  assert.match(migration, /\bbegin;[\s\S]*\bcommit;/i);
   assert.match(migration, /count\(owner_row\.title_id\) filter \(where owner_row\.is_present\)/i);
   assert.match(migration, /row_count = exact_counts\.present_count/i);
   assert.match(migration, /raise exception 'catalog background owner row_count repair is incomplete'/i);

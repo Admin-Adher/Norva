@@ -6,6 +6,8 @@
 -- ready/active/retained, transition-table triggers maintain the count without
 -- introducing one parent-row update for every inserted catalogue row.
 
+begin;
+
 create or replace function public.norva_catalog_background_owner_rows_insert_count()
 returns trigger
 language plpgsql
@@ -146,3 +148,5 @@ begin
   end if;
 end
 $assert$;
+
+commit;
