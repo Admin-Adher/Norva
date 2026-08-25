@@ -488,31 +488,6 @@ async function countSourceItemsTotal(
   return count || 0;
 }
 
-// Delete the rows a healthy run did NOT re-see (provider-removed titles), via the batched RPC.
-async function pruneStaleSourceItems(
-  sourceId: string,
-  userId: string,
-  version: number,
-  db: SupabaseClient,
-  generation: CatalogAccessSnapshot,
-): Promise<number> {
-  let removed = 0;
-  for (let guard = 0; guard < 5000; guard++) {
-    const { data, error } = await db.rpc("norva_prune_stale_catalog_generation_items", {
-      p_source_id: sourceId, p_user_id: userId,
-      ...catalogGenerationRpcFence(generation),
-      // Keep each cascading delete comfortably below the authenticator statement
-      // timeout. The loop is resumable because every RPC batch commits independently.
-      p_catalog_version: version, p_limit: 200,
-    });
-    if (error) throwDb(error, "Unable to prune removed catalog items");
-    const n = Number(Array.isArray(data) ? data[0] : data) || 0;
-    removed += n;
-    if (n < 200) return removed;
-  }
-  return removed;
-}
-
 // Clear a source's items in bounded chunks. Uses a server-side batched-delete RPC (subquery LIMIT)
 // rather than SELECT-ids → .delete().in('id', [...]): a 2000-element IN list builds a ~74KB request
 // URL that PostgREST/proxy rejects, which made clearing a large catalogue (100k+ rows) fail
@@ -1028,23 +1003,13 @@ export async function driveXtreamSyncToReady(sourceId: string, userId: string, d
       const healthy = fetchErrors === 0 && removeFraction <= PRUNE_MAX_REMOVE_FRACTION;
       if (healthy) {
         if (wouldRemove > 0) {
-          // Single-flight guard, re-checked immediately before the DELETE: a force re-sync that
-          // started while we finished discovery would be re-stamping rows with ITS runVersion, and
-          // pruning "version != ours" would delete those fresh rows. Bail if we no longer own the
-          // cursor — the superseding run will prune at its own completion.
-          const { data: guardFresh } = await db
-            .from("cloud_sources").select("config_hint").eq("id", sourceId).eq("user_id", userId).maybeSingle();
-          if (stringOr(recordOrEmpty(recordOrEmpty(guardFresh?.config_hint).syncCursor).startedAt, myRun) !== myRun) return;
-          await assertCatalogSnapshotCurrent(db, sourceId, userId, accessSnapshot);
-          const removed = await pruneStaleSourceItems(
-            sourceId,
-            userId,
-            Number(cursor.runVersion),
-            db,
-            accessSnapshot,
-          );
-          await assertCatalogSnapshotCurrent(db, sourceId, userId, accessSnapshot);
-          console.log("[xtream-sync] Layer3 pruned removed titles", sourceId, "removed", removed);
+          // Keep the old inventory as a safe superset through handoff. The
+          // durable pre-READY gate owns this delete now: it persists the exact
+          // catalogVersion, refreshes the post-delete epoch after every commit,
+          // survives isolate loss, and is shared by both finalize engines.
+          // Deleting here used to strand large sources because this discovery
+          // isolate had no durable prune cursor across early termination.
+          console.log("[xtream-sync] Layer3 deferred stale prune to ready gate", sourceId, "rows", wouldRemove);
         }
       } else {
         // Unsafe to prune — keep the prior items (the table is now a safe superset old+new). The

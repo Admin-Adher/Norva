@@ -66,10 +66,11 @@ test('finalize prunes at the logical title boundary and rechecks before ready', 
   }
 });
 
-test('discovery prune uses the same timeout-safe batch size', () => {
-  assert.match(xtream, /p_catalog_version: version, p_limit: 200/);
-  assert.match(xtream, /if \(n < 200\) return removed/);
+test('discovery persists the exact version and delegates deletion to the durable ready gate', () => {
   assert.match(xtream, /catalogVersion: cursor\.runVersion \? Number\(cursor\.runVersion\) : undefined/);
+  assert.match(xtream, /Layer3 deferred stale prune to ready gate/);
+  assert.doesNotMatch(xtream, /async function pruneStaleSourceItems/);
+  assert.doesNotMatch(xtream, /norva_prune_stale_catalog_generation_items/);
 });
 
 test('real PostgreSQL proof harness commits bounded batches from fresh snapshots', () => {
