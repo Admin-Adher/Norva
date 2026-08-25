@@ -106,6 +106,10 @@ test('production installer is exact, backed up and dormant', () => {
   assert.match(installer, /flags\\t9\\t0/);
   assert.match(installer, /observation_rows\\t0/);
   assert.match(installer, /permission denied for table cloud_provider_access_rollout/);
+  assert.match(installer, /RESUME_POSTINSTALL_VALIDATION/);
+  assert.match(installer, /resume-current-state\.tsv/);
+  assert.match(installer, /sha256sum -c/);
+  assert.match(installer, /env DB_CONTAINER="\$DB_CONTAINER"/);
   assert.match(installer, /status=INSTALLED_DORMANT/);
   assert.match(installer, /INSTALL_PROVIDER_ACCESS_OBSERVATION_GATE_DORMANT/);
   assert.doesNotMatch(installer, /SET_PROVIDER_ACCESS_STAGE_internal/);

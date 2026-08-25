@@ -91,52 +91,70 @@ from public.cloud_provider_access_rollout where singleton;
 SQL
 }
 
-capture_state >"$REPORT_DIR/preinstall-state.tsv"
-grep -qx $'rollout\toff\t2\t0' "$REPORT_DIR/preinstall-state.tsv" \
-  || fail 'rollout is not the approved OFF revision 2 boundary'
-grep -qx $'cache\tinstalled\tf' "$REPORT_DIR/preinstall-state.tsv" \
-  || fail 'cache epoch is not at the expected pre-completion boundary'
-grep -qx $'flags\t9\t0' "$REPORT_DIR/preinstall-state.tsv" \
-  || fail 'Provider Access flags are not all OFF'
-grep -qx $'internal_users\t1' "$REPORT_DIR/preinstall-state.tsv" \
-  || fail 'internal canary allowlist is not exactly one user'
-grep -qx $'provider_crons\t0' "$REPORT_DIR/preinstall-state.tsv" \
-  || fail 'Provider Access cron already exists'
-grep -qx $'p0_safe\tt' "$REPORT_DIR/preinstall-state.tsv" \
-  || fail 'production is not P0-safe'
-grep -qx $'notification_cron_v1\tt' "$REPORT_DIR/preinstall-state.tsv" \
-  || fail 'notification cron v1 boundary is missing'
-grep -qx $'observation_gate_v1\tf' "$REPORT_DIR/preinstall-state.tsv" \
-  || fail 'observation gate is already installed or boundary is ambiguous'
-grep -Eq $'^legal_reference\t.{12,}$' "$REPORT_DIR/preinstall-state.tsv" \
-  || fail 'legal rollout reference is missing'
-grep -Eq $'^operational_reference\t.{12,}$' "$REPORT_DIR/preinstall-state.tsv" \
-  || fail 'operational rollout reference is missing'
+if test -e "$REPORT_DIR/preinstall-state.tsv"; then
+  # A committed migration batch may outlive the invoking shell. Resume only
+  # from the exact, fully captured post-install boundary; never reapply or
+  # infer success from object presence alone.
+  for artifact in preinstall-schema.dump preinstall-control-data.dump \
+    preinstall-artifacts.sha256 postinstall-state.tsv; do
+    test -s "$REPORT_DIR/$artifact" || fail "incomplete resume artifact $artifact"
+  done
+  sha256sum -c "$REPORT_DIR/preinstall-artifacts.sha256"
+  capture_state >"$REPORT_DIR/resume-current-state.tsv"
+  diff -u "$REPORT_DIR/postinstall-state.tsv" "$REPORT_DIR/resume-current-state.tsv" \
+    >"$REPORT_DIR/resume-state.diff" \
+    || fail 'current state differs from the captured post-install boundary'
+  grep -qx $'observation_gate_v1\tt' "$REPORT_DIR/resume-current-state.tsv" \
+    || fail 'resume boundary does not contain the observation gate'
+  printf 'RESUME_POSTINSTALL_VALIDATION %s\n' "$(date -u +%FT%TZ)"
+else
+  capture_state >"$REPORT_DIR/preinstall-state.tsv"
+  grep -qx $'rollout\toff\t2\t0' "$REPORT_DIR/preinstall-state.tsv" \
+    || fail 'rollout is not the approved OFF revision 2 boundary'
+  grep -qx $'cache\tinstalled\tf' "$REPORT_DIR/preinstall-state.tsv" \
+    || fail 'cache epoch is not at the expected pre-completion boundary'
+  grep -qx $'flags\t9\t0' "$REPORT_DIR/preinstall-state.tsv" \
+    || fail 'Provider Access flags are not all OFF'
+  grep -qx $'internal_users\t1' "$REPORT_DIR/preinstall-state.tsv" \
+    || fail 'internal canary allowlist is not exactly one user'
+  grep -qx $'provider_crons\t0' "$REPORT_DIR/preinstall-state.tsv" \
+    || fail 'Provider Access cron already exists'
+  grep -qx $'p0_safe\tt' "$REPORT_DIR/preinstall-state.tsv" \
+    || fail 'production is not P0-safe'
+  grep -qx $'notification_cron_v1\tt' "$REPORT_DIR/preinstall-state.tsv" \
+    || fail 'notification cron v1 boundary is missing'
+  grep -qx $'observation_gate_v1\tf' "$REPORT_DIR/preinstall-state.tsv" \
+    || fail 'observation gate is already installed or boundary is ambiguous'
+  grep -Eq $'^legal_reference\t.{12,}$' "$REPORT_DIR/preinstall-state.tsv" \
+    || fail 'legal rollout reference is missing'
+  grep -Eq $'^operational_reference\t.{12,}$' "$REPORT_DIR/preinstall-state.tsv" \
+    || fail 'operational rollout reference is missing'
 
-umask 077
-docker exec "$DB_CONTAINER" pg_dump -U supabase_admin -d postgres \
-  -Fc --schema-only >"$REPORT_DIR/preinstall-schema.dump"
-docker exec "$DB_CONTAINER" pg_dump -U supabase_admin -d postgres \
-  -Fc --data-only \
-  -t public.cloud_provider_access_rollout \
-  -t public.cloud_provider_access_rollout_internal_users \
-  -t public.cloud_provider_access_rollout_events \
-  -t public.cloud_provider_access_rollout_channel_events \
-  -t public.admin_feature_flags \
-  -t public.cloud_catalog_cache_epoch_v2_rollout \
-  >"$REPORT_DIR/preinstall-control-data.dump"
-chmod 600 "$REPORT_DIR/preinstall-schema.dump" "$REPORT_DIR/preinstall-control-data.dump"
-test -s "$REPORT_DIR/preinstall-schema.dump" || fail 'schema backup is empty'
-test -s "$REPORT_DIR/preinstall-control-data.dump" || fail 'control-data backup is empty'
-sha256sum "$REPORT_DIR/preinstall-schema.dump" \
-  "$REPORT_DIR/preinstall-control-data.dump" \
-  "$REPORT_DIR/preinstall-state.tsv" >"$REPORT_DIR/preinstall-artifacts.sha256"
+  umask 077
+  docker exec "$DB_CONTAINER" pg_dump -U supabase_admin -d postgres \
+    -Fc --schema-only >"$REPORT_DIR/preinstall-schema.dump"
+  docker exec "$DB_CONTAINER" pg_dump -U supabase_admin -d postgres \
+    -Fc --data-only \
+    -t public.cloud_provider_access_rollout \
+    -t public.cloud_provider_access_rollout_internal_users \
+    -t public.cloud_provider_access_rollout_events \
+    -t public.cloud_provider_access_rollout_channel_events \
+    -t public.admin_feature_flags \
+    -t public.cloud_catalog_cache_epoch_v2_rollout \
+    >"$REPORT_DIR/preinstall-control-data.dump"
+  chmod 600 "$REPORT_DIR/preinstall-schema.dump" "$REPORT_DIR/preinstall-control-data.dump"
+  test -s "$REPORT_DIR/preinstall-schema.dump" || fail 'schema backup is empty'
+  test -s "$REPORT_DIR/preinstall-control-data.dump" || fail 'control-data backup is empty'
+  sha256sum "$REPORT_DIR/preinstall-schema.dump" \
+    "$REPORT_DIR/preinstall-control-data.dump" \
+    "$REPORT_DIR/preinstall-state.tsv" >"$REPORT_DIR/preinstall-artifacts.sha256"
 
-for migration in "$OBSERVATION_MIGRATION" "$ANALYTICS_MIGRATION"; do
-  printf 'APPLY %s %s\n' "$(date -u +%FT%TZ)" "$migration"
-  docker exec -i "$DB_CONTAINER" psql -X -U supabase_admin -d postgres \
-    -v ON_ERROR_STOP=1 <"$WORKSPACE/supabase/migrations/$migration"
-done
+  for migration in "$OBSERVATION_MIGRATION" "$ANALYTICS_MIGRATION"; do
+    printf 'APPLY %s %s\n' "$(date -u +%FT%TZ)" "$migration"
+    docker exec -i "$DB_CONTAINER" psql -X -U supabase_admin -d postgres \
+      -v ON_ERROR_STOP=1 <"$WORKSPACE/supabase/migrations/$migration"
+  done
+fi
 
 capture_state >"$REPORT_DIR/postinstall-state.tsv"
 diff -u \
@@ -205,7 +223,7 @@ grep -q 'permission denied for table cloud_provider_access_rollout' \
   "$REPORT_DIR/direct-service-dml-refusal.log" \
   || fail 'direct DML refusal was not the expected privilege fence'
 
-DB_CONTAINER="$DB_CONTAINER" \
+env DB_CONTAINER="$DB_CONTAINER" \
   "$WORKSPACE/ops/hetzner/scripts/run_provider_access_rollout_gate.sh" observation-status \
   >"$REPORT_DIR/observation-status.txt"
 grep -qx 'observation=NONE' "$REPORT_DIR/observation-status.txt" \
