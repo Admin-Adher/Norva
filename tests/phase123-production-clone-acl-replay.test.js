@@ -36,3 +36,14 @@ test('clone acceptance requires a canonical post-replay ACL diff', () => {
   assert.match(script, /api-acl-diff\.txt/);
   assert.match(script, /clone API ACLs differ from production/);
 });
+
+test('current production state is rehearsed without replaying an installed migration', () => {
+  assert.match(script, /t\) REHEARSAL_MODE="current-state"/);
+  assert.match(
+    script,
+    /if test "\$REHEARSAL_MODE" = incremental; then\s+apply_range "\$PREVIOUS_PROVIDER_ACCESS_HEAD"/,
+  );
+  assert.match(script, /policy_state_sha256/);
+  assert.match(script, /rollout_state_sha256/);
+  assert.match(script, /internal-user count changed/);
+});
