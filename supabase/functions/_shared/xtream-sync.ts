@@ -501,12 +501,14 @@ async function pruneStaleSourceItems(
     const { data, error } = await db.rpc("norva_prune_stale_catalog_generation_items", {
       p_source_id: sourceId, p_user_id: userId,
       ...catalogGenerationRpcFence(generation),
-      p_catalog_version: version, p_limit: 2000,
+      // Keep each cascading delete comfortably below the authenticator statement
+      // timeout. The loop is resumable because every RPC batch commits independently.
+      p_catalog_version: version, p_limit: 200,
     });
     if (error) throwDb(error, "Unable to prune removed catalog items");
     const n = Number(Array.isArray(data) ? data[0] : data) || 0;
     removed += n;
-    if (n < 2000) return removed;
+    if (n < 200) return removed;
   }
   return removed;
 }
@@ -1067,6 +1069,10 @@ export async function driveXtreamSyncToReady(sourceId: string, userId: string, d
       stage: "materializing",
       percent: 74,
       updatedAt: new Date().toISOString(),
+      // Durable identity of the exact logical inventory handed to finalize.
+      // READY pruning must bind to this value; ordering versions by wall clock
+      // is not a safe substitute for identifying the completed discovery run.
+      catalogVersion: cursor.runVersion ? Number(cursor.runVersion) : undefined,
       counts: { live: liveCount, movies: movieCount, series: seriesCount, total },
       categories: { live: liveCats2, movies: movieCats2, series: seriesCats2, total: catTotal },
       steps: {

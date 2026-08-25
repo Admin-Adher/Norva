@@ -2765,6 +2765,55 @@ async function driveFinalizeToReady(db: SupabaseClient, sourceId: string, userId
   await selfInvokeFinalize(sourceId, country);
 }
 
+async function pruneCatalogGenerationBeforeReady(
+  db: SupabaseClient,
+  sourceId: string,
+  userId: string,
+  generation: CatalogAccessSnapshot,
+) {
+  const { data, error } = await db.rpc("norva_prune_catalog_generation_before_ready", {
+    p_source_id: sourceId,
+    p_user_id: userId,
+    ...catalogGenerationRpcFence(generation),
+    p_limit: 200,
+  });
+  if (error) throwDb(error, "Unable to prove catalog prune before ready");
+  const result = recordOrEmpty(Array.isArray(data) ? data[0] : data);
+  const returned = recordOrEmpty(result.writeSnapshot ?? result.write_snapshot);
+  const nextSnapshot = {
+    generationId: stringOr(returned.generationId ?? returned.generation_id, ""),
+    headRevision: String(returned.headRevision ?? returned.head_revision ?? ""),
+    configRevision: String(returned.configRevision ?? returned.config_revision ?? ""),
+    sourceVisibilityEpoch: String(
+      returned.sourceVisibilityEpoch ?? returned.source_visibility_epoch ?? "",
+    ),
+    userVisibilityEpoch: String(
+      returned.userVisibilityEpoch ?? returned.user_visibility_epoch ?? "",
+    ),
+  };
+  if (
+    !nextSnapshot.generationId || !nextSnapshot.headRevision ||
+    !nextSnapshot.configRevision || !nextSnapshot.sourceVisibilityEpoch ||
+    !nextSnapshot.userVisibilityEpoch ||
+    nextSnapshot.generationId !== generation.generationId ||
+    nextSnapshot.headRevision !== generation.headRevision ||
+    nextSnapshot.configRevision !== generation.configRevision ||
+    nextSnapshot.sourceVisibilityEpoch !== generation.sourceVisibilityEpoch
+  ) {
+    throw new HttpError(409, "Catalog access changed during ready prune", {
+      code: "SOURCE_CATALOG_CHANGED",
+    });
+  }
+  // This is the sole allowed self-induced fence advance: the delete batch bumped
+  // the user visibility epoch and the same transaction returned its exact value.
+  generation.userVisibilityEpoch = nextSnapshot.userVisibilityEpoch;
+  return {
+    catalogVersion: Number(result.catalogVersion) || 0,
+    deletedRows: Math.max(0, Number(result.deletedRows) || 0),
+    complete: result.complete === true,
+  };
+}
+
 // Read-merge-write a single config_hint mutation (preserves concurrent writers'
 // fields like syncProgress).
 async function patchSourceConfigHint(db: SupabaseClient, sourceId: string, mutate: (hint: JsonRecord) => JsonRecord) {
@@ -2816,6 +2865,7 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
     .maybeSingle();
   if (error) throwDb(error, "Unable to load source");
   if (!source) throw new HttpError(404, "Source not found");
+  const versionedCatalog = stringOr(source.source_type, "") === "xtream";
   await assertCatalogVisible(sourceId, userId, db);
   const accessSnapshot = await readCatalogAccessSnapshot(sourceId, userId, db, false);
 
@@ -2968,6 +3018,43 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
 
     if (phase === "titles") {
       const totalVod = counts.movies + counts.series;
+      // `totalVod` counts the freshly discovered version, while the physical
+      // generation may still be a safe superset if discovery's prune timed out.
+      // Once the logical offset is saturated, remove old versions in bounded,
+      // generation-fenced batches before walking any remaining current rows.
+      if (versionedCatalog && batchOffset >= totalVod) {
+        const prune = await pruneCatalogGenerationBeforeReady(
+          db,
+          sourceId,
+          userId,
+          accessSnapshot,
+        );
+        await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
+        if (!prune.complete) {
+          await reportProgress({
+            stage: "finalizing",
+            percent: 100,
+            liveReady: true,
+            browseReady: true,
+            usable: true,
+            steps: { finalize: { status: "running" } },
+          });
+          return {
+            sourceId,
+            status: "syncing",
+            phase: "titles",
+            nextPhase: "titles",
+            nextOffset: batchOffset,
+            nextAfterId: batchAfterId,
+            totalVod,
+            liveReady: true,
+            browseReady: true,
+            usable: true,
+            readyPrune: prune,
+            ...result,
+          };
+        }
+      }
       const rows = await loadSourceItems(sourceId, userId, db, accessSnapshot, {
         itemTypes: ["movie", "series"],
         afterId: batchAfterId,
@@ -3058,6 +3145,41 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
     }
 
     if (phase !== "complete") throw new HttpError(400, "Invalid catalog finalization phase");
+
+    // Re-check under the source-row lock immediately before READY. This second
+    // gate closes the gap between the titles boundary and the terminal commit.
+    if (versionedCatalog) {
+      const readyPrune = await pruneCatalogGenerationBeforeReady(
+        db,
+        sourceId,
+        userId,
+        accessSnapshot,
+      );
+      await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
+      if (!readyPrune.complete) {
+        await reportProgress({
+          stage: "finalizing",
+          percent: 100,
+          liveReady: true,
+          browseReady: true,
+          usable: true,
+          steps: { finalize: { status: "running" } },
+        });
+        return {
+          sourceId,
+          status: "syncing",
+          phase: "complete",
+          nextPhase: "complete",
+          nextOffset: batchOffset,
+          nextAfterId: batchAfterId,
+          liveReady: true,
+          browseReady: true,
+          usable: true,
+          readyPrune,
+          ...result,
+        };
+      }
+    }
 
     // Safety net: the client-driven "titles" phase can stop early and leave
     // verified titles without playable variants (vanishing from genre rails).

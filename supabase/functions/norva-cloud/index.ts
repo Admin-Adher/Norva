@@ -2106,6 +2106,51 @@ type FinalizeCloudSourceOptions = {
   afterId?: string;
 };
 
+async function pruneCatalogGenerationBeforeReady(
+  db: SupabaseClient,
+  sourceId: string,
+  userId: string,
+  generation: ActiveCatalogGeneration,
+) {
+  const { data, error } = await db.rpc("norva_prune_catalog_generation_before_ready", {
+    p_source_id: sourceId,
+    p_user_id: userId,
+    ...catalogGenerationRpcFence(generation),
+    p_limit: 200,
+  });
+  if (error) throwDb(error, "Unable to prove catalog prune before ready");
+  const result = recordOrEmpty(Array.isArray(data) ? data[0] : data);
+  const returned = recordOrEmpty(result.writeSnapshot ?? result.write_snapshot);
+  const nextSnapshot = {
+    generationId: stringOr(returned.generationId ?? returned.generation_id, ""),
+    headRevision: String(returned.headRevision ?? returned.head_revision ?? ""),
+    configRevision: String(returned.configRevision ?? returned.config_revision ?? ""),
+    sourceVisibilityEpoch: String(
+      returned.sourceVisibilityEpoch ?? returned.source_visibility_epoch ?? "",
+    ),
+    userVisibilityEpoch: String(
+      returned.userVisibilityEpoch ?? returned.user_visibility_epoch ?? "",
+    ),
+  };
+  if (
+    !nextSnapshot.generationId || !nextSnapshot.headRevision ||
+    !nextSnapshot.configRevision || !nextSnapshot.sourceVisibilityEpoch ||
+    !nextSnapshot.userVisibilityEpoch ||
+    nextSnapshot.generationId !== generation.generationId ||
+    nextSnapshot.headRevision !== generation.headRevision ||
+    nextSnapshot.configRevision !== generation.configRevision ||
+    nextSnapshot.sourceVisibilityEpoch !== generation.sourceVisibilityEpoch
+  ) {
+    throw new CatalogGenerationSupersededError("Catalog access changed during ready prune");
+  }
+  generation.userVisibilityEpoch = nextSnapshot.userVisibilityEpoch;
+  return {
+    catalogVersion: Number(result.catalogVersion) || 0,
+    deletedRows: Math.max(0, Number(result.deletedRows) || 0),
+    complete: result.complete === true,
+  };
+}
+
 async function finalizeCloudSource(sourceId: string, userId: string, db: SupabaseClient, options: FinalizeCloudSourceOptions) {
   const { data: source, error } = await db
     .from("cloud_sources")
@@ -2115,6 +2160,7 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
     .maybeSingle();
   if (error) throwDb(error, "Unable to load source");
   if (!source) throw new HttpError(404, "Source not found");
+  const versionedCatalog = stringOr(source.source_type, "") === "xtream";
   const generation = await readActiveCatalogGenerationSnapshot(db, sourceId, userId);
 
   const baseHint = recordOrEmpty(source.config_hint);
@@ -2262,6 +2308,39 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
 
     if (phase === "titles") {
       const totalVod = counts.movies + counts.series;
+      if (versionedCatalog && batchOffset >= totalVod) {
+        const prune = await pruneCatalogGenerationBeforeReady(
+          db,
+          sourceId,
+          userId,
+          generation,
+        );
+        await assertActiveCatalogGenerationCurrent(db, sourceId, userId, generation);
+        if (!prune.complete) {
+          await reportProgress({
+            stage: "finalizing",
+            percent: 100,
+            liveReady: true,
+            browseReady: true,
+            usable: true,
+            steps: { finalize: { status: "running" } },
+          });
+          return {
+            sourceId,
+            status: "syncing",
+            phase: "titles",
+            nextPhase: "titles",
+            nextOffset: batchOffset,
+            nextAfterId: batchAfterId,
+            totalVod,
+            liveReady: true,
+            browseReady: true,
+            usable: true,
+            readyPrune: prune,
+            ...result,
+          };
+        }
+      }
       const rows = await loadSourceItems(sourceId, userId, db, generation, {
         itemTypes: ["movie", "series"],
         afterId: batchAfterId,
@@ -2342,6 +2421,39 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
     }
 
     if (phase !== "complete") throw new HttpError(400, "Invalid catalog finalization phase");
+
+    if (versionedCatalog) {
+      const readyPrune = await pruneCatalogGenerationBeforeReady(
+        db,
+        sourceId,
+        userId,
+        generation,
+      );
+      await assertActiveCatalogGenerationCurrent(db, sourceId, userId, generation);
+      if (!readyPrune.complete) {
+        await reportProgress({
+          stage: "finalizing",
+          percent: 100,
+          liveReady: true,
+          browseReady: true,
+          usable: true,
+          steps: { finalize: { status: "running" } },
+        });
+        return {
+          sourceId,
+          status: "syncing",
+          phase: "complete",
+          nextPhase: "complete",
+          nextOffset: batchOffset,
+          nextAfterId: batchAfterId,
+          liveReady: true,
+          browseReady: true,
+          usable: true,
+          readyPrune,
+          ...result,
+        };
+      }
+    }
 
     // Safety net (mirrors norva-source-sync): a client-driven titles phase can stop
     // early and leave verified titles without playable variants (they vanish from
