@@ -2679,6 +2679,14 @@ async function admitHeavyImport(db: SupabaseClient, sourceId: string, createdAt:
 // fresh isolate resumes where the last left off, and the driver self-invokes the
 // next isolate at the budget — a huge catalogue (~200 batches) finishes
 // hands-off, app-closed, without the client's ~160-call ceiling.
+function isTransientFinalizeError(error: unknown): boolean {
+  const details = isRecord(error) ? error : {};
+  const message = error instanceof Error ? error.message : String(details.message ?? error);
+  const diagnostic = `${message} ${JSON.stringify(details)}`;
+  return (error instanceof HttpError && error.status === 503)
+    || /resource|timeout|timing out|upstream server|compute|deadlock|lock|statement|canceling|57014/i.test(diagnostic);
+}
+
 async function driveFinalizeToReady(db: SupabaseClient, sourceId: string, userId: string, country: string | null) {
   if (!(await sourceCatalogVisible(sourceId, userId, db))) return;
   const accessSnapshot = await readCatalogAccessSnapshot(sourceId, userId, db, false);
@@ -2740,9 +2748,7 @@ async function driveFinalizeToReady(db: SupabaseClient, sourceId: string, userId
       // error (e.g. 422 no items) surfaces and stops the chain. A statement timeout
       // surfaces as a PLAIN Error (not HttpError), so match the message regardless of
       // type — otherwise a timed-out batch wrongly stops the whole finalize.
-      const msg = e instanceof HttpError ? `${e.message} ${JSON.stringify(e.details ?? "")}` : String(e);
-      const transient = (e instanceof HttpError && e.status === 503)
-        || /resource|timeout|compute|deadlock|lock|statement|canceling|57014/i.test(msg);
+      const transient = isTransientFinalizeError(e);
       console.error("[cron] finalize batch failed", sourceId, transient ? "(transient)" : "", e);
       if (transient) await selfInvokeFinalize(sourceId, country);
       return;
