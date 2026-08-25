@@ -116,7 +116,7 @@
 <p>Two files can share the same dimensions and look different. One file can look different on two devices. The same stream can change during a session. Understanding the chain prevents a symptom at the screen from being blamed automatically on the network, display, or source.</p>
 <h2 id="start-with-the-source-and-encode">Start with the source and encode</h2>
 <p>The source determines what detail, motion, framing, color, and dynamic range are available before delivery. Editing, scaling, noise reduction, sharpening, and previous compression can change that information. A later encode cannot reliably restore detail that is absent from its input.</p>
-<p>Encoding represents the video using a codec and chosen parameters. Bitrate, resolution, frame rate, color properties, and scene complexity interact. Resolution and bitrate are separate variables, so neither should be used as a complete quality score.</p>
+<p>Encoding represents the video using a codec and chosen parameters. Bitrate, resolution, frame rate, color properties, and scene complexity interact. <a href="/blog/resolution-and-bitrate-why-they-are-not-the-same/">Resolution and bitrate are separate variables</a>, so neither should be used as a complete quality score.</p>
 <h2 id="describe-the-picture-dimensions-and-motion">Describe the picture dimensions and motion</h2>
 <p>Resolution describes frame dimensions, not how well every frame was encoded. Frame rate describes the temporal sampling or presentation rate, not spatial detail. The frame-rate guide explains why capture, cadence, shutter, encoding, display processing, and interpolation can all affect motion appearance.</p>
 <p>Aspect ratio determines the frame's shape. Fit, fill, crop, bars, and stretching can change presentation without changing encoded resolution.</p>
@@ -162,7 +162,16 @@
       <h2>Sources</h2>
       <ul><li><a href="https://www.itu.int/rec/R-REC-BT.500" target="_blank" rel="noopener">https://www.itu.int/rec/R-REC-BT.500</a></li><li><a href="https://www.itu.int/rec/R-REC-BT.2020/en" target="_blank" rel="noopener">https://www.itu.int/rec/R-REC-BT.2020/en</a></li><li><a href="https://www.w3.org/TR/media-capabilities/" target="_blank" rel="noopener">https://www.w3.org/TR/media-capabilities/</a></li><li><a href="https://norva.tv/#features" target="_blank" rel="noopener">https://norva.tv/#features</a></li></ul>
     </section>
-      
+      <section class="related">
+      <h2>Related reading</h2>
+      <div class="related-grid">
+        <a class="card" href="/blog/resolution-and-bitrate-why-they-are-not-the-same/">
+          <span class="tag">Video Quality Literacy</span>
+          <div class="card-title">Resolution and Bitrate: Why They Are Not the Same</div>
+          <p>A controlled comparison of frame dimensions and data rate, including codec, source, scene complexity, motion, and delivery context.</p>
+        </a>
+      </div>
+    </section>
     </article>
   </main>
   <footer class="blog-footer">
