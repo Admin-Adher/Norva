@@ -18,7 +18,10 @@
 // Everything else is private to this module.
 // ─────────────────────────────────────────────────────────────────────────────
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
-import { formatSourceSyncError } from "./source-sync-error.mjs";
+import {
+  formatSourceSyncError,
+  isTerminalSourceSyncStatus,
+} from "./source-sync-error.mjs";
 import {
   assertActiveCatalogGenerationCurrent,
   type ActiveCatalogGeneration,
@@ -1142,9 +1145,13 @@ export async function driveXtreamSyncToReady(sourceId: string, userId: string, d
     const message = formatSourceSyncError(err, "Source sync failed");
     console.error("[xtream-sync] sync driver failed", sourceId, message);
     const failedAt = new Date().toISOString();
+    const terminal = isTerminalSourceSyncStatus(
+      err instanceof HttpError ? err.status : null,
+    );
     const { data: fresh } = await db
       .from("cloud_sources").select("config_hint").eq("id", sourceId).eq("user_id", userId).maybeSingle();
     const freshHint = recordOrEmpty(fresh?.config_hint);
+    const failedCursor = recordOrEmpty(freshHint.syncCursor);
     await db
       .from("cloud_sources")
       .update({
@@ -1153,6 +1160,12 @@ export async function driveXtreamSyncToReady(sourceId: string, userId: string, d
         last_synced_at: failedAt,
         config_hint: compactRecord({
           ...freshHint,
+          syncCursor: terminal ? compactRecord({
+            ...failedCursor,
+            active: false,
+            terminalAt: failedAt,
+            terminalStatus: err instanceof HttpError ? err.status : null,
+          }) : freshHint.syncCursor,
           syncProgress: mergeSyncProgress(recordOrEmpty(freshHint.syncProgress), {
             status: "error",
             stage: "error",

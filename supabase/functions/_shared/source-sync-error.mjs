@@ -87,6 +87,19 @@ export function formatSourceSyncError(error, fallback = "Source sync failed") {
   return out.slice(0, MAX_SYNC_ERROR_CHARS);
 }
 
+// Discovery watchdogs may resume retryable provider/network failures, but a
+// permanent client-side refusal must wait for a new user-initiated sync. In
+// particular, leaving a 404/401/403 cursor active makes a one-minute watchdog
+// hammer the same provider forever. 408/425/429 are explicitly transient.
+export function isTerminalSourceSyncStatus(status) {
+  return Number.isInteger(status)
+    && status >= 400
+    && status < 500
+    && status !== 408
+    && status !== 425
+    && status !== 429;
+}
+
 // ---------------------------------------------------------------------------
 // Classification — ONE order for both surfaces
 // ---------------------------------------------------------------------------

@@ -79,6 +79,20 @@ test('a non-HttpError failure still yields its fallback', async () => {
   assert.equal(m.formatSourceSyncError(new Error(''), 'Source sync failed'), 'Source sync failed');
 });
 
+test('terminal discovery statuses stop the watchdog while transient statuses remain resumable', async () => {
+  const m = await load();
+  for (const status of [400, 401, 403, 404, 409, 422, 458, 499]) {
+    assert.equal(m.isTerminalSourceSyncStatus(status), true, String(status));
+  }
+  for (const status of [null, 399, 408, 425, 429, 500, 502, 503, 504]) {
+    assert.equal(m.isTerminalSourceSyncStatus(status), false, String(status));
+  }
+
+  const xtream = read('supabase/functions/_shared/xtream-sync.ts');
+  assert.match(xtream, /isTerminalSourceSyncStatus\([\s\S]*err instanceof HttpError \? err\.status : null/);
+  assert.match(xtream, /syncCursor: terminal \? compactRecord\(\{[\s\S]*active: false,[\s\S]*terminalAt: failedAt,[\s\S]*terminalStatus:/);
+});
+
 // Discovered, not enumerated. A hand-written file list missed
 // _shared/xtream-sync.ts — the site the recurring cron sync actually reaches,
 // because the driver catches its own gateway HttpError and never lets it
