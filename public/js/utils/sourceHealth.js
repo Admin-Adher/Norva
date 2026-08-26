@@ -252,13 +252,14 @@
 
         let state = 'degraded';
         let refreshing = false;
+        let retrying = false;
         if (!enabled) {
             state = 'degraded';
         } else if (EXPLICIT_ATTENTION_STATES.has(rawStatus) || EXPLICIT_ATTENTION_STATES.has(progressStatus)) {
             const explicitState = EXPLICIT_ATTENTION_STATES.has(progressStatus) ? progressStatus : rawStatus;
             if (explicitState === 'unreachable' && hasCompletedCatalog(source, status)) {
                 state = 'ready';
-                refreshing = true;
+                retrying = true;
             } else {
                 state = explicitState;
             }
@@ -267,12 +268,15 @@
             // A background re-sync that hits a TRANSIENT provider error (timeout,
             // unreachable, vague degraded) must not downgrade an already-built
             // catalog: the last import is still fully browsable. Keep it
-            // ready+refreshing and let the watchdog retry silently. Only a hard
+            // ready+retrying and let the watchdog retry silently. `refreshing`
+            // is deliberately reserved for work that is actually running so
+            // Home never claims that titles are being added after a failed
+            // attempt. Only a hard
             // auth/expiry verdict (the user must act) still surfaces. Initial
             // imports (no completed catalog yet) surface every error as before.
             if (hasCompletedCatalog(source, status) && errorState !== 'auth_failed' && errorState !== 'expired') {
                 state = 'ready';
-                refreshing = true;
+                retrying = true;
             } else {
                 state = errorState;
             }
@@ -304,6 +308,7 @@
         return {
             state,
             refreshing,
+            retrying,
             source,
             type: sourceType(source),
             label: meta.label,
@@ -491,6 +496,7 @@
             issues: [],
             ready,
             refreshing: ready.some(item => item.refreshing),
+            retrying: ready.some(item => item.retrying),
             ...STATE_META.ready
         };
     }

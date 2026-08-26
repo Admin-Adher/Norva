@@ -63,7 +63,25 @@ test('source health keeps hard account failures actionable but preserves a built
   assert.equal(authFailure.state, 'auth_failed');
   assert.equal(authFailure.isBlocking, true);
   assert.equal(timeout.state, 'ready');
-  assert.equal(timeout.refreshing, true);
+  assert.equal(timeout.refreshing, false);
+  assert.equal(timeout.retrying, true);
+});
+
+test('a failed background refresh never claims that Home is still adding titles', () => {
+  const health = sourceHealthHarness();
+  const summary = health.summarize([{
+    id: 'source-1',
+    sync_status: 'error',
+    sync_error: 'provider timeout',
+    configHint: { lastSync: { syncedAt: '2026-08-10T08:00:00.000Z', total: 42 } },
+  }]);
+
+  const availability = health.catalogAvailability(summary);
+  assert.equal(summary.state, 'ready');
+  assert.equal(summary.refreshing, false);
+  assert.equal(summary.retrying, true);
+  assert.equal(availability.browsable, true);
+  assert.equal(availability.backgrounding, false);
 });
 
 test('source health reports an API outage as unknown instead of not configured', async () => {
@@ -208,7 +226,8 @@ test('Account health summary reports the last completed sync instead of a failed
   const html = health.cardHtml(summary, { hideWhenReady: false, accountSummary: true });
 
   assert.equal(summary.state, 'ready');
-  assert.equal(summary.refreshing, true);
+  assert.equal(summary.refreshing, false);
+  assert.equal(summary.retrying, true);
   assert.match(html, /Catalogue updated 2 h ago/);
   assert.doesNotMatch(html, /Catalogue updated 2 min ago/);
 });
