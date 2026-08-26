@@ -2708,6 +2708,8 @@ async function driveFinalizeToReady(db: SupabaseClient, sourceId: string, userId
   // lease is still fresh, and the lease auto-expires if this isolate dies, so a
   // genuinely-dead finalize is still revived after the TTL.
   const leaseTtlMs = boundedInt(Deno.env.get("NORVA_FINALIZE_LEASE_TTL_MS"), 240_000, 30_000, 900_000);
+  const leaseToken = crypto.randomUUID();
+  if (!(await claimFinalizeLease(db, sourceId, userId, leaseToken, leaseTtlMs))) return;
   await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
   await stampFinalizeLease(db, sourceId, leaseTtlMs); // cover the first batch immediately
 
@@ -2750,7 +2752,10 @@ async function driveFinalizeToReady(db: SupabaseClient, sourceId: string, userId
       // type — otherwise a timed-out batch wrongly stops the whole finalize.
       const transient = isTransientFinalizeError(e);
       console.error("[cron] finalize batch failed", sourceId, transient ? "(transient)" : "", e);
-      if (transient) await selfInvokeFinalize(sourceId, country);
+      if (transient) {
+        await releaseFinalizeLease(db, sourceId, userId, leaseToken);
+        await selfInvokeFinalize(sourceId, country);
+      }
       return;
     }
     // finalizeCloudSource owns a fresh per-batch snapshot and may legitimately
@@ -2761,12 +2766,14 @@ async function driveFinalizeToReady(db: SupabaseClient, sourceId: string, userId
     await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
     if (String(result.status) === "ready") {
       await patchSourceConfigHint(db, sourceId, (hint) => { delete hint.finalizeCursor; delete hint.finalizeLease; return hint; });
+      await releaseFinalizeLease(db, sourceId, userId, leaseToken);
       return;
     }
     phase = stringOr(result.nextPhase, "complete");
     offset = Number(result.nextOffset) || 0;
     afterId = stringOr(result.nextAfterId, afterId);
     await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
+    if (!(await renewFinalizeLease(db, sourceId, userId, leaseToken, leaseTtlMs))) return;
     await patchSourceConfigHint(db, sourceId, (hint) => {
       hint.finalizeCursor = { phase, offset, afterId };
       // Refresh the single-flight lease before the next batch (folded into the cursor
@@ -2784,6 +2791,7 @@ async function driveFinalizeToReady(db: SupabaseClient, sourceId: string, userId
   }
   // Budget/guard hit before ready → continue in a fresh isolate.
   await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
+  await releaseFinalizeLease(db, sourceId, userId, leaseToken);
   await selfInvokeFinalize(sourceId, country);
 }
 
@@ -2854,6 +2862,51 @@ async function stampFinalizeLease(db: SupabaseClient, sourceId: string, ttlMs: n
       return hint;
     });
   } catch (_) { /* best-effort heartbeat */ }
+}
+
+async function claimFinalizeLease(
+  db: SupabaseClient,
+  sourceId: string,
+  userId: string,
+  leaseToken: string,
+  ttlMs: number,
+) {
+  const { data, error } = await db.rpc("norva_claim_source_finalize_lease", {
+    p_source_id: sourceId,
+    p_user_id: userId,
+    p_lease_token: leaseToken,
+    p_ttl_seconds: Math.max(30, Math.ceil(ttlMs / 1000)),
+  });
+  return !error && data === true;
+}
+
+async function renewFinalizeLease(
+  db: SupabaseClient,
+  sourceId: string,
+  userId: string,
+  leaseToken: string,
+  ttlMs: number,
+) {
+  const { data, error } = await db.rpc("norva_renew_source_finalize_lease", {
+    p_source_id: sourceId,
+    p_user_id: userId,
+    p_lease_token: leaseToken,
+    p_ttl_seconds: Math.max(30, Math.ceil(ttlMs / 1000)),
+  });
+  return !error && data === true;
+}
+
+async function releaseFinalizeLease(
+  db: SupabaseClient,
+  sourceId: string,
+  userId: string,
+  leaseToken: string,
+) {
+  await db.rpc("norva_release_source_finalize_lease", {
+    p_source_id: sourceId,
+    p_user_id: userId,
+    p_lease_token: leaseToken,
+  });
 }
 
 // Kick a fresh finalize isolate (resumes from the persisted finalize cursor).
