@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#05080f">
+  <title>Bandwidth, Throughput, Latency, and Jitter | Norva Blog</title>
+  <meta name="description" content="Learn how bandwidth, measured throughput, latency, jitter, and packet loss differ, what each network metric can show, and why context prevents false conclusions.">
+  <link rel="canonical" href="https://norva.tv/blog/bandwidth-throughput-latency-and-jitter-explained/">
+  <meta name="robots" content="index,follow">
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/css/blog.css?v=1">
+  <meta property="og:type" content="article">
+  <meta property="og:site_name" content="Norva">
+  <meta property="og:title" content="Bandwidth, Throughput, Latency, and Jitter | Norva Blog">
+  <meta property="og:description" content="Learn how bandwidth, measured throughput, latency, jitter, and packet loss differ, what each network metric can show, and why context prevents false conclusions.">
+  <meta property="og:url" content="https://norva.tv/blog/bandwidth-throughput-latency-and-jitter-explained/">
+  <meta property="og:image" content="https://norva.tv/img/devices/norva-device-tv.webp">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Bandwidth, Throughput, Latency, and Jitter | Norva Blog">
+  <meta name="twitter:description" content="Learn how bandwidth, measured throughput, latency, jitter, and packet loss differ, what each network metric can show, and why context prevents false conclusions.">
+  <meta name="twitter:image" content="https://norva.tv/img/devices/norva-device-tv.webp">
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "headline": "Bandwidth, Throughput, Latency, and Jitter Explained",
+  "description": "Learn how bandwidth, measured throughput, latency, jitter, and packet loss differ, what each network metric can show, and why context prevents false conclusions.",
+  "inLanguage": "en",
+  "datePublished": "2026-08-26T06:00:00+02:00",
+  "dateModified": "2026-08-26T06:00:00+02:00",
+  "author": {
+    "@type": "Organization",
+    "name": "Norva"
+  },
+  "publisher": {
+    "@type": "Organization",
+    "name": "Norva",
+    "logo": {
+      "@type": "ImageObject",
+      "url": "https://norva.tv/img/norva-app-icon-96.png"
+    }
+  },
+  "image": [
+    "https://norva.tv/img/devices/norva-device-tv.webp"
+  ],
+  "mainEntityOfPage": {
+    "@type": "WebPage",
+    "@id": "https://norva.tv/blog/bandwidth-throughput-latency-and-jitter-explained/"
+  }
+}
+  </script>
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    {
+      "@type": "ListItem",
+      "position": 1,
+      "name": "Home",
+      "item": "https://norva.tv/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 2,
+      "name": "Blog",
+      "item": "https://norva.tv/blog/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 3,
+      "name": "Bandwidth, Throughput, Latency, and Jitter Explained",
+      "item": "https://norva.tv/blog/bandwidth-throughput-latency-and-jitter-explained/"
+    }
+  ]
+}
+  </script>
+  <script src="/js/marketing-config.js?v=1"></script>
+  <script defer src="/js/marketing.js?v=1"></script>
+  <script defer src="/js/consent-banner.js?v=1"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="blog-nav">
+    <a class="brand" href="/" aria-label="Norva home">
+      <img src="/img/norva-app-icon-96.png" width="34" height="34" alt="" decoding="async">
+      <span>Norva</span>
+    </a>
+    <nav class="nav-right" aria-label="Primary">
+      <a href="/blog/">Blog</a>
+      <a class="hide-sm" href="/#how-it-works">How it works</a>
+      <a class="cta" href="/account.html?returnTo=%2Fapp%23home" data-cta="blog-nav" data-auth-action>Start free trial</a>
+    </nav>
+  </header>
+  <main id="main-content">
+    <nav class="breadcrumb" aria-label="Breadcrumb"><a href="/">Home</a><span class="sep">›</span><a href="/blog/">Blog</a><span class="sep">›</span><span aria-current="page">Bandwidth, Throughput, Latency, and Jitter Explained</span></nav>
+    <article>
+      <div class="article-meta">
+        <span class="tag">Home Network Video Basics</span>
+        <span>By Norva Editorial Team</span>
+        <span class="dot">·</span>
+        <time datetime="2026-08-26T06:00:00+02:00">26 August 2026</time>
+        <span class="dot">·</span>
+        <span>5 min read</span>
+      </div>
+      <h1>Bandwidth, Throughput, Latency, and Jitter Explained</h1>
+      <p class="lede">Bandwidth is an available or nominal capacity concept; throughput is the useful rate measured in a specific test. Latency is delay, while jitter describes delay variation under a stated method. Packet loss is separate again. Video can be affected by one or several, so record the method and path before interpreting a number.</p>
+      <nav class="toc" aria-label="On this page">
+      <strong>On this page</strong>
+      <ul><li><a href="#bandwidth-is-not-a-delivered-result">Bandwidth is not a delivered result</a></li><li><a href="#throughput-needs-a-test-context">Throughput needs a test context</a></li><li><a href="#latency-is-elapsed-delay">Latency is elapsed delay</a></li><li><a href="#jitter-is-variation-not-simply-slowness">Jitter is variation, not simply slowness</a></li><li><a href="#packet-loss-is-another-dimension">Packet loss is another dimension</a></li><li><a href="#original-evidence-metric-dictionary">Original evidence: metric dictionary</a></li><li><a href="#build-a-small-measurement-set">Build a small measurement set</a></li><li><a href="#interpret-combinations">Interpret combinations</a></li><li><a href="#common-interpretation-errors">Common interpretation errors</a></li><li><a href="#frequently-asked-questions">Frequently asked questions</a></li><li><a href="#your-next-step">Your next step</a></li><li><a href="#sources">Sources</a></li></ul>
+    </nav>
+      <blockquote><strong>In short:</strong> Bandwidth is an available or nominal capacity concept; throughput is the useful rate measured in a specific test. Latency is delay, while jitter describes delay variation under a stated method. Packet loss is separate again. Video can be affected by one or several, so record the method and path before interpreting a number.</blockquote>
+<p>Every metric is a partial view. Two tests with the same unit can still measure different endpoints, protocols, directions, durations, routes, or traffic conditions.</p>
+<h2 id="bandwidth-is-not-a-delivered-result">Bandwidth is not a delivered result</h2>
+<p>People often use bandwidth as shorthand for speed, but capacity labels do not say how much application data arrived during a particular interval. Shared links, protocol overhead, congestion, radio conditions, device limits, and the remote endpoint can reduce observed throughput.</p>
+<p>A plan rate, Wi-Fi link rate, Ethernet label, and application throughput are therefore different values. Record which one a screen displays before comparing it with another.</p>
+<h2 id="throughput-needs-a-test-context">Throughput needs a test context</h2>
+<p>Throughput is a measured transfer rate. RFC 6349 describes a framework for TCP throughput testing and emphasizes test methodology. A result belongs with its endpoint, direction, protocol, duration, number of connections, device, route, and time.</p>
+<p>The speed-test interpretation guide explains why a nearby test server does not reproduce every authorised source path. A brief peak also should not be presented as sustained application performance.</p>
+<h2 id="latency-is-elapsed-delay">Latency is elapsed delay</h2>
+<p>Latency describes how long data or a response takes to travel through a measured path. One-way delay requires synchronized clocks under RFC 2679's method; many consumer tools instead report a round trip. Those results are not interchangeable.</p>
+<p>Video startup, controls, authentication, and segment requests can feel responsive or delayed for different reasons. A high throughput result does not automatically mean low latency.</p>
+<h2 id="jitter-is-variation-not-simply-slowness">Jitter is variation, not simply slowness</h2>
+<p>RFC 3393 defines packet delay variation metrics. In everyday tools, “jitter” may use a different calculation, direction, interval, or statistic. Read the tool's definition before comparing values.</p>
+<p>A connection can have adequate average throughput yet irregular packet arrival, or stable delay with insufficient sustained throughput. The jitter comparison guide shows how to separate these patterns with a timeline.</p>
+<h2 id="packet-loss-is-another-dimension">Packet loss is another dimension</h2>
+<p>RFC 2680 defines a one-way packet loss metric with explicit methodology. Consumer results may instead infer loss from missing replies, and some devices can deprioritize diagnostic traffic. A reported zero does not prove every application packet arrived; a nonzero result needs recurrence and scope.</p>
+<p>The packet-loss symptom guide avoids equating one playback pause with proven loss.</p>
+<h2 id="original-evidence-metric-dictionary">Original evidence: metric dictionary</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>Metric</th><th>Plain-language question</th><th>Required context</th><th>What it cannot prove alone</th></tr></thead>
+<tbody><tr><td>Bandwidth/capacity</td><td>What could this link carry under its definition?</td><td>Link, label, direction</td><td>Application delivery</td></tr><tr><td>Throughput</td><td>What useful rate was measured?</td><td>Endpoint, protocol, duration, route</td><td>Every source path</td></tr><tr><td>Latency</td><td>How much delay did the method observe?</td><td>One-way/round-trip, clocks, path</td><td>Sustained capacity</td></tr><tr><td>Jitter</td><td>How did delay vary?</td><td>Formula, sample, statistic</td><td>Average throughput</td></tr><tr><td>Loss</td><td>Which expected packets were absent?</td><td>Probe type, direction, interval</td><td>Exact playback cause</td></tr></tbody>
+</table></div>
+<p>Attach units to every value and preserve raw results where privacy permits.</p>
+<h2 id="build-a-small-measurement-set">Build a small measurement set</h2>
+<p>Use the affected device in its normal location. Record three spaced samples at a quiet time and three during the symptom window. Where safe and supported, repeat over one alternate local link without changing the endpoint or test settings.</p>
+<p>Then compare medians, ranges, and recurrence rather than selecting the best number. Note simultaneous uploads, mesh changes, device power state, and weather only when directly observed; do not invent causal stories around coincidental events.</p>
+<h2 id="interpret-combinations">Interpret combinations</h2>
+<p>Low sustained throughput can drain a playback buffer. Delay variation and loss can disrupt delivery even when a short average rate looks adequate. High latency may slow request-response sequences without necessarily limiting a long transfer. The application, transport behavior, buffering design, and source determine visible impact.</p>
+<p><a href="/blog/the-complete-guide-to-home-network-basics-for-video/">The home-network basics guide</a> places these measurements within the full path. Norva plays compatible authorised sources; it does not control the household router, provider path, or source encoding. Any current diagnostics must be verified in official Norva information.</p>
+<h2 id="common-interpretation-errors">Common interpretation errors</h2>
+<p>Do not compare bits with bytes, confuse link rate with throughput, label all delay variation “packet loss,” or treat a single server result as a guarantee. Avoid measuring only after changing router, device, and source together.</p>
+<h2 id="frequently-asked-questions">Frequently asked questions</h2>
+<h3 id="which-metric-matters-most-for-video">Which metric matters most for video?</h3>
+<p>No single metric always dominates. The version's delivery pattern, path, device, and symptom determine which measurements are relevant.</p>
+<h3 id="can-throughput-exceed-a-plan-label">Can throughput exceed a plan label?</h3>
+<p>Labels, provisioning, test methods, units, and overhead definitions vary. Verify what each number represents before treating a difference as an error.</p>
+<h3 id="is-jitter-measured-the-same-way-by-every-tool">Is jitter measured the same way by every tool?</h3>
+<p>No. Check the tool's formula, direction, probe type, sample period, and reported statistic.</p>
+<h2 id="your-next-step">Your next step</h2>
+<p><a href="https://norva.tv/#features" target="_blank" rel="noopener">Explore Norva's playback features</a></p>
+<h2 id="sources">Sources</h2>
+<ul><li><a href="https://www.rfc-editor.org/rfc/rfc6349" target="_blank" rel="noopener">RFC 6349: TCP Throughput Testing</a></li><li><a href="https://www.rfc-editor.org/rfc/rfc2679" target="_blank" rel="noopener">RFC 2679: One-Way Delay Metric</a></li><li><a href="https://www.rfc-editor.org/rfc/rfc3393" target="_blank" rel="noopener">RFC 3393: Delay Variation Metric</a></li><li><a href="https://www.rfc-editor.org/rfc/rfc2680" target="_blank" rel="noopener">RFC 2680: One-Way Packet Loss Metric</a></li></ul>
+      <section class="article-cta">
+      <a class="btn" href="https://norva.tv/#features" data-cta="blog-article">Explore Norva's Playback Features</a>
+    </section>
+      <section class="sources">
+      <h2>Sources</h2>
+      <ul><li><a href="https://www.rfc-editor.org/rfc/rfc6349" target="_blank" rel="noopener">https://www.rfc-editor.org/rfc/rfc6349</a></li><li><a href="https://www.rfc-editor.org/rfc/rfc2679" target="_blank" rel="noopener">https://www.rfc-editor.org/rfc/rfc2679</a></li><li><a href="https://www.rfc-editor.org/rfc/rfc3393" target="_blank" rel="noopener">https://www.rfc-editor.org/rfc/rfc3393</a></li><li><a href="https://www.rfc-editor.org/rfc/rfc2680" target="_blank" rel="noopener">https://www.rfc-editor.org/rfc/rfc2680</a></li></ul>
+    </section>
+      
+    </article>
+  </main>
+  <footer class="blog-footer">
+    <div class="foot-inner">
+      <nav class="foot-links" aria-label="Footer">
+        <a href="/">Home</a>
+        <a href="/blog/">Blog</a>
+        <a href="/#features">Benefits</a>
+        <a href="/#pricing">Pricing</a>
+        <a href="/support.html?returnTo=%2Fblog%2F">Support</a>
+        <a href="/terms.html">Terms</a>
+        <a href="/privacy.html">Privacy</a>
+        <a href="/mentions-legales.html">Legal notice</a>
+      </nav>
+      <p class="disclaimer">&copy; 2026 Norva. Norva is a media player and organiser. It does not provide media. Use requires a compatible source you own or are authorised to access.</p>
+    </div>
+  </footer>
+</body>
+</html>
