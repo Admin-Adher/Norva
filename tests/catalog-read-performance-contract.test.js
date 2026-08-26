@@ -11,6 +11,7 @@ const read = (relativePath) => fs.readFileSync(path.join(root, relativePath), 'u
 const catalog = read('supabase/functions/norva-catalog/index.ts');
 const migration = read('supabase/migrations/20260826090000_catalog_genre_rail_read_model_v1.sql');
 const migrationV2 = read('supabase/migrations/20260826090010_catalog_genre_rail_read_model_v2.sql');
+const migrationV3 = read('supabase/migrations/20260826091244_catalog_genre_rail_refresh_isolation_v3.sql');
 const home = read('public/js/pages/HomePage.js');
 const api = read('public/js/api.js');
 const cloudApi = read('public/js/cloudApi.js');
@@ -45,6 +46,16 @@ test('the production correction avoids the unbounded visible-title runtime spool
   assert.match(migrationV2, /bucket_rank <= 150/);
   assert.match(migrationV2, /v_end_epoch <> v_start_epoch/);
   assert.doesNotMatch(migrationV2, /with visible as materialized \([\s\S]*from public\.cloud_catalog_visible_titles/);
+});
+
+test('rail refresh is isolated from slow language facets and independently scheduled', () => {
+  assert.match(migrationV3, /create or replace function public\.cloud_refresh_genre_rail_candidates/);
+  assert.match(migrationV3, /create or replace function public\.cloud_refresh_all_genre_rail_candidates/);
+  assert.match(migrationV3, /norva-genre-rail-candidate-refresh/);
+  assert.match(migrationV3, /statement_timeout='120s'/);
+  assert.match(migrationV3, /genre_rail_refreshed_at/);
+  assert.match(migrationV3, /from public\.cloud_catalog_visible_title_variants variant/);
+  assert.match(migrationV3, /revoke all on function public\.cloud_refresh_genre_rail_candidates[\s\S]*from public, anon, authenticated/);
 });
 
 test('Home timeouts abort the underlying rails fetch and route cancellation drains controllers', () => {
