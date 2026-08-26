@@ -2690,7 +2690,11 @@ function isTransientFinalizeError(error: unknown): boolean {
 async function driveFinalizeToReady(db: SupabaseClient, sourceId: string, userId: string, country: string | null) {
   if (!(await sourceCatalogVisible(sourceId, userId, db))) return;
   const accessSnapshot = await readCatalogAccessSnapshot(sourceId, userId, db, false);
-  const deadline = Date.now() + 90_000;
+  // Self-hosted Edge begins wall-clock termination around 60 seconds. Finish
+  // the current bounded statement, persist the cursor and hand off from a fresh
+  // isolate before that boundary instead of dying with a four-minute lease.
+  const runBudgetMs = boundedInt(Deno.env.get("NORVA_FINALIZE_RUN_BUDGET_MS"), 45_000, 15_000, 50_000);
+  const deadline = Date.now() + runBudgetMs;
   const { data: src0 } = await db.from("cloud_sources").select("config_hint,sync_status,created_at").eq("id", sourceId).maybeSingle();
   if (src0 && String(src0.sync_status) === "ready") return; // already done
 
