@@ -597,6 +597,24 @@ class App {
             } catch (_) { }
             this._profileGateComplete = true;
         }
+
+        // Home is the overwhelmingly common cold-start destination. Start its
+        // cache paint and catalogue reads as soon as the active profile is known,
+        // while the remaining shell/avatar wiring finishes. navigateTo('home')
+        // below reuses HomePage's in-flight promise, so this never duplicates a
+        // request. Deep links and native continuity to another page stay untouched.
+        const warmHashKey = window.location.hash.slice(1).split('/')[0];
+        const warmPersistedPage = this._nativeRecovery
+            && this._nativeContinuity
+            && (this._nativeContinuity.page in this.pages)
+            ? this._nativeContinuity.page
+            : '';
+        const shouldPrimeHome = (!warmHashKey || warmHashKey === 'home')
+            && (!warmPersistedPage || warmPersistedPage === 'home');
+        if (shouldPrimeHome) {
+            Promise.resolve(this.pages.home?.show?.())
+                .catch((error) => console.warn('[App] Early Home preparation failed:', error));
+        }
         if (continuityRecovery) {
             try {
                 const cleanUrl = new URL(window.location.href);

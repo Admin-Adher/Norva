@@ -2008,7 +2008,19 @@ class HomePage {
             const anchor = String(rail.curation?.anchorTitle || '').trim();
             return anchor ? `Because You Liked ${anchor}` : 'Because You Liked';
         }
-        return rail.title || rail.name || 'Norva Selection';
+        const title = rail.title || rail.name || 'Norva Selection';
+        // The fast first paint intentionally combines movie and series genre
+        // rails. A genre such as Action can exist in both payloads; without a
+        // type suffix Home briefly showed two indistinguishable "Action" rows
+        // before the personalized response arrived.
+        if (rail.curation?.kind === 'genre') {
+            const type = String(rail.itemType || rail.item_type || '').toLowerCase();
+            const suffix = type === 'series' ? 'Series' : type === 'movie' ? 'Movies' : '';
+            if (suffix && !new RegExp(`\\b${suffix}$`, 'i').test(String(title))) {
+                return `${title} ${suffix}`;
+            }
+        }
+        return title;
     }
 
     railSubtitle(rail = {}) {
