@@ -2181,6 +2181,15 @@ class SourceManager {
         return messages[code] || 'Norva could not complete this provider access operation safely. Try again.';
     }
 
+    showProviderAccessSavedReceipt(access = {}) {
+        const expiresOn = String(access.expiresOn || access.provider_access_expires_on || '');
+        const formattedEnd = this.formatAccessDate(expiresOn);
+        const message = formattedEnd
+            ? `Provider access saved until ${formattedEnd}.`
+            : 'Provider access period saved.';
+        NorvaModal.toast(message, 'provider-access-success', { duration: 4200 });
+    }
+
     async showProviderAccess(id) {
         const view = this.openProviderAccessModal('Provider access', `
           <div class="provider-access-loading" role="status" aria-live="polite">
@@ -2260,7 +2269,10 @@ class SourceManager {
                     : await API.providerAccess.createCycle(id, terms, options);
                 this.clearProviderAccessIdempotency(id, action);
                 await this.loadSources();
-                if (this.providerAccessViewToken === view.token) this.renderProviderAccessDetails(id, next, view);
+                if (this.providerAccessViewToken === view.token) {
+                    this.renderProviderAccessDetails(id, next, view);
+                    this.showProviderAccessSavedReceipt(next);
+                }
             } catch (error) {
                 setBusy(false, this.providerAccessErrorMessage(error));
             }
