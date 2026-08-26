@@ -1589,45 +1589,51 @@ async function listGenreRails(req: Request, url: URL, userId: string) {
   const hidden = await getHiddenGenres(req, userId);
   const candidateBuckets = BUCKET_ORDER.filter((b) => b !== "autres" && !hidden.has(b));
 
-  // Per-bucket, index-backed candidate fetch (genre_buckets @> {bucket}) over the
-  // WHOLE catalogue — not a recency window. The old scan only saw the newest ~few-k
-  // synced titles, so a bucket whose members were older/less-recently-enriched
-  // rendered near-empty. genre_buckets is the denormalised curated-bucket set
-  // (migration 20260704160000); the GIN index makes each of these cheap. We pull a
-  // buffer (perRail * 3) newest-by-created_at per bucket so the cross-rail dedup
-  // below still has enough to fill each row. Narrow select (id + buckets), so the
-  // heavy metadata is detoasted only for the final chosen ids.
+  // Read one generation-fenced materialisation rather than fanning a page request
+  // out into fifteen concurrent scans of cloud_catalog_visible_titles. The
+  // background facet refresh builds a complete-catalog top-150 pool per bucket;
+  // 150 is enough for the public max rail size (50) and the existing x3 de-dup
+  // buffer. A stale/missing read model is explicitly empty/fail-closed: never
+  // replace it with the old request-time fan-out that could starve Home and other
+  // users behind PostgreSQL's authenticated statement budget.
   const buffer = perRail * 3;
   let candidateSets: Array<{ bucket: string; rows: JsonRecord[] }>;
-  try {
-    candidateSets = await Promise.all(candidateBuckets.map(async (bucket) => {
-      let q = db
-        .from("cloud_catalog_visible_titles")
-        .select("id, genre_buckets, created_at")
-        .eq("user_id", userId)
-        .eq("item_type", itemType)
-        .gt("variant_count", 0)
-        // A rail is a curated preview — only titles with artwork belong in it (a
-        // TMDB-matched title always has a poster; an un-enriched one shows a blank
-        // placeholder). The genre picker / "See all" grid still exposes everything.
-        .not("poster_url", "is", null)
-        .contains("genre_buckets", [bucket]);
-      // Avoid an excessively-deep postgrest-js generic instantiation on this
-      // dynamically assembled overlap filter; runtime query semantics are unchanged.
-      if (hidden.size) q = (q as any).not("genre_buckets", "ov", `{${[...hidden].join(",")}}`);
-      const { data, error } = await q
-        .order("created_at", { ascending: false })
-        .limit(buffer);
-      if (error) {
-        if (isMissingMaterialization(error)) return { bucket, rows: [] as JsonRecord[] };
-        throwDb(error, "Unable to list genre rail candidates");
-      }
-      return { bucket, rows: (data ?? []) as JsonRecord[] };
-    }));
-  } catch (error) {
-    if (isMissingMaterialization(error)) return { contract: "norva.genre.rails.v1", type: itemType, rails: [] };
-    throw error;
+  const visibilityEpoch = requiredCatalogTitleVisibilityEpoch(userId);
+  const { data: candidatePayload, error: candidateError } = await db.rpc(
+    "norva_get_genre_rail_candidates",
+    {
+      p_user_id: userId,
+      p_item_type: itemType,
+      p_expected_visibility_epoch: visibilityEpoch,
+    },
+  );
+  if (candidateError) {
+    if (isGenreRailReadModelUnavailable(candidateError)) {
+      return { contract: "norva.genre.rails.v1", type: itemType, rails: [] };
+    }
+    throwDb(candidateError, "Unable to list genre rail candidates");
   }
+  if (!isRecord(candidatePayload)
+      || candidatePayload.contract !== "catalog-genre-rail-candidates-v1"
+      || !isRecord(candidatePayload.candidates)) throw catalogTitleReadUnavailable();
+  catalogTitleVisibilityEpoch(candidatePayload.visibilityEpoch, visibilityEpoch);
+
+  const candidates = candidatePayload.candidates as JsonRecord;
+  candidateSets = candidateBuckets.map((bucket) => {
+    const rawRows = Array.isArray(candidates[bucket]) ? candidates[bucket] as unknown[] : [];
+    const rows: JsonRecord[] = [];
+    for (const raw of rawRows.slice(0, buffer)) {
+      if (!isRecord(raw) || !Array.isArray(raw.genreBuckets)) throw catalogTitleReadUnavailable();
+      const genreBuckets = (raw.genreBuckets as unknown[]).map(String);
+      if (hidden.size && genreBuckets.some((value) => hidden.has(value))) continue;
+      rows.push({
+        id: catalogTitleUuid(raw.id),
+        genre_buckets: genreBuckets,
+        created_at: stringOrNull(raw.createdAt) ?? "",
+      });
+    }
+    return { bucket, rows };
+  });
 
   // A row's genre_buckets are already display-ordered and hidden-filtered by the
   // query; keep the same buckets each candidate belongs to for the dedup budget.
@@ -4476,6 +4482,13 @@ function isMissingMaterialization(error: unknown) {
   const record = error as { code?: string; message?: string };
   const message = String(record.message || "");
   return record.code === "42P01" || message.includes("cloud_live_") || message.includes("cloud_title");
+}
+
+function isGenreRailReadModelUnavailable(error: unknown) {
+  if (!error || typeof error !== "object") return false;
+  const record = error as { code?: string; message?: string; details?: string };
+  const details = `${record.message || ""} ${record.details || ""}`;
+  return record.code === "55000" && details.includes("genre_rail_read_model");
 }
 
 function isMissingRatingsExpansion(error: unknown) {

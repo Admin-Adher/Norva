@@ -990,7 +990,7 @@ const CloudAdapter = (() => {
         ), payload);
     }
 
-    async function getHomeRails({ type = '', limit = 12, fresh = '' } = {}) {
+    async function getHomeRails({ type = '', limit = 12, fresh = '' } = {}, options = {}) {
         const normalizedType = type ? cloudTypeFromLocal(type) : '';
         const normalizedLimit = Math.max(1, Math.min(50, Number.parseInt(limit, 10) || 12));
         const railCacheKey = () => JSON.stringify({
@@ -1011,7 +1011,7 @@ const CloudAdapter = (() => {
             type: normalizedType,
             limit: normalizedLimit,
             ...(freshToken ? { fresh: freshToken } : {})
-        });
+        }, options);
         syncVisibilityEpoch(payload);
         homeRailCache.set(railCacheKey(), {
             expiresAt: Date.now() + PAGE_CACHE_TTL_MS,
@@ -1020,7 +1020,7 @@ const CloudAdapter = (() => {
         return payload;
     }
 
-    async function getGenreRails({ type = '', limit = 18 } = {}) {
+    async function getGenreRails({ type = '', limit = 18 } = {}, options = {}) {
         const normalizedType = type ? cloudTypeFromLocal(type) : 'movie';
         const normalizedLimit = Math.max(1, Math.min(50, Number.parseInt(limit, 10) || 18));
         const genreRailCacheKey = () => JSON.stringify({
@@ -1038,7 +1038,7 @@ const CloudAdapter = (() => {
         const payload = await cloudHomeApi().genreRails({
             type: normalizedType,
             limit: normalizedLimit
-        });
+        }, options);
         syncVisibilityEpoch(payload);
         homeRailCache.set(genreRailCacheKey(), {
             expiresAt: Date.now() + PAGE_CACHE_TTL_MS,
@@ -1751,7 +1751,7 @@ const CloudAdapter = (() => {
         return patch;
     }
 
-    async function request(method, endpoint, data = null) {
+    async function request(method, endpoint, data = null, options = {}) {
         const [path, queryString = ''] = endpoint.split('?');
         const query = new URLSearchParams(queryString);
 
@@ -2321,7 +2321,7 @@ const CloudAdapter = (() => {
                 type: requestedType,
                 limit,
                 fresh: query.get('fresh') || ''
-            });
+            }, options);
             return {
                 ...payload,
                 rails: (payload.rails || []).map(rail => ({
@@ -2333,7 +2333,7 @@ const CloudAdapter = (() => {
         if (method === 'GET' && path === '/media/genre-rails') {
             const requestedType = query.get('type') || 'movie';
             const limit = Math.max(1, Math.min(50, Number.parseInt(query.get('limit') || '18', 10) || 18));
-            const payload = await getGenreRails({ type: requestedType, limit });
+            const payload = await getGenreRails({ type: requestedType, limit }, options);
             return {
                 ...payload,
                 rails: (payload.rails || []).map(rail => ({
@@ -2723,10 +2723,10 @@ const API = {
     /**
      * Make API request
      */
-    async request(method, endpoint, data = null) {
+    async request(method, endpoint, data = null, options = {}) {
         if (_shouldUseCloud()) {
             try {
-                return await CloudAdapter.request(method, endpoint, data);
+                return await CloudAdapter.request(method, endpoint, data, options);
             } catch (error) {
                 if (window.NorvaCloud?.entitlements?.isSubscriptionError?.(error)) {
                     routeToSubscribeWall(error);
@@ -2735,24 +2735,25 @@ const API = {
             }
         }
 
-        const options = {
+        const fetchOptions = {
             method,
             headers: {
                 'Content-Type': 'application/json'
-            }
+            },
+            ...(options.signal ? { signal: options.signal } : {})
         };
 
         // Add authentication token if available
         const token = localStorage.getItem('authToken');
         if (token) {
-            options.headers['Authorization'] = `Bearer ${token}`;
+            fetchOptions.headers['Authorization'] = `Bearer ${token}`;
         }
 
         if (data) {
-            options.body = JSON.stringify(data);
+            fetchOptions.body = JSON.stringify(data);
         }
 
-        const response = await fetch(`${_hubBase()}/api${endpoint}`, options);
+        const response = await fetch(`${_hubBase()}/api${endpoint}`, fetchOptions);
 
         let result;
         const contentType = response.headers.get('content-type');
