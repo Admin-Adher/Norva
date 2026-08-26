@@ -152,3 +152,23 @@ test('Because You Liked has honest editorial copy, For You hero treatment and no
         /because-you-\(\?:watched\|liked\)[^\n]*return 'foryou'/
     );
 });
+
+test('fast Home genre rails disambiguate movie and series rows with the same genre', () => {
+    const { page } = homeHarness();
+
+    assert.equal(page.railTitle({
+        title: 'Action',
+        itemType: 'movie',
+        curation: { kind: 'genre', genre: 'Action' },
+    }), 'Action Movies');
+    assert.equal(page.railTitle({
+        title: 'Action',
+        itemType: 'series',
+        curation: { kind: 'genre', genre: 'Action' },
+    }), 'Action Series');
+    assert.equal(page.railTitle({
+        title: 'Action Movies',
+        itemType: 'movie',
+        curation: { kind: 'genre', genre: 'Action' },
+    }), 'Action Movies');
+});

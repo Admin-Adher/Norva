@@ -15,6 +15,7 @@ const migrationV3 = read('supabase/migrations/20260826091244_catalog_genre_rail_
 const migrationV4 = read('supabase/migrations/20260826104421_catalog_facet_refresh_index_first_v4.sql');
 const migrationV5 = read('supabase/migrations/20260826110251_catalog_facet_refresh_cron_activation_v5.sql');
 const home = read('public/js/pages/HomePage.js');
+const app = read('public/js/app.js');
 const api = read('public/js/api.js');
 const cloudApi = read('public/js/cloudApi.js');
 const live = read('public/js/components/LiveGuideFusion.js');
@@ -93,6 +94,9 @@ test('an uncached Home progressively paints the generation-fenced genre read mod
   assert.match(home, /norva\.home\.fast-rails\.v1/);
   assert.match(home, /this\.renderCloudRails\(earlyRails\)/);
   assert.match(home, /this\.setHomeLoadingState\(false\)/);
+  assert.match(app, /const shouldPrimeHome = \(!warmHashKey \|\| warmHashKey === 'home'\)/);
+  assert.match(app, /Promise\.resolve\(this\.pages\.home\?\.show\?\.\(\)\)/);
+  assert.match(home, /rail\.curation\?\.kind === 'genre'/);
 });
 
 test('Home and phone genre rails bound pre-paint catalogue hydration', () => {
@@ -120,5 +124,5 @@ test('Live bounds first paint and defers off-screen logo decoding without hiding
   assert.match(appHtml, /cloudApi\.js\?v=70/);
   assert.match(appHtml, /api\.js\?v=88/);
   assert.match(appHtml, /LiveGuideFusion\.js\?v=30/);
-  assert.match(appHtml, /HomePage\.js\?v=67/);
+  assert.match(appHtml, /HomePage\.js\?v=c16a321817/);
 });
