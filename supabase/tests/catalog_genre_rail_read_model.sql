@@ -5,7 +5,7 @@ create extension if not exists pgtap with schema extensions;
 set local search_path=public,extensions;
 grant usage on schema extensions to service_role;
 grant execute on all functions in schema extensions to service_role;
-select extensions.plan(11);
+select extensions.plan(15);
 
 insert into auth.users(
   id,instance_id,aud,role,email,encrypted_password,email_confirmed_at,
@@ -55,13 +55,23 @@ begin
     '["Action","Adventure"]','{}',now()-interval '1 hour',now()
   );
   insert into public.cloud_title_variants(
-    id,user_id,title_id,source_id,item_type,external_id,raw_title,generation_id
+    id,user_id,title_id,source_id,item_type,external_id,raw_title,generation_id,language
   ) values (
     '98610000-0000-4000-8000-000000000203',
     '98610000-0000-4000-8000-000000000002',
     '98610000-0000-4000-8000-000000000202',
     '98610000-0000-4000-8000-000000000201',
-    'movie','9861','Genre rail materialisation fixture',v_generation
+    'movie','9861','Genre rail materialisation fixture',v_generation,'VF'
+  );
+
+  insert into public.cloud_title_file_language_observations(
+    user_id,title_id,variant_id,file_external_id,
+    audio_languages,subtitle_languages,audio_observed,subtitle_observed
+  ) values (
+    '98610000-0000-4000-8000-000000000002',
+    '98610000-0000-4000-8000-000000000202',
+    '98610000-0000-4000-8000-000000000203',
+    '9861-file',array['fr','en','und'],array['fr'],true,true
   );
 end
 $fixture$;
@@ -139,6 +149,30 @@ select extensions.is(
   '1',
   'the rail read model and facet count share the same visible-title set'
 );
+select extensions.is(
+  (select audio_lang_counts
+   from public.cloud_catalog_facet_summary
+   where user_id='98610000-0000-4000-8000-000000000002'
+     and item_type='movie'),
+  '{"en": 1, "fr": 1}'::jsonb,
+  'the index-first facet refresh counts exact visible audio languages'
+);
+select extensions.is(
+  (select subtitle_lang_counts
+   from public.cloud_catalog_facet_summary
+   where user_id='98610000-0000-4000-8000-000000000002'
+     and item_type='movie'),
+  '{"fr": 1}'::jsonb,
+  'the index-first facet refresh counts exact visible subtitle languages'
+);
+select extensions.is(
+  (select version_tags
+   from public.cloud_catalog_facet_summary
+   where user_id='98610000-0000-4000-8000-000000000002'
+     and item_type='movie'),
+  array['vf']::text[],
+  'the index-first facet refresh normalizes visible variant language tags'
+);
 select extensions.ok(
   (select genre_rail_refreshed_at is not null
    from public.cloud_catalog_facet_summary
@@ -157,6 +191,18 @@ select extensions.ok(
     'EXECUTE'
   ),
   'authenticated clients cannot invoke either rail refresh worker'
+);
+select extensions.ok(
+  not has_function_privilege(
+    'authenticated',
+    'public.cloud_refresh_facet_summary(uuid,text)',
+    'EXECUTE'
+  ) and not has_function_privilege(
+    'authenticated',
+    'public.cloud_refresh_all_facet_summaries(integer)',
+    'EXECUTE'
+  ),
+  'authenticated clients cannot invoke either facet refresh worker'
 );
 
 reset role;
