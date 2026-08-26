@@ -5,7 +5,7 @@ create extension if not exists pgtap with schema extensions;
 set local search_path=public,extensions;
 grant usage on schema extensions to service_role;
 grant execute on all functions in schema extensions to service_role;
-select extensions.plan(9);
+select extensions.plan(11);
 
 insert into auth.users(
   id,instance_id,aud,role,email,encrypted_password,email_confirmed_at,
@@ -121,6 +121,9 @@ select extensions.ok(
 select public.cloud_refresh_facet_summary(
   '98610000-0000-4000-8000-000000000002','movie'
 );
+select public.cloud_refresh_genre_rail_candidates(
+  '98610000-0000-4000-8000-000000000002','movie'
+);
 select extensions.is(
   public.norva_get_genre_rail_candidates(
     '98610000-0000-4000-8000-000000000002','movie',3
@@ -135,6 +138,25 @@ select extensions.is(
      and item_type='movie'),
   '1',
   'the rail read model and facet count share the same visible-title set'
+);
+select extensions.ok(
+  (select genre_rail_refreshed_at is not null
+   from public.cloud_catalog_facet_summary
+   where user_id='98610000-0000-4000-8000-000000000002'
+     and item_type='movie'),
+  'rail freshness is tracked independently from language facets'
+);
+select extensions.ok(
+  not has_function_privilege(
+    'authenticated',
+    'public.cloud_refresh_genre_rail_candidates(uuid,text)',
+    'EXECUTE'
+  ) and not has_function_privilege(
+    'authenticated',
+    'public.cloud_refresh_all_genre_rail_candidates(integer)',
+    'EXECUTE'
+  ),
+  'authenticated clients cannot invoke either rail refresh worker'
 );
 
 reset role;
