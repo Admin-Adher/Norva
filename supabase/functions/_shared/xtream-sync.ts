@@ -761,8 +761,17 @@ export async function driveXtreamSyncToReady(sourceId: string, userId: string, d
     let accountBusy = false;
     try {
       const accountKey = `${new URL(serverUrl).host}/${username}`;
-      const { data, error } = await db.rpc("provider_account_busy", { p_key: accountKey });
-      accountBusy = !error && data === true;
+      let busyResult = await db.rpc("provider_account_busy_for_catalog_refresh", {
+        p_key: accountKey,
+      });
+      // Rolling deploy safety: an older database must remain conservatively
+      // blocked by the legacy fence until the scoped RPC is installed. This
+      // fallback intentionally treats passive presence as busy for that brief
+      // mixed-version window rather than letting catalogue I/O race playback.
+      if (busyResult.error) {
+        busyResult = await db.rpc("provider_account_busy", { p_key: accountKey });
+      }
+      accountBusy = !busyResult.error && busyResult.data === true;
     } catch (_) {
       // Fail open here: the media gateway remains the authoritative final race
       // fence and returns a bounded 409 without touching the provider account.

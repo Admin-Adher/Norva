@@ -99,18 +99,29 @@ test('Xtream discovery yields to playback without recording a source failure', (
     source.indexOf('export async function driveXtreamSyncToReady('),
     source.indexOf('\n// Plain-language', source.indexOf('export async function driveXtreamSyncToReady(')),
   );
-  const preflightAt = xtream.indexOf('db.rpc("provider_account_busy"');
+  const preflightAt = xtream.indexOf('db.rpc("provider_account_busy_for_catalog_refresh"');
+  const rollingFallbackAt = xtream.indexOf('db.rpc("provider_account_busy"', preflightAt);
   const providerFetchAt = xtream.indexOf('const fetchCatalog = async');
   const contentionCatchAt = xtream.indexOf('isProviderViewerPriority(err)');
   const failureAt = xtream.indexOf('sync driver failed');
 
   assert.ok(preflightAt > 0, 'missing foreground-presence preflight');
+  assert.ok(rollingFallbackAt > preflightAt, 'missing conservative rolling-deploy fallback');
   assert.ok(providerFetchAt > preflightAt, 'busy preflight must run before provider fetches');
   assert.ok(contentionCatchAt > providerFetchAt, 'missing gateway race fence');
   assert.ok(failureAt > contentionCatchAt, 'viewer contention must be handled before failure persistence');
   assert.match(xtream, /if \(accountBusy\) \{[\s\S]*stage: "waiting_for_provider"[\s\S]*return;/);
   assert.match(xtream, /isProviderViewerPriority\(err\)[\s\S]*cursor\.attempts = Math\.max\(0,[\s\S]*cursor\.fetchErrors = Math\.max\(0,[\s\S]*stage: "waiting_for_provider"[\s\S]*return;/);
   assert.match(source, /function isProviderViewerPriority[\s\S]*error\.status !== 409[\s\S]*account_busy[\s\S]*provider_account_busy[\s\S]*viewer_preempted[\s\S]*active playback/);
+});
+
+test('catalog refresh ignores passive presence but keeps every real provider holder fenced', () => {
+  const migration = read('supabase/migrations/20260826141838_provider_catalog_refresh_busy_scope_v1.sql');
+  assert.match(migration, /create or replace function public\.provider_account_busy_for_catalog_refresh\(p_key text\)/i);
+  assert.match(migration, /last_seen_at > statement_timestamp\(\) - interval '5 minutes'[\s\S]*kind is distinct from 'presence'/i);
+  assert.doesNotMatch(migration, /kind is distinct from 'language-validation'/i);
+  assert.match(migration, /revoke all on function public\.provider_account_busy_for_catalog_refresh\(text\)[\s\S]*from public, anon, authenticated/i);
+  assert.match(migration, /grant execute on function public\.provider_account_busy_for_catalog_refresh\(text\)[\s\S]*to service_role/i);
 });
 
 // Discovered, not enumerated. A hand-written file list missed
