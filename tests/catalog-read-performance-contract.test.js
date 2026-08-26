@@ -68,6 +68,10 @@ test('Home timeouts abort the underlying rails fetch and route cancellation drai
 });
 
 test('Home and phone genre rails bound pre-paint catalogue hydration', () => {
+  assert.match(home, /this\.homeRailDisplayLimit = 18/);
+  assert.match(home, /this\.homeRailFetchLimit = 24/);
+  assert.match(home, /\/history\?limit=60/);
+  assert.match(home, /\/home\/rails\?limit=\$\{railFetchLimit\}/);
   assert.match(catalog, /const verifiedCandidateLimit = Math\.min\(200, Math\.max\(96, limit \* 4\)\)/);
   assert.match(catalog, /listVerifiedTitleCandidatePool\([\s\S]*verifiedCandidateLimit/);
   assert.match(catalog, /candidateLimit = 96/);
@@ -88,5 +92,5 @@ test('Live bounds first paint and defers off-screen logo decoding without hiding
   assert.match(appHtml, /cloudApi\.js\?v=70/);
   assert.match(appHtml, /api\.js\?v=88/);
   assert.match(appHtml, /LiveGuideFusion\.js\?v=30/);
-  assert.match(appHtml, /HomePage\.js\?v=65/);
+  assert.match(appHtml, /HomePage\.js\?v=66/);
 });

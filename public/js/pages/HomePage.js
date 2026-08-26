@@ -14,7 +14,11 @@ class HomePage {
         this.dashboardTtlMs = 60000;
         this.homeRequestTimeoutMs = 10000;
         this.homeRailDisplayLimit = 18;
-        this.homeRailFetchLimit = 60;
+        // Keep enough headroom for client-side language ranking without asking
+        // the Edge endpoint to hydrate 60 cards (and up to 200 ranking
+        // candidates) for every rail. Continue Watching has its own explicit
+        // history limit of 60 below; catalogue rails only paint 18 cards.
+        this.homeRailFetchLimit = 24;
         this._homeAbortControllers = new Set();
         this.railItems = [];
         this.historyItems = [];
