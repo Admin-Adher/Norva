@@ -757,7 +757,7 @@ async function route(
       await requireCloudAccess(user.id, db, "source_sync");
       const body = await readJson(req);
       return {
-        body: await finalizeCloudSource(id, user.id, db, {
+        body: await finalizeCloudSourceWithLease(id, user.id, db, {
           country: stringOrNull(body.country ?? url.searchParams.get("country")),
           phase: stringOr(body.phase ?? url.searchParams.get("phase"), "live"),
           offset: boundedInt(body.offset ?? url.searchParams.get("offset"), 0, 0, 1_000_000),
@@ -2105,6 +2105,82 @@ type FinalizeCloudSourceOptions = {
   limit: number;
   afterId?: string;
 };
+
+// The authenticated client and the durable watchdog are two adapters over the
+// same finalization machine. They must therefore share the same PostgreSQL CAS
+// lease. Without this fence, rapid mobile polling could start several identical
+// live-materialization batches while the watchdog also owned one, creating tuple
+// lock chains and turning otherwise tiny upserts into statement timeouts.
+async function finalizeCloudSourceWithLease(
+  sourceId: string,
+  userId: string,
+  db: SupabaseClient,
+  options: FinalizeCloudSourceOptions,
+) {
+  const ttlMs = boundedInt(Deno.env.get("NORVA_FINALIZE_LEASE_TTL_MS"), 240_000, 30_000, 900_000);
+  const leaseToken = crypto.randomUUID();
+  const claimed = await claimCloudFinalizeLease(db, sourceId, userId, leaseToken, ttlMs);
+  if (!claimed) {
+    return {
+      sourceId,
+      status: "syncing",
+      deferred: true,
+      reason: "finalize_in_progress",
+    };
+  }
+
+  try {
+    const result = await finalizeCloudSource(sourceId, userId, db, options);
+    await releaseCloudFinalizeLease(db, sourceId, userId, leaseToken);
+    return result;
+  } catch (error) {
+    // A timeout can reach the caller before PostgreSQL has finished cancelling
+    // the statement. Keep the claim until TTL so a poll retry cannot enter the
+    // locks still owned by that abandoned request. Permanent errors release the
+    // lease immediately and retain the endpoint's existing error semantics.
+    if (!isTransientCloudFinalizeError(error)) {
+      await releaseCloudFinalizeLease(db, sourceId, userId, leaseToken);
+    }
+    throw error;
+  }
+}
+
+function isTransientCloudFinalizeError(error: unknown) {
+  const details = isRecord(error) ? error : {};
+  const message = error instanceof Error ? error.message : String(details.message ?? error);
+  const diagnostic = `${message} ${JSON.stringify(details)}`;
+  return (error instanceof HttpError && error.status === 503)
+    || /resource|timeout|timing out|upstream server|compute|deadlock|lock|statement|canceling|57014/i.test(diagnostic);
+}
+
+async function claimCloudFinalizeLease(
+  db: SupabaseClient,
+  sourceId: string,
+  userId: string,
+  leaseToken: string,
+  ttlMs: number,
+) {
+  const { data, error } = await db.rpc("norva_claim_source_finalize_lease", {
+    p_source_id: sourceId,
+    p_user_id: userId,
+    p_lease_token: leaseToken,
+    p_ttl_seconds: Math.max(30, Math.ceil(ttlMs / 1000)),
+  });
+  return !error && data === true;
+}
+
+async function releaseCloudFinalizeLease(
+  db: SupabaseClient,
+  sourceId: string,
+  userId: string,
+  leaseToken: string,
+) {
+  await db.rpc("norva_release_source_finalize_lease", {
+    p_source_id: sourceId,
+    p_user_id: userId,
+    p_lease_token: leaseToken,
+  });
+}
 
 async function pruneCatalogGenerationBeforeReady(
   db: SupabaseClient,

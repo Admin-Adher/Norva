@@ -465,6 +465,7 @@ test('live summary merge uses bounded RPC bodies and never a logical-id URL filt
 
 test('durable finalizer claims one CAS lease before writing and fences every handoff', () => {
   const worker = source(path.join(ROOT, 'supabase', 'functions', 'norva-source-sync', 'index.ts'));
+  const cloud = source(path.join(ROOT, 'supabase', 'functions', 'norva-cloud', 'index.ts'));
   const migration = source(path.join(
     ROOT,
     'supabase',
@@ -477,6 +478,16 @@ test('durable finalizer claims one CAS lease before writing and fences every han
   const transientCatch = worker.match(/const transient = isTransientFinalizeError\(e\);([\s\S]*?)return;\n    }/)?.[1] || '';
   assert.doesNotMatch(transientCatch, /releaseFinalizeLease|selfInvokeFinalize/);
   assert.match(transientCatch, /Keep the durable claim until its TTL/);
+  assert.match(cloud, /action === "finalize"[\s\S]{0,500}finalizeCloudSourceWithLease\(/);
+  assert.match(cloud, /claimCloudFinalizeLease\([\s\S]{0,300}reason: "finalize_in_progress"/);
+  assert.match(cloud, /isTransientCloudFinalizeError\(error\)[\s\S]{0,180}releaseCloudFinalizeLease/);
+  const cloudLease = cloud.slice(
+    cloud.indexOf('async function finalizeCloudSourceWithLease'),
+    cloud.indexOf('function isTransientCloudFinalizeError'),
+  );
+  const cloudTransientCatch = cloudLease.match(/catch \(error\) \{([\s\S]*?)throw error;\n  \}/)?.[1] || '';
+  assert.match(cloudTransientCatch, /if \(!isTransientCloudFinalizeError\(error\)\)/);
+  assert.doesNotMatch(cloudTransientCatch, /if \(isTransientCloudFinalizeError\(error\)\)[\s\S]*releaseCloudFinalizeLease/);
   assert.match(migration, /on conflict \(source_id\) do update[\s\S]*lease\.lease_until <= statement_timestamp\(\)/i);
   assert.match(migration, /lease\.lease_token=p_lease_token/i);
   assert.match(migration, /enable row level security/i);
