@@ -476,6 +476,7 @@ test('durable finalizer claims one CAS lease before writing and fences every han
   assert.match(worker, /claimFinalizeLease\([\s\S]{0,180}return;/);
   assert.match(worker, /renewFinalizeLease\([\s\S]{0,180}patchSourceConfigHint/);
   assert.match(worker, /releaseFinalizeLease\([\s\S]{0,180}selfInvokeFinalize/);
+  assert.match(worker, /NORVA_FINALIZE_RUN_BUDGET_MS"\), 45_000, 15_000, 50_000/);
   const transientCatch = worker.match(/const transient = isTransientFinalizeError\(e\);([\s\S]*?)return;\n    }/)?.[1] || '';
   assert.doesNotMatch(transientCatch, /releaseFinalizeLease|selfInvokeFinalize/);
   assert.match(transientCatch, /Keep the durable claim until its TTL/);
