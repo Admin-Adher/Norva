@@ -434,8 +434,8 @@ test('live summary merge uses bounded RPC bodies and never a logical-id URL filt
     database.writeBatches
       .filter((batch) => batch.table === 'cloud_live_logical_channels')
       .map((batch) => batch.size),
-    [...Array(100).fill(10), 1],
-    'live channel statements remain well below the production statement timeout',
+    [250, 250, 250, 250, 1],
+    'each bounded provider page must pay the generation trigger cost only once',
   );
   for (const call of lookups) {
     assert.equal(call.args.p_source_id, sourceId);
@@ -458,7 +458,9 @@ test('live summary merge uses bounded RPC bodies and never a logical-id URL filt
   assert.match(migration, /channel\.generation_id = p_generation_id/);
   assert.match(migration, /revoke all on function[\s\S]*from public,anon,authenticated,service_role/);
   assert.match(migration, /grant execute on function[\s\S]*to service_role/);
-  assert.match(source(path.join(SHARED, 'live-materialization.ts')), /chunkSize: 10/g);
+  const liveWriter = source(path.join(SHARED, 'live-materialization.ts'));
+  assert.equal((liveWriter.match(/chunkSize: 250/g) || []).length, 2);
+  assert.doesNotMatch(liveWriter, /chunkSize: 10/);
   assert.match(source(path.join(ROOT, 'supabase', 'functions', 'norva-source-sync', 'index.ts')), /const LIVE_CHUNK = 250/);
   assert.match(source(path.join(ROOT, 'supabase', 'functions', 'norva-cloud', 'index.ts')), /const LIVE_CHUNK = 250/);
 });
