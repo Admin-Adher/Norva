@@ -253,7 +253,10 @@ export async function upsertLiveChannelRows(
   return await writeRows(db, "cloud_live_logical_channels", withCatalogGenerationRows(merged, generation), {
     selectColumns: "id,logical_id",
     onConflict: "source_id,generation_id,logical_id",
-    chunkSize: 10,
+    // One provider page is already bounded to 250 rows. Keep it as one SQL
+    // statement so the generation guard cache and revision trigger run once for
+    // the page, instead of paying that fixed cost in 25 separate transactions.
+    chunkSize: 250,
   });
 }
 
@@ -397,7 +400,7 @@ export async function upsertLiveVariantRows(
     .filter((row) => row.logical_channel_id);
   await writeRows(db, "cloud_live_variants", withCatalogGenerationRows(slice, generation), {
     onConflict: "source_id,generation_id,logical_id,stream_id,label",
-    chunkSize: 10,
+    chunkSize: 250,
   });
   return slice.length;
 }
