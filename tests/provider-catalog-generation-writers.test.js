@@ -463,6 +463,23 @@ test('live summary merge uses bounded RPC bodies and never a logical-id URL filt
   assert.match(source(path.join(ROOT, 'supabase', 'functions', 'norva-cloud', 'index.ts')), /const LIVE_CHUNK = 1000/);
 });
 
+test('durable finalizer claims one CAS lease before writing and fences every handoff', () => {
+  const worker = source(path.join(ROOT, 'supabase', 'functions', 'norva-source-sync', 'index.ts'));
+  const migration = source(path.join(
+    ROOT,
+    'supabase',
+    'migrations',
+    '20260826155244_source_finalize_lease_cas_v1.sql',
+  ));
+  assert.match(worker, /claimFinalizeLease\([\s\S]{0,180}return;/);
+  assert.match(worker, /renewFinalizeLease\([\s\S]{0,180}patchSourceConfigHint/);
+  assert.match(worker, /releaseFinalizeLease\([\s\S]{0,180}selfInvokeFinalize/);
+  assert.match(migration, /on conflict \(source_id\) do update[\s\S]*lease\.lease_until <= statement_timestamp\(\)/i);
+  assert.match(migration, /lease\.lease_token=p_lease_token/i);
+  assert.match(migration, /enable row level security/i);
+  assert.match(migration, /revoke all on table[\s\S]*service_role/i);
+});
+
 test('live clear budget checkpoints at live/0 and one-shot refresh writes only after a complete resume', async () => {
   const {
     clearLiveMaterialization,
