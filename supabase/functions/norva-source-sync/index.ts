@@ -2601,6 +2601,20 @@ async function cronResumeStuck(db: SupabaseClient) {
     const inFinalize = !inDiscovery
       && (finalizingStages.has(stringOr(progress.stage, "")) || (isError && finalizePhases.has(stringOr(finalizeCursor.phase, ""))));
     if (!inDiscovery && !inFinalize) continue;
+    // Runs that entered finalization before the durable catalogue-version proof
+    // was deployed can have a complete finalize cursor but no authoritative
+    // {catalogVersion, counts.total} binding.  The READY prune must never infer
+    // that identity from the rows already present.  Restart the non-destructive
+    // discovery walk instead: it stamps a fresh runVersion on every item it
+    // actually sees, persists the exact total, and then hands back to the same
+    // finalize cursor.  The previously active catalogue remains visible during
+    // the walk, so this is both fail-closed and transparent to the user.
+    const catalogVersion = Number(progress.catalogVersion);
+    const expectedTotal = Number(recordOrEmpty(progress.counts).total);
+    const missingFinalizeProof = inFinalize && (
+      !Number.isSafeInteger(catalogVersion) || catalogVersion <= 0 ||
+      !Number.isSafeInteger(expectedTotal) || expectedTotal < 0
+    );
     // Single-flight gate: a live finalize worker forward-dates this lease before every
     // batch. While it's unexpired a worker IS alive — even if its last progress write is
     // old because the batch is slow under load — so don't stack a duplicate finalizer.
@@ -2616,7 +2630,9 @@ async function cronResumeStuck(db: SupabaseClient) {
       : stringOr(progress.updatedAt, "");
     const staleIso = inDiscovery ? staleDiscoverIso : staleFinalizeIso;
     if (lastSeen && lastSeen > staleIso) continue;
-    if (inDiscovery) runInBackground(driveXtreamSyncToReady(String(src.id), String(src.user_id), db));
+    if (inDiscovery || missingFinalizeProof) {
+      runInBackground(driveXtreamSyncToReady(String(src.id), String(src.user_id), db));
+    }
     else runInBackground(driveFinalizeToReady(db, String(src.id), String(src.user_id), null));
     resumed.push(String(src.id));
     if (resumed.length >= 5) break;
