@@ -68,6 +68,9 @@ function makeHarness({ globalViewerBusyChecks = null } = {}) {
     Set,
     clearTimeout,
     setTimeout,
+    ACCOUNT_ACTIVITY_KIND_LANGUAGE_VALIDATION: 'language-validation',
+    ACCOUNT_ACTIVITY_KIND_CATALOG_REFRESH: 'catalog-refresh',
+    ACCOUNT_ACTIVITY_KIND_GATEWAY: 'gateway',
     FFPROBE_PATH: '/fake/ffprobe',
     lastNonEmptyLine(value) {
       return String(value || '').trim().split(/\r?\n/).filter(Boolean).at(-1) || '';
@@ -335,7 +338,7 @@ test('metadata uses the same decoded provider-account key and is viewer-preempti
   );
   assert.match(
     gateway,
-    /registerAccountExtraction\(backgroundKey, \{ kill: \(\) => controller\.abort\(\) \}\)/,
+    /registerAccountExtraction\([\s\S]{0,120}backgroundKey,[\s\S]{0,120}\{ kill: \(\) => controller\.abort\(\) \},[\s\S]{0,120}ACCOUNT_ACTIVITY_KIND_CATALOG_REFRESH/,
   );
   assert.match(
     gateway,

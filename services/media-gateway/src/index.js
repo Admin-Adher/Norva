@@ -451,6 +451,7 @@ function abortRawPumps(filter, keepSid, reason) {
 const accountExtractions = new Map(); // proxyKey -> Set<{ child, preempted, reportActivity, activityKind, globalPreemptible }>
 const ACCOUNT_ACTIVITY_KIND_GATEWAY = 'gateway';
 const ACCOUNT_ACTIVITY_KIND_LANGUAGE_VALIDATION = 'language-validation';
+const ACCOUNT_ACTIVITY_KIND_CATALOG_REFRESH = 'catalog-refresh';
 function groupProviderAccountActivities(candidates, maxKeys = 64) {
     const boundedMaxKeys = Math.max(0, Math.min(64, Number.parseInt(maxKeys, 10) || 0));
     const byKey = new Map();
@@ -459,11 +460,17 @@ function groupProviderAccountActivities(candidates, maxKeys = 64) {
         if (!key) continue;
         const kind = candidate?.kind === ACCOUNT_ACTIVITY_KIND_LANGUAGE_VALIDATION
             ? ACCOUNT_ACTIVITY_KIND_LANGUAGE_VALIDATION
-            : ACCOUNT_ACTIVITY_KIND_GATEWAY;
+            : (candidate?.kind === ACCOUNT_ACTIVITY_KIND_CATALOG_REFRESH
+                ? ACCOUNT_ACTIVITY_KIND_CATALOG_REFRESH
+                : ACCOUNT_ACTIVITY_KIND_GATEWAY);
         const existing = byKey.get(key);
         if (existing === ACCOUNT_ACTIVITY_KIND_GATEWAY) continue;
         if (existing === ACCOUNT_ACTIVITY_KIND_LANGUAGE_VALIDATION) {
             if (kind === ACCOUNT_ACTIVITY_KIND_GATEWAY) byKey.set(key, kind);
+            continue;
+        }
+        if (existing === ACCOUNT_ACTIVITY_KIND_CATALOG_REFRESH) {
+            if (kind !== ACCOUNT_ACTIVITY_KIND_CATALOG_REFRESH) byKey.set(key, kind);
             continue;
         }
         if (byKey.size >= boundedMaxKeys) continue;
@@ -471,11 +478,13 @@ function groupProviderAccountActivities(candidates, maxKeys = 64) {
     }
     const gateway = [];
     const languageValidation = [];
+    const catalogRefresh = [];
     for (const [key, kind] of byKey) {
         if (kind === ACCOUNT_ACTIVITY_KIND_LANGUAGE_VALIDATION) languageValidation.push(key);
+        else if (kind === ACCOUNT_ACTIVITY_KIND_CATALOG_REFRESH) catalogRefresh.push(key);
         else gateway.push(key);
     }
-    return { gateway, languageValidation };
+    return { gateway, languageValidation, catalogRefresh };
 }
 function preemptExtractionEntry(entry) {
     if (!entry || entry.preempted) return 0;
@@ -488,7 +497,11 @@ function registerAccountExtraction(proxyKey, child, reportActivity = true, globa
     // evaluates the registration ledger in isolation from the HTTP reporter.
     const activityKind = reportActivity === false
         ? null
-        : (reportActivity === 'language-validation' ? 'language-validation' : 'gateway');
+        : (reportActivity === ACCOUNT_ACTIVITY_KIND_LANGUAGE_VALIDATION
+            ? ACCOUNT_ACTIVITY_KIND_LANGUAGE_VALIDATION
+            : (reportActivity === ACCOUNT_ACTIVITY_KIND_CATALOG_REFRESH
+                ? ACCOUNT_ACTIVITY_KIND_CATALOG_REFRESH
+                : ACCOUNT_ACTIVITY_KIND_GATEWAY));
     const entry = {
         child,
         preempted: false,
@@ -1749,7 +1762,7 @@ if (
 }
 const MULTI_AUDIO_HLS_PROTOCOL = 1;
 const MAX_MULTI_AUDIO_RENDITIONS = 8;
-const GATEWAY_VERSION = 114;
+const GATEWAY_VERSION = 115;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -2453,6 +2466,7 @@ app.post('/xtream/metadata', requireGatewayAuth, async (req, res) => {
             XTREAM_METADATA_TIMEOUT_MS,
             {
                 backgroundAccountKey: providerAccountKeyFromCredentials(serverUrl, username),
+                activityKind: ACCOUNT_ACTIVITY_KIND_CATALOG_REFRESH,
                 maxResponseBytes: isAccountInfo ? XTREAM_ACCOUNT_INFO_MAX_BYTES : undefined,
             },
         );
@@ -15116,7 +15130,11 @@ async function fetchProviderJson(url, userAgent, timeoutMs = XTREAM_REQUEST_TIME
     // Register before the first await. A viewer that starts after the local
     // guard atomically aborts this metadata fetch and takes the provider slot.
     const registration = backgroundKey
-        ? registerAccountExtraction(backgroundKey, { kill: () => controller.abort() })
+        ? registerAccountExtraction(
+            backgroundKey,
+            { kill: () => controller.abort() },
+            options.activityKind || true,
+        )
         : null;
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     let response = null;
@@ -15648,7 +15666,11 @@ async function fetchProviderArrayToXtreamCatalogSpool({
         throw backgroundProbeError(429, 'background_busy', 'Account busy (background request)');
     }
     const registration = backgroundKey
-        ? registerAccountExtraction(backgroundKey, { kill: () => controller.abort() })
+        ? registerAccountExtraction(
+            backgroundKey,
+            { kill: () => controller.abort() },
+            ACCOUNT_ACTIVITY_KIND_CATALOG_REFRESH,
+        )
         : null;
     const timer = setTimeout(() => controller.abort(), XTREAM_CATALOG_BUILD_TIMEOUT_MS);
     let response = null;
@@ -16285,7 +16307,9 @@ function activeProviderAccountActivityGroups() {
                 key,
                 kind: entry.activityKind === ACCOUNT_ACTIVITY_KIND_LANGUAGE_VALIDATION
                     ? ACCOUNT_ACTIVITY_KIND_LANGUAGE_VALIDATION
-                    : ACCOUNT_ACTIVITY_KIND_GATEWAY,
+                    : (entry.activityKind === ACCOUNT_ACTIVITY_KIND_CATALOG_REFRESH
+                        ? ACCOUNT_ACTIVITY_KIND_CATALOG_REFRESH
+                        : ACCOUNT_ACTIVITY_KIND_GATEWAY),
             });
         }
     }
@@ -16320,6 +16344,10 @@ async function reportAccountActivity() {
         reportAccountActivityKind(
             groups.languageValidation,
             ACCOUNT_ACTIVITY_KIND_LANGUAGE_VALIDATION,
+        ),
+        reportAccountActivityKind(
+            groups.catalogRefresh,
+            ACCOUNT_ACTIVITY_KIND_CATALOG_REFRESH,
         ),
     ]);
 }
