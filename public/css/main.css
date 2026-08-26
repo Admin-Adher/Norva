@@ -4768,7 +4768,8 @@ button.provider-access-calendar-day {
 
 .provider-access-wizard-modal .modal-content {
   width: min(620px, calc(100vw - 32px));
-  height: min(820px, calc(100dvh - 32px));
+  max-width: 620px;
+  height: min(880px, calc(100dvh - 32px));
   max-height: calc(100dvh - 32px);
 }
 
@@ -4776,7 +4777,9 @@ button.provider-access-calendar-day {
   display: flex;
   min-height: 0;
   padding: 0;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scroll-padding-block-end: max(var(--space-md), var(--safe-area-inset-bottom));
 }
 
 .provider-access-wizard-modal .provider-access-panel {
@@ -4807,19 +4810,27 @@ button.provider-access-calendar-day {
 }
 
 .provider-access-wizard-modal .provider-access-terms {
-  min-height: 0;
-  flex: 1;
+  min-height: auto;
+  flex: 0 0 auto;
   margin: var(--space-md) var(--space-lg) 0;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .provider-access-wizard-modal .provider-access-wizard-stage {
-  min-height: 0;
-  padding-right: 2px;
-  overflow-x: hidden;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scrollbar-gutter: stable;
+  min-height: auto;
+  padding-right: 0;
+  overflow: visible;
+  overscroll-behavior: auto;
+  scrollbar-gutter: auto;
+}
+
+.provider-access-wizard-modal .provider-access-wizard-actions {
+  position: sticky;
+  bottom: 0;
+}
+
+.provider-access-wizard-modal .modal-footer {
+  display: none;
 }
 
 .provider-access-wizard-modal .provider-access-feedback {
