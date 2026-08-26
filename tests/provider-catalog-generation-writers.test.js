@@ -512,6 +512,22 @@ test('live row account deletion proof is cached only inside one catalog statemen
   assert.match(migration, /revoke all on function[\s\S]*public, anon, authenticated, service_role/i);
 });
 
+test('active upsert reuses only its own nonce-bound validated insert proof', () => {
+  const migration = source(path.join(
+    ROOT,
+    'supabase',
+    'migrations',
+    '20260826173500_active_catalog_upsert_statement_proof_v1.sql',
+  ));
+  assert.match(migration, /activeUpsertInsertProof/);
+  assert.match(migration, /tg_op = 'UPDATE'[\s\S]*new\.write_head_revision is null/);
+  assert.match(migration, /tg_op = 'INSERT'[\s\S]*set_config\(v_cache_name, v_cache::text, true\)/);
+  assert.match(migration, /position\(v_old in v_definition\) = 0/);
+  assert.match(migration, /definition drifted; refusing upsert proof patch/);
+  assert.match(migration, /proof block is ambiguous/);
+  assert.match(migration, /revoke all on function[\s\S]*public, anon, authenticated/i);
+});
+
 test('live clear budget checkpoints at live/0 and one-shot refresh writes only after a complete resume', async () => {
   const {
     clearLiveMaterialization,
