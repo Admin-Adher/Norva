@@ -225,6 +225,11 @@ class SourceManager {
                 label: this.isSourceManagementEnabled(source) ? 'Ready' : 'Disabled',
                 message: ''
             };
+            const retryPending = health.state === 'ready' && health.retrying === true;
+            const healthLabel = retryPending ? 'Ready · retry pending' : health.label;
+            const healthMessage = retryPending
+                ? 'Your existing catalogue is available. Norva will retry the update automatically.'
+                : (health.state !== 'ready' ? health.message : '');
             const progressButton = health.state === 'syncing'
                 ? `<button class="btn btn-sm btn-secondary source-progress-btn" data-action="progress" title="View catalog import progress">Progress</button>`
                 : '';
@@ -248,16 +253,16 @@ class SourceManager {
         <div class="source-info">
           <div class="source-name-row">
             <span class="source-name">${this.escapeHtml(source.name)}</span>
-            <span class="source-health-badge source-health-${this.escapeHtml(health.state)}">${this.escapeHtml(health.label)}</span>
+            <span class="source-health-badge source-health-${this.escapeHtml(health.state)} ${retryPending ? 'source-health-retrying' : ''}">${this.escapeHtml(healthLabel)}</span>
           </div>
           <div class="source-url">${this.escapeHtml(source.url || 'Managed by Norva Cloud')}</div>
-          ${health.message && health.state !== 'ready' ? `<div class="source-health-message">${this.escapeHtml(health.message)}</div>` : ''}
+          ${healthMessage ? `<div class="source-health-message">${this.escapeHtml(healthMessage)}</div>` : ''}
           ${accessSummary ? `<div class="provider-access-inline provider-access-${this.escapeHtml(accessSummary.tone)}"><span>${this.escapeHtml(accessSummary.label)}</span>${accessSummary.detail ? `<span>${this.escapeHtml(accessSummary.detail)}</span>` : ''}</div>` : ''}
           ${backgrounding ? `<div class="source-backgrounding"><span class="source-backgrounding-dot" aria-hidden="true"></span>Adding the rest of your library in the background…</div>` : ''}
         </div>
         <div class="source-actions">
           ${progressButton}
-          <button class="btn btn-sm btn-secondary source-primary-action ${primary.cls}" data-action="${primary.action}">${primary.label}</button>
+          <button class="btn btn-sm btn-secondary source-primary-action ${primary.cls}" data-action="${primary.action}"${retryPending ? ' title="Retry catalog update" aria-label="Retry catalog update"' : ''}>${primary.label}</button>
           <button class="btn btn-sm btn-secondary source-menu-btn" data-action="menu" aria-haspopup="true" aria-expanded="false" aria-label="More actions" title="More actions">⋯</button>
           <div class="source-menu" role="menu" hidden>
             <button class="source-menu-item" data-action="test" role="menuitem" type="button">Check service</button>

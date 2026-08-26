@@ -246,19 +246,21 @@
             'idle'
         );
         const progressStatus = lower(progress.status || progress.stage || '');
+        const progressStage = lower(progress.stage || '');
         const error = string(source.sync_error || source.syncError || status.error || status.sync_error || '');
         const lastSync = completedSyncAt(source, status);
         const enabled = source.enabled !== false && source.revoked !== true;
 
         let state = 'degraded';
         let refreshing = false;
+        let retrying = false;
         if (!enabled) {
             state = 'degraded';
         } else if (EXPLICIT_ATTENTION_STATES.has(rawStatus) || EXPLICIT_ATTENTION_STATES.has(progressStatus)) {
             const explicitState = EXPLICIT_ATTENTION_STATES.has(progressStatus) ? progressStatus : rawStatus;
             if (explicitState === 'unreachable' && hasCompletedCatalog(source, status)) {
                 state = 'ready';
-                refreshing = true;
+                retrying = true;
             } else {
                 state = explicitState;
             }
@@ -267,12 +269,15 @@
             // A background re-sync that hits a TRANSIENT provider error (timeout,
             // unreachable, vague degraded) must not downgrade an already-built
             // catalog: the last import is still fully browsable. Keep it
-            // ready+refreshing and let the watchdog retry silently. Only a hard
+            // ready+retrying and let the watchdog retry silently. `refreshing`
+            // is deliberately reserved for work that is actually running so
+            // Home never claims that titles are being added after a failed
+            // attempt. Only a hard
             // auth/expiry verdict (the user must act) still surfaces. Initial
             // imports (no completed catalog yet) surface every error as before.
             if (hasCompletedCatalog(source, status) && errorState !== 'auth_failed' && errorState !== 'expired') {
                 state = 'ready';
-                refreshing = true;
+                retrying = true;
             } else {
                 state = errorState;
             }
@@ -290,7 +295,11 @@
             // rather than make the user watch a bar crawl for hours.
             if (hasCompletedCatalog(source, status) || progress.usable === true) {
                 state = 'ready';
-                refreshing = true;
+                if (progressStage === 'waiting_for_provider') {
+                    retrying = true;
+                } else {
+                    refreshing = true;
+                }
             } else {
                 state = 'syncing';
             }
@@ -304,6 +313,7 @@
         return {
             state,
             refreshing,
+            retrying,
             source,
             type: sourceType(source),
             label: meta.label,
@@ -369,7 +379,8 @@
                 movies: unlocks.movies,
                 series: unlocks.series
             },
-            backgrounding: unlocks.browsable && (running || classification.refreshing === true),
+            backgrounding: unlocks.browsable && classification.retrying !== true &&
+                (running || classification.refreshing === true),
             classification,
             progress
         };
@@ -408,7 +419,8 @@
                     movies: unlocks.movies,
                     series: unlocks.series
                 };
-                policy.backgrounding = policy.browsable && (item.refreshing === true || item.state === 'syncing');
+                policy.backgrounding = policy.browsable && item.retrying !== true &&
+                    (item.refreshing === true || item.state === 'syncing');
                 policy.progress = itemProgress;
             }
             policies.push(policy);
@@ -491,6 +503,7 @@
             issues: [],
             ready,
             refreshing: ready.some(item => item.refreshing),
+            retrying: ready.some(item => item.retrying),
             ...STATE_META.ready
         };
     }

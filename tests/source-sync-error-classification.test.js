@@ -93,6 +93,26 @@ test('terminal discovery statuses stop the watchdog while transient statuses rem
   assert.match(xtream, /syncCursor: terminal \? compactRecord\(\{[\s\S]*active: false,[\s\S]*terminalAt: failedAt,[\s\S]*terminalStatus:/);
 });
 
+test('Xtream discovery yields to playback without recording a source failure', () => {
+  const source = read('supabase/functions/_shared/xtream-sync.ts');
+  const xtream = source.slice(
+    source.indexOf('export async function driveXtreamSyncToReady('),
+    source.indexOf('\n// Plain-language', source.indexOf('export async function driveXtreamSyncToReady(')),
+  );
+  const preflightAt = xtream.indexOf('db.rpc("provider_account_busy"');
+  const providerFetchAt = xtream.indexOf('const fetchCatalog = async');
+  const contentionCatchAt = xtream.indexOf('isProviderViewerPriority(err)');
+  const failureAt = xtream.indexOf('sync driver failed');
+
+  assert.ok(preflightAt > 0, 'missing foreground-presence preflight');
+  assert.ok(providerFetchAt > preflightAt, 'busy preflight must run before provider fetches');
+  assert.ok(contentionCatchAt > providerFetchAt, 'missing gateway race fence');
+  assert.ok(failureAt > contentionCatchAt, 'viewer contention must be handled before failure persistence');
+  assert.match(xtream, /if \(accountBusy\) \{[\s\S]*stage: "waiting_for_provider"[\s\S]*return;/);
+  assert.match(xtream, /isProviderViewerPriority\(err\)[\s\S]*cursor\.attempts = Math\.max\(0,[\s\S]*cursor\.fetchErrors = Math\.max\(0,[\s\S]*stage: "waiting_for_provider"[\s\S]*return;/);
+  assert.match(source, /function isProviderViewerPriority[\s\S]*error\.status !== 409[\s\S]*account_busy[\s\S]*provider_account_busy[\s\S]*viewer_preempted[\s\S]*active playback/);
+});
+
 // Discovered, not enumerated. A hand-written file list missed
 // _shared/xtream-sync.ts — the site the recurring cron sync actually reaches,
 // because the driver catches its own gateway HttpError and never lets it
