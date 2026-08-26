@@ -134,18 +134,18 @@ test('liked candidate ranking keeps only unrated genre matches and reuses watche
   );
 });
 
-test('liked rail preserves catalogue overlays, playable variants and anchor-specific copy', () => {
+test('liked rail reuses the overlaid playable candidate pool and anchor-specific copy', () => {
   const liked = sourceBetween(
     'async function listBecauseYouLikedRail(',
     '\nasync function listBecauseYouWatchedRail(',
   );
 
-  assert.match(liked, /await applyCatalogOverlay\(titles, itemType, options\.lang\)/);
-  assert.match(liked, /rankedTitles\.map\(\(row\) => String\(row\.id\)\)/);
-  assert.match(liked, /variantsByTitle\.get\(String\(row\.id\)\) \?\? \[\]\)\.length > 0/);
+  assert.match(liked, /const pool = await options\.candidatesFor\(itemType\)/);
+  assert.match(liked, /const candidates = pool\.titles/);
+  assert.match(liked, /pool\.variantsByTitle\.get\(String\(row\.id\)\) \?\? \[\]\)\.length > 0/);
   assert.match(liked, /title: anchorName \? `Because You Liked \$\{anchorName\}` : "Because You Liked"/);
   assert.match(liked, /kind: "because_you_liked"/);
-  assert.match(liked, /titleRailItem\(row, variantsByTitle\.get\(String\(row\.id\)\) \?\? \[\], options\.lang\)/);
+  assert.match(liked, /titleRailItem\(row, pool\.variantsByTitle\.get\(String\(row\.id\)\) \?\? \[\], options\.lang\)/);
 });
 
 test('watched recommendations are scoped to the active profile', () => {
