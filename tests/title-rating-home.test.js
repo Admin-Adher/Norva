@@ -171,4 +171,9 @@ test('fast Home genre rails disambiguate movie and series rows with the same gen
         itemType: 'movie',
         curation: { kind: 'genre', genre: 'Action' },
     }), 'Action Movies');
+    assert.equal(page.railTitle({
+        title: 'Action',
+        itemType: 'series',
+        curation: { kind: 'genre_bucket', bucket: 'action' },
+    }), 'Action Series');
 });

@@ -2013,7 +2013,7 @@ class HomePage {
         // rails. A genre such as Action can exist in both payloads; without a
         // type suffix Home briefly showed two indistinguishable "Action" rows
         // before the personalized response arrived.
-        if (rail.curation?.kind === 'genre') {
+        if (['genre', 'genre_bucket'].includes(rail.curation?.kind)) {
             const type = String(rail.itemType || rail.item_type || '').toLowerCase();
             const suffix = type === 'series' ? 'Series' : type === 'movie' ? 'Movies' : '';
             if (suffix && !new RegExp(`\\b${suffix}$`, 'i').test(String(title))) {
