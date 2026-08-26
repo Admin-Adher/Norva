@@ -26,6 +26,11 @@ values
     'language-validation'
   ),
   (
+    encode(extensions.digest('catalog-refresh.invalid/self', 'sha256'), 'hex'),
+    statement_timestamp(),
+    'catalog-refresh'
+  ),
+  (
     encode(extensions.digest('catalog-refresh.invalid/stale', 'sha256'), 'hex'),
     statement_timestamp() - interval '6 minutes',
     'gateway'
@@ -51,6 +56,57 @@ select extensions.is(
   public.provider_account_busy_for_catalog_refresh('catalog-refresh.invalid/stale'),
   false,
   'stale real activity no longer blocks catalogue refresh'
+);
+
+select extensions.is(
+  public.provider_account_busy_for_catalog_refresh('catalog-refresh.invalid/self'),
+  false,
+  'a released catalogue metadata page does not block its own next continuation'
+);
+
+select public.provider_account_touch_many(
+  array[encode(extensions.digest('catalog-refresh.invalid/priority-gateway', 'sha256'), 'hex')],
+  'gateway'
+);
+select public.provider_account_touch_many(
+  array[encode(extensions.digest('catalog-refresh.invalid/priority-gateway', 'sha256'), 'hex')],
+  'catalog-refresh'
+);
+select extensions.is(
+  (select kind from public.provider_account_activity
+   where account_key = encode(extensions.digest('catalog-refresh.invalid/priority-gateway', 'sha256'), 'hex')),
+  'gateway',
+  'catalogue reporting cannot downgrade a fresh gateway holder'
+);
+
+select public.provider_account_touch_many(
+  array[encode(extensions.digest('catalog-refresh.invalid/priority-language', 'sha256'), 'hex')],
+  'language-validation'
+);
+select public.provider_account_touch_many(
+  array[encode(extensions.digest('catalog-refresh.invalid/priority-language', 'sha256'), 'hex')],
+  'catalog-refresh'
+);
+select extensions.is(
+  (select kind from public.provider_account_activity
+   where account_key = encode(extensions.digest('catalog-refresh.invalid/priority-language', 'sha256'), 'hex')),
+  'language-validation',
+  'catalogue reporting cannot downgrade fresh foreground validation'
+);
+
+select public.provider_account_touch_many(
+  array[encode(extensions.digest('catalog-refresh.invalid/priority-upgrade', 'sha256'), 'hex')],
+  'catalog-refresh'
+);
+select public.provider_account_touch_many(
+  array[encode(extensions.digest('catalog-refresh.invalid/priority-upgrade', 'sha256'), 'hex')],
+  'language-validation'
+);
+select extensions.is(
+  (select kind from public.provider_account_activity
+   where account_key = encode(extensions.digest('catalog-refresh.invalid/priority-upgrade', 'sha256'), 'hex')),
+  'language-validation',
+  'foreground validation atomically upgrades catalogue activity'
 );
 
 select extensions.ok(

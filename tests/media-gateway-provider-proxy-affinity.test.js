@@ -337,6 +337,10 @@ test('account activity groups exact canonical keys with real gateway work taking
       reportActivity: true,
       activityKind: 'gateway',
     }])],
+    ['provider/catalog', new Set([{
+      reportActivity: true,
+      activityKind: 'catalog-refresh',
+    }])],
     ['provider/disabled', new Set([{
       reportActivity: false,
       activityKind: null,
@@ -364,6 +368,7 @@ test('account activity groups exact canonical keys with real gateway work taking
     'provider/shared',
   ]);
   assert.deepEqual([...grouped.languageValidation], ['provider/lid-only']);
+  assert.deepEqual([...grouped.catalogRefresh], ['provider/catalog']);
   assert.equal(grouped.gateway.includes('provider/disabled'), false);
   assert.equal(grouped.languageValidation.includes('provider/shared'), false,
     'a viewer/raw/non-LID candidate must never be downgraded to ignorable LID activity');
@@ -374,6 +379,16 @@ test('account activity groups exact canonical keys with real gateway work taking
   ]);
   assert.deepEqual([...reverseOrder.gateway], ['provider/reverse']);
   assert.deepEqual([...reverseOrder.languageValidation], []);
+
+  const catalogPriority = harness.groupProviderAccountActivities([
+    { key: 'provider/catalog-viewer', kind: 'catalog-refresh' },
+    { key: 'provider/catalog-viewer', kind: 'gateway' },
+    { key: 'provider/catalog-lid', kind: 'catalog-refresh' },
+    { key: 'provider/catalog-lid', kind: 'language-validation' },
+  ]);
+  assert.deepEqual([...catalogPriority.gateway], ['provider/catalog-viewer']);
+  assert.deepEqual([...catalogPriority.languageValidation], ['provider/catalog-lid']);
+  assert.deepEqual([...catalogPriority.catalogRefresh], []);
 });
 
 test('strict LID reports a dedicated kind without leaving the extraction/preemption ledger', () => {
@@ -390,6 +405,14 @@ test('strict LID reports a dedicated kind without leaving the extraction/preempt
     gateway,
     /reportAccountActivityKind\([\s\S]{0,120}groups\.languageValidation,[\s\S]{0,120}ACCOUNT_ACTIVITY_KIND_LANGUAGE_VALIDATION/,
   );
+  assert.match(
+    gateway,
+    /reportAccountActivityKind\([\s\S]{0,120}groups\.catalogRefresh,[\s\S]{0,120}ACCOUNT_ACTIVITY_KIND_CATALOG_REFRESH/,
+  );
+  assert.match(
+    gateway,
+    /activityKind: ACCOUNT_ACTIVITY_KIND_CATALOG_REFRESH/,
+  );
   assert.match(gateway, /body: JSON\.stringify\(\{ keys, kind \}\)/);
 });
 
@@ -404,7 +427,7 @@ test('gateway fails proxy 407 safely before provider 458 handling', () => {
 });
 
 test('gateway advertises targeted operator override support without identities or secrets', () => {
-  assert.match(gateway, /const GATEWAY_VERSION = 114;/);
+  assert.match(gateway, /const GATEWAY_VERSION = 115;/);
   assert.match(gateway, /providerProxyAffinityProtocol:\s*1/);
   assert.match(gateway, /providerProxyAffinityKey:\s*'provider-account'/);
   assert.match(gateway, /providerProxySlotOverrideProtocol:\s*1/);

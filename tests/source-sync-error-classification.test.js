@@ -115,13 +115,21 @@ test('Xtream discovery yields to playback without recording a source failure', (
   assert.match(source, /function isProviderViewerPriority[\s\S]*error\.status !== 409[\s\S]*account_busy[\s\S]*provider_account_busy[\s\S]*viewer_preempted[\s\S]*active playback/);
 });
 
-test('catalog refresh ignores passive presence but keeps every real provider holder fenced', () => {
+test('catalog refresh ignores passive presence and its own released pages but keeps every real holder fenced', () => {
   const migration = read('supabase/migrations/20260826141838_provider_catalog_refresh_busy_scope_v1.sql');
+  const activityKindMigration = read('supabase/migrations/20260826145555_provider_catalog_refresh_activity_kind_v1.sql');
   assert.match(migration, /create or replace function public\.provider_account_busy_for_catalog_refresh\(p_key text\)/i);
   assert.match(migration, /last_seen_at > statement_timestamp\(\) - interval '5 minutes'[\s\S]*kind is distinct from 'presence'/i);
   assert.doesNotMatch(migration, /kind is distinct from 'language-validation'/i);
   assert.match(migration, /revoke all on function public\.provider_account_busy_for_catalog_refresh\(text\)[\s\S]*from public, anon, authenticated/i);
   assert.match(migration, /grant execute on function public\.provider_account_busy_for_catalog_refresh\(text\)[\s\S]*to service_role/i);
+  assert.match(activityKindMigration, /kind is distinct from 'presence'[\s\S]*kind is distinct from 'catalog-refresh'/i);
+  assert.doesNotMatch(activityKindMigration, /kind is distinct from 'language-validation'/i);
+  assert.match(activityKindMigration, /create or replace function public\.provider_account_touch_many/i);
+  assert.match(activityKindMigration, /excluded\.kind not in \('presence', 'catalog-refresh', 'language-validation'\)/i);
+  assert.match(activityKindMigration, /activity\.kind in \('presence', 'catalog-refresh'\)/i);
+  assert.match(activityKindMigration, /revoke all on function public\.provider_account_busy_for_catalog_refresh\(text\)[\s\S]*from public, anon, authenticated/i);
+  assert.match(activityKindMigration, /grant execute on function public\.provider_account_busy_for_catalog_refresh\(text\)[\s\S]*to service_role/i);
 });
 
 // Discovered, not enumerated. A hand-written file list missed
