@@ -3821,30 +3821,29 @@ class SourceManager {
             const hasError = sourceStatuses.some(s => s.status === 'error');
             const lastSync = sourceStatuses.map(s => s.last_sync).sort().pop();
 
-            const btn = item.querySelector('[data-action="refresh"]');
-            const hardBtn = item.querySelector('[data-action="hard-refresh"]');
+            // Only update the visible primary action. The menu contains its own
+            // refresh actions; the legacy selector used to replace the first
+            // matching menu label with an icon whenever Repair was primary.
+            const btn = item.querySelector('.source-primary-action[data-action="refresh"]');
+            const hardBtn = item.querySelector('.source-menu-item[data-action="hard-refresh"]');
             if (btn) {
-                const icon = btn.querySelector('.icon') || btn; // icon inside button or button content
-                // If syncing, spin the refresh icon
                 if (isSyncing) {
                     btn.disabled = true;
-                    btn.classList.add('syncing'); // Custom style?
-                    // Ensure spin class is added (font awesome or similar)
-                    // The icon is usually SVH in `Icons.refresh`.
-                    // We can add a class to the SVG parent or button
-                    btn.innerHTML = `<span class="spin">${Icons.refresh}</span>`;
-                    btn.title = "Syncing...";
-                } else if (hasError) {
-                    btn.disabled = false;
-                    btn.innerHTML = Icons.refresh;
-                    btn.classList.remove('syncing');
-                    btn.title = "Sync Failed - Retry";
-                    // Maybe show error indicator?
+                    btn.classList.add('syncing');
+                    btn.textContent = 'Syncing…';
+                    btn.title = 'Catalog update in progress';
+                    btn.setAttribute('aria-label', 'Catalog update in progress');
                 } else {
                     btn.disabled = false;
-                    btn.innerHTML = Icons.refresh;
                     btn.classList.remove('syncing');
-                    btn.title = lastSync ? `Last Sync: ${new Date(lastSync).toLocaleString()}` : "Refresh Data";
+                    btn.textContent = 'Sync';
+                    // A transient background failure does not invalidate the
+                    // completed catalogue. Keep the action truthful and neutral;
+                    // the durable retry/backoff owns recovery.
+                    btn.title = hasError
+                        ? 'Retry catalog update'
+                        : (lastSync ? `Last update attempt: ${new Date(lastSync).toLocaleString()}` : 'Sync catalog now');
+                    btn.setAttribute('aria-label', btn.title);
                 }
             }
 

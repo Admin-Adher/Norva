@@ -194,6 +194,25 @@ test('Account health summary keeps the service price-neutral and secondary', () 
   assert.doesNotMatch(html, /price|billing|payment/i);
 });
 
+test('Account health summary reports the last completed sync instead of a failed attempt', () => {
+  const health = sourceHealthHarness();
+  const completedAt = new Date(Date.now() - (2 * 60 * 60 * 1000)).toISOString();
+  const failedAttemptAt = new Date(Date.now() - (2 * 60 * 1000)).toISOString();
+  const summary = health.summarize([{
+    id: 'source-1',
+    sync_status: 'error',
+    sync_error: 'provider timeout',
+    last_synced_at: failedAttemptAt,
+    configHint: { lastSync: { syncedAt: completedAt, total: 42 } },
+  }]);
+  const html = health.cardHtml(summary, { hideWhenReady: false, accountSummary: true });
+
+  assert.equal(summary.state, 'ready');
+  assert.equal(summary.refreshing, true);
+  assert.match(html, /Catalogue updated 2 h ago/);
+  assert.doesNotMatch(html, /Catalogue updated 2 min ago/);
+});
+
 test('TV handoff stays on the ten-foot surface when the product modal is unavailable', () => {
   let announced = '';
   const window = {
@@ -308,6 +327,84 @@ function sourceManagerHarness() {
   manager.sourceStatuses = [];
   return { manager, api };
 }
+
+function sourceManagerStatusHarness() {
+  const primary = {
+    disabled: false,
+    textContent: 'Sync',
+    title: '',
+    attributes: {},
+    classList: {
+      values: new Set(),
+      add(value) { this.values.add(value); },
+      remove(value) { this.values.delete(value); },
+    },
+    setAttribute(name, value) { this.attributes[name] = value; },
+  };
+  const hardRefresh = {
+    disabled: false,
+    textContent: 'Rebuild catalog',
+    title: '',
+  };
+  const item = {
+    dataset: { id: '900001' },
+    querySelector(selector) {
+      if (selector === '.source-primary-action[data-action="refresh"]') return primary;
+      if (selector === '.source-menu-item[data-action="hard-refresh"]') return hardRefresh;
+      return null;
+    },
+  };
+  const document = {
+    querySelectorAll(selector) {
+      assert.equal(selector, '.source-item');
+      return [item];
+    },
+  };
+  const api = { sources: {} };
+  const window = { API: api };
+  window.window = window;
+  const context = {
+    window,
+    document,
+    API: api,
+    console,
+    URL,
+    setTimeout,
+    clearTimeout,
+    setInterval,
+    clearInterval,
+  };
+  vm.runInNewContext(SOURCE_MANAGER_SOURCE, context, { filename: 'public/js/components/SourceManager.js' });
+  return {
+    manager: Object.create(window.SourceManager.prototype),
+    primary,
+    hardRefresh,
+  };
+}
+
+test('SourceManager keeps the primary sync action legible through transient failures and refreshes', () => {
+  const { manager, primary, hardRefresh } = sourceManagerStatusHarness();
+
+  manager.updateSyncStatus([{
+    source_id: 900001,
+    status: 'error',
+    last_sync: '2026-08-26T12:59:16.244Z',
+  }]);
+
+  assert.equal(primary.disabled, false);
+  assert.equal(primary.textContent, 'Sync');
+  assert.equal(primary.title, 'Retry catalog update');
+  assert.equal(primary.attributes['aria-label'], 'Retry catalog update');
+  assert.equal(hardRefresh.textContent, 'Rebuild catalog');
+
+  manager.updateSyncStatus([{ source_id: 900001, status: 'syncing' }]);
+
+  assert.equal(primary.disabled, true);
+  assert.equal(primary.textContent, 'Syncing…');
+  assert.equal(primary.title, 'Catalog update in progress');
+  assert.equal(primary.attributes['aria-label'], 'Catalog update in progress');
+  assert.equal(hardRefresh.textContent, 'Rebuild catalog');
+});
 
 test('SourceManager exposes one preparation view instead of leaking rendering internals', () => {
   const { manager } = sourceManagerHarness();
