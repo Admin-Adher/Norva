@@ -434,7 +434,7 @@ test('live summary merge uses bounded RPC bodies and never a logical-id URL filt
     database.writeBatches
       .filter((batch) => batch.table === 'cloud_live_logical_channels')
       .map((batch) => batch.size),
-    [...Array(20).fill(50), 1],
+    [...Array(100).fill(10), 1],
     'each bounded provider page must pay the generation trigger cost only once',
   );
   for (const call of lookups) {
@@ -459,10 +459,9 @@ test('live summary merge uses bounded RPC bodies and never a logical-id URL filt
   assert.match(migration, /revoke all on function[\s\S]*from public,anon,authenticated,service_role/);
   assert.match(migration, /grant execute on function[\s\S]*to service_role/);
   const liveWriter = source(path.join(SHARED, 'live-materialization.ts'));
-  assert.equal((liveWriter.match(/chunkSize: 50/g) || []).length, 2);
-  assert.doesNotMatch(liveWriter, /chunkSize: 10/);
-  assert.match(source(path.join(ROOT, 'supabase', 'functions', 'norva-source-sync', 'index.ts')), /const LIVE_CHUNK = 50/);
-  assert.match(source(path.join(ROOT, 'supabase', 'functions', 'norva-cloud', 'index.ts')), /const LIVE_CHUNK = 50/);
+  assert.equal((liveWriter.match(/chunkSize: 10/g) || []).length, 2);
+  assert.match(source(path.join(ROOT, 'supabase', 'functions', 'norva-source-sync', 'index.ts')), /const LIVE_CHUNK = 10/);
+  assert.match(source(path.join(ROOT, 'supabase', 'functions', 'norva-cloud', 'index.ts')), /const LIVE_CHUNK = 10/);
 });
 
 test('durable finalizer claims one CAS lease before writing and fences every handoff', () => {
