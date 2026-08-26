@@ -69,8 +69,11 @@ test('Home timeouts abort the underlying rails fetch and route cancellation drai
 
 test('Home and phone genre rails bound pre-paint catalogue hydration', () => {
   assert.match(catalog, /const verifiedCandidateLimit = Math\.min\(200, Math\.max\(96, limit \* 4\)\)/);
-  assert.match(catalog, /listVerifiedTitleCandidates\(userId, itemType, verifiedCandidateLimit\)/);
+  assert.match(catalog, /listVerifiedTitleCandidatePool\([\s\S]*verifiedCandidateLimit/);
   assert.match(catalog, /candidateLimit = 96/);
+  assert.match(catalog, /const variantsPromise = listVariantsByTitleIds\(titleIds, userId\)/);
+  assert.match(catalog, /await applyCatalogOverlay\(titles, itemType, lang\)/);
+  assert.match(catalog, /variantsByTitle: await variantsPromise/);
   assert.match(read('public/js/pages/MoviesPage.js'), /limit: this\._isTvMode\(\) \? 18 : 12/);
   assert.match(read('public/js/pages/SeriesPage.js'), /limit: this\._isTvMode\(\) \? 18 : 12/);
   assert.match(appHtml, /MoviesPage\.js\?v=58/);

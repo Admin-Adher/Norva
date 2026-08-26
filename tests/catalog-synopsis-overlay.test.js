@@ -48,13 +48,15 @@ test('all title rails forward the requested synopsis language', () => {
   assert.match(src, /applyCatalogOverlay\(selectedRows, itemType, lang\)/);
   assert.equal((src.match(/applyCatalogOverlay\(pageRows, itemType, lang\)/g) || []).length, 2);
   assert.match(src, /applyCatalogOverlay\(titles, itemType, lang\)/);
-  assert.equal((src.match(/applyCatalogOverlay\(titles, itemType, lang\)/g) || []).length, 4);
+  assert.equal((src.match(/applyCatalogOverlay\(titles, itemType, lang\)/g) || []).length, 2);
+  assert.match(src, /listVerifiedTitleCandidatePool\(userId, type, lang\)/);
   assert.match(src, /type TitleCandidatesFor = \(itemType: "movie" \| "series"\)/);
-  assert.match(src, /const candidatePromises = new Map<"movie" \| "series", Promise<JsonRecord\[\]>>/);
+  assert.match(src, /const candidatePromises = new Map<"movie" \| "series", Promise<HomeTitleCandidatePool>>/);
   assert.ok(
     (src.match(/await (?:options\.)?candidatesFor\(itemType\)/g) || []).length >= 3,
     'genre, popular and personalized rails must share the request-scoped candidate pool',
   );
+  assert.match(src, /listVerifiedTitleCandidatePool[\s\S]*variantsByTitle/);
 });
 
 test('flat grids avoid movie-series id collisions and support localized synopsis text', () => {

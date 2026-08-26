@@ -1348,11 +1348,16 @@ async function listHomeRails(req: Request, url: URL, userId: string) {
   // limits. This preserves recommendation diversity while keeping first paint
   // inside the WebView request budget on large catalogues.
   const verifiedCandidateLimit = Math.min(200, Math.max(96, limit * 4));
-  const candidatePromises = new Map<"movie" | "series", Promise<JsonRecord[]>>();
+  const candidatePromises = new Map<"movie" | "series", Promise<HomeTitleCandidatePool>>();
   const candidatesFor = (itemType: "movie" | "series") => {
     let promise = candidatePromises.get(itemType);
     if (!promise) {
-      promise = listVerifiedTitleCandidates(userId, itemType, verifiedCandidateLimit);
+      promise = listVerifiedTitleCandidatePool(
+        userId,
+        itemType,
+        lang,
+        verifiedCandidateLimit,
+      );
       candidatePromises.set(itemType, promise);
     }
     return promise;
@@ -2670,7 +2675,11 @@ async function listTitleRail(userId: string, itemType: "movie" | "series", id: s
   }
 }
 
-type TitleCandidatesFor = (itemType: "movie" | "series") => Promise<JsonRecord[]>;
+type HomeTitleCandidatePool = {
+  titles: JsonRecord[];
+  variantsByTitle: Map<string, JsonRecord[]>;
+};
+type TitleCandidatesFor = (itemType: "movie" | "series") => Promise<HomeTitleCandidatePool>;
 
 async function listGenreRail(
   userId: string,
@@ -2680,23 +2689,22 @@ async function listGenreRail(
   title: string,
   limit: number,
   lang: string | null,
-  candidatesFor: TitleCandidatesFor = (type) => listVerifiedTitleCandidates(userId, type),
+  candidatesFor: TitleCandidatesFor = (type) => listVerifiedTitleCandidatePool(userId, type, lang),
 ) {
   try {
-    const candidates = await candidatesFor(itemType);
+    const pool = await candidatesFor(itemType);
+    const candidates = pool.titles;
     const titles = candidates
       .filter((row) => titleGenres(row).some((value: string) => sameGenre(value, genre)))
       .sort((a, b) => String(b.synced_at ?? b.updated_at ?? "").localeCompare(String(a.synced_at ?? a.updated_at ?? "")))
       .slice(0, limit);
-    await applyCatalogOverlay(titles, itemType, lang);
-    const variantsByTitle = await listVariantsByTitleIds(titles.map((row) => String(row.id)), userId);
     return {
       id,
       title,
       itemType,
       source: "titles",
       curation: { kind: "genre", genre },
-      items: titles.map((row) => titleRailItem(row, variantsByTitle.get(String(row.id)) ?? [], lang)),
+      items: titles.map((row) => titleRailItem(row, pool.variantsByTitle.get(String(row.id)) ?? [], lang)),
     };
   } catch (error) {
     if (isMissingMaterialization(error)) return { id, title, itemType, source: "titles", items: [] };
@@ -2711,10 +2719,11 @@ async function listPopularTitleRail(
   title: string,
   limit: number,
   lang: string | null,
-  candidatesFor: TitleCandidatesFor = (type) => listVerifiedTitleCandidates(userId, type),
+  candidatesFor: TitleCandidatesFor = (type) => listVerifiedTitleCandidatePool(userId, type, lang),
 ) {
   try {
-    const candidates = await candidatesFor(itemType);
+    const pool = await candidatesFor(itemType);
+    const candidates = pool.titles;
     // Real-views signal: distinct users who have watched each title (global), so the
     // Top 10 reflects actual viewing. TMDB rating is the tiebreak, so it still reads as
     // a sensible ranking while views are sparse and self-improves as they accumulate.
@@ -2735,15 +2744,13 @@ async function listPopularTitleRail(
         String(b.synced_at ?? b.updated_at ?? "").localeCompare(String(a.synced_at ?? a.updated_at ?? ""))
       )
       .slice(0, limit);
-    await applyCatalogOverlay(titles, itemType, lang);
-    const variantsByTitle = await listVariantsByTitleIds(titles.map((row) => String(row.id)), userId);
     return {
       id,
       title,
       itemType,
       source: "titles",
       curation: { kind: "popular", metric: "views+tmdb_vote_average" },
-      items: titles.map((row) => titleRailItem(row, variantsByTitle.get(String(row.id)) ?? [], lang)),
+      items: titles.map((row) => titleRailItem(row, pool.variantsByTitle.get(String(row.id)) ?? [], lang)),
     };
   } catch (error) {
     if (isMissingMaterialization(error)) return { id, title, itemType, source: "titles", items: [] };
@@ -2851,7 +2858,8 @@ async function listBecauseYouLikedRail(
     const itemType: "movie" | "series" = String(anchorTitle.item_type) === "series" ? "series" : "movie";
     if ((itemType === "movie" && !options.includeMovies) || (itemType === "series" && !options.includeSeries)) return null;
 
-    const candidates = await options.candidatesFor(itemType);
+    const pool = await options.candidatesFor(itemType);
+    const candidates = pool.titles;
     const ratedTitleIds = await listRatedCandidateTitleIds(
       userId,
       profileId,
@@ -2866,15 +2874,10 @@ async function listBecauseYouLikedRail(
     );
     if (!rankedTitles.length) return null;
 
-    const variantsByTitle = await listVariantsByTitleIds(
-      rankedTitles.map((row) => String(row.id)),
-      userId,
-    );
     const titles = rankedTitles
-      .filter((row) => (variantsByTitle.get(String(row.id)) ?? []).length > 0)
+      .filter((row) => (pool.variantsByTitle.get(String(row.id)) ?? []).length > 0)
       .slice(0, options.limit);
     if (!titles.length) return null;
-    await applyCatalogOverlay(titles, itemType, options.lang);
     const anchorName = stringOrNull(anchorTitle.title ?? anchorTitle.original_title);
     return {
       id: `because-you-liked-${anchorId}`,
@@ -2887,7 +2890,7 @@ async function listBecauseYouLikedRail(
         anchorTitle: anchorName,
         genres: titleGenres(anchorTitle),
       },
-      items: titles.map((row) => titleRailItem(row, variantsByTitle.get(String(row.id)) ?? [], options.lang)),
+      items: titles.map((row) => titleRailItem(row, pool.variantsByTitle.get(String(row.id)) ?? [], options.lang)),
     };
   } catch (error) {
     if (isMissingRatingsExpansion(error)) return null;
@@ -2932,7 +2935,8 @@ async function listBecauseYouWatchedRail(
       if (!genres.length) continue;
 
       const itemType = String(watchedTitle.item_type) === "series" ? "series" : "movie";
-      const candidates = await options.candidatesFor(itemType);
+      const pool = await options.candidatesFor(itemType);
+      const candidates = pool.titles;
       const watchedId = String(watchedTitle.id);
       const titles = candidates
         .filter((row) => String(row.id) !== watchedId)
@@ -2946,8 +2950,6 @@ async function listBecauseYouWatchedRail(
         .slice(0, options.limit);
       if (!titles.length) continue;
 
-      await applyCatalogOverlay(titles, itemType, lang);
-      const variantsByTitle = await listVariantsByTitleIds(titles.map((row) => String(row.id)), userId);
       return {
         id: `because-you-watched-${watchedId}`,
         title: "Because You Watched",
@@ -2959,7 +2961,7 @@ async function listBecauseYouWatchedRail(
           anchorTitle: watchedTitle.title ?? watchedTitle.original_title ?? null,
           genres,
         },
-        items: titles.map((row) => titleRailItem(row, variantsByTitle.get(String(row.id)) ?? [], lang)),
+        items: titles.map((row) => titleRailItem(row, pool.variantsByTitle.get(String(row.id)) ?? [], lang)),
       };
     }
   } catch (error) {
@@ -3024,6 +3026,25 @@ async function listVerifiedTitleCandidates(
     visibilityEpoch,
   );
   return await hydrateVisibleCatalogTitlesByIds(userId, titleIds, visibilityEpoch);
+}
+
+async function listVerifiedTitleCandidatePool(
+  userId: string,
+  itemType: "movie" | "series",
+  lang: string | null,
+  candidateLimit = 96,
+): Promise<HomeTitleCandidatePool> {
+  const titles = await listVerifiedTitleCandidates(userId, itemType, candidateLimit);
+  const titleIds = titles.map((row) => String(row.id));
+  // Every Home rail over one item type shares the same hydrated title objects,
+  // display overlay and playable variants. Previously Action, Popular and each
+  // personalized rail repeated those DB round-trips over overlapping subsets.
+  const variantsPromise = listVariantsByTitleIds(titleIds, userId);
+  await applyCatalogOverlay(titles, itemType, lang);
+  return {
+    titles,
+    variantsByTitle: await variantsPromise,
+  };
 }
 
 // Source-health awareness for playable cards (home audit 2026-07-04). The visible
