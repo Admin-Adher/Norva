@@ -745,11 +745,6 @@ export async function driveXtreamSyncToReady(sourceId: string, userId: string, d
     if (!(await admitHeavyImport(db, sourceId, source.created_at ? String(source.created_at) : null, heavyImportBudget()))) {
       return; // queued — resumed when an older import finishes
     }
-    cursor.attempts = (Number(cursor.attempts) || 0) + 1;
-    if (Number(cursor.attempts) > SYNC_MAX_CONTINUATIONS) {
-      throw new HttpError(500, "Catalog sync exceeded its continuation budget");
-    }
-
     const runtimeConfig = await getRuntimeConfig(db);
     const config = await decryptSourceConfig(String(source.config_ciphertext), runtimeConfig);
     await assertCatalogSnapshotCurrent(db, sourceId, userId, accessSnapshot);
@@ -757,6 +752,34 @@ export async function driveXtreamSyncToReady(sourceId: string, userId: string, d
     const username = typeof config.username === "string" && config.username.trim() ? config.username : "";
     const password = typeof config.password === "string" && config.password.length ? config.password : "";
     if (!username || !password) throw new HttpError(400, "Xtream credentials are incomplete");
+    // Playback always wins on mono-account providers.  The foreground presence
+    // ledger is updated before a playback session starts, so consult it before
+    // the first provider request and park this durable cursor instead of
+    // provoking a gateway 409 (which used to be persisted as a terminal source
+    // failure).  A parked cursor consumes no continuation budget; the existing
+    // watchdog resumes it after the viewer-presence window has drained.
+    let accountBusy = false;
+    try {
+      const accountKey = `${new URL(serverUrl).host}/${username}`;
+      const { data, error } = await db.rpc("provider_account_busy", { p_key: accountKey });
+      accountBusy = !error && data === true;
+    } catch (_) {
+      // Fail open here: the media gateway remains the authoritative final race
+      // fence and returns a bounded 409 without touching the provider account.
+    }
+    if (accountBusy) {
+      await persist({
+        stage: "waiting_for_provider",
+        percent: Number(progress.percent ?? 0) || 4,
+        note: "viewer_priority",
+      });
+      return;
+    }
+
+    cursor.attempts = (Number(cursor.attempts) || 0) + 1;
+    if (Number(cursor.attempts) > SYNC_MAX_CONTINUATIONS) {
+      throw new HttpError(500, "Catalog sync exceeded its continuation budget");
+    }
     const directFallbackSnapshot = await buildProviderDirectFallbackSnapshot({
       serverUrl,
       username,
@@ -1102,6 +1125,21 @@ export async function driveXtreamSyncToReady(sourceId: string, userId: string, d
     } catch (guardError) {
       if (isCatalogAccessGuardError(guardError)) return;
       throw guardError;
+    }
+    // A viewer can start in the narrow interval after the ledger preflight and
+    // before the provider call.  The gateway rejects that background request
+    // with 409.  This is scheduling, not a broken source: preserve the active
+    // cursor, undo the attempt/fetch-error accounting and let the watchdog
+    // retry after playback has drained.  Never emit import_failed for this path.
+    if (isProviderViewerPriority(err)) {
+      cursor.attempts = Math.max(0, (Number(cursor.attempts) || 0) - 1);
+      cursor.fetchErrors = Math.max(0, (Number(cursor.fetchErrors) || 0) - 1);
+      await persist({
+        stage: "waiting_for_provider",
+        percent: Number(progress.percent ?? 0) || 4,
+        note: "viewer_priority",
+      });
+      return;
     }
     // Transient DB contention (timeout/lock/resource): don't fail the sync — the
     // cursor is checkpointed, so hand off to a fresh isolate where the DB may have
@@ -2174,6 +2212,19 @@ function isGatewayBackgroundBusy(error: unknown) {
   const details = recordOrEmpty(error.details);
   const nested = recordOrEmpty(details.details);
   return stringOr(details.code ?? nested.code, "") === "background_busy";
+}
+
+function isProviderViewerPriority(error: unknown) {
+  if (!(error instanceof HttpError) || error.status !== 409) return false;
+  const details = recordOrEmpty(error.details);
+  const nested = recordOrEmpty(details.details);
+  const code = stringOr(details.code ?? nested.code, "").toLowerCase();
+  if (["account_busy", "provider_account_busy", "viewer_preempted"].includes(code)) return true;
+  const reason = stringOr(
+    details.error ?? details.message ?? nested.error ?? nested.message,
+    "",
+  ).toLowerCase();
+  return /\b(account|provider)[ _-]*busy\b|\bactive playback\b|\bviewer[ _-]*preempted\b/.test(reason);
 }
 
 async function requestGatewayMetadata(

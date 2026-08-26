@@ -246,6 +246,7 @@
             'idle'
         );
         const progressStatus = lower(progress.status || progress.stage || '');
+        const progressStage = lower(progress.stage || '');
         const error = string(source.sync_error || source.syncError || status.error || status.sync_error || '');
         const lastSync = completedSyncAt(source, status);
         const enabled = source.enabled !== false && source.revoked !== true;
@@ -294,7 +295,11 @@
             // rather than make the user watch a bar crawl for hours.
             if (hasCompletedCatalog(source, status) || progress.usable === true) {
                 state = 'ready';
-                refreshing = true;
+                if (progressStage === 'waiting_for_provider') {
+                    retrying = true;
+                } else {
+                    refreshing = true;
+                }
             } else {
                 state = 'syncing';
             }
@@ -374,7 +379,8 @@
                 movies: unlocks.movies,
                 series: unlocks.series
             },
-            backgrounding: unlocks.browsable && (running || classification.refreshing === true),
+            backgrounding: unlocks.browsable && classification.retrying !== true &&
+                (running || classification.refreshing === true),
             classification,
             progress
         };
@@ -413,7 +419,8 @@
                     movies: unlocks.movies,
                     series: unlocks.series
                 };
-                policy.backgrounding = policy.browsable && (item.refreshing === true || item.state === 'syncing');
+                policy.backgrounding = policy.browsable && item.retrying !== true &&
+                    (item.refreshing === true || item.state === 'syncing');
                 policy.progress = itemProgress;
             }
             policies.push(policy);

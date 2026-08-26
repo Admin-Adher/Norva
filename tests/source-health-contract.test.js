@@ -84,6 +84,29 @@ test('a failed background refresh never claims that Home is still adding titles'
   assert.equal(availability.backgrounding, false);
 });
 
+test('a refresh parked behind playback stays usable and queued, never falsely active', () => {
+  const health = sourceHealthHarness();
+  const source = {
+    id: 'source-1',
+    sync_status: 'syncing',
+    syncProgress: {
+      status: 'syncing',
+      stage: 'waiting_for_provider',
+      note: 'viewer_priority',
+    },
+    configHint: { lastSync: { syncedAt: '2026-08-10T08:00:00.000Z', total: 42 } },
+  };
+
+  const classification = health.classifySource(source);
+  const availability = health.catalogAvailability(health.summarize([source]));
+
+  assert.equal(classification.state, 'ready');
+  assert.equal(classification.refreshing, false);
+  assert.equal(classification.retrying, true);
+  assert.equal(availability.browsable, true);
+  assert.equal(availability.backgrounding, false);
+});
+
 test('source health reports an API outage as unknown instead of not configured', async () => {
   const health = sourceHealthHarness({
     getAll: async () => { throw new Error('offline'); },
@@ -323,7 +346,7 @@ test('Settings keeps a compatible direct loader fallback when no App seam exists
   assert.equal(container.innerHTML, '<div>syncing</div>');
 });
 
-function sourceManagerHarness() {
+function sourceManagerHarness(options = {}) {
   const storage = new Map();
   const api = {
     sources: {
@@ -333,6 +356,7 @@ function sourceManagerHarness() {
   };
   const window = {
     API: api,
+    NorvaSourceHealth: options.sourceHealth,
     localStorage: {
       getItem(key) { return storage.get(key) || null; },
       setItem(key, value) { storage.set(key, String(value)); },
@@ -340,12 +364,53 @@ function sourceManagerHarness() {
     },
   };
   window.window = window;
-  const context = { window, API: api, console, URL, setTimeout, clearTimeout, setInterval, clearInterval };
+  const context = {
+    window,
+    API: api,
+    Icons: { live: '', guide: '', series: '' },
+    console,
+    URL,
+    setTimeout,
+    clearTimeout,
+    setInterval,
+    clearInterval,
+  };
   vm.runInNewContext(SOURCE_MANAGER_SOURCE, context, { filename: 'public/js/components/SourceManager.js' });
   const manager = Object.create(window.SourceManager.prototype);
   manager.sourceStatuses = [];
   return { manager, api };
 }
+
+test('SourceManager shows usable catalogue and pending retry together', () => {
+  const { manager } = sourceManagerHarness({
+    sourceHealth: {
+      classifySource() {
+        return {
+          state: 'ready',
+          label: 'Ready',
+          retrying: true,
+          needsAttention: false,
+        };
+      },
+    },
+  });
+  const container = {
+    innerHTML: '',
+    querySelectorAll() { return []; },
+  };
+
+  manager.renderSourceList(container, [{
+    id: 900001,
+    name: 'Living room',
+    type: 'm3u',
+    enabled: true,
+  }], 'm3u');
+
+  assert.match(container.innerHTML, /Ready · retry pending/);
+  assert.match(container.innerHTML, /existing catalogue is available/);
+  assert.match(container.innerHTML, /title="Retry catalog update" aria-label="Retry catalog update"/);
+  assert.doesNotMatch(container.innerHTML, /Adding the rest of your library/);
+});
 
 function sourceManagerStatusHarness() {
   const primary = {
