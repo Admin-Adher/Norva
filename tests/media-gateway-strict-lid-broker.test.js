@@ -504,6 +504,12 @@ test('strict broker can reopen immediately only after an exact provider range is
 test('strict LID broker preempts an old local range, awaits close, and never exceeds one provider socket', async (t) => {
   const { createStrictLidBroker } = brokerHarness();
   const data = Buffer.alloc(256, 0x5a);
+  // The provider's loopback `close` event can trail the client-side Undici
+  // drain acknowledgement by a few scheduler ticks. Keep a deliberately wide
+  // test-only grace so this integration assertion proves a substantial
+  // post-close cooldown without depending on sub-10 ms runner timing.
+  const releaseDelayMs = 200;
+  const minimumObservedPostCloseDelayMs = 100;
   const state = { active: 0, maxActive: 0, calls: 0, firstClosedAt: 0, secondOpenedAt: 0 };
   const provider = http.createServer((req, res) => {
     state.calls++;
@@ -539,7 +545,7 @@ test('strict LID broker preempts an old local range, awaits close, and never exc
     sourceUrl,
     fileSizeBytes: data.length,
     dispatcher: null,
-    releaseDelayMs: 25,
+    releaseDelayMs,
     openTimeoutMs: 2000,
   });
   t.after(() => broker.close());
@@ -559,7 +565,7 @@ test('strict LID broker preempts an old local range, awaits close, and never exc
   assert.equal(state.maxActive, 1, 'strict LID must never overlap provider bodies');
   assert.ok(state.firstClosedAt > 0 && state.secondOpenedAt >= state.firstClosedAt);
   assert.ok(
-    state.secondOpenedAt - state.firstClosedAt >= 20,
+    state.secondOpenedAt - state.firstClosedAt >= minimumObservedPostCloseDelayMs,
     `successor opened only ${state.secondOpenedAt - state.firstClosedAt}ms after close`,
   );
 });
