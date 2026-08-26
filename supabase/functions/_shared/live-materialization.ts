@@ -253,10 +253,10 @@ export async function upsertLiveChannelRows(
   return await writeRows(db, "cloud_live_logical_channels", withCatalogGenerationRows(merged, generation), {
     selectColumns: "id,logical_id",
     onConflict: "source_id,generation_id,logical_id",
-    // Keep one resumable 50-row provider slice in one SQL statement: this pays
-    // the generation guard/revision fixed cost once while staying comfortably
-    // below the Edge/PostgREST request budget with every row-level safety fence.
-    chunkSize: 50,
+    // One durable provider slice is exactly one 10-row SQL statement. The row-
+    // level generation/account-deletion fences make larger active-catalog
+    // statements exceed the Edge budget; the caller checkpoints after this slice.
+    chunkSize: 10,
   });
 }
 
@@ -400,7 +400,7 @@ export async function upsertLiveVariantRows(
     .filter((row) => row.logical_channel_id);
   await writeRows(db, "cloud_live_variants", withCatalogGenerationRows(slice, generation), {
     onConflict: "source_id,generation_id,logical_id,stream_id,label",
-    chunkSize: 50,
+    chunkSize: 10,
   });
   return slice.length;
 }
