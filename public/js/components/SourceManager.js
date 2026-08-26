@@ -1038,6 +1038,8 @@ class SourceManager {
                 if (activeStep === 'duration') this.renderProviderAccessCalendar(fieldset, { resetMonth: true });
                 const live = fieldset.querySelector('[data-access-wizard-live]');
                 if (live) live.textContent = `${stepNames[activeStep] || 'Provider access'}, step ${stepIndex + 1} of ${steps.length}.`;
+                const modalBody = fieldset.closest('.modal-body');
+                if (modalBody?.closest('.provider-access-wizard-modal')) modalBody.scrollTop = 0;
                 if (focus && !fieldset.hidden) {
                     requestAnimationFrame(() => fieldset.querySelector(`[data-access-wizard-stage="${activeStep}"] h3`)?.focus({ preventScroll: true }));
                 }

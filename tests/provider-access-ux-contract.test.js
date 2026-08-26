@@ -115,8 +115,17 @@ test('Provider Access controls use Norva tokens and remain touch, mobile and mot
   assert.match(css, /html\.tv-mode #page-settings \.settings-source-management[\s\S]{0,80}display:\s*none/);
 });
 
+test('Provider Access wizard has one vertical scroller and one action footer', () => {
+  assert.match(css, /\.provider-access-wizard-modal \.modal-body\s*\{[\s\S]{0,220}overflow-y:\s*auto/);
+  assert.match(css, /\.provider-access-wizard-modal \.provider-access-terms\s*\{[\s\S]{0,220}overflow:\s*visible/);
+  assert.match(css, /\.provider-access-wizard-modal \.provider-access-wizard-stage\s*\{[\s\S]{0,220}overflow:\s*visible/);
+  assert.match(css, /\.provider-access-wizard-modal \.provider-access-wizard-actions\s*\{[\s\S]{0,100}position:\s*sticky[\s\S]{0,80}bottom:\s*0/);
+  assert.match(css, /\.provider-access-wizard-modal \.modal-footer\s*\{[\s\S]{0,80}display:\s*none/);
+  assert.match(sourceManager, /modalBody\?\.closest\('\.provider-access-wizard-modal'\)[\s\S]{0,80}modalBody\.scrollTop = 0/);
+});
+
 test('all changed Provider Access UI assets are cache-busted', () => {
-  assert.match(shell, /main\.css\?v=120/);
+  assert.match(shell, /main\.css\?v=121/);
   assert.match(shell, /cloudApi\.js\?v=70/);
   assert.match(shell, /api\.js\?v=88/);
   assert.match(shell, /SourceManager\.js\?v=47/);
