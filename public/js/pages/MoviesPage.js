@@ -505,7 +505,13 @@ class MoviesPage {
         this.resetBtn?.classList.add('hidden');
         if (this.randomBtn) this.randomBtn.disabled = true; // "Random" needs the flat grid.
         try {
-            const payload = await API.media.genreRails({ type: 'movie', limit: 18 });
+            // Twelve cards cover two desktop/mobile viewports while bounding the
+            // hydration and variant joins required before the first rail can paint.
+            // TV keeps the longer row for D-pad browsing on a wide screen.
+            const payload = await API.media.genreRails({
+                type: 'movie',
+                limit: this._isTvMode() ? 18 : 12
+            });
             const rails = (payload && payload.rails) || [];
             // Fall back to the flat grid whenever the rails carry NO items — not only
             // when the rails array is empty. A mid-sync / incomplete materialization can

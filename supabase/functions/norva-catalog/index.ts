@@ -1341,11 +1341,18 @@ async function listHomeRails(req: Request, url: URL, userId: string) {
   const includeSeries = !type || type === "series";
   const includeMovies = !type || type === "movie";
   const profilePromise = resolveCatalogProfileId(req, userId);
+  // Home only displays `limit` cards per rail. Hydrating a fixed 300-title
+  // candidate pool made the common 24-card request detoast and join far more
+  // catalogue rows than it could ever render. Keep a four-screen ranking pool
+  // (96 for the default request), with a bounded larger pool for explicit high
+  // limits. This preserves recommendation diversity while keeping first paint
+  // inside the WebView request budget on large catalogues.
+  const verifiedCandidateLimit = Math.min(200, Math.max(96, limit * 4));
   const candidatePromises = new Map<"movie" | "series", Promise<JsonRecord[]>>();
   const candidatesFor = (itemType: "movie" | "series") => {
     let promise = candidatePromises.get(itemType);
     if (!promise) {
-      promise = listVerifiedTitleCandidates(userId, itemType);
+      promise = listVerifiedTitleCandidates(userId, itemType, verifiedCandidateLimit);
       candidatePromises.set(itemType, promise);
     }
     return promise;
@@ -3006,7 +3013,7 @@ async function loadTitleById(userId: string, titleId: string) {
 async function listVerifiedTitleCandidates(
   userId: string,
   itemType: "movie" | "series",
-  candidateLimit = 300,
+  candidateLimit = 96,
 ) {
   const visibilityEpoch = requiredCatalogTitleVisibilityEpoch(userId);
   const titleIds = await selectOrderedCatalogTitleIds(
