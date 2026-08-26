@@ -2752,10 +2752,10 @@ async function driveFinalizeToReady(db: SupabaseClient, sourceId: string, userId
       // type — otherwise a timed-out batch wrongly stops the whole finalize.
       const transient = isTransientFinalizeError(e);
       console.error("[cron] finalize batch failed", sourceId, transient ? "(transient)" : "", e);
-      if (transient) {
-        await releaseFinalizeLease(db, sourceId, userId, leaseToken);
-        await selfInvokeFinalize(sourceId, country);
-      }
+      // PostgREST can time out before PostgreSQL has finished cancelling the
+      // statement. Keep the durable claim until its TTL instead of launching a
+      // successor into locks still held by the abandoned query. The watchdog
+      // resumes once both the DB statement and this lease are guaranteed stale.
       return;
     }
     // finalizeCloudSource owns a fresh per-batch snapshot and may legitimately
