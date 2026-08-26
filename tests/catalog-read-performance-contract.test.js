@@ -96,7 +96,7 @@ test('an uncached Home progressively paints the generation-fenced genre read mod
   assert.match(home, /this\.setHomeLoadingState\(false\)/);
   assert.match(app, /const shouldPrimeHome = \(!warmHashKey \|\| warmHashKey === 'home'\)/);
   assert.match(app, /Promise\.resolve\(this\.pages\.home\?\.show\?\.\(\)\)/);
-  assert.match(home, /rail\.curation\?\.kind === 'genre'/);
+  assert.match(home, /\['genre', 'genre_bucket'\]\.includes\(rail\.curation\?\.kind\)/);
 });
 
 test('Home and phone genre rails bound pre-paint catalogue hydration', () => {
@@ -124,5 +124,5 @@ test('Live bounds first paint and defers off-screen logo decoding without hiding
   assert.match(appHtml, /cloudApi\.js\?v=70/);
   assert.match(appHtml, /api\.js\?v=88/);
   assert.match(appHtml, /LiveGuideFusion\.js\?v=30/);
-  assert.match(appHtml, /HomePage\.js\?v=c16a321817/);
+  assert.match(appHtml, /HomePage\.js\?v=e235acfa3f/);
 });
