@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#05080f">
+  <title>Startup vs Mid-Playback Buffering: Separate Them | Norva Blog</title>
+  <meta name="description" content="Separate time-to-first-frame from pauses after playback begins by recording stage, title timecode, elapsed time, network path, player state, recurrence, and recovery.">
+  <link rel="canonical" href="https://norva.tv/blog/startup-buffering-or-mid-playback-buffering-separate-the-cases/">
+  <meta name="robots" content="index,follow">
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/css/blog.css?v=1">
+  <meta property="og:type" content="article">
+  <meta property="og:site_name" content="Norva">
+  <meta property="og:title" content="Startup vs Mid-Playback Buffering: Separate Them | Norva Blog">
+  <meta property="og:description" content="Separate time-to-first-frame from pauses after playback begins by recording stage, title timecode, elapsed time, network path, player state, recurrence, and recovery.">
+  <meta property="og:url" content="https://norva.tv/blog/startup-buffering-or-mid-playback-buffering-separate-the-cases/">
+  <meta property="og:image" content="https://norva.tv/img/devices/norva-device-tv.webp">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Startup vs Mid-Playback Buffering: Separate Them | Norva Blog">
+  <meta name="twitter:description" content="Separate time-to-first-frame from pauses after playback begins by recording stage, title timecode, elapsed time, network path, player state, recurrence, and recovery.">
+  <meta name="twitter:image" content="https://norva.tv/img/devices/norva-device-tv.webp">
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "headline": "Startup Buffering or Mid-Playback Buffering: Separate the Cases",
+  "description": "Separate time-to-first-frame from pauses after playback begins by recording stage, title timecode, elapsed time, network path, player state, recurrence, and recovery.",
+  "inLanguage": "en",
+  "datePublished": "2026-08-26T20:00:00+02:00",
+  "dateModified": "2026-08-26T20:00:00+02:00",
+  "author": {
+    "@type": "Organization",
+    "name": "Norva"
+  },
+  "publisher": {
+    "@type": "Organization",
+    "name": "Norva",
+    "logo": {
+      "@type": "ImageObject",
+      "url": "https://norva.tv/img/norva-app-icon-96.png"
+    }
+  },
+  "image": [
+    "https://norva.tv/img/devices/norva-device-tv.webp"
+  ],
+  "mainEntityOfPage": {
+    "@type": "WebPage",
+    "@id": "https://norva.tv/blog/startup-buffering-or-mid-playback-buffering-separate-the-cases/"
+  }
+}
+  </script>
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    {
+      "@type": "ListItem",
+      "position": 1,
+      "name": "Home",
+      "item": "https://norva.tv/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 2,
+      "name": "Blog",
+      "item": "https://norva.tv/blog/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 3,
+      "name": "Startup Buffering or Mid-Playback Buffering: Separate the Cases",
+      "item": "https://norva.tv/blog/startup-buffering-or-mid-playback-buffering-separate-the-cases/"
+    }
+  ]
+}
+  </script>
+  <script src="/js/marketing-config.js?v=1"></script>
+  <script defer src="/js/marketing.js?v=1"></script>
+  <script defer src="/js/consent-banner.js?v=1"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="blog-nav">
+    <a class="brand" href="/" aria-label="Norva home">
+      <img src="/img/norva-app-icon-96.png" width="34" height="34" alt="" decoding="async">
+      <span>Norva</span>
+    </a>
+    <nav class="nav-right" aria-label="Primary">
+      <a href="/blog/">Blog</a>
+      <a class="hide-sm" href="/#how-it-works">How it works</a>
+      <a class="cta" href="/account.html?returnTo=%2Fapp%23home" data-cta="blog-nav" data-auth-action>Start free trial</a>
+    </nav>
+  </header>
+  <main id="main-content">
+    <nav class="breadcrumb" aria-label="Breadcrumb"><a href="/">Home</a><span class="sep">›</span><a href="/blog/">Blog</a><span class="sep">›</span><span aria-current="page">Startup Buffering or Mid-Playback Buffering: Separate the Cases</span></nav>
+    <article>
+      <div class="article-meta">
+        <span class="tag">Buffering Diagnostics</span>
+        <span>By Norva Editorial Team</span>
+        <span class="dot">·</span>
+        <time datetime="2026-08-26T20:00:00+02:00">26 August 2026</time>
+        <span class="dot">·</span>
+        <span>4 min read</span>
+      </div>
+      <h1>Startup Buffering or Mid-Playback Buffering: Separate the Cases</h1>
+      <p class="lede">Startup buffering happens before the first usable frame; mid-playback buffering interrupts media that was already advancing. Define both events precisely, record wall-clock and title time, and test them independently. Startup emphasizes setup and initial data; midplay emphasizes continued delivery, buffer behavior, decoding, and transitions.</p>
+      <nav class="toc" aria-label="On this page">
+      <strong>On this page</strong>
+      <ul><li><a href="#define-the-startup-interval">Define the startup interval</a></li><li><a href="#define-a-midplay-event">Define a midplay event</a></li><li><a href="#list-startup-candidate-stages">List startup candidate stages</a></li><li><a href="#list-midplay-candidate-stages">List midplay candidate stages</a></li><li><a href="#original-evidence-two-phase-timeline">Original evidence: two-phase timeline</a></li><li><a href="#build-separate-comparison-sets">Build separate comparison sets</a></li><li><a href="#change-one-axis">Change one axis</a></li><li><a href="#interpret-recovery-carefully">Interpret recovery carefully</a></li><li><a href="#report-the-cases-separately">Report the cases separately</a></li><li><a href="#frequently-asked-questions">Frequently asked questions</a></li><li><a href="#your-next-step">Your next step</a></li><li><a href="#sources">Sources</a></li></ul>
+    </nav>
+      <blockquote><strong>In short:</strong> Startup buffering happens before the first usable frame; mid-playback buffering interrupts media that was already advancing. Define both events precisely, record wall-clock and title time, and test them independently. Startup emphasizes setup and initial data; midplay emphasizes continued delivery, buffer behavior, decoding, and transitions.</blockquote>
+<p>The same spinner design can appear in both cases, but the path leading to it is different.</p>
+<h2 id="define-the-startup-interval">Define the startup interval</h2>
+<p>Choose a consistent starting event, such as activation of the play control, and an ending event, such as the first frame with advancing time. Record whether source selection, authorization, metadata, track setup, or device handoff occurred beforehand.</p>
+<p>Do not call the whole navigation journey “buffering.” Separate user interaction from measured playback startup.</p>
+<h2 id="define-a-midplay-event">Define a midplay event</h2>
+<p>Record when advancing playback stops after it had been stable, how long it stops, whether audio and picture behave differently, exact title timecode, elapsed time since start, quality change, message, and recovery.</p>
+<p>If the event always occurs at one title timecode, the one-title pattern guide becomes relevant.</p>
+<h2 id="list-startup-candidate-stages">List startup candidate stages</h2>
+<p>Name resolution, connection establishment, source authorization, playlist or metadata retrieval, version selection, initial media delivery, decoder preparation, and output setup may contribute. Not every implementation exposes these stages.</p>
+<p>RFC 8216 and W3C Media Source Extensions illustrate delivery and buffered-media concepts, but they should not be presented as the internal architecture of every source or player.</p>
+<h2 id="list-midplay-candidate-stages">List midplay candidate stages</h2>
+<p>Sustained throughput shortfall, delay variation, packet loss recovery, household congestion, Wi-Fi roaming, source response, version transition, coded-media issue, decoding pressure, or device resource changes can interrupt continued playback.</p>
+<p><a href="/blog/a-symptom-pattern-atlas-for-video-buffering/">The buffering atlas</a> maps these candidates by device, title, link, and time.</p>
+<h2 id="original-evidence-two-phase-timeline">Original evidence: two-phase timeline</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>Event</th><th>Wall-clock time</th><th>Title time</th><th>Player observation</th><th>Network/path context</th><th>Recovery</th></tr></thead>
+<tbody><tr><td>Play activation</td><td>Time</td><td>Position</td><td>State</td><td>Device/link/node</td><td>N/A</td></tr><tr><td>First frame</td><td>Time</td><td>Advancing</td><td>State</td><td>Metrics</td><td>Startup duration</td></tr><tr><td>Stable play</td><td>Time</td><td>Position</td><td>State</td><td>Metrics</td><td>N/A</td></tr><tr><td>Midplay pause</td><td>Time</td><td>Exact</td><td>Audio/picture/message</td><td>Metrics/event</td><td>Method/duration</td></tr><tr><td>Resume</td><td>Time</td><td>Position</td><td>State</td><td>Metrics</td><td>Result</td></tr></tbody>
+</table></div>
+<p>Use a stopwatch or logs consistently; do not claim frame-level precision from manual timing.</p>
+<h2 id="build-separate-comparison-sets">Build separate comparison sets</h2>
+<p>For startup, repeat a limited number of cold and warm launches only when those states are defined, and account for caches. Compare another authorised title and another endpoint time. For midplay, replay from before the exact event and include a longer stable section.</p>
+<p>Do not restart the router between every run; that changes network state and destroys comparability.</p>
+<h2 id="change-one-axis">Change one axis</h2>
+<p>Compare another title on the same device, the same title on another supported device, wired versus Wi-Fi, and normal versus recurring time window. Keep track, quality mode, and source version fixed where possible.</p>
+<p>The time-of-day timeline helps when either phase changes by schedule.</p>
+<h2 id="interpret-recovery-carefully">Interpret recovery carefully</h2>
+<p>Waiting may allow data or processing to recover. Seeking changes the requested position. Selecting another version changes media and possibly endpoint. Restarting the app clears multiple states. Each action is evidence with limitations, not a diagnostic verdict.</p>
+<p>Avoid factory resets and broad network reconfiguration unless authorized official support requires them.</p>
+<h2 id="report-the-cases-separately">Report the cases separately</h2>
+<p>Include two summaries even when both occur: startup definition and sample range; midplay timecodes and duration; device, app version, authorised title/version, track, path, network measurements, household activity, comparisons, recovery, and unknowns.</p>
+<p>Norva organises and plays compatible authorised sources. It cannot guarantee first-frame time, continuous source delivery, decoding performance, or network stability, and current diagnostics must be verified officially.</p>
+<h2 id="frequently-asked-questions">Frequently asked questions</h2>
+<h3 id="is-a-slow-first-frame-always-a-network-problem">Is a slow first frame always a network problem?</h3>
+<p>No. Resolution, authorization, source response, media preparation, decoding, and output setup can contribute.</p>
+<h3 id="does-a-pause-at-the-same-timecode-prove-a-damaged-file">Does a pause at the same timecode prove a damaged file?</h3>
+<p>No. It makes title/version-specific testing more relevant, but source delivery and player behavior still require comparison.</p>
+<h3 id="should-startup-and-midplay-durations-be-averaged-together">Should startup and midplay durations be averaged together?</h3>
+<p>No. They represent different event definitions and should remain separate.</p>
+<h2 id="your-next-step">Your next step</h2>
+<p><a href="https://norva.tv/#features" target="_blank" rel="noopener">Explore Norva's playback features</a></p>
+<h2 id="sources">Sources</h2>
+<ul><li><a href="https://www.w3.org/TR/media-source-2/" target="_blank" rel="noopener">W3C Media Source Extensions</a></li><li><a href="https://www.w3.org/TR/media-capabilities/" target="_blank" rel="noopener">W3C Media Capabilities</a></li><li><a href="https://www.rfc-editor.org/rfc/rfc8216" target="_blank" rel="noopener">RFC 8216: HTTP Live Streaming</a></li></ul>
+      <section class="article-cta">
+      <a class="btn" href="https://norva.tv/#features" data-cta="blog-article">Explore Norva's Playback Features</a>
+    </section>
+      <section class="sources">
+      <h2>Sources</h2>
+      <ul><li><a href="https://www.w3.org/TR/media-source-2/" target="_blank" rel="noopener">https://www.w3.org/TR/media-source-2/</a></li><li><a href="https://www.w3.org/TR/media-capabilities/" target="_blank" rel="noopener">https://www.w3.org/TR/media-capabilities/</a></li><li><a href="https://www.rfc-editor.org/rfc/rfc8216" target="_blank" rel="noopener">https://www.rfc-editor.org/rfc/rfc8216</a></li></ul>
+    </section>
+      <section class="related">
+      <h2>Related reading</h2>
+      <div class="related-grid">
+        <a class="card" href="/blog/a-symptom-pattern-atlas-for-video-buffering/">
+          <span class="tag">Buffering Diagnostics</span>
+          <div class="card-title">A Symptom-Pattern Atlas for Video Buffering</div>
+          <p>Classify buffering by playback phase, title and version, device, network link, room, time window, simultaneous traffic, recurrence, and recovery. Each pattern narrows candidate layers but does not prove one cause. Capture the failing state, then change one axis and compare the same authorised content.</p>
+        </a>
+      </div>
+    </section>
+    </article>
+  </main>
+  <footer class="blog-footer">
+    <div class="foot-inner">
+      <nav class="foot-links" aria-label="Footer">
+        <a href="/">Home</a>
+        <a href="/blog/">Blog</a>
+        <a href="/#features">Benefits</a>
+        <a href="/#pricing">Pricing</a>
+        <a href="/support.html?returnTo=%2Fblog%2F">Support</a>
+        <a href="/terms.html">Terms</a>
+        <a href="/privacy.html">Privacy</a>
+        <a href="/mentions-legales.html">Legal notice</a>
+      </nav>
+      <p class="disclaimer">&copy; 2026 Norva. Norva is a media player and organiser. It does not provide media. Use requires a compatible source you own or are authorised to access.</p>
+    </div>
+  </footer>
+</body>
+</html>

@@ -116,7 +116,7 @@
 <p>“Buffering” can describe a long start, a spinner during playback, repeated pauses, a quality change, or a stalled interface. Use observable language before technical labels.</p>
 <h2 id="pattern-1-startup-only">Pattern 1: startup only</h2>
 <p>If playback waits before the first frame but then remains stable, investigate startup stages: source availability, name resolution, connection establishment, authorization, initial metadata, player preparation, and enough initial data. Do not infer that the network is slow merely from a long spinner.</p>
-<p>Separate startup from mid-playback buffering with precise start and first-frame definitions.</p>
+<p><a href="/blog/startup-buffering-or-mid-playback-buffering-separate-the-cases/">Separate startup from mid-playback buffering</a> with precise start and first-frame definitions.</p>
 <h2 id="pattern-2-mid-playback-only">Pattern 2: mid-playback only</h2>
 <p>A pause after successful playback can align with buffer depletion, sustained delivery shortfall, bursty arrival, loss recovery, route transition, source response, decoding, or device resource pressure. Record elapsed playback position and exact title timecode.</p>
 <p>If the pause always happens at one content timecode, title/version evidence becomes more relevant than elapsed network time.</p>
@@ -165,7 +165,16 @@
       <h2>Sources</h2>
       <ul><li><a href="https://www.w3.org/TR/media-source-2/" target="_blank" rel="noopener">https://www.w3.org/TR/media-source-2/</a></li><li><a href="https://www.w3.org/TR/media-capabilities/" target="_blank" rel="noopener">https://www.w3.org/TR/media-capabilities/</a></li><li><a href="https://www.rfc-editor.org/rfc/rfc8216" target="_blank" rel="noopener">https://www.rfc-editor.org/rfc/rfc8216</a></li></ul>
     </section>
-      
+      <section class="related">
+      <h2>Related reading</h2>
+      <div class="related-grid">
+        <a class="card" href="/blog/startup-buffering-or-mid-playback-buffering-separate-the-cases/">
+          <span class="tag">Buffering Diagnostics</span>
+          <div class="card-title">Startup Buffering or Mid-Playback Buffering: Separate the Cases</div>
+          <p>Startup buffering happens before the first usable frame; mid-playback buffering interrupts media that was already advancing. Define both events precisely, record wall-clock and title time, and test them independently. Startup emphasizes setup and initial data; midplay emphasizes continued delivery, buffer behavior, decoding, and transitions.</p>
+        </a>
+      </div>
+    </section>
     </article>
   </main>
   <footer class="blog-footer">
