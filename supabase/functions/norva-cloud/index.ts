@@ -2232,7 +2232,9 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
 
     if (phase === "live" || phase === "live_channels" || phase === "live_variants") {
       const totalVod = counts.movies + counts.series;
-      const LIVE_CHUNK = 4000;
+      // Match the durable finalizer: large provider lists must not create a
+      // multi-thousand-row materialization transaction in a client isolate.
+      const LIVE_CHUNK = 1000;
       if (batchOffset === 0) {
         await assertActiveCatalogGenerationCurrent(db, sourceId, userId, generation);
         const cleared = await clearLiveMaterialization(db, sourceId, userId, generation);

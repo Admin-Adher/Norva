@@ -253,6 +253,7 @@ export async function upsertLiveChannelRows(
   return await writeRows(db, "cloud_live_logical_channels", withCatalogGenerationRows(merged, generation), {
     selectColumns: "id,logical_id",
     onConflict: "source_id,generation_id,logical_id",
+    chunkSize: 100,
   });
 }
 
@@ -396,6 +397,7 @@ export async function upsertLiveVariantRows(
     .filter((row) => row.logical_channel_id);
   await writeRows(db, "cloud_live_variants", withCatalogGenerationRows(slice, generation), {
     onConflict: "source_id,generation_id,logical_id,stream_id,label",
+    chunkSize: 100,
   });
   return slice.length;
 }
@@ -407,12 +409,14 @@ async function insertRows(db: SupabaseLike, table: string, rows: JsonRecord[], s
 type WriteRowsOptions = {
   selectColumns?: string;
   onConflict?: string;
+  chunkSize?: number;
 };
 
 async function writeRows(db: SupabaseLike, table: string, rows: JsonRecord[], options: WriteRowsOptions = {}) {
   const inserted: JsonRecord[] = [];
-  for (let index = 0; index < rows.length; index += 500) {
-    const chunk = rows.slice(index, index + 500);
+  const chunkSize = Math.max(1, Math.min(500, Math.trunc(options.chunkSize ?? 500)));
+  for (let index = 0; index < rows.length; index += chunkSize) {
+    const chunk = rows.slice(index, index + chunkSize);
     if (!chunk.length) continue;
     const query = options.onConflict
       ? db.from(table).upsert(chunk, { onConflict: options.onConflict })
