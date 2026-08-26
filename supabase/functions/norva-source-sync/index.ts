@@ -2962,7 +2962,10 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
 
     if (phase === "live" || phase === "live_channels" || phase === "live_variants") {
       const totalVod = counts.movies + counts.series;
-      const LIVE_CHUNK = 4000;
+      // Keep each live slice inside both the Edge lifetime and PostgreSQL's
+      // statement timeout. Channel/variant writes are further bounded to 100
+      // rows in live-materialization.ts.
+      const LIVE_CHUNK = 1000;
       if (batchOffset === 0) {
         await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
         const cleared = await clearLiveMaterialization(db, sourceId, userId, accessSnapshot);
