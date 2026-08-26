@@ -544,6 +544,28 @@ class HomePage {
                     ),
                     'rails'
                 );
+                // A cold personalized Home can still spend several seconds on
+                // history/rating ranking. In parallel, read the generation-
+                // fenced genre materialisation used by Movies and Series. It is
+                // already bounded and gives an uncached Home real catalogue
+                // content quickly; the complete personalized rails replace this
+                // provisional paint as soon as they arrive.
+                const fastRailsP = this._paintedFromCache
+                    ? Promise.resolve(null)
+                    : this.boundedHomeTask(async (signal) => {
+                        const [movies, series] = await Promise.allSettled([
+                            window.API.request('GET', '/media/genre-rails?type=movie&limit=12', null, { signal }),
+                            window.API.request('GET', '/media/genre-rails?type=series&limit=12', null, { signal })
+                        ]);
+                        const movieRails = movies.status === 'fulfilled' && Array.isArray(movies.value?.rails)
+                            ? movies.value.rails.slice(0, 2)
+                            : [];
+                        const seriesRails = series.status === 'fulfilled' && Array.isArray(series.value?.rails)
+                            ? series.value.rails.slice(0, 1)
+                            : [];
+                        const rails = [...movieRails, ...seriesRails];
+                        return rails.length ? { contract: 'norva.home.fast-rails.v1', rails } : null;
+                    }, 'fast rails');
 
                 const [healthResult, settingsResult] = await Promise.allSettled([
                     this.boundedHomeTask(
@@ -571,7 +593,7 @@ class HomePage {
                 if (this.shouldShowSetupGate(sourceSummary)) {
                     // Gate is showing; the in-flight fetches are unused — attach a
                     // handler so a rejection never surfaces as an unhandled rejection.
-                    Promise.allSettled([historyP, railsP]);
+                    Promise.allSettled([historyP, railsP, fastRailsP]);
                     this.renderSetupGate(sourceSummary || {});
                     this.lastLoadedAt = Date.now();
                     return;
@@ -579,6 +601,19 @@ class HomePage {
 
                 this.clearSetupGate();
                 this.renderImportRibbon(sourceSummary);
+
+                if (!this._paintedFromCache) {
+                    const earlyRails = await Promise.race([
+                        railsP.then(() => null, () => null),
+                        fastRailsP.catch(() => null)
+                    ]);
+                    if (!this.isCurrentLoad(generation)) return;
+                    if (earlyRails?.rails?.length) {
+                        this.renderCloudRails(earlyRails);
+                        this.renderHero([], this.railItems);
+                        this.setHomeLoadingState(false);
+                    }
+                }
 
                 const [historyResult, railsResult, favoritesResult] = await Promise.allSettled([
                     historyP,
