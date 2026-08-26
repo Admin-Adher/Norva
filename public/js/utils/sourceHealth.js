@@ -143,6 +143,39 @@
         return Number.isFinite(catalogVersion) && catalogVersion > 1;
     }
 
+    // `cloud_sources.last_synced_at` is the timestamp of the last *attempt* and
+    // is intentionally updated on failure to bound retry pressure. It must not
+    // be presented as "Catalogue updated". The completed summary stored in
+    // config_hint.lastSync is the success authority; scalar fallbacks are only
+    // accepted when the current source/status has no failure signal.
+    function completedSyncAt(source = {}, status = {}) {
+        const config = source.configHint || source.config_hint || {};
+        const summaries = [
+            config.lastSync,
+            config.last_sync,
+            source.last_sync_result,
+            status.last_sync_result
+        ];
+        for (const summary of summaries) {
+            if (!summary || typeof summary !== 'object' || Array.isArray(summary)) continue;
+            const timestamp = summary.syncedAt || summary.synced_at || summary.completedAt || summary.completed_at;
+            if (timestamp) return timestamp;
+        }
+
+        const rawStatus = lower(
+            source.sync_status || source.syncStatus || status.status || status.sync_status || ''
+        );
+        const error = string(source.sync_error || source.syncError || status.error || status.sync_error || '');
+        if (error || FAILURE_STATES.has(rawStatus)) return null;
+
+        const direct = source.lastSync || source.last_sync || status.lastSync || status.last_sync;
+        if (direct && typeof direct !== 'object') return direct;
+        if (READY_STATES.has(rawStatus)) {
+            return source.last_synced_at || source.lastSyncedAt || status.last_synced_at || status.lastSyncedAt || null;
+        }
+        return null;
+    }
+
     // Canonical classification — MIRROR of
     // supabase/functions/_shared/source-sync-error.mjs (authoritative; the
     // browser cannot import from supabase/functions). Behaviour parity is locked
@@ -214,7 +247,7 @@
         );
         const progressStatus = lower(progress.status || progress.stage || '');
         const error = string(source.sync_error || source.syncError || status.error || status.sync_error || '');
-        const lastSync = source.last_sync || source.lastSync || source.last_synced_at || status.last_sync || status.lastSyncedAt;
+        const lastSync = completedSyncAt(source, status);
         const enabled = source.enabled !== false && source.revoked !== true;
 
         let state = 'degraded';
@@ -512,7 +545,7 @@
         const primaryIssue = [...(summary.issues || [])].sort((a, b) => b.severity - a.severity)[0] || null;
         const primarySource = primaryIssue?.source || null;
         const latestSync = [...(summary.sources || []), ...(summary.ready || [])]
-            .map((item) => item?.lastSync || item?.source?.last_sync || item?.source?.lastSync || item?.source?.last_synced_at)
+            .map((item) => completedSyncAt(item?.source || item, item))
             .filter(Boolean)
             .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0] || null;
         const detail = options.detail || (latestSync
