@@ -13,6 +13,7 @@ const migration = read('supabase/migrations/20260826090000_catalog_genre_rail_re
 const migrationV2 = read('supabase/migrations/20260826090010_catalog_genre_rail_read_model_v2.sql');
 const migrationV3 = read('supabase/migrations/20260826091244_catalog_genre_rail_refresh_isolation_v3.sql');
 const migrationV4 = read('supabase/migrations/20260826104421_catalog_facet_refresh_index_first_v4.sql');
+const migrationV5 = read('supabase/migrations/20260826110251_catalog_facet_refresh_cron_activation_v5.sql');
 const home = read('public/js/pages/HomePage.js');
 const api = read('public/js/api.js');
 const cloudApi = read('public/js/cloudApi.js');
@@ -67,6 +68,13 @@ test('full facet refresh uses one generation-filtered variant spool and no hydra
   assert.match(migrationV4, /cloud_refresh_all_facet_summaries\(50\)/);
   assert.match(migrationV4, /revoke all on function public\.cloud_refresh_facet_summary[\s\S]*from public, anon, authenticated/);
   assert.doesNotMatch(migrationV4, /from public\.cloud_catalog_visible_titles/);
+});
+
+test('a previously paused named facet cron is reactivated explicitly and verified exactly', () => {
+  assert.match(migrationV5, /perform cron\.alter_job\(v_job_id, active => true\)/);
+  assert.match(migrationV5, /job\.schedule = '7-59\/15 \* \* \* \*'/);
+  assert.match(migrationV5, /cloud_refresh_all_facet_summaries\(50\)/);
+  assert.match(migrationV5, /reason=cron_activation_mismatch/);
 });
 
 test('Home timeouts abort the underlying rails fetch and route cancellation drains controllers', () => {

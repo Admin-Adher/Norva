@@ -5,7 +5,7 @@ create extension if not exists pgtap with schema extensions;
 set local search_path=public,extensions;
 grant usage on schema extensions to service_role;
 grant execute on all functions in schema extensions to service_role;
-select extensions.plan(15);
+select extensions.plan(16);
 
 insert into auth.users(
   id,instance_id,aud,role,email,encrypted_password,email_confirmed_at,
@@ -93,6 +93,17 @@ insert into public.cloud_catalog_facet_summary(
     ))
   ),
   7,now()
+);
+
+select extensions.ok(
+  (select active
+   from cron.job
+   where jobname='norva-facet-summary-refresh')
+  and (select command =
+       'set statement_timeout=''120s''; select public.cloud_refresh_all_facet_summaries(50);'
+       from cron.job
+       where jobname='norva-facet-summary-refresh'),
+  'the repaired bounded facet worker is explicitly active'
 );
 
 select set_config('request.jwt.claims','{"role":"service_role"}',true);
@@ -204,7 +215,6 @@ select extensions.ok(
   ),
   'authenticated clients cannot invoke either facet refresh worker'
 );
-
 reset role;
 update public.cloud_user_catalog_visibility_epochs
 set visibility_epoch=8,updated_at=now()
