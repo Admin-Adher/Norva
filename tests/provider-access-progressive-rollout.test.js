@@ -7,6 +7,7 @@ const ROOT = path.resolve(__dirname, '..');
 const read = (file) => fs.readFileSync(path.join(ROOT, file), 'utf8');
 const migration = read('supabase/migrations/20260824160000_provider_access_progressive_rollout_v1.sql');
 const channelGateMigration = read('supabase/migrations/20260824170000_provider_access_rollout_channel_gates_v1.sql');
+const internalFloorMigration = read('supabase/migrations/20260825235742_provider_access_rollout_internal_floor_v1.sql');
 const edge = read('supabase/functions/norva-provider-access/index.ts');
 const notifyEdge = read('supabase/functions/norva-provider-access-notify/index.ts');
 const app = read('public/js/app.js');
@@ -45,6 +46,15 @@ test('phase16 cohort assignment is durable, deterministic and server-only', () =
   assert.match(migration, /cloud_provider_access_rollout_internal_users/);
   assert.match(migration, /revoke all on function public\.norva_provider_access_rollout_eligible_internal\(uuid\)[\s\S]*authenticated/);
   assert.match(migration, /auth\.uid\(\) = p_user_id/);
+});
+
+test('public rollout retains the internal canary floor without weakening OFF', () => {
+  assert.match(internalFloorMigration, /when rollout\.stage = 'off' then false/);
+  assert.match(internalFloorMigration, /when exists \([\s\S]*cloud_provider_access_rollout_internal_users[\s\S]*member\.user_id = p_user_id[\s\S]*\) then true/);
+  assert.match(internalFloorMigration, /when rollout\.stage = 'internal' then false/);
+  assert.match(internalFloorMigration, /when rollout\.stage = '100_percent' then true/);
+  assert.match(internalFloorMigration, /% 10000 < rollout\.cohort_basis_points/);
+  assert.ok(internalFloorMigration.indexOf("stage = 'off'") < internalFloorMigration.indexOf('when exists'));
 });
 
 test('phase16 guards new scheduler and notification work and cohort-scopes access hiding', () => {

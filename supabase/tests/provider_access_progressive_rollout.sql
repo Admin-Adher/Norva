@@ -3,14 +3,15 @@ set local lock_timeout='3s';
 set local statement_timeout='45s';
 create extension if not exists pgtap with schema extensions;
 set local search_path=public,extensions;
-select extensions.plan(43);
+select extensions.plan(46);
 
 insert into auth.users(
   id,instance_id,aud,role,email,encrypted_password,email_confirmed_at,
   raw_app_meta_data,raw_user_meta_data,created_at,updated_at
 ) values
 ('98600000-0000-4000-8000-000000000045','00000000-0000-0000-0000-000000000000','authenticated','authenticated','rollout-internal@invalid.test','',now(),'{}','{}',now(),now()),
-('98600000-0000-4000-8000-000000000002','00000000-0000-0000-0000-000000000000','authenticated','authenticated','rollout-other@invalid.test','',now(),'{}','{}',now(),now());
+('98600000-0000-4000-8000-000000000002','00000000-0000-0000-0000-000000000000','authenticated','authenticated','rollout-other@invalid.test','',now(),'{}','{}',now(),now()),
+('98600000-0000-4000-8000-000000000003','00000000-0000-0000-0000-000000000000','authenticated','authenticated','rollout-internal-floor@invalid.test','',now(),'{}','{}',now(),now());
 
 insert into public.cloud_sources(id,user_id,source_type,display_name,config_ciphertext,config_hint,sync_status,catalog_version)
 values
@@ -63,6 +64,9 @@ select extensions.throws_ok(
 );
 select public.norva_set_provider_access_rollout_internal_user(
   '98600000-0000-4000-8000-000000000045',true,'acceptance allowlist member','acceptance-service'
+);
+select public.norva_set_provider_access_rollout_internal_user(
+  '98600000-0000-4000-8000-000000000003',true,'acceptance allowlist floor member','acceptance-service'
 );
 select public.norva_register_active_catalog_refresh_worker(
   'phase16-rollout-acceptance-worker',
@@ -178,6 +182,14 @@ select extensions.is((select cohort_basis_points from public.cloud_provider_acce
 select extensions.is((select count(*)::integer from public.admin_feature_flags where key in (
   'provider_access_auto_detection_v1_enabled','provider_access_email_v1_enabled','provider_access_push_v1_enabled'
 ) and enabled),0,'every stage transition resets external channels OFF');
+select extensions.ok(
+  public.norva_provider_access_rollout_eligible_internal('98600000-0000-4000-8000-000000000003'),
+  'an internal allowlist member outside the public one-percent hash remains eligible'
+);
+select extensions.ok(
+  public.norva_provider_access_rollout_eligible_internal('98600000-0000-4000-8000-000000000195'),
+  'a non-allowlisted user selected by the deterministic one-percent hash remains eligible'
+);
 select extensions.is(
   public.norva_provider_access_rollout_eligible_internal('98600000-0000-4000-8000-000000000002'),
   public.norva_provider_access_rollout_eligible_internal('98600000-0000-4000-8000-000000000002'),
@@ -233,6 +245,10 @@ select extensions.is(
 );
 select public.norva_set_provider_access_rollout_stage(
   6,'off','Emergency rollback to OFF remains available immediately.','acceptance-service'
+);
+select extensions.ok(
+  not public.norva_provider_access_rollout_eligible_internal('98600000-0000-4000-8000-000000000003'),
+  'OFF remains an absolute deny even for a retained internal allowlist member'
 );
 select extensions.throws_ok(
   $$select public.norva_set_provider_access_rollout_channels(7,true,false,false,'channel-readiness:off-refusal','acceptance-service')$$,
