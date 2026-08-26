@@ -12,6 +12,7 @@ const catalog = read('supabase/functions/norva-catalog/index.ts');
 const migration = read('supabase/migrations/20260826090000_catalog_genre_rail_read_model_v1.sql');
 const migrationV2 = read('supabase/migrations/20260826090010_catalog_genre_rail_read_model_v2.sql');
 const migrationV3 = read('supabase/migrations/20260826091244_catalog_genre_rail_refresh_isolation_v3.sql');
+const migrationV4 = read('supabase/migrations/20260826104421_catalog_facet_refresh_index_first_v4.sql');
 const home = read('public/js/pages/HomePage.js');
 const api = read('public/js/api.js');
 const cloudApi = read('public/js/cloudApi.js');
@@ -56,6 +57,16 @@ test('rail refresh is isolated from slow language facets and independently sched
   assert.match(migrationV3, /genre_rail_refreshed_at/);
   assert.match(migrationV3, /from public\.cloud_catalog_visible_title_variants variant/);
   assert.match(migrationV3, /revoke all on function public\.cloud_refresh_genre_rail_candidates[\s\S]*from public, anon, authenticated/);
+});
+
+test('full facet refresh uses one generation-filtered variant spool and no hydrated title runtime view', () => {
+  assert.match(migrationV4, /with visible_variants as materialized/);
+  assert.match(migrationV4, /from public\.cloud_catalog_visible_title_variants variant/);
+  assert.match(migrationV4, /cloud_title_file_language_observations observation/);
+  assert.match(migrationV4, /v_end_epoch <> v_start_epoch/);
+  assert.match(migrationV4, /cloud_refresh_all_facet_summaries\(50\)/);
+  assert.match(migrationV4, /revoke all on function public\.cloud_refresh_facet_summary[\s\S]*from public, anon, authenticated/);
+  assert.doesNotMatch(migrationV4, /from public\.cloud_catalog_visible_titles/);
 });
 
 test('Home timeouts abort the underlying rails fetch and route cancellation drains controllers', () => {
