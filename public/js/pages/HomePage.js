@@ -1246,6 +1246,7 @@ class HomePage {
             if (connectionStep) connectionStep.hidden = accessActive;
             if (accessTerms) accessTerms.hidden = !accessActive;
             submit.hidden = accessActive;
+            submit.classList.toggle('hidden', accessActive);
             if (flowTitle) flowTitle.textContent = accessActive ? 'When can you use this service?' : 'Paste your TV service link';
             if (flowDescription) flowDescription.textContent = accessActive
                 ? 'Add the access period now, or safely choose to do it later.'

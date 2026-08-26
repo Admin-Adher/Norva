@@ -48,6 +48,7 @@ test('onboarding collects an optional duration or explicit dates plus reminder o
   assert.match(home, /payload\.type === 'xtream'/);
   assert.match(home, /data-setup-flow-step="connection"/);
   assert.match(home, /setFlowStep\('access'\)/);
+  assert.match(home, /submit\.hidden = accessActive;[\s\S]{0,80}submit\.classList\.toggle\('hidden', accessActive\)/);
   assert.match(home, /norva:provider-access-complete/);
   assert.match(home, /accessWizardApproved = true[\s\S]{0,80}form\.requestSubmit\(\)/);
   assert.match(home, /if \(needsAccessStep && !accessWizardApproved\)/);
@@ -119,5 +120,5 @@ test('all changed Provider Access UI assets are cache-busted', () => {
   assert.match(shell, /cloudApi\.js\?v=70/);
   assert.match(shell, /api\.js\?v=88/);
   assert.match(shell, /SourceManager\.js\?v=47/);
-  assert.match(shell, /HomePage\.js\?v=e235acfa40/);
+  assert.match(shell, /HomePage\.js\?v=e235acfa41/);
 });
