@@ -3019,7 +3019,7 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
       // statement timeout. Channel/variant writes are further bounded to 100
       // rows in live-materialization.ts. Generation guards are intentionally
       // expensive per row, so keep the whole slice inside the 90-second Edge budget.
-      const LIVE_CHUNK = 250;
+      const LIVE_CHUNK = 50;
       if (batchOffset === 0) {
         await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
         const cleared = await clearLiveMaterialization(db, sourceId, userId, accessSnapshot);
