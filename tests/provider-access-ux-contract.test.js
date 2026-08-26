@@ -38,7 +38,7 @@ test('browser calls the dedicated v1 Edge contract with exact mutation precondit
 });
 
 test('onboarding collects an optional duration or explicit dates plus reminder opt-in', () => {
-  assert.match(home, /getProviderAccessTermsFields.*home-provider-access/);
+  assert.match(home, /getProviderAccessTermsFields.*home-provider-access[\s\S]{0,120}onboarding: true, deferred: true/);
   assert.match(home, /readProviderAccessTerms\(form\)/);
   assert.match(sourceManager, /Duration bought/);
   assert.match(sourceManager, /Start and end dates/);
@@ -46,7 +46,14 @@ test('onboarding collects an optional duration or explicit dates plus reminder o
   assert.match(sourceManager, /data-access-reminders\$\{reminders \? ' checked' : ''\}/);
   assert.doesNotMatch(sourceManager, /data-access-reminders checked/);
   assert.match(home, /payload\.type === 'xtream'/);
-  assert.match(home, /accessTerms\.hidden = playlistLink/);
+  assert.match(home, /data-setup-flow-step="connection"/);
+  assert.match(home, /setFlowStep\('access'\)/);
+  assert.match(home, /norva:provider-access-complete/);
+  assert.match(home, /accessWizardApproved = true[\s\S]{0,80}form\.requestSubmit\(\)/);
+  assert.match(home, /if \(needsAccessStep && !accessWizardApproved\)/);
+  assert.match(sourceManager, /const initialMode = cycle\?\.termValue \? 'duration' : \(access\?\.expiresOn \? 'dates' : 'duration'\)/);
+  assert.match(sourceManager, /document\.getElementById\('modal-save'\)\.hidden = true/);
+  assert.match(sourceManager, /norva:provider-access-complete'[\s\S]{0,180}modal-save/);
   assert.doesNotMatch(sourceManager, /API\.(?:notifications|push).*reminder|enqueue.*reminder/i);
 });
 
@@ -108,9 +115,9 @@ test('Provider Access controls use Norva tokens and remain touch, mobile and mot
 });
 
 test('all changed Provider Access UI assets are cache-busted', () => {
-  assert.match(shell, /main\.css\?v=119/);
+  assert.match(shell, /main\.css\?v=120/);
   assert.match(shell, /cloudApi\.js\?v=70/);
   assert.match(shell, /api\.js\?v=88/);
-  assert.match(shell, /SourceManager\.js\?v=46/);
-  assert.match(shell, /HomePage\.js\?v=e235acfa3f/);
+  assert.match(shell, /SourceManager\.js\?v=47/);
+  assert.match(shell, /HomePage\.js\?v=e235acfa40/);
 });

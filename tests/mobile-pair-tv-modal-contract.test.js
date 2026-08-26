@@ -55,10 +55,10 @@ test('the phone Home action opens the sheet without changing route', () => {
 
   const modalIndex = appHtml.indexOf('/js/components/NorvaModal.js?v=2');
   const pairIndex = appHtml.indexOf('/js/components/PairTvSheet.js?v=3');
-  const homeIndex = appHtml.indexOf('/js/pages/HomePage.js?v=e235acfa3f');
+  const homeIndex = appHtml.indexOf('/js/pages/HomePage.js?v=e235acfa40');
   const appIndex = appHtml.indexOf('/js/app.js?v=fb3b86f23e');
   assert.ok(modalIndex > 0 && modalIndex < pairIndex && pairIndex < homeIndex && homeIndex < appIndex);
-  assert.match(appHtml, /\/css\/main\.css\?v=119/);
+  assert.match(appHtml, /\/css\/main\.css\?v=120/);
 });
 
 test('pairing code normalization matches the six-character TV alphabet exactly', () => {
