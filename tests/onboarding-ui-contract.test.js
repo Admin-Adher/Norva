@@ -87,6 +87,6 @@ test('setup visuals reuse Norva assets and ship cache-busted', () => {
   assert.match(shell, /main\.css\?v=119/);
   assert.match(shell, /sourceHealth\.js\?v=11/);
   assert.match(shell, /SourceManager\.js\?v=46/);
-  assert.match(shell, /HomePage\.js\?v=66/);
+  assert.match(shell, /HomePage\.js\?v=67/);
   assert.match(shell, /app\.js\?v=1207157791/);
 });

@@ -67,6 +67,15 @@ test('Home timeouts abort the underlying rails fetch and route cancellation drai
   assert.match(cloudApi, /rails: \(params = \{\}, options = \{\}\) => catalogRequest\('\/home\/rails', params, options\)/);
 });
 
+test('an uncached Home progressively paints the generation-fenced genre read model', () => {
+  assert.match(home, /\/media\/genre-rails\?type=movie&limit=12/);
+  assert.match(home, /\/media\/genre-rails\?type=series&limit=12/);
+  assert.match(home, /Promise\.race\(\[/);
+  assert.match(home, /norva\.home\.fast-rails\.v1/);
+  assert.match(home, /this\.renderCloudRails\(earlyRails\)/);
+  assert.match(home, /this\.setHomeLoadingState\(false\)/);
+});
+
 test('Home and phone genre rails bound pre-paint catalogue hydration', () => {
   assert.match(home, /this\.homeRailDisplayLimit = 18/);
   assert.match(home, /this\.homeRailFetchLimit = 24/);
@@ -92,5 +101,5 @@ test('Live bounds first paint and defers off-screen logo decoding without hiding
   assert.match(appHtml, /cloudApi\.js\?v=70/);
   assert.match(appHtml, /api\.js\?v=88/);
   assert.match(appHtml, /LiveGuideFusion\.js\?v=30/);
-  assert.match(appHtml, /HomePage\.js\?v=66/);
+  assert.match(appHtml, /HomePage\.js\?v=67/);
 });
