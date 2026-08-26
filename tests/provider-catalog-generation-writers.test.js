@@ -474,6 +474,9 @@ test('durable finalizer claims one CAS lease before writing and fences every han
   assert.match(worker, /claimFinalizeLease\([\s\S]{0,180}return;/);
   assert.match(worker, /renewFinalizeLease\([\s\S]{0,180}patchSourceConfigHint/);
   assert.match(worker, /releaseFinalizeLease\([\s\S]{0,180}selfInvokeFinalize/);
+  const transientCatch = worker.match(/const transient = isTransientFinalizeError\(e\);([\s\S]*?)return;\n    }/)?.[1] || '';
+  assert.doesNotMatch(transientCatch, /releaseFinalizeLease|selfInvokeFinalize/);
+  assert.match(transientCatch, /Keep the durable claim until its TTL/);
   assert.match(migration, /on conflict \(source_id\) do update[\s\S]*lease\.lease_until <= statement_timestamp\(\)/i);
   assert.match(migration, /lease\.lease_token=p_lease_token/i);
   assert.match(migration, /enable row level security/i);
