@@ -109,8 +109,8 @@ test('Provider Access controls use Norva tokens and remain touch, mobile and mot
 
 test('all changed Provider Access UI assets are cache-busted', () => {
   assert.match(shell, /main\.css\?v=119/);
-  assert.match(shell, /cloudApi\.js\?v=69/);
-  assert.match(shell, /api\.js\?v=87/);
+  assert.match(shell, /cloudApi\.js\?v=70/);
+  assert.match(shell, /api\.js\?v=88/);
   assert.match(shell, /SourceManager\.js\?v=46/);
-  assert.match(shell, /HomePage\.js\?v=64/);
+  assert.match(shell, /HomePage\.js\?v=65/);
 });

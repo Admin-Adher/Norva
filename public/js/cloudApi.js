@@ -4625,8 +4625,8 @@
         },
 
         home: {
-            rails: (params = {}) => catalogRequest('/home/rails', params),
-            genreRails: (params = {}) => catalogRequest('/media-genre-rails', params),
+            rails: (params = {}, options = {}) => catalogRequest('/home/rails', params, options),
+            genreRails: (params = {}, options = {}) => catalogRequest('/media-genre-rails', params, options),
             genreItems: (params = {}) => catalogRequest('/media-genre-items', params),
             genreSummary: (params = {}) => catalogRequest('/media-genre-summary', params),
             languageFacets: (params = {}) => catalogRequest('/media-language-facets', params),
@@ -4767,8 +4767,8 @@
                 variants: (channelId, params = {}) => catalogRequest(`/device/live/channel/${encodeURIComponent(channelId)}/variants`, params, { token: getDeviceToken() })
             },
             home: {
-                rails: (params = {}) => catalogRequest('/device/home/rails', params, { token: getDeviceToken() }),
-                genreRails: (params = {}) => catalogRequest('/device/media-genre-rails', params, { token: getDeviceToken() }),
+                rails: (params = {}, options = {}) => catalogRequest('/device/home/rails', params, { ...options, token: getDeviceToken() }),
+                genreRails: (params = {}, options = {}) => catalogRequest('/device/media-genre-rails', params, { ...options, token: getDeviceToken() }),
                 genreItems: (params = {}) => catalogRequest('/device/media-genre-items', params, { token: getDeviceToken() }),
                 genreSummary: (params = {}) => catalogRequest('/device/media-genre-summary', params, { token: getDeviceToken() }),
                 languageFacets: (params = {}) => catalogRequest('/device/media-language-facets', params, { token: getDeviceToken() }),

@@ -15,6 +15,7 @@ class HomePage {
         this.homeRequestTimeoutMs = 10000;
         this.homeRailDisplayLimit = 18;
         this.homeRailFetchLimit = 60;
+        this._homeAbortControllers = new Set();
         this.railItems = [];
         this.historyItems = [];
         this.heroItem = null;
@@ -441,16 +442,29 @@ class HomePage {
 
     boundedHomeTask(task, label, timeoutMs = this.homeRequestTimeoutMs) {
         let timer = null;
+        const controller = typeof task === 'function' && typeof AbortController !== 'undefined'
+            ? new AbortController()
+            : null;
+        if (controller) this._homeAbortControllers.add(controller);
+        let running;
+        try {
+            running = typeof task === 'function' ? task(controller?.signal) : task;
+        } catch (error) {
+            if (controller) this._homeAbortControllers.delete(controller);
+            return Promise.reject(error);
+        }
         const timeout = new Promise((_, reject) => {
             timer = window.setTimeout(() => {
+                controller?.abort();
                 const error = new Error(`Home ${label || 'request'} timed out`);
                 error.code = 'HOME_REQUEST_TIMEOUT';
                 reject(error);
             }, timeoutMs);
         });
-        return Promise.race([Promise.resolve(task), timeout])
+        return Promise.race([Promise.resolve(running), timeout])
             .finally(() => {
                 if (timer !== null) window.clearTimeout(timer);
+                if (controller) this._homeAbortControllers.delete(controller);
             });
     }
 
@@ -459,6 +473,8 @@ class HomePage {
         // waiting on requests made without the selected profile. Retire that
         // generation so it can neither block nor repaint the newly selected one.
         this.loadGeneration += 1;
+        for (const controller of this._homeAbortControllers) controller.abort();
+        this._homeAbortControllers.clear();
         this.isLoading = false;
         this.loadPromise = null;
     }
@@ -515,10 +531,12 @@ class HomePage {
                     'history'
                 );
                 const railsP = this.boundedHomeTask(
-                    window.API.request(
+                    (signal) => window.API.request(
                         'GET',
                         `/home/rails?limit=${railFetchLimit}`
-                        + (forceFreshRails ? `&fresh=${Date.now()}-${generation}` : '')
+                        + (forceFreshRails ? `&fresh=${Date.now()}-${generation}` : ''),
+                        null,
+                        { signal }
                     ),
                     'rails'
                 );

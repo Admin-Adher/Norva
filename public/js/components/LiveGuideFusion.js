@@ -14,7 +14,8 @@ class LiveGuideFusion {
         this._searchTimer = null;
         this._remoteSearchTimer = null;   // debounce for the mobile all-sources server search
         this._remoteSearchSeq = 0;        // sequence guard to drop stale remote-search responses
-        this.BASE_ROW_LIMIT = 150;        // rows rendered up-front; "Show more" grows it
+        this.BASE_ROW_LIMIT = 48;         // phone/web rows rendered up-front; "Show more" grows it
+        this.TV_ROW_LIMIT = 60;           // preserve the proven 10-foot D-pad first chunk
         this._rowLimit = this.BASE_ROW_LIMIT;
         this._cinema = false;             // cinema mode: player enlarged, guide compacted
         this.shortEpgCache = new Map();
@@ -1338,12 +1339,13 @@ class LiveGuideFusion {
         // Render up to _rowLimit rows and let the viewer pull in the rest in chunks.
         // Keeps the DOM bounded on huge lineups (thousands of channels) without ever
         // silently hiding channels the way the old hard 150 cap did.
-        // TV: render far fewer rows up-front. The D-pad engine scans every
-        // interactive node (each row = row + play button) with getBoundingClientRect
-        // per keypress, so 150 rows = ~300 nodes = laggy navigation. Cap at 60 on TV
-        // ("Show more" still loads the rest); web/phone keep the full cap.
+        // Phone/web used to render 150 rows and eagerly request every logo. That
+        // made the first Live paint transfer-heavy even though only a handful of
+        // rows fit in the viewport. Keep both DOM and image work bounded; "Show
+        // more" still exposes every channel. TV retains its proven 60-row D-pad
+        // chunk (each row also contributes a play-button focus target).
         const baseLimit = this._rowLimit || this.BASE_ROW_LIMIT;
-        const limit = this._isTvMode() ? Math.min(baseLimit, 60) : baseLimit;
+        const limit = this._isTvMode() ? Math.max(baseLimit, this.TV_ROW_LIMIT) : baseLimit;
         const shown = families.slice(0, limit);
         const remaining = families.length - shown.length;
         const nextChunk = Math.min(this.BASE_ROW_LIMIT, remaining);
@@ -1380,7 +1382,7 @@ class LiveGuideFusion {
                  role="button" tabindex="0"
                  data-channel-id="${channel.id}" data-source-id="${channel.sourceId}" data-family-key="${this.escapeHtml(family.familyKey)}">
                 <span class="live-guide-num">${channel.num || index + 1}</span>
-                <img class="live-guide-logo" src="${this.getChannelLogoSrc(channel)}" alt="" onerror="this.onerror=null;this.src='${this.getChannelLogoErrorSrc(channel)}'">
+                <img class="live-guide-logo" src="${this.getChannelLogoSrc(channel)}" alt="" loading="lazy" decoding="async" fetchpriority="low" onerror="this.onerror=null;this.src='${this.getChannelLogoErrorSrc(channel)}'">
                 <span class="live-guide-info">
                     <span class="live-guide-name-row">
                         <span class="live-guide-channel-name">${this.escapeHtml(family.label)}</span>
