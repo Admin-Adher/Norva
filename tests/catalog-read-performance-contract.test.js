@@ -10,6 +10,7 @@ const read = (relativePath) => fs.readFileSync(path.join(root, relativePath), 'u
 
 const catalog = read('supabase/functions/norva-catalog/index.ts');
 const migration = read('supabase/migrations/20260826090000_catalog_genre_rail_read_model_v1.sql');
+const migrationV2 = read('supabase/migrations/20260826090010_catalog_genre_rail_read_model_v2.sql');
 const home = read('public/js/pages/HomePage.js');
 const api = read('public/js/api.js');
 const cloudApi = read('public/js/cloudApi.js');
@@ -35,6 +36,15 @@ test('the SQL read model is bounded, service-only and visibility-epoch fenced', 
   assert.match(migration, /reason=genre_rail_read_model_stale_or_missing/);
   assert.match(migration, /revoke all on function public\.norva_get_genre_rail_candidates[\s\S]*from public, anon, authenticated/);
   assert.match(migration, /grant execute on function public\.norva_get_genre_rail_candidates[\s\S]*to service_role/);
+});
+
+test('the production correction avoids the unbounded visible-title runtime spool', () => {
+  assert.match(migrationV2, /from public\.cloud_catalog_visible_title_variants variant/);
+  assert.match(migrationV2, /left join public\.cloud_source_catalog_generation_candidate_titles projection/);
+  assert.match(migrationV2, /select distinct on \(variant\.title_id\)/);
+  assert.match(migrationV2, /bucket_rank <= 150/);
+  assert.match(migrationV2, /v_end_epoch <> v_start_epoch/);
+  assert.doesNotMatch(migrationV2, /with visible as materialized \([\s\S]*from public\.cloud_catalog_visible_titles/);
 });
 
 test('Home timeouts abort the underlying rails fetch and route cancellation drains controllers', () => {
