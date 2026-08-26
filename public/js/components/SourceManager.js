@@ -342,6 +342,8 @@ class SourceManager {
 
         const titles = { xtream: 'Add TV provider', m3u: 'Add playlist link', epg: 'Add TV guide' };
         title.textContent = titles[type];
+        modal.classList.remove('provider-access-wizard-modal');
+        footer.hidden = false;
 
         body.innerHTML = this.getSourceForm(type);
 
@@ -362,7 +364,14 @@ class SourceManager {
             btn.disabled = true;
             Promise.resolve(this.saveNewSource(type)).finally(() => { btn.disabled = false; });
         };
-        this.bindSourceForm(type);
+        const accessWizard = this.bindSourceForm(type);
+        if (accessWizard?.fieldset) {
+            document.getElementById('modal-save').hidden = true;
+            accessWizard.fieldset.addEventListener('norva:provider-access-cancel', () => modal.classList.remove('active'));
+            accessWizard.fieldset.addEventListener('norva:provider-access-complete', () => {
+                document.getElementById('modal-save')?.click();
+            });
+        }
     }
 
     /**
@@ -387,6 +396,8 @@ class SourceManager {
 
             const titles = { xtream: 'Edit TV provider', m3u: 'Edit playlist link', epg: 'Edit TV guide' };
             title.textContent = titles[type] || 'Edit provider';
+            modal.classList.remove('provider-access-wizard-modal');
+            footer.hidden = false;
             body.innerHTML = this.getSourceForm(type, source);
 
             footer.innerHTML = `
@@ -617,47 +628,87 @@ class SourceManager {
     `;
     }
 
-    getProviderAccessTermsFields({ prefix = 'source-access', access = null, onboarding = false } = {}) {
+    providerAccessWizardSteps(mode = 'duration') {
+        if (mode === 'dates') return ['choice', 'dates', 'review'];
+        if (mode === 'skip') return ['choice', 'review'];
+        return ['choice', 'activation', 'duration', 'review'];
+    }
+
+    getProviderAccessTermsFields({ prefix = 'source-access', access = null, onboarding = false, deferred = false } = {}) {
         if (!this.providerAccessUiEnabled()) return '';
         const cycle = access?.activeCycle || null;
-        const initialMode = cycle?.termValue ? 'duration' : (access?.expiresOn ? 'dates' : 'skip');
+        const initialMode = cycle?.termValue ? 'duration' : (access?.expiresOn ? 'dates' : 'duration');
         const startedOn = access?.startedOn || '';
         const activationOn = startedOn || this.providerAccessTodayKey();
         const expiresOn = access?.expiresOn || '';
         const termValue = cycle?.termValue || 1;
         const termUnit = String(cycle?.termUnit || 'MONTH').toUpperCase();
         const reminders = access?.remindersEnabled === true;
+        const initialSteps = this.providerAccessWizardSteps(initialMode);
+        const choices = [
+            ['duration', 'Duration bought', 'For example, 2 months from the activation date', '2 mo', 'Recommended'],
+            ['dates', 'Start and end dates', 'Use the exact dates from your receipt', '01–31', ''],
+            ['skip', 'Add this later', 'Continue without recording an access period', 'Later', '']
+        ];
         return `
-          <fieldset class="provider-access-terms" data-provider-access-terms="${this.escapeHtml(prefix)}">
-            <legend>${onboarding ? 'Provider access period' : 'Access dates and reminders'}</legend>
-            <p class="provider-access-explainer">Your TV provider access is separate from your Norva plan. Norva can remember the period you bought; it never renews or sells that access.</p>
-            <div class="form-group provider-access-mode-field">
-              <label for="${this.escapeHtml(prefix)}-mode">What do you know?</label>
-              <span class="provider-access-select-shell">
-                <select id="${this.escapeHtml(prefix)}-mode" class="form-input provider-access-native-select" data-access-mode>
-                  <option value="skip"${initialMode === 'skip' ? ' selected' : ''}>Add this later</option>
-                  <option value="duration"${initialMode === 'duration' ? ' selected' : ''}>Duration bought</option>
-                  <option value="dates"${initialMode === 'dates' ? ' selected' : ''}>Start and end dates</option>
-                </select>
-                <button type="button" class="form-input provider-access-select-trigger" data-provider-access-select-trigger aria-label="What do you know?: ${initialMode === 'duration' ? 'Duration bought' : (initialMode === 'dates' ? 'Start and end dates' : 'Add this later')}" aria-haspopup="listbox" aria-expanded="false" aria-controls="${this.escapeHtml(prefix)}-mode-listbox" hidden>
-                  <span data-provider-access-select-value>${initialMode === 'duration' ? 'Duration bought' : (initialMode === 'dates' ? 'Start and end dates' : 'Add this later')}</span>
-                  <svg class="provider-access-select-chevron" aria-hidden="true" viewBox="0 0 20 20" fill="none">
-                    <path d="M5.5 7.5 10 12l4.5-4.5" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/>
-                  </svg>
-                </button>
-                <span id="${this.escapeHtml(prefix)}-mode-listbox" class="provider-access-select-menu" data-provider-access-select-menu role="listbox" aria-label="What do you know?" hidden>
-                  ${[
-                    ['skip', 'Add this later'],
-                    ['duration', 'Duration bought'],
-                    ['dates', 'Start and end dates']
-                  ].map(([value, label]) => `<button type="button" class="provider-access-select-option" role="option" data-provider-access-select-option="${value}" aria-selected="${initialMode === value}">${label}</button>`).join('')}
-                </span>
+          <fieldset class="provider-access-terms provider-access-wizard${onboarding ? ' is-onboarding' : ''}" data-provider-access-terms="${this.escapeHtml(prefix)}" data-access-onboarding="${onboarding}" data-access-has-cycle="${Boolean(cycle)}"${deferred ? ' hidden' : ''}>
+            <legend class="provider-access-sr-only">${onboarding ? 'Provider access period' : 'Access dates and reminders'}</legend>
+            <div class="provider-access-wizard-progress">
+              <div class="provider-access-wizard-progress-copy">
+                <span data-access-step-label>Step 1 of ${initialSteps.length}</span>
+                <strong data-access-step-name>Choose period</strong>
+              </div>
+              <span class="provider-access-wizard-track" role="progressbar" aria-label="Provider access setup" aria-valuemin="1" aria-valuemax="${initialSteps.length}" aria-valuenow="1" data-access-progress>
+                <i data-access-progress-fill></i>
               </span>
             </div>
-            <div class="provider-access-mode" data-access-panel="duration"${initialMode === 'duration' ? '' : ' hidden'}>
+
+            <section class="provider-access-wizard-stage" data-access-wizard-stage="choice" aria-labelledby="${this.escapeHtml(prefix)}-choice-title">
+              <div class="provider-access-wizard-copy">
+                <span class="provider-access-wizard-eyebrow">Access period</span>
+                <h3 id="${this.escapeHtml(prefix)}-choice-title" tabindex="-1">What do you know?</h3>
+                <p>Choose the quickest way to describe the provider access you bought.</p>
+              </div>
+              <select id="${this.escapeHtml(prefix)}-mode" data-access-mode tabindex="-1" aria-hidden="true" hidden>
+                <option value="duration"${initialMode === 'duration' ? ' selected' : ''}>Duration bought</option>
+                <option value="dates"${initialMode === 'dates' ? ' selected' : ''}>Start and end dates</option>
+                <option value="skip"${initialMode === 'skip' ? ' selected' : ''}>Add this later</option>
+              </select>
+              <div class="provider-access-choice-list" role="radiogroup" aria-label="What do you know?">
+                ${choices.map(([value, label, hint, glyph, badge]) => `
+                  <button type="button" class="provider-access-choice${initialMode === value ? ' is-selected' : ''}" data-access-mode-choice="${value}" role="radio" aria-checked="${initialMode === value}">
+                    <span class="provider-access-choice-glyph" aria-hidden="true">${glyph}</span>
+                    <span class="provider-access-choice-copy"><strong>${label}</strong><small>${hint}</small></span>
+                    ${badge ? `<span class="provider-access-choice-badge">${badge}</span>` : ''}
+                    <span class="provider-access-choice-check" aria-hidden="true"></span>
+                  </button>
+                `).join('')}
+              </div>
+              <p class="provider-access-explainer">Your provider access is separate from your Norva plan. Norva records the period; it never sells or renews it.</p>
+            </section>
+
+            <section class="provider-access-wizard-stage" data-access-wizard-stage="activation" aria-labelledby="${this.escapeHtml(prefix)}-activation-title" hidden>
+              <div class="provider-access-wizard-copy">
+                <span class="provider-access-wizard-eyebrow">Activation</span>
+                <h3 id="${this.escapeHtml(prefix)}-activation-title" tabindex="-1">When does access begin?</h3>
+                <p>Use the purchase date if access started immediately.</p>
+              </div>
               <div class="form-group provider-access-activation-field">
                 <label for="${this.escapeHtml(prefix)}-activation-on">Activation or purchase date</label>
                 <input id="${this.escapeHtml(prefix)}-activation-on" class="form-input" type="date" value="${this.escapeHtml(activationOn)}" data-access-activation-on>
+              </div>
+              <div class="provider-access-date-shortcuts" aria-label="Activation date shortcuts">
+                <button type="button" data-access-date-shortcut="today">Today</button>
+                <button type="button" data-access-date-shortcut="yesterday">Yesterday</button>
+              </div>
+              <div class="provider-access-context-note"><span aria-hidden="true"></span><p>The end date will be calculated from this day and the duration you enter next.</p></div>
+            </section>
+
+            <section class="provider-access-wizard-stage" data-access-wizard-stage="duration" aria-labelledby="${this.escapeHtml(prefix)}-duration-title" hidden>
+              <div class="provider-access-wizard-copy">
+                <span class="provider-access-wizard-eyebrow">Duration</span>
+                <h3 id="${this.escapeHtml(prefix)}-duration-title" tabindex="-1">How long is access active?</h3>
+                <p>Duration and unit stay together. The calendar gives you a precise visual end date.</p>
               </div>
               <div class="provider-access-field-row provider-access-duration-row">
                 <div class="form-group">
@@ -682,7 +733,6 @@ class SourceManager {
                   </span>
                 </div>
               </div>
-              <p class="hint">The end date updates automatically from the activation date and duration.</p>
               <section class="provider-access-calendar" data-access-calendar aria-label="Provider access end-date preview">
                 <div class="provider-access-calendar-summary">
                   <div class="provider-access-calendar-copy">
@@ -707,8 +757,14 @@ class SourceManager {
                 <div class="provider-access-calendar-grid" data-access-calendar-grid></div>
                 <p class="provider-access-calendar-caption">Choose another end date to update the duration above. Norva will switch it to an exact number of days.</p>
               </section>
-            </div>
-            <div class="provider-access-mode" data-access-panel="dates"${initialMode === 'dates' ? '' : ' hidden'}>
+            </section>
+
+            <section class="provider-access-wizard-stage" data-access-wizard-stage="dates" aria-labelledby="${this.escapeHtml(prefix)}-dates-title" hidden>
+              <div class="provider-access-wizard-copy">
+                <span class="provider-access-wizard-eyebrow">Exact dates</span>
+                <h3 id="${this.escapeHtml(prefix)}-dates-title" tabindex="-1">Enter the start and end dates</h3>
+                <p>Use the exact dates shown by your provider or on your receipt.</p>
+              </div>
               <div class="provider-access-field-row">
                 <div class="form-group">
                   <label for="${this.escapeHtml(prefix)}-started-on">Start date</label>
@@ -719,17 +775,45 @@ class SourceManager {
                   <input id="${this.escapeHtml(prefix)}-expires-on" class="form-input" type="date" value="${this.escapeHtml(expiresOn)}" data-access-expires-on>
                 </div>
               </div>
-            </div>
-            <label class="provider-access-reminder" data-access-reminder-row${initialMode === 'skip' ? ' hidden' : ''}>
-              <input type="checkbox" data-access-reminders${reminders ? ' checked' : ''}>
-              <span><strong>Remind me before it ends</strong><small>Explicit opt-in. No reminder is queued until the notification phase is enabled.</small></span>
-            </label>
+              <div class="provider-access-context-note"><span aria-hidden="true"></span><p data-access-dates-summary>Norva will use these dates to keep the catalogue status accurate.</p></div>
+            </section>
+
+            <section class="provider-access-wizard-stage" data-access-wizard-stage="review" aria-labelledby="${this.escapeHtml(prefix)}-review-title" hidden>
+              <div class="provider-access-wizard-copy">
+                <span class="provider-access-wizard-eyebrow">Review</span>
+                <h3 id="${this.escapeHtml(prefix)}-review-title" tabindex="-1">Everything look right?</h3>
+                <p data-access-review-intro>Review the period before saving it.</p>
+              </div>
+              <div class="provider-access-review" data-access-review>
+                <div class="provider-access-review-hero">
+                  <span><small>Provider access</small><strong data-access-review-title></strong></span>
+                  <span class="provider-access-review-duration"><b data-access-review-value></b><small data-access-review-unit></small></span>
+                </div>
+                <dl class="provider-access-review-rows" data-access-review-rows>
+                  <div><dt>Starts</dt><dd data-access-review-start></dd></div>
+                  <div><dt>Ends</dt><dd data-access-review-end></dd></div>
+                </dl>
+              </div>
+              <label class="provider-access-reminder" data-access-reminder-row${initialMode === 'skip' ? ' hidden' : ''}>
+                <span class="provider-access-reminder-icon" aria-hidden="true"></span>
+                <span><strong>Remind me before it ends</strong><small>Explicit opt-in. You can change this at any time.</small></span>
+                <input type="checkbox" data-access-reminders${reminders ? ' checked' : ''}>
+              </label>
+              ${cycle ? '<button class="provider-access-remove-period" type="button" data-access-end>Remove recorded period</button>' : ''}
+            </section>
+
             <p class="form-error provider-access-form-error" data-access-error role="alert" hidden></p>
+            <div class="provider-access-wizard-actions">
+              <button class="btn btn-secondary" type="button" data-access-wizard-back>${onboarding ? 'Back' : 'Cancel'}</button>
+              <button class="btn btn-primary" type="button" data-access-wizard-next>Continue <span aria-hidden="true">→</span></button>
+            </div>
+            <span class="provider-access-sr-only" aria-live="polite" aria-atomic="true" data-access-wizard-live></span>
           </fieldset>
         `;
     }
 
     bindProviderAccessTerms(root = document) {
+        const controllers = [];
         root.querySelectorAll?.('[data-provider-access-terms]').forEach((fieldset) => {
             const mode = fieldset.querySelector('[data-access-mode]');
             const activation = fieldset.querySelector('[data-access-activation-on]');
@@ -744,7 +828,6 @@ class SourceManager {
                 menu.hidden = true;
                 trigger.setAttribute('aria-expanded', 'false');
                 shell.classList.remove('is-open');
-                fieldset.classList.remove('is-skip-select-open');
                 if (restoreFocus) trigger.focus({ preventScroll: true });
             };
             const closeOtherSelects = (currentShell) => {
@@ -781,9 +864,6 @@ class SourceManager {
                 menu.hidden = false;
                 trigger.setAttribute('aria-expanded', 'true');
                 shell.classList.add('is-open');
-                if (select.matches('[data-access-mode]') && select.value === 'skip') {
-                    fieldset.classList.add('is-skip-select-open');
-                }
                 if (focusEdge === 'none') return;
                 const target = focusEdge === 'first'
                     ? options[0]
@@ -852,26 +932,193 @@ class SourceManager {
                     });
                 });
             });
-            const update = () => {
+            const error = fieldset.querySelector('[data-access-error]');
+            const clearError = () => {
+                if (error) {
+                    error.textContent = '';
+                    error.hidden = true;
+                }
+                fieldset.querySelectorAll('[aria-invalid="true"]').forEach((control) => control.removeAttribute('aria-invalid'));
+            };
+            const updateReview = () => {
                 const selected = mode?.value || 'skip';
-                fieldset.querySelectorAll('[data-access-panel]').forEach((panel) => {
-                    panel.hidden = panel.dataset.accessPanel !== selected;
-                });
                 const reminders = fieldset.querySelector('[data-access-reminder-row]');
                 if (reminders) reminders.hidden = selected === 'skip';
-                const error = fieldset.querySelector('[data-access-error]');
-                if (error) error.hidden = true;
-                closeOtherSelects(null);
-                if (selected === 'duration') this.renderProviderAccessCalendar(fieldset, { resetMonth: true });
+                fieldset.querySelectorAll('[data-access-mode-choice]').forEach((choice) => {
+                    const checked = choice.dataset.accessModeChoice === selected;
+                    choice.classList.toggle('is-selected', checked);
+                    choice.setAttribute('aria-checked', String(checked));
+                });
+                const title = fieldset.querySelector('[data-access-review-title]');
+                const value = fieldset.querySelector('[data-access-review-value]');
+                const unit = fieldset.querySelector('[data-access-review-unit]');
+                const startNode = fieldset.querySelector('[data-access-review-start]');
+                const endNode = fieldset.querySelector('[data-access-review-end]');
+                const rows = fieldset.querySelector('[data-access-review-rows]');
+                const intro = fieldset.querySelector('[data-access-review-intro]');
+                if (selected === 'skip') {
+                    if (title) title.textContent = fieldset.dataset.accessHasCycle === 'true' ? 'Keep current period' : 'Add later';
+                    if (value) value.textContent = '—';
+                    if (unit) unit.textContent = 'No new dates';
+                    if (rows) rows.hidden = true;
+                    if (intro) intro.textContent = fieldset.dataset.accessHasCycle === 'true'
+                        ? 'Your currently recorded period will stay unchanged.'
+                        : 'You can finish now and add an access period later in Settings.';
+                    return;
+                }
+                if (rows) rows.hidden = false;
+                if (intro) intro.textContent = 'Review the period before saving it.';
+                let startKey = '';
+                let endKey = '';
+                if (selected === 'duration') {
+                    startKey = String(activation?.value || '');
+                    const amount = Number(termValue?.value);
+                    const selectedUnit = String(termUnit?.value || '');
+                    const end = this.providerAccessAddTerm(startKey, amount, selectedUnit);
+                    endKey = end ? this.providerAccessDateKey(end) : '';
+                    if (title) title.textContent = `${Number.isFinite(amount) ? amount : '—'} ${selectedUnit ? selectedUnit.toLowerCase() : ''}${amount === 1 ? '' : 's'}`;
+                    if (value) value.textContent = Number.isFinite(amount) ? String(amount) : '—';
+                    if (unit) unit.textContent = selectedUnit ? `${selectedUnit.toLowerCase()}${amount === 1 ? '' : 's'}` : '';
+                } else {
+                    startKey = String(fieldset.querySelector('[data-access-started-on]')?.value || '');
+                    endKey = String(fieldset.querySelector('[data-access-expires-on]')?.value || '');
+                    const startDate = this.providerAccessDateFromKey(startKey);
+                    const endDate = this.providerAccessDateFromKey(endKey);
+                    const exactDays = startDate && endDate ? Math.max(0, Math.round((endDate.getTime() - startDate.getTime()) / 86400000)) : 0;
+                    if (title) title.textContent = exactDays ? `${exactDays} days` : 'Exact dates';
+                    if (value) value.textContent = exactDays ? String(exactDays) : '—';
+                    if (unit) unit.textContent = exactDays === 1 ? 'day' : 'days';
+                    const datesSummary = fieldset.querySelector('[data-access-dates-summary]');
+                    if (datesSummary) datesSummary.textContent = exactDays
+                        ? `${exactDays} days of provider access are selected.`
+                        : 'Norva will use these dates to keep the catalogue status accurate.';
+                }
+                if (startNode) startNode.textContent = this.formatAccessDate(startKey) || 'Not set';
+                if (endNode) endNode.textContent = this.formatAccessDate(endKey) || 'Not set';
             };
             const updateCalendar = () => {
                 syncSelect(termUnit);
                 this.renderProviderAccessCalendar(fieldset, { resetMonth: true });
+                updateReview();
             };
-            mode?.addEventListener('change', update);
+            const stepNames = {
+                choice: 'Choose period', activation: 'Activation date', duration: 'Duration and calendar', dates: 'Exact dates', review: 'Review'
+            };
+            let stepIndex = 0;
+            const showStep = (nextIndex, { focus = true } = {}) => {
+                const steps = this.providerAccessWizardSteps(mode?.value || 'skip');
+                stepIndex = Math.max(0, Math.min(nextIndex, steps.length - 1));
+                const activeStep = steps[stepIndex];
+                fieldset.dataset.accessWizardStep = activeStep;
+                fieldset.querySelectorAll('[data-access-wizard-stage]').forEach((stage) => {
+                    stage.hidden = stage.dataset.accessWizardStage !== activeStep;
+                });
+                const label = fieldset.querySelector('[data-access-step-label]');
+                const name = fieldset.querySelector('[data-access-step-name]');
+                const progress = fieldset.querySelector('[data-access-progress]');
+                const fill = fieldset.querySelector('[data-access-progress-fill]');
+                const back = fieldset.querySelector('[data-access-wizard-back]');
+                const next = fieldset.querySelector('[data-access-wizard-next]');
+                const finalStep = stepIndex === steps.length - 1;
+                if (label) label.textContent = `Step ${stepIndex + 1} of ${steps.length}`;
+                if (name) name.textContent = stepNames[activeStep] || 'Provider access';
+                if (progress) {
+                    progress.setAttribute('aria-valuemax', String(steps.length));
+                    progress.setAttribute('aria-valuenow', String(stepIndex + 1));
+                }
+                if (fill) fill.style.width = `${((stepIndex + 1) / steps.length) * 100}%`;
+                if (back) back.textContent = stepIndex === 0 ? (fieldset.dataset.accessOnboarding === 'true' ? 'Back' : 'Cancel') : 'Back';
+                if (next) {
+                    const hasCycle = fieldset.dataset.accessHasCycle === 'true';
+                    next.innerHTML = finalStep
+                        ? `${mode?.value === 'skip' ? (hasCycle ? 'Keep current period' : 'Finish without dates') : (hasCycle ? 'Save period' : (fieldset.dataset.accessOnboarding === 'true' ? 'Connect and prepare catalogue' : 'Add period'))} <span aria-hidden="true">→</span>`
+                        : 'Continue <span aria-hidden="true">→</span>';
+                }
+                updateReview();
+                if (activeStep === 'duration') this.renderProviderAccessCalendar(fieldset, { resetMonth: true });
+                const live = fieldset.querySelector('[data-access-wizard-live]');
+                if (live) live.textContent = `${stepNames[activeStep] || 'Provider access'}, step ${stepIndex + 1} of ${steps.length}.`;
+                if (focus && !fieldset.hidden) {
+                    requestAnimationFrame(() => fieldset.querySelector(`[data-access-wizard-stage="${activeStep}"] h3`)?.focus({ preventScroll: true }));
+                }
+            };
+            const failStep = (message, control) => {
+                if (error) {
+                    error.textContent = message;
+                    error.hidden = false;
+                }
+                control?.setAttribute('aria-invalid', 'true');
+                control?.focus({ preventScroll: true });
+                return false;
+            };
+            const validateStep = (step) => {
+                clearError();
+                if (step === 'activation') {
+                    const value = String(activation?.value || '');
+                    if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || !this.providerAccessDateFromKey(value)) {
+                        return failStep('Enter a valid provider access activation date.', activation);
+                    }
+                }
+                if (step === 'duration') {
+                    const amount = Number(termValue?.value);
+                    if (!Number.isInteger(amount) || amount < 1 || amount > 10000 || !['DAY', 'WEEK', 'MONTH', 'YEAR'].includes(String(termUnit?.value || ''))) {
+                        return failStep('Enter a valid provider access duration.', termValue);
+                    }
+                }
+                if (step === 'dates') {
+                    const started = fieldset.querySelector('[data-access-started-on]');
+                    const expires = fieldset.querySelector('[data-access-expires-on]');
+                    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(started?.value || '')) || !/^\d{4}-\d{2}-\d{2}$/.test(String(expires?.value || '')) || expires.value < started.value) {
+                        return failStep('Enter a valid provider access start and end date.', !started?.value ? started : expires);
+                    }
+                }
+                return true;
+            };
+            const chooseMode = (choice, { focus = false } = {}) => {
+                if (!mode) return;
+                mode.value = choice.dataset.accessModeChoice || 'skip';
+                mode.dispatchEvent(new Event('change', { bubbles: true }));
+                if (focus) choice.focus({ preventScroll: true });
+            };
+            const modeChoices = [...fieldset.querySelectorAll('[data-access-mode-choice]')];
+            modeChoices.forEach((choice, index) => {
+                choice.addEventListener('click', () => chooseMode(choice));
+                choice.addEventListener('keydown', (event) => {
+                    if (!['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+                    event.preventDefault();
+                    const nextIndex = event.key === 'Home' ? 0
+                        : (event.key === 'End' ? modeChoices.length - 1
+                            : (index + (['ArrowDown', 'ArrowRight'].includes(event.key) ? 1 : -1) + modeChoices.length) % modeChoices.length);
+                    chooseMode(modeChoices[nextIndex], { focus: true });
+                });
+            });
+            mode?.addEventListener('change', () => {
+                clearError();
+                closeOtherSelects(null);
+                updateReview();
+                if (fieldset.dataset.accessWizardStep === 'choice') showStep(0, { focus: false });
+            });
             activation?.addEventListener('change', updateCalendar);
             termValue?.addEventListener('input', updateCalendar);
             termUnit?.addEventListener('change', updateCalendar);
+            fieldset.querySelectorAll('[data-access-started-on], [data-access-expires-on], [data-access-reminders]').forEach((control) => {
+                control.addEventListener('change', () => {
+                    clearError();
+                    updateReview();
+                });
+            });
+            fieldset.querySelectorAll('[data-access-date-shortcut]').forEach((button) => {
+                button.addEventListener('click', () => {
+                    let dateKey = this.providerAccessTodayKey();
+                    if (button.dataset.accessDateShortcut === 'yesterday') {
+                        const date = this.providerAccessDateFromKey(dateKey);
+                        date.setUTCDate(date.getUTCDate() - 1);
+                        dateKey = this.providerAccessDateKey(date);
+                    }
+                    if (activation) activation.value = dateKey;
+                    updateCalendar();
+                });
+            });
             calendar?.querySelector('[data-access-calendar-prev]')?.addEventListener('click', () => {
                 const [year, month] = String(calendar.dataset.displayMonth || '').split('-').map(Number);
                 const previous = new Date(Date.UTC(year, month - 2, 1));
@@ -900,8 +1147,28 @@ class SourceManager {
                 requestAnimationFrame(() => calendar.classList.add('is-adjusted'));
                 termValue.focus({ preventScroll: true });
             });
-            update();
+            fieldset.querySelector('[data-access-wizard-next]')?.addEventListener('click', () => {
+                const steps = this.providerAccessWizardSteps(mode?.value || 'skip');
+                const activeStep = steps[stepIndex];
+                if (!validateStep(activeStep)) return;
+                if (stepIndex === steps.length - 1) {
+                    fieldset.dispatchEvent(new CustomEvent('norva:provider-access-complete', { bubbles: true, detail: { mode: mode?.value || 'skip' } }));
+                    return;
+                }
+                showStep(stepIndex + 1);
+            });
+            fieldset.querySelector('[data-access-wizard-back]')?.addEventListener('click', () => {
+                if (stepIndex === 0) {
+                    fieldset.dispatchEvent(new CustomEvent('norva:provider-access-cancel', { bubbles: true }));
+                    return;
+                }
+                showStep(stepIndex - 1);
+            });
+            updateReview();
+            showStep(0, { focus: false });
+            controllers.push({ fieldset, showStep, updateReview, get stepIndex() { return stepIndex; } });
         });
+        return controllers.length === 1 ? controllers[0] : controllers;
     }
 
     readProviderAccessTerms(root = document) {
@@ -990,8 +1257,8 @@ class SourceManager {
     }
 
     bindSourceForm(type) {
-        this.bindProviderAccessTerms(document.getElementById('modal') || document);
-        if (type !== 'xtream') return;
+        const accessWizard = this.bindProviderAccessTerms(document.getElementById('modal') || document);
+        if (type !== 'xtream') return accessWizard;
         const urlInput = document.getElementById('source-url');
         const nameInput = document.getElementById('source-name');
         const usernameInput = document.getElementById('source-username');
@@ -1032,6 +1299,7 @@ class SourceManager {
         urlInput.addEventListener('paste', () => setTimeout(() => applyParsedLink(true), 0));
         urlInput.addEventListener('blur', () => applyParsedLink(false));
         urlInput.addEventListener('change', () => applyParsedLink(false));
+        return accessWizard;
     }
 
     openAdvancedSourceLogin() {
@@ -2157,10 +2425,14 @@ class SourceManager {
         const token = this.providerAccessViewToken;
         title.textContent = titleText;
         body.innerHTML = bodyHtml;
+        modal.classList.remove('provider-access-wizard-modal');
+        footer.hidden = false;
         footer.innerHTML = '<button class="btn btn-secondary" type="button" data-provider-close>Close</button>';
         const close = () => {
             if (this.providerAccessViewToken === token) this.providerAccessViewToken += 1;
             modal.classList.remove('active');
+            modal.classList.remove('provider-access-wizard-modal');
+            footer.hidden = false;
         };
         modal.querySelector('.modal-close').onclick = close;
         footer.querySelector('[data-provider-close]').onclick = close;
@@ -2230,39 +2502,49 @@ class SourceManager {
               ${confirmedHidden ? '<p class="provider-access-policy-note">Your catalogue is retained but hidden. A future date starts restoration; only a successful provider check makes it visible again.</p>' : ''}
             </div>
             ${this.getProviderAccessTermsFields({ prefix: 'provider-access-settings', access })}
-            <div class="provider-access-actions" aria-label="Provider access actions">
-              <button class="btn btn-primary" type="button" data-access-save>${access.activeCycle ? 'Save period' : 'Add period'}</button>
-              ${access.activeCycle ? '<button class="btn btn-secondary" type="button" data-access-end>Remove recorded period</button>' : ''}
-            </div>
-            <div class="provider-access-paths">
-              <h3>Restore or change this service</h3>
-              <button class="provider-access-path" type="button" data-access-path="renew">
-                <strong>Provider renewed the same login</strong><span>Update the period above. Norva will verify access without rebuilding the catalogue.</span>
-              </button>
-              <button class="provider-access-path" type="button" data-access-path="credentials">
-                <strong>I received new login details</strong><span>Validate them as an immutable candidate before changing the active service.</span>
-              </button>
-              <button class="provider-access-path" type="button" data-access-path="provider">
-                <strong>I changed provider or catalogue</strong><span>Use the same safe candidate check; a different catalogue is staged before any switch.</span>
-              </button>
-            </div>
+            <details class="provider-access-more-actions">
+              <summary>Login or catalogue changed?</summary>
+              <div class="provider-access-paths">
+                <button class="provider-access-path" type="button" data-access-path="renew">
+                  <strong>Provider renewed the same login</strong><span>Update the period without rebuilding the catalogue.</span>
+                </button>
+                <button class="provider-access-path" type="button" data-access-path="credentials">
+                  <strong>I received new login details</strong><span>Validate them safely before changing the active service.</span>
+                </button>
+                <button class="provider-access-path" type="button" data-access-path="provider">
+                  <strong>I changed provider or catalogue</strong><span>Prepare a different catalogue separately before any switch.</span>
+                </button>
+              </div>
+            </details>
             <p class="provider-access-feedback" data-access-feedback role="status" aria-live="polite"></p>
           </div>
         `;
-        this.bindProviderAccessTerms(view.body);
+        view.modal.classList.add('provider-access-wizard-modal');
+        view.footer.hidden = true;
+        const wizard = this.bindProviderAccessTerms(view.body);
+        const fieldset = view.body.querySelector('[data-provider-access-terms]');
         const feedback = view.body.querySelector('[data-access-feedback]');
         const setBusy = (busy, message = '') => {
             view.body.querySelectorAll('button,select,input').forEach((control) => { control.disabled = busy; });
             view.body.closest('.modal-content')?.setAttribute('aria-busy', busy ? 'true' : 'false');
             if (feedback) feedback.textContent = message;
         };
-        view.body.querySelector('[data-access-save]')?.addEventListener('click', async () => {
+        fieldset?.addEventListener('norva:provider-access-cancel', () => view.close());
+        fieldset?.addEventListener('norva:provider-access-complete', async () => {
             let terms;
             try {
                 terms = this.readProviderAccessTerms(view.body);
-                if (!terms) throw new Error('Choose a duration or dates before saving.');
             } catch (error) {
-                if (feedback) feedback.textContent = error.message;
+                const accessError = fieldset.querySelector('[data-access-error]');
+                if (accessError) {
+                    accessError.textContent = error.message;
+                    accessError.hidden = false;
+                }
+                return;
+            }
+            if (!terms) {
+                view.close();
+                NorvaModal.toast(access.activeCycle ? 'Your current provider access period was kept.' : 'You can add the provider access period later from Settings.', 'info');
                 return;
             }
             const action = access.activeCycle ? `cycle-update-${access.revision}` : 'cycle-create';
@@ -2298,7 +2580,8 @@ class SourceManager {
             }
         });
         view.body.querySelector('[data-access-path="renew"]')?.addEventListener('click', () => {
-            view.body.querySelector('[data-access-mode]')?.focus();
+            view.body.querySelector('.provider-access-more-actions')?.removeAttribute('open');
+            wizard?.showStep?.(0);
         });
         for (const path of ['credentials', 'provider']) {
             view.body.querySelector(`[data-access-path="${path}"]`)?.addEventListener('click', () => {

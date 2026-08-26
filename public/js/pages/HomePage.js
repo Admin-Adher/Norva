@@ -1140,45 +1140,54 @@ class HomePage {
             <section class="norva-setup-gate norva-setup-connect" data-setup-state="not_configured" data-paired-screen="false">
                 <div class="norva-setup-connect-card">
                     <div class="norva-setup-kicker">One step to watch</div>
-                    <h1>Paste your TV service link</h1>
-                    <p>We’ll organize your catalog. Nothing else.</p>
-                    <form class="norva-setup-inline-form" id="home-tv-service-form" autocomplete="off" novalidate>
-                        <div class="form-group">
-                            <label for="home-source-url">Xtream or M3U link</label>
-                            <input type="url" id="home-source-url" class="form-input setup-form-input"
-                                   placeholder="https://provider.com/get.php?username=…&password=…"
-                                   inputmode="url" autocomplete="url" required
-                                   aria-describedby="home-source-url-hint home-source-find-link home-source-url-error">
-                            <p class="setup-form-hint" id="home-source-url-hint">Xtream or M3U — login fills in automatically.</p>
-                            <p class="setup-form-help" id="home-source-find-link">Don’t have the link handy? Check the email or account of your TV service for “M3U” or “Xtream”. You can also search your provider’s name plus “Xtream” or “M3U”.</p>
-                            <p class="setup-field-error hidden" id="home-source-url-error"></p>
-                        </div>
-                        <details class="source-advanced-login setup-manual-login" id="home-source-advanced">
-                            <summary>Name or login manually</summary>
-                            <p class="setup-form-hint">Optional. Auto-filled when a complete link is pasted above.</p>
-                            <div class="form-group setup-service-name-group">
-                                <label for="home-source-name">Service name <span class="label-optional">(optional)</span></label>
-                                <input type="text" id="home-source-name" class="form-input setup-form-input" placeholder="Family TV" autocomplete="off">
+                    <div class="norva-setup-flow-progress" aria-label="Setup progress">
+                        <span class="is-current" data-setup-flow-marker="connection"><i>1</i><b>Connect</b></span>
+                        <span class="norva-setup-flow-line"></span>
+                        <span data-setup-flow-marker="access"><i>2</i><b>Access</b></span>
+                        <span class="norva-setup-flow-line"></span>
+                        <span data-setup-flow-marker="finish"><i>3</i><b>Finish</b></span>
+                    </div>
+                    <h1 data-setup-flow-title>Paste your TV service link</h1>
+                    <p data-setup-flow-description>We’ll organize your catalog. Nothing else.</p>
+                    <form class="norva-setup-inline-form" id="home-tv-service-form" data-setup-flow-step="connection" autocomplete="off" novalidate>
+                        <div data-setup-connection-step>
+                            <div class="form-group">
+                                <label for="home-source-url">Xtream or M3U link</label>
+                                <input type="url" id="home-source-url" class="form-input setup-form-input"
+                                       placeholder="https://provider.com/get.php?username=…&password=…"
+                                       inputmode="url" autocomplete="url" required
+                                       aria-describedby="home-source-url-hint home-source-find-link home-source-url-error">
+                                <p class="setup-form-hint" id="home-source-url-hint">Xtream or M3U — login fills in automatically.</p>
+                                <p class="setup-form-help" id="home-source-find-link">Don’t have the link handy? Check the email or account of your TV service for “M3U” or “Xtream”. You can also search your provider’s name plus “Xtream” or “M3U”.</p>
+                                <p class="setup-field-error hidden" id="home-source-url-error"></p>
                             </div>
-                            <div class="setup-manual-grid">
-                                <div class="form-group">
-                                    <label for="home-source-username">Username</label>
-                                    <input type="text" id="home-source-username" class="form-input setup-form-input" placeholder="username" autocomplete="username" aria-describedby="home-source-username-error">
-                                    <p class="setup-field-error hidden" id="home-source-username-error"></p>
+                            <details class="source-advanced-login setup-manual-login" id="home-source-advanced">
+                                <summary>Name or login manually</summary>
+                                <p class="setup-form-hint">Optional. Auto-filled when a complete link is pasted above.</p>
+                                <div class="form-group setup-service-name-group">
+                                    <label for="home-source-name">Service name <span class="label-optional">(optional)</span></label>
+                                    <input type="text" id="home-source-name" class="form-input setup-form-input" placeholder="Family TV" autocomplete="off">
                                 </div>
-                                <div class="form-group">
-                                    <label for="home-source-password">Password</label>
-                                    <div class="setup-password-field">
-                                        <input type="password" id="home-source-password" class="form-input setup-form-input" placeholder="password" autocomplete="current-password" aria-describedby="home-source-password-error">
-                                        <button type="button" class="setup-password-toggle" id="home-source-password-toggle" aria-label="Show password" aria-pressed="false">${Icons.hide}</button>
+                                <div class="setup-manual-grid">
+                                    <div class="form-group">
+                                        <label for="home-source-username">Username</label>
+                                        <input type="text" id="home-source-username" class="form-input setup-form-input" placeholder="username" autocomplete="username" aria-describedby="home-source-username-error">
+                                        <p class="setup-field-error hidden" id="home-source-username-error"></p>
                                     </div>
-                                    <p class="setup-field-error hidden" id="home-source-password-error"></p>
+                                    <div class="form-group">
+                                        <label for="home-source-password">Password</label>
+                                        <div class="setup-password-field">
+                                            <input type="password" id="home-source-password" class="form-input setup-form-input" placeholder="password" autocomplete="current-password" aria-describedby="home-source-password-error">
+                                            <button type="button" class="setup-password-toggle" id="home-source-password-toggle" aria-label="Show password" aria-pressed="false">${Icons.hide}</button>
+                                        </div>
+                                        <p class="setup-field-error hidden" id="home-source-password-error"></p>
+                                    </div>
                                 </div>
-                            </div>
-                        </details>
-                        ${manager?.getProviderAccessTermsFields?.({ prefix: 'home-provider-access', onboarding: true }) || ''}
+                            </details>
+                        </div>
                         <div class="norva-setup-error hidden" id="home-tv-service-error" role="alert" aria-atomic="true" tabindex="-1"></div>
-                        <button class="btn btn-primary norva-setup-submit" id="home-tv-service-submit" type="submit">Connect</button>
+                        ${manager?.getProviderAccessTermsFields?.({ prefix: 'home-provider-access', onboarding: true, deferred: true }) || ''}
+                        <button class="btn btn-primary norva-setup-submit" id="home-tv-service-submit" type="submit">Continue</button>
                     </form>
                 </div>
             </section>
@@ -1221,9 +1230,43 @@ class HomePage {
         const hint = container.querySelector('#home-source-url-hint');
         const error = container.querySelector('#home-tv-service-error');
         const submit = container.querySelector('#home-tv-service-submit');
+        const connectionStep = container.querySelector('[data-setup-connection-step]');
+        const accessTerms = form?.querySelector('[data-provider-access-terms]');
+        const flowTitle = container.querySelector('[data-setup-flow-title]');
+        const flowDescription = container.querySelector('[data-setup-flow-description]');
         const manager = this.app?.sourceManager || window.app?.sourceManager;
         if (!form || !urlInput || !usernameInput || !passwordInput || !submit) return;
-        manager?.bindProviderAccessTerms?.(form);
+        const accessWizard = manager?.bindProviderAccessTerms?.(form);
+        let accessWizardApproved = false;
+
+        const setFlowStep = (step) => {
+            const accessActive = step === 'access';
+            form.dataset.setupFlowStep = step;
+            container.querySelector('.norva-setup-connect-card')?.classList.toggle('is-access-step', accessActive);
+            if (connectionStep) connectionStep.hidden = accessActive;
+            if (accessTerms) accessTerms.hidden = !accessActive;
+            submit.hidden = accessActive;
+            if (flowTitle) flowTitle.textContent = accessActive ? 'When can you use this service?' : 'Paste your TV service link';
+            if (flowDescription) flowDescription.textContent = accessActive
+                ? 'Add the access period now, or safely choose to do it later.'
+                : 'We’ll organize your catalog. Nothing else.';
+            container.querySelectorAll('[data-setup-flow-marker]').forEach((marker) => {
+                const markerStep = marker.dataset.setupFlowMarker;
+                marker.classList.toggle('is-current', markerStep === step);
+                marker.classList.toggle('is-complete', accessActive && markerStep === 'connection');
+            });
+            if (accessActive) accessWizard?.showStep?.(0);
+            else {
+                accessWizardApproved = false;
+                requestAnimationFrame(() => urlInput.focus({ preventScroll: true }));
+            }
+        };
+
+        accessTerms?.addEventListener('norva:provider-access-cancel', () => setFlowStep('connection'));
+        accessTerms?.addEventListener('norva:provider-access-complete', () => {
+            accessWizardApproved = true;
+            form.requestSubmit();
+        });
 
         const fieldErrors = new Map([
             [urlInput, container.querySelector('#home-source-url-error')],
@@ -1264,21 +1307,25 @@ class HomePage {
                 try { error.focus({ preventScroll: true }); } catch (_) { /* noop */ }
             }
         };
-        const setSubmitting = (busy, label = 'Connect TV Service') => {
+        const setSubmitting = (busy, label = 'Continue') => {
             submit.disabled = busy;
             submit.textContent = label;
             if (busy) submit.setAttribute('aria-busy', 'true');
             else submit.removeAttribute('aria-busy');
+            if (accessTerms && form.dataset.setupFlowStep === 'access') {
+                accessTerms.setAttribute('aria-busy', String(busy));
+                accessTerms.querySelectorAll('button,input,select').forEach((control) => { control.disabled = busy; });
+            }
         };
 
         const applyParsedLink = (force = false) => {
             const parsed = manager?.parseXtreamLink?.(urlInput.value);
-            const accessTerms = form.querySelector('[data-provider-access-terms]');
+            const termsFieldset = form.querySelector('[data-provider-access-terms]');
             const playlistLink = manager?.looksLikePlaylistLink?.(urlInput.value) === true;
-            if (accessTerms) {
-                accessTerms.hidden = playlistLink;
+            if (termsFieldset) {
+                if (form.dataset.setupFlowStep === 'access' && playlistLink) setFlowStep('connection');
                 if (playlistLink) {
-                    const mode = accessTerms.querySelector('[data-access-mode]');
+                    const mode = termsFieldset.querySelector('[data-access-mode]');
                     if (mode) {
                         mode.value = 'skip';
                         mode.dispatchEvent(new Event('change'));
@@ -1336,7 +1383,12 @@ class HomePage {
             let accessTerms = null;
             try {
                 payload = this.readSetupConnectionForm(container);
-                if (payload.type === 'xtream' && manager?.providerAccessUiEnabled?.()) {
+                const needsAccessStep = payload.type === 'xtream' && manager?.providerAccessUiEnabled?.();
+                if (needsAccessStep && !accessWizardApproved) {
+                    setFlowStep('access');
+                    return;
+                }
+                if (needsAccessStep) {
                     accessTerms = manager.readProviderAccessTerms(form);
                 }
             } catch (validationError) {
@@ -1348,7 +1400,7 @@ class HomePage {
                         accessError.textContent = message;
                         accessError.hidden = false;
                     }
-                    const target = fieldset?.querySelector('[data-access-panel]:not([hidden]) input, [data-access-panel]:not([hidden]) select');
+                    const target = fieldset?.querySelector('[data-access-wizard-stage]:not([hidden]) input, [data-access-wizard-stage]:not([hidden]) select');
                     target?.setAttribute('aria-invalid', 'true');
                     showSummaryError(message);
                     try { target?.focus({ preventScroll: true }); } catch (_) { /* noop */ }
@@ -1385,7 +1437,10 @@ class HomePage {
             try {
                 if (manager?.confirmLargePlaylistIfNeeded && !await manager.confirmLargePlaylistIfNeeded(payload)) {
                     setSubmitting(false);
-                    try { submit.focus({ preventScroll: true }); } catch (_) { /* noop */ }
+                    const focusTarget = form.dataset.setupFlowStep === 'access'
+                        ? form.querySelector('[data-provider-access-terms] [data-access-wizard-next]')
+                        : submit;
+                    try { focusTarget?.focus({ preventScroll: true }); } catch (_) { /* noop */ }
                     return;
                 }
                 const created = await window.API.sources.create(payload);

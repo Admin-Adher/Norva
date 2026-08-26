@@ -115,11 +115,19 @@ test('in-app notifications are owner-scoped, fail-closed and route to Provider A
   assert.match(css, /provider-access-in-app-notice\.is-full-attention/);
 });
 
-test('the chosen mobile duration layout keeps Duration and Unit on one compact row', () => {
+test('the approved wizard keeps Duration and Unit compact while replacing the raw mode dropdown', () => {
   assert.match(sourceManager, /provider-access-field-row provider-access-duration-row/);
-  assert.equal((sourceManager.match(/provider-access-select-shell/g) || []).length >= 2, true);
-  assert.equal((sourceManager.match(/provider-access-select-chevron/g) || []).length >= 2, true);
+  assert.equal((sourceManager.match(/provider-access-select-shell/g) || []).length >= 1, true);
+  assert.equal((sourceManager.match(/provider-access-select-chevron/g) || []).length >= 1, true);
   assert.match(css, /provider-access-field-row\.provider-access-duration-row[\s\S]*grid-template-columns: minmax\(0, 3fr\) minmax\(112px, 2fr\)/);
+  assert.match(sourceManager, /data-access-mode-choice="\$\{value\}" role="radio" aria-checked/);
+  assert.match(sourceManager, /providerAccessWizardSteps\(mode = 'duration'\)/);
+  assert.match(sourceManager, /return \['choice', 'activation', 'duration', 'review'\]/);
+  assert.match(sourceManager, /if \(mode === 'dates'\) return \['choice', 'dates', 'review'\]/);
+  assert.match(sourceManager, /if \(mode === 'skip'\) return \['choice', 'review'\]/);
+  assert.match(sourceManager, /\['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Home', 'End'\]/);
+  assert.match(sourceManager, /norva:provider-access-complete/);
+  assert.match(sourceManager, /norva:provider-access-cancel/);
   assert.match(sourceManager, /aria-haspopup="listbox"/);
   assert.match(sourceManager, /role="option"[\s\S]*aria-selected/);
   assert.match(sourceManager, /select\.hidden = true[\s\S]*trigger\.hidden = false/);
@@ -127,12 +135,20 @@ test('the chosen mobile duration layout keeps Duration and Unit on one compact r
   assert.match(sourceManager, /select\.labels\?\.\[0\]\?\.addEventListener\('click'/);
   assert.match(sourceManager, /\['ArrowDown', 'ArrowUp', 'Home', 'End'\]/);
   assert.match(sourceManager, /event\.key === 'Escape'/);
-  assert.match(sourceManager, /select\.value === 'skip'[\s\S]*fieldset\.classList\.add\('is-skip-select-open'\)/);
-  assert.match(sourceManager, /fieldset\.classList\.remove\('is-skip-select-open'\)/);
   assert.match(css, /provider-access-select-menu[\s\S]*z-index: 10/);
-  assert.match(css, /provider-access-terms\.is-skip-select-open[\s\S]*padding-bottom: calc\(132px \+ var\(--space-lg\)\)/);
   assert.match(css, /provider-access-select-option[\s\S]*min-height: 44px/);
   assert.match(css, /provider-access-select-shell\.is-open \.provider-access-select-chevron/);
+  assert.match(css, /provider-access-wizard-actions[\s\S]*min-height: 48px/);
+  assert.match(css, /provider-access-choice[\s\S]*min-height: 76px/);
+});
+
+test('wizard branch lengths are deterministic for duration, exact dates and add-later', () => {
+  const context = { window: {}, Date, Intl, Set, Map, console };
+  vm.runInNewContext(sourceManager, context);
+  const manager = Object.create(context.window.SourceManager.prototype);
+  assert.deepEqual([...manager.providerAccessWizardSteps('duration')], ['choice', 'activation', 'duration', 'review']);
+  assert.deepEqual([...manager.providerAccessWizardSteps('dates')], ['choice', 'dates', 'review']);
+  assert.deepEqual([...manager.providerAccessWizardSteps('skip')], ['choice', 'review']);
 });
 
 test('duration mode binds an activation date to an interactive accessible calendar', () => {
