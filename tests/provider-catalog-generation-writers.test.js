@@ -495,6 +495,23 @@ test('durable finalizer claims one CAS lease before writing and fences every han
   assert.match(migration, /revoke all on table[\s\S]*service_role/i);
 });
 
+test('live row account deletion proof is cached only inside one catalog statement', () => {
+  const migration = source(path.join(
+    ROOT,
+    'supabase',
+    'migrations',
+    '20260826172500_catalog_account_delete_guard_statement_cache_v1.sql',
+  ));
+  assert.match(migration, /current_setting\('norva\.catalog_guard_nonce', true\)/);
+  assert.match(migration, /for key share nowait/i);
+  assert.match(migration, /provider_account_delete_preparations/);
+  assert.match(migration, /provider_deletion_pending/);
+  assert.match(migration, /jsonb_build_object\('nonce', v_nonce, 'allowed', true\)/);
+  assert.match(migration, /on public\.cloud_live_logical_channels/);
+  assert.match(migration, /on public\.cloud_live_variants/);
+  assert.match(migration, /revoke all on function[\s\S]*public, anon, authenticated, service_role/i);
+});
+
 test('live clear budget checkpoints at live/0 and one-shot refresh writes only after a complete resume', async () => {
   const {
     clearLiveMaterialization,
