@@ -160,3 +160,26 @@ test('calendar preview clamps month and year terms like PostgreSQL calendar inte
   assert.equal(manager.providerAccessDateKey(manager.providerAccessAddTerm('2028-02-29', 1, 'YEAR')), '2029-02-28');
   assert.equal(manager.providerAccessDateKey(manager.providerAccessAddTerm('2026-08-24', 2, 'MONTH')), '2026-10-24');
 });
+
+test('saving Provider Access shows a viewport-fixed animated receipt without moving modal focus', () => {
+  assert.match(sourceManager, /showProviderAccessSavedReceipt\(next\)/);
+  assert.match(sourceManager, /NorvaModal\.toast\(message, 'provider-access-success', \{ duration: 4200 \}\)/);
+  assert.match(css, /\.norva-toasts[\s\S]*bottom: max\(24px, calc\(var\(--bottom-nav-h\) \+ var\(--safe-area-inset-bottom\) \+ var\(--space-md\)\)\)/);
+  assert.match(css, /\.norva-toast-provider-access-success::before[\s\S]*transform: scale\(0\.94\)/);
+  assert.match(css, /\.norva-toast-provider-access-success \{[\s\S]*width: min\(92vw, 380px\)/);
+  assert.match(css, /\.norva-toast-provider-access-success\.show::before[\s\S]*transform: scale\(1\)/);
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.norva-toast-provider-access-success::before[\s\S]*transform: none/);
+
+  const receipts = [];
+  const context = {
+    window: {}, Date, Intl, Set, Map, console,
+    NorvaModal: { toast: (...args) => receipts.push(args) }
+  };
+  vm.runInNewContext(sourceManager, context);
+  const manager = Object.create(context.window.SourceManager.prototype);
+  manager.showProviderAccessSavedReceipt({ expiresOn: '2026-10-26' });
+  assert.equal(receipts.length, 1);
+  assert.match(receipts[0][0], /^Provider access saved until .+2026\.$/);
+  assert.equal(receipts[0][1], 'provider-access-success');
+  assert.equal(receipts[0][2].duration, 4200);
+});
