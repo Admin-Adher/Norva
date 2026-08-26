@@ -769,6 +769,17 @@ const VIDEO_ENCODER_PREFLIGHT = preflightVideoEncoder(VIDEO_ENCODER_CONFIG, {
     spawnSync,
 });
 const DEFAULT_TTL_SECONDS = clampInt(process.env.SESSION_TTL_SECONDS, 30 * 60, 60, 12 * 60 * 60);
+// A transport token may legitimately outlive the short database entitlement so a
+// movie can play to completion. It must not, however, keep FFmpeg and a
+// mono-account provider socket alive when the browser/WebView disappears without
+// sending DELETE. Every authenticated HLS asset read renews this local liveness
+// timestamp; an idle session is reaped independently of its long transport TTL.
+const VIEWER_SESSION_IDLE_TIMEOUT_MS = clampInt(
+    process.env.VIEWER_SESSION_IDLE_TIMEOUT_SECONDS,
+    2 * 60,
+    30,
+    30 * 60,
+) * 1000;
 // Startup remains bounded even though finite MKV resumes now use the private
 // serialized range broker; the same deadline also covers ordinary provider
 // startup and the fail-safe legacy non-seekable paths.
@@ -1738,7 +1749,7 @@ if (
 }
 const MULTI_AUDIO_HLS_PROTOCOL = 1;
 const MAX_MULTI_AUDIO_RENDITIONS = 8;
-const GATEWAY_VERSION = 113;
+const GATEWAY_VERSION = 114;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -2136,6 +2147,7 @@ app.get('/health', (req, res) => {
         },
         viewerSessionStartupAdmissionStats: { ...viewerSessionStartupAdmissionStats },
         viewerPlaybackActiveLocally: viewerPlaybackActiveLocally(),
+        viewerSessionIdleTimeoutMs: VIEWER_SESSION_IDLE_TIMEOUT_MS,
         viewerQosStats: { ...viewerQosStats },
         backgroundCpuProcessCount: backgroundCpuProcesses.size,
         whisperInferenceActive,
@@ -7975,6 +7987,7 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             playlistPath: path.join(outputDir, 'playlist.m3u8'),
             accessToken,
             createdAt: new Date(),
+            lastClientAccessAtMs: Date.now(),
             expiresAt: expiresAtDate,
             ffmpeg: null,
             inputPump: null,
@@ -8385,6 +8398,7 @@ app.delete('/sessions/:id', requireGatewayAuth, async (req, res) => {
 app.get('/sessions/:id/playlist.m3u8', requirePlaybackToken, async (req, res) => {
     const session = sessions.get(req.params.id);
     if (!session) return res.status(404).send('Session not found');
+    touchViewerSessionClientAccess(session);
 
     try {
         if (session.lastError) throw new Error(session.lastError);
@@ -8421,6 +8435,7 @@ app.get('/sessions/:id/playlist.m3u8', requirePlaybackToken, async (req, res) =>
 app.get('/sessions/:id/:file', requirePlaybackToken, async (req, res) => {
     const session = sessions.get(req.params.id);
     if (!session) return res.status(404).send('Session not found');
+    touchViewerSessionClientAccess(session);
 
     const requested = safeSessionArtifactName(req.params.file);
     if (!requested) return res.status(400).send('Invalid segment path');
@@ -14500,6 +14515,22 @@ async function stopSession(session, options = {}) {
     return session.stoppingPromise;
 }
 
+function touchViewerSessionClientAccess(session, nowMs = Date.now()) {
+    if (!session || session.backgroundCacheContinuation === true) return;
+    session.lastClientAccessAtMs = Number(nowMs);
+}
+
+function viewerSessionIdleExpired(session, nowMs = Date.now()) {
+    if (!session || session.backgroundCacheContinuation === true) return false;
+    const createdAtMs = session.createdAt instanceof Date
+        ? session.createdAt.getTime()
+        : Date.parse(String(session.createdAt || ''));
+    const lastClientAccessAtMs = Number(session.lastClientAccessAtMs || createdAtMs || 0);
+    return Number.isFinite(lastClientAccessAtMs)
+        && lastClientAccessAtMs > 0
+        && Number(nowMs) - lastClientAccessAtMs >= VIEWER_SESSION_IDLE_TIMEOUT_MS;
+}
+
 function providerAffinityHashForGatewayKey(key) {
     return key ? sha256Hex(String(key)) : '';
 }
@@ -14769,6 +14800,9 @@ function debugSession(session) {
         inputProbeMode: session.fastInputProbe === true ? 'known-fast' : 'full',
         fastInputProbeFallbacks: Number(session.fastInputProbeFallbacks || 0),
         createdAt: session.createdAt.toISOString(),
+        lastClientAccessAt: Number.isFinite(Number(session.lastClientAccessAtMs))
+            ? new Date(Number(session.lastClientAccessAtMs)).toISOString()
+            : null,
         expiresAt: session.expiresAt.toISOString(),
         lastError: session.lastError,
         logTail: String(session.logTail || '').slice(-1200)
@@ -16318,6 +16352,9 @@ setInterval(() => {
         if (session.expiresAt.getTime() < now) {
             stopSession(session, { reason: 'session-expired' })
                 .catch((err) => console.error('[media-gateway] cleanup failed:', err));
+        } else if (viewerSessionIdleExpired(session, now)) {
+            stopSession(session, { reason: 'viewer-idle' })
+                .catch((err) => console.error('[media-gateway] idle cleanup failed:', err));
         }
     }
     // Purge expired codec-profile cache entries (read-path also evicts lazily).
