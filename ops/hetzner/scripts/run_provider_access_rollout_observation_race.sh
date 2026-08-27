@@ -2,9 +2,13 @@
 set -euo pipefail
 
 readonly DB_CONTAINER="${DB_CONTAINER:-}"
-case "$DB_CONTAINER" in
-  norva-phase3-proof-*-db) ;;
-  *) echo "refusing non-proof database container: ${DB_CONTAINER:-unset}" >&2; exit 64 ;;
+readonly DB_DATABASE="${DB_DATABASE:-postgres}"
+case "$DB_CONTAINER:$DB_DATABASE" in
+  norva-phase3-proof-*-db:postgres|norva-phase3-proof-*-db:norva_material_restart_proof_*) ;;
+  *)
+    echo "refusing non-proof database target: ${DB_CONTAINER:-unset}:${DB_DATABASE:-unset}" >&2
+    exit 64
+    ;;
 esac
 
 readonly USER_ID='98620000-0000-4000-8000-000000000001'
@@ -12,7 +16,7 @@ readonly SOURCE_ID='98620000-0000-4000-8000-000000000101'
 readonly WORK_DIR="$(mktemp -d /tmp/norva-provider-observation-race.XXXXXX)"
 
 psql_admin() {
-  docker exec -i "$DB_CONTAINER" psql -X -U supabase_admin -d postgres \
+  docker exec -i "$DB_CONTAINER" psql -X -U supabase_admin -d "$DB_DATABASE" \
     -v ON_ERROR_STOP=1 "$@"
 }
 
@@ -127,15 +131,73 @@ if ! grep -q 'rollout observation already collecting' "$WORK_DIR/start-a.err" "$
   exit 1
 fi
 
+readonly INITIAL_OBSERVATION_ID="$(psql_admin -Atq <<SQL
+select id from public.cloud_provider_access_rollout_observations
+where rollout_revision=3 and state='collecting';
+SQL
+)"
+
+restart_sql() {
+  local actor="$1"
+  cat <<SQL
+begin;
+set local role service_role;
+select public.norva_restart_provider_access_rollout_observation_after_change(
+  '$INITIAL_OBSERVATION_ID',3,
+  'Material menu and internal allowlist change requires fresh evidence.','$actor'
+);
+commit;
+SQL
+}
+
+set +e
+restart_sql 'observation-restart-race-a' | psql_admin -Atq >"$WORK_DIR/restart-a.out" 2>"$WORK_DIR/restart-a.err" &
+readonly RESTART_PID_A=$!
+restart_sql 'observation-restart-race-b' | psql_admin -Atq >"$WORK_DIR/restart-b.out" 2>"$WORK_DIR/restart-b.err" &
+readonly RESTART_PID_B=$!
+wait "$RESTART_PID_A"; readonly RESTART_EXIT_A=$?
+wait "$RESTART_PID_B"; readonly RESTART_EXIT_B=$?
+set -e
+
+if [[ $(( (RESTART_EXIT_A == 0) + (RESTART_EXIT_B == 0) )) -ne 1 ]]; then
+  echo "FAIL material observation restart race exits: A=$RESTART_EXIT_A B=$RESTART_EXIT_B" >&2
+  exit 1
+fi
+if ! grep -q 'stale rollout observation predecessor' "$WORK_DIR/restart-a.err" "$WORK_DIR/restart-b.err"; then
+  echo 'FAIL material observation restart loser did not report STALE' >&2
+  exit 1
+fi
+
 readonly OBSERVATION_ID="$(psql_admin -Atq <<SQL
 select id from public.cloud_provider_access_rollout_observations
 where rollout_revision=3 and state='collecting';
 SQL
 )"
+readonly RESTART_STATE="$(psql_admin -Atq <<SQL
+select
+  (select count(*) from public.cloud_provider_access_rollout_observations
+    where rollout_revision=3 and state='stale') || ':' ||
+  (select count(*) from public.cloud_provider_access_rollout_observations
+    where rollout_revision=3 and state='collecting') || ':' ||
+  (select (activity_started_at = started_at)::text
+    from public.cloud_provider_access_rollout_observations where id='$OBSERVATION_ID') || ':' ||
+  (select (not_before >= started_at + interval '1 hour')::text
+    from public.cloud_provider_access_rollout_observations where id='$OBSERVATION_ID') || ':' ||
+  (select restart_reason
+    from public.cloud_provider_access_rollout_observations where id='$OBSERVATION_ID');
+SQL
+)"
+if [[ "$RESTART_STATE" != '1:1:true:true:Material menu and internal allowlist change requires fresh evidence.' ]]; then
+  echo "FAIL unexpected material observation restart state: $RESTART_STATE" >&2
+  exit 1
+fi
+
 psql_admin <<SQL
 begin;
 update public.cloud_provider_access_rollout_observations
-set not_before=clock_timestamp()-interval '1 second'
+set started_at=started_at-interval '2 hours',
+    activity_started_at=activity_started_at-interval '2 hours',
+    not_before=clock_timestamp()-interval '1 second'
 where id='$OBSERVATION_ID';
 insert into public.cloud_source_lifecycle_events(
   user_id,source_id,event_kind,idempotency_key,payload,actor,occurred_at
@@ -221,6 +283,7 @@ fi
 
 printf 'PASS provider access rollout observation race\n'
 printf 'start_a_exit=%s\nstart_b_exit=%s\n' "$START_EXIT_A" "$START_EXIT_B"
+printf 'restart_a_exit=%s\nrestart_b_exit=%s\n' "$RESTART_EXIT_A" "$RESTART_EXIT_B"
 printf 'complete_a_exit=%s\ncomplete_b_exit=%s\n' "$COMPLETE_EXIT_A" "$COMPLETE_EXIT_B"
 printf 'promote_a_exit=%s\npromote_b_exit=%s\n' "$PROMOTE_EXIT_A" "$PROMOTE_EXIT_B"
 printf 'final_state=%s\n' "$FINAL"

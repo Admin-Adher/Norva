@@ -9,9 +9,9 @@ if [[ "$DB_CONTAINER" != 'norva-db' ]]; then
   exit 64
 fi
 case "$ACTION" in
-  preflight|observation-status|configure-gates|set-internal-user|set-stage|start-observation|restart-observation-v2|complete-observation|set-channels|enqueue-push-readiness-smoke|install-notification-cron|install-detection-cron|remove-provider-crons) ;;
+  preflight|observation-status|configure-gates|set-internal-user|set-stage|start-observation|restart-observation-v2|restart-observation-after-change|complete-observation|set-channels|enqueue-push-readiness-smoke|install-notification-cron|install-detection-cron|remove-provider-crons) ;;
   *)
-    echo 'usage: run_provider_access_rollout_gate.sh [preflight|observation-status|configure-gates|set-internal-user|set-stage|start-observation|restart-observation-v2|complete-observation|set-channels|enqueue-push-readiness-smoke|install-notification-cron|install-detection-cron|remove-provider-crons]' >&2
+    echo 'usage: run_provider_access_rollout_gate.sh [preflight|observation-status|configure-gates|set-internal-user|set-stage|start-observation|restart-observation-v2|restart-observation-after-change|complete-observation|set-channels|enqueue-push-readiness-smoke|install-notification-cron|install-detection-cron|remove-provider-crons]' >&2
     exit 64
     ;;
 esac
@@ -294,6 +294,34 @@ select public.norva_restart_provider_access_rollout_observation_v2(
 commit;
 SQL
     ;;
+  restart-observation-after-change)
+    : "${PREDECESSOR_OBSERVATION_ID:?PREDECESSOR_OBSERVATION_ID is required}"
+    : "${EXPECTED_ROLLOUT_REVISION:?EXPECTED_ROLLOUT_REVISION is required}"
+    : "${OBSERVATION_RESTART_REASON:?OBSERVATION_RESTART_REASON is required}"
+    : "${ROLLOUT_ACTOR:?ROLLOUT_ACTOR is required}"
+    [[ "$PREDECESSOR_OBSERVATION_ID" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$ ]]
+    [[ "$EXPECTED_ROLLOUT_REVISION" =~ ^[0-9]+$ ]]
+    valid_text "$OBSERVATION_RESTART_REASON" 12 1000
+    valid_text "$ROLLOUT_ACTOR" 3 200
+    if [[ "${CONFIRM_ROLLOUT_OBSERVATION:-}" != 'RESTART_PROVIDER_ACCESS_ROLLOUT_OBSERVATION_AFTER_CHANGE' ]]; then
+      echo 'status=REFUSED_MISSING_EXPLICIT_MATERIAL_OBSERVATION_RESTART_CONFIRMATION' >&2
+      exit 64
+    fi
+    psql_admin -v predecessor_observation_id="$PREDECESSOR_OBSERVATION_ID" \
+      -v expected_revision="$EXPECTED_ROLLOUT_REVISION" \
+      -v reason="$OBSERVATION_RESTART_REASON" \
+      -v actor="$ROLLOUT_ACTOR" <<'SQL'
+begin;
+set local role service_role;
+select public.norva_restart_provider_access_rollout_observation_after_change(
+  :'predecessor_observation_id'::uuid,
+  :'expected_revision'::bigint,
+  :'reason',
+  :'actor'
+);
+commit;
+SQL
+    ;;
   complete-observation)
     : "${OBSERVATION_ID:?OBSERVATION_ID is required}"
     : "${EXPECTED_ROLLOUT_REVISION:?EXPECTED_ROLLOUT_REVISION is required}"
@@ -442,7 +470,7 @@ esac
 
 readonly AFTER="$(state)"
 print_state "$AFTER"
-if [[ "$ACTION" == 'start-observation' || "$ACTION" == 'restart-observation-v2' || "$ACTION" == 'complete-observation' ]]; then
+if [[ "$ACTION" == 'start-observation' || "$ACTION" == 'restart-observation-v2' || "$ACTION" == 'restart-observation-after-change' || "$ACTION" == 'complete-observation' ]]; then
   print_observation_state "$(observation_state)"
 fi
 echo 'status=COMPLETED'

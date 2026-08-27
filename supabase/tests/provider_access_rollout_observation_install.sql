@@ -1,7 +1,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path=public,extensions;
-select extensions.plan(12);
+select extensions.plan(15);
 
 select extensions.has_table(
   'public','cloud_provider_access_rollout_observations',
@@ -15,6 +15,15 @@ select extensions.has_function(
   'public','norva_complete_provider_access_rollout_observation',
   array['uuid','bigint','text','text','text'],
   'observation completion RPC is installed'
+);
+select extensions.has_function(
+  'public','norva_restart_provider_access_rollout_observation_after_change',
+  array['uuid','bigint','text','text'],
+  'material-change observation restart RPC is installed'
+);
+select extensions.has_column(
+  'public','cloud_provider_access_rollout_observations','restart_reason',
+  'material restart reason is durable'
 );
 select extensions.has_trigger(
   'public','cloud_provider_access_rollout',
@@ -34,6 +43,24 @@ select extensions.ok(
   and not has_table_privilege('service_role','public.cloud_provider_access_rollout_observations','UPDATE')
   and not has_table_privilege('service_role','public.cloud_provider_access_rollout_observations','DELETE'),
   'service role can inspect but cannot forge observation evidence'
+);
+select extensions.ok(
+  has_function_privilege(
+    'service_role',
+    'public.norva_restart_provider_access_rollout_observation_after_change(uuid,bigint,text,text)',
+    'EXECUTE'
+  )
+  and not has_function_privilege(
+    'anon',
+    'public.norva_restart_provider_access_rollout_observation_after_change(uuid,bigint,text,text)',
+    'EXECUTE'
+  )
+  and not has_function_privilege(
+    'authenticated',
+    'public.norva_restart_provider_access_rollout_observation_after_change(uuid,bigint,text,text)',
+    'EXECUTE'
+  ),
+  'only service role may restart an observation after a material change'
 );
 select extensions.is(
   (select stage from public.cloud_provider_access_rollout where singleton),
