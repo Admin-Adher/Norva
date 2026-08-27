@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#05080f">
+  <title>A Plain-English Taxonomy of Playback Errors | Norva Blog</title>
+  <meta name="description" content="Sort playback messages by availability, session, permission, network, media capability, processing, output, device resource, and unknown layers without guessing causes.">
+  <link rel="canonical" href="https://norva.tv/blog/build-a-plain-english-taxonomy-of-playback-error-messages/">
+  <meta name="robots" content="index,follow">
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/css/blog.css?v=1">
+  <meta property="og:type" content="article">
+  <meta property="og:site_name" content="Norva">
+  <meta property="og:title" content="A Plain-English Taxonomy of Playback Errors | Norva Blog">
+  <meta property="og:description" content="Sort playback messages by availability, session, permission, network, media capability, processing, output, device resource, and unknown layers without guessing causes.">
+  <meta property="og:url" content="https://norva.tv/blog/build-a-plain-english-taxonomy-of-playback-error-messages/">
+  <meta property="og:image" content="https://norva.tv/img/devices/norva-device-tv.webp">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="A Plain-English Taxonomy of Playback Errors | Norva Blog">
+  <meta name="twitter:description" content="Sort playback messages by availability, session, permission, network, media capability, processing, output, device resource, and unknown layers without guessing causes.">
+  <meta name="twitter:image" content="https://norva.tv/img/devices/norva-device-tv.webp">
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "headline": "Build a Plain-English Taxonomy of Playback Error Messages",
+  "description": "Sort playback messages by availability, session, permission, network, media capability, processing, output, device resource, and unknown layers without guessing causes.",
+  "inLanguage": "en",
+  "datePublished": "2026-08-27T06:00:00+02:00",
+  "dateModified": "2026-08-27T06:00:00+02:00",
+  "author": {
+    "@type": "Organization",
+    "name": "Norva"
+  },
+  "publisher": {
+    "@type": "Organization",
+    "name": "Norva",
+    "logo": {
+      "@type": "ImageObject",
+      "url": "https://norva.tv/img/norva-app-icon-96.png"
+    }
+  },
+  "image": [
+    "https://norva.tv/img/devices/norva-device-tv.webp"
+  ],
+  "mainEntityOfPage": {
+    "@type": "WebPage",
+    "@id": "https://norva.tv/blog/build-a-plain-english-taxonomy-of-playback-error-messages/"
+  }
+}
+  </script>
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    {
+      "@type": "ListItem",
+      "position": 1,
+      "name": "Home",
+      "item": "https://norva.tv/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 2,
+      "name": "Blog",
+      "item": "https://norva.tv/blog/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 3,
+      "name": "Build a Plain-English Taxonomy of Playback Error Messages",
+      "item": "https://norva.tv/blog/build-a-plain-english-taxonomy-of-playback-error-messages/"
+    }
+  ]
+}
+  </script>
+  <script src="/js/marketing-config.js?v=1"></script>
+  <script defer src="/js/marketing.js?v=1"></script>
+  <script defer src="/js/consent-banner.js?v=1"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="blog-nav">
+    <a class="brand" href="/" aria-label="Norva home">
+      <img src="/img/norva-app-icon-96.png" width="34" height="34" alt="" decoding="async">
+      <span>Norva</span>
+    </a>
+    <nav class="nav-right" aria-label="Primary">
+      <a href="/blog/">Blog</a>
+      <a class="hide-sm" href="/#how-it-works">How it works</a>
+      <a class="cta" href="/account.html?returnTo=%2Fapp%23home" data-cta="blog-nav" data-auth-action>Start free trial</a>
+    </nav>
+  </header>
+  <main id="main-content">
+    <nav class="breadcrumb" aria-label="Breadcrumb"><a href="/">Home</a><span class="sep">›</span><a href="/blog/">Blog</a><span class="sep">›</span><span aria-current="page">Build a Plain-English Taxonomy of Playback Error Messages</span></nav>
+    <article>
+      <div class="article-meta">
+        <span class="tag">Playback Error Diagnostics</span>
+        <span>By Norva Editorial Team</span>
+        <span class="dot">·</span>
+        <time datetime="2026-08-27T06:00:00+02:00">27 August 2026</time>
+        <span class="dot">·</span>
+        <span>4 min read</span>
+      </div>
+      <h1>Build a Plain-English Taxonomy of Playback Error Messages</h1>
+      <p class="lede">Group messages by the stage they appear to reference—availability, session or authorization, permission, network resolution or transfer, media capability, media processing, output, device resources, or unknown—while preserving the exact official code. A category routes the next question; it does not establish the cause.</p>
+      <nav class="toc" aria-label="On this page">
+      <strong>On this page</strong>
+      <ul><li><a href="#category-1-availability">Category 1: availability</a></li><li><a href="#category-2-session-and-authorization">Category 2: session and authorization</a></li><li><a href="#category-3-permission-and-policy">Category 3: permission and policy</a></li><li><a href="#category-4-network-resolution-or-transfer">Category 4: network resolution or transfer</a></li><li><a href="#original-evidence-layer-and-language-taxonomy">Original evidence: layer-and-language taxonomy</a></li><li><a href="#category-5-media-capability">Category 5: media capability</a></li><li><a href="#category-6-media-processing">Category 6: media processing</a></li><li><a href="#category-7-output">Category 7: output</a></li><li><a href="#category-8-device-resource-or-app-state">Category 8: device resource or app state</a></li><li><a href="#use-scope-as-the-second-axis">Use scope as the second axis</a></li><li><a href="#keep-norva-boundaries-accurate">Keep Norva boundaries accurate</a></li><li><a href="#frequently-asked-questions">Frequently asked questions</a></li><li><a href="#your-next-step">Your next step</a></li><li><a href="#sources">Sources</a></li></ul>
+    </nav>
+      <blockquote><strong>In short:</strong> Group messages by the stage they appear to reference—availability, session or authorization, permission, network resolution or transfer, media capability, media processing, output, device resources, or unknown—while preserving the exact official code. A category routes the next question; it does not establish the cause.</blockquote>
+<p>User-facing wording is designed for readability and may combine several internal conditions. Keep the original text beside the category.</p>
+<h2 id="category-1-availability">Category 1: availability</h2>
+<p>Messages such as “unavailable,” “not found,” or “try later” may concern one title, version, source, region, account, or temporary source state. Record scope, time, status notice, and comparison titles.</p>
+<p>Separate temporary and persistent unavailability before repeated retries.</p>
+<h2 id="category-2-session-and-authorization">Category 2: session and authorization</h2>
+<p>Messages may mention expiry, sign-in, authorization, device limit, or access. Record account-safe state, clock, phase, source, device, and whether other authorised titles work. Do not publish session tokens or cookies.</p>
+<p>Do not assume a session message means the password is wrong.</p>
+<h2 id="category-3-permission-and-policy">Category 3: permission and policy</h2>
+<p>Local-network access, storage, background activity, parental controls, managed-device policy, source entitlement, or region rules may affect playback. Verify official requirements and authorization; never bypass a policy as a diagnostic shortcut.</p>
+<p>Keep billing and legal questions with the relevant official support team.</p>
+<h2 id="category-4-network-resolution-or-transfer">Category 4: network resolution or transfer</h2>
+<p>Messages may refer to offline state, timeout, connection, or server reachability. Record active path, endpoint scope, name resolution, throughput, delay variation, loss, and time. A generic network message does not prove Wi-Fi or provider fault.</p>
+<p>RFC 9110 defines HTTP semantics, but do not map app wording to a specific status without validated evidence.</p>
+<h2 id="original-evidence-layer-and-language-taxonomy">Original evidence: layer-and-language taxonomy</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>Exact wording/code</th><th>Phase</th><th>Plain category</th><th>Scope</th><th>Required evidence</th><th>Safe next check</th><th>Official definition</th></tr></thead>
+<tbody><tr><td>Verbatim</td><td>Startup/midplay</td><td>Availability/session/etc.</td><td>Title/device/path</td><td>Context</td><td>One comparison</td><td>Link/version</td></tr><tr><td>Verbatim</td><td>Seek/track change</td><td>Category</td><td>Scope</td><td>Context</td><td>One comparison</td><td>Verified/unknown</td></tr></tbody>
+</table></div>
+<p>Add separate columns for privacy risk and confidence. Never overwrite the original wording with the category.</p>
+<h2 id="category-5-media-capability">Category 5: media capability</h2>
+<p>“Unsupported format,” “cannot play,” or capability messages may concern container, codec, profile, resolution, frame rate, dynamic range, audio, encryption, output, or the combination. W3C Media Capabilities provides contextual queries in supported web implementations.</p>
+<p>The unsupported-media guide builds a version and device matrix.</p>
+<h2 id="category-6-media-processing">Category 6: media processing</h2>
+<p>Parse, append, decode, synchronization, and seek failures may occur after media is found and authorized. W3C Media Source Extensions defines coded-media processing for compatible implementations, but native players can use other paths.</p>
+<p>Do not translate a stall into “decoder error” without an official code definition.</p>
+<h2 id="category-7-output">Category 7: output</h2>
+<p>Black screen with audio, picture without sound, protected-output messages, or remote-playback failure can involve display, receiver, cable, audio route, permissions, or capability. Record local versus external output and safe-volume state.</p>
+<p>Output failures should remain distinct from network delivery unless evidence links them.</p>
+<h2 id="category-8-device-resource-or-app-state">Category 8: device resource or app state</h2>
+<p>Messages may mention storage, memory, update, temperature, background limits, or internal app state. Record official warnings and versions. Avoid service menus, unofficial firmware, and intrusive monitors.</p>
+<p>An “unknown error” belongs in the unknown category until official support provides a definition.</p>
+<h2 id="use-scope-as-the-second-axis">Use scope as the second axis</h2>
+<p>Within each category, mark one title, one source, one device, one network, one time window, or global. <a href="/blog/how-to-read-a-playback-error-before-trying-a-fix/">Read the error before fixing it</a> and compare one axis.</p>
+<p>Scope often routes support more effectively than the friendly wording alone.</p>
+<h2 id="keep-norva-boundaries-accurate">Keep Norva boundaries accurate</h2>
+<p>Norva organises and plays compatible authorised sources. Current Norva messages and code meanings must be verified from official, version-specific documentation. It cannot redefine a source's availability, authorization, or media errors.</p>
+<h2 id="frequently-asked-questions">Frequently asked questions</h2>
+<h3 id="can-one-message-belong-to-two-categories">Can one message belong to two categories?</h3>
+<p>Yes. Preserve a primary and secondary candidate category with uncertainty until official evidence clarifies it.</p>
+<h3 id="should-categories-be-converted-into-automatic-fixes">Should categories be converted into automatic fixes?</h3>
+<p>No. They route safe questions; exact causes and recovery remain version and context dependent.</p>
+<h3 id="is-unknown-a-useful-category">Is “unknown” a useful category?</h3>
+<p>Yes. It prevents invented meaning and signals that official definition or more evidence is required.</p>
+<h2 id="your-next-step">Your next step</h2>
+<p><a href="https://norva.tv/#features" target="_blank" rel="noopener">Explore Norva's playback features</a></p>
+<h2 id="sources">Sources</h2>
+<ul><li><a href="https://www.rfc-editor.org/rfc/rfc9110" target="_blank" rel="noopener">RFC 9110: HTTP Semantics</a></li><li><a href="https://www.w3.org/TR/media-capabilities/" target="_blank" rel="noopener">W3C Media Capabilities</a></li><li><a href="https://www.w3.org/TR/media-source-2/" target="_blank" rel="noopener">W3C Media Source Extensions</a></li></ul>
+      <section class="article-cta">
+      <a class="btn" href="https://norva.tv/#features" data-cta="blog-article">Explore Norva's Playback Features</a>
+    </section>
+      <section class="sources">
+      <h2>Sources</h2>
+      <ul><li><a href="https://www.rfc-editor.org/rfc/rfc9110" target="_blank" rel="noopener">https://www.rfc-editor.org/rfc/rfc9110</a></li><li><a href="https://www.w3.org/TR/media-capabilities/" target="_blank" rel="noopener">https://www.w3.org/TR/media-capabilities/</a></li><li><a href="https://www.w3.org/TR/media-source-2/" target="_blank" rel="noopener">https://www.w3.org/TR/media-source-2/</a></li></ul>
+    </section>
+      <section class="related">
+      <h2>Related reading</h2>
+      <div class="related-grid">
+        <a class="card" href="/blog/how-to-read-a-playback-error-before-trying-a-fix/">
+          <span class="tag">Playback Error Diagnostics</span>
+          <div class="card-title">How to Read a Playback Error Before Trying a Fix</div>
+          <p>Copy the exact message and code, timestamp it, identify the playback phase, authorised source version, device, app, operating system, session state, network path, scope, recurrence, and recovery. Then find the official definition for that exact version. A friendly message may summarize several internal conditions, so do not diagnose from wording alone.</p>
+        </a>
+      </div>
+    </section>
+    </article>
+  </main>
+  <footer class="blog-footer">
+    <div class="foot-inner">
+      <nav class="foot-links" aria-label="Footer">
+        <a href="/">Home</a>
+        <a href="/blog/">Blog</a>
+        <a href="/#features">Benefits</a>
+        <a href="/#pricing">Pricing</a>
+        <a href="/support.html?returnTo=%2Fblog%2F">Support</a>
+        <a href="/terms.html">Terms</a>
+        <a href="/privacy.html">Privacy</a>
+        <a href="/mentions-legales.html">Legal notice</a>
+      </nav>
+      <p class="disclaimer">&copy; 2026 Norva. Norva is a media player and organiser. It does not provide media. Use requires a compatible source you own or are authorised to access.</p>
+    </div>
+  </footer>
+</body>
+</html>
