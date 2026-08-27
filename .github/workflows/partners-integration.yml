@@ -406,7 +406,6 @@ jobs:
       - name: Run exhaustive Partners pgTAP tests on the fresh database
         run: >-
           supabase test db
-          supabase/tests/provider_auto_refresh_fair_claim.sql
           supabase/tests/affiliate_p0.sql
           supabase/tests/affiliate_access_requests.sql
           supabase/tests/affiliate_didit_certification_pre_gate.sql
@@ -449,6 +448,37 @@ jobs:
           --type performance
           --level error
           --fail-on error
+
+      - name: Apply the focused Provider refresh migration graph
+        shell: bash
+        run: |
+          set -euo pipefail
+          phase123_dir="$RUNNER_TEMP/phase123-online-migrations"
+          mapfile -t db_containers < <(
+            docker ps --format '{{.Names}}' | grep '^supabase_db_'
+          )
+          if [[ "${#db_containers[@]}" -ne 1 ]]; then
+            printf 'Expected one disposable Supabase DB, found %s\n' \
+              "${#db_containers[@]}" >&2
+            exit 1
+          fi
+          migrations=(
+            20260822220703_provider_access_lifecycle_foundation.sql
+            20260824120000_provider_access_cycles_detection_v1.sql
+            20260827033406_provider_auto_refresh_fair_claim_v1.sql
+          )
+          for migration in "${migrations[@]}"; do
+            test -f "$phase123_dir/$migration"
+            docker exec -i "${db_containers[0]}" \
+              psql -X -U supabase_admin -d postgres -v ON_ERROR_STOP=1 \
+              < "$phase123_dir/$migration"
+          done
+
+      - name: Run the Provider refresh PostgreSQL concurrency proof
+        run: >-
+          supabase test db
+          supabase/tests/provider_auto_refresh_fair_claim.sql
+          --local
 
       - name: Stop the disposable stack
         if: always()

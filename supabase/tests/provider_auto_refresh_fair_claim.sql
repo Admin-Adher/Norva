@@ -46,6 +46,19 @@ set local lock_timeout = '3s';
 set local statement_timeout = '30s';
 create extension if not exists pgtap with schema extensions;
 create extension if not exists dblink with schema extensions;
+do $dblink_schema$
+begin
+  if exists (
+    select 1
+    from pg_extension extension
+    join pg_namespace namespace on namespace.oid = extension.extnamespace
+    where extension.extname = 'dblink'
+      and namespace.nspname <> 'extensions'
+  ) then
+    execute 'alter extension dblink set schema extensions';
+  end if;
+end
+$dblink_schema$;
 grant usage on schema extensions to authenticated, service_role;
 select extensions.plan(28);
 
@@ -107,12 +120,12 @@ select extensions.ok(
 
 -- Two real PostgreSQL sessions race for the only claimable row. The fresh
 -- legacy JSON lock is deliberately older in sort order but remains fenced.
-select public.dblink_connect('auto_refresh_989_a', format('dbname=%I user=%I', current_database(), current_user));
-select public.dblink_connect('auto_refresh_989_b', format('dbname=%I user=%I', current_database(), current_user));
-select public.dblink_exec('auto_refresh_989_a', 'set role service_role');
-select public.dblink_exec('auto_refresh_989_b', 'set role service_role');
+select extensions.dblink_connect('auto_refresh_989_a', format('dbname=%I user=%I', current_database(), current_user));
+select extensions.dblink_connect('auto_refresh_989_b', format('dbname=%I user=%I', current_database(), current_user));
+select extensions.dblink_exec('auto_refresh_989_a', 'set role service_role');
+select extensions.dblink_exec('auto_refresh_989_b', 'set role service_role');
 select extensions.is(
-  public.dblink_send_query(
+  extensions.dblink_send_query(
     'auto_refresh_989_a',
     $$select * from public.norva_claim_cloud_auto_refresh_sources('auto-refresh-989-a',1,720)$$
   ),
@@ -120,7 +133,7 @@ select extensions.is(
   'first PostgreSQL session starts the auto-refresh claim race'
 );
 select extensions.is(
-  public.dblink_send_query(
+  extensions.dblink_send_query(
     'auto_refresh_989_b',
     $$select * from public.norva_claim_cloud_auto_refresh_sources('auto-refresh-989-b',1,720)$$
   ),
@@ -129,16 +142,16 @@ select extensions.is(
 );
 insert into auto_refresh_989_claims
 select 'auto-refresh-989-a', result.*
-from public.dblink_get_result('auto_refresh_989_a') as result(
+from extensions.dblink_get_result('auto_refresh_989_a') as result(
   source_id uuid, user_id uuid, source_type text, lease_sequence bigint, auto_refresh_state jsonb
 );
 insert into auto_refresh_989_claims
 select 'auto-refresh-989-b', result.*
-from public.dblink_get_result('auto_refresh_989_b') as result(
+from extensions.dblink_get_result('auto_refresh_989_b') as result(
   source_id uuid, user_id uuid, source_type text, lease_sequence bigint, auto_refresh_state jsonb
 );
-select public.dblink_disconnect('auto_refresh_989_a');
-select public.dblink_disconnect('auto_refresh_989_b');
+select extensions.dblink_disconnect('auto_refresh_989_a');
+select extensions.dblink_disconnect('auto_refresh_989_b');
 
 select extensions.is(
   (select count(*)::integer from auto_refresh_989_claims),

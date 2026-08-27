@@ -138,8 +138,19 @@ test('Edge exposes and deployment verifies the fair-claim protocol on every runt
 });
 
 test('disposable Supabase CI executes the real fair-claim pgTAP suite', () => {
+  const migrationStep = integrationWorkflow.indexOf(
+    'Apply the focused Provider refresh migration graph',
+  );
+  const proofStep = integrationWorkflow.indexOf(
+    'Run the Provider refresh PostgreSQL concurrency proof',
+  );
+  assert.ok(migrationStep >= 0 && proofStep > migrationStep);
+  const focusedProof = integrationWorkflow.slice(migrationStep, proofStep + 500);
+  assert.match(focusedProof, /20260822220703_provider_access_lifecycle_foundation\.sql/);
+  assert.match(focusedProof, /20260824120000_provider_access_cycles_detection_v1\.sql/);
+  assert.match(focusedProof, /20260827033406_provider_auto_refresh_fair_claim_v1\.sql/);
   assert.match(
-    integrationWorkflow,
+    focusedProof,
     /supabase test db[\s\S]*supabase\/tests\/provider_auto_refresh_fair_claim\.sql[\s\S]*--local/,
   );
   assert.doesNotMatch(
@@ -147,4 +158,6 @@ test('disposable Supabase CI executes the real fair-claim pgTAP suite', () => {
     /grant execute on all functions in schema extensions/i,
     'the proof must not request privileged dblink_connect_u authority',
   );
+  assert.doesNotMatch(pgTapProof, /public\.dblink_/i);
+  assert.match(pgTapProof, /alter extension dblink set schema extensions/i);
 });
