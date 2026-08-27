@@ -531,7 +531,7 @@ test('SourceManager routes a 401 or 404 to Provider Access dates instead of a bl
   }], 'xtream');
 
   assert.match(container.innerHTML, /data-action="provider-access"[^>]*>Add access dates<\/button>/);
-  assert.match(container.innerHTML, /Access dates not added/);
+  assert.match(container.innerHTML, /No period recorded/);
   assert.doesNotMatch(container.innerHTML, /data-action="edit"[^>]*>Repair<\/button>/);
 });
 
@@ -563,7 +563,7 @@ test('SourceManager renders an intentional pause with one enable action and no r
   assert.match(container.innerHTML, /This service is paused/);
   assert.match(container.innerHTML, /data-action="toggle"[^>]*>Enable service<\/button>/);
   assert.match(container.innerHTML, /data-action="refresh"[^>]*disabled aria-disabled="true"/);
-  assert.doesNotMatch(container.innerHTML, /Needs attention|>Repair<|Access dates not added/);
+  assert.doesNotMatch(container.innerHTML, /Needs attention|>Repair<|No period recorded/);
 });
 
 function sourceManagerStatusHarness({ disabled = false } = {}) {

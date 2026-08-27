@@ -289,7 +289,15 @@ class SourceManager {
                 <span class="source-menu-heading" aria-hidden="true">Provider access</span>
                 <button class="source-menu-item source-menu-item-featured" data-action="provider-access" role="menuitem" type="button">
                   <span class="source-menu-item-label">Manage provider access</span>
-                  <span class="source-menu-item-detail">Dates, duration, reminders, login or catalogue changes</span>
+                  <span class="source-menu-item-detail">Dates, duration and reminders</span>
+                </button>
+                <button class="source-menu-item" data-action="provider-login" role="menuitem" type="button">
+                  <span class="source-menu-item-label">Repair or change login</span>
+                  <span class="source-menu-item-detail">Validate new credentials before switching anything.</span>
+                </button>
+                <button class="source-menu-item" data-action="provider-catalogue" role="menuitem" type="button">
+                  <span class="source-menu-item-label">Change provider or catalogue</span>
+                  <span class="source-menu-item-detail">Prepare and compare a different catalogue safely.</span>
                 </button>
               </div>
             ` : ''}
@@ -333,6 +341,8 @@ class SourceManager {
                     case 'toggle': this.toggleSource(id); break;
                     case 'edit': this.showEditModal(id, type); break;
                     case 'provider-access': this.showProviderAccess(id); break;
+                    case 'provider-login': this.showEditModal(id, type, { intent: 'credentials' }); break;
+                    case 'provider-catalogue': this.showEditModal(id, type, { intent: 'provider' }); break;
                     case 'delete': this.deleteSource(id); break;
                 }
             });
@@ -436,7 +446,7 @@ class SourceManager {
     /**
      * Show edit source modal
      */
-    async showEditModal(id, type) {
+    async showEditModal(id, type, { intent = 'edit' } = {}) {
         try {
             const source = await API.sources.getById(id);
             // getById returns null (not a throw) when the source is gone/stale; the form
@@ -454,10 +464,25 @@ class SourceManager {
             const footer = document.getElementById('modal-footer');
 
             const titles = { xtream: 'Edit TV provider', m3u: 'Edit playlist link', epg: 'Edit TV guide' };
-            title.textContent = titles[type] || 'Edit provider';
+            const intentTitles = {
+                credentials: 'Repair or change login',
+                provider: 'Change provider or catalogue'
+            };
+            const intentCopy = {
+                credentials: 'Enter the login supplied for this service. Norva validates it before changing the active connection.',
+                provider: 'Enter the new provider details. Norva prepares and compares the catalogue before any switch.'
+            };
+            title.textContent = type === 'xtream' && intentTitles[intent]
+                ? intentTitles[intent]
+                : (titles[type] || 'Edit provider');
             modal.classList.remove('provider-access-wizard-modal');
             footer.hidden = false;
-            body.innerHTML = this.getSourceForm(type, source);
+            body.innerHTML = `${type === 'xtream' && intentCopy[intent] ? `
+                <div class="source-edit-intent" role="note">
+                    <strong>${this.escapeHtml(intentTitles[intent])}</strong>
+                    <p>${this.escapeHtml(intentCopy[intent])}</p>
+                </div>
+            ` : ''}${this.getSourceForm(type, source)}`;
 
             footer.innerHTML = `
         <button class="btn btn-secondary" id="modal-cancel">Cancel</button>
@@ -524,7 +549,7 @@ class SourceManager {
             access_unavailable_confirmed: ['Provider access unavailable', 'danger'],
             check_failed_temporary: ['Access check delayed', 'neutral'],
             restoring: ['Restoring provider access', 'warning'],
-            unknown: ['Access dates not added', 'neutral']
+            unknown: ['No period recorded', 'neutral']
         };
         const [label, tone] = labels[status] || labels.unknown;
         return {
@@ -538,7 +563,7 @@ class SourceManager {
     formatAccessDate(value) {
         if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value || ''))) return '';
         try {
-            return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeZone: 'UTC' })
+            return new Intl.DateTimeFormat('en', { dateStyle: 'medium', timeZone: 'UTC' })
                 .format(new Date(`${value}T00:00:00Z`));
         } catch (_) {
             return String(value);
@@ -626,8 +651,8 @@ class SourceManager {
             year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC'
         }).format(date);
         const unitLabel = `${termUnit.charAt(0)}${termUnit.slice(1).toLowerCase()}${termValue === 1 ? '' : 's'}`;
-        if (summary) summary.textContent = `${termValue} ${unitLabel.toLowerCase()} from ${formatLong(start)} · ends ${formatLong(end)}`;
-        if (badge) badge.textContent = `Ends ${formatLong(end)}`;
+        if (summary) summary.textContent = `Ends ${formatLong(end)}`;
+        if (badge) badge.textContent = `${termValue} ${unitLabel.toLowerCase()}`;
 
         const endMonthKey = this.providerAccessDateKey(end).slice(0, 7);
         if (resetMonth || !/^\d{4}-\d{2}$/.test(calendar.dataset.displayMonth || '')) {
@@ -760,14 +785,14 @@ class SourceManager {
                 <button type="button" data-access-date-shortcut="today">Today</button>
                 <button type="button" data-access-date-shortcut="yesterday">Yesterday</button>
               </div>
-              <div class="provider-access-context-note"><span aria-hidden="true"></span><p>The end date will be calculated from this day and the duration you enter next.</p></div>
+              <div class="provider-access-context-note"><span aria-hidden="true"></span><p>Today is selected by default. Change it if this access started earlier; Norva calculates the end date from your choice.</p></div>
             </section>
 
             <section class="provider-access-wizard-stage" data-access-wizard-stage="duration" aria-labelledby="${this.escapeHtml(prefix)}-duration-title" hidden>
               <div class="provider-access-wizard-copy">
                 <span class="provider-access-wizard-eyebrow">Duration</span>
                 <h3 id="${this.escapeHtml(prefix)}-duration-title" tabindex="-1">How long is access active?</h3>
-                <p>Duration and unit stay together. The calendar gives you a precise visual end date.</p>
+                <p>Enter the period you bought. Norva calculates its end date automatically.</p>
               </div>
               <div class="provider-access-field-row provider-access-duration-row">
                 <div class="form-group">
@@ -792,30 +817,33 @@ class SourceManager {
                   </span>
                 </div>
               </div>
-              <section class="provider-access-calendar" data-access-calendar aria-label="Provider access end-date preview">
-                <div class="provider-access-calendar-summary">
+              <details class="provider-access-calendar" data-access-calendar>
+                <summary class="provider-access-calendar-summary">
                   <div class="provider-access-calendar-copy">
-                    <span class="provider-access-calendar-kicker">Access preview</span>
+                    <span class="provider-access-calendar-kicker">Calculated end date</span>
                     <strong data-access-calendar-summary aria-live="polite"></strong>
                   </div>
                   <span class="provider-access-calendar-badge" data-access-calendar-badge></span>
+                  <span class="provider-access-calendar-expand">Adjust date</span>
+                </summary>
+                <div class="provider-access-calendar-body">
+                  <div class="provider-access-calendar-timeline" aria-hidden="true">
+                    <span class="provider-access-calendar-timeline-point is-start"></span>
+                    <span class="provider-access-calendar-timeline-track"></span>
+                    <span class="provider-access-calendar-timeline-point is-end"></span>
+                  </div>
+                  <div class="provider-access-calendar-header">
+                    <button type="button" class="provider-access-calendar-nav" data-access-calendar-prev aria-label="Previous month">&#8249;</button>
+                    <strong data-access-calendar-title></strong>
+                    <button type="button" class="provider-access-calendar-nav" data-access-calendar-next aria-label="Next month">&#8250;</button>
+                  </div>
+                  <div class="provider-access-calendar-weekdays" aria-hidden="true">
+                    ${['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day) => `<span>${day}</span>`).join('')}
+                  </div>
+                  <div class="provider-access-calendar-grid" data-access-calendar-grid></div>
+                  <p class="provider-access-calendar-caption">Choose an exact end date only if the calculated date is not the one you bought. Norva will then record the period in days.</p>
                 </div>
-                <div class="provider-access-calendar-timeline" aria-hidden="true">
-                  <span class="provider-access-calendar-timeline-point is-start"></span>
-                  <span class="provider-access-calendar-timeline-track"></span>
-                  <span class="provider-access-calendar-timeline-point is-end"></span>
-                </div>
-                <div class="provider-access-calendar-header">
-                  <button type="button" class="provider-access-calendar-nav" data-access-calendar-prev aria-label="Previous month">&#8249;</button>
-                  <strong data-access-calendar-title></strong>
-                  <button type="button" class="provider-access-calendar-nav" data-access-calendar-next aria-label="Next month">&#8250;</button>
-                </div>
-                <div class="provider-access-calendar-weekdays" aria-hidden="true">
-                  ${['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day) => `<span>${day}</span>`).join('')}
-                </div>
-                <div class="provider-access-calendar-grid" data-access-calendar-grid></div>
-                <p class="provider-access-calendar-caption">Choose another end date to update the duration above. Norva will switch it to an exact number of days.</p>
-              </section>
+              </details>
             </section>
 
             <section class="provider-access-wizard-stage" data-access-wizard-stage="dates" aria-labelledby="${this.escapeHtml(prefix)}-dates-title" hidden>
@@ -845,7 +873,7 @@ class SourceManager {
               </div>
               <div class="provider-access-review" data-access-review>
                 <div class="provider-access-review-hero">
-                  <span><small>Provider access</small><strong data-access-review-title></strong></span>
+                  <span><small>Provider access period</small><strong data-access-review-title></strong></span>
                   <span class="provider-access-review-duration"><b data-access-review-value></b><small data-access-review-unit></small></span>
                 </div>
                 <dl class="provider-access-review-rows" data-access-review-rows>
@@ -1061,7 +1089,7 @@ class SourceManager {
                 updateReview();
             };
             const stepNames = {
-                choice: 'Choose period', activation: 'Activation date', duration: 'Duration and calendar', dates: 'Exact dates', review: 'Review'
+                choice: 'Choose period', activation: 'Activation date', duration: 'Duration and end date', dates: 'Exact dates', review: 'Review'
             };
             let stepIndex = 0;
             const showStep = (nextIndex, { focus = true } = {}) => {
@@ -1206,7 +1234,8 @@ class SourceManager {
                 calendar.classList.remove('is-adjusted');
                 this.renderProviderAccessCalendar(fieldset);
                 requestAnimationFrame(() => calendar.classList.add('is-adjusted'));
-                termValue.focus({ preventScroll: true });
+                if ('open' in calendar) calendar.open = false;
+                calendar.querySelector('summary')?.focus({ preventScroll: true });
             });
             fieldset.querySelector('[data-access-wizard-next]')?.addEventListener('click', () => {
                 const steps = this.providerAccessWizardSteps(mode?.value || 'skip');
@@ -2589,9 +2618,12 @@ class SourceManager {
         `);
         if (!view) return;
         try {
-            const access = await API.providerAccess.get(id);
+            const [access, source] = await Promise.all([
+                API.providerAccess.get(id),
+                API.sources.getById(id).catch(() => null)
+            ]);
             if (this.providerAccessViewToken !== view.token) return;
-            this.renderProviderAccessDetails(id, access, view);
+            this.renderProviderAccessDetails(id, access, view, source);
         } catch (error) {
             if (this.providerAccessViewToken !== view.token) return;
             view.body.innerHTML = `<div class="provider-access-terminal" role="alert"><strong>Provider access unavailable</strong><p>${this.escapeHtml(this.providerAccessErrorMessage(error))}</p><button class="btn btn-secondary" type="button" data-access-retry>Try again</button></div>`;
@@ -2599,40 +2631,33 @@ class SourceManager {
         }
     }
 
-    renderProviderAccessDetails(id, access, view) {
+    renderProviderAccessDetails(id, access, view, source = null) {
         const summary = this.providerAccessSummary({
             provider_access_status: access.status,
             provider_access_expires_on: access.expiresOn
         });
         const confirmedHidden = ['EXPIRED_CONFIRMED', 'ACCESS_UNAVAILABLE_CONFIRMED'].includes(access.status);
+        const servicePaused = source ? !this.isSourceManagementEnabled(source) : false;
         view.body.innerHTML = `
           <div class="provider-access-panel" data-access-status="${this.escapeHtml(String(access.status).toLowerCase())}">
+            ${servicePaused ? `
+              <div class="provider-access-service-state" role="note">
+                <span aria-hidden="true"></span>
+                <div><strong>Service paused</strong><p>Recording an access period will not enable this service. Enable it separately when you are ready to sync.</p></div>
+              </div>
+            ` : ''}
             <div class="provider-access-overview provider-access-${this.escapeHtml(summary.tone)}">
               <div><span class="provider-access-eyebrow">Current status</span><strong>${this.escapeHtml(summary.label)}</strong></div>
               <p>${access.expiresOn ? `Recorded until ${this.escapeHtml(this.formatAccessDate(access.expiresOn))}.` : 'No provider access end date is recorded.'}</p>
               ${confirmedHidden ? '<p class="provider-access-policy-note">Your catalogue is retained but hidden. A future date starts restoration; only a successful provider check makes it visible again.</p>' : ''}
             </div>
             ${this.getProviderAccessTermsFields({ prefix: 'provider-access-settings', access })}
-            <details class="provider-access-more-actions">
-              <summary>Login or catalogue changed?</summary>
-              <div class="provider-access-paths">
-                <button class="provider-access-path" type="button" data-access-path="renew">
-                  <strong>Provider renewed the same login</strong><span>Update the period without rebuilding the catalogue.</span>
-                </button>
-                <button class="provider-access-path" type="button" data-access-path="credentials">
-                  <strong>I received new login details</strong><span>Validate them safely before changing the active service.</span>
-                </button>
-                <button class="provider-access-path" type="button" data-access-path="provider">
-                  <strong>I changed provider or catalogue</strong><span>Prepare a different catalogue separately before any switch.</span>
-                </button>
-              </div>
-            </details>
             <p class="provider-access-feedback" data-access-feedback role="status" aria-live="polite"></p>
           </div>
         `;
         view.modal.classList.add('provider-access-wizard-modal');
         view.footer.hidden = true;
-        const wizard = this.bindProviderAccessTerms(view.body);
+        this.bindProviderAccessTerms(view.body);
         const fieldset = view.body.querySelector('[data-provider-access-terms]');
         const feedback = view.body.querySelector('[data-access-feedback]');
         const setBusy = (busy, message = '') => {
@@ -2668,7 +2693,7 @@ class SourceManager {
                 this.clearProviderAccessIdempotency(id, action);
                 await this.loadSources();
                 if (this.providerAccessViewToken === view.token) {
-                    this.renderProviderAccessDetails(id, next, view);
+                    this.renderProviderAccessDetails(id, next, view, source);
                     this.showProviderAccessSavedReceipt(next);
                 }
             } catch (error) {
@@ -2685,21 +2710,11 @@ class SourceManager {
                 });
                 this.clearProviderAccessIdempotency(id, action);
                 await this.loadSources();
-                if (this.providerAccessViewToken === view.token) this.renderProviderAccessDetails(id, next, view);
+                if (this.providerAccessViewToken === view.token) this.renderProviderAccessDetails(id, next, view, source);
             } catch (error) {
                 setBusy(false, this.providerAccessErrorMessage(error));
             }
         });
-        view.body.querySelector('[data-access-path="renew"]')?.addEventListener('click', () => {
-            view.body.querySelector('.provider-access-more-actions')?.removeAttribute('open');
-            wizard?.showStep?.(0);
-        });
-        for (const path of ['credentials', 'provider']) {
-            view.body.querySelector(`[data-access-path="${path}"]`)?.addEventListener('click', () => {
-                view.close();
-                this.showEditModal(id, 'xtream');
-            });
-        }
     }
 
     showCredentialCandidate(id, candidate) {

@@ -779,7 +779,7 @@ class HomePage {
         }
         this.setupRecoverySession?.cancel?.();
         this.setupRecoverySession = null;
-        document.getElementById('page-home')?.classList.remove('home-setup-active', 'home-setup-connect-active');
+        document.getElementById('page-home')?.classList.remove('home-setup-active', 'home-setup-connect-active', 'home-service-paused-active');
         document.getElementById('home-service-health')?.classList.remove('setup-suppressed');
         document.getElementById('home-hero')?.classList.remove('hidden');
         document.getElementById('continue-watching-section')?.classList.remove('hidden');
@@ -896,12 +896,18 @@ class HomePage {
         document.getElementById('favorite-channels-section')?.classList.add('hidden');
         document.getElementById('home-service-health')?.classList.add('setup-suppressed');
         document.getElementById('page-home')?.classList.add('home-setup-active');
+        document.getElementById('page-home')?.classList.remove('home-service-paused-active');
 
         const state = summary.state || 'not_configured';
         const copy = this.setupCopy(summary);
         const steps = this.setupSteps(state);
         const secondaryLabel = copy.secondary || 'Check again';
         const showSecondary = secondaryLabel && secondaryLabel !== copy.primary;
+
+        if (state === 'disabled' && !this.isPairedScreen()) {
+            this.renderPausedServicesGate(container, summary);
+            return;
+        }
 
         if (state === 'not_configured' && !this.isPairedScreen()) {
             this.renderSetupConnectionGate(container, summary, steps);
@@ -953,6 +959,45 @@ class HomePage {
         });
         // (No syncing timer here: state === 'syncing' returns early into
         // renderSetupSyncingGate above, which schedules its own 4s poll.)
+    }
+
+    renderPausedServicesGate(container, summary = {}) {
+        const pausedCount = Math.max(1, Number(summary.disabled?.length || summary.sources?.length || 0));
+        const multiple = pausedCount > 1;
+        const page = document.getElementById('page-home');
+        page?.classList.remove('home-setup-connect-active');
+        page?.classList.add('home-service-paused-active');
+
+        container.innerHTML = `
+            <section class="norva-paused-home" data-setup-state="disabled" aria-labelledby="norva-paused-home-title">
+                <div class="norva-paused-home-main">
+                    <div class="norva-paused-home-status" role="status">
+                        <span class="norva-paused-home-dot" aria-hidden="true"></span>
+                        <span>${multiple ? 'TV services paused' : 'TV service paused'}</span>
+                        <span class="norva-paused-home-count">${this.escapeHtml(pausedCount)} saved</span>
+                    </div>
+                    <h1 id="norva-paused-home-title">${multiple ? 'All TV services are paused' : 'Your TV service is paused'}</h1>
+                    <p>Your saved ${multiple ? 'catalogs are' : 'catalog is'} preserved. Enable ${multiple ? 'any service' : 'the service'} when you are ready to bring its channels, movies and series back.</p>
+                    <div class="norva-paused-home-actions">
+                        <button class="btn btn-primary" id="norva-paused-home-manage" type="button">Enable ${multiple ? 'a service' : 'service'}</button>
+                    </div>
+                    <ul class="norva-paused-home-assurances" aria-label="What stays safe while services are paused">
+                        <li><strong>Catalog preserved</strong><span>Norva keeps the saved library while the service is paused.</span></li>
+                        <li><strong>No automatic renewal</strong><span>Provider access dates and reminders remain separate.</span></li>
+                    </ul>
+                </div>
+                <aside class="norva-paused-home-next" aria-label="Next step">
+                    <img src="/img/icons/norva-live-tv.svg" alt="" aria-hidden="true">
+                    <span>Next step</span>
+                    <strong>Choose the service you want to enable.</strong>
+                    <p>You can review its access period or login separately before syncing.</p>
+                </aside>
+            </section>
+        `;
+
+        container.querySelector('#norva-paused-home-manage')?.addEventListener('click', () => {
+            window.NorvaSourceHealth?.openAction?.(summary, this.app);
+        });
     }
 
     renderSetupPosterStrip() {

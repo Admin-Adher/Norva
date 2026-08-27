@@ -68,6 +68,20 @@ test('onboarding import uses a cinema-building surface instead of an ops dashboa
   assert.doesNotMatch(home, /Progress panel/);
 });
 
+test('an intentionally paused account gets a recovery surface instead of first-run onboarding', () => {
+  const pausedStart = home.indexOf('renderPausedServicesGate(container, summary = {})');
+  const pausedEnd = home.indexOf('renderSetupPosterStrip()', pausedStart);
+  const pausedSurface = home.slice(pausedStart, pausedEnd);
+  assert.ok(pausedStart > -1 && pausedEnd > pausedStart);
+  assert.match(home, /state === 'disabled'[\s\S]{0,120}renderPausedServicesGate\(container, summary\)/);
+  assert.match(pausedSurface, /All TV services are paused/);
+  assert.match(pausedSurface, /Catalog preserved/);
+  assert.match(pausedSurface, /Enable \$\{multiple \? 'a service' : 'service'\}/);
+  assert.doesNotMatch(pausedSurface, /Norva setup|Check again|setupSteps/);
+  assert.match(css, /\.norva-paused-home\s*\{[\s\S]{0,220}grid-template-columns:/);
+  assert.match(css, /@media \(max-width: 640px\)[\s\S]*\.norva-paused-home-actions \.btn\s*\{[\s\S]{0,80}width:\s*100%/);
+});
+
 test('catalog preparation modal shares focus, Back and inert hygiene', () => {
   assert.match(sourceManager, /NorvaModal\.installHygiene\(modal, \{[\s\S]{0,180}onClose: closeToSettings,[\s\S]{0,120}initialFocus: closeButton/);
   assert.match(sourceManager, /catalogErrorDetails\(/);
@@ -92,9 +106,9 @@ test('setup visuals reuse Norva assets and ship cache-busted', () => {
   assert.match(shell, /class="tc-intro-icon" src="\/img\/icons\/norva-movies\.svg/);
   assert.match(shell, /class="tc-intro-icon" src="\/img\/icons\/norva-settings\.svg/);
   assert.doesNotMatch(shell, /<div class="tc-intro-icon">/);
-  assert.match(shell, /main\.css\?v=5fb0adbb61/);
+  assert.match(shell, /main\.css\?v=5eb7be4e33/);
   assert.match(shell, /sourceHealth\.js\?v=6c0eefcb4f/);
-  assert.match(shell, /SourceManager\.js\?v=a659ebb978/);
-  assert.match(shell, /HomePage\.js\?v=ce0d273210/);
+  assert.match(shell, /SourceManager\.js\?v=a47eaa0316/);
+  assert.match(shell, /HomePage\.js\?v=6016cf63fb/);
   assert.match(shell, /app\.js\?v=b0962d47ce/);
 });
