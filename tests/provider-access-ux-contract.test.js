@@ -58,6 +58,17 @@ test('onboarding collects an optional duration or explicit dates plus reminder o
   assert.doesNotMatch(sourceManager, /API\.(?:notifications|push).*reminder|enqueue.*reminder/i);
 });
 
+test('Settings provider label cannot inherit personal account autofill', () => {
+  assert.match(sourceManager, /id="source-name"[^>]*name="provider-display-name"/);
+  assert.match(sourceManager, /id="source-name"[^>]*autocomplete="off"/);
+  assert.match(sourceManager, /id="source-name"[^>]*autocapitalize="words"/);
+  assert.match(sourceManager, /id="source-name"[^>]*spellcheck="false"/);
+  assert.match(sourceManager, /id="source-username"[^>]*name="provider-login"[^>]*autocomplete="off"[^>]*autocapitalize="none"[^>]*spellcheck="false"/);
+  assert.match(sourceManager, /id="source-password"[^>]*name="provider-secret"[^>]*autocomplete="new-password"/);
+  assert.doesNotMatch(sourceManager, /id="source-username"[^>]*autocomplete="username"/);
+  assert.doesNotMatch(sourceManager, /id="source-password"[^>]*autocomplete="current-password"/);
+});
+
 test('calendar durations are resolved server-side and cannot be mixed with an explicit end date', () => {
   // Calendar authority was moved to a forward-only migration so an already
   // applied 1200 migration is never silently rewritten.
@@ -128,6 +139,6 @@ test('all changed Provider Access UI assets are cache-busted', () => {
   assert.match(shell, /main\.css\?v=121/);
   assert.match(shell, /cloudApi\.js\?v=70/);
   assert.match(shell, /api\.js\?v=88/);
-  assert.match(shell, /SourceManager\.js\?v=47/);
-  assert.match(shell, /HomePage\.js\?v=e235acfa41/);
+  assert.match(shell, /SourceManager\.js\?v=48/);
+  assert.match(shell, /HomePage\.js\?v=e235acfa42/);
 });

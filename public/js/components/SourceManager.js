@@ -1224,16 +1224,16 @@ class SourceManager {
         const nameField = `
       <div class="form-group">
         <label for="source-name">Service name <span class="label-optional">(optional)</span></label>
-        <input type="text" id="source-name" class="form-input" placeholder="Family TV" value="${this.escapeHtml(source.name || '')}">
+        <input type="text" id="source-name" name="provider-display-name" class="form-input" placeholder="Family TV" value="${this.escapeHtml(source.name || '')}" autocomplete="off" autocapitalize="words" spellcheck="false" data-1p-ignore="true" data-lpignore="true" data-form-type="other">
       </div>
     `;
 
         const urlField = `
       <div class="form-group">
         <label for="source-url">${type === 'xtream' ? 'Provider URL or complete Xtream link' : type === 'epg' ? 'TV guide URL' : 'Playlist URL'}</label>
-        <input type="text" id="source-url" class="form-input" 
+        <input type="text" id="source-url" name="provider-server-url" class="form-input"
                placeholder="${type === 'xtream' ? 'https://provider.com/get.php?username=...&password=...' : 'https://example.com/playlist.m3u'}"
-               value="${this.escapeHtml(urlValue)}">
+               value="${this.escapeHtml(urlValue)}" autocomplete="off" autocapitalize="none" spellcheck="false">
         ${type === 'xtream' ? '<p class="hint" id="source-url-parse-hint">If you paste a full Xtream link, Norva will fill the login fields automatically.</p>' : ''}
         ${source.cloud ? '<p class="hint">Norva keeps the original full link private. The saved server is shown here. Paste a complete link only when replacing or repairing the login.</p>' : ''}
       </div>
@@ -1251,13 +1251,13 @@ class SourceManager {
           <summary>Enter server login manually</summary>
           <div class="form-group">
           <label for="source-username">Username</label>
-          <input type="text" id="source-username" class="form-input" value="${this.escapeHtml(source.username || '')}">
+          <input type="text" id="source-username" name="provider-login" class="form-input" value="${this.escapeHtml(source.username || '')}" autocomplete="off" autocapitalize="none" spellcheck="false" data-1p-ignore="true" data-lpignore="true" data-form-type="other">
           </div>
           <div class="form-group">
           <label for="source-password">Password</label>
-          <input type="password" id="source-password" class="form-input"
+          <input type="password" id="source-password" name="provider-secret" class="form-input"
                  placeholder="${isExisting ? 'Password saved - leave blank to keep it' : ''}"
-                 value="${source.password && !source.password.includes('•') ? this.escapeHtml(source.password) : ''}">
+                 value="${source.password && !source.password.includes('•') ? this.escapeHtml(source.password) : ''}" autocomplete="new-password" data-1p-ignore="true" data-lpignore="true" data-form-type="other">
             ${isExisting ? '<p class="hint">Leave this empty to keep the saved password. Type a new password only when repairing or replacing the login.</p>' : ''}
           </div>
         </details>
