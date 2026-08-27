@@ -53,9 +53,24 @@ test('onboarding collects an optional duration or explicit dates plus reminder o
   assert.match(home, /accessWizardApproved = true[\s\S]{0,80}form\.requestSubmit\(\)/);
   assert.match(home, /if \(needsAccessStep && !accessWizardApproved\)/);
   assert.match(sourceManager, /const initialMode = cycle\?\.termValue \? 'duration' : \(access\?\.expiresOn \? 'dates' : 'duration'\)/);
-  assert.match(sourceManager, /document\.getElementById\('modal-save'\)\.hidden = true/);
+  assert.match(sourceManager, /modal\.classList\.add\('provider-access-wizard-modal'\);[\s\S]{0,80}footer\.hidden = true/);
   assert.match(sourceManager, /norva:provider-access-complete'[\s\S]{0,180}modal-save/);
   assert.doesNotMatch(sourceManager, /API\.(?:notifications|push).*reminder|enqueue.*reminder/i);
+});
+
+test('Add TV provider makes connection step one and access choice step two', () => {
+  assert.match(sourceManager, /data-source-provider-onboarding/);
+  assert.match(sourceManager, /data-source-connection-step[\s\S]{0,900}Step 1 of \$\{initialTotal\}[\s\S]{0,900}Add your TV provider/);
+  assert.match(sourceManager, /\$\{urlField\}[\s\S]{0,180}source-provider-login-separator[\s\S]{0,180}\$\{manualLogin\}[\s\S]{0,120}\$\{nameField\}/);
+  assert.match(sourceManager, /source-provider-manual-login[\s\S]{0,180}Enter server login manually/);
+  assert.match(sourceManager, /source-access-onboarding'[\s\S]{0,120}deferred: true, stepOffset: 1/);
+  assert.match(sourceManager, /data-access-step-offset="\$\{normalizedStepOffset\}"/);
+  assert.match(sourceManager, /const visibleStep = stepOffset \+ stepIndex \+ 1/);
+  assert.match(sourceManager, /const showSourceAccessStep = \(\) => \{[\s\S]+?accessWizard\.showStep\(0\)/);
+  assert.match(sourceManager, /norva:provider-access-cancel'[\s\S]{0,180}showSourceConnectionStep/);
+  assert.match(css, /\.source-provider-login-separator\s*\{[\s\S]{0,220}grid-template-columns/);
+  assert.match(css, /\.source-provider-manual-login summary\s*\{[\s\S]{0,80}color:\s*var\(--color-text-primary\)/);
+  assert.match(css, /\.provider-access-wizard-modal \.source-provider-onboarding > \.provider-access-terms\s*\{[\s\S]{0,280}border:\s*0;[\s\S]{0,100}background:\s*transparent;[\s\S]{0,80}box-shadow:\s*none/);
 });
 
 test('Settings provider label cannot inherit personal account autofill', () => {
@@ -167,10 +182,10 @@ test('Provider Access keeps the exact-date calendar optional and explains paused
 });
 
 test('all changed Provider Access UI assets are cache-busted', () => {
-  assert.match(shell, /main\.css\?v=5eb7be4e33/);
+  assert.match(shell, /main\.css\?v=be53290734/);
   assert.match(shell, /cloudApi\.js\?v=70/);
   assert.match(shell, /api\.js\?v=89/);
   assert.match(shell, /sourceHealth\.js\?v=6c0eefcb4f/);
-  assert.match(shell, /SourceManager\.js\?v=a47eaa0316/);
+  assert.match(shell, /SourceManager\.js\?v=dedefaf3cf/);
   assert.match(shell, /HomePage\.js\?v=6016cf63fb/);
 });
