@@ -435,11 +435,19 @@ class SourceManager {
         };
         const accessWizard = this.bindSourceForm(type);
         if (accessWizard?.fieldset) {
-            document.getElementById('modal-save').hidden = true;
-            accessWizard.fieldset.addEventListener('norva:provider-access-cancel', () => modal.classList.remove('active'));
+            modal.classList.add('provider-access-wizard-modal');
+            footer.hidden = true;
+            accessWizard.fieldset.addEventListener('norva:provider-access-cancel', () => {
+                if (accessWizard.isSourceOnboarding) {
+                    accessWizard.showSourceConnectionStep?.();
+                    return;
+                }
+                modal.classList.remove('active');
+            });
             accessWizard.fieldset.addEventListener('norva:provider-access-complete', () => {
                 document.getElementById('modal-save')?.click();
             });
+            body.querySelector('[data-source-onboarding-cancel]')?.addEventListener('click', () => modal.classList.remove('active'));
         }
     }
 
@@ -718,7 +726,7 @@ class SourceManager {
         return ['choice', 'activation', 'duration', 'review'];
     }
 
-    getProviderAccessTermsFields({ prefix = 'source-access', access = null, onboarding = false, deferred = false } = {}) {
+    getProviderAccessTermsFields({ prefix = 'source-access', access = null, onboarding = false, deferred = false, stepOffset = 0 } = {}) {
         if (!this.providerAccessUiEnabled()) return '';
         const cycle = access?.activeCycle || null;
         const initialMode = cycle?.termValue ? 'duration' : (access?.expiresOn ? 'dates' : 'duration');
@@ -729,21 +737,26 @@ class SourceManager {
         const termUnit = String(cycle?.termUnit || 'MONTH').toUpperCase();
         const reminders = access?.remindersEnabled === true;
         const initialSteps = this.providerAccessWizardSteps(initialMode);
+        const normalizedStepOffset = Number.isInteger(Number(stepOffset))
+            ? Math.max(0, Number(stepOffset))
+            : 0;
+        const initialStepNumber = normalizedStepOffset + 1;
+        const initialStepTotal = normalizedStepOffset + initialSteps.length;
         const choices = [
             ['duration', 'Duration bought', 'For example, 2 months from the activation date', '2 mo', 'Recommended'],
             ['dates', 'Start and end dates', 'Use the exact dates from your receipt', '01–31', ''],
             ['skip', 'Add this later', 'Continue without recording an access period', 'Later', '']
         ];
         return `
-          <fieldset class="provider-access-terms provider-access-wizard${onboarding ? ' is-onboarding' : ''}" data-provider-access-terms="${this.escapeHtml(prefix)}" data-access-onboarding="${onboarding}" data-access-has-cycle="${Boolean(cycle)}"${deferred ? ' hidden' : ''}>
+          <fieldset class="provider-access-terms provider-access-wizard${onboarding ? ' is-onboarding' : ''}" data-provider-access-terms="${this.escapeHtml(prefix)}" data-access-onboarding="${onboarding}" data-access-has-cycle="${Boolean(cycle)}" data-access-step-offset="${normalizedStepOffset}"${deferred ? ' hidden' : ''}>
             <legend class="provider-access-sr-only">${onboarding ? 'Provider access period' : 'Access dates and reminders'}</legend>
             <div class="provider-access-wizard-progress">
               <div class="provider-access-wizard-progress-copy">
-                <span data-access-step-label>Step 1 of ${initialSteps.length}</span>
+                <span data-access-step-label>Step ${initialStepNumber} of ${initialStepTotal}</span>
                 <strong data-access-step-name>Choose period</strong>
               </div>
-              <span class="provider-access-wizard-track" role="progressbar" aria-label="Provider access setup" aria-valuemin="1" aria-valuemax="${initialSteps.length}" aria-valuenow="1" data-access-progress>
-                <i data-access-progress-fill></i>
+              <span class="provider-access-wizard-track" role="progressbar" aria-label="Provider access setup" aria-valuemin="1" aria-valuemax="${initialStepTotal}" aria-valuenow="${initialStepNumber}" data-access-progress>
+                <i data-access-progress-fill style="width:${(initialStepNumber / initialStepTotal) * 100}%"></i>
               </span>
             </div>
 
@@ -1091,11 +1104,14 @@ class SourceManager {
             const stepNames = {
                 choice: 'Choose period', activation: 'Activation date', duration: 'Duration and end date', dates: 'Exact dates', review: 'Review'
             };
+            const stepOffset = Math.max(0, Number.parseInt(fieldset.dataset.accessStepOffset || '0', 10) || 0);
             let stepIndex = 0;
             const showStep = (nextIndex, { focus = true } = {}) => {
                 const steps = this.providerAccessWizardSteps(mode?.value || 'skip');
                 stepIndex = Math.max(0, Math.min(nextIndex, steps.length - 1));
                 const activeStep = steps[stepIndex];
+                const visibleStep = stepOffset + stepIndex + 1;
+                const visibleTotal = stepOffset + steps.length;
                 fieldset.dataset.accessWizardStep = activeStep;
                 fieldset.querySelectorAll('[data-access-wizard-stage]').forEach((stage) => {
                     stage.hidden = stage.dataset.accessWizardStage !== activeStep;
@@ -1107,13 +1123,13 @@ class SourceManager {
                 const back = fieldset.querySelector('[data-access-wizard-back]');
                 const next = fieldset.querySelector('[data-access-wizard-next]');
                 const finalStep = stepIndex === steps.length - 1;
-                if (label) label.textContent = `Step ${stepIndex + 1} of ${steps.length}`;
+                if (label) label.textContent = `Step ${visibleStep} of ${visibleTotal}`;
                 if (name) name.textContent = stepNames[activeStep] || 'Provider access';
                 if (progress) {
-                    progress.setAttribute('aria-valuemax', String(steps.length));
-                    progress.setAttribute('aria-valuenow', String(stepIndex + 1));
+                    progress.setAttribute('aria-valuemax', String(visibleTotal));
+                    progress.setAttribute('aria-valuenow', String(visibleStep));
                 }
-                if (fill) fill.style.width = `${((stepIndex + 1) / steps.length) * 100}%`;
+                if (fill) fill.style.width = `${(visibleStep / visibleTotal) * 100}%`;
                 if (back) back.textContent = stepIndex === 0 ? (fieldset.dataset.accessOnboarding === 'true' ? 'Back' : 'Cancel') : 'Back';
                 if (next) {
                     const hasCycle = fieldset.dataset.accessHasCycle === 'true';
@@ -1124,7 +1140,7 @@ class SourceManager {
                 updateReview();
                 if (activeStep === 'duration') this.renderProviderAccessCalendar(fieldset, { resetMonth: true });
                 const live = fieldset.querySelector('[data-access-wizard-live]');
-                if (live) live.textContent = `${stepNames[activeStep] || 'Provider access'}, step ${stepIndex + 1} of ${steps.length}.`;
+                if (live) live.textContent = `${stepNames[activeStep] || 'Provider access'}, step ${visibleStep} of ${visibleTotal}.`;
                 const modalBody = fieldset.closest('.modal-body');
                 if (modalBody?.closest('.provider-access-wizard-modal')) modalBody.scrollTop = 0;
                 if (focus && !fieldset.hidden) {
@@ -1295,7 +1311,7 @@ class SourceManager {
         const urlValue = this.editableSourceUrl(type, source);
         const savedConnectionCard = this.getSavedConnectionCard(type, source);
         const accessFields = type === 'xtream' && !isExisting
-            ? this.getProviderAccessTermsFields({ prefix: 'source-access-onboarding', onboarding: true })
+            ? this.getProviderAccessTermsFields({ prefix: 'source-access-onboarding', onboarding: true, deferred: true, stepOffset: 1 })
             : '';
         const introField = `
       <p class="source-form-intro">${this.escapeHtml(intros[type] || 'Connect a TV service to Norva.')}</p>
@@ -1316,30 +1332,69 @@ class SourceManager {
         ${type === 'xtream' ? '<p class="hint" id="source-url-parse-hint">If you paste a full Xtream link, Norva will fill the login fields automatically.</p>' : ''}
         ${source.cloud ? '<p class="hint">Norva keeps the original full link private. The saved server is shown here. Paste a complete link only when replacing or repairing the login.</p>' : ''}
       </div>
-    `;
+        `;
 
         if (type === 'xtream') {
             const advancedOpen = source.id ? ' open' : '';
+            const manualLogin = `
+              <details class="source-advanced-login source-provider-manual-login" id="source-advanced-login"${advancedOpen}>
+                <summary>Enter server login manually</summary>
+                <p class="source-provider-manual-hint">Use this when your provider sent a server address, username and password separately.</p>
+                <div class="form-group">
+                <label for="source-username">Username</label>
+                <input type="text" id="source-username" name="provider-login" class="form-input" value="${this.escapeHtml(source.username || '')}" autocomplete="off" autocapitalize="none" spellcheck="false" data-1p-ignore="true" data-lpignore="true" data-form-type="other">
+                </div>
+                <div class="form-group">
+                <label for="source-password">Password</label>
+                <input type="password" id="source-password" name="provider-secret" class="form-input"
+                       placeholder="${isExisting ? 'Password saved - leave blank to keep it' : ''}"
+                       value="${source.password && !source.password.includes('•') ? this.escapeHtml(source.password) : ''}" autocomplete="new-password" data-1p-ignore="true" data-lpignore="true" data-form-type="other">
+                  ${isExisting ? '<p class="hint">Leave this empty to keep the saved password. Type a new password only when repairing or replacing the login.</p>' : ''}
+                </div>
+              </details>
+            `;
+            if (!isExisting && accessFields) {
+                const initialTotal = this.providerAccessWizardSteps('duration').length + 1;
+                return `
+                  <div class="source-provider-onboarding" data-source-provider-onboarding>
+                    <section class="provider-access-terms provider-access-wizard is-onboarding source-provider-connection" data-source-connection-step aria-labelledby="source-provider-connection-title">
+                      <div class="provider-access-wizard-progress">
+                        <div class="provider-access-wizard-progress-copy">
+                          <span data-source-connection-step-label>Step 1 of ${initialTotal}</span>
+                          <strong>Connect provider</strong>
+                        </div>
+                        <span class="provider-access-wizard-track" role="progressbar" aria-label="TV provider setup" aria-valuemin="1" aria-valuemax="${initialTotal}" aria-valuenow="1" data-source-connection-progress>
+                          <i style="width:${100 / initialTotal}%"></i>
+                        </span>
+                      </div>
+                      <div class="provider-access-wizard-stage">
+                        <div class="provider-access-wizard-copy">
+                          <span class="provider-access-wizard-eyebrow">TV provider</span>
+                          <h3 id="source-provider-connection-title" tabindex="-1">Add your TV provider</h3>
+                          <p>${this.escapeHtml(intros.xtream)}</p>
+                        </div>
+                        ${urlField}
+                        <div class="source-provider-login-separator" aria-hidden="true"><span>or</span></div>
+                        ${manualLogin}
+                        ${nameField}
+                      </div>
+                      <p class="form-error provider-access-form-error" data-source-connection-error role="alert" hidden></p>
+                      <div class="provider-access-wizard-actions">
+                        <button class="btn btn-secondary" type="button" data-source-onboarding-cancel>Cancel</button>
+                        <button class="btn btn-primary" type="button" data-source-onboarding-next>Continue <span aria-hidden="true">→</span></button>
+                      </div>
+                      <span class="provider-access-sr-only" aria-live="polite" aria-atomic="true" data-source-onboarding-live></span>
+                    </section>
+                    ${accessFields}
+                  </div>
+                `;
+            }
             return `
         ${introField}
         ${savedConnectionCard}
         ${urlField}
         ${nameField}
-        ${accessFields}
-        <details class="source-advanced-login" id="source-advanced-login"${advancedOpen}>
-          <summary>Enter server login manually</summary>
-          <div class="form-group">
-          <label for="source-username">Username</label>
-          <input type="text" id="source-username" name="provider-login" class="form-input" value="${this.escapeHtml(source.username || '')}" autocomplete="off" autocapitalize="none" spellcheck="false" data-1p-ignore="true" data-lpignore="true" data-form-type="other">
-          </div>
-          <div class="form-group">
-          <label for="source-password">Password</label>
-          <input type="password" id="source-password" name="provider-secret" class="form-input"
-                 placeholder="${isExisting ? 'Password saved - leave blank to keep it' : ''}"
-                 value="${source.password && !source.password.includes('•') ? this.escapeHtml(source.password) : ''}" autocomplete="new-password" data-1p-ignore="true" data-lpignore="true" data-form-type="other">
-            ${isExisting ? '<p class="hint">Leave this empty to keep the saved password. Type a new password only when repairing or replacing the login.</p>' : ''}
-          </div>
-        </details>
+        ${manualLogin}
       `;
         }
 
@@ -1355,6 +1410,11 @@ class SourceManager {
         const passwordInput = document.getElementById('source-password');
         const advancedLogin = document.getElementById('source-advanced-login');
         const hint = document.getElementById('source-url-parse-hint');
+        const sourceOnboarding = document.querySelector('[data-source-provider-onboarding]');
+        const connectionStep = sourceOnboarding?.querySelector('[data-source-connection-step]');
+        const connectionError = sourceOnboarding?.querySelector('[data-source-connection-error]');
+        const connectionNext = sourceOnboarding?.querySelector('[data-source-onboarding-next]');
+        const connectionLive = sourceOnboarding?.querySelector('[data-source-onboarding-live]');
         if (!urlInput || !usernameInput || !passwordInput) return;
 
         const applyParsedLink = (force = false) => {
@@ -1389,6 +1449,75 @@ class SourceManager {
         urlInput.addEventListener('paste', () => setTimeout(() => applyParsedLink(true), 0));
         urlInput.addEventListener('blur', () => applyParsedLink(false));
         urlInput.addEventListener('change', () => applyParsedLink(false));
+        if (sourceOnboarding && connectionStep && connectionNext && accessWizard?.fieldset) {
+            const modalBody = sourceOnboarding.closest('.modal-body');
+            const clearConnectionError = () => {
+                if (connectionError) {
+                    connectionError.textContent = '';
+                    connectionError.hidden = true;
+                }
+                [urlInput, usernameInput, passwordInput].forEach((control) => control.removeAttribute('aria-invalid'));
+            };
+            const updateConnectionProgress = () => {
+                const selectedMode = accessWizard.fieldset.querySelector('[data-access-mode]')?.value || 'duration';
+                const total = this.providerAccessWizardSteps(selectedMode).length + 1;
+                const label = connectionStep.querySelector('[data-source-connection-step-label]');
+                const progress = connectionStep.querySelector('[data-source-connection-progress]');
+                const fill = progress?.querySelector('i');
+                if (label) label.textContent = `Step 1 of ${total}`;
+                if (progress) progress.setAttribute('aria-valuemax', String(total));
+                if (fill) fill.style.width = `${100 / total}%`;
+            };
+            const showSourceConnectionStep = ({ focus = true } = {}) => {
+                sourceOnboarding.dataset.sourceOnboardingStep = 'connection';
+                connectionStep.hidden = false;
+                accessWizard.fieldset.hidden = true;
+                updateConnectionProgress();
+                if (modalBody) modalBody.scrollTop = 0;
+                if (connectionLive) connectionLive.textContent = 'Connect provider, step 1.';
+                if (focus) requestAnimationFrame(() => connectionStep.querySelector('h3')?.focus({ preventScroll: true }));
+            };
+            const showSourceAccessStep = () => {
+                clearConnectionError();
+                applyParsedLink(false);
+                try {
+                    this.buildSourceConnection({
+                        type: 'xtream',
+                        url: urlInput.value,
+                        name: nameInput?.value || '',
+                        username: usernameInput.value,
+                        password: passwordInput.value,
+                        existing: false
+                    });
+                } catch (error) {
+                    const target = !urlInput.value.trim()
+                        ? urlInput
+                        : (!usernameInput.value.trim() ? usernameInput : passwordInput);
+                    if (target !== urlInput && advancedLogin) advancedLogin.open = true;
+                    target.setAttribute('aria-invalid', 'true');
+                    if (connectionError) {
+                        connectionError.textContent = error.message;
+                        connectionError.hidden = false;
+                    }
+                    target.focus({ preventScroll: true });
+                    return;
+                }
+                sourceOnboarding.dataset.sourceOnboardingStep = 'access';
+                connectionStep.hidden = true;
+                accessWizard.fieldset.hidden = false;
+                accessWizard.showStep(0);
+                if (modalBody) modalBody.scrollTop = 0;
+                if (connectionLive) connectionLive.textContent = 'Choose the provider access period.';
+            };
+            [urlInput, usernameInput, passwordInput].forEach((control) => {
+                control.addEventListener('input', clearConnectionError);
+            });
+            connectionNext.addEventListener('click', showSourceAccessStep);
+            accessWizard.isSourceOnboarding = true;
+            accessWizard.showSourceConnectionStep = showSourceConnectionStep;
+            accessWizard.showSourceAccessStep = showSourceAccessStep;
+            showSourceConnectionStep({ focus: false });
+        }
         return accessWizard;
     }
 
