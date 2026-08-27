@@ -3158,7 +3158,12 @@ video::cue {
 }
 
 .source-item.disabled {
-  opacity: 0.5;
+  opacity: 1;
+}
+
+.source-item.disabled .source-icon,
+.source-item.disabled .source-url {
+  opacity: 0.62;
 }
 
 .source-icon {
@@ -3327,6 +3332,12 @@ video::cue {
   box-shadow: var(--shadow-lg);
 }
 
+.source-health-disabled {
+  color: var(--color-text-secondary);
+  border-color: var(--color-border-light);
+  background: var(--color-bg-tertiary);
+}
+
 .source-menu[hidden] {
   display: none;
 }
@@ -3403,6 +3414,12 @@ video::cue {
   outline: none;
   background: var(--color-bg-hover);
   box-shadow: inset 0 0 0 2px var(--color-accent);
+}
+
+.source-menu-item:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background: transparent;
 }
 
 .source-menu-danger {

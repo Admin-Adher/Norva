@@ -28,6 +28,13 @@
             message: 'Your catalog is ready to watch.',
             action: 'Manage service'
         },
+        disabled: {
+            severity: 0,
+            label: 'Disabled',
+            title: 'TV service paused',
+            message: 'This service is paused. Its saved catalog will return when you enable it.',
+            action: 'Manage service'
+        },
         degraded: {
             severity: 3,
             label: 'Needs attention',
@@ -100,6 +107,16 @@
     function sourceType(source = {}) {
         source = source || {};
         return string(source.type || source.source_type || source.sourceType || 'xtream') || 'xtream';
+    }
+
+    // `enabled` on a normalized source is the effective catalogue visibility
+    // (`managementEnabled && catalogVisible`). It must not be used on its own to
+    // decide whether the user intentionally paused the provider. Prefer the
+    // explicit management fields and keep the legacy fallback for raw sources.
+    function sourceManagementEnabled(source = {}) {
+        if (typeof source.managementEnabled === 'boolean') return source.managementEnabled;
+        if (typeof source.sourceEnabled === 'boolean') return source.sourceEnabled;
+        return source.enabled !== false;
     }
 
     function statusFor(source, statuses = []) {
@@ -271,13 +288,16 @@
         const progressStage = lower(progress.stage || '');
         const error = string(source.sync_error || source.syncError || status.error || status.sync_error || '');
         const lastSync = completedSyncAt(source, status);
-        const enabled = source.enabled !== false && source.revoked !== true;
+        const managementEnabled = sourceManagementEnabled(source);
+        const revoked = source.revoked === true;
         const autoRefreshAction = autoRefreshActionState(source);
 
         let state = 'degraded';
         let refreshing = false;
         let retrying = false;
-        if (!enabled) {
+        if (!managementEnabled) {
+            state = 'disabled';
+        } else if (revoked) {
             state = 'degraded';
         } else if (autoRefreshAction) {
             state = autoRefreshAction;
@@ -347,7 +367,7 @@
             label: meta.label,
             title: meta.title,
             message: error && state !== 'ready'
-                && !['auth_failed', 'expired', 'provider_changed'].includes(state)
+                && !['auth_failed', 'expired', 'provider_changed', 'disabled'].includes(state)
                 ? safeShortError(error)
                 : meta.message,
             action: meta.action,
@@ -365,6 +385,9 @@
 
     function catalogUnlocks(progress = {}, classification = {}) {
         const source = classification.source || {};
+        if (classification.state === 'disabled') {
+            return { live: false, movies: false, series: false, browsable: false };
+        }
         const providerAccessStatus = lower(
             source.provider_access_status || source.providerAccessStatus || ''
         );
@@ -505,6 +528,18 @@
         const issues = classified.filter(item => item.needsAttention);
         const ready = classified.filter(item => item.state === 'ready');
         const syncing = classified.filter(item => item.state === 'syncing');
+        const disabled = classified.filter(item => item.state === 'disabled');
+
+        if (disabled.length === classified.length) {
+            return {
+                state: 'disabled',
+                sources: classified,
+                issues: [],
+                ready,
+                disabled,
+                ...STATE_META.disabled
+            };
+        }
 
         if (!ready.length && syncing.length && !issues.length) {
             return {
@@ -588,7 +623,7 @@
         const tvHandoff = options.tvHandoff === true;
         const accountSummary = options.accountSummary === true;
         const publicState = tvHandoff
-            ? (state === 'ready' ? 'ready' : state === 'syncing' ? 'syncing' : 'degraded')
+            ? (state === 'ready' ? 'ready' : state === 'syncing' ? 'syncing' : state === 'disabled' ? 'disabled' : 'degraded')
             : state;
         const issueCount = summary.issues?.length || 0;
         const sourceCount = summary.sources?.length || 0;
@@ -615,6 +650,12 @@
                     message: 'Available titles appear as your catalogue is prepared.',
                     action: 'Show instructions'
                 }
+                : state === 'disabled'
+                    ? {
+                        title: 'TV service is paused',
+                        message: 'Enable it from TV Service settings to make its saved catalogue available again.',
+                        action: 'Show instructions'
+                    }
                 : {
                     title: 'TV service needs attention',
                     message: 'Some content may be unavailable. Available titles still play.',

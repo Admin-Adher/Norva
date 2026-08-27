@@ -1501,6 +1501,14 @@ class HomePage {
         const pairedScreen = this.isPairedScreen();
 
         if (pairedScreen) {
+            if (state === 'disabled') {
+                return {
+                    title: 'Your TV service is paused',
+                    message: 'Enable it from your phone or web account, then check again here.',
+                    primary: 'Check again',
+                    primaryAction: 'refresh'
+                };
+            }
             if (state === 'syncing') {
                 return {
                     title: 'Norva is preparing your catalog',
@@ -1532,6 +1540,13 @@ class HomePage {
                 primary: 'View TV service'
             };
         }
+        if (state === 'disabled') {
+            return {
+                title: 'Your TV service is paused',
+                message: summary.message || 'Enable it from TV Service settings to make its saved catalog available again.',
+                primary: 'Manage TV service'
+            };
+        }
         if (['auth_failed', 'expired'].includes(state)) {
             return {
                 title: 'Repair your TV service',
@@ -1556,6 +1571,7 @@ class HomePage {
     setupSteps(state) {
         const connected = state !== 'not_configured';
         const ready = state === 'ready';
+        const disabled = state === 'disabled';
         const needsRepair = ['auth_failed', 'expired', 'unreachable', 'degraded'].includes(state);
         return [
             {
@@ -1567,7 +1583,7 @@ class HomePage {
             {
                 index: '2',
                 title: state === 'syncing' ? 'Preparing catalog' : 'Catalog preparation',
-                hint: state === 'syncing' ? 'Importing content now.' : ready ? 'Catalog ready.' : 'Norva prepares channels, movies and series after connection.',
+                hint: state === 'syncing' ? 'Importing content now.' : ready ? 'Catalog ready.' : disabled ? 'Enable the service to restore its saved catalog.' : 'Norva prepares channels, movies and series after connection.',
                 state: ready ? 'complete' : state === 'syncing' ? 'active' : 'pending'
             },
             {

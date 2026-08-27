@@ -220,10 +220,12 @@ class SourceManager {
 
         container.innerHTML = sources.map(source => {
             const sourceView = this.sourceWithStatus(source);
+            const managementEnabled = this.isSourceManagementEnabled(sourceView);
             const health = window.NorvaSourceHealth?.classifySource(sourceView, this.sourceStatuses || []) || {
-                state: this.isSourceManagementEnabled(source) ? 'ready' : 'degraded',
-                label: this.isSourceManagementEnabled(source) ? 'Ready' : 'Disabled',
-                message: ''
+                state: managementEnabled ? 'ready' : 'disabled',
+                label: managementEnabled ? 'Ready' : 'Disabled',
+                message: managementEnabled ? '' : 'This service is paused. Its saved catalog will return when you enable it.',
+                needsAttention: false
             };
             const retryPending = health.state === 'ready' && health.retrying === true;
             const healthLabel = retryPending ? 'Ready · retry pending' : health.label;
@@ -236,9 +238,9 @@ class SourceManager {
             // Usable-but-still-topping-up: onboarding is "done" (catalogue navigable) yet the
             // remaining VOD long-tail is still materialising in the background. Surface it as
             // a quiet line here in Settings only — never as a blocking onboarding bar.
-            const backgrounding = this.sourceSyncState(sourceView).backgrounding === true;
+            const backgrounding = managementEnabled && this.sourceSyncState(sourceView).backgrounding === true;
             const providerAccessEnabled = type === 'xtream' && this.providerAccessUiEnabled();
-            const accessSummary = providerAccessEnabled
+            const accessSummary = providerAccessEnabled && managementEnabled
                 ? this.providerAccessSummary(sourceView)
                 : null;
             // One clear primary action (Repair when the service needs attention, else
@@ -248,7 +250,9 @@ class SourceManager {
             const needsAccessReview = providerAccessEnabled
                 && ['auth_failed', 'expired', 'provider_changed'].includes(health.state);
             let primary = { action: 'refresh', label: 'Sync', cls: '' };
-            if (needsAccessReview) {
+            if (!managementEnabled) {
+                primary = { action: 'toggle', label: 'Enable service', cls: '' };
+            } else if (needsAccessReview) {
                 primary = {
                     action: 'provider-access',
                     label: accessSummary?.detail ? 'Review access' : 'Add access dates',
@@ -263,7 +267,7 @@ class SourceManager {
                 ? 'Edit playlist link'
                 : (type === 'epg' ? 'Edit TV guide' : 'Edit service');
             return `
-      <div class="source-item ${this.isSourceManagementEnabled(source) ? '' : 'disabled'} ${health.needsAttention ? 'needs-attention' : ''}" data-id="${this.escapeHtml(source.id)}">
+      <div class="source-item ${managementEnabled ? '' : 'disabled'} ${health.needsAttention ? 'needs-attention' : ''}" data-id="${this.escapeHtml(source.id)}">
         <span class="source-icon">${icons[type]}</span>
         <div class="source-info">
           <div class="source-name-row">
@@ -291,14 +295,14 @@ class SourceManager {
             ` : ''}
             <div class="source-menu-section" role="group" aria-label="Catalog actions">
               <span class="source-menu-heading" aria-hidden="true">Catalog actions</span>
-              <button class="source-menu-item" data-action="test" role="menuitem" type="button"><span class="source-menu-item-label">Check service</span></button>
-              <button class="source-menu-item" data-action="refresh" role="menuitem" type="button"><span class="source-menu-item-label">Sync now</span></button>
-              <button class="source-menu-item" data-action="hard-refresh" role="menuitem" type="button"><span class="source-menu-item-label">Rebuild catalog</span></button>
+              <button class="source-menu-item" data-action="test" role="menuitem" type="button"${managementEnabled ? '' : ' disabled aria-disabled="true" title="Enable the service first"'}><span class="source-menu-item-label">Check service</span></button>
+              <button class="source-menu-item" data-action="refresh" role="menuitem" type="button"${managementEnabled ? '' : ' disabled aria-disabled="true" title="Enable the service first"'}><span class="source-menu-item-label">Sync now</span></button>
+              <button class="source-menu-item" data-action="hard-refresh" role="menuitem" type="button"${managementEnabled ? '' : ' disabled aria-disabled="true" title="Enable the service first"'}><span class="source-menu-item-label">Rebuild catalog</span></button>
             </div>
             <div class="source-menu-section" role="group" aria-label="Service">
               <span class="source-menu-heading" aria-hidden="true">Service</span>
               ${type !== 'xtream' ? `<button class="source-menu-item" data-action="edit" role="menuitem" type="button"><span class="source-menu-item-label">${legacyEditLabel}</span></button>` : ''}
-              <button class="source-menu-item" data-action="toggle" role="menuitem" type="button"><span class="source-menu-item-label">${this.isSourceManagementEnabled(source) ? 'Disable service' : 'Enable service'}</span></button>
+              <button class="source-menu-item" data-action="toggle" role="menuitem" type="button"><span class="source-menu-item-label">${managementEnabled ? 'Disable service' : 'Enable service'}</span></button>
             </div>
             <div class="source-menu-section source-menu-section-danger" role="group" aria-label="Danger zone">
               <span class="source-menu-heading" aria-hidden="true">Danger zone</span>

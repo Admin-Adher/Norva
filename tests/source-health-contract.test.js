@@ -44,6 +44,53 @@ test('source health distinguishes an initial import from a usable background ref
   assert.equal(refresh.refreshing, true);
 });
 
+test('an intentionally disabled service is paused, not broken, and cannot unlock the catalog', () => {
+  const health = sourceHealthHarness();
+  const source = {
+    id: 'source-disabled',
+    managementEnabled: false,
+    sourceEnabled: false,
+    enabled: false,
+    catalogVisible: false,
+    sync_status: 'ready',
+    sync_error: 'stale provider error that must stay hidden',
+    configHint: { lastSync: { syncedAt: '2026-08-10T08:00:00.000Z', total: 42 } },
+  };
+
+  const classification = health.classifySource(source);
+  const summary = health.summarize([source]);
+  const availability = health.catalogAvailability(summary);
+
+  assert.equal(classification.state, 'disabled');
+  assert.equal(classification.label, 'Disabled');
+  assert.equal(classification.needsAttention, false);
+  assert.equal(classification.isBlocking, false);
+  assert.doesNotMatch(classification.message, /error|repair|unavailable/i);
+  assert.equal(summary.state, 'disabled');
+  assert.equal(availability.catalogReady, false);
+  assert.equal(availability.browsable, false);
+  assert.equal(availability.gate, true);
+});
+
+test('effective catalog visibility never masks an enabled provider action state as disabled', () => {
+  const health = sourceHealthHarness();
+  const source = {
+    id: 'source-hidden',
+    managementEnabled: true,
+    sourceEnabled: true,
+    enabled: false,
+    catalogVisible: false,
+    sync_status: 'ready',
+    auto_refresh_state: {
+      actionRequired: true,
+      terminalHttpStatus: 404,
+      terminalErrorKind: 'not_found',
+    },
+  };
+
+  assert.equal(health.classifySource(source).state, 'provider_changed');
+});
+
 test('source health keeps hard account failures actionable but preserves a built catalog on transient errors', () => {
   const health = sourceHealthHarness();
   const completed = { lastSync: { syncedAt: '2026-08-10T08:00:00.000Z', total: 42 } };
@@ -486,6 +533,37 @@ test('SourceManager routes a 401 or 404 to Provider Access dates instead of a bl
   assert.match(container.innerHTML, /data-action="provider-access"[^>]*>Add access dates<\/button>/);
   assert.match(container.innerHTML, /Access dates not added/);
   assert.doesNotMatch(container.innerHTML, /data-action="edit"[^>]*>Repair<\/button>/);
+});
+
+test('SourceManager renders an intentional pause with one enable action and no repair warning', () => {
+  const health = sourceHealthHarness();
+  const { manager } = sourceManagerHarness({
+    providerAccessUiEnabled: true,
+    sourceHealth: health,
+  });
+  const container = {
+    innerHTML: '',
+    querySelectorAll() { return []; },
+  };
+
+  manager.renderSourceList(container, [{
+    id: 'source-disabled',
+    name: 'AtlasPro',
+    type: 'xtream',
+    managementEnabled: false,
+    sourceEnabled: false,
+    enabled: false,
+    catalogVisible: false,
+    sync_status: 'ready',
+    provider_access_status: 'unknown',
+  }], 'xtream');
+
+  assert.match(container.innerHTML, /source-item disabled/);
+  assert.match(container.innerHTML, /source-health-disabled[^>]*>Disabled</);
+  assert.match(container.innerHTML, /This service is paused/);
+  assert.match(container.innerHTML, /data-action="toggle"[^>]*>Enable service<\/button>/);
+  assert.match(container.innerHTML, /data-action="refresh"[^>]*disabled aria-disabled="true"/);
+  assert.doesNotMatch(container.innerHTML, /Needs attention|>Repair<|Access dates not added/);
 });
 
 function sourceManagerStatusHarness() {
