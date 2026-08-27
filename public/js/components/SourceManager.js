@@ -237,25 +237,31 @@ class SourceManager {
             // remaining VOD long-tail is still materialising in the background. Surface it as
             // a quiet line here in Settings only — never as a blocking onboarding bar.
             const backgrounding = this.sourceSyncState(sourceView).backgrounding === true;
-            const accessSummary = type === 'xtream' && this.providerAccessUiEnabled()
+            const providerAccessEnabled = type === 'xtream' && this.providerAccessUiEnabled();
+            const accessSummary = providerAccessEnabled
                 ? this.providerAccessSummary(sourceView)
                 : null;
             // One clear primary action (Repair when the service needs attention, else
             // Sync); everything else lives in a labelled ⋯ menu instead of a row of
             // tooltip-only icons that are illegible on touch and TV.
             const needsRepair = !!health.needsAttention;
-            const needsAccessReview = type === 'xtream'
-                && this.providerAccessUiEnabled()
+            const needsAccessReview = providerAccessEnabled
                 && ['auth_failed', 'expired', 'provider_changed'].includes(health.state);
-            const primary = needsAccessReview
-                ? {
+            let primary = { action: 'refresh', label: 'Sync', cls: '' };
+            if (needsAccessReview) {
+                primary = {
                     action: 'provider-access',
                     label: accessSummary?.detail ? 'Review access' : 'Add access dates',
                     cls: 'btn-repair'
-                }
-                : needsRepair
-                ? { action: 'edit', label: 'Repair', cls: 'btn-repair' }
-                : { action: 'refresh', label: 'Sync', cls: '' };
+                };
+            } else if (needsRepair && type === 'xtream' && !providerAccessEnabled) {
+                primary = { action: 'test', label: 'Check service', cls: 'btn-repair' };
+            } else if (needsRepair) {
+                primary = { action: 'edit', label: 'Repair', cls: 'btn-repair' };
+            }
+            const legacyEditLabel = type === 'm3u'
+                ? 'Edit playlist link'
+                : (type === 'epg' ? 'Edit TV guide' : 'Edit service');
             return `
       <div class="source-item ${this.isSourceManagementEnabled(source) ? '' : 'disabled'} ${health.needsAttention ? 'needs-attention' : ''}" data-id="${this.escapeHtml(source.id)}">
         <span class="source-icon">${icons[type]}</span>
@@ -271,16 +277,33 @@ class SourceManager {
         </div>
         <div class="source-actions">
           ${progressButton}
-          <button class="btn btn-sm btn-secondary source-primary-action ${primary.cls}" data-action="${primary.action}"${retryPending ? ' title="Retry catalog update" aria-label="Retry catalog update"' : ''}>${primary.label}</button>
-          <button class="btn btn-sm btn-secondary source-menu-btn" data-action="menu" aria-haspopup="true" aria-expanded="false" aria-label="More actions" title="More actions">⋯</button>
-          <div class="source-menu" role="menu" hidden>
-            <button class="source-menu-item" data-action="test" role="menuitem" type="button">Check service</button>
-            <button class="source-menu-item" data-action="refresh" role="menuitem" type="button">Sync now</button>
-            <button class="source-menu-item" data-action="hard-refresh" role="menuitem" type="button">Rebuild catalog</button>
-            <button class="source-menu-item" data-action="edit" role="menuitem" type="button">${needsRepair ? 'Repair login' : 'Edit login'}</button>
-            ${type === 'xtream' && this.providerAccessUiEnabled() ? '<button class="source-menu-item" data-action="provider-access" role="menuitem" type="button">Provider access</button>' : ''}
-            <button class="source-menu-item" data-action="toggle" role="menuitem" type="button">${this.isSourceManagementEnabled(source) ? 'Disable service' : 'Enable service'}</button>
-            <button class="source-menu-item source-menu-danger" data-action="delete" role="menuitem" type="button">Remove</button>
+          <button class="btn btn-sm btn-secondary source-primary-action ${primary.cls}" data-action="${primary.action}" type="button"${retryPending ? ' title="Retry catalog update" aria-label="Retry catalog update"' : ''}>${primary.label}</button>
+          <button class="btn btn-sm btn-secondary source-menu-btn" data-action="menu" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="More actions" title="More actions">⋯</button>
+          <div class="source-menu" role="menu" aria-label="${this.escapeHtml(source.name || 'TV service')} actions" hidden>
+            ${providerAccessEnabled ? `
+              <div class="source-menu-section" role="group" aria-label="Provider access">
+                <span class="source-menu-heading" aria-hidden="true">Provider access</span>
+                <button class="source-menu-item source-menu-item-featured" data-action="provider-access" role="menuitem" type="button">
+                  <span class="source-menu-item-label">Manage provider access</span>
+                  <span class="source-menu-item-detail">Dates, duration, reminders, login or catalogue changes</span>
+                </button>
+              </div>
+            ` : ''}
+            <div class="source-menu-section" role="group" aria-label="Catalog actions">
+              <span class="source-menu-heading" aria-hidden="true">Catalog actions</span>
+              <button class="source-menu-item" data-action="test" role="menuitem" type="button"><span class="source-menu-item-label">Check service</span></button>
+              <button class="source-menu-item" data-action="refresh" role="menuitem" type="button"><span class="source-menu-item-label">Sync now</span></button>
+              <button class="source-menu-item" data-action="hard-refresh" role="menuitem" type="button"><span class="source-menu-item-label">Rebuild catalog</span></button>
+            </div>
+            <div class="source-menu-section" role="group" aria-label="Service">
+              <span class="source-menu-heading" aria-hidden="true">Service</span>
+              ${type !== 'xtream' ? `<button class="source-menu-item" data-action="edit" role="menuitem" type="button"><span class="source-menu-item-label">${legacyEditLabel}</span></button>` : ''}
+              <button class="source-menu-item" data-action="toggle" role="menuitem" type="button"><span class="source-menu-item-label">${this.isSourceManagementEnabled(source) ? 'Disable service' : 'Enable service'}</span></button>
+            </div>
+            <div class="source-menu-section source-menu-section-danger" role="group" aria-label="Danger zone">
+              <span class="source-menu-heading" aria-hidden="true">Danger zone</span>
+              <button class="source-menu-item source-menu-danger" data-action="delete" role="menuitem" type="button"><span class="source-menu-item-label">Remove</span></button>
+            </div>
           </div>
         </div>
       </div>
@@ -297,7 +320,7 @@ class SourceManager {
                 if (!actionEl || !item.contains(actionEl)) return;
                 const action = actionEl.dataset.action;
                 if (action === 'menu') { this.toggleSourceMenu(item); return; }
-                this.closeAllSourceMenus();
+                this.closeAllSourceMenus({ restoreFocus: true });
                 switch (action) {
                     case 'progress': this.showCatalogPreparationById(id, type); break;
                     case 'refresh': this.refreshSource(id, type); break;
@@ -316,28 +339,51 @@ class SourceManager {
     toggleSourceMenu(item) {
         const menu = item.querySelector('.source-menu');
         if (!menu) return;
+        const trigger = item.querySelector('.source-menu-btn');
         const willOpen = menu.hasAttribute('hidden');
         this.closeAllSourceMenus();
         if (!willOpen) return;
         menu.removeAttribute('hidden');
-        item.querySelector('.source-menu-btn')?.setAttribute('aria-expanded', 'true');
+        trigger?.setAttribute('aria-expanded', 'true');
         // Close on outside click / Escape. Deferred so the opening click doesn't
         // immediately re-close it.
         this._srcMenuOutside = (e) => { if (!item.contains(e.target)) this.closeAllSourceMenus(); };
-        this._srcMenuKey = (e) => { if (e.key === 'Escape' || e.key === 'GoBack') this.closeAllSourceMenus(); };
+        this._srcMenuKey = (e) => {
+            const controls = [...menu.querySelectorAll('[role="menuitem"]')].filter(control => !control.disabled);
+            const activeIndex = controls.indexOf(document.activeElement);
+            if (e.key === 'Escape' || e.key === 'GoBack') {
+                e.preventDefault();
+                this.closeAllSourceMenus({ restoreFocus: true });
+                return;
+            }
+            let nextIndex = null;
+            if (e.key === 'ArrowDown') nextIndex = activeIndex < 0 ? 0 : (activeIndex + 1) % controls.length;
+            if (e.key === 'ArrowUp') nextIndex = activeIndex < 0 ? controls.length - 1 : (activeIndex - 1 + controls.length) % controls.length;
+            if (e.key === 'Home') nextIndex = 0;
+            if (e.key === 'End') nextIndex = controls.length - 1;
+            if (nextIndex !== null && controls[nextIndex]) {
+                e.preventDefault();
+                controls[nextIndex].focus();
+            }
+        };
         setTimeout(() => {
             document.addEventListener('click', this._srcMenuOutside, true);
             document.addEventListener('keydown', this._srcMenuKey, true);
+            menu.querySelector('[role="menuitem"]')?.focus();
         }, 0);
     }
 
-    closeAllSourceMenus() {
+    closeAllSourceMenus({ restoreFocus = false } = {}) {
+        let restoreTarget = null;
         document.querySelectorAll('.source-menu:not([hidden])').forEach((m) => {
             m.setAttribute('hidden', '');
-            m.closest('.source-item')?.querySelector('.source-menu-btn')?.setAttribute('aria-expanded', 'false');
+            const trigger = m.closest('.source-item')?.querySelector('.source-menu-btn');
+            trigger?.setAttribute('aria-expanded', 'false');
+            if (restoreFocus && !restoreTarget) restoreTarget = trigger;
         });
         if (this._srcMenuOutside) { document.removeEventListener('click', this._srcMenuOutside, true); this._srcMenuOutside = null; }
         if (this._srcMenuKey) { document.removeEventListener('keydown', this._srcMenuKey, true); this._srcMenuKey = null; }
+        restoreTarget?.focus();
     }
 
     /**
@@ -1511,10 +1557,14 @@ class SourceManager {
             payload.error_code || payload.errorCode || payload.code || value?.code || ''
         ).trim().toUpperCase();
         if (code === 'PROVIDER_CREDENTIALS_REJECTED') {
-            return 'The provider refused the saved username or password. Open Repair login to update it.';
+            return this.providerAccessUiEnabled()
+                ? 'The provider refused the saved username or password. Open Manage provider access to update it.'
+                : 'The provider refused the saved username or password. Secure login repair is not available for this account yet.';
         }
         if (code === 'PROVIDER_ENDPOINT_NOT_FOUND') {
-            return 'The provider address or account endpoint is no longer available. Open Repair login to review it.';
+            return this.providerAccessUiEnabled()
+                ? 'The provider address or account endpoint is no longer available. Open Manage provider access to review it.'
+                : 'The provider address or account endpoint is no longer available. Secure login repair is not available for this account yet.';
         }
         if (code === 'PROVIDER_ACCESS_EXPIRED') {
             return 'The provider reports that this access is inactive. Review the access dates before syncing again.';

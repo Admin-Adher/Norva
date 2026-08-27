@@ -120,6 +120,76 @@ begin
 end
 $proof$;
 
+select set_config(
+  'norva.test.superseded_v2_id',
+  current_setting('norva.test.observation_id'),
+  true
+);
+
+set local role service_role;
+select (result ->> 'observationId') as material_observation_id
+from public.norva_restart_provider_access_rollout_observation_after_change(
+  current_setting('norva.test.superseded_v2_id')::uuid,
+  current_setting('norva.test.rollout_revision')::bigint,
+  'Material UI and allowlist changes require a fresh observation boundary.',
+  'codex-runtime-proof'
+) result
+\gset
+reset role;
+
+select set_config('norva.test.observation_id', :'material_observation_id', true);
+
+do $proof$
+declare
+  v_predecessor public.cloud_provider_access_rollout_observations%rowtype;
+  v_successor public.cloud_provider_access_rollout_observations%rowtype;
+begin
+  select * into strict v_predecessor
+  from public.cloud_provider_access_rollout_observations
+  where id = current_setting('norva.test.superseded_v2_id')::uuid;
+  select * into strict v_successor
+  from public.cloud_provider_access_rollout_observations
+  where id = current_setting('norva.test.observation_id')::uuid;
+
+  if v_predecessor.state <> 'stale'
+     or v_predecessor.decision_reasons <> '["MATERIAL_CHANGE_RESTART"]'::jsonb then
+    raise exception 'collecting v2 predecessor was not preserved as stale';
+  end if;
+  if v_successor.threshold_contract <> 'provider-access-rollout-observation:v2'
+     or v_successor.supersedes_observation_id <> v_predecessor.id
+     or v_successor.activity_started_at <> v_successor.started_at
+     or v_successor.activity_started_at <= v_predecessor.activity_started_at
+     or v_successor.not_before < v_successor.started_at + interval '1 hour'
+     or v_successor.restart_reason <>
+       'Material UI and allowlist changes require a fresh observation boundary.'
+     or (v_successor.baseline_snapshot ->> 'qualifyingActivity')::bigint <> 0 then
+    raise exception 'material restart did not create a full fresh evidence boundary';
+  end if;
+end
+$proof$;
+
+set local role service_role;
+do $proof$
+declare
+  v_detail text;
+begin
+  perform public.norva_restart_provider_access_rollout_observation_after_change(
+    current_setting('norva.test.superseded_v2_id')::uuid,
+    current_setting('norva.test.rollout_revision')::bigint,
+    'A replay against the stale predecessor must lose under CAS.',
+    'codex-runtime-proof'
+  );
+  raise exception 'material restart replay unexpectedly succeeded';
+exception
+  when sqlstate 'PT409' then
+    get stacked diagnostics v_detail = pg_exception_detail;
+    if position('reason=stale_observation' in coalesce(v_detail, '')) = 0 then
+      raise;
+    end if;
+end
+$proof$;
+reset role;
+
 set local role service_role;
 do $proof$
 declare

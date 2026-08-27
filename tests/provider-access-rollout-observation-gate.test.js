@@ -16,6 +16,9 @@ const analyticsFix = read(
 const observationV2 = read(
   'supabase/migrations/20260825195500_provider_access_rollout_observation_contract_v2.sql',
 );
+const materialRestart = read(
+  'supabase/migrations/20260827180000_provider_access_rollout_material_observation_restart_v1.sql',
+);
 const operator = read('ops/hetzner/scripts/run_provider_access_rollout_gate.sh');
 const race = read('ops/hetzner/scripts/run_provider_access_rollout_observation_race.sh');
 const installer = read(
@@ -122,6 +125,31 @@ test('v2 completion and promotion fail closed on superseded contracts', () => {
   );
 });
 
+test('material changes restart v2 with a fresh activity boundary under CAS', () => {
+  assert.match(materialRestart, /norva_restart_provider_access_rollout_observation_after_change/);
+  assert.match(materialRestart, /v_predecessor\.threshold_contract <> 'provider-access-rollout-observation:v2'/);
+  assert.match(materialRestart, /v_predecessor\.rollout_revision <> v_rollout\.revision/);
+  assert.match(materialRestart, /v_predecessor\.stage <> v_rollout\.stage/);
+  assert.match(materialRestart, /v_started_at := clock_timestamp\(\)/);
+  assert.match(materialRestart, /v_not_before := v_started_at \+ \(v_window_seconds \* interval '1 second'\)/);
+  assert.match(materialRestart, /reason=observation_window_invalid/);
+  assert.match(materialRestart, /activity_started_at,[\s\S]*v_started_at,[\s\S]*v_started_at,/);
+  assert.match(materialRestart, /MATERIAL_CHANGE_RESTART/);
+  assert.match(materialRestart, /restart_reason/);
+  assert.match(materialRestart, /errcode = 'PT409', detail = 'reason=stale_observation'/);
+  assert.match(materialRestart, /supersedes_observation_id/);
+  assert.match(materialRestart, /where id = v_predecessor\.id[\s\S]*and state = 'collecting'/);
+  assert.match(materialRestart, /#>> '\{p0,active\}'/);
+  assert.match(
+    materialRestart,
+    /revoke all on function[\s\S]*norva_restart_provider_access_rollout_observation_after_change[\s\S]*from public, anon, authenticated, service_role/,
+  );
+  assert.match(
+    materialRestart,
+    /grant execute on function[\s\S]*norva_restart_provider_access_rollout_observation_after_change[\s\S]*to service_role/,
+  );
+});
+
 test('notification analytics use the canonical delivered terminal state', () => {
   assert.doesNotMatch(analyticsFix, /notification\.state = 'completed'/);
   assert.equal((analyticsFix.match(/notification\.state = 'delivered'/g) || []).length, 5);
@@ -132,18 +160,27 @@ test('operator gate exposes read-only status plus explicit observation mutations
   assert.match(operator, /start-observation/);
   assert.match(operator, /complete-observation/);
   assert.match(operator, /restart-observation-v2/);
+  assert.match(operator, /restart-observation-after-change/);
   assert.match(operator, /START_PROVIDER_ACCESS_ROLLOUT_OBSERVATION/);
   assert.match(operator, /COMPLETE_PROVIDER_ACCESS_ROLLOUT_OBSERVATION/);
   assert.match(operator, /RESTART_PROVIDER_ACCESS_ROLLOUT_OBSERVATION_V2/);
+  assert.match(operator, /RESTART_PROVIDER_ACCESS_ROLLOUT_OBSERVATION_AFTER_CHANGE/);
+  assert.match(operator, /OBSERVATION_RESTART_REASON/);
 });
 
 test('real PostgreSQL concurrency proof races start, completion and promotion', () => {
+  assert.match(race, /DB_DATABASE="\$\{DB_DATABASE:-postgres\}"/);
+  assert.match(race, /norva_material_restart_proof_/);
   assert.match(race, /start_sql 'observation-start-race-a'[\s\S]*start_sql 'observation-start-race-b'/);
   assert.match(race, /complete_sql 'observation-complete-race-a'[\s\S]*complete_sql 'observation-complete-race-b'/);
   assert.match(race, /promote_sql 'observation-promotion-race-a'[\s\S]*promote_sql 'observation-promotion-race-b'/);
+  assert.match(race, /restart_sql 'observation-restart-race-a'[\s\S]*restart_sql 'observation-restart-race-b'/);
   assert.match(race, /rollout observation already collecting/);
   assert.match(race, /stale rollout observation/);
   assert.match(race, /stale rollout revision/);
+  assert.match(race, /stale rollout observation predecessor/);
+  assert.match(race, /started_at=started_at-interval '2 hours'/);
+  assert.match(race, /activity_started_at=activity_started_at-interval '2 hours'/);
   assert.match(race, /1_percent:4:1:1/);
 });
 
