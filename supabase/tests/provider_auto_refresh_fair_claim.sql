@@ -104,6 +104,24 @@ create temporary table auto_refresh_989_claims (
 ) on commit drop;
 grant all on auto_refresh_989_claims to service_role;
 
+create temporary table auto_refresh_989_dblink_connection (
+  connection_string text not null
+) on commit drop;
+insert into auto_refresh_989_dblink_connection values (
+  format(
+    'dbname=%I user=%I%s',
+    current_database(),
+    current_user,
+    case
+      when nullif(current_setting('norva.test_dblink_password', true), '') is null then ''
+      else format(
+        ' password=%L',
+        current_setting('norva.test_dblink_password', true)
+      )
+    end
+  )
+);
+
 select extensions.ok(
   not has_function_privilege(
     'authenticated',
@@ -120,8 +138,14 @@ select extensions.ok(
 
 -- Two real PostgreSQL sessions race for the only claimable row. The fresh
 -- legacy JSON lock is deliberately older in sort order but remains fenced.
-select extensions.dblink_connect('auto_refresh_989_a', format('dbname=%I user=%I', current_database(), current_user));
-select extensions.dblink_connect('auto_refresh_989_b', format('dbname=%I user=%I', current_database(), current_user));
+select extensions.dblink_connect(
+  'auto_refresh_989_a',
+  (select connection_string from auto_refresh_989_dblink_connection)
+);
+select extensions.dblink_connect(
+  'auto_refresh_989_b',
+  (select connection_string from auto_refresh_989_dblink_connection)
+);
 select extensions.dblink_exec('auto_refresh_989_a', 'set role service_role');
 select extensions.dblink_exec('auto_refresh_989_b', 'set role service_role');
 select extensions.is(
