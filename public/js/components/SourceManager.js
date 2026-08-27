@@ -2980,7 +2980,21 @@ class SourceManager {
 
             // 1. Trigger Backend Sync
             console.log(`[SourceManager] Triggering ${isHardRefresh ? 'hard refresh' : 'sync'} for source ${id}`);
-            const syncResult = isHardRefresh ? await API.sources.hardSync(id) : await API.sources.sync(id);
+            let syncResult = null;
+            try {
+                syncResult = isHardRefresh ? await API.sources.hardSync(id) : await API.sources.sync(id);
+            } catch (err) {
+                if (String(err?.code || '').toUpperCase() !== 'STALE_CATALOG_VISIBILITY_EPOCH') {
+                    throw err;
+                }
+
+                // The write may already be durable even though another response
+                // advanced this browser's visibility epoch before the POST reply
+                // arrived. Never retry the mutation: discard cached source views
+                // and reconcile exclusively from the durable status endpoint.
+                console.warn('[SourceManager] Sync response used an older visibility epoch; reconciling durable status without retrying the mutation.');
+                window.NorvaCloud?.catalogVisibility?.invalidate?.();
+            }
 
             // 2. Poll for completion
             let retries = 0;

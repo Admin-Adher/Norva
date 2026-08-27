@@ -4528,8 +4528,11 @@
                 'GET',
                 `/sources/${encodeURIComponent(id)}/epg${query(params)}`
             ),
-            sync: (id, opts = {}) => sourceSyncRequest(id, opts).then((r) => { invalidateSourcesCache(); return r; }),
-            finalize: (id, params = {}) => sourceFinalizeRequest(id, params).then((r) => { invalidateSourcesCache(); return r; }),
+            // A stale visibility response can reject after the server committed
+            // the mutation. Clear the cached source view on both resolution and
+            // rejection so callers can reconcile via the durable status route.
+            sync: (id, opts = {}) => sourceSyncRequest(id, opts).finally(invalidateSourcesCache),
+            finalize: (id, params = {}) => sourceFinalizeRequest(id, params).finally(invalidateSourcesCache),
             remove: (id) => request('DELETE', `/sources/${encodeURIComponent(id)}`).then((r) => { invalidateSourcesCache(); return r; })
         },
 
