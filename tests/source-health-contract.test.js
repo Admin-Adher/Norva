@@ -566,7 +566,7 @@ test('SourceManager renders an intentional pause with one enable action and no r
   assert.doesNotMatch(container.innerHTML, /Needs attention|>Repair<|Access dates not added/);
 });
 
-function sourceManagerStatusHarness() {
+function sourceManagerStatusHarness({ disabled = false } = {}) {
   const primary = {
     disabled: false,
     textContent: 'Sync',
@@ -583,9 +583,15 @@ function sourceManagerStatusHarness() {
     disabled: false,
     textContent: 'Rebuild catalog',
     title: '',
+    attributes: {},
+    setAttribute(name, value) { this.attributes[name] = value; },
+    removeAttribute(name) { delete this.attributes[name]; },
   };
   const item = {
     dataset: { id: '900001' },
+    classList: {
+      contains(value) { return value === 'disabled' && disabled; },
+    },
     querySelector(selector) {
       if (selector === '.source-primary-action[data-action="refresh"]') return primary;
       if (selector === '.source-menu-item[data-action="hard-refresh"]') return hardRefresh;
@@ -642,6 +648,22 @@ test('SourceManager keeps the primary sync action legible through transient fail
   assert.equal(primary.title, 'Catalog update in progress');
   assert.equal(primary.attributes['aria-label'], 'Catalog update in progress');
   assert.equal(hardRefresh.textContent, 'Rebuild catalog');
+});
+
+test('sync polling cannot re-enable Rebuild catalog while the service is paused', () => {
+  const { manager, hardRefresh } = sourceManagerStatusHarness({ disabled: true });
+
+  manager.updateSyncStatus([]);
+
+  assert.equal(hardRefresh.disabled, true);
+  assert.equal(hardRefresh.attributes['aria-disabled'], 'true');
+  assert.equal(hardRefresh.title, 'Enable the service first');
+
+  manager.updateSyncStatus([{ source_id: 900001, status: 'syncing' }]);
+
+  assert.equal(hardRefresh.disabled, true);
+  assert.equal(hardRefresh.attributes['aria-disabled'], 'true');
+  assert.equal(hardRefresh.title, 'Enable the service first');
 });
 
 test('SourceManager exposes one preparation view instead of leaking rendering internals', () => {
