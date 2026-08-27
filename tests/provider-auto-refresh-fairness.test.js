@@ -124,6 +124,9 @@ test('Edge scans past ineligible owners but performs only one provider refresh',
 test('migration changes no cron activation state and RPC authority remains service-only', () => {
   assert.equal((migration.match(/cron\.schedule\s*\(/gi) || []).length, 0);
   assert.equal((migration.match(/active\s*=>/gi) || []).length, 0);
+  assert.doesNotMatch(migration, /cron\.alter_job\s*\(/i);
+  assert.doesNotMatch(migration, /https?:\/\//i);
+  assert.match(migration, /cron endpoint, headers and activation state are operator-owned/i);
   assert.match(migration, /revoke all on function public\.norva_claim_cloud_auto_refresh_sources[\s\S]*from public, anon, authenticated/i);
   assert.match(migration, /grant execute on function public\.norva_settle_cloud_auto_refresh_source[\s\S]*to service_role/i);
 });

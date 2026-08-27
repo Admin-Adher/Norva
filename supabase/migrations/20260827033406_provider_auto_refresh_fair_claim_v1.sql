@@ -429,41 +429,8 @@ grant execute on function public.norva_claim_cloud_auto_refresh_sources(text,int
 grant execute on function public.norva_settle_cloud_auto_refresh_source(uuid,uuid,text,bigint,text,timestamptz,integer,text)
   to service_role;
 
--- Tighten the existing cron's cheap wake-up guard when pg_cron is installed.
--- This never creates or enables a job; it only avoids waking Edge for sources
--- that the durable scheduler has suspended pending user action.
-do $migration$
-declare
-  v_job_id bigint;
-begin
-  if to_regclass('cron.job') is null or to_regprocedure('cron.alter_job(bigint,text,text,text,text,boolean)') is null then
-    return;
-  end if;
-  execute $sql$select jobid from cron.job where jobname = 'norva-auto-refresh-detect'$sql$
-    into v_job_id;
-  if v_job_id is null then return; end if;
-  perform cron.alter_job(v_job_id, command => $command$
-    select net.http_post(
-      url := 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-source-sync/cron/refresh-due',
-      body := '{}'::jsonb,
-      headers := jsonb_build_object(
-        'Content-Type', 'application/json',
-        'Authorization', 'Bearer ' || (
-          select decrypted_secret from vault.decrypted_secrets
-          where name = 'norva_cron_shared_secret'
-        )
-      ),
-      timeout_milliseconds := 20000
-    )
-    where exists (
-      select 1
-      from public.cloud_sources source
-      where source.source_type in ('xtream','m3u')
-        and source.enabled
-        and source.deleted_at is null
-        and (source.auto_refresh_state ->> 'suspended') is distinct from 'true'
-        and (source.auto_refresh_next_at is null or source.auto_refresh_next_at <= now())
-    );
-  $command$);
-end
-$migration$;
+-- The cron endpoint, headers and activation state are operator-owned because
+-- managed Supabase and self-hosted Hetzner use different URLs. Do not rewrite
+-- that environment-specific command from a schema migration. The claim RPC is
+-- the durable authority and filters suspended sources before any provider I/O;
+-- an existing cheap wake-up may therefore remain a harmless no-op.
