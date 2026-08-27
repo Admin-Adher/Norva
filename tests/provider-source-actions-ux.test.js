@@ -8,6 +8,7 @@ const { pathToFileURL } = require('node:url');
 const root = path.resolve(__dirname, '..');
 const appSource = fs.readFileSync(path.join(root, 'public/js/app.js'), 'utf8');
 const apiSource = fs.readFileSync(path.join(root, 'public/js/api.js'), 'utf8');
+const cloudApiSource = fs.readFileSync(path.join(root, 'public/js/cloudApi.js'), 'utf8');
 const sourceManagerSource = fs.readFileSync(
   path.join(root, 'public/js/components/SourceManager.js'),
   'utf8',
@@ -56,6 +57,8 @@ function sourceManagerHarness({
   instantTimers = false,
   loadError = null,
   statuses = [{ source_id: 'source-1', status: 'ready' }],
+  syncError = null,
+  hardSyncError = null,
   testResult = null,
 } = {}) {
   const calls = {
@@ -64,6 +67,7 @@ function sourceManagerHarness({
     delete: [],
     getStatus: 0,
     hardSync: [],
+    visibilityInvalidate: 0,
     load: 0,
     notify: 0,
     release: 0,
@@ -110,10 +114,12 @@ function sourceManagerHarness({
       },
       async hardSync(id) {
         calls.hardSync.push(id);
+        if (hardSyncError) throw hardSyncError;
         return { accepted: true };
       },
       async sync(id) {
         calls.sync.push(id);
+        if (syncError) throw syncError;
         return { accepted: true };
       },
       async test(id) {
@@ -130,7 +136,15 @@ function sourceManagerHarness({
     },
     toast(message, tone) { calls.toast.push({ message, tone }); },
   };
-  const window = { API: api, NorvaModal: modal };
+  const window = {
+    API: api,
+    NorvaModal: modal,
+    NorvaCloud: {
+      catalogVisibility: {
+        invalidate() { calls.visibilityInvalidate += 1; },
+      },
+    },
+  };
   window.window = window;
   const context = {
     window,
@@ -271,6 +285,81 @@ test('Sync now turns a durable rejected-login status into Repair login guidance'
   assert.deepEqual(calls.cacheClear, []);
   assert.match(calls.toast.at(-1).message, /Open Repair login/);
   assert.equal(calls.toast.at(-1).tone, 'error');
+});
+
+test('Sync now reconciles a stale visibility response without replaying the mutation', async () => {
+  const stale = new Error('Stale catalog visibility generation');
+  stale.code = 'STALE_CATALOG_VISIBILITY_EPOCH';
+  const { manager, calls } = sourceManagerHarness({
+    instantTimers: true,
+    syncError: stale,
+    statuses: [{
+      source_id: 'source-1',
+      status: 'error',
+      error: 'The TV service rejected the saved credentials.',
+      error_code: 'PROVIDER_CREDENTIALS_REJECTED',
+    }],
+  });
+
+  await manager.refreshSource('source-1', 'xtream');
+
+  assert.deepEqual(calls.sync, ['source-1']);
+  assert.deepEqual(calls.hardSync, []);
+  assert.equal(calls.visibilityInvalidate, 1);
+  assert.equal(calls.getStatus, 1);
+  assert.match(calls.toast.at(-1).message, /Open Repair login/);
+  assert.equal(calls.toast.at(-1).tone, 'error');
+});
+
+test('Rebuild reconciles a stale visibility response without replaying hard-sync', async () => {
+  const stale = new Error('Stale catalog visibility generation');
+  stale.code = 'STALE_CATALOG_VISIBILITY_EPOCH';
+  const { manager, calls } = sourceManagerHarness({
+    confirm: true,
+    instantTimers: true,
+    hardSyncError: stale,
+  });
+
+  await manager.refreshSource('source-1', 'xtream', { hard: true });
+
+  assert.deepEqual(calls.sync, []);
+  assert.deepEqual(calls.hardSync, ['source-1']);
+  assert.equal(calls.visibilityInvalidate, 1);
+  assert.equal(calls.getStatus, 1);
+  assert.deepEqual(calls.toast.at(-1), {
+    message: 'Xtream data hard refreshed!',
+    tone: 'success',
+  });
+});
+
+test('non-visibility sync failures remain fail-closed and do not enter reconciliation', async () => {
+  const failure = new Error('Network request failed');
+  failure.code = 'NETWORK_ERROR';
+  const { manager, calls } = sourceManagerHarness({
+    instantTimers: true,
+    syncError: failure,
+  });
+
+  await manager.refreshSource('source-1', 'xtream');
+
+  assert.deepEqual(calls.sync, ['source-1']);
+  assert.equal(calls.getStatus, 0);
+  assert.equal(calls.visibilityInvalidate, 0);
+  assert.deepEqual(calls.toast.at(-1), {
+    message: 'Sync could not finish. Try again.',
+    tone: 'error',
+  });
+});
+
+test('cloud source sync invalidates its cache even when the response is rejected', () => {
+  assert.match(
+    cloudApiSource,
+    /sync:\s*\(id, opts = \{\}\) => sourceSyncRequest\(id, opts\)\.finally\(invalidateSourcesCache\)/,
+  );
+  assert.match(
+    cloudApiSource,
+    /finalize:\s*\(id, params = \{\}\) => sourceFinalizeRequest\(id, params\)\.finally\(invalidateSourcesCache\)/,
+  );
 });
 
 test('sync errors turn terminal provider states into actionable guidance', () => {
