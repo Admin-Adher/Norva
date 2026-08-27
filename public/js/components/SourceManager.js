@@ -4263,6 +4263,7 @@ class SourceManager {
 
         document.querySelectorAll('.source-item').forEach(item => {
             const id = parseInt(item.dataset.id);
+            const managementEnabled = !item.classList.contains('disabled');
             const status = statuses.find(s => s.source_id === id); // We might have multiple statuses (live, vod, epg) for one source
 
             // Just check if ANY sync is active/failed for this source
@@ -4298,8 +4299,16 @@ class SourceManager {
             }
 
             if (hardBtn) {
-                hardBtn.disabled = isSyncing;
-                hardBtn.title = isSyncing
+                const hardRefreshDisabled = !managementEnabled || isSyncing;
+                hardBtn.disabled = hardRefreshDisabled;
+                if (hardRefreshDisabled) {
+                    hardBtn.setAttribute('aria-disabled', 'true');
+                } else {
+                    hardBtn.removeAttribute('aria-disabled');
+                }
+                hardBtn.title = !managementEnabled
+                    ? 'Enable the service first'
+                    : isSyncing
                     ? 'Syncing...'
                     : (window.API?.isCloudMode?.() === true
                         ? 'Rescan and update the complete provider catalog'
