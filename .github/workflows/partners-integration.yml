@@ -476,6 +476,12 @@ jobs:
               psql -X -U supabase_admin -d postgres -v ON_ERROR_STOP=1 \
               < "$phase123_dir/$migration"
           done
+          # Production has no Supabase migration ledger. Prove the guarded
+          # forward migration is a safe no-op if a deploy loses its receipt
+          # after PostgreSQL committed the transaction.
+          docker exec -i "${db_containers[0]}" \
+            psql -X -U supabase_admin -d postgres -v ON_ERROR_STOP=1 \
+            < "$phase123_dir/20260827143000_postgrest_application_conflict_sqlstate_v1.sql"
       - name: Run the Provider refresh PostgreSQL concurrency proof
         shell: bash
         run: |

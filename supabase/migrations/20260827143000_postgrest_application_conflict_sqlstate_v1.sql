@@ -34,6 +34,7 @@ declare
   v_changed_functions integer := 0;
   v_changed_occurrences integer := 0;
   v_occurrences integer;
+  v_existing_pt409 integer;
   v_remaining integer;
 begin
   for v_function in
@@ -75,8 +76,36 @@ begin
   end loop;
 
   if v_changed_functions = 0 then
-    raise exception 'application conflict SQLSTATE rewrite found no eligible functions'
-      using errcode = '55000';
+    select count(*)::integer
+    into v_existing_pt409
+    from pg_proc p
+    join pg_namespace n on n.oid = p.pronamespace
+    where p.prokind in ('f', 'p')
+      and n.nspname in ('public', 'email_private', 'affiliate_private')
+      and pg_get_functiondef(p.oid) like '%PT409%'
+      and not exists (
+        select 1
+        from pg_depend dependency
+        where dependency.classid = 'pg_proc'::regclass
+          and dependency.objid = p.oid
+          and dependency.deptype = 'e'
+      );
+
+    if v_existing_pt409 = 0
+       or not exists (
+         select 1
+         from pg_proc p
+         join pg_namespace n on n.oid = p.pronamespace
+         where n.nspname = 'public'
+           and p.proname = 'norva_set_provider_access_rollout_stage'
+           and pg_get_functiondef(p.oid) like '%PT409%'
+       ) then
+      raise exception 'application conflict SQLSTATE rewrite found no eligible Norva contract'
+        using errcode = '55000';
+    end if;
+
+    raise notice 'application conflict SQLSTATE rewrite already complete: functions=%',
+      v_existing_pt409;
   end if;
 
   select count(*)::integer
