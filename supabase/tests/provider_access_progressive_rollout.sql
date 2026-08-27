@@ -60,7 +60,7 @@ select public.norva_configure_provider_access_rollout_gates(
 select extensions.is((select revision::integer from public.cloud_provider_access_rollout where singleton),2,'gate approval advances the CAS revision');
 select extensions.throws_ok(
   $$select public.norva_configure_provider_access_rollout_gates(1,'legal-policy:stale','ops-proof:stale','acceptance-service')$$,
-  '40001','stale rollout revision','stale gate approval loses cleanly'
+  'PT409','stale rollout revision','stale gate approval loses cleanly'
 );
 select public.norva_set_provider_access_rollout_internal_user(
   '98600000-0000-4000-8000-000000000045',true,'acceptance allowlist member','acceptance-service'
@@ -130,7 +130,7 @@ select extensions.is((select count(*)::integer from public.admin_feature_flags w
 ) and enabled),6,'channel approval cannot disable the active core capability set');
 select extensions.throws_ok(
   $$select public.norva_set_provider_access_rollout_channels(3,false,false,false,'channel-readiness:stale-proof','acceptance-service')$$,
-  '40001','stale rollout revision','stale channel approval loses cleanly'
+  'PT409','stale rollout revision','stale channel approval loses cleanly'
 );
 select extensions.throws_ok(
   $$select public.norva_set_provider_access_rollout_stage(4,'1_percent','Promotion without a durable observation must fail.','acceptance-service')$$,
@@ -197,7 +197,7 @@ select extensions.is(
 );
 select extensions.throws_ok(
   $$select public.norva_set_provider_access_rollout_stage(4,'5_percent','A stale concurrent promotion must lose cleanly.','acceptance-service')$$,
-  '40001','stale rollout revision','concurrent promotion is fenced by revision CAS'
+  'PT409','stale rollout revision','concurrent promotion is fenced by revision CAS'
 );
 select public.norva_start_provider_access_rollout_observation(5,'acceptance-service');
 reset role;

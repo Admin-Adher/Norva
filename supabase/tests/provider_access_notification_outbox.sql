@@ -384,7 +384,7 @@ select extensions.throws_ok(
     '98600000-0000-4000-8000-000000000001',0,
     'fcm-readiness:stale-revision-proof','test:phase11'
   )$$,
-  '40001','stale rollout revision',
+  'PT409','stale rollout revision',
   'readiness smoke is CAS-bound to the exact rollout revision'
 );
 select extensions.is(

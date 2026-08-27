@@ -279,7 +279,7 @@ select extensions.throws_ok(
      where id = '93000000-0000-4000-8000-000000000601'),
     (select head_revision + 1 from public.cloud_source_catalog_heads
      where source_id = '93000000-0000-4000-8000-000000000102')
-  ), '40001', 'replacement candidate head CAS failed',
+  ), 'PT409', 'replacement candidate head CAS failed',
   'stale candidate head loses before the atomic replacement cutover'
 );
 insert into phase4_builder_ctx values ('promotion',public.norva_promote_source_replacement_v3(
@@ -358,7 +358,7 @@ select extensions.throws_ok(
     '93000000-0000-4000-8000-000000000601',
     '93000000-0000-4000-8000-000000000001','replacement-promotion-v2-fixture',
     0,3,1
-  )$sql$, '40001', 'completed replacement candidate head replay CAS failed',
+  )$sql$, 'PT409', 'completed replacement candidate head replay CAS failed',
   'promotion replay rejects a mismatched candidate-head snapshot'
 );
 reset role;
@@ -436,7 +436,7 @@ select extensions.throws_ok(format($sql$select public.norva_rollback_source_repl
   'replacement-rollback-second',repeat('e',64),
   (select revision from public.cloud_source_transitions
     where id='93000000-0000-4000-8000-000000000601'),1),
-  '40001','replacement rollback endpoints changed',
+  'PT409','replacement rollback endpoints changed',
   'a second rollback cannot resurrect B after compensation');
 reset role;
 

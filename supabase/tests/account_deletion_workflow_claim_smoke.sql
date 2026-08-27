@@ -34,7 +34,7 @@ begin
     perform public.norva_advance_account_deletion_workflow(
       'd0000000-0000-0000-0000-000000000092',0,25
     );
-  exception when sqlstate '40001' then v_stale := true;
+  exception when sqlstate 'PT409' then v_stale := true;
   end;
   if not v_stale then
     raise exception 'obsolete scheduler revision advanced the workflow';
@@ -52,7 +52,7 @@ begin
     perform public.norva_advance_account_deletion_workflow(
       'd0000000-0000-0000-0000-000000000092',v_claim.revision,25
     );
-  exception when sqlstate '40001' then v_stale := true;
+  exception when sqlstate 'PT409' then v_stale := true;
   end;
   if not v_stale then
     raise exception 'crashed scheduler revived after recovery claim';

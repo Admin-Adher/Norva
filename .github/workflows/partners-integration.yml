@@ -468,6 +468,7 @@ jobs:
             20260824120000_provider_access_cycles_detection_v1.sql
             20260827033406_provider_auto_refresh_fair_claim_v1.sql
             20260827122100_provider_auto_refresh_claim_cooldown_v1.sql
+            20260827143000_postgrest_application_conflict_sqlstate_v1.sql
           )
           for migration in "${migrations[@]}"; do
             test -f "$phase123_dir/$migration"
@@ -511,6 +512,32 @@ jobs:
               "$passed_tests" "$expected_tests" >&2
             exit 1
           fi
+
+      - name: Prove application conflicts are non-retryable
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t db_containers < <(
+            docker ps --format '{{.Names}}' | grep '^supabase_db_'
+          )
+          if [[ "${#db_containers[@]}" -ne 1 ]]; then
+            printf 'Expected one disposable Supabase DB, found %s\n' \
+              "${#db_containers[@]}" >&2
+            exit 1
+          fi
+          tap_output="$RUNNER_TEMP/postgrest-application-conflict.tap"
+          if ! docker exec -i "${db_containers[0]}" \
+              psql -X -qAt -U supabase_admin -d postgres -v ON_ERROR_STOP=1 \
+              < supabase/tests/postgrest_application_conflict_sqlstate.sql \
+              > "$tap_output" 2>&1; then
+            cat "$tap_output"
+            exit 1
+          fi
+          cat "$tap_output"
+          if grep -Eq '^(not ok|Bail out!)' "$tap_output"; then
+            exit 1
+          fi
+          test "$(grep -Ec '^ok( |$)' "$tap_output" || true)" = '5'
 
       - name: Stop the disposable stack
         if: always()

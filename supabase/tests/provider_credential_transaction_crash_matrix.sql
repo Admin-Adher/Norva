@@ -568,7 +568,7 @@ begin
       and item.external_id='shared-001';
     raise exception 'N+1 write unexpectedly committed after N+2 rollback';
   exception
-    when sqlstate '40001' then
+    when sqlstate 'PT409' then
       v_n_plus_1_stale:=true;
     when check_violation then
       if sqlerrm='candidate generation cannot carry an active write proof' then

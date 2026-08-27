@@ -87,7 +87,7 @@ begin
       select public.norva_claim_account_deletion_transport_stop(
         'd0000000-0000-0000-0000-000000000094'::uuid,'transport-race-b',120)
     $sql$) as remote(payload jsonb);
-  exception when sqlstate '40001' then v_stale := true;
+  exception when sqlstate 'PT409' then v_stale := true;
   end;
   if not v_stale then
     raise exception 'transport claim B was not rejected as STALE';
@@ -110,7 +110,7 @@ begin
       (v_claim->>'deletionEpoch')::bigint,(v_claim->>'leaseSequence')::integer,
       (v_claim->>'revision')::bigint
     );
-  exception when sqlstate '40001' then v_stale := true;
+  exception when sqlstate 'PT409' then v_stale := true;
   end;
   if not v_stale then
     raise exception 'transport worker survived a workflow fence bump';
@@ -163,7 +163,7 @@ begin
       'd0000000-0000-0000-0000-000000000094','transport-race-a',1,1,
       'completed',repeat('a',64),null,0
     );
-  exception when sqlstate '40001' then v_stale := true;
+  exception when sqlstate 'PT409' then v_stale := true;
   end;
   if not v_stale then raise exception 'expired worker A settled a transport stop'; end if;
   perform public.norva_revalidate_account_deletion_transport_stop(

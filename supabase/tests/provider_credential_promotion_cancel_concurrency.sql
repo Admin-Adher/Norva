@@ -207,12 +207,12 @@ begin
   select transition.* into strict v_transition from public.cloud_source_transitions transition
   where transition.idempotency_key='phase3-create-2';
   if v_mode='promotion_wins' then
-    if v_first_result->>'sqlstate' <> '00000' or v_second_result->>'sqlstate' <> '40001'
+    if v_first_result->>'sqlstate' <> '00000' or v_second_result->>'sqlstate' <> 'PT409'
        or v_transition.state <> 'committing' then
       raise exception 'promotion/cancel race invariant failed: first=% second=% state=%',v_first_result,v_second_result,v_transition.state;
     end if;
   else
-    if v_first_result->>'sqlstate' <> '00000' or v_second_result->>'sqlstate' <> '40001'
+    if v_first_result->>'sqlstate' <> '00000' or v_second_result->>'sqlstate' <> 'PT409'
        or v_transition.state <> 'cancelled'
        or exists (select 1 from public.cloud_source_credential_transition_jobs job
                   where job.transition_id=v_transition.id and job.job_kind='post_switch_verify'
@@ -226,7 +226,7 @@ begin
         v_stale_job.lease_sequence,'completed',null,1
       );
       raise exception 'pre-cancel worker unexpectedly settled after cancellation';
-    exception when sqlstate '40001' then
+    exception when sqlstate 'PT409' then
       v_stale_worker_rejected := true;
     end;
     if not v_stale_worker_rejected then

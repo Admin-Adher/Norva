@@ -527,7 +527,7 @@ test('post-switch completion is fenced by a durable active refresh proof', () =>
   const gateway = section('async function gatewayMetadataPage', '\nasync function gatewayRequestJson');
   assert.match(gateway, /assertProviderReadAllowed/);
   const rpc = section('async function workerRpc', '\nasync function settleJob');
-  assert.match(rpc, /error\?\.code === "40001"/);
+  assert.match(rpc, /isStaleDatabaseConflict\(error\)/);
   assert.match(rpc, /new WorkerFault\("stale", true\)/);
   const workerFailure = section('    } catch (error) {', '\n  }\n  return successResponse');
   assert.match(workerFailure, /failure\.queueCode !== "stale"/);

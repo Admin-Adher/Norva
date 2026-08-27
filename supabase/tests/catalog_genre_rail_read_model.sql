@@ -225,7 +225,7 @@ select extensions.throws_ok(
   $$select public.norva_get_genre_rail_candidates(
     '98610000-0000-4000-8000-000000000001','movie',7
   )$$,
-  '40001','catalog visibility epoch changed',
+  'PT409','catalog visibility epoch changed',
   'a caller carrying the previous visibility epoch is stale'
 );
 select extensions.throws_ok(

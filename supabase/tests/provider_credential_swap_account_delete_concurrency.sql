@@ -341,7 +341,7 @@ begin
     end if;
   else
     if v_first_result->>'sqlstate' <> '00000'
-       or v_second_result->>'sqlstate' <> '40001'
+       or v_second_result->>'sqlstate' <> 'PT409'
        or v_transition_after.state <> 'ready_to_switch'
        or v_config_revision_after <> v_config_revision_before
        or v_head_revision_after <> v_head_revision_before

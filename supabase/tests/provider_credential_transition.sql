@@ -459,7 +459,7 @@ select extensions.throws_ok(
     (select value->>'lease_sequence' from phase3_ctx where key='claim'),
     (select value->>'transition_revision' from phase3_ctx where key='claim')
   ),
-  '40001', 'candidate validation lease CAS failed',
+  'PT409', 'candidate validation lease CAS failed',
   'validation completion rejects the wrong lease owner'
 );
 
@@ -1070,7 +1070,7 @@ select extensions.throws_ok(
     (select value->>'generationId' from phase3_ctx where key='allocate2'),
     '93000000-0000-4000-8000-000000000001'
   ),
-  '40001','credential generation title promotion CAS failed',
+  'PT409','credential generation title promotion CAS failed',
   'COMMITTING remains compensable and cannot publish candidate title metadata'
 );
 select public.provider_account_touch_by_source(
@@ -1447,7 +1447,7 @@ select extensions.throws_ok(
     '93000000-0000-4000-8000-000000000102',
     (select value->>'generationId' from phase3_ctx where key='preswap2')
   ),
-  '40001','active catalog write proof is stale or missing',
+  'PT409','active catalog write proof is stale or missing',
   'pre-cutover writer is rejected after A to B to A ABA rollback'
 );
 insert into phase3_ctx

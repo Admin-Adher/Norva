@@ -325,7 +325,7 @@ select extensions.throws_ok(format($sql$select public.norva_allocate_replacement
   (select value->>'job_id' from phase4_ctx where key='claim'),'phase4-worker-1',
   (select (value->>'lease_sequence')::integer from phase4_ctx where key='claim'),
   (select (value->>'transition_revision')::bigint from phase4_ctx where key='claim')),
-  '40001','replacement candidate generation CAS failed',
+  'PT409','replacement candidate generation CAS failed',
   'the pre-allocation worker snapshot is stale after IMPORTING');
 insert into phase4_ctx values ('cancel',public.norva_cancel_source_replacement(
   (select (value->>'replacementId')::uuid from phase4_ctx where key='create'),

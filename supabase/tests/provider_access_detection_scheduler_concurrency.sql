@@ -134,7 +134,7 @@ select extensions.throws_ok(
     1,
     '{"detectionVersion":1,"status":"active","reasonCode":"PROVIDER_CONFIRMED_ACTIVE","expiresOn":"2026-12-31","hideEligible":false,"restorationConfirmed":true,"contradictions":[]}'
   ),
-  '40001',
+  'PT409',
   'Provider Access check lease is stale',
   'worker that wakes after reclaim cannot commit its stale observation'
 );

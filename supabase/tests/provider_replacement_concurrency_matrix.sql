@@ -314,7 +314,7 @@ begin
     else v_transition.candidate_source_id end;
   v_expected_second_sqlstate:=case
     when v_mode in ('promotion_delete_promotion','rollback_delete_rollback')
-      then '00000' else '40001' end;
+      then '00000' else 'PT409' end;
   if v_mode='rollback_delete_rollback' then v_expected_reversals:=1; end if;
 
   if v_first_result->>'sqlstate'<>'00000'

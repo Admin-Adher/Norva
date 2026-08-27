@@ -98,7 +98,7 @@ test('background outcome writer is fenced atomically while retaining the proven 
   );
   assert.match(writer, /genre_rail_visibility_epoch := v_result_epoch/);
 
-  assert.match(sourceSync, /String\(error\.code \?\? ""\) === "40001"/);
+  assert.match(sourceSync, /isStaleDatabaseConflict\(error\)/);
   assert.match(sourceSync, /if \(isCatalogBackgroundCasConflict\(error\)\) return null/);
 });
 

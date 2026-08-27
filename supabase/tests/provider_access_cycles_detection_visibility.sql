@@ -237,7 +237,7 @@ select extensions.throws_ok(
     (select revision - 1 from public.cloud_source_provider_access where source_id='98500000-0000-4000-8000-000000000101'),
     'update-985-stale',repeat('d',64),'test:phase6'
   ),
-  '40001',
+  'PT409',
   'provider access revision CAS failed',
   'stale date editor cannot overwrite a newer Provider Access snapshot'
 );

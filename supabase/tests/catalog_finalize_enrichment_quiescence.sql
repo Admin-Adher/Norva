@@ -168,7 +168,7 @@ select throws_ok(
       '{"matched":false}'::jsonb
     )
   $sql$,
-  '40001',
+  'PT409',
   'catalog background write deferred during source finalization',
   'an already-selected background outcome is stale under the finalizer fence'
 );
