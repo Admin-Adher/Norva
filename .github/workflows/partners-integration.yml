@@ -487,7 +487,7 @@ jobs:
           fi
           tap_output="$RUNNER_TEMP/provider-auto-refresh-fair-claim.tap"
           if ! docker exec -i "${db_containers[0]}" \
-              psql -X -qAt -U postgres -d postgres -v ON_ERROR_STOP=1 \
+              psql -X -qAt -U supabase_admin -d postgres -v ON_ERROR_STOP=1 \
               < supabase/tests/provider_auto_refresh_fair_claim.sql \
               > "$tap_output" 2>&1; then
             cat "$tap_output"

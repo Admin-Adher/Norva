@@ -150,7 +150,8 @@ test('disposable Supabase CI executes the real fair-claim pgTAP suite', () => {
   assert.match(focusedProof, /20260822220703_provider_access_lifecycle_foundation\.sql/);
   assert.match(focusedProof, /20260824120000_provider_access_cycles_detection_v1\.sql/);
   assert.match(focusedProof, /20260827033406_provider_auto_refresh_fair_claim_v1\.sql/);
-  assert.match(focusedProof, /psql -X -qAt -U postgres -d postgres/);
+  assert.match(focusedProof, /psql -X -qAt -U supabase_admin -d postgres/);
+  assert.doesNotMatch(focusedProof, /psql -X -qAt -U postgres -d postgres/);
   assert.match(focusedProof, /supabase\/tests\/provider_auto_refresh_fair_claim\.sql/);
   assert.match(focusedProof, /not ok\|Bail out!/);
   assert.match(focusedProof, /expected_tests="\$\{plan_line#1\.\.\}"/);
