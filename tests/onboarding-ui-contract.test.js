@@ -92,9 +92,9 @@ test('setup visuals reuse Norva assets and ship cache-busted', () => {
   assert.match(shell, /class="tc-intro-icon" src="\/img\/icons\/norva-movies\.svg/);
   assert.match(shell, /class="tc-intro-icon" src="\/img\/icons\/norva-settings\.svg/);
   assert.doesNotMatch(shell, /<div class="tc-intro-icon">/);
-  assert.match(shell, /main\.css\?v=122/);
-  assert.match(shell, /sourceHealth\.js\?v=11/);
-  assert.match(shell, /SourceManager\.js\?v=50/);
-  assert.match(shell, /HomePage\.js\?v=e235acfa42/);
+  assert.match(shell, /main\.css\?v=5fb0adbb61/);
+  assert.match(shell, /sourceHealth\.js\?v=6c0eefcb4f/);
+  assert.match(shell, /SourceManager\.js\?v=9aa468a08c/);
+  assert.match(shell, /HomePage\.js\?v=ce0d273210/);
   assert.match(shell, /app\.js\?v=b0962d47ce/);
 });

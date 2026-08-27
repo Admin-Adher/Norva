@@ -154,9 +154,10 @@ test('Provider Access wizard has one vertical scroller and one action footer', (
 });
 
 test('all changed Provider Access UI assets are cache-busted', () => {
-  assert.match(shell, /main\.css\?v=122/);
+  assert.match(shell, /main\.css\?v=5fb0adbb61/);
   assert.match(shell, /cloudApi\.js\?v=70/);
   assert.match(shell, /api\.js\?v=89/);
-  assert.match(shell, /SourceManager\.js\?v=50/);
-  assert.match(shell, /HomePage\.js\?v=e235acfa42/);
+  assert.match(shell, /sourceHealth\.js\?v=6c0eefcb4f/);
+  assert.match(shell, /SourceManager\.js\?v=9aa468a08c/);
+  assert.match(shell, /HomePage\.js\?v=ce0d273210/);
 });
