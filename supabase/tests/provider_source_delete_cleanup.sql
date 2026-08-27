@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 set local search_path = public,extensions;
-select extensions.plan(18);
+select extensions.plan(20);
 
 -- The proof container may retain unrelated historical cleanup fixtures. Keep
 -- them pending but outside this rollback-only test window so the global fair
@@ -81,6 +81,24 @@ select extensions.ok(
     where id = '93200000-0000-4000-8000-000000000101'
   ),
   'removed source is absent from the catalog before background cleanup'
+);
+
+select extensions.is(
+  (public.norva_run_replacement_cleanup_batch(
+    'source-delete-backoff-proof',
+    200
+  )->>'waitingForReaper')::boolean,
+  true,
+  'terminal cleanup yields while the bounded database reaper still owns payload deletion'
+);
+
+select extensions.ok(
+  (select available_at >= clock_timestamp() + interval '9 minutes 50 seconds'
+   from public.cloud_source_replacement_cleanup_jobs
+   where source_id = '93200000-0000-4000-8000-000000000101'
+     and cleanup_kind = 'source_delete'
+     and state = 'pending'),
+  'waiting cleanup retries at the ten-minute reaper cadence instead of every ten seconds'
 );
 
 call public.reap_deleted_sources();
