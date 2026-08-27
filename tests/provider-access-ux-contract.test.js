@@ -79,10 +79,12 @@ test('calendar durations are resolved server-side and cannot be mixed with an ex
   assert.match(calendarTerms, /provider_access_expires_on = v_expires_on/);
 });
 
-test('Settings exposes renewal, candidate login and replacement paths without a credential PATCH', () => {
-  assert.match(sourceManager, /Provider renewed the same login/);
-  assert.match(sourceManager, /I received new login details/);
-  assert.match(sourceManager, /I changed provider or catalogue/);
+test('Settings separates access dates, candidate login and replacement paths without a credential PATCH', () => {
+  assert.match(sourceManager, /Manage provider access/);
+  assert.match(sourceManager, /Repair or change login/);
+  assert.match(sourceManager, /Change provider or catalogue/);
+  assert.match(sourceManager, /intent: 'credentials'/);
+  assert.match(sourceManager, /intent: 'provider'/);
   assert.match(sourceManager, /API\.providerAccess\.createCandidate/);
   assert.match(sourceManager, /API\.providerAccess\.decideCandidate/);
   assert.match(sourceManager, /API\.providerAccess\.applyCandidate/);
@@ -95,16 +97,16 @@ test('Settings exposes renewal, candidate login and replacement paths without a 
   assert.doesNotMatch(sourceManager, /API\.sources\.update\(id, \{[^}]*password/s);
 });
 
-test('source actions expose one grouped Provider Access entry without a Repair login duplicate', () => {
+test('source actions group Provider Access by period, login and catalogue intent', () => {
   assert.match(
     sourceManager,
-    /role="group" aria-label="Provider access"[\s\S]*Manage provider access[\s\S]*Dates, duration, reminders, login or catalogue changes/,
+    /role="group" aria-label="Provider access"[\s\S]*Manage provider access[\s\S]*Dates, duration and reminders[\s\S]*Repair or change login[\s\S]*Change provider or catalogue/,
   );
   assert.match(
     sourceManager,
     /Provider access[\s\S]*Catalog actions[\s\S]*Service[\s\S]*Danger zone/,
   );
-  assert.doesNotMatch(sourceManager, /Repair login|Edit login/);
+  assert.doesNotMatch(sourceManager, /Login or catalogue changed\?/);
   assert.match(sourceManager, /needsRepair && type === 'xtream' && !providerAccessEnabled[\s\S]{0,160}Check service/);
   assert.match(sourceManager, /type !== 'xtream'[\s\S]{0,180}data-action="edit"/);
   assert.match(css, /\.source-menu-item\s*\{[\s\S]{0,160}min-height:\s*44px/);
@@ -144,20 +146,31 @@ test('Provider Access controls use Norva tokens and remain touch, mobile and mot
   assert.match(css, /html\.tv-mode #page-settings \.settings-source-management[\s\S]{0,80}display:\s*none/);
 });
 
-test('Provider Access wizard has one vertical scroller and one action footer', () => {
+test('Provider Access wizard uses adaptive height, one scroller and non-obscuring actions', () => {
+  assert.match(css, /\.provider-access-wizard-modal \.modal-content\s*\{[\s\S]{0,180}height:\s*auto/);
   assert.match(css, /\.provider-access-wizard-modal \.modal-body\s*\{[\s\S]{0,220}overflow-y:\s*auto/);
   assert.match(css, /\.provider-access-wizard-modal \.provider-access-terms\s*\{[\s\S]{0,220}overflow:\s*visible/);
   assert.match(css, /\.provider-access-wizard-modal \.provider-access-wizard-stage\s*\{[\s\S]{0,220}overflow:\s*visible/);
-  assert.match(css, /\.provider-access-wizard-modal \.provider-access-wizard-actions\s*\{[\s\S]{0,100}position:\s*sticky[\s\S]{0,80}bottom:\s*0/);
+  assert.match(css, /\.provider-access-wizard-modal \.provider-access-wizard-actions\s*\{[\s\S]{0,100}position:\s*static/);
   assert.match(css, /\.provider-access-wizard-modal \.modal-footer\s*\{[\s\S]{0,80}display:\s*none/);
   assert.match(sourceManager, /modalBody\?\.closest\('\.provider-access-wizard-modal'\)[\s\S]{0,80}modalBody\.scrollTop = 0/);
 });
 
+test('Provider Access keeps the exact-date calendar optional and explains paused services', () => {
+  assert.match(sourceManager, /<details class="provider-access-calendar" data-access-calendar>/);
+  assert.match(sourceManager, /Calculated end date/);
+  assert.match(sourceManager, /Adjust date/);
+  assert.match(sourceManager, /will then record the period in days/);
+  assert.match(sourceManager, /Recording an access period will not enable this service/);
+  assert.match(sourceManager, /new Intl\.DateTimeFormat\('en'/);
+  assert.match(css, /\.provider-access-calendar > summary\s*\{[\s\S]{0,120}min-height:\s*44px/);
+});
+
 test('all changed Provider Access UI assets are cache-busted', () => {
-  assert.match(shell, /main\.css\?v=5fb0adbb61/);
+  assert.match(shell, /main\.css\?v=5eb7be4e33/);
   assert.match(shell, /cloudApi\.js\?v=70/);
   assert.match(shell, /api\.js\?v=89/);
   assert.match(shell, /sourceHealth\.js\?v=6c0eefcb4f/);
-  assert.match(shell, /SourceManager\.js\?v=a659ebb978/);
-  assert.match(shell, /HomePage\.js\?v=ce0d273210/);
+  assert.match(shell, /SourceManager\.js\?v=a47eaa0316/);
+  assert.match(shell, /HomePage\.js\?v=6016cf63fb/);
 });

@@ -2345,6 +2345,191 @@ video::cue {
   color: #fca5a5;
 }
 
+.norva-paused-home {
+  min-height: calc(100dvh - 180px);
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.65fr);
+  align-items: center;
+  gap: clamp(var(--space-xl), 5vw, var(--space-2xl));
+  padding: clamp(var(--space-xl), 6vw, var(--space-2xl)) clamp(var(--space-lg), 6vw, var(--space-2xl));
+  background:
+    radial-gradient(circle at 12% 12%, color-mix(in srgb, var(--color-accent) 16%, transparent), transparent 34%),
+    linear-gradient(145deg, color-mix(in srgb, var(--color-bg-secondary) 72%, transparent), var(--color-bg-primary));
+}
+
+.norva-paused-home-main {
+  width: min(760px, 100%);
+}
+
+.norva-paused-home-status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-sm);
+  min-height: 36px;
+  padding: var(--space-xs) var(--space-sm);
+  border: 1px solid color-mix(in srgb, var(--color-warning) 28%, var(--color-border));
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--color-warning) 8%, transparent);
+  color: var(--color-text-secondary);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.norva-paused-home-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-full);
+  background: var(--color-warning);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-warning) 14%, transparent);
+}
+
+.norva-paused-home-count {
+  padding-left: var(--space-sm);
+  border-left: 1px solid color-mix(in srgb, var(--color-warning) 22%, var(--color-border));
+  color: var(--color-text-muted);
+}
+
+.norva-paused-home h1 {
+  max-width: 760px;
+  margin: var(--space-lg) 0 var(--space-md);
+  color: var(--color-text-primary);
+  font-family: var(--font-display, inherit);
+  font-size: clamp(2.2rem, 4.4vw, 4.25rem);
+  line-height: 1;
+  letter-spacing: -0.035em;
+}
+
+.norva-paused-home-main > p {
+  max-width: 650px;
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: clamp(1rem, 1.4vw, 1.15rem);
+  line-height: 1.55;
+}
+
+.norva-paused-home-actions {
+  display: flex;
+  margin-top: var(--space-xl);
+}
+
+.norva-paused-home-actions .btn {
+  min-width: min(260px, 100%);
+  min-height: 52px;
+}
+
+.norva-paused-home-assurances {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-lg);
+  margin: var(--space-2xl) 0 0;
+  padding: var(--space-lg) 0 0;
+  border-top: 1px solid var(--color-border);
+  list-style: none;
+}
+
+.norva-paused-home-assurances li {
+  display: grid;
+  gap: var(--space-xs);
+}
+
+.norva-paused-home-assurances strong {
+  color: var(--color-text-primary);
+  font-size: 0.9rem;
+}
+
+.norva-paused-home-assurances span {
+  color: var(--color-text-muted);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.norva-paused-home-next {
+  display: grid;
+  align-content: start;
+  gap: var(--space-sm);
+  padding: var(--space-xl);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 24%, var(--color-border));
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--color-bg-secondary) 88%, transparent);
+  box-shadow: var(--shadow-md), inset 0 1px 0 var(--glass-border);
+}
+
+.norva-paused-home-next img {
+  width: 48px;
+  height: 48px;
+  margin-bottom: var(--space-md);
+}
+
+.norva-paused-home-next > span {
+  color: var(--color-accent-hover);
+  font-size: 0.75rem;
+  font-weight: 750;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.norva-paused-home-next strong {
+  color: var(--color-text-primary);
+  font-size: 1.12rem;
+  line-height: 1.35;
+}
+
+.norva-paused-home-next p {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+@media (max-width: 900px) {
+  .norva-paused-home {
+    min-height: auto;
+    grid-template-columns: 1fr;
+    align-items: start;
+    gap: var(--space-xl);
+  }
+
+  .norva-paused-home-next {
+    grid-template-columns: 48px minmax(0, 1fr);
+    grid-template-areas: "icon eyebrow" "icon title" "icon copy";
+    align-items: center;
+  }
+
+  .norva-paused-home-next img { grid-area: icon; margin: 0; }
+  .norva-paused-home-next > span { grid-area: eyebrow; }
+  .norva-paused-home-next strong { grid-area: title; }
+  .norva-paused-home-next p { grid-area: copy; }
+}
+
+@media (max-width: 640px) {
+  .norva-paused-home {
+    padding: var(--space-xl) var(--space-md) calc(var(--space-2xl) + env(safe-area-inset-bottom, 0px));
+  }
+
+  .norva-paused-home h1 {
+    font-size: clamp(2rem, 12vw, 3.2rem);
+  }
+
+  .norva-paused-home-actions .btn {
+    width: 100%;
+  }
+
+  .norva-paused-home-assurances {
+    grid-template-columns: 1fr;
+    gap: var(--space-md);
+  }
+
+  .norva-paused-home-next {
+    grid-template-columns: 40px minmax(0, 1fr);
+    padding: var(--space-lg);
+  }
+
+  .norva-paused-home-next img {
+    width: 40px;
+    height: 40px;
+  }
+}
+
 .norva-setup-connect {
   position: relative;
   display: grid;
@@ -3765,6 +3950,27 @@ video::cue {
   gap: var(--space-lg);
 }
 
+.source-edit-intent {
+  display: grid;
+  gap: var(--space-xs);
+  margin-bottom: var(--space-lg);
+  padding: var(--space-md);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 26%, var(--color-border));
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--color-accent) 7%, var(--color-bg-tertiary));
+}
+
+.source-edit-intent strong {
+  color: var(--color-text-primary);
+}
+
+.source-edit-intent p {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
+
 /* Provider Access lifecycle — shared web/phone Settings surface. The TV shell
    keeps its existing handoff card and never asks for provider credentials. */
 .provider-access-inline {
@@ -4154,27 +4360,27 @@ video::cue {
 }
 
 .provider-access-review-duration {
-  display: grid;
-  place-content: center;
-  width: 72px;
-  height: 72px;
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-xs);
+  width: auto;
+  min-height: 36px;
   flex: 0 0 auto;
+  padding: var(--space-xs) var(--space-sm);
   border: 1px solid color-mix(in srgb, var(--color-accent) 42%, var(--color-border));
-  border-radius: var(--radius-full);
+  border-radius: var(--radius-md);
   background: var(--color-accent-dim);
   color: var(--color-accent-hover);
-  text-align: center;
 }
 
 .provider-access-review-duration b {
-  font-size: 1.35rem;
+  font-size: 1rem;
   line-height: 1;
 }
 
 .provider-access-review-duration small {
-  margin-top: 3px;
   color: var(--color-accent-hover);
-  font-size: 0.58rem;
+  font-size: 0.72rem;
 }
 
 .provider-access-review-rows {
@@ -4428,6 +4634,22 @@ video::cue {
   box-shadow: inset 0 1px 0 var(--glass-border), var(--shadow-md);
 }
 
+.provider-access-calendar > summary {
+  min-height: 44px;
+  list-style: none;
+  cursor: pointer;
+}
+
+.provider-access-calendar > summary::-webkit-details-marker {
+  display: none;
+}
+
+.provider-access-calendar > summary:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 4px;
+  border-radius: var(--radius-sm);
+}
+
 .provider-access-calendar-summary,
 .provider-access-calendar-header {
   display: flex;
@@ -4438,6 +4660,7 @@ video::cue {
 
 .provider-access-calendar-summary > div {
   display: grid;
+  flex: 1 1 auto;
   gap: 2px;
   min-width: 0;
 }
@@ -4465,6 +4688,32 @@ video::cue {
   color: var(--color-accent-hover);
   font-size: 0.78rem;
   font-weight: 700;
+}
+
+.provider-access-calendar-expand {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  min-height: 32px;
+  color: var(--color-accent-hover);
+  font-size: 0.78rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.provider-access-calendar-expand::after {
+  content: '⌄';
+  font-size: 1rem;
+  line-height: 1;
+  transition: transform var(--transition-fast);
+}
+
+.provider-access-calendar[open] .provider-access-calendar-expand::after {
+  transform: rotate(180deg);
+}
+
+.provider-access-calendar-body {
+  padding-top: var(--space-xs);
 }
 
 .provider-access-calendar-timeline {
@@ -4710,6 +4959,38 @@ button.provider-access-calendar-day {
   background: var(--color-bg-tertiary);
 }
 
+.provider-access-service-state {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr);
+  gap: var(--space-sm);
+  align-items: start;
+  margin: var(--space-md) var(--space-lg) 0;
+  padding: var(--space-sm) var(--space-md);
+  border: 1px solid color-mix(in srgb, var(--color-warning) 34%, var(--color-border));
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--color-warning) 8%, var(--color-bg-tertiary));
+}
+
+.provider-access-service-state > span {
+  width: 8px;
+  height: 8px;
+  margin-top: 6px;
+  border-radius: var(--radius-full);
+  background: var(--color-warning);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-warning) 12%, transparent);
+}
+
+.provider-access-service-state strong {
+  color: var(--color-text-primary);
+}
+
+.provider-access-service-state p {
+  margin: 2px 0 0;
+  color: var(--color-text-secondary);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
 .provider-access-overview>div {
   display: grid;
   gap: var(--space-xs);
@@ -4847,7 +5128,7 @@ button.provider-access-calendar-day {
 .provider-access-wizard-modal .modal-content {
   width: min(620px, calc(100vw - 32px));
   max-width: 620px;
-  height: min(880px, calc(100dvh - 32px));
+  height: auto;
   max-height: calc(100dvh - 32px);
 }
 
@@ -4903,8 +5184,7 @@ button.provider-access-calendar-day {
 }
 
 .provider-access-wizard-modal .provider-access-wizard-actions {
-  position: sticky;
-  bottom: 0;
+  position: static;
 }
 
 .provider-access-wizard-modal .modal-footer {
@@ -5135,18 +5415,22 @@ button.provider-access-calendar-day {
   }
 
   .provider-access-wizard-modal {
-    align-items: stretch;
+    align-items: flex-end;
     padding: max(8px, var(--safe-area-inset-top)) 8px max(8px, var(--safe-area-inset-bottom));
   }
 
   .provider-access-wizard-modal .modal-content {
     width: 100%;
-    height: calc(100dvh - 16px);
+    height: auto;
     max-height: calc(100dvh - 16px);
   }
 
   .provider-access-wizard-modal .provider-access-overview {
     display: none;
+  }
+
+  .provider-access-wizard-modal .provider-access-service-state {
+    margin: var(--space-sm) var(--space-sm) 0;
   }
 
   .provider-access-wizard-modal .provider-access-overview > p {
@@ -5225,7 +5509,6 @@ button.provider-access-calendar-day {
     overscroll-behavior-inline: contain;
   }
 
-  .provider-access-calendar-summary,
   .provider-access-calendar-timeline,
   .provider-access-calendar-header,
   .provider-access-calendar-caption {
@@ -5237,7 +5520,7 @@ button.provider-access-calendar-day {
   }
 
   .provider-access-calendar-badge {
-    margin-top: 2px;
+    display: none;
   }
 
   .provider-access-actions,
