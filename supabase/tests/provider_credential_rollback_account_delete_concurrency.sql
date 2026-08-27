@@ -361,7 +361,7 @@ begin
         and item.generation_id=v_candidate_before.id
         and item.external_id='shared-001';
       raise exception 'N+1 writer unexpectedly committed after rollback';
-    exception when sqlstate '40001' then
+    exception when sqlstate 'PT409' then
       v_n_plus_1_stale:=true;
     end;
     if v_first_result->>'sqlstate' <> '00000'
@@ -391,7 +391,7 @@ begin
     end if;
   else
     if v_first_result->>'sqlstate' <> '00000'
-       or v_second_result->>'sqlstate' <> '40001'
+       or v_second_result->>'sqlstate' <> 'PT409'
        or v_transition_after.state <> v_transition_before.state
        or v_config_revision_after <> v_config_revision_before
        or v_head_revision_after <> v_head_revision_before

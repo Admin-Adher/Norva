@@ -9,6 +9,7 @@ import {
   extractProviderAccessState,
   PROVIDER_ACCESS_DETECTION_VERSION,
 } from "../_shared/provider-access-state.mjs";
+import { isStaleDatabaseConflict } from "../_shared/database-conflict.ts";
 
 // Provider Access v1 is intentionally a service-mediated API.  Browser/user
 // requests are authenticated with a Supabase user JWT, while the durable job
@@ -1360,7 +1361,7 @@ function mapRpcError(error, context = {}) {
           : "TRANSITION_NOT_FOUND",
     );
   }
-  if (sqlstate === "40001" || message.includes(" cas failed") || message.includes("stale source revision")) {
+  if (sqlstate === "PT409" || sqlstate === "40001" || message.includes(" cas failed") || message.includes("stale source revision")) {
     return new ContractError(
       context.cas === "source"
         ? "SOURCE_REVISION_MISMATCH"
@@ -3367,11 +3368,11 @@ function assertAuthenticatedAccount(payload) {
 
 async function workerRpc(name, params) {
   const { data, error } = await admin.rpc(name, params);
-  // Every durable writer expresses a lost CAS/lease as serialization failure.
+  // Every durable writer expresses a lost CAS/lease as an application conflict.
   // It is not evidence that candidate credentials are bad and must never take
   // the compensation branch; a later claim either resumes from PostgreSQL or
   // finds that the transition is terminal/cancelled.
-  if (error?.code === "40001") throw new WorkerFault("stale", true);
+  if (isStaleDatabaseConflict(error)) throw new WorkerFault("stale", true);
   if (error) throw new WorkerFault("internal_error", false);
   if (data === null || data === undefined) throw new WorkerFault("internal_error", false);
   return data;

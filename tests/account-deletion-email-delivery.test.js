@@ -91,7 +91,7 @@ test('cron advances only bounded durable deletion steps with revision CAS', () =
   assert.match(runner, /norva_advance_account_deletion_workflow/);
   assert.match(runner, /norva_purge_account_deletion_paywall_batch/);
   assert.match(runner, /norva_purge_account_deletion_product_batch/);
-  assert.match(runner, /nextError\.code === "40001"/);
+  assert.match(runner, /isStaleDatabaseConflict\(nextError\)/);
   assert.doesNotMatch(runner, /auth\.admin\.deleteUser/);
 });
 

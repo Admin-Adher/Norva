@@ -7,6 +7,7 @@ const read = (...parts) => fs.readFileSync(path.join(__dirname, '..', ...parts),
 const edge = read('supabase', 'functions', 'norva-account-delete', 'index.ts');
 const migration = read('supabase', 'migrations', '20260823182793_account_deletion_transport_stop_revalidate.sql');
 const scopeMigration = read('supabase', 'migrations', '20260823182794_account_deletion_transport_stop_scope.sql');
+const conflictHelper = read('supabase', 'functions', '_shared', 'database-conflict.ts');
 
 test('transport stop revalidates every durable fence immediately before gateway fetch', () => {
   const start = edge.indexOf('async function drainProviderTransportStop');
@@ -15,11 +16,17 @@ test('transport stop revalidates every durable fence immediately before gateway 
   const revalidateAt = worker.indexOf('norva_revalidate_account_deletion_transport_stop');
   const fetchAt = worker.indexOf('fetch(`${MEDIA_GATEWAY_URL}/sessions/stop-provider-affinities`');
   assert.ok(revalidateAt > 0 && revalidateAt < fetchAt, 'revalidation must precede gateway fetch');
-  assert.match(worker, /revalidateError\?\.code === "40001"\) return "stale"/);
+  assert.match(worker, /isStaleDatabaseConflict\(revalidateError\)\) return "stale"/);
   assert.match(worker, /revalidated\.deletionEpoch !== epoch/);
   assert.match(worker, /revalidated\.leaseSequence !== leaseSequence/);
   assert.match(worker, /revalidated\.revision !== revision/);
   assert.match(worker, /body: JSON\.stringify\(\{ affinityHashes: revalidatedAffinities \}\)/);
+});
+
+test('transport stop treats PT409 as stale while retaining rolling 40001 compatibility', () => {
+  assert.match(conflictHelper, /code === "PT409" \|\| code === "40001"/);
+  assert.match(edge, /isStaleDatabaseConflict\(error\)/);
+  assert.match(edge, /isStaleDatabaseConflict\(settleError\)/);
 });
 
 test('revalidation is a server-only CAS over account epoch, workflow state, lease, and revision', () => {

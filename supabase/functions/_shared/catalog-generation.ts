@@ -1,3 +1,5 @@
+import { isStaleDatabaseConflict } from "./database-conflict.ts";
+
 // Catalog generation fencing shared by every catalog writer.
 //
 // Normal refreshes may write only the snapshotted ACTIVE head. Credential
@@ -224,7 +226,8 @@ export function isCatalogGenerationSuperseded(error: unknown): boolean {
   const value = recordOrEmpty(error);
   const code = stringValue(value.code).toUpperCase();
   const message = stringValue(value.message ?? error).toLowerCase();
-  return ["40001", "42501", "CATALOG_GENERATION_SUPERSEDED", "SOURCE_CATALOG_CHANGED"].includes(code) ||
+  return isStaleDatabaseConflict(value) ||
+    ["42501", "CATALOG_GENERATION_SUPERSEDED", "SOURCE_CATALOG_CHANGED"].includes(code) ||
     /catalog generation (?:write lease|snapshot|head|is not an active|changed)|active catalog row does not match source head/.test(message);
 }
 

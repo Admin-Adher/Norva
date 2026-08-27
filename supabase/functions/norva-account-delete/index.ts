@@ -10,6 +10,7 @@
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
+import { isStaleDatabaseConflict } from "../_shared/database-conflict.ts";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -479,7 +480,7 @@ async function drainProviderTransportStop(db: SupabaseClient, userId: string) {
     p_user_id: userId, p_worker: worker, p_lease_seconds: 120,
   });
   if (error) {
-    if (error.code === "40001") return "stale";
+    if (isStaleDatabaseConflict(error)) return "stale";
     throw new Error(`account_deletion_transport_claim_failed:${error.message}`);
   }
   const claim = (data && typeof data === "object" ? data : {}) as JsonRecord;
@@ -505,7 +506,7 @@ async function drainProviderTransportStop(db: SupabaseClient, userId: string) {
       p_expected_lease_sequence: leaseSequence, p_expected_revision: revision,
     },
   );
-  if (revalidateError?.code === "40001") return "stale";
+  if (isStaleDatabaseConflict(revalidateError)) return "stale";
   if (revalidateError) throw new Error(`account_deletion_transport_revalidate_failed:${revalidateError.message}`);
   const revalidated = (revalidatedData && typeof revalidatedData === "object" ? revalidatedData : {}) as JsonRecord;
   const revalidatedAffinities = Array.isArray(revalidated.affinityHashes)
@@ -525,7 +526,7 @@ async function drainProviderTransportStop(db: SupabaseClient, userId: string) {
       p_expected_revision: revision, p_outcome: "completed", p_transport_stop_receipt_hash: receipt,
       p_error_code: null, p_retry_after_seconds: 0,
     });
-    if (settleError?.code === "40001") return "stale";
+    if (isStaleDatabaseConflict(settleError)) return "stale";
     if (settleError) throw new Error(`account_deletion_transport_settle_failed:${settleError.message}`);
     return "completed";
   }
@@ -547,7 +548,7 @@ async function drainProviderTransportStop(db: SupabaseClient, userId: string) {
     p_expected_revision: revision, p_outcome: "completed", p_transport_stop_receipt_hash: receipt,
     p_error_code: null, p_retry_after_seconds: 0,
   });
-  if (settleError?.code === "40001") return "stale";
+  if (isStaleDatabaseConflict(settleError)) return "stale";
   if (settleError) throw new Error(`account_deletion_transport_settle_failed:${settleError.message}`);
   return "completed";
 }
@@ -584,7 +585,7 @@ async function drainAccountDeletionWorkflows(db: SupabaseClient) {
     // Revision CAS failures are expected under duplicate schedulers. They are
     // STALE/no-op, never an invitation to retry with a guessed revision.
     if (nextError) {
-      if (nextError.code === "40001") stale++;
+      if (isStaleDatabaseConflict(nextError)) stale++;
       else throw new Error(`account_deletion_workflow_advance_failed:${nextError.message}`);
       continue;
     }
@@ -610,7 +611,7 @@ async function drainAccountDeletionWorkflows(db: SupabaseClient) {
         { p_user_id: userId, p_expected_revision: nextRevision, p_limit: 500 },
       );
       if (batchError) {
-        if (batchError.code === "40001") stale++;
+        if (isStaleDatabaseConflict(batchError)) stale++;
         else throw new Error(`account_deletion_paywall_batch_failed:${batchError.message}`);
       } else batches++;
     } else if (action === "purge_product") {
@@ -619,7 +620,7 @@ async function drainAccountDeletionWorkflows(db: SupabaseClient) {
         { p_user_id: userId, p_expected_revision: nextRevision, p_limit: 500 },
       );
       if (batchError) {
-        if (batchError.code === "40001") stale++;
+        if (isStaleDatabaseConflict(batchError)) stale++;
         else throw new Error(`account_deletion_product_batch_failed:${batchError.message}`);
       } else batches++;
     }

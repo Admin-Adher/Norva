@@ -57,7 +57,7 @@ begin
       'd0000000-0000-0000-0000-000000000098',0,true,
       'LEGAL-READER-APPROVAL-2026-001','legal-access-smoke'
     );
-  exception when sqlstate '40001' then v_stale := true;
+  exception when sqlstate 'PT409' then v_stale := true;
   end;
 
   perform set_config(

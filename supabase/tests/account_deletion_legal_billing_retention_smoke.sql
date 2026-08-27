@@ -100,7 +100,7 @@ begin
       'fixture://reviewed-policy/accounting-records-v2',10,12,31,
       'account-deletion-retention-smoke'
     );
-  exception when sqlstate '40001' then v_stale := true;
+  exception when sqlstate 'PT409' then v_stale := true;
   end;
   begin
     update public.legal_billing_archive_policy_events

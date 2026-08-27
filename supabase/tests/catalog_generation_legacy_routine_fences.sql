@@ -118,7 +118,7 @@ select extensions.throws_ok(
     '10000000-0000-0000-0000-000000000003'::uuid,
     1,1,1,1,'series-1','{"episodes":[]}'::jsonb
   )$$,
-  '40001',
+  'PT409',
   'catalog delete proof CAS failed',
   'a stale or foreign generation fence is rejected before series mutation'
 );
@@ -316,14 +316,14 @@ select extensions.throws_ok(
   $$select public.record_provider_overview_outcome(
     gen_random_uuid(),gen_random_uuid(),'x',null,null,null,'missing',null,'{}'::jsonb,
     gen_random_uuid(),1,1,1,1)$$,
-  '40001','catalog delete proof CAS failed',
+  'PT409','catalog delete proof CAS failed',
   'stale overview writer proof is rejected before any legacy body runs'
 );
 select extensions.throws_ok(
   $$select public.record_catalog_file_container_observation(
     gen_random_uuid(),gen_random_uuid(),gen_random_uuid(),'movie','x','mkv','mp4',
     '{}'::jsonb,gen_random_uuid(),clock_timestamp(),gen_random_uuid(),1,1,1,1)$$,
-  '40001','catalog delete proof CAS failed',
+  'PT409','catalog delete proof CAS failed',
   'stale container writer proof is rejected before any legacy body runs'
 );
 select extensions.throws_ok(

@@ -466,7 +466,7 @@ begin
       );
       perform dblink_exec('norva_owner_builder','commit');
 
-      if v_first_sqlstate = '40001' then
+      if v_first_sqlstate = 'PT409' then
         v_retried := true;
         select epoch.visibility_epoch into strict v_current_epoch
         from public.cloud_user_catalog_visibility_epochs epoch
@@ -678,7 +678,7 @@ begin
   if (select count(*) from catalog_background_owner_snapshot_race_results) <> 6
      or exists (
        select 1 from catalog_background_owner_snapshot_race_results result
-       where result.first_build_sqlstate not in ('00000','40001')
+       where result.first_build_sqlstate not in ('00000','PT409')
           or (result.ordering = 'writer_first'
             and not result.builder_wait_observed)
           or (result.ordering = 'activation_first'

@@ -91,7 +91,7 @@ select extensions.throws_ok(
     'pgTAP-break-glass',
     'WAIVE_CACHE_EPOCH_V2_OBSERVATION_FOR_AD_LAUNCH'
   )$sql$,
-  '40001',
+  'PT409',
   'stale rollout revision',
   'waiver rejects a stale rollout CAS revision'
 );

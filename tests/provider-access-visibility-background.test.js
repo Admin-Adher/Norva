@@ -207,6 +207,7 @@ test('background RPC path rolls its own epoch, rejects an interleaved transition
     recordOrEmpty: (value) => value !== null && typeof value === 'object' && !Array.isArray(value) ? value : {},
     stringOr: (value, fallback) => typeof value === 'string' && value ? value : fallback,
     stringOrNull: (value) => typeof value === 'string' && value ? value : null,
+    isStaleDatabaseConflict: (error) => ['PT409', '40001'].includes(String(error?.code ?? '').toUpperCase()),
     crypto: { randomUUID: () => 'dddddddd-dddd-4ddd-8ddd-dddddddddddd' },
   };
   vm.runInNewContext(compiled, sandbox, { filename: 'norva-source-sync/background-rpc.ts' });

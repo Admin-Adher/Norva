@@ -645,7 +645,7 @@ begin
   values ('guard_first',v_write_result,v_begin_result);
 
   -- Race B: begin_prepare owns auth UPDATE first.  The direct-DML guard uses
-  -- NOWAIT and maps 55P03 to the retryable contract SQLSTATE 40001.
+  -- NOWAIT and maps 55P03 to the retryable contract SQLSTATE PT409.
   perform dblink_exec('norva_adk_begin','begin');
   perform dblink_exec(
     'norva_adk_begin','set local statement_timeout = ''15s'''
@@ -731,7 +731,7 @@ begin
      ) then
     raise exception 'guard-first race invariant failed: %',row_to_json(v_guard);
   end if;
-  if split_part(v_begin.write_result,'|',1) <> '40001'
+  if split_part(v_begin.write_result,'|',1) <> 'PT409'
      or split_part(v_begin.write_result,'|',2) <>
        'reason=provider_account_fence_busy'
      or v_begin.begin_result->>'state' <> 'pending'
@@ -862,7 +862,7 @@ begin
   );
 
   -- Begin owns auth UPDATE.  Permit acquisition blocks (it is not NOWAIT),
-  -- then observes the committed preparation and returns the contract 40001.
+  -- then observes the committed preparation and returns the contract PT409.
   perform dblink_exec('norva_adk_permit_begin','begin');
   perform dblink_exec(
     'norva_adk_permit_begin','set local statement_timeout = ''15s'''
@@ -1006,7 +1006,7 @@ begin
      or (v_first->>'fallbackReleased')::boolean is not true then
     raise exception 'permit-first race invariant failed: %',v_first;
   end if;
-  if v_second#>>'{permitEnvelope,sqlstate}' <> '40001'
+  if v_second#>>'{permitEnvelope,sqlstate}' <> 'PT409'
      or v_second#>>'{permitEnvelope,detail}' <> 'reason=account_deletion_pending'
      or v_second#>>'{begin,state}' <> 'pending'
      or (v_second->>'fallbackReleased')::boolean is not true then
@@ -1533,9 +1533,9 @@ begin
      or (v_result#>>'{w2,leaseSequence}')::integer <> 2
      or (v_result#>>'{w2,revision}')::bigint <> 2
      or (v_result#>>'{w2,failureAttemptCount}')::integer <> 1
-     or v_result#>>'{staleW1,sqlstate}' <> '40001'
-     or v_result#>>'{staleCheckpointW1,sqlstate}' <> '40001'
-     or v_result#>>'{staleSettleW1,sqlstate}' <> '40001'
+     or v_result#>>'{staleW1,sqlstate}' <> 'PT409'
+     or v_result#>>'{staleCheckpointW1,sqlstate}' <> 'PT409'
+     or v_result#>>'{staleSettleW1,sqlstate}' <> 'PT409'
      or v_result#>>'{w3,state}' <> 'processing'
      or (v_result#>>'{w3,leaseSequence}')::integer <> 3
      or (v_result#>>'{w3,revision}')::bigint <> 3

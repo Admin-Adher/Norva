@@ -394,7 +394,7 @@ select extensions.throws_ok(
     '98900000-0000-4000-8000-000000000001',
     'auto-refresh-989-second', 2, 'success', now(), null, null
   )$$,
-  '40001',
+  'PT409',
   'cloud auto refresh lease is stale',
   'worker from before foreground recovery cannot commit'
 );
@@ -435,7 +435,7 @@ select extensions.throws_ok(
     '98900000-0000-4000-8000-000000000001',
     'auto-refresh-989-missing', 1, 'success', now(), null, null
   )$$,
-  '40001',
+  'PT409',
   'cloud auto refresh lease is stale',
   'a deleted or unknown source is reported as a stale lease without repair'
 );

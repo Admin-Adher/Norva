@@ -93,7 +93,7 @@ begin
       'WAIVE_CACHE_EPOCH_V2_OBSERVATION_FOR_AD_LAUNCH'
     );
     raise exception 'stale revision unexpectedly succeeded';
-  exception when sqlstate '40001' then
+  exception when sqlstate 'PT409' then
     if sqlerrm <> 'stale rollout revision' then
       raise;
     end if;

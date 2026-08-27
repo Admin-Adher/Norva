@@ -37,6 +37,7 @@ import {
   readActiveCatalogGenerationSnapshot,
   withCatalogGenerationRows,
 } from "../_shared/catalog-generation.ts";
+import { isStaleDatabaseConflict } from "../_shared/database-conflict.ts";
 
 type JsonRecord = Record<string, unknown>;
 type RuntimeConfig = {
@@ -112,7 +113,7 @@ Deno.serve(async (req) => {
       return json(req, {
         ok: true,
         service: "norva-source-sync",
-        version: 13,
+        version: 14,
         liveMaterialization: true,
         syncProgress: true,
         catalogFinalize: true,
@@ -955,7 +956,7 @@ async function selectCatalogBackgroundBatch(
 }
 
 function isCatalogBackgroundCasConflict(error: unknown): boolean {
-  return isRecord(error) && String(error.code ?? "") === "40001";
+  return isRecord(error) && isStaleDatabaseConflict(error);
 }
 
 async function applyCatalogBackgroundResult(
@@ -2517,7 +2518,7 @@ async function settleCloudAutoRefreshClaim(
   if (error) {
     // A lost lease means a newer claim/config generation owns the continuation.
     // Never repair or overwrite it from the stale worker.
-    if (String(error.code ?? "") === "40001") return null;
+    if (isStaleDatabaseConflict(error)) return null;
     throw new Error(`Unable to settle cloud auto refresh: ${error.message}`);
   }
   return data;

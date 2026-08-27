@@ -185,7 +185,7 @@ select extensions.is(
       %L,0,%L)
   $sql$, repeat('f',64),
     encode(extensions.digest('cipher-a','sha256'),'hex'))),
-  '40001',
+  'PT409',
   'stale account affinity rejects the claim before provider fetch'
 );
 select extensions.is(
@@ -197,7 +197,7 @@ select extensions.is(
   $sql$,
     encode(extensions.digest('panel-a.example:8080/alpha','sha256'),'hex'),
     encode(extensions.digest('cipher-a','sha256'),'hex'))),
-  '40001',
+  'PT409',
   'same-account password ABA is fenced by config revision'
 );
 select extensions.is(
@@ -209,7 +209,7 @@ select extensions.is(
   $sql$,
     encode(extensions.digest('panel-a.example:8080/alpha','sha256'),'hex'),
     encode(extensions.digest('not-cipher-a','sha256'),'hex'))),
-  '40001',
+  'PT409',
   'cross-table stale ciphertext snapshot is fenced even at the same revision input'
 );
 select extensions.is(
