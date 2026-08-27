@@ -111,7 +111,10 @@ insert into auto_refresh_989_dblink_connection values (
   format(
     'dbname=%I user=%I%s',
     current_database(),
-    current_user,
+    coalesce(
+      nullif(current_setting('norva.test_dblink_user', true), ''),
+      current_user::text
+    ),
     case
       when nullif(current_setting('norva.test_dblink_password', true), '') is null then ''
       else format(

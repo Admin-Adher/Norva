@@ -149,7 +149,10 @@ test('disposable Supabase CI executes the real fair-claim pgTAP suite', () => {
   assert.match(focusedProof, /20260822220703_provider_access_lifecycle_foundation\.sql/);
   assert.match(focusedProof, /20260824120000_provider_access_cycles_detection_v1\.sql/);
   assert.match(focusedProof, /20260827033406_provider_auto_refresh_fair_claim_v1\.sql/);
-  assert.match(focusedProof, /norva\.test_dblink_password = 'postgres'/);
+  assert.match(focusedProof, /create role norva_auto_refresh_989_dblink/);
+  assert.match(focusedProof, /grant service_role to norva_auto_refresh_989_dblink/);
+  assert.match(focusedProof, /norva\.test_dblink_user/);
+  assert.match(focusedProof, /norva\.test_dblink_password/);
   assert.match(
     focusedProof,
     /supabase test db[\s\S]*supabase\/tests\/provider_auto_refresh_fair_claim\.sql[\s\S]*--local/,
@@ -161,6 +164,7 @@ test('disposable Supabase CI executes the real fair-claim pgTAP suite', () => {
   );
   assert.doesNotMatch(pgTapProof, /public\.dblink_/i);
   assert.match(pgTapProof, /alter extension dblink set schema extensions/i);
+  assert.match(pgTapProof, /current_setting\('norva\.test_dblink_user', true\)/i);
   assert.match(pgTapProof, /current_setting\('norva\.test_dblink_password', true\)/i);
   assert.doesNotMatch(pgTapProof, /password=postgres/i);
 });

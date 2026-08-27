@@ -475,7 +475,15 @@ jobs:
           done
           docker exec -i "${db_containers[0]}" \
             psql -X -U supabase_admin -d postgres -v ON_ERROR_STOP=1 \
-            -c "alter database postgres set norva.test_dblink_password = 'postgres'"
+            <<'SQL'
+          create role norva_auto_refresh_989_dblink
+            login password 'norva-auto-refresh-989-disposable-only';
+          grant service_role to norva_auto_refresh_989_dblink;
+          alter database postgres set norva.test_dblink_user =
+            'norva_auto_refresh_989_dblink';
+          alter database postgres set norva.test_dblink_password =
+            'norva-auto-refresh-989-disposable-only';
+          SQL
 
       - name: Run the Provider refresh PostgreSQL concurrency proof
         run: >-
