@@ -97,7 +97,7 @@ begin
          from pg_proc p
          join pg_namespace n on n.oid = p.pronamespace
          where n.nspname = 'public'
-           and p.proname = 'norva_set_provider_access_rollout_stage'
+           and p.proname = 'norva_settle_cloud_auto_refresh_source'
            and pg_get_functiondef(p.oid) like '%PT409%'
        ) then
       raise exception 'application conflict SQLSTATE rewrite found no eligible Norva contract'

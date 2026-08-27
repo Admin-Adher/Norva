@@ -17,7 +17,7 @@ test('forward migration rewrites only application routines and reserves 40001 fo
   assert.match(migration, /dependency\.deptype = 'e'/);
   assert.match(migration, /replace\(v_definition, '40001', 'PT409'\)/);
   assert.match(migration, /rewrite already complete: functions=%/);
-  assert.match(migration, /norva_set_provider_access_rollout_stage/);
+  assert.match(migration, /norva_settle_cloud_auto_refresh_source/);
   assert.match(migration, /if v_remaining <> 0 then/);
   assert.match(migration, /notify pgrst, 'reload schema'/);
 });

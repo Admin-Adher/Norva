@@ -5,10 +5,6 @@ create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
 select extensions.plan(5);
 
-insert into public.cloud_provider_access_rollout(singleton)
-values (true)
-on conflict (singleton) do nothing;
-
 select extensions.is(
   (
     select count(*)::integer
@@ -46,33 +42,32 @@ select extensions.is(
     select count(*)::integer
     from pg_proc p
     join pg_namespace n on n.oid = p.pronamespace
-    where p.proname = 'norva_set_provider_access_rollout_stage'
+    where p.proname = 'norva_settle_cloud_auto_refresh_source'
       and n.nspname = 'public'
       and pg_get_functiondef(p.oid) like '%PT409%'
   ),
   1,
-  'the progressive rollout CAS routine is covered by the rewrite'
+  'the auto-refresh lease CAS routine is covered by the rewrite'
 );
 
 set local request.jwt.claim.role = 'service_role';
 select extensions.throws_ok(
-  format(
-    'select public.norva_set_provider_access_rollout_stage(%s,%L,%L,%L)',
-    (select revision - 1 from public.cloud_provider_access_rollout where singleton),
-    (select stage from public.cloud_provider_access_rollout where singleton),
-    'Intentional stale CAS proof for the non-retryable conflict contract.',
-    'postgrest-conflict-proof'
-  ),
+  $$select public.norva_settle_cloud_auto_refresh_source(
+    '98990000-0000-4000-8000-000000000101',
+    '98990000-0000-4000-8000-000000000001',
+    'postgrest-conflict-proof', 1, 'success', now(), null, null
+  )$$,
   'PT409',
-  'stale rollout revision',
-  'a real stale rollout CAS returns PT409'
+  'cloud auto refresh lease is stale',
+  'a real stale lease CAS returns PT409'
 );
 set local request.jwt.claim.role = '';
 
 select extensions.is(
-  (select count(*)::integer from public.cloud_provider_access_rollout where singleton),
-  1,
-  'the rejected stale CAS leaves the singleton intact'
+  (select count(*)::integer from public.cloud_sources
+    where id = '98990000-0000-4000-8000-000000000101'),
+  0,
+  'the rejected stale CAS does not synthesize or repair the missing source'
 );
 
 select * from extensions.finish();
