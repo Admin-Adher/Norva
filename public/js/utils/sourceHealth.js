@@ -49,6 +49,13 @@
             message: 'The provider reports an inactive or expired account. Renew it, then update the login if needed.',
             action: 'Update service'
         },
+        provider_changed: {
+            severity: 4,
+            label: 'Review service',
+            title: 'Review your TV service',
+            message: 'The provider address or account endpoint is no longer available. Review the access dates and login before syncing again.',
+            action: 'Review access'
+        },
         unreachable: {
             severity: 3,
             label: 'Unavailable',
@@ -194,12 +201,14 @@
     // `paid` is kept because this file already matched it in production.
     const BUSY_PATTERN = /\b(458|user_multi_ip|account[_\s-]*shar|account[_\s-]*busy|already in use|max(?:imum)?[_\s-]*conn|slot[_\s-]*busy)\b/;
     const EXPIRED_PATTERN = /\b(expired|expire|inactive|disabled|banned|subscription|renew|unpaid|paid|trial ended)\b/;
+    const NOT_FOUND_PATTERN = /(?:^|\D)404(?:\D|$)|\b(not found|endpoint missing|unknown account)\b/;
     const AUTH_PATTERN = /\b(401|403|unauthorized|forbidden|auth|auth[_\s-]*fail|authentication|credential|credentials|invalid user|invalid pass|invalid password|invalid login|bad password|wrong password)\b/;
     const INFRA_PATTERN = /\b(media gateway|gateway refused|refused|500|502|503|504|timeout|timed out|econn|enotfound|dns|network|unreachable|service unavailable|temporarily unavailable)\b/;
 
     const ERROR_KIND_LABELS = {
         busy: 'Slot occupé',
         expired: 'Abonnement terminé',
+        not_found: 'Service introuvable',
         auth: 'Identifiants rejetés',
         infra: 'Panne passerelle',
         unknown: 'Erreur non classée'
@@ -209,6 +218,7 @@
         const error = lower(String(text || ''));
         if (BUSY_PATTERN.test(error)) return 'busy';
         if (EXPIRED_PATTERN.test(error)) return 'expired';
+        if (NOT_FOUND_PATTERN.test(error)) return 'not_found';
         if (AUTH_PATTERN.test(error)) return 'auth';
         if (INFRA_PATTERN.test(error)) return 'infra';
         return 'unknown';
@@ -222,6 +232,7 @@
     const KIND_TO_STATE = {
         busy: 'degraded',
         expired: 'expired',
+        not_found: 'provider_changed',
         auth: 'auth_failed',
         infra: 'unreachable',
         unknown: 'degraded'
@@ -231,6 +242,17 @@
         const error = lower(`${rawStatus} ${errorText}`);
         if (!error.trim()) return 'degraded';
         return KIND_TO_STATE[classifyErrorKind(error)] || 'degraded';
+    }
+
+    function autoRefreshActionState(source = {}) {
+        const state = source.auto_refresh_state || source.autoRefreshState || {};
+        if (!state || typeof state !== 'object' || Array.isArray(state) || state.actionRequired !== true) return '';
+        const status = Number(state.terminalHttpStatus ?? state.lastHttpStatus);
+        if (status === 404) return 'provider_changed';
+        if (status === 401 || status === 403) {
+            return lower(state.terminalErrorKind || state.lastErrorKind) === 'expired' ? 'expired' : 'auth_failed';
+        }
+        return '';
     }
 
     function classifySource(source = {}, statuses = []) {
@@ -250,12 +272,15 @@
         const error = string(source.sync_error || source.syncError || status.error || status.sync_error || '');
         const lastSync = completedSyncAt(source, status);
         const enabled = source.enabled !== false && source.revoked !== true;
+        const autoRefreshAction = autoRefreshActionState(source);
 
         let state = 'degraded';
         let refreshing = false;
         let retrying = false;
         if (!enabled) {
             state = 'degraded';
+        } else if (autoRefreshAction) {
+            state = autoRefreshAction;
         } else if (EXPLICIT_ATTENTION_STATES.has(rawStatus) || EXPLICIT_ATTENTION_STATES.has(progressStatus)) {
             const explicitState = EXPLICIT_ATTENTION_STATES.has(progressStatus) ? progressStatus : rawStatus;
             if (explicitState === 'unreachable' && hasCompletedCatalog(source, status)) {
@@ -275,7 +300,10 @@
             // attempt. Only a hard
             // auth/expiry verdict (the user must act) still surfaces. Initial
             // imports (no completed catalog yet) surface every error as before.
-            if (hasCompletedCatalog(source, status) && errorState !== 'auth_failed' && errorState !== 'expired') {
+            if (hasCompletedCatalog(source, status)
+                && errorState !== 'auth_failed'
+                && errorState !== 'expired'
+                && errorState !== 'provider_changed') {
                 state = 'ready';
                 retrying = true;
             } else {
@@ -318,7 +346,10 @@
             type: sourceType(source),
             label: meta.label,
             title: meta.title,
-            message: error && state !== 'ready' ? safeShortError(error) : meta.message,
+            message: error && state !== 'ready'
+                && !['auth_failed', 'expired', 'provider_changed'].includes(state)
+                ? safeShortError(error)
+                : meta.message,
             action: meta.action,
             severity: meta.severity,
             needsAttention: meta.severity >= 3,
@@ -333,11 +364,17 @@
     }
 
     function catalogUnlocks(progress = {}, classification = {}) {
-        const blocked = classification.state === 'auth_failed' || classification.state === 'expired';
+        const source = classification.source || {};
+        const providerAccessStatus = lower(
+            source.provider_access_status || source.providerAccessStatus || ''
+        );
+        const blocked = ['expired_confirmed', 'access_unavailable_confirmed'].includes(providerAccessStatus);
         if (blocked) {
             return { live: false, movies: false, series: false, browsable: false };
         }
-        const fullyReady = classification.state === 'ready' || progress.usable === true;
+        const fullyReady = classification.state === 'ready'
+            || progress.usable === true
+            || Boolean(classification.lastSync);
         const browseReady = fullyReady || progress.browseReady === true;
         const liveReady = browseReady || progress.liveReady === true;
         return {

@@ -187,7 +187,7 @@ test('catalog policy unlocks every consumer from the authoritative usable flag',
   assert.equal(availability.categories.series, true);
 });
 
-test('catalog policy keeps a hard login failure actionable even with an older catalog', () => {
+test('catalog policy keeps a hard login failure actionable without hiding an unconfirmed older catalog', () => {
   const health = sourceHealthHarness();
   const summary = health.summarize([{
     id: 'source-1',
@@ -198,6 +198,46 @@ test('catalog policy keeps a hard login failure actionable even with an older ca
 
   const availability = health.catalogAvailability(summary);
   assert.equal(summary.state, 'auth_failed');
+  assert.equal(availability.gate, false);
+  assert.equal(availability.browsable, true);
+});
+
+test('401 and 404 scheduler evidence require user action while only confirmed Provider Access hides', () => {
+  const health = sourceHealthHarness();
+  const completed = { lastSync: { syncedAt: '2026-08-10T08:00:00.000Z', total: 42 } };
+  const missing = {
+    id: 'source-404',
+    sync_status: 'ready',
+    auto_refresh_state: {
+      actionRequired: true,
+      terminalHttpStatus: 404,
+      terminalErrorKind: 'not_found',
+    },
+    configHint: completed,
+    provider_access_status: 'unknown',
+  };
+  const rejected = {
+    id: 'source-401',
+    sync_status: 'ready',
+    auto_refresh_state: {
+      actionRequired: true,
+      terminalHttpStatus: 401,
+      terminalErrorKind: 'auth',
+    },
+    configHint: completed,
+    provider_access_status: 'unknown',
+  };
+
+  assert.equal(health.classifySource(missing).state, 'provider_changed');
+  assert.equal(health.classifySource(rejected).state, 'auth_failed');
+  assert.equal(health.catalogAvailability(health.summarize([missing])).browsable, true);
+  assert.equal(health.catalogAvailability(health.summarize([rejected])).browsable, true);
+
+  const confirmed = {
+    ...missing,
+    provider_access_status: 'expired_confirmed',
+  };
+  const availability = health.catalogAvailability(health.summarize([confirmed]));
   assert.equal(availability.gate, true);
   assert.equal(availability.browsable, false);
 });
@@ -353,10 +393,14 @@ function sourceManagerHarness(options = {}) {
       finalize: async () => ({ done: true, nextPhase: 'complete' }),
       getById: async () => null,
     },
+    providerAccess: {
+      available: () => options.providerAccessUiEnabled === true,
+    },
   };
   const window = {
     API: api,
     NorvaSourceHealth: options.sourceHealth,
+    NORVA_PROVIDER_ACCESS_UI_V1: options.providerAccessUiEnabled === true,
     localStorage: {
       getItem(key) { return storage.get(key) || null; },
       setItem(key, value) { storage.set(key, String(value)); },
@@ -410,6 +454,38 @@ test('SourceManager shows usable catalogue and pending retry together', () => {
   assert.match(container.innerHTML, /existing catalogue is available/);
   assert.match(container.innerHTML, /title="Retry catalog update" aria-label="Retry catalog update"/);
   assert.doesNotMatch(container.innerHTML, /Adding the rest of your library/);
+});
+
+test('SourceManager routes a 401 or 404 to Provider Access dates instead of a blind retry', () => {
+  const { manager } = sourceManagerHarness({
+    providerAccessUiEnabled: true,
+    sourceHealth: {
+      classifySource() {
+        return {
+          state: 'provider_changed',
+          label: 'Review service',
+          message: 'Review the provider access dates and login.',
+          needsAttention: true,
+        };
+      },
+    },
+  });
+  const container = {
+    innerHTML: '',
+    querySelectorAll() { return []; },
+  };
+
+  manager.renderSourceList(container, [{
+    id: 'source-404',
+    name: 'Internal provider',
+    type: 'xtream',
+    enabled: true,
+    provider_access_status: 'unknown',
+  }], 'xtream');
+
+  assert.match(container.innerHTML, /data-action="provider-access"[^>]*>Add access dates<\/button>/);
+  assert.match(container.innerHTML, /Access dates not added/);
+  assert.doesNotMatch(container.innerHTML, /data-action="edit"[^>]*>Repair<\/button>/);
 });
 
 function sourceManagerStatusHarness() {

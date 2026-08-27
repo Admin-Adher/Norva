@@ -48,6 +48,8 @@ const FIXTURES = [
   // The ordering fix: cause outranks symptom.
   ['[401] provider says subscription expired', 'expired'],
   ['403 unauthorized', 'auth'],
+  ['[404] Media gateway refused the metadata request', 'not_found'],
+  ['provider endpoint not found', 'not_found'],
   // A busy slot outranks everything: the account is valid, another device holds it.
   ['[458] account busy, subscription expired', 'busy'],
   ['user_multi_ip detected', 'busy'],
@@ -83,7 +85,7 @@ test('both copies return the same kind for every fixture', async () => {
 test('both copies carry the same operator labels', async () => {
   const mirror = loadBrowserMirror();
   const shared = await loadAuthoritative();
-  const kinds = ['busy', 'expired', 'auth', 'infra', 'unknown'];
+  const kinds = ['busy', 'expired', 'not_found', 'auth', 'infra', 'unknown'];
   for (const kind of kinds) {
     assert.equal(
       mirror.ERROR_KIND_LABELS[kind],
@@ -98,7 +100,7 @@ test('the suppressed kinds are the user-actionable ones', async () => {
   const shared = await loadAuthoritative();
   assert.deepEqual(
     [...shared.SILENT_OPS_SOURCE_ERROR_KINDS].sort(),
-    ['auth', 'busy', 'expired'],
+    ['auth', 'busy', 'expired', 'not_found'],
   );
   assert.equal(shared.SILENT_OPS_SOURCE_ERROR_KINDS.has('infra'), false);
   assert.equal(shared.SILENT_OPS_SOURCE_ERROR_KINDS.has('unknown'), false);

@@ -244,7 +244,16 @@ class SourceManager {
             // Sync); everything else lives in a labelled ⋯ menu instead of a row of
             // tooltip-only icons that are illegible on touch and TV.
             const needsRepair = !!health.needsAttention;
-            const primary = needsRepair
+            const needsAccessReview = type === 'xtream'
+                && this.providerAccessUiEnabled()
+                && ['auth_failed', 'expired', 'provider_changed'].includes(health.state);
+            const primary = needsAccessReview
+                ? {
+                    action: 'provider-access',
+                    label: accessSummary?.detail ? 'Review access' : 'Add access dates',
+                    cls: 'btn-repair'
+                }
+                : needsRepair
                 ? { action: 'edit', label: 'Repair', cls: 'btn-repair' }
                 : { action: 'refresh', label: 'Sync', cls: '' };
             return `

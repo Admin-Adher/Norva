@@ -29,7 +29,14 @@ test('title projection checks visibility before shared or global catalog writes'
 test('background selectors and continuations use the centralized visible-source boundary', () => {
   const source = read('supabase/functions/norva-source-sync/index.ts');
 
-  for (const functionName of ['cronRefreshDue', 'cronResumeStuck', 'cronFinalizeSource', 'admitHeavyImport']) {
+  const refreshStart = source.indexOf('async function cronRefreshDue(');
+  const refreshNext = source.indexOf('\nasync function ', refreshStart + 1);
+  const refresh = source.slice(refreshStart, refreshNext < 0 ? source.length : refreshNext);
+  assert.match(refresh, /db\.rpc\("norva_claim_cloud_auto_refresh_sources"/);
+  const refreshClaim = read('supabase/migrations/20260827033406_provider_auto_refresh_fair_claim_v1.sql');
+  assert.match(refreshClaim, /public\.norva_source_catalog_visible_internal\(source\.id, source\.user_id\)/);
+
+  for (const functionName of ['cronResumeStuck', 'cronFinalizeSource', 'admitHeavyImport']) {
     const start = source.indexOf(`async function ${functionName}(`);
     assert.notEqual(start, -1, `missing ${functionName}`);
     const next = source.indexOf('\nasync function ', start + 1);
