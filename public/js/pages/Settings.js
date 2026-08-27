@@ -20,6 +20,59 @@ function isTvSettingsShell() {
         || /[?&]tv=1\b/.test(window.location?.search || '');
 }
 
+// Settings navigation is intentionally persisted at two complementary levels:
+// the hash makes refresh/deep-links explicit, while sessionStorage restores the
+// last section when another app surface navigates to the generic #settings route.
+// Only public section identifiers are stored; no account or provider data enters
+// browser storage.
+const SETTINGS_TAB_STORAGE_KEY = 'norva-settings-tab-v1';
+const SETTINGS_TAB_NAMES = new Set([
+    'account',
+    'screens',
+    'player',
+    'sources',
+    'content',
+    'transcode',
+    'users',
+]);
+
+function normalizeSettingsTab(value) {
+    const tabName = String(value || '').trim().toLowerCase();
+    return SETTINGS_TAB_NAMES.has(tabName) ? tabName : '';
+}
+
+function settingsTabFromHash(hashValue) {
+    const route = String(hashValue || '').replace(/^#/, '');
+    const separator = route.indexOf('/');
+    if (separator < 0 || route.slice(0, separator) !== 'settings') return '';
+    try {
+        return normalizeSettingsTab(decodeURIComponent(route.slice(separator + 1)));
+    } catch (_) {
+        return '';
+    }
+}
+
+function readPersistedSettingsTab() {
+    try {
+        return normalizeSettingsTab(sessionStorage.getItem(SETTINGS_TAB_STORAGE_KEY));
+    } catch (_) {
+        return '';
+    }
+}
+
+function writePersistedSettingsTab(tabName) {
+    try {
+        sessionStorage.setItem(SETTINGS_TAB_STORAGE_KEY, tabName);
+    } catch (_) { /* storage can be unavailable in hardened WebViews */ }
+}
+
+window.NorvaSettingsNavigation = Object.freeze({
+    normalizeTab: normalizeSettingsTab,
+    tabFromHash: settingsTabFromHash,
+    readPersistedTab: readPersistedSettingsTab,
+    storageKey: SETTINGS_TAB_STORAGE_KEY,
+});
+
 // True once the native APK exposes the Play Billing purchase bridge. In-app
 // purchase is allowed by stores (only external web payment links are not), so
 // when this bridge is present we can surface an in-app "Subscribe" action.
@@ -1897,10 +1950,39 @@ class SettingsPage {
         }
     }
 
+    isTabAvailable(tabName) {
+        const normalizedTab = normalizeSettingsTab(tabName);
+        if (!normalizedTab) return false;
+        const tab = [...this.tabs].find((item) => item.dataset.tab === normalizedTab);
+        const panel = [...this.tabContents].find((item) => item.id === `tab-${normalizedTab}`);
+        return !!(tab && panel
+            && !tab.disabled
+            && !tab.hidden
+            && tab.style.display !== 'none'
+            && tab.getAttribute('aria-hidden') !== 'true');
+    }
+
+    syncTabRoute(tabName) {
+        if (this.app?.currentPage !== 'settings') return;
+        try {
+            const currentState = history.state && typeof history.state === 'object'
+                ? history.state
+                : {};
+            history.replaceState({
+                ...currentState,
+                page: 'settings',
+                idx: typeof currentState.idx === 'number' ? currentState.idx : (this.app?._histIdx || 0),
+                settingsTab: tabName,
+            }, '', `#settings/${encodeURIComponent(tabName)}`);
+        } catch (_) { /* route persistence remains best-effort in restricted shells */ }
+    }
+
     switchTab(tabName) {
+        tabName = normalizeSettingsTab(tabName) || 'account';
         if (isTvSettingsShell() && !['account', 'player', 'sources'].includes(tabName)) {
             tabName = 'account';
         }
+        if (!this.isTabAvailable(tabName)) tabName = 'account';
         this.tabs.forEach(t => {
             const selected = t.dataset.tab === tabName;
             t.classList.toggle('active', selected);
@@ -1936,6 +2018,9 @@ class SettingsPage {
             document.querySelector('.settings-container .tabs')?.classList.add('show-advanced');
         }
 
+        writePersistedSettingsTab(tabName);
+        this.syncTabRoute(tabName);
+
         // Load content browser when switching to that tab
         if (tabName === 'content') {
             this.app.sourceManager.loadContentSources();
@@ -1958,10 +2043,13 @@ class SettingsPage {
         if (tabName === 'screens') {
             this.initScreensTab();
         }
+
+        return tabName;
     }
 
     async show() {
-        const requestedSubRoute = this.app?._settingsSubRoute === 'sources' ? 'sources' : '';
+        const requestedSubRoute = normalizeSettingsTab(this.app?._settingsSubRoute);
+        const requestedTab = requestedSubRoute || readPersistedSettingsTab() || 'account';
         if (this.app) this.app._settingsSubRoute = '';
         // TV Settings uses a fixed header/tab shell with only the active panel
         // scrolling. Reset synchronously before any network request so entry can
@@ -1974,10 +2062,7 @@ class SettingsPage {
             if (container) container.scrollTop = 0;
             const activePanel = container?.querySelector('.tab-content.active');
             if (activePanel) activePanel.scrollTop = 0;
-            this.switchTab('account');
         }
-
-        if (requestedSubRoute) this.switchTab(requestedSubRoute);
 
         // Local hub user management stays available to local admins only.
         const usersTab = document.getElementById('users-tab');
@@ -1986,9 +2071,6 @@ class SettingsPage {
             && !this.app.currentUser?.cloud;
         if (usersTab) {
             usersTab.style.display = canManageLocalUsers ? 'block' : 'none';
-            if (!canManageLocalUsers && usersTab.classList.contains('active')) {
-                this.switchTab('account');
-            }
         }
 
         // "Screens & pairing" (devices) is a cloud-account-only feature.
@@ -1996,10 +2078,12 @@ class SettingsPage {
         if (screensTab) {
             const cloudUser = !!this.app.currentUser?.cloud && !isTvSettingsShell();
             screensTab.style.display = cloudUser ? 'block' : 'none';
-            if (!cloudUser && screensTab.classList.contains('active')) {
-                this.switchTab('account');
-            }
         }
+
+        // Apply the requested/persisted section only after role/device visibility
+        // is known. A stale or unavailable section safely falls back to Account
+        // and rewrites both the hash and session value to that valid destination.
+        this.switchTab(requestedTab);
 
         // Load sources when page is shown
         await this.app.sourceManager.loadSources();
