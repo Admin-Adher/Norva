@@ -58,7 +58,7 @@ test('the phone Home action opens the sheet without changing route', () => {
   const homeIndex = appHtml.indexOf('/js/pages/HomePage.js?v=6016cf63fb');
   const appIndex = appHtml.indexOf('/js/app.js?v=877ca37de9');
   assert.ok(modalIndex > 0 && modalIndex < pairIndex && pairIndex < homeIndex && homeIndex < appIndex);
-  assert.match(appHtml, /\/css\/main\.css\?v=be53290734/);
+  assert.match(appHtml, /\/css\/main\.css\?v=ee4d1292b9/);
 });
 
 test('pairing code normalization matches the six-character TV alphabet exactly', () => {
