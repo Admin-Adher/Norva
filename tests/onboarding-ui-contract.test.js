@@ -51,6 +51,14 @@ test('first-source form exposes field errors and focuses recovery', () => {
   assert.match(home, />Connect</);
 });
 
+test('first-source provider fields cannot inherit Norva account autofill', () => {
+  assert.match(home, /id="home-source-name"[^>]*name="provider-display-name"[^>]*autocomplete="off"/);
+  assert.match(home, /id="home-source-username"[^>]*name="provider-login"[^>]*autocomplete="off"[^>]*autocapitalize="none"[^>]*spellcheck="false"/);
+  assert.match(home, /id="home-source-password"[^>]*name="provider-secret"[^>]*autocomplete="new-password"/);
+  assert.doesNotMatch(home, /id="home-source-username"[^>]*autocomplete="username"/);
+  assert.doesNotMatch(home, /id="home-source-password"[^>]*autocomplete="current-password"/);
+});
+
 test('onboarding import uses a cinema-building surface instead of an ops dashboard', () => {
   assert.match(home, /Building your cinema/);
   assert.match(home, /renderSetupPosterStrip/);
@@ -86,7 +94,7 @@ test('setup visuals reuse Norva assets and ship cache-busted', () => {
   assert.doesNotMatch(shell, /<div class="tc-intro-icon">/);
   assert.match(shell, /main\.css\?v=121/);
   assert.match(shell, /sourceHealth\.js\?v=11/);
-  assert.match(shell, /SourceManager\.js\?v=47/);
-  assert.match(shell, /HomePage\.js\?v=e235acfa41/);
-  assert.match(shell, /app\.js\?v=fb3b86f23e/);
+  assert.match(shell, /SourceManager\.js\?v=49/);
+  assert.match(shell, /HomePage\.js\?v=e235acfa42/);
+  assert.match(shell, /app\.js\?v=b0962d47ce/);
 });

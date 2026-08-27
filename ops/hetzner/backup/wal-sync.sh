@@ -20,20 +20,45 @@ SRC="${WAL_ARCHIVE_DIR:-/var/lib/norva/wal-archive}"
 DST="r2:${R2_BUCKET}/${R2_PREFIX_WAL%/}"
 [ -d "$SRC" ] || { echo "ERROR: $SRC missing"; exit 1; }
 
+if ! acquire_wal_r2_lock "${WAL_R2_SYNC_LOCK_WAIT_SECONDS:-30}"; then
+  echo "ERROR: another WAL R2 maintenance job still owns the shared lock" >&2
+  exit 75
+fi
+
 # Upload new segments (copy keeps local; prune below is upload-verified).
 # --no-traverse: we add a handful of files to a prefix holding thousands, so
 # checking those names beats listing the whole destination every 5 minutes.
 rclone copy "$SRC" "$DST" --transfers 8 --retries 4 --min-age 5s --no-traverse
 
 # Prune local segments older than KEEP_LOCAL_WAL_MINUTES only if present on R2.
-# This keeps local disk bounded without deleting WAL that failed to upload.
+# Fetch the destination inventory ONCE, then intersect it locally with the old
+# source files. The former per-segment remote lookup made one R2 request per
+# local WAL and turned a 2k-file backlog into a multi-hour,
+# multi-gigabyte oneshot. A failed/incomplete remote listing exits before any
+# local deletion, so the safety property remains fail-closed.
 CUTOFF_MINUTES="${KEEP_LOCAL_WAL_MINUTES:-60}"
-find "$SRC" -maxdepth 1 -type f -mmin +"$CUTOFF_MINUTES" -printf '%f\n' | while read -r f; do
-  # One lsf, not two: a non-empty result already proves the object exists.
-  if [ -n "$(rclone lsf "$DST/$f" 2>/dev/null)" ]; then
-    rm -f "$SRC/$f"
-  fi
-done
+REMOTE_LIST="$(mktemp "${TMPDIR:-/tmp}/norva-wal-remote.XXXXXX")"
+LOCAL_OLD_LIST="$(mktemp "${TMPDIR:-/tmp}/norva-wal-local-old.XXXXXX")"
+PRUNE_LIST="$(mktemp "${TMPDIR:-/tmp}/norva-wal-prune.XXXXXX")"
+cleanup_lists() { rm -f -- "$REMOTE_LIST" "$LOCAL_OLD_LIST" "$PRUNE_LIST"; }
+trap cleanup_lists EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+rclone lsf "$DST" --files-only --max-depth 1 > "$REMOTE_LIST"
+LC_ALL=C sort -u "$REMOTE_LIST" -o "$REMOTE_LIST"
+find "$SRC" -maxdepth 1 -type f -mmin +"$CUTOFF_MINUTES" -printf '%f\n' \
+  | LC_ALL=C sort -u > "$LOCAL_OLD_LIST"
+LC_ALL=C comm -12 "$LOCAL_OLD_LIST" "$REMOTE_LIST" > "$PRUNE_LIST"
+
+PRUNED=0
+while IFS= read -r f; do
+  [ -n "$f" ] || continue
+  rm -f -- "$SRC/$f"
+  PRUNED=$((PRUNED + 1))
+done < "$PRUNE_LIST"
+log "verified one R2 inventory; pruned $PRUNED uploaded local WAL files"
 
 # R2 retention is handled by norva-wal-prune-r2.timer.
 # Keep this opt-in escape hatch for manual/debug use only.

@@ -302,7 +302,7 @@
                 </div>
                 <div class="field">
                     <label for="source-name">Name</label>
-                    <input id="source-name" type="text" maxlength="80" placeholder="Family IPTV">
+                    <input id="source-name" name="provider-display-name" type="text" maxlength="80" placeholder="Family IPTV" autocomplete="off" autocapitalize="words" spellcheck="false" data-1p-ignore="true" data-lpignore="true" data-form-type="other">
                 </div>
                 <div id="xtream-fields">
                     <div class="field">
@@ -312,11 +312,11 @@
                     </div>
                     <div class="field">
                         <label for="xtream-username">Username</label>
-                        <input id="xtream-username" type="text" autocomplete="username">
+                        <input id="xtream-username" name="provider-login" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" data-1p-ignore="true" data-lpignore="true" data-form-type="other">
                     </div>
                     <div class="field">
                         <label for="xtream-password">Password</label>
-                        <input id="xtream-password" type="password" autocomplete="current-password">
+                        <input id="xtream-password" name="provider-secret" type="password" autocomplete="new-password" data-1p-ignore="true" data-lpignore="true" data-form-type="other">
                     </div>
                 </div>
                 <div id="m3u-fields" class="hidden">

@@ -1155,7 +1155,7 @@ class HomePage {
                                 <label for="home-source-url">Xtream or M3U link</label>
                                 <input type="url" id="home-source-url" class="form-input setup-form-input"
                                        placeholder="https://provider.com/get.php?username=…&password=…"
-                                       inputmode="url" autocomplete="url" required
+                                       name="provider-server-url" inputmode="url" autocomplete="off" autocapitalize="none" spellcheck="false" required
                                        aria-describedby="home-source-url-hint home-source-find-link home-source-url-error">
                                 <p class="setup-form-hint" id="home-source-url-hint">Xtream or M3U — login fills in automatically.</p>
                                 <p class="setup-form-help" id="home-source-find-link">Don’t have the link handy? Check the email or account of your TV service for “M3U” or “Xtream”. You can also search your provider’s name plus “Xtream” or “M3U”.</p>
@@ -1166,18 +1166,18 @@ class HomePage {
                                 <p class="setup-form-hint">Optional. Auto-filled when a complete link is pasted above.</p>
                                 <div class="form-group setup-service-name-group">
                                     <label for="home-source-name">Service name <span class="label-optional">(optional)</span></label>
-                                    <input type="text" id="home-source-name" class="form-input setup-form-input" placeholder="Family TV" autocomplete="off">
+                                    <input type="text" id="home-source-name" name="provider-display-name" class="form-input setup-form-input" placeholder="Family TV" autocomplete="off" autocapitalize="words" spellcheck="false" data-1p-ignore="true" data-lpignore="true" data-form-type="other">
                                 </div>
                                 <div class="setup-manual-grid">
                                     <div class="form-group">
                                         <label for="home-source-username">Username</label>
-                                        <input type="text" id="home-source-username" class="form-input setup-form-input" placeholder="username" autocomplete="username" aria-describedby="home-source-username-error">
+                                        <input type="text" id="home-source-username" name="provider-login" class="form-input setup-form-input" placeholder="username" autocomplete="off" autocapitalize="none" spellcheck="false" data-1p-ignore="true" data-lpignore="true" data-form-type="other" aria-describedby="home-source-username-error">
                                         <p class="setup-field-error hidden" id="home-source-username-error"></p>
                                     </div>
                                     <div class="form-group">
                                         <label for="home-source-password">Password</label>
                                         <div class="setup-password-field">
-                                            <input type="password" id="home-source-password" class="form-input setup-form-input" placeholder="password" autocomplete="current-password" aria-describedby="home-source-password-error">
+                                            <input type="password" id="home-source-password" name="provider-secret" class="form-input setup-form-input" placeholder="password" autocomplete="new-password" data-1p-ignore="true" data-lpignore="true" data-form-type="other" aria-describedby="home-source-password-error">
                                             <button type="button" class="setup-password-toggle" id="home-source-password-toggle" aria-label="Show password" aria-pressed="false">${Icons.hide}</button>
                                         </div>
                                         <p class="setup-field-error hidden" id="home-source-password-error"></p>

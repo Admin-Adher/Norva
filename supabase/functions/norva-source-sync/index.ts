@@ -11,7 +11,7 @@ import {
 } from "../_shared/live-materialization.ts";
 import { refreshVodTitleProjection, validateTmdbCandidate, searchTmdbMatch } from "../_shared/vod-title-projection.ts";
 import { backfillProviderOverviews } from "../_shared/provider-overview-backfill.ts";
-import { formatSourceSyncError } from "../_shared/source-sync-error.mjs";
+import { classifyOpsSourceError, formatSourceSyncError } from "../_shared/source-sync-error.mjs";
 import {
   buildProviderDirectFallbackSnapshot,
   createSourceDirectFallbackLeaseRunner,
@@ -112,7 +112,7 @@ Deno.serve(async (req) => {
       return json(req, {
         ok: true,
         service: "norva-source-sync",
-        version: 12,
+        version: 13,
         liveMaterialization: true,
         syncProgress: true,
         catalogFinalize: true,
@@ -126,6 +126,7 @@ Deno.serve(async (req) => {
         seriesPriorityCycleV2: true,
         episodeProbeBatchCanary: "4/5",
         exactTailDrainSafe: true,
+        cloudAutoRefreshClaimProtocol: 1,
       });
     }
     // Premium per-user background refresh (pg_cron → here). Drives a small batch
@@ -2460,96 +2461,132 @@ async function cronEnrichmentFleet(db: SupabaseClient, limit: number, dryRun = f
   };
 }
 
-// Premium per-user background refresh. It owns an independent due window and
-// compare-and-set lock because detection-only catalogue refresh can outlive the
-// initiating cron request.
+type CloudAutoRefreshClaim = {
+  sourceId: string;
+  userId: string;
+  sourceType: "xtream" | "m3u";
+  leaseSequence: number;
+};
+
+function normalizeCloudAutoRefreshClaim(value: unknown): CloudAutoRefreshClaim | null {
+  if (!isRecord(value)) return null;
+  const sourceId = stringOr(value.source_id ?? value.sourceId, "");
+  const userId = stringOr(value.user_id ?? value.userId, "");
+  const sourceType = stringOr(value.source_type ?? value.sourceType, "");
+  const leaseSequence = Number(value.lease_sequence ?? value.leaseSequence);
+  if (!UUID_TEXT.test(sourceId) || !UUID_TEXT.test(userId)
+      || !["xtream", "m3u"].includes(sourceType)
+      || !Number.isSafeInteger(leaseSequence) || leaseSequence < 1) return null;
+  return { sourceId, userId, sourceType: sourceType as "xtream" | "m3u", leaseSequence };
+}
+
+function cloudAutoRefreshFailure(error: unknown) {
+  const rawStatus = isRecord(error) ? Number(error.status) : Number.NaN;
+  const status = Number.isInteger(rawStatus) && rawStatus >= 100 && rawStatus <= 599
+    ? rawStatus
+    : null;
+  const classified = classifyOpsSourceError(formatSourceSyncError(error, "Source refresh failed"));
+  if (status !== null && [401, 403, 404].includes(status)) {
+    const errorKind = status === 404
+      ? "not_found"
+      : classified === "expired" ? "expired" : "auth";
+    return { outcome: "action_required", httpStatus: status, errorKind } as const;
+  }
+  const errorKind = ["busy", "infra"].includes(classified) ? classified : "unknown";
+  return { outcome: "transient_failure", httpStatus: null, errorKind } as const;
+}
+
+async function settleCloudAutoRefreshClaim(
+  db: SupabaseClient,
+  claim: CloudAutoRefreshClaim,
+  worker: string,
+  outcome: "success" | "not_entitled" | "transient_failure" | "action_required",
+  errorKind: string | null = null,
+  httpStatus: number | null = null,
+) {
+  const { data, error } = await db.rpc("norva_settle_cloud_auto_refresh_source", {
+    p_source_id: claim.sourceId,
+    p_user_id: claim.userId,
+    p_worker: worker,
+    p_expected_lease_sequence: claim.leaseSequence,
+    p_outcome: outcome,
+    p_observed_at: new Date().toISOString(),
+    p_http_status: httpStatus,
+    p_error_kind: errorKind,
+  });
+  if (error) {
+    // A lost lease means a newer claim/config generation owns the continuation.
+    // Never repair or overwrite it from the stale worker.
+    if (String(error.code ?? "") === "40001") return null;
+    throw new Error(`Unable to settle cloud auto refresh: ${error.message}`);
+  }
+  return data;
+}
+
+// Premium per-user background refresh. PostgreSQL owns fair due selection and
+// a monotone lease fence; the Edge worker owns only the bounded provider I/O.
 async function cronRefreshDue(db: SupabaseClient) {
-  const CADENCE_MS = 6 * 60 * 60 * 1000;   // premium cadence: every 6h
-  const LOCK_TTL_MS = 12 * 60 * 1000;      // a stuck/crashed run frees after 12 min
-  const BATCH = 1;                          // sources kicked per tick — kept at 1 so a
-                                            // background sync owns the isolate's budget
-  const nowMs = Date.now();
-  const nowIso = new Date(nowMs).toISOString();
-  const staleIso = new Date(nowMs - LOCK_TTL_MS).toISOString();
-  const asMs = (v: unknown) => { const m = new Date(String(v ?? "")).getTime(); return Number.isFinite(m) ? m : 0; };
+  const SCAN_LIMIT = 8;
+  const worker = `cloud-auto-refresh:${crypto.randomUUID()}`;
+  let toSync: CloudAutoRefreshClaim | null = null;
+  let scanned = 0;
+  let notEntitled = 0;
 
-  const { data: due, error } = await db
-    .from("cloud_catalog_visible_sources")
-    .select("id,user_id,source_type,auto_refresh_state,auto_refresh_next_at")
-    .in("source_type", ["xtream", "m3u"])
-    .is("deleted_at", null) // never auto-refresh a removed (soft-deleted) source (null next_at reads as "due")
-    .eq("enabled", true)    // a disabled source is paused — no auto-refresh
-    .or(`auto_refresh_next_at.is.null,auto_refresh_next_at.lte.${nowIso}`)
-    .order("auto_refresh_next_at", { ascending: true, nullsFirst: true })
-    .limit(BATCH);
-  if (error) return { ok: false, error: error.message };
+  // Claim one row at a time so a non-entitled owner is durably rescheduled and
+  // the same tick can continue to the next oldest due source. Bounded scanning
+  // prevents one Edge request from becoming an unbounded entitlement sweep.
+  for (let scan = 0; scan < SCAN_LIMIT && !toSync; scan++) {
+    const { data, error } = await db.rpc("norva_claim_cloud_auto_refresh_sources", {
+      p_worker: worker,
+      p_limit: 1,
+      p_lease_seconds: 720,
+    });
+    if (error) return { ok: false, error: error.message };
+    const row = Array.isArray(data) ? data[0] : null;
+    if (!row) break;
+    const claim = normalizeCloudAutoRefreshClaim(row);
+    if (!claim) return { ok: false, error: "Invalid cloud auto refresh claim" };
+    scanned++;
 
-  const schedule = (id: string, nextMs: number, state: JsonRecord) =>
-    db.from("cloud_sources")
-      .update({ auto_refresh_next_at: new Date(nextMs).toISOString(), auto_refresh_state: state })
-      .eq("id", id); // a state without lockedAt releases the lock
-
-  const toSync: { id: string; userId: string; state: JsonRecord }[] = [];
-  let skipped = 0, notEntitled = 0;
-
-  for (const src of (due ?? [])) {
-    const id = String(src.id);
-    const userId = String(src.user_id);
-    const state = isRecord(src.auto_refresh_state) ? src.auto_refresh_state : {};
-
-    // Backing off after a recent provider error → leave it alone this tick.
-    if (asMs(state.backoffUntil) > nowMs) { skipped++; continue; }
-
-    // ENFORCE premium. Non-entitled → push the next window out a full cadence so
-    // we don't re-check it every tick.
     let entitled = false;
     try {
-      const decision = await getEntitlementDecision(db, userId, { autoStartTrial: false });
+      const decision = await getEntitlementDecision(db, claim.userId, { autoStartTrial: false });
       entitled = planFeatureEntitled(realPlanCode(decision), "auto_refresh_background");
     } catch (_) { entitled = false; }
-    if (!entitled) { await schedule(id, nowMs + CADENCE_MS, { attempts: 0 }); notEntitled++; continue; }
-
-    // Compare-and-set lock: only proceed if no fresh lock is held (another tick
-    // holding it → update matches 0 rows → skip, no double-run). We also push the
-    // due window out by the lock TTL so this source isn't re-picked while its
-    // background sync runs.
-    const { data: locked } = await db
-      .from("cloud_sources")
-      .update({
-        auto_refresh_state: { ...state, lockedAt: nowIso },
-        auto_refresh_next_at: new Date(nowMs + LOCK_TTL_MS).toISOString(),
-      })
-      .eq("id", id)
-      .or(`auto_refresh_state->>lockedAt.is.null,auto_refresh_state->>lockedAt.lt.${staleIso}`)
-      .select("id");
-    if (!locked || !locked.length) { skipped++; continue; }
-
-    toSync.push({ id, userId, state });
+    if (!entitled) {
+      await settleCloudAutoRefreshClaim(db, claim, worker, "not_entitled");
+      notEntitled++;
+      continue;
+    }
+    toSync = claim;
   }
 
   // Drive the heavy syncs in the background so pg_net gets a fast response rather
-  // than holding the connection open for the whole import. Each job reschedules
-  // itself (next window on success, exponential backoff on a provider error).
-  if (toSync.length) {
+  // than holding the connection open for the whole scan. PostgreSQL settles the
+  // next window and rejects a completion from any stale lease generation.
+  if (toSync) {
+    const job = toSync;
     runInBackground((async () => {
-      for (const job of toSync) {
-        try {
-          // Detection-only refresh: fetch the provider and compare its signature
-          // against our last full import. On a change, a capped "what's new" event
-          // is recorded (the app-closed premium signal). Wall-clock-safe — it never
-          // imports or materializes; the client does that on next open.
-          await syncCloudSource(job.id, job.userId, db, null, { force: false, rawOnly: true });
-          await schedule(job.id, Date.now() + CADENCE_MS, { attempts: 0 });
-        } catch (_) {
-          const attempts = (Number(job.state.attempts) || 0) + 1;
-          const backoff = Math.min(CADENCE_MS, 5 * 60 * 1000 * Math.pow(2, Math.min(attempts, 6)));
-          await schedule(job.id, Date.now() + backoff, { attempts, backoffUntil: new Date(Date.now() + backoff).toISOString() });
-        }
+      try {
+        // Detection-only refresh: fetch the provider and compare its signature
+        // against our last full import. It never imports or materializes.
+        await syncCloudSource(job.sourceId, job.userId, db, null, { force: false, rawOnly: true });
+        await settleCloudAutoRefreshClaim(db, job, worker, "success");
+      } catch (error) {
+        const failure = cloudAutoRefreshFailure(error);
+        await settleCloudAutoRefreshClaim(
+          db,
+          job,
+          worker,
+          failure.outcome,
+          failure.errorKind,
+          failure.httpStatus,
+        );
       }
     })());
   }
 
-  return { ok: true, due: (due ?? []).length, locked: toSync.length, skipped, notEntitled };
+  return { ok: true, scanned, locked: toSync ? 1 : 0, skipped: 0, notEntitled };
 }
 
 // Watchdog for the resumable discovery chain. An isolate can occasionally be

@@ -449,6 +449,68 @@ jobs:
           --level error
           --fail-on error
 
+      - name: Apply the focused Provider refresh migration graph
+        shell: bash
+        run: |
+          set -euo pipefail
+          phase123_dir="$RUNNER_TEMP/phase123-online-migrations"
+          mapfile -t db_containers < <(
+            docker ps --format '{{.Names}}' | grep '^supabase_db_'
+          )
+          if [[ "${#db_containers[@]}" -ne 1 ]]; then
+            printf 'Expected one disposable Supabase DB, found %s\n' \
+              "${#db_containers[@]}" >&2
+            exit 1
+          fi
+          migrations=(
+            20260822220703_provider_access_lifecycle_foundation.sql
+            20260822220712_provider_source_lifecycle_triggers.sql
+            20260824120000_provider_access_cycles_detection_v1.sql
+            20260827033406_provider_auto_refresh_fair_claim_v1.sql
+          )
+          for migration in "${migrations[@]}"; do
+            test -f "$phase123_dir/$migration"
+            docker exec -i "${db_containers[0]}" \
+              psql -X -U supabase_admin -d postgres -v ON_ERROR_STOP=1 \
+              < "$phase123_dir/$migration"
+          done
+      - name: Run the Provider refresh PostgreSQL concurrency proof
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t db_containers < <(
+            docker ps --format '{{.Names}}' | grep '^supabase_db_'
+          )
+          if [[ "${#db_containers[@]}" -ne 1 ]]; then
+            printf 'Expected one disposable Supabase DB, found %s\n' \
+              "${#db_containers[@]}" >&2
+            exit 1
+          fi
+          tap_output="$RUNNER_TEMP/provider-auto-refresh-fair-claim.tap"
+          if ! docker exec -i "${db_containers[0]}" \
+              psql -X -qAt -U supabase_admin -d postgres -v ON_ERROR_STOP=1 \
+              < supabase/tests/provider_auto_refresh_fair_claim.sql \
+              > "$tap_output" 2>&1; then
+            cat "$tap_output"
+            exit 1
+          fi
+          cat "$tap_output"
+          if grep -Eq '^(not ok|Bail out!)' "$tap_output"; then
+            exit 1
+          fi
+          plan_line="$(grep -E '^1\.\.[0-9]+$' "$tap_output" | tail -n 1)"
+          if [[ ! "$plan_line" =~ ^1\.\.[0-9]+$ ]]; then
+            printf 'Missing pgTAP plan\n' >&2
+            exit 1
+          fi
+          expected_tests="${plan_line#1..}"
+          passed_tests="$(grep -Ec '^ok( |$)' "$tap_output" || true)"
+          if [[ "$passed_tests" != "$expected_tests" ]]; then
+            printf 'pgTAP count mismatch: %s/%s\n' \
+              "$passed_tests" "$expected_tests" >&2
+            exit 1
+          fi
+
       - name: Stop the disposable stack
         if: always()
         run: supabase stop --no-backup

@@ -110,8 +110,29 @@ UNIT_CHECKS="${CAPACITY_UNIT_CHECKS:-norva-backup-nightly:36 norva-basebackup:36
 UNIT_PROBLEMS=""
 for spec in $UNIT_CHECKS; do
   u="${spec%%:*}"; max_h="${spec##*:}"
+  active_state="$(systemctl show "$u.service" -p ActiveState --value 2>/dev/null || true)"
+  started="$(systemctl show "$u.service" -p ExecMainStartTimestamp --value 2>/dev/null || true)"
   result="$(systemctl show "$u.service" -p Result --value 2>/dev/null || true)"
   ts="$(systemctl show "$u.service" -p ExecMainExitTimestamp --value 2>/dev/null || true)"
+
+  # A Type=oneshot service has no exit timestamp while it is still running.
+  # Treating that as "never executed" hid the actual incident: a WAL sync can
+  # be alive for hours while consuming memory and blocking its timer. Report a
+  # long-running unit explicitly, while allowing a normal in-flight run.
+  if [ "$active_state" = "activating" ] || [ "$active_state" = "active" ]; then
+    started_epoch="$(date -d "$started" +%s 2>/dev/null || echo 0)"
+    if [ "$started_epoch" -eq 0 ]; then
+      UNIT_PROBLEMS="$UNIT_PROBLEMS $u=en-cours-date-illisible"
+      continue
+    fi
+    running_seconds=$((NOW_EPOCH - started_epoch))
+    if [ "$running_seconds" -ge $((max_h * 3600)) ]; then
+      running_minutes=$((running_seconds / 60))
+      UNIT_PROBLEMS="$UNIT_PROBLEMS $u=en-cours-${running_minutes}min"
+    fi
+    continue
+  fi
+
   if [ -n "$result" ] && [ "$result" != "success" ]; then
     UNIT_PROBLEMS="$UNIT_PROBLEMS $u=$result"
     continue

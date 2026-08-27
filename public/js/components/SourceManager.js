@@ -244,7 +244,16 @@ class SourceManager {
             // Sync); everything else lives in a labelled ⋯ menu instead of a row of
             // tooltip-only icons that are illegible on touch and TV.
             const needsRepair = !!health.needsAttention;
-            const primary = needsRepair
+            const needsAccessReview = type === 'xtream'
+                && this.providerAccessUiEnabled()
+                && ['auth_failed', 'expired', 'provider_changed'].includes(health.state);
+            const primary = needsAccessReview
+                ? {
+                    action: 'provider-access',
+                    label: accessSummary?.detail ? 'Review access' : 'Add access dates',
+                    cls: 'btn-repair'
+                }
+                : needsRepair
                 ? { action: 'edit', label: 'Repair', cls: 'btn-repair' }
                 : { action: 'refresh', label: 'Sync', cls: '' };
             return `
@@ -1215,16 +1224,16 @@ class SourceManager {
         const nameField = `
       <div class="form-group">
         <label for="source-name">Service name <span class="label-optional">(optional)</span></label>
-        <input type="text" id="source-name" class="form-input" placeholder="Family TV" value="${this.escapeHtml(source.name || '')}">
+        <input type="text" id="source-name" name="provider-display-name" class="form-input" placeholder="Family TV" value="${this.escapeHtml(source.name || '')}" autocomplete="off" autocapitalize="words" spellcheck="false" data-1p-ignore="true" data-lpignore="true" data-form-type="other">
       </div>
     `;
 
         const urlField = `
       <div class="form-group">
         <label for="source-url">${type === 'xtream' ? 'Provider URL or complete Xtream link' : type === 'epg' ? 'TV guide URL' : 'Playlist URL'}</label>
-        <input type="text" id="source-url" class="form-input" 
+        <input type="text" id="source-url" name="provider-server-url" class="form-input"
                placeholder="${type === 'xtream' ? 'https://provider.com/get.php?username=...&password=...' : 'https://example.com/playlist.m3u'}"
-               value="${this.escapeHtml(urlValue)}">
+               value="${this.escapeHtml(urlValue)}" autocomplete="off" autocapitalize="none" spellcheck="false">
         ${type === 'xtream' ? '<p class="hint" id="source-url-parse-hint">If you paste a full Xtream link, Norva will fill the login fields automatically.</p>' : ''}
         ${source.cloud ? '<p class="hint">Norva keeps the original full link private. The saved server is shown here. Paste a complete link only when replacing or repairing the login.</p>' : ''}
       </div>
@@ -1242,13 +1251,13 @@ class SourceManager {
           <summary>Enter server login manually</summary>
           <div class="form-group">
           <label for="source-username">Username</label>
-          <input type="text" id="source-username" class="form-input" value="${this.escapeHtml(source.username || '')}">
+          <input type="text" id="source-username" name="provider-login" class="form-input" value="${this.escapeHtml(source.username || '')}" autocomplete="off" autocapitalize="none" spellcheck="false" data-1p-ignore="true" data-lpignore="true" data-form-type="other">
           </div>
           <div class="form-group">
           <label for="source-password">Password</label>
-          <input type="password" id="source-password" class="form-input"
+          <input type="password" id="source-password" name="provider-secret" class="form-input"
                  placeholder="${isExisting ? 'Password saved - leave blank to keep it' : ''}"
-                 value="${source.password && !source.password.includes('•') ? this.escapeHtml(source.password) : ''}">
+                 value="${source.password && !source.password.includes('•') ? this.escapeHtml(source.password) : ''}" autocomplete="new-password" data-1p-ignore="true" data-lpignore="true" data-form-type="other">
             ${isExisting ? '<p class="hint">Leave this empty to keep the saved password. Type a new password only when repairing or replacing the login.</p>' : ''}
           </div>
         </details>
@@ -1490,6 +1499,52 @@ class SourceManager {
         if (code === 'PROVIDER_NETWORK_UNREACHABLE') return 'The network route to the provider is unavailable.';
         if (status === 401 || status === 403) return 'The provider refused the saved username or password.';
         return 'Norva cannot reach the provider right now.';
+    }
+
+    sourceSyncErrorMessage(value, { hard = false } = {}) {
+        if (this.isInvalidDeviceTokenError(value)) {
+            return 'This device session expired. Sign in or pair this device again.';
+        }
+
+        const payload = value?.payload || value || {};
+        const code = String(
+            payload.error_code || payload.errorCode || payload.code || value?.code || ''
+        ).trim().toUpperCase();
+        if (code === 'PROVIDER_CREDENTIALS_REJECTED') {
+            return 'The provider refused the saved username or password. Open Repair login to update it.';
+        }
+        if (code === 'PROVIDER_ENDPOINT_NOT_FOUND') {
+            return 'The provider address or account endpoint is no longer available. Open Repair login to review it.';
+        }
+        if (code === 'PROVIDER_ACCESS_EXPIRED') {
+            return 'The provider reports that this access is inactive. Review the access dates before syncing again.';
+        }
+        if (code === 'PROVIDER_BUSY') {
+            return 'This TV service is busy. Wait a few seconds, then try again.';
+        }
+        if (code === 'PROVIDER_TEMPORARILY_UNAVAILABLE') {
+            return 'This TV service is temporarily unavailable. Your existing catalog remains available; try again later.';
+        }
+        return `${hard ? 'Catalog rebuild' : 'Sync'} could not finish. Try again.`;
+    }
+
+    rebuildConfirmationCopy() {
+        if (window.API?.isCloudMode?.() === true) {
+            return {
+                title: 'Rebuild catalog?',
+                message: 'Norva will rescan the complete provider catalog. Your current catalog stays available while the rebuild runs.',
+                details: 'Norva clears only saved sync progress, then rediscovers and updates channels, movies, series and TV guide data in place.<br><br>Preserved: source settings, current catalog, favorites, profiles and watch history.',
+                proceedText: 'Rebuild catalog',
+                cancelText: 'Cancel'
+            };
+        }
+        return {
+            title: 'Rebuild local catalog?',
+            message: 'This will delete the current local catalog for this source, then rebuild it from the playlist or provider.',
+            details: 'Removed locally: categories, channels, movies, series, TV guide data, sync status and source cache.<br><br>Preserved: source settings, favorites, profiles and watch history.',
+            proceedText: 'Rebuild catalog',
+            cancelText: 'Cancel'
+        };
     }
 
     hostFromUrl(raw) {
@@ -2785,6 +2840,16 @@ class SourceManager {
         try {
             await this.releasePlaybackForSourceChange();
             await API.sources.delete(id);
+        } catch (err) {
+            console.warn('[SourceManager] Source removal failed before commit:', err);
+            NorvaModal.toast('Could not remove this source. Try again.', 'error');
+            return;
+        }
+
+        // The delete is already committed. UI refresh failures must never invite
+        // the user to repeat an irreversible operation or imply that it failed.
+        NorvaModal.toast('Source removed from Norva.', 'success');
+        try {
             await this.loadSources();
             this.notifySourceHealthChanged();
 
@@ -2793,8 +2858,8 @@ class SourceManager {
                 await window.app.channelList.loadChannels();
             }
         } catch (err) {
-            console.warn('[SourceManager] Source removal failed:', err);
-            NorvaModal.toast('Could not remove this source. Try again.', 'error');
+            console.warn('[SourceManager] Source removed; view refresh failed:', err);
+            this.notifySourceHealthChanged();
         }
     }
 
@@ -2802,14 +2867,38 @@ class SourceManager {
      * Toggle source enabled/disabled
      */
     async toggleSource(id) {
+        const sourceItem = document.querySelector(`.source-item[data-id="${id}"]`);
+        const currentlyEnabled = !sourceItem?.classList?.contains('disabled');
+        const sourceName = sourceItem?.querySelector('.source-name')?.textContent?.trim() || 'this service';
+        if (currentlyEnabled) {
+            const confirmed = await NorvaModal.confirm(
+                `Disable ${sourceName}? Its catalog will be hidden without being deleted, and you can enable it again later.`,
+                { title: 'Disable service?', confirmLabel: 'Disable' }
+            );
+            if (!confirmed) return;
+        }
+
         try {
             await this.releasePlaybackForSourceChange();
             await API.sources.toggle(id);
+        } catch (err) {
+            console.warn('[SourceManager] Source toggle failed before commit:', err);
+            NorvaModal.toast('Could not change this source right now. Try again.', 'error');
+            return;
+        }
+
+        // A successful toggle is authoritative even if the subsequent card
+        // refresh is interrupted. Do not tell the user to retry a committed CAS.
+        NorvaModal.toast(
+            currentlyEnabled ? 'Service disabled. Its catalog is still saved.' : 'Service enabled.',
+            'success'
+        );
+        try {
             await this.loadSources();
             this.notifySourceHealthChanged();
         } catch (err) {
-            console.warn('[SourceManager] Source toggle failed:', err);
-            NorvaModal.toast('Could not change this source right now. Try again.', 'error');
+            console.warn('[SourceManager] Source toggled; view refresh failed:', err);
+            this.notifySourceHealthChanged();
         }
     }
 
@@ -2817,7 +2906,13 @@ class SourceManager {
      * Test source connection
      */
     async testSource(id) {
+        const button = document.querySelector(`.source-item[data-id="${id}"] [data-action="test"]`);
+        const previousText = button?.textContent || 'Check service';
         try {
+            if (button) {
+                button.disabled = true;
+                button.textContent = 'Checking…';
+            }
             const result = await API.sources.test(id);
             if (result.success) {
                 NorvaModal.toast('Connection successful!', 'success');
@@ -2827,6 +2922,11 @@ class SourceManager {
         } catch (err) {
             console.warn('[SourceManager] Connection test failed:', err);
             NorvaModal.toast(this.sourceConnectionTestMessage(err), 'error');
+        } finally {
+            if (button) {
+                button.disabled = false;
+                button.textContent = previousText;
+            }
         }
     }
 
@@ -2841,13 +2941,7 @@ class SourceManager {
 
         try {
             if (isHardRefresh) {
-                const proceed = await this.showWarningModal({
-                    title: 'Hard Refresh Source',
-                    message: 'This will delete the current local catalogue for this source, then rebuild it from the playlist/provider.',
-                    details: 'Removed locally: categories, channels, movies, series, EPG data, sync status, and source cache.<br><br>Preserved: source settings, favorites, users, and watch history.',
-                    proceedText: 'Hard Refresh',
-                    cancelText: 'Cancel'
-                });
+                const proceed = await this.showWarningModal(this.rebuildConfirmationCopy());
                 if (!proceed) return;
             }
 
@@ -2926,7 +3020,10 @@ class SourceManager {
                     console.log('[SourceManager] Sync completed successfully');
                     break;
                 } else if (status && st === 'error') {
-                    throw new Error(`Sync failed: ${status.error}`);
+                    const syncError = new Error(status.error || 'Sync failed');
+                    syncError.code = status.error_code || status.errorCode || status.code || '';
+                    syncError.payload = status;
+                    throw syncError;
                 }
 
                 // If no status found yet, or still syncing, continue
@@ -2971,12 +3068,7 @@ class SourceManager {
             this.notifySourceHealthChanged();
         } catch (err) {
             console.error('Error refreshing source:', err);
-            NorvaModal.toast(
-                this.isInvalidDeviceTokenError(err)
-                    ? 'This device session expired. Sign in or pair this device again.'
-                    : `${isHardRefresh ? 'Hard refresh' : 'Refresh'} could not finish. Try again.`,
-                'error'
-            );
+            NorvaModal.toast(this.sourceSyncErrorMessage(err, { hard: isHardRefresh }), 'error');
         } finally {
             refreshButtons.forEach(button => { button.disabled = false; });
             if (btn) btn.querySelector('.icon')?.classList.remove('spin');
@@ -4141,7 +4233,9 @@ class SourceManager {
                 hardBtn.disabled = isSyncing;
                 hardBtn.title = isSyncing
                     ? 'Syncing...'
-                    : 'Hard Refresh: clear local data and sync';
+                    : (window.API?.isCloudMode?.() === true
+                        ? 'Rescan and update the complete provider catalog'
+                        : 'Clear and rebuild the local catalog');
             }
 
             // Optional: Update status text/badge in .source-info

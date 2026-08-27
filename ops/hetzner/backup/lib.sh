@@ -39,3 +39,16 @@ pgtool() {
 }
 
 log() { echo "[$(date -u +%FT%TZ)] $*"; }
+
+# Serialize operations that inspect or mutate the shared R2 WAL prefix. The
+# sync job verifies remote coverage before deleting local files, while the
+# retention job deletes old remote files; allowing both to run concurrently
+# creates a real check/delete race. The caller chooses how long it is willing
+# to wait and decides whether a timeout is retryable or fatal.
+acquire_wal_r2_lock() {
+  local wait_seconds="${1:-30}"
+  local lock_file="${WAL_R2_LOCK_FILE:-/run/lock/norva-wal-r2.lock}"
+
+  exec 9>"$lock_file"
+  flock -w "$wait_seconds" 9
+}

@@ -916,6 +916,18 @@ class App {
      */
     async maybeAutoRefreshSources() {
         if (!window.API?.sources?.getAll) return;
+
+        // Cloud refreshes are owned by the durable, fair server scheduler. A
+        // browser-open fan-out used to start every stale provider at once,
+        // racing catalog visibility epochs and repeatedly retrying sources that
+        // already required user action (for example a rejected login). Local
+        // libraries have no server scheduler, so they keep the legacy behavior.
+        if (window.API.isCloudMode?.() === true) {
+            try { this.refreshSourceHealth?.(); } catch (_) { /* noop */ }
+            await this.surfaceWhatsNew();
+            return;
+        }
+
         const settings = this.player?.settings || {};
         const enabled = settings.autoRefreshEnabled !== false;
         const intervalHours = Number(settings.autoRefreshIntervalHours);

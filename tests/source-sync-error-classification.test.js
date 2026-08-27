@@ -46,6 +46,14 @@ test('discarding the status is what made every provider problem look like infra'
   assert.equal(m.classifyOpsSourceError(m.formatSourceSyncError(fail(403, null))), 'auth');
 });
 
+test('a provider 404 is user-actionable and distinct from a Norva outage', async () => {
+  const m = await load();
+  const text = m.formatSourceSyncError(fail(404, { error: 'provider endpoint not found' }));
+  assert.equal(m.classifyOpsSourceError(text), 'not_found');
+  assert.ok(m.SILENT_OPS_SOURCE_ERROR_KINDS.has('not_found'));
+  assert.equal(m.OPS_SOURCE_ERROR_LABELS.not_found, 'Service introuvable');
+});
+
 test('a busy slot outranks an expiry mentioned in the same payload', async () => {
   const m = await load();
   const text = m.formatSourceSyncError(fail(403, { error: 'account busy, subscription expired' }));

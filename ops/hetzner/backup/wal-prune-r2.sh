@@ -22,6 +22,11 @@ source "$HERE/lib.sh"
 
 DST="r2:${R2_BUCKET}/${R2_PREFIX_WAL%/}"
 
+if ! acquire_wal_r2_lock "${WAL_R2_PRUNE_LOCK_WAIT_SECONDS:-600}"; then
+  echo "ERROR: WAL sync still owns the shared R2 lock; retention was not run" >&2
+  exit 75
+fi
+
 log "pruning R2 WAL older than ${KEEP_WAL_DAYS:-3} days from $DST"
 rclone delete "$DST" --min-age "${KEEP_WAL_DAYS:-3}d" --use-server-modtime --retries 4
 log "R2 WAL prune done."
