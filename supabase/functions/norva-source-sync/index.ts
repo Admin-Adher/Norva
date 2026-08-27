@@ -112,7 +112,7 @@ Deno.serve(async (req) => {
       return json(req, {
         ok: true,
         service: "norva-source-sync",
-        version: 12,
+        version: 13,
         liveMaterialization: true,
         syncProgress: true,
         catalogFinalize: true,
@@ -126,6 +126,7 @@ Deno.serve(async (req) => {
         seriesPriorityCycleV2: true,
         episodeProbeBatchCanary: "4/5",
         exactTailDrainSafe: true,
+        cloudAutoRefreshClaimProtocol: 1,
       });
     }
     // Premium per-user background refresh (pg_cron → here). Drives a small batch

@@ -9,6 +9,7 @@ const ROOT = path.resolve(__dirname, '..');
 const read = (relative) => fs.readFileSync(path.join(ROOT, relative), 'utf8');
 const migration = read('supabase/migrations/20260827033406_provider_auto_refresh_fair_claim_v1.sql');
 const edge = read('supabase/functions/norva-source-sync/index.ts');
+const edgeDeploy = read('ops/hetzner/scripts/04-deploy-edge-functions.sh');
 const visibility = read('supabase/migrations/20260822220703_provider_access_lifecycle_foundation.sql');
 
 function between(source, start, end) {
@@ -123,4 +124,13 @@ test('migration changes no cron activation state and RPC authority remains servi
   assert.equal((migration.match(/active\s*=>/gi) || []).length, 0);
   assert.match(migration, /revoke all on function public\.norva_claim_cloud_auto_refresh_sources[\s\S]*from public, anon, authenticated/i);
   assert.match(migration, /grant execute on function public\.norva_settle_cloud_auto_refresh_source[\s\S]*to service_role/i);
+});
+
+test('Edge exposes and deployment verifies the fair-claim protocol on every runtime', () => {
+  assert.match(edge, /version: 13[\s\S]*cloudAutoRefreshClaimProtocol: 1/);
+  assert.match(edgeDeploy, /EXPECTED_SOURCE_SYNC_VERSION=13/);
+  assert.match(edgeDeploy, /EXPECTED_CLOUD_AUTO_REFRESH_CLAIM_PROTOCOL=1/);
+  assert.match(edgeDeploy, /norva-source-sync source digest mismatch/);
+  assert.match(edgeDeploy, /function_health_in_service "\$service" norva-source-sync/);
+  assert.match(edgeDeploy, /norva-source-sync protocol marker mismatch/);
 });
