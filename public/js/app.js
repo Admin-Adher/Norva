@@ -791,7 +791,22 @@ class App {
         window.addEventListener('popstate', (e) => {
             const page = e.state?.page || 'home';
             this._histIdx = (typeof e.state?.idx === 'number') ? e.state.idx : 0;
-            if (this.currentPage === page) return; // already showing it; idx synced
+            if (page === 'settings') {
+                const stateTab = window.NorvaSettingsNavigation?.normalizeTab?.(e.state?.settingsTab) || '';
+                const hashTab = window.NorvaSettingsNavigation?.tabFromHash?.(window.location.hash) || '';
+                this._settingsSubRoute = stateTab || hashTab;
+            }
+            if (this.currentPage === page) {
+                // Settings tabs replace (rather than push) their route. If a host
+                // browser restores such an entry in place, reflect it immediately
+                // without creating a duplicate Back step.
+                if (page === 'settings' && this._settingsSubRoute) {
+                    const settingsTab = this._settingsSubRoute;
+                    this._settingsSubRoute = '';
+                    this.pages.settings?.switchTab?.(settingsTab);
+                }
+                return; // already showing it; idx synced
+            }
             this.applyPage(page);
         });
 
@@ -821,10 +836,11 @@ class App {
         // "#page/sub" (e.g. #admin/client:<id>): the page key is the first segment.
         const hash = window.location.hash.slice(1); // Remove #
         const hashKey = hash.split('/')[0];
-        // Provider Access notifications deep-link to the Sources tab. Preserve
-        // only this allow-listed Settings sub-route before navigateTo normalizes
-        // the URL back to #settings.
-        this._settingsSubRoute = hash === 'settings/sources' ? 'sources' : '';
+        // Preserve an allow-listed Settings section before navigateTo normalizes
+        // the URL. SettingsPage restores the canonical section hash after paint.
+        this._settingsSubRoute = hashKey === 'settings'
+            ? (window.NorvaSettingsNavigation?.tabFromHash?.(window.location.hash) || '')
+            : '';
         // Stash the admin sub-route BEFORE navigateTo rewrites the hash to "#admin" —
         // AdminPage.show() consumes it to restore the exact CRM view (fiche, ticket…).
         this._adminSubRoute = hashKey === 'admin' ? hash.slice('admin/'.length) : '';
