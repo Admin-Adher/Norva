@@ -47,7 +47,6 @@ set local statement_timeout = '30s';
 create extension if not exists pgtap with schema extensions;
 create extension if not exists dblink with schema extensions;
 grant usage on schema extensions to authenticated, service_role;
-grant execute on all functions in schema extensions to authenticated, service_role;
 select extensions.plan(28);
 
 -- Exercise the scheduler guards independently from RLS. This helper exists

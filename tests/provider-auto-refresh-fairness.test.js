@@ -12,6 +12,7 @@ const edge = read('supabase/functions/norva-source-sync/index.ts');
 const edgeDeploy = read('ops/hetzner/scripts/04-deploy-edge-functions.sh');
 const integrationWorkflow = read('.github/workflows/partners-integration.yml');
 const visibility = read('supabase/migrations/20260822220703_provider_access_lifecycle_foundation.sql');
+const pgTapProof = read('supabase/tests/provider_auto_refresh_fair_claim.sql');
 
 function between(source, start, end) {
   const from = source.indexOf(start);
@@ -140,5 +141,10 @@ test('disposable Supabase CI executes the real fair-claim pgTAP suite', () => {
   assert.match(
     integrationWorkflow,
     /supabase test db[\s\S]*supabase\/tests\/provider_auto_refresh_fair_claim\.sql[\s\S]*--local/,
+  );
+  assert.doesNotMatch(
+    pgTapProof,
+    /grant execute on all functions in schema extensions/i,
+    'the proof must not request privileged dblink_connect_u authority',
   );
 });
