@@ -49,7 +49,7 @@ test('connected-product navigation links both shipped Android apps to their cano
   assert.match(app, /href="\$\{esc\(a\.storeUrl\)\}" target="_blank" rel="noopener noreferrer">Install<\/a>/);
   assert.match(app, /Available now/);
   assert.doesNotMatch(app, />Coming soon</);
-  assert.match(appHtml, /\/js\/app\.js\?v=fb3b86f23e/);
+  assert.match(appHtml, /\/js\/app\.js\?v=b0962d47ce/);
 });
 
 test('transaction screens keep terms, privacy and self-service cancellation accessible', () => {
@@ -81,7 +81,7 @@ test('all changed funnel assets use fresh cache keys', () => {
   assert.match(appHtml, /billing-config\.js\?v=8/);
   assert.match(appHtml, /billing\.js\?v=18/);
   assert.match(appHtml, /HomePage\.js\?v=e235acfa42/);
-  assert.match(appHtml, /app\.js\?v=fb3b86f23e/);
+  assert.match(appHtml, /app\.js\?v=b0962d47ce/);
   assert.match(appJs, /AdminPage\.js\?v=[0-9a-f]{10}/);
   assert.match(subscribe, /marketing\.js\?v=2/);
   assert.match(subscribe, /cloudApi\.js\?v=52/);

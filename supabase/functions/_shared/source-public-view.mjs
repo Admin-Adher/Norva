@@ -161,6 +161,10 @@ const PUBLIC_SYNC_ERRORS = Object.freeze({
     code: "PROVIDER_CREDENTIALS_REJECTED",
     message: "The TV service rejected the saved credentials.",
   },
+  not_found: {
+    code: "PROVIDER_ENDPOINT_NOT_FOUND",
+    message: "The TV service address or account endpoint is no longer available.",
+  },
   infra: {
     code: "PROVIDER_TEMPORARILY_UNAVAILABLE",
     message: "The TV service is temporarily unavailable.",

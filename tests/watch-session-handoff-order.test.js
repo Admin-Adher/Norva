@@ -71,7 +71,7 @@ test('unsafe silent version failover remains dormant', () => {
 });
 
 test('changed playback assets have fresh app-shell cache versions', () => {
-    assert.match(appShell, /\/js\/api\.js\?v=88/);
+    assert.match(appShell, /\/js\/api\.js\?v=89/);
     assert.match(appShell, /\/js\/pages\/WatchPage\.js\?v=148/);
 });
 

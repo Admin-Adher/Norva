@@ -1773,6 +1773,7 @@ const CloudAdapter = (() => {
                 sourceId: source.id,
                 status: source.sync_status,
                 error: source.sync_error,
+                error_code: source.sync_error_code || source.syncErrorCode || null,
                 last_sync: source.last_sync
             }));
         }
@@ -2797,7 +2798,7 @@ const API = {
         test: (id) => API.request('POST', `/sources/${id}/test`),
         sync: (id) => API.request('POST', `/sources/${id}/sync`), // Manual sync
         finalize: (id, params = {}) => API.request('POST', `/sources/${id}/finalize`, params), // Resume catalog finalization
-        hardSync: (id) => API.request('POST', `/sources/${id}/hard-sync`), // Clear local content then sync
+        hardSync: (id) => API.request('POST', `/sources/${id}/hard-sync`), // Rebuild the complete catalog
         getStatus: () => API.request('GET', '/sources/status'), // Get all statuses
         estimate: (id) => API.request('GET', `/sources/${id}/estimate`), // Estimate M3U size
         estimateByUrl: (url, type) => API.request('POST', '/sources/estimate', { url, type }), // Estimate by URL (before creation)
