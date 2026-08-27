@@ -148,6 +148,7 @@ test('disposable Supabase CI executes the real fair-claim pgTAP suite', () => {
   assert.ok(migrationStep >= 0 && proofStep > migrationStep && proofEnd > proofStep);
   const focusedProof = integrationWorkflow.slice(migrationStep, proofEnd);
   assert.match(focusedProof, /20260822220703_provider_access_lifecycle_foundation\.sql/);
+  assert.match(focusedProof, /20260822220712_provider_source_lifecycle_triggers\.sql/);
   assert.match(focusedProof, /20260824120000_provider_access_cycles_detection_v1\.sql/);
   assert.match(focusedProof, /20260827033406_provider_auto_refresh_fair_claim_v1\.sql/);
   assert.match(focusedProof, /psql -X -qAt -U supabase_admin -d postgres/);
