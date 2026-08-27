@@ -10474,6 +10474,18 @@ kbd {
   transition: opacity var(--transition-fast), filter var(--transition-fast);
 }
 
+/* The top-bar controls are geometrically centred by flexbox, but the visible
+   strokes inside their SVG viewBoxes sit optically high next to the logo and
+   profile avatar. Nudge only the artwork — never the 40/48px hit targets — and
+   leave the phone bottom rail and Android TV navigation untouched. */
+html:not(.tv-mode) .navbar > .navbar-menu .nav-icon,
+html:not(.tv-mode) .navbar > .nav-search-btn > svg,
+html:not(.tv-mode) .navbar > .nav-devices-btn > svg,
+html:not(.tv-mode) .navbar > .nav-bell-btn > svg {
+  position: relative;
+  top: 2px;
+}
+
 html:not(.tv-mode) .nav-link:hover .norva-ui-icon,
 html:not(.tv-mode) .nav-link:focus-visible .norva-ui-icon,
 html:not(.tv-mode) .nav-link.active .norva-ui-icon {

@@ -52,6 +52,16 @@ test('navigation icons use an explicit sharp core and one restrained non-TV aura
   );
 });
 
+test('top-bar artwork is optically centred without moving its accessible hit targets', () => {
+  assert.match(
+    navIconCss,
+    /html:not\(\.tv-mode\) \.navbar > \.navbar-menu \.nav-icon,[\s\S]*?\.navbar > \.nav-search-btn > svg,[\s\S]*?\.navbar > \.nav-devices-btn > svg,[\s\S]*?\.navbar > \.nav-bell-btn > svg\s*\{[\s\S]*?position:\s*relative;[\s\S]*?top:\s*2px;/
+  );
+  assert.match(css, /\.nav-link\s*\{[\s\S]*?min-width:\s*48px;[\s\S]*?min-height:\s*48px;/);
+  assert.match(css, /\.nav-search-btn\s*\{[\s\S]*?width:\s*40px;[\s\S]*?height:\s*40px;/);
+  assert.match(css, /\.nav-profile\s*\{[\s\S]*?width:\s*38px;[\s\S]*?height:\s*38px;/);
+});
+
 test('icon-only navigation links keep an accessible name and current-page state', () => {
   const model = createDefaultNavigationModel();
   const webShell = model.renderProjection('web') + model.renderProjection('phone');
@@ -117,7 +127,7 @@ test('revised SVG URLs bypass existing image and service-worker caches', () => {
   }
   assert.match(renderedNavigation, /norva-logout\.svg\?v=sharp-core-1/);
   assert.match(iconsJs, /norva-\$\{name\}\.svg\?v=sharp-core-1/);
-  assert.match(html, /\/css\/main\.css\?v=be53290734/);
+  assert.match(html, /\/css\/main\.css\?v=ee4d1292b9/);
   assert.match(html, /\/js\/icons\.js\?v=3/);
   assert.match(html, /\/js\/navigation\/NavigationModel\.js\?v=1/);
   assert.match(html, /\/js\/navigation\/NavigationAdapters\.js\?v=1/);
