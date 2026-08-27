@@ -144,19 +144,18 @@ test('disposable Supabase CI executes the real fair-claim pgTAP suite', () => {
   const proofStep = integrationWorkflow.indexOf(
     'Run the Provider refresh PostgreSQL concurrency proof',
   );
-  assert.ok(migrationStep >= 0 && proofStep > migrationStep);
-  const focusedProof = integrationWorkflow.slice(migrationStep, proofStep + 500);
+  const proofEnd = integrationWorkflow.indexOf('Stop the disposable stack', proofStep);
+  assert.ok(migrationStep >= 0 && proofStep > migrationStep && proofEnd > proofStep);
+  const focusedProof = integrationWorkflow.slice(migrationStep, proofEnd);
   assert.match(focusedProof, /20260822220703_provider_access_lifecycle_foundation\.sql/);
   assert.match(focusedProof, /20260824120000_provider_access_cycles_detection_v1\.sql/);
   assert.match(focusedProof, /20260827033406_provider_auto_refresh_fair_claim_v1\.sql/);
-  assert.match(focusedProof, /create role norva_auto_refresh_989_dblink/);
-  assert.match(focusedProof, /grant service_role to norva_auto_refresh_989_dblink/);
-  assert.match(focusedProof, /norva\.test_dblink_user/);
-  assert.match(focusedProof, /norva\.test_dblink_password/);
-  assert.match(
-    focusedProof,
-    /supabase test db[\s\S]*supabase\/tests\/provider_auto_refresh_fair_claim\.sql[\s\S]*--local/,
-  );
+  assert.match(focusedProof, /psql -X -qAt -U postgres -d postgres/);
+  assert.match(focusedProof, /supabase\/tests\/provider_auto_refresh_fair_claim\.sql/);
+  assert.match(focusedProof, /not ok\|Bail out!/);
+  assert.match(focusedProof, /expected_tests="\$\{plan_line#1\.\.\}"/);
+  assert.match(focusedProof, /passed_tests="\$\(grep -Ec/);
+  assert.doesNotMatch(focusedProof, /norva_auto_refresh_989_dblink|norva\.test_dblink/);
   assert.doesNotMatch(
     pgTapProof,
     /grant execute on all functions in schema extensions/i,
@@ -164,12 +163,6 @@ test('disposable Supabase CI executes the real fair-claim pgTAP suite', () => {
   );
   assert.doesNotMatch(pgTapProof, /public\.dblink_/i);
   assert.match(pgTapProof, /alter extension dblink set schema extensions/i);
-  assert.match(pgTapProof, /current_setting\('norva\.test_dblink_user', true\)/i);
-  assert.match(pgTapProof, /current_setting\('norva\.test_dblink_password', true\)/i);
-  assert.match(
-    pgTapProof,
-    /hostaddr=127\.0\.0\.1/i,
-    'the disposable password login must use TCP instead of peer-authenticated Unix sockets',
-  );
-  assert.doesNotMatch(pgTapProof, /password=postgres/i);
+  assert.match(pgTapProof, /dbname=%I user=%I/i);
+  assert.doesNotMatch(pgTapProof, /password=/i);
 });
