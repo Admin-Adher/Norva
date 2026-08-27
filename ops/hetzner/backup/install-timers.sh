@@ -42,6 +42,11 @@ After=docker.service network-online.target
 [Service]
 Type=oneshot
 ExecStart=/usr/bin/bash $HERE/wal-sync.sh
+TimeoutStartSec=30min
+MemoryMax=1G
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
 EOF
 
 write_unit norva-wal-sync.timer <<'EOF'

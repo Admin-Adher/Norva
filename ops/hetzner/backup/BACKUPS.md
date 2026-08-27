@@ -102,6 +102,13 @@ sudo journalctl -u norva-basebackup.service -n 20 --no-pager
   `KEEP_LOCAL_WAL_MINUTES` sans être partis, ou si >2000 fichiers s'accumulent en local
   → archivage/upload en panne → vérifier réseau/R2 AVANT que `pg_wal` remplisse
   le disque.
+- **Vérification bornée du WAL local.** Après l'upload, `wal-sync` charge une seule
+  fois l'inventaire plat du préfixe R2, calcule localement l'intersection avec les
+  segments expirés, puis ne supprime que les noms présents des deux côtés. Il ne
+  lance jamais un `rclone lsf` par segment. `wal-sync` et `wal-prune-r2` partagent
+  en plus un verrou `flock`, afin que la rétention distante ne puisse pas courir
+  entre la preuve de présence et la suppression locale. L'unité est bornée à
+  30 minutes et 1 Gio de mémoire : un dépassement devient un échec explicite.
 - **Volume de WAL — audit 2026-08-20.** Le bucket était à 183 GB, dont 122 GiB de
   `selfhost/wal/` (79 %) pour seulement 3 jours de rétention : la base produisait
   ~27 GiB de WAL par jour. Cause amont : `checkpoint_timeout` était resté au défaut
@@ -129,8 +136,9 @@ sudo journalctl -u norva-basebackup.service -n 20 --no-pager
   cout marginal. Plafond de la box : ~31 M de titres avec un base backup en flux,
   ~20 M avec le staging local actuel.
 - **Santé des unités.** `capacity-check.sh` interroge systemd sur les quatre autres
-  unités (`Result` et ancienneté du dernier run) et alerte si l'une a échoué, n'a
-  jamais tourné, ou n'a pas tourné depuis trop longtemps. Seuils dans
+  unités (`ActiveState`, heure de démarrage, `Result` et ancienneté du dernier run)
+  et alerte si l'une a échoué, n'a jamais tourné, tourne depuis trop longtemps,
+  ou n'a pas tourné depuis trop longtemps. Seuils dans
   `CAPACITY_UNIT_CHECKS`. C'est ce qui rend enfin vrai le commentaire de
   `wal-sync.sh` (« non-zero so systemd marks the unit failed, visible in
   monitoring ») : rien ne regardait, le `go.d` de Netdata n'ayant pas de
