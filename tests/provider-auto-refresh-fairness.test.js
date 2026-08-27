@@ -166,5 +166,10 @@ test('disposable Supabase CI executes the real fair-claim pgTAP suite', () => {
   assert.match(pgTapProof, /alter extension dblink set schema extensions/i);
   assert.match(pgTapProof, /current_setting\('norva\.test_dblink_user', true\)/i);
   assert.match(pgTapProof, /current_setting\('norva\.test_dblink_password', true\)/i);
+  assert.match(
+    pgTapProof,
+    /hostaddr=127\.0\.0\.1/i,
+    'the disposable password login must use TCP instead of peer-authenticated Unix sockets',
+  );
   assert.doesNotMatch(pgTapProof, /password=postgres/i);
 });

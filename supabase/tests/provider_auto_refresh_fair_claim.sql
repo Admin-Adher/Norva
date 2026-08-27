@@ -109,12 +109,16 @@ create temporary table auto_refresh_989_dblink_connection (
 ) on commit drop;
 insert into auto_refresh_989_dblink_connection values (
   format(
-    'dbname=%I user=%I%s',
+    'dbname=%I user=%I%s%s',
     current_database(),
     coalesce(
       nullif(current_setting('norva.test_dblink_user', true), ''),
       current_user::text
     ),
+    case
+      when nullif(current_setting('norva.test_dblink_password', true), '') is null then ''
+      else ' hostaddr=127.0.0.1'
+    end,
     case
       when nullif(current_setting('norva.test_dblink_password', true), '') is null then ''
       else format(
