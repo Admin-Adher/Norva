@@ -467,6 +467,7 @@ jobs:
             20260822220712_provider_source_lifecycle_triggers.sql
             20260824120000_provider_access_cycles_detection_v1.sql
             20260827033406_provider_auto_refresh_fair_claim_v1.sql
+            20260827122100_provider_auto_refresh_claim_cooldown_v1.sql
           )
           for migration in "${migrations[@]}"; do
             test -f "$phase123_dir/$migration"

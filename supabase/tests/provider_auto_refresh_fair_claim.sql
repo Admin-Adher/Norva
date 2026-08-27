@@ -60,7 +60,7 @@ begin
 end
 $dblink_schema$;
 grant usage on schema extensions to authenticated, service_role;
-select extensions.plan(28);
+select extensions.plan(29);
 
 -- Exercise the scheduler guards independently from RLS. This helper exists
 -- only inside the rolled-back test transaction. Its definer may reach the row,
@@ -184,6 +184,12 @@ select extensions.is(
   (select lease_sequence from auto_refresh_989_claims),
   1::bigint,
   'the first durable claim starts lease sequence one'
+);
+select extensions.ok(
+  (select auto_refresh_next_at >= auto_refresh_lease_expires_at + interval '29 minutes 59 seconds'
+   from public.cloud_sources
+   where id = '98900000-0000-4000-8000-000000000104'),
+  'an abandoned claim cannot immediately starve younger due sources after lease expiry'
 );
 
 select set_config(

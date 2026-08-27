@@ -29,10 +29,12 @@ STATE="${CAPACITY_STATE_FILE:-/var/lib/norva/capacity-check.state}"
 WAL_WARN_GIB="${CAPACITY_WAL_WARN_GIB:-15}"
 USER_WARN_MIB="${CAPACITY_USER_WARN_MIB:-1200}"
 # Marginal cost of one catalogue title across the per-user cloud_* tables.
-# 5719 bytes at 2026-08-21 after the reindex pass; it was 7138 before it, so
-# this doubles as the "time to REINDEX" signal. The canonical catalog_* layer
-# is fixed overhead and is deliberately excluded — it saturates, titles do not.
-TITLE_WARN_BYTES="${CAPACITY_TITLE_WARN_BYTES:-7000}"
+# 10,109 bytes at 2026-08-27 after the Phase-3 schema and a concurrent reindex
+# pass. The former 7,000-byte threshold predated durable owner snapshots, live
+# catalogue indexes and projection queues, so it became a permanent false
+# positive even on freshly rebuilt indexes. Keep roughly 19% headroom over the
+# current compact baseline; this remains a growth signal, not a bloat estimate.
+TITLE_WARN_BYTES="${CAPACITY_TITLE_WARN_BYTES:-12000}"
 DISK_WARN_PCT="${CAPACITY_DISK_WARN_PCT:-70}"
 
 q() { docker exec "$DB_CONTAINER" psql -U postgres -Atc "$1"; }
@@ -160,7 +162,7 @@ if [ -n "$WAL_GIB_DAY" ] && awk -v v="$WAL_GIB_DAY" -v t="$WAL_WARN_GIB" 'BEGIN{
   ALERTS+=("WAL ${WAL_GIB_DAY} GiB/jour depasse le seuil de ${WAL_WARN_GIB}. Verifier checkpoint_timeout, pg_stat_checkpointer et wal_fpi dans pg_stat_statements avant de toucher a KEEP_WAL_DAYS.")
 fi
 if [ "$BYTES_PER_TITLE" -gt "$TITLE_WARN_BYTES" ]; then
-  ALERTS+=("Cout ${BYTES_PER_TITLE} octets par titre (seuil ${TITLE_WARN_BYTES}). Ballonnement d'index probable — REINDEX TABLE CONCURRENTLY sur cloud_titles, cloud_media_items, cloud_title_variants, catalog_titles.")
+  ALERTS+=("Cout ${BYTES_PER_TITLE} octets par titre (seuil ${TITLE_WARN_BYTES}). Croissance anormale possible — mesurer pgstattuple/pgstatindex avant REINDEX TABLE CONCURRENTLY sur cloud_titles, cloud_media_items et cloud_title_variants.")
 fi
 if [ -n "$UNIT_PROBLEMS" ]; then
   ALERTS+=("Unites de backup en defaut:$UNIT_PROBLEMS. Diagnostic: systemctl status <unite>.service et journalctl -u <unite>.service -n 50.")

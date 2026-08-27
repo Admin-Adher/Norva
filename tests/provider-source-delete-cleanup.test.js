@@ -11,6 +11,12 @@ const MIGRATION = fs.readFileSync(path.join(
   'migrations',
   '20260827111500_source_delete_cleanup_recovery_v1.sql',
 ), 'utf8');
+const BACKOFF_MIGRATION = fs.readFileSync(path.join(
+  ROOT,
+  'supabase',
+  'migrations',
+  '20260827122000_source_delete_cleanup_wait_backoff_v1.sql',
+), 'utf8');
 
 test('ordinary source removal reuses the fenced durable cleanup lane', () => {
   assert.match(MIGRATION, /cleanup_kind in \('replacement','source_delete'\)/);
@@ -30,6 +36,9 @@ test('crash recovery is PostgreSQL-owned and remains bounded', () => {
   assert.match(MIGRATION, /order by source\.deleted_at,source\.id\s+limit p_limit/);
   assert.match(MIGRATION, /norva_run_replacement_cleanup_batch\(''source-reaper'',200\)/);
   assert.doesNotMatch(MIGRATION, /commit;[\s\S]*commit;/i);
+  assert.match(BACKOFF_MIGRATION, /v_occurrences <> 2/i);
+  assert.match(BACKOFF_MIGRATION, /interval ''10 minutes''/i);
+  assert.doesNotMatch(BACKOFF_MIGRATION, /grant execute[\s\S]*authenticated/i);
 });
 
 test('operator path does not broaden client authority', () => {

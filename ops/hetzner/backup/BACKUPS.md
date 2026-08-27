@@ -128,8 +128,11 @@ sudo journalctl -u norva-basebackup.service -n 20 --no-pager
   Dépassement → message Telegram (même bot que Netdata, identifiants lus dans le
   `.env` de la stack) **et** sortie non nulle, donc unité en `failed`. Le premier
   run ne fait qu'amorcer son fichier d'état et reste muet.
-- **La bonne unite de capacite, c'est le titre.** Audit 2026-08-21 : 777 160 titres
-  pour 4 238 MB de tables `cloud_*`, soit ~5 719 octets par titre. Le nombre
+- **La bonne unite de capacite, c'est le titre.** Audit 2026-08-27 : après le
+  schéma Phase 3 et une réindexation concurrente mesurée, les tables `cloud_*`
+  occupent ~10 109 octets par titre. Le seuil d'alerte est 12 000 ; il signale
+  une croissance à diagnostiquer avec `pgstattuple`/`pgstatindex`, pas une preuve
+  automatique de bloat. Le nombre
   d'utilisateurs ne dit rien — un seul compte portait 523 050 titres (67 % du
   total) et 11 inscrits sur 16 n'avaient importe aucun catalogue. La couche
   `catalog_*` (1,1 GB) est un cout fixe qui sature : ne pas l'inclure dans le
@@ -147,8 +150,10 @@ sudo journalctl -u norva-basebackup.service -n 20 --no-pager
 - **Réindexation.** `cloud_titles` tourne à ~14 % de HOT, donc chaque mise à jour
   non-HOT ajoute une entrée dans **tous** ses index : le ballonnement revient en
   régime permanent. Audit 2026-08-21 : un seul index était ballonné à 69 %
-  (199 → 62 MB), et un `REINDEX TABLE CONCURRENTLY` sur les quatre grosses tables
-  a rendu 1,1 GB sur 6,8. Automatisé : `norva-reindex.timer`, le 1er de chaque
+  (199 → 62 MB). Le passage du 2026-08-27 sur `cloud_titles`,
+  `cloud_media_items` et `cloud_title_variants` a rendu ~1,85 GB sans index
+  invalide. `catalog_titles` est dominé par son TOAST et reste hors de cette
+  opération. Automatisé : `norva-reindex.timer`, le 1er de chaque
   mois. `REINDEX TABLE CONCURRENTLY` ne pose pas de verrou exclusif mais construit
   le nouvel index à côté de l'ancien, donc il faut la place du plus gros index en
   cours de reconstruction. Un échec laisse un index INVALID qui consomme les

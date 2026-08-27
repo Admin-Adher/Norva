@@ -8,6 +8,7 @@ const path = require('node:path');
 const ROOT = path.resolve(__dirname, '..');
 const read = (relative) => fs.readFileSync(path.join(ROOT, relative), 'utf8');
 const migration = read('supabase/migrations/20260827033406_provider_auto_refresh_fair_claim_v1.sql');
+const cooldownMigration = read('supabase/migrations/20260827122100_provider_auto_refresh_claim_cooldown_v1.sql');
 const edge = read('supabase/functions/norva-source-sync/index.ts');
 const edgeDeploy = read('ops/hetzner/scripts/04-deploy-edge-functions.sh');
 const integrationWorkflow = read('.github/workflows/partners-integration.yml');
@@ -33,6 +34,10 @@ test('PostgreSQL owns a short fair claim with a monotone lease fence', () => {
   assert.match(claim, /norva_source_catalog_visible_internal/);
   assert.match(claim, /source\.auto_refresh_state ->> 'suspended'.*is distinct from 'true'/s);
   assert.match(claim, /limit p_limit/i);
+  assert.match(cooldownMigration, /interval ''30 minutes''/i);
+  assert.match(cooldownMigration, /auto_refresh_lease_expires_at <= clock_timestamp\(\)/i);
+  assert.match(cooldownMigration, /auto_refresh_lease_owner = null/i);
+  assert.match(cooldownMigration, /lastOutcome', 'transient_failure'/i);
 });
 
 test('settlement is CAS-only and never lets an old worker repair a newer claim', () => {
@@ -154,6 +159,7 @@ test('disposable Supabase CI executes the real fair-claim pgTAP suite', () => {
   assert.match(focusedProof, /20260822220712_provider_source_lifecycle_triggers\.sql/);
   assert.match(focusedProof, /20260824120000_provider_access_cycles_detection_v1\.sql/);
   assert.match(focusedProof, /20260827033406_provider_auto_refresh_fair_claim_v1\.sql/);
+  assert.match(focusedProof, /20260827122100_provider_auto_refresh_claim_cooldown_v1\.sql/);
   assert.match(focusedProof, /psql -X -qAt -U supabase_admin -d postgres/);
   assert.doesNotMatch(focusedProof, /psql -X -qAt -U postgres -d postgres/);
   assert.match(focusedProof, /supabase\/tests\/provider_auto_refresh_fair_claim\.sql/);

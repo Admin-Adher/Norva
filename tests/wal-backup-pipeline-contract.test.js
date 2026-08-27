@@ -13,6 +13,7 @@ const walSync = read('ops/hetzner/backup/wal-sync.sh');
 const walPrune = read('ops/hetzner/backup/wal-prune-r2.sh');
 const capacityCheck = read('ops/hetzner/backup/capacity-check.sh');
 const timerInstaller = read('ops/hetzner/backup/install-timers.sh');
+const reindexMonthly = read('ops/hetzner/backup/reindex-monthly.sh');
 
 function bashBinary() {
   if (process.platform !== 'win32') return 'bash';
@@ -194,4 +195,11 @@ test('WAL maintenance scripts share a lock and the oneshot has hard resource bou
   assert.match(capacityCheck, /en-cours-\$\{running_minutes\}min/);
   assert.match(timerInstaller, /TimeoutStartSec=30min/);
   assert.match(timerInstaller, /MemoryMax=1G/);
+  assert.match(capacityCheck, /CAPACITY_TITLE_WARN_BYTES:-12000/);
+  assert.doesNotMatch(capacityCheck, /cloud_title_variants, catalog_titles/);
+  assert.match(
+    reindexMonthly,
+    /REINDEX_TABLES:-public\.cloud_titles public\.cloud_media_items public\.cloud_title_variants}/
+  );
+  assert.doesNotMatch(reindexMonthly, /REINDEX_TABLES:-[^\n]*catalog_titles/);
 });
