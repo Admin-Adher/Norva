@@ -406,6 +406,7 @@ jobs:
       - name: Run exhaustive Partners pgTAP tests on the fresh database
         run: >-
           supabase test db
+          supabase/tests/provider_auto_refresh_fair_claim.sql
           supabase/tests/affiliate_p0.sql
           supabase/tests/affiliate_access_requests.sql
           supabase/tests/affiliate_didit_certification_pre_gate.sql

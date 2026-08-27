@@ -10,6 +10,7 @@ const read = (relative) => fs.readFileSync(path.join(ROOT, relative), 'utf8');
 const migration = read('supabase/migrations/20260827033406_provider_auto_refresh_fair_claim_v1.sql');
 const edge = read('supabase/functions/norva-source-sync/index.ts');
 const edgeDeploy = read('ops/hetzner/scripts/04-deploy-edge-functions.sh');
+const integrationWorkflow = read('.github/workflows/partners-integration.yml');
 const visibility = read('supabase/migrations/20260822220703_provider_access_lifecycle_foundation.sql');
 
 function between(source, start, end) {
@@ -133,4 +134,11 @@ test('Edge exposes and deployment verifies the fair-claim protocol on every runt
   assert.match(edgeDeploy, /norva-source-sync source digest mismatch/);
   assert.match(edgeDeploy, /function_health_in_service "\$service" norva-source-sync/);
   assert.match(edgeDeploy, /norva-source-sync protocol marker mismatch/);
+});
+
+test('disposable Supabase CI executes the real fair-claim pgTAP suite', () => {
+  assert.match(
+    integrationWorkflow,
+    /supabase test db[\s\S]*supabase\/tests\/provider_auto_refresh_fair_claim\.sql[\s\S]*--local/,
+  );
 });
