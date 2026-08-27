@@ -56,6 +56,7 @@ function sourceManagerHarness({
   confirm = true,
   instantTimers = false,
   loadError = null,
+  providerAccessUiEnabled = false,
   statuses = [{ source_id: 'source-1', status: 'ready' }],
   syncError = null,
   hardSyncError = null,
@@ -105,6 +106,7 @@ function sourceManagerHarness({
   };
   const api = {
     isCloudMode: () => true,
+    providerAccess: { available: () => providerAccessUiEnabled },
     proxy: { cache: { async clear(id) { calls.cacheClear.push(id); } } },
     sources: {
       async delete(id) { calls.delete.push(id); },
@@ -138,6 +140,7 @@ function sourceManagerHarness({
   };
   const window = {
     API: api,
+    NORVA_PROVIDER_ACCESS_UI_V1: providerAccessUiEnabled,
     NorvaModal: modal,
     NorvaCloud: {
       catalogVisibility: {
@@ -171,7 +174,7 @@ function sourceManagerHarness({
     if (loadError) throw loadError;
   };
   manager.notifySourceHealthChanged = () => { calls.notify += 1; };
-  return { manager, calls, checkButton, hardSyncButton, syncButton };
+  return { manager, calls, checkButton, document, hardSyncButton, syncButton };
 }
 
 test('cloud app launch leaves refresh ownership to the durable fair scheduler', async () => {
@@ -197,6 +200,55 @@ test('cloud Settings does not expose a browser-only refresh control as server au
     appHtml,
     /class="setting-item needs-local-server" id="auto-refresh-interval-row"/,
   );
+});
+
+test('source action menu follows visual order with arrow keys and restores trigger focus on Escape', () => {
+  const { manager, document } = sourceManagerHarness({ instantTimers: true });
+  const listeners = {};
+  const controls = Array.from({ length: 4 }, (_, index) => ({
+    disabled: false,
+    focus() { document.activeElement = controls[index]; },
+  }));
+  const trigger = {
+    attributes: {},
+    focus() { document.activeElement = trigger; },
+    setAttribute(name, value) { this.attributes[name] = value; },
+  };
+  const menu = {
+    hidden: true,
+    closest() { return item; },
+    hasAttribute(name) { return name === 'hidden' && this.hidden; },
+    querySelector() { return controls[0]; },
+    querySelectorAll() { return controls; },
+    removeAttribute(name) { if (name === 'hidden') this.hidden = false; },
+    setAttribute(name) { if (name === 'hidden') this.hidden = true; },
+  };
+  const item = {
+    contains() { return true; },
+    querySelector(selector) {
+      if (selector === '.source-menu') return menu;
+      if (selector === '.source-menu-btn') return trigger;
+      return null;
+    },
+  };
+  document.activeElement = trigger;
+  document.querySelectorAll = () => (menu.hidden ? [] : [menu]);
+  document.addEventListener = (type, callback) => { listeners[type] = callback; };
+  document.removeEventListener = (type) => { delete listeners[type]; };
+
+  manager.toggleSourceMenu(item);
+  assert.equal(menu.hidden, false);
+  assert.equal(trigger.attributes['aria-expanded'], 'true');
+  assert.equal(document.activeElement, controls[0]);
+
+  listeners.keydown({ key: 'ArrowDown', preventDefault() {} });
+  assert.equal(document.activeElement, controls[1]);
+  listeners.keydown({ key: 'End', preventDefault() {} });
+  assert.equal(document.activeElement, controls[3]);
+  listeners.keydown({ key: 'Escape', preventDefault() {} });
+  assert.equal(menu.hidden, true);
+  assert.equal(trigger.attributes['aria-expanded'], 'false');
+  assert.equal(document.activeElement, trigger);
 });
 
 test('local app launch retains one-device stale-provider refresh behavior', async () => {
@@ -268,9 +320,10 @@ test('Rebuild catalog cancels without mutation and otherwise uses only hard-sync
   });
 });
 
-test('Sync now turns a durable rejected-login status into Repair login guidance', async () => {
+test('Sync now turns a durable rejected-login status into Manage provider access guidance', async () => {
   const { manager, calls } = sourceManagerHarness({
     instantTimers: true,
+    providerAccessUiEnabled: true,
     statuses: [{
       source_id: 'source-1',
       status: 'error',
@@ -283,7 +336,7 @@ test('Sync now turns a durable rejected-login status into Repair login guidance'
 
   assert.deepEqual(calls.sync, ['source-1']);
   assert.deepEqual(calls.cacheClear, []);
-  assert.match(calls.toast.at(-1).message, /Open Repair login/);
+  assert.match(calls.toast.at(-1).message, /Open Manage provider access/);
   assert.equal(calls.toast.at(-1).tone, 'error');
 });
 
@@ -292,6 +345,7 @@ test('Sync now reconciles a stale visibility response without replaying the muta
   stale.code = 'STALE_CATALOG_VISIBILITY_EPOCH';
   const { manager, calls } = sourceManagerHarness({
     instantTimers: true,
+    providerAccessUiEnabled: true,
     syncError: stale,
     statuses: [{
       source_id: 'source-1',
@@ -307,7 +361,7 @@ test('Sync now reconciles a stale visibility response without replaying the muta
   assert.deepEqual(calls.hardSync, []);
   assert.equal(calls.visibilityInvalidate, 1);
   assert.equal(calls.getStatus, 1);
-  assert.match(calls.toast.at(-1).message, /Open Repair login/);
+  assert.match(calls.toast.at(-1).message, /Open Manage provider access/);
   assert.equal(calls.toast.at(-1).tone, 'error');
 });
 
@@ -363,11 +417,16 @@ test('cloud source sync invalidates its cache even when the response is rejected
 });
 
 test('sync errors turn terminal provider states into actionable guidance', () => {
-  const { manager } = sourceManagerHarness();
+  const { manager } = sourceManagerHarness({ providerAccessUiEnabled: true });
+  const { manager: gatedManager } = sourceManagerHarness({ providerAccessUiEnabled: false });
 
   assert.match(
     manager.sourceSyncErrorMessage({ error_code: 'PROVIDER_CREDENTIALS_REJECTED' }),
-    /Open Repair login/,
+    /Open Manage provider access/,
+  );
+  assert.match(
+    gatedManager.sourceSyncErrorMessage({ error_code: 'PROVIDER_CREDENTIALS_REJECTED' }),
+    /Secure login repair is not available for this account yet/,
   );
   assert.match(
     manager.sourceSyncErrorMessage({ error_code: 'PROVIDER_ENDPOINT_NOT_FOUND' }),

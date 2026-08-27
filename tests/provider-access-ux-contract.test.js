@@ -95,6 +95,24 @@ test('Settings exposes renewal, candidate login and replacement paths without a 
   assert.doesNotMatch(sourceManager, /API\.sources\.update\(id, \{[^}]*password/s);
 });
 
+test('source actions expose one grouped Provider Access entry without a Repair login duplicate', () => {
+  assert.match(
+    sourceManager,
+    /role="group" aria-label="Provider access"[\s\S]*Manage provider access[\s\S]*Dates, duration, reminders, login or catalogue changes/,
+  );
+  assert.match(
+    sourceManager,
+    /Provider access[\s\S]*Catalog actions[\s\S]*Service[\s\S]*Danger zone/,
+  );
+  assert.doesNotMatch(sourceManager, /Repair login|Edit login/);
+  assert.match(sourceManager, /needsRepair && type === 'xtream' && !providerAccessEnabled[\s\S]{0,160}Check service/);
+  assert.match(sourceManager, /type !== 'xtream'[\s\S]{0,180}data-action="edit"/);
+  assert.match(css, /\.source-menu-item\s*\{[\s\S]{0,160}min-height:\s*44px/);
+  assert.match(css, /\.source-menu-item:focus-visible\s*\{[\s\S]{0,160}box-shadow:\s*inset 0 0 0 2px var\(--color-accent\)/);
+  assert.match(sourceManager, /ArrowDown[\s\S]*ArrowUp[\s\S]*Home[\s\S]*End/);
+  assert.match(sourceManager, /Escape[\s\S]{0,180}restoreFocus:\s*true/);
+});
+
 test('onboarding reports Provider Access validation separately from login errors', () => {
   assert.match(home, /\^Enter a valid provider access /);
   assert.match(home, /querySelector\('\[data-access-error\]'\)/);
@@ -136,9 +154,9 @@ test('Provider Access wizard has one vertical scroller and one action footer', (
 });
 
 test('all changed Provider Access UI assets are cache-busted', () => {
-  assert.match(shell, /main\.css\?v=121/);
+  assert.match(shell, /main\.css\?v=122/);
   assert.match(shell, /cloudApi\.js\?v=70/);
   assert.match(shell, /api\.js\?v=89/);
-  assert.match(shell, /SourceManager\.js\?v=49/);
+  assert.match(shell, /SourceManager\.js\?v=50/);
   assert.match(shell, /HomePage\.js\?v=e235acfa42/);
 });
