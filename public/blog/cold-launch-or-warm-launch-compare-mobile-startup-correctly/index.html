@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#05080f">
+  <title>Compare Mobile Cold and Warm App Launches | Norva Blog</title>
+  <meta name="description" content="Compare mobile cold and warm launches using defined states, start and usable endpoints, versions, power, network, repeated trials, order, failures, and uncertainty.">
+  <link rel="canonical" href="https://norva.tv/blog/cold-launch-or-warm-launch-compare-mobile-startup-correctly/">
+  <meta name="robots" content="index,follow">
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/css/blog.css?v=1">
+  <meta property="og:type" content="article">
+  <meta property="og:site_name" content="Norva">
+  <meta property="og:title" content="Compare Mobile Cold and Warm App Launches | Norva Blog">
+  <meta property="og:description" content="Compare mobile cold and warm launches using defined states, start and usable endpoints, versions, power, network, repeated trials, order, failures, and uncertainty.">
+  <meta property="og:url" content="https://norva.tv/blog/cold-launch-or-warm-launch-compare-mobile-startup-correctly/">
+  <meta property="og:image" content="https://norva.tv/img/devices/norva-device-tv.webp">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Compare Mobile Cold and Warm App Launches | Norva Blog">
+  <meta name="twitter:description" content="Compare mobile cold and warm launches using defined states, start and usable endpoints, versions, power, network, repeated trials, order, failures, and uncertainty.">
+  <meta name="twitter:image" content="https://norva.tv/img/devices/norva-device-tv.webp">
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "headline": "Cold Launch or Warm Launch: Compare Mobile Startup Correctly",
+  "description": "Compare mobile cold and warm launches using defined states, start and usable endpoints, versions, power, network, repeated trials, order, failures, and uncertainty.",
+  "inLanguage": "en",
+  "datePublished": "2026-08-28T06:00:00+02:00",
+  "dateModified": "2026-08-28T06:00:00+02:00",
+  "author": {
+    "@type": "Organization",
+    "name": "Norva"
+  },
+  "publisher": {
+    "@type": "Organization",
+    "name": "Norva",
+    "logo": {
+      "@type": "ImageObject",
+      "url": "https://norva.tv/img/norva-app-icon-96.png"
+    }
+  },
+  "image": [
+    "https://norva.tv/img/devices/norva-device-tv.webp"
+  ],
+  "mainEntityOfPage": {
+    "@type": "WebPage",
+    "@id": "https://norva.tv/blog/cold-launch-or-warm-launch-compare-mobile-startup-correctly/"
+  }
+}
+  </script>
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    {
+      "@type": "ListItem",
+      "position": 1,
+      "name": "Home",
+      "item": "https://norva.tv/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 2,
+      "name": "Blog",
+      "item": "https://norva.tv/blog/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 3,
+      "name": "Cold Launch or Warm Launch: Compare Mobile Startup Correctly",
+      "item": "https://norva.tv/blog/cold-launch-or-warm-launch-compare-mobile-startup-correctly/"
+    }
+  ]
+}
+  </script>
+  <script src="/js/marketing-config.js?v=1"></script>
+  <script defer src="/js/marketing.js?v=1"></script>
+  <script defer src="/js/consent-banner.js?v=1"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="blog-nav">
+    <a class="brand" href="/" aria-label="Norva home">
+      <img src="/img/norva-app-icon-96.png" width="34" height="34" alt="" decoding="async">
+      <span>Norva</span>
+    </a>
+    <nav class="nav-right" aria-label="Primary">
+      <a href="/blog/">Blog</a>
+      <a class="hide-sm" href="/#how-it-works">How it works</a>
+      <a class="cta" href="/account.html?returnTo=%2Fapp%23home" data-cta="blog-nav" data-auth-action>Start free trial</a>
+    </nav>
+  </header>
+  <main id="main-content">
+    <nav class="breadcrumb" aria-label="Breadcrumb"><a href="/">Home</a><span class="sep">›</span><a href="/blog/">Blog</a><span class="sep">›</span><span aria-current="page">Cold Launch or Warm Launch: Compare Mobile Startup Correctly</span></nav>
+    <article>
+      <div class="article-meta">
+        <span class="tag">Mobile Performance</span>
+        <span>By Norva Editorial Team</span>
+        <span class="dot">·</span>
+        <time datetime="2026-08-28T06:00:00+02:00">28 August 2026</time>
+        <span class="dot">·</span>
+        <span>4 min read</span>
+      </div>
+      <h1>Cold Launch or Warm Launch: Compare Mobile Startup Correctly</h1>
+      <p class="lede">Define launch states with current platform guidance, then use the same device, system and app versions, power and thermal state, network, account-safe session, and endpoint. Time user action to a genuinely usable screen, preserve failed launches, alternate trial order, and keep foreground resume separate. Never manufacture a “cold” state with destructive data clearing.</p>
+      <nav class="toc" aria-label="On this page">
+      <strong>On this page</strong>
+      <ul><li><a href="#define-states-before-measuring">Define states before measuring</a></li><li><a href="#choose-one-usable-endpoint">Choose one usable endpoint</a></li><li><a href="#original-evidence-launch-protocol">Original evidence: launch protocol</a></li><li><a href="#stabilize-device-context">Stabilize device context</a></li><li><a href="#handle-one-time-initialization">Handle one-time initialization</a></li><li><a href="#alternate-order-and-preserve-raw-trials">Alternate order and preserve raw trials</a></li><li><a href="#keep-background-return-separate">Keep background return separate</a></li><li><a href="#interpret-without-a-universal-target">Interpret without a universal target</a></li><li><a href="#use-safe-recovery">Use safe recovery</a></li><li><a href="#frequently-asked-questions">Frequently asked questions</a></li><li><a href="#your-next-step">Your next step</a></li><li><a href="#sources">Sources</a></li></ul>
+    </nav>
+      <blockquote><strong>In short:</strong> Define launch states with current platform guidance, then use the same device, system and app versions, power and thermal state, network, account-safe session, and endpoint. Time user action to a genuinely usable screen, preserve failed launches, alternate trial order, and keep foreground resume separate. Never manufacture a “cold” state with destructive data clearing.</blockquote>
+<p>“Opening the app” can mean process creation, task restoration, foreground resume, or returning to an existing screen. A comparison is valid only when the initial states are documented.</p>
+<h2 id="define-states-before-measuring">Define states before measuring</h2>
+<p>Use platform-appropriate terms from current official documentation. Describe the observable preparation: device restarted, app normally closed, app recently used, app in background for a stated interval, or screen revisited. Do not claim the process was absent unless trusted tooling verifies it.</p>
+<p><a href="/blog/mobile-media-app-performance-a-practical-diagnostic-guide/">The mobile performance guide</a> explains why lifecycle is only one performance layer.</p>
+<h2 id="choose-one-usable-endpoint">Choose one usable endpoint</h2>
+<p>Start at a deliberate tap on the app icon or supported launch action. End when the intended screen is visible, blocking prompts are gone, required content is present to the defined level, and one ordinary interaction responds. A logo or first painted frame may not be usable.</p>
+<p>Record separate milestones if text, artwork, and interaction become ready at different times.</p>
+<h2 id="original-evidence-launch-protocol">Original evidence: launch protocol</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>Trial</th><th>Prepared state</th><th>Start/end</th><th>App/system build</th><th>Power/network</th><th>Time/result</th><th>One-time work</th></tr></thead>
+<tbody><tr><td>Cold A</td><td>Defined procedure</td><td>Fixed events</td><td>Values</td><td>Context</td><td>Range/failure</td><td>Observed</td></tr><tr><td>Warm A</td><td>Defined procedure</td><td>Same events</td><td>Same</td><td>Same</td><td>Range/failure</td><td>Observed</td></tr><tr><td>Reverse order</td><td>Recreated states</td><td>Same events</td><td>Same</td><td>Same</td><td>Range/failure</td><td>Observed</td></tr><tr><td>Resume</td><td>Background interval</td><td>Same endpoint</td><td>Same</td><td>Same</td><td>Range/failure</td><td>Separate</td></tr></tbody>
+</table></div>
+<p>Label manual timing and state uncertainty explicitly.</p>
+<h2 id="stabilize-device-context">Stabilize device context</h2>
+<p>Record model class, operating-system version, app build, available update status, battery level band, battery-saver state, charging, thermal warning, orientation, storage warning, and network category. Keep notifications and other active work consistent where practical.</p>
+<p>Do not charge one condition and run the other on battery without labeling the mismatch.</p>
+<h2 id="handle-one-time-initialization">Handle one-time initialization</h2>
+<p>The first launch after install or update may show permission prompts, migration, data refresh, or resource preparation. Record it as a separate initialization case. Complete only supported prompts, then measure later steady-state launches.</p>
+<p>Build a post-update mobile baseline instead of comparing initialization with an older warm run.</p>
+<h2 id="alternate-order-and-preserve-raw-trials">Alternate order and preserve raw trials</h2>
+<p>If every cold launch precedes every warm launch, network reconnection, observer readiness, cache warming, or thermal change can bias the result. Alternate the order across sessions when the platform permits the states to be established safely.</p>
+<p>Report individual values, range, median when useful, stalls, and failures. Do not remove the slowest result without a documented interruption.</p>
+<h2 id="keep-background-return-separate">Keep background return separate</h2>
+<p>Foreground resume can restore an existing view, recreate part of the interface, or relaunch after system termination. Recheck background-return performance with a stated interval, intervening action, and saved state. Do not call every return a warm launch.</p>
+<h2 id="interpret-without-a-universal-target">Interpret without a universal target</h2>
+<p>Android and Apple provide developer guidance and instrumentation for launch performance, but user-visible timing varies by device, version, state, network, and screen. W3C Navigation Timing offers related web concepts, not a native-app equivalence.</p>
+<p>Compare the same workflow against its own baseline rather than inventing a pass/fail number.</p>
+<h2 id="use-safe-recovery">Use safe recovery</h2>
+<p>After evidence capture, retry once, restart only the app through normal controls, and use a supported device restart if the lifecycle state appears corrupted. Avoid cache clearing, app-data clearing, reinstall, or factory reset simply to improve a launch number.</p>
+<p>Before publication, verify current Norva mobile startup and supported platform claims from official product evidence.</p>
+<h2 id="frequently-asked-questions">Frequently asked questions</h2>
+<h3 id="is-force-stopping-an-app-always-a-cold-launch-setup">Is force-stopping an app always a cold launch setup?</h3>
+<p>Platform behavior and terminology vary. Use the official definition and document the exact action rather than assuming.</p>
+<h3 id="should-the-timer-stop-when-the-logo-appears">Should the timer stop when the logo appears?</h3>
+<p>Only if the logo itself is the intended usable endpoint, which is rarely the reader's real goal.</p>
+<h3 id="how-many-trials-are-necessary">How many trials are necessary?</h3>
+<p>Use a small predefined set that reveals range and failure without excessive state manipulation; report the count and every valid result.</p>
+<h2 id="your-next-step">Your next step</h2>
+<p><a href="https://norva.tv/#features" target="_blank" rel="noopener">See Norva's mobile experience</a></p>
+<h2 id="sources">Sources</h2>
+<ul><li><a href="https://developer.android.com/topic/performance/vitals/launch-time" target="_blank" rel="noopener">Android Developers: App Startup Time</a></li><li><a href="https://developer.apple.com/documentation/xcode/reducing-your-app-s-launch-time" target="_blank" rel="noopener">Apple Developer: Reducing Your App's Launch Time</a></li><li><a href="https://www.w3.org/TR/navigation-timing-2/" target="_blank" rel="noopener">W3C Navigation Timing</a></li></ul>
+      <section class="article-cta">
+      <a class="btn" href="https://norva.tv/#features" data-cta="blog-article">See Norva's Mobile Experience</a>
+    </section>
+      <section class="sources">
+      <h2>Sources</h2>
+      <ul><li><a href="https://developer.android.com/topic/performance/vitals/launch-time" target="_blank" rel="noopener">https://developer.android.com/topic/performance/vitals/launch-time</a></li><li><a href="https://developer.apple.com/documentation/xcode/reducing-your-app-s-launch-time" target="_blank" rel="noopener">https://developer.apple.com/documentation/xcode/reducing-your-app-s-launch-time</a></li><li><a href="https://www.w3.org/TR/navigation-timing-2/" target="_blank" rel="noopener">https://www.w3.org/TR/navigation-timing-2/</a></li></ul>
+    </section>
+      <section class="related">
+      <h2>Related reading</h2>
+      <div class="related-grid">
+        <a class="card" href="/blog/mobile-media-app-performance-a-practical-diagnostic-guide/">
+          <span class="tag">Mobile Performance</span>
+          <div class="card-title">Mobile Media App Performance: A Practical Diagnostic Guide</div>
+          <p>Separate touch response, scrolling and rendering, app lifecycle, storage, memory, battery and thermal state, background competition, network response, search, media decoding, playback controls, rotation, and output. Define one visible start and end event, hold device and content state stable, run matched controls, and preserve failures before changing settings.</p>
+        </a>
+      </div>
+    </section>
+    </article>
+  </main>
+  <footer class="blog-footer">
+    <div class="foot-inner">
+      <nav class="foot-links" aria-label="Footer">
+        <a href="/">Home</a>
+        <a href="/blog/">Blog</a>
+        <a href="/#features">Benefits</a>
+        <a href="/#pricing">Pricing</a>
+        <a href="/support.html?returnTo=%2Fblog%2F">Support</a>
+        <a href="/terms.html">Terms</a>
+        <a href="/privacy.html">Privacy</a>
+        <a href="/mentions-legales.html">Legal notice</a>
+      </nav>
+      <p class="disclaimer">&copy; 2026 Norva. Norva is a media player and organiser. It does not provide media. Use requires a compatible source you own or are authorised to access.</p>
+    </div>
+  </footer>
+</body>
+</html>

@@ -127,7 +127,7 @@
 <p>Record touch type, gesture distance, screen, visible item count, artwork state, orientation, refresh behavior only when officially exposed, and whether the system interface responds normally. A dropped gesture, late frame, and delayed data arrival are different symptoms.</p>
 <p>Android performance vitals and Apple performance documentation describe developer instrumentation; a user report should rely on visible evidence unless trusted diagnostics are available.</p>
 <h2 id="app-lifecycle-and-startup">App lifecycle and startup</h2>
-<p>Cold launch, warm launch, foreground resume, and screen revisit are not interchangeable. Define how each state was established and what “usable” means. Compare mobile cold and warm launch correctly before using startup as a baseline.</p>
+<p>Cold launch, warm launch, foreground resume, and screen revisit are not interchangeable. Define how each state was established and what “usable” means. <a href="/blog/cold-launch-or-warm-launch-compare-mobile-startup-correctly/">Compare mobile cold and warm launch correctly</a> before using startup as a baseline.</p>
 <p>Record permissions or one-time initialization that changes the first run.</p>
 <h2 id="storage-memory-power-and-heat">Storage, memory, power, and heat</h2>
 <p>Official storage warnings, repeated reloads, lost state, system terminations, battery-saver state, thermal warnings, charging, and unusual warmth can guide focused checks. They do not reveal a hidden resource value by themselves.</p>
@@ -165,7 +165,16 @@
       <h2>Sources</h2>
       <ul><li><a href="https://developer.android.com/topic/performance/vitals" target="_blank" rel="noopener">https://developer.android.com/topic/performance/vitals</a></li><li><a href="https://developer.apple.com/documentation/xcode/improving-your-app-s-performance" target="_blank" rel="noopener">https://developer.apple.com/documentation/xcode/improving-your-app-s-performance</a></li><li><a href="https://www.w3.org/TR/performance-timeline/" target="_blank" rel="noopener">https://www.w3.org/TR/performance-timeline/</a></li></ul>
     </section>
-      
+      <section class="related">
+      <h2>Related reading</h2>
+      <div class="related-grid">
+        <a class="card" href="/blog/cold-launch-or-warm-launch-compare-mobile-startup-correctly/">
+          <span class="tag">Mobile Performance</span>
+          <div class="card-title">Cold Launch or Warm Launch: Compare Mobile Startup Correctly</div>
+          <p>Define launch states with current platform guidance, then use the same device, system and app versions, power and thermal state, network, account-safe session, and endpoint. Time user action to a genuinely usable screen, preserve failed launches, alternate trial order, and keep foreground resume separate. Never manufacture a “cold” state with destructive data clearing.</p>
+        </a>
+      </div>
+    </section>
     </article>
   </main>
   <footer class="blog-footer">
