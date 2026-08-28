@@ -46,6 +46,8 @@ import java.util.concurrent.Future;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import tv.norva.analytics.NativeClarity;
+
 /**
  * Native "Downloads" screen — the offline library, styled to match the Norva
  * web app. Movies show as cards; episodes are grouped under their show. Each
@@ -114,6 +116,9 @@ public final class DownloadsActivity extends Activity {
     @Override
     protected void onCreate(Bundle b) {
         super.onCreate(b);
+        NativeClarity.configure(BuildConfig.CLARITY_PROJECT_ID, "android_mobile", BuildConfig.VERSION_NAME);
+        NativeClarity.applyStoredConsent(this);
+        NativeClarity.screen("downloads");
         if (Build.VERSION.SDK_INT >= 30) {
             getWindow().setDecorFitsSystemWindows(false);
         }
@@ -308,6 +313,7 @@ public final class DownloadsActivity extends Activity {
 
         scroll.addView(container);
         setContentView(scroll);
+        NativeClarity.registerSensitiveView(scroll);
     }
 
     /**

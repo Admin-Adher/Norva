@@ -2737,6 +2737,7 @@ class SourceManager {
     }
 
     async showProviderAccess(id) {
+        window.NorvaNativeAnalytics?.track?.('provider_access_opened');
         const view = this.openProviderAccessModal('Provider access', `
           <div class="provider-access-loading" role="status" aria-live="polite">
             <span class="provider-access-skeleton"></span>
@@ -2754,6 +2755,7 @@ class SourceManager {
             if (this.providerAccessViewToken !== view.token) return;
             this.renderProviderAccessDetails(id, access, view, source);
         } catch (error) {
+            window.NorvaNativeAnalytics?.track?.('provider_access_error');
             if (this.providerAccessViewToken !== view.token) return;
             view.body.innerHTML = `<div class="provider-access-terminal" role="alert"><strong>Provider access unavailable</strong><p>${this.escapeHtml(this.providerAccessErrorMessage(error))}</p><button class="btn btn-secondary" type="button" data-access-retry>Try again</button></div>`;
             view.body.querySelector('[data-access-retry]')?.addEventListener('click', () => this.showProviderAccess(id));
@@ -2824,8 +2826,10 @@ class SourceManager {
                 if (this.providerAccessViewToken === view.token) {
                     this.renderProviderAccessDetails(id, next, view, source);
                     this.showProviderAccessSavedReceipt(next);
+                    window.NorvaNativeAnalytics?.track?.('provider_access_saved');
                 }
             } catch (error) {
+                window.NorvaNativeAnalytics?.track?.('provider_access_error');
                 setBusy(false, this.providerAccessErrorMessage(error));
             }
         });

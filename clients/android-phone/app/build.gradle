@@ -19,8 +19,8 @@ android {
         applicationId "tv.norva.phone"
         minSdk 23
         targetSdk 36
-        versionCode 23
-        versionName "1.3.10"
+        versionCode 24
+        versionName "1.3.11"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
 
         // RevenueCat public SDK key, injected at build time. Empty by default so
@@ -29,6 +29,9 @@ android {
         // Public key used only to validate the signed-in WebView token with
         // Supabase before RevenueCat is allowed to switch account.
         buildConfigField "String", "SUPABASE_PUBLISHABLE_KEY", "\"${project.findProperty('SUPABASE_PUBLISHABLE_KEY') ?: 'sb_publishable_LJwYVgPGHYNYTDk7s3eOew_6TU73Fcw'}\""
+        // Public Microsoft Clarity mobile project id. Collection still remains
+        // disabled until the in-app consent bridge explicitly grants analytics.
+        buildConfigField "String", "CLARITY_PROJECT_ID", "\"${project.findProperty('CLARITY_PROJECT_ID') ?: 'y9fagfyr9a'}\""
     }
 
     buildFeatures {
@@ -38,6 +41,12 @@ android {
     // Reuse the repository's deterministic codec matrix as test-only assets.
     // None of these fixtures enter the production APK.
     sourceSets {
+        main {
+            java.srcDir "../../android-common/src/main/java"
+        }
+        test {
+            java.srcDir "../../android-common/src/test/java"
+        }
         androidTest {
             assets.srcDir "../../../public/webengine/media"
         }
@@ -95,6 +104,9 @@ dependencies {
     // NotificationCompat for the download foreground-service progress notice.
     implementation "androidx.core:core:1.13.1"
     implementation "androidx.webkit:webkit:1.12.1"
+    // Privacy-masked native session replay. Pinned for deterministic releases;
+    // initialization is late and consent-gated in NativeClarity.
+    implementation "com.microsoft.clarity:clarity:3.8.3"
     // Branded cold-start splash (Android 12+ native, backported below).
     implementation "androidx.core:core-splashscreen:1.0.1"
     // In-app subscriptions (Google Play Billing) through RevenueCat. RevenueCat
@@ -109,8 +121,9 @@ dependencies {
     implementation "com.google.firebase:firebase-messaging"
     // Firebase / Google Analytics for Firebase: measures app usage and conversions
     // (first_open, purchase, …) for Google Ads App install campaigns, and feeds GA4.
-    // Auto-collects once app/google-services.json is present (same conditional plugin as FCM
-    // below). Uses the advertising ID — declared via AD_ID permission in AndroidManifest.xml.
+    // Collection defaults OFF in the manifest and is enabled only by the same
+    // explicit analytics-consent bridge as Clarity. Uses the advertising ID —
+    // declared via AD_ID permission in AndroidManifest.xml.
     implementation "com.google.firebase:firebase-analytics"
 
     // Native Google Sign-In (Credential Manager) — the WebView's "Continue with

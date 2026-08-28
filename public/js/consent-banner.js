@@ -42,11 +42,21 @@
   }
 
   function apply(status) {
-    if (window.NorvaMarketing && typeof window.NorvaMarketing.setConsent === 'function') {
-      window.NorvaMarketing.setConsent(status);
+    var nativeSurface = Boolean(window.NorvaNativeAnalytics
+      && typeof window.NorvaNativeAnalytics.available === 'function'
+      && window.NorvaNativeAnalytics.available());
+    // Android has its own consent-gated Clarity/Firebase streams. Do not also
+    // load the browser GA/Ads tags inside the WebView or double-count sessions.
+    if (!nativeSurface) {
+      if (window.NorvaMarketing && typeof window.NorvaMarketing.setConsent === 'function') {
+        window.NorvaMarketing.setConsent(status);
+      }
+      if (window.NorvaProductAnalytics && typeof window.NorvaProductAnalytics.setConsent === 'function') {
+        window.NorvaProductAnalytics.setConsent(status);
+      }
     }
-    if (window.NorvaProductAnalytics && typeof window.NorvaProductAnalytics.setConsent === 'function') {
-      window.NorvaProductAnalytics.setConsent(status);
+    if (window.NorvaNativeAnalytics && typeof window.NorvaNativeAnalytics.setConsent === 'function') {
+      window.NorvaNativeAnalytics.setConsent(status);
     }
   }
 
@@ -110,14 +120,16 @@
       decide(btn.getAttribute('data-consent') === 'granted' ? 'granted' : 'denied');
     });
     (document.body || document.documentElement).appendChild(el);
+    if (isTvSurface()) {
+      var decline = el.querySelector('[data-consent="denied"]');
+      if (decline) decline.focus();
+    }
   }
 
   /*
-   * TV surfaces (Norva Android TV app, Tizen/LG/other smart-TV browsers, a
-   * QR-paired TV screen) can't comfortably operate a consent banner with a
-   * remote, and the consent choice is made on web/mobile. On a TV we therefore
-   * skip the banner entirely and default consent to 'granted'. Detection is UA-
-   * based plus the cloud-pair device hint; phones are intentionally excluded.
+   * TV detection is used only to put initial D-pad focus on the conservative
+   * Decline action. A TV must never imply consent or reuse another device's
+   * choice: every native installation keeps its own explicit decision.
    */
   function isTvSurface() {
     try {
@@ -130,7 +142,6 @@
   }
 
   function init() {
-    if (isTvSurface()) { apply('granted'); return; } // TV: consent handled on web/mobile → default granted, no banner
     var stored = read();
     if (stored) { apply(stored); return; } // returning visitor: honour the saved choice silently
     if (!cfg.enabled) return;               // marketing disabled: nothing to consent to yet

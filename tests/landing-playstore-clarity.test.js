@@ -20,7 +20,7 @@ test('landing exposes both shipped Play Store apps directly below the primary he
     assert.match(html, /Google Play \(opens in a new tab\)/);
 
     const analytics = html.indexOf('/js/product-analytics.js?v=1');
-    const consent = html.indexOf('/js/consent-banner.js?v=2');
+    const consent = html.indexOf('/js/consent-banner.js?v=3');
     const landing = html.indexOf('/js/landing.js?v=29');
     assert.ok(analytics > 0 && analytics < consent && consent < landing,
       `${file}: analytics adapter must be ready before consent and landing events`);
@@ -126,5 +126,6 @@ test('landing store clicks emit a dedicated analytics event and privacy disclosu
   assert.match(landing, /querySelectorAll\('\[data-store-platform\]'\)[\s\S]*?emitLandingEvent\('store_cta_click'/);
   assert.match(privacy, /Microsoft Clarity/);
   assert.match(privacy, /privacy-masked session replay/i);
-  assert.match(privacy, /not initialized inside the Android phone or TV shells/i);
+  assert.match(privacy, /Android mobile and Android TV use separate Clarity projects/i);
+  assert.match(privacy, /credential-entry and playback views/i);
 });

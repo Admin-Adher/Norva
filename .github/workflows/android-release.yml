@@ -75,7 +75,7 @@ jobs:
           # project.findProperty('REVENUECAT_API_KEY'); Gradle maps this ORG_GRADLE_PROJECT_
           # env var to that property. If the secret is empty, billing stays inert.
           ORG_GRADLE_PROJECT_REVENUECAT_API_KEY: ${{ secrets.REVENUECAT_API_KEY_PHONE }}
-        run: gradle :app:bundleRelease --no-daemon
+        run: gradle :app:testDebugUnitTest :app:bundleRelease --no-daemon
 
       - name: Upload AAB artifact
         uses: actions/upload-artifact@v4
@@ -127,7 +127,7 @@ jobs:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: gradle :app:bundleRelease --no-daemon
+        run: gradle :app:testDebugUnitTest :app:bundleRelease --no-daemon
 
       - name: Upload AAB artifact
         uses: actions/upload-artifact@v4

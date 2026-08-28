@@ -50,6 +50,8 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory;
 import androidx.media3.session.MediaSession;
 import androidx.media3.ui.SubtitleView;
 
+import tv.norva.analytics.NativeClarity;
+
 import org.json.JSONObject;
 
 import java.io.InputStream;
@@ -385,6 +387,10 @@ public class PlayerActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        NativeClarity.configure(BuildConfig.CLARITY_PROJECT_ID, "android_tv", BuildConfig.VERSION_NAME);
+        NativeClarity.applyStoredConsent(this);
+        NativeClarity.screen("player");
+        NativeClarity.event("player_started");
         playbackLaunchElapsedMs = android.os.SystemClock.elapsedRealtime();
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
 
@@ -428,6 +434,7 @@ public class PlayerActivity extends Activity {
         } catch (Exception ignored) { variants = null; }
 
         root = new FrameLayout(this);
+        NativeClarity.registerSensitiveView(root);
         root.setId(R.id.norva_tv_player_root);
         root.setBackgroundColor(Color.BLACK);
         setContentView(root);
@@ -783,6 +790,7 @@ public class PlayerActivity extends Activity {
             public void onRenderedFirstFrame() {
                 if (!firstFrameRendered) {
                     firstFrameRendered = true;
+                    NativeClarity.event("player_first_frame");
                     hideStartupContext();
                     if (!controlsVisible) showControls(playPauseBtn);
                     final String firstFrameBearer = playbackAuthToken;
@@ -801,6 +809,7 @@ public class PlayerActivity extends Activity {
 
             @Override
             public void onPlayerError(PlaybackException error) {
+                NativeClarity.event("player_error");
                 handler.removeCallbacks(bufferWatchdog);
                 final int code = error.errorCode;
                 final int httpStatus = ProviderPlaybackPolicy.httpStatus(error);
@@ -1479,6 +1488,7 @@ public class PlayerActivity extends Activity {
     }
 
     private void recoverPlayback(final String reason) {
+        NativeClarity.event("player_retry");
         if (player == null || freshStreamRequested) return;
         final int scheduledGeneration = ++recoveryGeneration;
         handler.removeCallbacks(bufferWatchdog);
@@ -1701,6 +1711,7 @@ public class PlayerActivity extends Activity {
     }
 
     private void finishWithoutRecovery() {
+        NativeClarity.event("player_exit");
         clearFreshStreamRequest(true);
         finish();
     }

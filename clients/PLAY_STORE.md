@@ -77,6 +77,21 @@ Declare what the apps collect (see `public/privacy.html` for the full list):
 - Note: media-source credentials you enter are stored to connect to *your*
   source; declare under "app functionality".
 
+Before publishing a build with Microsoft Clarity Mobile, revalidate **both**
+listings and add the optional, consent-gated analytics data described in
+\`clients/CLARITY_ANDROID_ROLLOUT.md\`:
+
+- Approximate location: country/region.
+- App activity: taps, gestures, scrolling and screen transitions.
+- App info & performance: application errors/exceptions plus app/version,
+  device and display context.
+- Device or other IDs: the SDK's random identifier.
+- Purpose: analytics. Collection is optional, transmitted off-device and
+  encrypted in transit.
+- Do not mark Microsoft as “not shared” by assumption: confirm that the current
+  Play service-provider exception and Microsoft's processor terms apply when
+  submitting the form.
+
 ## 6. Permissions & foreground service — **[console declarations]**
 
 - **CAMERA** (phone): used only to scan a QR pairing code. Add a prominent

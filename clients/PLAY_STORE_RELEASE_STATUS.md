@@ -3,7 +3,7 @@
 > Snapshot opérationnel daté. Le référentiel exhaustif est `clients/PLAY_STORE.md`.
 > Ce fichier dit **où on en est** et **quoi faire ensuite**, pas à pas.
 >
-> **Dernière mise à jour : 2026-07-29.**
+> **Dernière mise à jour : 2026-08-28.**
 
 ## Où on en est (résumé)
 
@@ -13,7 +13,7 @@
 | 1. Keystore + secrets + build des AAB signés | ✅ **fait** (build run #3 vert) |
 | 2. Créer les 2 apps + publier leurs fiches | ✅ **fait** — les deux URLs Play répondent 200 |
 | 3. Publier les SHA-256 autorisés dans `assetlinks.json` | ✅ **fait** — fichier live valide le 2026-07-29 |
-| 4. Fiche magasin + Data Safety + assets | ✅ **publiées** — contenu Console à revalider à chaque release |
+| 4. Fiche magasin + Data Safety + assets | ⚠️ **publiées, mais Data Safety à mettre à jour avant Clarity natif** |
 
 Les deux fiches publiques et `https://norva.tv/.well-known/assetlinks.json` ont été
 revérifiés le 29 juillet 2026. Le fichier live répond 200, cible uniquement
@@ -110,6 +110,16 @@ la mise en production.
   - Historique des achats : **statut d'abonnement** → compte (aucun n° de carte stocké)
   - Adresse IP : pas un type dédié chez Google ; si demandé → « ID d'appareil ou autres »,
     finalité Sécurité / prévention de la fraude.
+
+**Delta obligatoire pour le prochain build Clarity natif (phone 24 / TV 28) :**
+- collecte facultative après consentement : pays/région approximatif, interactions
+  dans l'app, erreurs/diagnostics, contexte app/appareil/affichage et identifiant
+  SDK aléatoire ;
+- finalité : Analytics ; transfert hors appareil : oui ; chiffrement TLS : oui ;
+- vérifier dans la Console la qualification « prestataire de service » de
+  Microsoft avant de répondre « non partagé » ;
+- le détail opérationnel et les limites de suppression ciblée sont dans
+  \`clients/CLARITY_ANDROID_ROLLOUT.md\`.
 
 **3 rappels qui font rejeter s'ils manquent :**
 1. **App access** → fournir un **compte démo avec abonnement valide** pour la revue Google.

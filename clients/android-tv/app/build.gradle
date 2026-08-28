@@ -16,9 +16,12 @@ android {
         applicationId "tv.norva.tv"
         minSdk 23
         targetSdk 36
-        versionCode 27
-        versionName "3.8.14-hybrid"
+        versionCode 28
+        versionName "3.8.15-hybrid"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        // Public routing configuration for the dedicated Android TV project.
+        // Operators can still override it for an isolated build when needed.
+        buildConfigField "String", "CLARITY_PROJECT_ID", "\"${project.findProperty('CLARITY_PROJECT_ID') ?: 'y9fxs54jpc'}\""
     }
 
     buildFeatures {
@@ -28,6 +31,10 @@ android {
     sourceSets {
         main {
             assets.srcDirs = ["src/main/assets"]
+            java.srcDir "../../android-common/src/main/java"
+        }
+        test {
+            java.srcDir "../../android-common/src/test/java"
         }
     }
 
@@ -86,6 +93,8 @@ dependencies {
     // Watch Next ("Play Next") row on the Android TV home screen.
     // 1.1.0 exposes the Watch Next builder contract as public API.
     implementation "androidx.tvprovider:tvprovider:1.1.0"
+    implementation "androidx.webkit:webkit:1.12.1"
+    implementation "com.microsoft.clarity:clarity:3.8.3"
     androidTestImplementation "androidx.test:runner:1.6.2"
     androidTestImplementation "androidx.test.ext:junit:1.2.1"
     testImplementation "junit:junit:4.13.2"

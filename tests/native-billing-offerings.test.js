@@ -11,8 +11,8 @@ const targets = [
     main: 'clients/android-phone/app/src/main/java/tv/norva/phone/MainActivity.java',
     manifest: 'clients/android-phone/app/src/main/AndroidManifest.xml',
     gradle: 'clients/android-phone/app/build.gradle',
-    versionCode: 23,
-    versionName: '1.3.10',
+    versionCode: 24,
+    versionName: '1.3.11',
     bridgeCount: 0,
   },
 ];
@@ -239,8 +239,8 @@ test('native cloud bridges fail closed and authenticate billing and first-frame 
 
 test('Android TV release version remains explicit after billing removal', () => {
   const gradle = read('clients/android-tv/app/build.gradle');
-  assert.match(gradle, /versionCode\s+27\b/);
-  assert.match(gradle, /versionName\s+"3\.8\.14-hybrid"/);
+  assert.match(gradle, /versionCode\s+28\b/);
+  assert.match(gradle, /versionName\s+"3\.8\.15-hybrid"/);
 });
 
 test('Android builds enforce lint and opt out of OS data extraction', () => {
@@ -250,7 +250,7 @@ test('Android builds enforce lint and opt out of OS data extraction', () => {
   const phoneRules = read('clients/android-phone/app/src/main/res/xml/data_extraction_rules.xml');
   const tvRules = read('clients/android-tv/app/src/main/res/xml/data_extraction_rules.xml');
 
-  assert.equal((workflow.match(/gradle :app:lintDebug :app:assembleDebug/g) || []).length, 2);
+  assert.equal((workflow.match(/gradle[^\r\n]*:app:lintDebug[^\r\n]*:app:assembleDebug/g) || []).length, 2);
   for (const manifest of [phoneManifest, tvManifest]) {
     assert.match(manifest, /android:allowBackup="false"/);
     assert.match(manifest, /android:dataExtractionRules="@xml\/data_extraction_rules"/);

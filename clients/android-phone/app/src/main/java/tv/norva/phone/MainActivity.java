@@ -58,7 +58,10 @@ import androidx.credentials.exceptions.NoCredentialException;
 
 import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption;
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential;
+import com.google.firebase.analytics.FirebaseAnalytics;
 import com.google.firebase.messaging.FirebaseMessaging;
+
+import tv.norva.analytics.NativeClarity;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -209,6 +212,7 @@ public class MainActivity extends Activity {
         // window then black flash; must be installed before super.onCreate().
         try { androidx.core.splashscreen.SplashScreen.installSplashScreen(this); } catch (Exception ignored) { }
         super.onCreate(savedInstanceState);
+        NativeClarity.configure(BuildConfig.CLARITY_PROJECT_ID, "android_mobile", BuildConfig.VERSION_NAME);
         if (Build.VERSION.SDK_INT >= 33) {
             getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
                     android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT,
@@ -241,6 +245,10 @@ public class MainActivity extends Activity {
         buildSetupPanel();
         buildErrorPanel();
         buildSplash();
+        NativeClarity.registerSensitiveView(setupPanel);
+        NativeClarity.registerSensitiveView(advancedPanel);
+        NativeClarity.registerSensitiveView(urlInput);
+        NativeClarity.applyStoredConsent(this, this::setFirebaseAnalyticsCollection);
         showSplash();
         registerPlayerRecoveryBridge();
         registerPlaybackAuthBridge();
@@ -981,6 +989,7 @@ public class MainActivity extends Activity {
 
         installOriginScopedBillingChannel();
         installOriginScopedPartnerShareChannel();
+        installOriginScopedNativeAnalyticsChannel();
 
         root.addView(webView, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
@@ -1477,6 +1486,38 @@ public class MainActivity extends Activity {
                                 replyProxy);
                     }
                 });
+    }
+
+    /**
+     * Data-minimal analytics bridge exposed only to Norva's trusted main frame.
+     * Arbitrary event names and properties never cross this boundary.
+     */
+    private void installOriginScopedNativeAnalyticsChannel() {
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) return;
+        final Set<String> origins = new LinkedHashSet<>();
+        origins.add("https://norva.tv");
+        origins.add("https://www.norva.tv");
+        WebViewCompat.addWebMessageListener(webView, "NorvaAnalyticsNative", origins,
+                new WebViewCompat.WebMessageListener() {
+                    @Override
+                    public void onPostMessage(WebView view, WebMessageCompat message,
+                                              Uri sourceOrigin, boolean isMainFrame,
+                                              JavaScriptReplyProxy replyProxy) {
+                        if (!isMainFrame || sourceOrigin == null || view == null
+                                || !isTrustedCloudUrl(sourceOrigin.toString())
+                                || !isTrustedCloudUrl(view.getUrl())) return;
+                        NativeClarity.handleMessage(
+                                MainActivity.this,
+                                message == null ? null : message.getData(),
+                                MainActivity.this::setFirebaseAnalyticsCollection);
+                    }
+                });
+    }
+
+    private void setFirebaseAnalyticsCollection(boolean granted) {
+        try {
+            FirebaseAnalytics.getInstance(this).setAnalyticsCollectionEnabled(granted);
+        } catch (Throwable ignored) { }
     }
 
     private void dispatchPartnerShareMessage(String raw, JavaScriptReplyProxy replyProxy) {
@@ -2773,6 +2814,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        NativeClarity.event("app_open");
         if (webAppReady) {
             flushPendingNativeProgress();
             flushPendingPlaybackSessionCloses(true);

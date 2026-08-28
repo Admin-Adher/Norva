@@ -1,0 +1,95 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+
+const root = path.join(__dirname, '..');
+const read = file => fs.readFileSync(path.join(root, file), 'utf8').replace(/\r\n/g, '\n');
+
+function runNativeAdapter(hash = '#settings/sources') {
+  const messages = [];
+  const listeners = {};
+  const window = {
+    NorvaAnalyticsNative: { postMessage: value => messages.push(JSON.parse(value)) },
+    addEventListener: (name, listener) => { listeners[name] = listener; }
+  };
+  const document = {
+    readyState: 'complete',
+    addEventListener() {},
+    documentElement: {
+      attributes: {},
+      setAttribute(name, value) { this.attributes[name] = value; }
+    }
+  };
+  vm.runInNewContext(read('public/js/native-analytics.js'), {
+    window,
+    document,
+    location: { hash },
+    JSON,
+    Set
+  });
+  return { window, messages, listeners };
+}
+
+test('native adapter sends only a bounded screen and exact consent payload', () => {
+  const runtime = runNativeAdapter();
+  assert.equal(runtime.window.NorvaNativeAnalytics.available(), true);
+  assert.deepEqual(runtime.messages[0], {
+    v: 1, type: 'screen', name: 'settings_sources'
+  });
+  runtime.window.NorvaNativeAnalytics.setConsent('granted');
+  assert.deepEqual(runtime.messages[1], {
+    v: 1, type: 'consent', status: 'granted'
+  });
+  assert.deepEqual(runtime.messages[2], {
+    v: 1, type: 'screen', name: 'settings_sources'
+  });
+});
+
+test('native WebView capture preserves geometry but masks all rendered content', () => {
+  const runtime = runNativeAdapter('#home');
+  assert.equal(runtime.window.NorvaNativeAnalytics.available(), true);
+  assert.match(read('public/js/native-analytics.js'),
+    /documentElement\.setAttribute\('data-clarity-mask', 'true'\)/);
+});
+
+test('native adapter rejects arbitrary event names and payload identifiers', () => {
+  const runtime = runNativeAdapter('#movies');
+  assert.equal(runtime.window.NorvaNativeAnalytics.track('provider_access_saved_user_123'), false);
+  assert.equal(runtime.messages.length, 1);
+  assert.equal(runtime.window.NorvaNativeAnalytics.track('provider_access_saved'), true);
+  assert.deepEqual(runtime.messages[1], {
+    v: 1, type: 'event', name: 'provider_access_saved'
+  });
+  assert.equal(JSON.stringify(runtime.messages).includes('user_123'), false);
+});
+
+test('Android shells are analytics-eligible only through the native consent bridge', () => {
+  const html = read('public/app.html');
+  const consent = read('public/js/consent-banner.js');
+  const adapter = read('clients/android-common/src/main/java/tv/norva/analytics/NativeClarity.java');
+  const phoneGradle = read('clients/android-phone/app/build.gradle');
+  const tvGradle = read('clients/android-tv/app/build.gradle');
+  assert.match(html, /native-analytics\.js\?v=1[\s\S]*consent-banner\.js\?v=3/);
+  assert.doesNotMatch(consent, /isTvSurface\(\)\)\s*\{\s*apply\('granted'/);
+  assert.match(consent, /NorvaNativeAnalytics\.setConsent\(status\)/);
+  assert.match(consent, /if \(!nativeSurface\)[\s\S]*NorvaMarketing\.setConsent/);
+  assert.match(adapter, /boolean possible = Clarity\.initialize\(activity,/);
+  assert.match(adapter, /Clarity\.setOnSessionStartedCallback/);
+  assert.match(adapter, /PENDING_EVENTS\.size\(\) < EVENTS\.size\(\)/);
+  assert.match(phoneGradle, /CLARITY_PROJECT_ID[^\n]*y9fagfyr9a/);
+  assert.match(tvGradle, /CLARITY_PROJECT_ID[^\n]*y9fxs54jpc/);
+});
+
+test('native playback and downloads remain useful but content-masked', () => {
+  for (const file of [
+    'clients/android-phone/app/src/main/java/tv/norva/phone/PlayerActivity.java',
+    'clients/android-tv/app/src/main/java/tv/norva/tv/PlayerActivity.java',
+    'clients/android-phone/app/src/main/java/tv/norva/phone/DownloadsActivity.java'
+  ]) {
+    const source = read(file);
+    assert.match(source, /NativeClarity\.registerSensitiveView\(/);
+    assert.doesNotMatch(source, /NativeClarity\.(?:event|screen)\([^)]*(?:title|provider|source|url)/i);
+  }
+});
