@@ -14,6 +14,7 @@ const migration = read('supabase/migrations/20260822220703_provider_access_lifec
 const catalog = read('supabase/functions/norva-catalog/index.ts');
 const cloud = read('supabase/functions/norva-cloud/index.ts');
 const playback = read('supabase/functions/norva-playback/index.ts');
+const seriesInfo = read('supabase/functions/norva-series-info/index.ts');
 const responseGuard = read('supabase/functions/_shared/catalog-visibility-response.mjs');
 
 function section(source, start, end) {
@@ -113,6 +114,19 @@ test('norva-playback binds user and device identities and keeps service routes u
   );
   assert.doesNotMatch(serviceRoutes, /bindCatalogVisibilityEpoch/);
   assertResponseHeaderContract(playback, false);
+});
+
+test('norva-series-info emits the same canonical v2 cache epoch as the catalog', () => {
+  assert.match(seriesInfo, /bindCatalogVisibilityEpoch as bindCatalogVisibilityEpochShared/);
+  assert.match(seriesInfo, /await bindCatalogVisibilityEpoch\(req, identity\.userId, supabase\)/);
+  assert.match(seriesInfo, /finalizeCatalogVisibilityResponse\(\s*req,\s*await handleRequest\(req\)/);
+  assert.match(seriesInfo, /\.\.\.catalogVisibilityEpochHeaders\(req\)/);
+  assert.doesNotMatch(seriesInfo, /const catalogVisibilityEpochs = new WeakMap/);
+  assert.doesNotMatch(seriesInfo, /sourceSnapshot\.userVisibilityEpoch\);\s*\n\s*return json/);
+  assert.match(
+    seriesInfo,
+    /"Access-Control-Expose-Headers": "x-norva-visibility-epoch, x-norva-user-visibility-epoch, x-norva-global-visibility-epoch, x-norva-catalog-cache-contract"/,
+  );
 });
 
 test('unauthenticated health responses cannot acquire a visibility epoch header', () => {

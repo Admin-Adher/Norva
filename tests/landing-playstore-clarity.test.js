@@ -31,6 +31,8 @@ test('Play Store affordance has bounded pointer motion and an explicit reduced-m
   const css = read('public/css/landing-premium.css');
   const landing = read('public/js/landing.js');
   assert.match(css, /\.play-store-cta\s*\{[\s\S]*?min-height:\s*68px/);
+  assert.match(css, /\.hero-store-access\s*\{[\s\S]*?position:\s*relative;[\s\S]*?z-index:\s*1;/,
+    'the complete store-card surface must stay above the later product-preview layer');
   assert.match(css, /@media \(hover: hover\) and \(pointer: fine\)[\s\S]*?\.play-store-cta:hover/);
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.play-store-cta::after\s*\{\s*display:\s*none/);
   assert.match(css, /@media \(max-width: 680px\)[\s\S]*?\.hero-store-buttons\s*\{\s*grid-template-columns:\s*1fr/);

@@ -348,6 +348,8 @@
     }
     .secondary-cta:hover { color: var(--text); border-color: rgba(96,165,250,.35); background: rgba(59,130,246,.08); }
     .hero-store-access {
+      position: relative;
+      z-index: 1;
       width: min(760px, 100%);
       margin: 24px auto 0;
       display: grid;

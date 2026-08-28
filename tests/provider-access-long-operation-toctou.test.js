@@ -74,11 +74,13 @@ test('series-info fences fresh cache, stale fallback, provider response, cache w
 
   const route = section(source, 'segments[2] === "series-info"', 'throw new HttpError(404');
   const finalGuard = route.lastIndexOf('await assertSourceSnapshotCurrent(');
-  const bind = route.lastIndexOf('catalogVisibilityEpochs.set(req, sourceSnapshot.userVisibilityEpoch)');
   const response = route.lastIndexOf('return json(req');
-  assert.ok(finalGuard >= 0 && bind > finalGuard && response > bind);
-  assert.match(source, /"X-Norva-Visibility-Epoch": epoch/);
-  assert.match(source, /"Access-Control-Expose-Headers": "x-norva-visibility-epoch"/);
+  assert.ok(finalGuard >= 0 && response > finalGuard);
+  assert.match(route, /await bindCatalogVisibilityEpoch\(req, identity\.userId, supabase\)/);
+  assert.match(source, /bindCatalogVisibilityEpoch as bindCatalogVisibilityEpochShared/);
+  assert.match(source, /finalizeCatalogVisibilityResponse\(\s*req,\s*await handleRequest\(req\)/);
+  assert.match(source, /\.\.\.catalogVisibilityEpochHeaders\(req\)/);
+  assert.match(source, /x-norva-catalog-cache-contract/);
 });
 
 test('series prewarm and account probe stop on a changed snapshot before cache or response', () => {
