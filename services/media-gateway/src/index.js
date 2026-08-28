@@ -514,6 +514,14 @@ function registerAccountExtraction(proxyKey, child, reportActivity = true, globa
     if (!set) { set = new Set(); accountExtractions.set(proxyKey, set); }
     set.add(entry);
     entry.release = () => { set.delete(entry); if (!set.size) accountExtractions.delete(proxyKey); };
+    // Short catalogue calls routinely finish before the periodic 60-second
+    // reporter. Publish the just-registered holder at the next microtask so the
+    // Edge can preserve a provider drain after the child exits. Function
+    // declarations are hoisted in production; the typeof guard keeps the
+    // isolated ledger contract harness self-contained.
+    if (entry.reportActivity && typeof reportAccountActivity === 'function') {
+        Promise.resolve().then(() => reportAccountActivity()).catch(() => {});
+    }
     // The queue may have selected this job immediately before a viewer reserved
     // startup. Registration is the last synchronous boundary before provider I/O;
     // close that ordering without affecting explicit viewer-origin jobs.
@@ -534,6 +542,17 @@ function preemptAccountExtractions(proxyKey, reason) {
     }
     if (n) console.log(`[media-gateway] preempted ${n} background extraction(s) — ${reason}`);
     return n;
+}
+function activeCatalogRefreshExtractionCount(proxyKey) {
+    const set = accountExtractions.get(proxyKey);
+    if (!set || !set.size) return 0;
+    let count = 0;
+    for (const entry of set) {
+        if (!entry.preempted && entry.activityKind === ACCOUNT_ACTIVITY_KIND_CATALOG_REFRESH) {
+            count += 1;
+        }
+    }
+    return count;
 }
 function preemptBackgroundExtractionsGlobally(exceptProxyKey, reason) {
     let n = 0;
@@ -1429,6 +1448,12 @@ const MAX_VIEWER_SUBTITLE_REQUESTS_PER_MINUTE = clampInt(process.env.MAX_VIEWER_
 const MAX_PENDING_VIEWER_SUBTITLE_OPERATIONS = clampInt(process.env.MAX_PENDING_VIEWER_SUBTITLE_OPERATIONS, 8, 1, 32);
 const VIEWER_SUBTITLE_QUEUE_WAIT_MS = clampInt(process.env.VIEWER_SUBTITLE_QUEUE_WAIT_MS, 75_000, 5_000, 180_000);
 const PROVIDER_SLOT_RELEASE_DELAY_MS = clampInt(process.env.PROVIDER_SLOT_RELEASE_DELAY_MS, 2_500, 0, 15_000);
+const PROVIDER_CATALOG_REFRESH_SLOT_RELEASE_DELAY_MS = clampInt(
+    process.env.PROVIDER_CATALOG_REFRESH_SLOT_RELEASE_DELAY_MS,
+    45_000,
+    0,
+    120_000,
+);
 // Stop provider/CPU work before the public request deadline. The reserve includes the provider
 // panel's logical socket-release grace plus bounded Node response overhead.
 const STRICT_LID_DRAIN_RESPONSE_RESERVE_MS = Math.min(
@@ -1762,7 +1787,7 @@ if (
 }
 const MULTI_AUDIO_HLS_PROTOCOL = 1;
 const MAX_MULTI_AUDIO_RENDITIONS = 8;
-const GATEWAY_VERSION = 115;
+const GATEWAY_VERSION = 116;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -2162,6 +2187,8 @@ app.get('/health', (req, res) => {
         viewerPlaybackActiveLocally: viewerPlaybackActiveLocally(),
         viewerSessionIdleTimeoutMs: VIEWER_SESSION_IDLE_TIMEOUT_MS,
         viewerQosStats: { ...viewerQosStats },
+        providerSlotReleaseDelayMs: PROVIDER_SLOT_RELEASE_DELAY_MS,
+        providerCatalogRefreshSlotReleaseDelayMs: PROVIDER_CATALOG_REFRESH_SLOT_RELEASE_DELAY_MS,
         backgroundCpuProcessCount: backgroundCpuProcesses.size,
         whisperInferenceActive,
         backgroundWhisperInferenceActive: backgroundWhisperCount(),
@@ -7839,6 +7866,7 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             // A background extraction (whisper/storyboard) mid-film on this account would fight the
             // viewer for the single slot for MINUTES. Its already-produced WAV must not leave a
             // service/pregen Whisper process fighting the viewer for CPU either.
+            const catalogRefreshExtractions = activeCatalogRefreshExtractionCount(playbackProxyKey);
             stoppedConflictingSessions += preemptAccountExtractions(playbackProxyKey, 'transcode session start');
             // CPU preemption does not hold a provider connection and must not trigger the provider
             // slot-release delay below.
@@ -7864,10 +7892,16 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
                 );
             }
 
-            if (stoppedConflictingSessions > 0 && PROVIDER_SLOT_RELEASE_DELAY_MS > 0) {
-                console.log(`[media-gateway] waiting ${PROVIDER_SLOT_RELEASE_DELAY_MS}ms for provider slot release after stopping ${stoppedConflictingSessions} session(s)`);
-                slotReleaseWaitMs = PROVIDER_SLOT_RELEASE_DELAY_MS;
-                await sleep(PROVIDER_SLOT_RELEASE_DELAY_MS);
+            const providerSlotReleaseDelayMs = catalogRefreshExtractions > 0
+                ? Math.max(
+                    PROVIDER_SLOT_RELEASE_DELAY_MS,
+                    PROVIDER_CATALOG_REFRESH_SLOT_RELEASE_DELAY_MS,
+                )
+                : PROVIDER_SLOT_RELEASE_DELAY_MS;
+            if (stoppedConflictingSessions > 0 && providerSlotReleaseDelayMs > 0) {
+                console.log(`[media-gateway] waiting ${providerSlotReleaseDelayMs}ms for provider slot release after stopping ${stoppedConflictingSessions} session(s)`);
+                slotReleaseWaitMs = providerSlotReleaseDelayMs;
+                await sleep(providerSlotReleaseDelayMs);
             }
         }
         const cleanupMs = Math.max(0, Date.now() - cleanupStartedAt);
@@ -16302,7 +16336,7 @@ function activeProviderAccountActivityGroups() {
     }
     for (const [key, entries] of accountExtractions) {
         for (const entry of entries) {
-            if (entry.reportActivity === false) continue;
+            if (entry.preempted || entry.reportActivity === false) continue;
             candidates.push({
                 key,
                 kind: entry.activityKind === ACCOUNT_ACTIVITY_KIND_LANGUAGE_VALIDATION

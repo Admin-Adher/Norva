@@ -324,7 +324,7 @@ test('playback edge checks the circuit, claims one account session and reports s
   assert.match(heartbeat, /PLAYBACK_SUPERSEDED/);
   assert.match(edge, /open_provider_playback_circuit/);
   assert.match(edge, /PROVIDER_ACCOUNT_BUSY/);
-  assert.match(edge, /version:\s*61/);
+  assert.match(edge, /version:\s*62/);
   assert.match(edge, /providerCircuitProtocol:\s*1/);
   assert.match(edge, /exactFileCodecProfileProtocol:\s*1/);
 });
@@ -579,11 +579,11 @@ test('production rollout proves the provider circuit protocol on every runtime',
   const cloud = read('supabase/functions/norva-cloud/index.ts');
   const deploy = read('ops/hetzner/scripts/04-deploy-edge-functions.sh');
 
-  assert.match(gateway, /const GATEWAY_VERSION = 115/);
+  assert.match(gateway, /const GATEWAY_VERSION = 116/);
   assert.match(gateway, /providerCircuitProtocol:\s*1/);
   assert.match(gateway, /providerProxyAffinityProtocol:\s*1/);
   assert.match(gateway, /exactFileCodecProfileProtocol:\s*1/);
-  assert.match(playback, /version:\s*61/);
+  assert.match(playback, /version:\s*62/);
   assert.match(playback, /providerCircuitProtocol:\s*1/);
   assert.match(playback, /exactFileCodecProfileProtocol:\s*1/);
   assert.match(playback, /relayTakeoverProtocol:\s*1/);

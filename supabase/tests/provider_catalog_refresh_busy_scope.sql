@@ -65,6 +65,28 @@ select extensions.is(
 );
 
 select public.provider_account_touch_many(
+  array['catalog-refresh.invalid/raw-touch'],
+  'catalog-refresh'
+);
+select extensions.ok(
+  exists (
+    select 1
+    from public.provider_account_activity
+    where account_key = encode(
+      extensions.digest('catalog-refresh.invalid/raw-touch', 'sha256'),
+      'hex'
+    )
+      and kind = 'catalog-refresh'
+  )
+  and not exists (
+    select 1
+    from public.provider_account_activity
+    where account_key = 'catalog-refresh.invalid/raw-touch'
+  ),
+  'real gateway raw keys are normalized into the opaque 64-hex activity ledger'
+);
+
+select public.provider_account_touch_many(
   array[encode(extensions.digest('catalog-refresh.invalid/priority-gateway', 'sha256'), 'hex')],
   'gateway'
 );
@@ -107,6 +129,21 @@ select extensions.is(
    where account_key = encode(extensions.digest('catalog-refresh.invalid/priority-upgrade', 'sha256'), 'hex')),
   'language-validation',
   'foreground validation atomically upgrades catalogue activity'
+);
+
+select public.provider_account_touch_many(
+  array[encode(extensions.digest('catalog-refresh.invalid/priority-presence', 'sha256'), 'hex')],
+  'catalog-refresh'
+);
+select public.provider_account_touch_many(
+  array[encode(extensions.digest('catalog-refresh.invalid/priority-presence', 'sha256'), 'hex')],
+  'presence'
+);
+select extensions.is(
+  (select kind from public.provider_account_activity
+   where account_key = encode(extensions.digest('catalog-refresh.invalid/priority-presence', 'sha256'), 'hex')),
+  'catalog-refresh',
+  'passive presence cannot downgrade a fresh catalogue holder'
 );
 
 select extensions.ok(
