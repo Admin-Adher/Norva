@@ -36,7 +36,7 @@
     } catch (e) {}
   </script>
   <link rel="stylesheet" href="/css/landing.css?v=40">
-  <link rel="stylesheet" href="/css/landing-premium.css?v=2">
+  <link rel="stylesheet" href="/css/landing-premium.css?v=3">
 
   <script type="application/ld+json">
     {
@@ -49,9 +49,10 @@
       "description": "A cloud media player that organizes a compatible media source and synchronizes playback across screens."
     }
   </script>
-  <script src="/js/marketing-config.js?v=1"></script>
+  <script src="/js/marketing-config.js?v=2"></script>
   <script defer src="/js/marketing.js?v=2"></script>
-  <script defer src="/js/consent-banner.js?v=1"></script>
+  <script defer src="/js/product-analytics.js?v=1"></script>
+  <script defer src="/js/consent-banner.js?v=2"></script>
   <script>
     try {
       if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
@@ -117,6 +118,35 @@
           <a class="edge-cta primary-btn" href="/account.html?returnTo=%2Fapp%23home"
             data-cta="hero-primary" data-auth-action>Start my 7-day free trial</a>
           <a class="secondary-cta" href="#product-preview" data-cta="hero-secondary">See Norva in action</a>
+        </div>
+        <div class="hero-store-access reveal delay-3" aria-labelledby="hero-store-label">
+          <span class="hero-store-label" id="hero-store-label">Or install Norva on Android</span>
+          <div class="hero-store-buttons">
+            <a class="play-store-cta play-store-cta--mobile"
+              href="https://play.google.com/store/apps/details?id=tv.norva.phone"
+              target="_blank" rel="noopener noreferrer"
+              data-cta="play-store-mobile" data-store-platform="android_mobile" data-store-placement="hero"
+              aria-label="Get Norva for Android mobile on Google Play (opens in a new tab)">
+              <img class="play-store-mark" src="/img/icons/google-play-mark.svg" width="29" height="33" alt="">
+              <span class="play-store-copy">
+                <span class="play-store-overline">Get it on Google Play</span>
+                <strong>Android mobile</strong>
+              </span>
+              <span class="play-store-format" aria-hidden="true">Phone + tablet</span>
+            </a>
+            <a class="play-store-cta play-store-cta--tv"
+              href="https://play.google.com/store/apps/details?id=tv.norva.tv"
+              target="_blank" rel="noopener noreferrer"
+              data-cta="play-store-tv" data-store-platform="android_tv" data-store-placement="hero"
+              aria-label="Get Norva for Android TV on Google Play (opens in a new tab)">
+              <img class="play-store-mark" src="/img/icons/google-play-mark.svg" width="29" height="33" alt="">
+              <span class="play-store-copy">
+                <span class="play-store-overline">Get it on Google Play</span>
+                <strong>Android TV</strong>
+              </span>
+              <span class="play-store-format" aria-hidden="true">Big screen</span>
+            </a>
+          </div>
         </div>
         <p class="trial-note reveal delay-3">
           Payment method required · 7 days free, then from US$4.99/month · Reminder before renewal · Cancel anytime.
@@ -537,6 +567,6 @@
   </footer>
 
   <script src="/js/landing-premium.js?v=2" defer></script>
-  <script src="/js/landing.js?v=27" defer></script>
+  <script src="/js/landing.js?v=29" defer></script>
 </body>
 </html>

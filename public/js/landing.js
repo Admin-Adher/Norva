@@ -1053,6 +1053,7 @@
     const ROTATION_DELAY = 9000;
     const AUTO_COMPACT_DELAY = 7600;
     const motion = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const compactViewport = window.matchMedia('(max-width: 680px)');
     const messages = {
       hero: [
         {
@@ -1557,8 +1558,14 @@
     updatePauseControl();
     renderMessage(false, 'initial');
     window.addEventListener('scroll', revealOnScroll, { passive: true });
-    revealTimer = window.setTimeout(() => reveal({ reason: 'delay' }),
-      hasSavedMode ? 900 : REVEAL_DELAY);
+    if (compactViewport.matches) {
+      // Keep the bottom-right guide clear of the stacked Play Store actions on
+      // the first mobile viewport. It appears after an intentional scroll.
+      revealOnScroll();
+    } else {
+      revealTimer = window.setTimeout(() => reveal({ reason: 'delay' }),
+        hasSavedMode ? 900 : REVEAL_DELAY);
+    }
   }
 
   function setupFunnelInstrumentation() {
@@ -1567,6 +1574,7 @@
     const targetFor = link => {
       const href = link.getAttribute('href') || '';
       if (href.startsWith('#')) return href.slice(1) || 'top';
+      if (link.matches('[data-store-platform]')) return link.dataset.storePlatform || 'google_play';
       if (href.includes('/subscribe.html') || link.matches('[data-plan]')) return 'subscribe';
       if (href.includes('/account.html')) return 'account';
       if (href.includes('/app')) return 'app';
@@ -1577,6 +1585,16 @@
       link.addEventListener('click', () => emitLandingEvent('hero_cta', {
         cta: link.textContent.trim().replace(/\s+/g, ' '),
         target: targetFor(link),
+        position: index + 1,
+        authenticated: signedIn
+      }));
+    });
+
+    document.querySelectorAll('[data-store-platform]').forEach((link, index) => {
+      link.addEventListener('click', () => emitLandingEvent('store_cta_click', {
+        source: link.dataset.storePlacement || 'landing',
+        cta: link.getAttribute('data-cta') || link.textContent.trim().replace(/\s+/g, ' '),
+        target: link.dataset.storePlatform || 'google_play',
         position: index + 1,
         authenticated: signedIn
       }));

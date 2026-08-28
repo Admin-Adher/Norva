@@ -347,6 +347,119 @@
       transition: color 150ms ease, border-color 150ms ease, background 150ms ease;
     }
     .secondary-cta:hover { color: var(--text); border-color: rgba(96,165,250,.35); background: rgba(59,130,246,.08); }
+    .hero-store-access {
+      width: min(760px, 100%);
+      margin: 24px auto 0;
+      display: grid;
+      gap: 10px;
+      justify-items: center;
+    }
+    .hero-store-label {
+      color: var(--text-muted);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: .16em;
+      text-transform: uppercase;
+    }
+    .hero-store-buttons {
+      width: 100%;
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .play-store-cta {
+      --store-glow: rgba(59,130,246,.2);
+      position: relative;
+      isolation: isolate;
+      min-width: 0;
+      min-height: 68px;
+      overflow: hidden;
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 13px;
+      padding: 10px 14px;
+      border: 1px solid rgba(148,163,184,.2);
+      border-radius: var(--radius-lg);
+      background:
+        linear-gradient(135deg, rgba(255,255,255,.075), rgba(255,255,255,.018)),
+        rgba(8,11,18,.78);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.055), 0 14px 34px -24px rgba(0,0,0,.9);
+      color: var(--text);
+      text-align: left;
+      transition: transform 200ms cubic-bezier(.22,1,.36,1), border-color 180ms ease,
+        background-color 180ms ease, box-shadow 200ms ease;
+    }
+    .play-store-cta--tv { --store-glow: rgba(139,92,246,.22); }
+    .play-store-cta::after {
+      position: absolute;
+      z-index: -1;
+      content: "";
+      inset: -55% auto -55% -34%;
+      width: 28%;
+      opacity: 0;
+      transform: translateX(-20%) skewX(-18deg);
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,.16), transparent);
+      transition: transform 380ms ease, opacity 180ms ease;
+      pointer-events: none;
+    }
+    .play-store-mark {
+      width: 29px;
+      height: 33px;
+      flex: none;
+      filter: drop-shadow(0 6px 12px rgba(0,0,0,.28));
+      transition: transform 200ms cubic-bezier(.22,1,.36,1);
+    }
+    .play-store-copy {
+      min-width: 0;
+      display: grid;
+      gap: 2px;
+    }
+    .play-store-overline {
+      color: var(--text-muted);
+      font-size: 9px;
+      font-weight: 650;
+      letter-spacing: .1em;
+      line-height: 1.2;
+      text-transform: uppercase;
+    }
+    .play-store-copy strong {
+      overflow: hidden;
+      color: var(--text);
+      font-size: 15px;
+      font-weight: 760;
+      line-height: 1.25;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .play-store-format {
+      min-height: 28px;
+      display: inline-flex;
+      align-items: center;
+      padding: 0 10px;
+      border: 1px solid rgba(148,163,184,.16);
+      border-radius: 999px;
+      background: rgba(255,255,255,.035);
+      color: var(--text-muted);
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: .05em;
+      white-space: nowrap;
+    }
+    .play-store-cta:active {
+      transform: translateY(1px) scale(.995);
+      border-color: rgba(96,165,250,.42);
+    }
+    @media (hover: hover) and (pointer: fine) {
+      .play-store-cta:hover {
+        transform: translateY(-3px);
+        border-color: rgba(96,165,250,.48);
+        background-color: rgba(18,24,40,.92);
+        box-shadow: inset 0 1px 0 rgba(255,255,255,.09), 0 22px 42px -25px var(--store-glow);
+      }
+      .play-store-cta:hover::after { opacity: 1; transform: translateX(520%) skewX(-18deg); }
+      .play-store-cta:hover .play-store-mark { transform: scale(1.07) rotate(-2deg); }
+    }
     .play-dot {
       width: 26px; height: 26px; display: grid; place-items: center;
       border-radius: 50%; background: rgba(255,255,255,.08); color: var(--accent-hover);
@@ -917,6 +1030,9 @@
       .hero-copy { font-size: 16px; }
       .hero-actions { flex-direction: column; }
       .hero-actions a { width: min(100%, 330px); }
+      .hero-store-access { width: min(100%, 360px); }
+      .hero-store-buttons { grid-template-columns: 1fr; }
+      .play-store-cta { width: 100%; min-height: 66px; }
       .device-stage { margin-top: 68px; padding: 8px; border-radius: 18px; }
       .device-stage .phone { left: -4%; width: 23%; }
       .device-stage .web-preview { right: -4%; width: 36%; padding: 4px; border-radius: 10px; }
@@ -945,6 +1061,12 @@
       .reveal { opacity: 1; transform: none; }
       .particle-field i { animation: none !important; opacity: .24; }
       .hero h1 .accent-line::after { animation: none !important; transform: rotate(-1deg) scaleX(1); }
+      .play-store-cta,
+      .play-store-cta::after,
+      .play-store-mark { transition: none !important; }
+      .play-store-cta:hover,
+      .play-store-cta:active { transform: none !important; }
+      .play-store-cta::after { display: none; }
     }
 
 /* =====================================================================
@@ -1282,8 +1404,10 @@ main {
 }
 
 .norva-guide__launcher {
+  display: flex;
   width: 54px;
   height: 54px;
+  margin-left: auto;
   padding: 8px;
   border-radius: 50%;
   box-shadow: 0 18px 48px rgba(0,0,0,.48), 0 0 30px rgba(59,130,246,.12);
