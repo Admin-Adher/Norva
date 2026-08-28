@@ -218,6 +218,16 @@ watchlist:
 - `Alerte - Erreurs JavaScript production`
 - `Alerte - Performance Web pauvre`
 - `Alerte - Clics non valides production`
+- `Alerte - Clics de colère production`
+- `Alerte - Défilement excessif production`
+- `Alerte - Retours rapides production`
+
+Three production-only comparison cohorts are also saved, without adding noise
+to the alert watchlist:
+
+- `Production Web - Mobile`
+- `Production Web - Tablette`
+- `Production Web - Bureau`
 
 The production segment filters URLs to `https://norva.tv/` and therefore
 excludes localhost and preview traffic. The current sample is too small to set
