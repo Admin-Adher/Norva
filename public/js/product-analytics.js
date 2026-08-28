@@ -69,6 +69,14 @@
     releaseChannel: { key: 'release_channel', values: ['production', 'qa', 'preview', 'unknown'] }
   });
 
+  var APP_SCREENS = new Set([
+    'home', 'live', 'guide', 'movies', 'series', 'settings', 'partners',
+    'search', 'watch', 'pairing', 'error'
+  ]);
+  var SETTINGS_SCREENS = new Set([
+    'account', 'sources', 'profile', 'notifications'
+  ]);
+
   function readStoredConsent() {
     try {
       var parsed = JSON.parse(localStorage.getItem(CONSENT_KEY) || 'null');
@@ -135,7 +143,12 @@
     var surface = surfaceContext();
     if (surface !== 'app') return surface;
     var raw = String(location.hash || '#home').replace(/^#/, '').split(/[?&]/, 1)[0];
-    return normalizeToken(raw.split('/').filter(Boolean).slice(0, 2).join('_') || 'home');
+    var parts = raw.split('/').filter(Boolean);
+    var page = normalizeToken(parts[0] || 'home');
+    if (!APP_SCREENS.has(page)) return 'other';
+    if (page !== 'settings') return page;
+    var settingsPage = normalizeToken(parts[1] || 'account');
+    return SETTINGS_SCREENS.has(settingsPage) ? 'settings_' + settingsPage : 'settings';
   }
 
   function clarityEligible() {

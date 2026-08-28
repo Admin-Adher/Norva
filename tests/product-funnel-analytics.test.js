@@ -7,7 +7,7 @@ const vm = require('node:vm');
 const root = path.join(__dirname, '..');
 const read = file => fs.readFileSync(path.join(root, file), 'utf8').replace(/\r\n/g, '\n');
 
-function productRuntime() {
+function productRuntime({ hash = '#movies' } = {}) {
   const listeners = {};
   const appended = [];
   const window = {
@@ -33,7 +33,7 @@ function productRuntime() {
     window,
     document,
     navigator: { userAgent: 'Mozilla/5.0' },
-    location: { pathname: '/app.html', hostname: 'norva.tv', hash: '#movies' },
+    location: { pathname: '/app.html', hostname: 'norva.tv', hash },
     localStorage: { getItem: () => JSON.stringify({ status: 'granted', v: 1 }) },
     encodeURIComponent,
     Set
@@ -120,4 +120,12 @@ test('adapter has no identity API and drops arbitrary dimensions before all anal
   assert.equal(serialized.includes('source-secret'), false);
   assert.equal(serialized.includes('credential dump'), false);
   assert.equal(read('public/js/product-analytics.js').includes("clarity('identify'"), false);
+});
+
+test('screen tags reduce dynamic routes to a closed privacy-safe page name', () => {
+  const runtime = productRuntime({ hash: '#movies/open:private-title-id' });
+  const calls = (runtime.window.clarity.q || []).map(args => Array.from(args));
+  const screenTag = calls.find(args => args[0] === 'set' && args[1] === 'norva_screen');
+  assert.deepEqual(screenTag, ['set', 'norva_screen', 'movies']);
+  assert.equal(JSON.stringify(calls).includes('private-title-id'), false);
 });
