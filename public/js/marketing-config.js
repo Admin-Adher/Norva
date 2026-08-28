@@ -2,6 +2,14 @@ window.NORVA_MARKETING_CONFIG = window.NORVA_MARKETING_CONFIG || {
   enabled: true,
   consentMode: 'denied',
   debug: false,
+  productAnalytics: {
+    schema: 'norva-product-analytics:v1',
+    clarity: {
+      enabled: true,
+      projectId: 'y8fgihobbx',
+      allowedPaths: ['/', '/landing.html']
+    }
+  },
   googleAnalytics: {
     measurementId: 'G-2Z7P4LRR1T',
     sendPageView: true

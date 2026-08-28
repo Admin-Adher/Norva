@@ -16,7 +16,7 @@
   var VERSION = 1;
 
   var T = {
-    text: 'We use analytics and advertising cookies to measure how Norva is used and improve our ads. You can accept or decline — this won’t affect how the site works.',
+    text: 'We use analytics, including privacy-masked session replay, and advertising cookies to understand friction and improve Norva. You can accept or decline — this won’t affect how the site works.',
     accept: 'Accept',
     refuse: 'Decline',
     more: 'Learn more',
@@ -44,6 +44,9 @@
   function apply(status) {
     if (window.NorvaMarketing && typeof window.NorvaMarketing.setConsent === 'function') {
       window.NorvaMarketing.setConsent(status);
+    }
+    if (window.NorvaProductAnalytics && typeof window.NorvaProductAnalytics.setConsent === 'function') {
+      window.NorvaProductAnalytics.setConsent(status);
     }
   }
 

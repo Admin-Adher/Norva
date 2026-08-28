@@ -44,7 +44,7 @@
   <main>
     <div class="brand"><img src="/favicon.png" alt=""><span>Norva</span></div>
     <h1>Privacy Policy</h1>
-    <p class="updated">Last updated: 11 August 2026</p>
+    <p class="updated">Last updated: 28 August 2026</p>
 
     <p>This Privacy Policy explains how Norva (“Norva”, “we”, “us”) collects, uses, stores and
       deletes information when you use the Norva apps (Android phone/tablet and Android TV) and the
@@ -71,7 +71,7 @@
       <tr><td>Optional Partner cash payout</td><td>Only after Norva's server confirms that your account is in the current cash cohort and you choose a cash transfer: your explicit payout country; the minimum normalized Didit identity, age, country and capacity result; hashed transaction references; exact amount paid, tax and currency/exponent; payout status; required tax-profile fields; and tokenized payout-provider references. An account outside that cohort is not asked for payout country, KYC, tax or banking information. Norva does not store identity-document images, biometric captures, a full KYC response, raw Google Play purchase token, buyer address, bank credentials or card number.</td><td>Assess cash-payout readiness, reconcile and pay valid individual commissions, and meet applicable tax, accounting and transfer obligations</td></tr>
       <tr><td>Partners operations analytics</td><td>Aggregated counts and financial totals by day, payment rail and currency, including referral claims, attributions, verification outcomes, holds, refunds, chargebacks and commission processing. These aggregates exclude names, emails, public referral codes, payment identifiers and raw KYC or payment-provider payloads.</td><td>Monitor the programme, reconcile its ledger and detect operational or fraud-control failures without exposing individual records</td></tr>
       <tr><td>Technical</td><td>IP address, app version, device/model, basic logs and crash data</td><td>Deliver streams from your network, secure the Service, fix bugs</td></tr>
-      <tr><td>Analytics &amp; advertising (web, with consent)</td><td>Cookies and identifiers set by Google Analytics, Google Ads and Meta Pixel when you accept them</td><td>Measure how the Service is used and how our ads perform</td></tr>
+      <tr><td>Analytics &amp; advertising (web, with consent)</td><td>Cookies, pseudonymous identifiers, page and device context, performance signals, clicks, scrolling and privacy-masked session-replay events processed by Google Analytics, Microsoft Clarity, Google Ads and Meta Pixel when you accept them. Norva does not send media-source credentials or account identifiers to Clarity.</td><td>Understand friction, improve the web experience and measure how our ads perform</td></tr>
       <tr><td>Downloads (on device)</td><td>Media you download is encrypted and stored only on your device</td><td>Offline viewing; this content is not uploaded to us</td></tr>
       </tbody>
     </table>
@@ -129,7 +129,7 @@
 
     <h2 id="cookies">3. Cookies, analytics &amp; advertising</h2>
     <p>The first-party sign-up context described in section 1 is an operational account record,
-      not a Google Analytics, Google Ads or Meta cookie. It remains available when optional
+      not a Google Analytics, Microsoft Clarity, Google Ads or Meta cookie. It remains available when optional
       analytics cookies are declined, and is kept separate from billing country and your chosen
       catalogue region.</p>
     <p>On the Norva web app we use cookies and similar technologies. Analytics and advertising
@@ -138,15 +138,18 @@
     <ul>
       <li><strong>Strictly necessary</strong> — needed for the site to work (sign-in, security and
         remembering your consent choice). Always active; no marketing use.</li>
-      <li><strong>Analytics</strong> — <strong>Google Analytics 4</strong>, to understand how the
-        Service is used so we can improve it.</li>
+      <li><strong>Analytics</strong> — <strong>Google Analytics 4</strong>, to understand aggregate
+        use, and <strong>Microsoft Clarity</strong>, for privacy-masked session replay, heatmaps,
+        interaction diagnostics and web-performance signals. Clarity is enabled on Norva's public
+        web landing experience only; it is not initialized inside the Android phone or TV shells.</li>
       <li><strong>Advertising</strong> — <strong>Google Ads</strong> and <strong>Meta Pixel</strong>,
         to measure how our ads perform (for example a sign-up or purchase that follows an ad).</li>
     </ul>
     <p>You can change or withdraw your choice at any time from <strong>Settings → Privacy &amp; legal
       → Manage cookies</strong>, which reopens the consent banner. If you decline, these analytics and
       advertising tools are not loaded. These providers process data under their own policies:
-      <a href="https://policies.google.com/privacy" target="_blank" rel="noopener">Google</a> and
+      <a href="https://policies.google.com/privacy" target="_blank" rel="noopener">Google</a>,
+      <a href="https://privacy.microsoft.com/privacystatement" target="_blank" rel="noopener">Microsoft</a> and
       <a href="https://www.facebook.com/privacy/policy" target="_blank" rel="noopener">Meta</a>.</p>
 
     <h2>4. Sharing and processors</h2>
@@ -171,8 +174,9 @@
         account identifier. They do not include the raw IP address or city. Norva marks messages as
         protected against forwarding and saving where supported by Telegram, but this cannot prevent
         screenshots or manual copying and does not delete a delivered message.</li>
-      <li><strong>Google</strong> (Analytics, Ads) and <strong>Meta</strong> (Pixel) — audience
-        measurement and advertising performance on the web app, only after you consent (see section 3).</li>
+      <li><strong>Google</strong> (Analytics, Ads), <strong>Microsoft</strong> (Clarity) and
+        <strong>Meta</strong> (Pixel) — audience measurement, privacy-masked web interaction analysis
+        and advertising performance, only after you consent (see section 3).</li>
       <li><strong>Google Play</strong> — Android subscription entitlement and, only for an
         attributed Partners account, the Orders API fields needed to record the exact paid total,
         tax, currency and refund state. Norva hashes transaction references and does not copy the
