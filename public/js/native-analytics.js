@@ -5,7 +5,7 @@
   var SCREENS = new Set([
     'home', 'live', 'guide', 'movies', 'series', 'settings',
     'settings_account', 'settings_sources', 'settings_profile',
-    'settings_notifications', 'partners', 'search', 'pairing', 'error'
+    'settings_notifications', 'partners', 'search', 'pairing', 'account', 'error'
   ]);
   var EVENTS = new Set([
     'provider_access_opened', 'provider_access_saved',
@@ -43,6 +43,8 @@
   }
 
   function currentScreen() {
+    var pathname = String(location.pathname || '').toLowerCase();
+    if (/(?:^|\/)account(?:\.html)?\/?$/.test(pathname)) return 'account';
     var raw = String(location.hash || '#home').replace(/^#/, '').split(/[?&]/, 1)[0];
     var parts = raw.split('/').filter(Boolean);
     var page = normalize(parts[0] || 'home');

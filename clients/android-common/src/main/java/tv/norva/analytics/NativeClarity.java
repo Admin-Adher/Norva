@@ -44,7 +44,7 @@ public final class NativeClarity {
             "home", "live", "guide", "movies", "series", "settings",
             "settings_account", "settings_sources", "settings_profile",
             "settings_notifications", "partners", "search", "player",
-            "downloads", "pairing", "setup", "error"
+            "downloads", "pairing", "setup", "account", "error"
     ));
 
     // Clarity supports at most 20 custom Smart Events. Keep this set bounded.

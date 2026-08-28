@@ -7,7 +7,7 @@ const vm = require('node:vm');
 const root = path.join(__dirname, '..');
 const read = file => fs.readFileSync(path.join(root, file), 'utf8').replace(/\r\n/g, '\n');
 
-function runNativeAdapter(hash = '#settings/sources') {
+function runNativeAdapter(hash = '#settings/sources', pathname = '/app.html') {
   const messages = [];
   const listeners = {};
   const window = {
@@ -25,7 +25,7 @@ function runNativeAdapter(hash = '#settings/sources') {
   vm.runInNewContext(read('public/js/native-analytics.js'), {
     window,
     document,
-    location: { hash },
+    location: { hash, pathname },
     JSON,
     Set
   });
@@ -52,6 +52,19 @@ test('native WebView capture preserves geometry but masks all rendered content',
   assert.equal(runtime.window.NorvaNativeAnalytics.available(), true);
   assert.match(read('public/js/native-analytics.js'),
     /documentElement\.setAttribute\('data-clarity-mask', 'true'\)/);
+});
+
+test('first-run account consent is bridged immediately and labelled as account', () => {
+  const account = read('public/account.html');
+  assert.match(account, /native-analytics\.js\?v=1[\s\S]*consent-banner\.js\?v=1/);
+  const runtime = runNativeAdapter('', '/account');
+  assert.deepEqual(runtime.messages[0], {
+    v: 1, type: 'screen', name: 'account'
+  });
+  runtime.window.NorvaNativeAnalytics.setConsent('denied');
+  assert.deepEqual(runtime.messages[1], {
+    v: 1, type: 'consent', status: 'denied'
+  });
 });
 
 test('native adapter rejects arbitrary event names and payload identifiers', () => {
