@@ -10,6 +10,8 @@ class SeriesPage {
         // Native player reports a natural end → autoplay the next episode (no-op on
         // movies / when the fiche isn't open). Harmlessly inert until the APK sends it.
         window.addEventListener('norva-native-ended', (e) => this.onNativeEpisodeEnded(e.detail));
+        window.addEventListener('norva-native-episode-navigation', (e) =>
+            this.onNativeEpisodeNavigation(e.detail));
         this.pageEl = document.getElementById('page-series');
         this.container = document.getElementById('series-grid');
         this.sourceSelect = document.getElementById('series-source-select');
@@ -4068,6 +4070,19 @@ class SeriesPage {
         return null;
     }
 
+    episodeNavigationLabel(episodeEl, fallbackSeason = '1') {
+        if (!episodeEl) return null;
+        const title = episodeEl.querySelector('.episode-title')?.textContent || '';
+        const episode = episodeEl.dataset.episodeNum
+            || episodeEl.querySelector('.episode-number')?.textContent?.replace('E', '')
+            || '';
+        const season = episodeEl.dataset.season
+            || episodeEl.closest('.season-group')?.querySelector('.season-name')
+                ?.textContent?.match(/Season (\d+)/)?.[1]
+            || fallbackSeason;
+        return `S${season} E${episode}${title ? ' - ' + title : ''}`;
+    }
+
     // Native-player autoplay: when an episode finishes in the native player, queue
     // the next one with a brief, cancellable "Up next" prompt. Web playback handles
     // its own next-episode flow (WatchPage.onEnded); this only covers the native path.
@@ -4091,6 +4106,33 @@ class SeriesPage {
             return;
         }
         this.promptNextEpisode(nextEl);
+    }
+
+    // Manual Previous/Next arrives only after MainActivity has closed and
+    // received an ACK for the exact outgoing cloud playback session. Resolve
+    // the adjacent episode now — never before — to preserve mono-session TV
+    // providers and to avoid a hidden second stream behind the player.
+    onNativeEpisodeNavigation(detail = {}) {
+        if (!detail || (detail.itemType !== 'episode' && detail.itemType !== 'series')) return;
+        if (detail.direction !== 'previous' && detail.direction !== 'next') return;
+        if (this.app?.currentPage !== 'series') return;
+        if (!this.currentSeriesInfo || !this.seasonsContainer
+            || this.detailsPanel?.classList.contains('hidden')) return;
+        if (this._nativeEpisodeNavigationPending) return;
+
+        const all = [...this.seasonsContainer.querySelectorAll('.episode-item')];
+        const idx = all.findIndex((el) =>
+            String(el.dataset.episodeId) === String(detail.itemId)
+            && (!detail.sourceId || String(el.dataset.sourceId) === String(detail.sourceId)));
+        if (idx < 0) return;
+        const target = all[idx + (detail.direction === 'previous' ? -1 : 1)];
+        if (!target) return;
+
+        this.cancelNextEpisodePrompt();
+        this._nativeEpisodeNavigationPending = true;
+        Promise.resolve(this.playEpisode(target))
+            .catch((error) => console.warn('[Series] native episode navigation failed:', error))
+            .finally(() => { this._nativeEpisodeNavigationPending = false; });
     }
 
     promptNextEpisode(nextEl) {
@@ -4169,22 +4211,16 @@ class SeriesPage {
         // Episode duration ("00:42:10") as timeline fallback
         const durationText = episodeEl.querySelector('.episode-duration')?.textContent;
         const durationHint = (h?.duration) || MediaUtils.parseDurationToSeconds(durationText);
-        // Follower label for the native player's end-of-stream "À suivre" overlay
-        // (season boundaries included: the flat episode list is in play order).
-        let nextEpisodeLabel = null;
+        // Adjacent labels drive the native Previous/Next affordances. They are
+        // metadata only; URLs remain unresolved until the outgoing player has
+        // closed its exact cloud session.
         const flatEpisodes = this.seasonsContainer
             ? [...this.seasonsContainer.querySelectorAll('.episode-item')] : [];
         const flatIdx = flatEpisodes.indexOf(episodeEl);
+        const previousEpisodeEl = flatIdx > 0 ? flatEpisodes[flatIdx - 1] : null;
         const nextEpisodeEl = flatIdx >= 0 ? flatEpisodes[flatIdx + 1] : null;
-        if (nextEpisodeEl) {
-            const nTitle = nextEpisodeEl.querySelector('.episode-title')?.textContent || '';
-            const nNum = nextEpisodeEl.dataset.episodeNum
-                || nextEpisodeEl.querySelector('.episode-number')?.textContent?.replace('E', '') || '';
-            const nSeason = nextEpisodeEl.dataset.season
-                || nextEpisodeEl.closest('.season-group')?.querySelector('.season-name')?.textContent?.match(/Season (\d+)/)?.[1]
-                || seasonNum;
-            nextEpisodeLabel = `S${nSeason} E${nNum}${nTitle ? ' - ' + nTitle : ''}`;
-        }
+        const previousEpisodeLabel = this.episodeNavigationLabel(previousEpisodeEl, seasonNum);
+        const nextEpisodeLabel = this.episodeNavigationLabel(nextEpisodeEl, seasonNum);
         const content = {
             type: 'series',
             id: episodeId,
@@ -4224,6 +4260,7 @@ class SeriesPage {
             audioTracksScope: null,
             subtitleTracks: null,
             subtitleTracksScope: null,
+            previousEpisodeLabel,
             nextEpisodeLabel
         };
 

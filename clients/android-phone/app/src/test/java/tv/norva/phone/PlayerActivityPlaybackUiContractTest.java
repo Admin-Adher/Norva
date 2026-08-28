@@ -24,6 +24,7 @@ public final class PlayerActivityPlaybackUiContractTest {
         backgroundPlaybackRequiresForegroundOrPip();
         formatRecoveryClassificationIsDeterministic();
         knownGoodFixtureRequiresRealExactCodecEvidence();
+        episodeNavigationInputsAreBounded();
     }
 
     private static void declaresEveryExclusiveState() {
@@ -129,6 +130,22 @@ public final class PlayerActivityPlaybackUiContractTest {
                 true,
                 "",
                 ""));
+    }
+
+    private static void episodeNavigationInputsAreBounded() {
+        equal(
+                PlayerActivity.EPISODE_NAVIGATION_PREVIOUS,
+                PlayerActivity.boundedEpisodeNavigationDirection("previous"));
+        equal(
+                PlayerActivity.EPISODE_NAVIGATION_NEXT,
+                PlayerActivity.boundedEpisodeNavigationDirection("next"));
+        equal(null, PlayerActivity.boundedEpisodeNavigationDirection("restart"));
+        equal(null, PlayerActivity.boundedEpisodeNavigationDirection(null));
+        equal("S4 E2 - Next episode",
+                PlayerActivity.boundedEpisodeLabel("  S4 E2 - Next\nepisode  "));
+        equal(null, PlayerActivity.boundedEpisodeLabel("   "));
+        String oversized = "x".repeat(300);
+        equal(180, PlayerActivity.boundedEpisodeLabel(oversized).length());
     }
 
     private static void check(boolean condition) {

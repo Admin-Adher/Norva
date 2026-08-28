@@ -1345,6 +1345,7 @@ public class MainActivity extends Activity {
                         preferenceScope == null ? null : preferenceScope.toString(),
                         playbackPreferences == null ? null : playbackPreferences.toString(),
                         emptyToNull(o.optString("poster")),
+                        emptyToNull(o.optString("previousTitle")),
                         emptyToNull(o.optString("nextTitle")),
                         emptyToNull(o.optString("sessionId")));
             } catch (Exception ignored) {
@@ -2366,7 +2367,8 @@ public class MainActivity extends Activity {
                             final String fallbackUrl, final String variantsJson, final String activeStreamId,
                             final String trackMetadataJson, final String preferenceScopeJson,
                             final String playbackPreferencesJson, final String posterUrl,
-                            final String nextTitle, final String playbackSessionId) {
+                            final String previousTitle, final String nextTitle,
+                            final String playbackSessionId) {
         // Variant picks and explicit Play actions are new intents. Retire the
         // previous retry token before the new Activity is launched.
         clearPendingPlayerRecovery(null);
@@ -2392,6 +2394,9 @@ public class MainActivity extends Activity {
             }
             if (posterUrl != null && !posterUrl.isEmpty()) {
                 intent.putExtra(PlayerActivity.EXTRA_POSTER_URL, posterUrl);
+            }
+            if (previousTitle != null && !previousTitle.isEmpty()) {
+                intent.putExtra(PlayerActivity.EXTRA_PREVIOUS_TITLE, previousTitle);
             }
             if (nextTitle != null && !nextTitle.isEmpty()) {
                 intent.putExtra(PlayerActivity.EXTRA_NEXT_TITLE, nextTitle);
@@ -2532,6 +2537,20 @@ public class MainActivity extends Activity {
                     + jsStr(pickedVariant) + "," + jsStr(pickedSource) + ")";
             runOnUiThread(() -> {
                 try { webView.evaluateJavascript(jsv, null); } catch (Exception ignored) { }
+            });
+            return;
+        }
+        final String episodeNavigation =
+                PlayerActivity.boundedEpisodeNavigationDirection(data.getStringExtra(
+                        PlayerActivity.EXTRA_EPISODE_NAVIGATION_DIRECTION));
+        if (episodeNavigation != null && itemId != null) {
+            final String jsNavigation =
+                    "window.__norvaNative&&window.__norvaNative.onEpisodeNavigation&&"
+                    + "window.__norvaNative.onEpisodeNavigation("
+                    + jsStr(sourceId) + "," + jsStr(itemType) + "," + jsStr(itemId)
+                    + "," + jsStr(episodeNavigation) + ")";
+            runOnUiThread(() -> {
+                try { webView.evaluateJavascript(jsNavigation, null); } catch (Exception ignored) { }
             });
             return;
         }
