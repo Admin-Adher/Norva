@@ -38,7 +38,7 @@
   </style>
   <script src="/js/marketing-config.js?v=1"></script>
   <script defer src="/js/marketing.js?v=1"></script>
-  <script defer src="/js/consent-banner.js?v=1"></script>
+  <script defer src="/js/consent-banner.js?v=3"></script>
 </head>
 <body>
   <main>
@@ -71,7 +71,7 @@
       <tr><td>Optional Partner cash payout</td><td>Only after Norva's server confirms that your account is in the current cash cohort and you choose a cash transfer: your explicit payout country; the minimum normalized Didit identity, age, country and capacity result; hashed transaction references; exact amount paid, tax and currency/exponent; payout status; required tax-profile fields; and tokenized payout-provider references. An account outside that cohort is not asked for payout country, KYC, tax or banking information. Norva does not store identity-document images, biometric captures, a full KYC response, raw Google Play purchase token, buyer address, bank credentials or card number.</td><td>Assess cash-payout readiness, reconcile and pay valid individual commissions, and meet applicable tax, accounting and transfer obligations</td></tr>
       <tr><td>Partners operations analytics</td><td>Aggregated counts and financial totals by day, payment rail and currency, including referral claims, attributions, verification outcomes, holds, refunds, chargebacks and commission processing. These aggregates exclude names, emails, public referral codes, payment identifiers and raw KYC or payment-provider payloads.</td><td>Monitor the programme, reconcile its ledger and detect operational or fraud-control failures without exposing individual records</td></tr>
       <tr><td>Technical</td><td>IP address, app version, device/model, basic logs and crash data</td><td>Deliver streams from your network, secure the Service, fix bugs</td></tr>
-      <tr><td>Analytics &amp; advertising (web, with consent)</td><td>Cookies, pseudonymous identifiers, page and device context, performance signals, clicks, scrolling and privacy-masked session-replay events processed by Google Analytics, Microsoft Clarity, Google Ads and Meta Pixel when you accept them. Norva does not send media-source credentials or account identifiers to Clarity.</td><td>Understand friction, improve the web experience and measure how our ads perform</td></tr>
+      <tr><td>Analytics &amp; advertising (optional)</td><td>After consent: cookies or local consent state, random SDK identifiers, app/version/device/screen context, performance and diagnostic signals, taps, gestures, scrolling and privacy-masked session-replay events processed by Google Analytics, Microsoft Clarity, Google Ads and Meta Pixel where applicable. Android mobile and Android TV use separate Clarity projects. Native WebView capture keeps layout and interaction geometry while masking its text and images, and native provider-login and playback views are also masked. Norva does not send media-source credentials, provider names, media titles or account identifiers to Clarity.</td><td>Understand friction across web, Android mobile and Android TV, improve the experience and measure how our ads perform</td></tr>
       <tr><td>Downloads (on device)</td><td>Media you download is encrypted and stored only on your device</td><td>Offline viewing; this content is not uploaded to us</td></tr>
       </tbody>
     </table>
@@ -86,7 +86,7 @@
       <li>Only after the server confirms cash-pilot eligibility and you choose a cash payout, to collect your explicit payout country, verify the individual payout requirements, collect the applicable tax profile, validate a supported corridor and administer the transfer.</li>
       <li>To understand which Norva sign-up journey and device type were used and improve onboarding.</li>
       <li>To diagnose problems and improve reliability.</li>
-      <li>With your consent, to measure audience and the performance of our advertising (web app only).</li>
+      <li>With your consent, to measure audience and product friction on web, Android mobile and Android TV, and advertising performance where advertising measurement applies.</li>
     </ul>
     <p>We do <strong>not</strong> sell your personal information. With your consent, we use analytics
       and advertising cookies on the web app to measure usage and how our ads perform — see
@@ -132,16 +132,18 @@
       not a Google Analytics, Microsoft Clarity, Google Ads or Meta cookie. It remains available when optional
       analytics cookies are declined, and is kept separate from billing country and your chosen
       catalogue region.</p>
-    <p>On the Norva web app we use cookies and similar technologies. Analytics and advertising
-      technologies are <strong>not loaded until you accept them</strong>: a consent banner appears on
-      your first visit, and nothing is set or sent to these providers unless you choose “Accept”.</p>
+    <p>On the Norva web app and Android applications we use consent-controlled analytics technologies.
+      They are <strong>not initialized until you accept them</strong>: a consent banner appears on your
+      first visit or installation, and nothing is sent to these analytics providers unless you choose “Accept”.</p>
     <ul>
       <li><strong>Strictly necessary</strong> — needed for the site to work (sign-in, security and
         remembering your consent choice). Always active; no marketing use.</li>
       <li><strong>Analytics</strong> — <strong>Google Analytics 4</strong>, to understand aggregate
         use, and <strong>Microsoft Clarity</strong>, for privacy-masked session replay, heatmaps,
-        interaction diagnostics and web-performance signals. Clarity is enabled on Norva's public
-        web landing experience only; it is not initialized inside the Android phone or TV shells.</li>
+        interaction diagnostics and performance signals. The public web landing, Android mobile and
+        Android TV use separate Clarity projects so their journeys can be compared without merging
+        platform data. Native session replay masks WebView text and images plus credential-entry and playback views;
+        custom events use a closed, identifier-free vocabulary.</li>
       <li><strong>Advertising</strong> — <strong>Google Ads</strong> and <strong>Meta Pixel</strong>,
         to measure how our ads perform (for example a sign-up or purchase that follows an ad).</li>
     </ul>

@@ -247,6 +247,27 @@ class WatchPage {
         this.init();
     }
 
+    trackProduct(event, details = {}) {
+        return window.NorvaTrackProduct?.(event, {
+            placement: 'player',
+            journey: 'time_to_value',
+            step: 'playback',
+            ...details
+        });
+    }
+
+    playbackFailureFamily(message) {
+        const value = String(message || '').toLowerCase();
+        if (this.isPlaybackSupersededError(value)) return 'superseded';
+        if (this.isProviderBusyError(value)) return 'provider_busy';
+        if (this.isConnectionLimitError(value) || /403|blocked|forbidden/.test(value)) return 'provider_blocked';
+        if (/401|credential|login|unauthori[sz]ed/.test(value)) return 'credentials';
+        if (/408|504|timeout|timed out/.test(value)) return 'timeout';
+        if (/network|fetch|offline|connection/.test(value)) return 'network';
+        if (/codec|format|decode|container|unsupported/.test(value)) return 'format';
+        return 'unknown';
+    }
+
     init() {
         // iOS Safari: detect and compensate for floating bottom toolbar
         const updateIosUiBottom = () => {
@@ -1553,6 +1574,7 @@ class WatchPage {
 
         this.content = content;
         this.contentType = content.type;
+        this.trackProduct('content_opened', { step: 'content', state: 'started' });
         this.beginPlaybackTelemetry(cloudPlaybackSessionId, playbackAttemptId, {
             requestedAt: playbackRequestedAt,
         });
@@ -2563,6 +2585,7 @@ class WatchPage {
                 ...(engineTimings ? { engineTimings } : {})
             }
         });
+        this.trackProduct('playback_first_frame', { state: 'ready', outcome: 'success' });
         this.rememberWatchedLanguageValidationIntent(playbackAttemptId);
         // The muxed-mono informational row depends on real decoded-media
         // evidence. Refresh it at the first rendered frame so an audio menu
@@ -6293,6 +6316,7 @@ class WatchPage {
             this._playStartedReported = true;
             if (this.playbackTelemetry) this.playbackTelemetry.playStartedReported = true;
             this.sendPlaybackEvent('play_started');
+            this.trackProduct('playback_started', { state: 'started' });
         } else if (this._lastPauseTelemetryAt) {
             this._lastPauseTelemetryAt = 0;
             this.sendPlaybackEvent('resume');
@@ -6749,6 +6773,9 @@ class WatchPage {
         }
 
         const friendly = this.getFriendlyPlaybackError(safeMessage);
+        this.trackProduct('journey_error', {
+            state: 'error', outcome: 'error', failureFamily: this.playbackFailureFamily(safeMessage)
+        });
         // A provider auth / rate-limit block (401/403/429) does not clear on a
         // reload — auto-refreshing just spins on the same blocked path. Skip it
         // and point the user to a residential path (native app / local hub).
@@ -6801,6 +6828,7 @@ class WatchPage {
         errorEl.classList.remove('hidden');
         document.getElementById('watch-error-refresh-btn')?.addEventListener('click', () => {
             this.clearPlaybackErrorRefreshTimer();
+            this._nextProductRetrySource = 'manual';
             this.retryPlaybackInPlace();
         });
 
@@ -6869,6 +6897,11 @@ class WatchPage {
     async retryPlaybackInPlace(positionOverride = null) {
         const playbackRequestedAt = Date.now();
         if (this._inPlaceRetryRunning) return;
+        const retrySource = this._nextProductRetrySource === 'manual' ? 'manual' : 'automatic';
+        this._nextProductRetrySource = '';
+        this.trackProduct('journey_retry', {
+            source: retrySource, state: 'started', outcome: 'retry'
+        });
         if (!this.content?.sourceId || !this.content?.id) {
             window.location.reload();
             return;

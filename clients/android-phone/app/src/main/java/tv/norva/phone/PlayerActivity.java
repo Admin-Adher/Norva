@@ -74,6 +74,8 @@ import androidx.media3.ui.PlayerView;
 
 import com.google.firebase.analytics.FirebaseAnalytics;
 
+import tv.norva.analytics.NativeClarity;
+
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
@@ -212,6 +214,7 @@ public class PlayerActivity extends Activity {
     private boolean pendingDelayedRecovery;
     private int pendingDelayedRecoveryGeneration;
     private boolean everReady = false;    // direct or fallback reached STATE_READY at least once
+    private boolean clarityPlaybackStarted = false;
     private boolean firstFrameRendered = false;
     private boolean firstFrameTelemetrySent = false;
     private long playbackLaunchElapsedMs;
@@ -427,6 +430,12 @@ public class PlayerActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        NativeClarity.configure(BuildConfig.CLARITY_PROJECT_ID, "android_mobile", BuildConfig.VERSION_NAME, BuildConfig.DEBUG ? "qa" : "production");
+        NativeClarity.applyStoredConsent(this);
+        NativeClarity.screen("player");
+        NativeClarity.tag("journey_name", "time_to_value");
+        NativeClarity.tag("journey_step", "playback");
+        NativeClarity.event("content_opened");
         if (Build.VERSION.SDK_INT >= 33) {
             getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
                     android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT,
@@ -491,6 +500,7 @@ public class PlayerActivity extends Activity {
 
         FrameLayout root = new FrameLayout(this);
         playerRoot = root;
+        NativeClarity.registerSensitiveView(root);
         root.setId(R.id.norva_player_root);
         root.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         root.setBackgroundColor(color(R.color.norva_bg_primary));
@@ -695,6 +705,8 @@ public class PlayerActivity extends Activity {
 
             @Override
             public void onPlayerError(PlaybackException error) {
+                NativeClarity.tag("failure_family", "unknown");
+                NativeClarity.event("journey_error");
                 errHandler.removeCallbacks(bufferWatchdog);
                 errHandler.removeCallbacks(longStartNotice);
                 engineReady = false;
@@ -739,6 +751,10 @@ public class PlayerActivity extends Activity {
             public void onIsPlayingChanged(boolean isPlaying) {
                 errHandler.removeCallbacks(healthyRecoveryReset);
                 if (isPlaying) {
+                    if (!clarityPlaybackStarted) {
+                        clarityPlaybackStarted = true;
+                        NativeClarity.event("playback_started");
+                    }
                     if (firstFrameForCurrentRoute) {
                         errHandler.removeCallbacks(bufferWatchdog);
                     }
@@ -1166,6 +1182,7 @@ public class PlayerActivity extends Activity {
         transitionTo(PlaybackUiState.PLAYING, false);
         if (!firstFrameRendered) {
             firstFrameRendered = true;
+            NativeClarity.event("playback_first_frame");
             recordNativeFirstFrame();
         }
         updatePlaybackHeartbeat();
@@ -3048,6 +3065,8 @@ public class PlayerActivity extends Activity {
      * preventing rapid READY/EOF loops from retrying forever.
      */
     private void recoverPlayback(final String reason) {
+        NativeClarity.tag("journey_outcome", "retry");
+        NativeClarity.event("journey_retry");
         if (player == null || freshStreamRequested) return;
         rememberRecoverySignal(reason, fallbackTried ? "gateway" : "direct", true);
         final int scheduledGeneration = ++recoveryGeneration;

@@ -387,8 +387,10 @@
         html.native-app .onb-slide p { font-size: 13px; line-height: 1.45; }
         html.native-app .onb-dots { margin-top: 10px; }
     </style>
-  <script src="/js/marketing-config.js?v=1"></script>
+  <script src="/js/marketing-config.js?v=2"></script>
   <script defer src="/js/marketing.js?v=1"></script>
+  <script defer src="/js/native-analytics.js?v=2"></script>
+  <script defer src="/js/product-analytics.js?v=2"></script>
   <script defer src="/js/consent-banner.js?v=1"></script>
 </head>
 <body>
@@ -591,6 +593,7 @@
         // step 2, native Google Sign-In).
         const isNativeApp = document.documentElement.classList.contains('native-app');
         const SIGNUP_ATTRIBUTION_KEY = 'norva-signup-attribution-pending-v1';
+        const AUTH_FUNNEL_KEY = 'norva-auth-funnel-intent-v1';
         const signupGeoPromise = loadSignupGeoContext();
         const forms = {
             signin: document.getElementById('signin-form'),
@@ -598,6 +601,50 @@
             recover: document.getElementById('recover-form'),
             password: document.getElementById('password-form')
         };
+
+        function trackAuth(event, method, outcome = 'pending', failureFamily) {
+            window.NorvaTrackProduct?.(event, {
+                method,
+                placement: 'account',
+                journey: 'authentication',
+                step: event.startsWith('signup_') ? 'signup'
+                    : event.startsWith('login_') ? 'login'
+                        : authFunnelIntent(),
+                outcome,
+                failureFamily
+            });
+        }
+
+        function authFailureFamily(error) {
+            const code = String(error?.code || error?.payload?.code || '').toLowerCase();
+            const message = String(error?.message || '').toLowerCase();
+            if (code.includes('rate') || /too many|rate.?limit/.test(message)) return 'provider_busy';
+            if (/network|fetch|offline/.test(message)) return 'network';
+            if (/timeout|timed out/.test(message)) return 'timeout';
+            if (/invalid.*credential|invalid.*login|password/.test(message)) return 'credentials';
+            return 'unknown';
+        }
+
+        function setAuthFunnelIntent(intent) {
+            const safe = intent === 'signup' ? 'signup' : 'login';
+            try { sessionStorage.setItem(AUTH_FUNNEL_KEY, safe); } catch (_) { /* best effort */ }
+            return safe;
+        }
+
+        function authFunnelIntent() {
+            try { return sessionStorage.getItem(AUTH_FUNNEL_KEY) === 'signup' ? 'signup' : 'login'; }
+            catch (_) { return 'login'; }
+        }
+
+        function clearAuthFunnelIntent() {
+            try { sessionStorage.removeItem(AUTH_FUNNEL_KEY); } catch (_) { /* best effort */ }
+        }
+
+        function completeAuthFunnel(method) {
+            const intent = authFunnelIntent();
+            trackAuth(`${intent}_completed`, method, 'success');
+            clearAuthFunnelIntent();
+        }
 
         function compactSignupFields(values) {
             return Object.fromEntries(Object.entries(values || {}).filter(([, value]) =>
@@ -904,12 +951,15 @@
         }
         async function startSocialAuth(provider = 'google') {
             if (socialAuthStarting) return;
+            const authIntent = setAuthFunnelIntent(forms.signup.classList.contains('active') ? 'signup' : 'login');
+            trackAuth(`${authIntent}_started`, provider, 'pending');
             setSocialAuthBusy(true);
             setStatus('info', 'Preparing secure sign-in...');
             try {
                 await buildSignupAttribution(provider, true);
             } catch (_) {
                 clearStoredSignupAttribution();
+                trackAuth('journey_error', provider, 'error', 'network');
                 setSocialAuthBusy(false);
                 setStatus('error', 'Google sign-in is unavailable. Try again.');
                 return;
@@ -921,6 +971,7 @@
                 clearTimeout(nativeGoogleTimer);
                 nativeGoogleTimer = setTimeout(() => {
                     clearStoredSignupAttribution();
+                    trackAuth('journey_error', 'google', 'error', 'timeout');
                     setSocialAuthBusy(false);
                     setStatus('error', 'Google sign-in didn’t complete. Try again, or sign in with your email.');
                 }, 30000);
@@ -928,6 +979,7 @@
                 catch (_) {
                     clearTimeout(nativeGoogleTimer);
                     clearStoredSignupAttribution();
+                    trackAuth('journey_error', 'google', 'error', 'invalid_state');
                     setSocialAuthBusy(false);
                     setStatus('error', 'Google sign-in is unavailable.');
                 }
@@ -987,6 +1039,7 @@
             clearTimeout(nativeGoogleTimer);
             if (!idToken) {
                 clearStoredSignupAttribution();
+                trackAuth('journey_error', 'google', (!error || /cancel/i.test(error)) ? 'cancelled' : 'error', (!error || /cancel/i.test(error)) ? 'cancelled' : 'unknown');
                 setSocialAuthBusy(false);
                 if (error === 'google_not_configured') setStatus('error', 'Google sign-in isn’t available yet.');
                 else if (!error || /cancel/i.test(error)) setStatus('error', 'Google sign-in was cancelled.');
@@ -998,10 +1051,12 @@
                 await NorvaAuth.signInWithIdToken({ provider: 'google', token: idToken });
                 await ensureProfile();
                 await capturePostAuthAttribution();
+                completeAuthFunnel('google');
                 setStatus('success', 'Signed in. Opening Norva…');
                 location.replace(returnTo);
             } catch (e) {
                 clearStoredSignupAttribution();
+                trackAuth('journey_error', 'google', 'error', 'credentials');
                 setSocialAuthBusy(false);
                 setStatus('error', 'Google sign-in couldn’t be completed. Try again, or use email sign-in.');
             }
@@ -1013,6 +1068,8 @@
             // Passwordless mode (default on web): the primary button emails a link.
             if (document.getElementById('signin-password-wrap').hidden) { requestMagicLink(); return; }
             await withBusy(forms.signin, async () => {
+                setAuthFunnelIntent('login');
+                trackAuth('login_started', 'email_password', 'pending');
                 setStatus('info', 'Signing in...');
                 try {
                     await NorvaAuth.signIn({
@@ -1024,10 +1081,12 @@
                     // rather than the raw obfuscated "Invalid login credentials".
                     setStatus('error', 'We couldn’t sign you in with that password.');
                     showAuthHelp('If you created your account with Google, use Continue with Google — or get a sign-in link by email, or reset your password.');
+                    trackAuth('journey_error', 'email_password', 'error', 'credentials');
                     return;
                 }
                 await ensureProfile();
                 await capturePostAuthAttribution();
+                completeAuthFunnel('email_password');
                 setStatus('success', 'Signed in. Opening Norva...');
                 location.replace(returnTo);
             });
@@ -1044,6 +1103,8 @@
             }
             await withBusy(forms.signup, async () => {
                 const displayName = document.getElementById('signup-name').value.trim();
+                setAuthFunnelIntent('signup');
+                trackAuth('signup_started', 'email_password', 'pending');
                 setStatus('info', 'Creating your account...');
                 const attribution = await buildSignupAttribution('email_password', false);
                 const payload = await NorvaAuth.signUp({
@@ -1057,6 +1118,7 @@
                 if (NorvaAuth.getSession()) {
                     await ensureProfile(displayName);
                     await capturePostAuthAttribution(attribution);
+                    completeAuthFunnel('email_password');
                     setStatus('success', 'Account created. Opening Norva...');
                     location.replace(returnTo);
                     return;
@@ -1089,7 +1151,7 @@
                 }
 
                 setStatus('success', 'Check your email to finish creating your account.');
-            });
+            }, error => trackAuth('journey_error', 'email_password', 'error', authFailureFamily(error)));
         });
 
         forms.recover.addEventListener('submit', async event => {
@@ -1139,6 +1201,8 @@
                 const confirmationContext = storedSignupAttribution()
                     || await buildSignupAttribution(confirmationMethod, false);
                 await capturePostAuthAttribution(confirmationContext);
+                if (otpType === 'signup' || otpType === 'email') setAuthFunnelIntent('signup');
+                completeAuthFunnel(confirmationMethod);
                 location.replace(returnTo);
                 return;
             }
@@ -1152,6 +1216,7 @@
                 const oauthError = hp.get('error') || params.get('error');
                 if (oauthError) {
                     clearStoredSignupAttribution();
+                    trackAuth('journey_error', 'google', oauthError === 'access_denied' ? 'cancelled' : 'error', oauthError === 'access_denied' ? 'cancelled' : 'unknown');
                     try { history.replaceState(null, '', location.pathname + location.search); } catch (_) { /* noop */ }
                     showForm('signin');
                     setStatus('error', oauthError === 'access_denied'
@@ -1189,10 +1254,12 @@
                     // Still no user: keep them here with a retry instead of shipping a
                     // user-less session into the app (which would bounce to the landing).
                     setStatus('error', "We couldn't finish signing you in — check your connection and reload to retry.");
+                    trackAuth('journey_error', 'google', 'error', 'network');
                     return;
                 }
                 await ensureProfile();
                 await capturePostAuthAttribution();
+                completeAuthFunnel('google');
                 // If the account now carries both a Google and an email identity,
                 // Google was just linked onto a pre-existing account — reassure the
                 // user rather than showing a generic "Signed in".
@@ -1352,12 +1419,13 @@
             }
         }
 
-        async function withBusy(form, action) {
+        async function withBusy(form, action, onError) {
             const buttons = Array.from(form.querySelectorAll('button'));
             buttons.forEach(button => button.disabled = true);
             try {
                 await action();
             } catch (error) {
+                try { onError?.(error); } catch (_) { /* analytics must never block auth */ }
                 setStatus('error', authErrorMessage(error));
             } finally {
                 buttons.forEach(button => button.disabled = false);
@@ -1519,6 +1587,8 @@
                 return;
             }
             clearAuthHelp();
+            setAuthFunnelIntent(opts.signup ? 'signup' : 'login');
+            trackAuth(opts.signup ? 'signup_started' : 'login_started', 'email_magic_link', 'pending');
             setStatus('info', 'Sending your secure link…');
             // createUser:true for sign-up (the link provisions the account); false for
             // sign-in. Stay neutral on the result for anti-enumeration.
@@ -1530,7 +1600,9 @@
                     createUser: opts.createUser === true,
                     data: attribution ? signupMetadata(attribution) : undefined
                 });
-            } catch (_) { /* neutral */ }
+            } catch (error) {
+                trackAuth('journey_error', 'email_magic_link', 'error', authFailureFamily(error));
+            }
             setStatus('success', opts.signup
                 ? 'Check your email for a secure link to finish creating your account.'
                 : 'If that email has a Norva account, we sent a sign-in link. Check your inbox.');

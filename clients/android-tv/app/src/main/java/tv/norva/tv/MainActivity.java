@@ -37,6 +37,12 @@ import android.widget.ProgressBar;
 import android.widget.TextView;
 
 import androidx.core.content.ContextCompat;
+import androidx.webkit.JavaScriptReplyProxy;
+import androidx.webkit.WebMessageCompat;
+import androidx.webkit.WebViewCompat;
+import androidx.webkit.WebViewFeature;
+
+import tv.norva.analytics.NativeClarity;
 
 import java.lang.ref.WeakReference;
 import java.util.UUID;
@@ -127,6 +133,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        NativeClarity.configure(BuildConfig.CLARITY_PROJECT_ID, "android_tv", BuildConfig.VERSION_NAME, BuildConfig.DEBUG ? "qa" : "production");
         currentRef = new WeakReference<>(this);
         debugBundledDpadAssets =
                 (getApplicationInfo().flags & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
@@ -142,6 +149,10 @@ public class MainActivity extends Activity {
         buildErrorPanel();
         buildSplash();
         buildExitPanel();
+        NativeClarity.registerSensitiveView(setupPanel);
+        NativeClarity.registerSensitiveView(advancedPanel);
+        NativeClarity.registerSensitiveView(urlInput);
+        NativeClarity.applyStoredConsent(this);
         showSplash();
         registerPlayerRecoveryBridge();
         registerPlaybackAuthBridge();
@@ -647,8 +658,31 @@ public class MainActivity extends Activity {
             }
         });
 
+        installOriginScopedNativeAnalyticsChannel();
+
         root.addView(webView, 0, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+    }
+
+    /** Accept only bounded analytics messages from Norva's HTTPS main frame. */
+    private void installOriginScopedNativeAnalyticsChannel() {
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) return;
+        WebViewCompat.addWebMessageListener(webView, "NorvaAnalyticsNative",
+                java.util.Collections.singleton("https://norva.tv"),
+                new WebViewCompat.WebMessageListener() {
+                    @Override
+                    public void onPostMessage(WebView view, WebMessageCompat message,
+                                              Uri sourceOrigin, boolean isMainFrame,
+                                              JavaScriptReplyProxy replyProxy) {
+                        if (!isMainFrame || sourceOrigin == null || view == null
+                                || !isTrustedCloudUrl(sourceOrigin.toString())
+                                || !isTrustedCloudUrl(view.getUrl())) return;
+                        NativeClarity.handleMessage(
+                                MainActivity.this,
+                                message == null ? null : message.getData(),
+                                null);
+                    }
+                });
     }
 
     private WebResourceResponse bundledDpadAssetForAudit(WebResourceRequest request) {
@@ -1579,6 +1613,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        NativeClarity.event("app_open");
         // Web app already loaded and MainActivity came back to front (e.g. the native
         // player was killed by the system): flush any pending native progress now.
         if (webAppReady) flushPendingNativeProgress();

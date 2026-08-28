@@ -135,7 +135,8 @@ test('passwordless UI remains account-neutral and does not claim transport ackno
   const end = account.indexOf('function sanitizeReturnTo', start);
   const flow = account.slice(start, end);
 
-  assert.match(flow, /catch \(_\) \{ \/\* neutral \*\/ \}/);
+  assert.match(flow, /catch \(error\) \{[\s\S]*trackAuth\('journey_error', 'email_magic_link'[\s\S]*authFailureFamily\(error\)/);
   assert.match(flow, /If that email has a Norva account, we sent a sign-in link/);
   assert.doesNotMatch(flow, /Resend|delivered|provider ID|delivery receipt/i);
+  assert.doesNotMatch(flow, /trackAuth\([^)]*(?:email|user|account|source)Id/i);
 });

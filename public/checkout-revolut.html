@@ -167,8 +167,10 @@
     }
   </style>
   <link rel="stylesheet" href="/css/commerce.css?v=3">
-  <script src="/js/marketing-config.js?v=1"></script>
+  <script src="/js/marketing-config.js?v=2"></script>
   <script defer src="/js/marketing.js?v=2"></script>
+  <script defer src="/js/native-analytics.js?v=2"></script>
+  <script defer src="/js/product-analytics.js?v=2"></script>
   <script defer src="/js/consent-banner.js?v=1"></script>
 </head>
 <body class="commerce-page commerce-checkout">
@@ -403,6 +405,15 @@
       let publicCatalogAbandoned = false;
       let checkoutCountdownTimer = 0;
       let checkoutPromo = null;
+      function trackCheckout(event, details) {
+        window.NorvaTrackProduct?.(event, Object.assign({
+          plan: plan,
+          period: period,
+          placement: placement,
+          journey: 'subscription',
+          step: 'checkout'
+        }, details || {}));
+      }
       function currencyLabel(code) { return String(code || '').toUpperCase() === 'USD' ? 'US$' : String(code || '').toUpperCase(); }
       function displayMoney(value) { return currencyLabel(displayCurrency) + value; }
       function trialChargeDate() {
@@ -891,6 +902,7 @@
           await new Promise(function (res) { setTimeout(res, 1400); });
         }
         if (!done) {
+          trackCheckout('journey_error', { outcome: 'pending', failureFamily: 'entitlement_pending' });
           finishing = false;
           loading.classList.add('hide');
           setStatus(checkoutKind === 'resubscribe'
@@ -928,6 +940,7 @@
         }
         success.querySelector('p').textContent = successMessage;
         success.classList.add('show');
+        trackCheckout('checkout_completed', { outcome: 'success' });
         if (window.NorvaMarketing && typeof window.NorvaMarketing.track === 'function') {
           if (checkoutKind === 'trial_setup') {
             window.NorvaMarketing.track('start_trial', {
@@ -952,7 +965,6 @@
         payBtn.disabled = submitting || !cardField || !cardValid || !commercialQuote;
       }
       function trackBeginCheckoutOnce(data, quote) {
-        if (!(window.NorvaMarketing && typeof window.NorvaMarketing.track === 'function')) return;
         const orderId = String((data && data.order_id) || '');
         if (!orderId) return;
         const dedupeKey = 'norva-marketing-begin-checkout:' + orderId;
@@ -961,15 +973,18 @@
         } catch (_) {
           try { if (sessionStorage.getItem(dedupeKey)) return; } catch (_) { /* continue */ }
         }
-        window.NorvaMarketing.track('begin_checkout', {
-          currency: quote.currency,
-          value: quote.amountMinor / 100,
-          plan: quote.plan,
-          period: quote.period,
-          checkout_kind: quote.kind,
-          transaction_id: orderId,
-          price_source: 'revolut_order_snapshot'
-        });
+        if (window.NorvaMarketing && typeof window.NorvaMarketing.track === 'function') {
+          window.NorvaMarketing.track('begin_checkout', {
+            currency: quote.currency,
+            value: quote.amountMinor / 100,
+            plan: quote.plan,
+            period: quote.period,
+            checkout_kind: quote.kind,
+            transaction_id: orderId,
+            price_source: 'revolut_order_snapshot'
+          });
+        }
+        trackCheckout('checkout_started', { outcome: 'pending' });
         try { localStorage.setItem(dedupeKey, String(Date.now())); }
         catch (_) { try { sessionStorage.setItem(dedupeKey, String(Date.now())); } catch (_) { /* analytics only */ } }
       }
@@ -1000,6 +1015,7 @@
             location.replace('/account.html?returnTo=' + encodeURIComponent(location.pathname + location.search));
             return;
           }
+          trackCheckout('journey_error', { outcome: 'error', failureFamily: 'billing_unavailable' });
           setStatus('The exact plan, price and renewal terms could not be verified. No payment can be submitted. Please retry.', true);
           addRetry();
           return;
@@ -1038,6 +1054,7 @@
             // address elsewhere to pass on submit — so the field must stay visible.
             onSuccess: function () { finish(currentOrderId); },
             onError: function (err) {
+              trackCheckout('journey_error', { outcome: 'error', failureFamily: 'payment_declined' });
               submitting = false;
               syncPayAvailability();
               setStatus('Payment could not be completed. Please check your card and try again.', true);
@@ -1054,6 +1071,7 @@
               syncPayAvailability();
             },
             onCancel: function () {
+              trackCheckout('journey_error', { outcome: 'cancelled', failureFamily: 'cancelled' });
               submitting = false;
               syncPayAvailability();
               setStatus('Payment was canceled. Your card was not charged; you can try again when ready.', false);
@@ -1068,6 +1086,7 @@
           syncPayAvailability();
           loading.classList.add('hide');
           // Widget failed to load → fall back to Revolut's hosted page.
+          trackCheckout('journey_error', { outcome: 'error', failureFamily: 'billing_unavailable' });
           setStatus('Secure card form could not load. Use the full secure payment page below.', true);
           if (data.checkout_url) { fallback.hidden = false; }
         }
@@ -1107,6 +1126,7 @@
             savePaymentMethodFor: 'merchant',
           });
         } catch (error) {
+          trackCheckout('journey_error', { outcome: 'error', failureFamily: 'payment_declined' });
           submitting = false;
           syncPayAvailability();
           setStatus('Payment could not start. Please review your card details and try again.', true);

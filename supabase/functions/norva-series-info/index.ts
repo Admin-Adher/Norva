@@ -19,6 +19,11 @@ import {
   BoundedProviderResponseError,
   fetchBoundedProviderJson,
 } from "../_shared/bounded-provider-response.mjs";
+import {
+  bindCatalogVisibilityEpoch as bindCatalogVisibilityEpochShared,
+  catalogVisibilityEpochHeaders,
+  finalizeCatalogVisibilityResponse,
+} from "../_shared/catalog-visibility-response.mjs";
 
 type JsonRecord = Record<string, unknown>;
 type RuntimeConfig = {
@@ -70,7 +75,6 @@ if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
   auth: { autoRefreshToken: false, persistSession: false },
 });
-const catalogVisibilityEpochs = new WeakMap<Request, string>();
 
 let runtimeConfigCache: { value: RuntimeConfig; expiresAt: number } | null = null;
 
@@ -85,6 +89,15 @@ Deno.serve(async (req) => {
     return new Response(null, { status: 204, headers: corsHeaders(req) });
   }
 
+  return await finalizeCatalogVisibilityResponse(
+    req,
+    await handleRequest(req),
+    supabase,
+    { service: "norva-series-info", corsHeaders },
+  );
+});
+
+async function handleRequest(req: Request): Promise<Response> {
   try {
     const url = new URL(req.url);
     const segments = routeSegments(url.pathname);
@@ -98,6 +111,7 @@ Deno.serve(async (req) => {
     }
     if (req.method === "GET" && segments[0] === "sources" && segments[2] === "series-info") {
       const identity = await requireIdentity(req, supabase);
+      await bindCatalogVisibilityEpoch(req, identity.userId, supabase);
       const sourceId = segments[1];
       const sourceSnapshot = await assertVisibleSource(sourceId, identity.userId, supabase);
       const seriesInfoResult = await getXtreamSeriesInfo(
@@ -132,7 +146,6 @@ Deno.serve(async (req) => {
       // hid A during that work must win over this response, even if the payload
       // itself was already fetched and sanitized.
       await assertSourceSnapshotCurrent(sourceId, identity.userId, sourceSnapshot, supabase);
-      catalogVisibilityEpochs.set(req, sourceSnapshot.userVisibilityEpoch);
       return json(req, originalLanguage ? { ...seriesInfo, original_language: originalLanguage } : seriesInfo);
     }
     throw new HttpError(404, "Route not found");
@@ -148,7 +161,7 @@ Deno.serve(async (req) => {
     console.error("[norva-series-info]", status, code ?? "UNCLASSIFIED");
     return json(req, { error: message, ...(code ? { code } : {}) }, status);
   }
-});
+}
 
 const SERIES_INFO_PUBLIC_ERROR_CODES = new Set([
   "SOURCE_CATALOG_NOT_VISIBLE",
@@ -187,6 +200,17 @@ async function requireIdentity(req: Request, db: SupabaseClient): Promise<CloudI
   if (deviceError) throwDb(deviceError, "Unable to verify device token");
   if (!device) throw new HttpError(401, "Invalid bearer token");
   return { userId: device.user_id, deviceId: device.id };
+}
+
+async function bindCatalogVisibilityEpoch(req: Request, userId: string, db: SupabaseClient) {
+  try {
+    await bindCatalogVisibilityEpochShared(req, userId, db);
+  } catch (_) {
+    console.warn("[norva-series-info] catalog visibility epoch unavailable");
+    throw new HttpError(503, "Catalog visibility is temporarily unavailable", {
+      code: "CATALOG_VISIBILITY_UNAVAILABLE",
+    });
+  }
 }
 
 async function registerSeriesEpisodes(
@@ -956,7 +980,7 @@ function corsHeaders(req: Request) {
     "Access-Control-Allow-Origin": allowOrigin,
     "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-norva-profile-id",
     "Access-Control-Allow-Methods": "GET,OPTIONS",
-    "Access-Control-Expose-Headers": "x-norva-visibility-epoch",
+    "Access-Control-Expose-Headers": "x-norva-visibility-epoch, x-norva-user-visibility-epoch, x-norva-global-visibility-epoch, x-norva-catalog-cache-contract",
     "Access-Control-Max-Age": "86400",
     Vary: "Origin",
   };
@@ -987,11 +1011,6 @@ function json(req: Request, data: unknown, status = 200) {
       "Cache-Control": "no-store",
     },
   });
-}
-
-function catalogVisibilityEpochHeaders(req: Request) {
-  const epoch = catalogVisibilityEpochs.get(req);
-  return epoch ? { "X-Norva-Visibility-Epoch": epoch } : {};
 }
 
 function recordOrEmpty(value: unknown): JsonRecord {

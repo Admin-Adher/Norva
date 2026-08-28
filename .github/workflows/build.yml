@@ -92,7 +92,7 @@ jobs:
 
       - name: Build Android TV debug APK
         working-directory: clients/android-tv
-        run: gradle :app:lintDebug :app:assembleDebug --no-daemon
+        run: gradle :app:testDebugUnitTest :app:lintDebug :app:assembleDebug --no-daemon
 
       - name: Upload Android TV APK artifact
         uses: actions/upload-artifact@v4
@@ -145,7 +145,7 @@ jobs:
 
       - name: Build Android Phone debug APK
         working-directory: clients/android-phone
-        run: gradle :app:lintDebug :app:assembleDebug --no-daemon --stacktrace
+        run: gradle :app:testDebugUnitTest :app:lintDebug :app:assembleDebug --no-daemon --stacktrace
 
       - name: Upload Android Phone APK artifact
         uses: actions/upload-artifact@v4

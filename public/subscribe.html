@@ -244,8 +244,10 @@
     }
   </style>
   <link rel="stylesheet" href="/css/commerce.css?v=3">
-  <script src="/js/marketing-config.js?v=1"></script>
+  <script src="/js/marketing-config.js?v=2"></script>
   <script defer src="/js/marketing.js?v=2"></script>
+  <script defer src="/js/native-analytics.js?v=2"></script>
+  <script defer src="/js/product-analytics.js?v=2"></script>
   <script defer src="/js/consent-banner.js?v=1"></script>
 </head>
 <body class="commerce-page commerce-subscribe">
@@ -469,6 +471,14 @@
       let currentPlan = null;     // 'plus' | 'family' | null
       let currentPeriod = null;   // 'monthly' | 'annual' | null (web rail only)
       const tvPurchaseOnly = Boolean(window.NorvaBilling && window.NorvaBilling.isTvShell && window.NorvaBilling.isTvShell());
+
+      function trackSubscription(event, details) {
+        window.NorvaTrackProduct?.(event, Object.assign({
+          placement: paywallPlacement || 'subscribe_plans',
+          journey: 'subscription',
+          step: event === 'plan_selected' ? 'pricing' : 'checkout'
+        }, details || {}));
+      }
       const nativeOffersRequired = Boolean(!tvPurchaseOnly && window.NorvaBilling
         && window.NorvaBilling.isNative && window.NorvaBilling.isNative());
       const webPricesRequired = Boolean(!tvPurchaseOnly && !nativeOffersRequired
@@ -984,7 +994,10 @@
       }
 
       document.querySelectorAll('.period').forEach(function (b) {
-        b.addEventListener('click', function () { applyPeriod(b.dataset.period); });
+        b.addEventListener('click', function () {
+          applyPeriod(b.dataset.period);
+          trackSubscription('billing_period_changed', { period: b.dataset.period, step: 'pricing' });
+        });
       });
 
       // Codes worth a second attempt: the store or the bridge was busy or slow,
@@ -1132,6 +1145,11 @@
           setStatus('Open norva.tv on your phone or computer and sign in with this same account to choose a plan.', false);
           return;
         }
+        trackSubscription('plan_selected', {
+          plan: card.dataset.plan,
+          period: period,
+          outcome: 'pending'
+        });
         const uid = appUserId();
         if (!uid) {
           window.location.href = '/account.html?returnTo=' + encodeURIComponent(window.location.pathname + window.location.search);
@@ -1139,14 +1157,17 @@
         }
         if (!window.NorvaBilling.hasNativeBilling() && !window.NorvaBilling.isWebBillingConfigured()
             && !window.NorvaBilling.isRevolutEnabled()) {
+          trackSubscription('journey_error', { outcome: 'error', failureFamily: 'billing_unavailable' });
           setStatus('Billing is not configured yet on this platform. Please try again once setup is complete.', true);
           return;
         }
         if (nativeOffersRequired && !nativeOffersReady) {
+          trackSubscription('journey_error', { outcome: 'error', failureFamily: 'billing_unavailable' });
           setStatus('Current Google Play prices are still loading or unavailable. No purchase has started.', true);
           return;
         }
         if (webPricesRequired && !webPricesReady) {
+          trackSubscription('journey_error', { outcome: 'error', failureFamily: 'billing_unavailable' });
           setStatus('Current web prices are unavailable. No checkout has started. Please retry when the exact price can be loaded.', true);
           return;
         }
@@ -1157,6 +1178,7 @@
             || selectedOffer.packageId !== packageId
             || selectedOffer.productId !== card.dataset.product
             || selectedOffer.supported !== true)) {
+          trackSubscription('journey_error', { outcome: 'error', failureFamily: 'invalid_state' });
           setStatus('The selected Google Play offer is no longer current. Reload prices before purchasing.', true);
           return;
         }
@@ -1165,6 +1187,11 @@
         button.setAttribute('aria-busy', 'true');
         button.textContent = 'Opening checkout…';
         try {
+          trackSubscription('checkout_started', {
+            plan: card.dataset.plan,
+            period: period,
+            outcome: 'pending'
+          });
           if (nativeOffersRequired && window.NorvaMarketing && typeof window.NorvaMarketing.track === 'function') {
             const offer = selectedOffer;
             window.NorvaMarketing.track('begin_checkout', {
@@ -1185,13 +1212,28 @@
             placement: paywallPlacement,
             returnTo: returnTo, // Revolut web → carried through so the return page can go back here.
           });
+          const completedStatuses = new Set(['plan_changed', 'plan_scheduled', 'unchanged']);
+          const checkoutCompleted = completedStatuses.has(result && result.status)
+            || Boolean(result && result.purchaseVerified === true && result.entitlementActive === true);
+          if (checkoutCompleted) {
+            trackSubscription('checkout_completed', {
+              plan: card.dataset.plan,
+              period: period,
+              outcome: 'success'
+            });
+          } else if (result && result.status !== 'redirect') {
+            trackSubscription('journey_error', { outcome: 'pending', failureFamily: 'entitlement_pending' });
+          }
           showTrialConfirmation(result, card, selectedOffer);
         } catch (e) {
           if (e && e.code === 'cancelled') {
+            trackSubscription('journey_error', { outcome: 'cancelled', failureFamily: 'cancelled' });
             setStatus('Checkout cancelled. You can pick a plan whenever you\'re ready.', false);
           } else if (e && (e.code === 'not_configured' || e.code === 'unavailable')) {
+            trackSubscription('journey_error', { outcome: 'error', failureFamily: 'billing_unavailable' });
             setStatus('Billing is not available on this platform yet.', true);
           } else {
+            trackSubscription('journey_error', { outcome: 'error', failureFamily: 'unknown' });
             setStatus('Something went wrong starting the purchase. Try again.', true);
           }
           button.disabled = false;
