@@ -124,7 +124,7 @@
 <p>Artwork can depend on cache, network, source response, image processing, and rendering. Search adds remote input, text update, debounce, query, result delivery, and layout. Time those stages separately.</p>
 <p>Do not infer that blank artwork proves network failure.</p>
 <h2 id="layer-4-app-lifecycle">Layer 4: app lifecycle</h2>
-<p>Cold launch, warm launch, foreground resume, and screen revisit are different states. Measure cold and warm launches separately. Record how the state was established.</p>
+<p>Cold launch, warm launch, foreground resume, and screen revisit are different states. <a href="/blog/cold-start-or-warm-start-measure-the-right-tv-launch/">Measure cold and warm launches separately</a>. Record how the state was established.</p>
 <p>Do not call a cached screen a fresh launch.</p>
 <h2 id="original-evidence-layer-map">Original evidence: layer map</h2>
 <div class="table-wrap"><table>
@@ -167,7 +167,16 @@
       <h2>Sources</h2>
       <ul><li><a href="https://www.w3.org/TR/performance-timeline/" target="_blank" rel="noopener">https://www.w3.org/TR/performance-timeline/</a></li><li><a href="https://www.w3.org/TR/longtasks-1/" target="_blank" rel="noopener">https://www.w3.org/TR/longtasks-1/</a></li><li><a href="https://www.w3.org/TR/media-capabilities/" target="_blank" rel="noopener">https://www.w3.org/TR/media-capabilities/</a></li></ul>
     </section>
-      
+      <section class="related">
+      <h2>Related reading</h2>
+      <div class="related-grid">
+        <a class="card" href="/blog/cold-start-or-warm-start-measure-the-right-tv-launch/">
+          <span class="tag">Smart TV Performance</span>
+          <div class="card-title">Cold Start or Warm Start: Measure the Right TV Launch</div>
+          <p>Define state before timing. A cold launch starts from a documented not-running state; a warm launch reuses a retained app state; resume returns from background; a screen revisit stays inside the app. Measure remote action to first visible frame and to usable screen separately, with fixed version, network, source, and trial order.</p>
+        </a>
+      </div>
+    </section>
     </article>
   </main>
   <footer class="blog-footer">

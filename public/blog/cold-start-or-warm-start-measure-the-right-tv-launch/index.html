@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#05080f">
+  <title>Cold vs Warm Smart TV App Launch | Norva Blog</title>
+  <meta name="description" content="Define cold, warm, resume, and TV screen-revisit states, then measure action-to-usable-screen timing with fixed device, version, network, source, order, and uncertainty.">
+  <link rel="canonical" href="https://norva.tv/blog/cold-start-or-warm-start-measure-the-right-tv-launch/">
+  <meta name="robots" content="index,follow">
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/css/blog.css?v=1">
+  <meta property="og:type" content="article">
+  <meta property="og:site_name" content="Norva">
+  <meta property="og:title" content="Cold vs Warm Smart TV App Launch | Norva Blog">
+  <meta property="og:description" content="Define cold, warm, resume, and TV screen-revisit states, then measure action-to-usable-screen timing with fixed device, version, network, source, order, and uncertainty.">
+  <meta property="og:url" content="https://norva.tv/blog/cold-start-or-warm-start-measure-the-right-tv-launch/">
+  <meta property="og:image" content="https://norva.tv/img/devices/norva-device-tv.webp">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Cold vs Warm Smart TV App Launch | Norva Blog">
+  <meta name="twitter:description" content="Define cold, warm, resume, and TV screen-revisit states, then measure action-to-usable-screen timing with fixed device, version, network, source, order, and uncertainty.">
+  <meta name="twitter:image" content="https://norva.tv/img/devices/norva-device-tv.webp">
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "headline": "Cold Start or Warm Start: Measure the Right TV Launch",
+  "description": "Define cold, warm, resume, and TV screen-revisit states, then measure action-to-usable-screen timing with fixed device, version, network, source, order, and uncertainty.",
+  "inLanguage": "en",
+  "datePublished": "2026-08-27T20:00:00+02:00",
+  "dateModified": "2026-08-27T20:00:00+02:00",
+  "author": {
+    "@type": "Organization",
+    "name": "Norva"
+  },
+  "publisher": {
+    "@type": "Organization",
+    "name": "Norva",
+    "logo": {
+      "@type": "ImageObject",
+      "url": "https://norva.tv/img/norva-app-icon-96.png"
+    }
+  },
+  "image": [
+    "https://norva.tv/img/devices/norva-device-tv.webp"
+  ],
+  "mainEntityOfPage": {
+    "@type": "WebPage",
+    "@id": "https://norva.tv/blog/cold-start-or-warm-start-measure-the-right-tv-launch/"
+  }
+}
+  </script>
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    {
+      "@type": "ListItem",
+      "position": 1,
+      "name": "Home",
+      "item": "https://norva.tv/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 2,
+      "name": "Blog",
+      "item": "https://norva.tv/blog/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 3,
+      "name": "Cold Start or Warm Start: Measure the Right TV Launch",
+      "item": "https://norva.tv/blog/cold-start-or-warm-start-measure-the-right-tv-launch/"
+    }
+  ]
+}
+  </script>
+  <script src="/js/marketing-config.js?v=1"></script>
+  <script defer src="/js/marketing.js?v=1"></script>
+  <script defer src="/js/consent-banner.js?v=1"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="blog-nav">
+    <a class="brand" href="/" aria-label="Norva home">
+      <img src="/img/norva-app-icon-96.png" width="34" height="34" alt="" decoding="async">
+      <span>Norva</span>
+    </a>
+    <nav class="nav-right" aria-label="Primary">
+      <a href="/blog/">Blog</a>
+      <a class="hide-sm" href="/#how-it-works">How it works</a>
+      <a class="cta" href="/account.html?returnTo=%2Fapp%23home" data-cta="blog-nav" data-auth-action>Start free trial</a>
+    </nav>
+  </header>
+  <main id="main-content">
+    <nav class="breadcrumb" aria-label="Breadcrumb"><a href="/">Home</a><span class="sep">›</span><a href="/blog/">Blog</a><span class="sep">›</span><span aria-current="page">Cold Start or Warm Start: Measure the Right TV Launch</span></nav>
+    <article>
+      <div class="article-meta">
+        <span class="tag">Smart TV Performance</span>
+        <span>By Norva Editorial Team</span>
+        <span class="dot">·</span>
+        <time datetime="2026-08-27T20:00:00+02:00">27 August 2026</time>
+        <span class="dot">·</span>
+        <span>4 min read</span>
+      </div>
+      <h1>Cold Start or Warm Start: Measure the Right TV Launch</h1>
+      <p class="lede">Define state before timing. A cold launch starts from a documented not-running state; a warm launch reuses a retained app state; resume returns from background; a screen revisit stays inside the app. Measure remote action to first visible frame and to usable screen separately, with fixed version, network, source, and trial order.</p>
+      <nav class="toc" aria-label="On this page">
+      <strong>On this page</strong>
+      <ul><li><a href="#define-four-states">Define four states</a></li><li><a href="#define-two-finish-points">Define two finish points</a></li><li><a href="#fix-context">Fix context</a></li><li><a href="#original-evidence-launch-protocol">Original evidence: launch protocol</a></li><li><a href="#establish-cold-state-safely">Establish cold state safely</a></li><li><a href="#establish-warm-state">Establish warm state</a></li><li><a href="#reverse-order-and-rest">Reverse order and rest</a></li><li><a href="#interpret-differences">Interpret differences</a></li><li><a href="#compare-after-change">Compare after change</a></li><li><a href="#control-trial-order-and-readiness">Control trial order and readiness</a></li><li><a href="#frequently-asked-questions">Frequently asked questions</a></li><li><a href="#your-next-step">Your next step</a></li><li><a href="#sources">Sources</a></li></ul>
+    </nav>
+      <blockquote><strong>In short:</strong> Define state before timing. A cold launch starts from a documented not-running state; a warm launch reuses a retained app state; resume returns from background; a screen revisit stays inside the app. Measure remote action to first visible frame and to usable screen separately, with fixed version, network, source, and trial order.</blockquote>
+<p>TV operating systems may manage processes invisibly, so use platform documentation and mark uncertain state.</p>
+<h2 id="define-four-states">Define four states</h2>
+<p>Write exact steps for cold, warm, resume, and revisit. Closing a screen may not stop the app, while a system restart may initialize much more than the app. Never infer process state from a logo alone.</p>
+<p><a href="/blog/smart-tv-media-app-performance-a-layer-by-layer-guide/">The layer guide</a> separates lifecycle from network and rendering.</p>
+<h2 id="define-two-finish-points">Define two finish points</h2>
+<p>First visible frame can appear before focus works, artwork loads, or navigation responds. Record “first app frame” and “usable screen” separately. Add “stable artwork” only when that is the question.</p>
+<p>Do not stop the clock at the most favorable milestone.</p>
+<h2 id="fix-context">Fix context</h2>
+<p>Record TV model, OS, app version, input source, power state, output, wired or Wi-Fi path, time, account-safe session, source availability, and background activity. Keep network and source state comparable.</p>
+<p>Manual timing should state reaction-time uncertainty.</p>
+<h2 id="original-evidence-launch-protocol">Original evidence: launch protocol</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>Trial</th><th>Prepared state</th><th>Start event</th><th>First frame</th><th>Usable screen</th><th>Artwork stable</th><th>Context/notes</th></tr></thead>
+<tbody><tr><td>Cold A</td><td>Documented</td><td>Remote action</td><td>Time</td><td>Time</td><td>Time</td><td>Values</td></tr><tr><td>Warm A</td><td>Documented</td><td>Same</td><td>Time</td><td>Time</td><td>Time</td><td>Values</td></tr><tr><td>Warm B</td><td>Documented</td><td>Same</td><td>Time</td><td>Time</td><td>Time</td><td>Values</td></tr><tr><td>Cold B</td><td>Documented</td><td>Same</td><td>Time</td><td>Time</td><td>Time</td><td>Values</td></tr></tbody>
+</table></div>
+<p>Report all valid trials, not only the fastest.</p>
+<h2 id="establish-cold-state-safely">Establish cold state safely</h2>
+<p>Use only official app-stop, TV restart, or power guidance. Do not pull power, use service menus, or clear data merely to create cold state. If the platform cannot verify not-running state, call it “post-restart launch.”</p>
+<p>Safety and device integrity take precedence over experimental purity.</p>
+<h2 id="establish-warm-state">Establish warm state</h2>
+<p>Launch, reach the same screen, exit through the documented control, wait a fixed short interval, and relaunch. Record whether the screen, focus, or artwork persisted.</p>
+<p>Warm state can change between trials under memory pressure, so preserve unexpected reloads.</p>
+<h2 id="reverse-order-and-rest">Reverse order and rest</h2>
+<p>Use cold-warm-warm-cold where practical, with fixed rest intervals. Order reveals caching, thermal, network, or source drift. Do not perform dozens of launches; predefine a small count.</p>
+<p>W3C Performance Timeline and User Timing provide web timing concepts where instrumented; they do not guarantee TV telemetry.</p>
+<h2 id="interpret-differences">Interpret differences</h2>
+<p>Warm faster than cold can reflect retained state or cached resources, but does not quantify which cache. Warm behaving like cold may reflect app termination, update, memory pressure, or implementation choice.</p>
+<p>Memory-pressure clues require official warnings or repeated state loss, not one launch.</p>
+<h2 id="compare-after-change">Compare after change</h2>
+<p>After an app update, repeat the same protocol and version context. The TV app update guide preserves before/after evidence. Do not compare an old cold launch with a new warm launch.</p>
+<p>Norva's TV launch behavior is device- and version-specific and must be verified officially.</p>
+<h2 id="control-trial-order-and-readiness">Control trial order and readiness</h2>
+<p>Cold trials often happen first, so startup maintenance, network reconnection, or observer preparation can unfairly penalize them. Alternate the order across sessions when the platform permits a documented state, and wait the same fixed interval before every start. Record whether the home screen, remote, network, and output were already ready.</p>
+<p>Define "usable" before timing: for example, the intended screen is visible, focus responds once, and no blocking overlay remains. Do not end timing merely when a logo appears. Report the median only alongside the individual values and range; a single summary can hide one stalled or failed launch that matters more than a small average difference.</p>
+<h2 id="frequently-asked-questions">Frequently asked questions</h2>
+<h3 id="is-tv-power-on-the-same-as-app-cold-start">Is TV power-on the same as app cold start?</h3>
+<p>No. It includes system startup and may restore app state differently.</p>
+<h3 id="how-many-runs-are-needed">How many runs are needed?</h3>
+<p>Use several predefined runs sufficient to show range without stressing the device or source.</p>
+<h3 id="should-artwork-completion-define-launch">Should artwork completion define launch?</h3>
+<p>Only if artwork readiness is the task; keep first frame and usable focus separate.</p>
+<h2 id="your-next-step">Your next step</h2>
+<p><a href="https://norva.tv/#features" target="_blank" rel="noopener">Explore Norva's playback features</a></p>
+<h2 id="sources">Sources</h2>
+<ul><li><a href="https://www.w3.org/TR/performance-timeline/" target="_blank" rel="noopener">W3C Performance Timeline</a></li><li><a href="https://www.w3.org/TR/user-timing/" target="_blank" rel="noopener">W3C User Timing</a></li><li><a href="https://www.w3.org/TR/longtasks-1/" target="_blank" rel="noopener">W3C Long Tasks API</a></li></ul>
+      <section class="article-cta">
+      <a class="btn" href="https://norva.tv/#features" data-cta="blog-article">Explore Norva's Playback Features</a>
+    </section>
+      <section class="sources">
+      <h2>Sources</h2>
+      <ul><li><a href="https://www.w3.org/TR/performance-timeline/" target="_blank" rel="noopener">https://www.w3.org/TR/performance-timeline/</a></li><li><a href="https://www.w3.org/TR/user-timing/" target="_blank" rel="noopener">https://www.w3.org/TR/user-timing/</a></li><li><a href="https://www.w3.org/TR/longtasks-1/" target="_blank" rel="noopener">https://www.w3.org/TR/longtasks-1/</a></li></ul>
+    </section>
+      <section class="related">
+      <h2>Related reading</h2>
+      <div class="related-grid">
+        <a class="card" href="/blog/smart-tv-media-app-performance-a-layer-by-layer-guide/">
+          <span class="tag">Smart TV Performance</span>
+          <div class="card-title">Smart TV Media App Performance: A Layer-by-Layer Guide</div>
+          <p>Separate remote input, focus movement, interface rendering, artwork delivery, search, app lifecycle, storage, memory clues, network response, media capability, playback controls, and output. Time one observable event at a time on the exact TV, app, and version. A slow interface is not automatically a slow network or decoder.</p>
+        </a>
+      </div>
+    </section>
+    </article>
+  </main>
+  <footer class="blog-footer">
+    <div class="foot-inner">
+      <nav class="foot-links" aria-label="Footer">
+        <a href="/">Home</a>
+        <a href="/blog/">Blog</a>
+        <a href="/#features">Benefits</a>
+        <a href="/#pricing">Pricing</a>
+        <a href="/support.html?returnTo=%2Fblog%2F">Support</a>
+        <a href="/terms.html">Terms</a>
+        <a href="/privacy.html">Privacy</a>
+        <a href="/mentions-legales.html">Legal notice</a>
+      </nav>
+      <p class="disclaimer">&copy; 2026 Norva. Norva is a media player and organiser. It does not provide media. Use requires a compatible source you own or are authorised to access.</p>
+    </div>
+  </footer>
+</body>
+</html>
