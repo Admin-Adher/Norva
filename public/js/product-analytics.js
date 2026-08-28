@@ -8,31 +8,66 @@
   var consent = readStoredConsent();
   var clarityLoaded = false;
   var clarityScript = null;
-  var landingViewSent = false;
+  var sentPageEvents = new Set();
 
+  // The raw API vocabulary is intentionally broader than the 20 Smart Events
+  // configured in Clarity. The reusable 20-event funnel spine is exported
+  // below; supporting events stay available for diagnostics without consuming
+  // another Smart Event slot.
   var CLARITY_EVENTS = new Set([
-    'landing_view',
-    'hero_cta',
-    'nav_cta',
-    'store_cta_click',
-    'signup_started',
-    'pricing_view',
-    'billing_period_change',
-    'plan_cta',
-    'faq_open',
-    'demo_interaction',
-    'context_widget_cta',
-    'context_widget_action'
+    'app_open', 'landing_view', 'primary_cta_clicked', 'store_cta_clicked',
+    'signup_started', 'signup_completed', 'login_started', 'login_completed',
+    'pricing_viewed', 'plan_selected', 'checkout_started', 'checkout_completed',
+    'provider_connect_started', 'provider_connected', 'provider_access_opened',
+    'provider_access_saved', 'provider_action_required', 'provider_repair_started',
+    'provider_repair_succeeded', 'catalog_sync_started', 'catalog_ready',
+    'content_opened', 'playback_started', 'playback_first_frame',
+    'journey_retry', 'journey_error',
+    'billing_period_changed', 'faq_opened', 'demo_interaction',
+    'context_widget_action', 'context_widget_impression'
   ]);
 
-  var SAFE_TAGS = {
-    authenticated: 'visitor_state',
-    period: 'billing_period',
-    plan: 'selected_plan',
-    source: 'event_source',
-    target: 'event_target',
-    state: 'event_state'
-  };
+  var SMART_EVENT_SPINE = Object.freeze([
+    'app_open', 'primary_cta_clicked', 'signup_started', 'signup_completed',
+    'plan_selected', 'checkout_started', 'checkout_completed',
+    'provider_connect_started', 'provider_connected', 'provider_access_saved',
+    'provider_action_required', 'provider_repair_started', 'provider_repair_succeeded',
+    'catalog_sync_started', 'catalog_ready', 'content_opened',
+    'playback_started', 'playback_first_frame', 'journey_retry', 'journey_error'
+  ]);
+
+  var EVENT_ALIASES = Object.freeze({
+    hero_cta: 'primary_cta_clicked',
+    nav_cta: 'primary_cta_clicked',
+    context_widget_cta: 'primary_cta_clicked',
+    store_cta_click: 'store_cta_clicked',
+    pricing_view: 'pricing_viewed',
+    plan_cta: 'plan_selected',
+    begin_checkout: 'checkout_started',
+    start_trial: 'checkout_completed',
+    billing_period_change: 'billing_period_changed',
+    faq_open: 'faq_opened',
+    context_widget_message_view: 'context_widget_impression'
+  });
+
+  var TAG_RULES = Object.freeze({
+    authenticated: { key: 'visitor_state', values: ['signed_in', 'anonymous'] },
+    period: { key: 'billing_period', values: ['monthly', 'annual'] },
+    plan: { key: 'selected_plan', values: ['plus', 'family', 'unknown'] },
+    source: { key: 'event_source', values: ['landing', 'hero', 'nav', 'pricing', 'context_widget', 'manual', 'automatic', 'settings', 'onboarding', 'player', 'unknown'] },
+    target: { key: 'event_target', values: ['signup', 'login', 'pricing', 'android_mobile', 'android_tv', 'app', 'checkout', 'unknown'] },
+    state: { key: 'event_state', values: ['started', 'completed', 'ready', 'action_required', 'error', 'cancelled', 'unknown'] },
+    method: { key: 'auth_method', values: ['email_password', 'email_magic_link', 'google', 'unknown'] },
+    placement: { key: 'journey_entrypoint', values: ['landing', 'account', 'subscribe_plans', 'paywall', 'locked_profile', 'settings', 'onboarding', 'player', 'unknown'] },
+    journey: { key: 'journey_name', values: ['acquisition', 'subscription', 'provider_onboarding', 'provider_recovery', 'catalog', 'time_to_value', 'authentication', 'unknown'] },
+    step: { key: 'journey_step', values: ['landing', 'signup', 'login', 'pricing', 'checkout', 'provider_connect', 'provider_access', 'provider_repair', 'catalog_sync', 'content', 'playback', 'unknown'] },
+    outcome: { key: 'journey_outcome', values: ['success', 'error', 'cancelled', 'pending', 'retry', 'unknown'] },
+    failureFamily: { key: 'failure_family', values: ['credentials', 'provider_busy', 'provider_blocked', 'provider_unreachable', 'network', 'timeout', 'format', 'superseded', 'revision_conflict', 'invalid_state', 'billing_unavailable', 'payment_declined', 'entitlement_pending', 'cancelled', 'unknown'] },
+    catalogState: { key: 'catalog_state', values: ['none', 'syncing', 'ready', 'error', 'unknown'] },
+    providerAccessState: { key: 'provider_access_state', values: ['active', 'expiring', 'expected_expired', 'expired_confirmed', 'access_unavailable_confirmed', 'check_failed_temporary', 'restoring', 'unknown'] },
+    subscriptionState: { key: 'subscription_state', values: ['none', 'trialing', 'active', 'past_due', 'cancelled', 'unknown'] },
+    releaseChannel: { key: 'release_channel', values: ['production', 'qa', 'preview', 'unknown'] }
+  });
 
   function readStoredConsent() {
     try {
@@ -47,6 +82,18 @@
     if (typeof value === 'boolean') return value ? 'signed_in' : 'anonymous';
     if (typeof value !== 'string' && typeof value !== 'number') return '';
     return String(value).trim().slice(0, 80);
+  }
+
+  function normalizeToken(value) {
+    return String(value || '').trim().toLowerCase().replace(/[^a-z0-9_.-]+/g, '_').slice(0, 48);
+  }
+
+  function safeTagValue(rule, value) {
+    if (!rule) return '';
+    var normalized = typeof value === 'boolean'
+      ? (value ? 'signed_in' : 'anonymous')
+      : normalizeToken(value);
+    return rule.values.indexOf(normalized) !== -1 ? normalized : '';
   }
 
   function platformContext() {
@@ -71,6 +118,24 @@
   function isAllowedPath() {
     var allowed = Array.isArray(clarityCfg.allowedPaths) ? clarityCfg.allowedPaths : [];
     return allowed.indexOf(location.pathname || '/') !== -1;
+  }
+
+  function surfaceContext() {
+    var path = String(location.pathname || '/').toLowerCase();
+    if (path === '/' || path === '/landing.html') return 'landing';
+    if (path === '/account' || path === '/account.html') return 'account';
+    if (path === '/subscribe.html' || path === '/paywall.html') return 'pricing';
+    if (path === '/checkout-revolut.html') return 'checkout';
+    if (path === '/app' || path === '/app.html') return 'app';
+    if (path === '/subscription.html') return 'subscription';
+    return 'other';
+  }
+
+  function currentScreen() {
+    var surface = surfaceContext();
+    if (surface !== 'app') return surface;
+    var raw = String(location.hash || '#home').replace(/^#/, '').split(/[?&]/, 1)[0];
+    return normalizeToken(raw.split('/').filter(Boolean).slice(0, 2).join('_') || 'home');
   }
 
   function clarityEligible() {
@@ -108,11 +173,14 @@
 
   function applyBaseTags() {
     var context = platformContext();
-    setTag('norva_schema', analyticsCfg.schema || 'norva-product-analytics:v1');
+    setTag('norva_schema', analyticsCfg.schema || 'norva-product-analytics:v2');
     setTag('norva_platform', context.platform);
     setTag('norva_runtime', context.runtime);
     setTag('norva_viewport', context.viewport);
-    setTag('norva_surface', 'landing');
+    setTag('norva_surface', surfaceContext());
+    setTag('norva_screen', currentScreen());
+    setTag('funnel_version', analyticsCfg.funnelVersion || 'norva-funnel:v2');
+    setTag('release_channel', location.hostname === 'norva.tv' ? 'production' : 'qa');
   }
 
   function loadClarity() {
@@ -130,37 +198,60 @@
     clarityLoaded = true;
   }
 
+  function canonicalEvent(name) {
+    var raw = normalizeToken(name);
+    return EVENT_ALIASES[raw] || raw;
+  }
+
+  function safeDetails(details) {
+    var safe = {};
+    Object.keys(TAG_RULES).forEach(function (key) {
+      if (!details || details[key] === undefined) return;
+      var value = safeTagValue(TAG_RULES[key], details[key]);
+      if (value) safe[key] = value;
+    });
+    return safe;
+  }
+
   function track(name, params) {
-    var eventName = String(name || '').trim().slice(0, 64);
-    if (!eventName || consent !== 'granted') return;
-    if (eventName === 'landing_view') {
-      if (landingViewSent) return;
-      landingViewSent = true;
+    var originalName = normalizeToken(name);
+    var eventName = canonicalEvent(originalName);
+    if (!eventName || consent !== 'granted' || !CLARITY_EVENTS.has(eventName)) return false;
+    var details = params && typeof params === 'object' ? params : {};
+    var safeParams = safeDetails(details);
+    if (details.once === 'page' || ['landing_view', 'pricing_viewed', 'app_open'].indexOf(eventName) !== -1) {
+      var pageKey = eventName + ':' + surfaceContext();
+      if (sentPageEvents.has(pageKey)) return false;
+      sentPageEvents.add(pageKey);
     }
 
     if (window.NorvaMarketing && typeof window.NorvaMarketing.track === 'function') {
-      window.NorvaMarketing.track(eventName, params || {});
+      window.NorvaMarketing.track(eventName, safeParams);
     }
 
-    if (!CLARITY_EVENTS.has(eventName)) return;
-    loadClarity();
-    if (!clarityLoaded || typeof window.clarity !== 'function') return;
+    if (platformContext().nativeShell && window.NorvaNativeAnalytics
+        && typeof window.NorvaNativeAnalytics.track === 'function') {
+      return window.NorvaNativeAnalytics.track(eventName, safeParams);
+    }
 
-    Object.keys(SAFE_TAGS).forEach(function (key) {
-      if (!params || params[key] === undefined) return;
-      setTag(SAFE_TAGS[key], params[key]);
+    loadClarity();
+    if (!clarityLoaded || typeof window.clarity !== 'function') return false;
+
+    Object.keys(TAG_RULES).forEach(function (key) {
+      if (safeParams[key] === undefined) return;
+      var value = safeTagValue(TAG_RULES[key], safeParams[key]);
+      if (value) setTag(TAG_RULES[key].key, value);
     });
     setTag('last_product_event', eventName);
     window.clarity('event', eventName);
+    return true;
   }
 
   function setConsent(next) {
     consent = next === 'granted' ? 'granted' : 'denied';
     if (consent === 'granted') {
       loadClarity();
-      if (!landingViewSent && document.readyState !== 'loading') {
-        track('landing_view', { source: 'consent' });
-      }
+      publishPageLifecycle();
       return;
     }
     if (clarityLoaded) clarityConsent('denied');
@@ -172,18 +263,58 @@
     track(detail.event, detail);
   });
 
+  window.addEventListener('norva:product-event', function (event) {
+    var detail = event && event.detail;
+    if (!detail || typeof detail.event !== 'string') return;
+    track(detail.event, detail);
+  });
+
+  function publishPageLifecycle() {
+    if (consent !== 'granted') return;
+    var surface = surfaceContext();
+    setTag('norva_surface', surface);
+    setTag('norva_screen', currentScreen());
+    if (surface === 'landing') track('landing_view', { source: 'landing', once: 'page' });
+    if (surface === 'pricing') track('pricing_viewed', { journey: 'subscription', step: 'pricing', once: 'page' });
+    if (surface === 'app') track('app_open', { placement: 'unknown', once: 'page' });
+  }
+
+  function drainQueue() {
+    var queue = Array.isArray(window.NorvaProductAnalyticsQueue)
+      ? window.NorvaProductAnalyticsQueue.splice(0)
+      : [];
+    queue.forEach(function (item) {
+      if (!Array.isArray(item)) return;
+      track(item[0], item[1]);
+    });
+  }
+
   window.NorvaProductAnalytics = {
     init: loadClarity,
     track: track,
     setConsent: setConsent,
     context: platformContext,
-    isClarityEligible: clarityEligible
+    isClarityEligible: clarityEligible,
+    smartEventSpine: SMART_EVENT_SPINE,
+    surface: surfaceContext
   };
+
+  window.NorvaTrackProduct = track;
+
+  window.addEventListener('hashchange', function () {
+    if (consent !== 'granted') return;
+    setTag('norva_screen', currentScreen());
+  });
 
   if (consent === 'granted') {
     if (window.NorvaMarketing && typeof window.NorvaMarketing.setConsent === 'function') {
       window.NorvaMarketing.setConsent('granted');
     }
     loadClarity();
+    drainQueue();
+    publishPageLifecycle();
+  } else {
+    // Interactions that happened before consent are deliberately not replayed.
+    window.NorvaProductAnalyticsQueue = [];
   }
 }());

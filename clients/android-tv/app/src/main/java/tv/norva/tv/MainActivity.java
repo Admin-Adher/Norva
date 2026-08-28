@@ -133,7 +133,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        NativeClarity.configure(BuildConfig.CLARITY_PROJECT_ID, "android_tv", BuildConfig.VERSION_NAME);
+        NativeClarity.configure(BuildConfig.CLARITY_PROJECT_ID, "android_tv", BuildConfig.VERSION_NAME, BuildConfig.DEBUG ? "qa" : "production");
         currentRef = new WeakReference<>(this);
         debugBundledDpadAssets =
                 (getApplicationInfo().flags & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0

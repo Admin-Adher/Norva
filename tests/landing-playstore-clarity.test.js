@@ -19,7 +19,7 @@ test('landing exposes both shipped Play Store apps directly below the primary he
     assert.match(html, /data-store-platform="android_mobile"[\s\S]{0,900}data-store-platform="android_tv"/);
     assert.match(html, /Google Play \(opens in a new tab\)/);
 
-    const analytics = html.indexOf('/js/product-analytics.js?v=1');
+    const analytics = html.indexOf('/js/product-analytics.js?v=2');
     const consent = html.indexOf('/js/consent-banner.js?v=3');
     const landing = html.indexOf('/js/landing.js?v=29');
     assert.ok(analytics > 0 && analytics < consent && consent < landing,
@@ -46,8 +46,9 @@ function runAnalytics({ consent = 'granted', userAgent = 'Mozilla/5.0', pathname
     NORVA_MARKETING_CONFIG: {
       enabled: true,
       productAnalytics: {
-        schema: 'norva-product-analytics:v1',
-        clarity: { enabled: true, projectId: 'y8fgihobbx', allowedPaths: ['/', '/landing.html'] }
+        schema: 'norva-product-analytics:v2',
+        funnelVersion: 'norva-funnel:v2',
+        clarity: { enabled: true, projectId: 'y8fgihobbx', allowedPaths: ['/', '/landing.html', '/app.html'] }
       }
     },
     NorvaMarketing: {
@@ -70,7 +71,7 @@ function runAnalytics({ consent = 'granted', userAgent = 'Mozilla/5.0', pathname
     window,
     document,
     navigator: { userAgent },
-    location: { pathname },
+    location: { pathname, hostname: 'norva.tv', hash: '' },
     localStorage: { getItem: () => JSON.stringify({ status: consent, v: 1 }) },
     encodeURIComponent,
     Set
@@ -99,10 +100,15 @@ test('Clarity starts only after stored consent on an eligible browser landing an
 
   const calls = (runtime.window.clarity.q || []).map(args => Array.from(args));
   assert.ok(calls.some(args => args[0] === 'consentv2' && args[1].analytics_Storage === 'granted'));
-  assert.ok(calls.some(args => args[0] === 'event' && args[1] === 'store_cta_click'));
+  assert.ok(calls.some(args => args[0] === 'event' && args[1] === 'store_cta_clicked'));
   assert.ok(calls.some(args => args[0] === 'set' && args[1] === 'event_target' && args[2] === 'android_tv'));
   assert.ok(!calls.some(args => args[0] === 'identify'), 'account identity must never be sent to Clarity');
   assert.ok(!calls.some(args => args[0] === 'set' && args[1] === 'question'));
+  const marketingTrack = runtime.marketing.find(args => args[0] === 'track' && args[1] === 'store_cta_clicked');
+  assert.deepEqual(JSON.parse(JSON.stringify(marketingTrack[2])), {
+    authenticated: 'anonymous', source: 'hero', target: 'android_tv'
+  });
+  assert.equal(Object.hasOwn(marketingTrack[2], 'question'), false);
 });
 
 test('Clarity stays fail-closed before consent and inside Android phone or TV shells', () => {

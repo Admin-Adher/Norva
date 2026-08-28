@@ -211,6 +211,7 @@ public class PlayerActivity extends Activity {
     private String fallbackUrl;              // gateway URL to retry with on a direct-URL refusal
     private boolean fallbackTried = false;
     private boolean everReady = false;        // direct or fallback reached STATE_READY at least once
+    private boolean clarityPlaybackStarted = false;
     private boolean firstFrameRendered = false;
     private long playbackLaunchElapsedMs;
     private String playbackAuthToken;
@@ -387,10 +388,12 @@ public class PlayerActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        NativeClarity.configure(BuildConfig.CLARITY_PROJECT_ID, "android_tv", BuildConfig.VERSION_NAME);
+        NativeClarity.configure(BuildConfig.CLARITY_PROJECT_ID, "android_tv", BuildConfig.VERSION_NAME, BuildConfig.DEBUG ? "qa" : "production");
         NativeClarity.applyStoredConsent(this);
         NativeClarity.screen("player");
-        NativeClarity.event("player_started");
+        NativeClarity.tag("journey_name", "time_to_value");
+        NativeClarity.tag("journey_step", "playback");
+        NativeClarity.event("content_opened");
         playbackLaunchElapsedMs = android.os.SystemClock.elapsedRealtime();
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
 
@@ -762,6 +765,10 @@ public class PlayerActivity extends Activity {
             public void onIsPlayingChanged(boolean isPlaying) {
                 handler.removeCallbacks(healthyRecoveryReset);
                 if (isPlaying) {
+                    if (!clarityPlaybackStarted) {
+                        clarityPlaybackStarted = true;
+                        NativeClarity.event("playback_started");
+                    }
                     handler.postDelayed(healthyRecoveryReset, HEALTHY_RECOVERY_RESET_MS);
                     updatePlaybackHeartbeat();
                 } else {
@@ -790,7 +797,7 @@ public class PlayerActivity extends Activity {
             public void onRenderedFirstFrame() {
                 if (!firstFrameRendered) {
                     firstFrameRendered = true;
-                    NativeClarity.event("player_first_frame");
+                    NativeClarity.event("playback_first_frame");
                     hideStartupContext();
                     if (!controlsVisible) showControls(playPauseBtn);
                     final String firstFrameBearer = playbackAuthToken;
@@ -809,7 +816,8 @@ public class PlayerActivity extends Activity {
 
             @Override
             public void onPlayerError(PlaybackException error) {
-                NativeClarity.event("player_error");
+                NativeClarity.tag("failure_family", "unknown");
+                NativeClarity.event("journey_error");
                 handler.removeCallbacks(bufferWatchdog);
                 final int code = error.errorCode;
                 final int httpStatus = ProviderPlaybackPolicy.httpStatus(error);
@@ -1488,7 +1496,8 @@ public class PlayerActivity extends Activity {
     }
 
     private void recoverPlayback(final String reason) {
-        NativeClarity.event("player_retry");
+        NativeClarity.tag("journey_outcome", "retry");
+        NativeClarity.event("journey_retry");
         if (player == null || freshStreamRequested) return;
         final int scheduledGeneration = ++recoveryGeneration;
         handler.removeCallbacks(bufferWatchdog);
@@ -1711,7 +1720,6 @@ public class PlayerActivity extends Activity {
     }
 
     private void finishWithoutRecovery() {
-        NativeClarity.event("player_exit");
         clearFreshStreamRequest(true);
         finish();
     }

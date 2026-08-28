@@ -25,7 +25,7 @@ operational telemetry as the fallback for older supported phones and TVs.
 - Revoking consent pauses Clarity. On phone it also disables Firebase Analytics.
 - No custom user ID, account ID, source ID, provider name, media title or
   playback URL is sent.
-- The bridge accepts only the closed \`norva-native-clarity:v1\` protocol, only
+- The bridge accepts only the closed \`norva-native-clarity:v2\` protocol, only
   from the HTTPS \`norva.tv\` main frame, and rejects extra JSON keys.
 - Native login/setup and playback roots are masked with \`maskView\`.
 - Inside the WebView, \`data-clarity-mask=true\` is applied to the document root.
@@ -47,9 +47,13 @@ Before uploading a build containing the project ID:
    - keep a bounded per-device daily network limit.
 3. Keep all Norva Activities available for analytics. Sensitive views are
    masked in code; screen names are identifier-free.
-4. Filter and report only the 16 bounded custom events in
-   \`NativeClarity.EVENTS\`. Do not convert unrelated signals into Smart Events;
-   Clarity's separate Smart Events limit is 20.
+4. Filter and report only the bounded custom events in
+   \`NativeClarity.EVENTS\`. Configure exactly the shared 20-event Smart Event
+   spine from \`docs/analytics/clarity-funnels-v2.md\`; supporting diagnostic
+   events remain API events and must not consume extra Smart Event slots.
+5. Reuse the same funnel names and bounded dimensions across Web, phone and TV.
+   Keep project-level results separate because Norva deliberately sends no
+   cross-platform identity.
 
 ## Google Play Data Safety delta
 

@@ -36,14 +36,14 @@ test('native adapter sends only a bounded screen and exact consent payload', () 
   const runtime = runNativeAdapter();
   assert.equal(runtime.window.NorvaNativeAnalytics.available(), true);
   assert.deepEqual(runtime.messages[0], {
-    v: 1, type: 'screen', name: 'settings_sources'
+    v: 2, type: 'screen', name: 'settings_sources'
   });
   runtime.window.NorvaNativeAnalytics.setConsent('granted');
   assert.deepEqual(runtime.messages[1], {
-    v: 1, type: 'consent', status: 'granted'
+    v: 2, type: 'consent', status: 'granted'
   });
   assert.deepEqual(runtime.messages[2], {
-    v: 1, type: 'screen', name: 'settings_sources'
+    v: 2, type: 'screen', name: 'settings_sources'
   });
 });
 
@@ -56,14 +56,14 @@ test('native WebView capture preserves geometry but masks all rendered content',
 
 test('first-run account consent is bridged immediately and labelled as account', () => {
   const account = read('public/account.html');
-  assert.match(account, /native-analytics\.js\?v=1[\s\S]*consent-banner\.js\?v=1/);
+  assert.match(account, /native-analytics\.js\?v=2[\s\S]*product-analytics\.js\?v=2[\s\S]*consent-banner\.js\?v=1/);
   const runtime = runNativeAdapter('', '/account');
   assert.deepEqual(runtime.messages[0], {
-    v: 1, type: 'screen', name: 'account'
+    v: 2, type: 'screen', name: 'account'
   });
   runtime.window.NorvaNativeAnalytics.setConsent('denied');
   assert.deepEqual(runtime.messages[1], {
-    v: 1, type: 'consent', status: 'denied'
+    v: 2, type: 'consent', status: 'denied'
   });
 });
 
@@ -73,7 +73,7 @@ test('native adapter rejects arbitrary event names and payload identifiers', () 
   assert.equal(runtime.messages.length, 1);
   assert.equal(runtime.window.NorvaNativeAnalytics.track('provider_access_saved'), true);
   assert.deepEqual(runtime.messages[1], {
-    v: 1, type: 'event', name: 'provider_access_saved'
+    v: 2, type: 'event', name: 'provider_access_saved'
   });
   assert.equal(JSON.stringify(runtime.messages).includes('user_123'), false);
 });
@@ -84,7 +84,7 @@ test('Android shells are analytics-eligible only through the native consent brid
   const adapter = read('clients/android-common/src/main/java/tv/norva/analytics/NativeClarity.java');
   const phoneGradle = read('clients/android-phone/app/build.gradle');
   const tvGradle = read('clients/android-tv/app/build.gradle');
-  assert.match(html, /native-analytics\.js\?v=1[\s\S]*consent-banner\.js\?v=3/);
+  assert.match(html, /native-analytics\.js\?v=2[\s\S]*product-analytics\.js\?v=2[\s\S]*consent-banner\.js\?v=3/);
   assert.doesNotMatch(consent, /isTvSurface\(\)\)\s*\{\s*apply\('granted'/);
   assert.match(consent, /NorvaNativeAnalytics\.setConsent\(status\)/);
   assert.match(consent, /if \(!nativeSurface\)[\s\S]*NorvaMarketing\.setConsent/);
@@ -93,6 +93,25 @@ test('Android shells are analytics-eligible only through the native consent brid
   assert.match(adapter, /PENDING_EVENTS\.size\(\) < EVENTS\.size\(\)/);
   assert.match(phoneGradle, /CLARITY_PROJECT_ID[^\n]*y9fagfyr9a/);
   assert.match(tvGradle, /CLARITY_PROJECT_ID[^\n]*y9fxs54jpc/);
+});
+
+test('native context is split into bounded identifier-free bridge messages', () => {
+  const runtime = runNativeAdapter('#movies');
+  assert.equal(runtime.window.NorvaNativeAnalytics.track('journey_error', {
+    journey: 'time_to_value',
+    step: 'playback',
+    outcome: 'error',
+    failureFamily: 'network',
+    providerId: 'source-secret'
+  }), true);
+  assert.deepEqual(runtime.messages.slice(1), [
+    { v: 2, type: 'context', tags: { journey_name: 'time_to_value' } },
+    { v: 2, type: 'context', tags: { journey_step: 'playback' } },
+    { v: 2, type: 'context', tags: { journey_outcome: 'error' } },
+    { v: 2, type: 'context', tags: { failure_family: 'network' } },
+    { v: 2, type: 'event', name: 'journey_error' }
+  ]);
+  assert.equal(JSON.stringify(runtime.messages).includes('source-secret'), false);
 });
 
 test('native playback and downloads remain useful but content-masked', () => {

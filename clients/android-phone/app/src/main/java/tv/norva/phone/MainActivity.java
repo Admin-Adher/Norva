@@ -212,7 +212,7 @@ public class MainActivity extends Activity {
         // window then black flash; must be installed before super.onCreate().
         try { androidx.core.splashscreen.SplashScreen.installSplashScreen(this); } catch (Exception ignored) { }
         super.onCreate(savedInstanceState);
-        NativeClarity.configure(BuildConfig.CLARITY_PROJECT_ID, "android_mobile", BuildConfig.VERSION_NAME);
+        NativeClarity.configure(BuildConfig.CLARITY_PROJECT_ID, "android_mobile", BuildConfig.VERSION_NAME, BuildConfig.DEBUG ? "qa" : "production");
         if (Build.VERSION.SDK_INT >= 33) {
             getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
                     android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT,

@@ -18,8 +18,36 @@ class SourceManager {
         this.searchQuery = ''; // Search filter for content browser
         this.warningModalFlight = null; // one shared confirmation per open modal
         this.providerAccessOperations = new Map(); // stable retry identities per source/action
+        this.productSignals = new Set(); // local dedupe only; source/candidate ids never leave the device
 
         this.init();
+    }
+
+    trackProduct(event, details = {}) {
+        return window.NorvaTrackProduct?.(event, {
+            placement: 'settings',
+            ...details
+        });
+    }
+
+    productFailureFamily(error) {
+        const code = String(error?.code || error?.status || error?.payload?.status || '').toUpperCase();
+        const message = String(error?.message || '').toLowerCase();
+        if (code === '401' || code.includes('AUTH') || message.includes('credential')) return 'credentials';
+        if (code === '403' || code.includes('BLOCK')) return 'provider_blocked';
+        if (code === '404' || code.includes('NOT_FOUND') || message.includes('unreachable')) return 'provider_unreachable';
+        if (code === '408' || code === '504' || code.includes('TIMEOUT') || message.includes('timed out')) return 'timeout';
+        if (code === '409' || code.includes('REVISION') || code.includes('STALE')) return 'revision_conflict';
+        if (code === '458' || code.includes('BUSY')) return 'provider_busy';
+        if (message.includes('network') || message.includes('fetch')) return 'network';
+        return 'unknown';
+    }
+
+    trackProductOnce(key, event, details = {}) {
+        if (this.productSignals.has(key)) return false;
+        const delivered = this.trackProduct(event, details);
+        if (delivered === true) this.productSignals.add(key);
+        return delivered;
     }
 
     init() {
@@ -162,6 +190,19 @@ class SourceManager {
             this.renderSourceList(this.xtreamList, sources.filter(s => s.type === 'xtream'), 'xtream');
             this.renderSourceList(this.m3uList, sources.filter(s => s.type === 'm3u'), 'm3u');
             this.renderSourceList(this.epgList, sources.filter(s => s.type === 'epg'), 'epg');
+            const actionRequired = sources.find((source) => {
+                if (source.type !== 'xtream' || !this.isSourceManagementEnabled(source)) return false;
+                const health = window.NorvaSourceHealth?.classifySource(this.sourceWithStatus(source), this.sourceStatuses || []);
+                const access = this.providerAccessSummary(source);
+                return health?.needsAttention === true
+                    || ['expected_expired', 'expired_confirmed', 'access_unavailable_confirmed', 'check_failed_temporary'].includes(access.status);
+            });
+            if (actionRequired) {
+                this.trackProductOnce('provider-action-required', 'provider_action_required', {
+                    journey: 'provider_recovery', step: 'provider_access', state: 'action_required',
+                    providerAccessState: this.providerAccessSummary(actionRequired).status
+                });
+            }
             window.app?.pages?.settings?.refreshSourceHealthCard?.();
         } catch (err) {
             console.error('Error loading sources:', err);
@@ -404,6 +445,11 @@ class SourceManager {
      * Show add source modal
      */
     showAddModal(type) {
+        if (type === 'xtream') {
+            this.trackProduct('provider_connect_started', {
+                source: 'settings', journey: 'provider_onboarding', step: 'provider_connect', state: 'started'
+            });
+        }
         const modal = document.getElementById('modal');
         const title = document.getElementById('modal-title');
         const body = document.getElementById('modal-body');
@@ -456,6 +502,11 @@ class SourceManager {
      */
     async showEditModal(id, type, { intent = 'edit' } = {}) {
         try {
+            if (type === 'xtream' && ['credentials', 'provider'].includes(intent)) {
+                this.trackProduct('provider_repair_started', {
+                    journey: 'provider_recovery', step: 'provider_repair', state: 'started'
+                });
+            }
             const source = await API.sources.getById(id);
             // getById returns null (not a throw) when the source is gone/stale; the form
             // builders deref source.* and would throw into a silent console.error, leaving
@@ -2404,6 +2455,9 @@ class SourceManager {
                 setTimeout(() => this.showCatalogPreparation(latest, type), 0);
             } catch (_) {
                 const retryMessage = 'Norva still cannot reach this service. Wait a moment or review it in TV Service settings.';
+                this.trackProduct('journey_error', {
+                    journey: 'catalog', step: 'catalog_sync', outcome: 'error', failureFamily: 'provider_unreachable', catalogState: 'error'
+                });
                 const message = body.querySelector('.source-sync-error-message span');
                 if (message) message.textContent = retryMessage;
                 const announcement = body.querySelector('.source-sync-announcement');
@@ -2446,6 +2500,9 @@ class SourceManager {
             };
 
             if (phase === 'ready') {
+                this.trackProductOnce(`catalog-ready:${sourceId || 'pending'}`, 'catalog_ready', {
+                    journey: 'catalog', step: 'catalog_sync', outcome: 'success', catalogState: 'ready'
+                });
                 footer.innerHTML = `
           <button class="btn btn-secondary" id="catalog-stay">Stay in Settings</button>
           <button class="btn btn-primary" id="catalog-start">Start Watching</button>
@@ -2454,6 +2511,9 @@ class SourceManager {
                 document.getElementById('catalog-start').onclick = startWatching;
                 focusIfNeeded('catalog-start');
             } else if (phase === 'error') {
+                this.trackProductOnce(`catalog-error:${sourceId || 'pending'}`, 'journey_error', {
+                    journey: 'catalog', step: 'catalog_sync', outcome: 'error', failureFamily: 'unknown', catalogState: 'error'
+                });
                 footer.innerHTML = `
           <button class="btn btn-secondary" id="catalog-background">Close</button>
           <button class="btn btn-primary" id="catalog-error-action">${this.escapeHtml(errorDetails.actionLabel)}</button>
@@ -2554,6 +2614,11 @@ class SourceManager {
             if (!await this.confirmLargePlaylistIfNeeded(form)) return;
 
             const createdSource = await API.sources.create({ type, name, url, username, password });
+            if (type === 'xtream') {
+                this.trackProduct('provider_connected', {
+                    journey: 'provider_onboarding', step: 'provider_connect', state: 'completed', outcome: 'success'
+                });
+            }
             let accessSaveFailed = false;
             if (accessTerms) {
                 const sourceId = createdSource.cloudId || createdSource.cloud_id || createdSource.id;
@@ -2561,12 +2626,21 @@ class SourceManager {
                 try {
                     await API.providerAccess.createCycle(sourceId, accessTerms, { idempotencyKey: operationKey });
                     this.clearProviderAccessIdempotency(sourceId, 'onboarding-cycle');
+                    this.trackProduct('provider_access_saved', {
+                        journey: 'provider_onboarding', step: 'provider_access', state: 'completed', outcome: 'success'
+                    });
                 } catch (error) {
                     accessSaveFailed = true;
+                    this.trackProduct('journey_error', {
+                        journey: 'provider_onboarding', step: 'provider_access', outcome: 'error', failureFamily: this.productFailureFamily(error)
+                    });
                     console.warn('[SourceManager] Source created but Provider Access terms remain retryable:', error?.code || 'request_failed');
                 }
             }
             await this.loadSources();
+            this.trackProduct('catalog_sync_started', {
+                journey: 'catalog', step: 'catalog_sync', state: 'started', catalogState: 'syncing'
+            });
             this.notifySourceHealthChanged();
             try { window.app?.startImportWatcher?.(); } catch (_) { /* noop */ } // toast when this import finishes
             this.showCatalogPreparation(createdSource, type);
@@ -2583,6 +2657,9 @@ class SourceManager {
             }
         } catch (err) {
             console.warn('[SourceManager] Source creation failed:', err);
+            this.trackProduct('journey_error', {
+                journey: 'provider_onboarding', step: 'provider_connect', outcome: 'error', failureFamily: this.productFailureFamily(err)
+            });
             NorvaModal.toast('Could not add this source. Check the details and try again.', 'error');
         }
     }
@@ -2680,6 +2757,9 @@ class SourceManager {
             this.notifySourceHealthChanged();
         } catch (err) {
             console.warn('[SourceManager] Source update failed:', err);
+            this.trackProduct('journey_error', {
+                journey: 'provider_recovery', step: 'provider_repair', outcome: 'error', failureFamily: this.productFailureFamily(err)
+            });
             NorvaModal.toast('Could not update this source. Try again.', 'error');
         }
     }
@@ -2737,7 +2817,9 @@ class SourceManager {
     }
 
     async showProviderAccess(id) {
-        window.NorvaNativeAnalytics?.track?.('provider_access_opened');
+        this.trackProduct('provider_access_opened', {
+            journey: 'provider_recovery', step: 'provider_access', state: 'started'
+        });
         const view = this.openProviderAccessModal('Provider access', `
           <div class="provider-access-loading" role="status" aria-live="polite">
             <span class="provider-access-skeleton"></span>
@@ -2755,7 +2837,9 @@ class SourceManager {
             if (this.providerAccessViewToken !== view.token) return;
             this.renderProviderAccessDetails(id, access, view, source);
         } catch (error) {
-            window.NorvaNativeAnalytics?.track?.('provider_access_error');
+            this.trackProduct('journey_error', {
+                journey: 'provider_recovery', step: 'provider_access', outcome: 'error', failureFamily: this.productFailureFamily(error)
+            });
             if (this.providerAccessViewToken !== view.token) return;
             view.body.innerHTML = `<div class="provider-access-terminal" role="alert"><strong>Provider access unavailable</strong><p>${this.escapeHtml(this.providerAccessErrorMessage(error))}</p><button class="btn btn-secondary" type="button" data-access-retry>Try again</button></div>`;
             view.body.querySelector('[data-access-retry]')?.addEventListener('click', () => this.showProviderAccess(id));
@@ -2826,10 +2910,15 @@ class SourceManager {
                 if (this.providerAccessViewToken === view.token) {
                     this.renderProviderAccessDetails(id, next, view, source);
                     this.showProviderAccessSavedReceipt(next);
-                    window.NorvaNativeAnalytics?.track?.('provider_access_saved');
+                    this.trackProduct('provider_access_saved', {
+                        journey: 'provider_recovery', step: 'provider_access', state: 'completed', outcome: 'success',
+                        providerAccessState: String(next?.status || 'unknown').toLowerCase()
+                    });
                 }
             } catch (error) {
-                window.NorvaNativeAnalytics?.track?.('provider_access_error');
+                this.trackProduct('journey_error', {
+                    journey: 'provider_recovery', step: 'provider_access', outcome: 'error', failureFamily: this.productFailureFamily(error)
+                });
                 setBusy(false, this.providerAccessErrorMessage(error));
             }
         });
@@ -2871,6 +2960,20 @@ class SourceManager {
         if (this.providerAccessViewToken !== view.token) return;
         const root = view.body.querySelector('[data-provider-transition]');
         if (!root) return;
+        const candidateKey = candidate.candidateId || candidate.candidate_id || 'candidate';
+        if (candidate.state === 'COMPLETED') {
+            this.trackProductOnce(`provider-repair:${candidateKey}:completed`, 'provider_repair_succeeded', {
+                journey: 'provider_recovery', step: 'provider_repair', state: 'completed', outcome: 'success'
+            });
+        } else if (candidate.state === 'FAILED') {
+            this.trackProductOnce(`provider-repair:${candidateKey}:failed`, 'journey_error', {
+                journey: 'provider_recovery', step: 'provider_repair', state: 'error', outcome: 'error', failureFamily: 'credentials'
+            });
+        } else if (candidate.state === 'CANCELLED') {
+            this.trackProductOnce(`provider-repair:${candidateKey}:cancelled`, 'journey_error', {
+                journey: 'provider_recovery', step: 'provider_repair', state: 'cancelled', outcome: 'cancelled', failureFamily: 'cancelled'
+            });
+        }
         const [title, copy] = this.credentialCandidateCopy(candidate);
         const working = ['VALIDATING', 'STAGING', 'IMPORTING', 'COMMITTING'].includes(candidate.state)
             && !candidate.actions?.canDecide;
@@ -2897,6 +3000,9 @@ class SourceManager {
                 this.clearProviderAccessIdempotency(id, action);
                 this.renderCredentialCandidate(id, next, view);
             } catch (error) {
+                this.trackProduct('journey_error', {
+                    journey: 'provider_recovery', step: 'provider_repair', outcome: 'error', failureFamily: this.productFailureFamily(error)
+                });
                 root.querySelectorAll('button').forEach((button) => { button.disabled = false; });
                 if (feedback) feedback.textContent = this.providerAccessErrorMessage(error);
             }
@@ -3182,6 +3288,9 @@ class SourceManager {
 
             // 1. Trigger Backend Sync
             console.log(`[SourceManager] Triggering ${isHardRefresh ? 'hard refresh' : 'sync'} for source ${id}`);
+            this.trackProduct('catalog_sync_started', {
+                source: 'manual', journey: 'catalog', step: 'catalog_sync', state: 'started', catalogState: 'syncing'
+            });
             let syncResult = null;
             try {
                 syncResult = isHardRefresh ? await API.sources.hardSync(id) : await API.sources.sync(id);
@@ -3281,9 +3390,16 @@ class SourceManager {
             if (isHardRefresh && syncResult?.cleared) {
                 console.log('[SourceManager] Hard refresh cleared:', syncResult.cleared);
             }
+            this.trackProduct('catalog_ready', {
+                source: 'manual', journey: 'catalog', step: 'catalog_sync', state: 'ready', outcome: 'success', catalogState: 'ready'
+            });
             this.notifySourceHealthChanged();
         } catch (err) {
             console.error('Error refreshing source:', err);
+            this.trackProduct('journey_error', {
+                source: 'manual', journey: 'catalog', step: 'catalog_sync', state: 'error', outcome: 'error',
+                failureFamily: this.productFailureFamily(err), catalogState: 'error'
+            });
             NorvaModal.toast(this.sourceSyncErrorMessage(err, { hard: isHardRefresh }), 'error');
         } finally {
             refreshButtons.forEach(button => { button.disabled = false; });

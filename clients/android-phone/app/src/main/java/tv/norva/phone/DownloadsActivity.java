@@ -116,7 +116,7 @@ public final class DownloadsActivity extends Activity {
     @Override
     protected void onCreate(Bundle b) {
         super.onCreate(b);
-        NativeClarity.configure(BuildConfig.CLARITY_PROJECT_ID, "android_mobile", BuildConfig.VERSION_NAME);
+        NativeClarity.configure(BuildConfig.CLARITY_PROJECT_ID, "android_mobile", BuildConfig.VERSION_NAME, BuildConfig.DEBUG ? "qa" : "production");
         NativeClarity.applyStoredConsent(this);
         NativeClarity.screen("downloads");
         if (Build.VERSION.SDK_INT >= 30) {

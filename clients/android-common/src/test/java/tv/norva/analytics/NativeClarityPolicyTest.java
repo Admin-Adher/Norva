@@ -18,8 +18,18 @@ public class NativeClarityPolicyTest {
     @Test
     public void customEventVocabularyStaysBoundedAndIdentifierFree() {
         assertTrue(NativeClarity.isAllowedEvent("provider_access_saved"));
-        assertTrue(NativeClarity.isAllowedEvent("player_error"));
+        assertTrue(NativeClarity.isAllowedEvent("playback_first_frame"));
+        assertTrue(NativeClarity.isAllowedEvent("journey_error"));
         assertFalse(NativeClarity.isAllowedEvent("provider_access_saved_user_123"));
         assertFalse(NativeClarity.isAllowedEvent("title_the_matrix"));
+    }
+
+    @Test
+    public void contextVocabularyRejectsIdentifiersAndRawErrors() {
+        assertTrue(NativeClarity.isAllowedContext("journey_name", "provider_onboarding"));
+        assertTrue(NativeClarity.isAllowedContext("failure_family", "credentials"));
+        assertTrue(NativeClarity.isAllowedContext("release_channel", "production"));
+        assertFalse(NativeClarity.isAllowedContext("provider_name", "ninja"));
+        assertFalse(NativeClarity.isAllowedContext("failure_family", "401 from provider.example"));
     }
 }
