@@ -149,6 +149,12 @@ const PROVIDER_SLOT_RELEASE_DELAY_MS = boundedInt(
   0,
   15_000,
 );
+const PROVIDER_CATALOG_REFRESH_DRAIN_MS = boundedInt(
+  Deno.env.get("NORVA_PROVIDER_CATALOG_REFRESH_DRAIN_MS"),
+  60_000,
+  0,
+  120_000,
+);
 const PROVIDER_NATIVE_TAKEOVER_GRACE_MS = boundedInt(
   Deno.env.get("NORVA_PROVIDER_NATIVE_TAKEOVER_GRACE_MS"),
   6_000,
@@ -271,7 +277,7 @@ async function handleRequest(req: Request): Promise<Response> {
       return json(req, {
         ok: true,
         service: "norva-playback",
-        version: 61,
+        version: 62,
         nativeHeartbeatProtocol: 1,
         providerCircuitProtocol: 1,
         vodContainerSelfHealProtocol: 1,
@@ -324,6 +330,7 @@ async function handleRequest(req: Request): Promise<Response> {
           selectedUsers: config.mediaGatewayRouting.canaryUserHashes.length,
         },
         exactTailDrainSafe: true,
+        providerCatalogRefreshDrainMs: PROVIDER_CATALOG_REFRESH_DRAIN_MS,
         completeHlsCacheCallbackProtocol: 1,
       });
     }
@@ -1086,6 +1093,42 @@ async function createPlaybackSession(
   }
 
   const playbackCreatedAt = stringOr(session.created_at, new Date().toISOString());
+  // A catalogue metadata call can finish before the Gateway's 60-second reporter
+  // tick yet leave a single-slot provider connection draining upstream. Read its
+  // last opaque activity before upgrading the holder to `session`, then wait only
+  // the remaining bounded drain. This prevents the first provider connection from
+  // being opened into a known collision; it is deliberately not a retry after 458.
+  const catalogRefreshDrainMs = await providerCatalogRefreshDrainRemainingMs(
+    db,
+    providerAccountHash,
+  );
+
+  // Account busy-lock writer: every playback session start means this provider account's
+  // single connection slot is (about to be) held — direct native plays included. Best-effort.
+  await touchProviderAccountByUrl(db, targetUrl, "session");
+
+  // The atomic claim already made the previous generation terminal. Close its
+  // real Gateway/raw transport before any provider drain or new coordinator lock;
+  // otherwise the bounded catalogue wait would consume the coordinator's TTL.
+  const releasedSuperseded = await releaseSupersededPlaybackSessions(
+    supersededSessionIds,
+    db,
+  );
+  if (mode === "transcode" && releasedSuperseded > 0) {
+    await sleep(PROVIDER_SLOT_RELEASE_DELAY_MS);
+  }
+  // Gateway pumps can be aborted server-side immediately. A direct native
+  // session is owned by the previous device, so give its short heartbeat poll
+  // one bounded window to observe PLAYBACK_SUPERSEDED and release the provider
+  // socket before this replacement URL is returned.
+  if (mode !== "transcode" && releasedSuperseded > 0) {
+    await sleep(PROVIDER_NATIVE_TAKEOVER_GRACE_MS);
+  }
+  if (catalogRefreshDrainMs > 0) await sleep(catalogRefreshDrainMs);
+
+  // Prepare the cross-device coordinator only after all known provider drains.
+  // Its 120-second lock then covers the actual Gateway startup/commit budget,
+  // rather than expiring while Norva is intentionally not opening provider I/O.
   const edgeCoordination = mode === "transcode"
     ? await prepareEdgeSessionCoordinator({
       userId,
@@ -1100,31 +1143,8 @@ async function createPlaybackSession(
       expiresAt: gatewayTransportExpiresAt,
     }, db)
     : null;
-  // The cloud-gateway transcode path uses its coordinator's bounded release wait.
-  // Direct/relay replacement is handled after the atomic claim: the old native
-  // session is marked superseded first, then gets one short heartbeat window to
-  // close its provider socket. No gateway or provider-auth retry is involved.
   const startupWaitMs = edgeCoordination?.waitMs ?? 0;
   if (startupWaitMs) await sleep(startupWaitMs);
-
-  const releasedSuperseded = await releaseSupersededPlaybackSessions(
-    supersededSessionIds,
-    db,
-  );
-  if (mode === "transcode" && releasedSuperseded > 0 && !startupWaitMs) {
-    await sleep(PROVIDER_SLOT_RELEASE_DELAY_MS);
-  }
-  // Gateway pumps can be aborted server-side immediately. A direct native
-  // session is owned by the previous device, so give its short heartbeat poll
-  // one bounded window to observe PLAYBACK_SUPERSEDED and release the provider
-  // socket before this replacement URL is returned.
-  if (mode !== "transcode" && releasedSuperseded > 0) {
-    await sleep(PROVIDER_NATIVE_TAKEOVER_GRACE_MS);
-  }
-
-  // Account busy-lock writer: every playback session start means this provider account's
-  // single connection slot is (about to be) held — direct native plays included. Best-effort.
-  await touchProviderAccountByUrl(db, targetUrl, "session");
 
   if (mode === "direct") {
     // Native playback gets exactly one transport. A hidden gateway fallback
@@ -9877,6 +9897,30 @@ async function touchProviderAccountByUrl(db: SupabaseClient, url: string, kind: 
     const key = providerAccountKeyFromUrl(url);
     if (key) await db.rpc("provider_account_touch_many", { p_keys: [key], p_kind: kind });
   } catch (_) { /* best-effort */ }
+}
+
+async function providerCatalogRefreshDrainRemainingMs(
+  db: SupabaseClient,
+  providerAccountHash: string,
+) {
+  if (!PROVIDER_CATALOG_REFRESH_DRAIN_MS || !providerAccountHash) return 0;
+  try {
+    const { data, error } = await db
+      .from("provider_account_activity")
+      .select("kind,last_seen_at")
+      .eq("account_key", providerAccountHash)
+      .maybeSingle();
+    if (error || stringOr(data?.kind, "") !== "catalog-refresh") return 0;
+    const lastSeenAt = Date.parse(stringOr(data?.last_seen_at, ""));
+    if (!Number.isFinite(lastSeenAt)) return 0;
+    const ageMs = Date.now() - lastSeenAt;
+    if (ageMs < 0 || ageMs >= PROVIDER_CATALOG_REFRESH_DRAIN_MS) return 0;
+    return Math.ceil(PROVIDER_CATALOG_REFRESH_DRAIN_MS - ageMs);
+  } catch (_) {
+    // Activity is a best-effort coordination signal. A bookkeeping outage must
+    // not turn into a new playback outage.
+    return 0;
+  }
 }
 async function touchProviderAccountBySource(db: SupabaseClient, sourceId: string | null, kind: string) {
   try {
