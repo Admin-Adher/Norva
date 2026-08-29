@@ -1787,7 +1787,7 @@ if (
 }
 const MULTI_AUDIO_HLS_PROTOCOL = 1;
 const MAX_MULTI_AUDIO_RENDITIONS = 8;
-const GATEWAY_VERSION = 121;
+const GATEWAY_VERSION = 122;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -8367,10 +8367,14 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
         createdSession = session;
 
         if (finiteMkvPlayback && normalizedSeekOffset > 0) {
-            await prepareFiniteMkvSeekBroker(
-                session,
-                sessionRequestAbortController.signal,
-            );
+            // FFmpeg's Matroska demuxer can issue overlapping HTTP ranges while
+            // resolving cues around a resume point. A mono-slot provider cannot
+            // safely service those reads through the loopback range broker: the
+            // next request would have to supersede a still-active provider body.
+            // Keep the provider behind the proven bounded pump instead and let
+            // FFmpeg perform the resume as a linear post-input seek on pipe:0.
+            session.startupTimings.finiteMkvSeekBroker = false;
+            session.startupTimings.finiteMkvResumeMode = 'bounded-pump-linear-seek';
         }
 
         // The exact size preflight above is provider I/O, but it neither starts
@@ -9066,16 +9070,16 @@ async function ensureBoundedMkvInputPump(session, parentSignal = null) {
     if (parentSignal?.aborted) throw abortedVodInputPumpError();
     session.startupTimings = asRecord(session.startupTimings);
     session.startupTimings.boundedMkvInputPump = true;
-    // Normal playback retains one full-file response for the pump. A seek only
-    // needs an authoritative file identity before FFmpeg starts issuing ranges,
-    // so drain bytes=0-0 instead of opening then cancelling a full-file body.
-    // This proves size, effective URL and validator without an artificial slot
-    // handoff delay or overlapping the first broker request.
+    // Retain one full-file response for every finite MKV, including resumed
+    // titles. FFmpeg's HTTP Matroska demuxer opens overlapping ranges while
+    // resolving cues; exposing the loopback broker would therefore supersede a
+    // still-active provider body on a mono-slot account. The bounded pump keeps
+    // exactly one upstream body and reconnects it at the exact byte offset,
+    // while FFmpeg performs resumed playback as a linear post-input seek.
+    // Complete local HLS cache hits bypass this path and remain instant-seekable.
     const preopenStartedAt = Date.now();
     const hadExactFileSize = Boolean(fileSizeBytesForSession(session));
-    await preopenBoundedMkvInputPump(session, parentSignal, {
-        drainExactRange: Number(session?.seekOffset || 0) > 0,
-    });
+    await preopenBoundedMkvInputPump(session, parentSignal);
     const fileSizeBytes = fileSizeBytesForSession(session);
     const unknownLengthFullBody = session.preopenedVodInputAttempt?.range?.fullBodyUnknownSize === true;
     if (!fileSizeBytes && !unknownLengthFullBody) {
