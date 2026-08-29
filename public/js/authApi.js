@@ -404,6 +404,20 @@
         });
     }
 
+    // Verify the numeric code typed on account.html. This is deliberately a
+    // separate helper from verifyOtp(tokenHash): token_hash belongs to the secure
+    // link fallback, while the user-facing six-digit code is verified with the
+    // email address and GoTrue's `email` OTP type.
+    async function verifyEmailOtp(email, token) {
+        const payload = await request('/auth/v1/verify', {
+            method: 'POST',
+            body: { email, token, type: 'email' }
+        });
+        if (payload && payload.access_token) return setSession(payload);
+        if (payload && payload.session) return setSession(payload.session);
+        return null;
+    }
+
     // Call a Postgres RPC (PostgREST /rest/v1/rpc/<fn>) as the signed-in user, so
     // SECURITY DEFINER functions can read the caller's own auth state (e.g.
     // auth_methods_self → has_password/providers). apikey stays the publishable
@@ -908,6 +922,7 @@
         challengeAndVerifyMfa,
         captureSessionFromUrl,
         verifyOtp,
+        verifyEmailOtp,
         signInWithOAuth,
         signInWithIdToken,
         signInWithOtp,

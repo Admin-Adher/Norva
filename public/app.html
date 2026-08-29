@@ -19,6 +19,12 @@
   <link rel="dns-prefetch" href="https://image.tmdb.org">
   <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
   <link rel="stylesheet" href="/css/main.css?v=ee4d1292b9">
+  <link id="premium-profile-style" rel="stylesheet" href="/css/profiles-premium.css?v=2" media="not all">
+  <script>
+    if (!/NorvaTV-AndroidTV/i.test(navigator.userAgent || '') && !/[?&]tv=1\b/.test(window.location.search || '')) {
+      document.getElementById('premium-profile-style').media = 'all';
+    }
+  </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@800&display=swap"

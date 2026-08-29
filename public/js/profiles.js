@@ -446,6 +446,9 @@ html.tv .np-avatar-choice:focus{outline:2px solid #b579ff;outline-offset:2px}
 
   function render() {
     if (!overlayEl) return;
+    if (document.body.classList.contains('norva-phone-apk')) {
+      overlayEl.dataset.mode = state.mode || 'select';
+    }
     if (state.mode === 'setup') renderSetup();
     else if (state.mode === 'add' || state.mode === 'edit') renderEdit();
     else renderGrid();

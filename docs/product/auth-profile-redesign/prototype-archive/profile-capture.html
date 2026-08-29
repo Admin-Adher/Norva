@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Norva profile capture fixture</title>
+    <style>
+      html,
+      body {
+        width: 390px;
+        height: 844px;
+        margin: 0;
+        overflow: hidden;
+        background: #05070d;
+      }
+
+      iframe {
+        display: block;
+        width: 390px;
+        height: 844px;
+        border: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <iframe title="Norva profile capture"></iframe>
+    <script>
+      const params = new URLSearchParams(window.location.search);
+      const state = params.get("state") || "chooser";
+      const returnTo = params.get("returnTo") || "setup";
+      const frame = document.querySelector("iframe");
+      frame.src = `l-premium-continuity.html?view=profiles&profile=${encodeURIComponent(state)}&returnTo=${encodeURIComponent(returnTo)}`;
+    </script>
+  </body>
+</html>

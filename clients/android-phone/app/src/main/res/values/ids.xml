@@ -29,6 +29,8 @@
     <item name="norva_player_seek_feedback" type="id" />
     <item name="norva_player_resize_button" type="id" />
     <item name="norva_player_brightness_button" type="id" />
+    <item name="norva_player_previous_episode_button" type="id" />
+    <item name="norva_player_next_episode_button" type="id" />
     <item name="norva_player_state_overlay" type="id" />
     <item name="norva_player_state_content" type="id" />
     <item name="norva_player_state_poster" type="id" />

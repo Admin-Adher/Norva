@@ -96,6 +96,15 @@ test('Android phone French resources translate the complete player string contra
     'player_unlock',
     'player_resize_fit',
     'player_resize_zoom',
+    'player_resize_action_fit',
+    'player_resize_action_fill',
+    'player_previous_episode',
+    'player_next_episode',
+    'player_previous_episode_description',
+    'player_next_episode_description',
+    'player_no_previous_episode',
+    'player_no_next_episode',
+    'player_opening_episode',
     'player_resize_selected_description',
     'player_version_title',
     'player_cast_connected_to',
@@ -174,6 +183,8 @@ test('Android phone player assigns stable IDs to the generated native views', ()
     'R.id.norva_player_seek_feedback',
     'R.id.norva_player_resize_button',
     'R.id.norva_player_brightness_button',
+    'R.id.norva_player_previous_episode_button',
+    'R.id.norva_player_next_episode_button',
   ];
 
   assert.deepEqual(
@@ -224,7 +235,10 @@ test('Android phone player reserves system navigation and cutout insets', () => 
 
   assert.match(player, /getInsetsIgnoringVisibility\([\s\S]*WindowInsets\.Type\.navigationBars\(\)/);
   assert.match(player, /findViewById\(androidx\.media3\.ui\.R\.id\.exo_controller\)/);
-  assert.match(player, /controller\.setPadding\([\s\S]*safeInsetBottom/);
+  assert.match(player, /controller\.setPadding\(0, 0, 0, 0\)/);
+  assert.match(player, /R\.id\.exo_bottom_bar\)[\s\S]*bottomBar\.setPadding\([\s\S]*safeInsetLeft,[\s\S]*safeInsetRight,[\s\S]*safeInsetBottom/);
+  assert.match(player, /R\.id\.exo_progress\)[\s\S]*progress\.setPadding\([\s\S]*safeInsetLeft,[\s\S]*safeInsetRight/);
+  assert.doesNotMatch(player, /controller\.setPadding\([\s\S]{0,120}safeInset/);
   assert.doesNotMatch(player, /playerView\.setPadding\(/);
   assert.match(player, /topBar\.addView\(variantButton, lp\)/);
   assert.match(player, /topBar\.addView\(castButton, btnLp\)/);

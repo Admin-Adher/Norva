@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Norva — Prototypes connexion / inscription</title>
+  <link rel="icon" href="data:,">
+  <style>
+    :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; --bg:#080b12; --surface:#12121a; --line:#27272a; --text:#f8fafc; --muted:#94a3b8; --accent:#3b82f6; }
+    * { box-sizing:border-box; }
+    body { margin:0; min-width:320px; color:var(--text); background:var(--bg); }
+    main { width:min(1440px,100%); margin:auto; padding:clamp(24px,5vw,72px); }
+    header { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:24px; align-items:end; margin-bottom:40px; }
+    .brand { display:flex; align-items:center; gap:12px; font-weight:760; }
+    .brand img { width:44px; height:44px; border-radius:10px; }
+    h1 { max-width:18ch; margin:24px 0 0; font-size:clamp(2.25rem,5vw,4.5rem); line-height:.98; letter-spacing:-.055em; }
+    .intro { max-width:68ch; margin:18px 0 0; color:var(--muted); line-height:1.65; }
+    .density { display:grid; gap:8px; min-width:220px; color:var(--muted); font-size:.85rem; }
+    .density input { width:100%; accent-color:var(--accent); }
+    .round { margin-top:48px; }
+    .round-heading { display:flex; align-items:end; justify-content:space-between; gap:24px; margin-bottom:20px; }
+    .round-heading h2 { margin:0; font-size:1.5rem; letter-spacing:-.025em; }
+    .round-heading p { max-width:62ch; margin:0; color:var(--muted); line-height:1.55; }
+    .grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:24px; }
+    .grid.round-three-grid { grid-template-columns:repeat(2,minmax(0,1fr)); gap:32px; }
+    .featured { display:grid; grid-template-columns:minmax(0,.8fr) minmax(320px,1.2fr); gap:clamp(32px,5vw,72px); align-items:center; padding:clamp(24px,4vw,52px); border:1px solid #29334a; border-radius:24px; background:linear-gradient(135deg,#111522,#0d1018); box-shadow:0 28px 80px rgba(0,0,0,.28); }
+    .featured-copy h2 { margin:0; font-size:clamp(2rem,4vw,3.4rem); letter-spacing:-.05em; }
+    .featured-copy p { color:var(--muted); line-height:1.65; }
+    .featured-copy ul { display:grid; gap:10px; padding-left:20px; color:#c5d2e8; line-height:1.5; }
+    .featured-preview { justify-self:end; width:min(100%,430px); }
+    article { min-width:0; border-top:1px solid var(--line); padding-top:20px; }
+    article h2 { margin:0; font-size:1.25rem; }
+    article p { min-height:4.8em; color:var(--muted); line-height:1.6; }
+    .preview { position:relative; width:100%; aspect-ratio:390/844; overflow:hidden; border:1px solid var(--line); border-radius:18px; background:#080b12; box-shadow:0 22px 60px rgba(0,0,0,.35); }
+    iframe { width:390px; height:844px; border:0; transform-origin:top left; }
+    .open { min-height:48px; display:flex; align-items:center; justify-content:center; margin-top:16px; border:1px solid #3b4b67; border-radius:10px; color:#fff; text-decoration:none; font-weight:700; background:#172033; }
+    .open:hover { background:#233049; }
+    .open:focus-visible { outline:2px solid #93c5fd; outline-offset:3px; }
+    .tag { display:inline-block; margin-bottom:10px; color:#93c5fd; font-size:.72rem; font-weight:760; letter-spacing:.12em; text-transform:uppercase; }
+    details { margin-top:56px; border-top:1px solid var(--line); padding-top:20px; }
+    summary { min-height:48px; display:flex; align-items:center; cursor:pointer; font-weight:750; }
+    details .grid { margin-top:24px; }
+    @media(max-width:980px){ header{grid-template-columns:1fr}.density{max-width:320px}.round-heading{display:block}.round-heading p{margin-top:8px}.grid,.grid.round-three-grid{grid-template-columns:1fr}.featured{grid-template-columns:1fr}.featured-preview{justify-self:start}.preview{max-width:430px;aspect-ratio:390/844} article p{min-height:0} }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <div class="brand"><img src="assets/norva-app-icon.png" alt=""><span>Norva · exploration auth</span></div>
+        <h1>Une direction premium, enfin propre à Norva.</h1>
+        <p class="intro">Après comparaison de Netflix, Disney+, Spotify, Uber, Airbnb, Headspace, Wise, Hulu, Prime Video, Revolut et Notion : aucun écran n’est copié. La nouvelle piste L réunit la clarté du parcours progressif, une illustration originale et un mouvement sobre.</p>
+      </div>
+      <label class="density" for="density">Densité du prototype <output id="density-value">1.00</output><input id="density" type="range" min="0.8" max="1.2" value="1" step="0.05"></label>
+    </header>
+
+    <section class="round featured" aria-labelledby="featured-title">
+      <div class="featured-copy">
+        <span class="tag">L · nouvelle direction recommandée</span>
+        <h2 id="featured-title">Continuité premium</h2>
+        <p>Une vraie scène de marque, sans collage de posters ni carrousel. Le formulaire ne pose qu’une question à la fois et reste entièrement visible sur mobile.</p>
+        <ul><li>Illustration Norva originale, haute définition</li><li>Mouvement local léger et désactivable</li><li>Progression e-mail → accès sécurisé</li></ul>
+        <a class="open" href="l-premium-continuity.html">Ouvrir L en plein écran</a>
+      </div>
+      <div class="preview featured-preview"><iframe title="Prototype L, continuité premium" src="l-premium-continuity.html?density=1"></iframe></div>
+    </section>
+
+    <section class="round" aria-labelledby="round-three-title">
+      <div class="round-heading"><div><span class="tag">Tour 3</span><h2 id="round-three-title">Quatre hypothèses vraiment distinctes</h2></div><p>Compare d’abord le parcours, pas seulement la surface. Chaque prototype est interactif : H sépare l’accueil de l’auth; I révèle une étape à la fois; J concentre les choix dans une feuille; K élimine le mot de passe.</p></div>
+      <div class="grid round-three-grid">
+      <article>
+        <span class="tag">H · accueil séparé</span>
+        <h2>Bienvenue, puis accès</h2>
+        <p>Une promesse produit statique et un seul CTA. Dès qu’on choisit connexion ou inscription, tout le marketing disparaît au profit d’un écran de compte dédié.</p>
+        <div class="preview"><iframe title="Prototype H, accueil séparé de l’authentification" src="h-welcome-separated.html?density=1"></iframe></div>
+        <a class="open" href="h-welcome-separated.html">Ouvrir H en plein écran</a>
+      </article>
+      <article>
+        <span class="tag">I · recommandé</span>
+        <h2>Identité progressive</h2>
+        <p>Une seule question d’abord : l’e-mail. Norva détermine ensuite s’il faut connecter ou créer le compte, puis ne révèle que l’étape nécessaire.</p>
+        <div class="preview"><iframe title="Prototype I, identité progressive" src="i-progressive-identity.html?density=1"></iframe></div>
+        <a class="open" href="i-progressive-identity.html">Ouvrir I en plein écran</a>
+      </article>
+      <article>
+        <span class="tag">J · feuille d’accès</span>
+        <h2>Choix concentrés</h2>
+        <p>La scène Norva reste sobre; une feuille familière rassemble Google et e-mail, avec une reassurance explicite sur la séparation du mot de passe fournisseur TV.</p>
+        <div class="preview"><iframe title="Prototype J, feuille d’accès" src="j-access-sheet.html?density=1"></iframe></div>
+        <a class="open" href="j-access-sheet.html">Ouvrir J en plein écran</a>
+      </article>
+      <article>
+        <span class="tag">K · sans mot de passe</span>
+        <h2>Code temporaire</h2>
+        <p>L’e-mail déclenche un code court et le même point d’entrée sert aux nouveaux comptes comme aux retours. Très fluide, mais demande un vrai changement d’authentification.</p>
+        <div class="preview"><iframe title="Prototype K, connexion par code temporaire" src="k-code-first.html?density=1"></iframe></div>
+        <a class="open" href="k-code-first.html">Ouvrir K en plein écran</a>
+      </article>
+      </div>
+    </section>
+
+    <details>
+      <summary>Voir les propositions du tour 2 (D, E et G)</summary>
+      <section class="grid" aria-label="Propositions du tour 2">
+      <article>
+        <span class="tag">D · Norva immersive</span>
+        <h2>Scène + tiroir d’accès</h2>
+        <p>La personnalité Norva occupe la scène; l’authentification vit dans un vrai panneau latéral, sans carte flottante ni discours animé.</p>
+        <div class="preview"><iframe title="Prototype D, scène immersive et tiroir d’accès" src="d-immersive-drawer.html?density=1"></iframe></div>
+        <a class="open" href="d-immersive-drawer.html">Ouvrir D en plein écran</a>
+      </article>
+      <article>
+        <span class="tag">E · recommandé</span>
+        <h2>Accès calme</h2>
+        <p>Logo, choix du compte et rien d’autre sur mobile. C’est la piste la plus rapide à comprendre, la plus robuste et la moins fatigante.</p>
+        <div class="preview"><iframe title="Prototype E, accès calme" src="e-quiet-access.html?density=1"></iframe></div>
+        <a class="open" href="e-quiet-access.html">Ouvrir E en plein écran</a>
+      </article>
+      <article>
+        <span class="tag">G · parcours radical</span>
+        <h2>Une seule porte</h2>
+        <p>Un champ e-mail neutre, puis l’étape strictement nécessaire. Plus fluide, mais demande une adaptation réelle du parcours d’authentification.</p>
+        <div class="preview"><iframe title="Prototype G, une seule porte d’entrée" src="g-one-doorway.html?density=1"></iframe></div>
+        <a class="open" href="g-one-doorway.html">Ouvrir G en plein écran</a>
+      </article>
+      </section>
+    </details>
+
+    <details>
+      <summary>Voir les explorations conservées (A, B, C et F)</summary>
+      <section class="grid" aria-label="Explorations précédentes">
+        <article><span class="tag">A</span><h2>Action d’abord</h2><p>Le formulaire précède une preuve produit statique.</p><div class="preview"><iframe title="Prototype A, action d’abord" src="a-action-first.html?density=1"></iframe></div><a class="open" href="a-action-first.html">Ouvrir A</a></article>
+        <article><span class="tag">B</span><h2>Une seule scène</h2><p>Une composition multi-écrans remplace le rail.</p><div class="preview"><iframe title="Prototype B, une seule scène" src="b-single-scene.html?density=1"></iframe></div><a class="open" href="b-single-scene.html">Ouvrir B</a></article>
+        <article><span class="tag">C</span><h2>Ce qui arrive ensuite</h2><p>Trois étapes concrètes expliquent le parcours.</p><div class="preview"><iframe title="Prototype C, étapes guidées" src="c-guided-next.html?density=1"></iframe></div><a class="open" href="c-guided-next.html">Ouvrir C</a></article>
+        <article><span class="tag">F</span><h2>Carte d’identité</h2><p>Un schéma fixe explique le lien entre les écrans.</p><div class="preview"><iframe title="Prototype F, carte d’identité" src="f-identity-map.html?density=1"></iframe></div><a class="open" href="f-identity-map.html">Ouvrir F</a></article>
+      </section>
+    </details>
+  </main>
+  <script>
+    const slider = document.getElementById('density');
+    const output = document.getElementById('density-value');
+    const frames = Array.from(document.querySelectorAll('iframe'));
+    const previews = Array.from(document.querySelectorAll('.preview'));
+    function sizeFrames() {
+      previews.forEach((preview, index) => {
+        const scale = preview.clientWidth / 390;
+        frames[index].style.transform = `scale(${scale})`;
+      });
+    }
+    function setDensity() {
+      const value = Number(slider.value).toFixed(2);
+      output.value = value;
+      frames.forEach((frame) => {
+        const url = new URL(frame.src);
+        url.searchParams.set('density', value);
+        frame.src = url.toString();
+      });
+    }
+    slider.addEventListener('input', setDensity);
+    addEventListener('resize', sizeFrames);
+    sizeFrames();
+  </script>
+</body>
+</html>

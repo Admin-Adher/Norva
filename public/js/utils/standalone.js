@@ -170,6 +170,30 @@
         } catch (_) { /* best-effort */ }
     };
 
+    // Manual Previous/Next from the native phone player. MainActivity invokes
+    // this only after the exact outgoing playback session has been closed and
+    // acknowledged, so the Series page can safely resolve one adjacent stream
+    // without overlapping provider sessions.
+    window.__norvaNative.onEpisodeNavigation = (sourceId, itemType, itemId, direction) => {
+        const boundedDirection = direction === 'previous' || direction === 'next'
+            ? direction
+            : '';
+        if (!boundedDirection) return false;
+        try {
+            window.dispatchEvent(new CustomEvent('norva-native-episode-navigation', {
+                detail: {
+                    sourceId: String(sourceId || ''),
+                    itemType: itemType || '',
+                    itemId: String(itemId || ''),
+                    direction: boundedDirection
+                }
+            }));
+            return true;
+        } catch (_) {
+            return false;
+        }
+    };
+
     // Deep-link entry (Android TV Watch Next card, share links): resume the item
     // from the cloud history. Returns synchronously; the lookup runs async.
     window.__norvaNative.openItem = (sourceId, itemType, itemId) => {
@@ -891,8 +915,9 @@
             const resume = Math.max(0, Math.floor(Number(resumeSeconds) || 0));
             const fb = fallbackUrl || '';
             if (meta && typeof bridge.playVideoJson === 'function') {
-                // Newest APK: one JSON payload. Extras feed the launcher's Play Next
-                // card (poster) and the native "À suivre" overlay (nextTitle).
+                // Newest APK: one JSON payload. Episode navigation carries labels
+                // only — never adjacent provider URLs — so native Previous/Next
+                // cannot open a second mono-session stream before hand-off.
                 let poster = '';
                 try {
                     if (extras?.poster) poster = new URL(extras.poster, location.origin).href;
@@ -906,6 +931,7 @@
                     itemId: String(meta.itemId || ''),
                     resumeSeconds: resume,
                     poster,
+                    previousTitle: extras?.previousTitle || '',
                     nextTitle: extras?.nextTitle || '',
                     trackMetadata: extras?.trackMetadata || null,
                     preferenceScope: extras?.preferenceScope || null,
@@ -1251,6 +1277,7 @@
                     ).trim();
                     if (!nativePlay(resolved.url, nativeTitle(content), meta, resumeAt, fallbackUrl, {
                         poster: content.poster || '',
+                        previousTitle: content.previousEpisodeLabel || '',
                         nextTitle: content.nextEpisodeLabel || '',
                         trackMetadata: buildNativeTrackMetadata(content),
                         preferenceScope: nativePreferenceScope(content),

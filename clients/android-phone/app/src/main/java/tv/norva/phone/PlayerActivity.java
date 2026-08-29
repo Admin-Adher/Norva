@@ -127,7 +127,12 @@ public class PlayerActivity extends Activity {
     public static final String EXTRA_PREFERENCE_SCOPE = "preferenceScope";
     public static final String EXTRA_PLAYBACK_PREFERENCES = "playbackPreferences";
     public static final String EXTRA_POSTER_URL = "poster";
+    public static final String EXTRA_PREVIOUS_TITLE = "previousTitle";
     public static final String EXTRA_NEXT_TITLE = "nextTitle";
+    public static final String EXTRA_EPISODE_NAVIGATION_DIRECTION =
+            "episodeNavigationDirection";
+    static final String EPISODE_NAVIGATION_PREVIOUS = "previous";
+    static final String EPISODE_NAVIGATION_NEXT = "next";
     public static final String ACTION_REQUEST_FRESH_STREAM =
             "tv.norva.phone.action.REQUEST_FRESH_STREAM";
     public static final String ACTION_APPLY_FRESH_STREAM =
@@ -259,6 +264,11 @@ public class PlayerActivity extends Activity {
     private int resumeSeconds = 0;
     private boolean resumeApplied = false;
     private boolean endedNaturally = false;   // reached STATE_ENDED → web autoplays next episode
+    // A manual episode hand-off is returned to MainActivity only after this
+    // Activity has stopped playback. MainActivity then waits for the exact
+    // server-side session-close ACK before asking the WebView to resolve the
+    // adjacent episode, preserving providers that allow a single stream.
+    private String pendingEpisodeNavigationDirection;
     private TextView seekBubble;         // transient "+10s" / "🔆 60%" gesture feedback
     private View gestureTouchLayer;
     private final Runnable hideSeekBubble = new Runnable() {
@@ -298,6 +308,7 @@ public class PlayerActivity extends Activity {
     private String pendingVariantSourceId;
     private String mediaTitle;
     private String posterUrl;
+    private String previousTitle;
     private String nextTitle;
     private FrameLayout playerRoot;
     private LinearLayout topBar;
@@ -313,6 +324,8 @@ public class PlayerActivity extends Activity {
     private android.widget.ImageButton subtitleButton;
     private android.widget.ImageButton resizeButton;
     private android.widget.ImageButton brightnessButton;
+    private android.widget.ImageButton previousEpisodeButton;
+    private android.widget.ImageButton nextEpisodeButton;
     private android.app.AlertDialog trackDialog;
     private org.json.JSONArray verifiedAudioTracks;
     private org.json.JSONArray exactSubtitleTracks;
@@ -334,6 +347,11 @@ public class PlayerActivity extends Activity {
     private boolean pendingSubtitleOff;
     private static final int TRACK_SECTION_AUDIO = 1;
     private static final int TRACK_SECTION_SUBTITLES = 2;
+    private static final String PLAYER_UI_PREFS = "norva_player_ui";
+    private static final String PREF_VIDEO_RESIZE_MODE = "video_resize_mode_v1";
+    private static final String VIDEO_RESIZE_MODE_FIT = "fit";
+    private static final String VIDEO_RESIZE_MODE_FILL = "fill";
+    private static final int MAX_EPISODE_LABEL_LENGTH = 180;
 
     private final Handler errHandler = new Handler(Looper.getMainLooper());
     private static final long BUFFER_TIMEOUT_MS = 35_000L; // "no data" watchdog
@@ -443,6 +461,7 @@ public class PlayerActivity extends Activity {
         }
         playbackLaunchElapsedMs = SystemClock.elapsedRealtime();
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        configureEdgeToEdgeWindow();
 
         String url = getIntent().getStringExtra(EXTRA_URL);
         mediaTitle = getIntent().getStringExtra(EXTRA_TITLE);
@@ -452,7 +471,9 @@ public class PlayerActivity extends Activity {
         preferenceScopeJson = getIntent().getStringExtra(EXTRA_PREFERENCE_SCOPE);
         cloudPlaybackPreferencesJson = getIntent().getStringExtra(EXTRA_PLAYBACK_PREFERENCES);
         posterUrl = getIntent().getStringExtra(EXTRA_POSTER_URL);
-        nextTitle = getIntent().getStringExtra(EXTRA_NEXT_TITLE);
+        previousTitle = boundedEpisodeLabel(
+                getIntent().getStringExtra(EXTRA_PREVIOUS_TITLE));
+        nextTitle = boundedEpisodeLabel(getIntent().getStringExtra(EXTRA_NEXT_TITLE));
         playbackAuthToken = getIntent().getStringExtra(EXTRA_PLAYBACK_AUTH_TOKEN);
         playbackAuthChannelId = getIntent().getStringExtra(EXTRA_PLAYBACK_AUTH_CHANNEL_ID);
         if (!NativePlaybackAuthPolicy.validNonce(playbackAuthChannelId)) {
@@ -492,9 +513,17 @@ public class PlayerActivity extends Activity {
         // The poster/status layer owns startup. Media3 remains fully inert until
         // a real first frame, so viewers never see a false Pause affordance or
         // a fabricated 00:00 timeline over a black surface.
-        getWindow().setBackgroundDrawable(new ColorDrawable(color(R.color.norva_bg_primary)));
-        playerView.setBackgroundColor(color(R.color.norva_bg_primary));
-        playerView.setShutterBackgroundColor(color(R.color.norva_bg_primary));
+        // A native video surface is cinematic black. The branded preparation
+        // layer still owns loading and recovery, but playback itself must never
+        // inherit a grey/navy cast around or over the decoded frame.
+        getWindow().setBackgroundDrawable(new ColorDrawable(Color.BLACK));
+        playerView.setBackgroundColor(Color.BLACK);
+        playerView.setShutterBackgroundColor(Color.BLACK);
+        // Phone video should occupy the physical display rather than look like
+        // a smaller rectangle floating inside it. Keep the video's aspect ratio
+        // and crop only the overflow; viewers can switch to the persisted
+        // "fit entire video" mode from the explicit resize control or a pinch.
+        applyStoredVideoResizeMode();
         playerView.setUseController(false);
         playerView.hideController();
 
@@ -503,7 +532,7 @@ public class PlayerActivity extends Activity {
         NativeClarity.registerSensitiveView(root);
         root.setId(R.id.norva_player_root);
         root.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-        root.setBackgroundColor(color(R.color.norva_bg_primary));
+        root.setBackgroundColor(Color.BLACK);
         root.addView(playerView, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
         installPlaybackStateOverlay(root);
@@ -512,14 +541,9 @@ public class PlayerActivity extends Activity {
         loadPosterAsync();
         transitionTo(PlaybackUiState.PREPARING, false);
 
-        // Fullscreen video that respects display cutouts (notches): draw
-        // edge-to-edge under the cutout, hide the system bars, but pad the
-        // player by the cutout's safe insets so the media3 controls (title,
-        // seek bar, buttons) are never hidden behind a notch or the nav bar.
-        if (Build.VERSION.SDK_INT >= 28) {
-            getWindow().getAttributes().layoutInDisplayCutoutMode =
-                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
-        }
+        // Video draws edge-to-edge beneath cutouts and transient system bars.
+        // Only controller content receives safe insets; the decoded frame and
+        // the PlayerView itself remain full-window.
         root.setOnApplyWindowInsetsListener((v, insets) -> {
             int l = 0, t = 0, r = 0, b = 0;
             if (Build.VERSION.SDK_INT >= 28 && insets.getDisplayCutout() != null) {
@@ -640,6 +664,8 @@ public class PlayerActivity extends Activity {
         installGestureOverlay();
         installTopBar(root);
         installCompactBottomControls();
+        installEpisodeNavigationControls();
+        styleMedia3ControllerSurface();
         // Chromecast: the receiver fetches the provider URL itself from the same
         // home network. Local (encrypted) downloads can't be cast.
         if (!isLocal) installCastSupport(root);
@@ -2373,6 +2399,186 @@ public class PlayerActivity extends Activity {
     }
 
     /**
+     * Media3 ships a 60% full-controller scrim and an opaque bottom bar. They
+     * visibly wash out the entire frame and make the player look inset even
+     * though the video surface is already edge-to-edge. Keep the controller
+     * structure and touch targets, but render its large surfaces transparent;
+     * the white controls and time labels retain local text shadow for contrast.
+     */
+    private void styleMedia3ControllerSurface() {
+        View controlsBackground = playerView.findViewById(
+                androidx.media3.ui.R.id.exo_controls_background);
+        View bottomBar = playerView.findViewById(androidx.media3.ui.R.id.exo_bottom_bar);
+        View centerControls = playerView.findViewById(
+                androidx.media3.ui.R.id.exo_center_controls);
+        View time = playerView.findViewById(androidx.media3.ui.R.id.exo_time);
+        for (View surface : new View[] { controlsBackground, bottomBar, centerControls, time }) {
+            if (surface != null) surface.setBackgroundColor(Color.TRANSPARENT);
+        }
+        applyPlayerTextShadow(playerView.findViewById(androidx.media3.ui.R.id.exo_position));
+        applyPlayerTextShadow(playerView.findViewById(androidx.media3.ui.R.id.exo_duration));
+    }
+
+    private void applyPlayerTextShadow(View view) {
+        if (view instanceof TextView) {
+            ((TextView) view).setShadowLayer(dp(2), 0, dp(1), Color.BLACK);
+        }
+    }
+
+    static String boundedEpisodeLabel(String raw) {
+        if (raw == null) return null;
+        String normalized = raw.trim().replaceAll("[\\r\\n\\t]+", " ");
+        if (normalized.isEmpty()) return null;
+        return normalized.length() > MAX_EPISODE_LABEL_LENGTH
+                ? normalized.substring(0, MAX_EPISODE_LABEL_LENGTH)
+                : normalized;
+    }
+
+    static String boundedEpisodeNavigationDirection(String raw) {
+        if (EPISODE_NAVIGATION_PREVIOUS.equals(raw)) {
+            return EPISODE_NAVIGATION_PREVIOUS;
+        }
+        if (EPISODE_NAVIGATION_NEXT.equals(raw)) {
+            return EPISODE_NAVIGATION_NEXT;
+        }
+        return null;
+    }
+
+    private boolean hasEpisodeNavigationContext() {
+        boolean episode = "episode".equals(itemType) || "series".equals(itemType);
+        return episode && (previousTitle != null || nextTitle != null);
+    }
+
+    private android.widget.ImageButton episodeNavigationButton(
+            int id,
+            int fallbackDrawable,
+            int fallbackDescription,
+            View stockButton,
+            View.OnClickListener listener) {
+        android.widget.ImageButton button = compactIconButton(
+                id, fallbackDrawable, fallbackDescription, listener);
+        if (stockButton instanceof ImageView
+                && ((ImageView) stockButton).getDrawable() != null) {
+            button.setImageDrawable(((ImageView) stockButton).getDrawable());
+        }
+        button.setFocusable(true);
+        button.setVisibility(View.GONE);
+        return button;
+    }
+
+    private void replaceMedia3NavigationButton(
+            View stockButton, android.widget.ImageButton replacement) {
+        if (stockButton == null || replacement == null) return;
+        if (!(stockButton.getParent() instanceof android.view.ViewGroup)) {
+            stockButton.setVisibility(View.GONE);
+            return;
+        }
+        android.view.ViewGroup parent = (android.view.ViewGroup) stockButton.getParent();
+        int index = Math.max(0, parent.indexOfChild(stockButton));
+        stockButton.setVisibility(View.GONE);
+        android.view.ViewGroup.LayoutParams layoutParams = parent instanceof LinearLayout
+                ? new LinearLayout.LayoutParams(dp(48), dp(48))
+                : new android.view.ViewGroup.LayoutParams(dp(48), dp(48));
+        parent.addView(replacement, index, layoutParams);
+    }
+
+    /**
+     * Replace Media3's single-item Previous/Next semantics with Norva episode
+     * hand-offs. The playing Activity still owns one MediaItem and one provider
+     * stream; the adjacent URL is deliberately unknown until this Activity has
+     * returned and MainActivity has received the exact session-close ACK.
+     */
+    private void installEpisodeNavigationControls() {
+        View stockPrevious = playerView.findViewById(androidx.media3.ui.R.id.exo_prev);
+        View stockNext = playerView.findViewById(androidx.media3.ui.R.id.exo_next);
+        if (stockPrevious == null || stockNext == null) return;
+
+        previousEpisodeButton = episodeNavigationButton(
+                R.id.norva_player_previous_episode_button,
+                android.R.drawable.ic_media_previous,
+                R.string.player_previous_episode,
+                stockPrevious,
+                v -> requestEpisodeNavigation(EPISODE_NAVIGATION_PREVIOUS));
+        nextEpisodeButton = episodeNavigationButton(
+                R.id.norva_player_next_episode_button,
+                android.R.drawable.ic_media_next,
+                R.string.player_next_episode,
+                stockNext,
+                v -> requestEpisodeNavigation(EPISODE_NAVIGATION_NEXT));
+        replaceMedia3NavigationButton(stockPrevious, previousEpisodeButton);
+        replaceMedia3NavigationButton(stockNext, nextEpisodeButton);
+        updateEpisodeNavigationControls(false);
+    }
+
+    private void updateEpisodeNavigationControls(boolean controllerVisible) {
+        if (previousEpisodeButton == null || nextEpisodeButton == null) return;
+        boolean visible = hasEpisodeNavigationContext()
+                && controllerVisible
+                && !controlsLocked
+                && isControllerState(playbackUiState);
+        boolean idle = pendingEpisodeNavigationDirection == null;
+        bindEpisodeNavigationButton(
+                previousEpisodeButton,
+                visible,
+                idle && previousTitle != null,
+                previousTitle,
+                R.string.player_previous_episode,
+                R.string.player_previous_episode_description,
+                R.string.player_no_previous_episode);
+        bindEpisodeNavigationButton(
+                nextEpisodeButton,
+                visible,
+                idle && nextTitle != null,
+                nextTitle,
+                R.string.player_next_episode,
+                R.string.player_next_episode_description,
+                R.string.player_no_next_episode);
+    }
+
+    private void bindEpisodeNavigationButton(
+            android.widget.ImageButton button,
+            boolean visible,
+            boolean enabled,
+            String episodeLabel,
+            int defaultDescription,
+            int targetDescription,
+            int unavailableDescription) {
+        button.setVisibility(visible ? View.VISIBLE : View.GONE);
+        button.setEnabled(enabled);
+        button.setClickable(enabled);
+        button.setFocusable(enabled);
+        button.setAlpha(enabled ? 1f : 0.38f);
+        button.setContentDescription(episodeLabel == null
+                ? getString(unavailableDescription)
+                : getString(targetDescription, episodeLabel));
+        if (Build.VERSION.SDK_INT >= 26) {
+            button.setTooltipText(episodeLabel == null
+                    ? getString(defaultDescription)
+                    : getString(targetDescription, episodeLabel));
+        }
+    }
+
+    private void requestEpisodeNavigation(String rawDirection) {
+        String direction = boundedEpisodeNavigationDirection(rawDirection);
+        if (direction == null || pendingEpisodeNavigationDirection != null) return;
+        String target = EPISODE_NAVIGATION_PREVIOUS.equals(direction)
+                ? previousTitle : nextTitle;
+        if (target == null) return;
+        pendingEpisodeNavigationDirection = direction;
+        if (player != null) player.pause();
+        updateEpisodeNavigationControls(false);
+        if (playerView != null) {
+            playerView.announceForAccessibility(getString(
+                    R.string.player_opening_episode, target));
+        }
+        NativePlayerUiTelemetry.log(this, "player_gesture", "tap",
+                EPISODE_NAVIGATION_PREVIOUS.equals(direction)
+                        ? "previous_episode" : "next_episode",
+                "handoff");
+        finish();
+    }
+
+    /**
      * Keep every secondary playback action in Media3's own bottom action row.
      * This preserves the progress-bar geometry and keeps the title/back overlay
      * clear of the lock control on small landscape phones.
@@ -2444,6 +2650,7 @@ public class PlayerActivity extends Activity {
             media3Overflow.addView(resizeButton, extraInsertAt,
                     new LinearLayout.LayoutParams(dp(48), dp(48)));
         }
+        updateResizeButtonDescription();
     }
 
     private void updateCompactControlVisibility(boolean controllerVisible) {
@@ -2471,6 +2678,55 @@ public class PlayerActivity extends Activity {
         if (lockBtn != null) {
             lockBtn.setVisibility(visible ? View.VISIBLE : View.GONE);
         }
+        updateEpisodeNavigationControls(controllerVisible);
+    }
+
+    private void applyStoredVideoResizeMode() {
+        if (playerView == null) return;
+        String mode = getSharedPreferences(PLAYER_UI_PREFS, MODE_PRIVATE)
+                .getString(PREF_VIDEO_RESIZE_MODE, VIDEO_RESIZE_MODE_FILL);
+        playerView.setResizeMode(VIDEO_RESIZE_MODE_FIT.equals(mode)
+                ? AspectRatioFrameLayout.RESIZE_MODE_FIT
+                : AspectRatioFrameLayout.RESIZE_MODE_ZOOM);
+    }
+
+    private void setVideoResizeMode(int resizeMode, boolean persist, boolean feedback) {
+        if (playerView == null) return;
+        int bounded = resizeMode == AspectRatioFrameLayout.RESIZE_MODE_FIT
+                ? AspectRatioFrameLayout.RESIZE_MODE_FIT
+                : AspectRatioFrameLayout.RESIZE_MODE_ZOOM;
+        playerView.setResizeMode(bounded);
+        if (persist) {
+            getSharedPreferences(PLAYER_UI_PREFS, MODE_PRIVATE).edit()
+                    .putString(PREF_VIDEO_RESIZE_MODE,
+                            bounded == AspectRatioFrameLayout.RESIZE_MODE_FIT
+                                    ? VIDEO_RESIZE_MODE_FIT
+                                    : VIDEO_RESIZE_MODE_FILL)
+                    .apply();
+        }
+        updateResizeButtonDescription();
+        if (feedback) {
+            showSeekFeedback(getString(
+                    R.string.player_resize_feedback,
+                    getString(bounded == AspectRatioFrameLayout.RESIZE_MODE_FIT
+                            ? R.string.player_resize_fit
+                            : R.string.player_resize_zoom)));
+        }
+    }
+
+    private void updateResizeButtonDescription() {
+        if (resizeButton == null || playerView == null) return;
+        boolean filled = playerView.getResizeMode()
+                == AspectRatioFrameLayout.RESIZE_MODE_ZOOM;
+        String current = getString(filled
+                ? R.string.player_resize_zoom
+                : R.string.player_resize_fit);
+        String action = getString(filled
+                ? R.string.player_resize_action_fit
+                : R.string.player_resize_action_fill);
+        resizeButton.setContentDescription(getString(
+                R.string.player_resize_selected_description, current, action));
+        if (Build.VERSION.SDK_INT >= 26) resizeButton.setTooltipText(action);
     }
 
     private void toggleResizeMode() {
@@ -2478,15 +2734,7 @@ public class PlayerActivity extends Activity {
         int next = playerView.getResizeMode() == AspectRatioFrameLayout.RESIZE_MODE_ZOOM
                 ? AspectRatioFrameLayout.RESIZE_MODE_FIT
                 : AspectRatioFrameLayout.RESIZE_MODE_ZOOM;
-        playerView.setResizeMode(next);
-        String label = getString(next == AspectRatioFrameLayout.RESIZE_MODE_ZOOM
-                ? R.string.player_resize_zoom
-                : R.string.player_resize_fit);
-        if (resizeButton != null) {
-            resizeButton.setContentDescription(
-                    getString(R.string.player_resize_selected_description, label));
-        }
-        showSeekFeedback(getString(R.string.player_resize_feedback, label));
+        setVideoResizeMode(next, true, true);
         NativePlayerUiTelemetry.log(this, "player_gesture", "tap", "resize",
                 next == AspectRatioFrameLayout.RESIZE_MODE_ZOOM ? "zoom" : "fit");
     }
@@ -2806,8 +3054,26 @@ public class PlayerActivity extends Activity {
         if (playerView != null) {
             View controller = playerView.findViewById(androidx.media3.ui.R.id.exo_controller);
             if (controller != null) {
-                controller.setPadding(
-                        safeInsetLeft, safeInsetTop, safeInsetRight, safeInsetBottom);
+                // Never pad the whole Media3 controller: exo_center_controls is
+                // centered inside that padded rectangle, so an asymmetric
+                // landscape cutout shifts Play/Previous/Next away from the
+                // decoded frame's physical centre. Keep the controller canvas
+                // full-window and protect only the edge-bound controls below.
+                controller.setPadding(0, 0, 0, 0);
+            }
+            View bottomBar = playerView.findViewById(
+                    androidx.media3.ui.R.id.exo_bottom_bar);
+            if (bottomBar != null) {
+                bottomBar.setPadding(
+                        safeInsetLeft, 0, safeInsetRight, safeInsetBottom);
+            }
+            View progress = playerView.findViewById(androidx.media3.ui.R.id.exo_progress);
+            if (progress != null) {
+                progress.setPadding(
+                        safeInsetLeft,
+                        progress.getPaddingTop(),
+                        safeInsetRight,
+                        progress.getPaddingBottom());
             }
         }
         if (topBar != null) {
@@ -3378,25 +3644,13 @@ public class PlayerActivity extends Activity {
             @Override public void onScaleEnd(ScaleGestureDetector d) {
                 if (!controlsLocked && isControllerState(playbackUiState)) {
                     if (pinchAccum > 1.15f) {
-                        playerView.setResizeMode(AspectRatioFrameLayout.RESIZE_MODE_ZOOM);
-                        if (resizeButton != null) {
-                            resizeButton.setContentDescription(getString(
-                                    R.string.player_resize_selected_description,
-                                    getString(R.string.player_resize_zoom)));
-                        }
-                        showSeekFeedback(getString(R.string.player_resize_feedback,
-                                getString(R.string.player_resize_zoom)));
+                        setVideoResizeMode(
+                                AspectRatioFrameLayout.RESIZE_MODE_ZOOM, true, true);
                         NativePlayerUiTelemetry.log(PlayerActivity.this, "player_gesture",
                                 "pinch", "resize", "zoom");
                     } else if (pinchAccum < 0.87f) {
-                        playerView.setResizeMode(AspectRatioFrameLayout.RESIZE_MODE_FIT);
-                        if (resizeButton != null) {
-                            resizeButton.setContentDescription(getString(
-                                    R.string.player_resize_selected_description,
-                                    getString(R.string.player_resize_fit)));
-                        }
-                        showSeekFeedback(getString(R.string.player_resize_feedback,
-                                getString(R.string.player_resize_fit)));
+                        setVideoResizeMode(
+                                AspectRatioFrameLayout.RESIZE_MODE_FIT, true, true);
                         NativePlayerUiTelemetry.log(PlayerActivity.this, "player_gesture",
                                 "pinch", "resize", "fit");
                     }
@@ -3701,11 +3955,23 @@ public class PlayerActivity extends Activity {
         seekBubble.postDelayed(hideSeekBubble, 650);
     }
 
+    private void configureEdgeToEdgeWindow() {
+        if (Build.VERSION.SDK_INT >= 30) {
+            getWindow().setDecorFitsSystemWindows(false);
+        }
+        if (Build.VERSION.SDK_INT >= 28) {
+            WindowManager.LayoutParams attributes = getWindow().getAttributes();
+            attributes.layoutInDisplayCutoutMode =
+                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+            getWindow().setAttributes(attributes);
+        }
+    }
+
     /** Immersive fullscreen: hide the status and navigation bars (sticky, so a
      *  swipe reveals them transiently without resizing the video). */
     private void applyImmersive() {
+        configureEdgeToEdgeWindow();
         if (Build.VERSION.SDK_INT >= 30) {
-            getWindow().setDecorFitsSystemWindows(false);
             android.view.WindowInsetsController controller = getWindow().getInsetsController();
             if (controller != null) {
                 controller.hide(WindowInsets.Type.systemBars());
@@ -3879,6 +4145,9 @@ public class PlayerActivity extends Activity {
 
     private String playbackCloseReason() {
         if (endedNaturally) return "ended";
+        if (pendingEpisodeNavigationDirection != null) {
+            return "episode_navigation";
+        }
         if (pendingVariantStreamId != null && !pendingVariantStreamId.isEmpty()) {
             return "variant_change";
         }
@@ -3954,6 +4223,15 @@ public class PlayerActivity extends Activity {
                         ? 0L : Math.max(0, player.getCurrentPosition() / 1000));
                 data.putExtra("retryPlayback", true);
                 data.putExtra("retryReason", freshStreamReason);
+            }
+            if (pendingEpisodeNavigationDirection != null) {
+                if (data == null) data = new Intent();
+                data.putExtra("sourceId", sourceId);
+                data.putExtra("itemType", itemType);
+                data.putExtra("itemId", itemId);
+                data.putExtra(
+                        EXTRA_EPISODE_NAVIGATION_DIRECTION,
+                        pendingEpisodeNavigationDirection);
             }
             if (playbackSessionId != null) {
                 if (data == null) data = new Intent();

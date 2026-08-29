@@ -1,0 +1,95 @@
+/* Premium profile surfaces for web and touch WebView. Android TV keeps the
+   existing compact D-pad layout and focus model from profiles.js. */
+html:not(.tv):not(.tv-mode) body .np-overlay {
+  padding: max(24px, env(safe-area-inset-top, 0px)) max(24px, env(safe-area-inset-right, 0px)) max(24px, env(safe-area-inset-bottom, 0px)) max(24px, env(safe-area-inset-left, 0px));
+  overflow: hidden;
+  background:
+    linear-gradient(0deg, rgba(5, 7, 12, 0.98), rgba(5, 7, 12, 0.5) 58%, rgba(5, 7, 12, 0.84)),
+    url('/img/auth/norva-auth-poster-mosaic-night-premium.webp') center 32% / cover no-repeat,
+    #080b12;
+}
+html:not(.tv):not(.tv-mode) body .np-overlay::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(70% 65% at 50% 12%, rgba(59, 130, 246, 0.2), transparent 68%);
+}
+html:not(.tv):not(.tv-mode) body .np-panel {
+  position: relative;
+  z-index: 1;
+  width: min(920px, 100%);
+  max-height: calc(100dvh - 48px);
+  overflow: auto;
+  padding: 32px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 24px;
+  background: linear-gradient(155deg, rgba(18, 24, 38, 0.9), rgba(8, 11, 18, 0.94));
+  box-shadow: 0 32px 90px rgba(0, 0, 0, 0.55), inset 0 1px rgba(255, 255, 255, 0.05);
+  scrollbar-width: thin;
+}
+html:not(.tv):not(.tv-mode) body .np-brand { margin-bottom: 16px; }
+html:not(.tv):not(.tv-mode) body .np-brand img { width: 42px; height: 42px; border-radius: 13px; }
+html:not(.tv):not(.tv-mode) body .np-title {
+  margin-bottom: 24px;
+  font-family: Outfit, Inter, sans-serif;
+  font-size: clamp(32px, 5vw, 52px);
+  letter-spacing: -0.045em;
+}
+html:not(.tv):not(.tv-mode) body .np-grid { gap: clamp(16px, 3vw, 28px); }
+html:not(.tv):not(.tv-mode) body .np-card { width: clamp(118px, 18vw, 164px); gap: 12px; }
+html:not(.tv):not(.tv-mode) body .np-avatar {
+  width: clamp(112px, 17vw, 156px);
+  height: clamp(112px, 17vw, 156px);
+  border-radius: 20px;
+  border: 2px solid rgba(148, 163, 184, 0.2);
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.36);
+}
+html:not(.tv):not(.tv-mode) body .np-card:hover .np-avatar,
+html:not(.tv):not(.tv-mode) body .np-card:focus-visible .np-avatar,
+html:not(.tv):not(.tv-mode) body .np-current .np-avatar {
+  border-color: #7aa7ff;
+  box-shadow: 0 20px 50px rgba(59, 130, 246, 0.28);
+}
+html:not(.tv):not(.tv-mode) body .np-name { font-size: 17px; font-weight: 750; }
+html:not(.tv):not(.tv-mode) body .np-actions { margin-top: 32px; }
+html:not(.tv):not(.tv-mode) body .np-btn { border-radius: 12px; min-height: 48px; }
+html:not(.tv):not(.tv-mode) body .np-btn-primary { background: linear-gradient(120deg, #3b82f6, #5866f2 58%, #8b5cf6); border: 0; }
+html:not(.tv):not(.tv-mode) body .np-panel-edit { width: min(680px, 100%); }
+html:not(.tv):not(.tv-mode) body .np-input { min-height: 52px; border-radius: 12px; background: rgba(5, 8, 15, 0.84); }
+html:not(.tv):not(.tv-mode) body .np-avatar-choice { width: 68px; height: 68px; border-radius: 14px; }
+html:not(.tv):not(.tv-mode) body .np-close { top: max(16px, env(safe-area-inset-top, 0px)); right: max(16px, env(safe-area-inset-right, 0px)); }
+
+@media (max-width: 620px) {
+  html:not(.tv):not(.tv-mode) body .np-overlay { padding: max(12px, env(safe-area-inset-top, 0px)) max(12px, env(safe-area-inset-right, 0px)) max(12px, env(safe-area-inset-bottom, 0px)) max(12px, env(safe-area-inset-left, 0px)); }
+  html:not(.tv):not(.tv-mode) body .np-panel { max-height: calc(100dvh - 24px); padding: 24px 16px; border-radius: 22px; }
+  html:not(.tv):not(.tv-mode) body .np-title { font-size: 34px; margin-bottom: 20px; }
+  html:not(.tv):not(.tv-mode) body .np-grid { gap: 18px 14px; }
+  html:not(.tv):not(.tv-mode) body .np-card { width: 118px; }
+  html:not(.tv):not(.tv-mode) body .np-avatar { width: 112px; height: 112px; border-radius: 18px; }
+  html:not(.tv):not(.tv-mode) body .np-actions { margin-top: 24px; }
+  html:not(.tv):not(.tv-mode) body .np-avatar-choice { width: 56px; height: 56px; }
+}
+
+@media (orientation: landscape) and (max-height: 520px) {
+  html:not(.tv):not(.tv-mode) body .np-overlay { padding: 8px 14px; }
+  html:not(.tv):not(.tv-mode) body .np-panel { width: min(820px, 100%); max-height: calc(100dvh - 16px); padding: 16px 24px; }
+  html:not(.tv):not(.tv-mode) body .np-brand { margin: 0 0 6px; }
+  html:not(.tv):not(.tv-mode) body .np-brand img { width: 32px; height: 32px; }
+  html:not(.tv):not(.tv-mode) body .np-title { font-size: 28px; margin-bottom: 12px; }
+  html:not(.tv):not(.tv-mode) body .np-grid { gap: 12px; flex-wrap: nowrap; }
+  html:not(.tv):not(.tv-mode) body .np-card { width: 104px; gap: 6px; }
+  html:not(.tv):not(.tv-mode) body .np-avatar { width: 96px; height: 96px; border-radius: 15px; }
+  html:not(.tv):not(.tv-mode) body .np-name { font-size: 14px; }
+  html:not(.tv):not(.tv-mode) body .np-actions { margin-top: 12px; }
+  html:not(.tv):not(.tv-mode) body .np-panel-edit { width: min(780px, 100%); }
+  html:not(.tv):not(.tv-mode) body .np-panel-edit .np-avatar-lg { width: 88px; height: 88px; margin-bottom: 8px; }
+  html:not(.tv):not(.tv-mode) body .np-input { min-height: 44px; margin-bottom: 8px; }
+  html:not(.tv):not(.tv-mode) body .np-avatars { margin-bottom: 6px; gap: 6px; }
+  html:not(.tv):not(.tv-mode) body .np-avatar-choice { width: 46px; height: 46px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html:not(.tv):not(.tv-mode) body .np-overlay,
+  html:not(.tv):not(.tv-mode) body .np-panel { animation: none; }
+}

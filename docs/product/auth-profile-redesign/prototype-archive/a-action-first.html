@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#080b12">
+  <title>Norva Auth Prototype A — Action first</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="prototype.css">
+</head>
+<body class="variant-a" data-variant="a" data-mode="signup" data-p-density="1">
+  <main class="auth-stage">
+    <div class="auth-shell">
+      <section class="brand-column" aria-labelledby="a-title">
+        <a class="brand-lockup" href="index.html" aria-label="Back to Norva auth proposals">
+          <img src="https://norva.tv/img/norva-app-icon.png" alt="">
+          <span>Norva</span>
+        </a>
+
+        <div class="brand-story">
+          <p class="eyebrow">One account · every screen</p>
+          <h1 class="display-title" id="a-title">Your catalog follows you.</h1>
+          <p class="display-copy">Create one Norva account, connect a compatible source you’re authorized to use, and pick up on phone, web or Android TV.</p>
+
+          <h2 class="mobile-proof-title" data-proof-title>Why create a Norva account?</h2>
+          <ul class="value-lines" aria-label="Norva account benefits">
+            <li class="value-line">
+              <span class="value-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>
+              </span>
+              <span><strong>Continue on any screen</strong><span>Profiles, favorites and progress stay with your account.</span></span>
+            </li>
+            <li class="value-line">
+              <span class="value-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v18M7 8l5-5 5 5M7 16l5 5 5-5"/></svg>
+              </span>
+              <span><strong>Connect what you already use</strong><span>Norva organizes a compatible source; it doesn’t sell content.</span></span>
+            </li>
+            <li class="value-line">
+              <span class="value-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/><path d="m9 12 2 2 4-4"/></svg>
+              </span>
+              <span><strong>Your account stays yours</strong><span>Clear sign-in choices and no forced product tour.</span></span>
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="form-column" aria-label="Norva account access">
+        <div class="auth-panel">
+          <div class="auth-tabs" role="tablist" aria-label="Account access">
+            <button class="auth-tab" id="a-signin-tab" type="button" role="tab" aria-selected="false" aria-controls="a-signin" data-mode="signin">Sign in</button>
+            <button class="auth-tab" id="a-signup-tab" type="button" role="tab" aria-selected="true" aria-controls="a-signup" data-mode="signup">Create account</button>
+          </div>
+
+          <section id="a-signin" role="tabpanel" aria-labelledby="a-signin-tab" data-mode="signin" hidden>
+            <h2 class="form-heading">Welcome back</h2>
+            <p class="form-intro">Sign in to reconnect your Norva screens.</p>
+            <form class="auth-form">
+              <div class="field"><label for="a-signin-email">Email</label><input id="a-signin-email" type="email" autocomplete="email" placeholder="name@example.com" required></div>
+              <div class="field"><label for="a-signin-password">Password</label><input id="a-signin-password" type="password" autocomplete="current-password" required></div>
+              <button class="action action-primary" type="submit">Sign in</button>
+              <button class="action-link" type="button" data-prototype-action>Forgot password</button>
+              <div class="divider">or</div>
+              <button class="action action-google" type="button" data-prototype-action>
+                <svg class="google-mark" viewBox="0 0 48 48" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.1H42V20H24v8h11.3A12 12 0 1 1 32 15l5.7-5.6A20 20 0 1 0 44 24c0-1.3-.1-2.6-.4-3.9Z"/><path fill="#1976D2" d="M43.6 20.1H42V20H24v8h11.3a12 12 0 0 1-4.1 5.6l6.2 5.2C41.2 35.3 44 30.1 44 24c0-1.3-.1-2.6-.4-3.9Z"/></svg>
+                Continue with Google
+              </button>
+              <p class="prototype-status" data-status aria-live="polite"></p>
+            </form>
+          </section>
+
+          <section id="a-signup" role="tabpanel" aria-labelledby="a-signup-tab" data-mode="signup">
+            <h2 class="form-heading">Create your Norva account</h2>
+            <p class="form-intro">Start with Google or use your email. Your TV service is connected later.</p>
+            <form class="auth-form">
+              <button class="action action-google" type="button" data-prototype-action>
+                <svg class="google-mark" viewBox="0 0 48 48" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.1H42V20H24v8h11.3A12 12 0 1 1 32 15l5.7-5.6A20 20 0 1 0 44 24c0-1.3-.1-2.6-.4-3.9Z"/><path fill="#1976D2" d="M43.6 20.1H42V20H24v8h11.3a12 12 0 0 1-4.1 5.6l6.2 5.2C41.2 35.3 44 30.1 44 24c0-1.3-.1-2.6-.4-3.9Z"/></svg>
+                Continue with Google
+              </button>
+              <div class="divider">or</div>
+              <button class="action action-secondary" type="button" data-reveal-email>Continue with email</button>
+              <div class="email-fields" data-email-fields hidden>
+                <div class="field"><label for="a-signup-email">Email</label><input id="a-signup-email" type="email" autocomplete="email" placeholder="name@example.com" required></div>
+                <div class="field"><label for="a-signup-password">Password</label><input id="a-signup-password" type="password" autocomplete="new-password" minlength="6" required></div>
+                <button class="action action-primary" type="submit">Create account</button>
+              </div>
+              <p class="prototype-status" data-status aria-live="polite"></p>
+            </form>
+          </section>
+
+          <p class="fine-print">Norva is a media player and includes no content. Connect only a compatible source you own or are authorized to use.</p>
+          <nav class="legal-links" aria-label="Legal"><a href="#">Privacy</a><a href="#">Terms</a></nav>
+        </div>
+      </section>
+    </div>
+  </main>
+  <script src="prototype.js"></script>
+</body>
+</html>

@@ -10,8 +10,19 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.graphics.Bitmap;
+import android.graphics.Color;
+import android.graphics.Rect;
+import android.graphics.drawable.ColorDrawable;
+import android.os.SystemClock;
+import android.view.View;
+import android.view.DisplayCutout;
+import android.view.WindowInsets;
+import android.widget.ImageButton;
 
 import androidx.core.content.ContextCompat;
+import androidx.media3.ui.AspectRatioFrameLayout;
+import androidx.media3.ui.PlayerView;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
 
@@ -112,6 +123,228 @@ public final class FirstFrameFixtureInstrumentedTest {
             //noinspection ResultOfMethodCallIgnored
             fixture.delete();
         }
+    }
+
+    @Test
+    public void episodeControlsFillTheDisplayAndHandOffInsteadOfSeeking() throws Exception {
+        Instrumentation instrumentation = InstrumentationRegistry.getInstrumentation();
+        Context target = instrumentation.getTargetContext();
+        Context testContext = instrumentation.getContext();
+        File fixture = new File(target.getCacheDir(), "norva-player-ui-h264-aac.mkv");
+        copyFixture(testContext, fixture);
+        target.getSharedPreferences("norva_player_ui", Context.MODE_PRIVATE)
+                .edit().clear().commit();
+
+        String token = UUID.randomUUID().toString();
+        CountDownLatch resultLatch = new CountDownLatch(1);
+        AtomicReference<Activity> activityRef = new AtomicReference<>();
+        Instrumentation.ActivityMonitor monitor =
+                instrumentation.addMonitor(PlayerActivity.class.getName(), null, false);
+        BroadcastReceiver receiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                if (token.equals(intent.getStringExtra(
+                        PlayerActivity.EXTRA_FIRST_FRAME_TEST_TOKEN))) {
+                    resultLatch.countDown();
+                }
+            }
+        };
+        ContextCompat.registerReceiver(
+                target,
+                receiver,
+                new IntentFilter(PlayerActivity.ACTION_FIRST_FRAME_TEST_RESULT),
+                ContextCompat.RECEIVER_NOT_EXPORTED);
+
+        try (FixtureHttpServer server = new FixtureHttpServer(
+                Files.readAllBytes(fixture.toPath()))) {
+            Intent launch = new Intent(target, PlayerActivity.class)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    .putExtra(PlayerActivity.EXTRA_URL, server.url())
+                    .putExtra(PlayerActivity.EXTRA_TITLE, "Norva player UI gate")
+                    .putExtra(PlayerActivity.EXTRA_SOURCE_ID, "fixture-source")
+                    .putExtra(PlayerActivity.EXTRA_ITEM_TYPE, "episode")
+                    .putExtra(PlayerActivity.EXTRA_ITEM_ID, "s4e1")
+                    .putExtra(PlayerActivity.EXTRA_CONTAINER, "mkv")
+                    .putExtra(PlayerActivity.EXTRA_PREVIOUS_TITLE, "S3 E10 - Previous")
+                    .putExtra(PlayerActivity.EXTRA_NEXT_TITLE, "S4 E2 - Next")
+                    .putExtra(PlayerActivity.EXTRA_FIRST_FRAME_TEST_TOKEN, token);
+            target.startActivity(launch);
+            Activity activity = instrumentation.waitForMonitorWithTimeout(monitor, 15_000);
+            activityRef.set(activity);
+            assertNotNull(activity);
+            assertTrue("fixture did not render", resultLatch.await(45, TimeUnit.SECONDS));
+
+            AtomicReference<ImageButton> previousRef = new AtomicReference<>();
+            AtomicReference<ImageButton> nextRef = new AtomicReference<>();
+            instrumentation.runOnMainSync(() -> {
+                PlayerView playerView = activity.findViewById(R.id.norva_player_view);
+                View root = activity.findViewById(R.id.norva_player_root);
+                View videoSurface = playerView.getVideoSurfaceView();
+                View controller = activity.findViewById(androidx.media3.ui.R.id.exo_controller);
+                View centerControls = activity.findViewById(
+                        androidx.media3.ui.R.id.exo_center_controls);
+                View bottomBar = activity.findViewById(androidx.media3.ui.R.id.exo_bottom_bar);
+                View progress = activity.findViewById(androidx.media3.ui.R.id.exo_progress);
+                ImageButton previous = activity.findViewById(
+                        R.id.norva_player_previous_episode_button);
+                ImageButton next = activity.findViewById(
+                        R.id.norva_player_next_episode_button);
+                assertNotNull(playerView);
+                assertNotNull(root);
+                assertNotNull(videoSurface);
+                assertNotNull(controller);
+                assertNotNull(centerControls);
+                assertNotNull(bottomBar);
+                assertNotNull(progress);
+                assertNotNull(previous);
+                assertNotNull(next);
+                if (playerView.getPlayer() != null) playerView.getPlayer().pause();
+                playerView.showController();
+                assertEquals(AspectRatioFrameLayout.RESIZE_MODE_ZOOM,
+                        playerView.getResizeMode());
+                assertEquals(root.getWidth(), playerView.getWidth());
+                assertEquals(root.getHeight(), playerView.getHeight());
+                Rect windowBounds = activity.getWindowManager()
+                        .getCurrentWindowMetrics().getBounds();
+                assertEquals(0, root.getLeft());
+                assertEquals(0, root.getTop());
+                assertEquals(windowBounds.width(), root.getWidth());
+                assertEquals(windowBounds.height(), root.getHeight());
+                assertEquals(0, playerView.getLeft());
+                assertEquals(0, playerView.getTop());
+                assertCentersMatch("decoded video", root, videoSurface, 1);
+                assertCentersMatch("transport controls", root, centerControls, 1);
+                Rect safeInsets = expectedSafeInsets(root);
+                assertEquals(0, controller.getPaddingLeft());
+                assertEquals(0, controller.getPaddingRight());
+                assertEquals(safeInsets.left, bottomBar.getPaddingLeft());
+                assertEquals(safeInsets.right, bottomBar.getPaddingRight());
+                assertEquals(safeInsets.bottom, bottomBar.getPaddingBottom());
+                assertEquals(safeInsets.left, progress.getPaddingLeft());
+                assertEquals(safeInsets.right, progress.getPaddingRight());
+                assertTransparentBackground(activity.findViewById(
+                        androidx.media3.ui.R.id.exo_controls_background));
+                assertTransparentBackground(activity.findViewById(
+                        androidx.media3.ui.R.id.exo_bottom_bar));
+                assertEquals(View.VISIBLE, previous.getVisibility());
+                assertEquals(View.VISIBLE, next.getVisibility());
+                assertTrue(previous.isEnabled());
+                assertTrue(next.isEnabled());
+                assertTrue(previous.getWidth() >= dp(target, 48));
+                assertTrue(previous.getHeight() >= dp(target, 48));
+                assertTrue(next.getWidth() >= dp(target, 48));
+                assertTrue(next.getHeight() >= dp(target, 48));
+                assertTrue(previous.getContentDescription().toString().contains("S3 E10"));
+                assertTrue(next.getContentDescription().toString().contains("S4 E2"));
+                previousRef.set(previous);
+                nextRef.set(next);
+            });
+            SystemClock.sleep(250L);
+
+            Bitmap screenshot = instrumentation.getUiAutomation().takeScreenshot();
+            File screenshotFile = new File(
+                    target.getExternalFilesDir(null),
+                    "norva-player-episode-navigation.png");
+            try (FileOutputStream output = new FileOutputStream(screenshotFile, false)) {
+                assertTrue(screenshot.compress(Bitmap.CompressFormat.PNG, 100, output));
+            }
+            int sampleX = screenshot.getWidth() * 3 / 4;
+            int sampleY = screenshot.getHeight() / 4;
+            int controlsVisiblePixel = screenshot.getPixel(sampleX, sampleY);
+            screenshot.recycle();
+
+            instrumentation.runOnMainSync(() -> {
+                PlayerView playerView = activity.findViewById(R.id.norva_player_view);
+                playerView.hideController();
+            });
+            SystemClock.sleep(250L);
+            Bitmap controlsHidden = instrumentation.getUiAutomation().takeScreenshot();
+            int controlsHiddenPixel = controlsHidden.getPixel(sampleX, sampleY);
+            controlsHidden.recycle();
+            assertTrue("controller must not wash out the decoded frame",
+                    rgbDistance(controlsVisiblePixel, controlsHiddenPixel) <= 24);
+            instrumentation.runOnMainSync(() -> {
+                PlayerView playerView = activity.findViewById(R.id.norva_player_view);
+                playerView.showController();
+            });
+            SystemClock.sleep(150L);
+
+            instrumentation.runOnMainSync(() -> previousRef.get().performClick());
+            long deadline = SystemClock.elapsedRealtime() + 3_000L;
+            while (!activity.isFinishing() && SystemClock.elapsedRealtime() < deadline) {
+                SystemClock.sleep(25L);
+            }
+            assertTrue("Previous must hand off by closing, not seek to zero",
+                    activity.isFinishing());
+        } finally {
+            Activity activity = activityRef.get();
+            if (activity != null && !activity.isFinishing()) {
+                instrumentation.runOnMainSync(activity::finish);
+            }
+            instrumentation.removeMonitor(monitor);
+            try { target.unregisterReceiver(receiver); } catch (Exception ignored) { }
+            //noinspection ResultOfMethodCallIgnored
+            fixture.delete();
+        }
+    }
+
+    private static int dp(Context context, int value) {
+        return Math.round(value * context.getResources().getDisplayMetrics().density);
+    }
+
+    private static void assertCentersMatch(
+            String label, View reference, View candidate, int tolerancePx) {
+        int[] referenceLocation = new int[2];
+        int[] candidateLocation = new int[2];
+        reference.getLocationInWindow(referenceLocation);
+        candidate.getLocationInWindow(candidateLocation);
+        int referenceCenterX2 = referenceLocation[0] * 2 + reference.getWidth();
+        int referenceCenterY2 = referenceLocation[1] * 2 + reference.getHeight();
+        int candidateCenterX2 = candidateLocation[0] * 2 + candidate.getWidth();
+        int candidateCenterY2 = candidateLocation[1] * 2 + candidate.getHeight();
+        assertTrue(label + " must be horizontally centered: expected x2="
+                        + referenceCenterX2 + " actual x2=" + candidateCenterX2,
+                Math.abs(referenceCenterX2 - candidateCenterX2) <= tolerancePx * 2);
+        assertTrue(label + " must be vertically centered: expected y2="
+                        + referenceCenterY2 + " actual y2=" + candidateCenterY2,
+                Math.abs(referenceCenterY2 - candidateCenterY2) <= tolerancePx * 2);
+    }
+
+    private static Rect expectedSafeInsets(View root) {
+        WindowInsets insets = root.getRootWindowInsets();
+        assertNotNull(insets);
+        int left = 0;
+        int top = 0;
+        int right = 0;
+        int bottom = 0;
+        DisplayCutout cutout = insets.getDisplayCutout();
+        if (cutout != null) {
+            left = cutout.getSafeInsetLeft();
+            top = cutout.getSafeInsetTop();
+            right = cutout.getSafeInsetRight();
+            bottom = cutout.getSafeInsetBottom();
+        }
+        android.graphics.Insets nav = insets.getInsetsIgnoringVisibility(
+                WindowInsets.Type.navigationBars());
+        android.graphics.Insets gestures = insets.getInsets(
+                WindowInsets.Type.mandatorySystemGestures());
+        return new Rect(
+                Math.max(left, Math.max(nav.left, gestures.left)),
+                Math.max(top, Math.max(nav.top, gestures.top)),
+                Math.max(right, Math.max(nav.right, gestures.right)),
+                Math.max(bottom, Math.max(nav.bottom, gestures.bottom)));
+    }
+
+    private static void assertTransparentBackground(View view) {
+        assertNotNull(view);
+        assertTrue(view.getBackground() instanceof ColorDrawable);
+        assertEquals(Color.TRANSPARENT, ((ColorDrawable) view.getBackground()).getColor());
+    }
+
+    private static int rgbDistance(int left, int right) {
+        return Math.abs(Color.red(left) - Color.red(right))
+                + Math.abs(Color.green(left) - Color.green(right))
+                + Math.abs(Color.blue(left) - Color.blue(right));
     }
 
     private static void copyFixture(Context testContext, File destination) throws Exception {

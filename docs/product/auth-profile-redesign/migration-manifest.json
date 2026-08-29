@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "status": "production_candidate_authorized",
+  "canonicalWorktree": "C:\\Users\\AdrienHernandez\\Documents\\Norva-post-provider-rollout-batch",
+  "canonicalBranch": "codex/post-provider-rollout-batch",
+  "productionBase": "56fdc9b0188407293f4d3a3a24e4b5d67f78f71c",
+  "approvedReference": {
+    "journey": "prototype-archive/l-premium-continuity.html",
+    "responsiveBoard": "prototype-archive/qa-l.html",
+    "profileFunnels": "prototype-archive/profile-funnels.html",
+    "qaReport": "prototype-archive/design-qa.md"
+  },
+  "productionTargets": [
+    "public/account.html",
+    "public/css/account-premium.css",
+    "public/css/profiles-premium.css",
+    "public/img/auth/",
+    "public/js/authApi.js",
+    "public/js/profiles.js",
+    "public/app.html",
+    "supabase/functions/norva-auth-email/index.ts",
+    "clients/android-phone/app/build.gradle"
+  ],
+  "decisions": {
+    "singleEntryAction": true,
+    "emailFirst": true,
+    "nativeEmailOtpDigits": 6,
+    "secureLinkFallback": true,
+    "passwordIsOptionalFallback": true,
+    "kidsProfiles": false,
+    "posterColumns": 3,
+    "welcomeSlides": 2,
+    "nominalScreenScroll": false,
+    "reducedMotionFallback": true
+  },
+  "resolved": [
+    {
+      "id": "numeric_email_otp_contract",
+      "detail": "Le client verifie le code GoTrue natif a six chiffres sur /auth/v1/verify et conserve le lien token_hash."
+    },
+    {
+      "id": "account_page_extraction",
+      "detail": "Les styles premium sont extraits. Le controleur historique reste en place et contract-teste pour limiter le risque de release."
+    }
+  ],
+  "remainingGates": [
+    {
+      "id": "material_change_rollout_gate",
+      "severity": "production_gate",
+      "detail": "Apres disponibilite reelle, utiliser la RPC CAS existante pour rendre l'observation precedente stale et redemarrer 24 h completes a 20 %."
+    }
+  ],
+  "forbidden": [
+    "mock-only OTP verification",
+    "account enumeration",
+    "PII in analytics",
+    "Kids profile UI",
+    "direct push to main",
+    "manual observation row mutation",
+    "Android TV publication without TV changes"
+  ],
+  "authorization": {
+    "grantedAt": "2026-08-29",
+    "scope": "full grouped batch including web, self-hosted backend, database, Cloudflare and Android phone",
+    "requiresEvidence": true
+  }
+}

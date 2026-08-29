@@ -7,15 +7,18 @@
     <title>Norva Account</title>
     <link rel="icon" type="image/png" href="/favicon.png">
     <script>
-      // Native app (Android phone/TV APK WebView): render a clean, app-style
-      // login — hide the web marketing brand copy and center the form (see the
-      // html.native-app rules below). Web browsers keep the full marketing brand.
+      // Web and Android phone share the premium email-first account surface.
+      // Android TV remains pairing-only and is redirected before first paint.
       (function () {
         var ua = navigator.userAgent || '';
-        if (/NorvaTV-/i.test(ua) || window.NorvaTVCloud || window.NodeCastNative
-            || /[?&]mobile=1\b/.test(window.location.search || '')) {
+        var androidPhone = /NorvaTV-AndroidPhone/i.test(ua)
+          || /[?&]mobile=1\b/.test(window.location.search || '');
+        var androidTv = /NorvaTV-AndroidTV/i.test(ua);
+        if (/NorvaTV-/i.test(ua) || window.NorvaTVCloud || window.NodeCastNative || androidPhone) {
           document.documentElement.classList.add('native-app');
         }
+        if (androidPhone) document.documentElement.classList.add('android-phone-auth');
+        if (!androidTv) document.documentElement.classList.add('premium-auth');
       })();
 
       // TV safety net: the Android TV APK (UA `NorvaTV-AndroidTV`) authenticates
@@ -387,6 +390,12 @@
         html.native-app .onb-slide p { font-size: 13px; line-height: 1.45; }
         html.native-app .onb-dots { margin-top: 10px; }
     </style>
+    <link id="premium-auth-style" rel="stylesheet" href="/css/account-premium.css?v=2" media="not all">
+    <script>
+      if (document.documentElement.classList.contains('premium-auth')) {
+        document.getElementById('premium-auth-style').media = 'all';
+      }
+    </script>
   <script src="/js/marketing-config.js?v=2"></script>
   <script defer src="/js/marketing.js?v=1"></script>
   <script defer src="/js/native-analytics.js?v=2"></script>
@@ -394,6 +403,53 @@
   <script defer src="/js/consent-banner.js?v=1"></script>
 </head>
 <body>
+    <section class="welcome-stage" id="welcome-stage" aria-label="Welcome to Norva" hidden>
+        <article class="welcome-slide is-active" data-welcome-slide="0" aria-hidden="false">
+            <div class="welcome-layout">
+                <div class="welcome-wall" aria-hidden="true">
+                    <div class="welcome-columns">
+                        <div class="welcome-column"><div class="welcome-reel"><img src="/img/auth/norva-auth-wall-1-col-1.webp" alt=""><img src="/img/auth/norva-auth-wall-1-col-1.webp" alt=""></div></div>
+                        <div class="welcome-column"><div class="welcome-reel"><img src="/img/auth/norva-auth-wall-1-col-2.webp" alt=""><img src="/img/auth/norva-auth-wall-1-col-2.webp" alt=""></div></div>
+                        <div class="welcome-column"><div class="welcome-reel"><img src="/img/auth/norva-auth-wall-1-col-3.webp" alt=""><img src="/img/auth/norva-auth-wall-1-col-3.webp" alt=""></div></div>
+                    </div>
+                </div>
+                <div class="welcome-copy">
+                    <div class="welcome-brand"><img src="/img/norva-app-icon.png" alt=""><span>Norva</span></div>
+                    <span class="welcome-kicker">Your screens, together</span>
+                    <h1>A world to explore.</h1>
+                    <p>Movies, series and Live TV — organized around you.</p>
+                    <div class="welcome-actions"><button class="welcome-primary" type="button" data-welcome-next>Continue</button></div>
+                    <div class="welcome-dots" role="group" aria-label="Welcome screens">
+                        <button class="welcome-dot" type="button" aria-label="Welcome screen 1" aria-current="true" data-welcome-dot="0"></button>
+                        <button class="welcome-dot" type="button" aria-label="Welcome screen 2" aria-current="false" data-welcome-dot="1"></button>
+                    </div>
+                </div>
+            </div>
+        </article>
+        <article class="welcome-slide" data-welcome-slide="1" aria-hidden="true">
+            <div class="welcome-layout">
+                <div class="welcome-wall" aria-hidden="true">
+                    <div class="welcome-columns">
+                        <div class="welcome-column"><div class="welcome-reel"><img src="/img/auth/norva-auth-wall-2-col-1.webp" alt=""><img src="/img/auth/norva-auth-wall-2-col-1.webp" alt=""></div></div>
+                        <div class="welcome-column"><div class="welcome-reel"><img src="/img/auth/norva-auth-wall-2-col-2.webp" alt=""><img src="/img/auth/norva-auth-wall-2-col-2.webp" alt=""></div></div>
+                        <div class="welcome-column"><div class="welcome-reel"><img src="/img/auth/norva-auth-wall-2-col-3.webp" alt=""><img src="/img/auth/norva-auth-wall-2-col-3.webp" alt=""></div></div>
+                    </div>
+                </div>
+                <div class="welcome-copy">
+                    <div class="welcome-brand"><img src="/img/norva-app-icon.png" alt=""><span>Norva</span></div>
+                    <span class="welcome-kicker">Pick up anywhere</span>
+                    <h1>Made for every screen.</h1>
+                    <p>Your profiles, favorites and progress stay with you.</p>
+                    <div class="welcome-actions"><button class="welcome-primary" id="welcome-start" type="button">Get started</button></div>
+                    <div class="welcome-dots" role="group" aria-label="Welcome screens">
+                        <button class="welcome-dot" type="button" aria-label="Welcome screen 1" aria-current="false" data-welcome-dot="0"></button>
+                        <button class="welcome-dot" type="button" aria-label="Welcome screen 2" aria-current="true" data-welcome-dot="1"></button>
+                    </div>
+                </div>
+            </div>
+        </article>
+    </section>
+
     <!-- Sign-up advantages carousel (native app only; hidden on web). -->
     <section class="native-onboarding" aria-label="Why Norva">
         <div class="onb-track" id="onb-track">
@@ -417,14 +473,14 @@
                 <img src="/img/norva-app-icon.png" alt="Norva">
                 <span>Norva</span>
             </div>
-            <h1>One account for every Norva screen.</h1>
+            <h1>Your catalogue. Everywhere.</h1>
             <p class="lead">
-                Sign in once, pair your TV or mobile app, and keep your devices, sources, favorites and playback history attached to your Norva account.
+                Sign in once and keep your profiles, favourites and playback progress connected across your screens.
             </p>
-            <div class="signals" aria-hidden="true">
-                <div class="signal"><span class="dot"></span><span>Pairing for TV, mobile and web</span></div>
-                <div class="signal"><span class="dot"></span><span>Supabase Auth identity and secure sessions</span></div>
-                <div class="signal"><span class="dot"></span><span>Ready for direct playback and relay phases</span></div>
+            <div class="signals" aria-label="Why your Norva account is safe and useful">
+                <div class="signal"><span class="dot" aria-hidden="true"></span><span>One account across phone, web and TV.</span></div>
+                <div class="signal"><span class="dot" aria-hidden="true"></span><span>Secure code. No password required.</span></div>
+                <div class="signal"><span class="dot" aria-hidden="true"></span><span>Norva includes no content.</span></div>
             </div>
         </section>
 
@@ -463,6 +519,32 @@
                 </div>
                 <button class="primary" type="submit" id="signin-submit" hidden>Sign in</button>
                 <button class="ghost" type="button" id="forgot-button">Forgot password</button>
+                <button class="linklike" type="button" id="use-code-toggle" hidden>Use a secure code instead</button>
+                <button class="linklike" type="button" id="create-password-account" hidden>Create an account with a password</button>
+            </form>
+
+            <form class="form" id="otp-form" hidden>
+                <div class="auth-lead">
+                    <h2 class="auth-title">Check your inbox.</h2>
+                    <p class="auth-sub">Enter the six-digit code sent to <span class="otp-email" id="otp-email"></span>.</p>
+                </div>
+                <fieldset class="otp-fieldset">
+                    <legend class="otp-legend">Secure code</legend>
+                    <div class="otp-grid" id="otp-grid">
+                        <input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="1" autocomplete="one-time-code" aria-label="Code digit 1" data-otp-digit>
+                        <input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="1" aria-label="Code digit 2" data-otp-digit>
+                        <input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="1" aria-label="Code digit 3" data-otp-digit>
+                        <input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="1" aria-label="Code digit 4" data-otp-digit>
+                        <input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="1" aria-label="Code digit 5" data-otp-digit>
+                        <input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="1" aria-label="Code digit 6" data-otp-digit>
+                    </div>
+                </fieldset>
+                <button class="primary" type="submit" id="otp-submit">Verify and continue</button>
+                <div class="otp-actions">
+                    <button class="secondary otp-resend" type="button" id="otp-resend">Send a new code</button>
+                    <button class="secondary" type="button" id="otp-change-email">Change email</button>
+                </div>
+                <button class="linklike" type="button" id="otp-use-password">Use a password instead</button>
             </form>
 
             <form class="form" id="signup-form" role="tabpanel" aria-labelledby="signup-tab" hidden>
@@ -587,20 +669,90 @@
         const socialEl = document.getElementById('social-auth');
         const nativeOnboardingEl = document.querySelector('.native-onboarding');
         const tabs = document.getElementById('tabs');
-        // Native app (Android WebView): magic-link and social sign-in return via the
-        // system browser / a blocked WebView, so the session wouldn't land back in
-        // the app. Both are web/PWA-only; native uses email+password (and, from
-        // step 2, native Google Sign-In).
+        const welcomeStage = document.getElementById('welcome-stage');
+        const WELCOME_SEEN_KEY = 'norva-account-welcome-seen-v1';
+        // Web and Android phone use one neutral email-first OTP funnel. Android TV
+        // is redirected to its pairing-only surface before first paint.
         const isNativeApp = document.documentElement.classList.contains('native-app');
+        const isNativePhoneApp = document.documentElement.classList.contains('android-phone-auth');
+        const isPremiumAuth = document.documentElement.classList.contains('premium-auth');
         const SIGNUP_ATTRIBUTION_KEY = 'norva-signup-attribution-pending-v1';
         const AUTH_FUNNEL_KEY = 'norva-auth-funnel-intent-v1';
         const signupGeoPromise = loadSignupGeoContext();
         const forms = {
             signin: document.getElementById('signin-form'),
             signup: document.getElementById('signup-form'),
+            otp: document.getElementById('otp-form'),
             recover: document.getElementById('recover-form'),
             password: document.getElementById('password-form')
         };
+        const otpInputs = [...document.querySelectorAll('[data-otp-digit]')];
+        let pendingOtpEmail = '';
+        let otpResendUntil = 0;
+        let otpResendTimer = null;
+
+        function setWelcomeSlide(index) {
+            const safeIndex = index === 1 ? 1 : 0;
+            const focusedSlide = document.activeElement?.closest?.('[data-welcome-slide]');
+            if (focusedSlide && Number(focusedSlide.dataset.welcomeSlide) !== safeIndex) {
+                document.activeElement.blur();
+            }
+            welcomeStage?.querySelectorAll('[data-welcome-slide]').forEach((slide, i) => {
+                const active = i === safeIndex;
+                slide.classList.toggle('is-active', active);
+                slide.setAttribute('aria-hidden', String(!active));
+            });
+            welcomeStage?.querySelectorAll('[data-welcome-dot]').forEach(dot => {
+                dot.setAttribute('aria-current', String(Number(dot.dataset.welcomeDot) === safeIndex));
+            });
+            if (!welcomeStage?.hidden) {
+                requestAnimationFrame(() => {
+                    welcomeStage.querySelector(`[data-welcome-slide="${safeIndex}"] .welcome-primary`)?.focus({ preventScroll: true });
+                });
+            }
+        }
+
+        function shouldShowWelcome() {
+            if (!isPremiumAuth || !welcomeStage || params.get('manage') === '1' || params.get('email') || params.get('token_hash')
+                || params.get('mode') === 'recovery' || location.hash) return false;
+            try { return localStorage.getItem(WELCOME_SEEN_KEY) !== '1'; }
+            catch (_) { return false; }
+        }
+
+        function showWelcome() {
+            if (!shouldShowWelcome()) return false;
+            setWelcomeSlide(0);
+            welcomeStage.hidden = false;
+            document.body.classList.add('welcome-active');
+            requestAnimationFrame(() => welcomeStage.querySelector('[data-welcome-next]')?.focus({ preventScroll: true }));
+            return true;
+        }
+
+        function finishWelcome() {
+            try { localStorage.setItem(WELCOME_SEEN_KEY, '1'); } catch (_) { /* private mode */ }
+            document.body.classList.remove('welcome-active');
+            welcomeStage.hidden = true;
+            requestAnimationFrame(() => document.getElementById('signin-email')?.focus({ preventScroll: true }));
+        }
+
+        welcomeStage?.querySelector('[data-welcome-next]')?.addEventListener('click', () => setWelcomeSlide(1));
+        welcomeStage?.querySelector('#welcome-start')?.addEventListener('click', finishWelcome);
+        welcomeStage?.querySelectorAll('[data-welcome-dot]').forEach(dot => {
+            dot.addEventListener('click', () => setWelcomeSlide(Number(dot.dataset.welcomeDot)));
+        });
+
+        function configurePremiumAuthSurface() {
+            if (!isPremiumAuth) return;
+            const lead = forms.signin.querySelector('.auth-lead');
+            const title = lead?.querySelector('.auth-title');
+            const sub = lead?.querySelector('.auth-sub');
+            const hint = forms.signin.querySelector('.auth-hint');
+            if (title) title.textContent = 'Enter your email.';
+            if (sub) sub.textContent = 'We’ll recognize your account or create it securely.';
+            if (hint) hint.lastChild.textContent = ' We’ll email a six-digit code. No password required.';
+            document.getElementById('magic-link-primary').textContent = 'Continue';
+            document.getElementById('use-password-toggle').textContent = 'Use a password instead';
+        }
 
         function trackAuth(event, method, outcome = 'pending', failureFamily) {
             window.NorvaTrackProduct?.(event, {
@@ -682,9 +834,10 @@
             return 'account';
         }
 
-        function authEmailRedirectUrl() {
+        function authEmailRedirectUrl(flow = '') {
             const url = new URL('/account.html', location.origin);
             url.searchParams.set('returnTo', returnTo);
+            if (isPremiumAuth && flow === 'otp') url.searchParams.set('client', 'unified_email_otp');
             return url.toString();
         }
 
@@ -879,6 +1032,9 @@
             document.getElementById('signin-password').required = on;
             document.getElementById('signin-submit').hidden = !on;
             document.getElementById('signin-passwordless').hidden = on;
+            document.getElementById('forgot-button').hidden = isPremiumAuth ? !on : false;
+            document.getElementById('use-code-toggle').hidden = !(isPremiumAuth && on);
+            document.getElementById('create-password-account').hidden = !(isPremiumAuth && on);
             const lead = forms.signin.querySelector('.auth-lead');
             if (lead) lead.hidden = on;
             if (on) setTimeout(() => { try { document.getElementById('signin-password').focus(); } catch (_) { } }, 0);
@@ -900,35 +1056,24 @@
             }
         }
         document.getElementById('use-password-toggle').addEventListener('click', () => setSigninPasswordMode(true));
-        if (isNativeApp) {
-            // Sign in: email/password visible below the Google hero (Google-first).
+        document.getElementById('use-code-toggle').addEventListener('click', () => setSigninPasswordMode(false));
+        document.getElementById('create-password-account').addEventListener('click', () => {
+            document.getElementById('signup-email').value = document.getElementById('signin-email').value.trim();
+            setSignupPasswordMode(true);
+            showForm('signup');
+        });
+        document.getElementById('otp-use-password').addEventListener('click', () => {
+            document.getElementById('signin-email').value = pendingOtpEmail;
             setSigninPasswordMode(true);
-            // Create account: collapse the email fields behind a "Sign up with email"
-            // reveal so the 5-slide carousel + Google hero fit without scrolling.
-            // Native can't complete a magic link (WebView), so hide it and let the
-            // reveal expose the password fields instead.
-            setSignupPasswordMode(false);
-            const sp = document.getElementById('signup-passwordless');
-            const signupEmailField = document.getElementById('signup-email')?.closest('.field');
-            // Fully collapse: hide the always-visible email field too, so Create
-            // shows just Google + "Sign up with email" until the user opts in.
-            if (signupEmailField) signupEmailField.hidden = true;
-            if (sp) {
-                const magic = document.getElementById('signup-magic-primary');
-                if (magic) magic.style.display = 'none';
-                const hint = sp.querySelector('.auth-hint');
-                if (hint) hint.style.display = 'none';
-                const reveal = document.createElement('button');
-                reveal.type = 'button';
-                reveal.className = 'native-email-reveal';
-                reveal.textContent = 'Sign up with email';
-                reveal.addEventListener('click', () => {
-                    if (signupEmailField) signupEmailField.hidden = false;
-                    setSignupPasswordMode(true);
-                });
-                sp.appendChild(reveal);
-            }
-        }
+            showForm('signin');
+        });
+        document.getElementById('otp-change-email').addEventListener('click', () => {
+            setSigninPasswordMode(false);
+            showForm('signin');
+        });
+        configurePremiumAuthSurface();
+        setSigninPasswordMode(false);
+        setSignupPasswordMode(false);
         document.getElementById('back-to-signin').addEventListener('click', () => showForm('signin'));
 
         // Social sign-in (OAuth via Supabase). Dormant until the owner (1) enables the
@@ -938,7 +1083,7 @@
         const OAUTH_PROVIDERS = ['google']; // add 'apple' once its provider is configured in Supabase
         // Native Google Sign-In bridge (Android app): NorvaTVCloud.googleSignIn()
         // fetches a Google ID token natively and calls window.onNorvaGoogleIdToken.
-        const nativeGoogle = isNativeApp
+        const nativeGoogle = isNativePhoneApp
             && window.NorvaTVCloud && typeof window.NorvaTVCloud.googleSignIn === 'function';
         let nativeGoogleTimer = null;
         let socialAuthStarting = false;
@@ -1014,24 +1159,8 @@
             if (socialEl.dataset.enabled) socialEl.style.display = 'block'; // default form is signin
         })();
 
-        // Native Google-first layout: with the native Google bridge available, make
-        // "Continue with Google" the hero at the TOP of the panel and demote the
-        // email/password form to a quiet fallback below an "or continue with email"
-        // divider. Web is untouched (it stays passwordless-first, social below).
-        if (nativeGoogle && socialEl && socialEl.dataset.enabled) {
-            const panel = socialEl.parentElement;
-            const lead = document.createElement('div');
-            lead.className = 'native-google-lead';
-            lead.innerHTML = '<h2>Welcome to Norva</h2><p>Sign in or create your account in seconds.</p>';
-            // Move the social block above the forms. The header goes INSIDE it (at the
-            // top) so showForm's show/hide of socialEl also hides the header on the
-            // recover/password forms — no orphan "Welcome" above a reset-password form.
-            panel.insertBefore(socialEl, forms.signin);
-            socialEl.insertBefore(lead, socialEl.firstChild);
-            // Put the divider BELOW the Google button and relabel it as the email lead-in.
-            const divider = socialEl.querySelector('.divider');
-            if (divider) { divider.textContent = 'or continue with email'; socialEl.appendChild(divider); }
-        }
+        // Email remains the primary, platform-consistent entry. Native Google is a
+        // secondary choice below it; the bridge still avoids WebView OAuth redirects.
 
         // Callback for the native Google Sign-In bridge: exchange the Google ID token
         // for a Norva session (Supabase signInWithIdToken), then open the app.
@@ -1091,6 +1220,87 @@
                 location.replace(returnTo);
             });
         });
+
+        function otpCode() {
+            return otpInputs.map(input => input.value).join('');
+        }
+
+        function fillOtp(value) {
+            const digits = String(value || '').replace(/\D/g, '').slice(0, otpInputs.length);
+            otpInputs.forEach((input, index) => { input.value = digits[index] || ''; });
+            return digits;
+        }
+
+        function updateOtpResend() {
+            const button = document.getElementById('otp-resend');
+            const seconds = Math.max(0, Math.ceil((otpResendUntil - Date.now()) / 1000));
+            button.disabled = seconds > 0;
+            button.textContent = seconds > 0 ? `Send again in ${seconds}s` : 'Send a new code';
+            if (seconds > 0) otpResendTimer = setTimeout(updateOtpResend, 1000);
+        }
+
+        function startOtpCooldown() {
+            clearTimeout(otpResendTimer);
+            otpResendUntil = Date.now() + 60000;
+            updateOtpResend();
+        }
+
+        otpInputs.forEach((input, index) => {
+            input.addEventListener('input', () => {
+                input.value = input.value.replace(/\D/g, '').slice(-1);
+                if (input.value && otpInputs[index + 1]) otpInputs[index + 1].focus({ preventScroll: true });
+                if (otpCode().length === otpInputs.length) forms.otp.requestSubmit();
+            });
+            input.addEventListener('keydown', event => {
+                if (event.key === 'Backspace' && !input.value && otpInputs[index - 1]) {
+                    otpInputs[index - 1].value = '';
+                    otpInputs[index - 1].focus({ preventScroll: true });
+                } else if (event.key === 'ArrowLeft' && otpInputs[index - 1]) {
+                    event.preventDefault(); otpInputs[index - 1].focus({ preventScroll: true });
+                } else if (event.key === 'ArrowRight' && otpInputs[index + 1]) {
+                    event.preventDefault(); otpInputs[index + 1].focus({ preventScroll: true });
+                }
+            });
+        });
+        document.getElementById('otp-grid').addEventListener('paste', event => {
+            const digits = fillOtp(event.clipboardData?.getData('text') || '');
+            if (!digits) return;
+            event.preventDefault();
+            otpInputs[Math.min(digits.length, otpInputs.length) - 1]?.focus({ preventScroll: true });
+            if (digits.length === otpInputs.length) forms.otp.requestSubmit();
+        });
+
+        forms.otp.addEventListener('submit', async event => {
+            event.preventDefault();
+            const code = otpCode();
+            if (!pendingOtpEmail || code.length !== 6) {
+                setStatus('error', 'Enter all six digits from the email.');
+                (otpInputs.find(input => !input.value) || otpInputs[0])?.focus();
+                return;
+            }
+            await withBusy(forms.otp, async () => {
+                setStatus('info', 'Checking your code…');
+                let session = null;
+                try { session = await NorvaAuth.verifyEmailOtp(pendingOtpEmail, code); }
+                catch (error) {
+                    trackAuth('journey_error', 'email_otp', 'error', authFailureFamily(error));
+                }
+                if (!session) {
+                    fillOtp('');
+                    setStatus('error', 'That code is invalid or expired. Check the email or request a new code.');
+                    otpInputs[0]?.focus();
+                    return;
+                }
+                const createdAt = Date.parse(session.user?.created_at || '');
+                setAuthFunnelIntent(Number.isFinite(createdAt) && Date.now() - createdAt < 5 * 60 * 1000 ? 'signup' : 'login');
+                await ensureProfile();
+                await capturePostAuthAttribution();
+                completeAuthFunnel('email_otp');
+                setStatus('success', 'Verified. Opening Norva…');
+                location.replace(returnTo);
+            });
+        });
+        document.getElementById('otp-resend').addEventListener('click', () => requestMagicLink(pendingOtpEmail, { resend: true }));
 
         forms.signup.addEventListener('submit', async event => {
             event.preventDefault();
@@ -1306,8 +1516,14 @@
                 document.getElementById('signin-email').value = email;
                 document.getElementById('signup-email').value = email;
             }
-            const pairingReturn = /[?&]pair=/.test(params.get('returnTo') || '');
-            if (isNativeApp && !email && !pairingReturn) showForm('signup');
+            if (isPremiumAuth) {
+                showForm('signin');
+                showWelcome();
+            } else {
+                const pairingReturn = /[?&]pair=/.test(params.get('returnTo') || '');
+                if (isNativeApp && !email && !pairingReturn) showForm('signup');
+                else showForm('signin');
+            }
         }
 
         // Authenticated "manage sign-in" view for a user who is already signed in:
@@ -1374,20 +1590,23 @@
                 button.setAttribute('aria-selected', String(selected));
                 button.tabIndex = selected ? 0 : -1;
             });
-            const tabsVisible = name !== 'recover' && name !== 'password';
-            tabs.style.display = tabsVisible ? 'grid' : 'none';
-            tabs.setAttribute('aria-hidden', String(!tabsVisible));
-            if (socialEl) {
-                socialEl.style.display = socialEl.dataset.enabled && (name === 'signin' || name === 'signup') ? 'block' : 'none';
-            }
-            // Native: the marketing carousel appears only on Create account (new
-            // users); Sign in stays compact/no-scroll. The Google divider reads
-            // "or continue with email" when the fields are visible (Sign in) and a
-            // plain "or" when they're behind the "Sign up with email" reveal (Create).
-            if (isNativeApp) {
-                if (nativeOnboardingEl) nativeOnboardingEl.style.display = (name === 'signup') ? 'block' : 'none';
+            if (isPremiumAuth) {
+                tabs.style.display = 'none';
+                tabs.hidden = true;
+                tabs.setAttribute('aria-hidden', 'true');
+                if (socialEl) socialEl.style.display = socialEl.dataset.enabled && name === 'signin' ? 'block' : 'none';
+                if (nativeOnboardingEl) nativeOnboardingEl.style.display = 'none';
                 const div = socialEl && socialEl.querySelector('.divider');
-                if (div) div.textContent = (name === 'signup') ? 'or' : 'or continue with email';
+                if (div) div.textContent = 'or';
+            } else {
+                const tabsVisible = name !== 'recover' && name !== 'password';
+                tabs.style.display = tabsVisible ? 'grid' : 'none';
+                tabs.hidden = !tabsVisible;
+                tabs.setAttribute('aria-hidden', String(!tabsVisible));
+                if (socialEl) {
+                    socialEl.style.display = socialEl.dataset.enabled && (name === 'signin' || name === 'signup') ? 'block' : 'none';
+                }
+                if (nativeOnboardingEl) nativeOnboardingEl.style.display = 'none';
             }
             if (name !== 'password') statusEl.className = 'status';
             if (name === 'password') {
@@ -1405,6 +1624,7 @@
                     const preferred = {
                         signin: 'signin-email',
                         signup: 'signup-name',
+                        otp: 'otp-submit',
                         recover: 'recover-email',
                         password: 'new-password'
                     };
@@ -1550,11 +1770,11 @@
                 g.addEventListener('click', () => startSocialAuth('google'));
                 wrap.appendChild(g);
             }
-            if (opts.magic !== false && !isNativeApp) {
+            if (opts.magic !== false) {
                 const ml = document.createElement('button');
                 ml.type = 'button';
                 ml.className = 'secondary';
-                ml.textContent = 'Email me a sign-in link';
+                ml.textContent = isPremiumAuth ? 'Send me a secure code' : 'Email me a sign-in link';
                 ml.addEventListener('click', () => requestMagicLink());
                 wrap.appendChild(ml);
             }
@@ -1574,38 +1794,62 @@
             statusEl.insertAdjacentElement('afterend', wrap);
         }
 
-        // Passwordless sign-in: email a one-time magic link. Works for ANY account
-        // (Google-first users included) without a password. Neutral confirmation
-        // regardless of whether the email exists (anti-enumeration).
+        // Web and Android phone use one email-first OTP rail for known and new
+        // addresses. Responses remain neutral so account existence is never disclosed.
         async function requestMagicLink(emailArg, opts = {}) {
             const email = (emailArg
                 || document.getElementById('signin-email').value.trim()
                 || document.getElementById('signup-email').value.trim());
             if (!email) {
-                setStatus('error', 'Enter your email first, then request a link.');
+                setStatus('error', isPremiumAuth
+                    ? 'Enter your email first, then request a code.'
+                    : 'Enter your email first, then request a link.');
                 document.getElementById(opts.signup ? 'signup-email' : 'signin-email').focus();
                 return;
             }
             clearAuthHelp();
             setAuthFunnelIntent(opts.signup ? 'signup' : 'login');
-            trackAuth(opts.signup ? 'signup_started' : 'login_started', 'email_magic_link', 'pending');
-            setStatus('info', 'Sending your secure link…');
-            // createUser:true for sign-up (the link provisions the account); false for
-            // sign-in. Stay neutral on the result for anti-enumeration.
-            const attribution = opts.signup
-                ? await buildSignupAttribution('email_magic_link', false)
-                : null;
+
+            if (!isPremiumAuth) {
+                trackAuth(opts.signup ? 'signup_started' : 'login_started', 'email_magic_link', 'pending');
+                setStatus('info', 'Sending your secure link…');
+                const attribution = opts.signup
+                    ? await buildSignupAttribution('email_magic_link', false)
+                    : null;
+                try {
+                    await NorvaAuth.signInWithOtp(email, authEmailRedirectUrl(), {
+                        createUser: opts.createUser === true,
+                        data: attribution ? signupMetadata(attribution) : undefined
+                    });
+                } catch (error) {
+                    trackAuth('journey_error', 'email_magic_link', 'error', authFailureFamily(error));
+                }
+                setStatus('success', opts.signup
+                    ? 'Check your email for a secure link to finish creating your account.'
+                    : 'If that email has a Norva account, we sent a sign-in link. Check your inbox.');
+                return;
+            }
+
+            trackAuth(opts.signup ? 'signup_started' : 'login_started', 'email_otp', 'pending');
+            setStatus('info', opts.resend ? 'Sending a new code…' : 'Sending your secure code…');
+            const attribution = await buildSignupAttribution('email_otp', false);
             try {
-                await NorvaAuth.signInWithOtp(email, authEmailRedirectUrl(), {
-                    createUser: opts.createUser === true,
-                    data: attribution ? signupMetadata(attribution) : undefined
+                await NorvaAuth.signInWithOtp(email, authEmailRedirectUrl('otp'), {
+                    createUser: true,
+                    data: signupMetadata(attribution)
                 });
             } catch (error) {
-                trackAuth('journey_error', 'email_magic_link', 'error', authFailureFamily(error));
+                trackAuth('journey_error', 'email_otp', 'error', authFailureFamily(error));
+                setStatus('error', 'We couldn’t request a code. Check your connection and try again.');
+                return;
             }
-            setStatus('success', opts.signup
-                ? 'Check your email for a secure link to finish creating your account.'
-                : 'If that email has a Norva account, we sent a sign-in link. Check your inbox.');
+            pendingOtpEmail = email;
+            document.getElementById('otp-email').textContent = email;
+            fillOtp('');
+            showForm('otp');
+            startOtpCooldown();
+            setStatus('success', 'If the address can receive Norva emails, a six-digit code is on its way.');
+            requestAnimationFrame(() => otpInputs[0]?.focus({ preventScroll: true }));
         }
 
         function sanitizeReturnTo(value) {

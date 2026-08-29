@@ -151,9 +151,11 @@ test('all account creation paths carry platform, journey and coarse location', (
   assert.match(account, /target\.pathname === '\/cloud\.html'[\s\S]*return 'tv_pairing'/);
   assert.match(account, /buildSignupAttribution\('email_password', false\)/);
   assert.match(account, /buildSignupAttribution\('email_magic_link', false\)/);
+  assert.match(account, /buildSignupAttribution\('email_otp', false\)/);
   assert.match(account, /async function startSocialAuth\(provider = 'google'\)[\s\S]*buildSignupAttribution\(provider, true\)/);
   assert.match(account, /signupContext: signupMetadata\(attribution\)/);
   assert.match(account, /data: attribution \? signupMetadata\(attribution\) : undefined/);
+  assert.match(account, /data:\s*signupMetadata\(attribution\)/);
   const metadata = section(account, 'function signupMetadata(context)', 'function storedSignupAttribution()');
   assert.doesNotMatch(metadata, /country|region|city|location_source/i);
   assert.match(account, /NorvaAuth\.rpc\('capture_signup_attribution'/);
@@ -195,7 +197,7 @@ test('authenticated handoff consumes the HttpOnly partner claim before redirect'
 });
 
 test('email verification preserves a bounded pairing or subscription journey', () => {
-  const redirect = section(account, 'function authEmailRedirectUrl()', 'async function loadSignupGeoContext()');
+  const redirect = section(account, 'function authEmailRedirectUrl(flow = \'\')', 'async function loadSignupGeoContext()');
   assert.match(redirect, /new URL\('\/account\.html', location\.origin\)/);
   assert.match(redirect, /searchParams\.set\('returnTo', returnTo\)/);
   assert.match(account, /redirectTo: authEmailRedirectUrl\(\)/);
