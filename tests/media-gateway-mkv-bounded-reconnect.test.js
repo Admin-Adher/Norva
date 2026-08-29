@@ -2818,7 +2818,7 @@ test('finite MKV seek preparation drains the retained provider before opening on
     assert.equal(brokerOptions.effectiveUrlIdentitySha256, session.vodInputEffectiveUrlIdentitySha256);
     assert.equal(brokerOptions.pathPrefix, 'finite-mkv-seek');
     assert.equal(brokerOptions.completedReleaseDelayMs, 0);
-    assert.equal(brokerOptions.supersededReleaseDelayMs, 0);
+    assert.equal(brokerOptions.supersededReleaseDelayMs, 2500);
     assert.equal(harness.usesFiniteMkvSeekBroker(session), true);
 
     await harness.closeFiniteMkvSeekBroker(session);

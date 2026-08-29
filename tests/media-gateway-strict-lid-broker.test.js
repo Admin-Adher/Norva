@@ -573,7 +573,7 @@ test('strict LID broker preempts an old local range, awaits close, and never exc
   );
 });
 
-test('finite seek broker reopens immediately after planned supersession without overlapping provider sockets', async (t) => {
+test('finite seek broker waits for mono-account release after planned supersession', async (t) => {
   const { createStrictLidBroker } = brokerHarness();
   const data = Buffer.alloc(256, 0x5b);
   const state = { active: 0, maxActive: 0, calls: 0, firstClosedAt: 0, secondOpenedAt: 0 };
@@ -611,9 +611,9 @@ test('finite seek broker reopens immediately after planned supersession without 
     sourceUrl,
     fileSizeBytes: data.length,
     dispatcher: null,
-    releaseDelayMs: 500,
+    releaseDelayMs: 200,
     completedReleaseDelayMs: 0,
-    supersededReleaseDelayMs: 0,
+    supersededReleaseDelayMs: 200,
     openTimeoutMs: 2000,
   });
   t.after(() => broker.close());
@@ -633,8 +633,8 @@ test('finite seek broker reopens immediately after planned supersession without 
   assert.equal(state.maxActive, 1, 'planned supersession must remain strictly serialized');
   assert.ok(state.firstClosedAt > 0 && state.secondOpenedAt >= state.firstClosedAt);
   assert.ok(
-    state.secondOpenedAt - state.firstClosedAt < 300,
-    `planned successor waited ${state.secondOpenedAt - state.firstClosedAt}ms`,
+    state.secondOpenedAt - state.firstClosedAt >= 100,
+    `planned successor opened only ${state.secondOpenedAt - state.firstClosedAt}ms after close`,
   );
   assert.equal(broker.completedProviderFetches, 1);
   assert.equal(broker.interruptedProviderFetches, 1);
@@ -1336,7 +1336,8 @@ test('strict LID rejects invalid exact signed coordinates before creating a serv
   assert.match(route, /detectLanguageRequestPolicy\(req, options\)[\s\S]*validateDetectLanguageCapability\(capabilityToken, policy\.requiredScope\)/);
   assert.match(gatewaySource, /strictLidLoopbackBrokerProtocol: 1/);
   assert.match(gatewaySource, /strictLidFileSizeClaim: 'fileSizeBytes'/);
-  assert.match(gatewaySource, /const GATEWAY_VERSION = 120/);
+  assert.match(gatewaySource, /const GATEWAY_VERSION = 121/);
+  assert.match(gatewaySource, /supersededReleaseDelayMs:\s*PROVIDER_SLOT_RELEASE_DELAY_MS/);
   assert.match(gatewaySource, /strictLidProviderDrainProtocol: 1/);
   assert.match(gatewaySource, /strictLidWeakFallbackProtocol: 1/);
   assert.match(gatewaySource, /strictLidTimelineSamplingProtocol: 1/);
