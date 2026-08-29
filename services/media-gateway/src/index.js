@@ -1787,7 +1787,7 @@ if (
 }
 const MULTI_AUDIO_HLS_PROTOCOL = 1;
 const MAX_MULTI_AUDIO_RENDITIONS = 8;
-const GATEWAY_VERSION = 119;
+const GATEWAY_VERSION = 120;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -3810,7 +3810,7 @@ async function closeStrictLidBrokerProviderFetch(context, attempt, reason = 'com
         ? context.completedReleaseDelayMs
         : (reason === 'superseded'
             ? context.supersededReleaseDelayMs
-            : (reason === 'reconnect' ? 0 : context.releaseDelayMs));
+            : context.releaseDelayMs);
     if (releaseDelayMs > 0) {
         context.nextOpenAt = Math.max(
             Number(context.nextOpenAt || 0),
@@ -3969,11 +3969,24 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                     ));
                 }
                 if (upstreamStatus !== 206) {
-                    throw markStrictLidTerminal(context, strictLidBrokerError(
-                        'PROVIDER_REQUEST_FAILED',
-                        'Provider rejected the language-validation byte range.',
+                    const providerRequestError = strictLidBrokerError(
+                        finiteSeek && upstreamStatus >= 500 && upstreamStatus <= 599
+                            ? 'PROVIDER_UPSTREAM_TRANSIENT'
+                            : 'PROVIDER_REQUEST_FAILED',
+                        finiteSeek && upstreamStatus >= 500 && upstreamStatus <= 599
+                            ? 'Provider temporarily rejected the finite MKV byte range.'
+                            : 'Provider rejected the language-validation byte range.',
                         { status: 502, upstreamStatus },
-                    ));
+                    );
+                    // The provider can keep its mono-account socket reserved for
+                    // a short grace period after its CDN closes a declared range
+                    // early. A bounded finite-playback reconnect may absorb only
+                    // transient upstream 5xx responses. Strict language reads and
+                    // all provider/account 4xx responses remain terminal.
+                    if (finiteSeek && upstreamStatus >= 500 && upstreamStatus <= 599) {
+                        throw providerRequestError;
+                    }
+                    throw markStrictLidTerminal(context, providerRequestError);
                 }
                 const contentEncoding = String(attempt.response.headers?.get?.('content-encoding') || '').trim().toLowerCase();
                 if (contentEncoding && contentEncoding !== 'identity') {
@@ -9827,11 +9840,11 @@ async function prepareFiniteMkvSeekBroker(session, parentSignal = null) {
         effectiveUrlSha256: session.vodInputEffectiveUrlSha256,
         effectiveUrlIdentitySha256: session.vodInputEffectiveUrlIdentitySha256,
         pathPrefix: 'finite-mkv-seek',
-        // Exact responses are fully drained and the broker remains strictly
-        // serialized, so no provider-slot grace is needed between them. A
-        // planned FFmpeg supersession also waits for cancellation/socket close
-        // before the next GET. Shutdown, timeout and error paths retain the
-        // conservative global release delay for safe external handoff.
+        // Exact responses are fully drained and planned FFmpeg supersessions
+        // wait for cancellation/socket close, so those paths need no extra
+        // grace. A truncated/error reconnect still waits the conservative
+        // provider-slot release delay before opening the exact remaining range;
+        // some mono-account providers keep the closed socket reserved briefly.
         completedReleaseDelayMs: 0,
         supersededReleaseDelayMs: 0,
         abortSignal: parentSignal,
