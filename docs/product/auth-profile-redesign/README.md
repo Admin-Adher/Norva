@@ -1,6 +1,6 @@
 # Norva auth + profile redesign
 
-Ce dossier fige le travail de conception realise avant sa migration vers la production. Il est volontairement stocke dans le worktree differe `Norva-post-provider-rollout-batch` afin de ne pas modifier l'observation Provider Access active.
+Ce dossier fige la conception approuvee et son contrat de migration. Le worktree isole `Norva-post-provider-rollout-batch` est le point de release autorise afin de garder le checkout principal intact et de rendre le changement materiel auditable.
 
 ## Ce qui est ici
 
@@ -34,7 +34,7 @@ Les variantes A a K sont conservees comme historique de decision. Elles ne sont 
 
 ## Limite de securite essentielle
 
-Le code a quatre chiffres du prototype n'est pas encore implemente cote serveur. Le flux actuel de `public/account.html` envoie un lien securise par email et echange un `token_hash`. Le candidat ne doit donc pas etre relie tel quel a la production. Voir `STATE_AND_CONTRACT_MAP.md` pour les options compatibles.
+L'archive visuelle conserve des captures historiques a quatre chiffres, mais la production n'en reprend jamais le faux contrat. Le parcours integre utilise le code GoTrue natif a six chiffres, verifie cote serveur, et conserve le lien `token_hash` comme repli. Aucun embranchement client ne revele si l'adresse existait avant la demande.
 
 ## Validation rapide
 

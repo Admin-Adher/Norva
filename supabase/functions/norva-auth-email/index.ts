@@ -229,6 +229,20 @@ function redirectTarget(redirectTo: string | undefined): string | null {
   }
 }
 
+export function isUnifiedEmailOtpRedirect(redirectTo: string | undefined): boolean {
+  try {
+    const url = new URL(String(redirectTo ?? ""));
+    const client = url.searchParams.get("client");
+    return url.origin === SITE_URL && (client === "unified_email_otp" || client === "android_phone_otp");
+  } catch {
+    return false;
+  }
+}
+
+// Backward-compatible export for deployed Android 1.3.11 links and focused
+// tests. New web and phone requests use the unified marker above.
+export const isAndroidPhoneOtpRedirect = isUnifiedEmailOtpRedirect;
+
 // Point the action link at norva.tv carrying the one-time token_hash, NOT the raw
 // {SUPABASE_URL}/auth/v1/verify URL — account.html verifies it client-side (verifyOtp),
 // so the recipient only ever sees a norva.tv address (no "oupsceccx…supabase.co").
@@ -301,12 +315,18 @@ function renderHtml(
   opts: { tokenHash?: string; emailChangeRecipient?: EmailChangeRecipient } = {},
 ): { subject: string; html: string } {
   const url = verifyUrl(d, opts.tokenHash ?? d.token_hash);
+  const unifiedEmailOtp = isUnifiedEmailOtpRedirect(d.redirect_to);
   switch (d.email_action_type) {
     case "signup":
-      return {
-        subject: "Confirm your email — Norva",
-        html: shell({ heading: "Confirm your email", intro: "Welcome to Norva! Confirm your email address to activate your account and start watching.", cta: { label: "Confirm my email", url } }),
-      };
+      return unifiedEmailOtp
+        ? {
+          subject: "Your Norva code",
+          html: shell({ heading: "Your Norva code", intro: "Enter this six-digit code on the Norva screen where you started. You can also use the secure button below.", code: d.token, cta: { label: "Confirm securely", url } }),
+        }
+        : {
+          subject: "Confirm your email — Norva",
+          html: shell({ heading: "Confirm your email", intro: "Welcome to Norva! Confirm your email address to activate your account and start watching.", cta: { label: "Confirm my email", url } }),
+        };
     case "recovery":
       return {
         subject: "Reset your password — Norva",
@@ -314,10 +334,15 @@ function renderHtml(
       };
     case "magiclink":     // Supabase sends "magiclink" (one word); keep the underscore alias defensively.
     case "magic_link":
-      return {
-        subject: "Your sign-in link — Norva",
-        html: shell({ heading: "Sign in to Norva", intro: "Click the button below to sign in. This link expires shortly and can be used once.", cta: { label: "Sign in", url } }),
-      };
+      return unifiedEmailOtp
+        ? {
+          subject: "Your Norva code",
+          html: shell({ heading: "Your Norva code", intro: "Enter this six-digit code on the Norva screen where you started. You can also use the secure button below.", code: d.token, cta: { label: "Sign in securely", url } }),
+        }
+        : {
+          subject: "Your sign-in link — Norva",
+          html: shell({ heading: "Sign in to Norva", intro: "Click the button below to sign in. This link expires shortly and can be used once.", cta: { label: "Sign in", url } }),
+        };
     case "email_change":
       if (opts.emailChangeRecipient === "current") {
         return {

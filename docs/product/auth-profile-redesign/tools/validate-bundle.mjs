@@ -91,7 +91,12 @@ for (const htmlName of ['l-premium-continuity.html', 'profile-funnels.html', 'qa
 }
 
 const manifest = JSON.parse(fs.readFileSync(path.join(root, 'migration-manifest.json'), 'utf8'));
-if (manifest.status !== 'local_deferred_candidate') failures.push('manifest status is not fail-closed');
+if (!['local_deferred_candidate', 'production_candidate_authorized'].includes(manifest.status)) {
+  failures.push('manifest status is not an allowed gated state');
+}
+if (manifest.status === 'production_candidate_authorized' && !manifest.authorization?.requiresEvidence) {
+  failures.push('authorized production candidate must require evidence');
+}
 if (manifest.decisions?.kidsProfiles !== false) failures.push('manifest must explicitly disable Kids profiles');
 
 if (failures.length) {

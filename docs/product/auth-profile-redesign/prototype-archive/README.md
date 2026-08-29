@@ -21,6 +21,7 @@ Cette archive conserve toute l'exploration realisee avant migration. Aucun fichi
 
 - `index.html` : planche de comparaison historique.
 - `qa-l.html` : grille responsive et etats du candidat L.
+- `web-funnels.html` : revue web/desktop interactive des parcours accueil, acces, creation de compte et profils, avec presets 1440x900, 1280x720 et 1024x768.
 - `profile-funnels.html` : parcours profils interactifs.
 - `profile-capture.html` et `qa-capture-l.html` : fixtures de capture.
 - `design-qa.md` : rapport de verification.

@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Norva web funnels — local prototype</title>
+  <link rel="icon" href="data:,">
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+      --ink: #f8fafc;
+      --muted: #93a0b7;
+      --line: #263047;
+      --surface: #0b101b;
+      --accent: #789eff;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; color: var(--ink); background: #05070b; }
+    button, a { font: inherit; }
+    button:focus-visible, a:focus-visible { outline: 2px solid #93c5fd; outline-offset: 3px; }
+    .page { width: min(1760px, calc(100% - 32px)); margin: 0 auto; padding: 24px 0 44px; }
+    .topline { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin-bottom: 18px; }
+    .eyebrow { margin: 0 0 7px; color: #8fb5ff; font-size: 11px; font-weight: 850; letter-spacing: .14em; text-transform: uppercase; }
+    h1 { margin: 0; font-size: clamp(30px, 4.2vw, 58px); line-height: .98; letter-spacing: -.055em; }
+    .lede { max-width: 700px; margin: 10px 0 0; color: var(--muted); font-size: 14px; line-height: 1.5; }
+    .scope { flex: 0 0 auto; padding: 10px 14px; border: 1px solid var(--line); border-radius: 999px; color: #bdc9dc; background: #0d1220; font-size: 12px; font-weight: 760; }
+    .control-deck { display: grid; gap: 12px; margin-bottom: 16px; padding: 14px; border: 1px solid #202a3d; border-radius: 16px; background: rgba(11, 16, 27, .9); }
+    .flow-row { display: grid; grid-template-columns: minmax(130px, 160px) minmax(0, 1fr); align-items: center; gap: 12px; }
+    .flow-row h2 { margin: 0; color: #dce6f7; font-size: 13px; }
+    .steps, .viewports { display: flex; flex-wrap: wrap; gap: 7px; }
+    .step, .viewport-button {
+      min-height: 44px;
+      padding: 0 13px;
+      border: 1px solid #303b52;
+      border-radius: 10px;
+      color: #b8c4d7;
+      background: #111827;
+      font-size: 12px;
+      font-weight: 740;
+      cursor: pointer;
+    }
+    .step:hover, .step.is-current, .viewport-button:hover, .viewport-button.is-current {
+      color: #fff;
+      border-color: var(--accent);
+      background: #1a2850;
+    }
+    .preview-meta { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin: 0 2px 10px; }
+    .preview-meta h2 { margin: 0; font-size: 17px; letter-spacing: -.025em; }
+    .preview-meta p { margin: 4px 0 0; color: var(--muted); font-size: 12px; }
+    .preview-actions { display: flex; align-items: center; gap: 10px; }
+    .preview-actions a { min-height: 44px; display: inline-flex; align-items: center; padding: 0 14px; border: 1px solid #4667e9; border-radius: 10px; color: #fff; background: #304cbf; font-size: 12px; font-weight: 780; text-decoration: none; }
+    .viewport-label { color: #71809a; font-size: 11px; white-space: nowrap; }
+    .preview-shell { position: relative; width: 100%; min-height: 520px; overflow: hidden; border: 1px solid #34415b; border-radius: 18px; background: #090b12; box-shadow: 0 30px 90px rgba(0, 0, 0, .52); }
+    .preview-shell iframe { position: absolute; top: 0; left: 50%; display: block; border: 0; background: #090b12; transform-origin: top center; }
+    .note { margin: 12px 2px 0; color: #68758c; font-size: 11px; line-height: 1.45; }
+    @media (max-width: 840px) {
+      .page { width: min(100% - 20px, 760px); }
+      .topline { align-items: flex-start; flex-direction: column; }
+      .flow-row { grid-template-columns: 1fr; }
+      .preview-meta { align-items: flex-start; flex-direction: column; }
+      .preview-shell { min-height: 420px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="topline">
+      <div>
+        <p class="eyebrow">Norva · web experience</p>
+        <h1>The complete funnel, now in web proportions.</h1>
+        <p class="lede">Review the same structure as the validated mobile prototype, recomposed for desktop and tablet rather than enlarged from a phone canvas.</p>
+      </div>
+      <span class="scope">Local prototype · production untouched</span>
+    </header>
+
+    <section class="control-deck" aria-label="Choose a funnel state">
+      <div class="flow-row">
+        <h2>Welcome</h2>
+        <div class="steps">
+          <button class="step is-current" type="button" data-preview="l-premium-continuity.html?slide=0" data-title="Welcome · Explore" data-note="Animated poster wall, concise promise and one entry point.">Explore</button>
+          <button class="step" type="button" data-preview="l-premium-continuity.html?slide=1" data-title="Welcome · Continuity" data-note="The second poster wall keeps the same visual language and explains cross-device continuity.">Continuity</button>
+        </div>
+      </div>
+      <div class="flow-row">
+        <h2>Account access</h2>
+        <div class="steps">
+          <button class="step" type="button" data-preview="l-premium-continuity.html?view=auth" data-title="Account · Email" data-note="One email doorway. Known addresses continue to access; new addresses continue to account creation.">Email</button>
+          <button class="step" type="button" data-preview="l-premium-continuity.html?view=auth&amp;step=code&amp;email=adrien%40norva.tv&amp;otp=21" data-title="Account · Secure code" data-note="Passwordless code is the default for a returning account.">Code</button>
+          <button class="step" type="button" data-preview="l-premium-continuity.html?view=auth&amp;step=password&amp;email=adrien%40norva.tv" data-title="Account · Password fallback" data-note="Password remains available, but never becomes the default branch.">Password</button>
+          <button class="step" type="button" data-preview="l-premium-continuity.html?view=auth&amp;step=code&amp;account=new&amp;email=new-user%40norva.tv&amp;otp=21" data-title="New account · Verify email" data-note="The same doorway becomes account creation after email lookup.">New account</button>
+        </div>
+      </div>
+      <div class="flow-row">
+        <h2>Profiles</h2>
+        <div class="steps">
+          <button class="step" type="button" data-preview="l-premium-continuity.html?view=profiles&amp;profile=chooser" data-title="Profiles · Who’s watching?" data-note="A cinematic profile switcher, with no Kids mode.">Choose</button>
+          <button class="step" type="button" data-preview="l-premium-continuity.html?view=profiles&amp;profile=setup" data-title="Profiles · First profile" data-note="A compact first-profile step for a new account.">First profile</button>
+          <button class="step" type="button" data-preview="l-premium-continuity.html?view=profiles&amp;profile=avatars&amp;returnTo=setup" data-title="Profiles · Avatar library" data-note="The Norva avatar library uses a web-native grid without a phone-shaped detour.">Avatars</button>
+          <button class="step" type="button" data-preview="l-premium-continuity.html?view=profiles&amp;profile=manage" data-title="Profiles · Manage" data-note="Manage, edit and add remain explicit actions.">Manage</button>
+          <button class="step" type="button" data-preview="l-premium-continuity.html?view=profiles&amp;profile=edit" data-title="Profiles · Edit" data-note="Name and avatar editing share the same visual system as first setup.">Edit</button>
+          <button class="step" type="button" data-preview="l-premium-continuity.html?view=profiles&amp;profile=created" data-title="Profiles · Ready" data-note="A short confirmation before entering the product.">Ready</button>
+          <button class="step" type="button" data-preview="l-premium-continuity.html?view=profiles&amp;profile=arrival" data-title="Profiles · Home handoff" data-note="The final state bridges into Norva Home with a desktop catalogue backdrop.">Home handoff</button>
+        </div>
+      </div>
+      <div class="flow-row">
+        <h2>Preview size</h2>
+        <div class="viewports" role="group" aria-label="Preview viewport">
+          <button class="viewport-button is-current" type="button" data-width="1440" data-height="900">1440 × 900</button>
+          <button class="viewport-button" type="button" data-width="1280" data-height="720">1280 × 720</button>
+          <button class="viewport-button" type="button" data-width="1024" data-height="768">1024 × 768</button>
+        </div>
+      </div>
+    </section>
+
+    <div class="preview-meta">
+      <div>
+        <h2 data-preview-title>Welcome · Explore</h2>
+        <p data-preview-note>Animated poster wall, concise promise and one entry point.</p>
+      </div>
+      <div class="preview-actions">
+        <span class="viewport-label" data-viewport-label>1440 × 900 · scaled to fit</span>
+        <a href="l-premium-continuity.html?slide=0" target="_blank" rel="noopener" data-preview-link>Open at browser size</a>
+      </div>
+    </div>
+
+    <section class="preview-shell" data-preview-shell aria-live="polite">
+      <iframe title="Norva web funnel preview" src="l-premium-continuity.html?slide=0" width="1440" height="900" data-preview-frame></iframe>
+    </section>
+    <p class="note">These files are review fixtures only. They do not call authentication, OAuth, email, profile APIs, deployment workflows or Provider Access rollout controls.</p>
+  </main>
+
+  <script>
+    const frame = document.querySelector('[data-preview-frame]');
+    const shell = document.querySelector('[data-preview-shell]');
+    const title = document.querySelector('[data-preview-title]');
+    const note = document.querySelector('[data-preview-note]');
+    const link = document.querySelector('[data-preview-link]');
+    const viewportLabel = document.querySelector('[data-viewport-label]');
+    let viewport = { width: 1440, height: 900 };
+
+    function fitPreview() {
+      const available = shell.clientWidth;
+      const scale = Math.min(1, available / viewport.width);
+      frame.width = viewport.width;
+      frame.height = viewport.height;
+      frame.style.width = `${viewport.width}px`;
+      frame.style.height = `${viewport.height}px`;
+      frame.style.transform = `translateX(-50%) scale(${scale})`;
+      shell.style.height = `${Math.round(viewport.height * scale)}px`;
+      viewportLabel.textContent = `${viewport.width} × ${viewport.height}${scale < 1 ? ' · scaled to fit' : ''}`;
+    }
+
+    document.querySelectorAll('[data-preview]').forEach((button) => {
+      button.addEventListener('click', () => {
+        document.querySelectorAll('[data-preview]').forEach((item) => item.classList.toggle('is-current', item === button));
+        frame.src = button.dataset.preview;
+        link.href = button.dataset.preview;
+        title.textContent = button.dataset.title;
+        note.textContent = button.dataset.note;
+      });
+    });
+
+    document.querySelectorAll('[data-width]').forEach((button) => {
+      button.addEventListener('click', () => {
+        document.querySelectorAll('[data-width]').forEach((item) => item.classList.toggle('is-current', item === button));
+        viewport = { width: Number(button.dataset.width), height: Number(button.dataset.height) };
+        fitPreview();
+      });
+    });
+
+    new ResizeObserver(fitPreview).observe(shell);
+    fitPreview();
+  </script>
+</body>
+</html>

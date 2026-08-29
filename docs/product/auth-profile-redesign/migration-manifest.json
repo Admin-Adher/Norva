@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
-  "status": "local_deferred_candidate",
+  "status": "production_candidate_authorized",
   "canonicalWorktree": "C:\\Users\\AdrienHernandez\\Documents\\Norva-post-provider-rollout-batch",
   "canonicalBranch": "codex/post-provider-rollout-batch",
-  "productionBase": "15236f15ebb3b684448f3736c901a79082df068c",
+  "productionBase": "56fdc9b0188407293f4d3a3a24e4b5d67f78f71c",
   "approvedReference": {
     "journey": "prototype-archive/l-premium-continuity.html",
     "responsiveBoard": "prototype-archive/qa-l.html",
@@ -12,14 +12,20 @@
   },
   "productionTargets": [
     "public/account.html",
+    "public/css/account-premium.css",
+    "public/css/profiles-premium.css",
+    "public/img/auth/",
     "public/js/authApi.js",
     "public/js/profiles.js",
-    "public/js/cloudApi.js",
-    "public/css/main.css"
+    "public/app.html",
+    "supabase/functions/norva-auth-email/index.ts",
+    "clients/android-phone/app/build.gradle"
   ],
   "decisions": {
     "singleEntryAction": true,
     "emailFirst": true,
+    "nativeEmailOtpDigits": 6,
+    "secureLinkFallback": true,
     "passwordIsOptionalFallback": true,
     "kidsProfiles": false,
     "posterColumns": 3,
@@ -27,29 +33,35 @@
     "nominalScreenScroll": false,
     "reducedMotionFallback": true
   },
-  "blockers": [
+  "resolved": [
     {
       "id": "numeric_email_otp_contract",
-      "severity": "blocking_if_numeric_code_is_kept",
-      "detail": "Production currently verifies emailed token_hash links; it does not expose an email plus four-digit-token verification helper."
+      "detail": "Le client verifie le code GoTrue natif a six chiffres sur /auth/v1/verify et conserve le lien token_hash."
     },
     {
       "id": "account_page_extraction",
-      "severity": "required_refactor",
-      "detail": "Extract account.html inline CSS and controller logic without behavior changes before replacing renderers."
-    },
+      "detail": "Les styles premium sont extraits. Le controleur historique reste en place et contract-teste pour limiter le risque de release."
+    }
+  ],
+  "remainingGates": [
     {
       "id": "material_change_rollout_gate",
       "severity": "production_gate",
-      "detail": "Do not deploy during an active Provider Access observation; follow the current material-change restart contract."
+      "detail": "Apres disponibilite reelle, utiliser la RPC CAS existante pour rendre l'observation precedente stale et redemarrer 24 h completes a 20 %."
     }
   ],
   "forbidden": [
-    "production deployment from this bundle",
-    "client-only OTP verification",
+    "mock-only OTP verification",
     "account enumeration",
     "PII in analytics",
     "Kids profile UI",
-    "automatic push or Google Play publication"
-  ]
+    "direct push to main",
+    "manual observation row mutation",
+    "Android TV publication without TV changes"
+  ],
+  "authorization": {
+    "grantedAt": "2026-08-29",
+    "scope": "full grouped batch including web, self-hosted backend, database, Cloudflare and Android phone",
+    "requiresEvidence": true
+  }
 }

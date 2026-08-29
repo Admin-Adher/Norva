@@ -117,6 +117,11 @@
       <div class="premium-story">
         <h1 id="l-scene-title">Your catalogue.<br>Everywhere.</h1>
         <p class="premium-screenline">Phone · Web · TV</p>
+        <div class="premium-trust" aria-label="Why your Norva account is safe and useful">
+          <span>One account across phone, web and TV.</span>
+          <span>Secure code. No password required.</span>
+          <span>Norva includes no content.</span>
+        </div>
       </div>
     </section>
 
@@ -159,6 +164,7 @@
               Continue with Google
             </button>
           </form>
+          <p class="premium-mobile-trust">One account on phone, web and TV · Secure code by default</p>
         </section>
 
         <section class="premium-step premium-code-step" data-l-step="code" aria-labelledby="l-code-title" hidden>
@@ -167,7 +173,7 @@
             <span data-l-code-email-value>name@example.com</span>
             <button type="button" data-l-code-change>Change</button>
           </div>
-          <p class="premium-step-copy" data-l-code-copy>Enter the 4-digit code we sent you.</p>
+          <p class="premium-step-copy" data-l-code-copy>Enter the 6-digit code we sent you.</p>
 
           <form class="premium-form premium-code-form" data-l-code-form>
             <fieldset class="premium-otp-fieldset">
@@ -177,6 +183,8 @@
                 <input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="1" aria-label="Code digit 2" data-l-otp>
                 <input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="1" aria-label="Code digit 3" data-l-otp>
                 <input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="1" aria-label="Code digit 4" data-l-otp>
+                <input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="1" aria-label="Code digit 5" data-l-otp>
+                <input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="1" aria-label="Code digit 6" data-l-otp>
               </div>
             </fieldset>
 
@@ -364,7 +372,10 @@
         </section>
 
         <section class="profile-screen profile-arrival" data-profile-screen="arrival" aria-labelledby="profile-arrival-title" hidden>
-          <img class="profile-arrival-bg" src="assets/mock-phone-movies.webp" alt="">
+          <picture class="profile-arrival-media" aria-hidden="true">
+            <source media="(min-width: 900px)" srcset="assets/mock-tv-home.webp">
+            <img class="profile-arrival-bg" src="assets/mock-phone-movies.webp" alt="">
+          </picture>
           <div class="profile-arrival-scrim" aria-hidden="true"></div>
           <div class="profile-arrival-copy">
             <p class="profile-kicker">Home</p>

@@ -3,7 +3,7 @@
 ## Gate avant code de production
 
 - [ ] Le candidat L est encore la version approuvee.
-- [ ] Le choix lien securise versus code numerique est signe.
+- [x] Code GoTrue natif a six chiffres signe, avec lien securise de repli.
 - [ ] Les assets poster sont juridiquement et commercialement reutilisables.
 - [ ] Les textes finaux sont valides en anglais et en francais.
 - [ ] Le comportement compte connu/inconnu respecte l'anti-enumeration.
@@ -67,7 +67,7 @@ Ajouter ensuite les suites Android ciblees et un replay physique sur telephone e
 - [ ] Diff relu lot par lot; staging explicite seulement.
 - [ ] CI complete verte.
 - [ ] Validation emulation phone + TV et appareil physique.
-- [ ] Autorisation explicite pour migration/deploiement/Google Play.
+- [x] Autorisation explicite pour migration/deploiement/Google Play recue le 2026-08-29.
 - [ ] Invariants Provider Access verts.
 - [ ] Procedure de changement materiel et nouvelle fenetre d'observation confirmee.
 - [ ] Preuve finale horodatee et hashee.

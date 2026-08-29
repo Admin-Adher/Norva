@@ -1,6 +1,6 @@
 # Validation locale du bundle
 
-Date : 2026-08-29. Cette validation concerne uniquement le worktree local differe. Elle ne prouve ni un deploiement, ni une migration, ni une publication Android.
+Date : 2026-08-29. Cette validation est le baseline local du candidat autorise. Elle ne devient une preuve de production qu'apres CI, deploiements, verification live et publication Android documentes separement.
 
 ## Inventaire
 
@@ -43,9 +43,10 @@ auth-profile bundle: PASS
 validated states=14 avatars=12 inert=true
 ```
 
-## Limites restantes
+## Limites et gates restants
 
 - Le clavier Android reel, TalkBack, le font scale 1,3 et le D-pad TV doivent etre rejoues apres integration dans les composants de production.
 - Les posters generes doivent recevoir une validation juridique et commerciale avant diffusion publique.
-- Le code numerique a quatre chiffres n'est pas un contrat d'authentification Norva actuel et ne doit jamais etre simule cote client.
+- Les captures historiques a quatre chiffres restent des artefacts de conception. Le code de production est le code GoTrue a six chiffres et ne doit jamais etre valide cote client.
 - Le `no scroll` est une cible nominale ; IME et grand texte doivent conserver un reflow ou un scroll interne accessible.
+- Le deploiement groupe doit redemarrer atomiquement une nouvelle observation Provider Access 20 % apres disponibilite reelle.

@@ -3,13 +3,13 @@
 | Etat prototype | Action utilisateur | Contrat Norva reel | Statut migration |
 |---|---|---|---|
 | Welcome, slide 1/2 | Get started | navigation locale vers l'auth | Pret visuellement |
-| Email | Continue | choix de methode sans exposer l'existence du compte | Decision serveur necessaire pour un tunnel totalement unifie |
-| Existing account | recevoir un acces securise | `NorvaAuth.signInWithOtp(createUser: false)` envoie un lien | Contrat existant, visuel a adapter |
-| New account | recevoir un acces securise | `NorvaAuth.signInWithOtp(createUser: true)` ou `signUp` | Contrat existant mais l'intention doit rester explicite cote serveur |
-| Code 4 chiffres | saisir/verifier | aucun helper email+code public dans `authApi.js` | Bloque tant qu'un vrai contrat OTP n'est pas ajoute |
+| Email | Continue | `signInWithOtp(createUser: true)` sans detection cliente de l'existence | Integre web + Android phone |
+| Existing account | recevoir un code securise | meme requete OTP, compte existant conserve | Integre, message neutre |
+| New account | recevoir un code securise | meme requete OTP, creation GoTrue autorisee | Integre, attribution apres session valide |
+| Code 6 chiffres | saisir/verifier | `authApi.verifyEmailOtp(email, token)` + GoTrue `type=email` | Contrat reel, lien token_hash conserve en repli |
 | Password fallback | mot de passe | `NorvaAuth.signIn` | Pret, doit rester secondaire |
 | Google | OAuth / ID token | `signInWithOAuth` web, `signInWithIdToken` Android | Pret, conserver les controles de disponibilite |
-| Recovery | envoyer lien | `NorvaAuth.recover` | Pret, renderer manquant dans le candidat final |
+| Recovery | envoyer lien | `NorvaAuth.recover` | Integre comme recours secondaire |
 | Profile loading | attendre/reessayer | `NorvaCloud.profiles.list` | Pret, garder retry et message sanitise |
 | First profile setup | nom + avatar | `profiles.update(... setupCompleted: true)` | Pret |
 | Chooser | selectionner | `profiles.setActiveId` + cache/session rules | Pret |

@@ -11,11 +11,13 @@ Remplacer l'onboarding/authentification et l'habillage des profils par le candid
 - Point d'entree actuel : `public/account.html`.
 - Transport/session : `public/js/authApi.js`.
 - Donnees, attribution et post-auth : logique actuelle de `public/account.html` et `public/js/cloudApi.js`.
-- Cible recommandee : extraire l'habillage et la machine d'etats dans `public/css/account.css` et `public/js/account.js` au lieu d'ajouter une seconde page concurrente.
+- Habillage de production : `public/css/account-premium.css`, charge par `public/account.html` sur web et Android phone uniquement.
+- Machine d'etats : conservee dans `public/account.html` pour preserver l'ordre de boot, les retours OAuth/pairing et les contrats historiques pendant ce changement materiel. Une extraction JavaScript ulterieure devra etre strictement neutre et ne fait pas partie de cette release.
 
 Le futur composant visuel doit appeler les fonctions existantes plutot que reimplementer Supabase :
 
-- `NorvaAuth.signInWithOtp(...)` pour le lien securise actuel ;
+- `NorvaAuth.signInWithOtp(...)` pour demander le code natif et conserver le lien securise de repli ;
+- `NorvaAuth.verifyEmailOtp(...)` pour verifier les six chiffres cote GoTrue ;
 - `NorvaAuth.signIn(...)` pour le mot de passe facultatif ;
 - `NorvaAuth.signInWithOAuth(...)` sur le web ;
 - `NorvaAuth.signInWithIdToken(...)` depuis le pont Android Google ;
@@ -47,13 +49,11 @@ Les contrats a conserver sont :
 - Absence de mode Kids encodee dans le candidat.
 - Validateur statique ajoute pour detecter les references manquantes, les appels reseau accidentels et les regressions structurelles.
 
-## Travail restant avant activation
+## Etat du candidat de production
 
-### 1. Choisir le contrat email
+### 1. Contrat email retenu
 
-Option A, moins risquee : conserver le lien securise actuel et adapter le visuel du prototype en un ecran `Check your email` sans cases numeriques.
-
-Option B, plus fluide en WebView : ajouter un vrai code email cote Supabase/serveur, puis une methode `verifyEmailOtp({ email, token, type })` qui POSTe vers `/auth/v1/verify`. Cette option doit preserver :
+Le candidat utilise le code email natif GoTrue a six chiffres, verifie par `verifyEmailOtp({ email, token })` sur `/auth/v1/verify` avec `type=email`. Le lien `token_hash` reste un repli securise dans le meme email. Le contrat preserve :
 
 - la neutralite des messages pour ne pas reveler si un compte existe ;
 - la creation explicite ou non du compte selon le contexte ;
@@ -61,18 +61,11 @@ Option B, plus fluide en WebView : ajouter un vrai code email cote Supabase/serv
 - le retour Android, la reprise apres mise en arriere-plan et le resend borne ;
 - l'attribution signup seulement apres une authentification valide.
 
-Tant que ce choix n'est pas implemente et teste, les quatre cases OTP restent purement illustratives.
+Le client appelle `signInWithOtp(createUser: true)` pour les adresses connues ou nouvelles sans branche cliente. Les messages restent neutres ; l'attribution n'est finalisee qu'apres session valide.
 
-### 2. Extraire le code inline de `account.html`
+### 2. Integration de la page compte
 
-La page contient aujourd'hui styles et logique inline. Avant le remplacement visuel :
-
-1. extraire sans changement fonctionnel les styles vers un fichier dedie ;
-2. extraire la logique vers un module dedie ;
-3. garder les IDs/semantiques couverts par les tests existants ;
-4. seulement ensuite remplacer les renderers par les etats du candidat L.
-
-Cette sequence permet de separer une refactorisation neutre d'un changement UX et rend les regressions plus faciles a localiser.
+Les styles premium sont extraits dans `public/css/account-premium.css`. Les IDs et semantiques historiques restent couverts par les tests. Le controleur demeure volontairement dans `account.html` pour cette release afin de ne pas melanger une extraction structurelle risquee avec le changement de parcours.
 
 ### 3. Adapter les tokens
 
@@ -115,7 +108,7 @@ Ne jamais envoyer email, nom de profil, identifiant de compte, token ou code dan
 1. `refactor(auth): extract account styles and controller` sans changement rendu.
 2. `feat(auth): add unified email-first journey` avec transport existant.
 3. `feat(profiles): apply approved profile journey visuals` sans changement API.
-4. Eventuellement `feat(auth): add verified numeric email otp` dans un commit backend/frontend separe.
+4. `feat(auth): add verified six-digit email otp` dans un commit backend/frontend separe.
 5. `test(auth): add responsive, accessibility and platform contracts`.
 
-Ces commits peuvent rester dans ce worktree jusqu'au gate de production. Ils ne doivent pas etre melanges avec une migration SQL ou une publication Google Play sans audit de release explicite.
+Le lot groupe a recu l'autorisation explicite de production le 2026-08-29. Il reste soumis au scan de securite, a la CI, aux validations physiques et au redemarrage atomique de l'observation Provider Access.

@@ -129,14 +129,18 @@ test('Resend key rotation preserves Edge capacity and proves the Auth hook after
   assert.doesNotMatch(rotate, /GOTRUE_SMTP_PASS|replace_env_key SMTP_PASS/);
 });
 
-test('passwordless UI remains account-neutral and does not claim transport acknowledgement', () => {
+test('numeric email OTP UI remains account-neutral and does not claim transport acknowledgement', () => {
   const account = read('public/account.html');
   const start = account.indexOf('async function requestMagicLink');
   const end = account.indexOf('function sanitizeReturnTo', start);
   const flow = account.slice(start, end);
 
-  assert.match(flow, /catch \(error\) \{[\s\S]*trackAuth\('journey_error', 'email_magic_link'[\s\S]*authFailureFamily\(error\)/);
-  assert.match(flow, /If that email has a Norva account, we sent a sign-in link/);
-  assert.doesNotMatch(flow, /Resend|delivered|provider ID|delivery receipt/i);
+  assert.match(flow, /catch \(error\) \{[\s\S]*trackAuth\('journey_error', 'email_otp'[\s\S]*authFailureFamily\(error\)/);
+  assert.match(flow, /We couldn’t request a code\. Check your connection and try again\.[\s\S]*return;/);
+  assert.match(flow, /If the address can receive Norva emails, a six-digit code is on its way/);
+  assert.match(flow, /createUser:\s*true/);
+  assert.match(flow, /if \(!isPremiumAuth\)[\s\S]*email_magic_link/);
+  assert.match(flow, /authEmailRedirectUrl\('otp'\)/);
+  assert.doesNotMatch(flow, /delivered|provider ID|delivery receipt/i);
   assert.doesNotMatch(flow, /trackAuth\([^)]*(?:email|user|account|source)Id/i);
 });

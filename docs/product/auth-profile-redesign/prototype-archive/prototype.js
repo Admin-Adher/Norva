@@ -315,7 +315,7 @@
     const useCodeButton = document.querySelector('[data-l-use-code]');
     const requestedStep = params.get('step');
     const requestedEmail = (params.get('email') || '').trim();
-    const requestedOtp = (params.get('otp') || '').replace(/\D/g, '').slice(0, 4);
+    const requestedOtp = (params.get('otp') || '').replace(/\D/g, '').slice(0, 6);
     const requestedAccount = params.get('account') === 'new' ? 'new' : 'existing';
     const requestedProfile = params.get('profile') || '';
     let lookupTimer;
@@ -519,8 +519,8 @@
       codeEmailValue.textContent = emailInput.value.trim() || requestedEmail || 'name@example.com';
       codeTitle.textContent = accountMode === 'new' ? 'Create your account.' : 'Check your email.';
       codeCopy.textContent = accountMode === 'new'
-        ? 'First, confirm your email with the 4-digit code.'
-        : 'Enter the 4-digit code we sent you.';
+        ? 'First, confirm your email with the 6-digit code.'
+        : 'Enter the 6-digit code we sent you.';
       usePasswordButton.hidden = accountMode !== 'existing';
       identityStep.hidden = true;
       credentialStep.hidden = true;
@@ -655,7 +655,7 @@
       window.clearTimeout(verificationStartTimer);
       setCodeBusy(false);
       fillOtp('');
-      liveStatus.textContent = 'A new 4-digit code was sent.';
+      liveStatus.textContent = 'A new 6-digit code was sent.';
       otpInputs[0].focus({ preventScroll: true });
     });
 
@@ -791,7 +791,8 @@
 
     document.querySelector('[data-profile-restart]').addEventListener('click', openProfilePicker);
 
-    setLSlide(0);
+    const requestedSlide = Number.parseInt(params.get('slide') || '0', 10);
+    setLSlide(Number.isFinite(requestedSlide) ? requestedSlide : 0);
     if (requestedEmail) emailInput.value = requestedEmail;
     if (params.get('view') === 'profiles' || requestedProfile) {
       const directProfile = requestedProfile === 'add' ? 'setup' : (requestedProfile || 'chooser');
@@ -801,7 +802,7 @@
     } else if (params.get('view') === 'auth') {
       showLAuth();
       if (requestedStep === 'code' || requestedStep === 'verify') {
-        showLCode({ focus: false, value: requestedStep === 'verify' && requestedOtp.length < 4 ? '2192' : requestedOtp, mode: requestedAccount });
+        showLCode({ focus: false, value: requestedStep === 'verify' && requestedOtp.length < 6 ? '219284' : requestedOtp, mode: requestedAccount });
         if (requestedStep === 'verify') startLVerification({ fixture: true });
       } else if (requestedStep === 'password') showLCredential();
     } else showLWelcome(false);

@@ -1,18 +1,19 @@
-# Lot groupe differe apres la fenetre Provider Access 20 %
+# Lot groupe de production - changement materiel Provider Access
 
-> ETAT : LOCAL UNIQUEMENT. Ne pas pousser, deployer, migrer ni publier ce lot pendant une fenetre d'observation Provider Access active.
+> ETAT : CANDIDAT DE PRODUCTION AUTORISE LE 2026-08-29. La publication doit rester atomique, auditee et suivie d'un `MATERIAL_CHANGE_RESTART` de l'observation Provider Access 20 %.
 
 ## Point de reprise canonique
 
 - Worktree : `C:\Users\AdrienHernandez\Documents\Norva-post-provider-rollout-batch`
 - Branche : `codex/post-provider-rollout-batch`
-- Base de production au moment de la consolidation : `15236f15ebb3b684448f3736c901a79082df068c`
-- Correctif lecteur : `6641cf072ce1e58c13612600fc760d560b97fd72`
-- Correctif liberation d'activite fournisseur : `7740a463852b93752b961cd329ca34be43785521`
-- Documentation initiale du lot : `ff3594ed`
+- Base `origin/main` verifiee avant release : `56fdc9b0188407293f4d3a3a24e4b5d67f78f71c`
+- Correctif lecteur : `f41acc92`
+- Correctif liberation d'activite fournisseur : `fbb65587`
+- Documentation initiale du lot : `ca653efe`
+- Archive auth/profils initiale : `785dc2b3`
 - Dossier onboarding/auth/profils : `docs/product/auth-profile-redesign/`
 
-Ce worktree est le seul point de reprise recommande pour les changements materiels volontairement gardes hors production. Le checkout principal, ses changements non lies et l'observation Provider Access active ne doivent pas etre modifies depuis cette branche.
+Ce worktree est le seul point de publication du lot. Le checkout principal et ses changements non lies restent intacts. La branche passe par PR et CI ; aucune publication directe depuis le checkout principal n'est autorisee.
 
 ## Lot A - Lecteur VOD Android et navigation des episodes
 
@@ -44,7 +45,7 @@ Le dossier `docs/product/auth-profile-redesign/` contient :
 - un manifeste de migration, une matrice etat-vers-contrat et une checklist de mise en production ;
 - un validateur statique reproductible.
 
-Le prototype reste volontairement inerte : il ne lance aucun OAuth, aucun email, aucune creation de compte et aucune mutation de profil. Son ecran de code a quatre chiffres est une direction UX, pas encore un contrat backend Norva. La production actuelle utilise un lien securise par email (`signInWithOtp` avec `token_hash`) ; activer une saisie de code necessite d'abord un contrat serveur verifiable, anti-enumeration et compatible WebView.
+L'archive de prototype reste inerte. Son parcours approuve est maintenant transpose dans la production web et Android phone : email unique, code GoTrue natif a six chiffres, lien `token_hash` de repli, mot de passe secondaire et Google conserve. La meme requete `signInWithOtp(create_user: true)` dessert compte existant et creation sans detection cliente de l'existence du compte. La verification reste exclusivement serveur via `/auth/v1/verify` et `type=email`. La TV conserve son parcours D-pad/pairing et ne charge pas le nouvel habillage profils.
 
 ## Preuves locales du lot C
 
@@ -53,7 +54,7 @@ Le prototype reste volontairement inerte : il ne lance aucun OAuth, aucun email,
 - Rendu Playwright : **22/22** combinaisons sans scroll nominal ni debordement a 390 x 844 et 844 x 390.
 - Cibles interactives visibles : aucune sous **44 CSS px**.
 - Reduced motion : animation poster desactivee.
-- Contrats auth, responsive, profils, modales et analytics : **34/34 PASS**.
+- Contrats auth, OTP, responsive, profils, modales et analytics : **68/68 PASS** lors du dernier gate local cible.
 - Rapport : `docs/product/auth-profile-redesign/VALIDATION_REPORT.md`.
 
 ## Preuves locales deja obtenues pour les lots A et B
@@ -75,22 +76,21 @@ Ces preuves ne remplacent pas la validation de migration en base, le deploiement
 
 ## Ordre de sortie recommande
 
-1. Ne rien publier depuis ce worktree pendant une observation Provider Access active.
-2. Au gate autorise, recuperer le dernier `origin/main`, rebaser cette branche et revoir chaque conflit.
-3. Relancer tous les tests Android, WebView, gateway, Edge, SQL, auth/profils et securite applicables.
-4. Pour le lot C, choisir explicitement entre le lien securise existant et un nouveau code numerique. Ne jamais simuler le code numerique avec une validation uniquement cliente.
-5. Appliquer la migration SQL transactionnellement uniquement avec autorisation de production, puis deployer `norva-playback` sur les deux replicas et le gateway media de facon coherente.
-6. Integrer les ecrans auth/profils en preservant les contrats de session, anti-enumeration, OAuth, attribution, focus, Android Back, TalkBack et D-pad decrits dans la documentation du lot C.
-7. Publier de nouvelles versions Android uniquement apres confirmation explicite du clic public final Google Play.
-8. Verifier physiquement auth, profils, un film, une serie, precedent/suivant, fin naturelle, Retour, arriere-plan/retour, Zoom/Fit, gestes, navigation trois boutons et font 1,3.
-9. Recontroler P0, owners/pointers, jobs non terminaux/dead, transitions, sources READY, cache/refresh, crons et canaux externes.
-10. Traiter le deploiement groupe comme un changement materiel. L'operateur du rollout doit appliquer la procedure `MATERIAL_CHANGE_RESTART` exigee par le contrat Provider Access en vigueur avant toute promotion ulterieure.
+1. Figer le diff complet contre le dernier `origin/main`, relire les fichiers et executer le scan de securite diff.
+2. Relancer les tests Android, WebView, gateway, Edge, SQL, auth/profils et les rendus responsive/reduced-motion.
+3. Pousser la branche par staging explicite, ouvrir la PR, attendre la CI et fusionner sur `main` seulement si tous les gates sont verts.
+4. Appliquer la migration SQL transactionnellement, puis deployer `norva-playback` et `norva-auth-email` sur les deux replicas ainsi que le gateway media de facon coherente.
+5. Verifier le deploiement Cloudflare Pages/Relay issu de `main`, puis verifier physiquement auth, profils, film, serie, precedent/suivant, fin naturelle, Retour, arriere-plan/retour, Zoom/Fit, gestes, navigation trois boutons et font 1,3.
+6. Construire, signer et publier Android phone `1.3.12 (25)` uniquement apres les validations precedentes. Aucun nouveau bundle TV n'est necessaire car le lot ne modifie pas le client TV.
+7. Recontroler P0, owners/pointers, jobs non terminaux/dead, transitions, sources READY, cache/refresh, crons et canaux externes.
+8. Marquer l'observation active precedente stale et demarrer atomiquement une nouvelle observation rev16 a 20 % de 86 400 secondes via la RPC de changement materiel existante.
+9. Produire une preuve finale horodatee et hashee distinguant Git, CI, deploiements, Google Play, validation physique et nouvelle observation.
 
-## Interdictions de ce lot local
+## Interdictions maintenues pendant la release
 
-- Aucun `push` automatique.
-- Aucun deploiement Cloudflare, Edge, gateway ou base de donnees automatique.
-- Aucun envoi Google Play automatique.
-- Aucune modification de l'observation Provider Access depuis ce worktree.
+- Aucun push direct sur `main` et aucun staging global implicite.
+- Aucun gate de test ou scan de securite contourne.
+- Aucune modification manuelle des lignes d'observation ; utiliser uniquement la RPC CAS prevue.
 - Aucun secret, identifiant fournisseur ou credential dans cette branche.
-- Aucun branchement du prototype statique directement sur les API de production.
+- Aucun branchement de l'archive prototype sur les API de production.
+- Aucune publication Android TV sans changement TV et nouveau versionCode explicite.
