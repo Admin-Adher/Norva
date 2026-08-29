@@ -1787,7 +1787,7 @@ if (
 }
 const MULTI_AUDIO_HLS_PROTOCOL = 1;
 const MAX_MULTI_AUDIO_RENDITIONS = 8;
-const GATEWAY_VERSION = 118;
+const GATEWAY_VERSION = 119;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -3689,20 +3689,20 @@ function sendStrictLidBrokerError(res, error) {
     res.end(body);
 }
 
-function waitForStrictLidBrokerSlot(context) {
+function waitForStrictLidBrokerSlot(context, signal = context.controller.signal) {
     const remaining = Math.max(0, Number(context.nextOpenAt || 0) - Date.now());
     if (!remaining) return Promise.resolve();
     return new Promise((resolve, reject) => {
         let timer = null;
         const finish = (error) => {
             if (timer) clearTimeout(timer);
-            context.controller.signal.removeEventListener('abort', onAbort);
+            signal?.removeEventListener?.('abort', onAbort);
             if (error) reject(error);
             else resolve();
         };
         const onAbort = () => finish(strictLidBrokerError('STRICT_LID_ABORTED', 'Strict language media broker stopped', { status: 499 }));
-        context.controller.signal.addEventListener('abort', onAbort, { once: true });
-        if (context.controller.signal.aborted) return onAbort();
+        signal?.addEventListener?.('abort', onAbort, { once: true });
+        if (signal?.aborted) return onAbort();
         timer = setTimeout(() => finish(), remaining);
         timer.unref?.();
     });
@@ -3778,39 +3778,59 @@ function createStrictLidRangeDeadline({
     };
 }
 
+async function closeStrictLidBrokerProviderFetch(context, attempt, reason = 'completed') {
+    if (!attempt?.upstreamController) return;
+    const controller = attempt.upstreamController;
+    const reader = attempt.reader;
+    const response = attempt.response;
+    const deadline = attempt.deadline;
+    const onAttemptAbort = attempt.onAttemptAbort;
+    const fetchStarted = attempt.fetchStarted === true;
+    const completedExactRange = attempt.upstreamCompletedExactRange === true;
+    attempt.upstreamController = null;
+    attempt.reader = null;
+    attempt.response = null;
+    attempt.deadline = null;
+    attempt.onAttemptAbort = null;
+    attempt.fetchStarted = false;
+    attempt.upstreamCompletedExactRange = false;
+    deadline?.close?.();
+    attempt.controller.signal.removeEventListener?.('abort', onAttemptAbort);
+    try { controller.abort(new Error(reason)); } catch (_) {}
+    if (reader) {
+        try { await reader.cancel(); } catch (_) {}
+        try { reader.releaseLock(); } catch (_) {}
+    } else if (response?.body && !response.body.locked) {
+        try { await response.body.cancel(); } catch (_) {}
+    }
+    if (!fetchStarted) return;
+    if (completedExactRange) context.completedProviderFetches++;
+    else context.interruptedProviderFetches++;
+    const releaseDelayMs = completedExactRange
+        ? context.completedReleaseDelayMs
+        : (reason === 'superseded'
+            ? context.supersededReleaseDelayMs
+            : (reason === 'reconnect' ? 0 : context.releaseDelayMs));
+    if (releaseDelayMs > 0) {
+        context.nextOpenAt = Math.max(
+            Number(context.nextOpenAt || 0),
+            Date.now() + releaseDelayMs,
+        );
+    }
+}
+
 async function closeStrictLidBrokerAttempt(context, attempt, reason = 'completed') {
     if (!attempt) return;
     if (!attempt.closePromise) {
         attempt.closePromise = (async () => {
             attempt.stopReason = reason;
-            attempt.deadline?.close?.();
             attempt.signalParent?.removeEventListener?.('abort', attempt.onParentAbort);
             try { attempt.controller.abort(new Error(reason)); } catch (_) {}
-            if (attempt.reader) {
-                try { await attempt.reader.cancel(); } catch (_) {}
-                try { attempt.reader.releaseLock(); } catch (_) {}
-            } else if (attempt.response?.body && !attempt.response.body.locked) {
-                try { await attempt.response.body.cancel(); } catch (_) {}
-            }
+            await closeStrictLidBrokerProviderFetch(context, attempt, reason);
             if (reason !== 'completed' && attempt.localResponse && !attempt.localResponse.writableEnded) {
                 try { attempt.localResponse.destroy(); } catch (_) {}
             }
             if (context.activeAttempt === attempt) context.activeAttempt = null;
-            if (attempt.fetchStarted) {
-                const releaseDelayMs = attempt.completedExactRange === true
-                    ? context.completedReleaseDelayMs
-                    : (attempt.stopReason === 'superseded'
-                        ? context.supersededReleaseDelayMs
-                        : context.releaseDelayMs);
-                if (attempt.completedExactRange === true) context.completedProviderFetches++;
-                else context.interruptedProviderFetches++;
-                if (releaseDelayMs > 0) {
-                    context.nextOpenAt = Math.max(
-                        Number(context.nextOpenAt || 0),
-                        Date.now() + releaseDelayMs,
-                    );
-                }
-            }
         })();
     }
     await attempt.closePromise;
@@ -3829,17 +3849,19 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
     const controller = new AbortController();
     const attempt = {
         controller,
+        upstreamController: null,
         response: null,
         reader: null,
         localResponse: res,
         signalParent: context.controller.signal,
         onParentAbort: null,
+        onAttemptAbort: null,
         deadline: null,
         fetchStarted: false,
         localClosed: false,
         closePromise: null,
         stopReason: null,
-        completedExactRange: false,
+        upstreamCompletedExactRange: false,
     };
     attempt.onParentAbort = () => {
         try { controller.abort(context.controller.signal.reason); } catch (_) {}
@@ -3854,182 +3876,289 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
     };
     res.once('close', onLocalClose);
     context.activeAttempt = attempt;
-    attempt.deadline = createStrictLidRangeDeadline({
-        controller,
-        firstByteTimeoutMs: context.firstByteTimeoutMs,
-        idleTimeoutMs: context.idleTimeoutMs,
-        setTimer: context.setTimer,
-        clearTimer: context.clearTimer,
-    });
 
     try {
-        const headers = {
-            Range: `bytes=${range.start}-${range.end}`,
-            Accept: '*/*',
-            'Accept-Encoding': 'identity',
-            'User-Agent': context.userAgent,
-            Connection: 'close',
-        };
-        if (context.validator) headers[context.validator.header] = context.validator.value;
-        attempt.fetchStarted = true;
-        context.providerFetches++;
-        attempt.response = await context.fetchImpl(context.sourceUrl, {
-            method: 'GET',
-            headers,
-            redirect: 'follow',
-            signal: controller.signal,
-            dispatcher: context.dispatcher || undefined,
-        });
-        const upstreamStatus = Number(attempt.response.status);
-        if (upstreamStatus === 458) {
-            throw markStrictLidTerminal(context, strictLidBrokerError(
-                'PROVIDER_BUSY',
-                'This TV service is busy. Wait a few seconds, then try again.',
-                { status: 458, upstreamStatus },
-            ));
-        }
-        if (upstreamStatus === 407) {
-            throw markStrictLidTerminal(context, strictLidBrokerError(
-                'PROXY_AUTH_FAILED',
-                'The media service is temporarily unavailable.',
-                { status: 502, upstreamStatus },
-            ));
-        }
-        const observedEffectiveUrlSha256 = strictLidEffectiveUrlSha256(
-            attempt.response?.url || context.sourceUrl,
-        );
-        if (upstreamStatus === 200) {
-            const busy = await strictLidResponseHasBusyPrefix(
-                attempt.response,
-                controller.signal,
-                () => attempt.deadline.progress(),
-            );
-            if (busy) {
-                throw markStrictLidTerminal(context, strictLidBrokerError(
-                    'PROVIDER_BUSY',
-                    'This TV service is busy. Wait a few seconds, then try again.',
-                    { status: 458, upstreamStatus },
-                ));
-            }
+        const finiteSeek = context.pathPrefix === 'finite-mkv-seek';
+        const requestedLength = range.end - range.start + 1;
+        let forwarded = 0;
+        let reconnects = 0;
+        let consecutiveNoProgressFailures = 0;
+        let responseStarted = false;
+        while (forwarded < requestedLength) {
+            await waitForStrictLidBrokerSlot(context, controller.signal);
             if (controller.signal.aborted) {
                 throw controller.signal.reason || new Error('strict LID provider read stopped');
             }
-            throw markStrictLidTerminal(context, strictLidBrokerError(
-                'RANGE_UNSUPPORTED',
-                'Provider ignored the exact language-validation byte range.',
-                { status: 502, upstreamStatus },
-            ));
-        }
-        if (upstreamStatus !== 206) {
-            throw markStrictLidTerminal(context, strictLidBrokerError(
-                'PROVIDER_REQUEST_FAILED',
-                'Provider rejected the language-validation byte range.',
-                { status: 502, upstreamStatus },
-            ));
-        }
-        const contentEncoding = String(attempt.response.headers?.get?.('content-encoding') || '').trim().toLowerCase();
-        if (contentEncoding && contentEncoding !== 'identity') {
-            throw markStrictLidTerminal(context, strictLidBrokerError(
-                'RANGE_UNSUPPORTED',
-                'Provider encoded the language-validation byte range.',
-                { status: 502, upstreamStatus },
-            ));
-        }
-        const exactRange = strictLidContentRange(attempt.response, range);
-        if (!exactRange) {
-            throw markStrictLidTerminal(context, strictLidBrokerError(
-                'RANGE_UNSUPPORTED',
-                'Provider returned an invalid language-validation byte range.',
-                { status: 502, upstreamStatus },
-            ));
-        }
-        const observedValidator = strictLidResponseValidator(attempt.response);
-        if (
-            context.validator
-            && (
-                !observedValidator
-                || observedValidator.kind !== context.validator.kind
-                || observedValidator.value !== context.validator.value
-            )
-        ) {
-            throw markStrictLidTerminal(context, strictLidBrokerError(
-                'VOD_CHANGED',
-                'The media file changed during language validation.',
-                { status: 502, upstreamStatus },
-            ));
-        }
-        if (!context.validator && observedValidator) context.validator = observedValidator;
-        const observedEffectiveUrlIdentitySha256 = strictLidEffectiveUrlIdentitySha256(
-            attempt.response?.url || context.sourceUrl,
-        );
-        // The broker always fetches the same authenticated logical source URL.
-        // A provider may legitimately redirect every exact range to another
-        // signed CDN host/path. For finite MKV playback, continuity is therefore
-        // pinned by that immutable source URL, the exact Content-Range total and
-        // any strong validator, rather than by the provider's volatile redirect.
-        // Strict language validation keeps the original effective-URL fence.
-        if (
-            context.effectiveUrlSha256
-            && observedEffectiveUrlSha256 !== context.effectiveUrlSha256
-            && context.pathPrefix !== 'finite-mkv-seek'
-        ) {
-            throw markStrictLidTerminal(context, strictLidBrokerError(
-                'VOD_CHANGED',
-                'The media provider target changed during the byte-range session.',
-                { status: 502, upstreamStatus },
-            ));
-        }
-        if (!context.effectiveUrlSha256) context.effectiveUrlSha256 = observedEffectiveUrlSha256;
-        if (!context.effectiveUrlIdentitySha256) {
-            context.effectiveUrlIdentitySha256 = observedEffectiveUrlIdentitySha256;
-        }
-        if (!attempt.response.body || typeof attempt.response.body.getReader !== 'function') {
-            throw markStrictLidTerminal(context, strictLidBrokerError(
-                'PROVIDER_EMPTY_RESPONSE',
-                'Provider returned no language-validation media body.',
-                { status: 502, upstreamStatus },
-            ));
-        }
-        attempt.reader = attempt.response.body.getReader();
-        res.statusCode = 206;
-        res.setHeader('Accept-Ranges', 'bytes');
-        res.setHeader('Content-Type', 'application/octet-stream');
-        res.setHeader('Content-Range', `bytes ${range.start}-${range.end}/${range.total}`);
-        res.setHeader('Content-Length', String(exactRange.length));
-        res.setHeader('Cache-Control', 'no-store');
-        res.setHeader('X-Content-Type-Options', 'nosniff');
-        if (observedValidator?.kind === 'etag') res.setHeader('ETag', observedValidator.value);
-        if (observedValidator?.kind === 'last-modified') res.setHeader('Last-Modified', observedValidator.value);
+            const upstreamController = new AbortController();
+            attempt.upstreamController = upstreamController;
+            attempt.onAttemptAbort = () => {
+                try { upstreamController.abort(controller.signal.reason); } catch (_) {}
+            };
+            controller.signal.addEventListener('abort', attempt.onAttemptAbort, { once: true });
+            if (controller.signal.aborted) attempt.onAttemptAbort();
+            attempt.deadline = createStrictLidRangeDeadline({
+                controller: upstreamController,
+                firstByteTimeoutMs: context.firstByteTimeoutMs,
+                idleTimeoutMs: context.idleTimeoutMs,
+                setTimer: context.setTimer,
+                clearTimer: context.clearTimer,
+            });
+            const offsetBeforeFetch = forwarded;
+            const remainingRange = {
+                start: range.start + forwarded,
+                end: range.end,
+                total: range.total,
+            };
+            let upstreamStatus = null;
+            try {
+                const headers = {
+                    Range: `bytes=${remainingRange.start}-${remainingRange.end}`,
+                    Accept: '*/*',
+                    'Accept-Encoding': 'identity',
+                    'User-Agent': context.userAgent,
+                    Connection: 'close',
+                };
+                if (context.validator) headers[context.validator.header] = context.validator.value;
+                attempt.fetchStarted = true;
+                context.providerFetches++;
+                attempt.response = await context.fetchImpl(context.sourceUrl, {
+                    method: 'GET',
+                    headers,
+                    redirect: 'follow',
+                    signal: upstreamController.signal,
+                    dispatcher: context.dispatcher || undefined,
+                });
+                upstreamStatus = Number(attempt.response.status);
+                if (upstreamStatus === 458) {
+                    throw markStrictLidTerminal(context, strictLidBrokerError(
+                        'PROVIDER_BUSY',
+                        'This TV service is busy. Wait a few seconds, then try again.',
+                        { status: 458, upstreamStatus },
+                    ));
+                }
+                if (upstreamStatus === 407) {
+                    throw markStrictLidTerminal(context, strictLidBrokerError(
+                        'PROXY_AUTH_FAILED',
+                        'The media service is temporarily unavailable.',
+                        { status: 502, upstreamStatus },
+                    ));
+                }
+                const observedEffectiveUrlSha256 = strictLidEffectiveUrlSha256(
+                    attempt.response?.url || context.sourceUrl,
+                );
+                if (upstreamStatus === 200) {
+                    const busy = await strictLidResponseHasBusyPrefix(
+                        attempt.response,
+                        upstreamController.signal,
+                        () => attempt.deadline.progress(),
+                    );
+                    if (busy) {
+                        throw markStrictLidTerminal(context, strictLidBrokerError(
+                            'PROVIDER_BUSY',
+                            'This TV service is busy. Wait a few seconds, then try again.',
+                            { status: 458, upstreamStatus },
+                        ));
+                    }
+                    if (upstreamController.signal.aborted) {
+                        throw upstreamController.signal.reason || new Error('strict LID provider read stopped');
+                    }
+                    throw markStrictLidTerminal(context, strictLidBrokerError(
+                        'RANGE_UNSUPPORTED',
+                        'Provider ignored the exact language-validation byte range.',
+                        { status: 502, upstreamStatus },
+                    ));
+                }
+                if (upstreamStatus !== 206) {
+                    throw markStrictLidTerminal(context, strictLidBrokerError(
+                        'PROVIDER_REQUEST_FAILED',
+                        'Provider rejected the language-validation byte range.',
+                        { status: 502, upstreamStatus },
+                    ));
+                }
+                const contentEncoding = String(attempt.response.headers?.get?.('content-encoding') || '').trim().toLowerCase();
+                if (contentEncoding && contentEncoding !== 'identity') {
+                    throw markStrictLidTerminal(context, strictLidBrokerError(
+                        'RANGE_UNSUPPORTED',
+                        'Provider encoded the language-validation byte range.',
+                        { status: 502, upstreamStatus },
+                    ));
+                }
+                const exactRange = strictLidContentRange(attempt.response, remainingRange);
+                if (!exactRange) {
+                    throw markStrictLidTerminal(context, strictLidBrokerError(
+                        'RANGE_UNSUPPORTED',
+                        'Provider returned an invalid language-validation byte range.',
+                        { status: 502, upstreamStatus },
+                    ));
+                }
+                const observedValidator = strictLidResponseValidator(attempt.response);
+                if (
+                    context.validator
+                    && (
+                        !observedValidator
+                        || observedValidator.kind !== context.validator.kind
+                        || observedValidator.value !== context.validator.value
+                    )
+                ) {
+                    throw markStrictLidTerminal(context, strictLidBrokerError(
+                        'VOD_CHANGED',
+                        'The media file changed during language validation.',
+                        { status: 502, upstreamStatus },
+                    ));
+                }
+                if (!context.validator && observedValidator) context.validator = observedValidator;
+                const observedEffectiveUrlIdentitySha256 = strictLidEffectiveUrlIdentitySha256(
+                    attempt.response?.url || context.sourceUrl,
+                );
+                // Finite playback always refetches the same authenticated logical
+                // source. Signed CDN host/path rotation is acceptable only while
+                // the exact byte coordinates, total and strong validator remain
+                // pinned. Strict language validation keeps the original target
+                // fence and never enables the playback reconnect path.
+                if (
+                    context.effectiveUrlSha256
+                    && observedEffectiveUrlSha256 !== context.effectiveUrlSha256
+                    && !finiteSeek
+                ) {
+                    throw markStrictLidTerminal(context, strictLidBrokerError(
+                        'VOD_CHANGED',
+                        'The media provider target changed during the byte-range session.',
+                        { status: 502, upstreamStatus },
+                    ));
+                }
+                if (!context.effectiveUrlSha256) context.effectiveUrlSha256 = observedEffectiveUrlSha256;
+                if (!context.effectiveUrlIdentitySha256) {
+                    context.effectiveUrlIdentitySha256 = observedEffectiveUrlIdentitySha256;
+                }
+                if (!attempt.response.body || typeof attempt.response.body.getReader !== 'function') {
+                    throw markStrictLidTerminal(context, strictLidBrokerError(
+                        'PROVIDER_EMPTY_RESPONSE',
+                        'Provider returned no language-validation media body.',
+                        { status: 502, upstreamStatus },
+                    ));
+                }
+                attempt.reader = attempt.response.body.getReader();
+                if (!responseStarted) {
+                    res.statusCode = 206;
+                    res.setHeader('Accept-Ranges', 'bytes');
+                    res.setHeader('Content-Type', 'application/octet-stream');
+                    res.setHeader('Content-Range', `bytes ${range.start}-${range.end}/${range.total}`);
+                    res.setHeader('Content-Length', String(requestedLength));
+                    res.setHeader('Cache-Control', 'no-store');
+                    res.setHeader('X-Content-Type-Options', 'nosniff');
+                    if (observedValidator?.kind === 'etag') res.setHeader('ETag', observedValidator.value);
+                    if (observedValidator?.kind === 'last-modified') res.setHeader('Last-Modified', observedValidator.value);
+                    responseStarted = true;
+                }
 
-        let forwarded = 0;
-        while (!controller.signal.aborted) {
-            const { value, done } = await attempt.reader.read();
-            if (done) break;
-            const chunk = Buffer.from(value || []);
-            if (!chunk.length) continue;
-            attempt.deadline.progress();
-            if (forwarded + chunk.length > exactRange.length) {
-                throw markStrictLidTerminal(context, strictLidBrokerError(
-                    'RANGE_LENGTH_MISMATCH',
-                    'Provider exceeded the exact language-validation byte range.',
-                    { status: 502, upstreamStatus },
-                ));
+                while (!upstreamController.signal.aborted) {
+                    const { value, done } = await attempt.reader.read();
+                    if (done) break;
+                    const chunk = Buffer.from(value || []);
+                    if (!chunk.length) continue;
+                    attempt.deadline.progress();
+                    if (forwarded + chunk.length > requestedLength) {
+                        throw markStrictLidTerminal(context, strictLidBrokerError(
+                            'RANGE_LENGTH_MISMATCH',
+                            'Provider exceeded the exact language-validation byte range.',
+                            { status: 502, upstreamStatus },
+                        ));
+                    }
+                    forwarded += chunk.length;
+                    if (!res.write(chunk)) await waitForStrictLidDrain(res, controller.signal);
+                }
+                if (controller.signal.aborted) {
+                    throw controller.signal.reason || new Error('strict LID provider read stopped');
+                }
+                if (upstreamController.signal.aborted) {
+                    throw upstreamController.signal.reason || new Error('strict LID provider read stopped');
+                }
+                const providerBytes = forwarded - offsetBeforeFetch;
+                if (providerBytes !== exactRange.length) {
+                    throw strictLidBrokerError(
+                        'RANGE_LENGTH_MISMATCH',
+                        'Provider truncated the exact language-validation byte range.',
+                        { status: 502, upstreamStatus },
+                    );
+                }
+                attempt.upstreamCompletedExactRange = true;
+                await closeStrictLidBrokerProviderFetch(context, attempt, 'completed');
+            } catch (error) {
+                const progressBytes = forwarded - offsetBeforeFetch;
+                const timeoutKind = attempt.deadline?.timeoutKind || null;
+                const intentionallyStopped = controller.signal.aborted
+                    || context.closed
+                    || attempt.localClosed
+                    || attempt.stopReason === 'superseded'
+                    || attempt.stopReason === 'broker_closed';
+                if (intentionallyStopped) {
+                    await closeStrictLidBrokerProviderFetch(context, attempt, attempt.stopReason || 'stopped');
+                    throw error;
+                }
+                if (context.terminalError) {
+                    await closeStrictLidBrokerProviderFetch(context, attempt, 'failed');
+                    throw error;
+                }
+                let publicError = null;
+                if (isProxyAuthenticationFailure(error)) {
+                    publicError = strictLidBrokerError(
+                        'PROXY_AUTH_FAILED',
+                        'The media service is temporarily unavailable.',
+                        { status: 502, upstreamStatus: 407 },
+                    );
+                } else if (timeoutKind === 'first-byte') {
+                    publicError = strictLidBrokerError(
+                        'PROVIDER_FIRST_BYTE_TIMEOUT',
+                        'Provider did not start the language-validation byte range in time.',
+                        { status: 504 },
+                    );
+                } else if (timeoutKind === 'idle') {
+                    publicError = strictLidBrokerError(
+                        'PROVIDER_IDLE_TIMEOUT',
+                        'Provider stopped the language-validation byte range.',
+                        { status: 504 },
+                    );
+                } else if (error?.code === 'RANGE_LENGTH_MISMATCH') {
+                    publicError = error;
+                } else {
+                    publicError = strictLidBrokerError(
+                        'PROVIDER_FETCH_FAILED',
+                        'Provider media request failed during language validation.',
+                        { status: 502, upstreamStatus },
+                    );
+                }
+                await closeStrictLidBrokerProviderFetch(
+                    context,
+                    attempt,
+                    finiteSeek ? 'reconnect' : 'failed',
+                );
+                if (!finiteSeek) throw markStrictLidTerminal(context, publicError);
+
+                consecutiveNoProgressFailures = progressBytes > 0
+                    ? 0
+                    : consecutiveNoProgressFailures + 1;
+                reconnects++;
+                if (
+                    consecutiveNoProgressFailures > context.finiteNoProgressRetryLimit
+                    || reconnects > context.finiteMaxReconnects
+                ) {
+                    throw markStrictLidTerminal(context, strictLidBrokerError(
+                        'PROVIDER_RECONNECT_EXHAUSTED',
+                        'Provider repeatedly interrupted the finite MKV byte range.',
+                        { status: 502, upstreamStatus },
+                    ));
+                }
+                const retryDelayMs = context.finiteRetryDelaysMs[
+                    Math.max(0, consecutiveNoProgressFailures - 1)
+                ] || 0;
+                if (retryDelayMs > 0) {
+                    context.nextOpenAt = Math.max(
+                        Number(context.nextOpenAt || 0),
+                        Date.now() + retryDelayMs,
+                    );
+                }
             }
-            forwarded += chunk.length;
-            if (!res.write(chunk)) await waitForStrictLidDrain(res, controller.signal);
         }
-        if (controller.signal.aborted) throw controller.signal.reason || new Error('strict LID provider read stopped');
-        if (forwarded !== exactRange.length) {
-            throw markStrictLidTerminal(context, strictLidBrokerError(
-                'RANGE_LENGTH_MISMATCH',
-                'Provider truncated the exact language-validation byte range.',
-                { status: 502, upstreamStatus },
-            ));
-        }
-        // The provider body has been consumed to the exact terminal byte. Its
-        // account slot is drained, so finite-MKV seek may safely open the next
-        // serialized demux range without the abort-only grace delay.
-        attempt.completedExactRange = true;
         res.end();
     } catch (error) {
         const intentionallyStopped = context.closed
@@ -4163,6 +4292,15 @@ async function createStrictLidBroker(options = {}) {
         idleTimeoutMs: Number.isFinite(Number(options.idleTimeoutMs))
             ? Math.max(100, Number(options.idleTimeoutMs))
             : STRICT_LID_BROKER_IDLE_TIMEOUT_MS,
+        finiteNoProgressRetryLimit: Number.isFinite(Number(options.finiteNoProgressRetryLimit))
+            ? Math.max(0, Math.min(8, Number(options.finiteNoProgressRetryLimit)))
+            : VOD_INPUT_RETRY_LIMIT,
+        finiteMaxReconnects: Number.isFinite(Number(options.finiteMaxReconnects))
+            ? Math.max(1, Math.min(4_096, Number(options.finiteMaxReconnects)))
+            : VOD_INPUT_MAX_RECONNECTS,
+        finiteRetryDelaysMs: Array.isArray(options.finiteRetryDelaysMs)
+            ? options.finiteRetryDelaysMs.map((value) => Math.max(0, Number(value) || 0))
+            : VOD_INPUT_RETRY_DELAYS_MS,
         setTimer: typeof options.setTimer === 'function' ? options.setTimer : setTimeout,
         clearTimer: typeof options.clearTimer === 'function' ? options.clearTimer : clearTimeout,
         controller,

@@ -33,6 +33,9 @@ function brokerHarness() {
       PROVIDER_SLOT_RELEASE_DELAY_MS: 0,
       STRICT_LID_BROKER_FIRST_BYTE_TIMEOUT_MS: 30_000,
       STRICT_LID_BROKER_IDLE_TIMEOUT_MS: 15_000,
+      VOD_INPUT_MAX_RECONNECTS: 1_024,
+      VOD_INPUT_RETRY_DELAYS_MS: [0, 250, 1_000, 2_500],
+      VOD_INPUT_RETRY_LIMIT: 3,
       Readable: require('node:stream').Readable,
       String,
       URL,
@@ -1011,6 +1014,229 @@ test('finite MKV seek follows rotating CDN targets while exact ranges and valida
 
 });
 
+test('finite MKV seek transparently resumes short declared ranges without overlapping provider sockets', async (t) => {
+  const { createStrictLidBroker } = brokerHarness();
+  const data = Buffer.from(Array.from({ length: 40 }, (_, index) => index));
+  const calls = [];
+  const tracker = { active: 0, maxActive: 0 };
+  const broker = await createStrictLidBroker({
+    sourceUrl: 'https://provider.example/movie/account/secret/title.mkv',
+    fileSizeBytes: data.length,
+    dispatcher: null,
+    pathPrefix: 'finite-mkv-seek',
+    releaseDelayMs: 0,
+    finiteMaxReconnects: 16,
+    fetchImpl: async (_url, options) => {
+      const match = /^bytes=(\d+)-(\d+)$/.exec(options.headers.Range);
+      const start = Number(match[1]);
+      const end = Number(match[2]);
+      calls.push(options.headers.Range);
+      tracker.active++;
+      tracker.maxActive = Math.max(tracker.maxActive, tracker.active);
+      let emitted = false;
+      let released = false;
+      const release = () => {
+        if (released) return;
+        released = true;
+        tracker.active--;
+      };
+      const body = new ReadableStream({
+        pull(controller) {
+          if (!emitted) {
+            emitted = true;
+            controller.enqueue(data.subarray(start, Math.min(end + 1, start + 4)));
+            return;
+          }
+          release();
+          controller.close();
+        },
+        cancel() { release(); },
+      });
+      return new Response(body, {
+        status: 206,
+        headers: {
+          'Content-Range': `bytes ${start}-${end}/${data.length}`,
+          'Content-Length': String(end - start + 1),
+          ETag: '"short-v1"',
+        },
+      });
+    },
+  });
+  t.after(() => broker.close());
+
+  const response = await fetch(broker.inputUrl, { headers: { Range: 'bytes=0-39' } });
+  assert.equal(response.status, 206);
+  assert.deepEqual(Buffer.from(await response.arrayBuffer()), data);
+  assert.equal(tracker.maxActive, 1);
+  assert.equal(tracker.active, 0);
+  assert.deepEqual(calls, Array.from({ length: 10 }, (_, index) => `bytes=${index * 4}-39`));
+  assert.equal(broker.providerFetches, 10);
+  assert.equal(broker.completedProviderFetches, 1);
+  assert.equal(broker.interruptedProviderFetches, 9);
+});
+
+test('finite MKV seek resumes from the exact byte after an upstream reader error', async (t) => {
+  const { createStrictLidBroker } = brokerHarness();
+  const data = Buffer.from(Array.from({ length: 24 }, (_, index) => 0x60 + index));
+  const calls = [];
+  const tracker = { active: 0, maxActive: 0 };
+  const broker = await createStrictLidBroker({
+    sourceUrl: 'https://provider.example/movie/account/secret/title.mkv',
+    fileSizeBytes: data.length,
+    dispatcher: null,
+    pathPrefix: 'finite-mkv-seek',
+    releaseDelayMs: 0,
+    finiteMaxReconnects: 16,
+    fetchImpl: async (_url, options) => {
+      const match = /^bytes=(\d+)-(\d+)$/.exec(options.headers.Range);
+      const start = Number(match[1]);
+      const end = Number(match[2]);
+      calls.push(options.headers.Range);
+      tracker.active++;
+      tracker.maxActive = Math.max(tracker.maxActive, tracker.active);
+      let pull = 0;
+      let released = false;
+      const release = () => {
+        if (released) return;
+        released = true;
+        tracker.active--;
+      };
+      const body = new ReadableStream({
+        pull(controller) {
+          if (pull++ === 0) {
+            controller.enqueue(data.subarray(start, Math.min(end + 1, start + 6)));
+            return;
+          }
+          release();
+          controller.error(new Error('simulated upstream reset'));
+        },
+        cancel() { release(); },
+      });
+      return new Response(body, {
+        status: 206,
+        headers: {
+          'Content-Range': `bytes ${start}-${end}/${data.length}`,
+          'Content-Length': String(end - start + 1),
+          ETag: '"reset-v1"',
+        },
+      });
+    },
+  });
+  t.after(() => broker.close());
+
+  const response = await fetch(broker.inputUrl, { headers: { Range: 'bytes=0-23' } });
+  assert.equal(response.status, 206);
+  assert.deepEqual(Buffer.from(await response.arrayBuffer()), data);
+  assert.deepEqual(calls, ['bytes=0-23', 'bytes=6-23', 'bytes=12-23', 'bytes=18-23']);
+  assert.equal(tracker.maxActive, 1);
+  assert.equal(tracker.active, 0);
+});
+
+test('strict language broker never reconnects a truncated provider range', async (t) => {
+  const { createStrictLidBroker } = brokerHarness();
+  let calls = 0;
+  const broker = await createStrictLidBroker({
+    sourceUrl: 'https://provider.example/movie/account/secret/title.mkv',
+    fileSizeBytes: 20,
+    dispatcher: null,
+    releaseDelayMs: 0,
+    fetchImpl: async (_url, options) => {
+      calls++;
+      const match = /^bytes=(\d+)-(\d+)$/.exec(options.headers.Range);
+      const start = Number(match[1]);
+      const end = Number(match[2]);
+      return new Response(Buffer.alloc(4, 0x44), {
+        status: 206,
+        headers: {
+          'Content-Range': `bytes ${start}-${end}/20`,
+          'Content-Length': String(end - start + 1),
+          ETag: '"strict-v1"',
+        },
+      });
+    },
+  });
+  t.after(() => broker.close());
+
+  await assert.rejects(fetch(broker.inputUrl, { headers: { Range: 'bytes=0-19' } }));
+  assert.equal(calls, 1);
+  assert.equal(broker.terminalError.code, 'RANGE_LENGTH_MISMATCH');
+});
+
+test('finite MKV seek bounds no-progress reconnects and fails closed on validator drift', async (t) => {
+  const { createStrictLidBroker } = brokerHarness();
+  let emptyCalls = 0;
+  const emptyBroker = await createStrictLidBroker({
+    sourceUrl: 'https://provider.example/movie/account/secret/title.mkv',
+    fileSizeBytes: 20,
+    dispatcher: null,
+    pathPrefix: 'finite-mkv-seek',
+    releaseDelayMs: 0,
+    finiteNoProgressRetryLimit: 2,
+    finiteRetryDelaysMs: [0, 0, 0],
+    fetchImpl: async (_url, options) => {
+      emptyCalls++;
+      const match = /^bytes=(\d+)-(\d+)$/.exec(options.headers.Range);
+      const start = Number(match[1]);
+      const end = Number(match[2]);
+      return new Response(new ReadableStream({ start(controller) { controller.close(); } }), {
+        status: 206,
+        headers: {
+          'Content-Range': `bytes ${start}-${end}/20`,
+          'Content-Length': String(end - start + 1),
+          ETag: '"empty-v1"',
+        },
+      });
+    },
+  });
+  try {
+    const response = await fetch(emptyBroker.inputUrl, { headers: { Range: 'bytes=0-19' } })
+      .catch(() => null);
+    if (response) {
+      assert.equal(response.status, 502);
+      assert.equal((await response.json()).code, 'PROVIDER_RECONNECT_EXHAUSTED');
+    }
+    assert.equal(emptyCalls, 3);
+    assert.equal(emptyBroker.terminalError.code, 'PROVIDER_RECONNECT_EXHAUSTED');
+  } finally {
+    await emptyBroker.close();
+  }
+
+  let validatorCalls = 0;
+  const validatorBroker = await createStrictLidBroker({
+    sourceUrl: 'https://provider.example/movie/account/secret/title.mkv',
+    fileSizeBytes: 20,
+    dispatcher: null,
+    pathPrefix: 'finite-mkv-seek',
+    releaseDelayMs: 0,
+    fetchImpl: async (_url, options) => {
+      validatorCalls++;
+      const match = /^bytes=(\d+)-(\d+)$/.exec(options.headers.Range);
+      const start = Number(match[1]);
+      const end = Number(match[2]);
+      return new Response(Buffer.alloc(Math.min(4, end - start + 1), 0x55), {
+        status: 206,
+        headers: {
+          'Content-Range': `bytes ${start}-${end}/20`,
+          'Content-Length': String(end - start + 1),
+          ETag: validatorCalls === 1 ? '"stable-v1"' : '"changed-v2"',
+        },
+      });
+    },
+  });
+  try {
+    const response = await fetch(validatorBroker.inputUrl, { headers: { Range: 'bytes=0-19' } })
+      .catch(() => null);
+    if (response) {
+      assert.equal(response.status, 206);
+      await assert.rejects(response.arrayBuffer());
+    }
+    assert.equal(validatorCalls, 2);
+    assert.equal(validatorBroker.terminalError.code, 'VOD_CHANGED');
+  } finally {
+    await validatorBroker.close();
+  }
+});
+
 test('strict LID rejects invalid exact signed coordinates before creating a server or provider fetch', async () => {
   const { createStrictLidBroker } = brokerHarness();
   let fetches = 0;
@@ -1042,7 +1268,7 @@ test('strict LID rejects invalid exact signed coordinates before creating a serv
   assert.match(route, /detectLanguageRequestPolicy\(req, options\)[\s\S]*validateDetectLanguageCapability\(capabilityToken, policy\.requiredScope\)/);
   assert.match(gatewaySource, /strictLidLoopbackBrokerProtocol: 1/);
   assert.match(gatewaySource, /strictLidFileSizeClaim: 'fileSizeBytes'/);
-  assert.match(gatewaySource, /const GATEWAY_VERSION = 118/);
+  assert.match(gatewaySource, /const GATEWAY_VERSION = 119/);
   assert.match(gatewaySource, /strictLidProviderDrainProtocol: 1/);
   assert.match(gatewaySource, /strictLidWeakFallbackProtocol: 1/);
   assert.match(gatewaySource, /strictLidTimelineSamplingProtocol: 1/);
