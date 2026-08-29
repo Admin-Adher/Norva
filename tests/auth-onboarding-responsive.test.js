@@ -31,3 +31,11 @@ test('auth and pairing pages can scroll and keep 44px targets on phones', () => 
   assert.match(login, /font-size:\s*16px/);
   assert.match(login, /min-height:\s*44px/);
 });
+
+test('native premium auth joins the card and stays touch-safe across phone viewports', () => {
+  const css = read('public/css/account-premium.css');
+  assert.match(css, /@media \(max-width: 720px\)[\s\S]*html\.premium-auth\.native-app \.shell \{ gap: 0; margin-block: auto; \}/);
+  assert.match(css, /\.shell \{[\s\S]{0,260}max-height: calc\(100dvh - 32px\);[\s\S]{0,180}overflow-y: auto;/);
+  assert.match(css, /html\.premium-auth\.native-app \.fine a \{[\s\S]{0,160}min-height: 44px;/);
+  assert.match(css, /html\.premium-auth\.native-app body \{[\s\S]{0,180}justify-content: center;[\s\S]{0,260}safe-area-inset-bottom/);
+});

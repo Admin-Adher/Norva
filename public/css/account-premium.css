@@ -330,6 +330,17 @@ input:focus { border-color: #74a2ff; box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.
     overflow-y: auto;
     border-radius: 24px;
   }
+  /* The base native layout contributes a 16px grid gap between the trust strip
+     and the form. Remove that exposed dark band, then center the joined card
+     only while it fits. With an IME or enlarged text, flex auto margins collapse
+     to zero and the shell keeps its existing internal scroll. */
+  html.premium-auth.native-app .shell { gap: 0; margin-block: auto; }
+  html.premium-auth.native-app .fine a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    vertical-align: middle;
+  }
   .brand {
     padding: 18px 20px 12px;
     display: block;
@@ -426,6 +437,10 @@ input:focus { border-color: #74a2ff; box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.
 }
 
 @media (orientation: landscape) and (max-height: 520px) {
+  html.premium-auth.native-app body {
+    justify-content: center;
+    padding: max(8px, env(safe-area-inset-top, 0px)) max(12px, env(safe-area-inset-right, 0px)) max(8px, env(safe-area-inset-bottom, 0px)) max(12px, env(safe-area-inset-left, 0px));
+  }
   html.premium-auth.native-app .shell {
     width: min(920px, 100%);
     max-width: none;
