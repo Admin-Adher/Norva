@@ -1787,7 +1787,7 @@ if (
 }
 const MULTI_AUDIO_HLS_PROTOCOL = 1;
 const MAX_MULTI_AUDIO_RENDITIONS = 8;
-const GATEWAY_VERSION = 122;
+const GATEWAY_VERSION = 123;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -7901,6 +7901,8 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             audioChannels,
             audioStreamIndex,
             audio_stream_index,
+            subtitleStreamIndex,
+            subtitle_stream_index,
             audioMode,
             videoCodec,
             clientAudioPassthrough,
@@ -8002,6 +8004,7 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             audioProfile: stringOrNull(audioProfile) || stringOrNull(normalizedPlaybackHint.audioProfile) || stringOrNull(normalizedPlaybackHint.audio_profile) || stringOrNull(normalizedCodecProfile.audioProfile) || stringOrNull(normalizedCodecProfile.audio_profile),
             audioChannels: nullableInt(audioChannels ?? normalizedPlaybackHint.audioChannels ?? normalizedPlaybackHint.audio_channels ?? normalizedCodecProfile.audioChannels ?? normalizedCodecProfile.audio_channels ?? normalizedCodecProfile.channels),
             audioStreamIndex: normalizeAudioStreamIndex(audioStreamIndex ?? audio_stream_index ?? normalizedPlaybackHint.audioStreamIndex ?? normalizedPlaybackHint.audio_stream_index),
+            subtitleStreamIndex: normalizeAudioStreamIndex(subtitleStreamIndex ?? subtitle_stream_index ?? normalizedPlaybackHint.subtitleStreamIndex ?? normalizedPlaybackHint.subtitle_stream_index),
             audioMode: stringOrNull(audioMode) || stringOrNull(normalizedPlaybackHint.audioMode) || stringOrNull(normalizedPlaybackHint.audio_mode),
             clientAudioPassthrough: clientAudioPassthrough === false || normalizedPlaybackHint.clientAudioPassthrough === false || normalizedPlaybackHint.client_audio_passthrough === false ? false : true,
             completeHlsCachePolicy: normalizedCompleteHlsCachePolicy,
@@ -8191,6 +8194,7 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             audioProfile: stringOrNull(audioProfile) || stringOrNull(normalizedPlaybackHint.audioProfile) || stringOrNull(normalizedPlaybackHint.audio_profile) || stringOrNull(normalizedCodecProfile.audioProfile) || stringOrNull(normalizedCodecProfile.audio_profile),
             audioChannels: nullableInt(audioChannels ?? normalizedPlaybackHint.audioChannels ?? normalizedPlaybackHint.audio_channels ?? normalizedCodecProfile.audioChannels ?? normalizedCodecProfile.audio_channels ?? normalizedCodecProfile.channels),
             audioStreamIndex: normalizeAudioStreamIndex(audioStreamIndex ?? audio_stream_index ?? normalizedPlaybackHint.audioStreamIndex ?? normalizedPlaybackHint.audio_stream_index),
+            subtitleStreamIndex: normalizeAudioStreamIndex(subtitleStreamIndex ?? subtitle_stream_index ?? normalizedPlaybackHint.subtitleStreamIndex ?? normalizedPlaybackHint.subtitle_stream_index),
             audioMode: stringOrNull(audioMode) || stringOrNull(normalizedPlaybackHint.audioMode) || stringOrNull(normalizedPlaybackHint.audio_mode),
             videoCodec: stringOrNull(videoCodec) || stringOrNull(normalizedPlaybackHint.videoCodec) || stringOrNull(normalizedPlaybackHint.video_codec) || stringOrNull(normalizedCodecProfile.videoCodec) || stringOrNull(normalizedCodecProfile.video_codec) || stringOrNull(normalizedCodecProfile.video),
             clientAudioPassthrough: clientAudioPassthrough === false || normalizedPlaybackHint.clientAudioPassthrough === false || normalizedPlaybackHint.client_audio_passthrough === false ? false : true,
@@ -8543,6 +8547,7 @@ function gatewayCreatedSessionPayload(req, session) {
         videoModeReason: session.videoModeReason,
         hlsTargetSeconds: session.hlsTargetSeconds,
         audioStreamIndex: mappedAudioStreamIndexForSession(session),
+        subtitleStreamIndex: mappedSubtitleStreamIndexForSession(session),
         audioRenditions: audioRenditionsForSession(session),
         multiAudioHls: multiAudioHlsDiagnosticsForSession(session),
         requestedSeekOffset: session.seekOffset || 0,
@@ -13603,21 +13608,25 @@ function appendSubtitleOutputs(args, session, postInputSeek = []) {
 }
 
 function subtitleTracksForSession(session) {
+    const requestedIndex = normalizeAudioStreamIndex(session?.subtitleStreamIndex);
+    // Subtitle extraction is deliberately opt-in and single-lane. Eagerly mapping
+    // every text track can create dozens of FFmpeg outputs on subtitle-heavy MKVs,
+    // delaying the first HLS segment by nearly a minute. A missing preference means
+    // subtitles stay off; an exact preference may select one authoritative track.
+    if (!Number.isInteger(requestedIndex)) return [];
     const tracks = Array.isArray(session.codecProfile?.subtitles)
         ? session.codecProfile.subtitles
         : (Array.isArray(session.playbackHint?.subtitles) ? session.playbackHint.subtitles : []);
-    const seen = new Set();
-
-    return tracks
+    const selected = tracks
         .filter((track) => track && track.extractable === true && subtitleKind(track.codec) === 'text')
         .map((track) => ({ ...track, index: nullableInt(track.index) }))
-        .filter((track) => {
-            if (track.index === null || track.index === undefined) return false;
-            if (seen.has(track.index)) return false;
-            seen.add(track.index);
-            return true;
-        })
-        .slice(0, MAX_SUBTITLE_TRACKS);
+        .find((track) => normalizeAudioStreamIndex(track.index) === requestedIndex);
+    return selected ? [selected] : [];
+}
+
+function mappedSubtitleStreamIndexForSession(session) {
+    const selected = subtitleTracksForSession(session)[0];
+    return normalizeAudioStreamIndex(selected?.index);
 }
 
 function shouldCopyAudio(session) {
@@ -14975,6 +14984,7 @@ function serializeSession(req, session) {
         mode: session.mode,
         audioMode: audioModeForSession(session),
         audioStreamIndex: mappedAudioStreamIndexForSession(session),
+        subtitleStreamIndex: mappedSubtitleStreamIndexForSession(session),
         audioRenditions: audioRenditionsForSession(session),
         multiAudioHls: multiAudioHlsDiagnosticsForSession(session),
         requestedSeekOffset: session.seekOffset || 0,
@@ -15006,6 +15016,7 @@ function debugSession(session) {
         mode: session.mode,
         audioMode: audioModeForSession(session),
         audioStreamIndex: mappedAudioStreamIndexForSession(session),
+        subtitleStreamIndex: mappedSubtitleStreamIndexForSession(session),
         audioRenditions: audioRenditionsForSession(session),
         multiAudioHls: multiAudioHlsDiagnosticsForSession(session),
         requestedSeekOffset: session.seekOffset || 0,

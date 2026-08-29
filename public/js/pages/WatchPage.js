@@ -188,6 +188,8 @@ class WatchPage {
         this._lastCommittedSeekAt = 0;
         this._audioSwitchPromise = null;
         this._audioSwitchRequestId = 0;
+        this._subtitleSwitchPromise = null;
+        this._subtitleSwitchRequestId = 0;
         this._gatewayAudioSwitchMetrics = null;
         this.currentSessionId = null;
         this.activeSessionIds = new Set();
@@ -587,6 +589,15 @@ class WatchPage {
         if (audio && typeof audio === 'object') result.audio = { ...audio };
         if (subtitle && typeof subtitle === 'object') result.subtitle = { ...subtitle };
         return result.audio || result.subtitle ? result : null;
+    }
+
+    applyPlaybackPreferencesToHint(hint, preferences) {
+        const mediaUtils = typeof MediaUtils !== 'undefined'
+            ? MediaUtils
+            : (typeof window !== 'undefined' ? window.MediaUtils : null);
+        return mediaUtils?.applyPlaybackPreferencesToHint
+            ? mediaUtils.applyPlaybackPreferencesToHint(hint, preferences)
+            : hint;
     }
 
     getPlaybackPreferences() {
@@ -1251,15 +1262,11 @@ class WatchPage {
         // the probed audio map). The played stream id is the episode, not the series.
         const seriesIdForAudio = content.seriesId || content.series_id;
         if (streamType === 'series' && seriesIdForAudio) hint.audioSeriesId = seriesIdForAudio;
-        const audioPreference = snapshot?.playback?.playbackPreferences?.audio
-            || snapshot?.playbackPreferences?.audio
-            || snapshot?.content?.playbackPreferences?.audio
+        const playbackPreferences = snapshot?.playback?.playbackPreferences
+            || snapshot?.playbackPreferences
+            || snapshot?.content?.playbackPreferences
             || null;
-        const audioStreamIndex = Number(audioPreference?.streamIndex ?? audioPreference?.stream_index);
-        if (Number.isInteger(audioStreamIndex)) {
-            hint.audioStreamIndex = audioStreamIndex;
-        }
-        return hint;
+        return this.applyPlaybackPreferencesToHint(hint, playbackPreferences);
     }
 
     async restoreFromResumeSnapshot() {
@@ -1303,7 +1310,7 @@ class WatchPage {
 
             await this.releasePlaybackPipelineForRetry();
             const resumePlan = this.getGatewaySeekPlan(snapshotResumePosition);
-            const playbackHint = {
+            let playbackHint = {
                 ...this.buildResumePlaybackHint(snapshot),
                 seekOffset: resumePlan.sessionStart,
                 startOffset: resumePlan.sessionStart,
@@ -1383,6 +1390,16 @@ class WatchPage {
             nestedPlayback.audio_stream_index ??
             gatewaySession?.audioStreamIndex ??
             gatewaySession?.audio_stream_index
+        );
+        const subtitleStreamIndex = Number(
+            extra.subtitleStreamIndex ??
+            extra.subtitle_stream_index ??
+            root.subtitleStreamIndex ??
+            root.subtitle_stream_index ??
+            nestedPlayback.subtitleStreamIndex ??
+            nestedPlayback.subtitle_stream_index ??
+            gatewaySession?.subtitleStreamIndex ??
+            gatewaySession?.subtitle_stream_index
         );
         const requestedSeekOffset = Number(
             extra.requestedSeekOffset ??
@@ -1476,6 +1493,9 @@ class WatchPage {
                 || null,
             audioStreamIndex: Number.isInteger(audioStreamIndex) && audioStreamIndex >= 0
                 ? audioStreamIndex
+                : null,
+            subtitleStreamIndex: Number.isInteger(subtitleStreamIndex) && subtitleStreamIndex >= 0
+                ? subtitleStreamIndex
                 : null,
             requestedSeekOffset: Number.isFinite(requestedSeekOffset) && requestedSeekOffset > 0
                 ? requestedSeekOffset
@@ -1588,6 +1608,25 @@ class WatchPage {
         this.seriesInfo = content.seriesInfo || null;
         this.currentSeason = content.currentSeason || null;
         this.currentEpisode = content.currentEpisode || null;
+
+        // A new playback intention owns the Watch shell immediately. Clear the
+        // outgoing title's terminal error and content panels before resume/session
+        // resolution can yield, otherwise a slow MKV resolve leaves stale UI on
+        // screen and makes a healthy request look broken.
+        this.hidePlaybackError();
+        this._lastFailureMsg = null;
+        this.closeEpisodesMenu();
+        if (this.recommendedGrid) this.recommendedGrid.replaceChildren();
+        if (this.seasonsContainer) this.seasonsContainer.replaceChildren();
+        if (this.episodesNavList) this.episodesNavList.replaceChildren();
+        if (content.type === 'movie') {
+            this.episodesSection?.classList.add('hidden');
+            this.recommendedSection?.classList.remove('hidden');
+        } else {
+            this.recommendedSection?.classList.add('hidden');
+            this.episodesSection?.classList.remove('hidden');
+        }
+        this.updateEpisodeNavUI();
         let requestedResumeTime = Number(
             content.resumeTime ??
             playbackMetadata.resumeTarget ??
@@ -1833,6 +1872,7 @@ class WatchPage {
             localSeekTarget: playbackMetadata.localSeekTarget ?? playbackMetadata.local_seek_target ?? null,
             sourceTimestamps: playbackMetadata.sourceTimestamps ?? playbackMetadata.source_timestamps ?? false,
             audioStreamIndex: playbackMetadata.audioStreamIndex ?? playbackMetadata.audio_stream_index ?? null,
+            subtitleStreamIndex: playbackMetadata.subtitleStreamIndex ?? playbackMetadata.subtitle_stream_index ?? null,
             audioRenditions: playbackMetadata.audioRenditions ?? playbackMetadata.audio_renditions ?? null,
             multiAudioHls: playbackMetadata.multiAudioHls ?? playbackMetadata.multi_audio_hls ?? null,
             startupPolicy: playbackMetadata.startupPolicy ?? playbackMetadata.startup_policy
@@ -2258,14 +2298,13 @@ class WatchPage {
             await this.saveCastProgress();
             const container = nextEp.container_extension || 'mp4';
             const prefs = this.getPlaybackPreferences?.() || {};
-            const audioStreamIndex = Number(prefs?.audio?.streamIndex ?? prefs?.audio?.stream_index);
-            const hint = {
+            let hint = {
                 gatewayMode: 'transcode', audioMode: 'transcode',
                 ...this.getSelectedAudioPlaybackOptions?.(),
                 audioSeriesId: this.content.seriesId || this.content.series_id || undefined,
                 seekOffset: 0, startOffset: 0, resumeTime: 0
             };
-            if (Number.isInteger(audioStreamIndex)) hint.audioStreamIndex = audioStreamIndex;
+            hint = this.applyPlaybackPreferencesToHint(hint, prefs);
             const result = await API.proxy.xtream.getStreamUrl(this.content.sourceId, nextEp.id, 'series', container, hint);
             if (!result?.url || !/^https?:\/\//i.test(result.url)) throw new Error('No stream for next episode');
             // Advance the episode context so the bar + progress target the new episode.
@@ -3686,7 +3725,9 @@ class WatchPage {
     }
 
     getSelectedAudioTrack(info = this.currentStreamInfo) {
-        const tracks = Array.isArray(info?.audioTracks) ? info.audioTracks : this.audioTracks;
+        const tracks = Array.isArray(info?.audioTracks)
+            ? info.audioTracks
+            : (Array.isArray(this.audioTracks) ? this.audioTracks : []);
         if (!tracks.length) return null;
 
         return tracks.find(track => Number(track.index) === Number(this.selectedAudioStreamIndex))
@@ -4012,14 +4053,22 @@ class WatchPage {
             // asks it to copy safe H.264/AAC first. The API/gateway can still encode a
             // codec the exact-file profile proves unsafe, without making every runtime
             // MSE/mux failure replay linearly from byte zero.
-            result = await API.proxy.xtream.getStreamUrl(c.sourceId, c.id, type, c.containerExtension || 'mp4', {
+            let playbackHint = {
                 mode: 'transcode', gatewayMode: 'remux',
                 ...audioOptions,
                 ...(type === 'series' && (c.seriesId || c.series_id)
                     ? { audioSeriesId: c.seriesId || c.series_id }
                     : {}),
                 seekOffset: startOffset, startOffset, resumeTime: startOffset
-            });
+            };
+            playbackHint = this.applyPlaybackPreferencesToHint(playbackHint, playbackPreferences);
+            result = await API.proxy.xtream.getStreamUrl(
+                c.sourceId,
+                c.id,
+                type,
+                c.containerExtension || 'mp4',
+                playbackHint
+            );
         } catch (err) {
             console.warn('[WatchPage] transcode fallback resolve failed:', err?.message || err);
             return false;
@@ -5796,7 +5845,7 @@ class WatchPage {
             this.video.load();
         }
 
-        const playbackHint = {
+        let playbackHint = {
             ...(MediaUtils.playbackHintFromItem
                 ? MediaUtils.playbackHintFromItem(this.content, { container, streamType: itemType })
                 : { container, streamType: itemType }),
@@ -5805,6 +5854,9 @@ class WatchPage {
             startOffset: sessionStart,
             resumeTime: sessionStart
         };
+        playbackHint = typeof this.applyPlaybackPreferencesToHint === 'function'
+            ? this.applyPlaybackPreferencesToHint(playbackHint, playbackPreferences)
+            : playbackHint;
 
         let result = null;
         try {
@@ -6642,7 +6694,8 @@ class WatchPage {
             await this.releasePlaybackPipelineForRetry();
             const itemType = this.content.type === 'series' ? 'series' : 'movie';
             const container = this.containerExtension || 'mp4';
-            const playbackHint = {
+            const playbackPreferences = this.savePlaybackPreferences(this.getMergedPlaybackPreferences());
+            let playbackHint = {
                 // Force the resolver onto the transcode path. gatewayMode alone does NOT set the
                 // resolver's `mode` (getStreamUrl reads query `mode` → forcedMode), so without this
                 // the retry re-evaluated browserSafeVod on the still-metadata-less hint and silently
@@ -6656,6 +6709,7 @@ class WatchPage {
                 startOffset: position,
                 resumeTime: position
             };
+            playbackHint = this.applyPlaybackPreferencesToHint(playbackHint, playbackPreferences);
 
             await this.waitForProviderSlotRelease(1400);
             let result;
@@ -6933,7 +6987,8 @@ class WatchPage {
             const container = this.containerExtension || 'mp4';
             const explicitServerConversion = this.isCloudPlaybackMode()
                 && this._preferredExplicitCloudMode === 'transcode';
-            const playbackHint = {
+            const playbackPreferences = this.savePlaybackPreferences(this.getMergedPlaybackPreferences());
+            let playbackHint = {
                 ...(explicitServerConversion ? {
                     mode: 'transcode',
                     gatewayMode: 'remux',
@@ -6943,6 +6998,7 @@ class WatchPage {
                 startOffset: position,
                 resumeTime: position
             };
+            playbackHint = this.applyPlaybackPreferencesToHint(playbackHint, playbackPreferences);
             const result = await API.proxy.xtream.getStreamUrl(
                 this.content.sourceId, this.content.id, itemType, container, playbackHint);
             const resultSessionId = this.playbackMetadataFromResult(result).sessionId;
@@ -7185,13 +7241,21 @@ class WatchPage {
             const position = positionOverride !== null
                 ? Math.max(0, Math.floor(Number(positionOverride) || 0))
                 : Math.max(0, Math.floor(this.getPlaybackPosition()));
-            const result = await API.proxy.xtream.getStreamUrl(nextSourceId, nextStreamId, next.type || 'movie', nextContainer, {
+            let failoverHint = {
                 ...nextPlaybackHint,
                 ...nextAudioOptions,
                 seekOffset: position,
                 startOffset: position,
                 resumeTime: position
-            });
+            };
+            failoverHint = this.applyPlaybackPreferencesToHint(failoverHint, playbackPreferences);
+            const result = await API.proxy.xtream.getStreamUrl(
+                nextSourceId,
+                nextStreamId,
+                next.type || 'movie',
+                nextContainer,
+                failoverHint
+            );
             const resultSessionId = this.playbackMetadataFromResult(result).sessionId;
             if (this.isStalePlaybackAttempt(playbackAttemptId) || this.content !== contentAtStart) {
                 await this.cleanupStaleCloudPlaybackSession(resultSessionId);
@@ -8749,7 +8813,7 @@ class WatchPage {
         await this.waitForProviderSlotRelease(300);
         if (this.isStaleAudioSwitch(requestId)) return false;
 
-        const playbackHint = {
+        let playbackHint = {
             ...(MediaUtils.playbackHintFromItem
                 ? MediaUtils.playbackHintFromItem(this.content, { container, streamType: itemType })
                 : { container, streamType: itemType }),
@@ -8758,6 +8822,9 @@ class WatchPage {
             startOffset: sessionStart,
             resumeTime: sessionStart
         };
+        playbackHint = typeof this.applyPlaybackPreferencesToHint === 'function'
+            ? this.applyPlaybackPreferencesToHint(playbackHint, playbackPreferences)
+            : playbackHint;
 
         let result = null;
         try {
@@ -8925,6 +8992,96 @@ class WatchPage {
         });
     }
 
+    queueSelectedSubtitleTrackRestart(preference) {
+        const requestId = ++this._subtitleSwitchRequestId;
+        const run = (this._subtitleSwitchPromise || Promise.resolve())
+            .catch(() => {})
+            .then(() => {
+                if (this.isStaleSubtitleSwitch(requestId)) return false;
+                return this.restartWithSelectedSubtitleTrack(preference, requestId);
+            });
+
+        this._subtitleSwitchPromise = run.finally(() => {
+            if (!this.isStaleSubtitleSwitch(requestId)) {
+                this._subtitleSwitchPromise = null;
+            }
+        });
+        return this._subtitleSwitchPromise;
+    }
+
+    isStaleSubtitleSwitch(requestId) {
+        return Number.isInteger(requestId) && requestId !== this._subtitleSwitchRequestId;
+    }
+
+    async restartWithSelectedSubtitleTrack(preference, requestId = this._subtitleSwitchRequestId) {
+        if (this.isStaleSubtitleSwitch(requestId)) return false;
+
+        // Hosted VOD owns one provider lane. Tear it down first, then let the
+        // normal measured-seek restart mint one replacement session carrying the
+        // selected subtitle index (or no index for Off).
+        if (this.currentPlaybackMode === 'gateway-session'
+            && this.content?.sourceId && this.content?.id) {
+            const position = Math.max(0, Math.floor(this.getPlaybackPosition()));
+            await this.restartCloudGatewayStreamAt(position, { subtitleSwitchRequestId: requestId });
+            return !this.isStaleSubtitleSwitch(requestId);
+        }
+
+        if (this.currentPlaybackMode !== 'transcode-session') {
+            if (preference?.source === 'probe') this.attachSelectedProbeSubtitleTrack();
+            else this.clearExternalSubtitleTracks({ keepAiPolling: this.aiSubtitleState === 'processing' });
+            return true;
+        }
+
+        const sourceUrl = this.baseStreamUrl || this.currentUrl;
+        if (!sourceUrl) return false;
+        const position = Math.max(0, this.getPlaybackPosition());
+        const autoplay = !this.video?.paused;
+        const info = this.currentStreamInfo || {};
+        const videoCodec = info.video || this.currentProcessingOptions.videoCodec || 'unknown';
+        const processingOptions = {
+            ...this.currentProcessingOptions,
+            ...this.getCurrentAudioPlaybackOptions(),
+            videoMode: this.currentProcessingOptions.videoMode || this.getTranscodeVideoMode(info),
+            videoCodec,
+            seekOffset: position
+        };
+
+        this.hidePlaybackError();
+        this.showLoading();
+        this.updateTranscodeStatus('transcoding', preference?.source === 'probe'
+            ? 'Subtitles: selected track'
+            : 'Subtitles off');
+        if (this.hls) {
+            this.hls.destroy();
+            this.hls = null;
+        }
+        await this.stopTranscodeSession();
+        if (this.isStaleSubtitleSwitch(requestId)) return false;
+        if (this.video) {
+            this.video.pause();
+            this.video.removeAttribute('src');
+            this.video.load();
+        }
+
+        this.currentPlaybackMode = 'transcode-session';
+        this.currentProcessingOptions = processingOptions;
+        this.streamStartOffset = position;
+        this.attachProbeSubtitles(sourceUrl, this.subtitleTracks, position);
+        this.updateDurationState();
+        const playlistUrl = await this.startTranscodeSession(sourceUrl, processingOptions);
+        if (this.isStaleSubtitleSwitch(requestId)) {
+            await this.stopTranscodeSession();
+            return false;
+        }
+        if (!playlistUrl) {
+            await this.handlePlaybackFailure('Failed to restart playback with the selected subtitles.');
+            return false;
+        }
+        this.playHlsOrDirect(playlistUrl, { autoplay });
+        this.setVolumeFromStorage();
+        return true;
+    }
+
     // True for the src-less <track> elements we own (probe extraction + AI transcript), whose
     // cues we feed via addCue(). The CC menu lists these through their own metadata/state rows,
     // so the native-textTrack enumeration must skip them to avoid a duplicate entry.
@@ -9073,14 +9230,8 @@ class WatchPage {
     }
 
     getSubtitleExtractionTracks() {
-        const tracks = this.getExtractableSubtitleTracks();
         const selected = this.getSelectedSubtitleTrack();
-        if (!selected) return tracks;
-
-        return [
-            selected,
-            ...tracks.filter(track => Number(track.index) !== Number(selected.index))
-        ];
+        return selected ? [selected] : [];
     }
 
     getSelectedSubtitleTrack() {
@@ -9095,8 +9246,8 @@ class WatchPage {
     // Two delivery modes, both feeding cues into a src-less <track>
     // via TextTrack.addCue() (no reload, no flicker):
     //
-    // 1. transcode-session: FFmpeg extracts every text track to growing
-    //    sub_<index>.vtt files IN the transcoding process — zero extra
+    // 1. transcode-session: FFmpeg extracts only the explicitly selected text
+    //    track to a growing sub_<index>.vtt file IN the transcoding process — zero extra
     //    provider connections (critical for single-connection accounts).
     //    We poll the local file and append new cues as they are written.
     //
@@ -10861,6 +11012,12 @@ class WatchPage {
     async selectCaptionTrack(source, index, streamIndex = null) {
         if (!this.video) return;
 
+        const previousPreference = this.normalizePlaybackPreferences(
+            this.content?.playbackPreferences || this.content?.playback_preferences || {}
+        )?.subtitle || this.getCurrentSubtitlePreference();
+        const previousStreamIndex = Number(previousPreference?.streamIndex ?? previousPreference?.stream_index);
+        const previousWasOff = previousPreference?.source === 'off' || previousPreference?.mode === 'off';
+
         const tracks = this.video.textTracks;
         for (let i = 0; i < tracks.length; i++) {
             tracks[i].mode = 'hidden';
@@ -10903,10 +11060,12 @@ class WatchPage {
             return;
         }
 
+        let subtitlePreference = null;
         if (source === 'off') {
             this.selectedSubtitleStreamIndex = null;
             this.subtitleOffsetSeconds = 0;
             this.selectedSubtitleTrackUserChoice = true;
+            subtitlePreference = { source: 'off', mode: 'off' };
             // Turning subtitles off must not silently kill an in-flight transcription's polling —
             // the job keeps running server-side; keep tracking it so the menu can flip to ready.
             this.clearExternalSubtitleTracks({ keepAiPolling: this.aiSubtitleState === 'processing' });
@@ -10914,7 +11073,7 @@ class WatchPage {
             this.selectedSubtitleStreamIndex = streamIndex;
             this.subtitleOffsetSeconds = this.loadSubtitleOffset(streamIndex);
             this.selectedSubtitleTrackUserChoice = true;
-            this.attachSelectedProbeSubtitleTrack();
+            subtitlePreference = this.getCurrentSubtitlePreference();
         } else if (source === 'native' && index >= 0 && index < tracks.length) {
             this.selectedSubtitleStreamIndex = null;
             this.subtitleOffsetSeconds = 0;
@@ -10929,11 +11088,26 @@ class WatchPage {
         }
 
         this.clearPendingPreference('subtitle');
-        this.savePlaybackPreferences(this.getMergedPlaybackPreferences());
+        const playbackPreferences = this.savePlaybackPreferences(this.getMergedPlaybackPreferences(
+            subtitlePreference ? { subtitle: subtitlePreference } : {}
+        ));
         this.updateCaptionsTracks();
         this.closeCaptionsMenu();
         this.saveResumeSnapshotThrottled(true);
         this.saveProgress({ force: true });
+
+        const selectedStreamIndex = Number(subtitlePreference?.streamIndex ?? subtitlePreference?.stream_index);
+        const selectedIsOff = subtitlePreference?.source === 'off' || subtitlePreference?.mode === 'off';
+        const gatewayBacked = ['gateway-session', 'transcode-session'].includes(this.currentPlaybackMode);
+        const laneChanged = selectedIsOff
+            ? !previousWasOff
+            : Number.isInteger(selectedStreamIndex) && selectedStreamIndex !== previousStreamIndex;
+        if (gatewayBacked && subtitlePreference && laneChanged) {
+            await this.queueSelectedSubtitleTrackRestart(subtitlePreference);
+        } else if (subtitlePreference?.source === 'probe') {
+            this.attachSelectedProbeSubtitleTrack();
+        }
+        if (playbackPreferences) this.saveResumeSnapshotThrottled(true);
     }
 
     // === Overlay Auto-Hide ===
@@ -11316,7 +11490,7 @@ class WatchPage {
             const seriesId = outgoingContent.seriesId || outgoingContent.series_id;
             const seriesInfo = this.seriesInfo;
             const playbackPreferences = this.getPlaybackPreferences();
-            const playbackHint = MediaUtils.playbackHintFromItem
+            let playbackHint = MediaUtils.playbackHintFromItem
                 ? MediaUtils.playbackHintFromItem(episode, {
                     container,
                     streamType: 'series',
@@ -11327,10 +11501,7 @@ class WatchPage {
                     streamType: 'series',
                     audioSeriesId: seriesId
                 };
-            const audioStreamIndex = Number(playbackPreferences?.audio?.streamIndex ?? playbackPreferences?.audio?.stream_index);
-            if (Number.isInteger(audioStreamIndex)) {
-                playbackHint.audioStreamIndex = audioStreamIndex;
-            }
+            playbackHint = this.applyPlaybackPreferencesToHint(playbackHint, playbackPreferences);
             const episodeTitle = episodeEl.querySelector('.watch-episode-title')?.textContent || `Episode ${episodeNum}`;
             const content = {
                 type: 'series',
@@ -11679,7 +11850,7 @@ class WatchPage {
             const seriesInfo = this.seriesInfo;
             const container = ep.container_extension || 'mp4';
             const playbackPreferences = this.getPlaybackPreferences();
-            const playbackHint = MediaUtils.playbackHintFromItem
+            let playbackHint = MediaUtils.playbackHintFromItem
                 ? MediaUtils.playbackHintFromItem(ep, {
                     container,
                     streamType: 'series',
@@ -11690,10 +11861,7 @@ class WatchPage {
                     streamType: 'series',
                     audioSeriesId: seriesId
                 };
-            const audioStreamIndex = Number(playbackPreferences?.audio?.streamIndex ?? playbackPreferences?.audio?.stream_index);
-            if (Number.isInteger(audioStreamIndex)) {
-                playbackHint.audioStreamIndex = audioStreamIndex;
-            }
+            playbackHint = this.applyPlaybackPreferencesToHint(playbackHint, playbackPreferences);
             const content = {
                 type: 'series',
                 id: ep.id,

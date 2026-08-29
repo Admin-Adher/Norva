@@ -1393,6 +1393,31 @@ const MediaUtils = (() => {
         return hint;
     }
 
+    function applyPlaybackPreferencesToHint(hint = {}, preferences = null) {
+        const result = { ...(hint || {}) };
+        const audioIndex = Number(preferences?.audio?.streamIndex ?? preferences?.audio?.stream_index);
+        if (Number.isInteger(audioIndex) && audioIndex >= 0 && audioIndex <= 1024) {
+            result.audioStreamIndex = audioIndex;
+        } else {
+            delete result.audioStreamIndex;
+            delete result.audio_stream_index;
+        }
+
+        const subtitle = preferences?.subtitle || preferences?.subtitles || null;
+        const subtitleOff = subtitle?.source === 'off' || subtitle?.mode === 'off';
+        const subtitleIndex = Number(subtitle?.streamIndex ?? subtitle?.stream_index);
+        if (!subtitleOff && subtitle?.source === 'probe'
+            && Number.isInteger(subtitleIndex) && subtitleIndex >= 0 && subtitleIndex <= 1024) {
+            result.subtitleStreamIndex = subtitleIndex;
+        } else {
+            // Subtitles are opt-in. Omitting the index is an explicit request for
+            // no Gateway subtitle output, not permission to extract every track.
+            delete result.subtitleStreamIndex;
+            delete result.subtitle_stream_index;
+        }
+        return result;
+    }
+
     /**
      * Decide the gateway processing mode for a LIVE channel/variant.
      *
@@ -1880,7 +1905,7 @@ const MediaUtils = (() => {
         orderVersionsByPreference, versionLabel, versionLanguageBadge, audioLanguageBadge,
         versionDescriptor,
         saveFilters, loadFilters, escapeHtml, tmdbPosterUrl, parseDurationToSeconds,
-        playbackHintFromItem, liveGatewayMode, safeImageUrl, downloadablePosterUrl,
+        playbackHintFromItem, applyPlaybackPreferencesToHint, liveGatewayMode, safeImageUrl, downloadablePosterUrl,
         enhanceRailScroll, openTrailerLightbox, tmdbSrcset, isRecentlyAdded
     };
 })();

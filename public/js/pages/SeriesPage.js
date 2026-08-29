@@ -2131,9 +2131,17 @@ class SeriesPage {
                 playbackHint.startOffset = resumePlan.sessionStart;
                 playbackHint.resumeTime = resumePlan.sessionStart;
             }
-            const audioStreamIndex = Number(playbackPreferences?.audio?.streamIndex ?? playbackPreferences?.audio?.stream_index);
-            if (Number.isInteger(audioStreamIndex)) {
-                playbackHint.audioStreamIndex = audioStreamIndex;
+            if (MediaUtils.applyPlaybackPreferencesToHint) {
+                Object.assign(playbackHint, MediaUtils.applyPlaybackPreferencesToHint(playbackHint, playbackPreferences));
+            } else {
+                const preferredAudioStreamIndex = playbackPreferences?.audio?.streamIndex
+                    ?? playbackPreferences?.audio?.stream_index;
+                if (preferredAudioStreamIndex !== null && preferredAudioStreamIndex !== undefined) {
+                    const audioStreamIndex = Number(preferredAudioStreamIndex);
+                    if (Number.isInteger(audioStreamIndex) && audioStreamIndex >= 0) {
+                        playbackHint.audioStreamIndex = audioStreamIndex;
+                    }
+                }
             }
             const result = await API.proxy.xtream.getStreamUrl(
                 sourceId,
@@ -4203,9 +4211,17 @@ class SeriesPage {
             playbackHint.startOffset = resumePlan.sessionStart;
             playbackHint.resumeTime = resumePlan.sessionStart;
         }
-        const audioStreamIndex = Number(playbackPreferences?.audio?.streamIndex ?? playbackPreferences?.audio?.stream_index);
-        if (Number.isInteger(audioStreamIndex)) {
-            playbackHint.audioStreamIndex = audioStreamIndex;
+        if (MediaUtils.applyPlaybackPreferencesToHint) {
+            Object.assign(playbackHint, MediaUtils.applyPlaybackPreferencesToHint(playbackHint, playbackPreferences));
+        } else {
+            const preferredAudioStreamIndex = playbackPreferences?.audio?.streamIndex
+                ?? playbackPreferences?.audio?.stream_index;
+            if (preferredAudioStreamIndex !== null && preferredAudioStreamIndex !== undefined) {
+                const audioStreamIndex = Number(preferredAudioStreamIndex);
+                if (Number.isInteger(audioStreamIndex) && audioStreamIndex >= 0) {
+                    playbackHint.audioStreamIndex = audioStreamIndex;
+                }
+            }
         }
         const episodeTitle = episodeEl.querySelector('.episode-title')?.textContent || `Episode ${episodeNum}`;
         // Episode duration ("00:42:10") as timeline fallback

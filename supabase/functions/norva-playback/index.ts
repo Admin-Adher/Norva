@@ -1626,6 +1626,10 @@ async function createPlaybackSession(
       audio_stream_index: gateway.audioStreamIndex ?? null,
       requestedAudioStreamIndex: gateway.requestedAudioStreamIndex ?? null,
       requested_audio_stream_index: gateway.requestedAudioStreamIndex ?? null,
+      subtitleStreamIndex: gateway.subtitleStreamIndex ?? null,
+      subtitle_stream_index: gateway.subtitleStreamIndex ?? null,
+      requestedSubtitleStreamIndex: gateway.requestedSubtitleStreamIndex ?? null,
+      requested_subtitle_stream_index: gateway.requestedSubtitleStreamIndex ?? null,
       requestedSeekOffset: gateway.requestedSeekOffset ?? 0,
       requested_seek_offset: gateway.requestedSeekOffset ?? 0,
       actualStartOffset: gateway.actualStartOffset ?? 0,
@@ -1656,6 +1660,10 @@ async function createPlaybackSession(
       audio_stream_index: gateway.audioStreamIndex ?? null,
       requestedAudioStreamIndex: gateway.requestedAudioStreamIndex ?? null,
       requested_audio_stream_index: gateway.requestedAudioStreamIndex ?? null,
+      subtitleStreamIndex: gateway.subtitleStreamIndex ?? null,
+      subtitle_stream_index: gateway.subtitleStreamIndex ?? null,
+      requestedSubtitleStreamIndex: gateway.requestedSubtitleStreamIndex ?? null,
+      requested_subtitle_stream_index: gateway.requestedSubtitleStreamIndex ?? null,
       requestedSeekOffset: gateway.requestedSeekOffset ?? 0,
       requested_seek_offset: gateway.requestedSeekOffset ?? 0,
       actualStartOffset: gateway.actualStartOffset ?? 0,
@@ -5375,6 +5383,11 @@ async function createGatewaySession(
     0,
     1024,
   );
+  const requestedSubtitleStreamIndex = boundedNullableInt(
+    gatewayHints.subtitleStreamIndex ?? gatewayHints.subtitle_stream_index,
+    0,
+    1024,
+  );
   const runtimeConfig = await getRuntimeConfig(db);
   const gatewayRoute = await mediaGatewayRouteForPlaybackUser(runtimeConfig, userId);
   if (!gatewayRoute) {
@@ -5397,6 +5410,8 @@ async function createGatewaySession(
       startupMs: null,
       audioStreamIndex: null,
       requestedAudioStreamIndex,
+      subtitleStreamIndex: null,
+      requestedSubtitleStreamIndex,
       requestedSeekOffset: gatewayHints.seekOffset ?? 0,
       actualStartOffset: gatewayHints.seekOffset ?? 0,
       localSeekTarget: 0,
@@ -5551,6 +5566,12 @@ async function createGatewaySession(
     0,
     1024,
   );
+  const subtitleStreamIndex = boundedNullableInt(
+    gatewayBody.subtitleStreamIndex ??
+      gatewayBody.subtitle_stream_index,
+    0,
+    1024,
+  );
   const codecProfile = firstUsefulCodecProfile(gatewayBody.codecProfile, gatewayBody.codec_profile);
   const staleRequestedAudioFallback = gatewayProvesRequestedAudioFallback(
     codecProfile,
@@ -5574,6 +5595,20 @@ async function createGatewaySession(
   }
   if (staleRequestedAudioFallback) {
     console.warn("[norva-playback] stale file-local audio stream preference replaced by exact Gateway default");
+  }
+  if (
+    requestedSubtitleStreamIndex !== null &&
+    subtitleStreamIndex !== requestedSubtitleStreamIndex
+  ) {
+    const cleanup = await cleanupCreatedSession();
+    if (!cleanup.ok) {
+      console.warn("[norva-playback] mismatched subtitle gateway cleanup failed");
+    }
+    throw new HttpError(502, "Media gateway did not map the requested subtitle stream", {
+      code: "SUBTITLE_STREAM_MAP_MISMATCH",
+      requestedSubtitleStreamIndex,
+      actualSubtitleStreamIndex: subtitleStreamIndex,
+    });
   }
   const requestedSeekOffset = boundedNullableNumber(
     gatewayBody.requestedSeekOffset ??
@@ -5641,6 +5676,8 @@ async function createGatewaySession(
       audioMode,
       audioStreamIndex,
       requestedAudioStreamIndex,
+      subtitleStreamIndex,
+      requestedSubtitleStreamIndex,
       requestedSeekOffset,
       actualStartOffset,
       localSeekTarget,
@@ -5736,6 +5773,12 @@ function gatewayPlaybackHints(playbackHint: JsonRecord) {
     audioStreamIndex: boundedNullableInt(
       playbackHint.audioStreamIndex ??
         playbackHint.audio_stream_index,
+      0,
+      1024,
+    ),
+    subtitleStreamIndex: boundedNullableInt(
+      playbackHint.subtitleStreamIndex ??
+        playbackHint.subtitle_stream_index,
       0,
       1024,
     ),
