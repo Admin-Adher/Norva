@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '..');
 const archive = path.join(root, 'prototype-archive');
+const repositoryRoot = path.resolve(root, '..', '..', '..');
 const failures = [];
 
 function requireFile(relativePath) {
@@ -23,6 +24,7 @@ const required = [
   'RELEASE_AND_QA_CHECKLIST.md',
   'migration-manifest.json',
   'prototype-archive/l-premium-continuity.html',
+  'prototype-archive/account-menu.html',
   'prototype-archive/profile-funnels.html',
   'prototype-archive/qa-l.html',
   'prototype-archive/prototype.css',
@@ -76,19 +78,27 @@ for (const [pattern, label] of forbiddenRuntime) {
 }
 
 const localReferencePattern = /(?:src|href)="([^"]+)"/g;
-for (const htmlName of ['l-premium-continuity.html', 'profile-funnels.html', 'qa-l.html']) {
+for (const htmlName of ['l-premium-continuity.html', 'account-menu.html', 'profile-funnels.html', 'qa-l.html']) {
   const html = fs.readFileSync(path.join(archive, htmlName), 'utf8');
   for (const match of html.matchAll(localReferencePattern)) {
     const reference = match[1];
     if (/^(?:#|data:|https?:|mailto:|tel:)/.test(reference)) continue;
     const cleanReference = reference.split(/[?#]/, 1)[0];
     if (!cleanReference) continue;
-    const target = path.resolve(archive, cleanReference);
-    if (!target.startsWith(archive + path.sep) || !fs.existsSync(target)) {
+    const isRepositoryReference = cleanReference.startsWith('/');
+    const referenceRoot = isRepositoryReference ? repositoryRoot : archive;
+    const target = path.resolve(referenceRoot, isRepositoryReference ? cleanReference.slice(1) : cleanReference);
+    if (!target.startsWith(referenceRoot + path.sep) || !fs.existsSync(target)) {
       failures.push(`${htmlName} has missing or unsafe local reference: ${reference}`);
     }
   }
 }
+
+const accountMenuHtml = fs.readFileSync(path.join(archive, 'account-menu.html'), 'utf8');
+for (const marker of ['role="menu"', 'Administration', 'Manage profiles', 'data-account-sheet']) {
+  if (!accountMenuHtml.includes(marker)) failures.push(`account menu prototype is missing: ${marker}`);
+}
+if (/\bKids\b/i.test(accountMenuHtml)) failures.push('account menu prototype unexpectedly contains Kids UI');
 
 const manifest = JSON.parse(fs.readFileSync(path.join(root, 'migration-manifest.json'), 'utf8'));
 if (!['local_deferred_candidate', 'production_candidate_authorized'].includes(manifest.status)) {

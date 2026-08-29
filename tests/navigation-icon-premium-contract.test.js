@@ -59,7 +59,7 @@ test('top-bar artwork is optically centred without moving its accessible hit tar
   );
   assert.match(css, /\.nav-link\s*\{[\s\S]*?min-width:\s*48px;[\s\S]*?min-height:\s*48px;/);
   assert.match(css, /\.nav-search-btn\s*\{[\s\S]*?width:\s*40px;[\s\S]*?height:\s*40px;/);
-  assert.match(css, /\.nav-profile\s*\{[\s\S]*?width:\s*38px;[\s\S]*?height:\s*38px;/);
+  assert.match(css, /\.nav-profile\s*\{[\s\S]*?width:\s*44px;[\s\S]*?height:\s*44px;/);
 });
 
 test('icon-only navigation links keep an accessible name and current-page state', () => {
@@ -71,16 +71,12 @@ test('icon-only navigation links keep an accessible name and current-page state'
     ['live', 2],
     ['movies', 2],
     ['series', 2],
-    ['settings', 1],
-    ['admin', 1],
   ]);
   const labels = {
     home: 'Home',
     live: 'Live TV',
     movies: 'Movies',
     series: 'Series',
-    settings: 'Settings',
-    admin: 'Admin',
   };
 
   for (const [page, count] of expectedCounts) {
@@ -95,6 +91,13 @@ test('icon-only navigation links keep an accessible name and current-page state'
     2,
     'both pre-boot Home links truthfully expose the initial route'
   );
+
+  assert.doesNotMatch(
+    model.renderProjection('web'),
+    /data-page="settings"|data-page="admin"|data-action="logout"/,
+    'secondary account and operational actions stay behind the Web avatar'
+  );
+  assert.match(model.renderProjection('tv'), /data-page="settings"/);
   assert.equal(
     (webShell.match(/data-action="downloads"[^>]*aria-label="Downloads"/g) || []).length,
     2,

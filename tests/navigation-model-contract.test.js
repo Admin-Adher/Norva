@@ -17,7 +17,7 @@ test('one navigation model owns routes, actions and platform projection order', 
 
   assert.ok(model instanceof NavigationModel);
   assert.deepEqual(model.keysFor('web'), [
-    'home', 'live', 'movies', 'series', 'downloads', 'admin', 'settings', 'logout',
+    'home', 'live', 'movies', 'series', 'downloads',
   ]);
   assert.deepEqual(model.keysFor('phone'), [
     'home', 'live', 'movies', 'series', 'search', 'downloads', 'account',
@@ -45,7 +45,7 @@ test('one navigation model owns routes, actions and platform projection order', 
   assert.equal(model.allowsPlatform('downloads', 'web'), false);
   assert.equal(model.allowsPlatform('downloads', 'tv'), false);
   assert.equal(model.allowsPlatform('admin', 'web'), true);
-  assert.equal(model.allowsPlatform('admin', 'phone'), true);
+  assert.equal(model.allowsPlatform('admin', 'phone'), false);
 
   assert.throws(
     () => new NavigationModel({
@@ -79,14 +79,13 @@ test('the model renders accessible web, phone and TV projections without markup 
     assert.match(html, /aria-current="page"/);
   }
 
-  assert.equal((web.match(/class="nav-link/g) || []).length, 8);
+  assert.equal((web.match(/class="nav-link/g) || []).length, 5);
   assert.equal((phone.match(/class="nav-link/g) || []).length, 7);
   assert.equal((tv.match(/class="nav-link/g) || []).length, 6);
   assert.match(phone, /id="nav-search-bottom"[^>]*data-action="search"/);
   assert.match(phone, /id="nav-downloads-bottom"[^>]*data-action="downloads"/);
   assert.match(phone, /id="nav-account"[^>]*aria-label="Account and settings"/);
-  assert.match(web, /id="nav-admin"[^>]*data-nav-gate="admin"[^>]*hidden/);
-  assert.match(web, /id="logout-btn"[^>]*data-nav-gate="authenticated"[^>]*hidden/);
+  assert.doesNotMatch(web, /data-nav-key="admin"|data-nav-key="settings"|data-nav-key="logout"/);
   assert.match(tv, /id="logout-btn"/);
   assert.doesNotMatch(tv, /data-nav-key="admin"|data-nav-key="downloads"/);
 
