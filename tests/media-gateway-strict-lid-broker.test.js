@@ -1132,6 +1132,74 @@ test('finite MKV seek resumes from the exact byte after an upstream reader error
   assert.equal(tracker.active, 0);
 });
 
+test('finite MKV seek waits for mono-account release and bounds transient provider 5xx retries', async (t) => {
+  const { createStrictLidBroker } = brokerHarness();
+  const data = Buffer.from(Array.from({ length: 12 }, (_, index) => 0x30 + index));
+  const calls = [];
+  const startedAt = [];
+  const releaseDelayMs = 40;
+  const broker = await createStrictLidBroker({
+    sourceUrl: 'https://provider.example/movie/account/secret/title.mkv',
+    fileSizeBytes: data.length,
+    dispatcher: null,
+    pathPrefix: 'finite-mkv-seek',
+    releaseDelayMs,
+    finiteNoProgressRetryLimit: 2,
+    finiteRetryDelaysMs: [0, 0, 0],
+    fetchImpl: async (_url, options) => {
+      const match = /^bytes=(\d+)-(\d+)$/.exec(options.headers.Range);
+      const start = Number(match[1]);
+      const end = Number(match[2]);
+      calls.push(options.headers.Range);
+      startedAt.push(Date.now());
+      if (calls.length === 2) {
+        return new Response('provider socket still releasing', { status: 503 });
+      }
+      const body = calls.length === 1
+        ? data.subarray(start, Math.min(end + 1, start + 4))
+        : data.subarray(start, end + 1);
+      return new Response(body, {
+        status: 206,
+        headers: {
+          'Content-Range': `bytes ${start}-${end}/${data.length}`,
+          'Content-Length': String(end - start + 1),
+          ETag: '"release-v1"',
+        },
+      });
+    },
+  });
+  t.after(() => broker.close());
+
+  const response = await fetch(broker.inputUrl, { headers: { Range: 'bytes=0-11' } });
+  assert.equal(response.status, 206);
+  assert.deepEqual(Buffer.from(await response.arrayBuffer()), data);
+  assert.deepEqual(calls, ['bytes=0-11', 'bytes=4-11', 'bytes=4-11']);
+  assert.ok(startedAt[1] - startedAt[0] >= releaseDelayMs - 5);
+  assert.ok(startedAt[2] - startedAt[1] >= releaseDelayMs - 5);
+  assert.equal(broker.terminalError, null);
+});
+
+test('strict language broker treats provider 5xx as terminal and never retries', async (t) => {
+  const { createStrictLidBroker } = brokerHarness();
+  let calls = 0;
+  const broker = await createStrictLidBroker({
+    sourceUrl: 'https://provider.example/movie/account/secret/title.mkv',
+    fileSizeBytes: 12,
+    dispatcher: null,
+    releaseDelayMs: 0,
+    fetchImpl: async () => {
+      calls++;
+      return new Response('temporarily unavailable', { status: 503 });
+    },
+  });
+  t.after(() => broker.close());
+
+  const response = await fetch(broker.inputUrl, { headers: { Range: 'bytes=0-11' } });
+  assert.equal(response.status, 502);
+  assert.equal((await response.json()).code, 'PROVIDER_REQUEST_FAILED');
+  assert.equal(calls, 1);
+});
+
 test('strict language broker never reconnects a truncated provider range', async (t) => {
   const { createStrictLidBroker } = brokerHarness();
   let calls = 0;
@@ -1268,7 +1336,7 @@ test('strict LID rejects invalid exact signed coordinates before creating a serv
   assert.match(route, /detectLanguageRequestPolicy\(req, options\)[\s\S]*validateDetectLanguageCapability\(capabilityToken, policy\.requiredScope\)/);
   assert.match(gatewaySource, /strictLidLoopbackBrokerProtocol: 1/);
   assert.match(gatewaySource, /strictLidFileSizeClaim: 'fileSizeBytes'/);
-  assert.match(gatewaySource, /const GATEWAY_VERSION = 119/);
+  assert.match(gatewaySource, /const GATEWAY_VERSION = 120/);
   assert.match(gatewaySource, /strictLidProviderDrainProtocol: 1/);
   assert.match(gatewaySource, /strictLidWeakFallbackProtocol: 1/);
   assert.match(gatewaySource, /strictLidTimelineSamplingProtocol: 1/);
