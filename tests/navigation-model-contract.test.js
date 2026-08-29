@@ -156,11 +156,11 @@ test('app shell delegates navigation policy and removes the retired hamburger pa
   const css = read('public/css/main.css');
   const tvMain = read('clients/android-tv/app/src/main/java/tv/norva/tv/MainActivity.java');
 
-  const modelScript = html.indexOf('/js/navigation/NavigationModel.js?v=1');
+  const modelScript = html.indexOf('/js/navigation/NavigationModel.js?v=b09ff7a7da');
   const adaptersScript = html.indexOf('/js/navigation/NavigationAdapters.js?v=1');
   const bootstrapScript = html.indexOf('/js/navigation/navigationBootstrap.js?v=1');
   const tvScript = html.indexOf('/js/utils/tvNavigation.js?v=32');
-  const appScript = html.indexOf('/js/app.js?v=9a0dadaa02');
+  const appScript = html.indexOf('/js/app.js?v=6066ea92b3');
   assert.ok(modelScript > 0 && modelScript < adaptersScript);
   assert.ok(adaptersScript < bootstrapScript && bootstrapScript < tvScript && tvScript < appScript);
 
