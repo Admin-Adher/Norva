@@ -3035,9 +3035,17 @@ class HomePage {
             playbackHint.startOffset = resumeOffset;
             playbackHint.resumeTime = resumeOffset;
         }
-        const audioStreamIndex = Number(playbackPreferences?.audio?.streamIndex ?? playbackPreferences?.audio?.stream_index);
-        if (Number.isInteger(audioStreamIndex)) {
-            playbackHint.audioStreamIndex = audioStreamIndex;
+        if (MediaUtils.applyPlaybackPreferencesToHint) {
+            Object.assign(playbackHint, MediaUtils.applyPlaybackPreferencesToHint(playbackHint, playbackPreferences));
+        } else {
+            const preferredAudioStreamIndex = playbackPreferences?.audio?.streamIndex
+                ?? playbackPreferences?.audio?.stream_index;
+            if (preferredAudioStreamIndex !== null && preferredAudioStreamIndex !== undefined) {
+                const audioStreamIndex = Number(preferredAudioStreamIndex);
+                if (Number.isInteger(audioStreamIndex) && audioStreamIndex >= 0) {
+                    playbackHint.audioStreamIndex = audioStreamIndex;
+                }
+            }
         }
 
         // Live H.264 → remux (copy video), H.265/HEVC → full transcode.
