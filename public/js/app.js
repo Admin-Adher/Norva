@@ -2791,7 +2791,10 @@ class App {
         if (email) email.textContent = this.currentUser?.email || this.currentUser?.username || '';
         const switchRow = menu.querySelector('[data-act="switch"]');
         const manageRow = menu.querySelector('[data-act="manage"]');
-        if (switchRow) switchRow.hidden = !(cur.isCloud && cur.count > 1);
+        // A cloud account can always open the profile switcher. Even when only
+        // one profile exists, this is the discoverable path to create another
+        // profile; hiding it made the account disclosure look incomplete.
+        if (switchRow) switchRow.hidden = !cur.isCloud;
         if (manageRow) manageRow.hidden = !cur.isCloud;
         this.refreshAccountAdminEntry(menu);
         const currentAction = this.currentPage === 'settings' || this.currentPage === 'admin'
@@ -2917,8 +2920,9 @@ class App {
         if (switchIc && cur.avatarUrl) switchIc.src = cur.avatarUrl;
         if (name) name.textContent = cur.name || 'Profile';
         if (email) email.textContent = this.currentUser?.email || this.currentUser?.username || '';
-        // Profile switching only exists in cloud mode.
-        if (switchRow) switchRow.style.display = cur.isCloud && cur.count > 1 ? '' : 'none';
+        // Keep the switcher discoverable for single-profile cloud accounts so
+        // they can add a second profile without first finding Manage profiles.
+        if (switchRow) switchRow.style.display = cur.isCloud ? '' : 'none';
         if (manageRow) manageRow.style.display = cur.isCloud ? '' : 'none';
         if (screensRow) {
             const cloudUser = Boolean(cur.isCloud || this.currentUser?.cloud || window.API?.isCloudMode?.());
