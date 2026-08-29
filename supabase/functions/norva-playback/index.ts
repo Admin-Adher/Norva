@@ -3222,6 +3222,42 @@ function hasExactGatewayInbandVodProfile(value: unknown) {
   );
 }
 
+function gatewayProvesRequestedAudioFallback(
+  value: unknown,
+  requestedAudioStreamIndex: number | null,
+  actualAudioStreamIndex: number | null,
+) {
+  if (
+    requestedAudioStreamIndex === null ||
+    actualAudioStreamIndex === null ||
+    requestedAudioStreamIndex === actualAudioStreamIndex ||
+    !hasExactGatewayInbandVodProfile(value)
+  ) {
+    return false;
+  }
+
+  const profile = normalizeCodecProfile(recordOrEmpty(value));
+  const tracks = Array.isArray(profile.audioTracks)
+    ? profile.audioTracks.map((track) => recordOrEmpty(track))
+    : [];
+  const streamIndices = tracks.map((track) => Number(track.index));
+  if (
+    streamIndices.length < 1 ||
+    streamIndices.some((index) => !Number.isInteger(index) || index < 0 || index > 1_024) ||
+    new Set(streamIndices).size !== streamIndices.length
+  ) {
+    return false;
+  }
+
+  // A saved preference is file-local. If a current-file Gateway probe proves
+  // that the old index is not an audio stream in this exact file, accepting
+  // the Gateway's proven default is safer than deleting an otherwise healthy
+  // HLS session. A real map drift remains fail-closed whenever the requested
+  // index is present in the exact inventory.
+  return !streamIndices.includes(requestedAudioStreamIndex) &&
+    streamIndices.includes(actualAudioStreamIndex);
+}
+
 async function loadLanguageValidationIdentity(
   db: SupabaseClient,
   userId: string,
@@ -5515,9 +5551,16 @@ async function createGatewaySession(
     0,
     1024,
   );
+  const codecProfile = firstUsefulCodecProfile(gatewayBody.codecProfile, gatewayBody.codec_profile);
+  const staleRequestedAudioFallback = gatewayProvesRequestedAudioFallback(
+    codecProfile,
+    requestedAudioStreamIndex,
+    audioStreamIndex,
+  );
   if (
     requestedAudioStreamIndex !== null &&
-    audioStreamIndex !== requestedAudioStreamIndex
+    audioStreamIndex !== requestedAudioStreamIndex &&
+    !staleRequestedAudioFallback
   ) {
     const cleanup = await cleanupCreatedSession();
     if (!cleanup.ok) {
@@ -5528,6 +5571,9 @@ async function createGatewaySession(
       requestedAudioStreamIndex,
       actualAudioStreamIndex: audioStreamIndex,
     });
+  }
+  if (staleRequestedAudioFallback) {
+    console.warn("[norva-playback] stale file-local audio stream preference replaced by exact Gateway default");
   }
   const requestedSeekOffset = boundedNullableNumber(
     gatewayBody.requestedSeekOffset ??
@@ -5567,7 +5613,6 @@ async function createGatewaySession(
   // hls.js indexes are safe only when the diagnostics bind the default absolute
   // stream to the exact rendition array returned by this same Gateway response.
   const audioRenditions = multiAudioHls ? normalizedAudioRenditions : null;
-  const codecProfile = firstUsefulCodecProfile(gatewayBody.codecProfile, gatewayBody.codec_profile);
   const startupPolicy = normalizeGatewayStartupPolicy(
     gatewayBody.startupPolicy ?? gatewayBody.startup_policy,
   );
