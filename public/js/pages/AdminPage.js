@@ -816,11 +816,166 @@ class AdminPage {
   #page-admin .client-summary-skeleton,#page-admin .client-skeleton-row{animation:none;}
   #page-admin .client-inspector-backdrop,#page-admin .client-desk-inspector{transition:none;}
 }
-#page-admin .price-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px;}
-#page-admin .price-cell{display:flex;flex-direction:column;gap:6px;background:var(--adm-panel);border:1px solid var(--adm-line);border-radius:10px;padding:10px 12px;font-size:12.5px;color:var(--adm-tx2);}
-#page-admin .price-cell .price-in{display:flex;align-items:center;gap:6px;color:var(--adm-tx);font-weight:700;}
-#page-admin .price-cell input{width:96px;background:rgba(0,0,0,.25);border:1px solid var(--adm-line);border-radius:8px;color:var(--adm-tx);padding:6px 8px;font:inherit;}
-#page-admin .price-cell input:focus-visible{outline:none;border-color:#5b7cfa;}
+#page-admin .promo-workspace{display:grid;gap:16px;margin-top:16px;color:var(--color-text-primary);}
+#page-admin .promo-intro{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:18px 20px;border:1px solid var(--color-border);border-radius:var(--radius-lg);background:var(--color-bg-secondary);}
+#page-admin .promo-kicker{display:block;margin-bottom:6px;color:var(--color-accent-hover);font-size:10px;font-weight:800;letter-spacing:.09em;text-transform:uppercase;}
+#page-admin .promo-intro h2{margin:0;color:var(--color-text-primary);font-size:21px;line-height:1.2;}
+#page-admin .promo-intro p{max-width:720px;margin:7px 0 0;color:var(--color-text-secondary);font-size:12.5px;line-height:1.55;}
+#page-admin .promo-state{display:inline-flex;align-items:center;gap:7px;min-height:32px;padding:5px 10px;border:1px solid color-mix(in srgb,var(--color-warning) 42%,transparent);border-radius:var(--radius-full);background:color-mix(in srgb,var(--color-warning) 9%,transparent);color:var(--color-warning);font-size:10.5px;font-weight:800;white-space:nowrap;}
+#page-admin .promo-state::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor;}
+#page-admin .promo-state.is-active{border-color:color-mix(in srgb,var(--color-success) 42%,transparent);background:color-mix(in srgb,var(--color-success) 9%,transparent);color:var(--color-success);}
+#page-admin .promo-layout{display:grid;grid-template-columns:minmax(0,1fr) 330px;gap:16px;align-items:start;}
+#page-admin .promo-layout.is-preview-expanded{grid-template-columns:1fr;}
+#page-admin .promo-layout.is-preview-expanded .promo-preview{grid-row:1;position:static;}
+#page-admin .promo-layout.is-preview-expanded .promo-main{grid-row:2;}
+#page-admin .promo-layout.is-preview-expanded .promo-preview-card{min-height:520px;}
+#page-admin .promo-main{display:grid;gap:16px;min-width:0;}
+#page-admin .promo-panel{overflow:hidden;border:1px solid var(--color-border);border-radius:var(--radius-lg);background:var(--color-bg-secondary);}
+#page-admin .promo-panel-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:15px 17px;border-bottom:1px solid var(--color-border);}
+#page-admin .promo-panel-head h3{margin:0;color:var(--color-text-primary);font-size:14px;line-height:1.35;}
+#page-admin .promo-panel-head p{margin:4px 0 0;color:var(--color-text-muted);font-size:10.5px;line-height:1.45;}
+#page-admin .promo-panel-body{padding:16px;}
+#page-admin .promo-campaign-grid{display:grid;grid-template-columns:minmax(170px,1fr) minmax(190px,1fr) minmax(150px,.75fr);gap:12px;align-items:end;}
+#page-admin .promo-field{display:grid;gap:6px;min-width:0;color:var(--color-text-secondary);font-size:11px;font-weight:700;}
+#page-admin .promo-field input,#page-admin .promo-field select{width:100%;min-height:44px;border:1px solid var(--color-border-light);border-radius:var(--radius-md);background:var(--color-bg-primary);color:var(--color-text-primary);padding:9px 11px;font:inherit;font-size:13px;}
+#page-admin .promo-field input:focus-visible,#page-admin .promo-field select:focus-visible,#page-admin .promo-button:focus-visible,#page-admin .promo-check-wrap:focus-within,#page-admin .promo-catalogue summary:focus-visible{outline:2px solid var(--color-accent);outline-offset:2px;}
+#page-admin .promo-field input:disabled,#page-admin .promo-field select:disabled{opacity:.48;cursor:not-allowed;}
+#page-admin .promo-field-help{color:var(--color-text-muted);font-size:10px;font-weight:500;line-height:1.4;}
+#page-admin .promo-custom-label[hidden]{display:none;}
+#page-admin .promo-bulkbar{display:flex;align-items:end;gap:10px;margin-top:14px;padding-top:14px;border-top:1px solid var(--color-border);}
+#page-admin .promo-panel-body>.promo-bulkbar:first-child{margin-top:0;padding-top:0;border-top:0;}
+#page-admin .promo-bulkbar .promo-field{width:170px;}
+#page-admin .promo-bulk-note{margin-left:auto;max-width:340px;color:var(--color-text-muted);font-size:10.5px;line-height:1.45;text-align:right;}
+#page-admin .promo-button{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:44px;border:1px solid var(--color-border-light);border-radius:var(--radius-md);background:var(--color-bg-tertiary);color:var(--color-text-primary);padding:9px 13px;font:inherit;font-size:12px;font-weight:750;cursor:pointer;touch-action:manipulation;transition:border-color .18s ease,background .18s ease,opacity .18s ease;}
+#page-admin .promo-button:hover:not(:disabled){border-color:var(--color-accent-hover);background:var(--color-bg-hover);}
+#page-admin .promo-button:active:not(:disabled){background:var(--color-bg-active);}
+#page-admin .promo-button.primary{border-color:var(--color-accent-action);background:var(--color-accent-action);color:var(--color-text-primary);}
+#page-admin .promo-button.primary:hover:not(:disabled){border-color:var(--color-accent-action-hover);background:var(--color-accent-action-hover);}
+#page-admin .promo-button.primary:active:not(:disabled){border-color:var(--color-accent-action-hover);background:var(--color-accent-action-hover);}
+#page-admin .promo-button.quiet{background:transparent;}
+#page-admin .promo-button:disabled,#page-admin .promo-button[aria-disabled="true"]{opacity:.45;cursor:not-allowed;}
+#page-admin .promo-offers{min-width:0;}
+#page-admin .promo-offer-head,#page-admin .promo-offer-row{display:grid;grid-template-columns:44px minmax(160px,1.35fr) 82px minmax(118px,.75fr) 80px minmax(112px,.7fr);align-items:center;gap:10px;}
+#page-admin .promo-offer-head{min-height:36px;padding:0 12px;border-bottom:1px solid var(--color-border);color:var(--color-text-muted);font-size:9px;font-weight:800;letter-spacing:.07em;text-transform:uppercase;}
+#page-admin .promo-offer-row{padding:10px 12px;border-bottom:1px solid var(--color-border);}
+#page-admin .promo-offer-row:last-child{border-bottom:0;}
+#page-admin .promo-offer-row.is-disabled{background:color-mix(in srgb,var(--color-bg-primary) 45%,transparent);}
+#page-admin .promo-check-wrap{display:flex;align-items:center;justify-content:center;width:44px;min-height:44px;border-radius:var(--radius-sm);cursor:pointer;touch-action:manipulation;}
+#page-admin .promo-check-wrap input{width:18px;height:18px;margin:0;accent-color:var(--color-accent);}
+#page-admin .promo-offer-name strong,#page-admin .promo-offer-name span{display:block;}
+#page-admin .promo-offer-name strong{color:var(--color-text-primary);font-size:12.5px;}
+#page-admin .promo-offer-name span{margin-top:3px;color:var(--color-text-muted);font-size:10px;}
+#page-admin .promo-base-price{color:var(--color-text-secondary);font-size:12px;font-variant-numeric:tabular-nums;}
+#page-admin .promo-price-field{position:relative;display:block;}
+#page-admin .promo-price-field::before{content:"$";position:absolute;left:10px;top:50%;z-index:1;color:var(--color-text-muted);font-size:11px;transform:translateY(-50%);pointer-events:none;}
+#page-admin .promo-price-field input{width:100%;min-height:44px;border:1px solid var(--color-border-light);border-radius:var(--radius-md);background:var(--color-bg-primary);color:var(--color-text-primary);padding:9px 9px 9px 24px;font:inherit;font-size:13px;font-variant-numeric:tabular-nums;}
+#page-admin .promo-price-field input:focus-visible{outline:2px solid var(--color-accent);outline-offset:2px;}
+#page-admin .promo-price-field input:disabled{opacity:.42;cursor:not-allowed;}
+#page-admin .promo-discount{display:inline-flex;align-items:center;justify-content:center;min-height:28px;width:fit-content;min-width:58px;padding:3px 8px;border-radius:var(--radius-full);background:color-mix(in srgb,var(--color-success) 11%,transparent);color:var(--color-success);font-size:10.5px;font-weight:800;font-variant-numeric:tabular-nums;}
+#page-admin .promo-discount.is-neutral{background:var(--color-bg-tertiary);color:var(--color-text-muted);}
+#page-admin .promo-cycle-field select{width:100%;min-height:44px;border:1px solid var(--color-border-light);border-radius:var(--radius-md);background:var(--color-bg-primary);color:var(--color-text-primary);padding:9px 10px;font:inherit;font-size:12px;}
+#page-admin .promo-cycle-field select:focus-visible{outline:2px solid var(--color-accent);outline-offset:2px;}
+#page-admin .promo-cycle-field select:disabled{opacity:.42;cursor:not-allowed;}
+#page-admin .promo-offer-advanced{grid-column:2/-1;display:flex;align-items:center;gap:10px;min-height:1px;}
+#page-admin .promo-ref-toggle{display:inline-flex;align-items:center;gap:8px;min-height:44px;border:0;background:transparent;color:var(--color-text-secondary);padding:4px 0;font:inherit;font-size:10.5px;cursor:pointer;touch-action:manipulation;}
+#page-admin .promo-ref-toggle::before{content:"";width:14px;height:14px;border:1px solid var(--color-border-light);border-radius:4px;background:var(--color-bg-primary);}
+#page-admin .promo-ref-toggle[aria-pressed="true"]::before{border-color:var(--color-accent);background:var(--color-accent);box-shadow:inset 0 0 0 3px var(--color-bg-primary);}
+#page-admin .promo-ref-toggle:focus-visible{outline:2px solid var(--color-accent);outline-offset:2px;border-radius:var(--radius-sm);}
+#page-admin .promo-ref-toggle:disabled{opacity:.4;cursor:not-allowed;}
+#page-admin .promo-empty-selection{margin:0;padding:12px 16px;border-top:1px solid var(--color-border);color:var(--color-text-muted);font-size:10.5px;line-height:1.45;}
+#page-admin .promo-creative{display:grid;grid-template-columns:136px minmax(0,1fr);gap:14px;align-items:center;}
+#page-admin .promo-creative-thumb{width:136px;aspect-ratio:16/9;object-fit:cover;border:1px solid var(--color-border-light);border-radius:var(--radius-md);background:var(--color-bg-primary);}
+#page-admin .promo-creative-copy strong,#page-admin .promo-creative-copy span{display:block;}
+#page-admin .promo-creative-copy strong{color:var(--color-text-primary);font-size:12px;}
+#page-admin .promo-creative-copy span{margin-top:5px;color:var(--color-text-muted);font-size:10.5px;line-height:1.45;}
+#page-admin .promo-creative-actions{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-top:10px;}
+#page-admin .promo-visually-hidden{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important;}
+#page-admin .promo-preview{position:sticky;top:74px;}
+#page-admin .promo-preview-card{position:relative;display:flex;flex-direction:column;justify-content:flex-end;min-height:390px;padding:18px;overflow:hidden;background:var(--color-bg-primary);isolation:isolate;}
+#page-admin .promo-preview-card::before{content:"";position:absolute;inset:0;z-index:-2;background-image:var(--promo-image);background-size:cover;background-position:center;}
+#page-admin .promo-preview-card::after{content:"";position:absolute;inset:0;z-index:-1;background:linear-gradient(180deg,transparent,var(--color-bg-primary));}
+#page-admin .promo-preview-brand{display:flex;align-items:center;gap:8px;margin-bottom:auto;color:var(--color-text-primary);font-size:12px;font-weight:800;}
+#page-admin .promo-preview-brand img{width:28px;height:28px;border-radius:var(--radius-sm);}
+#page-admin .promo-preview-kicker{margin:34px 0 6px;color:var(--color-accent-hover);font-size:9.5px;font-weight:850;letter-spacing:.1em;text-transform:uppercase;}
+#page-admin .promo-preview-card h4{max-width:270px;margin:0;color:var(--color-text-primary);font-size:23px;line-height:1.08;letter-spacing:-.02em;}
+#page-admin .promo-preview-card>p{margin:8px 0 14px;color:var(--color-text-secondary);font-size:10.5px;line-height:1.45;}
+#page-admin .promo-preview-offer{padding:12px;border:1px solid var(--color-border-light);border-radius:var(--radius-md);background:color-mix(in srgb,var(--color-bg-primary) 88%,transparent);}
+#page-admin .promo-preview-offer-head{display:flex;justify-content:space-between;gap:10px;align-items:flex-start;}
+#page-admin .promo-preview-offer-name{color:var(--color-text-primary);font-size:11px;font-weight:800;}
+#page-admin .promo-preview-price{text-align:right;font-variant-numeric:tabular-nums;}
+#page-admin .promo-preview-price strong,#page-admin .promo-preview-price s{display:block;}
+#page-admin .promo-preview-price strong{color:var(--color-text-primary);font-size:18px;}
+#page-admin .promo-preview-price s{margin-top:2px;color:var(--color-text-muted);font-size:9px;}
+#page-admin .promo-preview-meta{margin-top:8px;color:var(--color-success);font-size:9.5px;font-weight:700;line-height:1.4;}
+#page-admin .promo-preview-facts{display:grid;grid-template-columns:1fr 1fr;border-top:1px solid var(--color-border);}
+#page-admin .promo-preview-fact{padding:11px 14px;}
+#page-admin .promo-preview-fact+.promo-preview-fact{border-left:1px solid var(--color-border);}
+#page-admin .promo-preview-fact strong,#page-admin .promo-preview-fact span{display:block;}
+#page-admin .promo-preview-fact strong{color:var(--color-text-primary);font-size:12px;}
+#page-admin .promo-preview-fact span{margin-top:2px;color:var(--color-text-muted);font-size:9px;}
+#page-admin .promo-review{border:1px solid color-mix(in srgb,var(--color-warning) 32%,var(--color-border));border-radius:var(--radius-md);background:color-mix(in srgb,var(--color-warning) 6%,var(--color-bg-secondary));padding:14px;}
+#page-admin .promo-review[hidden]{display:none;}
+#page-admin .promo-review h4{margin:0;color:var(--color-text-primary);font-size:12px;}
+#page-admin .promo-review-list{margin:9px 0 0;padding-left:18px;color:var(--color-text-secondary);font-size:11px;line-height:1.55;}
+#page-admin .promo-image-remove-copy{margin:8px 0 0;text-align:left;}
+#page-admin .promo-review-actions{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin-top:12px;}
+#page-admin .promo-action-dock{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:11px 12px;border:1px solid var(--color-border-light);border-radius:var(--radius-md);background:var(--color-bg-secondary);box-shadow:var(--shadow-md);}
+#page-admin .promo-action-copy strong,#page-admin .promo-action-copy span{display:block;}
+#page-admin .promo-action-copy strong{color:var(--color-text-primary);font-size:11.5px;}
+#page-admin .promo-action-copy span{margin-top:3px;color:var(--color-text-muted);font-size:9.5px;}
+#page-admin .promo-action-buttons{display:flex;gap:8px;}
+#page-admin .promo-status-message{min-height:20px;color:var(--color-text-secondary);font-size:11px;line-height:1.45;}
+#page-admin .promo-status-message.is-error{color:var(--color-error-text);}
+#page-admin .promo-status-message.is-success{color:var(--color-success);}
+#page-admin .promo-catalogue{border:1px solid var(--color-border);border-radius:var(--radius-lg);background:var(--color-bg-secondary);}
+#page-admin .promo-catalogue summary{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:52px;padding:10px 16px;color:var(--color-text-primary);font-size:12px;font-weight:800;cursor:pointer;list-style:none;touch-action:manipulation;}
+#page-admin .promo-catalogue summary::-webkit-details-marker{display:none;}
+#page-admin .promo-catalogue summary::after{content:"Afficher";color:var(--color-text-muted);font-size:10px;font-weight:650;}
+#page-admin .promo-catalogue[open] summary::after{content:"Masquer";}
+#page-admin .promo-catalogue-body{padding:0 16px 16px;border-top:1px solid var(--color-border);}
+#page-admin .promo-catalogue-warning{margin:14px 0;color:var(--color-warning);font-size:10.5px;line-height:1.5;}
+#page-admin .promo-catalogue-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;}
+#page-admin .promo-catalogue-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:12px;}
+@media(max-width:1080px){
+  #page-admin .promo-layout{grid-template-columns:1fr;}
+  #page-admin .promo-preview{position:static;}
+  #page-admin .promo-preview-card{min-height:330px;}
+  #page-admin .promo-catalogue-grid{grid-template-columns:repeat(2,minmax(0,1fr));}
+}
+@media(max-width:760px){
+  #page-admin .promo-intro{display:block;padding:16px;}
+  #page-admin .promo-state{margin-top:12px;}
+  #page-admin .promo-campaign-grid{grid-template-columns:1fr;}
+  #page-admin .promo-bulkbar{align-items:stretch;flex-wrap:wrap;}
+  #page-admin .promo-bulkbar .promo-field{width:100%;}
+  #page-admin .promo-bulk-note{width:100%;max-width:none;margin:0;text-align:left;}
+  #page-admin .promo-offer-head{display:none;}
+  #page-admin .promo-offer-row{grid-template-columns:44px minmax(0,1fr) 74px;gap:8px;padding:12px;}
+  #page-admin .promo-offer-name{grid-column:2;}
+  #page-admin .promo-discount{grid-column:3;grid-row:1;justify-self:end;}
+  #page-admin .promo-base-price{grid-column:2/4;}
+  #page-admin .promo-price-field{grid-column:2/4;}
+  #page-admin .promo-cycle-field{grid-column:2/4;}
+  #page-admin .promo-offer-advanced{grid-column:2/4;}
+  #page-admin .promo-creative{grid-template-columns:96px minmax(0,1fr);}
+  #page-admin .promo-creative-thumb{width:96px;}
+  #page-admin .promo-action-dock{align-items:stretch;}
+  #page-admin .promo-action-copy{display:none;}
+  #page-admin .promo-action-buttons{width:100%;}
+  #page-admin .promo-action-buttons .promo-button{flex:1;}
+}
+@media(max-width:520px){
+  #page-admin .promo-panel-head{display:block;}
+  #page-admin .promo-panel-head .promo-button{width:100%;margin-top:10px;}
+  #page-admin .promo-panel-body{padding:13px;}
+  #page-admin .promo-creative{grid-template-columns:1fr;}
+  #page-admin .promo-creative-thumb{width:100%;max-width:260px;}
+  #page-admin .promo-catalogue-grid{grid-template-columns:1fr;}
+  #page-admin .promo-action-buttons{display:grid;grid-template-columns:1fr;}
+}
+@media(prefers-reduced-motion:reduce){
+  #page-admin .promo-button{transition:none;}
+}
 #page-admin .pev{position:relative;}
 #page-admin .pev-btn{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;background:rgba(0,0,0,.25);border:1px solid var(--adm-line);border-radius:8px;color:var(--adm-tx);padding:7px 10px;font:inherit;font-size:12.5px;cursor:pointer;transition:border-color .14s;}
 #page-admin .pev-btn:hover{border-color:#5b7cfa;}
@@ -830,13 +985,6 @@ class AdminPage {
 #page-admin .pev-opt{display:flex;align-items:center;gap:8px;width:100%;text-align:left;background:none;border:0;border-radius:7px;color:var(--adm-tx2);padding:7px 9px;font:inherit;font-size:12.5px;cursor:pointer;}
 #page-admin .pev-opt:hover{background:rgba(91,124,250,.14);color:var(--adm-tx);}
 #page-admin .pev-opt.on{background:linear-gradient(135deg,rgba(91,124,250,.2),rgba(168,85,247,.16));color:#fff;}
-#page-admin .price-cell input.pev-label{width:100%;font-size:12px;}
-#page-admin .price-cell .pcy-unit{font-style:normal;color:var(--adm-tx2);font-weight:500;font-size:11.5px;}
-#page-admin .price-cell input[data-pcycles]{width:58px;}
-#page-admin .refm{margin-left:6px;padding:4px 8px;border-radius:999px;border:1px solid var(--adm-line);background:rgba(0,0,0,.25);color:var(--adm-tx2);font:inherit;font-size:11px;font-weight:800;cursor:pointer;transition:border-color .14s,color .14s;}
-#page-admin .refm:hover:not(:disabled){border-color:#5b7cfa;color:var(--adm-tx);}
-#page-admin .refm.on{background:linear-gradient(135deg,rgba(91,124,250,.3),rgba(168,85,247,.25));border-color:#5b7cfa;color:#fff;}
-#page-admin .refm:disabled{opacity:.35;cursor:default;}
 #page-admin .mkt-notif-grid{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:18px;}
 @media (max-width:900px){#page-admin .mkt-notif-grid{grid-template-columns:1fr;}}
 #page-admin .mkt-notif-grid input[type=text],#page-admin .mkt-notif-grid textarea{width:100%;background:rgba(0,0,0,.25);border:1px solid var(--adm-line);border-radius:8px;color:var(--adm-tx);padding:9px 11px;font:inherit;font-size:13px;}
@@ -852,10 +1000,6 @@ class AdminPage {
 #page-admin .mkt-log-msg{max-width:460px;min-width:220px;white-space:normal;word-break:break-word;line-height:1.45;color:var(--adm-tx2);font-size:12px;}
 #page-admin .mkt-log-bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;}
 #page-admin #mkt-log-q{background:rgba(0,0,0,.25);border:1px solid var(--adm-line);border-radius:8px;color:var(--adm-tx);padding:8px 11px;font:inherit;font-size:12.5px;min-width:260px;}
-#page-admin .price-cell.promo-on{border-color:rgba(255,128,103,.55);}
-#page-admin .price-cell .pchip{display:inline-block;margin-left:6px;padding:2px 7px;border-radius:999px;font-size:9.5px;font-weight:900;letter-spacing:.04em;color:#0b1220;background:linear-gradient(135deg,#ff8067,#b579ff);}
-#page-admin .price-cell .promo-sub{display:flex;flex-direction:column;gap:6px;margin-top:4px;padding-top:8px;border-top:1px dashed var(--adm-line);}
-#page-admin .price-cell .promo-sub select,#page-admin .price-cell .promo-sub input[type="datetime-local"]{background:rgba(0,0,0,.25);border:1px solid var(--adm-line);border-radius:8px;color:var(--adm-tx);padding:6px 8px;font:inherit;font-size:12px;width:100%;}
 #page-admin .filter-bar{background:var(--adm-panel);border:1px solid var(--adm-line);border-radius:14px;padding:12px 14px;margin-bottom:14px;}
 #page-admin .filter-bar .fb-h{font-size:10.5px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--adm-tx3);margin-bottom:10px;display:flex;align-items:center;gap:6px;}
 #page-admin .filter-bar .users-controls{margin-bottom:0;}
@@ -2148,23 +2292,20 @@ class AdminPage {
         const v = this._view();
         const MKT_TABS = { overview: 'mkt-tab-overview', promos: 'mkt-tab-promos', notifs: 'mkt-tab-notifs' };
         const tab = MKT_TABS[this._marketingTab] ? this._marketingTab : 'overview';
-        const show = t => (tab === t ? '' : ' style="display:none"');
+        const show = t => (tab === t ? '' : ' hidden');
         v.innerHTML = `<div class="crm-page">
-            <h1 class="crm-h1">📣 Marketing</h1>
+            <h1 class="crm-h1">Marketing</h1>
             <p class="crm-sub">Promotions, campagnes visuelles et notifications push — tout ce qui pousse Norva vers ses utilisateurs.</p>
             <div class="qv-row" id="mkt-tabs" role="tablist" aria-label="Sections Marketing">
-                <button class="qv-chip ${tab === 'overview' ? 'active' : ''}" data-mtab="overview" role="tab">📣 Vue d'ensemble</button>
-                <button class="qv-chip ${tab === 'promos' ? 'active' : ''}" data-mtab="promos" role="tab">🏷️ Promotions</button>
-                <button class="qv-chip ${tab === 'notifs' ? 'active' : ''}" data-mtab="notifs" role="tab">📲 Notifications</button>
+                <button class="qv-chip ${tab === 'overview' ? 'active' : ''}" id="mkt-tab-button-overview" data-mtab="overview" role="tab" aria-controls="mkt-tab-overview" aria-selected="${tab === 'overview'}" tabindex="${tab === 'overview' ? '0' : '-1'}">Vue d'ensemble</button>
+                <button class="qv-chip ${tab === 'promos' ? 'active' : ''}" id="mkt-tab-button-promos" data-mtab="promos" role="tab" aria-controls="mkt-tab-promos" aria-selected="${tab === 'promos'}" tabindex="${tab === 'promos' ? '0' : '-1'}">Promotions</button>
+                <button class="qv-chip ${tab === 'notifs' ? 'active' : ''}" id="mkt-tab-button-notifs" data-mtab="notifs" role="tab" aria-controls="mkt-tab-notifs" aria-selected="${tab === 'notifs'}" tabindex="${tab === 'notifs' ? '0' : '-1'}">Notifications</button>
             </div>
-            <div id="mkt-tab-overview"${show('overview')}><div id="mkt-overview"><div class="ssub">Chargement…</div></div></div>
-            <div id="mkt-tab-promos"${show('promos')}>
-                <div class="admin-block"><h2>💵 Tarifs web &amp; promotions (Revolut)</h2>
-                    <div class="ssub" style="margin-bottom:10px">Source unique <code>billing_prices</code> — appliquée aux <b>nouveaux</b> checkouts et changements de plan ; les abonnés existants gardent leur prix souscrit. Rail Play : tarifs et promos gérés dans la Play Console.</div>
-                    <div id="fin-prices"><div class="ssub">Chargement…</div></div>
-                </div>
+            <div id="mkt-tab-overview" role="tabpanel" aria-labelledby="mkt-tab-button-overview"${show('overview')}><div id="mkt-overview"><div class="ssub">Chargement…</div></div></div>
+            <div id="mkt-tab-promos" role="tabpanel" aria-labelledby="mkt-tab-button-promos"${show('promos')}>
+                <div id="fin-prices" aria-live="polite"><div class="ssub">Chargement…</div></div>
             </div>
-            <div id="mkt-tab-notifs"${show('notifs')}>
+            <div id="mkt-tab-notifs" role="tabpanel" aria-labelledby="mkt-tab-button-notifs"${show('notifs')}>
                 <div class="admin-block"><h2>📲 Notification push (mobile)</h2>
                     <div class="ssub" style="margin-bottom:10px">Envoyée immédiatement à <b>tous les appareils enregistrés</b> (app Android installée + push accepté). Rédige en <b>anglais</b> — le produit est anglophone — et reste parcimonieux : une notification de trop = désinstallation.</div>
                     <div class="mkt-notif-grid">
@@ -2206,16 +2347,36 @@ class AdminPage {
 
         // Bascule d'onglet : montrer/cacher en préservant l'état (dépliant promo
         // ouvert, brouillon de notification…), URL reflétée pour F5 / favoris.
-        v.querySelectorAll('#mkt-tabs .qv-chip').forEach(chip => chip.addEventListener('click', () => {
+        const activateMarketingTab = chip => {
             const t = MKT_TABS[chip.dataset.mtab] ? chip.dataset.mtab : 'overview';
             this._marketingTab = t;
-            v.querySelectorAll('#mkt-tabs .qv-chip').forEach(c => c.classList.toggle('active', c === chip));
+            v.querySelectorAll('#mkt-tabs .qv-chip').forEach(c => {
+                const selected = c === chip;
+                c.classList.toggle('active', selected);
+                c.setAttribute('aria-selected', String(selected));
+                c.tabIndex = selected ? 0 : -1;
+            });
             Object.entries(MKT_TABS).forEach(([k2, id]) => {
                 const node = document.getElementById(id);
-                if (node) node.style.display = k2 === t ? '' : 'none';
+                if (node) node.hidden = k2 !== t;
             });
             try { if (String(location.hash || '').startsWith('#admin')) history.replaceState(history.state, '', '#admin/marketing' + (t === 'overview' ? '' : '/' + t)); } catch (_) { /* non-navigable */ }
-        }));
+        };
+        const marketingTabs = Array.from(v.querySelectorAll('#mkt-tabs .qv-chip'));
+        marketingTabs.forEach((chip, index) => {
+            chip.addEventListener('click', () => activateMarketingTab(chip));
+            chip.addEventListener('keydown', event => {
+                if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+                event.preventDefault();
+                let next = index;
+                if (event.key === 'ArrowLeft') next = (index - 1 + marketingTabs.length) % marketingTabs.length;
+                if (event.key === 'ArrowRight') next = (index + 1) % marketingTabs.length;
+                if (event.key === 'Home') next = 0;
+                if (event.key === 'End') next = marketingTabs.length - 1;
+                marketingTabs[next].focus();
+                activateMarketingTab(marketingTabs[next]);
+            });
+        });
 
         this._loadWebPrices();
         this._loadMarketingOverview();
@@ -2439,283 +2600,725 @@ class AdminPage {
         });
     }
 
-    // Carte « 💵 Tarifs web » : édition de billing_prices (source unique lue par les
-    // edge et le front). Deux étages par tarif : le prix de BASE, et une PROMO
-    // optionnelle (montant + événement → badge sur la page de vente + échéance
-    // auto-désactivante). Le promo PRIME tant qu'il est rempli et non échu.
-    // Effet : nouveaux checkouts + changements de plan uniquement — les abonnés
-    // existants gardent leur prix souscrit (mapping). Cache edge 60 s.
+    // Espace Promotions : une campagne guidée, des offres sélectionnables, une
+    // action groupée secondaire et un aperçu storefront avant toute écriture.
+    // Les tarifs catalogue restent disponibles dans un volet protégé séparé.
     async _loadWebPrices() {
         const host = document.getElementById('fin-prices');
         if (!host) return;
+        host.setAttribute('aria-busy', 'true');
+
         let rows = null;
+        let campaign = null;
+        let campaignUnavailable = false;
         try { rows = await this._rpc('admin_billing_prices'); } catch (_) { /* rendu dégradé ci-dessous */ }
+        try { campaign = await this._rpc('admin_promo_campaign'); } catch (_) { campaignUnavailable = true; }
         if (!Array.isArray(rows) || !rows.length) {
-            host.innerHTML = '<div class="ssub">Table des tarifs indisponible — appliquer les migrations 20260718150000 + 20260718170000 (supabase_admin) puis <code>NOTIFY pgrst, \'reload schema\'</code>.</div>';
+            host.innerHTML = '<div class="admin-err" role="alert">Les tarifs web sont momentanément indisponibles. Vérifiez la configuration côté serveur puis réessayez.</div>';
+            host.setAttribute('aria-busy', 'false');
             return;
         }
+
         const LBL = { plus: 'Norva', family: 'Norva Family' };
-        const PER = { monthly: 'mensuel', annual: 'annuel' };
-        // Catalogue d'événements (clé serveur → libellé FR admin + icône) ; le badge
-        // côté page de vente est le libellé anglais correspondant — sauf libellé
-        // personnalisé (événement « Autre »), qui prime.
+        const PER = { monthly: 'Mensuel', annual: 'Annuel' };
         const EVENTS = [
-            ['black_friday', 'Black Friday', '🖤'], ['cyber_monday', 'Cyber Monday', '💻'],
-            ['winter_sale', 'Soldes d\'hiver', '❄️'], ['summer_sale', 'Soldes d\'été', '☀️'],
-            ['christmas', 'Noël', '🎄'], ['new_year', 'Nouvel An', '🎆'], ['lunar_new_year', 'Nouvel An chinois', '🏮'],
-            ['eid', 'Aïd', '🌙'], ['easter', 'Pâques', '🐣'], ['halloween', 'Halloween', '🎃'],
-            ['valentines', 'Saint-Valentin', '💘'], ['back_to_school', 'Rentrée', '🎒'],
-            ['birthday', 'Anniversaire Norva', '🎂'], ['flash', 'Vente flash', '⚡'], ['other', 'Autre…', '🏷️']
+            { key: 'black_friday', admin: 'Black Friday', public: 'Black Friday', file: 'black-friday-v2.png' },
+            { key: 'cyber_monday', admin: 'Cyber Monday', public: 'Cyber Monday', file: 'cyber-monday-v2.png' },
+            { key: 'winter_sale', admin: 'Soldes d’hiver', public: 'Winter Sale', file: 'winter-sale-v2.png' },
+            { key: 'summer_sale', admin: 'Soldes d’été', public: 'Summer Sale', file: 'summer-sale-v2.png' },
+            { key: 'christmas', admin: 'Noël', public: 'Christmas Sale', file: 'christmas-v2.png' },
+            { key: 'new_year', admin: 'Nouvel An', public: 'New Year Sale', file: 'new-year-v2.png' },
+            { key: 'lunar_new_year', admin: 'Nouvel An chinois', public: 'Lunar New Year', file: 'lunar-new-year-v2.png' },
+            { key: 'eid', admin: 'Aïd', public: 'Eid Sale', file: 'eid-v2.png' },
+            { key: 'easter', admin: 'Pâques', public: 'Easter Sale', file: 'easter-v2.png' },
+            { key: 'halloween', admin: 'Halloween', public: 'Halloween Sale', file: 'halloween-v2.png' },
+            { key: 'valentines', admin: 'Saint-Valentin', public: 'Valentine’s Sale', file: 'valentines-v2.png' },
+            { key: 'back_to_school', admin: 'Rentrée', public: 'Back to School', file: 'back-to-school-v2.png' },
+            { key: 'birthday', admin: 'Anniversaire Norva', public: 'Birthday Sale', file: 'birthday-v2.png' },
+            { key: 'flash', admin: 'Vente flash', public: 'Flash Sale', file: 'flash-v2.png' },
+            { key: 'other', admin: 'Événement Norva', public: 'Limited Offer', file: '' },
         ];
-        const evOf = v => EVENTS.find(x => x[0] === v) || EVENTS[0];
-        const escA = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+        const evOf = key => EVENTS.find(event => event.key === key) || EVENTS[0];
+        const escA = value => String(value == null ? '' : value)
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
         const toLocalInput = iso => {
             if (!iso) return '';
-            const d = new Date(iso);
-            if (!isFinite(d.getTime())) return '';
-            const p = x => String(x).padStart(2, '0');
-            return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+            const date = new Date(iso);
+            if (!Number.isFinite(date.getTime())) return '';
+            const pad = value => String(value).padStart(2, '0');
+            return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+        };
+        const pct = (base, promo) => {
+            if (!Number.isFinite(base) || !Number.isFinite(promo) || promo <= 0 || promo >= base) return null;
+            return Math.round((1 - promo / base) * 100);
         };
         const by = {};
-        rows.forEach(r => { by[r.plan + ':' + r.period] = r; });
-        const order = ['plus:monthly', 'plus:annual', 'family:monthly', 'family:annual'].filter(k => by[k]);
-        host.innerHTML = `<div class="price-grid">${order.map(k => {
-            const [plan, period] = k.split(':');
-            const r = by[k];
-            return `<div class="price-cell${r.promo_active ? ' promo-on' : ''}">
-                <span>${LBL[plan]} · ${PER[period]}${r.promo_active ? ' <span class="pchip">PROMO</span>' : ''}</span>
-                <span class="price-in" title="Prix de base">$ <input type="number" step="0.01" min="1" max="999.99" data-price="${k}" value="${(r.amount_cents / 100).toFixed(2)}">${period === 'annual'
-                    ? `<button type="button" class="refm${r.promo_ref_monthly ? ' on' : ''}" data-refm="${k}" title="Ancre marketing (promo annuelle) : afficher la réduction par rapport à 12 × le prix mensuel de base, au lieu du prix annuel de base — le site le présente comme « vs monthly billing » (comparaison de deux offres actuelles, légal), jamais comme un ancien prix. Actif uniquement quand une promo est remplie.">12×</button>`
-                    : ''}</span>
-                <div class="promo-sub" title="Promo : prime sur le prix de base tant qu'elle est remplie (et non échue)">
-                    <span class="price-in">🏷 $ <input type="number" step="0.01" min="1" max="999.99" data-promo="${k}" placeholder="—" value="${r.promo_amount_cents ? (r.promo_amount_cents / 100).toFixed(2) : ''}"></span>
-                    <div class="pev" data-pev-host="${k}" data-val="${escA(r.promo_event || 'black_friday')}">
-                        <button type="button" class="pev-btn"><span class="pev-cur">${evOf(r.promo_event || 'black_friday')[2]} ${evOf(r.promo_event || 'black_friday')[1]}</span><span class="pev-car">▾</span></button>
-                        <div class="pev-menu" hidden>${EVENTS.map(([v, l, ic]) =>
-                            `<button type="button" class="pev-opt${(r.promo_event || 'black_friday') === v ? ' on' : ''}" data-val="${v}">${ic} ${l}</button>`).join('')}</div>
-                    </div>
-                    <input type="text" class="pev-label" data-plabel="${k}" maxlength="24" placeholder="Nom de l'événement (badge affiché)" value="${escA(r.promo_label || '')}"${(r.promo_event || '') === 'other' ? '' : ' style="display:none"'} title="Libellé du badge sur la page de vente (2-24 caractères) — pour un événement propre à Norva">
-                    <span class="price-in" title="Nombre de périodes facturées au prix promo, puis retour au prix de base — vide = réduction à vie (réserver aux early-birds). Conseillé : 3 en mensuel, 1 en annuel.">🔁 <input type="number" min="1" max="24" step="1" data-pcycles="${k}" placeholder="∞" value="${r.promo_amount_cents ? (r.promo_cycles ?? '') : (period === 'monthly' ? 3 : 1)}"> <em class="pcy-unit">${period === 'monthly' ? 'mois au prix promo' : 'an(s) au prix promo'}</em></span>
-                    <input type="datetime-local" data-pends="${k}" value="${toLocalInput(r.promo_ends_at)}" title="Fin de promo (optionnel) — passée cette date, la promo s'auto-désactive">
-                </div>
+        rows.forEach(row => { by[row.plan + ':' + row.period] = row; });
+        const order = ['plus:monthly', 'plus:annual', 'family:monthly', 'family:annual'].filter(key => by[key]);
+        const configured = order.map(key => by[key]).filter(row => row.promo_amount_cents != null);
+        const seed = configured[0] || by[order[0]];
+        const initialEvent = seed.promo_event || 'black_friday';
+        const initialEnd = toLocalInput(seed.promo_ends_at);
+        const initialLabel = seed.promo_label || '';
+        const activeCount = order.map(key => by[key]).filter(row => row.promo_active).length;
+        const campaignMixed = configured.some(row =>
+            (row.promo_event || 'black_friday') !== initialEvent
+            || toLocalInput(row.promo_ends_at) !== initialEnd
+            || String(row.promo_label || '') !== String(initialLabel));
+        const imagePath = campaign && campaign.bg_path ? String(campaign.bg_path) : '';
+        const encodedPath = imagePath.split('/').filter(Boolean).map(encodeURIComponent).join('/');
+        const customImageUrl = encodedPath
+            ? this._sbUrl() + '/storage/v1/object/public/promo-assets/' + encodedPath
+            : '';
+        const wallpaperFor = eventKey => {
+            const event = evOf(eventKey);
+            return event.file ? '/img/promo-wallpapers/' + encodeURIComponent(event.file) : '/img/promo-wallpapers/black-friday-v2.png';
+        };
+        const initialImage = customImageUrl || wallpaperFor(initialEvent);
+        const eventOptions = EVENTS.map(event =>
+            `<option value="${event.key}"${event.key === initialEvent ? ' selected' : ''}>${AdminPage.esc(event.admin)}</option>`
+        ).join('');
+        const cycleOptions = (currentValue, period) => {
+            const recommended = period === 'monthly' ? 3 : 1;
+            const current = currentValue == null ? '' : String(currentValue);
+            const values = [1, 2, 3, 6, 12, 24];
+            if (current && !values.includes(Number(current))) values.push(Number(current));
+            values.sort((a, b) => a - b);
+            return [
+                `<option value=""${current === '' ? ' selected' : ''}>À vie</option>`,
+                ...values.map(value => `<option value="${value}"${String(value) === current ? ' selected' : ''}>${value} période${value > 1 ? 's' : ''}</option>`),
+            ].join('');
+        };
+        const offerRows = order.map(key => {
+            const [plan, period] = key.split(':');
+            const row = by[key];
+            const checked = row.promo_amount_cents != null;
+            const promoValue = checked ? (Number(row.promo_amount_cents) / 100).toFixed(2) : '';
+            const cycles = checked ? row.promo_cycles : (period === 'monthly' ? 3 : 1);
+            const discount = pct(Number(row.amount_cents), Number(row.promo_amount_cents));
+            const safeKey = key.replace(':', '-');
+            const state = row.promo_active ? 'Promotion active' : (checked ? 'Promotion configurée' : 'Hors campagne');
+            return `<div class="promo-offer-row${checked ? '' : ' is-disabled'}" data-offer-row="${key}" data-base="${Number(row.amount_cents)}">
+                <label class="promo-check-wrap" for="promo-enable-${safeKey}">
+                    <span class="promo-visually-hidden">Inclure ${AdminPage.esc(LBL[plan])} ${AdminPage.esc(PER[period].toLowerCase())}</span>
+                    <input class="promo-enable" id="promo-enable-${safeKey}" type="checkbox"${checked ? ' checked' : ''}>
+                </label>
+                <div class="promo-offer-name"><strong>${AdminPage.esc(LBL[plan])}</strong><span>${AdminPage.esc(PER[period])} · <span data-offer-state>${state}</span></span></div>
+                <span class="promo-base-price"><span class="promo-visually-hidden">Tarif catalogue </span>$${(Number(row.amount_cents) / 100).toFixed(2)}</span>
+                <label class="promo-price-field" for="promo-price-${safeKey}">
+                    <span class="promo-visually-hidden">Prix promotionnel de ${AdminPage.esc(LBL[plan])} ${AdminPage.esc(PER[period].toLowerCase())}</span>
+                    <input id="promo-price-${safeKey}" class="promo-price" type="number" inputmode="decimal" step="0.01" min="1" max="999.99" value="${promoValue}" aria-describedby="promo-discount-${safeKey}"${checked ? '' : ' disabled'}>
+                </label>
+                <output class="promo-discount${discount == null ? ' is-neutral' : ''}" id="promo-discount-${safeKey}" for="promo-price-${safeKey}">${discount == null ? '—' : '−' + discount + '%'}</output>
+                <label class="promo-cycle-field" for="promo-cycles-${safeKey}">
+                    <span class="promo-visually-hidden">Durée promotionnelle de ${AdminPage.esc(LBL[plan])} ${AdminPage.esc(PER[period].toLowerCase())}</span>
+                    <select id="promo-cycles-${safeKey}" class="promo-cycles"${checked ? '' : ' disabled'}>${cycleOptions(cycles, period)}</select>
+                </label>
+                ${period === 'annual' ? `<div class="promo-offer-advanced"><button class="promo-ref-toggle" type="button" data-ref-monthly aria-pressed="${Boolean(row.promo_ref_monthly)}"${checked && promoValue ? '' : ' disabled'}>Comparer la réduction à 12 × le tarif mensuel</button></div>` : ''}
             </div>`;
-        }).join('')}</div>
-            <div style="margin-top:10px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-                <button class="mini-btn" id="fin-prices-save">💾 Enregistrer</button>
-                <span class="ssub">Promo vide = tarif de base seul. L'échéance est optionnelle (auto-désactivation).</span>
-                <span class="ssub" id="fin-prices-msg"></span>
+        }).join('');
+        const catalogueFields = order.map(key => {
+            const [plan, period] = key.split(':');
+            const row = by[key];
+            const safeKey = key.replace(':', '-');
+            return `<label class="promo-field" for="catalogue-price-${safeKey}">
+                ${AdminPage.esc(LBL[plan])} · ${AdminPage.esc(PER[period].toLowerCase())}
+                <input id="catalogue-price-${safeKey}" type="number" inputmode="decimal" step="0.01" min="1" max="999.99" data-catalogue-price="${key}" value="${(Number(row.amount_cents) / 100).toFixed(2)}">
+            </label>`;
+        }).join('');
+
+        host.innerHTML = `<div class="promo-workspace">
+            <section class="promo-intro" aria-labelledby="promo-workspace-title">
+                <div><span class="promo-kicker">Campagne guidée</span><h2 id="promo-workspace-title">Construire une campagne</h2><p>Choisissez les offres, appliquez une règle commune et contrôlez le storefront avant l’activation. Les abonnés existants conservent leur prix souscrit.</p></div>
+                <span class="promo-state${activeCount ? ' is-active' : ''}" id="promo-state">${activeCount ? activeCount + ' promotion' + (activeCount > 1 ? 's' : '') + ' active' + (activeCount > 1 ? 's' : '') : 'Aucune promotion active'}</span>
+            </section>
+            <div class="promo-layout" id="promo-layout">
+                <div class="promo-main">
+                    <section class="promo-panel" aria-labelledby="promo-rules-title">
+                        <div class="promo-panel-head"><div><h3 id="promo-rules-title">Règles de campagne</h3><p>Ces réglages seront appliqués à toutes les offres cochées.</p></div></div>
+                        <div class="promo-panel-body">
+                            <div class="promo-campaign-grid">
+                                <label class="promo-field" for="promo-campaign-event">Événement
+                                    <select id="promo-campaign-event">${eventOptions}</select>
+                                </label>
+                                <label class="promo-field" for="promo-campaign-end">Fin automatique
+                                    <input id="promo-campaign-end" type="datetime-local" value="${escA(initialEnd)}">
+                                    <span class="promo-field-help">Activation immédiate après confirmation ; vide : aucune échéance automatique.</span>
+                                </label>
+                                <label class="promo-field promo-custom-label" id="promo-custom-label-field" for="promo-campaign-label"${initialEvent === 'other' ? '' : ' hidden'}>Libellé storefront
+                                    <input id="promo-campaign-label" type="text" minlength="2" maxlength="24" value="${escA(initialLabel)}" placeholder="Limited Offer">
+                                </label>
+                            </div>
+                            ${campaignMixed ? '<p class="promo-empty-selection">Les offres actives utilisent actuellement des réglages différents. La prochaine validation les harmonisera avec les valeurs ci-dessus ; le récapitulatif détaillera chaque changement.</p>' : ''}
+                        </div>
+                    </section>
+                    <section class="promo-panel" aria-labelledby="promo-offers-title">
+                        <div class="promo-panel-head"><div><h3 id="promo-offers-title">Offres incluses</h3><p>Les tarifs catalogue restent visibles mais verrouillés dans ce flux.</p></div><button class="promo-button quiet" id="promo-open-catalogue" type="button">Tarifs catalogue</button></div>
+                        <div class="promo-panel-body">
+                            <div class="promo-bulkbar" aria-label="Application groupée">
+                                <label class="promo-field" for="promo-bulk-discount">Réduction groupée
+                                    <select id="promo-bulk-discount"><option value="25">−25 %</option><option value="30" selected>−30 %</option><option value="40">−40 %</option><option value="50">−50 %</option></select>
+                                </label>
+                                <button class="promo-button" id="promo-bulk-apply" type="button">Appliquer à la sélection</button>
+                                <span class="promo-bulk-note">Action secondaire : elle remplit les prix, sans enregistrer ni publier.</span>
+                            </div>
+                        </div>
+                        <div class="promo-offers">
+                            <div class="promo-offer-head"><label class="promo-check-wrap" for="promo-select-all"><input id="promo-select-all" type="checkbox" aria-label="Sélectionner toutes les offres"></label><span>Offre</span><span>Base</span><span>Prix promo</span><span>Réduction</span><span>Périodes</span></div>
+                            ${offerRows}
+                        </div>
+                        <p class="promo-empty-selection" id="promo-selection-note">Cochez les offres à inclure. Décocher une promotion existante proposera sa désactivation dans le récapitulatif.</p>
+                    </section>
+                    <section class="promo-panel" aria-labelledby="promo-creative-title">
+                        <div class="promo-panel-head"><div><h3 id="promo-creative-title">Visuel de campagne</h3><p>Le visuel est optionnel ; le thème de l’événement reste disponible en repli.</p></div></div>
+                        <div class="promo-panel-body">
+                            <div class="promo-creative">
+                                <img class="promo-creative-thumb" id="promo-creative-thumb" src="${escA(initialImage)}" alt="Aperçu du visuel de campagne" width="272" height="153" loading="lazy">
+                                <div class="promo-creative-copy"><strong>Fond storefront</strong><span>JPG, PNG ou WebP, jusqu’à 25 Mo. Le navigateur redimensionne et optimise avant l’envoi.</span>
+                                    <div class="promo-creative-actions">
+                                        <label class="promo-button" for="fin-campaign-file"${campaignUnavailable ? ' aria-disabled="true"' : ''}>Choisir une image</label>
+                                        <input class="promo-visually-hidden" type="file" id="fin-campaign-file" accept="image/jpeg,image/png,image/webp"${campaignUnavailable ? ' disabled' : ''}>
+                                        ${customImageUrl ? '<button class="promo-button quiet" id="fin-campaign-clear" type="button">Retirer le visuel</button>' : ''}
+                                    </div>
+                                    <span class="promo-status-message" id="fin-campaign-msg" role="status" aria-live="polite">${campaignUnavailable ? 'Le visuel personnalisé est indisponible ; le thème de l’événement reste utilisé.' : (customImageUrl ? 'Visuel personnalisé actif.' : 'Thème automatique actif.')}</span>
+                                </div>
+                            </div>
+                            <div class="promo-review" id="promo-image-remove-review" hidden tabindex="-1">
+                                <h4>Retirer le visuel personnalisé ?</h4>
+                                <p class="promo-bulk-note promo-image-remove-copy">Le storefront reviendra immédiatement au thème automatique de l’événement.</p>
+                                <div class="promo-review-actions"><button class="promo-button quiet" id="promo-image-remove-cancel" type="button">Annuler</button><button class="promo-button primary" id="promo-image-remove-confirm" type="button">Confirmer le retrait</button></div>
+                            </div>
+                        </div>
+                    </section>
+                    <section class="promo-review" id="promo-review" hidden tabindex="-1" aria-labelledby="promo-review-title">
+                        <h4 id="promo-review-title">Vérification avant activation</h4>
+                        <ul class="promo-review-list" id="promo-review-list"></ul>
+                        <div class="promo-review-actions"><button class="promo-button quiet" id="promo-review-cancel" type="button">Continuer les modifications</button><button class="promo-button primary" id="fin-prices-save" type="button" disabled>Activer les changements</button></div>
+                    </section>
+                    <div class="promo-action-dock">
+                        <div class="promo-action-copy"><strong id="promo-dock-title">Préparation de la campagne</strong><span id="promo-dock-copy">Aucune écriture tant que les changements ne sont pas confirmés.</span></div>
+                        <div class="promo-action-buttons"><button class="promo-button quiet" id="promo-preview-expand" type="button" aria-expanded="false" aria-controls="promo-preview-card">Agrandir l’aperçu</button><button class="promo-button primary" id="promo-verify" type="button">Vérifier la campagne</button></div>
+                    </div>
+                    <span class="promo-status-message" id="fin-prices-msg" role="status" aria-live="polite" aria-atomic="true"></span>
+                    <details class="promo-catalogue" id="promo-catalogue">
+                        <summary>Tarifs catalogue protégés</summary>
+                        <div class="promo-catalogue-body">
+                            <p class="promo-catalogue-warning">Modifier ces montants change la référence commerciale des nouveaux checkouts. Cette opération est séparée de la campagne et possède sa propre vérification.</p>
+                            <div class="promo-catalogue-grid">${catalogueFields}</div>
+                            <div class="promo-catalogue-actions"><button class="promo-button" id="promo-catalogue-verify" type="button">Vérifier les tarifs</button><span class="promo-status-message" id="promo-catalogue-msg" role="status" aria-live="polite"></span></div>
+                            <section class="promo-review" id="promo-catalogue-review" hidden tabindex="-1"><h4>Vérification des tarifs catalogue</h4><ul class="promo-review-list" id="promo-catalogue-review-list"></ul><div class="promo-review-actions"><button class="promo-button quiet" id="promo-catalogue-cancel" type="button">Annuler</button><button class="promo-button primary" id="promo-catalogue-save" type="button" disabled>Appliquer les tarifs catalogue</button></div></section>
+                        </div>
+                    </details>
+                </div>
+                <aside class="promo-panel promo-preview" aria-labelledby="promo-preview-title">
+                    <div class="promo-panel-head"><div><h3 id="promo-preview-title">Aperçu storefront</h3><p>Premier plan valide inclus dans la campagne.</p></div></div>
+                    <div class="promo-preview-card" id="promo-preview-card">
+                        <div class="promo-preview-brand"><img src="/img/norva-app-icon-96.webp" alt="" width="28" height="28">Norva</div>
+                        <span class="promo-preview-kicker" id="promo-preview-event">${AdminPage.esc(evOf(initialEvent).public)}</span>
+                        <h4>The best of Norva, for less.</h4>
+                        <p>Clear terms, a limited duration and no change for existing subscribers.</p>
+                        <div class="promo-preview-offer" aria-live="polite">
+                            <div class="promo-preview-offer-head"><span class="promo-preview-offer-name" id="promo-preview-plan">Sélectionnez une offre</span><span class="promo-preview-price"><strong id="promo-preview-price">—</strong><s id="promo-preview-base"></s></span></div>
+                            <div class="promo-preview-meta" id="promo-preview-meta">Aucun prix promotionnel valide.</div>
+                        </div>
+                    </div>
+                    <div class="promo-preview-facts"><div class="promo-preview-fact"><strong id="promo-preview-count">0 offre</strong><span>incluse</span></div><div class="promo-preview-fact"><strong id="promo-preview-average">0 %</strong><span>réduction moyenne</span></div></div>
+                </aside>
             </div>
-            <div class="kpi-gtitle" style="margin:16px 0 6px">🎨 Visuel de campagne (optionnel)</div>
-            <div class="ssub" style="margin-bottom:8px">Image de <b>fond plein écran</b> de la page de vente pendant une promo (les cartes gardent leur halo aux couleurs de l'événement). Uploade en <b>pleine qualité</b> (JPG/PNG/WebP, paysage 1920 × 1080 px ou plus, jusqu'à ~25 Mo) — l'image est <b>optimisée automatiquement</b> avant l'envoi (max 2560 px, WebP haute qualité) pour que la page reste instantanée. Un dégradé sombre vertical est appliqué par-dessus : le haut reste visible, le bas s'assombrit derrière les cartes.</div>
-            <div id="fin-campaign" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><span class="ssub">Chargement…</span></div>`;
-        // Dépliant d'événement maison (le <select> natif rendait clair-sur-clair) :
-        // clic → panneau sombre avec icônes ; « Autre… » révèle le champ du libellé
-        // personnalisé (badge affiché tel quel sur la page de vente).
-        host.querySelectorAll('[data-pev-host]').forEach(pev => {
-            const key = pev.dataset.pevHost;
-            const btn = pev.querySelector('.pev-btn');
-            const menu = pev.querySelector('.pev-menu');
-            btn?.addEventListener('click', (e) => {
-                e.stopPropagation();
-                const wasHidden = menu.hidden;
-                host.querySelectorAll('.pev-menu').forEach(m => { m.hidden = true; });
-                menu.hidden = !wasHidden;
+        </div>`;
+        host.setAttribute('aria-busy', 'false');
+
+        const allOfferRows = () => Array.from(host.querySelectorAll('[data-offer-row]'));
+        const message = document.getElementById('fin-prices-msg');
+        const campaignMessage = document.getElementById('fin-campaign-msg');
+        const review = document.getElementById('promo-review');
+        const reviewList = document.getElementById('promo-review-list');
+        const finalSave = document.getElementById('fin-prices-save');
+        const verifyButton = document.getElementById('promo-verify');
+        const eventInput = document.getElementById('promo-campaign-event');
+        const endInput = document.getElementById('promo-campaign-end');
+        const customLabelField = document.getElementById('promo-custom-label-field');
+        const customLabelInput = document.getElementById('promo-campaign-label');
+        const selectAll = document.getElementById('promo-select-all');
+        const bulkButton = document.getElementById('promo-bulk-apply');
+        const previewCard = document.getElementById('promo-preview-card');
+        const previewImage = document.getElementById('promo-creative-thumb');
+        const reduceMotion = () => Boolean(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+        const setMessage = (text, kind) => {
+            if (!message) return;
+            message.textContent = text || '';
+            message.className = 'promo-status-message' + (kind ? ' is-' + kind : '');
+        };
+        const setCampaignMessage = (text, kind) => {
+            if (!campaignMessage) return;
+            campaignMessage.textContent = text || '';
+            campaignMessage.className = 'promo-status-message' + (kind ? ' is-' + kind : '');
+        };
+        const invalidateReview = () => {
+            if (review) review.hidden = true;
+            if (finalSave) finalSave.disabled = true;
+        };
+        const formatCycles = value => {
+            if (value === '') return 'à vie';
+            const count = Number(value);
+            return count + ' période' + (count > 1 ? 's' : '') + ' puis prix catalogue';
+        };
+        const currentEventLabel = () => {
+            if (eventInput?.value === 'other') {
+                return String(customLabelInput?.value || '').trim() || evOf('other').public;
+            }
+            return evOf(eventInput?.value).public;
+        };
+        const setPreviewImage = () => {
+            const imageUrl = customImageUrl || wallpaperFor(eventInput?.value || initialEvent);
+            if (previewCard) previewCard.style.setProperty('--promo-image', 'url(\"' + String(imageUrl).replace(/\"/g, '%22') + '\")');
+            if (previewImage && !customImageUrl) previewImage.src = imageUrl;
+        };
+        const syncPreview = () => {
+            const selected = allOfferRows().filter(row => row.querySelector('.promo-enable')?.checked);
+            const valid = selected.map(row => {
+                const base = Number(row.dataset.base);
+                const price = Number(row.querySelector('.promo-price')?.value);
+                return { row, base, price, discount: pct(base, Math.round(price * 100)) };
+            }).filter(item => item.discount != null);
+            const first = valid[0] || null;
+            const eventLabel = currentEventLabel();
+            const eventNode = document.getElementById('promo-preview-event');
+            if (eventNode) eventNode.textContent = eventLabel;
+            setPreviewImage();
+            const countNode = document.getElementById('promo-preview-count');
+            if (countNode) countNode.textContent = selected.length + ' offre' + (selected.length > 1 ? 's' : '');
+            const average = valid.length
+                ? Math.round(valid.reduce((sum, item) => sum + item.discount, 0) / valid.length)
+                : 0;
+            const averageNode = document.getElementById('promo-preview-average');
+            if (averageNode) averageNode.textContent = average + ' %';
+            const dockTitle = document.getElementById('promo-dock-title');
+            const dockCopy = document.getElementById('promo-dock-copy');
+            if (dockTitle) dockTitle.textContent = selected.length
+                ? selected.length + ' offre' + (selected.length > 1 ? 's' : '') + ' sélectionnée' + (selected.length > 1 ? 's' : '')
+                : 'Aucune offre sélectionnée';
+            if (dockCopy) dockCopy.textContent = valid.length + ' prix valide' + (valid.length > 1 ? 's' : '') + ' · ' + average + ' % de réduction moyenne';
+            if (!first) {
+                const plan = document.getElementById('promo-preview-plan');
+                const price = document.getElementById('promo-preview-price');
+                const base = document.getElementById('promo-preview-base');
+                const meta = document.getElementById('promo-preview-meta');
+                if (plan) plan.textContent = selected.length ? 'Prix promotionnel à corriger' : 'Sélectionnez une offre';
+                if (price) price.textContent = '—';
+                if (base) base.textContent = '';
+                if (meta) meta.textContent = selected.length ? 'Le prix doit être inférieur au tarif catalogue.' : 'Aucun prix promotionnel valide.';
+                return;
+            }
+            const key = first.row.dataset.offerRow;
+            const [planKey, periodKey] = key.split(':');
+            const plan = document.getElementById('promo-preview-plan');
+            const price = document.getElementById('promo-preview-price');
+            const base = document.getElementById('promo-preview-base');
+            const meta = document.getElementById('promo-preview-meta');
+            if (plan) plan.textContent = LBL[planKey] + ' · ' + PER[periodKey].toLowerCase();
+            if (price) price.textContent = '$' + first.price.toFixed(2);
+            if (base) base.textContent = '$' + (first.base / 100).toFixed(2);
+            if (meta) meta.textContent = first.discount + ' % de réduction · ' + formatCycles(first.row.querySelector('.promo-cycles')?.value || '');
+        };
+        const syncRow = row => {
+            const enabled = Boolean(row.querySelector('.promo-enable')?.checked);
+            const price = row.querySelector('.promo-price');
+            const cycles = row.querySelector('.promo-cycles');
+            const ref = row.querySelector('[data-ref-monthly]');
+            const state = row.querySelector('[data-offer-state]');
+            if (price) price.disabled = !enabled;
+            if (cycles) cycles.disabled = !enabled;
+            if (ref) ref.disabled = !enabled || !String(price?.value || '').trim();
+            row.classList.toggle('is-disabled', !enabled);
+            if (state) state.textContent = enabled ? 'Incluse dans le brouillon' : 'Hors campagne';
+            const discountNode = row.querySelector('.promo-discount');
+            const discount = pct(Number(row.dataset.base), Math.round(Number(price?.value) * 100));
+            if (discountNode) {
+                discountNode.textContent = enabled && discount != null ? '−' + discount + '%' : '—';
+                discountNode.classList.toggle('is-neutral', !enabled || discount == null);
+            }
+        };
+        const syncSelection = () => {
+            const offerRows = allOfferRows();
+            offerRows.forEach(syncRow);
+            const selected = offerRows.filter(row => row.querySelector('.promo-enable')?.checked).length;
+            if (selectAll) {
+                selectAll.checked = selected === offerRows.length;
+                selectAll.indeterminate = selected > 0 && selected < offerRows.length;
+            }
+            if (bulkButton) bulkButton.disabled = selected === 0;
+            syncPreview();
+        };
+
+        allOfferRows().forEach(row => {
+            row.querySelectorAll('.promo-enable,.promo-price,.promo-cycles').forEach(control => {
+                control.addEventListener(control.matches('select,.promo-enable') ? 'change' : 'input', () => {
+                    invalidateReview();
+                    syncSelection();
+                });
+                control.addEventListener('blur', () => syncSelection());
             });
-            menu?.querySelectorAll('.pev-opt').forEach(opt => opt.addEventListener('click', () => {
-                pev.dataset.val = opt.dataset.val || 'other';
-                const curSpan = pev.querySelector('.pev-cur');
-                if (curSpan) curSpan.textContent = opt.textContent;
-                menu.querySelectorAll('.pev-opt').forEach(o => o.classList.toggle('on', o === opt));
-                menu.hidden = true;
-                const lblIn = host.querySelector(`input[data-plabel="${key}"]`);
-                if (lblIn) {
-                    lblIn.style.display = pev.dataset.val === 'other' ? '' : 'none';
-                    if (pev.dataset.val === 'other') lblIn.focus();
-                }
-            }));
+            const ref = row.querySelector('[data-ref-monthly]');
+            ref?.addEventListener('click', () => {
+                invalidateReview();
+                ref.setAttribute('aria-pressed', String(ref.getAttribute('aria-pressed') !== 'true'));
+            });
         });
-        if (!this._pevCloseWired) {
-            this._pevCloseWired = true;
-            document.addEventListener('click', () => {
-                document.querySelectorAll('#fin-prices .pev-menu').forEach(m => { m.hidden = true; });
+        selectAll?.addEventListener('change', () => {
+            invalidateReview();
+            allOfferRows().forEach(row => {
+                const checkbox = row.querySelector('.promo-enable');
+                if (checkbox) checkbox.checked = selectAll.checked;
             });
-        }
-        // Bouton « 12× » (ancre marketing des promos annuelles) : cliquable
-        // uniquement quand le champ promo de la ligne est rempli — suit la
-        // saisie en direct.
-        host.querySelectorAll('[data-refm]').forEach(btn => {
-            const key = btn.dataset.refm;
-            const promoIn = host.querySelector(`input[data-promo="${key}"]`);
-            const sync = () => { btn.disabled = !String(promoIn?.value ?? '').trim(); };
-            sync();
-            promoIn?.addEventListener('input', sync);
-            btn.addEventListener('click', () => btn.classList.toggle('on'));
+            syncSelection();
+        });
+        eventInput?.addEventListener('change', () => {
+            invalidateReview();
+            if (customLabelField) customLabelField.hidden = eventInput.value !== 'other';
+            if (eventInput.value === 'other') customLabelInput?.focus();
+            syncPreview();
+        });
+        endInput?.addEventListener('input', invalidateReview);
+        customLabelInput?.addEventListener('input', () => {
+            invalidateReview();
+            syncPreview();
+        });
+        bulkButton?.addEventListener('click', () => {
+            const selected = allOfferRows().filter(row => row.querySelector('.promo-enable')?.checked);
+            if (!selected.length) {
+                setMessage('Sélectionnez au moins une offre avant l’application groupée.', 'error');
+                return;
+            }
+            invalidateReview();
+            const discount = Number(document.getElementById('promo-bulk-discount')?.value || 0);
+            selected.forEach(row => {
+                const input = row.querySelector('.promo-price');
+                if (input) input.value = (Number(row.dataset.base) / 100 * (1 - discount / 100)).toFixed(2);
+            });
+            syncSelection();
+            setMessage('Réduction de ' + discount + ' % appliquée au brouillon. Vérifiez la campagne pour continuer.');
         });
 
-        const msgEl = () => document.getElementById('fin-prices-msg');
-        document.getElementById('fin-prices-save')?.addEventListener('click', async () => {
-            const baseEdits = [], promoEdits = [];
-            for (const k of order) {
-                const [plan, period] = k.split(':');
-                const cur = by[k];
-                const baseIn = host.querySelector(`input[data-price="${k}"]`);
-                const cents = Math.round(parseFloat(baseIn?.value) * 100);
-                if (Number.isFinite(cents) && cents !== Number(cur.amount_cents)) baseEdits.push({ plan, period, cents });
-                const pv = String(host.querySelector(`input[data-promo="${k}"]`)?.value ?? '').trim();
-                const pCents = pv === '' ? null : Math.round(parseFloat(pv) * 100);
-                const pEvent = String(host.querySelector(`[data-pev-host="${k}"]`)?.dataset.val || 'other');
-                const pLabelRaw = String(host.querySelector(`input[data-plabel="${k}"]`)?.value || '').trim();
-                const pLabel = (pEvent === 'other' && pLabelRaw) ? pLabelRaw.slice(0, 24) : null;
-                const pEndsRaw = String(host.querySelector(`input[data-pends="${k}"]`)?.value || '');
-                const pEnds = pEndsRaw ? new Date(pEndsRaw).toISOString() : null;
-                const curEnds = cur.promo_ends_at ? new Date(cur.promo_ends_at).toISOString() : null;
-                const pCycRaw = String(host.querySelector(`input[data-pcycles="${k}"]`)?.value ?? '').trim();
-                let pCycles = pCycRaw === '' ? null : Math.round(parseFloat(pCycRaw));
-                if (pCycles != null && (!Number.isFinite(pCycles) || pCycles < 1)) pCycles = null;
-                if (pCycles != null) pCycles = Math.min(24, pCycles);
-                const pRef = period === 'annual'
-                    && Boolean(host.querySelector(`[data-refm="${k}"]`)?.classList.contains('on'));
-                const changed = (pCents ?? null) !== (cur.promo_amount_cents ?? null)
-                    || (pCents != null && (pEvent !== (cur.promo_event || 'other') || pEnds !== curEnds
-                        || (pLabel || null) !== (cur.promo_label || null)
-                        || (pCycles ?? null) !== (cur.promo_cycles ?? null)
-                        || pRef !== Boolean(cur.promo_ref_monthly)));
-                if (!changed) continue;
-                if (pCents != null && !Number.isFinite(pCents)) continue;
-                if (pCents != null && pEvent === 'other' && pLabelRaw && pLabelRaw.length < 2) {
-                    if (msgEl()) msgEl().textContent = `❌ ${LBL[plan]} ${PER[period]} : le nom de l'événement fait 2 à 24 caractères.`;
-                    return;
-                }
-                const baseAfter = Number.isFinite(cents) ? cents : Number(cur.amount_cents);
-                if (pCents != null && pCents >= baseAfter) {
-                    if (msgEl()) msgEl().textContent = `❌ ${LBL[plan]} ${PER[period]} : le promo doit être inférieur au prix de base.`;
-                    return;
-                }
-                promoEdits.push({ plan, period, cents: pCents, event: pEvent, ends: pEnds, label: pLabel, cycles: pCycles, ref: pRef });
+        const collectPromoEdits = () => {
+            const edits = [];
+            const summaries = [];
+            let firstInvalid = null;
+            const campaignEvent = String(eventInput?.value || 'black_friday');
+            const labelRaw = String(customLabelInput?.value || '').trim();
+            if (campaignEvent === 'other' && labelRaw.length < 2) {
+                firstInvalid = customLabelInput;
+                return { edits, summaries, error: 'Le libellé storefront doit contenir au moins 2 caractères.', firstInvalid };
             }
-            if (!baseEdits.length && !promoEdits.length) { if (msgEl()) msgEl().textContent = 'Aucun changement.'; return; }
-            const rec = baseEdits.map(e => `${LBL[e.plan]} ${PER[e.period]} → $${(e.cents / 100).toFixed(2)}`)
-                .concat(promoEdits.map(e => e.cents == null
-                    ? `${LBL[e.plan]} ${PER[e.period]} : fin de promo`
-                    : `${LBL[e.plan]} ${PER[e.period]} : PROMO $${(e.cents / 100).toFixed(2)} (${e.label || evOf(e.event)[1]}, ${e.cycles ? e.cycles + ' période' + (e.cycles > 1 ? 's' : '') + ' puis prix de base' : 'à vie'}${e.ref ? ', réf. 12× mensuel' : ''})`))
-                .join('\n');
-            if (!window.confirm(`Appliquer ces changements ?\n${rec}\n\nEffet immédiat sur les nouveaux checkouts (abonnés existants inchangés).`)) return;
-            try {
-                for (const e of baseEdits) {
-                    await this._rpc('admin_billing_price_set', { p_plan: e.plan, p_period: e.period, p_amount_cents: e.cents });
+            let campaignEnd = null;
+            const endRaw = String(endInput?.value || '');
+            if (endRaw) {
+                const date = new Date(endRaw);
+                if (!Number.isFinite(date.getTime())) return { edits, summaries, error: 'La date de fin est invalide.', firstInvalid: endInput };
+                campaignEnd = date.toISOString();
+            }
+            for (const row of allOfferRows()) {
+                const key = row.dataset.offerRow;
+                const [plan, period] = key.split(':');
+                const current = by[key];
+                const enabled = Boolean(row.querySelector('.promo-enable')?.checked);
+                const priceInput = row.querySelector('.promo-price');
+                const rawPrice = String(priceInput?.value || '').trim();
+                let promoCents = null;
+                if (enabled) {
+                    promoCents = Math.round(Number(rawPrice) * 100);
+                    if (!rawPrice || !Number.isFinite(promoCents) || promoCents < 100) {
+                        return { edits, summaries, error: 'Saisissez un prix promotionnel valide pour ' + LBL[plan] + ' ' + PER[period].toLowerCase() + '.', firstInvalid: priceInput };
+                    }
+                    if (promoCents >= Number(current.amount_cents)) {
+                        return { edits, summaries, error: 'Le prix promotionnel de ' + LBL[plan] + ' ' + PER[period].toLowerCase() + ' doit rester inférieur au tarif catalogue.', firstInvalid: priceInput };
+                    }
                 }
-                for (const e of promoEdits) {
+                const cycleRaw = enabled ? String(row.querySelector('.promo-cycles')?.value || '') : '';
+                const cycles = enabled && cycleRaw !== '' ? Math.min(24, Math.max(1, Math.round(Number(cycleRaw)))) : null;
+                const ref = enabled && period === 'annual' && row.querySelector('[data-ref-monthly]')?.getAttribute('aria-pressed') === 'true';
+                const label = enabled && campaignEvent === 'other' ? labelRaw.slice(0, 24) : null;
+                const event = enabled ? campaignEvent : null;
+                const ends = enabled ? campaignEnd : null;
+                const currentEnds = current.promo_ends_at ? new Date(current.promo_ends_at).toISOString() : null;
+                const changed = (promoCents ?? null) !== (current.promo_amount_cents ?? null)
+                    || (promoCents != null && (event !== (current.promo_event || 'black_friday')
+                        || ends !== currentEnds
+                        || (label || null) !== (current.promo_label || null)
+                        || (cycles ?? null) !== (current.promo_cycles ?? null)
+                        || ref !== Boolean(current.promo_ref_monthly)));
+                if (!changed) continue;
+                edits.push({ plan, period, cents: promoCents, event, ends, label, cycles, ref });
+                summaries.push(promoCents == null
+                    ? LBL[plan] + ' · ' + PER[period].toLowerCase() + ' : désactiver la promotion'
+                    : LBL[plan] + ' · ' + PER[period].toLowerCase() + ' : $' + (promoCents / 100).toFixed(2) + ' · ' + currentEventLabel() + ' · ' + formatCycles(cycleRaw) + (ends ? ' · fin ' + new Date(ends).toLocaleString('fr-FR') : ' · sans échéance'));
+            }
+            return { edits, summaries, error: '', firstInvalid };
+        };
+        verifyButton?.addEventListener('click', () => {
+            const result = collectPromoEdits();
+            if (result.error) {
+                setMessage(result.error, 'error');
+                result.firstInvalid?.focus();
+                return;
+            }
+            if (!result.edits.length) {
+                setMessage('Aucun changement à vérifier.');
+                invalidateReview();
+                return;
+            }
+            if (reviewList) {
+                reviewList.innerHTML = result.summaries.map(summary => '<li>' + AdminPage.esc(summary) + '</li>').join('')
+                    + '<li>Effet : nouveaux checkouts et changements de plan uniquement ; abonnés existants inchangés.</li>';
+            }
+            if (review) {
+                review.hidden = false;
+                review.scrollIntoView({ behavior: reduceMotion() ? 'auto' : 'smooth', block: 'nearest' });
+                review.focus({ preventScroll: true });
+            }
+            if (finalSave) finalSave.disabled = false;
+            setMessage('Récapitulatif prêt. Confirmez uniquement après avoir contrôlé chaque ligne.');
+        });
+        document.getElementById('promo-review-cancel')?.addEventListener('click', () => {
+            invalidateReview();
+            verifyButton?.focus();
+        });
+        finalSave?.addEventListener('click', async () => {
+            const result = collectPromoEdits();
+            if (result.error || !result.edits.length) {
+                setMessage(result.error || 'Les changements ont évolué. Relancez la vérification.', 'error');
+                invalidateReview();
+                result.firstInvalid?.focus();
+                return;
+            }
+            finalSave.disabled = true;
+            if (verifyButton) verifyButton.disabled = true;
+            host.setAttribute('aria-busy', 'true');
+            setMessage('Enregistrement de la campagne…');
+            try {
+                for (const edit of result.edits) {
                     await this._rpc('admin_billing_promo_set', {
-                        p_plan: e.plan, p_period: e.period,
-                        p_amount_cents: e.cents, p_event: e.cents == null ? null : e.event,
-                        p_ends_at: e.cents == null ? null : e.ends, p_label: e.cents == null ? null : e.label,
-                        p_cycles: e.cents == null ? null : e.cycles,
-                        p_ref_monthly: e.cents == null ? false : Boolean(e.ref),
+                        p_plan: edit.plan,
+                        p_period: edit.period,
+                        p_amount_cents: edit.cents,
+                        p_event: edit.cents == null ? null : edit.event,
+                        p_ends_at: edit.cents == null ? null : edit.ends,
+                        p_label: edit.cents == null ? null : edit.label,
+                        p_cycles: edit.cents == null ? null : edit.cycles,
+                        p_ref_monthly: edit.cents == null ? false : Boolean(edit.ref),
                     });
                 }
-                if (msgEl()) msgEl().textContent = `✅ Enregistré — visible sur le site sous ~1 min (cache edge 60 s).`;
-                this._loadWebPrices();
-            } catch (e) {
-                if (msgEl()) msgEl().textContent = '❌ ' + (e && e.message ? e.message : 'échec');
+                setMessage('Campagne enregistrée. Le storefront se met à jour après expiration du cache edge.', 'success');
+                await this._loadWebPrices();
+            } catch (error) {
+                console.warn('[Admin promotions] save failed', error);
+                setMessage('Impossible d’enregistrer la campagne. Vérifiez votre connexion puis réessayez.', 'error');
+                host.setAttribute('aria-busy', 'false');
+                finalSave.disabled = false;
+                if (verifyButton) verifyButton.disabled = false;
             }
         });
 
-        // Visuel de campagne : image publique (bucket promo-assets, écriture admin)
-        // appliquée en fond de la carte en promo. Best-effort — la carte tarifs
-        // reste utilisable si la migration campagne n'est pas encore passée.
-        try {
-            const camp = await this._rpc('admin_promo_campaign');
-            const cHost = document.getElementById('fin-campaign');
-            if (cHost) {
-                const path = camp && camp.bg_path ? String(camp.bg_path) : '';
-                const url = path ? `${this._sbUrl()}/storage/v1/object/public/promo-assets/${path}` : '';
-                cHost.innerHTML = `${url
-                    ? `<img src="${url}" alt="Visuel de campagne" style="width:160px;height:90px;object-fit:cover;border-radius:8px;border:1px solid var(--adm-line)">`
-                    : '<span class="ssub">Aucune image — les promos utilisent le thème par défaut de leur événement.</span>'}
-                    <input type="file" id="fin-campaign-file" accept="image/jpeg,image/png,image/webp" style="font-size:12px;color:var(--adm-tx2)">
-                    ${url ? '<button class="mini-btn" id="fin-campaign-clear">✕ Retirer</button>' : ''}
-                    <span class="ssub" id="fin-campaign-msg"></span>`;
-                // Optimisation navigateur : l'admin peut uploader un artwork en pleine
-                // qualité (PNG IA de 10 Mo…) — on le recadre à 2560 px max et on le
-                // ré-encode en WebP haute qualité AVANT l'envoi. Qualité visuelle
-                // intacte pour un fond de page, poids divisé par 10-20 : la page de
-                // vente doit rester instantanée, c'est elle qui convertit.
-                const optimizeImage = (file) => new Promise((resolve, reject) => {
-                    const url = URL.createObjectURL(file);
-                    const img = new Image();
-                    img.onload = () => {
-                        try {
-                            URL.revokeObjectURL(url);
-                            const MAXDIM = 2560;
-                            const scale = Math.min(1, MAXDIM / Math.max(img.naturalWidth || 1, img.naturalHeight || 1));
-                            const w = Math.max(1, Math.round((img.naturalWidth || 1) * scale));
-                            const h = Math.max(1, Math.round((img.naturalHeight || 1) * scale));
-                            const cv = document.createElement('canvas');
-                            cv.width = w; cv.height = h;
-                            cv.getContext('2d').drawImage(img, 0, 0, w, h);
-                            cv.toBlob(b => {
-                                // On ne garde l'optimisée que si elle apporte quelque chose
-                                // (plus légère, ou redimensionnée) — sinon l'original suffit.
-                                if (b && b.size > 0 && (b.size < file.size || scale < 1)) resolve(b);
-                                else resolve(null);
-                            }, 'image/webp', 0.85);
-                        } catch (e) { reject(e); }
-                    };
-                    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('image illisible')); };
-                    img.src = url;
-                });
-                const fmtSize = (n) => n >= 1024 * 1024 ? (n / 1048576).toFixed(1) + ' Mo' : Math.max(1, Math.round(n / 1024)) + ' Ko';
-                document.getElementById('fin-campaign-file')?.addEventListener('change', async (ev) => {
-                    const f = ev.target.files && ev.target.files[0];
-                    if (!f) return;
-                    const cMsg = document.getElementById('fin-campaign-msg');
-                    if (f.size > 25 * 1024 * 1024) { if (cMsg) cMsg.textContent = '❌ Fichier > 25 Mo — exporte une version plus raisonnable.'; return; }
-                    if (cMsg) cMsg.textContent = '⏳ Optimisation…';
-                    try {
-                        // Type MIME de repli (upload de l'original si l'optimisation
-                        // n'apporte rien) : celui du navigateur s'il est accepté par le
-                        // bucket, sinon déduit de l'extension.
-                        const byExt = { png: 'image/png', webp: 'image/webp', jpg: 'image/jpeg', jpeg: 'image/jpeg' };
-                        const nameExt = String(f.name || '').split('.').pop().toLowerCase();
-                        let body = f;
-                        let mime = ['image/jpeg', 'image/png', 'image/webp'].includes(f.type) ? f.type : (byExt[nameExt] || 'image/jpeg');
-                        try {
-                            const opt = await optimizeImage(f);
-                            if (opt) { body = opt; mime = 'image/webp'; }
-                        } catch (_) { /* image exotique → tentative avec l'original */ }
-                        if (body.size > 10 * 1024 * 1024) {
-                            if (cMsg) cMsg.textContent = '❌ Impossible de passer sous 10 Mo — réduis la résolution de l\'export.';
-                            return;
-                        }
-                        if (cMsg) cMsg.textContent = `⬆ Envoi… (${fmtSize(f.size)}${body !== f ? ' → ' + fmtSize(body.size) : ''})`;
-                        const ext = mime === 'image/png' ? 'png' : (mime === 'image/webp' ? 'webp' : 'jpg');
-                        const objPath = `campaign/bg-${Date.now()}.${ext}`;
-                        const res = await fetch(`${this._sbUrl()}/storage/v1/object/promo-assets/${objPath}`, {
-                            method: 'POST',
-                            headers: { apikey: this._sbKey(), Authorization: `Bearer ${this._token()}`, 'Content-Type': mime, 'x-upsert': 'true' },
-                            body,
-                        });
-                        if (!res.ok) {
-                            // La vraie raison du storage (RLS, MIME, taille) — sans
-                            // elle, un « 400 » sec est indiagnosticable.
-                            const t = await res.text().catch(() => '');
-                            throw new Error('upload ' + res.status + (t ? ' — ' + t.slice(0, 180) : ''));
-                        }
-                        await this._rpc('admin_promo_campaign_set', { p_bg_path: objPath });
-                        if (cMsg) cMsg.textContent = `✅ En ligne (${fmtSize(body.size)}${body !== f ? ', optimisée depuis ' + fmtSize(f.size) : ''}).`;
-                        setTimeout(() => this._loadWebPrices(), 1200);
-                    } catch (e) {
-                        if (cMsg) cMsg.textContent = '❌ ' + (e && e.message ? e.message : 'échec');
-                    }
-                });
-                document.getElementById('fin-campaign-clear')?.addEventListener('click', async () => {
-                    try { await this._rpc('admin_promo_campaign_set', { p_bg_path: null }); this._loadWebPrices(); } catch (_) { /* noop */ }
-                });
+        const layout = document.getElementById('promo-layout');
+        const expandButton = document.getElementById('promo-preview-expand');
+        expandButton?.addEventListener('click', () => {
+            const expanded = !layout?.classList.contains('is-preview-expanded');
+            layout?.classList.toggle('is-preview-expanded', expanded);
+            expandButton.setAttribute('aria-expanded', String(expanded));
+            expandButton.textContent = expanded ? 'Réduire l’aperçu' : 'Agrandir l’aperçu';
+            if (expanded) previewCard?.scrollIntoView({ behavior: reduceMotion() ? 'auto' : 'smooth', block: 'nearest' });
+        });
+        const catalogue = document.getElementById('promo-catalogue');
+        document.getElementById('promo-open-catalogue')?.addEventListener('click', () => {
+            if (catalogue) catalogue.open = true;
+            catalogue?.scrollIntoView({ behavior: reduceMotion() ? 'auto' : 'smooth', block: 'nearest' });
+            catalogue?.querySelector('input')?.focus({ preventScroll: true });
+        });
+
+        const catalogueReview = document.getElementById('promo-catalogue-review');
+        const catalogueSave = document.getElementById('promo-catalogue-save');
+        const catalogueMessage = document.getElementById('promo-catalogue-msg');
+        const invalidateCatalogueReview = () => {
+            if (catalogueReview) catalogueReview.hidden = true;
+            if (catalogueSave) catalogueSave.disabled = true;
+        };
+        host.querySelectorAll('[data-catalogue-price]').forEach(input => input.addEventListener('input', invalidateCatalogueReview));
+        const collectCatalogueEdits = () => {
+            const edits = [];
+            const summaries = [];
+            for (const input of host.querySelectorAll('[data-catalogue-price]')) {
+                const key = input.dataset.cataloguePrice;
+                const [plan, period] = key.split(':');
+                const current = by[key];
+                const cents = Math.round(Number(input.value) * 100);
+                if (!Number.isFinite(cents) || cents < 100) {
+                    return { edits, summaries, error: 'Saisissez un tarif catalogue valide pour ' + LBL[plan] + ' ' + PER[period].toLowerCase() + '.', firstInvalid: input };
+                }
+                if (current.promo_amount_cents != null && Number(current.promo_amount_cents) >= cents) {
+                    return { edits, summaries, error: 'Le nouveau tarif catalogue de ' + LBL[plan] + ' doit rester supérieur à sa promotion configurée.', firstInvalid: input };
+                }
+                if (cents === Number(current.amount_cents)) continue;
+                edits.push({ plan, period, cents });
+                summaries.push(LBL[plan] + ' · ' + PER[period].toLowerCase() + ' : $' + (Number(current.amount_cents) / 100).toFixed(2) + ' → $' + (cents / 100).toFixed(2));
             }
-        } catch (_) {
-            const cHost = document.getElementById('fin-campaign');
-            if (cHost) cHost.innerHTML = '<span class="ssub">Visuel de campagne indisponible — appliquer la migration 20260718190000 (+ NOTIFY pgrst).</span>';
-        }
+            return { edits, summaries, error: '', firstInvalid: null };
+        };
+        document.getElementById('promo-catalogue-verify')?.addEventListener('click', () => {
+            const result = collectCatalogueEdits();
+            if (result.error) {
+                if (catalogueMessage) catalogueMessage.textContent = result.error;
+                result.firstInvalid?.focus();
+                return;
+            }
+            if (!result.edits.length) {
+                if (catalogueMessage) catalogueMessage.textContent = 'Aucun tarif catalogue modifié.';
+                invalidateCatalogueReview();
+                return;
+            }
+            const list = document.getElementById('promo-catalogue-review-list');
+            if (list) list.innerHTML = result.summaries.map(summary => '<li>' + AdminPage.esc(summary) + '</li>').join('')
+                + '<li>Effet : nouveaux checkouts et changements de plan uniquement.</li>';
+            if (catalogueReview) {
+                catalogueReview.hidden = false;
+                catalogueReview.scrollIntoView({ behavior: reduceMotion() ? 'auto' : 'smooth', block: 'nearest' });
+                catalogueReview.focus({ preventScroll: true });
+            }
+            if (catalogueSave) catalogueSave.disabled = false;
+            if (catalogueMessage) catalogueMessage.textContent = 'Récapitulatif prêt.';
+        });
+        document.getElementById('promo-catalogue-cancel')?.addEventListener('click', invalidateCatalogueReview);
+        catalogueSave?.addEventListener('click', async () => {
+            const result = collectCatalogueEdits();
+            if (result.error || !result.edits.length) {
+                if (catalogueMessage) catalogueMessage.textContent = result.error || 'Relancez la vérification des tarifs.';
+                invalidateCatalogueReview();
+                result.firstInvalid?.focus();
+                return;
+            }
+            catalogueSave.disabled = true;
+            if (catalogueMessage) catalogueMessage.textContent = 'Enregistrement des tarifs…';
+            try {
+                for (const edit of result.edits) {
+                    await this._rpc('admin_billing_price_set', {
+                        p_plan: edit.plan,
+                        p_period: edit.period,
+                        p_amount_cents: edit.cents,
+                    });
+                }
+                if (catalogueMessage) catalogueMessage.textContent = 'Tarifs catalogue enregistrés.';
+                await this._loadWebPrices();
+            } catch (error) {
+                console.warn('[Admin promotions] catalogue save failed', error);
+                if (catalogueMessage) catalogueMessage.textContent = 'Impossible d’enregistrer les tarifs. Réessayez.';
+                catalogueSave.disabled = false;
+            }
+        });
+
+        const optimizeImage = file => new Promise((resolve, reject) => {
+            const objectUrl = URL.createObjectURL(file);
+            const image = new Image();
+            image.onload = () => {
+                try {
+                    URL.revokeObjectURL(objectUrl);
+                    const maxDimension = 2560;
+                    const scale = Math.min(1, maxDimension / Math.max(image.naturalWidth || 1, image.naturalHeight || 1));
+                    const width = Math.max(1, Math.round((image.naturalWidth || 1) * scale));
+                    const height = Math.max(1, Math.round((image.naturalHeight || 1) * scale));
+                    const canvas = document.createElement('canvas');
+                    canvas.width = width;
+                    canvas.height = height;
+                    canvas.getContext('2d').drawImage(image, 0, 0, width, height);
+                    canvas.toBlob(blob => {
+                        if (blob && blob.size > 0 && (blob.size < file.size || scale < 1)) resolve(blob);
+                        else resolve(null);
+                    }, 'image/webp', 0.85);
+                } catch (error) { reject(error); }
+            };
+            image.onerror = () => {
+                URL.revokeObjectURL(objectUrl);
+                reject(new Error('image unreadable'));
+            };
+            image.src = objectUrl;
+        });
+        const formatSize = bytes => bytes >= 1024 * 1024
+            ? (bytes / 1048576).toFixed(1) + ' Mo'
+            : Math.max(1, Math.round(bytes / 1024)) + ' Ko';
+        const fileInput = document.getElementById('fin-campaign-file');
+        fileInput?.addEventListener('change', async event => {
+            const file = event.target.files && event.target.files[0];
+            if (!file) return;
+            if (file.size > 25 * 1024 * 1024) {
+                setCampaignMessage('Le fichier dépasse 25 Mo. Choisissez une image plus légère.', 'error');
+                return;
+            }
+            fileInput.disabled = true;
+            setCampaignMessage('Optimisation de l’image…');
+            try {
+                const mimeByExtension = { png: 'image/png', webp: 'image/webp', jpg: 'image/jpeg', jpeg: 'image/jpeg' };
+                const extension = String(file.name || '').split('.').pop().toLowerCase();
+                let body = file;
+                let mime = ['image/jpeg', 'image/png', 'image/webp'].includes(file.type)
+                    ? file.type
+                    : (mimeByExtension[extension] || 'image/jpeg');
+                try {
+                    const optimized = await optimizeImage(file);
+                    if (optimized) { body = optimized; mime = 'image/webp'; }
+                } catch (_) { /* tentative avec l’original */ }
+                if (body.size > 10 * 1024 * 1024) {
+                    setCampaignMessage('L’image reste trop lourde après optimisation. Réduisez sa résolution.', 'error');
+                    fileInput.disabled = false;
+                    return;
+                }
+                setCampaignMessage('Envoi du visuel (' + formatSize(body.size) + ')…');
+                const extensionOut = mime === 'image/png' ? 'png' : (mime === 'image/webp' ? 'webp' : 'jpg');
+                const objectPath = 'campaign/bg-' + Date.now() + '.' + extensionOut;
+                const response = await fetch(this._sbUrl() + '/storage/v1/object/promo-assets/' + objectPath, {
+                    method: 'POST',
+                    headers: {
+                        apikey: this._sbKey(),
+                        Authorization: 'Bearer ' + this._token(),
+                        'Content-Type': mime,
+                        'x-upsert': 'true',
+                    },
+                    body,
+                });
+                if (!response.ok) throw new Error('campaign image upload failed');
+                await this._rpc('admin_promo_campaign_set', { p_bg_path: objectPath });
+                setCampaignMessage('Visuel enregistré (' + formatSize(body.size) + ').', 'success');
+                await this._loadWebPrices();
+            } catch (error) {
+                console.warn('[Admin promotions] campaign image upload failed', error);
+                setCampaignMessage('Impossible d’envoyer le visuel. Vérifiez le format et réessayez.', 'error');
+                fileInput.disabled = false;
+            }
+        });
+        const removeReview = document.getElementById('promo-image-remove-review');
+        document.getElementById('fin-campaign-clear')?.addEventListener('click', () => {
+            if (!removeReview) return;
+            removeReview.hidden = false;
+            removeReview.scrollIntoView({ behavior: reduceMotion() ? 'auto' : 'smooth', block: 'nearest' });
+            removeReview.focus({ preventScroll: true });
+        });
+        document.getElementById('promo-image-remove-cancel')?.addEventListener('click', () => {
+            if (removeReview) removeReview.hidden = true;
+            document.getElementById('fin-campaign-clear')?.focus();
+        });
+        document.getElementById('promo-image-remove-confirm')?.addEventListener('click', async event => {
+            event.currentTarget.disabled = true;
+            setCampaignMessage('Retrait du visuel…');
+            try {
+                await this._rpc('admin_promo_campaign_set', { p_bg_path: null });
+                setCampaignMessage('Visuel retiré. Le thème automatique est actif.', 'success');
+                await this._loadWebPrices();
+            } catch (error) {
+                console.warn('[Admin promotions] campaign image removal failed', error);
+                setCampaignMessage('Impossible de retirer le visuel. Réessayez.', 'error');
+                event.currentTarget.disabled = false;
+            }
+        });
+
+        syncSelection();
+        setPreviewImage();
     }
 
     _renderFinance(f, sparks, vat, paywall) {
