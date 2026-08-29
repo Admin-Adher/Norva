@@ -1787,7 +1787,7 @@ if (
 }
 const MULTI_AUDIO_HLS_PROTOCOL = 1;
 const MAX_MULTI_AUDIO_RENDITIONS = 8;
-const GATEWAY_VERSION = 116;
+const GATEWAY_VERSION = 117;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -3508,6 +3508,22 @@ function strictLidEffectiveUrlSha256(value) {
     return crypto.createHash('sha256').update(String(value || '')).digest('hex');
 }
 
+function strictLidEffectiveUrlIdentitySha256(value) {
+    try {
+        const parsed = new URL(String(value || ''));
+        if (!['http:', 'https:'].includes(parsed.protocol)) return null;
+        // Provider CDNs commonly rotate signed query values between two exact
+        // byte-range requests. Keep host, path and the query *shape* pinned,
+        // while excluding credentials and volatile signature values.
+        const queryKeys = [...new Set([...parsed.searchParams.keys()])].sort();
+        const identity = `${parsed.protocol}//${parsed.host}${parsed.pathname}`
+            + (queryKeys.length ? `?${queryKeys.join('&')}` : '');
+        return crypto.createHash('sha256').update(identity).digest('hex');
+    } catch (_) {
+        return null;
+    }
+}
+
 function strictLidBrokerError(code, message, options = {}) {
     const error = new Error(message);
     error.code = code;
@@ -3895,16 +3911,6 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                     { status: 458, upstreamStatus },
                 ));
             }
-            if (
-                context.effectiveUrlSha256 &&
-                observedEffectiveUrlSha256 !== context.effectiveUrlSha256
-            ) {
-                throw markStrictLidTerminal(context, strictLidBrokerError(
-                    'VOD_CHANGED',
-                    'The media provider target changed during the byte-range session.',
-                    { status: 502, upstreamStatus },
-                ));
-            }
             if (controller.signal.aborted) {
                 throw controller.signal.reason || new Error('strict LID provider read stopped');
             }
@@ -3921,17 +3927,6 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                 { status: 502, upstreamStatus },
             ));
         }
-        if (
-            context.effectiveUrlSha256 &&
-            observedEffectiveUrlSha256 !== context.effectiveUrlSha256
-        ) {
-            throw markStrictLidTerminal(context, strictLidBrokerError(
-                'VOD_CHANGED',
-                'The media provider target changed during the byte-range session.',
-                { status: 502, upstreamStatus },
-            ));
-        }
-        if (!context.effectiveUrlSha256) context.effectiveUrlSha256 = observedEffectiveUrlSha256;
         const contentEncoding = String(attempt.response.headers?.get?.('content-encoding') || '').trim().toLowerCase();
         if (contentEncoding && contentEncoding !== 'identity') {
             throw markStrictLidTerminal(context, strictLidBrokerError(
@@ -3964,6 +3959,28 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
             ));
         }
         if (!context.validator && observedValidator) context.validator = observedValidator;
+        const observedEffectiveUrlIdentitySha256 = strictLidEffectiveUrlIdentitySha256(
+            attempt.response?.url || context.sourceUrl,
+        );
+        if (
+            context.effectiveUrlSha256
+            && observedEffectiveUrlSha256 !== context.effectiveUrlSha256
+            && !(
+                context.pathPrefix === 'finite-mkv-seek'
+                && context.effectiveUrlIdentitySha256
+                && observedEffectiveUrlIdentitySha256 === context.effectiveUrlIdentitySha256
+            )
+        ) {
+            throw markStrictLidTerminal(context, strictLidBrokerError(
+                'VOD_CHANGED',
+                'The media provider target changed during the byte-range session.',
+                { status: 502, upstreamStatus },
+            ));
+        }
+        if (!context.effectiveUrlSha256) context.effectiveUrlSha256 = observedEffectiveUrlSha256;
+        if (!context.effectiveUrlIdentitySha256) {
+            context.effectiveUrlIdentitySha256 = observedEffectiveUrlIdentitySha256;
+        }
         if (!attempt.response.body || typeof attempt.response.body.getReader !== 'function') {
             throw markStrictLidTerminal(context, strictLidBrokerError(
                 'PROVIDER_EMPTY_RESPONSE',
@@ -4109,6 +4126,9 @@ async function createStrictLidBroker(options = {}) {
     const expectedEffectiveUrlSha256 = /^[a-f0-9]{64}$/.test(String(options.effectiveUrlSha256 || '').toLowerCase())
         ? String(options.effectiveUrlSha256).toLowerCase()
         : null;
+    const expectedEffectiveUrlIdentitySha256 = /^[a-f0-9]{64}$/.test(String(options.effectiveUrlIdentitySha256 || '').toLowerCase())
+        ? String(options.effectiveUrlIdentitySha256).toLowerCase()
+        : null;
     const controller = new AbortController();
     const context = {
         sourceUrl,
@@ -4149,7 +4169,9 @@ async function createStrictLidBroker(options = {}) {
         nextOpenAt: 0,
         latestRequestId: 0,
         validator: expectedValidator,
+        pathPrefix,
         effectiveUrlSha256: expectedEffectiveUrlSha256,
+        effectiveUrlIdentitySha256: expectedEffectiveUrlIdentitySha256,
         terminalError: null,
         providerFetches: 0,
         completedProviderFetches: 0,
@@ -9558,6 +9580,9 @@ async function preopenBoundedMkvInputPump(session, parentSignal = null, options 
         session.vodInputEffectiveUrlSha256 = sha256Hex(String(
             opened.attempt.response?.url || session.sourceUrl || '',
         ));
+        session.vodInputEffectiveUrlIdentitySha256 = strictLidEffectiveUrlIdentitySha256(
+            opened.attempt.response?.url || session.sourceUrl || '',
+        );
         session.startupTimings = asRecord(session.startupTimings);
         session.startupTimings.providerValidatorEvidence = validatorEvidence;
         session.startupTimings.providerFullBodyAtZero = opened.range.fullBody === true;
@@ -9660,6 +9685,7 @@ async function prepareFiniteMkvSeekBroker(session, parentSignal = null) {
         userAgent: session.userAgent || FFMPEG_USER_AGENT,
         expectedValidator: session.vodInputValidator,
         effectiveUrlSha256: session.vodInputEffectiveUrlSha256,
+        effectiveUrlIdentitySha256: session.vodInputEffectiveUrlIdentitySha256,
         pathPrefix: 'finite-mkv-seek',
         // Exact responses are fully drained and the broker remains strictly
         // serialized, so no provider-slot grace is needed between them. A

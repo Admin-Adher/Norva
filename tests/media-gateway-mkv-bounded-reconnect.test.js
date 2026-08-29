@@ -118,6 +118,13 @@ function pumpHarness(overrides = {}) {
         sanitizeLog: (value) => String(value || ''),
         spawn: () => { throw new Error('unexpected analyzer spawn'); },
         sha256Hex: (value) => crypto.createHash('sha256').update(String(value)).digest('hex'),
+        strictLidEffectiveUrlIdentitySha256: (value) => {
+            const parsed = new URL(String(value || ''));
+            const queryKeys = [...new Set([...parsed.searchParams.keys()])].sort();
+            const identity = `${parsed.protocol}//${parsed.host}${parsed.pathname}`
+                + (queryKeys.length > 0 ? `?${queryKeys.join('&')}` : '');
+            return crypto.createHash('sha256').update(identity).digest('hex');
+        },
         needsMkvH264CurrentHeaderAuthority: () => false,
         maybeFinalizeMkvH264FastStartProof: () => null,
         RAW_PREFIX_SNIFF_BYTES: 512,
@@ -2793,6 +2800,7 @@ test('finite MKV seek preparation drains the retained provider before opening on
         fileSizeBytes: 3_633_791_388,
         vodInputValidator: { header: 'If-Range', value: '"v1"', kind: 'etag' },
         vodInputEffectiveUrlSha256: 'a'.repeat(64),
+        vodInputEffectiveUrlIdentitySha256: 'b'.repeat(64),
         preopenedVodInputAttempt: { attempt: {} },
         startupTimings: { boundedMkvInputPump: true, slotReleaseWaitMs: 0 },
     };
@@ -2807,6 +2815,7 @@ test('finite MKV seek preparation drains the retained provider before opening on
     assert.equal(brokerOptions.fileSizeBytes, session.fileSizeBytes);
     assert.deepEqual({ ...brokerOptions.expectedValidator }, session.vodInputValidator);
     assert.equal(brokerOptions.effectiveUrlSha256, session.vodInputEffectiveUrlSha256);
+    assert.equal(brokerOptions.effectiveUrlIdentitySha256, session.vodInputEffectiveUrlIdentitySha256);
     assert.equal(brokerOptions.pathPrefix, 'finite-mkv-seek');
     assert.equal(brokerOptions.completedReleaseDelayMs, 0);
     assert.equal(brokerOptions.supersededReleaseDelayMs, 0);
@@ -2955,6 +2964,7 @@ test('FFmpeg MKV input keeps pipe:0 at offset zero and uses the serialized loopb
     );
     assert.match(source, /pathPrefix:\s*'finite-mkv-seek'/);
     assert.match(source, /effectiveUrlSha256:\s*session\.vodInputEffectiveUrlSha256/);
+    assert.match(source, /effectiveUrlIdentitySha256:\s*session\.vodInputEffectiveUrlIdentitySha256/);
     assert.match(source, /boundedMkvInputPumpProtocol:\s*1/);
     assert.match(source, /finiteMkvSeekBroker:\s*\{[\s\S]+?providerConnectionsSerialized:\s*true/);
 });

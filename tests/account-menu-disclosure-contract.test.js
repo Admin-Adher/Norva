@@ -57,6 +57,12 @@ test('desktop popover and mobile sheet share the same secondary account actions'
   assert.doesNotMatch(app, /Kids profile|Kids Profile/i);
 });
 
+test('profile switching stays discoverable for a single-profile cloud account', () => {
+  assert.match(app, /if \(switchRow\) switchRow\.hidden = !cur\.isCloud/);
+  assert.match(app, /if \(switchRow\) switchRow\.style\.display = cur\.isCloud \? '' : 'none'/);
+  assert.doesNotMatch(app, /switchRow[^\n]+cur\.count > 1/);
+});
+
 test('account disclosure meets hit-target, hidden-state and reduced-motion contracts', () => {
   assert.match(css, /\.nav-profile\s*\{[\s\S]{0,220}width:\s*44px;[\s\S]{0,80}height:\s*44px;/);
   assert.match(css, /\.account-menu-item\s*\{[\s\S]{0,260}min-height:\s*52px;/);

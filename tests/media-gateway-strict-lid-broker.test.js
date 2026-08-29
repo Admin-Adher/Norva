@@ -20,7 +20,7 @@ function brokerHarness() {
   assert.ok(start >= 0 && end > start, 'strict LID broker source block must remain extractable');
   const source = gatewaySource.slice(start, end);
   return vm.runInNewContext(
-    `(() => { ${source}; return { parseStrictLidRange, createStrictLidBroker, createStrictLidRangeDeadline }; })()`,
+    `(() => { ${source}; return { parseStrictLidRange, createStrictLidBroker, createStrictLidRangeDeadline, strictLidEffectiveUrlIdentitySha256 }; })()`,
     {
       AbortController,
       Buffer,
@@ -899,6 +899,72 @@ test('finite MKV seek broker pins preopen validator and effective URL before for
   }
 });
 
+test('finite MKV seek accepts rotated signature values only for the same pinned CDN target', async (t) => {
+  const { createStrictLidBroker, strictLidEffectiveUrlIdentitySha256 } = brokerHarness();
+  const data = Buffer.alloc(32, 0x45);
+  const initialUrl = 'https://cdn.example/media/title.mkv?expires=100&signature=old';
+  const rotatedUrl = 'https://cdn.example/media/title.mkv?signature=new&expires=200';
+  const changedPathUrl = 'https://cdn.example/media/other-title.mkv?expires=200&signature=new';
+  const expectedFullHash = require('node:crypto').createHash('sha256').update(initialUrl).digest('hex');
+  const expectedIdentityHash = strictLidEffectiveUrlIdentitySha256(initialUrl);
+
+  assert.equal(expectedIdentityHash, strictLidEffectiveUrlIdentitySha256(rotatedUrl));
+  assert.notEqual(expectedIdentityHash, strictLidEffectiveUrlIdentitySha256(changedPathUrl));
+
+  const responseFor = (url, range = { start: 4, end: 11 }) => {
+    const body = data.subarray(range.start, range.end + 1);
+    const response = new Response(body, {
+      status: 206,
+      headers: {
+        'Content-Range': `bytes ${range.start}-${range.end}/${data.length}`,
+        'Content-Length': String(body.length),
+      },
+    });
+    Object.defineProperty(response, 'url', { value: url });
+    return response;
+  };
+
+  const compatible = await createStrictLidBroker({
+    sourceUrl: 'https://provider.example/movie/account/secret/title.mkv',
+    fileSizeBytes: data.length,
+    dispatcher: null,
+    releaseDelayMs: 0,
+    openTimeoutMs: 2000,
+    pathPrefix: 'finite-mkv-seek',
+    effectiveUrlSha256: expectedFullHash,
+    effectiveUrlIdentitySha256: expectedIdentityHash,
+    fetchImpl: async () => responseFor(rotatedUrl),
+  });
+  t.after(() => compatible.close());
+  const accepted = await fetch(compatible.inputUrl, { headers: { Range: 'bytes=4-11' } });
+  assert.equal(accepted.status, 206);
+  assert.deepEqual(Buffer.from(await accepted.arrayBuffer()), data.subarray(4, 12));
+
+  for (const scenario of [
+    { name: 'a different CDN path', pathPrefix: 'finite-mkv-seek', url: changedPathUrl },
+    { name: 'strict language validation', pathPrefix: 'strict-lid', url: rotatedUrl },
+  ]) {
+    const broker = await createStrictLidBroker({
+      sourceUrl: 'https://provider.example/movie/account/secret/title.mkv',
+      fileSizeBytes: data.length,
+      dispatcher: null,
+      releaseDelayMs: 0,
+      openTimeoutMs: 2000,
+      pathPrefix: scenario.pathPrefix,
+      effectiveUrlSha256: expectedFullHash,
+      effectiveUrlIdentitySha256: expectedIdentityHash,
+      fetchImpl: async () => responseFor(scenario.url),
+    });
+    try {
+      const rejected = await fetch(broker.inputUrl, { headers: { Range: 'bytes=4-11' } });
+      assert.equal(rejected.status, 502, scenario.name);
+      assert.equal((await rejected.json()).code, 'VOD_CHANGED', scenario.name);
+    } finally {
+      await broker.close();
+    }
+  }
+});
+
 test('strict LID rejects invalid exact signed coordinates before creating a server or provider fetch', async () => {
   const { createStrictLidBroker } = brokerHarness();
   let fetches = 0;
@@ -930,7 +996,7 @@ test('strict LID rejects invalid exact signed coordinates before creating a serv
   assert.match(route, /detectLanguageRequestPolicy\(req, options\)[\s\S]*validateDetectLanguageCapability\(capabilityToken, policy\.requiredScope\)/);
   assert.match(gatewaySource, /strictLidLoopbackBrokerProtocol: 1/);
   assert.match(gatewaySource, /strictLidFileSizeClaim: 'fileSizeBytes'/);
-  assert.match(gatewaySource, /const GATEWAY_VERSION = 116/);
+  assert.match(gatewaySource, /const GATEWAY_VERSION = 117/);
   assert.match(gatewaySource, /strictLidProviderDrainProtocol: 1/);
   assert.match(gatewaySource, /strictLidWeakFallbackProtocol: 1/);
   assert.match(gatewaySource, /strictLidTimelineSamplingProtocol: 1/);
