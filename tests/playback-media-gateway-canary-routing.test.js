@@ -305,7 +305,7 @@ test('Edge v55 deploy drains one-user routing, upgrades both replicas, and resto
   assert.match(deploy, /h\.vaapiVodFastStart\?\.minimumEncodeRateX === 2/);
   assert.match(deploy, /a7a31dca6004980ca7088eba65f64ba1b691c416faee978d1e560427b7c12546  supabase\/functions\/norva-playback\/index\.ts/);
   assert.match(deploy, /767d3315c950070c93c827adc9c2bc583b17b3adba2a425fa0ca7dbbb1039dda  ops\/hetzner\/scripts\/04-deploy-edge-functions\.sh/);
-  assert.match(reload, /^EXPECTED_PLAYBACK_VERSION=61$/m);
+  assert.match(reload, /^EXPECTED_PLAYBACK_VERSION=62$/m);
 
   const drain = deploy.indexOf("set_canary_selection ''");
   const standby = deploy.indexOf('wait_edge_state 53 standby 0', drain);
