@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#080b12">
+  <title>Norva Auth Prototype I — Progressive identity</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="prototype.css">
+</head>
+<body class="variant-i" data-variant="i" data-p-density="1">
+  <main class="identity-shell">
+    <aside class="identity-context" aria-label="Norva product context">
+      <a class="brand-lockup" href="index.html" aria-label="Back to Norva auth proposals">
+        <img src="assets/norva-app-icon.png" alt=""><span>Norva</span>
+      </a>
+      <div>
+        <p class="eyebrow">One account</p>
+        <h1>Pick up where you left off.</h1>
+        <p>Your catalogue and watch progress stay connected across phone, web and TV.</p>
+      </div>
+      <ul class="identity-platforms" aria-label="Supported screens"><li>Phone</li><li>Web</li><li>Android TV</li></ul>
+    </aside>
+
+    <section class="identity-flow" aria-labelledby="i-title">
+      <header class="identity-flow-bar">
+        <button class="icon-back" type="button" data-i-back aria-label="Go back" hidden>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <span data-i-progress>Account access</span>
+        <a href="#">Need help?</a>
+      </header>
+
+      <div class="identity-flow-inner">
+        <section data-i-step="identity">
+          <p class="eyebrow">Step 1 of 2</p>
+          <h1 id="i-title">What’s your email?</h1>
+          <p>We’ll find your account or help you create one. No choice to make first.</p>
+          <form class="auth-form" data-i-identity-form>
+            <div class="field"><label for="i-email">Email</label><input id="i-email" type="email" autocomplete="email" inputmode="email" placeholder="name@example.com" required></div>
+            <button class="action action-primary" type="submit">Continue</button>
+            <div class="divider">or</div>
+            <button class="action action-google" type="button" data-prototype-action>
+              <svg class="google-mark" viewBox="0 0 48 48" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.1H42V20H24v8h11.3A12 12 0 1 1 32 15l5.7-5.6A20 20 0 1 0 44 24c0-1.3-.1-2.6-.4-3.9Z"/><path fill="#1976D2" d="M43.6 20.1H42V20H24v8h11.3a12 12 0 0 1-4.1 5.6l6.2 5.2C41.2 35.3 44 30.1 44 24c0-1.3-.1-2.6-.4-3.9Z"/></svg>
+              Continue with Google
+            </button>
+            <p class="prototype-status" data-status aria-live="polite"></p>
+          </form>
+        </section>
+
+        <section data-i-step="credential" hidden>
+          <p class="eyebrow">Step 2 of 2</p>
+          <h1>Welcome back.</h1>
+          <div class="identity-email-row"><span data-i-email-value>name@example.com</span><button type="button" data-i-change>Change</button></div>
+          <form class="auth-form" data-i-credential-form>
+            <div class="field password-field"><label for="i-password">Password</label><div><input id="i-password" type="password" autocomplete="current-password" required><button type="button" data-password-toggle aria-label="Show password">Show</button></div></div>
+            <button class="action action-primary" type="submit">Sign in</button>
+            <button class="action action-secondary" type="button" data-prototype-action>Email me a sign-in code</button>
+            <button class="action-link" type="button" data-prototype-action>Forgot password?</button>
+            <p class="prototype-status" data-status aria-live="polite"></p>
+          </form>
+        </section>
+
+        <p class="fine-print">Norva is a media player and includes no content. Connect only a compatible source you own or are authorized to use.</p>
+      </div>
+    </section>
+  </main>
+  <script src="prototype.js"></script>
+</body>
+</html>

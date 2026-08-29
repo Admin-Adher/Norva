@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "status": "local_deferred_candidate",
+  "canonicalWorktree": "C:\\Users\\AdrienHernandez\\Documents\\Norva-post-provider-rollout-batch",
+  "canonicalBranch": "codex/post-provider-rollout-batch",
+  "productionBase": "15236f15ebb3b684448f3736c901a79082df068c",
+  "approvedReference": {
+    "journey": "prototype-archive/l-premium-continuity.html",
+    "responsiveBoard": "prototype-archive/qa-l.html",
+    "profileFunnels": "prototype-archive/profile-funnels.html",
+    "qaReport": "prototype-archive/design-qa.md"
+  },
+  "productionTargets": [
+    "public/account.html",
+    "public/js/authApi.js",
+    "public/js/profiles.js",
+    "public/js/cloudApi.js",
+    "public/css/main.css"
+  ],
+  "decisions": {
+    "singleEntryAction": true,
+    "emailFirst": true,
+    "passwordIsOptionalFallback": true,
+    "kidsProfiles": false,
+    "posterColumns": 3,
+    "welcomeSlides": 2,
+    "nominalScreenScroll": false,
+    "reducedMotionFallback": true
+  },
+  "blockers": [
+    {
+      "id": "numeric_email_otp_contract",
+      "severity": "blocking_if_numeric_code_is_kept",
+      "detail": "Production currently verifies emailed token_hash links; it does not expose an email plus four-digit-token verification helper."
+    },
+    {
+      "id": "account_page_extraction",
+      "severity": "required_refactor",
+      "detail": "Extract account.html inline CSS and controller logic without behavior changes before replacing renderers."
+    },
+    {
+      "id": "material_change_rollout_gate",
+      "severity": "production_gate",
+      "detail": "Do not deploy during an active Provider Access observation; follow the current material-change restart contract."
+    }
+  ],
+  "forbidden": [
+    "production deployment from this bundle",
+    "client-only OTP verification",
+    "account enumeration",
+    "PII in analytics",
+    "Kids profile UI",
+    "automatic push or Google Play publication"
+  ]
+}

@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#080b12">
+  <title>Norva Auth Prototype J — Access sheet</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="prototype.css">
+</head>
+<body class="variant-j" data-variant="j" data-p-density="1">
+  <main class="sheet-stage">
+    <section class="sheet-scene" aria-labelledby="j-scene-title">
+      <a class="brand-lockup" href="index.html" aria-label="Back to Norva auth proposals">
+        <img src="assets/norva-app-icon.png" alt=""><span>Norva</span>
+      </a>
+      <div class="sheet-scene-copy">
+        <p class="eyebrow">Continue watching</p>
+        <h1 id="j-scene-title">One library.<br>Every screen.</h1>
+        <p>Your Norva account keeps the experience together. Your TV provider remains separate.</p>
+      </div>
+      <div class="screen-diagram" aria-hidden="true">
+        <span class="screen-diagram-tv"></span><span class="screen-diagram-phone"></span><span class="screen-diagram-line"></span>
+      </div>
+    </section>
+
+    <section class="access-sheet" aria-labelledby="j-title">
+      <div class="sheet-handle" aria-hidden="true"></div>
+      <p class="eyebrow">Account access</p>
+      <h2 id="j-title">Continue to Norva</h2>
+      <p>Create an account or return to yours. We’ll recognise which path you need.</p>
+
+      <form class="auth-form" data-j-form>
+        <button class="action action-google" type="button" data-prototype-action>
+          <svg class="google-mark" viewBox="0 0 48 48" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.1H42V20H24v8h11.3A12 12 0 1 1 32 15l5.7-5.6A20 20 0 1 0 44 24c0-1.3-.1-2.6-.4-3.9Z"/><path fill="#1976D2" d="M43.6 20.1H42V20H24v8h11.3a12 12 0 0 1-4.1 5.6l6.2 5.2C41.2 35.3 44 30.1 44 24c0-1.3-.1-2.6-.4-3.9Z"/></svg>
+          Continue with Google
+        </button>
+        <button class="action action-secondary" type="button" data-j-email>Continue with email</button>
+        <div class="sheet-email" data-j-email-fields hidden>
+          <div class="field"><label for="j-email">Email</label><input id="j-email" type="email" autocomplete="email" inputmode="email" placeholder="name@example.com" required></div>
+          <button class="action action-primary" type="submit">Continue</button>
+        </div>
+        <p class="prototype-status" data-status aria-live="polite"></p>
+      </form>
+
+      <p class="sheet-reassurance"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 11V8a4 4 0 0 1 8 0v3m-9 0h10v9H7z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg> Norva never asks for your TV provider password here.</p>
+      <nav class="legal-links" aria-label="Legal"><a href="#">Privacy</a><a href="#">Terms</a><a href="#">Help</a></nav>
+    </section>
+  </main>
+  <script src="prototype.js"></script>
+</body>
+</html>

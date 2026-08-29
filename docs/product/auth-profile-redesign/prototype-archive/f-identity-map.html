@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#080b12">
+  <title>Norva Auth Prototype F — Identity map</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="prototype.css">
+</head>
+<body class="variant-f" data-variant="f" data-mode="signup" data-p-density="1">
+  <main class="auth-stage">
+    <div class="handoff-shell">
+      <section class="handoff-story" aria-labelledby="f-title">
+        <a class="brand-lockup" href="index.html" aria-label="Back to Norva auth proposals">
+          <img src="https://norva.tv/img/norva-app-icon.png" alt="">
+          <span>Norva</span>
+        </a>
+        <p class="eyebrow">One identity · three surfaces</p>
+        <h1 id="f-title">Your account connects the screens.</h1>
+        <p>The diagram says one useful thing, once. It never moves and never competes with account creation.</p>
+        <div class="identity-map" aria-label="Phone and TV connected through your Norva account">
+          <span class="identity-node"><span class="identity-node-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="7" y="2" width="10" height="20" rx="2"/><path d="M10 18h4"/></svg></span><span>Phone</span></span>
+          <span class="identity-link" aria-hidden="true"></span>
+          <span class="identity-node norva"><span class="identity-node-icon"><img src="https://norva.tv/img/norva-app-icon.png" alt=""></span><span>Your account</span></span>
+          <span class="identity-link" aria-hidden="true"></span>
+          <span class="identity-node"><span class="identity-node-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg></span><span>TV & web</span></span>
+        </div>
+      </section>
+      <section class="handoff-form" aria-label="Norva account access">
+        <div class="auth-panel" data-auth-render data-prefix="f" data-signup-intro="Create one account, then add your compatible source." data-signin-intro="Reconnect every Norva screen with one sign-in."></div>
+      </section>
+    </div>
+  </main>
+  <script src="prototype.js"></script>
+</body>
+</html>

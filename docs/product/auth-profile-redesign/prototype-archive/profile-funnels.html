@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Norva profile funnels — local prototype</title>
+  <link rel="icon" href="data:,">
+  <style>
+    :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+    * { box-sizing: border-box; }
+    body { margin: 0; color: #f8fafc; background: #05070b; }
+    button, a { font: inherit; }
+    button:focus-visible, a:focus-visible { outline: 2px solid #93c5fd; outline-offset: 3px; }
+    .page { width: min(1180px, calc(100% - 32px)); margin: 0 auto; padding: 32px 0 48px; }
+    .intro { display: flex; align-items: end; justify-content: space-between; gap: 28px; margin-bottom: 28px; }
+    .eyebrow { margin: 0 0 8px; color: #8fb5ff; font-size: 12px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+    h1 { margin: 0; max-width: 760px; font-size: clamp(34px, 6vw, 64px); line-height: .98; letter-spacing: -.055em; }
+    .intro p:last-child { max-width: 490px; margin: 14px 0 0; color: #9da8bd; line-height: 1.5; }
+    .scope { flex: 0 0 auto; padding: 10px 14px; border: 1px solid #29344c; border-radius: 999px; color: #b8c6dc; background: #0d1220; font-size: 12px; font-weight: 760; }
+    .workspace { display: grid; grid-template-columns: minmax(310px, .86fr) minmax(430px, 1.14fr); gap: 28px; align-items: start; }
+    .lanes { display: grid; gap: 14px; }
+    .lane { padding: 18px; border: 1px solid #222c40; border-radius: 16px; background: #0b101b; }
+    .lane header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+    .lane h2 { margin: 0; font-size: 17px; letter-spacing: -.02em; }
+    .lane small { color: #71809a; }
+    .steps { display: flex; flex-wrap: wrap; gap: 8px; }
+    .step { min-height: 44px; padding: 0 12px; border: 1px solid #303b52; border-radius: 10px; color: #bdc8da; background: #111827; font-size: 12px; font-weight: 720; cursor: pointer; }
+    .step:hover, .step.is-current { color: #fff; border-color: #7399ff; background: #1a2850; }
+    .preview { position: sticky; top: 20px; display: grid; grid-template-columns: minmax(390px, auto) minmax(180px, 1fr); gap: 18px; align-items: start; }
+    .device { width: 390px; height: 844px; overflow: hidden; border: 1px solid #34415b; border-radius: 28px; background: #090b12; box-shadow: 0 30px 90px rgba(0,0,0,.55); }
+    iframe { width: 390px; height: 844px; display: block; border: 0; background: #090b12; }
+    .preview-copy { padding: 18px 0; }
+    .preview-copy h2 { margin: 0 0 8px; font-size: 22px; letter-spacing: -.03em; }
+    .preview-copy p { margin: 0 0 18px; color: #96a4ba; font-size: 14px; line-height: 1.5; }
+    .preview-copy a { min-height: 44px; display: inline-flex; align-items: center; padding: 0 14px; border: 1px solid #4667e9; border-radius: 10px; color: #fff; background: #304cbf; font-weight: 760; text-decoration: none; }
+    .legend { margin-top: 18px; color: #65728a; font-size: 11px; line-height: 1.45; }
+    @media (max-width: 900px) {
+      .intro { align-items: start; flex-direction: column; }
+      .workspace { grid-template-columns: 1fr; }
+      .preview { position: static; grid-template-columns: 390px minmax(180px, 1fr); }
+    }
+    @media (max-width: 660px) {
+      .page { width: min(100% - 20px, 420px); padding-top: 22px; }
+      .preview { grid-template-columns: 1fr; }
+      .device, iframe { width: 390px; max-width: 100%; }
+      .device { margin: 0 auto; }
+      iframe { transform-origin: top left; }
+      .scope { white-space: normal; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="intro">
+      <div>
+        <p class="eyebrow">Norva · profile experience</p>
+        <h1>Three funnels. One profile language.</h1>
+        <p>Explore the returning-user, first-account and profile-management paths. Every phone screen is a fixed viewport with no page scroll.</p>
+      </div>
+      <span class="scope">Local prototype · production untouched</span>
+    </header>
+
+    <div class="workspace">
+      <nav class="lanes" aria-label="Prototype funnels">
+        <section class="lane">
+          <header><h2>Returning account</h2><small>4 steps</small></header>
+          <div class="steps">
+            <button class="step" type="button" data-preview="l-premium-continuity.html?view=auth" data-title="1 · Enter email" data-note="One entry point. Norva decides the next path after the email.">Email</button>
+            <button class="step" type="button" data-preview="l-premium-continuity.html?view=auth&amp;step=code&amp;email=adrien%40norva.tv&amp;otp=21" data-title="2 · Secure code" data-note="The secure code is the default. Password remains an optional fallback.">Code</button>
+            <button class="step is-current" type="button" data-preview="l-premium-continuity.html?view=profiles&amp;profile=chooser" data-title="3 · Choose a profile" data-note="Shown only when several usable profiles exist. A single profile continues automatically.">Profiles</button>
+            <button class="step" type="button" data-preview="l-premium-continuity.html?view=profiles&amp;profile=arrival" data-title="4 · Enter Norva" data-note="Direct handoff to Home with a short, contextual welcome.">Home handoff</button>
+          </div>
+        </section>
+
+        <section class="lane">
+          <header><h2>New account</h2><small>5 steps</small></header>
+          <div class="steps">
+            <button class="step" type="button" data-preview="l-premium-continuity.html?view=auth" data-title="1 · Enter email" data-note="The same doorway starts both account access and creation.">Email</button>
+            <button class="step" type="button" data-preview="l-premium-continuity.html?view=auth&amp;step=code&amp;account=new&amp;email=new-user%40norva.tv&amp;otp=21" data-title="2 · Verify email" data-note="New users verify the address before profile setup.">Verify</button>
+            <button class="step" type="button" data-preview="l-premium-continuity.html?view=profiles&amp;profile=setup" data-title="3 · First profile" data-note="The auto-provisioned profile becomes personal in one compact screen.">Set up</button>
+            <button class="step" type="button" data-preview="l-premium-continuity.html?view=profiles&amp;profile=avatars&amp;returnTo=setup" data-title="4 · Choose an avatar" data-note="Twelve real Norva avatars fit without a vertical-scroll detour.">Avatar</button>
+            <button class="step" type="button" data-preview="l-premium-continuity.html?view=profiles&amp;profile=created" data-title="5 · Profile ready" data-note="One calm success state, then straight into Norva.">Ready</button>
+          </div>
+        </section>
+
+        <section class="lane">
+          <header><h2>Manage profiles</h2><small>4 steps</small></header>
+          <div class="steps">
+            <button class="step" type="button" data-preview="l-premium-continuity.html?view=profiles&amp;profile=chooser" data-title="1 · Profile switcher" data-note="The selection screen remains the natural hub.">Switcher</button>
+            <button class="step" type="button" data-preview="l-premium-continuity.html?view=profiles&amp;profile=manage" data-title="2 · Manage" data-note="Editing and adding are explicit; profile selection is disabled in this mode.">Manage</button>
+            <button class="step" type="button" data-preview="l-premium-continuity.html?view=profiles&amp;profile=edit" data-title="3 · Edit profile" data-note="Name, avatar and audience mode use the same controls as first setup.">Edit</button>
+            <button class="step" type="button" data-preview="l-premium-continuity.html?view=profiles&amp;profile=avatars&amp;returnTo=edit" data-title="4 · Avatar library" data-note="The picker returns to the exact editor that opened it.">Avatar</button>
+          </div>
+        </section>
+      </nav>
+
+      <section class="preview" aria-live="polite">
+        <div class="device"><iframe title="Norva profile funnel preview" src="l-premium-continuity.html?view=profiles&amp;profile=chooser" data-preview-frame></iframe></div>
+        <div class="preview-copy">
+          <p class="eyebrow">Selected state</p>
+          <h2 data-preview-title>3 · Choose a profile</h2>
+          <p data-preview-note>Shown only when several usable profiles exist. A single profile continues automatically.</p>
+          <a href="l-premium-continuity.html?view=profiles&amp;profile=chooser" target="_blank" rel="noopener" data-preview-link>Open full screen</a>
+          <p class="legend">The prototype mirrors Norva’s current profile model: name, avatar, viewing history and progress — no Kids mode.</p>
+        </div>
+      </section>
+    </div>
+  </main>
+  <script>
+    const frame = document.querySelector('[data-preview-frame]');
+    const title = document.querySelector('[data-preview-title]');
+    const note = document.querySelector('[data-preview-note]');
+    const link = document.querySelector('[data-preview-link]');
+    document.querySelectorAll('[data-preview]').forEach((button) => {
+      button.addEventListener('click', () => {
+        document.querySelectorAll('[data-preview]').forEach((item) => item.classList.toggle('is-current', item === button));
+        frame.src = button.dataset.preview;
+        title.textContent = button.dataset.title;
+        note.textContent = button.dataset.note;
+        link.href = button.dataset.preview;
+      });
+    });
+  </script>
+</body>
+</html>

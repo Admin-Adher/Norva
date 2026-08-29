@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#080b12">
+  <title>Norva Auth Prototype H — Welcome, then access</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="prototype.css">
+</head>
+<body class="variant-h" data-variant="h" data-p-density="1">
+  <main class="welcome-access-shell">
+    <section class="welcome-view" data-h-view="welcome" aria-labelledby="h-welcome-title">
+      <header class="welcome-bar">
+        <a class="brand-lockup" href="index.html" aria-label="Back to Norva auth proposals">
+          <img src="assets/norva-app-icon.png" alt="">
+          <span>Norva</span>
+        </a>
+        <button class="welcome-signin" type="button" data-h-open="signin">Sign in</button>
+      </header>
+
+      <div class="welcome-body">
+        <div class="welcome-copy">
+          <p class="eyebrow">Your screens, together</p>
+          <h1 id="h-welcome-title">Your TV service.<br>Ready everywhere.</h1>
+          <p>Keep your catalogue and continue watching across phone, web and Android TV.</p>
+        </div>
+
+        <div class="welcome-product" aria-label="Norva on television and phone">
+          <img class="welcome-tv" src="assets/mock-tv-home.webp" alt="Norva home on a television">
+          <img class="welcome-phone" src="assets/mock-phone-movies.webp" alt="Norva movies on a phone">
+        </div>
+      </div>
+
+      <footer class="welcome-actions">
+        <button class="action action-primary" type="button" data-h-open="signup">Get started</button>
+        <p>Norva is a media player and includes no content.</p>
+      </footer>
+    </section>
+
+    <section class="welcome-auth" data-h-view="auth" aria-labelledby="h-auth-title" hidden>
+      <div class="auth-only-bar">
+        <button class="icon-back" type="button" data-h-back aria-label="Back to welcome">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <a class="brand-lockup" href="index.html" aria-label="Back to Norva auth proposals">
+          <img src="assets/norva-app-icon.png" alt=""><span>Norva</span>
+        </a>
+      </div>
+
+      <div class="auth-only-content">
+        <p class="eyebrow" data-h-kicker>Account access</p>
+        <h1 id="h-auth-title" data-h-title>Continue to Norva</h1>
+        <p data-h-copy>Choose the quickest way to create your account.</p>
+
+        <form class="auth-form" data-h-form>
+          <button class="action action-google" type="button" data-prototype-action>
+            <svg class="google-mark" viewBox="0 0 48 48" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.1H42V20H24v8h11.3A12 12 0 1 1 32 15l5.7-5.6A20 20 0 1 0 44 24c0-1.3-.1-2.6-.4-3.9Z"/><path fill="#1976D2" d="M43.6 20.1H42V20H24v8h11.3a12 12 0 0 1-4.1 5.6l6.2 5.2C41.2 35.3 44 30.1 44 24c0-1.3-.1-2.6-.4-3.9Z"/></svg>
+            Continue with Google
+          </button>
+          <div class="divider">or</div>
+          <div class="field"><label for="h-email">Email</label><input id="h-email" type="email" autocomplete="email" inputmode="email" placeholder="name@example.com" required></div>
+          <button class="action action-primary" type="submit" data-h-submit>Continue with email</button>
+          <p class="prototype-status" data-status aria-live="polite"></p>
+        </form>
+
+        <button class="auth-switch" type="button" data-h-switch>Already have an account? <strong>Sign in</strong></button>
+        <p class="fine-print">By continuing, you agree to Norva’s <a href="#">Terms</a> and acknowledge the <a href="#">Privacy Policy</a>.</p>
+      </div>
+    </section>
+  </main>
+  <script src="prototype.js"></script>
+</body>
+</html>

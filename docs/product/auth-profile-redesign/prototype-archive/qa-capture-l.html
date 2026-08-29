@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Prototype L capture fixture</title>
+  <link rel="icon" href="data:,">
+  <style>
+    html,
+    body {
+      width: 100%;
+      min-height: 100%;
+      margin: 0;
+      background: #ff00ff;
+    }
+
+    iframe {
+      width: 390px;
+      height: 844px;
+      display: block;
+      border: 0;
+      background: #090b12;
+    }
+  </style>
+</head>
+<body>
+  <iframe title="Prototype L capture" src="l-premium-continuity.html?view=auth"></iframe>
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const state = params.get('state') || 'email';
+    if (state === 'welcome') {
+      document.querySelector('iframe').src = 'l-premium-continuity.html';
+    } else {
+      const query = new URLSearchParams({ view: 'auth', email: 'adrien@norva.tv' });
+      if (state === 'code' || state === 'new') {
+        query.set('step', 'code');
+        query.set('otp', '21');
+        if (state === 'new') query.set('account', 'new');
+      } else if (state === 'verify') {
+        query.set('step', 'verify');
+        query.set('otp', '2192');
+      } else if (state === 'password') {
+        query.set('step', 'password');
+      }
+      document.querySelector('iframe').src = `l-premium-continuity.html?${query}`;
+    }
+  </script>
+</body>
+</html>
