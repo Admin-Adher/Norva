@@ -1787,7 +1787,7 @@ if (
 }
 const MULTI_AUDIO_HLS_PROTOCOL = 1;
 const MAX_MULTI_AUDIO_RENDITIONS = 8;
-const GATEWAY_VERSION = 117;
+const GATEWAY_VERSION = 118;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -3962,14 +3962,16 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
         const observedEffectiveUrlIdentitySha256 = strictLidEffectiveUrlIdentitySha256(
             attempt.response?.url || context.sourceUrl,
         );
+        // The broker always fetches the same authenticated logical source URL.
+        // A provider may legitimately redirect every exact range to another
+        // signed CDN host/path. For finite MKV playback, continuity is therefore
+        // pinned by that immutable source URL, the exact Content-Range total and
+        // any strong validator, rather than by the provider's volatile redirect.
+        // Strict language validation keeps the original effective-URL fence.
         if (
             context.effectiveUrlSha256
             && observedEffectiveUrlSha256 !== context.effectiveUrlSha256
-            && !(
-                context.pathPrefix === 'finite-mkv-seek'
-                && context.effectiveUrlIdentitySha256
-                && observedEffectiveUrlIdentitySha256 === context.effectiveUrlIdentitySha256
-            )
+            && context.pathPrefix !== 'finite-mkv-seek'
         ) {
             throw markStrictLidTerminal(context, strictLidBrokerError(
                 'VOD_CHANGED',
