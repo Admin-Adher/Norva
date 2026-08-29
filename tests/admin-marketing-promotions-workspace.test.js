@@ -65,6 +65,10 @@ test('Promotion workspace uses product assets, semantic controls and safe user-f
 test('Promotion styles preserve focus, touch size, reduced motion and responsive layouts', () => {
   assert.ok(promoCssStart > 0 && promoCssEnd > promoCssStart);
   assert.match(promoCss, /min-height:44px/);
+  assert.match(promoCss, /\.promo-campaign-grid\{[^}]+grid-template-columns:repeat\(2,minmax\(0,1fr\)\)[^}]+align-items:start/);
+  assert.match(promoCss, /\.promo-campaign-grid\.has-custom-label\{[^}]*grid-template-columns:/);
+  assert.match(promoCss, /input\[type="datetime-local"\]\{color-scheme:dark;\}/);
+  assert.match(promoCss, /\.promo-field-help\{color:var\(--color-text-secondary\)/);
   assert.match(promoCss, /touch-action:manipulation/);
   assert.match(promoCss, /:focus-visible/);
   assert.match(promoCss, /outline:2px solid var\(--color-accent\)/);
@@ -72,6 +76,13 @@ test('Promotion styles preserve focus, touch size, reduced motion and responsive
   assert.match(promoCss, /@media\(max-width:520px\)/);
   assert.match(promoCss, /@media\(prefers-reduced-motion:reduce\)/);
   assert.doesNotMatch(promoCss, /#[0-9a-fA-F]{3,8}\b/);
+});
+
+test('Campaign end helper is explicitly associated with the native date control', () => {
+  assert.match(promotions, /id="promo-campaign-grid"/);
+  assert.match(promotions, /campaignGrid\?\.classList\.toggle\('has-custom-label', eventInput\.value === 'other'\)/);
+  assert.match(promotions, /id="promo-campaign-end"[^>]+aria-describedby="promo-campaign-end-help"/);
+  assert.match(promotions, /class="promo-field-help" id="promo-campaign-end-help"/);
 });
 
 test('Marketing tabs expose selection state and keyboard navigation', () => {

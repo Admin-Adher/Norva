@@ -56,7 +56,7 @@ test('the phone Home action opens the sheet without changing route', () => {
   const modalIndex = appHtml.indexOf('/js/components/NorvaModal.js?v=2');
   const pairIndex = appHtml.indexOf('/js/components/PairTvSheet.js?v=3');
   const homeIndex = appHtml.indexOf('/js/pages/HomePage.js?v=6016cf63fb');
-  const appIndex = appHtml.indexOf('/js/app.js?v=6066ea92b3');
+  const appIndex = appHtml.indexOf('/js/app.js?v=1d3b3be95a');
   assert.ok(modalIndex > 0 && modalIndex < pairIndex && pairIndex < homeIndex && homeIndex < appIndex);
   assert.match(appHtml, /\/css\/main\.css\?v=a8f7f047b9/);
 });

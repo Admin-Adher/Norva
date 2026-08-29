@@ -835,12 +835,15 @@ class AdminPage {
 #page-admin .promo-panel-head h3{margin:0;color:var(--color-text-primary);font-size:14px;line-height:1.35;}
 #page-admin .promo-panel-head p{margin:4px 0 0;color:var(--color-text-muted);font-size:10.5px;line-height:1.45;}
 #page-admin .promo-panel-body{padding:16px;}
-#page-admin .promo-campaign-grid{display:grid;grid-template-columns:minmax(170px,1fr) minmax(190px,1fr) minmax(150px,.75fr);gap:12px;align-items:end;}
+#page-admin .promo-campaign-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;align-items:start;}
+#page-admin .promo-campaign-grid.has-custom-label{grid-template-columns:minmax(170px,1fr) minmax(190px,1fr) minmax(150px,.75fr);}
 #page-admin .promo-field{display:grid;gap:6px;min-width:0;color:var(--color-text-secondary);font-size:11px;font-weight:700;}
 #page-admin .promo-field input,#page-admin .promo-field select{width:100%;min-height:44px;border:1px solid var(--color-border-light);border-radius:var(--radius-md);background:var(--color-bg-primary);color:var(--color-text-primary);padding:9px 11px;font:inherit;font-size:13px;}
+#page-admin .promo-campaign-grid input[type="datetime-local"]{color-scheme:dark;}
+#page-admin .promo-campaign-grid input[type="datetime-local"]::-webkit-calendar-picker-indicator{opacity:.78;cursor:pointer;}
 #page-admin .promo-field input:focus-visible,#page-admin .promo-field select:focus-visible,#page-admin .promo-button:focus-visible,#page-admin .promo-check-wrap:focus-within,#page-admin .promo-catalogue summary:focus-visible{outline:2px solid var(--color-accent);outline-offset:2px;}
 #page-admin .promo-field input:disabled,#page-admin .promo-field select:disabled{opacity:.48;cursor:not-allowed;}
-#page-admin .promo-field-help{color:var(--color-text-muted);font-size:10px;font-weight:500;line-height:1.4;}
+#page-admin .promo-field-help{color:var(--color-text-secondary);font-size:10.5px;font-weight:500;line-height:1.45;}
 #page-admin .promo-custom-label[hidden]{display:none;}
 #page-admin .promo-bulkbar{display:flex;align-items:end;gap:10px;margin-top:14px;padding-top:14px;border-top:1px solid var(--color-border);}
 #page-admin .promo-panel-body>.promo-bulkbar:first-child{margin-top:0;padding-top:0;border-top:0;}
@@ -945,7 +948,7 @@ class AdminPage {
 @media(max-width:760px){
   #page-admin .promo-intro{display:block;padding:16px;}
   #page-admin .promo-state{margin-top:12px;}
-  #page-admin .promo-campaign-grid{grid-template-columns:1fr;}
+  #page-admin .promo-campaign-grid,#page-admin .promo-campaign-grid.has-custom-label{grid-template-columns:1fr;}
   #page-admin .promo-bulkbar{align-items:stretch;flex-wrap:wrap;}
   #page-admin .promo-bulkbar .promo-field{width:100%;}
   #page-admin .promo-bulk-note{width:100%;max-width:none;margin:0;text-align:left;}
@@ -2737,13 +2740,13 @@ class AdminPage {
                     <section class="promo-panel" aria-labelledby="promo-rules-title">
                         <div class="promo-panel-head"><div><h3 id="promo-rules-title">Règles de campagne</h3><p>Ces réglages seront appliqués à toutes les offres cochées.</p></div></div>
                         <div class="promo-panel-body">
-                            <div class="promo-campaign-grid">
+                            <div class="promo-campaign-grid${initialEvent === 'other' ? ' has-custom-label' : ''}" id="promo-campaign-grid">
                                 <label class="promo-field" for="promo-campaign-event">Événement
                                     <select id="promo-campaign-event">${eventOptions}</select>
                                 </label>
                                 <label class="promo-field" for="promo-campaign-end">Fin automatique
-                                    <input id="promo-campaign-end" type="datetime-local" value="${escA(initialEnd)}">
-                                    <span class="promo-field-help">Activation immédiate après confirmation ; vide : aucune échéance automatique.</span>
+                                    <input id="promo-campaign-end" type="datetime-local" value="${escA(initialEnd)}" aria-describedby="promo-campaign-end-help">
+                                    <span class="promo-field-help" id="promo-campaign-end-help">Activation immédiate après confirmation ; vide : aucune échéance automatique.</span>
                                 </label>
                                 <label class="promo-field promo-custom-label" id="promo-custom-label-field" for="promo-campaign-label"${initialEvent === 'other' ? '' : ' hidden'}>Libellé storefront
                                     <input id="promo-campaign-label" type="text" minlength="2" maxlength="24" value="${escA(initialLabel)}" placeholder="Limited Offer">
@@ -2835,6 +2838,7 @@ class AdminPage {
         const reviewList = document.getElementById('promo-review-list');
         const finalSave = document.getElementById('fin-prices-save');
         const verifyButton = document.getElementById('promo-verify');
+        const campaignGrid = document.getElementById('promo-campaign-grid');
         const eventInput = document.getElementById('promo-campaign-event');
         const endInput = document.getElementById('promo-campaign-end');
         const customLabelField = document.getElementById('promo-custom-label-field');
@@ -2976,6 +2980,7 @@ class AdminPage {
         eventInput?.addEventListener('change', () => {
             invalidateReview();
             if (customLabelField) customLabelField.hidden = eventInput.value !== 'other';
+            campaignGrid?.classList.toggle('has-custom-label', eventInput.value === 'other');
             if (eventInput.value === 'other') customLabelInput?.focus();
             syncPreview();
         });
