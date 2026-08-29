@@ -583,7 +583,7 @@ test('strict language validation accepts exact AVI Gateway probes without accept
   const source = between(
     playback,
     'function hasExactGatewayInbandVodProfile(',
-    '\nasync function loadLanguageValidationIdentity(',
+    '\nfunction gatewayProvesRequestedAudioFallback(',
   ).replace('value: unknown', 'value');
   const context = {
     recordOrEmpty: value => value && typeof value === 'object' && !Array.isArray(value) ? value : {},
@@ -1008,14 +1008,63 @@ test('public job responses contain no provider capability, URL or transcript', (
   assert.match(verified, /audioTracks: options\.audioTracks/);
 });
 
-test('Edge still verifies the gateway-reported audio index instead of trusting the request', () => {
+test('Edge keeps real audio-map drift fail-closed but repairs a proven stale file-local preference', () => {
   const gateway = between(
     playback,
     'async function createGatewaySession(',
     '\nasync function requestGatewaySession(',
   );
   assert.match(gateway, /const requestedAudioStreamIndex = boundedNullableInt/);
-  assert.match(gateway, /audioStreamIndex !== requestedAudioStreamIndex/);
+  assert.match(gateway, /const staleRequestedAudioFallback = gatewayProvesRequestedAudioFallback/);
+  assert.match(gateway, /audioStreamIndex !== requestedAudioStreamIndex &&[\s\S]*!staleRequestedAudioFallback/);
   assert.match(gateway, /AUDIO_STREAM_MAP_MISMATCH/);
   assert.match(gateway, /const cleanup = await cleanupCreatedSession\(\)/);
+});
+
+test('audio fallback requires an exact current-file inventory that excludes the stale index', () => {
+  const source = between(
+    playback,
+    'function hasExactGatewayInbandVodProfile(',
+    '\nasync function loadLanguageValidationIdentity(',
+  )
+    .replaceAll(': unknown', '')
+    .replaceAll(': number | null', '');
+  const context = {
+    recordOrEmpty: value => value && typeof value === 'object' && !Array.isArray(value) ? value : {},
+    hasReliableVodCodecProfile: value => Boolean(value?.videoCodec && value?.audioCodec && value?.container),
+    normalizeCodecProfile: value => value,
+    normalizeCodecToken: value => String(value || '').toLowerCase().replace(/[^a-z0-9.]+/g, ''),
+    canonicalVodContainer: value => {
+      const token = String(value || '').toLowerCase();
+      return ['mkv', 'mp4', 'mov', 'avi', 'ogg', 'flv', 'mpg'].includes(token) ? token : null;
+    },
+    stringOr: (value, fallback) => typeof value === 'string' && value ? value : fallback,
+    Number,
+    Date,
+    Boolean,
+    Set,
+    Array,
+  };
+  vm.runInNewContext(
+    `${source}; this.fallback = gatewayProvesRequestedAudioFallback;`,
+    context,
+  );
+  const exact = {
+    metadataComplete: true,
+    container: 'mkv',
+    videoCodec: 'h264',
+    audioCodec: 'aac',
+    audioTracks: [{ index: 1 }, { index: 2 }],
+    subtitles: [],
+    durationSeconds: 3324,
+    fileSizeBytes: 1801768324,
+    probedAt: '2026-08-29T20:41:20.000Z',
+    probeSource: 'gateway_inband',
+  };
+
+  assert.equal(context.fallback(exact, 0, 1), true);
+  assert.equal(context.fallback(exact, 2, 1), false, 'a real requested audio track may not be replaced');
+  assert.equal(context.fallback({ ...exact, metadataComplete: false }, 0, 1), false);
+  assert.equal(context.fallback({ ...exact, audioTracks: [{ index: 1 }, { index: 1 }] }, 0, 1), false);
+  assert.equal(context.fallback(exact, 0, 3), false, 'the mapped track must exist in the exact inventory');
 });
