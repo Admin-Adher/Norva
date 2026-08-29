@@ -671,8 +671,9 @@
         const tabs = document.getElementById('tabs');
         const welcomeStage = document.getElementById('welcome-stage');
         const WELCOME_SEEN_KEY = 'norva-account-welcome-seen-v1';
-        // Web and Android phone use one neutral email-first OTP funnel. Android TV
-        // is redirected to its pairing-only surface before first paint.
+        // Web and Android phone use one neutral email-first OTP funnel. Only the
+        // native phone shell keeps the illustrated welcome; web enters directly
+        // at email, while Android TV is redirected to pairing before first paint.
         const isNativeApp = document.documentElement.classList.contains('native-app');
         const isNativePhoneApp = document.documentElement.classList.contains('android-phone-auth');
         const isPremiumAuth = document.documentElement.classList.contains('premium-auth');
@@ -713,7 +714,7 @@
         }
 
         function shouldShowWelcome() {
-            if (!isPremiumAuth || !welcomeStage || params.get('manage') === '1' || params.get('email') || params.get('token_hash')
+            if (!isNativePhoneApp || !isPremiumAuth || !welcomeStage || params.get('manage') === '1' || params.get('email') || params.get('token_hash')
                 || params.get('mode') === 'recovery' || location.hash) return false;
             try { return localStorage.getItem(WELCOME_SEEN_KEY) !== '1'; }
             catch (_) { return false; }

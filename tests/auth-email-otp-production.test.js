@@ -12,7 +12,9 @@ test('web and Android Phone share one email-first funnel with a real six-digit O
   const account = read('public/account.html');
   assert.match(account, /android-phone-auth/);
   assert.match(account, /premium-auth-style[^>]*media="not all"/);
-  assert.match(account, /if \(isPremiumAuth\)[\s\S]*showWelcome\(\)/);
+  assert.match(account, /if \(isPremiumAuth\)[\s\S]*showForm\('signin'\)/);
+  assert.match(account, /function shouldShowWelcome\(\)[\s\S]*if \(!isNativePhoneApp/);
+  assert.match(account, /params\.get\('token_hash'\)[\s\S]*params\.get\('mode'\) === 'recovery'[\s\S]*location\.hash/);
   assert.equal((account.match(/<input[^>]+data-otp-digit/g) || []).length, 6);
   assert.match(account, /We’ll email a six-digit code/);
   assert.match(account, /getElementById\('use-password-toggle'\)\.textContent = 'Use a password instead'/);
