@@ -3719,7 +3719,7 @@ class App {
                 // rewrite it. Keep this value equal to the first 10 characters of the
                 // file's canonical-LF SHA-256; the contract test fails if they drift apart.
                 // Using the content hash here also gives the immutable CDN cache a new URL.
-                s.src = '/js/pages/AdminPage.js?v=284dc032be';
+                s.src = '/js/pages/AdminPage.js?v=60f26ea346';
                 s.onload = () => resolve();
                 s.onerror = () => { this._adminPageLoading = null; reject(new Error('AdminPage.js failed to load')); };
                 document.head.appendChild(s);
@@ -3793,6 +3793,15 @@ class App {
 // `.modal-overlay.active` contract handled by standalone.js. Consume native
 // Android Back through their own Cancel control so the modal keeps ownership
 // of inert cleanup, Promise resolution and exact focus restoration.
+function closeAdminClientSheetForNativeBack() {
+    const sheet = document.querySelector('#page-admin .client-sheet-layer.is-open');
+    if (!sheet) return false;
+    const closeButton = sheet.querySelector('[data-client-close]');
+    if (!closeButton || typeof closeButton.click !== 'function') return true;
+    closeButton.click();
+    return true;
+}
+
 function closeAdminModalForNativeBack() {
     const modal = document.querySelector('#page-admin .crm-modal-back');
     if (!modal) return false;
@@ -3805,6 +3814,7 @@ function closeAdminModalForNativeBack() {
 const norvaHandleBackFallback = window.__norvaHandleBack;
 window.__norvaHandleBack = function () {
     try {
+        if (closeAdminClientSheetForNativeBack()) return 'handled';
         if (closeAdminModalForNativeBack()) return 'handled';
     } catch (_) { /* delegate to the established overlay / route contract */ }
     return typeof norvaHandleBackFallback === 'function'

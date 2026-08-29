@@ -16,6 +16,37 @@ function loadCloseHelper(document) {
     return vm.runInNewContext(`(${source})`, { document });
 }
 
+function loadClientSheetCloseHelper(document) {
+    const source = app.match(/function closeAdminClientSheetForNativeBack\(\) \{[\s\S]*?\n\}/)?.[0];
+    assert.ok(source, 'the Admin client-sheet Back helper must remain independently testable');
+    return vm.runInNewContext(`(${source})`, { document });
+}
+
+test('Android Back closes the Admin client inspector before changing route history', () => {
+    let closeClicks = 0;
+    const closeButton = { click: () => { closeClicks += 1; } };
+    const sheet = {
+        querySelector(selector) {
+            assert.equal(selector, '[data-client-close]');
+            return closeButton;
+        }
+    };
+    const closeAdminClientSheetForNativeBack = loadClientSheetCloseHelper({
+        querySelector(selector) {
+            assert.equal(selector, '#page-admin .client-sheet-layer.is-open');
+            return sheet;
+        }
+    });
+
+    assert.equal(closeAdminClientSheetForNativeBack(), true);
+    assert.equal(closeClicks, 1);
+    assert.ok(
+        app.indexOf('closeAdminClientSheetForNativeBack()')
+          < app.indexOf('closeAdminModalForNativeBack()'),
+        'the client sheet must be consumed before the generic Admin modal check',
+    );
+});
+
 test('Android Back closes an Admin dialog through its Cancel control', () => {
     let cancelClicks = 0;
     const cancelButton = { click: () => { cancelClicks += 1; } };

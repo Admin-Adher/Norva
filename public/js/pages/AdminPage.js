@@ -40,7 +40,11 @@ class AdminPage {
         this._route = 'cockpit';
         this._adminNavigation = new AdminNavigationFacade(this);
         // Clients list is LIVE/paginated (not part of the cached snapshot). Its own state.
-        this._users = { page: 0, limit: 25, search: '', sort: 'created_desc', tagId: '', billing: '', country: '', total: 0 };
+        this._users = {
+            page: 0, limit: 25, search: '', sort: 'created_desc', tagId: '', billing: '',
+            country: '', total: 0, selectedId: '', inspectorOpen: false
+        };
+        this._usersRows = [];
         this._allTags = [];
         this._usersDebounce = null;
         this._lastTs = null; // snapshot refreshed_at for the topbar
@@ -657,6 +661,161 @@ class AdminPage {
 #page-admin .qv-chip{background:var(--adm-panel);border:1px solid var(--adm-line);color:var(--adm-tx2);border-radius:20px;padding:6px 13px;font-size:12.5px;font-weight:600;cursor:pointer;transition:border-color .14s,color .14s,background .14s;}
 #page-admin .qv-chip:hover{border-color:#5b7cfa;color:var(--adm-tx);}
 #page-admin .qv-chip.active{background:linear-gradient(135deg,rgba(91,124,250,.2),rgba(168,85,247,.16));border-color:rgba(120,150,255,.4);color:#fff;}
+/* Clients operator desk: saved views, dense decision list and contextual inspector. */
+#page-admin .client-desk-page{max-width:1480px;}
+#page-admin .client-desk-head{align-items:center;margin-bottom:16px;}
+#page-admin .client-desk-head .crm-head-ic{width:44px;height:44px;border-radius:10px;background:var(--adm-card2);border-color:var(--adm-line);box-shadow:none;}
+#page-admin .client-desk-head .crm-head-ic img{width:23px;height:23px;opacity:.9;}
+#page-admin .client-desk-head-note{display:flex;align-items:center;gap:7px;margin-top:8px;color:var(--adm-tx3);font-size:11px;}
+#page-admin .client-desk-head-note::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--adm-blue);}
+#page-admin .client-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));margin-bottom:14px;border:1px solid var(--adm-line);border-radius:10px;background:var(--adm-card2);overflow:hidden;}
+#page-admin .client-summary-item{min-width:0;padding:12px 15px;border-right:1px solid var(--adm-line);}
+#page-admin .client-summary-item:last-child{border-right:0;}
+#page-admin .client-summary-label{display:block;color:var(--adm-tx3);font-size:10px;font-weight:750;letter-spacing:.06em;text-transform:uppercase;}
+#page-admin .client-summary-value{display:block;margin-top:4px;color:var(--adm-tx);font-size:18px;font-weight:760;font-variant-numeric:tabular-nums;}
+#page-admin .client-summary-item.is-alert .client-summary-value{color:var(--adm-red);}
+#page-admin .client-summary-skeleton{display:block;width:58px;height:20px;margin-top:6px;border-radius:5px;background:linear-gradient(90deg,var(--adm-card1) 30%,rgba(255,255,255,.08) 50%,var(--adm-card1) 70%);background-size:220% 100%;animation:client-skeleton 1.2s ease-in-out infinite;}
+#page-admin .client-desk-shell{border:1px solid var(--adm-line);border-radius:12px;background:var(--adm-card2);overflow:visible;}
+#page-admin .client-savedbar{display:flex;align-items:center;gap:10px;min-height:56px;padding:8px 10px;border-bottom:1px solid var(--adm-line);}
+#page-admin .client-savedbar-label{flex:0 0 auto;padding-left:3px;color:var(--adm-tx3);font-size:9.5px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;}
+#page-admin .client-savedviews{display:flex;align-items:center;gap:4px;min-width:0;overflow-x:auto;scrollbar-width:thin;}
+#page-admin .client-saved-view{flex:0 0 auto;min-height:40px;padding:0 11px;border:0;border-radius:7px;background:transparent;color:var(--adm-tx2);font:inherit;font-size:11.5px;font-weight:700;white-space:nowrap;cursor:pointer;}
+#page-admin .client-saved-view:hover{color:var(--adm-tx);background:rgba(255,255,255,.04);}
+#page-admin .client-saved-view[aria-selected="true"]{color:var(--adm-tx);background:rgba(91,124,250,.15);box-shadow:inset 2px 0 0 var(--adm-blue);}
+#page-admin .client-saved-view b{margin-left:5px;color:var(--adm-tx3);font-variant-numeric:tabular-nums;}
+#page-admin .client-saved-view[aria-selected="true"] b{color:#cbd5ff;}
+#page-admin .client-desk-toolbar{display:flex;align-items:center;gap:8px;padding:10px;border-bottom:1px solid var(--adm-line);}
+#page-admin .client-search{position:relative;flex:1;min-width:210px;max-width:480px;}
+#page-admin .client-search span{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;}
+#page-admin .client-search input,#page-admin .client-desk-sort,#page-admin .client-advanced-panel select{width:100%;min-height:44px;border:1px solid var(--adm-line);border-radius:8px;background:var(--adm-bg);color:var(--adm-tx);font:inherit;font-size:12.5px;padding:0 12px;}
+#page-admin .client-search input::placeholder{color:var(--adm-tx3);}
+#page-admin .client-desk-sort{width:auto;min-width:148px;padding-right:30px;color:var(--adm-tx2);}
+#page-admin .client-advanced{position:relative;}
+#page-admin .client-advanced summary,#page-admin .client-export,#page-admin .client-load-error button,#page-admin .client-empty button,#page-admin .client-inspector-action,#page-admin .client-inspector-close{min-height:44px;display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--adm-line);border-radius:8px;background:var(--adm-card1);color:var(--adm-tx2);font:inherit;font-size:12px;font-weight:700;padding:0 12px;cursor:pointer;list-style:none;white-space:nowrap;}
+#page-admin .client-advanced summary::-webkit-details-marker{display:none;}
+#page-admin .client-advanced summary:hover,#page-admin .client-export:hover,#page-admin .client-load-error button:hover,#page-admin .client-empty button:hover{border-color:rgba(91,124,250,.55);color:var(--adm-tx);}
+#page-admin .client-advanced[open] summary{border-color:rgba(91,124,250,.55);color:var(--adm-tx);}
+#page-admin .client-advanced-panel{position:absolute;z-index:30;top:calc(100% + 7px);right:0;width:min(520px,calc(100vw - 110px));display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;padding:12px;border:1px solid var(--adm-line);border-radius:10px;background:var(--adm-card1);box-shadow:0 18px 48px rgba(0,0,0,.48);}
+#page-admin .client-filter-field{display:grid;gap:6px;color:var(--adm-tx3);font-size:10.5px;font-weight:700;}
+#page-admin .client-filter-note{grid-column:1/-1;margin:0;color:var(--adm-tx3);font-size:10.5px;line-height:1.45;}
+#page-admin .client-export{color:#b8c6ff;}
+#page-admin .client-desk-workspace{display:grid;grid-template-columns:minmax(0,1fr) 340px;align-items:start;min-height:480px;}
+#page-admin .client-desk-list-pane{min-width:0;min-height:480px;border-right:1px solid var(--adm-line);}
+#page-admin .client-desk-list-head,#page-admin .client-desk-row{display:grid;grid-template-columns:minmax(190px,1.55fr) minmax(105px,.78fr) minmax(130px,.9fr) minmax(105px,.72fr) minmax(145px,1fr);align-items:center;gap:10px;}
+#page-admin .client-desk-list-head{min-height:38px;padding:0 14px;border-bottom:1px solid var(--adm-line);color:var(--adm-tx3);font-size:9.5px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;}
+#page-admin .client-desk-rows{min-width:0;}
+#page-admin .client-desk-row{position:relative;width:100%;min-height:68px;padding:8px 14px;border:0;border-bottom:1px solid var(--adm-line2);background:transparent;color:var(--adm-tx2);text-align:left;cursor:pointer;}
+#page-admin .client-desk-row:hover{background:rgba(255,255,255,.025);}
+#page-admin .client-desk-row[aria-selected="true"]{background:rgba(91,124,250,.11);box-shadow:inset 3px 0 0 var(--adm-blue);}
+#page-admin .client-desk-row:focus-visible{outline:2px solid #7c96ff;outline-offset:-3px;border-radius:6px;}
+#page-admin .client-main{min-width:0;display:grid;grid-template-columns:34px minmax(0,1fr);align-items:center;gap:10px;}
+#page-admin .client-avatar{display:grid;place-items:center;width:34px;height:34px;border-radius:9px;background:var(--adm-card1);border:1px solid var(--adm-line);color:#cdd6e8;font-size:10.5px;font-weight:800;}
+#page-admin .client-email{display:block;overflow:hidden;color:var(--adm-tx);text-overflow:ellipsis;white-space:nowrap;font-size:12.5px;font-weight:700;}
+#page-admin .client-meta{display:block;margin-top:3px;overflow:hidden;color:var(--adm-tx3);text-overflow:ellipsis;white-space:nowrap;font-size:10.5px;}
+#page-admin .client-cell{min-width:0;}
+#page-admin .client-cell-main{display:block;overflow:hidden;color:var(--adm-tx2);text-overflow:ellipsis;white-space:nowrap;font-size:11.5px;font-weight:650;}
+#page-admin .client-cell small{display:block;margin-top:4px;overflow:hidden;color:var(--adm-tx3);text-overflow:ellipsis;white-space:nowrap;font-size:10px;}
+#page-admin .client-signal{display:flex;align-items:center;gap:8px;min-width:0;}
+#page-admin .client-priority-bar{flex:0 0 auto;width:4px;height:30px;border-radius:3px;background:var(--adm-blue);}
+#page-admin .client-priority-bar.ok{background:var(--adm-green);}
+#page-admin .client-priority-bar.warn{background:var(--adm-amber);}
+#page-admin .client-priority-bar.danger{background:var(--adm-red);}
+#page-admin .client-priority-bar.neutral{background:var(--adm-tx3);}
+#page-admin .client-status{display:inline-flex;align-items:center;gap:6px;width:fit-content;max-width:100%;min-height:24px;padding:2px 8px;border:1px solid var(--adm-line);border-radius:999px;background:rgba(255,255,255,.025);color:var(--adm-tx2);font-size:10.5px;font-weight:750;white-space:nowrap;}
+#page-admin .client-status::before{content:"";flex:0 0 auto;width:6px;height:6px;border-radius:50%;background:var(--adm-blue);}
+#page-admin .client-status.ok::before{background:var(--adm-green);}
+#page-admin .client-status.warn::before{background:var(--adm-amber);}
+#page-admin .client-status.danger::before{background:var(--adm-red);}
+#page-admin .client-status.neutral::before{background:var(--adm-tx3);}
+#page-admin .client-action-main{display:block;color:var(--adm-tx);font-size:11px;font-weight:680;line-height:1.35;}
+#page-admin .client-mobile-status{display:none;}
+#page-admin #admin-users[aria-busy="true"] .client-desk-rows{opacity:.58;}
+#page-admin .client-list-status{min-height:1px;color:var(--adm-tx3);font-size:11px;}
+#page-admin .client-skeleton-row{height:68px;margin:0 14px;border-bottom:1px solid var(--adm-line2);background:linear-gradient(90deg,transparent 12%,rgba(255,255,255,.055) 30%,transparent 48%);background-size:220% 100%;animation:client-skeleton 1.2s ease-in-out infinite;}
+@keyframes client-skeleton{to{background-position:-220% 0;}}
+#page-admin .client-empty,#page-admin .client-load-error{min-height:360px;display:grid;place-items:center;padding:32px;text-align:center;}
+#page-admin .client-empty strong,#page-admin .client-load-error strong{display:block;color:var(--adm-tx);font-size:15px;}
+#page-admin .client-empty span,#page-admin .client-load-error span{display:block;max-width:430px;margin:7px auto 15px;color:var(--adm-tx3);font-size:11.5px;line-height:1.5;}
+#page-admin .client-load-error strong{color:var(--adm-red);}
+#page-admin .client-attribution-warning{margin:10px;border:1px solid rgba(251,191,36,.28);border-radius:8px;background:rgba(251,191,36,.06);color:var(--adm-tx2);font-size:11.5px;line-height:1.45;}
+#page-admin .client-sheet-layer{display:contents;}
+#page-admin .client-inspector-backdrop{display:none;}
+#page-admin .client-desk-inspector{min-width:0;min-height:480px;padding:18px;background:var(--adm-card1);}
+#page-admin .client-inspector-close{display:none;width:44px;padding:0;}
+#page-admin .client-inspector-close img{width:18px;height:18px;}
+#page-admin .client-inspector-kicker{display:block;color:var(--adm-tx3);font-size:9.5px;font-weight:800;letter-spacing:.09em;text-transform:uppercase;}
+#page-admin .client-desk-inspector h2{margin:7px 0 3px;color:var(--adm-tx);font-size:17px;line-height:1.3;overflow-wrap:anywhere;}
+#page-admin .client-inspector-email{color:var(--adm-tx3);font-size:11px;overflow-wrap:anywhere;}
+#page-admin .client-inspector-badges{display:flex;flex-wrap:wrap;gap:6px;margin:14px 0;}
+#page-admin .client-inspector-facts{margin:0;}
+#page-admin .client-inspector-fact{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:14px;padding:9px 0;border-bottom:1px solid var(--adm-line);}
+#page-admin .client-inspector-fact dt{color:var(--adm-tx3);font-size:11px;}
+#page-admin .client-inspector-fact dd{max-width:190px;margin:0;color:var(--adm-tx);text-align:right;font-size:11.5px;font-weight:700;overflow-wrap:anywhere;}
+#page-admin .client-next-block{margin-top:16px;padding:12px;border:1px solid rgba(251,191,36,.24);border-radius:8px;background:rgba(251,191,36,.055);}
+#page-admin .client-next-block.ok{border-color:rgba(52,211,153,.22);background:rgba(52,211,153,.045);}
+#page-admin .client-next-block.info,#page-admin .client-next-block.neutral{border-color:var(--adm-line);background:rgba(255,255,255,.025);}
+#page-admin .client-next-block strong{display:block;color:#ffd98d;font-size:11.5px;}
+#page-admin .client-next-block.ok strong{color:var(--adm-green);}
+#page-admin .client-next-block.info strong,#page-admin .client-next-block.neutral strong{color:var(--adm-tx2);}
+#page-admin .client-next-block p{margin:6px 0 0;color:var(--adm-tx2);font-size:11px;line-height:1.5;}
+#page-admin .client-inspector-action{width:100%;margin-top:14px;border-color:var(--adm-blue);background:var(--adm-blue);color:#fff;}
+#page-admin .client-inspector-action:hover{filter:brightness(1.08);}
+#page-admin .client-inspector-empty{min-height:390px;display:grid;place-items:center;text-align:center;color:var(--adm-tx3);font-size:12px;line-height:1.5;}
+#page-admin .client-desk-page .users-pager{justify-content:flex-end;margin:0;padding:10px;border-top:1px solid var(--adm-line);}
+#page-admin .client-desk-page .users-pager button{min-height:44px;padding-inline:14px;}
+@media(max-width:1380px){
+  #page-admin .client-desk-workspace{grid-template-columns:minmax(0,1fr) 310px;}
+  #page-admin .client-desk-list-head,#page-admin .client-desk-row{grid-template-columns:minmax(180px,1.5fr) minmax(100px,.75fr) minmax(125px,.9fr) minmax(140px,1fr);}
+  #page-admin .client-desk-list-head>:nth-child(4),#page-admin .client-desk-row>:nth-child(4){display:none;}
+}
+@media(max-width:900px){
+  #page-admin .client-summary{grid-template-columns:repeat(2,minmax(0,1fr));}
+  #page-admin .client-summary-item:nth-child(2){border-right:0;}
+  #page-admin .client-summary-item:nth-child(-n+2){border-bottom:1px solid var(--adm-line);}
+  #page-admin .client-savedbar{display:block;padding:9px;}
+  #page-admin .client-savedbar-label{display:block;margin:0 0 6px 3px;}
+  #page-admin .client-savedviews{scrollbar-width:none;}
+  #page-admin .client-savedviews::-webkit-scrollbar{display:none;}
+  #page-admin .client-saved-view{min-height:44px;}
+  #page-admin .client-desk-toolbar{align-items:stretch;flex-wrap:wrap;}
+  #page-admin .client-search{flex:1 1 calc(100% - 165px);max-width:none;}
+  #page-admin .client-desk-sort{flex:0 0 155px;}
+  #page-admin .client-advanced{margin-left:auto;}
+  #page-admin .client-desk-workspace{display:block;min-height:430px;}
+  #page-admin .client-desk-list-pane{min-height:430px;border-right:0;}
+  #page-admin .client-desk-list-head{display:none;}
+  #page-admin .client-desk-row{grid-template-columns:minmax(0,1fr) minmax(110px,.52fr);gap:10px;min-height:78px;padding:11px 12px;}
+  #page-admin .client-desk-row>:nth-child(2),#page-admin .client-desk-row>:nth-child(3),#page-admin .client-desk-row>:nth-child(4){display:none;}
+  #page-admin .client-desk-action{text-align:right;}
+  #page-admin .client-mobile-status{display:flex;justify-content:flex-end;margin-bottom:5px;}
+  #page-admin .client-action-main{font-size:10.5px;}
+  #page-admin .client-sheet-layer{display:block;position:fixed;inset:0;z-index:10040;visibility:hidden;pointer-events:none;}
+  #page-admin .client-sheet-layer.is-open{visibility:visible;pointer-events:auto;}
+  #page-admin .client-inspector-backdrop{display:block;position:absolute;inset:0;border:0;background:rgba(0,0,0,.62);opacity:0;transition:opacity .18s ease;}
+  #page-admin .client-sheet-layer.is-open .client-inspector-backdrop{opacity:1;}
+  #page-admin .client-desk-inspector{position:absolute;left:max(10px,env(safe-area-inset-left,0px));right:max(10px,env(safe-area-inset-right,0px));bottom:max(78px,calc(10px + env(safe-area-inset-bottom,0px)));min-height:0;max-height:min(72dvh,650px);overflow:auto;overscroll-behavior:contain;border:1px solid var(--adm-line);border-radius:14px;padding:18px 16px max(18px,env(safe-area-inset-bottom,0px));box-shadow:0 24px 70px rgba(0,0,0,.64);transform:translateY(calc(100% + 100px));transition:transform .2s ease;}
+  #page-admin .client-sheet-layer.is-open .client-desk-inspector{transform:none;}
+  #page-admin .client-inspector-close{display:inline-flex;position:absolute;top:10px;right:10px;}
+  #page-admin .client-desk-inspector h2{padding-right:48px;}
+  #page-admin .client-desk-page .users-pager{justify-content:space-between;padding-bottom:max(10px,env(safe-area-inset-bottom,0px));}
+}
+@media(max-width:560px){
+  #page-admin .client-desk-head .crm-head-ic{display:none;}
+  #page-admin .client-summary-item{padding:10px 11px;}
+  #page-admin .client-summary-value{font-size:17px;}
+  #page-admin .client-search{flex-basis:100%;}
+  #page-admin .client-desk-sort{flex:1 1 150px;}
+  #page-admin .client-advanced-panel{position:fixed;left:10px;right:10px;top:auto;width:auto;grid-template-columns:1fr;}
+  #page-admin .client-filter-note{grid-column:auto;}
+  #page-admin .client-export{padding-inline:10px;}
+  #page-admin .client-email{font-size:12px;}
+  #page-admin .client-meta{max-width:185px;}
+  #page-admin .client-desk-row{grid-template-columns:minmax(0,1fr) minmax(96px,.48fr);}
+}
+@media(prefers-reduced-motion:reduce){
+  #page-admin .client-summary-skeleton,#page-admin .client-skeleton-row{animation:none;}
+  #page-admin .client-inspector-backdrop,#page-admin .client-desk-inspector{transition:none;}
+}
 #page-admin .price-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px;}
 #page-admin .price-cell{display:flex;flex-direction:column;gap:6px;background:var(--adm-panel);border:1px solid var(--adm-line);border-radius:10px;padding:10px 12px;font-size:12.5px;color:var(--adm-tx2);}
 #page-admin .price-cell .price-in{display:flex;align-items:center;gap:6px;color:var(--adm-tx);font-weight:700;}
@@ -1099,6 +1258,22 @@ class AdminPage {
             }
             const b = e.target.closest('.resync-btn');
             if (b) { e.preventDefault(); this._resync(b); return; }
+            const clientClose = e.target.closest('[data-client-close]');
+            if (clientClose) { e.preventDefault(); this._closeClientSheet(); return; }
+            const clientOpen = e.target.closest('[data-client-open]');
+            if (clientOpen) {
+                e.preventDefault();
+                this._finishCloseClientSheet({ restoreFocus: false });
+                this._navigate('client:' + clientOpen.dataset.clientOpen);
+                return;
+            }
+            const clientClear = e.target.closest('[data-client-clear-filters]');
+            if (clientClear) { e.preventDefault(); this._clearClientFilters(); return; }
+            const clientRow = e.target.closest('.client-desk-row[data-client-select]');
+            if (clientRow) {
+                this._selectClientPreview(clientRow.dataset.clientSelect, { trigger: clientRow });
+                return;
+            }
             // Require data-user-id: support-ticket rows also carry .user-row but navigate to a
             // ticket via their own listener — matching them here would fire client:undefined too.
             const ur = e.target.closest('.user-row[data-user-id]');
@@ -1247,6 +1422,33 @@ class AdminPage {
         // Enter/Space on a focused row triggers the same click path. A child <button> keeps its own
         // native handling (guarded by e.target === el).
         root.addEventListener('keydown', (e) => {
+            const clientView = e.target.closest('.client-saved-view');
+            if (clientView && ['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) {
+                e.preventDefault();
+                const views = Array.from(root.querySelectorAll('.client-saved-view'));
+                const current = views.indexOf(clientView);
+                const nextIndex = e.key === 'Home' ? 0
+                    : (e.key === 'End' ? views.length - 1
+                        : (current + (e.key === 'ArrowRight' ? 1 : -1) + views.length) % views.length);
+                const target = views[nextIndex];
+                if (target) { target.focus(); target.click(); }
+                return;
+            }
+            const clientRow = e.target.closest('.client-desk-row[data-client-select]');
+            if (clientRow && ['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(e.key)) {
+                e.preventDefault();
+                const rows = Array.from(root.querySelectorAll('.client-desk-row[data-client-select]'));
+                const current = rows.indexOf(clientRow);
+                const nextIndex = e.key === 'Home' ? 0
+                    : (e.key === 'End' ? rows.length - 1
+                        : Math.max(0, Math.min(rows.length - 1, current + (e.key === 'ArrowDown' ? 1 : -1))));
+                const target = rows[nextIndex];
+                if (target) {
+                    target.focus();
+                    this._selectClientPreview(target.dataset.clientSelect, { trigger: target, openSheet: false });
+                }
+                return;
+            }
             const tab = e.target.closest('.partners-workspace-tab');
             if (tab && ['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) {
                 e.preventDefault();
@@ -1260,7 +1462,7 @@ class AdminPage {
                 return;
             }
             if (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar') return;
-            const el = e.target.closest('.user-row,.partner-row,.alert-card[data-user-id],.alert-card[data-route],.audit-row[data-user-id],[data-ticket-id],.fin-status');
+            const el = e.target.closest('.client-desk-row,.user-row,.partner-row,.alert-card[data-user-id],.alert-card[data-route],.audit-row[data-user-id],[data-ticket-id],.fin-status');
             if (el && e.target === el) { e.preventDefault(); el.click(); }
         });
         // Feature-flag switches fire 'change', not 'click' — delegate separately.
@@ -4133,48 +4335,67 @@ class AdminPage {
 
     // ── Page: Clients (list) ──
     _pageClients() {
+        this._finishCloseClientSheet({ restoreFocus: false });
         this._setCrumb('Clients');
         const v = this._view();
-        v.innerHTML = `<div class="crm-page">
-            <h1 class="crm-h1">👥 Clients</h1>
-            <p class="crm-sub">Liste paginée — recherche, tri, clic pour la fiche 360°. Agrégation bornée par page (scalable).</p>
-            <section id="admin-clients-kpis" class="admin-cards"><div class="ssub">Chargement…</div></section>
-            <div id="admin-clients-charts" class="chart-row"></div>
-            <div class="qv-row" id="admin-users-qv" role="tablist" aria-label="Vues rapides">
-              ${[['', 'Tous'], ['active', 'Actifs payants'], ['trialing', 'Nouveaux essais'], ['past_due', 'Échec paiement'], ['cancel_pending', 'Annulation prévue'], ['expired', 'Expirés']]
-                .map(([val, lbl]) => `<button class="qv-chip" data-billing="${val}" role="tab">${lbl}</button>`).join('')}
-            </div>
-            <div class="filter-bar">
-              <div class="fb-h">🔎 Filtres & recherche</div>
-              <div class="users-controls">
-                <input id="admin-users-search" type="search" placeholder="Rechercher un email ou un UUID complet…" autocomplete="off" value="${AdminPage.esc(this._users.search)}" title="La recherche par identifiant exige l'UUID complet (l'email peut être partiel)" />
-                <select id="admin-users-sort">
+        const views = [
+            ['', 'Tous'], ['active', 'Actifs payants'], ['trialing', 'Essais'],
+            ['past_due', 'Paiement à vérifier'], ['cancel_pending', 'Annulation prévue'],
+            ['expired', 'Expirés'], ['free', 'Sans abonnement']
+        ];
+        const summarySkeleton = ['Clients', 'Actifs sur 7 j', 'En essai', 'Paiement à vérifier']
+            .map(label => `<div class="client-summary-item"><span class="client-summary-label">${label}</span><span class="client-summary-skeleton" aria-hidden="true"></span></div>`).join('');
+        v.innerHTML = `<div class="crm-page client-desk-page">
+            <header class="crm-head client-desk-head">
+              <div class="crm-head-ic" aria-hidden="true"><img src="/img/icons/norva-account.svg" alt="" /></div>
+              <div class="crm-head-tx">
+                <h1 class="crm-h1">Clients</h1>
+                <p class="crm-sub">Vérifier un compte, comprendre ses signaux et ouvrir son dossier sans quitter la file.</p>
+                <div class="client-desk-head-note">Signaux indicatifs · aucune action automatique depuis cette liste</div>
+              </div>
+            </header>
+            <section id="admin-clients-summary" class="client-summary" aria-label="Synthèse clients" aria-busy="true">${summarySkeleton}</section>
+            <section class="client-desk-shell" aria-label="Poste de travail clients">
+              <div class="client-savedbar">
+                <span class="client-savedbar-label">Vues enregistrées</span>
+                <div class="client-savedviews" id="admin-users-qv" role="tablist" aria-label="Vues enregistrées des clients">
+                  ${views.map(([val, label]) => `<button class="client-saved-view" type="button" data-billing="${val}" role="tab" aria-controls="admin-users" aria-selected="false">${label}<b data-client-view-count="${val || 'all'}">—</b></button>`).join('')}
+                </div>
+              </div>
+              <div class="client-desk-toolbar">
+                <label class="client-search"><span>Rechercher un client</span><input id="admin-users-search" type="search" placeholder="Rechercher par email…" autocomplete="off" value="${AdminPage.esc(this._users.search)}" title="L’email peut être partiel. Un identifiant de compte doit être saisi en entier." /></label>
+                <select class="client-desk-sort" id="admin-users-sort" aria-label="Trier les clients">
                   <option value="created_desc">Plus récents</option>
                   <option value="created_asc">Plus anciens</option>
                   <option value="active_desc">Dernière activité</option>
                   <option value="email_asc">Email A→Z</option>
                 </select>
-                <select id="admin-users-billing">
-                  <option value="">Tous les abonnements</option>
-                  <option value="trialing">En essai</option>
-                  <option value="active">Actifs payants</option>
-                  <option value="past_due">Échec paiement</option>
-                  <option value="cancel_pending">Annulation prévue</option>
-                  <option value="expired">Expirés</option>
-                  <option value="free">Sans abonnement</option>
-                </select>
-                <select id="admin-users-country" title="Pays de paiement (storefront Play ou pays d'émission de la carte)"><option value="">Tous les pays de paiement</option><option value="??">Pays paiement inconnu</option></select>
-                <select id="admin-users-tag"><option value="">Tous les segments</option></select>
-                <button id="admin-users-csv" title="Exporter la liste filtrée en CSV (max 10 000 lignes)">⬇ Exporter CSV</button>
+                <details class="client-advanced">
+                  <summary>Filtres</summary>
+                  <div class="client-advanced-panel">
+                    <label class="client-filter-field">Pays de paiement<select id="admin-users-country" title="Storefront Play/App Store ou pays d’émission de la carte"><option value="">Tous les pays de paiement</option><option value="??">Pays paiement inconnu</option></select></label>
+                    <label class="client-filter-field">Segment<select id="admin-users-tag"><option value="">Tous les segments</option></select></label>
+                    <p class="client-filter-note">Le pays correspond au signal de paiement disponible, pas à la position actuelle de la personne.</p>
+                  </div>
+                </details>
+                <button class="client-export" id="admin-users-csv" type="button" title="Exporter la vue filtrée en CSV (10 000 lignes maximum)">Exporter CSV</button>
               </div>
-            </div>
-            <div id="admin-users-bulk"></div>
-            <div class="scroll"><div id="admin-users"></div></div>
-            <div class="users-pager">
-              <button id="admin-users-prev">← Précédent</button>
-              <span id="admin-users-range"></span>
-              <button id="admin-users-next">Suivant →</button>
-            </div>
+              <div id="admin-users-bulk"></div>
+              <div class="client-desk-workspace">
+                <div class="client-desk-list-pane">
+                  <div id="admin-users" aria-live="polite" aria-busy="true"></div>
+                </div>
+                <div class="client-sheet-layer" id="client-sheet-layer">
+                  <button class="client-inspector-backdrop" type="button" data-client-close aria-label="Fermer l’aperçu du client"></button>
+                  <aside class="client-desk-inspector" id="client-desk-inspector" aria-label="Aperçu du client sélectionné"></aside>
+                </div>
+              </div>
+              <div class="users-pager">
+                <button id="admin-users-prev" type="button">Précédent</button>
+                <span id="admin-users-range" class="client-list-status" aria-live="polite"></span>
+                <button id="admin-users-next" type="button">Suivant</button>
+              </div>
+            </section>
         </div>`;
         const sortSel = document.getElementById('admin-users-sort');
         if (sortSel) sortSel.value = this._users.sort;
@@ -4189,16 +4410,10 @@ class AdminPage {
         if (sortSel) sortSel.addEventListener('change', () => {
             this._users.sort = sortSel.value; this._users.page = 0; this._loadUsers();
         });
-        const billSel = document.getElementById('admin-users-billing');
-        if (billSel) {
-            billSel.value = this._users.billing || '';
-            billSel.addEventListener('change', () => { this._users.billing = billSel.value; this._users.page = 0; this._loadUsers(); this._syncQuickViews(); });
-        }
-        // Quick-view chips: one click = a business filter (mirrors the billing dropdown).
-        document.querySelectorAll('#admin-users-qv .qv-chip').forEach(chip => chip.addEventListener('click', () => {
+        // Saved views map directly to server-side billing filters, so counts and pagination remain exhaustive.
+        document.querySelectorAll('#admin-users-qv .client-saved-view').forEach(chip => chip.addEventListener('click', () => {
             this._users.billing = chip.dataset.billing || '';
             this._users.page = 0;
-            const bs = document.getElementById('admin-users-billing'); if (bs) bs.value = this._users.billing;
             this._loadUsers(); this._syncQuickViews();
         }));
         this._syncQuickViews();
@@ -4221,74 +4436,41 @@ class AdminPage {
             const s = this._users; if ((s.page + 1) * s.limit < s.total) { s.page += 1; this._loadUsers(); }
         });
         this._loadUsers();
-        this._loadClientCharts();
+        this._loadClientSummary();
     }
 
-    // Clients insights: KPI cards + real daily-active area + connected/inactive donut.
-    async _loadClientCharts() {
-        const el = document.getElementById('admin-clients-charts');
+    // Compact summary only: charts and funnels deliberately stay in the Cockpit.
+    async _loadClientSummary() {
+        const el = document.getElementById('admin-clients-summary');
         if (!el) return;
-        const seq = (this._nav || 0);
+        const seq = this._nav || 0;
         try {
-            const [a, ov, sparksR] = await Promise.all([
-                this._rpc('admin_activity_series', { p_days: 14 }),
-                this._rpc('admin_overview').catch(() => null),
-                this._rpc('admin_metric_sparks', { p_days: 14 }).catch(() => null)
-            ]);
+            const overview = await this._rpc('admin_overview');
             if ((this._nav || 0) !== seq || this._route !== 'clients') return;
-            const n = AdminPage.n;
-            // KPI cards (icon + sparkline) — same treatment as the Cockpit.
-            const kel = document.getElementById('admin-clients-kpis');
-            if (kel && ov) {
-                const S = (sparksR && sparksR.series) || {};
-                const kc = (v, l, cls, key, icon) => AdminPage.kpiCard(v, l, cls, icon, key && Array.isArray(S[key]) ? AdminPage.spark(S[key], cls) : '');
-                kel.innerHTML = [
-                    kc(n(ov.users_total), 'Utilisateurs', ov.users_active_7d ? 'ok' : '', 'users_total', '👥'),
-                    kc(n(ov.users_active_24h), 'Connectés 24 h', '', 'users_active_24h', '🕐'),
-                    kc(n(ov.users_active_7d), 'Connectés 7 j', '', 'users_active_7d', '🗓️'),
-                    kc(n(ov.users_watching_7d), 'Regardent 7 j', Number(ov.users_watching_7d) > 0 ? 'ok' : '', 'users_watching_7d', '👁️'),
-                    kc(n(ov.users_new_7d), 'Nouveaux 7 j', Number(ov.users_new_7d) > 0 ? 'ok' : '', 'users_new_7d', '➕'),
-                    kc(n(ov.users_new_30d), 'Nouveaux 30 j', '', 'users_new_30d', '📅')
-                ].join('');
-            } else if (kel) { kel.innerHTML = ''; }
-            // Header status line: total · actifs 7 j · essais · échec paiement (real overview data).
-            const tx = document.querySelector('#page-admin .crm-head-tx');
-            if (tx && ov) {
-                let meta = tx.querySelector('.crm-head-meta');
-                if (!meta) { meta = document.createElement('div'); meta.className = 'crm-head-meta'; tx.appendChild(meta); }
-                const pastDue = Number(ov.billing_past_due) || 0;
-                meta.innerHTML =
-                    `<span class="crm-hpill"><b>${n(ov.users_total)}</b> clients</span>` +
-                    `<span class="crm-hpill"><b>${n(ov.users_active_7d)}</b> actifs 7 j</span>` +
-                    `<span class="crm-hpill"><b>${n(ov.billing_trialing)}</b> en essai</span>` +
-                    `<span class="crm-hpill ${pastDue > 0 ? 'bad' : ''}"><b>${n(pastDue)}</b> échec(s) paiement</span>`;
-            }
-            const ud = Array.isArray(a.users_daily) ? a.users_daily : [];
-            const ld = Array.isArray(a.logins_daily) ? a.logins_daily : [];
-            // Primary line = real login events (connexions); dashed overlay = watch activity.
-            const pts = (ld.length ? ld : ud).map((d, i) => ({ label: (d.day || '').slice(5).replace('-', '/'), value: ld.length ? d.logins : d.active }));
-            const overlay = ud.map(d => Number(d.active) || 0);
-            const sp = a.users_split || { total: 0, connected: 0, inactive: 0 };
-            const total = Number(sp.total) || 0, conn = Number(sp.connected) || 0, inact = Number(sp.inactive) || 0;
-            const pct = v => total > 0 ? Math.round(100 * v / total) + ' %' : '—';
-            el.innerHTML = `
-                <div class="chart-panel">
-                    <h2>Connexions & activité</h2><p class="chsub">Connexions (events de login) vs activité visionnage — 14 derniers jours</p>
-                    ${AdminPage.area(pts, 'cli', overlay)}
-                    <div class="ssub" style="margin-top:6px"><span style="display:inline-block;width:14px;height:3px;border-radius:2px;background:#8098ff;vertical-align:middle"></span> connexions&nbsp;&nbsp;<span style="display:inline-block;width:14px;height:0;border-top:2px dashed #8a93a6;vertical-align:middle"></span> visionnage</div>
-                </div>
-                <div class="chart-panel">
-                    <h2>Répartition des utilisateurs</h2><p class="chsub">Statut des comptes (connexion ≤ 7 j)</p>
-                    <div class="donut-wrap">
-                        ${AdminPage.donut([{ value: conn, color: '#34d399' }, { value: inact, color: '#3a4356' }], total, 'Total')}
-                        <div class="chart-legend">
-                            <div class="lg"><span class="dotc" style="background:#34d399"></span>Connectés <b>${n(conn)}</b><span class="pct">${pct(conn)}</span></div>
-                            <div class="lg"><span class="dotc" style="background:#3a4356"></span>Inactifs <b>${n(inact)}</b><span class="pct">${pct(inact)}</span></div>
-                        </div>
-                    </div>
-                </div>`;
-        } catch (_) {
-            el.innerHTML = ''; // charts are a non-critical enhancement — never block the list
+            const pastDue = Number(overview && overview.billing_past_due) || 0;
+            const items = [
+                ['Clients', overview && overview.users_total, ''],
+                ['Actifs sur 7 j', overview && overview.users_active_7d, ''],
+                ['En essai', overview && overview.billing_trialing, ''],
+                ['Paiement à vérifier', pastDue, pastDue > 0 ? 'is-alert' : '']
+            ];
+            el.innerHTML = items.map(([label, value, cls]) => `<div class="client-summary-item ${cls}"><span class="client-summary-label">${AdminPage.esc(label)}</span><strong class="client-summary-value">${AdminPage.n(value)}</strong></div>`).join('');
+            el.setAttribute('aria-busy', 'false');
+            const counts = {
+                all: overview && overview.users_total,
+                active: overview && overview.billing_active,
+                trialing: overview && overview.billing_trialing,
+                past_due: overview && overview.billing_past_due,
+                cancel_pending: overview && overview.billing_cancel_pending
+            };
+            Object.entries(counts).forEach(([key, value]) => this._setClientViewCount(key, value));
+        } catch (error) {
+            console.warn('Admin clients summary unavailable', error);
+            if ((this._nav || 0) !== seq || this._route !== 'clients') return;
+            el.innerHTML = ['Clients', 'Actifs sur 7 j', 'En essai', 'Paiement à vérifier']
+                .map(label => `<div class="client-summary-item"><span class="client-summary-label">${label}</span><strong class="client-summary-value">—</strong></div>`).join('');
+            el.setAttribute('aria-busy', 'false');
+            el.title = 'Synthèse momentanément indisponible';
         }
     }
 
@@ -4304,8 +4486,9 @@ class AdminPage {
         const next = document.getElementById('admin-users-next');
         if (prev) prev.disabled = true;
         if (next) next.disabled = true;
-        if (range) range.textContent = '…';
-        if (!el.children.length || el.querySelector('.admin-err')) el.innerHTML = '<div class="ssub">Chargement…</div>';
+        if (range) range.textContent = 'Mise à jour…';
+        el.setAttribute('aria-busy', 'true');
+        if (!el.children.length || !this._usersRows.length || el.querySelector('.client-load-error')) this._renderClientSkeletons();
         try {
             let res;
             try {
@@ -4349,9 +4532,14 @@ class AdminPage {
             s.total = Number(res && res.total) || 0;
             if (res && Array.isArray(res.all_tags)) { this._allTags = res.all_tags; this._fillTagOptions(document.getElementById('admin-users-tag')); }
             if (res && Array.isArray(res.countries)) { this._countries = res.countries; this._fillCountryOptions(document.getElementById('admin-users-country')); }
+            this._usersRows = rows;
+            this._usersAttributionError = attributionError;
             this._renderUsers(rows, attributionError);
             document.getElementById('admin-users-attribution-retry')?.addEventListener('click', () => this._loadUsers());
             this._renderBulkBar();
+            // Saved-view counters describe the full view. A search, country or segment is an
+            // intersection shown by the pager and must not replace that global counter.
+            if (!s.search && !s.tagId && !s.country) this._setClientViewCount(s.billing || 'all', s.total);
             const from = s.total === 0 ? 0 : s.page * s.limit + 1;
             const to = Math.min(s.total, (s.page + 1) * s.limit);
             if (range) range.textContent = `${AdminPage.n(from)}–${AdminPage.n(to)} sur ${AdminPage.n(s.total)}`;
@@ -4362,7 +4550,10 @@ class AdminPage {
         } catch (e) {
             if (seq !== this._usersSeq) return;
             if (range) range.textContent = '';
-            el.innerHTML = `<div class="admin-err" role="alert">Erreur : ${AdminPage.esc(e.message)}</div>`;
+            console.warn('Admin clients list unavailable', e);
+            el.setAttribute('aria-busy', 'false');
+            el.innerHTML = `<div class="client-load-error" role="alert"><div><strong>Impossible de charger les clients</strong><span>Aucune action n’a été effectuée. Vérifie la connexion puis réessaie.</span><button id="admin-users-retry" type="button">Réessayer</button></div></div>`;
+            document.getElementById('admin-users-retry')?.addEventListener('click', () => this._loadUsers());
         }
     }
 
@@ -4392,48 +4583,272 @@ class AdminPage {
         if (sel.value !== cur) { sel.value = ''; this._users.country = ''; }
     }
 
-    // Highlight the quick-view chip matching the active billing filter.
+    _setClientViewCount(key, value) {
+        if (value == null || !Number.isFinite(Number(value))) return;
+        const el = document.querySelector(`[data-client-view-count="${key || 'all'}"]`);
+        if (el) el.textContent = AdminPage.n(value);
+    }
+
+    // Highlight the saved view matching the active server-side billing filter.
     _syncQuickViews() {
         const cur = this._users.billing || '';
-        document.querySelectorAll('#admin-users-qv .qv-chip').forEach(c =>
-            c.classList.toggle('active', (c.dataset.billing || '') === cur));
+        document.querySelectorAll('#admin-users-qv .client-saved-view').forEach(c => {
+            const selected = (c.dataset.billing || '') === cur;
+            c.setAttribute('aria-selected', selected ? 'true' : 'false');
+            c.tabIndex = selected ? 0 : -1;
+        });
+    }
+
+    _renderClientSkeletons() {
+        const el = document.getElementById('admin-users');
+        if (!el) return;
+        const head = '<div class="client-desk-list-head" role="row"><span>Client</span><span>Abonnement</span><span>Signal</span><span>Activité</span><span>Action potentielle</span></div>';
+        el.innerHTML = `${head}<div aria-hidden="true">${Array.from({ length: 7 }, () => '<div class="client-skeleton-row"></div>').join('')}</div>`;
+    }
+
+    _clientPriority(row) {
+        const r = row || {};
+        const billing = String(r.billing_status || '').toLowerCase();
+        const attribution = r.signup_attribution || {};
+        if (r.banned) return {
+            tone: 'danger', label: 'Suspendu', detail: 'Accès actuellement suspendu',
+            shortAction: 'Revoir le dossier', shortDetail: 'avant toute modification',
+            action: 'Le compte est déjà suspendu. Ouvrir le dossier et vérifier son historique avant toute modification.'
+        };
+        if (billing === 'past_due' || billing === 'grace') return {
+            tone: 'danger', label: 'Paiement', detail: 'Échec ou délai de grâce',
+            shortAction: 'Contrôler le statut', shortDetail: 'aucun email manuel',
+            action: 'Contrôler le statut de relance dans le dossier financier. Aucun envoi manuel depuis cette vue.'
+        };
+        if (r.email_confirmed === false) return {
+            tone: 'warn', label: 'Email non vérifié', detail: 'Activation incomplète',
+            shortAction: 'Vérifier l’activation', shortDetail: 'sans relance automatique',
+            action: 'Vérifier l’état de confirmation et le parcours d’activation. Aucune relance automatique depuis cette liste.'
+        };
+        if (attribution.capture_stage === 'unavailable') return {
+            tone: 'warn', label: 'Origine indisponible', detail: 'Signal à recharger',
+            shortAction: 'Recharger l’origine', shortDetail: 'les autres données restent fiables',
+            action: 'Réessayer le chargement de l’origine d’inscription. Ne pas déduire une localisation à partir de cette absence.'
+        };
+        if (!r.last_sign_in_at) return {
+            tone: 'neutral', label: 'À observer', detail: 'Jamais connecté',
+            shortAction: 'Observer l’activation', shortDetail: 'aucune urgence',
+            action: 'Observer le parcours d’activation. Aucune intervention automatique n’est nécessaire à ce stade.'
+        };
+        if (r.is_internal) return {
+            tone: 'info', label: 'Compte interne', detail: 'Exclu des statistiques finance',
+            shortAction: 'Aucune action', shortDetail: 'usage interne identifié',
+            action: 'Compte interne identifié. Aucune action prioritaire.'
+        };
+        if (r.is_driver) return {
+            tone: 'info', label: 'Compte pilote', detail: 'Enrichissement contrôlé',
+            shortAction: 'Suivre le pilote', shortDetail: 'aucune action automatique',
+            action: 'Compte pilote identifié. Suivre son usage dans le dossier sans intervention automatique.'
+        };
+        return {
+            tone: 'ok', label: 'Sain', detail: 'Aucun signal prioritaire',
+            shortAction: 'Aucune action', shortDetail: 'dossier sans alerte',
+            action: 'Aucune action prioritaire. Ouvrir le dossier uniquement si une vérification détaillée est nécessaire.'
+        };
+    }
+
+    _clientBilling(row) {
+        const r = row || {};
+        const status = String(r.billing_status || '').toLowerCase();
+        const labels = {
+            trialing: 'En essai', active: 'Actif', past_due: 'Échec paiement', grace: 'Délai de grâce',
+            cancelled_at_period_end: 'Annulation prévue', expired: 'Expiré'
+        };
+        const rawPlan = String(r.plan_code || '').trim();
+        const plans = { family: 'Family', premium: 'Premium', monthly: 'Mensuel', annual: 'Annuel' };
+        return {
+            label: labels[status] || (status ? 'Autre statut' : 'Sans abonnement'),
+            detail: rawPlan ? (plans[rawPlan.toLowerCase()] || rawPlan) : 'Aucun plan'
+        };
+    }
+
+    _clientOriginSummary(attribution) {
+        const a = attribution || {};
+        if (a.capture_stage === 'unavailable') return 'Indisponible';
+        if (a.capture_stage === 'historical_backfill') return 'Non capturée (historique)';
+        if (a.capture_stage === 'pending') return 'Capture en attente';
+        if (!a.signup_platform && !a.signup_surface) return 'Origine inconnue';
+        return [AdminPage.signupPlatformLabel(a.signup_platform), AdminPage.signupSurfaceLabel(a.signup_surface)].filter(Boolean).join(' · ');
     }
 
     _renderUsers(rows, attributionError = null) {
         const el = document.getElementById('admin-users');
         if (!el) return;
-        if (!rows.length) { el.innerHTML = '<div class="ssub">Aucun utilisateur.</div>'; return; }
-        const head = `<tr><th>Email</th><th>Abonnement</th><th>Pays paiement</th><th>Inscription</th><th>Rôle</th><th>Segments</th><th class="num">Sources</th><th>Inscrit</th><th>Dernière activité</th><th>Email vérifié</th></tr>`;
-        const day = (d) => d ? new Date(d).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
-        const body = rows.map(r => {
-            const role = r.role === 'admin' ? '<span class="badge amber">admin</span>' : '<span class="badge gray">user</span>';
-            const driver = r.is_driver ? ' <span class="badge blue" title="Compte pilote d\'enrichissement">pilote</span>' : '';
-            const internal = r.is_internal ? ' <span class="badge amber" title="Compte interne — exclu des stats finance">interne</span>' : '';
-            const banned = r.banned ? ' <span class="badge red" title="Compte suspendu">suspendu</span>' : '';
-            const conf = r.email_confirmed ? '<span class="badge green">✓</span>' : '<span class="badge red">non</span>';
-            const tags = (Array.isArray(r.tags) ? r.tags : [])
-                .map(t => `<span class="badge ${AdminPage.tagColor(t.color)}">${AdminPage.esc(t.label)}</span>`).join(' ') || '<span class="ssub">—</span>';
-            const last = r.last_sign_in_at
-                ? `<span title="${AdminPage.esc(new Date(r.last_sign_in_at).toLocaleString('fr-FR'))}">${AdminPage.esc(AdminPage.timeAgo(r.last_sign_in_at))}</span>`
-                : '<span class="badge gray">jamais</span>';
-            const ccTip = r.country_source === 'card' ? 'Pays d’émission de la carte (Revolut)' : r.country_source === 'store' ? 'Pays du storefront (Play/App Store)' : '';
-            return `<tr class="user-row" data-user-id="${AdminPage.esc(r.user_id)}" data-email="${AdminPage.esc(r.email || '')}" tabindex="0" aria-label="Voir la fiche de ${AdminPage.esc(r.email || r.user_id)}" title="Voir la fiche">
-                <td>${AdminPage.esc(r.email || '—')}${driver}${internal}${banned}</td>
-                <td>${AdminPage.billingBadge(r.billing_status, r.plan_code)}</td>
-                <td${ccTip ? ` title="${AdminPage.esc(ccTip)}"` : ''}>${AdminPage.flag(r.country_code)}</td>
-                <td>${AdminPage.signupOriginHtml(r.signup_attribution)}</td>
-                <td>${role}</td>
-                <td>${tags}</td>
-                <td class="num">${AdminPage.n(r.sources_count)}</td>
-                <td>${AdminPage.esc(day(r.created_at))}</td>
-                <td>${last}</td>
-                <td>${conf}</td>
-            </tr>`;
+        el.setAttribute('aria-busy', 'false');
+        const list = Array.isArray(rows) ? rows : [];
+        this._usersRows = list;
+        if (!list.length) {
+            this._users.selectedId = '';
+            this._finishCloseClientSheet({ restoreFocus: false });
+            el.innerHTML = `<div class="client-empty"><div><strong>Aucun client dans cette vue</strong><span>Modifie la recherche ou reviens à la vue « Tous ». Les filtres restent disponibles.</span><button type="button" data-client-clear-filters>Revenir à Tous</button></div></div>`;
+            this._renderClientInspector(null);
+            return;
+        }
+        let selected = list.find(row => String(row.user_id) === String(this._users.selectedId));
+        if (!selected) selected = list[0];
+        this._users.selectedId = String(selected.user_id);
+        const day = (d) => d ? new Date(d).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' }) : 'Date inconnue';
+        const body = list.map(r => {
+            const priority = this._clientPriority(r);
+            const billing = this._clientBilling(r);
+            const email = String(r.email || 'Email indisponible');
+            const local = email.split('@')[0].replace(/[^a-z0-9]/gi, ' ').trim();
+            const initials = (local.split(/\s+/).filter(Boolean).map(part => part[0]).join('').slice(0, 2) || email.slice(0, 2)).toUpperCase();
+            const tags = (Array.isArray(r.tags) ? r.tags : []).map(tag => tag.label).filter(Boolean);
+            const meta = [day(r.created_at), tags.slice(0, 2).join(' · ')].filter(Boolean).join(' · ');
+            const activity = r.last_sign_in_at ? AdminPage.timeAgo(r.last_sign_in_at) : 'Jamais connecté';
+            const sourceCount = Number(r.sources_count) || 0;
+            const isSelected = String(r.user_id) === String(selected.user_id);
+            return `<div class="client-desk-row" role="option" tabindex="${isSelected ? '0' : '-1'}" aria-selected="${isSelected ? 'true' : 'false'}" data-client-select="${AdminPage.esc(r.user_id)}" aria-label="${AdminPage.esc(email)}, ${AdminPage.esc(priority.label)}">
+                <span class="client-main"><span class="client-avatar" aria-hidden="true">${AdminPage.esc(initials)}</span><span><span class="client-email">${AdminPage.esc(email)}</span><span class="client-meta">${AdminPage.esc(meta)}</span></span></span>
+                <span class="client-cell"><span class="client-cell-main">${AdminPage.esc(billing.label)}</span><small>${AdminPage.esc(billing.detail)}</small></span>
+                <span class="client-cell client-signal"><span class="client-priority-bar ${priority.tone}" aria-hidden="true"></span><span><span class="client-status ${priority.tone}">${AdminPage.esc(priority.label)}</span><small>${AdminPage.esc(priority.detail)}</small></span></span>
+                <span class="client-cell"><span class="client-cell-main">${AdminPage.esc(activity)}</span><small>${AdminPage.n(sourceCount)} source${sourceCount > 1 ? 's' : ''}</small></span>
+                <span class="client-cell client-desk-action"><span class="client-mobile-status"><span class="client-status ${priority.tone}">${AdminPage.esc(priority.label)}</span></span><span class="client-action-main">${AdminPage.esc(priority.shortAction)}</span><small>${AdminPage.esc(priority.shortDetail)}</small></span>
+            </div>`;
         }).join('');
         const warning = attributionError
-            ? `<div class="admin-err" role="alert">Les données d’inscription sont momentanément indisponibles. Les autres colonnes restent fiables. <button class="mini-btn" id="admin-users-attribution-retry" type="button">Réessayer</button></div>`
+            ? `<div class="client-attribution-warning" role="alert">L’origine d’inscription est momentanément indisponible. Les autres signaux restent fiables. <button class="mini-btn" id="admin-users-attribution-retry" type="button">Réessayer</button></div>`
             : '';
-        el.innerHTML = `${warning}<table><thead>${head}</thead><tbody>${body}</tbody></table>`;
+        el.innerHTML = `${warning}<div class="client-desk-list-head" role="row"><span>Client</span><span>Abonnement</span><span>Signal</span><span>Activité</span><span>Action potentielle</span></div><div class="client-desk-rows" role="listbox" aria-label="Comptes clients">${body}</div>`;
+        this._renderClientInspector(selected);
+    }
+
+    _renderClientInspector(row) {
+        const el = document.getElementById('client-desk-inspector');
+        if (!el) return;
+        if (!row) {
+            el.innerHTML = '<div class="client-inspector-empty">Sélectionne un client pour afficher son aperçu.</div>';
+            return;
+        }
+        const priority = this._clientPriority(row);
+        const billing = this._clientBilling(row);
+        const created = row.created_at ? new Date(row.created_at).toLocaleString('fr-FR', { dateStyle: 'medium', timeStyle: 'short' }) : 'Inconnue';
+        const activity = row.last_sign_in_at ? AdminPage.timeAgo(row.last_sign_in_at) : 'Jamais connecté';
+        const sourceCount = Number(row.sources_count) || 0;
+        const role = row.role === 'admin' ? '<span class="badge amber">Administrateur</span>' : '';
+        const internal = row.is_internal ? '<span class="badge amber">Interne</span>' : '';
+        const driver = row.is_driver ? '<span class="badge blue">Pilote</span>' : '';
+        const subscription = row.billing_status ? AdminPage.billingBadge(row.billing_status, row.plan_code) : '<span class="badge gray">Sans abonnement</span>';
+        const countrySource = row.country_source === 'card' ? 'Émission de la carte' : row.country_source === 'store' ? 'Storefront mobile' : 'Signal indisponible';
+        el.innerHTML = `<button class="client-inspector-close" type="button" data-client-close aria-label="Fermer l’aperçu"><img src="/img/icons/norva-close-simple.svg" alt="" /></button>
+            <span class="client-inspector-kicker">Dossier sélectionné</span>
+            <h2 id="client-inspector-title">Compte client</h2>
+            <div class="client-inspector-email">${AdminPage.esc(row.email || 'Email indisponible')}</div>
+            <div class="client-inspector-badges"><span class="client-status ${priority.tone}">${AdminPage.esc(priority.label)}</span>${subscription}${role}${internal}${driver}</div>
+            <dl class="client-inspector-facts">
+              <div class="client-inspector-fact"><dt>Inscription</dt><dd>${AdminPage.esc(created)}</dd></div>
+              <div class="client-inspector-fact"><dt>Dernière activité</dt><dd>${AdminPage.esc(activity)}</dd></div>
+              <div class="client-inspector-fact"><dt>Abonnement</dt><dd>${AdminPage.esc(billing.label)} · ${AdminPage.esc(billing.detail)}</dd></div>
+              <div class="client-inspector-fact"><dt>Sources</dt><dd>${AdminPage.n(sourceCount)}</dd></div>
+              <div class="client-inspector-fact"><dt>Origine d’inscription</dt><dd>${AdminPage.esc(this._clientOriginSummary(row.signup_attribution))}</dd></div>
+              <div class="client-inspector-fact"><dt>Pays de paiement</dt><dd>${AdminPage.flag(row.country_code)}<br><span class="client-meta">${AdminPage.esc(countrySource)}</span></dd></div>
+            </dl>
+            <div class="client-next-block ${priority.tone}"><strong>Action potentielle</strong><p>${AdminPage.esc(priority.action)}</p></div>
+            <button class="client-inspector-action" type="button" data-client-open="${AdminPage.esc(row.user_id)}">Ouvrir le dossier complet</button>`;
+    }
+
+    _selectClientPreview(userId, options = {}) {
+        const row = this._usersRows.find(item => String(item.user_id) === String(userId));
+        if (!row) return;
+        this._users.selectedId = String(row.user_id);
+        document.querySelectorAll('.client-desk-row[data-client-select]').forEach(item => {
+            const selected = String(item.dataset.clientSelect) === String(userId);
+            item.setAttribute('aria-selected', selected ? 'true' : 'false');
+            item.tabIndex = selected ? 0 : -1;
+        });
+        this._renderClientInspector(row);
+        if (options.openSheet !== false && this._isClientSheetMode()) this._openClientSheet(options.trigger);
+    }
+
+    _isClientSheetMode() {
+        return Boolean(window.matchMedia && window.matchMedia('(max-width: 900px)').matches);
+    }
+
+    _openClientSheet(trigger) {
+        if (this._users.inspectorOpen) return;
+        const layer = document.getElementById('client-sheet-layer');
+        const inspector = document.getElementById('client-desk-inspector');
+        if (!layer || !inspector) return;
+        this._users.inspectorOpen = true;
+        this._clientSheetTrigger = trigger || document.activeElement;
+        layer.classList.add('is-open');
+        inspector.setAttribute('role', 'dialog');
+        inspector.setAttribute('aria-modal', 'true');
+        inspector.setAttribute('aria-labelledby', 'client-inspector-title');
+        this._clientSheetRestoreBackground = this._isolateModalBackground(layer);
+        const focusables = () => Array.from(inspector.querySelectorAll('button,[href],input,select,textarea,[tabindex]:not([tabindex="-1"])')).filter(item => !item.disabled);
+        this._clientSheetKeyHandler = (event) => {
+            if (event.key === 'Escape' || event.key === 'GoBack' || event.key === 'BrowserBack') {
+                event.preventDefault(); this._closeClientSheet(); return;
+            }
+            if (event.key !== 'Tab') return;
+            const items = focusables(); if (!items.length) return;
+            const first = items[0], last = items[items.length - 1], active = document.activeElement;
+            if (event.shiftKey && (active === first || !inspector.contains(active))) { event.preventDefault(); last.focus(); }
+            else if (!event.shiftKey && (active === last || !inspector.contains(active))) { event.preventDefault(); first.focus(); }
+        };
+        document.addEventListener('keydown', this._clientSheetKeyHandler, true);
+        this._clientSheetPopHandler = () => this._finishCloseClientSheet({ fromPop: true });
+        window.addEventListener?.('popstate', this._clientSheetPopHandler, { once: true });
+        try {
+            if (history.pushState && location.href) {
+                const state = history.state && typeof history.state === 'object' ? history.state : {};
+                history.pushState({ ...state, __norvaClientSheet: true }, '', location.href);
+                this._clientSheetOwnHistory = true;
+            }
+        } catch (_) { this._clientSheetOwnHistory = false; }
+        setTimeout(() => focusables()[0]?.focus(), 0);
+    }
+
+    _closeClientSheet() {
+        if (!this._users.inspectorOpen) return;
+        if (this._clientSheetOwnHistory && history.state?.__norvaClientSheet && typeof history.back === 'function') {
+            history.back();
+            setTimeout(() => { if (this._users.inspectorOpen) this._finishCloseClientSheet(); }, 180);
+            return;
+        }
+        this._finishCloseClientSheet();
+    }
+
+    _finishCloseClientSheet(options = {}) {
+        if (this._clientSheetKeyHandler) document.removeEventListener('keydown', this._clientSheetKeyHandler, true);
+        if (this._clientSheetPopHandler) window.removeEventListener?.('popstate', this._clientSheetPopHandler);
+        this._clientSheetKeyHandler = null;
+        this._clientSheetPopHandler = null;
+        if (this._clientSheetRestoreBackground) this._clientSheetRestoreBackground();
+        this._clientSheetRestoreBackground = null;
+        document.getElementById('client-sheet-layer')?.classList.remove('is-open');
+        const inspector = document.getElementById('client-desk-inspector');
+        inspector?.removeAttribute('role');
+        inspector?.removeAttribute('aria-modal');
+        inspector?.removeAttribute('aria-labelledby');
+        if (this._users) this._users.inspectorOpen = false;
+        if (!options.fromPop && history.state?.__norvaClientSheet && history.replaceState && location.href) {
+            try {
+                const state = { ...history.state }; delete state.__norvaClientSheet;
+                history.replaceState(state, '', location.href);
+            } catch (_) { /* non-navigable context */ }
+        }
+        this._clientSheetOwnHistory = false;
+        if (options.restoreFocus !== false && this._clientSheetTrigger?.focus) {
+            try { this._clientSheetTrigger.focus({ preventScroll: true }); } catch (_) { /* trigger removed */ }
+        }
+        this._clientSheetTrigger = null;
+    }
+
+    _clearClientFilters() {
+        Object.assign(this._users, { page: 0, search: '', tagId: '', billing: '', country: '' });
+        const search = document.getElementById('admin-users-search'); if (search) search.value = '';
+        const country = document.getElementById('admin-users-country'); if (country) country.value = '';
+        const tag = document.getElementById('admin-users-tag'); if (tag) tag.value = '';
+        this._syncQuickViews();
+        this._loadUsers();
     }
 
     // Bulk segment actions — only shown when a segment filter is active. Applies to EVERY client
