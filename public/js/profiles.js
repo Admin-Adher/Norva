@@ -1101,9 +1101,10 @@ html.tv .np-avatar-choice:focus{outline:2px solid #b579ff;outline-offset:2px}
     return state.profiles.find((p) => p.id === id) || state.profiles[0] || null;
   }
 
-  // Always-visible navbar avatar → opens the switcher. Discoverable entry point
-  // so users switch profile in one tap instead of digging into Settings. Also
-  // doubles as a "who am I" indicator (shows the active profile's avatar).
+  // Always-visible navbar avatar → opens the account disclosure on Web and the
+  // direct profile switcher on TV. The phone uses its dedicated Profile tab and
+  // bottom sheet, while TV keeps the shorter D-pad path until a TV-specific
+  // account drawer is designed and replayed on-device.
   async function refreshNavAvatar() {
     const btn = document.getElementById('nav-profile');
     const img = document.getElementById('nav-profile-img');
@@ -1120,10 +1121,35 @@ html.tv .np-avatar-choice:focus{outline:2px solid #b579ff;outline-offset:2px}
     // Keep the mobile bottom-bar Profile tab's avatar in sync with the same image.
     const tabImg = document.getElementById('nav-account-img');
     if (tabImg) tabImg.src = avatarSrc(p.avatar_id);
-    btn.title = p.name ? `${p.name} — switch profile` : 'Switch profile';
-    btn.setAttribute('aria-label', p.name ? `Profile ${p.name}, switch profile` : 'Switch profile');
+    const tvShell = document.documentElement?.classList?.contains('tv-mode')
+      || /NorvaTV-AndroidTV/i.test(navigator.userAgent || '');
+    btn.title = tvShell
+      ? (p.name ? `${p.name} — switch profile` : 'Switch profile')
+      : (p.name ? `${p.name} — account menu` : 'Account menu');
+    btn.setAttribute('aria-label', tvShell
+      ? (p.name ? `Profile ${p.name}, switch profile` : 'Switch profile')
+      : (p.name ? `Profile ${p.name}, open account menu` : 'Open account menu'));
+    if (!tvShell) {
+      btn.setAttribute('aria-haspopup', 'menu');
+      btn.setAttribute('aria-controls', 'account-menu-popover');
+      btn.setAttribute('aria-expanded', 'false');
+    } else {
+      btn.removeAttribute('aria-haspopup');
+      btn.removeAttribute('aria-controls');
+      btn.removeAttribute('aria-expanded');
+    }
     if (!btn.dataset.wired) {
-      btn.addEventListener('click', () => { openSwitcher(); });
+      btn.addEventListener('click', () => {
+        const isTv = document.documentElement?.classList?.contains('tv-mode')
+          || /NorvaTV-AndroidTV/i.test(navigator.userAgent || '');
+        if (isTv) {
+          openSwitcher();
+          return;
+        }
+        window.dispatchEvent(new CustomEvent('norva:account-menu-request', {
+          detail: { opener: btn }
+        }));
+      });
       btn.dataset.wired = '1';
     }
     btn.hidden = false;

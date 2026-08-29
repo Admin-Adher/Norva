@@ -87,7 +87,8 @@
             label: 'Admin',
             ariaLabel: 'Admin',
             gate: 'admin',
-            icon: Object.freeze({ kind: 'text', text: '⚙️' }),
+            platforms: Object.freeze(['web']),
+            icon: assetIcon('account'),
         },
         {
             key: 'partners',
@@ -154,9 +155,6 @@
             // Android tablets use the wide header projection. The native-phone
             // platform gate keeps this action unavailable in ordinary browsers.
             Object.freeze({ key: 'downloads', id: 'nav-downloads' }),
-            Object.freeze({ key: 'admin', id: 'nav-admin' }),
-            'settings',
-            Object.freeze({ key: 'logout', id: 'logout-btn' }),
         ]),
         phone: Object.freeze([
             'home',

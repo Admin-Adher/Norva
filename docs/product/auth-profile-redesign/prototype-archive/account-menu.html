@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Norva account disclosure — local prototype</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/public/css/main.css?v=prototype-account-menu">
+  <style>
+    * { box-sizing: border-box; }
+    html, body { min-width: 320px; min-height: 100%; }
+    body {
+      margin: 0;
+      color: var(--color-text-primary);
+      background:
+        radial-gradient(circle at 82% 14%, rgba(95, 94, 244, .16), transparent 32rem),
+        linear-gradient(180deg, #0a0c14, var(--color-bg-primary));
+    }
+    button { font: inherit; }
+    .menu-demo {
+      min-height: 100dvh;
+      padding-top: var(--topbar-h);
+    }
+    .menu-demo .navbar { z-index: 1100; }
+    .menu-demo .navbar-menu { justify-content: center; }
+    .menu-demo .nav-link {
+      border: 0;
+      background: transparent;
+      cursor: pointer;
+    }
+    .menu-demo .nav-link:hover,
+    .menu-demo .nav-link:focus-visible { color: var(--color-text-primary); background: var(--color-bg-hover); }
+    .menu-demo .nav-link.active { color: var(--color-accent); background: var(--color-accent-dim); }
+    .menu-demo .nav-link img { width: 22px; height: 22px; }
+    .menu-demo .nav-utility {
+      display: flex;
+      align-items: center;
+      gap: var(--space-sm);
+      margin-left: auto;
+    }
+    .demo-icon-button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 44px;
+      height: 44px;
+      padding: 0;
+      border: 0;
+      border-radius: var(--radius-md);
+      color: var(--color-text-secondary);
+      background: transparent;
+      cursor: pointer;
+    }
+    .demo-icon-button:hover,
+    .demo-icon-button:focus-visible { color: var(--color-text-primary); background: var(--color-bg-hover); }
+    .demo-icon-button img { width: 23px; height: 23px; }
+    .demo-main {
+      width: min(1180px, calc(100% - 48px));
+      margin: 0 auto;
+      padding: 72px 0 56px;
+    }
+    .demo-kicker {
+      margin: 0 0 var(--space-sm);
+      color: var(--color-accent);
+      font-size: .78rem;
+      font-weight: 800;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+    .demo-title {
+      max-width: 730px;
+      margin: 0;
+      font-family: Outfit, Inter, sans-serif;
+      font-size: clamp(2.5rem, 6vw, 5rem);
+      line-height: .96;
+      letter-spacing: -.055em;
+    }
+    .demo-lede {
+      max-width: 620px;
+      margin: var(--space-lg) 0 0;
+      color: var(--color-text-secondary);
+      font-size: 1.05rem;
+      line-height: 1.6;
+    }
+    .demo-rails {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: var(--space-md);
+      margin-top: 64px;
+    }
+    .demo-card {
+      min-height: 180px;
+      padding: var(--space-lg);
+      border: 1px solid var(--glass-border);
+      border-radius: var(--radius-lg);
+      background:
+        linear-gradient(155deg, rgba(95, 94, 244, .14), transparent 55%),
+        var(--color-bg-secondary);
+    }
+    .demo-card span { display: block; color: var(--color-text-secondary); font-size: .75rem; font-weight: 700; }
+    .demo-card strong { display: block; margin-top: var(--space-sm); font-size: 1.1rem; }
+    .demo-card:nth-child(2) { transform: translateY(18px); }
+    .demo-card:nth-child(4) { transform: translateY(18px); }
+    .account-menu-popover { top: calc(var(--topbar-h) + 8px); right: 16px; left: auto; }
+    .account-menu-popover::before { right: 17px; left: auto; transform: rotate(45deg); }
+    .nav-profile[aria-expanded="true"] { border-color: var(--color-accent); background: var(--color-accent-dim); }
+    .prototype-note {
+      position: fixed;
+      right: 18px;
+      bottom: 18px;
+      z-index: 40;
+      max-width: 320px;
+      padding: 10px 13px;
+      border: 1px solid var(--glass-border);
+      border-radius: var(--radius-md);
+      color: var(--color-text-secondary);
+      background: rgba(10, 12, 20, .92);
+      font-size: .72rem;
+      line-height: 1.45;
+      backdrop-filter: blur(14px);
+    }
+    @media (max-width: 980px) {
+      .nav-link span { display: none; }
+      .menu-demo .navbar-menu { gap: 0; }
+      .demo-rails { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (max-width: 640px) {
+      .menu-demo { padding-top: 68px; }
+      .menu-demo .navbar { min-height: 68px; }
+      .menu-demo .navbar-menu { display: none; }
+      .menu-demo .navbar-brand .brand-text { display: inline; }
+      .menu-demo .nav-utility .demo-icon-button:nth-child(-n+2) { display: none; }
+      .demo-main { width: min(100% - 32px, 520px); padding-top: 48px; }
+      .demo-title { font-size: clamp(2.35rem, 14vw, 4rem); }
+      .demo-rails { grid-template-columns: 1fr 1fr; gap: var(--space-sm); margin-top: 44px; }
+      .demo-card { min-height: 132px; padding: var(--space-md); }
+      .account-menu-popover {
+        display: block !important;
+        position: fixed;
+        top: auto !important;
+        right: 0;
+        bottom: 0;
+        left: 0 !important;
+        width: 100%;
+        max-height: min(78dvh, 660px);
+        border-width: 1px 0 0;
+        border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+        padding-bottom: max(var(--space-sm), env(safe-area-inset-bottom));
+        transform-origin: bottom center;
+      }
+      .account-menu-popover::before { display: none; }
+      .prototype-note { display: none; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .demo-card { transform: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <div class="menu-demo">
+    <nav class="navbar" aria-label="Primary navigation">
+      <div class="navbar-brand" aria-label="Norva Home">
+        <span class="logo"><img src="/public/img/norva-app-icon.png" alt=""></span>
+        <span class="brand-text">Norva</span>
+      </div>
+      <div class="navbar-menu">
+        <button class="nav-link active" type="button"><img src="/public/img/icons/norva-home.svg" alt=""><span>Home</span></button>
+        <button class="nav-link" type="button"><img src="/public/img/icons/norva-live-tv.svg" alt=""><span>Live TV</span></button>
+        <button class="nav-link" type="button"><img src="/public/img/icons/norva-movies.svg" alt=""><span>Movies</span></button>
+        <button class="nav-link" type="button"><img src="/public/img/icons/norva-series.svg" alt=""><span>Series</span></button>
+      </div>
+      <div class="nav-utility">
+        <button class="demo-icon-button" type="button" aria-label="Search">
+          <svg viewBox="0 0 24 24" width="23" height="23" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-4-4"></path></svg>
+        </button>
+        <button class="demo-icon-button" type="button" aria-label="Devices">
+          <img src="/public/img/icons/norva-devices-simple.svg" alt="">
+        </button>
+        <button class="demo-icon-button" type="button" aria-label="Notifications">
+          <svg viewBox="0 0 24 24" width="23" height="23" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.7 21a2 2 0 0 1-3.4 0"></path></svg>
+        </button>
+        <button class="nav-profile" id="demo-account-trigger" type="button" aria-label="Open profile and account menu" aria-haspopup="menu" aria-expanded="true" aria-controls="account-menu-popover">
+          <img class="nav-profile-img" src="/public/img/avatars/avatar-04.png" alt="">
+        </button>
+      </div>
+    </nav>
+
+    <main class="demo-main">
+      <p class="demo-kicker">Primary navigation, clarified</p>
+      <h1 class="demo-title">The catalogue stays visible. Account tools stay close.</h1>
+      <p class="demo-lede">Settings and Administration no longer compete with Home, Live TV, Movies and Series. They remain one deliberate click away behind your profile.</p>
+      <section class="demo-rails" aria-label="Catalogue preview">
+        <article class="demo-card"><span>Continue watching</span><strong>The evening queue</strong></article>
+        <article class="demo-card"><span>Live now</span><strong>Your channels</strong></article>
+        <article class="demo-card"><span>Recently added</span><strong>Movies</strong></article>
+        <article class="demo-card"><span>Next episode</span><strong>Your series</strong></article>
+      </section>
+    </main>
+
+    <div class="account-menu-popover" id="account-menu-popover" data-account-sheet aria-hidden="false">
+      <div class="account-menu-profile">
+        <img class="account-menu-avatar" src="/public/img/avatars/avatar-04.png" alt="">
+        <div class="account-menu-identity">
+          <strong>Adrien</strong>
+          <span>adrien.hernandez@outlook.com</span>
+        </div>
+      </div>
+      <div class="account-menu-items" role="menu" aria-label="Profile and account">
+        <button type="button" class="account-menu-item" role="menuitem">
+          <img class="account-menu-icon account-menu-current-avatar" src="/public/img/avatars/avatar-04.png" alt="">
+          <span>Switch profile</span>
+        </button>
+        <button type="button" class="account-menu-item" role="menuitem">
+          <img class="account-menu-icon" src="/public/img/icons/norva-account.svg" alt="">
+          <span>Manage profiles</span>
+        </button>
+        <div class="account-menu-divider" role="separator"></div>
+        <button type="button" class="account-menu-item" role="menuitem">
+          <img class="account-menu-icon" src="/public/img/icons/norva-settings.svg" alt="">
+          <span class="account-menu-copy"><strong>Settings</strong><small>Account, providers and playback</small></span>
+        </button>
+        <button type="button" class="account-menu-item" role="menuitem">
+          <img class="account-menu-icon" src="/public/img/icons/norva-account.svg" alt="">
+          <span class="account-menu-copy"><strong>Administration</strong><small>Operations and member access</small></span>
+        </button>
+        <button type="button" class="account-menu-item" role="menuitem">
+          <span class="account-menu-symbol" aria-hidden="true">?</span>
+          <span>Help &amp; support</span>
+        </button>
+        <div class="account-menu-divider" role="separator"></div>
+        <button type="button" class="account-menu-item account-menu-item-danger" role="menuitem">
+          <img class="account-menu-icon" src="/public/img/icons/norva-logout.svg" alt="">
+          <span>Log out</span>
+        </button>
+      </div>
+    </div>
+    <p class="prototype-note">Local review fixture. Administration is rendered here only to preview an authorised admin account; the application keeps it hidden until the server confirms the role.</p>
+  </div>
+  <script>
+    const trigger = document.getElementById('demo-account-trigger');
+    const menu = document.getElementById('account-menu-popover');
+    const items = [...menu.querySelectorAll('[role="menuitem"]')];
+    function setOpen(open, restoreFocus = false) {
+      menu.hidden = !open;
+      menu.setAttribute('aria-hidden', String(!open));
+      trigger.setAttribute('aria-expanded', String(open));
+      if (restoreFocus) trigger.focus();
+    }
+    trigger.addEventListener('click', () => setOpen(menu.hidden));
+    document.addEventListener('pointerdown', (event) => {
+      if (!menu.hidden && !menu.contains(event.target) && !trigger.contains(event.target)) setOpen(false);
+    });
+    menu.addEventListener('keydown', (event) => {
+      const index = items.indexOf(document.activeElement);
+      if (event.key === 'Escape') { event.preventDefault(); setOpen(false, true); }
+      if (event.key === 'ArrowDown') { event.preventDefault(); items[(index + 1 + items.length) % items.length].focus(); }
+      if (event.key === 'ArrowUp') { event.preventDefault(); items[(index - 1 + items.length) % items.length].focus(); }
+      if (event.key === 'Home') { event.preventDefault(); items[0].focus(); }
+      if (event.key === 'End') { event.preventDefault(); items.at(-1).focus(); }
+    });
+  </script>
+</body>
+</html>

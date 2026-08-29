@@ -18,7 +18,7 @@
   <link rel="preconnect" href="https://api.norva.tv" crossorigin>
   <link rel="dns-prefetch" href="https://image.tmdb.org">
   <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
-  <link rel="stylesheet" href="/css/main.css?v=ee4d1292b9">
+  <link rel="stylesheet" href="/css/main.css?v=a8f7f047b9">
   <link id="premium-profile-style" rel="stylesheet" href="/css/profiles-premium.css?v=2" media="not all">
   <script>
     if (!/NorvaTV-AndroidTV/i.test(navigator.userAgent || '') && !/[?&]tv=1\b/.test(window.location.search || '')) {
@@ -173,8 +173,8 @@
         <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
         <span class="nav-bell-dot" id="nav-bell-dot" hidden></span>
       </button>
-      <!-- Always-visible profile avatar → one-tap "Who's watching?" switcher.
-           Kept outside .navbar-menu so it stays visible on mobile. -->
+      <!-- Profile avatar → account disclosure on Web and direct profile switcher
+           on TV. Kept outside .navbar-menu so identity stays distinct from routes. -->
       <button class="nav-profile" id="nav-profile" type="button" hidden aria-label="Switch profile">
         <img class="nav-profile-img" id="nav-profile-img" src="/img/avatars/placeholder.svg" alt="">
       </button>
@@ -2128,7 +2128,7 @@
   <script defer src="/js/utils/castSender.js?v=2"></script>
   <script defer src="/js/utils/playbackHealth.js?v=2"></script>
   <script defer src="/js/utils/sourceHealth.js?v=6c0eefcb4f"></script>
-  <script defer src="/js/navigation/NavigationModel.js?v=1"></script>
+  <script defer src="/js/navigation/NavigationModel.js?v=b09ff7a7da"></script>
   <script defer src="/js/navigation/NavigationAdapters.js?v=1"></script>
   <script defer src="/js/navigation/navigationBootstrap.js?v=1"></script>
   <script defer src="/js/utils/tvNavigation.js?v=32"></script>
@@ -2155,12 +2155,12 @@
   <script defer src="/js/pages/Settings.js?v=d1ee96cc32"></script>
   <script defer src="/js/pages/PartnersPage.js?v=10"></script>
   <script defer src="/js/pages/WatchPage.js?v=148"></script>
-  <script defer src="/js/profiles.js?v=13"></script>
+  <script defer src="/js/profiles.js?v=d2b1662711"></script>
   <!-- AdminPage.js (76 KB, admin-only) is lazy-loaded by app.ensureAdminPage(). -->
   <script defer src="/js/maintenance-banner.js?v=1"></script>
   <script defer src="/js/billing-config.js?v=8"></script>
 <script defer src="/js/billing.js?v=18"></script>
-  <script defer src="/js/app.js?v=9a0dadaa02"></script>
+  <script defer src="/js/app.js?v=6066ea92b3"></script>
   <script>
     // PWA: register the app-shell service worker (network-first — a deploy always
     // wins; the cache only serves when offline). Skipped inside the native APK

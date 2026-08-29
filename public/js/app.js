@@ -85,6 +85,8 @@ class App {
             if (top > 0 && this.pages[page]) this.pages[page]._savedScrollTop = top;
         }
         this.installNativeContinuityListeners();
+        this._accountMenuRequest = (event) => this.openAccountMenu(event?.detail?.opener || null);
+        window.addEventListener('norva:account-menu-request', this._accountMenuRequest);
 
         document.addEventListener('visibilitychange', () => {
             if (document.visibilityState !== 'visible') return;
@@ -627,7 +629,8 @@ class App {
                 );
             } catch (_) { /* recovery marker cleanup is best-effort */ }
         }
-        // Surface the always-visible navbar profile avatar (one-tap switcher).
+        // Surface the navbar identity control (account menu on Web, direct
+        // profile switcher on TV; phone uses the Profile bottom tab).
         try { if (window.NorvaProfiles?.refreshNavAvatar) await window.NorvaProfiles.refreshNavAvatar(); } catch (_) { }
         window.NorvaTrace?.log?.('app shell ready — profile picked, router/page renders next. NorvaTrace.summary() for the full table.');
         this.applyCatalogAvailability(null);
@@ -2603,6 +2606,235 @@ class App {
         return true;
     }
 
+    // ---- Account disclosure (desktop/tablet Web) -------------------------
+    // Content remains in the primary navigation. Identity, profile management,
+    // Settings, Admin, help and sign-out live behind the avatar as a predictable
+    // second level. Phone keeps the modal bottom sheet; TV keeps its current
+    // D-pad rail and direct profile switcher.
+
+    usesAccountMenuPopover() {
+        const tv = document.documentElement?.classList?.contains('tv-mode')
+            || /NorvaTV-AndroidTV/i.test(navigator.userAgent || '');
+        return !tv
+            && !this.isNativePhoneShell()
+            && window.matchMedia('(min-width: 641px)').matches;
+    }
+
+    openAccountMenu(opener = null) {
+        if (!this.usesAccountMenuPopover()) {
+            this.openAccountSheet();
+            return true;
+        }
+        const menu = document.getElementById('account-menu-popover') || this.buildAccountMenu();
+        const trigger = opener?.isConnected ? opener : document.getElementById('nav-profile');
+        if (!menu.hidden) {
+            this.closeAccountMenu({ restoreFocus: true });
+            return true;
+        }
+
+        this._accountMenuOpener = trigger;
+        this.refreshAccountMenu(menu);
+        menu.hidden = false;
+        menu.setAttribute('aria-hidden', 'false');
+        trigger?.setAttribute('aria-expanded', 'true');
+        this.positionAccountMenu(menu, trigger);
+
+        this._accountMenuPointerDown = (event) => {
+            if (menu.contains(event.target) || trigger?.contains?.(event.target)) return;
+            this.closeAccountMenu();
+        };
+        this._accountMenuKeydown = (event) => this.handleAccountMenuKeydown(event, menu);
+        this._accountMenuViewportChange = () => {
+            if (!menu.hidden) this.positionAccountMenu(menu, trigger);
+        };
+        document.addEventListener('pointerdown', this._accountMenuPointerDown, true);
+        document.addEventListener('keydown', this._accountMenuKeydown, true);
+        window.addEventListener('resize', this._accountMenuViewportChange);
+        window.addEventListener('scroll', this._accountMenuViewportChange, true);
+
+        const first = this.accountMenuItems(menu)[0];
+        try { first?.focus({ preventScroll: true }); } catch (_) { /* noop */ }
+        return true;
+    }
+
+    closeAccountMenu({ restoreFocus = false } = {}) {
+        const menu = document.getElementById('account-menu-popover');
+        if (!menu || menu.hidden) return false;
+        menu.hidden = true;
+        menu.setAttribute('aria-hidden', 'true');
+        const opener = this._accountMenuOpener;
+        opener?.setAttribute('aria-expanded', 'false');
+        if (this._accountMenuPointerDown) {
+            document.removeEventListener('pointerdown', this._accountMenuPointerDown, true);
+            this._accountMenuPointerDown = null;
+        }
+        if (this._accountMenuKeydown) {
+            document.removeEventListener('keydown', this._accountMenuKeydown, true);
+            this._accountMenuKeydown = null;
+        }
+        if (this._accountMenuViewportChange) {
+            window.removeEventListener('resize', this._accountMenuViewportChange);
+            window.removeEventListener('scroll', this._accountMenuViewportChange, true);
+            this._accountMenuViewportChange = null;
+        }
+        this._accountMenuOpener = null;
+        if (restoreFocus) {
+            const target = opener?.isConnected ? opener : document.getElementById('nav-profile');
+            try { target?.focus({ preventScroll: true }); } catch (_) { /* noop */ }
+        }
+        return true;
+    }
+
+    accountMenuItems(menu) {
+        return [...menu.querySelectorAll('[role="menuitem"]:not([hidden]):not([disabled])')]
+            .filter((item) => item.style.display !== 'none');
+    }
+
+    handleAccountMenuKeydown(event, menu) {
+        if (menu.hidden) return;
+        if (event.key === 'Escape') {
+            event.preventDefault();
+            event.stopPropagation();
+            this.closeAccountMenu({ restoreFocus: true });
+            return;
+        }
+        if (event.key === 'Tab') {
+            this.closeAccountMenu();
+            return;
+        }
+        if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+        const items = this.accountMenuItems(menu);
+        if (!items.length) return;
+        event.preventDefault();
+        const current = items.indexOf(document.activeElement);
+        let next = 0;
+        if (event.key === 'End') next = items.length - 1;
+        else if (event.key === 'ArrowUp') next = current <= 0 ? items.length - 1 : current - 1;
+        else if (event.key === 'ArrowDown') next = current < 0 || current === items.length - 1 ? 0 : current + 1;
+        items[next]?.focus({ preventScroll: true });
+    }
+
+    positionAccountMenu(menu, opener) {
+        if (!menu || !opener?.getBoundingClientRect) return;
+        const rect = opener.getBoundingClientRect();
+        const gutter = 16;
+        const width = menu.offsetWidth || 320;
+        const left = Math.max(gutter, Math.min(rect.right - width, window.innerWidth - width - gutter));
+        menu.style.left = `${Math.round(left)}px`;
+        menu.style.top = `${Math.round(rect.bottom + 8)}px`;
+        menu.style.setProperty('--account-menu-arrow-x', `${Math.round(rect.left + rect.width / 2 - left)}px`);
+    }
+
+    buildAccountMenu() {
+        const menu = document.createElement('div');
+        menu.id = 'account-menu-popover';
+        menu.className = 'account-menu-popover';
+        menu.hidden = true;
+        menu.setAttribute('aria-hidden', 'true');
+        menu.innerHTML = `
+            <div class="account-menu-profile">
+                <img id="account-menu-avatar" class="account-menu-avatar" src="/img/avatars/placeholder.svg" alt="">
+                <div class="account-menu-identity">
+                    <strong id="account-menu-name">Profile</strong>
+                    <span id="account-menu-email"></span>
+                </div>
+            </div>
+            <div class="account-menu-items" role="menu" aria-label="Profile and account">
+                <button type="button" class="account-menu-item" data-act="switch" role="menuitem">
+                    <img class="account-menu-icon account-menu-current-avatar" src="/img/avatars/placeholder.svg" alt="">
+                    <span>Switch profile</span>
+                </button>
+                <button type="button" class="account-menu-item" data-act="manage" role="menuitem">
+                    <img class="account-menu-icon" src="/img/icons/norva-account.svg?v=sharp-core-1" alt="">
+                    <span>Manage profiles</span>
+                </button>
+                <button type="button" class="account-menu-item" data-act="settings" role="menuitem">
+                    <img class="account-menu-icon" src="/img/icons/norva-settings.svg?v=sharp-core-1" alt="">
+                    <span class="account-menu-copy"><strong>Settings</strong><small>Account, providers and playback</small></span>
+                </button>
+                <button type="button" class="account-menu-item" data-act="admin" role="menuitem" hidden aria-hidden="true">
+                    <img class="account-menu-icon" src="/img/icons/norva-account.svg?v=sharp-core-1" alt="">
+                    <span class="account-menu-copy"><strong>Administration</strong><small>Operations and member access</small></span>
+                </button>
+                <button type="button" class="account-menu-item" data-act="help" role="menuitem">
+                    <span class="account-menu-symbol" aria-hidden="true">?</span>
+                    <span>Help &amp; support</span>
+                </button>
+                <div class="account-menu-divider" role="separator"></div>
+                <button type="button" class="account-menu-item account-menu-item-danger" data-act="logout" role="menuitem">
+                    <img class="account-menu-icon" src="/img/icons/norva-logout.svg?v=sharp-core-1" alt="">
+                    <span>Log out</span>
+                </button>
+            </div>`;
+        menu.querySelectorAll('[data-act]').forEach((item) => {
+            item.addEventListener('click', () => {
+                const action = item.dataset.act;
+                this.closeAccountMenu();
+                this.performAccountAction(action, item);
+            });
+        });
+        document.body.appendChild(menu);
+        return menu;
+    }
+
+    refreshAccountMenu(menu) {
+        const cur = window.NorvaProfiles?.current?.() || {};
+        const avatar = menu.querySelector('#account-menu-avatar');
+        const switchAvatar = menu.querySelector('.account-menu-current-avatar');
+        if (cur.avatarUrl) {
+            if (avatar) avatar.src = cur.avatarUrl;
+            if (switchAvatar) switchAvatar.src = cur.avatarUrl;
+        }
+        const name = menu.querySelector('#account-menu-name');
+        const email = menu.querySelector('#account-menu-email');
+        if (name) name.textContent = cur.name || 'Profile';
+        if (email) email.textContent = this.currentUser?.email || this.currentUser?.username || '';
+        const switchRow = menu.querySelector('[data-act="switch"]');
+        const manageRow = menu.querySelector('[data-act="manage"]');
+        if (switchRow) switchRow.hidden = !(cur.isCloud && cur.count > 1);
+        if (manageRow) manageRow.hidden = !cur.isCloud;
+        this.refreshAccountAdminEntry(menu);
+        const currentAction = this.currentPage === 'settings' || this.currentPage === 'admin'
+            ? this.currentPage
+            : '';
+        menu.querySelectorAll('[data-act="settings"], [data-act="admin"]').forEach((item) => {
+            const current = item.dataset.act === currentAction;
+            item.classList.toggle('is-current', current);
+            if (current) item.setAttribute('aria-current', 'page');
+            else item.removeAttribute('aria-current');
+        });
+    }
+
+    refreshAccountAdminEntry(surface) {
+        const row = surface?.querySelector?.('[data-act="admin"]');
+        if (!row) return;
+        row.hidden = true;
+        row.setAttribute('aria-hidden', 'true');
+        this.checkIsAdmin().then((allowed) => {
+            if (!row.isConnected || !allowed) return;
+            row.hidden = false;
+            row.setAttribute('aria-hidden', 'false');
+        }).catch(() => {});
+    }
+
+    performAccountAction(action, trigger = null) {
+        if (action === 'switch') window.NorvaProfiles?.openSwitcher?.();
+        else if (action === 'manage') window.NorvaProfiles?.openManage?.();
+        else if (action === 'screens') this.openScreensSettings();
+        else if (action === 'partners') this.openPartners(trigger);
+        else if (action === 'settings') this.navigateTo('settings');
+        else if (action === 'admin') {
+            this.checkIsAdmin().then((allowed) => {
+                if (allowed) this.navigateTo('admin');
+            }).catch(() => {});
+        } else if (action === 'help') {
+            const returnTo = window.location.pathname + window.location.search + window.location.hash;
+            window.location.href = '/support.html?returnTo=' + encodeURIComponent(returnTo);
+        } else if (action === 'logout') {
+            void this.signOut();
+        }
+    }
+
     buildAccountSheet() {
         const overlay = document.createElement('div');
         overlay.id = 'account-sheet';
@@ -2623,6 +2855,9 @@ class App {
                 <button type="button" class="account-row" data-act="switch">
                     <img class="account-ic" src="/img/avatars/placeholder.svg" alt=""><span>Switch profile</span>
                 </button>
+                <button type="button" class="account-row" data-act="manage">
+                    <img class="account-ic" src="/img/icons/norva-account.svg?v=sharp-core-1" alt=""><span>Manage profiles</span>
+                </button>
                 <button type="button" class="account-row" data-act="screens">
                     <img class="account-ic account-ic-devices" src="/img/icons/norva-devices.svg?v=1" alt="">
                     <span class="account-row-copy">
@@ -2638,7 +2873,17 @@ class App {
                     </span>
                 </button>
                 <button type="button" class="account-row" data-act="settings">
-                    <img class="account-ic" src="/img/icons/norva-settings.svg?v=sharp-core-1" alt=""><span>Settings</span>
+                    <img class="account-ic" src="/img/icons/norva-settings.svg?v=sharp-core-1" alt="">
+                    <span class="account-row-copy">
+                        <span class="account-row-title">Settings</span>
+                        <span class="account-row-hint">Account, providers and playback</span>
+                    </span>
+                </button>
+                <button type="button" class="account-row" data-act="admin" hidden aria-hidden="true">
+                    <img class="account-ic" src="/img/icons/norva-account.svg?v=sharp-core-1" alt=""><span>Administration</span>
+                </button>
+                <button type="button" class="account-row" data-act="help">
+                    <span class="account-sheet-symbol" aria-hidden="true">?</span><span>Help &amp; support</span>
                 </button>
                 <button type="button" class="account-row account-row-danger" data-act="logout">
                     <img class="account-ic" src="/img/icons/norva-logout.svg?v=sharp-core-1" alt=""><span>Log out</span>
@@ -2651,11 +2896,7 @@ class App {
             row.addEventListener('click', () => {
                 const act = row.dataset.act;
                 this.closeAccountSheet();
-                if (act === 'switch') window.NorvaProfiles?.openSwitcher?.();
-                else if (act === 'screens') this.openScreensSettings();
-                else if (act === 'partners') this.openPartners(row);
-                else if (act === 'settings') this.navigateTo('settings');
-                else if (act === 'logout') this.signOut();
+                this.performAccountAction(act, row);
             });
         });
         document.body.appendChild(overlay);
@@ -2669,6 +2910,7 @@ class App {
         const name = sheet.querySelector('#account-sheet-title');
         const email = sheet.querySelector('#account-email');
         const switchRow = sheet.querySelector('[data-act="switch"]');
+        const manageRow = sheet.querySelector('[data-act="manage"]');
         const screensRow = sheet.querySelector('[data-act="screens"]');
         const partnersRow = sheet.querySelector('[data-act="partners"]');
         if (avatar && cur.avatarUrl) avatar.src = cur.avatarUrl;
@@ -2676,7 +2918,8 @@ class App {
         if (name) name.textContent = cur.name || 'Profile';
         if (email) email.textContent = this.currentUser?.email || this.currentUser?.username || '';
         // Profile switching only exists in cloud mode.
-        if (switchRow) switchRow.style.display = cur.isCloud ? '' : 'none';
+        if (switchRow) switchRow.style.display = cur.isCloud && cur.count > 1 ? '' : 'none';
+        if (manageRow) manageRow.style.display = cur.isCloud ? '' : 'none';
         if (screensRow) {
             const cloudUser = Boolean(cur.isCloud || this.currentUser?.cloud || window.API?.isCloudMode?.());
             screensRow.style.display = cloudUser ? '' : 'none';
@@ -2688,6 +2931,7 @@ class App {
             this.pages?.partners?.setEntryVisibility?.(false);
             this.pages?.partners?.primeVisibility?.().catch(() => {});
         }
+        this.refreshAccountAdminEntry(sheet);
     }
 
     // Canonical sign-out (cloud → Supabase + /account.html, else local token).

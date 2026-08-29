@@ -17,7 +17,7 @@ test('one navigation model owns routes, actions and platform projection order', 
 
   assert.ok(model instanceof NavigationModel);
   assert.deepEqual(model.keysFor('web'), [
-    'home', 'live', 'movies', 'series', 'downloads', 'admin', 'settings', 'logout',
+    'home', 'live', 'movies', 'series', 'downloads',
   ]);
   assert.deepEqual(model.keysFor('phone'), [
     'home', 'live', 'movies', 'series', 'search', 'downloads', 'account',
@@ -45,7 +45,7 @@ test('one navigation model owns routes, actions and platform projection order', 
   assert.equal(model.allowsPlatform('downloads', 'web'), false);
   assert.equal(model.allowsPlatform('downloads', 'tv'), false);
   assert.equal(model.allowsPlatform('admin', 'web'), true);
-  assert.equal(model.allowsPlatform('admin', 'phone'), true);
+  assert.equal(model.allowsPlatform('admin', 'phone'), false);
 
   assert.throws(
     () => new NavigationModel({
@@ -79,14 +79,13 @@ test('the model renders accessible web, phone and TV projections without markup 
     assert.match(html, /aria-current="page"/);
   }
 
-  assert.equal((web.match(/class="nav-link/g) || []).length, 8);
+  assert.equal((web.match(/class="nav-link/g) || []).length, 5);
   assert.equal((phone.match(/class="nav-link/g) || []).length, 7);
   assert.equal((tv.match(/class="nav-link/g) || []).length, 6);
   assert.match(phone, /id="nav-search-bottom"[^>]*data-action="search"/);
   assert.match(phone, /id="nav-downloads-bottom"[^>]*data-action="downloads"/);
   assert.match(phone, /id="nav-account"[^>]*aria-label="Account and settings"/);
-  assert.match(web, /id="nav-admin"[^>]*data-nav-gate="admin"[^>]*hidden/);
-  assert.match(web, /id="logout-btn"[^>]*data-nav-gate="authenticated"[^>]*hidden/);
+  assert.doesNotMatch(web, /data-nav-key="admin"|data-nav-key="settings"|data-nav-key="logout"/);
   assert.match(tv, /id="logout-btn"/);
   assert.doesNotMatch(tv, /data-nav-key="admin"|data-nav-key="downloads"/);
 
@@ -157,11 +156,11 @@ test('app shell delegates navigation policy and removes the retired hamburger pa
   const css = read('public/css/main.css');
   const tvMain = read('clients/android-tv/app/src/main/java/tv/norva/tv/MainActivity.java');
 
-  const modelScript = html.indexOf('/js/navigation/NavigationModel.js?v=1');
+  const modelScript = html.indexOf('/js/navigation/NavigationModel.js?v=b09ff7a7da');
   const adaptersScript = html.indexOf('/js/navigation/NavigationAdapters.js?v=1');
   const bootstrapScript = html.indexOf('/js/navigation/navigationBootstrap.js?v=1');
   const tvScript = html.indexOf('/js/utils/tvNavigation.js?v=32');
-  const appScript = html.indexOf('/js/app.js?v=9a0dadaa02');
+  const appScript = html.indexOf('/js/app.js?v=6066ea92b3');
   assert.ok(modelScript > 0 && modelScript < adaptersScript);
   assert.ok(adaptersScript < bootstrapScript && bootstrapScript < tvScript && tvScript < appScript);
 
