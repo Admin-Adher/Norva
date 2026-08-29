@@ -1787,7 +1787,7 @@ if (
 }
 const MULTI_AUDIO_HLS_PROTOCOL = 1;
 const MAX_MULTI_AUDIO_RENDITIONS = 8;
-const GATEWAY_VERSION = 120;
+const GATEWAY_VERSION = 121;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -9840,13 +9840,13 @@ async function prepareFiniteMkvSeekBroker(session, parentSignal = null) {
         effectiveUrlSha256: session.vodInputEffectiveUrlSha256,
         effectiveUrlIdentitySha256: session.vodInputEffectiveUrlIdentitySha256,
         pathPrefix: 'finite-mkv-seek',
-        // Exact responses are fully drained and planned FFmpeg supersessions
-        // wait for cancellation/socket close, so those paths need no extra
-        // grace. A truncated/error reconnect still waits the conservative
-        // provider-slot release delay before opening the exact remaining range;
-        // some mono-account providers keep the closed socket reserved briefly.
+        // An exact response is fully drained, so the next byte range may open
+        // immediately. A planned FFmpeg supersession still interrupts an
+        // in-flight provider response: mono-account panels can keep that socket
+        // reserved after transport close, so the successor must observe the same
+        // conservative release grace as a truncated/error reconnect.
         completedReleaseDelayMs: 0,
-        supersededReleaseDelayMs: 0,
+        supersededReleaseDelayMs: PROVIDER_SLOT_RELEASE_DELAY_MS,
         abortSignal: parentSignal,
     });
     session.finiteMkvSeekBroker = broker;
