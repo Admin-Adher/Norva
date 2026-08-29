@@ -84,6 +84,16 @@ class AdminPage {
         this._partnersContactKeys = new Map();
         this._partnersKycCertificationPollTimer = null;
         this._partnersKycCertificationPollUntil = 0;
+        this._notificationView = 'composer';
+        this._notificationOverview = {};
+        this._notificationSchedules = [];
+        this._notificationRules = [];
+        this._notificationSystemRules = [];
+        this._notificationAudienceCounts = null;
+        this._notificationSelectedRule = '';
+        this._notificationRuleEditor = null;
+        this._notificationDraft = null;
+        this._notificationScheduleFilter = 'active';
     }
 
     // ── direct PostgREST RPC client (mirrors authApi.js config resolution) ──
@@ -988,21 +998,168 @@ class AdminPage {
 #page-admin .pev-opt{display:flex;align-items:center;gap:8px;width:100%;text-align:left;background:none;border:0;border-radius:7px;color:var(--adm-tx2);padding:7px 9px;font:inherit;font-size:12.5px;cursor:pointer;}
 #page-admin .pev-opt:hover{background:rgba(91,124,250,.14);color:var(--adm-tx);}
 #page-admin .pev-opt.on{background:linear-gradient(135deg,rgba(91,124,250,.2),rgba(168,85,247,.16));color:#fff;}
-#page-admin .mkt-notif-grid{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:18px;}
-@media (max-width:900px){#page-admin .mkt-notif-grid{grid-template-columns:1fr;}}
-#page-admin .mkt-notif-grid input[type=text],#page-admin .mkt-notif-grid textarea{width:100%;background:rgba(0,0,0,.25);border:1px solid var(--adm-line);border-radius:8px;color:var(--adm-tx);padding:9px 11px;font:inherit;font-size:13px;}
-#page-admin .mkt-notif-grid textarea{resize:vertical;margin-top:6px;}
-#page-admin .mkt-preview{border:1px solid var(--adm-line);border-radius:14px;background:#12161f;padding:12px 14px;box-shadow:0 10px 26px rgba(0,0,0,.4);}
-#page-admin .mkt-pv-hd{display:flex;align-items:center;gap:6px;color:var(--adm-tx2);font-size:11px;margin-bottom:6px;}
-#page-admin .mkt-pv-ic{display:inline-grid;place-items:center;width:16px;height:16px;border-radius:4px;background:linear-gradient(135deg,#5b7cfa,#a855f7);color:#fff;font-size:10px;font-weight:900;}
-#page-admin .mkt-pv-t{color:#fff;font-size:13px;font-weight:700;word-break:break-word;}
-#page-admin .mkt-pv-b{color:var(--adm-tx2);font-size:12.5px;line-height:1.45;white-space:pre-wrap;word-break:break-word;}
+#page-admin .notif-center{display:grid;gap:16px;margin-top:16px;color:var(--color-text-primary);}
+#page-admin .notif-intro{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;padding:18px 20px;border:1px solid var(--color-border);border-radius:var(--radius-lg);background:var(--color-bg-secondary);}
+#page-admin .notif-kicker{display:block;margin-bottom:6px;color:var(--color-accent-hover);font-size:10px;font-weight:800;letter-spacing:.09em;text-transform:uppercase;}
+#page-admin .notif-intro h2{margin:0;color:var(--color-text-primary);font-size:21px;line-height:1.2;}
+#page-admin .notif-intro p{max-width:720px;margin:7px 0 0;color:var(--color-text-secondary);font-size:12.5px;line-height:1.55;}
+#page-admin .notif-live-state{display:inline-flex;align-items:center;gap:7px;min-height:32px;padding:5px 10px;border:1px solid color-mix(in srgb,var(--color-success) 40%,transparent);border-radius:var(--radius-full);background:color-mix(in srgb,var(--color-success) 8%,transparent);color:var(--color-success);font-size:10.5px;font-weight:800;white-space:nowrap;}
+#page-admin .notif-live-state::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor;}
+#page-admin .notif-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;}
+#page-admin .notif-kpi{min-width:0;padding:13px 14px;border:1px solid var(--color-border);border-radius:var(--radius-md);background:var(--color-bg-secondary);}
+#page-admin .notif-kpi strong,#page-admin .notif-kpi span{display:block;}
+#page-admin .notif-kpi strong{color:var(--color-text-primary);font-size:18px;font-variant-numeric:tabular-nums;}
+#page-admin .notif-kpi span{margin-top:4px;color:var(--color-text-muted);font-size:10px;line-height:1.4;}
+#page-admin .notif-tabs{display:flex;align-items:center;gap:4px;overflow-x:auto;padding:4px;border:1px solid var(--color-border);border-radius:var(--radius-md);background:var(--color-bg-secondary);scrollbar-width:thin;}
+#page-admin .notif-tab{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:44px;border:0;border-radius:var(--radius-sm);background:transparent;color:var(--color-text-secondary);padding:8px 13px;font:inherit;font-size:12px;font-weight:750;white-space:nowrap;cursor:pointer;touch-action:manipulation;}
+#page-admin .notif-tab:hover{background:var(--color-bg-hover);color:var(--color-text-primary);}
+#page-admin .notif-tab[aria-selected="true"]{background:var(--color-bg-active);color:var(--color-text-primary);box-shadow:inset 0 0 0 1px var(--color-border-light);}
+#page-admin .notif-tab[aria-pressed="true"]{background:var(--color-bg-active);color:var(--color-text-primary);box-shadow:inset 0 0 0 1px var(--color-border-light);}
+#page-admin .notif-tab-count{display:inline-flex;align-items:center;justify-content:center;min-width:20px;height:20px;border-radius:var(--radius-full);background:var(--color-bg-tertiary);color:var(--color-text-secondary);padding:0 6px;font-size:9.5px;font-variant-numeric:tabular-nums;}
+#page-admin .notif-panel[hidden]{display:none;}
+#page-admin .notif-card{overflow:hidden;border:1px solid var(--color-border);border-radius:var(--radius-lg);background:var(--color-bg-secondary);}
+#page-admin .notif-card-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:15px 17px;border-bottom:1px solid var(--color-border);}
+#page-admin .notif-card-head h3{margin:0;color:var(--color-text-primary);font-size:14px;line-height:1.35;}
+#page-admin .notif-card-head p{margin:4px 0 0;color:var(--color-text-muted);font-size:10.5px;line-height:1.45;}
+#page-admin .notif-card-body{padding:16px;}
+#page-admin .notif-composer-layout{display:grid;grid-template-columns:minmax(0,1fr) 330px;gap:16px;align-items:start;}
+#page-admin .notif-composer-main{display:grid;gap:16px;min-width:0;}
+#page-admin .notif-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;}
+#page-admin .notif-grid.span-2{grid-column:1/-1;}
+#page-admin .notif-field{display:grid;gap:6px;min-width:0;margin:0;padding:0;border:0;color:var(--color-text-secondary);font-size:11px;font-weight:700;}
+#page-admin .notif-field legend{margin:0;padding:0;color:inherit;font:inherit;}
+#page-admin .notif-field.span-2{grid-column:1/-1;}
+#page-admin .notif-field input,#page-admin .notif-field textarea,#page-admin .notif-field select{width:100%;min-height:44px;border:1px solid var(--color-border-light);border-radius:var(--radius-md);background:var(--color-bg-primary);color:var(--color-text-primary);padding:9px 11px;font:inherit;font-size:13px;}
+#page-admin .notif-field textarea{min-height:106px;resize:vertical;line-height:1.5;}
+#page-admin .notif-field input[type="datetime-local"]{color-scheme:dark;}
+#page-admin .notif-field-help{display:flex;justify-content:space-between;gap:12px;color:var(--color-text-muted);font-size:10px;font-weight:500;line-height:1.4;}
+#page-admin .notif-delivery-choice{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+#page-admin .notif-choice{position:relative;display:flex;align-items:flex-start;gap:9px;min-height:58px;border:1px solid var(--color-border);border-radius:var(--radius-md);background:var(--color-bg-primary);padding:10px 11px;cursor:pointer;}
+#page-admin .notif-choice:has(input:checked){border-color:var(--color-accent);background:color-mix(in srgb,var(--color-accent) 8%,var(--color-bg-primary));}
+#page-admin .notif-choice input{width:18px;height:18px;min-height:0;margin:2px 0 0;accent-color:var(--color-accent);}
+#page-admin .notif-choice strong,#page-admin .notif-choice span{display:block;}
+#page-admin .notif-choice strong{color:var(--color-text-primary);font-size:11.5px;}
+#page-admin .notif-choice span{margin-top:3px;color:var(--color-text-muted);font-size:9.5px;line-height:1.35;}
+#page-admin .notif-schedule-fields[hidden]{display:none;}
+#page-admin .notif-button{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:44px;border:1px solid var(--color-border-light);border-radius:var(--radius-md);background:var(--color-bg-tertiary);color:var(--color-text-primary);padding:9px 13px;font:inherit;font-size:12px;font-weight:750;cursor:pointer;touch-action:manipulation;transition:border-color .18s ease,background .18s ease,opacity .18s ease;}
+#page-admin .notif-button:hover:not(:disabled){border-color:var(--color-accent-hover);background:var(--color-bg-hover);}
+#page-admin .notif-button.primary{border-color:var(--color-accent-action);background:var(--color-accent-action);color:var(--color-text-primary);}
+#page-admin .notif-button.primary:hover:not(:disabled){border-color:var(--color-accent-action-hover);background:var(--color-accent-action-hover);}
+#page-admin .notif-button.quiet{background:transparent;}
+#page-admin .notif-button.danger{border-color:color-mix(in srgb,var(--color-error-text) 45%,var(--color-border));background:transparent;color:var(--color-error-text);}
+#page-admin .notif-button:disabled{opacity:.45;cursor:not-allowed;}
+#page-admin .notif-actions{display:flex;align-items:center;gap:9px;flex-wrap:wrap;}
+#page-admin .notif-status{min-height:20px;color:var(--color-text-secondary);font-size:11px;line-height:1.45;}
+#page-admin .notif-status.is-error{color:var(--color-error-text);}
+#page-admin .notif-status.is-success{color:var(--color-success);}
+#page-admin .notif-review{border:1px solid color-mix(in srgb,var(--color-warning) 32%,var(--color-border));border-radius:var(--radius-md);background:color-mix(in srgb,var(--color-warning) 6%,var(--color-bg-secondary));padding:14px;}
+#page-admin .notif-review[hidden]{display:none;}
+#page-admin .notif-review h4{margin:0;color:var(--color-text-primary);font-size:12px;}
+#page-admin .notif-review-list{margin:9px 0 0;padding-left:18px;color:var(--color-text-secondary);font-size:11px;line-height:1.55;}
+#page-admin .notif-preview-pane{position:sticky;top:74px;}
+#page-admin .notif-preview-wrap{padding:18px;background:var(--color-bg-primary);}
+#page-admin .notif-preview-device{padding:12px;border:1px solid var(--color-border-light);border-radius:var(--radius-lg);background:var(--color-bg-secondary);box-shadow:var(--shadow-lg);}
+#page-admin .notif-preview-top{display:flex;align-items:center;gap:8px;margin-bottom:8px;color:var(--color-text-muted);font-size:10px;}
+#page-admin .notif-preview-top img{width:22px;height:22px;border-radius:var(--radius-sm);}
+#page-admin .notif-pv-t{color:var(--color-text-primary);font-size:13px;font-weight:800;word-break:break-word;}
+#page-admin .notif-pv-b{margin-top:4px;color:var(--color-text-secondary);font-size:11.5px;line-height:1.45;white-space:pre-wrap;word-break:break-word;}
+#page-admin .notif-preview-facts{display:grid;grid-template-columns:1fr 1fr;border-top:1px solid var(--color-border);}
+#page-admin .notif-preview-fact{padding:11px 14px;}
+#page-admin .notif-preview-fact+.notif-preview-fact{border-left:1px solid var(--color-border);}
+#page-admin .notif-preview-fact strong,#page-admin .notif-preview-fact span{display:block;}
+#page-admin .notif-preview-fact strong{color:var(--color-text-primary);font-size:11.5px;}
+#page-admin .notif-preview-fact span{margin-top:2px;color:var(--color-text-muted);font-size:9px;}
+#page-admin .notif-list{display:grid;gap:8px;}
+#page-admin .notif-empty{padding:28px 18px;text-align:center;color:var(--color-text-muted);font-size:12px;line-height:1.55;}
+#page-admin .notif-schedule-row{display:grid;grid-template-columns:minmax(160px,1fr) minmax(140px,.7fr) 110px minmax(160px,.75fr) auto;gap:12px;align-items:center;min-height:68px;padding:11px 13px;border:1px solid var(--color-border);border-radius:var(--radius-md);background:var(--color-bg-primary);}
+#page-admin .notif-row-title{min-width:0;color:var(--color-text-primary);font-size:12px;font-weight:750;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+#page-admin .notif-row-sub{margin-top:4px;color:var(--color-text-muted);font-size:9.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+#page-admin .notif-state{display:inline-flex;align-items:center;gap:6px;width:fit-content;min-height:26px;padding:3px 8px;border-radius:var(--radius-full);background:var(--color-bg-tertiary);color:var(--color-text-secondary);font-size:9.5px;font-weight:800;}
+#page-admin .notif-state::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor;}
+#page-admin .notif-state.is-live,#page-admin .notif-state.is-sent{background:color-mix(in srgb,var(--color-success) 10%,transparent);color:var(--color-success);}
+#page-admin .notif-state.is-draft{background:color-mix(in srgb,var(--color-warning) 9%,transparent);color:var(--color-warning);}
+#page-admin .notif-state.is-failed{background:color-mix(in srgb,var(--color-error-text) 10%,transparent);color:var(--color-error-text);}
+#page-admin .notif-row-actions{display:flex;justify-content:flex-end;gap:7px;}
+#page-admin .notif-icon-button{display:inline-flex;align-items:center;justify-content:center;min-width:44px;min-height:44px;border:1px solid var(--color-border);border-radius:var(--radius-md);background:transparent;color:var(--color-text-secondary);font:inherit;font-size:10.5px;font-weight:750;cursor:pointer;}
+#page-admin .notif-icon-button:hover{border-color:var(--color-accent-hover);color:var(--color-text-primary);}
+#page-admin .notif-automation-layout{display:grid;grid-template-columns:310px minmax(0,1fr);min-height:560px;border:1px solid var(--color-border);border-radius:var(--radius-lg);overflow:hidden;background:var(--color-bg-secondary);}
+#page-admin .notif-rule-list-pane{border-right:1px solid var(--color-border);background:var(--color-bg-primary);}
+#page-admin .notif-rule-list-head{padding:14px;border-bottom:1px solid var(--color-border);}
+#page-admin .notif-rule-list-head .notif-button{width:100%;}
+#page-admin .notif-rule-list{display:grid;gap:4px;padding:8px;max-height:650px;overflow:auto;}
+#page-admin .notif-rule-item{display:block;width:100%;min-height:74px;border:1px solid transparent;border-radius:var(--radius-md);background:transparent;color:var(--color-text-primary);padding:10px;text-align:left;font:inherit;cursor:pointer;}
+#page-admin .notif-rule-item:hover{background:var(--color-bg-hover);}
+#page-admin .notif-rule-item[aria-current="true"]{border-color:var(--color-border-light);background:var(--color-bg-active);}
+#page-admin .notif-rule-item-head{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;}
+#page-admin .notif-rule-item strong{font-size:11.5px;line-height:1.35;}
+#page-admin .notif-rule-item p{margin:5px 0 0;color:var(--color-text-muted);font-size:9.5px;line-height:1.4;}
+#page-admin .notif-rule-detail{min-width:0;padding:18px;}
+#page-admin .notif-detail-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;padding-bottom:16px;border-bottom:1px solid var(--color-border);}
+#page-admin .notif-detail-head h3{margin:0;color:var(--color-text-primary);font-size:17px;}
+#page-admin .notif-detail-head p{margin:5px 0 0;color:var(--color-text-muted);font-size:10.5px;line-height:1.45;}
+#page-admin .notif-detail-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;}
+#page-admin .notif-protected{margin:16px 0;padding:12px 13px;border:1px solid color-mix(in srgb,var(--color-warning) 30%,var(--color-border));border-radius:var(--radius-md);background:color-mix(in srgb,var(--color-warning) 6%,transparent);color:var(--color-text-secondary);font-size:10.5px;line-height:1.5;}
+#page-admin .notif-detail-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:16px;}
+#page-admin .notif-detail-fact{padding:12px;border:1px solid var(--color-border);border-radius:var(--radius-md);background:var(--color-bg-primary);}
+#page-admin .notif-detail-fact span,#page-admin .notif-detail-fact strong{display:block;}
+#page-admin .notif-detail-fact span{color:var(--color-text-muted);font-size:9px;text-transform:uppercase;letter-spacing:.06em;}
+#page-admin .notif-detail-fact strong{margin-top:5px;color:var(--color-text-primary);font-size:11px;line-height:1.45;}
+#page-admin .notif-rule-form{display:grid;gap:14px;margin-top:16px;}
+#page-admin .notif-switch-row{display:flex;align-items:center;justify-content:space-between;gap:14px;min-height:56px;padding:9px 11px;border:1px solid var(--color-border);border-radius:var(--radius-md);background:var(--color-bg-primary);}
+#page-admin .notif-switch-row strong,#page-admin .notif-switch-row span{display:block;}
+#page-admin .notif-switch-row strong{color:var(--color-text-primary);font-size:11.5px;}
+#page-admin .notif-switch-row span{margin-top:3px;color:var(--color-text-muted);font-size:9.5px;}
+#page-admin .notif-switch{position:relative;display:inline-flex;align-items:center;width:48px;height:28px;flex:0 0 48px;}
+#page-admin .notif-switch input{position:absolute;opacity:0;pointer-events:none;}
+#page-admin .notif-switch-track{width:48px;height:28px;border:1px solid var(--color-border-light);border-radius:var(--radius-full);background:var(--color-bg-tertiary);transition:background .18s ease,border-color .18s ease;}
+#page-admin .notif-switch-track::after{content:"";display:block;width:20px;height:20px;margin:3px;border-radius:50%;background:var(--color-text-secondary);transition:transform .18s ease,background .18s ease;}
+#page-admin .notif-switch input:checked+.notif-switch-track{border-color:var(--color-accent);background:color-mix(in srgb,var(--color-accent) 65%,var(--color-bg-tertiary));}
+#page-admin .notif-switch input:checked+.notif-switch-track::after{background:var(--color-text-primary);transform:translateX(20px);}
+#page-admin .notif-field input:focus-visible,#page-admin .notif-field textarea:focus-visible,#page-admin .notif-field select:focus-visible,#page-admin .notif-button:focus-visible,#page-admin .notif-tab:focus-visible,#page-admin .notif-icon-button:focus-visible,#page-admin .notif-rule-item:focus-visible,#page-admin .notif-switch input:focus-visible+.notif-switch-track,#page-admin .notif-choice:focus-within{outline:2px solid var(--color-accent);outline-offset:2px;}
 #page-admin .mkt-log-clip{max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--adm-tx2);font-size:12px;}
 #page-admin .mkt-td-wrap{white-space:normal;overflow:visible;text-overflow:clip;vertical-align:top;}
 #page-admin .mkt-log-title{max-width:220px;min-width:120px;white-space:normal;word-break:break-word;line-height:1.4;font-size:12.5px;}
 #page-admin .mkt-log-msg{max-width:460px;min-width:220px;white-space:normal;word-break:break-word;line-height:1.45;color:var(--adm-tx2);font-size:12px;}
 #page-admin .mkt-log-bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;}
 #page-admin #mkt-log-q{background:rgba(0,0,0,.25);border:1px solid var(--adm-line);border-radius:8px;color:var(--adm-tx);padding:8px 11px;font:inherit;font-size:12.5px;min-width:260px;}
+@media(max-width:1040px){
+  #page-admin .notif-composer-layout{grid-template-columns:1fr;}
+  #page-admin .notif-preview-pane{position:static;}
+  #page-admin .notif-schedule-row{grid-template-columns:minmax(0,1fr) minmax(130px,.7fr) 100px auto;}
+  #page-admin .notif-schedule-row .notif-row-audience{display:none;}
+}
+@media(max-width:820px){
+  #page-admin .notif-kpis{grid-template-columns:repeat(2,minmax(0,1fr));}
+  #page-admin .notif-automation-layout{grid-template-columns:1fr;}
+  #page-admin .notif-rule-list-pane{border-right:0;border-bottom:1px solid var(--color-border);}
+  #page-admin .notif-rule-list{display:flex;max-height:none;overflow-x:auto;}
+  #page-admin .notif-rule-item{min-width:220px;}
+}
+@media(max-width:640px){
+  #page-admin .notif-intro{display:block;padding:16px;}
+  #page-admin .notif-live-state{margin-top:12px;}
+  #page-admin .notif-grid,#page-admin .notif-detail-grid{grid-template-columns:1fr;}
+  #page-admin .notif-field.span-2{grid-column:auto;}
+  #page-admin .notif-delivery-choice{grid-template-columns:1fr;}
+  #page-admin .notif-schedule-row{grid-template-columns:minmax(0,1fr) auto;gap:8px;}
+  #page-admin .notif-schedule-row .notif-row-time,#page-admin .notif-schedule-row .notif-row-audience{grid-column:1/-1;}
+  #page-admin .notif-schedule-row .notif-row-status{grid-column:2;grid-row:1;}
+  #page-admin .notif-row-actions{grid-column:1/-1;justify-content:flex-start;}
+  #page-admin .notif-detail-head{display:block;}
+  #page-admin .notif-detail-actions{justify-content:flex-start;margin-top:12px;}
+  #page-admin .mkt-log-bar{align-items:stretch;}
+  #page-admin #mkt-log-q{width:100%;min-width:0;min-height:44px;}
+}
+@media(max-width:460px){
+  #page-admin .notif-kpis{grid-template-columns:1fr;}
+  #page-admin .notif-card-body,#page-admin .notif-rule-detail{padding:13px;}
+  #page-admin .notif-actions .notif-button{width:100%;}
+  #page-admin .notif-preview-facts{grid-template-columns:1fr;}
+  #page-admin .notif-preview-fact+.notif-preview-fact{border-left:0;border-top:1px solid var(--color-border);}
+}
+@media(prefers-reduced-motion:reduce){
+  #page-admin .notif-button,#page-admin .notif-switch-track,#page-admin .notif-switch-track::after{transition:none;}
+}
 #page-admin .filter-bar{background:var(--adm-panel);border:1px solid var(--adm-line);border-radius:14px;padding:12px 14px;margin-bottom:14px;}
 #page-admin .filter-bar .fb-h{font-size:10.5px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--adm-tx3);margin-bottom:10px;display:flex;align-items:center;gap:6px;}
 #page-admin .filter-bar .users-controls{margin-bottom:0;}
@@ -2309,42 +2466,7 @@ class AdminPage {
                 <div id="fin-prices" aria-live="polite"><div class="ssub">Chargement…</div></div>
             </div>
             <div id="mkt-tab-notifs" role="tabpanel" aria-labelledby="mkt-tab-button-notifs"${show('notifs')}>
-                <div class="admin-block"><h2>📲 Notification push (mobile)</h2>
-                    <div class="ssub" style="margin-bottom:10px">Envoyée immédiatement à <b>tous les appareils enregistrés</b> (app Android installée + push accepté). Rédige en <b>anglais</b> — le produit est anglophone — et reste parcimonieux : une notification de trop = désinstallation.</div>
-                    <div class="mkt-notif-grid">
-                        <div>
-                            <input type="text" id="mkt-nt" maxlength="60" placeholder="Titre — ex. Flash Sale: 40% off tonight ⚡" autocomplete="off">
-                            <div class="ssub" id="mkt-nt-c" style="text-align:right;margin-top:3px">0/60</div>
-                            <textarea id="mkt-nb" maxlength="240" rows="3" placeholder="Message — ex. Annual plans are 40% off until Sunday. Open Norva to grab yours."></textarea>
-                            <div class="ssub" id="mkt-nb-c" style="text-align:right;margin-top:3px">0/240</div>
-                            <div class="ssub" style="margin:8px 0 4px">Audience</div>
-                            <div class="pev" id="mkt-aud" data-val="all" style="max-width:360px">
-                                <button type="button" class="pev-btn"><span class="pev-cur">📢 Tous les appareils</span><span class="pev-car">▾</span></button>
-                                <div class="pev-menu" hidden></div>
-                            </div>
-                            <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:10px">
-                                <button class="mini-btn" id="mkt-send">📤 Envoyer maintenant</button>
-                                <span class="ssub" id="mkt-send-msg"></span>
-                            </div>
-                        </div>
-                        <div>
-                            <div class="ssub" style="margin-bottom:6px">Aperçu (Android)</div>
-                            <div class="mkt-preview">
-                                <div class="mkt-pv-hd"><span class="mkt-pv-ic">N</span> Norva · maintenant</div>
-                                <div class="mkt-pv-t" id="mkt-pv-t">Titre</div>
-                                <div class="mkt-pv-b" id="mkt-pv-b">Message</div>
-                            </div>
-                            <div class="ssub" id="mkt-devices" style="margin-top:8px">📱 Appareils : chargement…</div>
-                        </div>
-                    </div>
-                </div>
-                <div class="admin-block"><h2>🗂 Historique des envois</h2>
-                    <div class="mkt-log-bar">
-                        <input type="search" id="mkt-log-q" placeholder="🔎 Rechercher (titre, message, auteur)…" autocomplete="off">
-                        <div class="qv-row" id="mkt-log-auds" role="group" aria-label="Filtrer par audience"></div>
-                    </div>
-                    <div id="mkt-log"><div class="ssub">Chargement…</div></div>
-                </div>
+                <div id="mkt-notification-center" aria-live="polite"><div class="ssub">Chargement du centre de notifications…</div></div>
             </div>
         </div>`;
 
@@ -2383,9 +2505,7 @@ class AdminPage {
 
         this._loadWebPrices();
         this._loadMarketingOverview();
-        this._loadPushLog();
-        this._wirePushComposer();
-        this._wirePushLogControls();
+        this._loadNotificationCenter();
     }
 
     // Vue d'ensemble Marketing : promos actives (billing_prices), appareils push,
@@ -2441,16 +2561,16 @@ class AdminPage {
     // Audiences push : clé serveur → picto + libellés (composeur + historique).
     static AUDIENCES() {
         return [
-            ['all', '📢', 'Tous les appareils'],
-            ['trialing', '⏳', 'En essai'],
-            ['paying', '💳', 'Abonnés payants'],
-            ['monthly', '📅', 'Mensuels payants — upsell annuel'],
-            ['free', '💤', 'Sans abonnement actif — win-back']
+            ['all', 'Tous', 'Tous les appareils'],
+            ['trialing', 'Essai', 'Comptes en essai'],
+            ['paying', 'Payants', 'Abonnés payants'],
+            ['monthly', 'Mensuels', 'Mensuels payants — upsell annuel'],
+            ['free', 'Sans abonnement', 'Sans abonnement actif — win-back']
         ];
     }
     static audShort(a) {
         const x = AdminPage.AUDIENCES().find(v => v[0] === a);
-        return x ? `${x[1]} ${x[0] === 'all' ? 'Tous' : x[0] === 'trialing' ? 'Essai' : x[0] === 'paying' ? 'Payants' : x[0] === 'monthly' ? 'Mensuels' : 'Sans abo'}` : (a || '—');
+        return x ? x[1] : (a || '—');
     }
 
     // Historique des notifications push marketing — vraie liste : recherche
@@ -2468,8 +2588,9 @@ class AdminPage {
             const esc = AdminPage.esc, n = AdminPage.n;
             const list = Array.isArray(rows) ? rows : [];
             el.innerHTML = list.length
-                ? `<div class="scroll"><table><thead><tr><th>Date</th><th>Audience</th><th>Titre</th><th>Message</th><th class="num">Envoyés</th><th class="num">Échecs</th><th>Par</th></tr></thead><tbody>${list.map(r => `<tr>
+                ? `<div class="scroll"><table><thead><tr><th>Date</th><th>Origine</th><th>Audience</th><th>Titre</th><th>Message</th><th class="num">Envoyés</th><th class="num">Échecs</th><th>Par</th></tr></thead><tbody>${list.map(r => `<tr>
                     <td style="white-space:nowrap;vertical-align:top">${new Date(r.created_at).toLocaleString('fr-FR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</td>
+                    <td style="vertical-align:top"><span class="badge ${r.origin === 'scheduled' ? 'amber' : 'gray'}">${r.origin === 'scheduled' ? 'Programmée' : 'Immédiate'}</span></td>
                     <td style="vertical-align:top"><span class="badge blue">${esc(AdminPage.audShort(r.audience))}</span></td>
                     <td class="mkt-td-wrap"><div class="mkt-log-title">${esc(r.title)}</div></td>
                     <td class="mkt-td-wrap"><div class="mkt-log-msg">${esc(r.body)}</div></td>
@@ -2479,7 +2600,7 @@ class AdminPage {
                 </tr>`).join('')}</tbody></table></div>`
                 : `<div class="ssub">${(this._pushLogQuery || this._pushLogAud) ? 'Aucun envoi ne correspond à cette recherche.' : 'Aucune notification marketing envoyée pour l\'instant — la première apparaîtra ici avec ses compteurs.'}</div>`;
         } catch (e) {
-            el.innerHTML = `<div class="ssub">Historique indisponible — appliquer les migrations 20260719090000 + 20260719110000 puis <code>NOTIFY pgrst, 'reload schema'</code>. (${AdminPage.esc(e && e.message ? e.message : 'erreur')})</div>`;
+            el.innerHTML = '<div class="notif-empty">L’historique est momentanément indisponible. Les envois ne sont pas affectés.</div>';
         }
     }
 
@@ -2600,6 +2721,651 @@ class AdminPage {
             } catch (e) {
                 if (msg) msg.textContent = '❌ ' + (e && e.message ? e.message : 'échec');
             } finally { sendBtn.disabled = false; }
+        });
+    }
+
+    static NOTIFICATION_EVENTS() {
+        return [
+            ['new_content', 'Nouveautés du catalogue', 'Lorsqu’une source publie son résumé de nouveaux contenus.'],
+            ['subtitle_ready', 'Sous-titres prêts', 'Lorsque les sous-titres IA demandés sont disponibles.'],
+            ['subtitle_empty', 'Sous-titres introuvables', 'Lorsque la génération ne trouve aucun sous-titre exploitable.'],
+            ['subtitle_failed', 'Échec des sous-titres', 'Lorsque la génération se termine en erreur.']
+        ];
+    }
+
+    _notificationLocalValue(value) {
+        const d = new Date(value || Date.now() + 60 * 60 * 1000);
+        const p = n => String(n).padStart(2, '0');
+        return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+    }
+
+    _notificationDateLabel(value, includeYear = false) {
+        if (!value) return '—';
+        const d = new Date(value);
+        if (Number.isNaN(d.getTime())) return '—';
+        return d.toLocaleString('fr-FR', {
+            day: '2-digit', month: 'short', ...(includeYear ? { year: 'numeric' } : {}),
+            hour: '2-digit', minute: '2-digit'
+        });
+    }
+
+    _notificationStatusLabel(status) {
+        return ({
+            draft: 'Brouillon', scheduled: 'Programmée', processing: 'En cours', sent: 'Envoyée',
+            canceled: 'Annulée', failed: 'À vérifier'
+        })[status] || 'Inconnue';
+    }
+
+    async _loadNotificationCenter() {
+        const host = document.getElementById('mkt-notification-center');
+        if (!host) return;
+        host.setAttribute('aria-busy', 'true');
+        const [overview, schedules, rules, systemRules, audiences] = await Promise.allSettled([
+            this._rpc('admin_marketing_notification_center_overview'),
+            this._rpc('admin_marketing_notification_schedules', { p_status: null, p_limit: 150 }),
+            this._rpc('admin_marketing_notification_rules'),
+            this._rpc('admin_marketing_system_automations'),
+            this._rpc('admin_marketing_audience_counts')
+        ]);
+        if (this._route !== 'marketing' || !document.getElementById('mkt-notification-center')) return;
+
+        this._notificationCenterAvailable = [overview, schedules, rules, systemRules].every(result => result.status === 'fulfilled');
+        this._notificationOverview = overview.status === 'fulfilled' && overview.value ? overview.value : {};
+        this._notificationSchedules = schedules.status === 'fulfilled' && Array.isArray(schedules.value) ? schedules.value : [];
+        this._notificationRules = rules.status === 'fulfilled' && Array.isArray(rules.value) ? rules.value : [];
+        this._notificationSystemRules = systemRules.status === 'fulfilled' && Array.isArray(systemRules.value) ? systemRules.value : [];
+        this._notificationAudienceCounts = audiences.status === 'fulfilled' && audiences.value ? audiences.value : null;
+        this._renderNotificationCenter();
+    }
+
+    _notificationComposerDraft() {
+        if (this._notificationDraft) return this._notificationDraft;
+        let timezone = 'Europe/Paris';
+        try { timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || timezone; } catch (_) { /* fallback */ }
+        this._notificationDraft = {
+            id: null,
+            title: '',
+            body: '',
+            audience: 'all',
+            mode: 'immediate',
+            scheduled_for: this._notificationLocalValue(),
+            timezone
+        };
+        return this._notificationDraft;
+    }
+
+    _notificationComposerMarkup() {
+        const d = this._notificationComposerDraft();
+        const esc = AdminPage.esc;
+        const audienceOptions = AdminPage.AUDIENCES().map(([value, short, label]) =>
+            `<option value="${value}"${d.audience === value ? ' selected' : ''}>${esc(label)} · ${esc(short)}</option>`
+        ).join('');
+        const schedulingDisabled = !this._notificationCenterAvailable;
+        return `<div class="notif-composer-layout">
+            <div class="notif-composer-main">
+                <section class="notif-card" aria-labelledby="notif-compose-title">
+                    <div class="notif-card-head"><div><h3 id="notif-compose-title">${d.id ? 'Modifier la programmation' : 'Composer un push'}</h3><p>Rédigez en anglais, ciblez précisément et vérifiez le message avant toute livraison.</p></div>${d.id ? '<span class="notif-state is-draft">Édition</span>' : ''}</div>
+                    <div class="notif-card-body">
+                        <div class="notif-grid">
+                            <label class="notif-field span-2" for="notif-title">Titre
+                                <input id="notif-title" type="text" maxlength="60" autocomplete="off" value="${esc(d.title || '')}" placeholder="New this week on Norva">
+                                <span class="notif-field-help"><span>2 à 60 caractères</span><span id="notif-title-count">0/60</span></span>
+                            </label>
+                            <label class="notif-field span-2" for="notif-body">Message
+                                <textarea id="notif-body" maxlength="240" placeholder="Open Norva to discover what just arrived.">${esc(d.body || '')}</textarea>
+                                <span class="notif-field-help"><span>Clair, utile et sans pression artificielle</span><span id="notif-body-count">0/240</span></span>
+                            </label>
+                            <label class="notif-field" for="notif-audience">Audience
+                                <select id="notif-audience">${audienceOptions}</select>
+                                <span class="notif-field-help"><span id="notif-audience-help">Comptage en cours…</span></span>
+                            </label>
+                            <fieldset class="notif-field"><legend>Livraison</legend>
+                                <div class="notif-delivery-choice">
+                                    <label class="notif-choice"><input type="radio" name="notif-delivery" value="immediate"${d.mode !== 'scheduled' ? ' checked' : ''}><span><strong>Maintenant</strong><span>Après vérification</span></span></label>
+                                    <label class="notif-choice"><input type="radio" name="notif-delivery" value="scheduled"${d.mode === 'scheduled' ? ' checked' : ''}${schedulingDisabled ? ' disabled' : ''}><span><strong>Programmer</strong><span>Date et heure locales</span></span></label>
+                                </div>
+                            </fieldset>
+                            <div class="notif-grid notif-schedule-fields span-2" id="notif-schedule-fields"${d.mode === 'scheduled' ? '' : ' hidden'}>
+                                <label class="notif-field" for="notif-scheduled-for">Date et heure
+                                    <input id="notif-scheduled-for" type="datetime-local" value="${esc(d.scheduled_for || this._notificationLocalValue())}">
+                                    <span class="notif-field-help"><span>Au moins une minute dans le futur</span></span>
+                                </label>
+                                <label class="notif-field" for="notif-timezone">Fuseau horaire
+                                    <input id="notif-timezone" type="text" maxlength="64" value="${esc(d.timezone || 'Europe/Paris')}" autocomplete="off">
+                                    <span class="notif-field-help"><span>Conservé avec la campagne</span></span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+                <section class="notif-review" id="notif-send-review" hidden tabindex="-1" aria-labelledby="notif-review-title">
+                    <h4 id="notif-review-title">Vérification avant livraison</h4>
+                    <ul class="notif-review-list" id="notif-review-list"></ul>
+                    <div class="notif-actions" style="margin-top:12px"><button class="notif-button quiet" id="notif-review-back" type="button">Continuer les modifications</button><button class="notif-button primary" id="notif-review-confirm" type="button">Confirmer</button></div>
+                </section>
+                <div class="notif-actions">
+                    <button class="notif-button primary" id="notif-verify" type="button">Vérifier l’envoi</button>
+                    <button class="notif-button" id="notif-save-draft" type="button"${d.mode === 'scheduled' ? '' : ' hidden'}${schedulingDisabled ? ' disabled' : ''}>Enregistrer le brouillon</button>
+                    <button class="notif-button quiet" id="notif-clear" type="button">Effacer</button>
+                    <span class="notif-status" id="notif-composer-status" role="status" aria-live="polite" aria-atomic="true"></span>
+                </div>
+                ${schedulingDisabled ? '<div class="notif-protected">La programmation et les automations sont indisponibles tant que le moteur de production n’est pas joignable. L’envoi immédiat reste disponible.</div>' : ''}
+            </div>
+            <aside class="notif-card notif-preview-pane" aria-labelledby="notif-preview-title">
+                <div class="notif-card-head"><div><h3 id="notif-preview-title">Aperçu Android</h3><p>Rendu compact avant ouverture de l’app.</p></div></div>
+                <div class="notif-preview-wrap"><div class="notif-preview-device">
+                    <div class="notif-preview-top"><img src="/img/norva-app-icon-96.webp" alt="" width="22" height="22">Norva · <span id="notif-preview-time">maintenant</span></div>
+                    <div class="notif-pv-t" id="notif-preview-title-text">Titre de la notification</div>
+                    <div class="notif-pv-b" id="notif-preview-body-text">Votre message apparaîtra ici.</div>
+                </div></div>
+                <div class="notif-preview-facts"><div class="notif-preview-fact"><strong id="notif-preview-audience">Tous</strong><span>audience</span></div><div class="notif-preview-fact"><strong id="notif-preview-devices">—</strong><span>appareils ciblés</span></div></div>
+            </aside>
+        </div>`;
+    }
+
+    _renderNotificationCenter() {
+        const host = document.getElementById('mkt-notification-center');
+        if (!host) return;
+        const n = AdminPage.n;
+        const overview = this._notificationOverview || {};
+        const counts = this._notificationAudienceCounts || {};
+        const scheduledCount = Number(overview.scheduled || 0);
+        const ruleCount = Number(overview.active_automations || 0);
+        const failureCount = Number(overview.automation_failures_7d || 0);
+        const next = overview.next_scheduled_at ? this._notificationDateLabel(overview.next_scheduled_at) : 'Aucune';
+        const views = [
+            ['composer', 'Composer', ''],
+            ['scheduled', 'Programmées', scheduledCount ? String(scheduledCount) : ''],
+            ['automations', 'Automatiques', String(this._notificationSystemRules.length + this._notificationRules.length)],
+            ['history', 'Historique', '']
+        ];
+        if (!views.some(([key]) => key === this._notificationView)) this._notificationView = 'composer';
+        const tabs = views.map(([key, label, count]) => `<button class="notif-tab" id="notif-tab-${key}" data-notif-view="${key}" role="tab" aria-controls="notif-panel-${key}" aria-selected="${this._notificationView === key}" tabindex="${this._notificationView === key ? '0' : '-1'}">${label}${count ? `<span class="notif-tab-count">${count}</span>` : ''}</button>`).join('');
+        host.innerHTML = `<div class="notif-center">
+            <section class="notif-intro" aria-labelledby="notif-center-title"><div><span class="notif-kicker">Centre de diffusion</span><h2 id="notif-center-title">Notifications</h2><p>Composez un push, programmez une campagne et supervisez les règles automatiques sans mélanger les messages marketing avec les alertes transactionnelles protégées.</p></div><span class="notif-live-state">Moteur ${this._notificationCenterAvailable ? 'opérationnel' : 'partiel'}</span></section>
+            <div class="notif-kpis" aria-label="Résumé des notifications">
+                <div class="notif-kpi"><strong>${typeof counts.all === 'number' ? n(counts.all) : '—'}</strong><span>appareils push disponibles</span></div>
+                <div class="notif-kpi"><strong>${n(scheduledCount)}</strong><span>campagnes programmées · prochaine : ${AdminPage.esc(next)}</span></div>
+                <div class="notif-kpi"><strong>${n(ruleCount)}</strong><span>automations personnalisées actives</span></div>
+                <div class="notif-kpi"><strong>${n(failureCount)}</strong><span>automations à vérifier sur 7 jours</span></div>
+            </div>
+            <div class="notif-tabs" role="tablist" aria-label="Sections du centre de notifications">${tabs}</div>
+            <section class="notif-panel" id="notif-panel-composer" role="tabpanel" aria-labelledby="notif-tab-composer"${this._notificationView === 'composer' ? '' : ' hidden'}>${this._notificationComposerMarkup()}</section>
+            <section class="notif-panel" id="notif-panel-scheduled" role="tabpanel" aria-labelledby="notif-tab-scheduled"${this._notificationView === 'scheduled' ? '' : ' hidden'}><div id="notif-schedule-list"></div></section>
+            <section class="notif-panel" id="notif-panel-automations" role="tabpanel" aria-labelledby="notif-tab-automations"${this._notificationView === 'automations' ? '' : ' hidden'}><div id="notif-automation-workspace"></div></section>
+            <section class="notif-panel" id="notif-panel-history" role="tabpanel" aria-labelledby="notif-tab-history"${this._notificationView === 'history' ? '' : ' hidden'}>
+                <div class="notif-card"><div class="notif-card-head"><div><h3>Historique des envois</h3><p>Envois immédiats et campagnes programmées, avec leurs compteurs réels.</p></div></div><div class="notif-card-body"><div class="mkt-log-bar"><input type="search" id="mkt-log-q" placeholder="Rechercher par titre, message ou auteur" autocomplete="off"><div class="qv-row" id="mkt-log-auds" role="group" aria-label="Filtrer par audience"></div></div><div id="mkt-log"><div class="ssub">Chargement…</div></div></div></div>
+            </section>
+        </div>`;
+        host.setAttribute('aria-busy', 'false');
+
+        const tabButtons = Array.from(host.querySelectorAll('.notif-tab[data-notif-view]'));
+        const activate = button => {
+            const view = button.dataset.notifView;
+            this._notificationView = view;
+            tabButtons.forEach(item => {
+                const selected = item === button;
+                item.setAttribute('aria-selected', String(selected));
+                item.tabIndex = selected ? 0 : -1;
+                const panel = document.getElementById(`notif-panel-${item.dataset.notifView}`);
+                if (panel) panel.hidden = !selected;
+            });
+            if (view === 'history') this._loadPushLog();
+        };
+        tabButtons.forEach((button, index) => {
+            button.addEventListener('click', () => activate(button));
+            button.addEventListener('keydown', event => {
+                if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+                event.preventDefault();
+                let next = index;
+                if (event.key === 'ArrowLeft') next = (index - 1 + tabButtons.length) % tabButtons.length;
+                if (event.key === 'ArrowRight') next = (index + 1) % tabButtons.length;
+                if (event.key === 'Home') next = 0;
+                if (event.key === 'End') next = tabButtons.length - 1;
+                tabButtons[next].focus();
+                activate(tabButtons[next]);
+            });
+        });
+
+        this._wireNotificationComposer();
+        this._renderNotificationSchedules();
+        this._renderNotificationAutomations();
+        this._wirePushLogControls();
+        this._loadPushLog();
+    }
+
+    _wireNotificationComposer() {
+        const title = document.getElementById('notif-title');
+        const body = document.getElementById('notif-body');
+        const audience = document.getElementById('notif-audience');
+        const scheduledFor = document.getElementById('notif-scheduled-for');
+        const timezone = document.getElementById('notif-timezone');
+        if (!title || !body || !audience) return;
+        const review = document.getElementById('notif-send-review');
+        const reviewList = document.getElementById('notif-review-list');
+        const reviewConfirm = document.getElementById('notif-review-confirm');
+        const status = document.getElementById('notif-composer-status');
+        const setStatus = (message, kind = '') => {
+            if (!status) return;
+            status.textContent = message || '';
+            status.className = `notif-status${kind ? ` is-${kind}` : ''}`;
+        };
+        const currentMode = () => document.querySelector('input[name="notif-delivery"]:checked')?.value === 'scheduled' ? 'scheduled' : 'immediate';
+        const sync = () => {
+            const mode = currentMode();
+            this._notificationDraft = {
+                ...(this._notificationDraft || {}),
+                title: title.value,
+                body: body.value,
+                audience: audience.value,
+                mode,
+                scheduled_for: scheduledFor?.value || this._notificationLocalValue(),
+                timezone: timezone?.value || 'Europe/Paris'
+            };
+            const titleCount = document.getElementById('notif-title-count');
+            const bodyCount = document.getElementById('notif-body-count');
+            const previewTitle = document.getElementById('notif-preview-title-text');
+            const previewBody = document.getElementById('notif-preview-body-text');
+            const previewAudience = document.getElementById('notif-preview-audience');
+            const previewDevices = document.getElementById('notif-preview-devices');
+            const previewTime = document.getElementById('notif-preview-time');
+            const scheduleFields = document.getElementById('notif-schedule-fields');
+            const saveDraft = document.getElementById('notif-save-draft');
+            const aud = AdminPage.AUDIENCES().find(([key]) => key === audience.value) || AdminPage.AUDIENCES()[0];
+            const deviceCount = this._notificationAudienceCounts && typeof this._notificationAudienceCounts[audience.value] === 'number' ? this._notificationAudienceCounts[audience.value] : null;
+            if (titleCount) titleCount.textContent = `${title.value.length}/60`;
+            if (bodyCount) bodyCount.textContent = `${body.value.length}/240`;
+            if (previewTitle) previewTitle.textContent = title.value.trim() || 'Titre de la notification';
+            if (previewBody) previewBody.textContent = body.value.trim() || 'Votre message apparaîtra ici.';
+            if (previewAudience) previewAudience.textContent = aud[1];
+            if (previewDevices) previewDevices.textContent = deviceCount === null ? '—' : AdminPage.n(deviceCount);
+            if (previewTime) {
+                const scheduledDate = scheduledFor?.value ? new Date(scheduledFor.value) : null;
+                previewTime.textContent = mode === 'scheduled'
+                    ? (scheduledDate && !Number.isNaN(scheduledDate.getTime()) ? this._notificationDateLabel(scheduledDate.toISOString()) : 'à définir')
+                    : 'maintenant';
+            }
+            const audienceHelp = document.getElementById('notif-audience-help');
+            if (audienceHelp) audienceHelp.textContent = deviceCount === null ? aud[2] : `${AdminPage.n(deviceCount)} appareil(s) actuellement ciblé(s)`;
+            if (scheduleFields) scheduleFields.hidden = mode !== 'scheduled';
+            if (saveDraft) saveDraft.hidden = mode !== 'scheduled';
+            if (review) review.hidden = true;
+            if (reviewConfirm) reviewConfirm.disabled = true;
+        };
+        [title, body, audience, scheduledFor, timezone].filter(Boolean).forEach(input => input.addEventListener('input', sync));
+        document.querySelectorAll('input[name="notif-delivery"]').forEach(input => input.addEventListener('change', sync));
+        sync();
+
+        const validation = () => {
+            const titleValue = title.value.trim();
+            const bodyValue = body.value.trim();
+            const mode = currentMode();
+            if (titleValue.length < 2 || bodyValue.length < 2) return { error: 'Le titre et le message doivent contenir au moins 2 caractères.' };
+            if (mode === 'scheduled') {
+                if (!this._notificationCenterAvailable) return { error: 'Le moteur de programmation est indisponible.' };
+                const date = new Date(scheduledFor?.value || '');
+                if (Number.isNaN(date.getTime()) || date.getTime() < Date.now() + 60000) return { error: 'Choisissez une date au moins une minute dans le futur.' };
+            }
+            return { titleValue, bodyValue, mode };
+        };
+
+        document.getElementById('notif-verify')?.addEventListener('click', () => {
+            const result = validation();
+            if (result.error) { setStatus(result.error, 'error'); return; }
+            const aud = AdminPage.AUDIENCES().find(([key]) => key === audience.value) || AdminPage.AUDIENCES()[0];
+            const deviceCount = this._notificationAudienceCounts && typeof this._notificationAudienceCounts[audience.value] === 'number' ? this._notificationAudienceCounts[audience.value] : null;
+            if (reviewList) reviewList.innerHTML = [
+                `<li><strong>${result.mode === 'scheduled' ? 'Programmation' : 'Envoi immédiat'}</strong>${result.mode === 'scheduled' ? ` · ${AdminPage.esc(this._notificationDateLabel(new Date(scheduledFor.value).toISOString(), true))}` : ' · le push ne pourra pas être rappelé'}</li>`,
+                `<li>Audience : <strong>${AdminPage.esc(aud[2])}</strong>${deviceCount === null ? '' : ` · ${AdminPage.n(deviceCount)} appareil(s) actuellement enregistrés`}</li>`,
+                `<li>Message : « ${AdminPage.esc(result.titleValue)} »</li>`
+            ].join('');
+            if (review) { review.hidden = false; review.focus(); }
+            if (reviewConfirm) {
+                reviewConfirm.disabled = false;
+                reviewConfirm.textContent = result.mode === 'scheduled' ? 'Programmer la campagne' : 'Envoyer maintenant';
+            }
+            setStatus('');
+        });
+        document.getElementById('notif-review-back')?.addEventListener('click', () => {
+            if (review) review.hidden = true;
+            document.getElementById('notif-verify')?.focus();
+        });
+
+        const saveSchedule = async publish => {
+            const result = validation();
+            if (result.error || result.mode !== 'scheduled') { setStatus(result.error || 'Choisissez la programmation.', 'error'); return; }
+            const target = publish ? reviewConfirm : document.getElementById('notif-save-draft');
+            if (target) target.disabled = true;
+            setStatus(publish ? 'Programmation en cours…' : 'Enregistrement du brouillon…');
+            try {
+                const saved = await this._rpc('admin_save_marketing_notification_schedule', {
+                    p_title: result.titleValue,
+                    p_body: result.bodyValue,
+                    p_audience: audience.value,
+                    p_scheduled_for: new Date(scheduledFor.value).toISOString(),
+                    p_timezone: (timezone?.value || 'Europe/Paris').trim(),
+                    p_id: this._notificationDraft?.id || null,
+                    p_publish: publish
+                });
+                this._notificationDraft = null;
+                this._notificationView = 'scheduled';
+                setStatus(publish ? 'Campagne programmée.' : 'Brouillon enregistré.', 'success');
+                this._notificationSelectedSchedule = saved?.id || '';
+                await this._loadNotificationCenter();
+            } catch (_) {
+                setStatus('La campagne n’a pas pu être enregistrée. Vérifiez la date puis réessayez.', 'error');
+            } finally { if (target) target.disabled = false; }
+        };
+        document.getElementById('notif-save-draft')?.addEventListener('click', () => saveSchedule(false));
+        reviewConfirm?.addEventListener('click', async () => {
+            const result = validation();
+            if (result.error) { setStatus(result.error, 'error'); return; }
+            if (result.mode === 'scheduled') { await saveSchedule(true); return; }
+            reviewConfirm.disabled = true;
+            setStatus('Envoi en cours…');
+            try {
+                const response = await fetch(`${this._sbUrl()}/functions/v1/norva-admin/marketing-push`, {
+                    method: 'POST',
+                    headers: { apikey: this._sbKey(), Authorization: `Bearer ${this._token()}`, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ title: result.titleValue, body: result.bodyValue, audience: audience.value })
+                });
+                const payload = await response.json().catch(() => ({}));
+                if (!response.ok) throw new Error('delivery failed');
+                setStatus(`${AdminPage.n(payload.sent || 0)} envoyé(s) sur ${AdminPage.n(payload.devices || 0)} appareil(s).`, 'success');
+                this._notificationDraft = null;
+                this._notificationView = 'history';
+                await this._loadNotificationCenter();
+            } catch (_) {
+                setStatus('L’envoi n’a pas abouti. Aucun nouvel essai automatique ne sera lancé.', 'error');
+                reviewConfirm.disabled = false;
+            }
+        });
+        document.getElementById('notif-clear')?.addEventListener('click', () => {
+            this._notificationDraft = null;
+            this._renderNotificationCenter();
+        });
+    }
+
+    _renderNotificationSchedules() {
+        const host = document.getElementById('notif-schedule-list');
+        if (!host) return;
+        const filter = this._notificationScheduleFilter || 'active';
+        const filtered = this._notificationSchedules.filter(row => {
+            if (filter === 'active') return ['draft', 'scheduled', 'processing', 'failed'].includes(row.status);
+            if (filter === 'history') return ['sent', 'canceled'].includes(row.status);
+            return true;
+        });
+        const chips = [['active', 'À traiter'], ['history', 'Terminées'], ['all', 'Toutes']].map(([value, label]) => `<button class="notif-tab" type="button" data-schedule-filter="${value}" aria-pressed="${filter === value}">${label}</button>`).join('');
+        const rows = filtered.map(row => {
+            const stateClass = row.status === 'scheduled' || row.status === 'processing' ? 'is-live' : row.status === 'sent' ? 'is-sent' : row.status === 'draft' ? 'is-draft' : row.status === 'failed' ? 'is-failed' : '';
+            const mutable = ['draft', 'scheduled', 'failed'].includes(row.status);
+            return `<article class="notif-schedule-row" data-schedule-id="${AdminPage.esc(row.id)}">
+                <div><div class="notif-row-title" title="${AdminPage.esc(row.title)}">${AdminPage.esc(row.title)}</div><div class="notif-row-sub">${AdminPage.esc(row.body)}</div></div>
+                <div class="notif-row-time"><div class="notif-row-title">${AdminPage.esc(this._notificationDateLabel(row.scheduled_for, true))}</div><div class="notif-row-sub">${AdminPage.esc(row.timezone || 'Europe/Paris')}</div></div>
+                <div class="notif-row-audience"><span class="badge blue">${AdminPage.esc(AdminPage.audShort(row.audience))}</span></div>
+                <div class="notif-row-status"><span class="notif-state ${stateClass}">${this._notificationStatusLabel(row.status)}</span>${row.last_error ? `<div class="notif-row-sub" title="${AdminPage.esc(row.last_error)}">Intervention manuelle requise</div>` : ''}</div>
+                <div class="notif-row-actions">${mutable ? '<button class="notif-icon-button" type="button" data-schedule-action="edit">Modifier</button>' : ''}<button class="notif-icon-button" type="button" data-schedule-action="duplicate">Dupliquer</button>${mutable ? '<button class="notif-icon-button" type="button" data-schedule-action="cancel">Annuler</button>' : ''}</div>
+            </article>`;
+        }).join('');
+        host.innerHTML = `<div class="notif-card"><div class="notif-card-head"><div><h3>Campagnes programmées</h3><p>Les messages restent modifiables ou annulables tant que leur livraison n’a pas commencé.</p></div><button class="notif-button primary" id="notif-new-schedule" type="button">Nouvelle programmation</button></div><div class="notif-card-body"><div class="notif-tabs" style="margin-bottom:12px" role="group" aria-label="Filtrer les programmations">${chips}</div><div id="notif-schedule-review"></div><div class="notif-list">${rows || '<div class="notif-empty">Aucune campagne dans cette section.</div>'}</div></div></div>`;
+        host.querySelectorAll('[data-schedule-filter]').forEach(button => button.addEventListener('click', () => {
+            this._notificationScheduleFilter = button.dataset.scheduleFilter;
+            this._renderNotificationSchedules();
+        }));
+        document.getElementById('notif-new-schedule')?.addEventListener('click', () => {
+            this._notificationDraft = null;
+            const draft = this._notificationComposerDraft();
+            draft.mode = 'scheduled';
+            this._notificationView = 'composer';
+            this._renderNotificationCenter();
+            document.getElementById('notif-title')?.focus();
+        });
+        host.querySelectorAll('[data-schedule-action]').forEach(button => button.addEventListener('click', () => {
+            const row = this._notificationSchedules.find(item => item.id === button.closest('[data-schedule-id]')?.dataset.scheduleId);
+            if (!row) return;
+            const action = button.dataset.scheduleAction;
+            if (action === 'cancel') { this._confirmNotificationScheduleCancel(row); return; }
+            const date = new Date(row.scheduled_for);
+            if (action === 'duplicate' && date.getTime() < Date.now() + 60000) date.setTime(Date.now() + 60 * 60 * 1000);
+            this._notificationDraft = {
+                id: action === 'edit' ? row.id : null,
+                title: row.title,
+                body: row.body,
+                audience: row.audience,
+                mode: 'scheduled',
+                scheduled_for: this._notificationLocalValue(date),
+                timezone: row.timezone || 'Europe/Paris'
+            };
+            this._notificationView = 'composer';
+            this._renderNotificationCenter();
+            document.getElementById('notif-title')?.focus();
+        }));
+    }
+
+    _confirmNotificationScheduleCancel(row) {
+        const host = document.getElementById('notif-schedule-review');
+        if (!host) return;
+        host.innerHTML = `<section class="notif-review" tabindex="-1"><h4>Annuler « ${AdminPage.esc(row.title)} » ?</h4><p class="notif-status">La campagne ne sera plus réclamée par le worker. Cette action reste visible dans l’historique des programmations.</p><div class="notif-actions" style="margin-top:10px"><button class="notif-button quiet" id="notif-cancel-back" type="button">Conserver</button><button class="notif-button danger" id="notif-cancel-confirm" type="button">Confirmer l’annulation</button><span class="notif-status" id="notif-cancel-status" role="status"></span></div></section>`;
+        host.firstElementChild?.focus();
+        document.getElementById('notif-cancel-back')?.addEventListener('click', () => { host.innerHTML = ''; });
+        document.getElementById('notif-cancel-confirm')?.addEventListener('click', async event => {
+            const confirmButton = event.currentTarget;
+            confirmButton.disabled = true;
+            const status = document.getElementById('notif-cancel-status');
+            if (status) status.textContent = 'Annulation…';
+            try {
+                const canceled = await this._rpc('admin_cancel_marketing_notification_schedule', { p_id: row.id, p_reason: 'Canceled from notification center' });
+                if (!canceled) throw new Error('immutable');
+                await this._loadNotificationCenter();
+            } catch (_) {
+                if (status) { status.textContent = 'La campagne a déjà commencé ou n’est plus modifiable.'; status.className = 'notif-status is-error'; }
+                confirmButton.disabled = false;
+            }
+        });
+    }
+
+    _notificationRuleDefaults(eventKey = 'new_content') {
+        const defaults = {
+            new_content: ['New on Norva', '{{summary}}'],
+            subtitle_ready: ['Your subtitles are ready', '{{summary}}'],
+            subtitle_empty: ['Subtitle update', '{{summary}}'],
+            subtitle_failed: ['Subtitle generation needs attention', '{{summary}}']
+        };
+        const copy = defaults[eventKey] || defaults.new_content;
+        return { id: null, name: '', event_key: eventKey, title_template: copy[0], body_template: copy[1], delay_minutes: 0, enabled: false };
+    }
+
+    _notificationRuleFormMarkup(rule) {
+        const r = { ...this._notificationRuleDefaults(rule?.event_key), ...(rule || {}) };
+        const options = AdminPage.NOTIFICATION_EVENTS().map(([key, label]) => `<option value="${key}"${r.event_key === key ? ' selected' : ''}>${AdminPage.esc(label)}</option>`).join('');
+        return `<div class="notif-detail-head"><div><span class="notif-kicker">${r.id ? 'Automation personnalisée' : 'Nouvelle automation'}</span><h3>${r.id ? 'Modifier la règle' : 'Créer un push automatique'}</h3><p>Cette règle ajoute uniquement un push à un événement applicatif existant. Elle ne remplace pas le message transactionnel source.</p></div></div>
+            <form class="notif-rule-form" id="notif-rule-form" data-rule-id="${AdminPage.esc(r.id || '')}">
+                <div class="notif-grid">
+                    <label class="notif-field" for="notif-rule-name">Nom interne<input id="notif-rule-name" type="text" maxlength="80" value="${AdminPage.esc(r.name || '')}" placeholder="Nouveautés · Push mobile" required></label>
+                    <label class="notif-field" for="notif-rule-event">Déclencheur<select id="notif-rule-event">${options}</select></label>
+                    <label class="notif-field span-2" for="notif-rule-title">Titre du push<input id="notif-rule-title" type="text" maxlength="60" value="${AdminPage.esc(r.title_template || '')}" required></label>
+                    <label class="notif-field span-2" for="notif-rule-body">Message du push<textarea id="notif-rule-body" maxlength="240" required>${AdminPage.esc(r.body_template || '')}</textarea><span class="notif-field-help"><span>Variables : {{summary}}, {{title}}, {{event}}</span></span></label>
+                    <label class="notif-field" for="notif-rule-delay">Délai avant envoi (minutes)<input id="notif-rule-delay" type="number" min="0" max="10080" step="1" value="${Number(r.delay_minutes || 0)}"></label>
+                    <div class="notif-switch-row"><div><strong>Règle active</strong><span>Les prochains événements seront mis en file.</span></div><label class="notif-switch"><input id="notif-rule-enabled" type="checkbox"${r.enabled ? ' checked' : ''} aria-label="Activer la règle"><span class="notif-switch-track"></span></label></div>
+                </div>
+                <div class="notif-actions"><button class="notif-button quiet" id="notif-rule-form-cancel" type="button">Annuler</button><button class="notif-button primary" type="submit">${r.id ? 'Enregistrer les modifications' : 'Créer la règle'}</button><span class="notif-status" id="notif-rule-form-status" role="status" aria-live="polite"></span></div>
+            </form>`;
+    }
+
+    _notificationSystemRuleDetail(rule) {
+        const extendable = rule.control === 'extendable';
+        return `<div class="notif-detail-head"><div><span class="notif-kicker">Règle système</span><h3>${AdminPage.esc(rule.name)}</h3><p>${AdminPage.esc(rule.description || '')}</p></div><div class="notif-detail-actions">${extendable ? '<button class="notif-button primary" type="button" data-rule-extend>Créer un push complémentaire</button>' : ''}</div></div>
+            <div class="notif-protected"><strong>Règle protégée.</strong> Son déclenchement dépend du moteur transactionnel indiqué et ne peut pas être désactivé depuis Marketing.${extendable ? ' Vous pouvez ajouter une automation push séparée sans modifier ce tunnel.' : ''}</div>
+            <div class="notif-detail-grid">
+                <div class="notif-detail-fact"><span>Déclencheur</span><strong>${AdminPage.esc(rule.trigger || '—')}</strong></div>
+                <div class="notif-detail-fact"><span>Canaux</span><strong>${AdminPage.esc((rule.channels || []).join(' · ') || '—')}</strong></div>
+                <div class="notif-detail-fact"><span>État observé</span><strong>${rule.state === 'deployment_controlled' ? 'Piloté par déploiement' : 'Actif'}</strong></div>
+                <div class="notif-detail-fact"><span>Contrôle</span><strong>${extendable ? 'Système + extension push possible' : 'Système uniquement'}</strong></div>
+            </div>`;
+    }
+
+    _notificationCustomRuleDetail(rule) {
+        const event = AdminPage.NOTIFICATION_EVENTS().find(([key]) => key === rule.event_key);
+        return `<div class="notif-detail-head"><div><span class="notif-kicker">Automation personnalisée</span><h3>${AdminPage.esc(rule.name)}</h3><p>${AdminPage.esc(event?.[2] || rule.event_key)}</p></div><div class="notif-detail-actions"><button class="notif-button" type="button" data-rule-toggle>${rule.enabled ? 'Désactiver' : 'Activer'}</button><button class="notif-button primary" type="button" data-rule-edit>Modifier</button></div></div>
+            <div class="notif-detail-grid">
+                <div class="notif-detail-fact"><span>État</span><strong>${rule.enabled ? 'Active' : 'En pause'}</strong></div>
+                <div class="notif-detail-fact"><span>Déclencheur</span><strong>${AdminPage.esc(event?.[1] || rule.event_key)}</strong></div>
+                <div class="notif-detail-fact"><span>Délai</span><strong>${Number(rule.delay_minutes || 0) ? `${AdminPage.n(rule.delay_minutes)} minute(s)` : 'Immédiat après l’événement'}</strong></div>
+                <div class="notif-detail-fact"><span>File actuelle</span><strong>${AdminPage.n(rule.queued_count || 0)} message(s)</strong></div>
+                <div class="notif-detail-fact"><span>Événements traités</span><strong>${AdminPage.n(rule.event_count || 0)}</strong></div>
+                <div class="notif-detail-fact"><span>Appareils livrés</span><strong>${AdminPage.n(rule.sent_count || 0)}</strong></div>
+            </div>
+            <section class="notif-card" style="margin-top:16px"><div class="notif-card-head"><div><h3>Aperçu du modèle</h3><p>Les variables sont remplacées au moment de l’événement.</p></div></div><div class="notif-card-body"><div class="notif-pv-t">${AdminPage.esc(rule.title_template)}</div><div class="notif-pv-b">${AdminPage.esc(rule.body_template)}</div></div></section>
+            ${rule.last_error ? '<div class="notif-protected">La dernière exécution nécessite une vérification. Aucun renvoi automatique n’a été effectué.</div>' : ''}
+            <div class="notif-actions" style="margin-top:16px"><button class="notif-button" type="button" data-rule-duplicate>Dupliquer</button><button class="notif-button danger" type="button" data-rule-archive>Archiver</button></div><div id="notif-rule-inline-review"></div>`;
+    }
+
+    _renderNotificationAutomations() {
+        const host = document.getElementById('notif-automation-workspace');
+        if (!host) return;
+        const system = this._notificationSystemRules || [];
+        const custom = this._notificationRules || [];
+        const allKeys = [...system.map(rule => `system:${rule.id}`), ...custom.map(rule => `custom:${rule.id}`)];
+        if (!this._notificationSelectedRule || !allKeys.includes(this._notificationSelectedRule)) {
+            this._notificationSelectedRule = allKeys.find(key => key === 'system:new-content') || allKeys[0] || '';
+        }
+        const systemItems = system.map(rule => {
+            const key = `system:${rule.id}`;
+            return `<button class="notif-rule-item" type="button" data-rule-key="${AdminPage.esc(key)}" aria-current="${this._notificationSelectedRule === key}"><span class="notif-rule-item-head"><strong>${AdminPage.esc(rule.name)}</strong><span class="notif-state ${rule.state === 'active' ? 'is-live' : 'is-draft'}">${rule.control === 'extendable' ? 'Extensible' : 'Protégée'}</span></span><p>${AdminPage.esc(rule.trigger || '')}</p></button>`;
+        }).join('');
+        const customItems = custom.map(rule => {
+            const key = `custom:${rule.id}`;
+            return `<button class="notif-rule-item" type="button" data-rule-key="${AdminPage.esc(key)}" aria-current="${this._notificationSelectedRule === key}"><span class="notif-rule-item-head"><strong>${AdminPage.esc(rule.name)}</strong><span class="notif-state ${rule.enabled ? 'is-live' : 'is-draft'}">${rule.enabled ? 'Active' : 'Pause'}</span></span><p>${AdminPage.esc(AdminPage.NOTIFICATION_EVENTS().find(([event]) => event === rule.event_key)?.[1] || rule.event_key)}</p></button>`;
+        }).join('');
+        let detail = '<div class="notif-empty">Sélectionnez une règle pour voir son fonctionnement.</div>';
+        if (this._notificationRuleEditor) detail = this._notificationRuleFormMarkup(this._notificationRuleEditor);
+        else if (this._notificationSelectedRule.startsWith('system:')) {
+            const rule = system.find(item => `system:${item.id}` === this._notificationSelectedRule);
+            if (rule) detail = this._notificationSystemRuleDetail(rule);
+        } else if (this._notificationSelectedRule.startsWith('custom:')) {
+            const rule = custom.find(item => `custom:${item.id}` === this._notificationSelectedRule);
+            if (rule) detail = this._notificationCustomRuleDetail(rule);
+        }
+        host.innerHTML = `<div class="notif-automation-layout"><aside class="notif-rule-list-pane" aria-label="Règles automatiques"><div class="notif-rule-list-head"><button class="notif-button primary" id="notif-new-rule" type="button"${this._notificationCenterAvailable ? '' : ' disabled'}>Nouvelle automation</button></div><div class="notif-rule-list"><div style="min-width:100%"><span class="notif-kicker" style="padding:8px 10px 2px">Système</span>${systemItems || '<div class="notif-empty">Inventaire indisponible.</div>'}<span class="notif-kicker" style="padding:14px 10px 2px">Personnalisées</span>${customItems || '<div class="notif-empty">Aucune règle personnalisée.</div>'}</div></div></aside><section class="notif-rule-detail" id="notif-rule-detail">${detail}</section></div>`;
+        host.querySelectorAll('[data-rule-key]').forEach(button => button.addEventListener('click', () => {
+            this._notificationSelectedRule = button.dataset.ruleKey;
+            this._notificationRuleEditor = null;
+            this._renderNotificationAutomations();
+        }));
+        document.getElementById('notif-new-rule')?.addEventListener('click', () => {
+            this._notificationRuleEditor = this._notificationRuleDefaults();
+            this._renderNotificationAutomations();
+            document.getElementById('notif-rule-name')?.focus();
+        });
+        const selectedSystem = system.find(item => `system:${item.id}` === this._notificationSelectedRule);
+        const selectedCustom = custom.find(item => `custom:${item.id}` === this._notificationSelectedRule);
+        host.querySelector('[data-rule-extend]')?.addEventListener('click', () => {
+            const eventKey = selectedSystem?.event_key || 'new_content';
+            this._notificationRuleEditor = { ...this._notificationRuleDefaults(eventKey), name: `Push · ${selectedSystem?.name || 'Automation'}` };
+            this._renderNotificationAutomations();
+            document.getElementById('notif-rule-name')?.focus();
+        });
+        host.querySelector('[data-rule-edit]')?.addEventListener('click', () => {
+            if (!selectedCustom) return;
+            this._notificationRuleEditor = { ...selectedCustom };
+            this._renderNotificationAutomations();
+        });
+        host.querySelector('[data-rule-duplicate]')?.addEventListener('click', () => {
+            if (!selectedCustom) return;
+            this._notificationRuleEditor = { ...selectedCustom, id: null, name: `${selectedCustom.name} · copie`, enabled: false };
+            this._renderNotificationAutomations();
+        });
+        host.querySelector('[data-rule-toggle]')?.addEventListener('click', async event => {
+            if (!selectedCustom) return;
+            const toggleButton = event.currentTarget;
+            toggleButton.disabled = true;
+            try {
+                await this._rpc('admin_save_marketing_notification_rule', {
+                    p_name: selectedCustom.name,
+                    p_event_key: selectedCustom.event_key,
+                    p_title_template: selectedCustom.title_template,
+                    p_body_template: selectedCustom.body_template,
+                    p_delay_minutes: Number(selectedCustom.delay_minutes || 0),
+                    p_enabled: !selectedCustom.enabled,
+                    p_id: selectedCustom.id
+                });
+                this._notificationView = 'automations';
+                await this._loadNotificationCenter();
+            } catch (_) { toggleButton.disabled = false; }
+        });
+        host.querySelector('[data-rule-archive]')?.addEventListener('click', () => this._confirmNotificationRuleArchive(selectedCustom));
+        this._wireNotificationRuleForm();
+    }
+
+    _wireNotificationRuleForm() {
+        const form = document.getElementById('notif-rule-form');
+        if (!form) return;
+        const eventSelect = document.getElementById('notif-rule-event');
+        eventSelect?.addEventListener('change', () => {
+            if (document.getElementById('notif-rule-title')?.value.trim() || document.getElementById('notif-rule-body')?.value.trim()) return;
+            const defaults = this._notificationRuleDefaults(eventSelect.value);
+            document.getElementById('notif-rule-title').value = defaults.title_template;
+            document.getElementById('notif-rule-body').value = defaults.body_template;
+        });
+        document.getElementById('notif-rule-form-cancel')?.addEventListener('click', () => {
+            this._notificationRuleEditor = null;
+            this._renderNotificationAutomations();
+        });
+        form.addEventListener('submit', async event => {
+            event.preventDefault();
+            const submit = form.querySelector('button[type="submit"]');
+            const status = document.getElementById('notif-rule-form-status');
+            const name = document.getElementById('notif-rule-name').value.trim();
+            const title = document.getElementById('notif-rule-title').value.trim();
+            const body = document.getElementById('notif-rule-body').value.trim();
+            const delay = Number(document.getElementById('notif-rule-delay').value || 0);
+            if (name.length < 2 || title.length < 2 || body.length < 2 || !Number.isInteger(delay) || delay < 0 || delay > 10080) {
+                if (status) { status.textContent = 'Complétez les champs et vérifiez le délai.'; status.className = 'notif-status is-error'; }
+                return;
+            }
+            submit.disabled = true;
+            if (status) { status.textContent = 'Enregistrement…'; status.className = 'notif-status'; }
+            try {
+                const saved = await this._rpc('admin_save_marketing_notification_rule', {
+                    p_name: name,
+                    p_event_key: eventSelect.value,
+                    p_title_template: title,
+                    p_body_template: body,
+                    p_delay_minutes: delay,
+                    p_enabled: document.getElementById('notif-rule-enabled').checked,
+                    p_id: form.dataset.ruleId || null
+                });
+                this._notificationRuleEditor = null;
+                this._notificationSelectedRule = `custom:${saved.id}`;
+                this._notificationView = 'automations';
+                await this._loadNotificationCenter();
+            } catch (_) {
+                if (status) { status.textContent = 'La règle n’a pas pu être enregistrée.'; status.className = 'notif-status is-error'; }
+                submit.disabled = false;
+            }
+        });
+    }
+
+    _confirmNotificationRuleArchive(rule) {
+        if (!rule) return;
+        const host = document.getElementById('notif-rule-inline-review');
+        if (!host) return;
+        host.innerHTML = `<section class="notif-review" style="margin-top:14px" tabindex="-1"><h4>Archiver « ${AdminPage.esc(rule.name)} » ?</h4><p class="notif-status">La règle sera désactivée et les messages encore en file seront annulés.</p><div class="notif-actions" style="margin-top:10px"><button class="notif-button quiet" id="notif-rule-archive-back" type="button">Conserver</button><button class="notif-button danger" id="notif-rule-archive-confirm" type="button">Confirmer l’archivage</button><span class="notif-status" id="notif-rule-archive-status" role="status"></span></div></section>`;
+        host.firstElementChild?.focus();
+        document.getElementById('notif-rule-archive-back')?.addEventListener('click', () => { host.innerHTML = ''; });
+        document.getElementById('notif-rule-archive-confirm')?.addEventListener('click', async event => {
+            const confirmButton = event.currentTarget;
+            confirmButton.disabled = true;
+            try {
+                const archived = await this._rpc('admin_archive_marketing_notification_rule', { p_id: rule.id });
+                if (!archived) throw new Error('missing');
+                this._notificationSelectedRule = '';
+                await this._loadNotificationCenter();
+            } catch (_) {
+                const status = document.getElementById('notif-rule-archive-status');
+                if (status) { status.textContent = 'La règle n’a pas pu être archivée.'; status.className = 'notif-status is-error'; }
+                confirmButton.disabled = false;
+            }
         });
     }
 

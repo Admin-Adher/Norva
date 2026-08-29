@@ -664,6 +664,88 @@ async function sendWeeklyDigest(): Promise<JsonRecord> {
   return { ok: true, sent, mrr_cents: mrr };
 }
 
+type PushDeliveryResult = {
+  devices: number;
+  sent: number;
+  fail: number;
+  dead: number;
+};
+
+async function deliverPushTokens(
+  rawTokens: unknown[],
+  title: string,
+  body: string,
+  kind: string,
+): Promise<PushDeliveryResult> {
+  const tokens = [...new Set(rawTokens.map((value) => String(value ?? "")).filter(Boolean))];
+  let sent = 0;
+  let fail = 0;
+  let dead = 0;
+
+  for (const token of tokens) {
+    const result = await sendFcmPush(token, { title, body, data: { kind } });
+    if (result.ok) sent++;
+    else if (result.unregistered) {
+      dead++;
+      try {
+        await admin.from("cloud_push_tokens").delete().eq("token", token);
+      } catch (_) {
+        // La purge est une hygiène best-effort ; elle ne change pas le résultat
+        // de la livraison qui vient d'être tentée.
+      }
+    } else fail++;
+  }
+
+  return { devices: tokens.length, sent, fail, dead };
+}
+
+async function deliverMarketingSegment(
+  title: string,
+  body: string,
+  audience: string,
+  kind = "marketing",
+): Promise<PushDeliveryResult> {
+  let tokenQuery = admin.from("cloud_push_tokens").select("token");
+  if (audience !== "all") {
+    const { data: userIdsData, error: segmentError } = await admin.rpc(
+      "marketing_push_targets",
+      { p_audience: audience },
+    );
+    if (segmentError) throw new Error("segment resolution unavailable");
+    const userIds = (userIdsData ?? []).map((value: unknown) => String(value)).filter(Boolean);
+    if (!userIds.length) return { devices: 0, sent: 0, fail: 0, dead: 0 };
+    tokenQuery = tokenQuery.in("user_id", userIds);
+  }
+
+  const { data: tokenRows, error: tokenError } = await tokenQuery;
+  if (tokenError) throw new Error("push token read unavailable");
+  return deliverPushTokens(
+    (tokenRows ?? []).map((row) => (row as { token?: string }).token),
+    title,
+    body,
+    kind,
+  );
+}
+
+async function deliverMarketingUser(
+  title: string,
+  body: string,
+  userId: string,
+  kind: string,
+): Promise<PushDeliveryResult> {
+  const { data: tokenRows, error: tokenError } = await admin
+    .from("cloud_push_tokens")
+    .select("token")
+    .eq("user_id", userId);
+  if (tokenError) throw new Error("push token read unavailable");
+  return deliverPushTokens(
+    (tokenRows ?? []).map((row) => (row as { token?: string }).token),
+    title,
+    body,
+    kind,
+  );
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders(req) });
   try {
@@ -696,6 +778,128 @@ Deno.serve(async (req) => {
       }
       if (!authed) return json(req, { error: "not authorized" }, 403);
       return json(req, await sendWeeklyDigest());
+    }
+
+    // ── route: /notification-center-drain — campagnes programmées et
+    // automations personnalisées. Dual auth : secrets cron/backfill ou JWT
+    // Admin pour un smoke manuel. Les claims SQL sont at-most-once : un job
+    // processing interrompu devient failed et n'est jamais rejoué seul. ──
+    if (segments[segments.length - 1] === "notification-center-drain") {
+      const expectedCron = Deno.env.get("NORVA_CRON_SHARED_SECRET") ?? "";
+      const expectedBackfill = Deno.env.get("NORVA_BACKFILL_TOKEN") ?? "";
+      let authed = (Boolean(expectedCron) && timingSafeEqual(token, expectedCron)) ||
+        (Boolean(expectedBackfill) && timingSafeEqual(token, expectedBackfill));
+      if (!authed) {
+        const { data: caller } = await admin.auth.getUser(token);
+        authed = ((caller?.user?.app_metadata as JsonRecord | undefined)?.role) === "admin";
+      }
+      if (!authed) return json(req, { error: "not authorized" }, 403);
+      if (!fcmConfigured()) return json(req, { error: "Push delivery is not configured" }, 503);
+
+      const { data: scheduleData, error: scheduleClaimError } = await admin.rpc(
+        "claim_due_marketing_notification_schedules",
+        { p_limit: 5 },
+      );
+      if (scheduleClaimError) {
+        return json(req, { error: "Notification scheduler is unavailable" }, 503);
+      }
+
+      const schedules = Array.isArray(scheduleData) ? scheduleData as JsonRecord[] : [];
+      let schedulesSent = 0;
+      let scheduleDevices = 0;
+      for (const job of schedules) {
+        const id = String(job.id ?? "");
+        const title = String(job.title ?? "").trim();
+        const body = String(job.body ?? "").trim();
+        const audience = String(job.audience ?? "all");
+        try {
+          const delivery = await deliverMarketingSegment(title, body, audience, "marketing_scheduled");
+          scheduleDevices += delivery.devices;
+          schedulesSent++;
+          await admin.rpc("complete_marketing_notification_schedule", {
+            p_id: id,
+            p_sent: delivery.sent,
+            p_fail: delivery.fail,
+            p_dead: delivery.dead,
+            p_error: null,
+          });
+          try {
+            await sendTelegram(
+              `📅 <b>Push programmé envoyé</b> (${tgEscape(audience)})\n${tgEscape(title)}\n${delivery.sent} envoyé(s) · ${delivery.fail} échec(s) · ${delivery.dead} token(s) mort(s) purgé(s)`,
+            );
+          } catch (_) {
+            // Best-effort : Telegram n'est pas dans le chemin critique FCM.
+          }
+        } catch (error) {
+          console.error("notification-center scheduled delivery failed", id, error);
+          await admin.rpc("complete_marketing_notification_schedule", {
+            p_id: id,
+            p_sent: 0,
+            p_fail: 0,
+            p_dead: 0,
+            p_error: "Push delivery unavailable before completion",
+          });
+        }
+      }
+
+      const { data: automationData, error: automationClaimError } = await admin.rpc(
+        "claim_due_marketing_notification_automations",
+        { p_limit: 20 },
+      );
+      if (automationClaimError) {
+        return json(req, {
+          error: "Automation worker is unavailable",
+          scheduled_processed: schedules.length,
+        }, 503);
+      }
+
+      const automations = Array.isArray(automationData) ? automationData as JsonRecord[] : [];
+      let automationsSent = 0;
+      let automationDevices = 0;
+      for (const job of automations) {
+        const id = String(job.id ?? "");
+        const userId = String(job.user_id ?? "");
+        const title = String(job.title ?? "").trim();
+        const body = String(job.body ?? "").trim();
+        const eventKey = String(job.event_key ?? "notification");
+        try {
+          const delivery = await deliverMarketingUser(title, body, userId, `marketing_${eventKey}`);
+          automationDevices += delivery.devices;
+          automationsSent++;
+          await admin.rpc("complete_marketing_notification_automation", {
+            p_id: id,
+            p_sent: delivery.sent,
+            p_fail: delivery.fail,
+            p_dead: delivery.dead,
+            p_error: null,
+          });
+        } catch (error) {
+          console.error("notification-center automation delivery failed", id, error);
+          await admin.rpc("complete_marketing_notification_automation", {
+            p_id: id,
+            p_sent: 0,
+            p_fail: 0,
+            p_dead: 0,
+            p_error: "Push delivery unavailable before completion",
+          });
+        }
+      }
+
+      try {
+        await admin.rpc("prune_marketing_notification_center");
+      } catch (_) {
+        // Rétention best-effort, indépendante de la livraison courante.
+      }
+
+      return json(req, {
+        ok: true,
+        scheduled_processed: schedules.length,
+        scheduled_completed: schedulesSent,
+        scheduled_devices: scheduleDevices,
+        automations_processed: automations.length,
+        automations_completed: automationsSent,
+        automation_devices: automationDevices,
+      });
     }
 
     // ── admin gate (all other routes) ──
@@ -784,41 +988,26 @@ Deno.serve(async (req) => {
       if (title.length < 2 || title.length > 60) return json(req, { error: "title must be 2..60 characters" }, 400);
       if (text.length < 2 || text.length > 240) return json(req, { error: "body must be 2..240 characters" }, 400);
       if (!fcmConfigured()) return json(req, { error: "FCM not configured (FCM_SERVICE_ACCOUNT secret missing)" }, 500);
-      let tokQuery = admin.from("cloud_push_tokens").select("token");
-      if (audience !== "all") {
-        const { data: uids, error: segErr } = await admin.rpc("marketing_push_targets", { p_audience: audience });
-        if (segErr) return json(req, { error: `segment resolution failed: ${segErr.message} — migration 20260719110000 appliquée + NOTIFY pgrst ?` }, 500);
-        const userIds = (uids ?? []).map((u: unknown) => String(u)).filter(Boolean);
-        if (!userIds.length) {
-          try {
-            await admin.from("marketing_push_log").insert({
-              title, body: text, audience, sent_count: 0, fail_count: 0, dead_count: 0, actor: actorEmail,
-            });
-          } catch (_) { /* best-effort */ }
-          return json(req, { ok: true, devices: 0, sent: 0, fail: 0, dead: 0, audience });
-        }
-        tokQuery = tokQuery.in("user_id", userIds);
-      }
-      const { data: toks, error: tokErr } = await tokQuery;
-      if (tokErr) return json(req, { error: `token read failed: ${tokErr.message}` }, 500);
-      const tokens = [...new Set((toks ?? []).map((t) => String((t as { token?: string }).token)).filter(Boolean))];
-      let sent = 0, fail = 0, dead = 0;
-      for (const tk of tokens) {
-        const r = await sendFcmPush(tk, { title, body: text, data: { kind: "marketing" } });
-        if (r.ok) sent++;
-        else if (r.unregistered) { dead++; try { await admin.from("cloud_push_tokens").delete().eq("token", tk); } catch (_) { /* noop */ } }
-        else fail++;
+      let delivery: PushDeliveryResult;
+      try {
+        delivery = await deliverMarketingSegment(title, text, audience);
+      } catch (_) {
+        return json(req, { error: "Push audience is temporarily unavailable" }, 503);
       }
       try {
         await admin.from("marketing_push_log").insert({
           title, body: text, audience,
-          sent_count: sent, fail_count: fail, dead_count: dead, actor: actorEmail,
+          sent_count: delivery.sent,
+          fail_count: delivery.fail,
+          dead_count: delivery.dead,
+          actor: actorEmail,
+          origin: "immediate",
         });
       } catch (_) { /* le log ne doit pas faire échouer un envoi réussi */ }
       try {
-        await sendTelegram(`📣 <b>Push marketing envoyé</b> (${audience})\n${tgEscape(title)}\n${sent} envoyé(s) · ${fail} échec(s) · ${dead} token(s) mort(s) purgé(s)`);
+        await sendTelegram(`📣 <b>Push marketing envoyé</b> (${audience})\n${tgEscape(title)}\n${delivery.sent} envoyé(s) · ${delivery.fail} échec(s) · ${delivery.dead} token(s) mort(s) purgé(s)`);
       } catch (_) { /* best-effort */ }
-      return json(req, { ok: true, devices: tokens.length, sent, fail, dead, audience });
+      return json(req, { ok: true, ...delivery, audience });
     }
 
     // ── route: /user/:id/:action ──

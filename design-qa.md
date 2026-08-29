@@ -120,7 +120,6 @@ Date: 2026-08-14
 - Post-deployment gate remains distinct: scan and approve the production QR from a phone, then confirm the automatic APK redirect.
 
 final result: passed
-
 ---
 
 # Subscription selector — Plan-first
@@ -182,5 +181,45 @@ Date: 2026-08-14
 - Replaced the rejected nested device illustration with a premium full-frame TV, phone and tablet render, optimized from 1,358,471-byte PNG to a 36,680-byte WebP.
 - Removed the inherited 190 px height cap. The image and slot now share the intended 8:5 ratio: 417 × 260.625 desktop, 358 × 223.75 at 390 px, 342 × 213.75 compact, and 360 × 225 landscape; no device crop remains.
 - Re-ran same-viewport reference/implementation comparisons after the responsive corrections.
+
+final result: passed
+
+---
+
+# Centre de notifications Admin
+
+Date: 2026-08-29
+
+## Source et implémentation
+
+- Source visuelle : `C:\Users\AdrienHernandez\.codex\generated_images\01a04ac7-516d-7a60-9bba-ebd1fbc27e9f\exec-93f7d78c-649e-40cc-82d2-ee145892ab8a.png`
+- Implémentation : `C:\Users\AdrienHernandez\Documents\Norva-notifications-center-20260829\.codex-artifacts\notification-center-automations-reference-viewport-corrected.png`
+- Comparaison commune : `C:\Users\AdrienHernandez\Documents\Norva-notifications-center-20260829\.codex-artifacts\notification-center-comparison-same-viewport-corrected.png`
+- Viewport de comparaison : référence 1513 × 1038 px ; implémentation 1512 × 1037 CSS px, densité navigateur 0,8. Le raster du navigateur a été recadré puis remis à l’échelle sur le viewport CSS pour neutraliser le facteur de capture Windows.
+- Contrôle responsive : 487 × 1055 CSS px (cible mobile demandée 390 × 844), sans débordement horizontal du document ; contrôles interactifs d’au moins 44 CSS px.
+
+## États et interactions contrôlés
+
+- Onglets Composer, Programmées, Automatiques et Historique ; navigation clavier par flèches.
+- Composition immédiate et programmée, date future, audience et revue explicite avant envoi.
+- Édition et duplication d’une programmation ; confirmation d’annulation intégrée et focus placé sur la revue.
+- Lecture des règles système protégées, extension des événements sûrs, création et édition des automations personnalisées.
+- Activation, duplication et archivage d’une automation personnalisée.
+- Repli responsive en une colonne, onglets défilables et formulaire Composer mobile.
+- Aucun message d’erreur de console sur l’URL locale finale.
+
+## Comparaison et décisions
+
+- La hiérarchie de la référence est conservée : navigation Marketing, sections opérationnelles, inventaire des règles à gauche et détail/action à droite.
+- L’implémentation sépare volontairement les règles transactionnelles protégées des automations marketing modifiables. Cette différence évite de présenter comme éditables des tunnels système dont le moteur n’expose pas de contrat d’écriture.
+- Les KPI remplacent le bandeau de prochaine programmation et gardent l’échéance visible dans le même écran. La modification reste disponible dans Programmées.
+- Le détail en lecture puis le bouton Modifier réduisent les changements accidentels ; le formulaire complet reste disponible en une action.
+
+## Historique des corrections
+
+- P2 corrigé : champs de programmation étendus sur les deux colonnes et `fieldset` natif neutralisé.
+- P2 corrigé : états pressés des filtres, focus visible et cibles tactiles normalisés.
+- P2 corrigé : aperçu de date invalide protégé et boutons asynchrones stabilisés avant `await`.
+- P1/P0 : aucun défaut restant dans le parcours principal contrôlé.
 
 final result: passed
