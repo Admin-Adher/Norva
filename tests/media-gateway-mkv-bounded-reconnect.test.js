@@ -783,9 +783,10 @@ test('HTTP 200 full-body fallback stays fail-closed outside an exact offset-zero
         });
     }
 
-    await t.test('seek identity preflight', async () => {
+    await t.test('resumed MKV retains the exact offset-zero body for the bounded pump', async () => {
         const tracker = makeTracker();
         let fetches = 0;
+        const writable = new CapturingWritable();
         const h = pumpHarness({
             fetch: async (_url, options) => {
                 fetches += 1;
@@ -799,12 +800,15 @@ test('HTTP 200 full-body fallback stays fail-closed outside an exact offset-zero
         });
         const session = mkvSession(fixture.length);
         session.seekOffset = 12;
-        await assert.rejects(
-            h.ensureBoundedMkvInputPump(session),
-            (error) => error?.code === 'RANGE_UNSUPPORTED' && error?.status === 502,
-        );
+
+        await h.ensureBoundedMkvInputPump(session);
+
         assert.equal(fetches, 1);
-        assert.equal(tracker.calls[0].Range, 'bytes=0-0');
+        assert.equal(tracker.calls[0].Range, `bytes=0-${fixture.length - 1}`);
+        assert.ok(session.preopenedVodInputAttempt, 'resume keeps the one provider body for pipe:0');
+        assert.equal(tracker.active, 1);
+        await h.runBoundedMkvInputPump(session, writable, new AbortController().signal, null);
+        assert.deepEqual(writable.bytes(), fixture);
         assert.equal(tracker.active, 0);
     });
 
@@ -928,17 +932,18 @@ test('a server-observed MP4 authority overrides stale MKV hints without provider
     assert.equal(h.normalizeSourceContainerAuthority({ ...authority, sourceUrlSha256: 'b'.repeat(64) }, sourceUrl), null);
 });
 
-test('finite MKV seek drains a one-byte identity range instead of retaining a full-file preopen', async () => {
+test('finite MKV resume retains one full bounded provider body for linear FFmpeg seek', async () => {
     const fixture = mkvFixture(128);
     const tracker = makeTracker();
+    const writable = new CapturingWritable();
     const h = pumpHarness({
         fetch: async (_url, options) => {
             tracker.calls.push(options.headers);
             return trackedResponse(tracker, {
-                chunks: [fixture.subarray(0, 1)],
+                chunks: [fixture],
                 headers: {
-                    'Content-Range': `bytes 0-0/${fixture.length}`,
-                    'Content-Length': '1',
+                    'Content-Range': `bytes 0-${fixture.length - 1}/${fixture.length}`,
+                    'Content-Length': String(fixture.length),
                     ETag: '"seek-identity-v1"',
                 },
             });
@@ -950,15 +955,16 @@ test('finite MKV seek drains a one-byte identity range instead of retaining a fu
     await h.ensureBoundedMkvInputPump(session);
 
     assert.equal(tracker.calls.length, 1);
-    assert.equal(tracker.calls[0].Range, 'bytes=0-0');
+    assert.equal(tracker.calls[0].Range, `bytes=0-${fixture.length - 1}`);
     assert.equal(tracker.maxActive, 1);
-    assert.equal(tracker.active, 0, 'identity response is fully drained before the broker opens');
-    assert.equal(session.preopenedVodInputAttempt, undefined);
-    assert.equal(session.startupTimings.providerGetPreopened, false);
-    assert.equal(session.startupTimings.providerSeekIdentityPreflight, true);
-    assert.equal(session.startupTimings.providerSeekIdentityPreflightBytes, 1);
+    assert.equal(tracker.active, 1, 'the only provider body stays open until FFmpeg consumes pipe:0');
+    assert.ok(session.preopenedVodInputAttempt);
+    assert.equal(session.startupTimings.providerGetPreopened, true);
     assert.equal(session.startupTimings.fileSizeBytes, fixture.length);
     assert.equal(session.vodInputValidator.value, '"seek-identity-v1"');
+    await h.runBoundedMkvInputPump(session, writable, new AbortController().signal, null);
+    assert.deepEqual(writable.bytes(), fixture);
+    assert.equal(tracker.active, 0);
 });
 
 test('cold proof training reuses that one provider body for both local analyzers', async () => {
@@ -2916,7 +2922,7 @@ test('finite MKV resume spawns FFmpeg against only the loopback URL with pre-inp
     assert.equal(capturedOptions.env.NO_PROXY, '127.0.0.1,localhost,::1');
 });
 
-test('FFmpeg MKV input keeps pipe:0 at offset zero and uses the serialized loopback broker for resume', () => {
+test('production finite MKV resume keeps the provider behind pipe:0 and linear post-input seek', () => {
     const source = readGateway();
     const startFfmpeg = sourceBetween(source, 'function startFfmpeg(', '\nfunction seekArgsForSession(');
     assert.match(startFfmpeg, /const seekableMkvInput = usesFiniteMkvSeekBroker\(session\)/);
@@ -2945,8 +2951,23 @@ test('FFmpeg MKV input keeps pipe:0 at offset zero and uses the serialized loopb
     assert.deepEqual(
         JSON.parse(JSON.stringify(seekArgsForSession({ sourceUrl: 'https://p/title.mkv', seekOffset: 120 }, true))),
         { preInputSeek: [], postInputSeek: ['-ss', '120'] },
-        'an incompletely prepared finite MKV fails safe to the historical linear seek',
+        'the production finite MKV path performs a linear seek after pipe:0',
     );
+
+    const createRoute = sourceBetween(source, "app.post('/sessions'", "\napp.delete('/raw-pumps'");
+    assert.doesNotMatch(
+        createRoute,
+        /await prepareFiniteMkvSeekBroker/,
+        'session creation must never expose resumed MKV playback to overlapping FFmpeg HTTP ranges',
+    );
+    assert.match(createRoute, /finiteMkvResumeMode = 'bounded-pump-linear-seek'/);
+    const ensurePump = sourceBetween(
+        source,
+        'async function ensureBoundedMkvInputPump(',
+        '\nfunction parseBoundedProviderContentRange(',
+    );
+    assert.doesNotMatch(ensurePump, /drainExactRange:\s*Number\(session\?\.seekOffset/);
+    assert.match(ensurePump, /await preopenBoundedMkvInputPump\(session, parentSignal\)/);
 
     const retry = sourceBetween(source, 'async function startSessionWithProviderRetry(', '\nfunction normalizeFileSizeBytes(');
     assert.ok(
