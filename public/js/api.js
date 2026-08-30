@@ -1567,6 +1567,7 @@ const CloudAdapter = (() => {
             audioChannels: query.get('audioChannels'),
             audioStreamIndex: numericPlaybackHint(query.get('audioStreamIndex') ?? query.get('audio_stream_index')),
             audioTrackCount: numericPlaybackHint(query.get('audioTrackCount') ?? query.get('audio_track_count')),
+            subtitleStreamIndex: numericPlaybackHint(query.get('subtitleStreamIndex') ?? query.get('subtitle_stream_index')),
             subtitleTrackCount: numericPlaybackHint(query.get('subtitleTrackCount') ?? query.get('subtitle_track_count')),
             durationSeconds: numericPlaybackHint(query.get('durationSeconds') ?? query.get('duration_seconds')),
             audioMode: query.get('audioMode'),

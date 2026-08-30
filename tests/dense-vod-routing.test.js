@@ -516,6 +516,7 @@ test('dense browser VOD without exact codecs uses one full Gateway conversion la
         subtitle_tracks: indexedTracks(34, 40)
     });
     playbackHint.audioStreamIndex = 8;
+    playbackHint.subtitleStreamIndex = 17;
     const result = await API.proxy.xtream.getStreamUrl(
         '00000000-0000-4000-8000-000000000001',
         '2045146',
@@ -534,6 +535,7 @@ test('dense browser VOD without exact codecs uses one full Gateway conversion la
     assert.strictEqual(calls[0].playbackHint.subtitleTrackCount, 34);
     assert.strictEqual(calls[0].playbackHint.durationSeconds, 9360);
     assert.strictEqual(calls[0].playbackHint.audioStreamIndex, 8);
+    assert.strictEqual(calls[0].playbackHint.subtitleStreamIndex, 17);
 });
 
 test('ordinary unknown MKV opens one bounded Gateway conversion lane', async () => {

@@ -815,7 +815,7 @@ class WatchPage {
             this.subtitleTracks = [...explicitTracks];
         }
 
-        const acknowledgedIndex = Number(
+        const acknowledgedIndex = this.nullablePlaybackStreamIndex(
             options.subtitleStreamIndex ??
             options.subtitle_stream_index ??
             gatewaySession.subtitleStreamIndex ??
@@ -1514,6 +1514,15 @@ class WatchPage {
      * Normalize Cloud playback/session responses so every caller can pass either
      * the full API result or the already-flattened playback object.
      */
+    nullablePlaybackStreamIndex(...values) {
+        for (const value of values) {
+            if (value === null || value === undefined || value === '') continue;
+            const parsed = Number(value);
+            if (Number.isInteger(parsed) && parsed >= 0) return parsed;
+        }
+        return null;
+    }
+
     playbackMetadataFromResult(playback = {}, extra = {}) {
         const root = playback && typeof playback === 'object' ? playback : {};
         const nestedPlayback = root.playback && typeof root.playback === 'object' ? root.playback : {};
@@ -1544,24 +1553,24 @@ class WatchPage {
             || session.id
             || nestedSession.id
             || null;
-        const audioStreamIndex = Number(
-            extra.audioStreamIndex ??
-            extra.audio_stream_index ??
-            root.audioStreamIndex ??
-            root.audio_stream_index ??
-            nestedPlayback.audioStreamIndex ??
-            nestedPlayback.audio_stream_index ??
-            gatewaySession?.audioStreamIndex ??
+        const audioStreamIndex = this.nullablePlaybackStreamIndex(
+            extra.audioStreamIndex,
+            extra.audio_stream_index,
+            root.audioStreamIndex,
+            root.audio_stream_index,
+            nestedPlayback.audioStreamIndex,
+            nestedPlayback.audio_stream_index,
+            gatewaySession?.audioStreamIndex,
             gatewaySession?.audio_stream_index
         );
-        const subtitleStreamIndex = Number(
-            extra.subtitleStreamIndex ??
-            extra.subtitle_stream_index ??
-            root.subtitleStreamIndex ??
-            root.subtitle_stream_index ??
-            nestedPlayback.subtitleStreamIndex ??
-            nestedPlayback.subtitle_stream_index ??
-            gatewaySession?.subtitleStreamIndex ??
+        const subtitleStreamIndex = this.nullablePlaybackStreamIndex(
+            extra.subtitleStreamIndex,
+            extra.subtitle_stream_index,
+            root.subtitleStreamIndex,
+            root.subtitle_stream_index,
+            nestedPlayback.subtitleStreamIndex,
+            nestedPlayback.subtitle_stream_index,
+            gatewaySession?.subtitleStreamIndex,
             gatewaySession?.subtitle_stream_index
         );
         const requestedSeekOffset = Number(
@@ -9832,8 +9841,14 @@ class WatchPage {
 
         try {
             const url = new URL(sourceUrl, window.location.href);
-            if (!this.isGatewayPlaybackUrl(url.href)) return '';
-            url.pathname = url.pathname.replace(/\/playlist\.m3u8$/i, `/sub_${streamIndex}.vtt`);
+            const normalizedStreamIndex = this.nullablePlaybackStreamIndex(streamIndex);
+            if (normalizedStreamIndex === null) return '';
+            const nextPath = url.pathname.replace(
+                /(\/sessions\/[^/?#]+)\/(?:playlist|video|audio_\d+)\.m3u8$/i,
+                `$1/sub_${normalizedStreamIndex}.vtt`
+            );
+            if (nextPath === url.pathname) return '';
+            url.pathname = nextPath;
             return url.toString();
         } catch (_) {
             return '';

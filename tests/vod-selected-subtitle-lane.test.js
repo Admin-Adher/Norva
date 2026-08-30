@@ -35,7 +35,12 @@ function loadMediaUtils() {
 }
 
 function loadWatchPage() {
-  const window = {};
+  const window = {
+    location: {
+      href: 'https://norva.tv/app#watch',
+      hostname: 'norva.tv',
+    },
+  };
   vm.runInNewContext(read('public/js/pages/WatchPage.js'), {
     window,
     console,
@@ -178,6 +183,58 @@ test('Watch keeps an explicit Off choice ahead of stale acknowledged session met
   assert.equal(page.subtitleOffsetSeconds, 0);
   assert.equal(page._pendingSubtitlePreferenceApplied, true);
   assert.equal(page.subtitleTracks.length, 0);
+});
+
+test('Watch never fabricates subtitle stream zero from absent Gateway metadata', () => {
+  const WatchPage = loadWatchPage();
+  const page = Object.create(WatchPage.prototype);
+  page.subtitleTracks = [{ index: 3, language: 'fr', subtitleType: 'text', extractable: true }];
+  page.currentStreamInfo = { subtitles: [...page.subtitleTracks] };
+  page.pendingPlaybackPreferences = {
+    subtitle: { source: 'probe', streamIndex: 3, language: 'fr' },
+  };
+  page.selectedSubtitleStreamIndex = null;
+  page.selectedSubtitleTrackUserChoice = false;
+  page._pendingSubtitlePreferenceApplied = false;
+  page.restorePendingSubtitlePreference = () => false;
+  page.updateCaptionsTracks = () => {};
+
+  const metadata = page.playbackMetadataFromResult({
+    gatewaySession: {
+      audio_stream_index: null,
+      subtitle_stream_index: null,
+    },
+  });
+  const tracks = page.applyAcknowledgedSubtitleSessionMetadata({
+    subtitleStreamIndex: null,
+    subtitleTracks: page.subtitleTracks,
+  });
+
+  assert.equal(metadata.audioStreamIndex, null);
+  assert.equal(metadata.subtitleStreamIndex, null);
+  assert.equal(page.selectedSubtitleStreamIndex, null);
+  assert.equal(tracks.some(track => Number(track?.index) === 0), false);
+});
+
+test('Watch derives the selected subtitle VTT from every Gateway session playlist shape', () => {
+  const WatchPage = loadWatchPage();
+  const cases = [
+    'playlist.m3u8',
+    'video.m3u8',
+    'audio_0.m3u8',
+  ];
+
+  for (const playlist of cases) {
+    const page = Object.create(WatchPage.prototype);
+    page.subtitleSourceUrl = `https://gateway.test/sessions/session-1/${playlist}?token=secret`;
+    const url = new URL(page.gatewaySubtitleUrlForTrack(3));
+    assert.equal(url.pathname, '/sessions/session-1/sub_3.vtt');
+    assert.equal(url.searchParams.get('token'), 'secret');
+  }
+
+  const invalid = Object.create(WatchPage.prototype);
+  invalid.subtitleSourceUrl = 'https://gateway.test/not-a-session/playlist.m3u8?token=secret';
+  assert.equal(invalid.gatewaySubtitleUrlForTrack(3), '');
 });
 
 test('Watch carries the selected subtitle lane through the serialized Gateway restart', async () => {
