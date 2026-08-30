@@ -1812,7 +1812,7 @@ const MULTI_AUDIO_HLS_PROTOCOL = 1;
 // production Ryzen/Radeon host. Keep the operational default evidence-based and configurable,
 // while bounding accidental fan-out. Every exact source track stays visible to the user.
 const MAX_MULTI_AUDIO_RENDITIONS = clampInt(process.env.MAX_MULTI_AUDIO_RENDITIONS, 12, 2, 32);
-const GATEWAY_VERSION = 128;
+const GATEWAY_VERSION = 129;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -6734,6 +6734,119 @@ function extractAudioWavChunks(url, ua, trackIndex, timeoutMs, proxyKey, firstCh
     });
 }
 
+// A viewer-triggered AI subtitle request may reuse the exact HLS audio that the
+// Gateway is already producing for that viewer. This is deliberately stricter
+// than provider affinity: the source URL AND absolute source audio index must
+// match, so a different title or track can never borrow the wrong stream. The
+// returned path is internal-only and remains confined to that session's output
+// directory.
+function localViewerTranscriptionSource(job) {
+    if (
+        jobPrio(job) !== JOB_PRIORITY.viewer ||
+        Number(job?.dur || 0) !== 0 ||
+        job?.kind
+    ) return null;
+    const requestedIndex = normalizeAudioStreamIndex(job?.index);
+    if (!Number.isInteger(requestedIndex) || !job?.url) return null;
+
+    for (const session of sessions.values()) {
+        if (
+            session?.sourceUrl !== job.url ||
+            session?.id === job?.localHlsFailedSessionId ||
+            (session?.status !== 'starting' && session?.status !== 'ready') ||
+            !session?.outputDir
+        ) continue;
+
+        let playlistPath = null;
+        if (multiAudioHlsEnabled(session)) {
+            const rendition = session.multiAudioHls.audioRenditions
+                .find((candidate) => normalizeAudioStreamIndex(candidate?.streamIndex) === requestedIndex);
+            if (rendition) {
+                playlistPath = path.resolve(session.outputDir, `audio_${rendition.hlsIndex}.m3u8`);
+            }
+        } else if (mappedAudioStreamIndexForSession(session) === requestedIndex) {
+            playlistPath = path.resolve(session.playlistPath);
+        }
+
+        if (!playlistPath || !isWithin(session.outputDir, playlistPath)) continue;
+        return {
+            sessionId: session.id,
+            outputDir: path.resolve(session.outputDir),
+            playlistPath,
+            sourceUrl: session.sourceUrl,
+            streamIndex: requestedIndex,
+        };
+    }
+    return null;
+}
+
+async function waitForLocalTranscriptionPlaylist(source, timeoutMs = 30_000) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+        const session = sessions.get(source?.sessionId);
+        if (
+            !session ||
+            session.sourceUrl !== source.sourceUrl ||
+            (session.status !== 'starting' && session.status !== 'ready') ||
+            !isWithin(session.outputDir, source.playlistPath)
+        ) return false;
+        const stat = await fsp.stat(source.playlistPath).catch(() => null);
+        if (stat?.isFile() && stat.size > 0) return true;
+        await sleep(250);
+    }
+    return false;
+}
+
+// Decode the already-open local HLS rendition instead of opening another
+// provider socket. No provider proxy, credentials, reconnect flags or account
+// extraction ledger are involved. The growing EVENT playlist lets chunk zero
+// reach Whisper while playback continues to populate later segments.
+async function extractLocalHlsAudioWavChunks(source, timeoutMs, firstChunkSec, chunkSec, dir) {
+    if (!await waitForLocalTranscriptionPlaylist(source)) {
+        return { ok: false, localSourceEnded: true, providerRead: false, error: 'local viewer playlist became unavailable' };
+    }
+    return new Promise((resolve) => {
+        const segmentTimes = transcriptionSegmentTimes(firstChunkSec, chunkSec).join(',');
+        const args = [
+            '-y', '-hide_banner', '-loglevel', 'error', '-nostdin',
+            '-i', source.playlistPath,
+            '-map', '0:a:0',
+            '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le',
+            '-f', 'segment', '-segment_times', segmentTimes, '-reset_timestamps', '1',
+            path.join(dir, 'chunk-%04d.wav'),
+        ];
+        let child;
+        try { child = spawn(FFMPEG_PATH, args, { stdio: ['ignore', 'ignore', 'pipe'] }); }
+        catch (error) {
+            return resolve({ ok: false, localSourceEnded: true, providerRead: false, error: 'local ffmpeg spawn failed: ' + String(error?.message || error) });
+        }
+        let stderr = '';
+        let timedOut = false;
+        const timer = setTimeout(() => {
+            timedOut = true;
+            try { child.kill('SIGKILL'); } catch (_) {}
+        }, timeoutMs);
+        child.stderr.on('data', (data) => { stderr += data.toString(); });
+        child.on('error', (error) => {
+            clearTimeout(timer);
+            resolve({ ok: false, localSourceEnded: true, providerRead: false, error: 'local ffmpeg error: ' + String(error?.message || error) });
+        });
+        child.on('close', (code) => {
+            clearTimeout(timer);
+            if (code === 0) return resolve({ ok: true, providerRead: false });
+            const tail = redactCreds(stderr.trim().split('\n').filter(Boolean).pop() || 'no stderr');
+            resolve({
+                ok: false,
+                providerRead: false,
+                localSourceEnded: true,
+                error: timedOut
+                    ? `local HLS extract timeout after ${Math.round(timeoutMs / 1000)}s: ${tail}`
+                    : `local HLS ffmpeg exit ${code}: ${tail}`,
+            });
+        });
+    });
+}
+
 // Shift every cue of a (chunk) VTT by offsetSec and return the cue BLOCKS (header dropped) —
 // the stitcher joins blocks from all chunks and runs cleanVtt for cross-chunk dedup. Only the
 // timing line is rewritten, so cue text containing time-like strings is safe.
@@ -7253,6 +7366,9 @@ async function nextRunnableJob(queue, kind) {
     let picked = null;
     while (queue.length) {
         const job = queue.shift();
+        const localTranscriptionSource = localViewerTranscriptionSource(job);
+        if (localTranscriptionSource) job.localTranscriptionSource = localTranscriptionSource;
+        else delete job.localTranscriptionSource;
         // Service/pregen enrichment is globally background work on this one-vCPU
         // replica. A viewer-origin request keeps its interactive priority, but
         // every other job waits while any local playback is starting or active.
@@ -7268,7 +7384,8 @@ async function nextRunnableJob(queue, kind) {
         // holds the job's provider account — no round-trip, and it sees what the edge gate
         // can't (a paused viewer whose transcode ffmpeg still runs). Then the edge gate for
         // relay-side signals (live sessions on other lanes, enrichment ticks).
-        const localViewerSlotBusy = accountSlotBusyLocally(job.url, job.uid ? sha256Hex(job.uid) : '');
+        const localViewerSlotBusy = !localTranscriptionSource &&
+            accountSlotBusyLocally(job.url, job.uid ? sha256Hex(job.uid) : '');
         if (localViewerSlotBusy) {
             // Same-account viewer auxiliary work cannot coexist with a
             // single-slot playback, but that viewing time is not a job failure.
@@ -7276,12 +7393,15 @@ async function nextRunnableJob(queue, kind) {
             deferred.push(job);
             continue;
         }
-        const locallyDeferred = storyboardCoolingDown(job)
-            || transcribeCoolingDown(job);
-        const edgeDeferred = locallyDeferred ? false : await shouldDeferJob(job);
+        const locallyDeferred = !localTranscriptionSource && (
+            storyboardCoolingDown(job) || transcribeCoolingDown(job)
+        );
+        const edgeDeferred = (locallyDeferred || localTranscriptionSource)
+            ? false
+            : await shouldDeferJob(job);
         // shouldDeferJob may wait up to 10 s. Re-check the global reservation
         // after that await before granting the job a provider/CPU slot.
-        const viewerWonGateRace = backgroundJobBlockedByViewer(job);
+        const viewerWonGateRace = !localTranscriptionSource && backgroundJobBlockedByViewer(job);
         if (!locallyDeferred && !edgeDeferred && !viewerWonGateRace) {
             job.gateDeferrals = 0;
             picked = job;
@@ -7438,11 +7558,15 @@ async function runTranscribeJob(job) {
     // Start the per-provider cooldown on any TERMINAL whole-film outcome (the provider was read,
     // success or not). A viewer preemption re-queues WITHOUT marking — the read barely started,
     // and cooling it down would add 12 min to that viewer's own wait after their playback ends.
-    if (dur === 0 && !(payload && payload.requeue)) markTranscribeRun(url);
+    if (
+        dur === 0 &&
+        !(payload && payload.requeue) &&
+        payload?.providerRead !== false
+    ) markTranscribeRun(url);
     if (payload && payload.requeue) {
         // Viewer preemption is a DEFERRAL, not a failure: keep the row alive/honest and put the
         // job back in line — the queue's local slot check holds it until the viewing ends.
-        console.log(`[media-gateway] transcribe job ${jobId} preempted by viewer — re-queued`);
+        console.log(`[media-gateway] transcribe job ${jobId} deferred — re-queued`);
         postJobHeartbeat(job, 'deferred');
         insertByPriority(transcribeQueue, job);
         return;
@@ -7607,8 +7731,20 @@ async function runChunkedTranscription(job) {
     let extractionSettled = false;
     let extractionResult = { ok: false, error: 'not started' };
     try {
-        // Extraction under the account lock for its WHOLE lifetime (the provider connection).
-        const extractionDone = withAccountJobLock(accountJobKey(uid, url), async () => {
+        const localSource = localViewerTranscriptionSource(job) || job.localTranscriptionSource || null;
+        // Exact local viewer HLS uses no provider connection and therefore no
+        // account lock. Every other path preserves the existing single-slot
+        // lock and retry policy byte-for-byte.
+        const extractionTask = async () => {
+            if (localSource) {
+                return extractLocalHlsAudioWavChunks(
+                    localSource,
+                    AUDIO_EXTRACT_TIMEOUT_MS,
+                    TRANSCRIBE_FIRST_CHUNK_SEC,
+                    TRANSCRIBE_CHUNK_SEC,
+                    dir,
+                );
+            }
             let ex = { ok: false, error: 'not attempted' };
             for (let attempt = 0; attempt <= AUDIO_EXTRACT_RETRIES; attempt++) {
                 if (backgroundJobBlockedByViewer(job)) {
@@ -7635,7 +7771,15 @@ async function runChunkedTranscription(job) {
                 if (attempt < AUDIO_EXTRACT_RETRIES) await sleep(AUDIO_EXTRACT_BACKOFF_MS * (attempt + 1));
             }
             return ex;
-        }).then((r) => { extractionSettled = true; extractionResult = r; return r; });
+        };
+        const extractionDone = (localSource
+            ? extractionTask()
+            : withAccountJobLock(accountJobKey(uid, url), extractionTask)
+        ).then((result) => {
+            extractionSettled = true;
+            extractionResult = result;
+            return result;
+        });
 
         // Consumer: transcribe chunks as they complete (chunk N is complete when N+1 exists or
         // the extraction has exited).
@@ -7664,7 +7808,7 @@ async function runChunkedTranscription(job) {
                 extractionResult.preempted
             ) {
                 await extractionDone;
-                return { jobId, requeue: true };
+                return { jobId, requeue: true, providerRead: localSource ? false : undefined };
             }
             if (!announcedTranscribing) { announcedTranscribing = true; postJobHeartbeat(job, 'transcribing'); }
             try { totalAudioSec += (await fsp.stat(p)).size / (16000 * 2); } catch (_) { /* best-effort */ }
@@ -7679,7 +7823,7 @@ async function runChunkedTranscription(job) {
                 // /raw also kills the provider extraction for this account, so this settles
                 // promptly. Re-queue without a failure callback; the gate resumes it later.
                 await extractionDone;
-                return { jobId, requeue: true };
+                return { jobId, requeue: true, providerRead: localSource ? false : undefined };
             }
             if (w.vtt) {
                 if (!lang && w.lang) lang = w.lang; // chunk 0 detects, the rest are forced
@@ -7707,7 +7851,14 @@ async function runChunkedTranscription(job) {
         const audioSec = Math.round(totalAudioSec);
         if (ex.preempted) {
             // Already-streamed partial cues stay served; the job restarts cleanly after the viewing.
-            return { jobId, requeue: true };
+            return { jobId, requeue: true, providerRead: localSource ? false : undefined };
+        }
+        if (localSource && !ex.ok) {
+            // The viewer closed or replaced the session before the local EVENT
+            // playlist completed. Keep any partial cues already delivered and
+            // retry later through the normal mono-slot path.
+            job.localHlsFailedSessionId = localSource.sessionId;
+            return { jobId, requeue: true, providerRead: false };
         }
         if (!ex.ok && chunksDone === 0) {
             return { jobId, ok: false, error: ('Audio extraction failed: ' + ex.error).slice(0, 300) };
@@ -7723,7 +7874,15 @@ async function runChunkedTranscription(job) {
         }
         const finalVtt = cleanVtt('WEBVTT\n\n' + blocks.join('\n\n'));
         const segments = (finalVtt.match(/-->/g) || []).length;
-        return { jobId, ok: true, vtt: finalVtt, sourceLang: lang || null, audioSec, segments };
+        return {
+            jobId,
+            ok: true,
+            vtt: finalVtt,
+            sourceLang: lang || null,
+            audioSec,
+            segments,
+            providerRead: localSource ? false : true,
+        };
     } finally {
         fsp.rm(dir, { recursive: true, force: true }).catch(() => {});
     }
