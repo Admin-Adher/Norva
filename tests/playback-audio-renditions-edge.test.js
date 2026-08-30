@@ -75,6 +75,7 @@ const validMetadata = {
   reason: 'enabled',
   maxAudioRenditions: 8,
   sourceTrackCount: 2,
+  preparedTrackCount: 2,
   masterPlaylist: 'playlist.m3u8',
   videoPlaylist: 'video.m3u8',
   defaultHlsIndex: 1,
@@ -139,7 +140,9 @@ test('the Edge drops the whole multi-audio topology on any diagnostics or defaul
     { ...validMetadata, enabled: false },
     { ...validMetadata, reason: 'disabled' },
     { ...validMetadata, maxAudioRenditions: 7 },
-    { ...validMetadata, sourceTrackCount: 3 },
+    { ...validMetadata, sourceTrackCount: 1 },
+    { ...validMetadata, preparedTrackCount: 1 },
+    { ...validMetadata, preparedTrackCount: 3 },
     { ...validMetadata, masterPlaylist: 'other.m3u8' },
     { ...validMetadata, videoPlaylist: 'playlist.m3u8' },
     { ...validMetadata, defaultHlsIndex: 0 },
@@ -150,4 +153,11 @@ test('the Edge drops the whole multi-audio topology on any diagnostics or defaul
   }
   assert.equal(normalizeMetadata(validMetadata, normalized, 2), null);
   assert.equal(normalizeMetadata(validMetadata, null, 5), null);
+
+  const boundedCohortMetadata = { ...validMetadata, sourceTrackCount: 12 };
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(normalizeMetadata(boundedCohortMetadata, normalized, 5))),
+    boundedCohortMetadata,
+    'the source may expose more tracks than the bounded simultaneous HLS cohort',
+  );
 });

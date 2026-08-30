@@ -177,6 +177,7 @@ const PLAYBACK_EVENT_TYPES = new Set([
   "playback_error",
   "gateway_error",
   "seek",
+  "subtitle_first_cue",
 ]);
 const PLAYBACK_SESSION_UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -6307,12 +6308,16 @@ function normalizeGatewayMultiAudioHls(
   const raw = recordOrEmpty(value);
   const defaultHlsIndex = Number(raw.defaultHlsIndex);
   const defaultStreamIndex = Number(raw.defaultStreamIndex);
+  const sourceTrackCount = Number(raw.sourceTrackCount);
+  const preparedTrackCount = Number(raw.preparedTrackCount);
   const defaultRendition = Number.isSafeInteger(defaultHlsIndex)
     ? renditions[defaultHlsIndex]
     : null;
   if (
     raw.protocol !== 1 || raw.enabled !== true || raw.reason !== "enabled" ||
-    raw.maxAudioRenditions !== 8 || raw.sourceTrackCount !== renditions.length ||
+    raw.maxAudioRenditions !== 8 ||
+    !Number.isSafeInteger(sourceTrackCount) || sourceTrackCount < renditions.length || sourceTrackCount > 1024 ||
+    !Number.isSafeInteger(preparedTrackCount) || preparedTrackCount !== renditions.length ||
     raw.masterPlaylist !== "playlist.m3u8" || raw.videoPlaylist !== "video.m3u8" ||
     !Number.isSafeInteger(defaultHlsIndex) || defaultHlsIndex < 0 ||
     defaultHlsIndex >= renditions.length ||
@@ -6327,7 +6332,8 @@ function normalizeGatewayMultiAudioHls(
     enabled: true,
     reason: "enabled",
     maxAudioRenditions: 8,
-    sourceTrackCount: renditions.length,
+    sourceTrackCount,
+    preparedTrackCount,
     masterPlaylist: "playlist.m3u8",
     videoPlaylist: "video.m3u8",
     defaultHlsIndex,
@@ -8576,6 +8582,41 @@ async function recordViewerTranscribeRequest(db: SupabaseClient, userId: string,
   } catch (_) { /* accounting must never fail the enqueue */ }
 }
 
+async function generatedSubtitleIncumbentResponse(
+  db: SupabaseClient,
+  claimRow: JsonRecord | null,
+  base: JsonRecord,
+): Promise<JsonRecord> {
+  const claimStatus = stringOr(claimRow?.status, "processing");
+  const claimJobId = stringOr(claimRow?.job_id, "");
+  if (claimStatus !== "processing") {
+    return { ...base, status: claimStatus, cached: true, jobId: claimJobId || null };
+  }
+  if (!claimJobId) {
+    return { ...base, status: "error", cached: true, jobId: null, error: "subtitle job was not durably created" };
+  }
+
+  // The claim row is durable before the outbound gateway request is accepted.
+  // Read the current milestone instead of calling that small pre-enqueue window
+  // "queued".  A gateway heartbeat is also accepted as durable evidence in
+  // case the best-effort queued timestamp write was interrupted after HTTP 202.
+  const { data, error } = await db.from("catalog_generated_subtitles")
+    .select("status, job_id, stage, enqueued_at")
+    .eq("job_id", claimJobId)
+    .maybeSingle();
+  if (error) throwDb(error, "subtitle incumbent lookup failed");
+  const current = data as JsonRecord | null;
+  const status = stringOr(current?.status, claimStatus);
+  const jobId = stringOr(current?.job_id, claimJobId);
+  const stage = stringOr(current?.stage, "");
+  const gatewayEvidence = Boolean(current?.enqueued_at)
+    || ["queued", "deferred", "extracting", "transcribing", "first_vtt"].includes(stage);
+  if (status === "processing" && !gatewayEvidence) {
+    return { ...base, status: "starting", cached: true, jobId, stage: "enqueueing" };
+  }
+  return { ...base, status, cached: true, jobId: jobId || null, stage: stage || null };
+}
+
 // Phase 3 (3a) ASYNC enqueue: kick off a background full-film transcription on the gateway and
 // cache the VTT cross-user (keyed by providerKey + file) when it calls back. Returns immediately.
 // 'ready' short-circuits straight from the cache. Shared by the service `transcribe-enqueue` mode
@@ -8587,6 +8628,7 @@ async function transcribeEnqueue(
   opts: { titleId?: string; sourceId?: string; externalId?: string; itemType?: string; index?: number; start?: number; dur?: number; force?: boolean; respectFailedCooldown?: boolean; origin?: string },
 ): Promise<JsonRecord> {
   if (!runtimeConfig.mediaGatewayUrl || !runtimeConfig.mediaGatewayToken) throw new HttpError(503, "Media gateway is not configured");
+  const requestedAt = new Date().toISOString();
   const { sourceId, externalId, itemType } = await resolveSubtitleTarget(db, userId, opts);
   // origin drives the gateway's priority classes AND the viewer-only guards below.
   const origin = ["viewer", "service", "pregen"].includes(stringOr(opts.origin, "")) ? stringOr(opts.origin, "") : "service";
@@ -8607,6 +8649,7 @@ async function transcribeEnqueue(
   // A blank provider key would collide every unkeyed title onto one cache row — refuse rather
   // than cross-contaminate transcripts. (Shouldn't happen: tUrl is a real, host-bearing URL.)
   if (!pkey) throw new HttpError(422, "no provider key for source");
+  const resolvedAt = new Date().toISOString();
   // Fast path: a ready transcript is served straight from the cache (no gateway pipe build).
   const { data: existing } = await db.from("catalog_generated_subtitles")
     .select("status, job_id, updated_at").eq("provider_key", pkey).eq("item_type", itemType).eq("external_id", externalId)
@@ -8639,22 +8682,39 @@ async function transcribeEnqueue(
   const claimRow = (Array.isArray(claim) ? claim[0] : claim) as JsonRecord | null;
   if (!claimRow?.won) {
     // Another trigger owns a fresh job (or it just turned ready) — reuse it, don't double-enqueue.
-    return { status: stringOr(claimRow?.status, "processing"), cached: true, jobId: claimRow?.job_id ?? null, providerKey: pkey };
+    return await generatedSubtitleIncumbentResponse(db, claimRow, { providerKey: pkey });
   }
+  // Reset the milestone columns when a stale/failed row is reclaimed. Timing
+  // instrumentation is best-effort and must never strand an otherwise valid
+  // provider-safe job before it reaches the gateway.
+  const { error: timingResetError } = await db.from("catalog_generated_subtitles").update({
+    requested_at: requestedAt,
+    resolved_at: resolvedAt,
+    stage: null,
+    enqueued_at: null,
+    extraction_started_at: null,
+    whisper_started_at: null,
+    first_vtt_at: null,
+    ready_at: null,
+  }).eq("job_id", jobId).eq("status", "processing");
+  if (timingResetError) console.error("[norva-playback] generated subtitle timing reset failed", timingResetError.message);
   const idx = Number.isInteger(Number(opts.index)) ? Number(opts.index) : 1;
   const bStart = Math.max(0, Number(opts.start) || 0);
   const bDur = Math.max(0, Number(opts.dur) || 0); // 0 = whole film (prod); >0 = clip (pipeline test)
   const exp = new Date(Date.now() + 2 * 3600 * 1000).toISOString();
-  const pipe = await createBytePipeAccess("transcribe-job", userId, tUrl, exp, db, null);
-  const cbUrl = `${PUBLIC_ORIGIN}/functions/v1/norva-playback/transcribe-callback`;
-  // origin (hoisted above, it also drives the viewer guards) sets the gateway's priority class:
-  // a viewer waiting in front of the player jumps ahead of the nightly pregen batch.
-  const asyncUrl = `${pipe.url.replace("/raw/", "/transcribe-async/")}?index=${idx}&jobId=${jobId}&callback=${encodeURIComponent(cbUrl)}&start=${bStart}&dur=${bDur}&origin=${origin}`;
   let gwStatus = 0, gwBody: JsonRecord | null = null;
   try {
+    const pipe = await createBytePipeAccess("transcribe-job", userId, tUrl, exp, db, null);
+    const cbUrl = `${PUBLIC_ORIGIN}/functions/v1/norva-playback/transcribe-callback`;
+    // origin (hoisted above, it also drives the viewer guards) sets the gateway's priority class:
+    // a viewer waiting in front of the player jumps ahead of the nightly pregen batch.
+    const asyncUrl = `${pipe.url.replace("/raw/", "/transcribe-async/")}?index=${idx}&jobId=${jobId}&callback=${encodeURIComponent(cbUrl)}&start=${bStart}&dur=${bDur}&origin=${origin}`;
     const gw = await fetch(asyncUrl, { method: "POST", signal: AbortSignal.timeout(20000) });
     gwStatus = gw.status; gwBody = await gw.json().catch(() => null) as JsonRecord | null;
-  } catch (_) { gwStatus = 0; }
+  } catch (error) {
+    gwStatus = 0;
+    console.error("[norva-playback] generated subtitle gateway enqueue failed", error instanceof Error ? error.message : String(error));
+  }
   if (gwStatus !== 202) {
     await db.from("catalog_generated_subtitles").update({ status: "failed", error: `enqueue gateway ${gwStatus}`, updated_at: new Date().toISOString() }).eq("job_id", jobId);
     // An enqueue failure is terminal like a callback failure: resolve any pending email/bell
@@ -8662,6 +8722,14 @@ async function transcribeEnqueue(
     try { await dispatchSubtitleNotifications(db, { provider_key: pkey, item_type: itemType, external_id: externalId, kind: "transcript", lang: "src", status: "failed" }); }
     catch (_) { /* best-effort */ }
     return { status: "error", jobId, providerKey: pkey, gatewayStatus: gwStatus, gateway: gwBody };
+  }
+  const { data: stageMarked, error: stageError } = await db.rpc("mark_generated_subtitle_stage", {
+    p_job_id: jobId,
+    p_stage: "queued",
+    p_at: new Date().toISOString(),
+  });
+  if (stageError || stageMarked !== true) {
+    console.error("[norva-playback] generated subtitle enqueue timing failed", stageError?.message ?? "row not processing");
   }
   // One budget event per REAL accepted enqueue (a full provider read will follow) — never for
   // cache hits, lost claims, or gateway refusals above.
@@ -8724,24 +8792,35 @@ async function ocrEnqueue(
   if (claimErr) throwDb(claimErr, "ocr enqueue claim failed");
   const claimRow = (Array.isArray(claim) ? claim[0] : claim) as JsonRecord | null;
   if (!claimRow?.won) {
-    return { status: stringOr(claimRow?.status, "processing"), cached: true, jobId: claimRow?.job_id ?? null, providerKey: pkey, kind: "ocr", lang };
+    return await generatedSubtitleIncumbentResponse(db, claimRow, { providerKey: pkey, kind: "ocr", lang });
   }
   const exp = new Date(Date.now() + 2 * 3600 * 1000).toISOString();
-  const pipe = await createBytePipeAccess("ocr-job", userId, tUrl, exp, db, null);
-  const cbUrl = `${PUBLIC_ORIGIN}/functions/v1/norva-playback/transcribe-callback`;
   const tessLang = TESS_LANG_MAP[lang] || "";
   const fmt = ["pgs", "vobsub", "dvb"].includes(stringOr(opts.fmt, "")) ? stringOr(opts.fmt, "") : "pgs";
-  const asyncUrl = `${pipe.url.replace("/raw/", "/ocr-async/")}?index=${idx}&jobId=${jobId}&callback=${encodeURIComponent(cbUrl)}&fmt=${fmt}${tessLang ? `&lang=${tessLang}` : ""}`;
   let gwStatus = 0, gwBody: JsonRecord | null = null;
   try {
+    const pipe = await createBytePipeAccess("ocr-job", userId, tUrl, exp, db, null);
+    const cbUrl = `${PUBLIC_ORIGIN}/functions/v1/norva-playback/transcribe-callback`;
+    const asyncUrl = `${pipe.url.replace("/raw/", "/ocr-async/")}?index=${idx}&jobId=${jobId}&callback=${encodeURIComponent(cbUrl)}&fmt=${fmt}${tessLang ? `&lang=${tessLang}` : ""}`;
     const gw = await fetch(asyncUrl, { method: "POST", signal: AbortSignal.timeout(20000) });
     gwStatus = gw.status; gwBody = await gw.json().catch(() => null) as JsonRecord | null;
-  } catch (_) { gwStatus = 0; }
+  } catch (error) {
+    gwStatus = 0;
+    console.error("[norva-playback] generated OCR gateway enqueue failed", error instanceof Error ? error.message : String(error));
+  }
   if (gwStatus !== 202) {
     await db.from("catalog_generated_subtitles").update({ status: "failed", error: `enqueue gateway ${gwStatus}`, updated_at: new Date().toISOString() }).eq("job_id", jobId);
     try { await dispatchSubtitleNotifications(db, { provider_key: pkey, item_type: itemType, external_id: externalId, kind: "ocr", lang: cacheLang, status: "failed" }); }
     catch (_) { /* best-effort */ }
     return { status: "error", jobId, providerKey: pkey, kind: "ocr", lang, gatewayStatus: gwStatus, gateway: gwBody };
+  }
+  const { data: stageMarked, error: stageError } = await db.rpc("mark_generated_subtitle_stage", {
+    p_job_id: jobId,
+    p_stage: "queued",
+    p_at: new Date().toISOString(),
+  });
+  if (stageError || stageMarked !== true) {
+    console.error("[norva-playback] generated OCR enqueue timing failed", stageError?.message ?? "row not processing");
   }
   if (origin === "viewer") await recordViewerTranscribeRequest(db, userId, pkey, "ocr");
   return { status: "processing", jobId, providerKey: pkey, kind: "ocr", lang, gateway: gwBody };
@@ -8879,7 +8958,7 @@ async function getGeneratedSubtitle(req: Request, userId: string, db: SupabaseCl
   const ident = await resolveSourceIdentity(sourceId, userId, db);
   const pkey = ident.key;
   if (!pkey) return { status: "none", providerKey: null };
-  const COLS = "status, vtt, source_lang, segments, audio_sec, job_id, updated_at, error, stage, claimed_by";
+  const COLS = "status, vtt, source_lang, segments, audio_sec, job_id, updated_at, error, stage, claimed_by, requested_at, resolved_at, enqueued_at, extraction_started_at, whisper_started_at, first_vtt_at, ready_at";
   let { data: row } = await db.from("catalog_generated_subtitles")
     .select(COLS)
     .eq("provider_key", pkey).eq("item_type", itemType).eq("external_id", externalId)
@@ -8894,10 +8973,21 @@ async function getGeneratedSubtitle(req: Request, userId: string, db: SupabaseCl
   }
   const rec = row as JsonRecord | null;
   if (!rec) return { status: "none", providerKey: pkey, kind, lang };
-  const status = stringOr(rec.status, "none");
-  const partialVtt = status === "processing" ? stringOr(rec.vtt, "") : "";
+  const persistedStatus = stringOr(rec.status, "none");
+  const jobId = stringOr(rec.job_id, "");
+  // A processing label without a durable job id is not a queue.  Fail open to
+  // `none` so the client can perform one real atomic enqueue instead of polling
+  // a zombie row forever.
+  if (persistedStatus === "processing" && !jobId) {
+    return { status: "none", providerKey: pkey, kind, lang, why: "missing-job" };
+  }
+  const persistedStage = stringOr(rec.stage, "");
+  const gatewayEvidence = Boolean(rec.enqueued_at)
+    || ["queued", "deferred", "extracting", "transcribing", "first_vtt"].includes(persistedStage);
+  const status = persistedStatus === "processing" && !gatewayEvidence ? "starting" : persistedStatus;
+  const partialVtt = persistedStatus === "processing" ? stringOr(rec.vtt, "") : "";
   return {
-    status, kind, lang, providerKey: pkey, jobId: rec.job_id ?? null,
+    status, kind, lang, providerKey: pkey, jobId: jobId || null,
     sourceLang: rec.source_lang ?? null, segments: rec.segments ?? null, audioSec: rec.audio_sec ?? null,
     updatedAt: rec.updated_at ?? null,
     // The real failure cause (creds-redacted at the source) — the player shows a short human
@@ -8905,11 +8995,20 @@ async function getGeneratedSubtitle(req: Request, userId: string, db: SupabaseCl
     error: status === "failed" ? stringOrNull(rec.error) : null,
     // Honest progress: gateway heartbeats stamp the stage (queued/deferred/extracting/
     // transcribing); "deferred because of YOUR playback" only when the requester is the claimer.
-    stage: status === "processing" ? stringOrNull(rec.stage) : null,
-    deferredByYou: status === "processing" && stringOr(rec.stage, "") === "deferred" && stringOr(rec.claimed_by, "") === userId,
+    stage: status === "starting" ? "enqueueing" : (status === "processing" ? stringOrNull(rec.stage) : null),
+    deferredByYou: status === "processing" && persistedStage === "deferred" && stringOr(rec.claimed_by, "") === userId,
     // Progressive delivery: a partial VTT streams in while transcription continues.
     partial: Boolean(partialVtt),
     vtt: status === "ready" ? stringOr(rec.vtt, "") : (partialVtt || null),
+    timings: {
+      requestedAt: rec.requested_at ?? null,
+      resolvedAt: rec.resolved_at ?? null,
+      enqueuedAt: rec.enqueued_at ?? null,
+      extractionStartedAt: rec.extraction_started_at ?? null,
+      whisperStartedAt: rec.whisper_started_at ?? null,
+      firstVttAt: rec.first_vtt_at ?? null,
+      readyAt: rec.ready_at ?? null,
+    },
   };
 }
 
@@ -9635,9 +9734,14 @@ async function runTranscribeCallback(req: Request, db: SupabaseClient) {
   if (body.heartbeat === true) {
     const stage = ["queued", "deferred", "extracting", "transcribing"].includes(stringOr(body.stage, ""))
       ? stringOr(body.stage, "") : null;
-    await db.from("catalog_generated_subtitles")
-      .update({ stage, updated_at: nowIso })
-      .eq("job_id", jobId).eq("status", "processing"); // never resurrect a terminal row
+    if (stage) {
+      const { error } = await db.rpc("mark_generated_subtitle_stage", {
+        p_job_id: jobId,
+        p_stage: stage,
+        p_at: nowIso,
+      });
+      if (error) throwDb(error, "transcribe heartbeat stage failed");
+    }
     return { ok: true, heartbeat: true, jobId, stage };
   }
 
@@ -9651,13 +9755,29 @@ async function runTranscribeCallback(req: Request, db: SupabaseClient) {
         stage: "transcribing", updated_at: nowIso,
       })
       .eq("job_id", jobId).eq("status", "processing");
+    if (stringOr(body.vtt, "").trim()) {
+      const { error } = await db.rpc("mark_generated_subtitle_stage", {
+        p_job_id: jobId,
+        p_stage: "first_vtt",
+        p_at: nowIso,
+      });
+      if (error) throwDb(error, "transcribe first-vtt stage failed");
+    }
     return { ok: true, partial: true, jobId };
   }
 
+  if (body.ok === true && stringOr(body.vtt, "").trim()) {
+    const { error } = await db.rpc("mark_generated_subtitle_stage", {
+      p_job_id: jobId,
+      p_stage: "first_vtt",
+      p_at: nowIso,
+    });
+    if (error) throwDb(error, "transcribe final-vtt stage failed");
+  }
   const patch: JsonRecord = body.ok === true
     ? { status: "ready", vtt: stringOr(body.vtt, ""), source_lang: stringOrNull(body.sourceLang),
         audio_sec: Number.isFinite(Number(body.audioSec)) ? Number(body.audioSec) : null,
-        segments: Number.isFinite(Number(body.segments)) ? Number(body.segments) : null, error: null, stage: null, updated_at: nowIso }
+        segments: Number.isFinite(Number(body.segments)) ? Number(body.segments) : null, error: null, stage: null, ready_at: nowIso, updated_at: nowIso }
     : { status: "failed", error: stringOr(body.error, "unknown").slice(0, 300), stage: null, updated_at: nowIso };
   const { data: updated, error } = await db.from("catalog_generated_subtitles").update(patch).eq("job_id", jobId)
     .select("provider_key, item_type, external_id, kind, lang, status, segments, source_lang, vtt, claimed_by").maybeSingle();

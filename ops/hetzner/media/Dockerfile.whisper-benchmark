@@ -1,0 +1,60 @@
+ARG WHISPER_CPP_COMMIT=080bbbe85230f624f0b52127f1ae1218247989f9
+ARG WHISPER_BACKEND=cpu
+ARG BASE_IMAGE=debian:trixie-slim
+ARG VULKAN_HEADERS_COMMIT=b955ae0edb4f02074bfbf134ccc1980e83122d30
+ARG VULKAN_APT_SUITE=
+
+FROM ${BASE_IMAGE} AS build
+ARG WHISPER_CPP_COMMIT
+ARG WHISPER_BACKEND
+ARG VULKAN_HEADERS_COMMIT
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        build-essential ca-certificates cmake git glslc libopenblas-dev libvulkan-dev pkg-config spirv-headers \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /opt
+RUN if [ "${WHISPER_BACKEND}" = "vulkan" ]; then \
+        git init Vulkan-Headers \
+        && cd Vulkan-Headers \
+        && git remote add origin https://github.com/KhronosGroup/Vulkan-Headers.git \
+        && git fetch --depth 1 origin "${VULKAN_HEADERS_COMMIT}" \
+        && git checkout --detach FETCH_HEAD \
+        && cmake -S . -B build -DCMAKE_INSTALL_PREFIX=/usr/local \
+        && cmake --install build; \
+    fi \
+    && cd /opt \
+    && git init whisper.cpp \
+    && cd whisper.cpp \
+    && git remote add origin https://github.com/ggml-org/whisper.cpp.git \
+    && git fetch --depth 1 origin "${WHISPER_CPP_COMMIT}" \
+    && git checkout --detach FETCH_HEAD \
+    && case "${WHISPER_BACKEND}" in \
+        cpu) backend_args="" ;; \
+        openblas) backend_args="-DGGML_BLAS=ON -DGGML_BLAS_VENDOR=OpenBLAS" ;; \
+        vulkan) backend_args="-DGGML_VULKAN=ON -DVulkan_INCLUDE_DIR=/usr/local/include" ;; \
+        *) echo "Unsupported WHISPER_BACKEND=${WHISPER_BACKEND}" >&2; exit 64 ;; \
+       esac \
+    && cmake -B build \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DBUILD_SHARED_LIBS=OFF \
+        -DWHISPER_BUILD_TESTS=OFF \
+        -DWHISPER_BUILD_EXAMPLES=ON \
+        ${backend_args} \
+    && cmake --build build --parallel 6 --config Release --target whisper-cli
+
+FROM ${BASE_IMAGE}
+ARG WHISPER_BACKEND
+ARG VULKAN_APT_SUITE
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && if [ -n "${VULKAN_APT_SUITE}" ]; then \
+        echo "deb http://deb.debian.org/debian ${VULKAN_APT_SUITE} main" > /etc/apt/sources.list.d/norva-vulkan.list \
+        && apt-get update \
+        && apt-get install -y --no-install-recommends -t "${VULKAN_APT_SUITE}" mesa-vulkan-drivers; \
+       else apt-get install -y --no-install-recommends mesa-vulkan-drivers; fi \
+    && apt-get install -y --no-install-recommends libgomp1 libopenblas0-pthread libvulkan1 time \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=build /opt/whisper.cpp/build/bin/whisper-cli /usr/local/bin/whisper-cli
+LABEL tv.norva.benchmark-only="true" \
+      tv.norva.whisper-backend="${WHISPER_BACKEND}"
+ENTRYPOINT ["/usr/local/bin/whisper-cli"]

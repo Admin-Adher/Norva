@@ -884,9 +884,14 @@ const WHISPER_MODEL_NAME = process.env.WHISPER_MODEL_NAME || (() => {
 const WHISPER_CPP_COMMIT = process.env.WHISPER_CPP_COMMIT || null;
 const WHISPER_BIN_BUILD_SHA256 = readBuildDigest('/opt/whisper/bin.sha256');
 const WHISPER_MODEL_BUILD_SHA256 = readBuildDigest('/opt/whisper/model.sha256');
+const WHISPER_VAD_MODEL = process.env.WHISPER_VAD_MODEL || '';
+const WHISPER_VAD_MODEL_BUILD_SHA256 = readBuildDigest('/opt/whisper/vad-model.sha256');
+const WHISPER_ACCELERATOR = process.env.WHISPER_ACCELERATOR || 'cpu';
 let WHISPER_BIN_SHA256 = null;
 let WHISPER_MODEL_SHA256 = null;
+let WHISPER_VAD_MODEL_SHA256 = null;
 let WHISPER_RUNTIME_VERIFIED = false;
+let WHISPER_VAD_RUNTIME_VERIFIED = false;
 const WHISPER_THREADS = clampInt(process.env.WHISPER_THREADS, 4, 1, 16);
 const WHISPER_TIMEOUT_MS = clampInt(process.env.WHISPER_TIMEOUT_MS, 60_000, 5_000, 300_000);
 // Production detect-only is capability-gated twice: a signed Edge scope selects the mode
@@ -1803,8 +1808,11 @@ if (
         : (MKV_COMPLETE_HLS_CACHE_SINGLE_INSTANCE_ATTESTED ? 'activation-unavailable' : 'single-instance-not-attested');
 }
 const MULTI_AUDIO_HLS_PROTOCOL = 1;
-const MAX_MULTI_AUDIO_RENDITIONS = 8;
-const GATEWAY_VERSION = 127;
+// Twelve exact-file renditions add roughly 0.2 s to first-HLS readiness versus eight on the
+// production Ryzen/Radeon host. Keep the operational default evidence-based and configurable,
+// while bounding accidental fan-out. Every exact source track stays visible to the user.
+const MAX_MULTI_AUDIO_RENDITIONS = clampInt(process.env.MAX_MULTI_AUDIO_RENDITIONS, 12, 2, 32);
+const GATEWAY_VERSION = 128;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -2118,6 +2126,10 @@ app.get('/health', (req, res) => {
             binarySha256: WHISPER_BIN_SHA256,
             modelSha256: WHISPER_MODEL_SHA256,
             runtimeVerified: WHISPER_RUNTIME_VERIFIED,
+            accelerator: WHISPER_ACCELERATOR,
+            vadEnabled: WHISPER_VAD_RUNTIME_VERIFIED,
+            vadModelSha256: WHISPER_VAD_MODEL_SHA256,
+            vadRuntimeVerified: WHISPER_VAD_RUNTIME_VERIFIED,
             detectOnlyBenchmark: true,
             detectOnlyProductionAvailable: WHISPER_DETECT_ONLY_PRODUCTION_AVAILABLE,
             detectOnlyMinProbability: WHISPER_DETECT_ONLY_MIN_PROBABILITY,
@@ -6655,16 +6667,34 @@ function extractAudioWav(
 // the player minutes after the real start, and a whisper hang/kill costs ONE chunk instead of
 // the whole film (the two 43-min SIGKILL burns of 2026-07-02 were exactly that).
 const TRANSCRIBE_CHUNK_SEC = clampInt(process.env.TRANSCRIBE_CHUNK_SEC, 300, 60, 1800);
+// Deliver the first visible subtitle quickly without multiplying the number of
+// Whisper invocations for the rest of a long film.  Only chunk zero is short;
+// every following chunk keeps the established 300-second production cadence.
+const TRANSCRIBE_FIRST_CHUNK_SEC = clampInt(process.env.TRANSCRIBE_FIRST_CHUNK_SEC, 90, 60, 90);
+const TRANSCRIBE_SEGMENT_HORIZON_SEC = clampInt(process.env.TRANSCRIBE_SEGMENT_HORIZON_SEC, 24 * 3600, 3600, 48 * 3600);
 // Per-chunk whisper budget: a 300s chunk transcribes in ~30-60s (RTF 0.1-0.2); 5 min is a hang,
 // not a slow run. Deliberately NOT whisperBudgetMs (its 20-min floor would defeat the bounding).
 const CHUNK_WHISPER_TIMEOUT_MS = clampInt(process.env.CHUNK_WHISPER_TIMEOUT_MS, 300_000, 60_000, 1_800_000);
 
 // Segmenting variant of extractAudioWav: same input/resilience flags, but writes
-// dir/chunk-%04d.wav pieces of chunkSec each (-reset_timestamps 1 → every chunk starts at 0;
-// audio-only segmentation is sample-accurate, so chunk N covers exactly [N*chunkSec, …)).
+// dir/chunk-%04d.wav pieces. Chunk zero is intentionally shorter, then every
+// following chunk uses the normal production duration (-reset_timestamps 1 →
+// every chunk starts at 0; audio-only segmentation is sample-accurate).
 // Resolves { ok, error } when ffmpeg exits; chunk files appear in `dir` as they complete.
-function extractAudioWavChunks(url, ua, trackIndex, timeoutMs, proxyKey, chunkSec, dir, globalPreemptible = true) {
+function transcriptionSegmentTimes(firstChunkSec = TRANSCRIBE_FIRST_CHUNK_SEC, chunkSec = TRANSCRIBE_CHUNK_SEC, horizonSec = TRANSCRIBE_SEGMENT_HORIZON_SEC) {
+    const boundaries = [];
+    for (let at = firstChunkSec; at < horizonSec; at += chunkSec) boundaries.push(at);
+    return boundaries;
+}
+
+function transcriptionChunkOffsetSec(index, firstChunkSec = TRANSCRIBE_FIRST_CHUNK_SEC, chunkSec = TRANSCRIBE_CHUNK_SEC) {
+    if (!Number.isInteger(index) || index <= 0) return 0;
+    return firstChunkSec + ((index - 1) * chunkSec);
+}
+
+function extractAudioWavChunks(url, ua, trackIndex, timeoutMs, proxyKey, firstChunkSec, chunkSec, dir, globalPreemptible = true) {
     return new Promise((resolve) => {
+        const segmentTimes = transcriptionSegmentTimes(firstChunkSec, chunkSec).join(',');
         const args = [
             '-y', '-hide_banner', '-loglevel', 'error', '-nostdin',
             '-reconnect', '1', '-reconnect_streamed', '1',
@@ -6676,7 +6706,7 @@ function extractAudioWavChunks(url, ua, trackIndex, timeoutMs, proxyKey, chunkSe
             '-i', url,
             '-map', `0:${trackIndex}`,
             '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le',
-            '-f', 'segment', '-segment_time', String(chunkSec), '-reset_timestamps', '1',
+            '-f', 'segment', '-segment_times', segmentTimes, '-reset_timestamps', '1',
             path.join(dir, 'chunk-%04d.wav'),
         ];
         let child;
@@ -7016,6 +7046,7 @@ function runWhisperVtt(wavPath, forceLang, timeoutMs = WHISPER_TRANSCRIBE_TIMEOU
             '-ovtt', '-of', outPrefix,
             '-t', String(WHISPER_THREADS),
             '-mc', '0',  // no cross-window text context → breaks whisper's repetition loops on music/silence
+            ...(WHISPER_VAD_RUNTIME_VERIFIED ? ['--vad', '-vm', WHISPER_VAD_MODEL] : []),
         ];
         let child;
         try { child = spawn(WHISPER_BIN, args, { stdio: ['ignore', 'ignore', 'pipe'] }); }
@@ -7590,6 +7621,7 @@ async function runChunkedTranscription(job) {
                     index,
                     AUDIO_EXTRACT_TIMEOUT_MS,
                     uid,
+                    TRANSCRIBE_FIRST_CHUNK_SEC,
                     TRANSCRIBE_CHUNK_SEC,
                     dir,
                     jobPrio(job) !== JOB_PRIORITY.viewer,
@@ -7651,7 +7683,7 @@ async function runChunkedTranscription(job) {
             }
             if (w.vtt) {
                 if (!lang && w.lang) lang = w.lang; // chunk 0 detects, the rest are forced
-                blocks.push(...shiftVttBlocks(w.vtt, idx * TRANSCRIBE_CHUNK_SEC));
+                blocks.push(...shiftVttBlocks(w.vtt, transcriptionChunkOffsetSec(idx)));
                 chunksDone++;
                 // Partial delivery: re-stitch + dedup, stream to the edge (player picks it up on
                 // its next poll). Chunks land ~45s+ apart — no extra throttling needed.
@@ -9040,9 +9072,10 @@ app.use((err, req, res, next) => {
 async function bootstrap() {
     await fsp.mkdir(OUTPUT_DIR, { recursive: true });
     if (WHISPER_BIN && WHISPER_MODEL) {
-        [WHISPER_BIN_SHA256, WHISPER_MODEL_SHA256] = await Promise.all([
+        [WHISPER_BIN_SHA256, WHISPER_MODEL_SHA256, WHISPER_VAD_MODEL_SHA256] = await Promise.all([
             hashFileSha256(WHISPER_BIN),
             hashFileSha256(WHISPER_MODEL),
+            WHISPER_VAD_MODEL ? hashFileSha256(WHISPER_VAD_MODEL) : Promise.resolve(null),
         ]);
         WHISPER_RUNTIME_VERIFIED = Boolean(
             WHISPER_BIN_BUILD_SHA256 &&
@@ -9052,6 +9085,15 @@ async function bootstrap() {
         );
         if (!WHISPER_RUNTIME_VERIFIED) {
             console.warn('[media-gateway] Whisper runtime hashes do not match the pinned build');
+        }
+        WHISPER_VAD_RUNTIME_VERIFIED = Boolean(
+            WHISPER_RUNTIME_VERIFIED &&
+            WHISPER_VAD_MODEL &&
+            WHISPER_VAD_MODEL_BUILD_SHA256 &&
+            WHISPER_VAD_MODEL_SHA256 === WHISPER_VAD_MODEL_BUILD_SHA256
+        );
+        if (WHISPER_VAD_MODEL && !WHISPER_VAD_RUNTIME_VERIFIED) {
+            console.warn('[media-gateway] Whisper VAD runtime hash does not match the pinned build; VAD disabled');
         }
     }
     app.listen(PORT, () => {
@@ -11813,8 +11855,6 @@ function openMkvCompleteHlsCacheProof(envelope) {
 function mkvCompleteHlsCacheAudioTopology(session, audioTracks) {
     const reject = (reason) => ({ eligible: false, reason });
     if (!Array.isArray(audioTracks) || audioTracks.length < 1) return reject('missing-audio');
-    if (audioTracks.length > MAX_MULTI_AUDIO_RENDITIONS) return reject('audio-track-cap-exceeded');
-
     if (audioTracks.length === 1) {
         const onlyTrack = asRecord(audioTracks[0]);
         const requestedStreamIndex = normalizeAudioStreamIndex(session?.audioStreamIndex);
@@ -11838,7 +11878,12 @@ function mkvCompleteHlsCacheAudioTopology(session, audioTracks) {
 
     const plan = buildMultiAudioHlsPlan(session);
     if (plan.enabled !== true) return reject(`multi-audio-${String(plan.reason || 'ineligible')}`);
-    if (!Array.isArray(plan.audioRenditions) || plan.audioRenditions.length !== audioTracks.length) {
+    if (
+        plan.sourceTrackCount !== audioTracks.length ||
+        !Array.isArray(plan.audioRenditions) ||
+        plan.audioRenditions.length < 2 ||
+        plan.audioRenditions.length > Math.min(MAX_MULTI_AUDIO_RENDITIONS, audioTracks.length)
+    ) {
         return reject('multi-audio-topology-drift');
     }
     return {
@@ -13719,32 +13764,23 @@ function multiAudioProfileAssessment(session) {
             tracks: [],
         };
     }
-    if (sourceTracks.length > MAX_MULTI_AUDIO_RENDITIONS) {
-        return {
-            eligible: false,
-            reason: 'audio_track_cap_exceeded',
-            sourceTrackCount: sourceTracks.length,
-            tracks: [],
-        };
-    }
-
-    const tracks = sourceTracks.map((track, hlsIndex) => {
+    const allTracks = sourceTracks.map((track, sourceOrder) => {
         const streamIndex = Number(track?.index);
         const sourceChannels = Number(track?.channels);
         const sourceCodec = stringOrNull(track?.codec);
         return {
-            hlsIndex,
+            sourceOrder,
             streamIndex,
             language: normalizeHlsAudioLanguage(track?.language),
-            title: sanitizeAudioRenditionTitle(track?.title, hlsIndex),
+            title: sanitizeAudioRenditionTitle(track?.title, sourceOrder),
             sourceChannels,
             sourceCodec,
             sourceDefault: track?.default === true,
         };
     });
-    const streamIndexes = tracks.map((track) => track.streamIndex);
+    const streamIndexes = allTracks.map((track) => track.streamIndex);
     if (
-        tracks.some((track) => (
+        allTracks.some((track) => (
             !Number.isInteger(track.streamIndex) || track.streamIndex < 0 || track.streamIndex > 1024 ||
             !Number.isInteger(track.sourceChannels) || track.sourceChannels <= 0 || track.sourceChannels > 64 ||
             !track.sourceCodec
@@ -13759,11 +13795,38 @@ function multiAudioProfileAssessment(session) {
         };
     }
 
+    // The source list is never truncated for product/UI purposes.  Only the
+    // simultaneously transcoded HLS cohort is bounded.  Put the requested
+    // stream first, then the source default, then distinct languages and the
+    // remaining source order. Selecting a track outside a previous cohort
+    // rebuilds a new provider-safe session with that track included.
+    const requestedStreamIndex = normalizeAudioStreamIndex(session?.audioStreamIndex);
+    const selected = [];
+    const selectedIndexes = new Set();
+    const pushTrack = (track) => {
+        if (!track || selectedIndexes.has(track.streamIndex) || selected.length >= MAX_MULTI_AUDIO_RENDITIONS) return;
+        selected.push(track);
+        selectedIndexes.add(track.streamIndex);
+    };
+    if (Number.isInteger(requestedStreamIndex)) {
+        pushTrack(allTracks.find((track) => track.streamIndex === requestedStreamIndex));
+    }
+    pushTrack(allTracks.find((track) => track.sourceDefault === true));
+    const languages = new Set(selected.map((track) => track.language));
+    for (const track of allTracks) {
+        if (languages.has(track.language)) continue;
+        languages.add(track.language);
+        pushTrack(track);
+    }
+    for (const track of allTracks) pushTrack(track);
+    const tracks = selected.map((track, hlsIndex) => ({ ...track, hlsIndex }));
+
     return {
         eligible: true,
         reason: 'eligible',
-        sourceTrackCount: tracks.length,
+        sourceTrackCount: allTracks.length,
         tracks,
+        allTracks,
     };
 }
 
@@ -13851,6 +13914,7 @@ function multiAudioHlsDiagnosticsForSession(session) {
         reason: stringOrNull(plan.reason) || 'not_evaluated',
         maxAudioRenditions: MAX_MULTI_AUDIO_RENDITIONS,
         sourceTrackCount: Number.isInteger(plan.sourceTrackCount) ? plan.sourceTrackCount : 0,
+        preparedTrackCount: Array.isArray(plan.audioRenditions) ? plan.audioRenditions.length : 0,
         masterPlaylist: 'playlist.m3u8',
         videoPlaylist: plan.enabled === true ? plan.videoPlaylistName : 'playlist.m3u8',
         defaultHlsIndex: Number.isInteger(plan.defaultHlsIndex) ? plan.defaultHlsIndex : null,

@@ -61,7 +61,7 @@ function loadPlanHarness() {
             freezeMultiAudioHlsTopology,
         }; })()`,
         {
-            MAX_MULTI_AUDIO_RENDITIONS: 8,
+            MAX_MULTI_AUDIO_RENDITIONS: 12,
             MULTI_AUDIO_HLS_PROTOCOL: 1,
             EXACT_MATROSKA_H264_MAX_WIDTH: 1_920,
             EXACT_MATROSKA_H264_MAX_HEIGHT: 1_080,
@@ -94,31 +94,32 @@ test('multi-audio plan is frozen from a complete exact profile with stable hls.j
     session.multiAudioHls = plan;
 
     assert.equal(plan.enabled, true);
-    assert.equal(plan.defaultHlsIndex, 2, 'the requested absolute stream index wins');
+    assert.equal(plan.defaultHlsIndex, 0, 'the requested absolute stream index wins and leads the bounded cohort');
     assert.equal(plan.defaultStreamIndex, 9);
     assert.deepStrictEqual(plain(h.audioRenditionsForSession(session)), [
-        { hlsIndex: 0, streamIndex: 2, language: 'eng', title: 'English', sourceChannels: 6, outputChannels: 2, codec: 'aac' },
+        { hlsIndex: 0, streamIndex: 9, language: 'spa', title: 'Español', sourceChannels: 2, outputChannels: 2, codec: 'aac' },
         { hlsIndex: 1, streamIndex: 5, language: 'fra', title: 'Français', sourceChannels: 6, outputChannels: 2, codec: 'aac' },
-        { hlsIndex: 2, streamIndex: 9, language: 'spa', title: 'Español', sourceChannels: 2, outputChannels: 2, codec: 'aac' },
+        { hlsIndex: 2, streamIndex: 2, language: 'eng', title: 'English', sourceChannels: 6, outputChannels: 2, codec: 'aac' },
     ]);
     assert.match(plan.varStreamMap, /^a:0,/);
-    assert.match(plan.varStreamMap, /a:2,agroup:audio,language:spa,default:yes,name:audio_2/);
+    assert.match(plan.varStreamMap, /a:0,agroup:audio,language:spa,default:yes,name:audio_0/);
     assert.match(plan.varStreamMap, /v:0,agroup:audio,name:video$/);
     assert.equal((plan.varStreamMap.match(/default:yes/g) || []).length, 1);
     assert.deepStrictEqual(plain(h.multiAudioHlsDiagnosticsForSession(session)), {
         protocol: 1,
         enabled: true,
         reason: 'enabled',
-        maxAudioRenditions: 8,
+        maxAudioRenditions: 12,
         sourceTrackCount: 3,
+        preparedTrackCount: 3,
         masterPlaylist: 'playlist.m3u8',
         videoPlaylist: 'video.m3u8',
-        defaultHlsIndex: 2,
+        defaultHlsIndex: 0,
         defaultStreamIndex: 9,
     });
 });
 
-test('multi-audio eligibility is fail-safe for incomplete, invalid, one-track and over-cap profiles', () => {
+test('multi-audio eligibility keeps every source track visible while bounding only the prepared HLS cohort', () => {
     const h = loadPlanHarness();
     const tracks = (count) => Array.from({ length: count }, (_, index) => ({
         index: index + 1,
@@ -129,9 +130,14 @@ test('multi-audio eligibility is fail-safe for incomplete, invalid, one-track an
         default: index === 0,
     }));
 
-    assert.equal(h.buildMultiAudioHlsPlan(exactMkvSession(tracks(8))).enabled, true, 'cap is inclusive');
+    assert.equal(h.buildMultiAudioHlsPlan(exactMkvSession(tracks(12))).enabled, true, 'cap is inclusive');
     assert.equal(h.buildMultiAudioHlsPlan(exactMkvSession(tracks(1))).reason, 'audio_track_count_below_minimum');
-    assert.equal(h.buildMultiAudioHlsPlan(exactMkvSession(tracks(9))).reason, 'audio_track_cap_exceeded');
+    const overCap = h.buildMultiAudioHlsPlan(exactMkvSession(tracks(13), { audioStreamIndex: 13 }));
+    assert.equal(overCap.enabled, true);
+    assert.equal(overCap.sourceTrackCount, 13);
+    assert.equal(overCap.audioRenditions.length, 12);
+    assert.equal(overCap.audioRenditions[0].streamIndex, 13, 'the requested track is always prepared');
+    assert.equal(overCap.audioRenditions.some((track) => track.streamIndex === 1), true, 'the source default is retained');
     assert.equal(h.buildMultiAudioHlsPlan(exactMkvSession([
         ...tracks(1),
         { ...tracks(1)[0], title: 'Duplicate' },
@@ -278,7 +284,7 @@ test('one FFmpeg maps absolute input indexes to audio-only ordinals and keeps th
     assert.equal(capturedArgs.includes('-reconnect'), false, 'the bounded MKV pipe never reconnects inside FFmpeg');
 
     const maps = capturedArgs.flatMap((value, index) => value === '-map' ? [capturedArgs[index + 1]] : []);
-    assert.deepStrictEqual(plain(maps), ['0:V:0', '0:2', '0:5', '0:9']);
+    assert.deepStrictEqual(plain(maps), ['0:V:0', '0:5', '0:2', '0:9']);
     assert.equal(maps.some((value) => /^0:a:/i.test(value)), false);
     assert.equal(session.actualMappedAudioStreamIndex, 5);
     assert.equal(capturedArgs[capturedArgs.indexOf('-ac') + 1], '2');
@@ -379,8 +385,9 @@ test('readiness waits for the video and every non-empty audio playlist and segme
                 protocol: 1,
                 enabled: true,
                 reason: 'enabled',
-                maxAudioRenditions: 8,
+                maxAudioRenditions: 12,
                 sourceTrackCount: session.multiAudioHls.audioRenditions.length,
+                preparedTrackCount: session.multiAudioHls.audioRenditions.length,
                 masterPlaylist: 'playlist.m3u8',
                 videoPlaylist: 'video.m3u8',
                 defaultHlsIndex: session.multiAudioHls.defaultHlsIndex,

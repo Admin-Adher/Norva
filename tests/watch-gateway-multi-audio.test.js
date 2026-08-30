@@ -285,6 +285,81 @@ test('Gateway menu maps exact HLS indexes to absolute streams and names only ver
     assert.equal(hls.loadSourceCalls.length, 1);
 });
 
+test('Gateway exposes every exact-file audio track while an out-of-cohort choice restarts safely', async () => {
+    FakeHls.instances.length = 0;
+    const WatchPage = loadWatchPage();
+    const harness = makePage(WatchPage);
+    const { page } = harness;
+    const exactTracks = Array.from({ length: 10 }, (_, position) => ({
+        index: position + 2,
+        codec: position % 2 === 0 ? 'ac3' : 'eac3',
+        channels: 6,
+    }));
+    const verifiedTracks = exactTracks.map((track, position) => ({
+        index: track.index,
+        lang: ['fra', 'eng', 'spa', 'deu', 'ita', 'por', 'nld', 'jpn', 'kor', 'ara'][position],
+    }));
+    const preparedRenditions = exactTracks.slice(0, 8).map((track, hlsIndex) => ({
+        hlsIndex,
+        streamIndex: track.index,
+        language: verifiedTracks[hlsIndex].lang,
+        sourceChannels: 6,
+        outputChannels: 2,
+        codec: 'aac',
+    }));
+
+    page.content.audioTracks = verifiedTracks;
+    page.audioLanguageValidationStatus = 'verified';
+    page.content.audioLanguageValidationStatus = 'verified';
+    page.saveResumeSnapshotThrottled = () => {};
+    page.saveProgress = () => {};
+    let restartCalls = 0;
+    page.queueSelectedAudioTrackRestart = async () => {
+        restartCalls += 1;
+        return true;
+    };
+
+    assert.equal(page.configureGatewayAudioRenditions(
+        preparedRenditions,
+        { defaultHlsIndex: 0, defaultStreamIndex: exactTracks[0].index },
+        exactTracks,
+        {
+            required: true,
+            playbackAttemptId: 17,
+            audioStreamIndex: exactTracks[0].index,
+            verifiedTracks,
+            audioLanguageValidationStatus: 'verified',
+        },
+    ), true);
+    page.playHls('https://gateway.example/sessions/session-all-audio/playlist.m3u8', {
+        playbackAttemptId: 17,
+        autoplay: false,
+    });
+    page.hls.audioTracks = preparedRenditions.map((entry) => ({
+        id: entry.hlsIndex,
+        lang: entry.language,
+    }));
+    page.hls._audioTrack = 0;
+    page.hls.emit(FakeHls.Events.AUDIO_TRACKS_UPDATED, { audioTracks: page.hls.audioTracks });
+    page.hls.emit(FakeHls.Events.AUDIO_TRACK_SWITCHED, { id: 0 });
+
+    const visible = page.getVisibleAudioTracks();
+    assert.equal(visible.length, 10, 'no exact-file audio track is hidden from the user');
+    assert.equal(visible.filter((track) => track.source === 'hls').length, 8);
+    assert.equal(visible.filter((track) => track.source === 'probe').length, 2);
+    assert.deepEqual(Array.from(visible, (track) => track.streamIndex), exactTracks.map((track) => track.index));
+
+    const outsideCohort = visible[9];
+    assert.equal(outsideCohort.source, 'probe');
+    assert.equal(await page.selectAudioTrack(
+        outsideCohort.source,
+        outsideCohort.index,
+        outsideCohort.streamIndex,
+    ), undefined);
+    assert.equal(restartCalls, 1, 'an out-of-cohort choice uses the serialized provider-safe restart');
+    assert.equal(page.selectedAudioStreamIndex, exactTracks[9].index);
+});
+
 test('uncertified rendition language and title stay explicitly unknown', () => {
     const WatchPage = loadWatchPage();
     const harness = makePage(WatchPage, { validationStatus: 'pending' });
