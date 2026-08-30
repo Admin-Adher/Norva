@@ -115,6 +115,7 @@ public class PlayerActivity extends Activity {
     public static final String EXTRA_RECOVERY_PAYLOAD = "recoveryPayload";
     public static final String EXTRA_PLAYBACK_AUTH_TOKEN = "playbackAuthToken";
     public static final String EXTRA_PLAYBACK_SESSION_ID = "playbackSessionId";
+    public static final String EXTRA_PLAYBACK_CLOSE_REASON = "playbackCloseReason";
     public static final String ACTION_REQUEST_PLAYBACK_AUTH =
             "tv.norva.tv.action.REQUEST_PLAYBACK_AUTH";
     public static final String ACTION_APPLY_PLAYBACK_AUTH =
@@ -3898,6 +3899,7 @@ public class PlayerActivity extends Activity {
      */
     @Override
     public void finish() {
+        final String closeReason = playbackCloseReason();
         try {
             clearFreshStreamRequest(true);
             android.content.Intent data = null;
@@ -3943,9 +3945,30 @@ public class PlayerActivity extends Activity {
                 if (data == null) data = new android.content.Intent();
                 data.putExtra(EXTRA_PLAYBACK_AUTH_CHANNEL_ID, playbackAuthChannelId);
             }
+            // Return the exact server-owned session even when playback never
+            // reached a first frame. MainActivity durably delivers it to the
+            // trusted WebView and gates any replacement resolver until expiry
+            // is acknowledged, preventing a stranded provider lane after Back.
+            if (playbackSessionId != null) {
+                if (data == null) data = new android.content.Intent();
+                data.putExtra(EXTRA_PLAYBACK_SESSION_ID, playbackSessionId);
+                data.putExtra(EXTRA_PLAYBACK_CLOSE_REASON, closeReason);
+            }
             if (data != null) setResult(RESULT_OK, data);
         } catch (Exception ignored) { /* result is best-effort */ }
         super.finish();
+    }
+
+    private String playbackCloseReason() {
+        if (endedNaturally) return "ended";
+        if (pendingVariantStreamId != null && !pendingVariantStreamId.isEmpty()) {
+            return "variant_change";
+        }
+        if (freshStreamRequested) return "recovery_abandoned";
+        if (errorPanel != null && errorPanel.getVisibility() == View.VISIBLE) {
+            return "terminal";
+        }
+        return "closed";
     }
 
     @Override
