@@ -54,6 +54,7 @@ EXPECTED_CATALOG_VERSION=6
 EXPECTED_FLAT_CODEC_PROFILE_PROTOCOL=1
 EXPECTED_SOURCE_SYNC_VERSION=14
 EXPECTED_CLOUD_AUTO_REFRESH_CLAIM_PROTOCOL=1
+EXPECTED_AUTH_EMAIL_CHALLENGE_PROTOCOL=1
 
 [[ -d "$FUNCS_DIR" ]] || { echo "ERROR: $FUNCS_DIR not found" >&2; exit 1; }
 
@@ -150,6 +151,7 @@ if command -v docker >/dev/null 2>&1 && [[ -f "$COMPOSE" ]]; then
     local provider_access_path="/home/deno/functions/norva-provider-access/index.ts"
     local account_delete_path="/home/deno/functions/norva-account-delete/index.ts"
     local source_sync_path="/home/deno/functions/norva-source-sync/index.ts"
+    local auth_challenge_path="/home/deno/functions/norva-auth-challenge/index.ts"
     local database_conflict_path="/home/deno/functions/_shared/database-conflict.ts"
     local live_materialization_path="/home/deno/functions/_shared/live-materialization.ts"
     local expected_playback_digest
@@ -159,6 +161,7 @@ if command -v docker >/dev/null 2>&1 && [[ -f "$COMPOSE" ]]; then
     local expected_provider_access_digest
     local expected_account_delete_digest
     local expected_source_sync_digest
+    local expected_auth_challenge_digest
     local expected_database_conflict_digest
     local expected_live_materialization_digest
     local observed_playback_digest
@@ -168,12 +171,14 @@ if command -v docker >/dev/null 2>&1 && [[ -f "$COMPOSE" ]]; then
     local observed_provider_access_digest
     local observed_account_delete_digest
     local observed_source_sync_digest
+    local observed_auth_challenge_digest
     local observed_database_conflict_digest
     local observed_live_materialization_digest
     local playback_health
     local cloud_health
     local catalog_health
     local source_sync_health
+    local auth_challenge_health
 
     expected_playback_digest="$(sha256sum "$FUNCS_DIR/norva-playback/index.ts" | awk '{print $1}')"
     expected_main_digest="$(sha256sum "$FUNCS_DIR/main/index.ts" | awk '{print $1}')"
@@ -182,6 +187,7 @@ if command -v docker >/dev/null 2>&1 && [[ -f "$COMPOSE" ]]; then
     expected_provider_access_digest="$(sha256sum "$FUNCS_DIR/norva-provider-access/index.ts" | awk '{print $1}')"
     expected_account_delete_digest="$(sha256sum "$FUNCS_DIR/norva-account-delete/index.ts" | awk '{print $1}')"
     expected_source_sync_digest="$(sha256sum "$FUNCS_DIR/norva-source-sync/index.ts" | awk '{print $1}')"
+    expected_auth_challenge_digest="$(sha256sum "$FUNCS_DIR/norva-auth-challenge/index.ts" | awk '{print $1}')"
     expected_database_conflict_digest="$(sha256sum "$FUNCS_DIR/_shared/database-conflict.ts" | awk '{print $1}')"
     expected_live_materialization_digest="$(sha256sum "$FUNCS_DIR/_shared/live-materialization.ts" | awk '{print $1}')"
     observed_playback_digest="$(file_digest_in_service "$service" "$playback_path")"
@@ -191,6 +197,7 @@ if command -v docker >/dev/null 2>&1 && [[ -f "$COMPOSE" ]]; then
     observed_provider_access_digest="$(file_digest_in_service "$service" "$provider_access_path")"
     observed_account_delete_digest="$(file_digest_in_service "$service" "$account_delete_path")"
     observed_source_sync_digest="$(file_digest_in_service "$service" "$source_sync_path")"
+    observed_auth_challenge_digest="$(file_digest_in_service "$service" "$auth_challenge_path")"
     observed_database_conflict_digest="$(file_digest_in_service "$service" "$database_conflict_path")"
     observed_live_materialization_digest="$(file_digest_in_service "$service" "$live_materialization_path")"
     [[ "$observed_playback_digest" == "$expected_playback_digest" ]] || {
@@ -221,6 +228,10 @@ if command -v docker >/dev/null 2>&1 && [[ -f "$COMPOSE" ]]; then
       echo "ERROR: $service norva-source-sync source digest mismatch" >&2
       exit 1
     }
+    [[ "$observed_auth_challenge_digest" == "$expected_auth_challenge_digest" ]] || {
+      echo "ERROR: $service norva-auth-challenge source digest mismatch" >&2
+      exit 1
+    }
     [[ "$observed_database_conflict_digest" == "$expected_database_conflict_digest" ]] || {
       echo "ERROR: $service shared database-conflict source digest mismatch" >&2
       exit 1
@@ -234,6 +245,7 @@ if command -v docker >/dev/null 2>&1 && [[ -f "$COMPOSE" ]]; then
     cloud_health="$(function_health_in_service "$service" norva-cloud)"
     catalog_health="$(function_health_in_service "$service" norva-catalog)"
     source_sync_health="$(function_health_in_service "$service" norva-source-sync)"
+    auth_challenge_health="$(function_health_in_service "$service" norva-auth-challenge)"
     [[ "$playback_health" == *"\"version\":$EXPECTED_PLAYBACK_VERSION"* \
         && "$playback_health" == *"\"providerCircuitProtocol\":$EXPECTED_PLAYBACK_PROTOCOL"* \
         && "$playback_health" == *"\"vodContainerSelfHealProtocol\":$EXPECTED_VOD_CONTAINER_SELF_HEAL_PROTOCOL"* \
@@ -280,7 +292,11 @@ if command -v docker >/dev/null 2>&1 && [[ -f "$COMPOSE" ]]; then
       echo "ERROR: $service norva-source-sync protocol marker mismatch" >&2
       exit 1
     }
-    echo "   $service source digests and playback/catalog/source-sync protocols verified"
+    [[ "$auth_challenge_health" == *"\"protocol\":$EXPECTED_AUTH_EMAIL_CHALLENGE_PROTOCOL"* ]] || {
+      echo "ERROR: $service norva-auth-challenge protocol marker mismatch" >&2
+      exit 1
+    }
+    echo "   $service source digests and playback/catalog/source-sync/auth-challenge protocols verified"
   }
 
   for service in "${function_services[@]}"; do

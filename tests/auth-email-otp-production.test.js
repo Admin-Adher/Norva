@@ -19,8 +19,10 @@ test('web and Android Phone share one email-first funnel with a real six-digit O
   assert.match(account, /We’ll email a six-digit code/);
   assert.match(account, /getElementById\('use-password-toggle'\)\.textContent = 'Use a password instead'/);
   assert.match(account, /id="create-password-account"[^>]*hidden/);
-  assert.match(account, /NorvaAuth\.verifyEmailOtp\(pendingOtpEmail, code\)/);
-  assert.match(account, /authEmailRedirectUrl\('otp'\)[\s\S]*createUser:\s*true/);
+  assert.match(account, /NorvaAuth\.verifyEmailChallenge\([\s\S]*NorvaAuth\.verifyOtp\(proof\.tokenHash, proof\.verificationType\)/);
+  assert.match(account, /id="email-review-form"[\s\S]*No account is created until you enter the code/);
+  assert.match(account, /COMMON_EMAIL_DOMAIN_FIXES[\s\S]*'outlook\.cop': 'outlook\.com'/);
+  assert.doesNotMatch(account.slice(account.indexOf("trackAuth(opts.signup ? 'signup_started'"), account.indexOf('function sanitizeReturnTo')), /createUser:\s*true/);
 });
 
 test('web activates the premium OTP surface while Android TV remains pairing-only', () => {
@@ -40,6 +42,8 @@ test('auth API separates typed email OTP verification from token-hash link verif
   assert.match(auth, /async function verifyOtp\(tokenHash, type\)/);
   assert.match(auth, /body:\s*\{ type: type \|\| 'recovery', token_hash: tokenHash \}/);
   assert.match(auth, /verifyEmailOtp,/);
+  assert.match(auth, /async function requestEmailChallenge/);
+  assert.match(auth, /async function verifyEmailChallenge/);
 });
 
 test('signed email hook exposes the numeric token only for a marked unified OTP redirect', () => {

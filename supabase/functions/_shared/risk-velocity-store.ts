@@ -130,6 +130,27 @@ export async function hashSubject(
     .join("");
 }
 
+/**
+ * Domain-separated HMAC for short-lived private values that are not velocity
+ * dimensions (for example a mailbox challenge code). Callers must still bind
+ * all relevant context into `value`; this helper only guarantees that values
+ * from different purposes cannot be correlated by comparing stored hashes.
+ */
+export async function hashPrivateValue(context: string, value: string): Promise<string> {
+  if (!velocityHashingConfigured()) throw new Error("velocity_key_missing");
+  const safeContext = String(context ?? "").trim();
+  if (!/^[a-z0-9_-]{3,48}$/.test(safeContext)) throw new Error("private_hash_context_invalid");
+  const rawValue = String(value ?? "");
+  if (!rawValue || rawValue.length > 1024) throw new Error("private_hash_value_invalid");
+  const message = new TextEncoder().encode(
+    `${HASH_VERSION}:private:${safeContext}:${rawValue}`,
+  );
+  const mac = await crypto.subtle.sign("HMAC", await hmacKey(), message);
+  return Array.from(new Uint8Array(mac))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
 function normaliseWindows(windowsSeconds: number[]): number[] {
   const seen = new Set<number>();
   for (const raw of windowsSeconds) {

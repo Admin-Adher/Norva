@@ -404,6 +404,54 @@
         });
     }
 
+    // Unified passwordless onboarding: prove the mailbox before GoTrue is
+    // allowed to provision a user. These same-origin Pages routes sign the
+    // Cloudflare network facts and proxy to the private decision boundary.
+    async function authChallengeRequest(path, body) {
+        const controller = typeof AbortController === 'function' ? new AbortController() : null;
+        const timeout = controller ? setTimeout(() => controller.abort(), 12_000) : null;
+        let response;
+        try {
+            response = await fetch(path, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+                signal: controller?.signal
+            });
+        } catch (error) {
+            if (error?.name === 'AbortError') throw new Error('Unable to verify this email right now.');
+            throw error;
+        } finally {
+            if (timeout) clearTimeout(timeout);
+        }
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            const error = new Error(payload.error || 'Unable to verify this email right now.');
+            error.status = response.status;
+            error.payload = payload;
+            throw error;
+        }
+        return payload;
+    }
+
+    async function requestEmailChallenge({ email, data, metadata, redirectTo }) {
+        return authChallengeRequest('/api/auth-email-challenge-request', {
+            email,
+            metadata: data || metadata || {},
+            redirectTo
+        });
+    }
+
+    async function verifyEmailChallenge({ email, challengeId, code, metadata, redirectTo }) {
+        return authChallengeRequest('/api/auth-email-challenge-verify', {
+            email,
+            challengeId,
+            code,
+            metadata: metadata || {},
+            redirectTo
+        });
+    }
+
     // Verify the numeric code typed on account.html. This is deliberately a
     // separate helper from verifyOtp(tokenHash): token_hash belongs to the secure
     // link fallback, while the user-facing six-digit code is verified with the
@@ -923,6 +971,8 @@
         captureSessionFromUrl,
         verifyOtp,
         verifyEmailOtp,
+        requestEmailChallenge,
+        verifyEmailChallenge,
         signInWithOAuth,
         signInWithIdToken,
         signInWithOtp,

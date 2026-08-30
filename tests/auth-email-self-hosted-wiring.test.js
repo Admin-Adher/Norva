@@ -136,9 +136,10 @@ test('numeric email OTP UI remains account-neutral and does not claim transport 
   const flow = account.slice(start, end);
 
   assert.match(flow, /catch \(error\) \{[\s\S]*trackAuth\('journey_error', 'email_otp'[\s\S]*authFailureFamily\(error\)/);
-  assert.match(flow, /We couldn’t request a code\. Check your connection and try again\.[\s\S]*return;/);
-  assert.match(flow, /If the address can receive Norva emails, a six-digit code is on its way/);
-  assert.match(flow, /createUser:\s*true/);
+  assert.match(flow, /We couldn’t request a code\. Check the address, your connection, and try again\.[\s\S]*return;/);
+  assert.match(flow, /No account exists until you verify it/);
+  assert.match(flow, /NorvaAuth\.requestEmailChallenge/);
+  assert.doesNotMatch(flow.slice(flow.indexOf("trackAuth(opts.signup ? 'signup_started'")), /createUser:\s*true/);
   assert.match(flow, /if \(!isPremiumAuth\)[\s\S]*email_magic_link/);
   assert.match(flow, /authEmailRedirectUrl\('otp'\)/);
   assert.doesNotMatch(flow, /delivered|provider ID|delivery receipt/i);

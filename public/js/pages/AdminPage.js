@@ -244,6 +244,7 @@ class AdminPage {
 #page-admin .crm-shell{display:flex;height:100%;background:var(--adm-bg);color:var(--adm-tx);}
 /* Sidebar */
 #page-admin .crm-sidebar{width:238px;flex-shrink:0;background:linear-gradient(180deg,#0e1220,#0a0d17);border-right:1px solid var(--adm-line);display:flex;flex-direction:column;overflow-y:auto;padding:18px 13px;}
+#page-admin .crm-nav-close,#page-admin .crm-menu-toggle,#page-admin .crm-sidebar-backdrop{display:none;}
 #page-admin .crm-brand{display:flex;align-items:center;gap:11px;padding:6px 8px 20px;font-weight:800;font-size:16px;color:var(--adm-tx);letter-spacing:.2px;}
 #page-admin .crm-brand .dot{width:27px;height:27px;border-radius:9px;background:linear-gradient(135deg,#5b7cfa,#a855f7);display:inline-block;box-shadow:0 5px 16px rgba(91,124,250,.42);}
 #page-admin .crm-brand .crm-logo{width:30px;height:30px;flex-shrink:0;filter:drop-shadow(0 2px 9px rgba(120,150,255,.4));}
@@ -826,6 +827,64 @@ class AdminPage {
   #page-admin .client-summary-skeleton,#page-admin .client-skeleton-row{animation:none;}
   #page-admin .client-inspector-backdrop,#page-admin .client-desk-inspector{transition:none;}
 }
+#page-admin .mkt-command-page{display:grid;gap:18px;}
+#page-admin .mkt-command-head{display:flex;align-items:flex-end;justify-content:space-between;gap:20px;}
+#page-admin .mkt-command-kicker{display:block;margin-bottom:7px;color:var(--adm-blue);font-size:10.5px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;}
+#page-admin .mkt-command-head h1{margin:0;color:var(--adm-tx);font-size:clamp(24px,3vw,34px);line-height:1.08;letter-spacing:-.035em;}
+#page-admin .mkt-command-head p{max-width:720px;margin:9px 0 0;color:var(--adm-tx2);font-size:12.5px;line-height:1.55;}
+#page-admin .mkt-command-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:9px;}
+#page-admin .mkt-command-button{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:44px;padding:9px 14px;border:1px solid var(--adm-line);border-radius:10px;background:var(--adm-card2);color:var(--adm-tx);font:inherit;font-size:12px;font-weight:750;cursor:pointer;}
+#page-admin .mkt-command-button.primary{border-color:var(--adm-blue);background:var(--adm-blue);color:#fff;}
+#page-admin .mkt-command-button.quiet{background:transparent;color:var(--adm-tx2);}
+#page-admin .mkt-command-button:hover{border-color:color-mix(in srgb,var(--adm-blue) 60%,var(--adm-line));color:var(--adm-tx);}
+#page-admin .mkt-command-button:focus-visible,#page-admin .mkt-command-row-action:focus-visible{outline:2px solid var(--adm-blue);outline-offset:2px;}
+#page-admin .mkt-command-button svg,#page-admin .mkt-command-row-icon svg,#page-admin .mkt-channel svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:0 0 auto;}
+#page-admin .mkt-command-tabs{display:flex;gap:4px;overflow-x:auto;border-bottom:1px solid var(--adm-line);scrollbar-width:none;}
+#page-admin .mkt-command-tabs::-webkit-scrollbar{display:none;}
+#page-admin .mkt-command-tabs .qv-chip{min-height:44px;margin:0;border:0;border-bottom:2px solid transparent;border-radius:0;background:transparent;white-space:nowrap;}
+#page-admin .mkt-command-tabs .qv-chip.active{border-bottom-color:var(--adm-blue);background:transparent;color:var(--adm-tx);}
+#page-admin .mkt-tab-count{display:inline-grid;place-items:center;min-width:20px;height:20px;margin-left:5px;padding:0 6px;border-radius:999px;background:var(--adm-card);color:var(--adm-tx2);font-size:10px;font-variant-numeric:tabular-nums;}
+#page-admin .mkt-command-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));overflow:hidden;border:1px solid var(--adm-line);border-radius:12px;background:var(--adm-card2);}
+#page-admin .mkt-command-summary-item{display:grid;grid-template-columns:auto minmax(0,1fr);gap:12px;align-items:center;min-height:92px;padding:16px 18px;border-right:1px solid var(--adm-line);}
+#page-admin .mkt-command-summary-item:last-child{border-right:0;}
+#page-admin .mkt-command-summary-item>strong{color:var(--adm-tx);font-size:24px;line-height:1;font-variant-numeric:tabular-nums;}
+#page-admin .mkt-command-summary-item span{color:var(--adm-tx2);font-size:11.5px;line-height:1.35;}
+#page-admin .mkt-command-summary-item small{display:block;margin-top:3px;color:var(--adm-tx3);font-size:10px;}
+#page-admin .mkt-command-layout{display:grid;grid-template-columns:minmax(0,1fr) 330px;gap:16px;align-items:start;}
+#page-admin .mkt-command-stack{display:grid;gap:16px;min-width:0;}
+#page-admin .mkt-command-panel{overflow:hidden;border:1px solid var(--adm-line);border-radius:12px;background:var(--adm-card2);}
+#page-admin .mkt-command-panel-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:15px 17px;border-bottom:1px solid var(--adm-line);}
+#page-admin .mkt-command-panel-head h2,#page-admin .mkt-command-panel-head h3{margin:0;color:var(--adm-tx);font-size:14px;line-height:1.35;}
+#page-admin .mkt-command-panel-head p{margin:4px 0 0;color:var(--adm-tx3);font-size:10.5px;line-height:1.45;}
+#page-admin .mkt-command-row{display:grid;grid-template-columns:38px minmax(0,1fr) auto;gap:12px;align-items:center;min-height:72px;padding:13px 16px;border-bottom:1px solid var(--adm-line2);}
+#page-admin .mkt-command-row:last-child{border-bottom:0;}
+#page-admin .mkt-command-row-icon{display:grid;place-items:center;width:36px;height:36px;border:1px solid var(--adm-line);border-radius:10px;color:var(--adm-blue);background:var(--adm-bg);}
+#page-admin .mkt-command-row-icon.warning{color:var(--adm-amber);}
+#page-admin .mkt-command-row-icon.success{color:var(--adm-green);}
+#page-admin .mkt-command-row strong{display:block;color:var(--adm-tx);font-size:12.5px;line-height:1.35;}
+#page-admin .mkt-command-row p{margin:4px 0 0;color:var(--adm-tx3);font-size:10.5px;line-height:1.45;}
+#page-admin .mkt-command-row-action{min-height:44px;padding:7px 10px;border:0;background:transparent;color:var(--adm-blue);font:inherit;font-size:11px;font-weight:800;cursor:pointer;white-space:nowrap;}
+#page-admin .mkt-command-status{display:inline-flex;align-items:center;gap:6px;color:var(--adm-tx2);font-size:10.5px;font-weight:700;white-space:nowrap;}
+#page-admin .mkt-command-status::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--adm-tx3);}
+#page-admin .mkt-command-status.success::before{background:var(--adm-green);}
+#page-admin .mkt-command-status.warning::before{background:var(--adm-amber);}
+#page-admin .mkt-command-empty{display:grid;justify-items:center;gap:8px;padding:26px 18px;text-align:center;}
+#page-admin .mkt-command-empty .mkt-command-row-icon{width:42px;height:42px;}
+#page-admin .mkt-command-empty h3{margin:2px 0 0;color:var(--adm-tx);font-size:13px;}
+#page-admin .mkt-command-empty p{max-width:250px;margin:0;color:var(--adm-tx3);font-size:10.5px;line-height:1.5;}
+#page-admin .mkt-channel-list{display:grid;}
+#page-admin .mkt-channel{display:grid;grid-template-columns:28px minmax(0,1fr) auto;gap:10px;align-items:center;min-height:62px;padding:12px 16px;border-bottom:1px solid var(--adm-line2);color:var(--adm-tx2);}
+#page-admin .mkt-channel:last-child{border-bottom:0;}
+#page-admin .mkt-channel strong{display:block;color:var(--adm-tx);font-size:11.5px;}
+#page-admin .mkt-channel small{display:block;margin-top:3px;color:var(--adm-tx3);font-size:10px;}
+#page-admin .mkt-activity{width:100%;border-collapse:collapse;}
+#page-admin .mkt-activity th,#page-admin .mkt-activity td{padding:11px 15px;border-bottom:1px solid var(--adm-line2);text-align:left;font-size:10.5px;}
+#page-admin .mkt-activity th{color:var(--adm-tx3);font-size:9.5px;text-transform:uppercase;letter-spacing:.06em;}
+#page-admin .mkt-activity td{color:var(--adm-tx2);}
+#page-admin .mkt-activity tr:last-child td{border-bottom:0;}
+@media(max-width:1120px){#page-admin .mkt-command-layout{grid-template-columns:1fr;}#page-admin .mkt-command-layout>aside{grid-template-columns:repeat(2,minmax(0,1fr));}}
+@media(max-width:760px){#page-admin .mkt-command-head{align-items:stretch;flex-direction:column;}#page-admin .mkt-command-actions{justify-content:stretch;}#page-admin .mkt-command-actions .mkt-command-button{flex:1 1 150px;}#page-admin .mkt-command-summary{grid-template-columns:repeat(2,minmax(0,1fr));}#page-admin .mkt-command-summary-item:nth-child(2){border-right:0;}#page-admin .mkt-command-summary-item:nth-child(-n+2){border-bottom:1px solid var(--adm-line);}#page-admin .mkt-command-layout>aside{grid-template-columns:1fr;}#page-admin .mkt-activity-wrap{overflow-x:auto;}#page-admin .mkt-activity{min-width:560px;}}
+@media(max-width:520px){#page-admin .mkt-command-summary-item{min-height:82px;padding:13px;}#page-admin .mkt-command-row{grid-template-columns:36px minmax(0,1fr);padding:12px;}#page-admin .mkt-command-row>:last-child{grid-column:2;justify-self:start;}#page-admin .mkt-command-row-action{margin-left:-10px;}#page-admin .mkt-command-panel-head{padding:13px;}#page-admin .mkt-command-panel-head>.mkt-command-button{padding-inline:9px;}}
 #page-admin .promo-workspace{display:grid;gap:16px;margin-top:16px;color:var(--color-text-primary);}
 #page-admin .promo-intro{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:18px 20px;border:1px solid var(--color-border);border-radius:var(--radius-lg);background:var(--color-bg-secondary);}
 #page-admin .promo-kicker{display:block;margin-bottom:6px;color:var(--color-accent-hover);font-size:10px;font-weight:800;letter-spacing:.09em;text-transform:uppercase;}
@@ -1415,7 +1474,7 @@ class AdminPage {
 #page-admin .crm-toast.ok{border-left-color:#3ecf8e;}
 #page-admin .crm-toast.err{border-left-color:#ff6b6b;}
 @keyframes crmtoast{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:none;}}
-@media(prefers-reduced-motion:reduce){#page-admin .crm-toast,#page-admin .crm-modal-back{animation:none;}}
+@media(prefers-reduced-motion:reduce){#page-admin .crm-toast,#page-admin .crm-modal-back{animation:none;}#page-admin .crm-sidebar,#page-admin .crm-sidebar-backdrop{transition:none;}}
 #page-admin .crm-modal-back{position:fixed;inset:0;z-index:10050;background:#000b;display:flex;align-items:center;justify-content:center;box-sizing:border-box;padding:max(20px,env(safe-area-inset-top,0px)) max(20px,env(safe-area-inset-right,0px)) max(20px,env(safe-area-inset-bottom,0px)) max(20px,env(safe-area-inset-left,0px));animation:crmtoast .15s ease both;}
 #page-admin .crm-modal{background:var(--color-bg-secondary,#16161c);border:1px solid var(--color-border,#2a2a38);border-radius:14px;padding:20px 22px;max-width:440px;width:100%;box-shadow:0 24px 70px #000b;}
 #page-admin .crm-modal.is-wide{max-width:720px;}
@@ -1453,10 +1512,17 @@ class AdminPage {
   #page-admin .partners-control-grid{grid-template-columns:1fr;}
 }
 @media(max-width:900px){
-  #page-admin .crm-sidebar{width:60px;padding:14px 8px;}
-  #page-admin .crm-nav-item .lb,#page-admin .crm-brand span:last-child,#page-admin .crm-side-foot,#page-admin .crm-nav-sec{display:none;}
-  #page-admin .crm-nav-item{justify-content:center;gap:0;position:relative;}
-  /* .lb (with its ticket count) is hidden on the rail — surface a red dot on the icon instead. */
+  #page-admin .crm-sidebar{position:fixed;z-index:10020;inset:0 auto 0 0;width:min(86vw,320px);padding:max(14px,env(safe-area-inset-top,0px)) max(13px,env(safe-area-inset-left,0px)) max(14px,env(safe-area-inset-bottom,0px));box-shadow:18px 0 54px rgba(0,0,0,.55);transform:translateX(calc(-100% - 20px));transition:transform .2s ease;}
+  #page-admin .crm-shell.is-nav-open .crm-sidebar{transform:none;}
+  #page-admin .crm-nav-item .lb,#page-admin .crm-brand span:last-child,#page-admin .crm-side-foot{display:flex;}
+  #page-admin .crm-nav-sec{display:block;}
+  #page-admin .crm-nav-item{justify-content:flex-start;gap:12px;position:relative;min-height:44px;}
+  #page-admin .crm-nav-close{display:inline-grid;place-items:center;position:absolute;z-index:2;top:max(10px,env(safe-area-inset-top,0px));right:10px;width:44px;height:44px;border:0;border-radius:10px;background:var(--adm-card2);color:var(--adm-tx);cursor:pointer;}
+  #page-admin .crm-nav-close svg,#page-admin .crm-menu-toggle svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;}
+  #page-admin .crm-brand{padding-right:50px;}
+  #page-admin .crm-menu-toggle{display:inline-grid;place-items:center;width:44px;height:44px;flex:0 0 auto;border:1px solid var(--adm-line);border-radius:10px;background:var(--adm-card2);color:var(--adm-tx);cursor:pointer;}
+  #page-admin .crm-sidebar-backdrop{display:block;position:fixed;z-index:10010;inset:0;width:100%;height:100%;border:0;background:rgba(0,0,0,.62);opacity:0;pointer-events:none;transition:opacity .2s ease;}
+  #page-admin .crm-shell.is-nav-open .crm-sidebar-backdrop{opacity:1;pointer-events:auto;}
   #page-admin .crm-nav-item.has-alerts::after{content:"";position:absolute;top:8px;right:12px;width:8px;height:8px;border-radius:50%;background:#e50914;box-shadow:0 0 0 2px var(--color-bg-primary,#0d0d0f);}
   #page-admin .crm-page{padding:20px 16px max(80px,calc(24px + env(safe-area-inset-bottom,0px)));}
   #page-admin .crm-topbar{padding:12px 16px;}
@@ -1516,7 +1582,8 @@ class AdminPage {
 }
 </style>
 <div class="crm-shell">
-  <aside class="crm-sidebar">
+  <aside class="crm-sidebar" id="crm-sidebar" aria-label="Navigation de l’administration">
+    <button class="crm-nav-close" type="button" aria-label="Fermer la navigation"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
     <div class="crm-brand"><svg class="crm-logo" viewBox="0 0 48 48" width="30" height="30" fill="none" aria-hidden="true"><defs><linearGradient id="ncg" x1="7" y1="5" x2="41" y2="43" gradientUnits="userSpaceOnUse"><stop stop-color="#5b8cff"/><stop offset="1" stop-color="#a855f7"/></linearGradient></defs><rect x="1.6" y="1.6" width="44.8" height="44.8" rx="13" fill="#0b1022" stroke="url(#ncg)" stroke-width="1.7"/><circle cx="24" cy="25.5" r="11.5" fill="none" stroke="url(#ncg)" stroke-width="2.2" opacity=".8"/><circle cx="24" cy="21" r="4.4" fill="url(#ncg)"/><path d="M16 33.4c0-4.4 3.6-7.2 8-7.2s8 2.8 8 7.2z" fill="url(#ncg)"/><circle cx="24" cy="14" r="3.2" fill="#8fb0ff"/><circle cx="14" cy="31" r="3.2" fill="#6f8dff"/><circle cx="34" cy="31" r="3.2" fill="#c084fc"/></svg><span>Norva CRM</span></div>
     <nav id="crm-nav">${nav}</nav>
     ${(() => {
@@ -1532,8 +1599,10 @@ class AdminPage {
     </div>`;
     })()}
   </aside>
+  <button class="crm-sidebar-backdrop" type="button" aria-label="Fermer la navigation" tabindex="-1"></button>
   <main class="crm-main" tabindex="-1">
     <div class="crm-topbar">
+      <button class="crm-menu-toggle" type="button" aria-label="Ouvrir la navigation" aria-controls="crm-sidebar" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
       <span class="crm-crumb" id="crm-crumb" aria-live="polite">Cockpit</span>
       <span class="crm-spacer"></span>
       <span id="crm-ts"></span>
@@ -1542,10 +1611,45 @@ class AdminPage {
     <div id="crm-view"></div>
   </main>
 </div>`;
+        const adminShell = root.querySelector('.crm-shell');
+        const adminSidebar = root.querySelector('.crm-sidebar');
+        const adminMain = root.querySelector('.crm-main');
+        const adminMenuToggle = root.querySelector('.crm-menu-toggle');
+        const adminBackdrop = root.querySelector('.crm-sidebar-backdrop');
+        const mobileAdminNav = window.matchMedia('(max-width: 900px)');
+        const setMobileNavOpen = (open, restoreFocus = false) => {
+            const mobile = mobileAdminNav.matches;
+            const visible = mobile && Boolean(open);
+            adminShell?.classList.toggle('is-nav-open', visible);
+            adminMenuToggle?.setAttribute('aria-expanded', String(visible));
+            if (!visible && adminMain) adminMain.inert = false;
+            if (!visible && restoreFocus && adminSidebar?.contains(document.activeElement)) {
+                try { adminMenuToggle?.focus({ preventScroll: true }); } catch (_) { /* noop */ }
+            }
+            if (adminSidebar) {
+                adminSidebar.inert = mobile && !visible;
+                adminSidebar.setAttribute('aria-hidden', mobile ? String(!visible) : 'false');
+                if (mobile) {
+                    adminSidebar.setAttribute('role', 'dialog');
+                    adminSidebar.setAttribute('aria-modal', String(visible));
+                } else {
+                    adminSidebar.removeAttribute('role');
+                    adminSidebar.removeAttribute('aria-modal');
+                }
+            }
+            if (visible && adminMain) adminMain.inert = true;
+            if (adminBackdrop) adminBackdrop.tabIndex = visible ? 0 : -1;
+            if (visible) requestAnimationFrame(() => root.querySelector('.crm-nav-close')?.focus({ preventScroll: true }));
+            else if (restoreFocus) requestAnimationFrame(() => adminMenuToggle?.focus({ preventScroll: true }));
+        };
+        setMobileNavOpen(false);
+        mobileAdminNav.addEventListener?.('change', () => setMobileNavOpen(false));
         // Delegated handlers on the stable root: sidebar nav, refresh, re-sync buttons, client rows.
         root.addEventListener('click', (e) => {
+            if (e.target.closest('.crm-menu-toggle')) { setMobileNavOpen(true); return; }
+            if (e.target.closest('.crm-nav-close,.crm-sidebar-backdrop')) { setMobileNavOpen(false, true); return; }
             const navItem = e.target.closest('.crm-nav-item');
-            if (navItem) { this._navigate(navItem.dataset.route); return; }
+            if (navItem) { setMobileNavOpen(false, true); this._navigate(navItem.dataset.route); return; }
             const rf = e.target.closest('#crm-refresh');
             if (rf) {
                 rf.disabled = true;
@@ -1726,6 +1830,11 @@ class AdminPage {
         // Enter/Space on a focused row triggers the same click path. A child <button> keeps its own
         // native handling (guarded by e.target === el).
         root.addEventListener('keydown', (e) => {
+            if (adminShell?.classList.contains('is-nav-open') && ['Escape', 'GoBack', 'BrowserBack'].includes(e.key)) {
+                e.preventDefault();
+                setMobileNavOpen(false, true);
+                return;
+            }
             const clientView = e.target.closest('.client-saved-view');
             if (clientView && ['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) {
                 e.preventDefault();
@@ -2453,13 +2562,18 @@ class AdminPage {
         const MKT_TABS = { overview: 'mkt-tab-overview', promos: 'mkt-tab-promos', notifs: 'mkt-tab-notifs' };
         const tab = MKT_TABS[this._marketingTab] ? this._marketingTab : 'overview';
         const show = t => (tab === t ? '' : ' hidden');
-        v.innerHTML = `<div class="crm-page">
-            <h1 class="crm-h1">Marketing</h1>
-            <p class="crm-sub">Promotions, campagnes visuelles et notifications push — tout ce qui pousse Norva vers ses utilisateurs.</p>
-            <div class="qv-row" id="mkt-tabs" role="tablist" aria-label="Sections Marketing">
+        v.innerHTML = `<div class="crm-page mkt-command-page">
+            <header class="mkt-command-head">
+                <div><span class="mkt-command-kicker">Centre marketing</span><h1>Décider, préparer, diffuser</h1><p>Les actions utiles passent avant les métriques : promotions, notifications programmées et automations sont réunies dans un même espace opérationnel.</p></div>
+                <div class="mkt-command-actions">
+                    <button class="mkt-command-button" type="button" data-mkt-action="schedule"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4M16 3v4M3 10h18"/></svg>Programmer un push</button>
+                    <button class="mkt-command-button primary" type="button" data-mkt-action="campaign"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Créer une campagne</button>
+                </div>
+            </header>
+            <div class="qv-row mkt-command-tabs" id="mkt-tabs" role="tablist" aria-label="Sections Marketing">
                 <button class="qv-chip ${tab === 'overview' ? 'active' : ''}" id="mkt-tab-button-overview" data-mtab="overview" role="tab" aria-controls="mkt-tab-overview" aria-selected="${tab === 'overview'}" tabindex="${tab === 'overview' ? '0' : '-1'}">Vue d'ensemble</button>
                 <button class="qv-chip ${tab === 'promos' ? 'active' : ''}" id="mkt-tab-button-promos" data-mtab="promos" role="tab" aria-controls="mkt-tab-promos" aria-selected="${tab === 'promos'}" tabindex="${tab === 'promos' ? '0' : '-1'}">Promotions</button>
-                <button class="qv-chip ${tab === 'notifs' ? 'active' : ''}" id="mkt-tab-button-notifs" data-mtab="notifs" role="tab" aria-controls="mkt-tab-notifs" aria-selected="${tab === 'notifs'}" tabindex="${tab === 'notifs' ? '0' : '-1'}">Notifications</button>
+                <button class="qv-chip ${tab === 'notifs' ? 'active' : ''}" id="mkt-tab-button-notifs" data-mtab="notifs" role="tab" aria-controls="mkt-tab-notifs" aria-selected="${tab === 'notifs'}" tabindex="${tab === 'notifs' ? '0' : '-1'}">Notifications<span class="mkt-tab-count" id="mkt-tab-notifs-count" hidden></span></button>
             </div>
             <div id="mkt-tab-overview" role="tabpanel" aria-labelledby="mkt-tab-button-overview"${show('overview')}><div id="mkt-overview"><div class="ssub">Chargement…</div></div></div>
             <div id="mkt-tab-promos" role="tabpanel" aria-labelledby="mkt-tab-button-promos"${show('promos')}>
@@ -2503,9 +2617,27 @@ class AdminPage {
             });
         });
 
+        const openNotificationWorkspace = (view, scheduled = false) => {
+            this._notificationView = view;
+            if (scheduled) {
+                const draft = this._notificationComposerDraft();
+                this._notificationDraft = { ...draft, mode: 'scheduled' };
+            }
+            v.querySelector('[data-mtab="notifs"]')?.click();
+            if (this._notificationSystemRules.length || this._notificationCenterAvailable !== undefined) {
+                this._renderNotificationCenter();
+            }
+            requestAnimationFrame(() => {
+                const target = view === 'automations' ? document.getElementById('notif-tab-automations') : document.getElementById('notif-title');
+                target?.focus({ preventScroll: true });
+            });
+        };
+        v.querySelector('[data-mkt-action="schedule"]')?.addEventListener('click', () => openNotificationWorkspace('composer', true));
+        v.querySelector('[data-mkt-action="campaign"]')?.addEventListener('click', () => v.querySelector('[data-mtab="promos"]')?.click());
+
         this._loadWebPrices();
+        this._notificationLoadPromise = this._loadNotificationCenter();
         this._loadMarketingOverview();
-        this._loadNotificationCenter();
     }
 
     // Vue d'ensemble Marketing : promos actives (billing_prices), appareils push,
@@ -2515,46 +2647,114 @@ class AdminPage {
         const el = document.getElementById('mkt-overview');
         if (!el) return;
         const esc = AdminPage.esc, n = AdminPage.n;
-        let ov = null, prices = null, camp = null;
-        try { ov = await this._rpc('admin_marketing_overview'); } catch (_) { /* migration 20260719090000 absente */ }
-        try { prices = await this._rpc('admin_billing_prices'); } catch (_) { /* dégradé */ }
-        try { camp = await this._rpc('admin_promo_campaign'); } catch (_) { /* dégradé */ }
+        el.setAttribute('aria-busy', 'true');
+        const [overviewResult, pricesResult, campaignResult] = await Promise.allSettled([
+            this._rpc('admin_marketing_overview'),
+            this._rpc('admin_billing_prices'),
+            this._rpc('admin_promo_campaign')
+        ]);
+        try { await this._notificationLoadPromise; } catch (_) { /* le centre garde son état partiel */ }
         if (this._route !== 'marketing') return;
+        const ov = overviewResult.status === 'fulfilled' ? overviewResult.value : null;
+        const prices = pricesResult.status === 'fulfilled' ? pricesResult.value : null;
+        const camp = campaignResult.status === 'fulfilled' ? campaignResult.value : null;
         const rows = Array.isArray(prices) ? prices : [];
         const actives = rows.filter(r => r.promo_active);
-        const LBL = { plus: 'Norva', family: 'Norva Family' }, PER = { monthly: 'mensuel', annual: 'annuel' };
-        const day = d => d ? new Date(d).toLocaleString('fr-FR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : null;
-        const promoRows = actives.map(r => {
-            const pct = Math.max(1, Math.round(100 - (r.promo_amount_cents / r.amount_cents) * 100));
-            const bits = [`−${pct}%`, `$${(r.promo_amount_cents / 100).toFixed(2)} (base $${(r.amount_cents / 100).toFixed(2)})`];
-            if (r.promo_cycles) bits.push(`${r.promo_cycles} période${r.promo_cycles > 1 ? 's' : ''} puis base`);
-            if (r.promo_ref_monthly) bits.push('réf. 12× mensuel');
-            const end = day(r.promo_ends_at);
-            return `<tr><td>${esc(LBL[r.plan] || r.plan)} · ${esc(PER[r.period] || r.period)}</td><td>${esc(bits.join(' · '))}</td><td>${end ? esc(end) : '<span class="pacct">sans échéance</span>'}</td></tr>`;
-        }).join('');
-        const card = (v2, l, icon, cls) => `<div class="kpi ${cls || ''}"><div class="kpi-hd"><div class="v">${v2}</div><span class="kpi-ic">${icon}</span></div><div class="l">${l}</div></div>`;
+        const notificationOverview = this._notificationOverview || {};
+        const schedules = Array.isArray(this._notificationSchedules) ? this._notificationSchedules : [];
+        const customRules = Array.isArray(this._notificationRules) ? this._notificationRules : [];
+        const systemRules = Array.isArray(this._notificationSystemRules) ? this._notificationSystemRules : [];
+        const audienceCounts = this._notificationAudienceCounts || {};
+        const scheduledCount = Number(notificationOverview.scheduled || 0);
+        const failureCount = Number(notificationOverview.automation_failures_7d || 0);
+        const activeCustomRules = customRules.filter(rule => rule.enabled).length;
+        const automationCount = systemRules.length + customRules.length;
+        const pushDevices = typeof audienceCounts.all === 'number' ? audienceCounts.all : Number(ov?.push_devices || 0);
+        const pushUsers = Number(ov?.push_users || 0);
+        const nextSchedule = schedules.find(row => row.status === 'scheduled') || null;
+        const nextAt = nextSchedule?.scheduled_for || notificationOverview.next_scheduled_at || null;
+        const hasCampaignVisual = Boolean(camp?.bg_path);
+        const icons = {
+            tag: '<path d="M20 13 13 20l-9-9V4h7z"/><circle cx="8.5" cy="8.5" r="1.5"/>',
+            clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+            bolt: '<path d="m13 2-8 12h7l-1 8 8-12h-7z"/>',
+            megaphone: '<path d="m3 11 14-6v14L3 13z"/><path d="M7 14v5h4l1-3"/>',
+            calendar: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4M16 3v4M3 10h18"/>',
+            phone: '<rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/>',
+            image: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9" r="1.5"/><path d="m21 15-5-5L5 20"/>',
+            alert: '<path d="M12 3 2.7 19h18.6z"/><path d="M12 9v4M12 17h.01"/>',
+            check: '<circle cx="12" cy="12" r="9"/><path d="m8 12 2.5 2.5L16 9"/>'
+        };
+        const icon = name => `<svg viewBox="0 0 24 24" aria-hidden="true">${icons[name] || icons.check}</svg>`;
+        const tasks = [];
+        if (failureCount > 0) tasks.push({
+            icon: 'alert', tone: 'warning', title: `${n(failureCount)} automation${failureCount > 1 ? 's' : ''} à vérifier`,
+            copy: 'Des livraisons ont échoué sur les sept derniers jours.', action: 'Examiner', view: 'automations'
+        });
+        if (!actives.length) tasks.push({
+            icon: 'tag', tone: 'warning', title: 'Aucune promotion active',
+            copy: 'Le storefront utilise actuellement les tarifs catalogue.', action: 'Préparer une campagne', goto: 'promos'
+        });
+        if (!scheduledCount) tasks.push({
+            icon: 'clock', tone: '', title: ov?.last_notif_at ? 'Aucune prochaine diffusion' : 'Aucune notification manuelle récente',
+            copy: `${n(pushDevices)} appareil${pushDevices > 1 ? 's' : ''} peuvent recevoir un message après vérification.`, action: 'Programmer', view: 'composer', scheduled: true
+        });
+        if (!tasks.length) tasks.push({
+            icon: 'check', tone: 'success', title: 'Aucune action urgente',
+            copy: 'Une promotion et une prochaine diffusion sont déjà en place.', action: 'Voir le planning', view: 'scheduled'
+        });
+        const taskRows = tasks.slice(0, 3).map(task => `<div class="mkt-command-row">
+            <span class="mkt-command-row-icon ${task.tone}">${icon(task.icon)}</span><div><strong>${esc(task.title)}</strong><p>${esc(task.copy)}</p></div>
+            <button class="mkt-command-row-action" type="button"${task.goto ? ` data-overview-goto="${task.goto}"` : ` data-overview-notif="${task.view}"${task.scheduled ? ' data-scheduled="true"' : ''}`}>${esc(task.action)}</button>
+        </div>`).join('');
+        const lastNotificationLabel = ov?.last_notif_at ? AdminPage.timeAgo(ov.last_notif_at) : 'Aucun envoi enregistré';
+        const nextLabel = nextAt ? this._notificationDateLabel(nextAt, true) : '';
+        const notificationTabCount = document.getElementById('mkt-tab-notifs-count');
+        if (notificationTabCount) {
+            notificationTabCount.textContent = String(scheduledCount);
+            notificationTabCount.hidden = scheduledCount === 0;
+        }
         el.innerHTML = `
-            <div class="kpi-group"><div class="kpi-gtitle">📣 L'essentiel</div><div class="admin-cards">
-                ${card(n(actives.length), 'Promo(s) active(s)', '🏷️', actives.length ? 'ok' : '')}
-                ${card(ov ? n(ov.push_devices) : '—', 'Appareils push' + (ov && Number(ov.push_users) ? ` (${n(ov.push_users)} compte${Number(ov.push_users) > 1 ? 's' : ''})` : ''), '📱', ov && Number(ov.push_devices) > 0 ? 'ok' : '')}
-                ${card(ov ? n(ov.notifs_30d) : '—', 'Notifications envoyées (30 j)', '📤', '')}
-                ${card(camp && camp.bg_path ? 'Oui' : 'Non', 'Visuel de campagne', '🎨', camp && camp.bg_path ? 'ok' : '')}
-            </div></div>
-            <div class="admin-block"><h2>🏷️ Promotions en cours</h2>
-                ${promoRows
-                    ? `<div class="scroll"><table><thead><tr><th>Tarif</th><th>Promo</th><th>Fin</th></tr></thead><tbody>${promoRows}</tbody></table></div>`
-                    : '<div class="ssub">Aucune promotion active — lance-en une dans l\'onglet Promotions.</div>'}
-            </div>
-            <div class="admin-block"><h2>⚡ Raccourcis</h2>
-                <div style="display:flex;gap:10px;flex-wrap:wrap">
-                    <button class="mini-btn" data-goto="promos">🏷️ Gérer les promotions</button>
-                    <button class="mini-btn" data-goto="notifs">📲 Envoyer une notification</button>
+            <section class="mkt-command-summary" aria-label="Résumé marketing">
+                <div class="mkt-command-summary-item"><strong>${n(actives.length)}</strong><span>promotion${actives.length > 1 ? 's' : ''} active${actives.length > 1 ? 's' : ''}<small>${actives.length ? 'offres actuellement publiées' : 'aucune campagne en cours'}</small></span></div>
+                <div class="mkt-command-summary-item"><strong>${n(pushDevices)}</strong><span>appareil${pushDevices > 1 ? 's' : ''} joignable${pushDevices > 1 ? 's' : ''}<small>${pushUsers ? `répartis sur ${n(pushUsers)} compte${pushUsers > 1 ? 's' : ''}` : 'audience push disponible'}</small></span></div>
+                <div class="mkt-command-summary-item"><strong>${n(scheduledCount)}</strong><span>diffusion${scheduledCount > 1 ? 's' : ''} programmée${scheduledCount > 1 ? 's' : ''}<small>${nextAt ? `prochaine ${esc(this._notificationDateLabel(nextAt))}` : 'aucune prochaine date'}</small></span></div>
+                <div class="mkt-command-summary-item"><strong>${n(automationCount)}</strong><span>règle${automationCount > 1 ? 's' : ''} automatique${automationCount > 1 ? 's' : ''}<small>${n(systemRules.length)} système · ${n(activeCustomRules)} personnalisée${activeCustomRules > 1 ? 's' : ''} active${activeCustomRules > 1 ? 's' : ''}</small></span></div>
+            </section>
+            <div class="mkt-command-layout">
+                <div class="mkt-command-stack">
+                    <section class="mkt-command-panel"><header class="mkt-command-panel-head"><div><h2>À faire maintenant</h2><p>${tasks.length} décision${tasks.length > 1 ? 's' : ''} utile${tasks.length > 1 ? 's' : ''}, classée${tasks.length > 1 ? 's' : ''} par priorité</p></div></header>${taskRows}</section>
+                    <section class="mkt-command-panel"><header class="mkt-command-panel-head"><div><h2>Diffusions et automations</h2><p>Ce qui fonctionne sans intervention immédiate</p></div><button class="mkt-command-button quiet" type="button" data-overview-notif="automations">Tout gérer</button></header>
+                        <div class="mkt-command-row"><span class="mkt-command-row-icon success">${icon('bolt')}</span><div><strong>Automations système</strong><p>${n(systemRules.length)} règles transactionnelles protégées, supervisées hors des campagnes marketing.</p></div><span class="mkt-command-status success">Inventoriées</span></div>
+                        <div class="mkt-command-row"><span class="mkt-command-row-icon">${icon('megaphone')}</span><div><strong>Automations personnalisées</strong><p>${activeCustomRules ? `${n(activeCustomRules)} règle${activeCustomRules > 1 ? 's' : ''} active${activeCustomRules > 1 ? 's' : ''}` : 'Aucune règle marketing active'}</p></div><button class="mkt-command-row-action" type="button" data-overview-notif="automations">${activeCustomRules ? 'Configurer' : 'Créer une règle'}</button></div>
+                    </section>
+                    <section class="mkt-command-panel"><header class="mkt-command-panel-head"><div><h2>Activité récente</h2><p>État réel des livraisons et moteurs</p></div><button class="mkt-command-button quiet" type="button" data-overview-notif="history">Historique complet</button></header><div class="mkt-activity-wrap"><table class="mkt-activity"><thead><tr><th>Événement</th><th>Canal</th><th>Statut</th><th>Date</th></tr></thead><tbody>
+                        <tr><td><strong>Notification manuelle</strong></td><td>Push</td><td><span class="mkt-command-status ${ov?.last_notif_at ? 'success' : ''}">${ov?.last_notif_at ? 'Livrée' : 'Aucune'}</span></td><td>${esc(lastNotificationLabel)}</td></tr>
+                        <tr><td><strong>Règles automatiques chargées</strong></td><td>Système</td><td><span class="mkt-command-status ${failureCount ? 'warning' : 'success'}">${failureCount ? `${n(failureCount)} à vérifier` : `${n(systemRules.length)} surveillées`}</span></td><td>Aujourd’hui</td></tr>
+                    </tbody></table></div></section>
                 </div>
-                ${ov && ov.last_notif_at ? `<div class="ssub" style="margin-top:8px">Dernière notification envoyée ${AdminPage.timeAgo(ov.last_notif_at)}.</div>` : ''}
-                ${ov ? '' : '<div class="ssub" style="margin-top:8px">⚠ KPIs push indisponibles — appliquer la migration 20260719090000 puis <code>NOTIFY pgrst, \'reload schema\'</code>.</div>'}
-            </div>`;
-        el.querySelectorAll('[data-goto]').forEach(b => b.addEventListener('click', () => {
-            document.querySelector(`#mkt-tabs .qv-chip[data-mtab="${b.dataset.goto}"]`)?.click();
+                <aside class="mkt-command-stack">
+                    <section class="mkt-command-panel"><header class="mkt-command-panel-head"><div><h3>Prochaine diffusion</h3><p>File de campagne</p></div></header>${nextAt ? `<div class="mkt-command-empty"><span class="mkt-command-row-icon">${icon('calendar')}</span><h3>${esc(nextSchedule?.title || 'Push programmé')}</h3><p>${esc(nextLabel)} · ${esc(AdminPage.audShort(nextSchedule?.audience || 'all'))}</p><button class="mkt-command-button" type="button" data-overview-notif="scheduled">Voir la programmation</button></div>` : `<div class="mkt-command-empty"><span class="mkt-command-row-icon">${icon('calendar')}</span><h3>Rien de programmé</h3><p>Préparez un message puis choisissez sa date après la relecture.</p><button class="mkt-command-button" type="button" data-overview-notif="composer" data-scheduled="true">Programmer un push</button></div>`}</section>
+                    <section class="mkt-command-panel"><header class="mkt-command-panel-head"><div><h3>État des canaux</h3><p>Disponibilité, pas performance</p></div></header><div class="mkt-channel-list">
+                        <div class="mkt-channel">${icon('phone')}<div><strong>Push Android</strong><small>${n(pushDevices)} appareil${pushDevices > 1 ? 's' : ''}</small></div><span class="mkt-command-status ${pushDevices ? 'success' : 'warning'}">${pushDevices ? 'Prêt' : 'À connecter'}</span></div>
+                        <div class="mkt-channel">${icon('image')}<div><strong>Visuel storefront</strong><small>${hasCampaignVisual ? 'Visuel configuré' : 'Thème automatique'}</small></div><span class="mkt-command-status ${hasCampaignVisual ? 'success' : 'warning'}">${hasCampaignVisual ? 'Prêt' : 'À choisir'}</span></div>
+                    </div></section>
+                </aside>
+            </div>
+            ${ov ? '' : '<div class="notif-protected">Les compteurs push historiques sont momentanément indisponibles. Les outils Marketing restent accessibles.</div>'}`;
+        el.setAttribute('aria-busy', 'false');
+        el.querySelectorAll('[data-overview-goto]').forEach(button => button.addEventListener('click', () => {
+            document.querySelector(`#mkt-tabs .qv-chip[data-mtab="${button.dataset.overviewGoto}"]`)?.click();
+        }));
+        el.querySelectorAll('[data-overview-notif]').forEach(button => button.addEventListener('click', () => {
+            this._notificationView = button.dataset.overviewNotif || 'composer';
+            if (button.dataset.scheduled === 'true') {
+                const draft = this._notificationComposerDraft();
+                this._notificationDraft = { ...draft, mode: 'scheduled' };
+            }
+            document.querySelector('#mkt-tabs .qv-chip[data-mtab="notifs"]')?.click();
+            this._renderNotificationCenter();
+            requestAnimationFrame(() => document.getElementById(`notif-tab-${this._notificationView}`)?.focus({ preventScroll: true }));
         }));
     }
 

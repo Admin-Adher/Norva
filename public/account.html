@@ -390,7 +390,7 @@
         html.native-app .onb-slide p { font-size: 13px; line-height: 1.45; }
         html.native-app .onb-dots { margin-top: 10px; }
     </style>
-    <link id="premium-auth-style" rel="stylesheet" href="/css/account-premium.css?v=2" media="not all">
+    <link id="premium-auth-style" rel="stylesheet" href="/css/account-premium.css?v=3" media="not all">
     <script>
       if (document.documentElement.classList.contains('premium-auth')) {
         document.getElementById('premium-auth-style').media = 'all';
@@ -504,6 +504,7 @@
                 <div class="field">
                     <label for="signin-email">Email</label>
                     <input id="signin-email" type="email" autocomplete="email" placeholder="name@example.com" required>
+                    <div class="email-assist" id="signin-email-assist" role="status" aria-live="polite" hidden></div>
                 </div>
                 <div id="signin-passwordless" data-passwordless>
                     <button class="primary" type="submit" id="magic-link-primary">Email me a sign-in link</button>
@@ -521,6 +522,21 @@
                 <button class="ghost" type="button" id="forgot-button">Forgot password</button>
                 <button class="linklike" type="button" id="use-code-toggle" hidden>Use a secure code instead</button>
                 <button class="linklike" type="button" id="create-password-account" hidden>Create an account with a password</button>
+            </form>
+
+            <form class="form" id="email-review-form" hidden>
+                <div class="auth-lead">
+                    <span class="review-step">Check before sending</span>
+                    <h2 class="auth-title">Is this email correct?</h2>
+                    <p class="auth-sub">We will send the code to this exact address.</p>
+                </div>
+                <div class="email-review-address" id="email-review-address" aria-live="polite"></div>
+                <p class="email-review-guard">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 3 4 6v6c0 5 3.4 8 8 9 4.6-1 8-4 8-9V6z"/><path d="m9 12 2 2 4-4"/></svg>
+                    No account is created until you enter the code received at this address.
+                </p>
+                <button class="primary" type="submit" id="email-review-confirm">Confirm and send code</button>
+                <button class="secondary" type="button" id="email-review-edit">Edit email</button>
             </form>
 
             <form class="form" id="otp-form" hidden>
@@ -563,6 +579,7 @@
                 <div class="field">
                     <label for="signup-email">Email</label>
                     <input id="signup-email" type="email" autocomplete="email" placeholder="name@example.com" required>
+                    <div class="email-assist" id="signup-email-assist" role="status" aria-live="polite" hidden></div>
                 </div>
                 <div id="signup-passwordless" data-passwordless>
                     <button class="primary" type="submit" id="signup-magic-primary">Email me a sign-in link</button>
@@ -655,7 +672,7 @@
     </main>
 
     <script src="/js/cloudApi.js?v=50"></script>
-    <script src="/js/authApi.js?v=7"></script>
+    <script src="/js/authApi.js?v=8"></script>
     <script>
         const params = new URLSearchParams(location.search);
         const rawReturnTo = params.get('returnTo') || '';
@@ -683,12 +700,16 @@
         const forms = {
             signin: document.getElementById('signin-form'),
             signup: document.getElementById('signup-form'),
+            review: document.getElementById('email-review-form'),
             otp: document.getElementById('otp-form'),
             recover: document.getElementById('recover-form'),
             password: document.getElementById('password-form')
         };
         const otpInputs = [...document.querySelectorAll('[data-otp-digit]')];
         let pendingOtpEmail = '';
+        let pendingOtpChallengeId = '';
+        let pendingOtpMetadata = {};
+        let pendingOtpOptions = { signup: false };
         let otpResendUntil = 0;
         let otpResendTimer = null;
 
@@ -1056,6 +1077,102 @@
                 }, 0);
             }
         }
+
+        const COMMON_EMAIL_DOMAIN_FIXES = Object.freeze({
+            'gmail.con': 'gmail.com',
+            'gmail.co': 'gmail.com',
+            'gmai.com': 'gmail.com',
+            'gmial.com': 'gmail.com',
+            'gmal.com': 'gmail.com',
+            'hotmail.con': 'hotmail.com',
+            'hotmai.com': 'hotmail.com',
+            'hotmal.com': 'hotmail.com',
+            'outlook.con': 'outlook.com',
+            'outlook.cop': 'outlook.com',
+            'outlok.com': 'outlook.com',
+            'icloud.con': 'icloud.com',
+            'yahoo.con': 'yahoo.com',
+            'orange.frr': 'orange.fr',
+            'neuf.frr': 'neuf.fr'
+        });
+
+        function emailSuggestion(email) {
+            const normalized = String(email || '').trim().toLowerCase();
+            const at = normalized.lastIndexOf('@');
+            if (at < 1) return '';
+            const domain = normalized.slice(at + 1);
+            const corrected = COMMON_EMAIL_DOMAIN_FIXES[domain];
+            return corrected ? `${normalized.slice(0, at)}@${corrected}` : '';
+        }
+
+        function updateEmailAssist(input, force = false) {
+            const assist = document.getElementById(`${input.id}-assist`);
+            if (!assist) return '';
+            const value = input.value.trim().toLowerCase();
+            const suggestion = emailSuggestion(value);
+            assist.replaceChildren();
+            if (!suggestion || (!force && input.dataset.suggestionDismissed === value)) {
+                assist.hidden = true;
+                return '';
+            }
+            const copy = document.createElement('span');
+            copy.textContent = `Did you mean ${suggestion}?`;
+            const actions = document.createElement('span');
+            actions.className = 'email-assist-actions';
+            const use = document.createElement('button');
+            use.type = 'button';
+            use.className = 'email-assist-use';
+            use.textContent = 'Use suggestion';
+            use.addEventListener('click', () => {
+                input.value = suggestion;
+                input.dataset.suggestionDismissed = '';
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+                input.focus({ preventScroll: true });
+            });
+            const keep = document.createElement('button');
+            keep.type = 'button';
+            keep.className = 'email-assist-keep';
+            keep.textContent = 'Keep what I typed';
+            keep.addEventListener('click', () => {
+                input.dataset.suggestionDismissed = value;
+                assist.hidden = true;
+                input.focus({ preventScroll: true });
+            });
+            actions.append(use, keep);
+            assist.append(copy, actions);
+            assist.hidden = false;
+            return suggestion;
+        }
+
+        ['signin-email', 'signup-email'].forEach(id => {
+            const input = document.getElementById(id);
+            input?.addEventListener('input', () => updateEmailAssist(input));
+            input?.addEventListener('blur', () => updateEmailAssist(input));
+        });
+
+        function beginEmailReview(emailArg, opts = {}) {
+            const input = document.getElementById(opts.signup ? 'signup-email' : 'signin-email');
+            const email = String(emailArg || input?.value || '').trim().toLowerCase();
+            if (input) input.value = email;
+            if (!email || !input?.checkValidity()) {
+                setStatus('error', 'Enter a complete email address first.');
+                input?.reportValidity();
+                input?.focus({ preventScroll: true });
+                return;
+            }
+            if (updateEmailAssist(input, true) && input.dataset.suggestionDismissed !== email) {
+                setStatus('info', 'Check the suggested domain before continuing.');
+                input.focus({ preventScroll: true });
+                return;
+            }
+            pendingOtpEmail = email;
+            pendingOtpOptions = { signup: opts.signup === true };
+            document.getElementById('email-review-address').textContent = email;
+            setStatus('info', 'Confirm the address that will receive your code.');
+            showForm('review');
+            requestAnimationFrame(() => document.getElementById('email-review-confirm')?.focus({ preventScroll: true }));
+        }
+
         document.getElementById('use-password-toggle').addEventListener('click', () => setSigninPasswordMode(true));
         document.getElementById('use-code-toggle').addEventListener('click', () => setSigninPasswordMode(false));
         document.getElementById('create-password-account').addEventListener('click', () => {
@@ -1069,8 +1186,23 @@
             showForm('signin');
         });
         document.getElementById('otp-change-email').addEventListener('click', () => {
+            pendingOtpChallengeId = '';
             setSigninPasswordMode(false);
             showForm('signin');
+        });
+        forms.review.addEventListener('submit', async event => {
+            event.preventDefault();
+            await withBusy(forms.review, () => requestMagicLink(pendingOtpEmail, {
+                ...pendingOtpOptions,
+                confirmed: true
+            }));
+        });
+        document.getElementById('email-review-edit').addEventListener('click', () => {
+            const target = pendingOtpOptions.signup ? 'signup' : 'signin';
+            const input = document.getElementById(`${target}-email`);
+            if (input) input.value = pendingOtpEmail;
+            showForm(target);
+            requestAnimationFrame(() => input?.focus({ preventScroll: true }));
         });
         configurePremiumAuthSurface();
         setSigninPasswordMode(false);
@@ -1282,7 +1414,17 @@
             await withBusy(forms.otp, async () => {
                 setStatus('info', 'Checking your code…');
                 let session = null;
-                try { session = await NorvaAuth.verifyEmailOtp(pendingOtpEmail, code); }
+                try {
+                    if (!pendingOtpChallengeId) throw new Error('email_challenge_missing');
+                    const proof = await NorvaAuth.verifyEmailChallenge({
+                        email: pendingOtpEmail,
+                        challengeId: pendingOtpChallengeId,
+                        code,
+                        metadata: pendingOtpMetadata,
+                        redirectTo: authEmailRedirectUrl('otp')
+                    });
+                    session = await NorvaAuth.verifyOtp(proof.tokenHash, proof.verificationType);
+                }
                 catch (error) {
                     trackAuth('journey_error', 'email_otp', 'error', authFailureFamily(error));
                 }
@@ -1294,6 +1436,7 @@
                 }
                 const createdAt = Date.parse(session.user?.created_at || '');
                 setAuthFunnelIntent(Number.isFinite(createdAt) && Date.now() - createdAt < 5 * 60 * 1000 ? 'signup' : 'login');
+                pendingOtpChallengeId = '';
                 await ensureProfile();
                 await capturePostAuthAttribution();
                 completeAuthFunnel('email_otp');
@@ -1301,13 +1444,17 @@
                 location.replace(returnTo);
             });
         });
-        document.getElementById('otp-resend').addEventListener('click', () => requestMagicLink(pendingOtpEmail, { resend: true }));
+        document.getElementById('otp-resend').addEventListener('click', () => requestMagicLink(pendingOtpEmail, {
+            ...pendingOtpOptions,
+            resend: true,
+            confirmed: true
+        }));
 
         forms.signup.addEventListener('submit', async event => {
             event.preventDefault();
             clearAuthHelp();
-            // Passwordless sign-up (default on web): email a secure link that creates
-            // the account (create_user:true). No password collected.
+            // Passwordless sign-up (default on web): confirm the address, then
+            // prove mailbox ownership before any account can be created.
             if (document.getElementById('signup-password-wrap').hidden) {
                 await requestMagicLink(document.getElementById('signup-email').value.trim(), { createUser: true, signup: true });
                 return;
@@ -1625,6 +1772,7 @@
                     const preferred = {
                         signin: 'signin-email',
                         signup: 'signup-name',
+                        review: 'email-review-confirm',
                         otp: 'otp-submit',
                         recover: 'recover-email',
                         password: 'new-password'
@@ -1808,6 +1956,10 @@
                 document.getElementById(opts.signup ? 'signup-email' : 'signin-email').focus();
                 return;
             }
+            if (isPremiumAuth && !opts.confirmed && !opts.resend) {
+                beginEmailReview(email, opts);
+                return;
+            }
             clearAuthHelp();
             setAuthFunnelIntent(opts.signup ? 'signup' : 'login');
 
@@ -1834,22 +1986,30 @@
             trackAuth(opts.signup ? 'signup_started' : 'login_started', 'email_otp', 'pending');
             setStatus('info', opts.resend ? 'Sending a new code…' : 'Sending your secure code…');
             const attribution = await buildSignupAttribution('email_otp', false);
+            const metadata = signupMetadata(attribution);
             try {
-                await NorvaAuth.signInWithOtp(email, authEmailRedirectUrl('otp'), {
-                    createUser: true,
-                    data: signupMetadata(attribution)
+                const challenge = await NorvaAuth.requestEmailChallenge({
+                    email,
+                    data: signupMetadata(attribution),
+                    redirectTo: authEmailRedirectUrl('otp')
                 });
+                if (!challenge?.challengeId) throw new Error('email_challenge_missing');
+                pendingOtpChallengeId = challenge.challengeId;
             } catch (error) {
                 trackAuth('journey_error', 'email_otp', 'error', authFailureFamily(error));
-                setStatus('error', 'We couldn’t request a code. Check your connection and try again.');
+                setStatus('error', error?.status === 422
+                    ? 'That email domain does not appear able to receive messages. Check the address and try again.'
+                    : 'We couldn’t request a code. Check the address, your connection, and try again.');
                 return;
             }
             pendingOtpEmail = email;
+            pendingOtpMetadata = metadata;
+            pendingOtpOptions = { signup: opts.signup === true };
             document.getElementById('otp-email').textContent = email;
             fillOtp('');
             showForm('otp');
             startOtpCooldown();
-            setStatus('success', 'If the address can receive Norva emails, a six-digit code is on its way.');
+            setStatus('success', 'A six-digit code is on its way. No account exists until you verify it.');
             requestAnimationFrame(() => otpInputs[0]?.focus({ preventScroll: true }));
         }
 

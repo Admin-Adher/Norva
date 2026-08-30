@@ -51,6 +51,12 @@ verify_jwt = false
 [functions.norva-auth-email]
 verify_jwt = false
 
+# Public mailbox pre-verification. Cloudflare signs the client/network envelope;
+# this function verifies it in-process and creates an Auth user only after the
+# recipient enters the short-lived code sent to that mailbox.
+[functions.norva-auth-challenge]
+verify_jwt = false
+
 # Resend delivery events (at-least-once, out of order). The function verifies
 # the Svix HMAC signature itself with RESEND_WEBHOOK_SECRET and writes an
 # idempotent service-only delivery ledger.

@@ -46,6 +46,7 @@
 
 export const INGRESS_VERSION = 1;
 export const INGRESS_AUDIENCE_SIGNUP = "norva-signup-edge-v1";
+export const INGRESS_AUDIENCE_AUTH_CHALLENGE = "norva-auth-challenge-edge-v1";
 
 /** Short: this protects one hop, not a user session. */
 export const INGRESS_MAX_AGE_MS = 3 * 60 * 1000;
@@ -67,7 +68,7 @@ export interface IngressEnvelope {
   timestampMs: number;
   requestId: string;
   method: string;
-  /** Function-relative: "/" or "/token". Never a full URL path. */
+  /** Function-relative (for example "/request"). Never a full URL path. */
   route: string;
   contentType: string;
   bodyHash: string;

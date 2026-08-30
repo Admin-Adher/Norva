@@ -18,6 +18,7 @@
 // body_hash is enough for integrity.
 
 import {
+  INGRESS_AUDIENCE_AUTH_CHALLENGE,
   INGRESS_AUDIENCE_SIGNUP,
   INGRESS_VERSION,
   MAX_INGRESS_BODY_BYTES,
@@ -33,6 +34,7 @@ interface Env {
   EDGE_INGRESS_SECRET_CURRENT?: string;
   EDGE_INGRESS_KEY_VERSION?: string;
   NORVA_EDGE_BASE?: string;
+  NORVA_AUTH_CHALLENGE_EDGE_BASE?: string;
 }
 
 // NORVA_EDGE_BASE, deliberately not NORVA_EDGE_URL. The Pages project already
@@ -46,6 +48,7 @@ interface Env {
 // serve it. Two names for two audiences, stated because the overlap invites
 // exactly the wrong assumption a year from now.
 const DEFAULT_EDGE_BASE = "https://api.norva.tv/functions/v1/norva-signup";
+const DEFAULT_AUTH_CHALLENGE_EDGE_BASE = "https://api.norva.tv/functions/v1/norva-auth-challenge";
 
 /** 128 bits, single-use, consumed atomically on the edge. */
 function newRequestId(): string {
@@ -54,46 +57,54 @@ function newRequestId(): string {
   return Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-function refuse(status: number): Response {
+function refuse(status: number, message = "Unable to complete registration. Please try again later."): Response {
   // One shape for every refusal: an attacker learns nothing about which layer
   // said no.
   return new Response(
-    JSON.stringify({ error: "Unable to complete registration. Please try again later." }),
+    JSON.stringify({ error: message }),
     { status, headers: { "content-type": "application/json", "cache-control": "no-store" } },
   );
 }
 
-export async function proxySignedSignup(
+interface SignedProxyOptions {
+  edgeBase: string;
+  edgePath: "/" | "/token" | "/request" | "/verify";
+  audience: string;
+  refusalMessage?: string;
+}
+
+async function proxySignedIngress(
   request: Request,
   env: Env,
-  edgePath: "" | "/token",
+  options: SignedProxyOptions,
 ): Promise<Response> {
-  if (request.method !== "POST") return refuse(405);
+  const refusal = (status: number) => refuse(status, options.refusalMessage);
+  if (request.method !== "POST") return refusal(405);
 
   const secret = env.EDGE_INGRESS_SECRET_CURRENT ?? "";
   // Inert rather than open: with no key this path cannot mint a signature, and
   // the edge would refuse it anyway.
-  if (secret.length < 32) return refuse(503);
+  if (secret.length < 32) return refusal(503);
 
   const contentType = normaliseContentType(request.headers.get("content-type"));
-  if (contentType !== "application/json") return refuse(415);
+  if (contentType !== "application/json") return refusal(415);
 
   // Read once. A second read of the body would be a different byte sequence as
   // far as the hash is concerned, and the hash is the whole integrity story.
   const rawBody = await request.arrayBuffer();
-  if (rawBody.byteLength > MAX_INGRESS_BODY_BYTES) return refuse(413);
+  if (rawBody.byteLength > MAX_INGRESS_BODY_BYTES) return refusal(413);
 
-  const target = `${env.NORVA_EDGE_BASE ?? DEFAULT_EDGE_BASE}${edgePath}`;
+  const target = `${options.edgeBase}${options.edgePath === "/" ? "" : options.edgePath}`;
   // La route SIGNEE est l'identifiant logique, pas le chemin de l'URL cible.
   // Kong pose strip_path: true sur functions-v1, donc l'amont ne voit jamais le
   // prefixe /functions/v1 : signer le chemin complet faisait echouer chaque
   // requete en ingress_route_mismatch. edgePath vaut deja "" ou "/token" ici,
   // c'est-a-dire exactement ce que le handler resoudra de son cote.
-  const signedRoute = normalisePath(edgePath || "/");
+  const signedRoute = normalisePath(options.edgePath);
 
   const cf = (request as unknown as { cf?: Record<string, unknown> }).cf ?? {};
   const clientIp = request.headers.get("CF-Connecting-IP") ?? "";
-  if (!clientIp) return refuse(400);
+  if (!clientIp) return refusal(400);
 
   const asnValue = Number(cf.asn);
   const country = typeof cf.country === "string" ? cf.country.toUpperCase() : "";
@@ -101,7 +112,7 @@ export async function proxySignedSignup(
   const envelope: IngressEnvelope = {
     version: INGRESS_VERSION,
     keyVersion: Number(env.EDGE_INGRESS_KEY_VERSION ?? "1"),
-    audience: INGRESS_AUDIENCE_SIGNUP,
+    audience: options.audience,
     timestampMs: Date.now(),
     requestId: newRequestId(),
     method: normaliseMethod(request.method),
@@ -141,6 +152,35 @@ export async function proxySignedSignup(
   } catch {
     // The catch is deliberately bare. Binding the error would put an object in
     // scope that may hold the request, and the request holds a password.
-    return refuse(502);
+    return refusal(502);
   }
+}
+
+export async function proxySignedSignup(
+  request: Request,
+  env: Env,
+  edgePath: "" | "/token",
+): Promise<Response> {
+  return proxySignedIngress(request, env, {
+    edgeBase: env.NORVA_EDGE_BASE ?? DEFAULT_EDGE_BASE,
+    edgePath: edgePath || "/",
+    audience: INGRESS_AUDIENCE_SIGNUP,
+  });
+}
+
+export async function proxySignedAuthChallenge(
+  request: Request,
+  env: Env,
+  edgePath: "/request" | "/verify",
+): Promise<Response> {
+  const configuredSignupBase = env.NORVA_EDGE_BASE ?? "";
+  const derivedBase = configuredSignupBase
+    ? configuredSignupBase.replace(/\/norva-signup\/?$/, "/norva-auth-challenge")
+    : DEFAULT_AUTH_CHALLENGE_EDGE_BASE;
+  return proxySignedIngress(request, env, {
+    edgeBase: env.NORVA_AUTH_CHALLENGE_EDGE_BASE ?? derivedBase,
+    edgePath,
+    audience: INGRESS_AUDIENCE_AUTH_CHALLENGE,
+    refusalMessage: "Unable to verify this email right now. Please try again later.",
+  });
 }

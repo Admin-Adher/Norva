@@ -318,6 +318,61 @@ input:focus { border-color: #74a2ff; box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.
 .otp-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
 .otp-actions button { margin: 0; }
 .otp-resend[disabled] { cursor: default; }
+.email-assist {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--auth-blue) 42%, var(--auth-border));
+  border-radius: 10px;
+  color: var(--auth-text);
+  background: color-mix(in srgb, var(--auth-blue) 10%, var(--auth-bg));
+  font-size: 13px;
+  line-height: 1.4;
+}
+.email-assist-actions { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 5px; }
+.email-assist button {
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  color: var(--auth-text);
+  background: transparent;
+  font: inherit;
+  font-weight: 750;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.email-assist-keep { color: var(--auth-muted) !important; }
+.review-step {
+  display: inline-block;
+  margin-bottom: 9px;
+  color: var(--auth-blue);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+}
+.email-review-address {
+  margin: 20px 0 12px;
+  padding: 16px;
+  border: 1px solid var(--auth-border);
+  border-radius: 12px;
+  color: var(--auth-text);
+  background: var(--auth-bg);
+  font-size: clamp(16px, 2.2vw, 19px);
+  font-weight: 750;
+  overflow-wrap: anywhere;
+}
+.email-review-guard {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin: 0 0 20px;
+  color: var(--auth-muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.email-review-guard svg { flex: 0 0 auto; margin-top: 1px; color: var(--auth-blue); }
+#email-review-form .secondary { margin-top: 8px; }
 
 @media (max-width: 720px) {
   body { padding: max(16px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) max(16px, env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)); }
@@ -422,6 +477,8 @@ input:focus { border-color: #74a2ff; box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.
   .otp-grid input { height: 48px; font-size: 21px; }
   .otp-fieldset { margin-bottom: 8px; }
   .otp-actions { margin-top: 5px; }
+  .email-review-address { margin: 12px 0 8px; padding: 12px; }
+  .email-review-guard { margin-bottom: 12px; font-size: 12px; }
   .welcome-layout { display: grid; grid-template-columns: 56% 44%; }
   .welcome-wall { position: relative; inset: auto; }
   .welcome-columns { inset: -18% 4%; }
