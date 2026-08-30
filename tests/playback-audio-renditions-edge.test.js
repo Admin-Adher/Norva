@@ -73,7 +73,7 @@ const validMetadata = {
   protocol: 1,
   enabled: true,
   reason: 'enabled',
-  maxAudioRenditions: 8,
+  maxAudioRenditions: 12,
   sourceTrackCount: 2,
   preparedTrackCount: 2,
   masterPlaylist: 'playlist.m3u8',
@@ -131,6 +131,32 @@ test('the Edge drops the whole rendition map on any cardinality, index, label or
   }
 });
 
+test('the Edge accepts the full bounded Gateway cohort instead of truncating it at the obsolete eight-track cap', () => {
+  const { normalize, normalizeMetadata } = loadNormalizer();
+  const cohort = Array.from({ length: 12 }, (_, hlsIndex) => ({
+    hlsIndex,
+    streamIndex: hlsIndex + 1,
+    language: hlsIndex % 2 === 0 ? 'eng' : 'fra',
+    title: `Provider track ${hlsIndex + 1}`,
+    sourceChannels: 2,
+    outputChannels: 2,
+    codec: 'aac',
+  }));
+  const normalized = normalize(cohort, 12);
+  assert.equal(normalized.length, 12);
+  const metadata = {
+    ...validMetadata,
+    sourceTrackCount: 12,
+    preparedTrackCount: 12,
+    defaultHlsIndex: 11,
+    defaultStreamIndex: 12,
+  };
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(normalizeMetadata(metadata, normalized, 12))),
+    metadata,
+  );
+});
+
 test('the Edge drops the whole multi-audio topology on any diagnostics or default-stream mismatch', () => {
   const { normalize, normalizeMetadata } = loadNormalizer();
   const normalized = normalize(valid, 5);
@@ -139,7 +165,8 @@ test('the Edge drops the whole multi-audio topology on any diagnostics or defaul
     { ...validMetadata, protocol: 2 },
     { ...validMetadata, enabled: false },
     { ...validMetadata, reason: 'disabled' },
-    { ...validMetadata, maxAudioRenditions: 7 },
+    { ...validMetadata, maxAudioRenditions: 1 },
+    { ...validMetadata, maxAudioRenditions: 33 },
     { ...validMetadata, sourceTrackCount: 1 },
     { ...validMetadata, preparedTrackCount: 1 },
     { ...validMetadata, preparedTrackCount: 3 },

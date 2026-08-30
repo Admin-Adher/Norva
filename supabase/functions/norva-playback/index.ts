@@ -6261,7 +6261,11 @@ function normalizeCodecProfile(profile: JsonRecord) {
 }
 
 function normalizeGatewayAudioRenditions(value: unknown, selectedStreamIndex: number | null) {
-  if (!Array.isArray(value) || value.length < 2 || value.length > 8) return null;
+  // The Gateway owns the bounded simultaneous HLS cohort. Keep the Edge
+  // validator compatible with every supported Gateway cohort instead of
+  // hard-coding an older deployment default (8) and silently discarding a
+  // valid 12-track topology.
+  if (!Array.isArray(value) || value.length < 2 || value.length > 32) return null;
   const normalized: JsonRecord[] = [];
   const streamIndices = new Set<number>();
   for (let position = 0; position < value.length; position += 1) {
@@ -6304,18 +6308,20 @@ function normalizeGatewayMultiAudioHls(
   renditions: JsonRecord[] | null,
   selectedStreamIndex: number | null,
 ) {
-  if (!renditions || renditions.length < 2 || renditions.length > 8) return null;
+  if (!renditions || renditions.length < 2 || renditions.length > 32) return null;
   const raw = recordOrEmpty(value);
   const defaultHlsIndex = Number(raw.defaultHlsIndex);
   const defaultStreamIndex = Number(raw.defaultStreamIndex);
   const sourceTrackCount = Number(raw.sourceTrackCount);
   const preparedTrackCount = Number(raw.preparedTrackCount);
+  const maxAudioRenditions = Number(raw.maxAudioRenditions);
   const defaultRendition = Number.isSafeInteger(defaultHlsIndex)
     ? renditions[defaultHlsIndex]
     : null;
   if (
     raw.protocol !== 1 || raw.enabled !== true || raw.reason !== "enabled" ||
-    raw.maxAudioRenditions !== 8 ||
+    !Number.isSafeInteger(maxAudioRenditions) || maxAudioRenditions < 2 || maxAudioRenditions > 32 ||
+    renditions.length > maxAudioRenditions ||
     !Number.isSafeInteger(sourceTrackCount) || sourceTrackCount < renditions.length || sourceTrackCount > 1024 ||
     !Number.isSafeInteger(preparedTrackCount) || preparedTrackCount !== renditions.length ||
     raw.masterPlaylist !== "playlist.m3u8" || raw.videoPlaylist !== "video.m3u8" ||
@@ -6331,7 +6337,7 @@ function normalizeGatewayMultiAudioHls(
     protocol: 1,
     enabled: true,
     reason: "enabled",
-    maxAudioRenditions: 8,
+    maxAudioRenditions,
     sourceTrackCount,
     preparedTrackCount,
     masterPlaylist: "playlist.m3u8",
