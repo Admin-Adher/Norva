@@ -2996,10 +2996,11 @@ test('production finite MKV resume uses continuous indexed windows and keeps lin
     assert.match(source, /effectiveUrlSha256:\s*session\.vodInputEffectiveUrlSha256/);
     assert.match(source, /effectiveUrlIdentitySha256:\s*session\.vodInputEffectiveUrlIdentitySha256/);
     assert.match(source, /boundedMkvInputPumpProtocol:\s*1/);
-    assert.match(source, /finiteMkvSeekBroker:\s*\{[\s\S]+?protocol:\s*3/);
+    assert.match(source, /finiteMkvSeekBroker:\s*\{[\s\S]+?protocol:\s*4/);
     assert.match(source, /finiteMkvSeekBroker:\s*\{[\s\S]+?bufferedWindowBeforeLocalResponse:\s*true/);
     assert.match(source, /finiteMkvSeekBroker:\s*\{[\s\S]+?continuousLocalRangeResponse:\s*true/);
-    assert.match(source, /finiteMkvSeekBroker:\s*\{[\s\S]+?overlappingLocalRangesQueued:\s*true/);
-    assert.match(source, /finiteMkvSeekBroker:\s*\{[\s\S]+?localSupersessionAfterProviderWindow:\s*true/);
+    assert.match(source, /finiteMkvSeekBroker:\s*\{[\s\S]+?concurrentLocalRanges:\s*true/);
+    assert.match(source, /finiteMkvSeekBroker:\s*\{[\s\S]+?prematureLocalRangeTermination:\s*false/);
+    assert.match(source, /finiteMkvSeekBroker:\s*\{[\s\S]+?providerWindowQueueSerialized:\s*true/);
     assert.match(source, /finiteMkvSeekBroker:\s*\{[\s\S]+?providerConnectionsSerialized:\s*true/);
 });

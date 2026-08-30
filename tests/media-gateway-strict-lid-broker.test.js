@@ -575,7 +575,7 @@ test('strict LID broker preempts an old local range, awaits close, and never exc
   );
 });
 
-test('finite seek broker preserves the latest continuous local range across serial provider windows', async (t) => {
+test('finite seek broker preserves every continuous local range across serial provider windows', async (t) => {
   const { createStrictLidBroker } = brokerHarness();
   const data = Buffer.from(Array.from({ length: 64 }, (_, index) => index));
   const state = { active: 0, maxActive: 0, calls: [], firstResponse: null };
@@ -635,25 +635,114 @@ test('finite seek broker preserves the latest continuous local range across seri
   state.firstResponse.res.end(state.firstResponse.body);
 
   const [firstOutcome, second] = await Promise.all([firstPending, secondPending]);
-  assert.ok(firstOutcome.error, 'the obsolete local range must be closed');
+  assert.equal(firstOutcome.error, undefined);
+  assert.equal(firstOutcome.response.status, 206);
+  assert.equal(firstOutcome.response.headers.get('content-range'), 'bytes 0-31/64');
+  assert.equal(firstOutcome.response.headers.get('content-length'), '32');
+  assert.deepEqual(firstOutcome.body, data.subarray(0, 32));
   assert.equal(second.status, 206);
   assert.equal(second.headers.get('content-range'), 'bytes 16-31/64');
   assert.equal(second.headers.get('content-length'), '16');
   assert.deepEqual(Buffer.from(await second.arrayBuffer()), data.subarray(16, 32));
-  assert.deepEqual(state.calls, ['bytes=0-7', 'bytes=16-23', 'bytes=24-31']);
+  assert.deepEqual(state.calls, ['bytes=0-7', 'bytes=16-23', 'bytes=8-15', 'bytes=24-31']);
   assert.equal(state.maxActive, 1, 'finite windows must never overlap provider bodies');
   assert.equal(state.active, 0);
-  assert.equal(broker.completedProviderFetches, 3);
+  assert.equal(broker.completedProviderFetches, 4);
   assert.equal(broker.interruptedProviderFetches, 0);
   assert.ok(broker.maxQueuedRequests >= 2);
+  assert.ok(broker.maxQueuedProviderWindows >= 2);
 
   const cached = await fetch(broker.inputUrl, { headers: { Range: 'bytes=0-31' } });
   assert.equal(cached.status, 206);
   assert.deepEqual(Buffer.from(await cached.arrayBuffer()), data.subarray(0, 32));
-  assert.deepEqual(state.calls, ['bytes=0-7', 'bytes=16-23', 'bytes=24-31', 'bytes=8-15']);
+  assert.deepEqual(state.calls, ['bytes=0-7', 'bytes=16-23', 'bytes=8-15', 'bytes=24-31']);
   assert.equal(broker.completedProviderFetches, 4);
-  assert.equal(broker.cacheHits, 3);
-  assert.equal(broker.cacheMisses, 4);
+  assert.ok(broker.cacheHits >= 5, 'queued overlapping windows must be coalesced from cache');
+  assert.equal(broker.cacheMisses, 5);
+});
+
+test('finite seek broker serves a newer cue while an older local response is backpressured', async (t) => {
+  const { createStrictLidBroker } = brokerHarness();
+  const MiB = 1024 * 1024;
+  const data = Buffer.alloc(17 * MiB);
+  for (let index = 0; index < data.length; index++) data[index] = index % 251;
+  const state = { active: 0, maxActive: 0, calls: 0 };
+  const provider = http.createServer((req, res) => {
+    const { start, end } = exactRange(req, data.length);
+    state.calls++;
+    state.active++;
+    state.maxActive = Math.max(state.maxActive, state.active);
+    let closed = false;
+    const release = () => {
+      if (closed) return;
+      closed = true;
+      state.active--;
+    };
+    res.once('close', release);
+    res.once('finish', release);
+    res.writeHead(206, {
+      'Content-Type': 'application/octet-stream',
+      'Content-Range': `bytes ${start}-${end}/${data.length}`,
+      'Content-Length': String(end - start + 1),
+      ETag: '"finite-backpressure-v1"',
+    });
+    res.end(data.subarray(start, end + 1));
+  });
+  const sourceUrl = await listen(provider);
+  t.after(() => closeServer(provider));
+  const broker = await createStrictLidBroker({
+    sourceUrl,
+    fileSizeBytes: data.length,
+    dispatcher: null,
+    pathPrefix: 'finite-mkv-seek',
+    finiteWindowBytes: MiB,
+    finiteCacheBytes: 4 * MiB,
+    releaseDelayMs: 0,
+    completedReleaseDelayMs: 0,
+    openTimeoutMs: 2000,
+  });
+  t.after(() => broker.close());
+
+  let firstResponse;
+  let resolveFirstResponse;
+  const firstResponseReady = new Promise((resolve) => { resolveFirstResponse = resolve; });
+  const firstRequest = http.get(broker.inputUrl, {
+    headers: { Range: `bytes=0-${16 * MiB - 1}` },
+  }, (response) => {
+    firstResponse = response;
+    response.pause();
+    resolveFirstResponse();
+  });
+  t.after(() => firstRequest.destroy());
+  await firstResponseReady;
+
+  const secondBody = await Promise.race([
+    fetch(broker.inputUrl, {
+      headers: { Range: `bytes=${16 * MiB}-${17 * MiB - 1}` },
+    }).then(async (response) => {
+      assert.equal(response.status, 206);
+      return Buffer.from(await response.arrayBuffer());
+    }),
+    new Promise((_, reject) => setTimeout(
+      () => reject(new Error('newer cue was blocked by an older local response')),
+      3000,
+    )),
+  ]);
+  assert.deepEqual(secondBody, data.subarray(16 * MiB));
+
+  const firstChunks = [];
+  firstResponse.on('data', (chunk) => firstChunks.push(Buffer.from(chunk)));
+  const firstComplete = new Promise((resolve, reject) => {
+    firstResponse.once('end', resolve);
+    firstResponse.once('error', reject);
+  });
+  firstResponse.resume();
+  await firstComplete;
+  assert.deepEqual(Buffer.concat(firstChunks), data.subarray(0, 16 * MiB));
+  assert.equal(state.maxActive, 1, 'provider bodies remain strictly serialized');
+  assert.equal(state.active, 0);
+  assert.ok(state.calls >= 17);
+  assert.ok(broker.maxQueuedProviderWindows >= 1);
 });
 
 for (const fixture of [
@@ -1352,7 +1441,7 @@ test('strict LID rejects invalid exact signed coordinates before creating a serv
   assert.match(route, /detectLanguageRequestPolicy\(req, options\)[\s\S]*validateDetectLanguageCapability\(capabilityToken, policy\.requiredScope\)/);
   assert.match(gatewaySource, /strictLidLoopbackBrokerProtocol: 1/);
   assert.match(gatewaySource, /strictLidFileSizeClaim: 'fileSizeBytes'/);
-  assert.match(gatewaySource, /const GATEWAY_VERSION = 125/);
+  assert.match(gatewaySource, /const GATEWAY_VERSION = 126/);
   assert.match(gatewaySource, /supersededReleaseDelayMs:\s*PROVIDER_SLOT_RELEASE_DELAY_MS/);
   assert.match(gatewaySource, /strictLidProviderDrainProtocol: 1/);
   assert.match(gatewaySource, /strictLidWeakFallbackProtocol: 1/);

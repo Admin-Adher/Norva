@@ -1804,7 +1804,7 @@ if (
 }
 const MULTI_AUDIO_HLS_PROTOCOL = 1;
 const MAX_MULTI_AUDIO_RENDITIONS = 8;
-const GATEWAY_VERSION = 125;
+const GATEWAY_VERSION = 126;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -2024,15 +2024,16 @@ app.get('/health', (req, res) => {
         },
         boundedMkvInputPumpProtocol: 1,
         finiteMkvSeekBroker: {
-            protocol: 3,
+            protocol: 4,
             active: Array.from(sessions.values()).filter((session) => (
                 Boolean(session?.finiteMkvSeekBroker)
             )).length,
             providerConnectionsSerialized: true,
+            providerWindowQueueSerialized: true,
             bufferedWindowBeforeLocalResponse: true,
             continuousLocalRangeResponse: true,
-            overlappingLocalRangesQueued: true,
-            localSupersessionAfterProviderWindow: true,
+            concurrentLocalRanges: true,
+            prematureLocalRangeTermination: false,
             exactRangeDrainReopensImmediately: true,
             plannedSupersessionReopensImmediately: false,
             windowBytes: FINITE_MKV_SEEK_WINDOW_BYTES,
@@ -3854,6 +3855,7 @@ async function closeStrictLidBrokerAttempt(context, attempt, reason = 'completed
                 try { attempt.localResponse.destroy(); } catch (_) {}
             }
             if (context.activeAttempt === attempt) context.activeAttempt = null;
+            context.activeFiniteAttempts?.delete(attempt);
         })();
     }
     await attempt.closePromise;
@@ -3872,7 +3874,7 @@ function finiteMkvSeekWindowRange(range, windowBytes) {
     };
 }
 
-function finiteMkvSeekCacheLookup(context, range) {
+function finiteMkvSeekCacheLookup(context, range, { countMiss = true } = {}) {
     for (const [key, entry] of context.finiteCache.entries()) {
         if (entry.start > range.start || entry.end < range.end) continue;
         context.finiteCache.delete(key);
@@ -3881,7 +3883,7 @@ function finiteMkvSeekCacheLookup(context, range) {
         const offset = range.start - entry.start;
         return entry.payload.subarray(offset, offset + (range.end - range.start + 1));
     }
-    context.finiteCacheMisses++;
+    if (countMiss) context.finiteCacheMisses++;
     return null;
 }
 
@@ -3905,6 +3907,40 @@ function finiteMkvSeekCacheStore(context, range, payload) {
     }
 }
 
+async function acquireFiniteMkvSeekProviderSlot(context, signal) {
+    let releaseSlot = null;
+    const slot = new Promise((resolve) => { releaseSlot = resolve; });
+    const previous = context.finiteProviderQueue || Promise.resolve();
+    // The queue guards only the bounded upstream window. Local loopback
+    // responses may overlap because FFmpeg legitimately opens a new cue range
+    // before it closes the previous one; keeping local backpressure inside this
+    // mutex caused the newer cue to destroy the older declared Content-Length.
+    context.finiteProviderQueue = previous.catch(() => {}).then(() => slot);
+    context.finiteQueuedProviderWindows++;
+    context.finiteMaxQueuedProviderWindows = Math.max(
+        context.finiteMaxQueuedProviderWindows,
+        context.finiteQueuedProviderWindows,
+    );
+    await previous.catch(() => {});
+    context.finiteQueuedProviderWindows = Math.max(0, context.finiteQueuedProviderWindows - 1);
+
+    let released = false;
+    const release = () => {
+        if (released) return;
+        released = true;
+        releaseSlot();
+    };
+    if (context.closed || signal?.aborted) {
+        release();
+        throw signal?.reason || strictLidBrokerError(
+            'STRICT_LID_ABORTED',
+            'Strict language media broker stopped',
+            { status: 499 },
+        );
+    }
+    return release;
+}
+
 function startFiniteMkvSeekResponse(context, res, range) {
     if (!res || res.destroyed || res.writableEnded || res.headersSent) return;
     res.statusCode = 206;
@@ -3920,26 +3956,12 @@ function startFiniteMkvSeekResponse(context, res, range) {
 
 async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
     const finiteSeek = context.pathPrefix === 'finite-mkv-seek';
-    if (finiteSeek && requestId !== context.latestRequestId) {
-        // A newer FFmpeg cue arrived while this request was queued. Do not
-        // spend the provider's mono-session slot on an obsolete local range.
-        if (!res.destroyed && !res.writableEnded) {
-            try { res.destroy(); } catch (_) {}
-        }
-        return;
-    }
     if (context.closed || (!finiteSeek && requestId !== context.latestRequestId)) {
         return sendStrictLidBrokerError(res, strictLidBrokerError('STRICT_LID_SUPERSEDED', 'Strict language media request was superseded', { status: 409 }));
     }
     if (finiteSeek && (res.destroyed || res.writableEnded)) return;
     if (context.terminalError) return sendStrictLidBrokerError(res, context.terminalError);
     await waitForStrictLidBrokerSlot(context);
-    if (finiteSeek && requestId !== context.latestRequestId) {
-        if (!res.destroyed && !res.writableEnded) {
-            try { res.destroy(); } catch (_) {}
-        }
-        return;
-    }
     if (context.closed || (!finiteSeek && requestId !== context.latestRequestId)) {
         return sendStrictLidBrokerError(res, strictLidBrokerError('STRICT_LID_SUPERSEDED', 'Strict language media request was superseded', { status: 409 }));
     }
@@ -3980,7 +4002,8 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
         }
     };
     res.once('close', onLocalClose);
-    context.activeAttempt = attempt;
+    if (finiteSeek) context.activeFiniteAttempts.add(attempt);
+    else context.activeAttempt = attempt;
 
     try {
         const requestedLength = range.end - range.start + 1;
@@ -3992,13 +4015,7 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
         let consecutiveNoProgressFailures = 0;
         let responseStarted = false;
         while (forwarded < requestedLength) {
-            if (finiteSeek && attempt.superseded) {
-                attempt.localClosed = true;
-                if (!res.destroyed && !res.writableEnded) {
-                    try { res.destroy(); } catch (_) {}
-                }
-                break;
-            }
+            if (attempt.localClosed) break;
             if (finiteSeek && forwarded === finiteWindowStartOffset) {
                 finiteWindowRange = finiteMkvSeekWindowRange({
                     start: range.start + forwarded,
@@ -4014,6 +4031,36 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                     }
                     if (!res.write(cached)) await waitForStrictLidDrain(res, controller.signal);
                     forwarded += cached.length;
+                    finiteWindowStartOffset = forwarded;
+                    finiteWindowRange = null;
+                    continue;
+                }
+            }
+            let releaseFiniteProviderSlot = null;
+            try {
+            if (finiteSeek) {
+                releaseFiniteProviderSlot = await acquireFiniteMkvSeekProviderSlot(context, controller.signal);
+                if (attempt.localClosed) break;
+                // Another overlapping local range may have filled this exact
+                // window while this attempt waited for the mono-provider slot.
+                // Recheck under the provider mutex so one byte window is never
+                // fetched twice merely because FFmpeg pipelines cue requests.
+                const queuedCacheHit = finiteMkvSeekCacheLookup(
+                    context,
+                    finiteWindowRange,
+                    { countMiss: false },
+                );
+                if (queuedCacheHit) {
+                    releaseFiniteProviderSlot();
+                    releaseFiniteProviderSlot = null;
+                    if (!responseStarted) {
+                        startFiniteMkvSeekResponse(context, res, range);
+                        responseStarted = true;
+                    }
+                    if (!res.write(queuedCacheHit)) {
+                        await waitForStrictLidDrain(res, controller.signal);
+                    }
+                    forwarded += queuedCacheHit.length;
                     finiteWindowStartOffset = forwarded;
                     finiteWindowRange = null;
                     continue;
@@ -4248,11 +4295,14 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                     }
                     finiteMkvSeekCacheStore(context, finiteWindowRange, payload);
                     bufferedChunks.length = 0;
-                    if (attempt.localClosed || attempt.superseded) {
+                    // The exact provider window is fully materialized. Release
+                    // the mono-account slot before writing to the local socket:
+                    // a paused/obsolete FFmpeg response must never block the
+                    // provider window requested by a newer cue.
+                    releaseFiniteProviderSlot?.();
+                    releaseFiniteProviderSlot = null;
+                    if (attempt.localClosed) {
                         attempt.localClosed = true;
-                        if (!res.destroyed && !res.writableEnded) {
-                            try { res.destroy(); } catch (_) {}
-                        }
                         break;
                     }
                     if (!responseStarted) {
@@ -4337,6 +4387,9 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                         Date.now() + retryDelayMs,
                     );
                 }
+            }
+            } finally {
+                releaseFiniteProviderSlot?.();
             }
         }
         if (!attempt.localClosed) res.end();
@@ -4423,21 +4476,6 @@ function handleStrictLidBrokerRequest(context, expectedPath, req, res) {
     const active = context.activeAttempt;
     if (active && !finiteSeek) {
         void closeStrictLidBrokerAttempt(context, active, 'superseded').catch(() => {});
-    } else if (active && finiteSeek) {
-        // FFmpeg may request a distant cue before it closes the previous local
-        // range. Let the exact provider window already in flight drain, then
-        // terminate only the obsolete loopback response. If no provider socket
-        // is active, close it now so response backpressure cannot block the
-        // newer request queued behind it.
-        active.superseded = true;
-        active.stopReason = 'superseded';
-        if (!active.upstreamController) {
-            active.localClosed = true;
-            try { active.controller.abort(new Error('finite MKV local range superseded')); } catch (_) {}
-            if (active.localResponse && !active.localResponse.destroyed && !active.localResponse.writableEnded) {
-                try { active.localResponse.destroy(); } catch (_) {}
-            }
-        }
     }
     if (finiteSeek) {
         context.finiteQueuedRequests++;
@@ -4446,12 +4484,21 @@ function handleStrictLidBrokerRequest(context, expectedPath, req, res) {
             context.finiteQueuedRequests,
         );
     }
+    if (finiteSeek) {
+        const work = serveStrictLidBrokerRange(context, req, res, range, requestId)
+            .catch((error) => {
+                if (!context.closed) sendStrictLidBrokerError(res, error);
+            })
+            .finally(() => {
+                context.finiteQueuedRequests = Math.max(0, context.finiteQueuedRequests - 1);
+                context.finiteLocalResponses.delete(work);
+            });
+        context.finiteLocalResponses.add(work);
+        return;
+    }
     const work = context.queue
         .catch(() => {})
-        .then(() => serveStrictLidBrokerRange(context, req, res, range, requestId))
-        .finally(() => {
-            if (finiteSeek) context.finiteQueuedRequests = Math.max(0, context.finiteQueuedRequests - 1);
-        });
+        .then(() => serveStrictLidBrokerRange(context, req, res, range, requestId));
     context.queue = work.catch((error) => {
         if (!context.closed) sendStrictLidBrokerError(res, error);
     });
@@ -4521,7 +4568,10 @@ async function createStrictLidBroker(options = {}) {
         clearTimer: typeof options.clearTimer === 'function' ? options.clearTimer : clearTimeout,
         controller,
         activeAttempt: null,
+        activeFiniteAttempts: new Set(),
         queue: Promise.resolve(),
+        finiteProviderQueue: Promise.resolve(),
+        finiteLocalResponses: new Set(),
         nextOpenAt: 0,
         latestRequestId: 0,
         validator: expectedValidator,
@@ -4539,6 +4589,8 @@ async function createStrictLidBroker(options = {}) {
         finiteCacheEvictions: 0,
         finiteQueuedRequests: 0,
         finiteMaxQueuedRequests: 0,
+        finiteQueuedProviderWindows: 0,
+        finiteMaxQueuedProviderWindows: 0,
         closed: false,
     };
     context.finiteCacheMaxBytes = Number.isFinite(Number(options.finiteCacheBytes))
@@ -4577,6 +4629,7 @@ async function createStrictLidBroker(options = {}) {
         get cacheMisses() { return context.finiteCacheMisses; },
         get cacheEvictions() { return context.finiteCacheEvictions; },
         get maxQueuedRequests() { return context.finiteMaxQueuedRequests; },
+        get maxQueuedProviderWindows() { return context.finiteMaxQueuedProviderWindows; },
         async close() {
             if (closePromise) return closePromise;
             closePromise = (async () => {
@@ -4584,7 +4637,14 @@ async function createStrictLidBroker(options = {}) {
                 context.latestRequestId++;
                 try { controller.abort(new Error('strict LID broker closed')); } catch (_) {}
                 await closeStrictLidBrokerAttempt(context, context.activeAttempt, 'broker_closed');
+                await Promise.allSettled(
+                    [...context.activeFiniteAttempts].map((attempt) => (
+                        closeStrictLidBrokerAttempt(context, attempt, 'broker_closed')
+                    )),
+                );
                 try { await context.queue; } catch (_) {}
+                await Promise.allSettled([...context.finiteLocalResponses]);
+                try { await context.finiteProviderQueue; } catch (_) {}
                 context.finiteCache.clear();
                 context.finiteCacheBytes = 0;
                 // `closeStrictLidBrokerAttempt` records the provider panel's

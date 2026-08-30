@@ -89,6 +89,7 @@ class WatchPage {
         // Transcode Status
         this.transcodeStatusEx = document.getElementById('watch-transcode-status');
         this.qualityBadgeEl = document.getElementById('watch-quality-badge');
+        this.subtitleStatusEl = document.getElementById('watch-subtitle-status');
 
         // State
         this.hls = null;
@@ -190,6 +191,9 @@ class WatchPage {
         this._audioSwitchRequestId = 0;
         this._subtitleSwitchPromise = null;
         this._subtitleSwitchRequestId = 0;
+        this._subtitleSwitchFeedbackState = 'idle';
+        this._subtitleStatusTimer = null;
+        this._subEngineReadyPromise = null;
         this._gatewayAudioSwitchMetrics = null;
         this.currentSessionId = null;
         this.activeSessionIds = new Set();
@@ -1539,6 +1543,9 @@ class WatchPage {
         // cooldown can yield. A later click/Back can now stale this invocation
         // instead of letting it resume and declare itself newest after the wait.
         const playbackAttemptId = this.beginPlaybackAttempt();
+        this._subtitleSwitchRequestId += 1;
+        this._subtitleSwitchPromise = null;
+        this.resetSubtitleSwitchFeedback();
         const streamUrlResolver = typeof streamUrl === 'function' ? streamUrl : null;
         this.cancelFirstFrameTelemetryObserver();
         this.cancelDeferredEngineTrackEnrichment();
@@ -5389,6 +5396,11 @@ class WatchPage {
     }
 
     stop({ enqueueStoryboard = true } = {}) {
+        if (enqueueStoryboard) {
+            this._subtitleSwitchRequestId += 1;
+            this._subtitleSwitchPromise = null;
+            this.resetSubtitleSwitchFeedback();
+        }
         if (this._stopPromise) return this._stopPromise;
 
         this.cancelPendingHlsAudioSwitch(false);
@@ -8988,8 +9000,87 @@ class WatchPage {
             if (track.track) {
                 track.track.mode = 'disabled';
             }
+            const bootstrapUrl = track.dataset.norvaBootstrapUrl;
+            if (bootstrapUrl) {
+                try { URL.revokeObjectURL(bootstrapUrl); } catch (_) { /* best-effort */ }
+                delete track.dataset.norvaBootstrapUrl;
+            }
             track.remove();
         });
+    }
+
+    setSubtitleSwitchFeedback(state, label = '') {
+        const status = this.subtitleStatusEl;
+        if (!status) return;
+        clearTimeout(this._subtitleStatusTimer);
+        this._subtitleStatusTimer = null;
+        this._subtitleSwitchFeedbackState = state;
+
+        const safeLabel = String(label || 'Selected').trim();
+        const messages = {
+            applying: `Applying ${safeLabel} subtitles…`,
+            ready: `${safeLabel} subtitles on`,
+            off: 'Subtitles off',
+            error: 'Subtitles could not be displayed',
+        };
+        status.textContent = messages[state] || '';
+        status.classList.remove('hidden', 'is-applying', 'is-ready', 'is-error');
+        if (state === 'applying') status.classList.add('is-applying');
+        else if (state === 'ready' || state === 'off') status.classList.add('is-ready');
+        else if (state === 'error') status.classList.add('is-error');
+        else status.classList.add('hidden');
+
+        this.showOverlay();
+        if (state !== 'applying') {
+            const visibleMs = state === 'error' ? 5000 : 2400;
+            this._subtitleStatusTimer = setTimeout(() => {
+                if (this._subtitleSwitchFeedbackState !== state) return;
+                this._subtitleSwitchFeedbackState = 'idle';
+                status.classList.add('hidden');
+                this.startOverlayTimer();
+            }, visibleMs);
+        }
+    }
+
+    resetSubtitleSwitchFeedback() {
+        clearTimeout(this._subtitleStatusTimer);
+        this._subtitleStatusTimer = null;
+        this._subtitleSwitchFeedbackState = 'idle';
+        if (!this.subtitleStatusEl) return;
+        this.subtitleStatusEl.textContent = '';
+        this.subtitleStatusEl.classList.remove('is-applying', 'is-ready', 'is-error');
+        this.subtitleStatusEl.classList.add('hidden');
+    }
+
+    subtitleTrackLabel(track = this.getSelectedSubtitleTrack()) {
+        if (!track) return 'Selected';
+        const tracks = this.getExtractableSubtitleTracks();
+        return this.getSubtitleMenuLabel(track, tracks, tracks.indexOf(track), 'Selected');
+    }
+
+    async waitForSelectedSubtitleActivation(streamIndex, requestId = this._subtitleSwitchRequestId, timeoutMs = 12_000) {
+        const deadline = Date.now() + timeoutMs;
+        while (Date.now() < deadline) {
+            if (this.isStaleSubtitleSwitch(requestId)) return false;
+            const engine = this._subEngine;
+            if (engine && Number(engine.streamIndex) === Number(streamIndex)) {
+                if (this._subEngineReadyPromise) {
+                    try {
+                        await Promise.race([
+                            this._subEngineReadyPromise,
+                            new Promise(resolve => setTimeout(() => resolve(false), 250)),
+                        ]);
+                    } catch (_) { /* retry until the bounded deadline */ }
+                }
+                const textTrackReady = engine.trackReady === true
+                    && engine.trackEl?.track?.mode === 'showing';
+                const deliveryReady = engine.mode === 'engine-inband'
+                    || Number.isFinite(engine.lastSuccessfulFetchAt);
+                if (textTrackReady && deliveryReady) return true;
+            }
+            await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        return false;
     }
 
     queueSelectedSubtitleTrackRestart(preference) {
@@ -9016,6 +9107,10 @@ class WatchPage {
     async restartWithSelectedSubtitleTrack(preference, requestId = this._subtitleSwitchRequestId) {
         if (this.isStaleSubtitleSwitch(requestId)) return false;
 
+        const selectedIndex = Number(preference?.streamIndex ?? preference?.stream_index);
+        const selectedIsOff = preference?.source === 'off' || preference?.mode === 'off';
+        const selectedLabel = selectedIsOff ? '' : this.subtitleTrackLabel();
+
         // Hosted VOD owns one provider lane. Tear it down first, then let the
         // normal measured-seek restart mint one replacement session carrying the
         // selected subtitle index (or no index for Off).
@@ -9023,12 +9118,27 @@ class WatchPage {
             && this.content?.sourceId && this.content?.id) {
             const position = Math.max(0, Math.floor(this.getPlaybackPosition()));
             await this.restartCloudGatewayStreamAt(position, { subtitleSwitchRequestId: requestId });
-            return !this.isStaleSubtitleSwitch(requestId);
+            if (this.isStaleSubtitleSwitch(requestId)) return false;
+            if (selectedIsOff) {
+                this.setSubtitleSwitchFeedback('off');
+                return true;
+            }
+            const activated = Number.isInteger(selectedIndex)
+                && await this.waitForSelectedSubtitleActivation(selectedIndex, requestId);
+            this.setSubtitleSwitchFeedback(activated ? 'ready' : 'error', selectedLabel);
+            return activated;
         }
 
         if (this.currentPlaybackMode !== 'transcode-session') {
-            if (preference?.source === 'probe') this.attachSelectedProbeSubtitleTrack();
-            else this.clearExternalSubtitleTracks({ keepAiPolling: this.aiSubtitleState === 'processing' });
+            if (preference?.source === 'probe') {
+                this.attachSelectedProbeSubtitleTrack();
+                const activated = Number.isInteger(selectedIndex)
+                    && await this.waitForSelectedSubtitleActivation(selectedIndex, requestId);
+                this.setSubtitleSwitchFeedback(activated ? 'ready' : 'error', selectedLabel);
+                return activated;
+            }
+            this.clearExternalSubtitleTracks({ keepAiPolling: this.aiSubtitleState === 'processing' });
+            this.setSubtitleSwitchFeedback('off');
             return true;
         }
 
@@ -9079,10 +9189,17 @@ class WatchPage {
         }
         this.playHlsOrDirect(playlistUrl, { autoplay });
         this.setVolumeFromStorage();
-        return true;
+        if (selectedIsOff) {
+            this.setSubtitleSwitchFeedback('off');
+            return true;
+        }
+        const activated = Number.isInteger(selectedIndex)
+            && await this.waitForSelectedSubtitleActivation(selectedIndex, requestId);
+        this.setSubtitleSwitchFeedback(activated ? 'ready' : 'error', selectedLabel);
+        return activated;
     }
 
-    // True for the src-less <track> elements we own (probe extraction + AI transcript), whose
+    // True for the managed <track> elements we own (probe extraction + AI transcript), whose
     // cues we feed via addCue(). The CC menu lists these through their own metadata/state rows,
     // so the native-textTrack enumeration must skip them to avoid a duplicate entry.
     _isManagedTextTrack(textTrack) {
@@ -9243,7 +9360,7 @@ class WatchPage {
     // ============================================================
     // Subtitle engine
     //
-    // Two delivery modes, both feeding cues into a src-less <track>
+    // Two delivery modes, both feeding cues into a loaded managed <track>
     // via TextTrack.addCue() (no reload, no flicker):
     //
     // 1. transcode-session: FFmpeg extracts only the explicitly selected text
@@ -9280,7 +9397,9 @@ class WatchPage {
 
     stopSubtitleEngine() {
         clearInterval(this._subEngineTimer);
+        clearTimeout(this._subEngineTimer);
         this._subEngineTimer = null;
+        this._subEngineReadyPromise = null;
         this._subEngine = null;
     }
 
@@ -9382,8 +9501,7 @@ class WatchPage {
     // the saved subtitle preference is restored — the bug where the chosen track came
     // back as OFF (because the lazy client enum populated the list too late to restore).
     // Enumeration is provider-free (payload data). The restore-ATTACH extracts via the
-    // gateway (a 2nd provider connection), so it's DEFERRED past initial buffering to
-    // avoid the single-connection contention crash. Returns true when tracks applied.
+    // gateway lane selected for this same playback session. Returns true when tracks applied.
     applyEngineSubtitleTracks(tracks, playbackAttemptId) {
         if (!Array.isArray(tracks) || !tracks.length) return false;
         const mapped = tracks
@@ -9404,19 +9522,18 @@ class WatchPage {
         this.subtitleStartOffset = 0;
         this._engineSubsEnriched = true; // server-provided → skip the client gateway probe
         this.updateCaptionsTracks();
-        // Restore the saved choice now that the list is known. Mark the selection
-        // immediately (menu shows it), but defer the extraction-attach until the stream
-        // is stable (buffer built) so the gateway extraction doesn't fight initial buffering.
+        // Restore the saved choice now that the list is known. The selected text track is
+        // extracted in the same Gateway FFmpeg process, so attach its local VTT as soon as
+        // the session metadata exists rather than imposing an arbitrary five-second blank.
         let restored = false;
         try { restored = this.restorePendingSubtitlePreference(); } catch (_) { /* best-effort */ }
         if (restored && this.selectedSubtitleStreamIndex !== null) {
             this.updateCaptionsTracks();
             const targetIndex = this.selectedSubtitleStreamIndex;
-            setTimeout(() => {
-                if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
-                if (this.selectedSubtitleStreamIndex !== targetIndex) return; // user changed it meanwhile
+            if (!this.isStalePlaybackAttempt(playbackAttemptId)
+                && this.selectedSubtitleStreamIndex === targetIndex) {
                 try { this.attachSelectedProbeSubtitleTrack(); } catch (_) { /* best-effort */ }
-            }, 5000);
+            }
         }
         return true;
     }
@@ -9514,8 +9631,8 @@ class WatchPage {
     }
 
     async subtitleSessionTick(engine) {
-        if (engine !== this._subEngine) return;
-        if (engine.done || engine.busy) return;
+        if (engine !== this._subEngine) return null;
+        if (engine.done || engine.busy) return null;
         engine.busy = true;
 
         // If-None-Match + size-based ETag: ticks are sub-second so a freshly
@@ -9527,7 +9644,7 @@ class WatchPage {
         if (!url) {
             engine.done = true;
             engine.busy = false;
-            return;
+            return -1;
         }
         const headers = engine.lastEtag ? { 'If-None-Match': engine.lastEtag } : undefined;
         const sessionTimeOffset = engine.sourceTimestamps
@@ -9535,12 +9652,14 @@ class WatchPage {
             : 0;
         const added = await this.fetchSubtitleCues(engine, url, sessionTimeOffset, { headers });
         engine.busy = false;
-        if (engine !== this._subEngine) return;
+        if (engine !== this._subEngine) return null;
 
         if (added > 0) {
             engine.idleRounds = 0;
+            engine.lastSuccessfulFetchAt = Date.now();
             this.updateCaptionsTracks();
         } else if (added === 0) {
+            engine.lastSuccessfulFetchAt = Date.now();
             engine.idleRounds = (engine.idleRounds || 0) + 1;
             // Whole file covered (last cue reaches the known duration) and the
             // file stopped growing for ~30s: extraction is complete, stop polling
@@ -9553,6 +9672,20 @@ class WatchPage {
         }
         // Session gone (cleaned up server-side after a seek/restart): stop
         if ((engine.failures || 0) >= 30) engine.done = true;
+        return added;
+    }
+
+    startSubtitleSessionPolling(engine) {
+        const tick = async () => {
+            if (engine !== this._subEngine || engine.done) return;
+            await this.subtitleSessionTick(engine);
+            if (engine !== this._subEngine || engine.done) return;
+            // Warm up aggressively until the selected VTT endpoint is real,
+            // then settle on the existing low-cost local polling cadence.
+            const delay = Number.isFinite(engine.lastSuccessfulFetchAt) ? 500 : 150;
+            this._subEngineTimer = setTimeout(tick, delay);
+        };
+        void tick();
     }
 
     /**
@@ -9619,10 +9752,33 @@ class WatchPage {
 
         const added = await this.fetchSubtitleCues(engine, extractUrl, windowStartLocal ? windowStartLocal : 0);
         if (engine === this._subEngine && added >= 0) {
+            engine.lastSuccessfulFetchAt = Date.now();
             engine.windowEndLocal = windowStartLocal + WINDOW;
             this.updateCaptionsTracks();
         }
         engine.busy = false;
+    }
+
+    waitForManagedSubtitleTrack(trackEl, timeoutMs = 2000) {
+        if (!trackEl) return Promise.resolve(false);
+        if (trackEl.readyState === 2) return Promise.resolve(true);
+        if (trackEl.readyState === 3) return Promise.resolve(false);
+        return new Promise((resolve) => {
+            let settled = false;
+            const finish = (ready) => {
+                if (settled) return;
+                settled = true;
+                clearTimeout(timer);
+                trackEl.removeEventListener('load', onLoad);
+                trackEl.removeEventListener('error', onError);
+                resolve(ready);
+            };
+            const onLoad = () => finish(true);
+            const onError = () => finish(false);
+            const timer = setTimeout(() => finish(trackEl.readyState === 2), timeoutMs);
+            trackEl.addEventListener('load', onLoad, { once: true });
+            trackEl.addEventListener('error', onError, { once: true });
+        });
     }
 
     attachSelectedProbeSubtitleTrack() {
@@ -9636,8 +9792,10 @@ class WatchPage {
             return false;
         }
 
-        // Src-less <track>: we own its TextTrack and feed cues via addCue(),
-        // so updates never reload/flicker the displayed subtitle
+        // A managed TextTrack still needs a valid WebVTT resource. A src-less
+        // <track> enters readyState=ERROR in Chromium: addCue() then fails while
+        // the menu misleadingly says the subtitle is active. Bootstrap it with
+        // a valid empty VTT and keep feeding cues into that loaded TextTrack.
         const trackEl = document.createElement('track');
         trackEl.kind = 'subtitles';
         const subtitleTracks = this.getExtractableSubtitleTracks();
@@ -9645,6 +9803,10 @@ class WatchPage {
         trackEl.srclang = this.normalizeTrackLanguage(selected.language);
         trackEl.dataset.norvaProbeSubtitle = 'true';
         trackEl.dataset.streamIndex = String(selected.index);
+        const bootstrapUrl = URL.createObjectURL(new Blob(['WEBVTT\n\n'], { type: 'text/vtt' }));
+        trackEl.dataset.norvaBootstrapUrl = bootstrapUrl;
+        trackEl.src = bootstrapUrl;
+        trackEl.default = true;
         this.video.appendChild(trackEl);
         if (trackEl.track) trackEl.track.mode = 'showing';
 
@@ -9688,37 +9850,42 @@ class WatchPage {
             sourceTimestamps: this.currentPlaybackMode === 'gateway-session'
                 && this.gatewaySourceTimestamps === true,
             streamStartOffset: this.streamStartOffset || 0,
-            failures: 0
+            failures: 0,
+            trackReady: false,
+            lastSuccessfulFetchAt: null,
         };
         this._subEngine = engine;
 
-        if (useInbandSubs) {
-            // No network: the engine decodes cues from packets it already demuxed.
-            engine.mode = 'engine-inband';
-            try { this.norvaEngine.enableSubtitleCapture(); } catch (_) { /* best-effort */ }
-            this.subtitleEngineInbandTick(engine);
-            this._subEngineTimer = setInterval(() => this.subtitleEngineInbandTick(engine), 1000);
-        } else if (isSessionMode && (this.currentSessionId || gatewaySubtitleUrl)) {
-            this.subtitleSessionTick(engine);
-            // Session subtitles are local files written by the same FFmpeg
-            // process as the video. Poll them often so a newly written cue is
-            // added before its startTime; otherwise it appears late but still
-            // ends on time.
-            this._subEngineTimer = setInterval(() => this.subtitleSessionTick(engine), 500);
-        } else if (isSessionMode) {
-            // Session not created yet (subtitles attach before session start):
-            // do nothing — startTranscodeSession re-attaches once the id exists.
-            // Crucially, no /api/subtitle fallback here: that would open a
-            // second provider connection while the session is starting.
-        } else {
-            this.subtitleWindowTick(engine, true);
-            this._subEngineTimer = setInterval(() => this.subtitleWindowTick(engine), 10000);
-        }
+        this._subEngineReadyPromise = this.waitForManagedSubtitleTrack(trackEl).then((loaded) => {
+            if (engine !== this._subEngine) return false;
+            if (!loaded || !trackEl.track) {
+                engine.trackLoadFailed = true;
+                return false;
+            }
+            engine.trackReady = true;
+            trackEl.track.mode = 'showing';
 
-        setTimeout(() => {
-            if (trackEl.track) trackEl.track.mode = 'showing';
+            if (useInbandSubs) {
+                // No network: the engine decodes cues from packets it already demuxed.
+                engine.mode = 'engine-inband';
+                try { this.norvaEngine.enableSubtitleCapture(); } catch (_) { /* best-effort */ }
+                this.subtitleEngineInbandTick(engine);
+                this._subEngineTimer = setInterval(() => this.subtitleEngineInbandTick(engine), 1000);
+            } else if (isSessionMode && (this.currentSessionId || gatewaySubtitleUrl)) {
+                this.startSubtitleSessionPolling(engine);
+            } else if (isSessionMode) {
+                // Session not created yet (subtitles attach before session start):
+                // do nothing — startTranscodeSession re-attaches once the id exists.
+                // Crucially, no /api/subtitle fallback here: that would open a
+                // second provider connection while the session is starting.
+            } else {
+                void this.subtitleWindowTick(engine, true);
+                this._subEngineTimer = setInterval(() => this.subtitleWindowTick(engine), 10000);
+            }
+
             this.updateCaptionsTracks();
-        }, 0);
+            return true;
+        });
         return true;
     }
 
@@ -11074,6 +11241,7 @@ class WatchPage {
             this.subtitleOffsetSeconds = this.loadSubtitleOffset(streamIndex);
             this.selectedSubtitleTrackUserChoice = true;
             subtitlePreference = this.getCurrentSubtitlePreference();
+            this.setSubtitleSwitchFeedback('applying', this.subtitleTrackLabel());
         } else if (source === 'native' && index >= 0 && index < tracks.length) {
             this.selectedSubtitleStreamIndex = null;
             this.subtitleOffsetSeconds = 0;
@@ -11106,6 +11274,25 @@ class WatchPage {
             await this.queueSelectedSubtitleTrackRestart(subtitlePreference);
         } else if (subtitlePreference?.source === 'probe') {
             this.attachSelectedProbeSubtitleTrack();
+            const activated = await this.waitForSelectedSubtitleActivation(
+                selectedStreamIndex,
+                this._subtitleSwitchRequestId,
+            );
+            this.setSubtitleSwitchFeedback(
+                activated ? 'ready' : 'error',
+                this.subtitleTrackLabel(),
+            );
+        } else if (selectedIsOff) {
+            this.setSubtitleSwitchFeedback('off');
+        } else if (source === 'native' && index >= 0 && index < tracks.length) {
+            this.setSubtitleSwitchFeedback('ready', tracks[index]?.label || 'Selected');
+        } else if (source === 'hls' && this.hls && index >= 0) {
+            this.setSubtitleSwitchFeedback(
+                'ready',
+                this.hls.subtitleTracks?.[index]?.name
+                    || this.hls.subtitleTracks?.[index]?.lang
+                    || 'Selected',
+            );
         }
         if (playbackPreferences) this.saveResumeSnapshotThrottled(true);
     }
@@ -11119,6 +11306,7 @@ class WatchPage {
     }
 
     hideOverlay() {
+        if (this._subtitleSwitchFeedbackState === 'applying') return;
         if (!this.video?.paused) {
             this.overlay?.classList.add('hidden');
             this.overlayVisible = false;
