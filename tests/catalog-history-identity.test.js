@@ -276,6 +276,8 @@ test('WatchPage persists optional titleId inside rich history metadata', async (
     saveResumeSnapshot: () => {},
     getPlaybackPreferences: () => ({}),
     containerExtension: 'mp4',
+    _historyPersistenceActive: true,
+    _historyPersistenceGeneration: 1,
     _historyMetaSentFor: null,
   });
 

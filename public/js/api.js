@@ -2742,7 +2742,10 @@ const API = {
             headers: {
                 'Content-Type': 'application/json'
             },
-            ...(options.signal ? { signal: options.signal } : {})
+            ...(options.signal ? { signal: options.signal } : {}),
+            // Final history/session writes must be allowed to finish while the
+            // document is unloading. Callers opt in and keep payloads bounded.
+            ...(options.keepalive ? { keepalive: true } : {})
         };
 
         // Add authentication token if available
