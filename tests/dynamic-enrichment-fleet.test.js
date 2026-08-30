@@ -133,16 +133,22 @@ test('generic cron replaces movie detection jobs but preserves subtitle pregen a
 
 test('server sync owns the canonical cross-tenant provider link', () => {
   const sync = read('supabase/functions/_shared/xtream-sync.ts');
+  const lifecycle = read('supabase/migrations/20260830091654_provisional_provider_identity_lifecycle.sql');
   const record = between(
     sync,
     'export async function recordProviderIdentity(',
     '\nexport function freshSyncCursor(',
   );
   assert.match(record, /db\.rpc\("norva_resolve_provider_identity"/);
-  assert.match(record, /catalog_source_provider_identities/);
-  assert.match(record, /identity_id: identityId/);
-  assert.match(record, /provider_key: providerKey/);
-  assert.match(record, /\[provider-identity\] scheduler link failed/);
+  assert.doesNotMatch(record, /catalog_source_provider_identities[\s\S]*upsert/);
+  assert.match(record, /resolver owns the whole lifecycle in one database transaction/);
+  const resolver = between(
+    lifecycle,
+    'create or replace function public.norva_resolve_provider_identity(',
+    'revoke all on function public.norva_resolve_provider_identity(',
+  );
+  assert.match(resolver, /insert into public\.catalog_source_provider_identities as link/);
+  assert.match(resolver, /delete from public\.catalog_source_provider_identity_candidates candidate[\s\S]*return v_identity/);
 });
 
 test('stale completion tokens cannot release a newer lease', () => {

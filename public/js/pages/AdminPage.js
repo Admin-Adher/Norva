@@ -617,6 +617,7 @@ class AdminPage {
 #page-admin .id-intake-row{display:grid;grid-template-columns:minmax(180px,1.2fr) minmax(170px,.9fr) minmax(155px,.75fr) auto;gap:14px;align-items:center;min-width:0;padding:12px 16px;border-bottom:1px solid var(--adm-line);border-inline-start:3px solid var(--adm-blue);}
 #page-admin .id-intake-row:last-child{border-bottom:0;}
 #page-admin .id-intake-row.is-unresolved{border-inline-start-color:var(--adm-amber);background:var(--adm-panel);}
+#page-admin .id-intake-row.is-provisional{border-inline-start-color:var(--adm-amber);background:rgba(251,191,36,.035);}
 #page-admin .id-intake-source,#page-admin .id-intake-owner,#page-admin .id-intake-resolution{min-width:0;}
 #page-admin .id-intake-name{display:block;overflow:hidden;color:var(--adm-tx);font-size:13px;font-weight:680;text-overflow:ellipsis;white-space:nowrap;}
 #page-admin .id-intake-meta,#page-admin .id-intake-owner,#page-admin .id-intake-resolution{color:var(--adm-tx2);font-size:11.5px;line-height:1.45;overflow-wrap:anywhere;}
@@ -625,6 +626,11 @@ class AdminPage {
 #page-admin .id-intake-open{min-height:44px;padding:7px 12px;border:1px solid var(--adm-line);border-radius:8px;background:var(--color-bg-secondary);color:var(--adm-tx);font:inherit;font-size:11.5px;font-weight:650;cursor:pointer;white-space:nowrap;touch-action:manipulation;}
 #page-admin .id-intake-open:hover{border-color:var(--adm-blue);}
 #page-admin .id-intake-open:focus-visible{border-color:var(--adm-blue);outline:2px solid var(--adm-blue);outline-offset:2px;}
+#page-admin .id-intake-actions{display:flex;align-items:stretch;justify-content:flex-end;gap:8px;flex-wrap:wrap;}
+#page-admin .id-intake-retry{min-height:44px;padding:7px 12px;border:1px solid rgba(251,191,36,.42);border-radius:8px;background:rgba(251,191,36,.08);color:var(--adm-tx);font:inherit;font-size:11.5px;font-weight:680;cursor:pointer;white-space:nowrap;touch-action:manipulation;}
+#page-admin .id-intake-retry:hover{border-color:var(--adm-amber);background:rgba(251,191,36,.12);}
+#page-admin .id-intake-retry:focus-visible{border-color:var(--adm-amber);outline:2px solid var(--adm-amber);outline-offset:2px;}
+#page-admin .id-intake-retry:disabled{cursor:wait;opacity:.62;}
 #page-admin #id-search,#page-admin #id-filters .qv-chip,#page-admin .identity-acts .id-actbtn{min-height:44px;}
 #page-admin .id-intake-empty{display:flex;align-items:flex-start;gap:10px;padding:15px 17px;color:var(--adm-tx2);font-size:12px;line-height:1.5;}
 #page-admin .id-intake-empty strong{display:block;color:var(--adm-tx);font-size:12.5px;}
@@ -632,8 +638,8 @@ class AdminPage {
 #page-admin .id-source-time{display:flex;flex-direction:column;gap:2px;color:var(--adm-tx2);font-size:11.5px;white-space:nowrap;}
 #page-admin .id-source-time small{color:var(--adm-tx3);font-size:10.5px;}
 #page-admin .id-sample-note{margin-top:8px;color:var(--adm-tx3);font-size:11px;}
-@media(max-width:920px){#page-admin .id-intake-row{grid-template-columns:minmax(0,1fr) minmax(150px,.8fr) auto;}#page-admin .id-intake-resolution{grid-column:1 / 3;}#page-admin .id-intake-open{grid-column:3;grid-row:1 / 3;}}
-@media(max-width:640px){#page-admin .id-intake-head{padding:14px;}#page-admin .id-intake-row{grid-template-columns:minmax(0,1fr);gap:8px;padding:13px 14px;}#page-admin .id-intake-resolution,#page-admin .id-intake-open{grid-column:auto;grid-row:auto;}#page-admin .id-intake-open{width:100%;}#page-admin .id-integrity{align-items:flex-start;}#page-admin #id-kpis .kpi-group{padding:12px;}#page-admin #id-kpis .admin-cards{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;}#page-admin #id-kpis .kpi{padding:12px;}#page-admin #id-kpis .kpi .v{font-size:22px;}#page-admin #id-kpis .kpi .l{font-size:9.5px;}#page-admin #id-kpis .kpi-ic{width:26px;height:26px;}}
+@media(max-width:920px){#page-admin .id-intake-row{grid-template-columns:minmax(0,1fr) minmax(150px,.8fr) auto;}#page-admin .id-intake-resolution{grid-column:1 / 3;}#page-admin .id-intake-actions{grid-column:3;grid-row:1 / 3;flex-direction:column;}}
+@media(max-width:640px){#page-admin .id-intake-head{padding:14px;}#page-admin .id-intake-row{grid-template-columns:minmax(0,1fr);gap:8px;padding:13px 14px;}#page-admin .id-intake-resolution,#page-admin .id-intake-actions{grid-column:auto;grid-row:auto;}#page-admin .id-intake-actions{width:100%;flex-direction:column;}#page-admin .id-intake-open,#page-admin .id-intake-retry{width:100%;}#page-admin .id-integrity{align-items:flex-start;}#page-admin #id-kpis .kpi-group{padding:12px;}#page-admin #id-kpis .admin-cards{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;}#page-admin #id-kpis .kpi{padding:12px;}#page-admin #id-kpis .kpi .v{font-size:22px;}#page-admin #id-kpis .kpi .l{font-size:9.5px;}#page-admin #id-kpis .kpi-ic{width:26px;height:26px;}}
 /* Système: health gauge bar + Services ‖ Activité two-column */
 #page-admin .kpi-bar{height:7px;border-radius:4px;background:rgba(255,255,255,.08);overflow:hidden;margin-top:11px;}
 #page-admin .kpi-bar>i{display:block;height:100%;border-radius:4px;background:linear-gradient(90deg,#5b7cfa,#8b7cff);}
@@ -14965,7 +14971,7 @@ class AdminPage {
         const filters = [['', 'Toutes'], ['mirror', 'Miroirs'], ['active', 'Actives'], ['multi', 'Multi-sources'], ['driver', 'Pilotes'], ['dormant', 'Dormantes 30 j']];
         v.innerHTML = `<div class="crm-page">
             <h1 class="crm-h1">🧬 Identités fournisseurs</h1>
-            <p class="crm-sub">Une identité correspond à un panel amont vérifié par le serveur. Les ajouts récents restent visibles avant résolution, sans créer de rapprochement artificiel.</p>
+            <p class="crm-sub">Une identité correspond à un panel amont vérifié par le serveur. Avant 32 signaux, la source reste provisoire et fonctionne uniquement dans son propre périmètre.</p>
             <div class="id-integrity" id="id-integrity-status" role="status">
               <strong>Rattachements vérifiés</strong><span>Chargement de la source de vérité…</span>
             </div>
@@ -14974,7 +14980,7 @@ class AdminPage {
             </div>
             <section class="id-intake" aria-labelledby="id-intake-title">
               <div class="id-intake-head">
-                <div class="id-intake-copy"><span class="id-intake-eyebrow">File de rattachement</span><h2 class="id-intake-title" id="id-intake-title">Sources non résolues / récemment ajoutées</h2><p class="id-intake-sub">Les sources non résolues restent visibles jusqu'à la preuve d'identité. Les ajouts des 30 derniers jours sont épinglés ici.</p></div>
+                <div class="id-intake-copy"><span class="id-intake-eyebrow">File de rattachement</span><h2 class="id-intake-title" id="id-intake-title">Sources provisoires / récemment ajoutées</h2><p class="id-intake-sub">La progression indique combien de signaux fiables sont disponibles sur les 32 requis. Aucun partage inter-comptes n’est activé avant vérification.</p></div>
                 <span class="id-intake-count" id="id-intake-count" aria-label="Sources dans la file">—</span>
               </div>
               <div id="admin-identity-intake" class="id-intake-list" aria-live="polite" aria-busy="true"><div class="id-intake-empty">Chargement des ajouts récents…</div></div>
@@ -14984,6 +14990,7 @@ class AdminPage {
               <span class="lgd">🧬 <b>Identité</b> = panel amont vérifié</span>
               <span class="lgd">🏷️ <b>Marque</b> = revendeur détecté</span>
               <span class="lgd">📡 <b>Source</b> = playlist non supprimée</span>
+              <span class="lgd"><b>Provisoire</b> = traitements isolés à cette source</span>
               <span class="lgd">🔁 <b>Miroir</b> = plusieurs marques → même panel</span>
             </div>
             <div class="qv-row" id="id-filters" role="tablist" aria-label="Filtres identités">
@@ -15028,13 +15035,19 @@ class AdminPage {
             let payload;
             let legacyFallback = false;
             try {
-                payload = await this._rpc('admin_identities_v2');
+                payload = await this._rpc('admin_identities_v3');
             } catch (error) {
-                const missing = error?.payload?.code === 'PGRST202' || String(error?.message || '').includes('PGRST202');
-                if (!missing) throw error;
-                const identities = await this._rpc('admin_identities');
-                payload = { schema_version: 1, identities: Array.isArray(identities) ? identities : [], summary: {}, unresolved_sources: [], recent_sources: [], recent_window_days: 30 };
-                legacyFallback = true;
+                const v3Missing = error?.payload?.code === 'PGRST202' || String(error?.message || '').includes('PGRST202');
+                if (!v3Missing) throw error;
+                try {
+                    payload = await this._rpc('admin_identities_v2');
+                } catch (fallbackError) {
+                    const v2Missing = fallbackError?.payload?.code === 'PGRST202' || String(fallbackError?.message || '').includes('PGRST202');
+                    if (!v2Missing) throw fallbackError;
+                    const identities = await this._rpc('admin_identities');
+                    payload = { schema_version: 1, identities: Array.isArray(identities) ? identities : [], summary: {}, unresolved_sources: [], recent_sources: [], recent_window_days: 30 };
+                    legacyFallback = true;
+                }
             }
             if (!payload || typeof payload !== 'object' || !Array.isArray(payload.identities)) {
                 throw new Error('Contrat Identités invalide');
@@ -15080,7 +15093,7 @@ class AdminPage {
         const unresolved = Array.isArray(this._identityUnresolvedSources) ? this._identityUnresolvedSources : [];
         recent.forEach(source => {
             const key = String(source?.source_id || 'recent:' + byId.size);
-            byId.set(key, { ...(source || {}), is_recent: true, is_unresolved: source?.resolution_state === 'unresolved' });
+            byId.set(key, { ...(source || {}), is_recent: true, is_unresolved: source?.resolution_state !== 'verified' });
         });
         unresolved.forEach(source => {
             const key = String(source?.source_id || 'unresolved:' + byId.size);
@@ -15120,20 +15133,28 @@ class AdminPage {
         }
         el.innerHTML = rows.map(source => {
             const unresolvedState = source.is_unresolved === true;
+            const provisionalState = source.resolution_state === 'provisional';
+            const requiredEvidence = Math.max(1, Number(source.required_evidence) || 32);
+            const evidenceCount = Math.max(0, Math.min(requiredEvidence, Number(source.evidence_count) || 0));
             const enabled = source.enabled !== false;
             const ready = source.sync_status === 'ready';
             const status = !enabled
                 ? '<span class="badge gray">désactivée</span>'
                 : ready ? '<span class="badge green">ready</span>' : `<span class="badge ${source.sync_status === 'error' ? 'red' : 'gray'}">${esc(source.sync_status || 'en attente')}</span>`;
-            const resolution = unresolvedState
-                ? '<strong>Empreinte non résolue</strong><br>Visible ici jusqu’au rattachement serveur.'
+            const resolution = provisionalState
+                ? `<strong>Provisoire · ${AdminPage.n(evidenceCount)}/${AdminPage.n(requiredEvidence)} signaux</strong><br>Enrichissements isolés à cette source jusqu’à la vérification.`
+                : unresolvedState
+                ? '<strong>Empreinte en attente</strong><br>Une synchronisation doit encore produire une empreinte serveur.'
                 : `<strong>Identité vérifiée</strong><br>${esc(source.identity_name || 'Rattachement confirmé')}`;
-            const badges = `${source.is_recent ? `<span class="badge blue">ajout ${esc(AdminPage.timeAgo(source.created_at))}</span>` : ''}${unresolvedState ? '<span class="badge amber">non résolue</span>' : ''}${status}`;
-            return `<div class="id-intake-row ${unresolvedState ? 'is-unresolved' : ''}">
+            const badges = `${source.is_recent ? `<span class="badge blue">ajout ${esc(AdminPage.timeAgo(source.created_at))}</span>` : ''}${provisionalState ? '<span class="badge amber">provisoire</span>' : unresolvedState ? '<span class="badge amber">en attente</span>' : ''}${status}`;
+            return `<div class="id-intake-row ${unresolvedState ? 'is-unresolved' : ''} ${provisionalState ? 'is-provisional' : ''}">
                 <div class="id-intake-source"><span class="id-intake-name" title="${esc(source.display_name || 'Source')}">${esc(source.display_name || 'Source sans nom')}</span><div class="id-intake-meta">${esc(String(source.source_type || 'source').toUpperCase())} · ajoutée ${source.created_at ? esc(AdminPage.timeAgo(source.created_at)) : 'à une date inconnue'}</div><div class="id-intake-badges">${badges}</div></div>
                 <div class="id-intake-owner">${esc(source.owner_email || 'Compte indisponible')}${source.is_driver ? '<br><span class="badge blue">pilote</span>' : ''}</div>
                 <div class="id-intake-resolution">${resolution}</div>
-                <button type="button" class="id-intake-open" data-source-name="${esc(source.display_name || '')}">Voir dans Providers</button>
+                <div class="id-intake-actions">
+                  ${unresolvedState ? `<button type="button" class="id-intake-retry" data-source-id="${esc(source.source_id || '')}">Relancer la résolution</button>` : ''}
+                  <button type="button" class="id-intake-open" data-source-name="${esc(source.display_name || '')}">Voir dans Providers</button>
+                </div>
             </div>`;
         }).join('') + (exactIntakeCount > rows.length
             ? `<div class="id-intake-limit">${AdminPage.n(rows.length)} sources affichées sur ${AdminPage.n(exactIntakeCount)} · affinez la recherche ou ouvrez Providers pour la liste complète.</div>`
@@ -15144,6 +15165,35 @@ class AdminPage {
             this._provFilter = '';
             this._navigate('providers');
         }));
+        el.querySelectorAll('.id-intake-retry').forEach(button => button.addEventListener('click', () => {
+            this._retryProviderIdentity(button);
+        }));
+    }
+
+    async _retryProviderIdentity(button) {
+        const sourceId = String(button?.dataset?.sourceId || '');
+        if (!/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(sourceId) || button.disabled) return;
+        const original = button.textContent;
+        button.disabled = true;
+        button.setAttribute('aria-busy', 'true');
+        button.textContent = 'Relance en cours…';
+        try {
+            const response = await fetch(`${this._sbUrl()}/functions/v1/norva-source-sync/admin/resync/${encodeURIComponent(sourceId)}`, {
+                method: 'POST',
+                headers: { apikey: this._sbKey(), Authorization: `Bearer ${this._token()}`, 'Content-Type': 'application/json' },
+                body: '{}'
+            });
+            if (!response.ok) throw new Error('retry-failed');
+            button.textContent = 'Résolution relancée';
+            this._toast('Résolution relancée : les signaux vont être recalculés.', 'ok');
+            await this._loadIdentities({ quiet: true });
+        } catch (_) {
+            button.textContent = original;
+            button.disabled = false;
+            this._toast('Relance impossible pour le moment.', 'err');
+        } finally {
+            button.removeAttribute('aria-busy');
+        }
     }
 
     _renderIdentities(list) {

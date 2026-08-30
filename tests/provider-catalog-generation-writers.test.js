@@ -661,7 +661,8 @@ test('legacy physical writers use exact ABA overloads and fallback only when the
   assert.equal(denied.length, 1, 'permission/ABA failures must never fall back to legacy');
 
   const overview = source(path.join(SHARED, 'provider-overview-backfill.ts'));
-  assert.match(overview, /callActiveCatalogGenerationRpc\(db, "record_provider_overview_outcome"/);
+  assert.match(overview, /const rpcName = input\.identityScope === "source"[\s\S]*"record_source_provider_overview_outcome"[\s\S]*"record_provider_overview_outcome"/);
+  assert.match(overview, /callActiveCatalogGenerationRpc\(db, rpcName/);
   assert.match(overview, /generation: options\.generation/g);
   const sourceSync = source(path.join(ROOT, 'supabase', 'functions', 'norva-source-sync', 'index.ts'));
   assert.match(sourceSync, /backfillProviderOverviews\(\{[\s\S]{0,220}generation: accessSnapshot/);

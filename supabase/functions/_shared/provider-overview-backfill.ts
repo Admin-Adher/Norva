@@ -23,6 +23,7 @@ type ProviderOverviewBackfillOptions = {
   assertSourceCurrent?: () => Promise<void>;
   limit?: number;
   concurrency?: number;
+  identityScope?: "verified" | "source";
 };
 
 const EMPTY_PROVIDER_TEXT =
@@ -127,9 +128,13 @@ async function recordProviderOverview(
     retryAt: string | null;
     provenance: JsonRecord;
     generation: ActiveCatalogGeneration;
+    identityScope: "verified" | "source";
   },
 ) {
-  const { data, error } = await callActiveCatalogGenerationRpc(db, "record_provider_overview_outcome", {
+  const rpcName = input.identityScope === "source"
+    ? "record_source_provider_overview_outcome"
+    : "record_provider_overview_outcome";
+  const { data, error } = await callActiveCatalogGenerationRpc(db, rpcName, {
     p_user_id: input.userId,
     p_source_id: input.sourceId,
     p_external_id: input.externalId,
@@ -140,7 +145,7 @@ async function recordProviderOverview(
     p_retry_at: input.retryAt,
     p_provenance: input.provenance,
   }, input.generation);
-  if (error) throw new Error(`record_provider_overview_outcome failed: ${error.message}`);
+  if (error) throw new Error(`${rpcName} failed: ${error.message}`);
   return recordOrEmpty(data);
 }
 
@@ -155,12 +160,16 @@ async function recordProviderOverview(
 export async function backfillProviderOverviews(options: ProviderOverviewBackfillOptions) {
   const limit = Math.max(1, Math.min(8, Number(options.limit) || 4));
   const concurrency = Math.max(1, Math.min(2, Number(options.concurrency) || 2));
-  const { data, error } = await options.db.rpc("claim_provider_overview_candidates", {
+  const identityScope = options.identityScope === "source" ? "source" : "verified";
+  const claimRpc = identityScope === "source"
+    ? "claim_source_provider_overview_candidates"
+    : "claim_provider_overview_candidates";
+  const { data, error } = await options.db.rpc(claimRpc, {
     p_user_id: options.userId,
     p_source_id: options.sourceId,
     p_limit: limit,
   });
-  if (error) throw new Error(`claim_provider_overview_candidates failed: ${error.message}`);
+  if (error) throw new Error(`${claimRpc} failed: ${error.message}`);
 
   const candidates = (Array.isArray(data) ? data : []) as ProviderOverviewCandidate[];
   if (!candidates.length) {
@@ -174,6 +183,7 @@ export async function backfillProviderOverviews(options: ProviderOverviewBackfil
       retried: 0,
       hasMore: false,
       exhausted: true,
+      identityScope,
     };
   }
 
@@ -207,8 +217,12 @@ export async function backfillProviderOverviews(options: ProviderOverviewBackfil
           imdbId: null,
           outcome: "resolved",
           retryAt: null,
-          provenance: { kind: "canonical-provider-cache", schemaVersion: 1 },
+          provenance: {
+            kind: identityScope === "source" ? "source-provider-cache" : "canonical-provider-cache",
+            schemaVersion: 1,
+          },
           generation: options.generation,
+          identityScope,
         });
         processed += 1;
         cached += 1;
@@ -248,6 +262,7 @@ export async function backfillProviderOverviews(options: ProviderOverviewBackfil
             transient: true,
           },
           generation: options.generation,
+          identityScope,
         });
         processed += 1;
         retried += 1;
@@ -285,6 +300,7 @@ export async function backfillProviderOverviews(options: ProviderOverviewBackfil
           hasImdbId: Boolean(ids.imdbId),
         },
         generation: options.generation,
+        identityScope,
       });
       processed += 1;
       updated += Math.max(0, Number(result.titles_updated) || 0);
@@ -313,5 +329,6 @@ export async function backfillProviderOverviews(options: ProviderOverviewBackfil
     skipped: stoppedAt,
     hasMore: paused || candidates.length >= limit,
     exhausted: !paused && candidates.length < limit,
+    identityScope,
   };
 }

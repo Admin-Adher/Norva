@@ -10,6 +10,7 @@ const ROOT = path.resolve(__dirname, '..');
 const read = (relativePath) => fs.readFileSync(path.join(ROOT, relativePath), 'utf8');
 const source = read('public/js/pages/AdminPage.js');
 const migration = read('supabase/migrations/20260830080313_admin_identities_verified_source_truth_v2.sql');
+const lifecycleMigration = read('supabase/migrations/20260830091654_provisional_provider_identity_lifecycle.sql');
 
 function fakeElement() {
   return {
@@ -91,10 +92,10 @@ test('Identities workspace exposes the intake queue, compatibility fallback and 
   assert.ok(start > 0 && end > start);
   const identities = source.slice(start, end);
 
-  assert.match(identities, /Sources non résolues \/ récemment ajoutées/);
+  assert.match(identities, /Sources provisoires \/ récemment ajoutées/);
   assert.match(identities, /Rattachements vérifiés/);
-  assert.match(identities, /this\._rpc\('admin_identities_v2'\)/);
-  assert.match(identities, /PGRST202[\s\S]*this\._rpc\('admin_identities'\)/);
+  assert.match(identities, /this\._rpc\('admin_identities_v3'\)/);
+  assert.match(identities, /PGRST202[\s\S]*this\._rpc\('admin_identities_v2'\)[\s\S]*PGRST202[\s\S]*this\._rpc\('admin_identities'\)/);
   assert.match(identities, /window\.setInterval[\s\S]*30000/);
   assert.match(identities, /document\.visibilityState !== 'visible'/);
   assert.match(identities, /sourceCount > sources\.length/);
@@ -110,6 +111,7 @@ test('Identities styles keep controls touch-sized, responsive and visibly focuse
   const css = source.slice(start, end);
 
   assert.match(css, /\.id-intake-open\{[^}]*min-height:44px/);
+  assert.match(css, /\.id-intake-retry\{[^}]*min-height:44px/);
   assert.match(css, /#id-search[^}]*min-height:44px/);
   assert.match(css, /\.id-intake-open:focus-visible\{[^}]*outline:2px solid var\(--adm-blue\)/);
   assert.match(css, /@media\(max-width:920px\)/);
@@ -154,7 +156,9 @@ test('Identity rendering deduplicates recent unresolved sources and reports exac
     sync_status: 'pending',
     enabled: true,
     created_at: '2026-08-30T07:30:00Z',
-    resolution_state: 'unresolved',
+    resolution_state: 'provisional',
+    evidence_count: 1,
+    required_evidence: 32,
   };
   Object.assign(page, {
     _idFilter: 'driver',
@@ -193,7 +197,8 @@ test('Identity rendering deduplicates recent unresolved sources and reports exac
   assert.equal(elements['id-intake-count'].textContent, '2');
   assert.equal((elements['admin-identity-intake'].innerHTML.match(/class="id-intake-row/g) || []).length, 2);
   assert.match(elements['admin-identity-intake'].innerHTML, /Source en attente/);
-  assert.match(elements['admin-identity-intake'].innerHTML, /Empreinte non résolue/);
+  assert.match(elements['admin-identity-intake'].innerHTML, /Provisoire · 1\/32 signaux/);
+  assert.match(elements['admin-identity-intake'].innerHTML, /Relancer la résolution/);
   assert.match(elements['admin-identity-intake'].innerHTML, /Voir dans Providers/);
   assert.doesNotMatch(elements['admin-identity-intake'].innerHTML, /<img src=x/);
   assert.match(elements['admin-identity-intake'].innerHTML, /&lt;img src=x onerror=alert\(1\)&gt;/);
@@ -211,7 +216,7 @@ test('Identity rendering deduplicates recent unresolved sources and reports exac
   assert.doesNotMatch(elements['admin-identity-intake'].innerHTML, /File de rattachement à jour/);
 });
 
-test('Identity loader prefers v2 and only falls back when PostgREST has not loaded it yet', async () => {
+test('Identity loader prefers v3 and falls back through v2 only when PostgREST has not loaded it yet', async () => {
   const intake = fakeElement();
   const document = {
     getElementById(id) { return id === 'admin-identity-intake' ? intake : null; },
@@ -230,7 +235,7 @@ test('Identity loader prefers v2 and only falls back when PostgREST has not load
     async _rpc(name) {
       calls.push(name);
       return {
-        schema_version: 2,
+        schema_version: 3,
         summary: { unresolved_source_count: 1 },
         identities: [{ id: 'identity-v2' }],
         unresolved_sources: [{ source_id: 'pending' }],
@@ -244,7 +249,7 @@ test('Identity loader prefers v2 and only falls back when PostgREST has not load
 
   await page._loadIdentities();
 
-  assert.deepEqual(calls, ['admin_identities_v2']);
+  assert.deepEqual(calls, ['admin_identities_v3']);
   assert.equal(page._identities[0].id, 'identity-v2');
   assert.equal(page._identityUnresolvedSources[0].source_id, 'pending');
   assert.equal(page._identityLegacyFallback, false);
@@ -257,7 +262,7 @@ test('Identity loader prefers v2 and only falls back when PostgREST has not load
     _identityLoadInFlight: false,
     async _rpc(name) {
       fallbackCalls.push(name);
-      if (name === 'admin_identities_v2') {
+      if (name === 'admin_identities_v3' || name === 'admin_identities_v2') {
         const error = new Error('function missing');
         error.payload = { code: 'PGRST202' };
         throw error;
@@ -270,7 +275,19 @@ test('Identity loader prefers v2 and only falls back when PostgREST has not load
 
   await fallback._loadIdentities();
 
-  assert.deepEqual(fallbackCalls, ['admin_identities_v2', 'admin_identities']);
+  assert.deepEqual(fallbackCalls, ['admin_identities_v3', 'admin_identities_v2', 'admin_identities']);
   assert.equal(fallback._identities[0].id, 'legacy-identity');
   assert.equal(fallback._identityLegacyFallback, true);
+});
+
+test('Provisional identity admin contract exposes bounded progress but no provider key', () => {
+  assert.match(lifecycleMigration, /create or replace function public\.admin_identities_v3\(\)/);
+  assert.match(lifecycleMigration, /'resolution_state', 'provisional'/);
+  assert.match(lifecycleMigration, /'evidence_count', candidate\.evidence_count/);
+  assert.match(lifecycleMigration, /'required_evidence', candidate\.required_evidence/);
+  const adminContract = lifecycleMigration.slice(lifecycleMigration.indexOf('create or replace function public.admin_identities_v3()'));
+  assert.doesNotMatch(adminContract, /'provider_key'/);
+  assert.doesNotMatch(adminContract, /sync_error|last_error/);
+  assert.match(adminContract, /revoke all on function public\.admin_identities_v3\(\)[\s\S]*from public, anon, authenticated/);
+  assert.match(adminContract, /grant execute on function public\.admin_identities_v3\(\)[\s\S]*to authenticated/);
 });

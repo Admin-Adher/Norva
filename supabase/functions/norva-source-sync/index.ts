@@ -1694,7 +1694,9 @@ async function runProviderOverviewFleetLane(
   }
 
   // Cross-account fan-out is allowed only after the server-derived stream-id
-  // identity is present. Never fall back to owner-editable source hints.
+  // identity is present. A provisional source still runs this lane, but its
+  // claim/cache/record RPCs are keyed only by source_id and never consult
+  // owner-editable source hints.
   const { data: verifiedIdentity, error: identityError } = await db
     .from("catalog_source_provider_identities")
     .select("identity_id")
@@ -1702,17 +1704,7 @@ async function runProviderOverviewFleetLane(
     .eq("user_id", claim.user_id)
     .maybeSingle();
   if (identityError) throw new Error(`Unable to verify synopsis provider identity: ${identityError.message}`);
-  if (!verifiedIdentity?.identity_id) {
-    return {
-      mode: "provider-overview",
-      processed: 0,
-      updated: 0,
-      skipped: "provider-identity-pending",
-      paused: true,
-      hasMore: true,
-      exhausted: false,
-    };
-  }
+  const identityScope = verifiedIdentity?.identity_id ? "verified" : "source";
 
   if (!source.config_ciphertext) throw new Error("Xtream source has no managed cloud configuration");
   const runtimeConfig = await getRuntimeConfig(db);
@@ -1743,6 +1735,7 @@ async function runProviderOverviewFleetLane(
     generation: accessSnapshot,
     limit: 4,
     concurrency: 2,
+    identityScope,
     assertSourceCurrent: () => assertCatalogSnapshotCurrent(
       claim.source_id,
       claim.user_id,
