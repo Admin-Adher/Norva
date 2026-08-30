@@ -360,7 +360,7 @@ test('Gateway exposes every exact-file audio track while an out-of-cohort choice
     assert.equal(page.selectedAudioStreamIndex, exactTracks[9].index);
 });
 
-test('uncertified rendition language and title stay explicitly unknown', () => {
+test('uncertified rendition language uses provider metadata only as a display fallback', () => {
     const WatchPage = loadWatchPage();
     const harness = makePage(WatchPage, { validationStatus: 'pending' });
     configureAndAttach(harness);
@@ -368,8 +368,14 @@ test('uncertified rendition language and title stay explicitly unknown', () => {
 
     assert.equal(tracks[0].language, null);
     assert.equal(tracks[1].language, null);
-    assert.match(tracks[1].label, /^Unknown language/);
-    assert.doesNotMatch(tracks[1].label, /English/i);
+    assert.match(tracks[0].label, /^Unknown language/, 'an absent/und tag remains honestly unknown');
+    assert.match(tracks[1].label, /^English/, 'a valid HLS language tag labels the menu immediately');
+    assert.doesNotMatch(tracks[1].label, /English tag/i, 'the free-form provider title is not trusted');
+    assert.equal(
+        harness.page._gatewayAudioRenditions[1].language,
+        null,
+        'provider metadata never becomes the authoritative verified language',
+    );
 });
 
 test('a restored absolute preference remains pending until Hls.js confirms it', async () => {
