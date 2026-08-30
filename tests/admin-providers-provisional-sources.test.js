@@ -11,6 +11,7 @@ const ROOT = path.resolve(__dirname, '..');
 const read = (relativePath) => fs.readFileSync(path.join(ROOT, relativePath), 'utf8');
 const source = read('public/js/pages/AdminPage.js');
 const migration = read('supabase/migrations/20260830123000_admin_sources_provisional_v2.sql');
+const completeMigration = read('supabase/migrations/20260830123737_admin_sources_complete_v3.sql');
 
 function fakeElement() {
   const classes = new Set();
@@ -96,7 +97,28 @@ test('Providers v2 contract appends bounded provisional sources from authoritati
   assert.match(migration, /notify pgrst, 'reload schema'/);
 });
 
-test('Providers loader prefers v2 and falls back only while PostgREST loads the function', async () => {
+test('Providers v3 starts from every live Xtream source and attaches authoritative state', () => {
+  assert.match(completeMigration, /create or replace function public\.admin_sources_v3\(\)/);
+  assert.match(completeMigration, /stable[\s\S]*security definer[\s\S]*set search_path = ''/);
+  assert.match(completeMigration, /if not public\.is_admin\(\)/);
+  assert.match(completeMigration, /from public\.cloud_sources source[\s\S]*where source\.deleted_at is null[\s\S]*source\.source_type = 'xtream'/);
+  assert.match(completeMigration, /left join public\.catalog_source_provider_identities verified[\s\S]*verified\.source_id = source\.id[\s\S]*verified\.user_id = source\.user_id/);
+  assert.match(completeMigration, /left join public\.catalog_source_provider_identity_candidates candidate[\s\S]*candidate\.source_id = source\.id[\s\S]*candidate\.user_id = source\.user_id/);
+  assert.match(completeMigration, /join live_sources source[\s\S]*source\.source_id = item\.source_id[\s\S]*source\.user_id = item\.user_id/);
+  assert.match(completeMigration, /join live_sources source[\s\S]*source\.source_id = variant\.source_id[\s\S]*source\.user_id = variant\.user_id/);
+  assert.match(completeMigration, /'inventory_scope', 'all_live_xtream_sources'/);
+  assert.match(completeMigration, /'source_count', count\(\*\)/);
+  assert.match(completeMigration, /'verified_source_count'/);
+  assert.match(completeMigration, /'provisional_source_count'/);
+  assert.match(completeMigration, /'unresolved_source_count'/);
+  assert.doesNotMatch(completeMigration, /public\.admin_sources\(\)|provider_key|last_error/);
+  assert.doesNotMatch(completeMigration, /limit\s+\d+/i);
+  assert.match(completeMigration, /revoke all on function public\.admin_sources_v3\(\)[\s\S]*from public, anon, authenticated/);
+  assert.match(completeMigration, /grant execute on function public\.admin_sources_v3\(\)[\s\S]*to authenticated/);
+  assert.match(completeMigration, /notify pgrst, 'reload schema'/);
+});
+
+test('Providers loader prefers complete v3 and falls back only while PostgREST loads it', async () => {
   const AdminPage = loadAdminPage();
   const page = Object.create(AdminPage.prototype);
   const calls = [];
@@ -104,21 +126,29 @@ test('Providers loader prefers v2 and falls back only while PostgREST loads the 
     async _rpc(name) {
       calls.push(name);
       return {
-        schema_version: 2,
+        schema_version: 3,
         generated_at: '2026-08-30T10:00:00Z',
-        sources: [{ source_id: 'provisional-1' }],
-        provisional_source_count: 1,
-        provisional_sources_emitted: 1,
-        provisional_sources_truncated: false,
-        provisional_sample_limit: 100,
+        inventory_scope: 'all_live_xtream_sources',
+        statistics_source: 'live_indexed_aggregates',
+        summary: {
+          source_count: 2,
+          verified_source_count: 1,
+          provisional_source_count: 1,
+          unresolved_source_count: 0,
+        },
+        sources: [{ source_id: 'verified-1' }, { source_id: 'provisional-1' }],
       };
     },
   });
 
   const rows = await page._loadProviderSources();
-  assert.deepEqual(calls, ['admin_sources_v2']);
-  assert.equal(rows[0].source_id, 'provisional-1');
+  assert.deepEqual(calls, ['admin_sources_v3']);
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].source_id, 'verified-1');
+  assert.equal(page._providerSourcesMeta.sourceCount, 2);
+  assert.equal(page._providerSourcesMeta.verifiedSourceCount, 1);
   assert.equal(page._providerSourcesMeta.provisionalSourceCount, 1);
+  assert.equal(page._providerSourcesMeta.sourceInventoryComplete, true);
   assert.equal(page._providerSourcesLegacyFallback, false);
 
   const fallbackCalls = [];
@@ -126,7 +156,36 @@ test('Providers loader prefers v2 and falls back only while PostgREST loads the 
   Object.assign(fallback, {
     async _rpc(name) {
       fallbackCalls.push(name);
-      if (name === 'admin_sources_v2') {
+      if (name === 'admin_sources_v3') {
+        const error = new Error('function missing');
+        error.payload = { code: 'PGRST202' };
+        throw error;
+      }
+      return {
+        schema_version: 2,
+        generated_at: '2026-08-30T10:00:00Z',
+        sources: [{ source_id: 'v2-source' }],
+        provisional_source_count: 0,
+        provisional_sources_emitted: 0,
+        provisional_sources_truncated: false,
+        provisional_sample_limit: 100,
+      };
+    },
+  });
+
+  const fallbackRows = await fallback._loadProviderSources();
+  assert.deepEqual(fallbackCalls, ['admin_sources_v3', 'admin_sources_v2']);
+  assert.equal(fallbackRows[0].source_id, 'v2-source');
+  assert.equal(fallback._providerSourcesLegacyFallback, true);
+  assert.equal(fallback._providerSourcesMeta.contractVersion, 2);
+  assert.equal(fallback._providerSourcesMeta.sourceInventoryComplete, false);
+
+  const legacyCalls = [];
+  const legacy = Object.create(AdminPage.prototype);
+  Object.assign(legacy, {
+    async _rpc(name) {
+      legacyCalls.push(name);
+      if (name === 'admin_sources_v3' || name === 'admin_sources_v2') {
         const error = new Error('function missing');
         error.payload = { code: 'PGRST202' };
         throw error;
@@ -134,11 +193,10 @@ test('Providers loader prefers v2 and falls back only while PostgREST loads the 
       return [{ source_id: 'legacy-source' }];
     },
   });
-
-  const legacyRows = await fallback._loadProviderSources();
-  assert.deepEqual(fallbackCalls, ['admin_sources_v2', 'admin_sources']);
+  const legacyRows = await legacy._loadProviderSources();
+  assert.deepEqual(legacyCalls, ['admin_sources_v3', 'admin_sources_v2', 'admin_sources']);
   assert.equal(legacyRows[0].source_id, 'legacy-source');
-  assert.equal(fallback._providerSourcesLegacyFallback, true);
+  assert.equal(legacy._providerSourcesMeta.contractVersion, 1);
 
   const fatalCalls = [];
   const fatal = Object.create(AdminPage.prototype);
@@ -151,7 +209,7 @@ test('Providers loader prefers v2 and falls back only while PostgREST loads the 
     },
   });
   await assert.rejects(() => fatal._loadProviderSources(), /forbidden/);
-  assert.deepEqual(fatalCalls, ['admin_sources_v2']);
+  assert.deepEqual(fatalCalls, ['admin_sources_v3']);
 });
 
 test('Providers rendering makes provisional isolation and progress explicit', () => {
@@ -175,6 +233,8 @@ test('Providers rendering makes provisional isolation and progress explicit', ()
     _provSearch: '',
     _providerSourcesLegacyFallback: false,
     _providerSourcesMeta: {
+      sourceInventoryComplete: true,
+      sourceCount: 2,
       provisionalSourceCount: 3,
       provisionalSourcesEmitted: 2,
       provisionalSourcesTruncated: true,
@@ -201,6 +261,7 @@ test('Providers rendering makes provisional isolation and progress explicit', ()
     sync_status: 'ready',
     resolution_state: 'unresolved',
   }];
+  page._sources = rows;
 
   page._renderSources(rows);
   const html = elements['admin-sources'].innerHTML;

@@ -95,6 +95,11 @@ class AdminPage {
         this._notificationDraft = null;
         this._notificationScheduleFilter = 'active';
         this._providerSourcesMeta = {
+            contractVersion: 0,
+            sourceInventoryComplete: false,
+            sourceCount: 0,
+            verifiedSourceCount: 0,
+            unresolvedSourceCount: 0,
             provisionalSourceCount: 0,
             provisionalSourcesEmitted: 0,
             provisionalSourcesTruncated: false,
@@ -643,10 +648,13 @@ class AdminPage {
 #page-admin .id-intake-open:hover{border-color:var(--adm-blue);}
 #page-admin .id-intake-open:focus-visible{border-color:var(--adm-blue);outline:2px solid var(--adm-blue);outline-offset:2px;}
 #page-admin .id-intake-actions{display:flex;align-items:stretch;justify-content:flex-end;gap:8px;flex-wrap:wrap;}
-#page-admin .id-intake-retry{min-height:44px;padding:7px 12px;border:1px solid rgba(251,191,36,.42);border-radius:8px;background:rgba(251,191,36,.08);color:var(--adm-tx);font:inherit;font-size:11.5px;font-weight:680;cursor:pointer;white-space:nowrap;touch-action:manipulation;}
-#page-admin .id-intake-retry:hover{border-color:var(--adm-amber);background:rgba(251,191,36,.12);}
-#page-admin .id-intake-retry:focus-visible{border-color:var(--adm-amber);outline:2px solid var(--adm-amber);outline-offset:2px;}
-#page-admin .id-intake-retry:disabled{cursor:wait;opacity:.62;}
+#page-admin .id-intake-retry{min-height:44px;padding:7px 12px;border:1px solid var(--adm-line);border-radius:8px;background:var(--color-bg-secondary);color:var(--adm-tx);font:inherit;font-size:11.5px;font-weight:650;cursor:pointer;white-space:nowrap;touch-action:manipulation;}
+#page-admin .id-intake-retry:hover{border-color:var(--adm-blue);}
+#page-admin .id-intake-retry:focus-visible{border-color:var(--adm-blue);outline:2px solid var(--adm-blue);outline-offset:2px;}
+#page-admin .id-intake-attest{min-height:44px;padding:7px 12px;border:1px solid rgba(251,191,36,.48);border-radius:8px;background:rgba(251,191,36,.1);color:var(--adm-tx);font:inherit;font-size:11.5px;font-weight:700;cursor:pointer;white-space:nowrap;touch-action:manipulation;}
+#page-admin .id-intake-attest:hover{border-color:var(--adm-amber);background:rgba(251,191,36,.15);}
+#page-admin .id-intake-attest:focus-visible{border-color:var(--adm-amber);outline:2px solid var(--adm-amber);outline-offset:2px;}
+#page-admin .id-intake-retry:disabled,#page-admin .id-intake-attest:disabled{cursor:wait;opacity:.62;}
 #page-admin #id-search,#page-admin #id-filters .qv-chip,#page-admin .identity-acts .id-actbtn{min-height:44px;}
 #page-admin .id-intake-empty{display:flex;align-items:flex-start;gap:10px;padding:15px 17px;color:var(--adm-tx2);font-size:12px;line-height:1.5;}
 #page-admin .id-intake-empty strong{display:block;color:var(--adm-tx);font-size:12.5px;}
@@ -655,7 +663,7 @@ class AdminPage {
 #page-admin .id-source-time small{color:var(--adm-tx3);font-size:10.5px;}
 #page-admin .id-sample-note{margin-top:8px;color:var(--adm-tx3);font-size:11px;}
 @media(max-width:920px){#page-admin .id-intake-row{grid-template-columns:minmax(0,1fr) minmax(150px,.8fr) auto;}#page-admin .id-intake-resolution{grid-column:1 / 3;}#page-admin .id-intake-actions{grid-column:3;grid-row:1 / 3;flex-direction:column;}}
-@media(max-width:640px){#page-admin .id-intake-head{padding:14px;}#page-admin .id-intake-row{grid-template-columns:minmax(0,1fr);gap:8px;padding:13px 14px;}#page-admin .id-intake-resolution,#page-admin .id-intake-actions{grid-column:auto;grid-row:auto;}#page-admin .id-intake-actions{width:100%;flex-direction:column;}#page-admin .id-intake-open,#page-admin .id-intake-retry{width:100%;}#page-admin .id-integrity{align-items:flex-start;}#page-admin #id-kpis .kpi-group{padding:12px;}#page-admin #id-kpis .admin-cards{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;}#page-admin #id-kpis .kpi{padding:12px;}#page-admin #id-kpis .kpi .v{font-size:22px;}#page-admin #id-kpis .kpi .l{font-size:9.5px;}#page-admin #id-kpis .kpi-ic{width:26px;height:26px;}}
+@media(max-width:640px){#page-admin .id-intake-head{padding:14px;}#page-admin .id-intake-row{grid-template-columns:minmax(0,1fr);gap:8px;padding:13px 14px;}#page-admin .id-intake-resolution,#page-admin .id-intake-actions{grid-column:auto;grid-row:auto;}#page-admin .id-intake-actions{width:100%;flex-direction:column;}#page-admin .id-intake-open,#page-admin .id-intake-retry,#page-admin .id-intake-attest{width:100%;}#page-admin .id-integrity{align-items:flex-start;}#page-admin #id-kpis .kpi-group{padding:12px;}#page-admin #id-kpis .admin-cards{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;}#page-admin #id-kpis .kpi{padding:12px;}#page-admin #id-kpis .kpi .v{font-size:22px;}#page-admin #id-kpis .kpi .l{font-size:9.5px;}#page-admin #id-kpis .kpi-ic{width:26px;height:26px;}}
 /* Système: health gauge bar + Services ‖ Activité two-column */
 #page-admin .kpi-bar{height:7px;border-radius:4px;background:rgba(255,255,255,.08);overflow:hidden;margin-top:11px;}
 #page-admin .kpi-bar>i{display:block;height:100%;border-radius:4px;background:linear-gradient(90deg,#5b7cfa,#8b7cff);}
@@ -14935,33 +14943,71 @@ class AdminPage {
 
     async _loadProviderSources() {
         this._providerSourcesLegacyFallback = false;
+        const missingFunction = (error) => error?.payload?.code === 'PGRST202'
+            || String(error?.message || '').includes('PGRST202');
         let payload;
         try {
-            payload = await this._rpc('admin_sources_v2');
-        } catch (error) {
-            const code = error?.payload?.code || '';
-            if (code !== 'PGRST202' && !String(error?.message || '').includes('PGRST202')) throw error;
-            const legacy = await this._rpc('admin_sources');
-            if (!Array.isArray(legacy)) throw new Error('invalid_admin_sources_response');
+            payload = await this._rpc('admin_sources_v3');
+        } catch (v3Error) {
+            if (!missingFunction(v3Error)) throw v3Error;
+            let fallback;
+            try {
+                fallback = await this._rpc('admin_sources_v2');
+            } catch (v2Error) {
+                if (!missingFunction(v2Error)) throw v2Error;
+                const legacy = await this._rpc('admin_sources');
+                if (!Array.isArray(legacy)) throw new Error('invalid_admin_sources_response');
+                this._providerSourcesLegacyFallback = true;
+                this._providerSourcesMeta = {
+                    contractVersion: 1,
+                    sourceInventoryComplete: false,
+                    sourceCount: legacy.length,
+                    verifiedSourceCount: 0,
+                    unresolvedSourceCount: 0,
+                    provisionalSourceCount: 0,
+                    provisionalSourcesEmitted: 0,
+                    provisionalSourcesTruncated: false,
+                    provisionalSampleLimit: 0,
+                    generatedAt: null
+                };
+                return legacy;
+            }
+            if (!fallback || Array.isArray(fallback) || fallback.schema_version !== 2 || !Array.isArray(fallback.sources)) {
+                throw new Error('invalid_admin_sources_v2_response');
+            }
+            const fallbackCount = (value) => Math.max(0, Math.trunc(Number(value) || 0));
             this._providerSourcesLegacyFallback = true;
             this._providerSourcesMeta = {
-                provisionalSourceCount: 0,
-                provisionalSourcesEmitted: 0,
-                provisionalSourcesTruncated: false,
-                provisionalSampleLimit: 0,
-                generatedAt: null
+                contractVersion: 2,
+                sourceInventoryComplete: false,
+                sourceCount: fallback.sources.length,
+                verifiedSourceCount: 0,
+                unresolvedSourceCount: 0,
+                provisionalSourceCount: fallbackCount(fallback.provisional_source_count),
+                provisionalSourcesEmitted: fallbackCount(fallback.provisional_sources_emitted),
+                provisionalSourcesTruncated: fallback.provisional_sources_truncated === true,
+                provisionalSampleLimit: fallbackCount(fallback.provisional_sample_limit),
+                generatedAt: fallback.generated_at || null
             };
-            return legacy;
+            return fallback.sources;
         }
-        if (!payload || Array.isArray(payload) || payload.schema_version !== 2 || !Array.isArray(payload.sources)) {
-            throw new Error('invalid_admin_sources_v2_response');
+        if (!payload || Array.isArray(payload) || payload.schema_version !== 3 || !Array.isArray(payload.sources)
+            || payload.inventory_scope !== 'all_live_xtream_sources' || !payload.summary || typeof payload.summary !== 'object') {
+            throw new Error('invalid_admin_sources_v3_response');
         }
         const count = (value) => Math.max(0, Math.trunc(Number(value) || 0));
+        const sourceCount = count(payload.summary.source_count);
+        if (sourceCount !== payload.sources.length) throw new Error('incomplete_admin_sources_v3_response');
         this._providerSourcesMeta = {
-            provisionalSourceCount: count(payload.provisional_source_count),
-            provisionalSourcesEmitted: count(payload.provisional_sources_emitted),
-            provisionalSourcesTruncated: payload.provisional_sources_truncated === true,
-            provisionalSampleLimit: count(payload.provisional_sample_limit),
+            contractVersion: 3,
+            sourceInventoryComplete: true,
+            sourceCount,
+            verifiedSourceCount: count(payload.summary.verified_source_count),
+            unresolvedSourceCount: count(payload.summary.unresolved_source_count),
+            provisionalSourceCount: count(payload.summary.provisional_source_count),
+            provisionalSourcesEmitted: count(payload.summary.provisional_source_count),
+            provisionalSourcesTruncated: false,
+            provisionalSampleLimit: sourceCount,
             generatedAt: payload.generated_at || null
         };
         return payload.sources;
@@ -14970,10 +15016,19 @@ class AdminPage {
     _renderProviderScope() {
         const el = document.getElementById('prov-scope');
         if (!el) return;
-        el.classList.toggle('is-warn', this._providerSourcesLegacyFallback === true || this._providerSourcesMeta?.provisionalSourcesTruncated === true);
+        const expected = Math.max(0, Number(this._providerSourcesMeta?.sourceCount) || 0);
+        const rendered = Array.isArray(this._sources) ? this._sources.length : 0;
+        const inventoryMismatch = this._providerSourcesMeta?.sourceInventoryComplete === true && expected !== rendered;
+        el.classList.toggle('is-warn', this._providerSourcesLegacyFallback === true
+            || this._providerSourcesMeta?.provisionalSourcesTruncated === true || inventoryMismatch);
         if (this._providerSourcesLegacyFallback) {
             el.hidden = false;
-            el.innerHTML = '<strong>Vue de compatibilité.</strong> Le nouveau contrat n’est pas encore chargé ; certaines sources provisoires peuvent manquer.';
+            el.innerHTML = '<strong>Vue de compatibilité partielle.</strong> Le contrat exhaustif n’est pas encore chargé ; certaines sources vérifiées peuvent manquer.';
+            return;
+        }
+        if (inventoryMismatch) {
+            el.hidden = false;
+            el.innerHTML = `<strong>Inventaire incomplet : ${AdminPage.n(rendered)}/${AdminPage.n(expected)} sources reçues.</strong> Rechargez la page ; aucune source absente n’est interprétée comme supprimée.`;
             return;
         }
         const total = Math.max(0, Number(this._providerSourcesMeta?.provisionalSourceCount) || 0);
@@ -15228,7 +15283,7 @@ class AdminPage {
                 ? '<span class="badge gray">désactivée</span>'
                 : ready ? '<span class="badge green">ready</span>' : `<span class="badge ${source.sync_status === 'error' ? 'red' : 'gray'}">${esc(source.sync_status || 'en attente')}</span>`;
             const resolution = provisionalState
-                ? `<strong>Provisoire · ${AdminPage.n(evidenceCount)}/${AdminPage.n(requiredEvidence)} signaux</strong><br>Enrichissements isolés à cette source jusqu’à la vérification.`
+                ? `<strong>Provisoire · ${AdminPage.n(evidenceCount)}/${AdminPage.n(requiredEvidence)} signaux</strong><br>Enrichissements isolés à cette source. Une validation manuelle reste source-locale.`
                 : unresolvedState
                 ? '<strong>Empreinte en attente</strong><br>Une synchronisation doit encore produire une empreinte serveur.'
                 : `<strong>Identité vérifiée</strong><br>${esc(source.identity_name || 'Rattachement confirmé')}`;
@@ -15238,7 +15293,8 @@ class AdminPage {
                 <div class="id-intake-owner">${esc(source.owner_email || 'Compte indisponible')}${source.is_driver ? '<br><span class="badge blue">pilote</span>' : ''}</div>
                 <div class="id-intake-resolution">${resolution}</div>
                 <div class="id-intake-actions">
-                  ${unresolvedState ? `<button type="button" class="id-intake-retry" data-source-id="${esc(source.source_id || '')}">Relancer la résolution</button>` : ''}
+                  ${unresolvedState ? `<button type="button" class="id-intake-retry" data-source-id="${esc(source.source_id || '')}">Recalculer les signaux</button>` : ''}
+                  ${provisionalState && enabled && ready && evidenceCount > 0 ? `<button type="button" class="id-intake-attest" data-source-id="${esc(source.source_id || '')}" data-source-name="${esc(source.display_name || 'Source')}" data-evidence-count="${evidenceCount}" data-required-evidence="${requiredEvidence}" aria-label="Valider manuellement ${esc(source.display_name || 'cette source')}">Valider manuellement</button>` : ''}
                   <button type="button" class="id-intake-open" data-source-name="${esc(source.display_name || '')}">Voir dans Providers</button>
                 </div>
             </div>`;
@@ -15254,6 +15310,9 @@ class AdminPage {
         el.querySelectorAll('.id-intake-retry').forEach(button => button.addEventListener('click', () => {
             this._retryProviderIdentity(button);
         }));
+        el.querySelectorAll('.id-intake-attest').forEach(button => button.addEventListener('click', () => {
+            this._attestProviderIdentity(button);
+        }));
     }
 
     async _retryProviderIdentity(button) {
@@ -15262,7 +15321,7 @@ class AdminPage {
         const original = button.textContent;
         button.disabled = true;
         button.setAttribute('aria-busy', 'true');
-        button.textContent = 'Relance en cours…';
+        button.textContent = 'Recalcul en cours…';
         try {
             const response = await fetch(`${this._sbUrl()}/functions/v1/norva-source-sync/admin/resync/${encodeURIComponent(sourceId)}`, {
                 method: 'POST',
@@ -15270,13 +15329,59 @@ class AdminPage {
                 body: '{}'
             });
             if (!response.ok) throw new Error('retry-failed');
-            button.textContent = 'Résolution relancée';
-            this._toast('Résolution relancée : les signaux vont être recalculés.', 'ok');
+            button.textContent = 'Recalcul lancé';
+            this._toast('Recalcul lancé : les signaux vont être actualisés.', 'ok');
             await this._loadIdentities({ quiet: true });
         } catch (_) {
             button.textContent = original;
             button.disabled = false;
-            this._toast('Relance impossible pour le moment.', 'err');
+            this._toast('Recalcul impossible pour le moment.', 'err');
+        } finally {
+            button.removeAttribute('aria-busy');
+        }
+    }
+
+    async _attestProviderIdentity(button) {
+        const sourceId = String(button?.dataset?.sourceId || '');
+        if (!/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(sourceId) || button.disabled) return;
+        const sourceName = String(button.dataset.sourceName || 'cette source').trim() || 'cette source';
+        const evidenceCount = Math.max(1, Number(button.dataset.evidenceCount) || 1);
+        const requiredEvidence = Math.max(evidenceCount + 1, Number(button.dataset.requiredEvidence) || 32);
+        const reason = await this._modal({
+            title: `Valider ${sourceName} manuellement`,
+            message: `Cette attestation transforme les ${AdminPage.n(evidenceCount)}/${AdminPage.n(requiredEvidence)} signaux disponibles en une identité vérifiée propre à cette source. Elle n’autorise aucun rapprochement ni partage automatique avec un autre compte.`,
+            prompt: true,
+            multiline: true,
+            compact: true,
+            rows: 4,
+            maxLength: 500,
+            inputLabel: 'Motif interne de la validation',
+            hint: '3 à 500 caractères. Le motif sera conservé dans le journal d’audit.',
+            validate: value => value.length >= 3 && value.length <= 500,
+            validationMessage: 'Le motif doit contenir entre 3 et 500 caractères.',
+            okLabel: 'Valider cette source'
+        });
+        if (reason == null) return;
+
+        const original = button.textContent;
+        button.disabled = true;
+        button.setAttribute('aria-busy', 'true');
+        button.textContent = 'Validation…';
+        try {
+            const result = await this._rpc('admin_attest_source_provider_identity', {
+                p_source_id: sourceId,
+                p_reason: reason
+            });
+            if (!result || result.status !== 'verified' || result.cross_account_eligible !== false) {
+                throw new Error('attestation-contract-invalid');
+            }
+            button.textContent = 'Source validée';
+            this._toast(`${sourceName} est maintenant vérifiée et reste isolée à cette source.`, 'ok');
+            await this._loadIdentities({ quiet: true });
+        } catch (_) {
+            button.textContent = original;
+            button.disabled = false;
+            this._toast('Validation impossible. Aucun rattachement n’a été modifié.', 'err');
         } finally {
             button.removeAttribute('aria-busy');
         }

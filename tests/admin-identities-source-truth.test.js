@@ -112,8 +112,10 @@ test('Identities styles keep controls touch-sized, responsive and visibly focuse
 
   assert.match(css, /\.id-intake-open\{[^}]*min-height:44px/);
   assert.match(css, /\.id-intake-retry\{[^}]*min-height:44px/);
+  assert.match(css, /\.id-intake-attest\{[^}]*min-height:44px/);
   assert.match(css, /#id-search[^}]*min-height:44px/);
   assert.match(css, /\.id-intake-open:focus-visible\{[^}]*outline:2px solid var\(--adm-blue\)/);
+  assert.match(css, /\.id-intake-attest:focus-visible\{[^}]*outline:2px solid var\(--adm-amber\)/);
   assert.match(css, /@media\(max-width:920px\)/);
   assert.match(css, /@media\(max-width:640px\)/);
   assert.doesNotMatch(css, /#[0-9a-fA-F]{3,8}\b/);
@@ -198,7 +200,7 @@ test('Identity rendering deduplicates recent unresolved sources and reports exac
   assert.equal((elements['admin-identity-intake'].innerHTML.match(/class="id-intake-row/g) || []).length, 2);
   assert.match(elements['admin-identity-intake'].innerHTML, /Source en attente/);
   assert.match(elements['admin-identity-intake'].innerHTML, /Provisoire · 1\/32 signaux/);
-  assert.match(elements['admin-identity-intake'].innerHTML, /Relancer la résolution/);
+  assert.match(elements['admin-identity-intake'].innerHTML, /Recalculer les signaux/);
   assert.match(elements['admin-identity-intake'].innerHTML, /Voir dans Providers/);
   assert.doesNotMatch(elements['admin-identity-intake'].innerHTML, /<img src=x/);
   assert.match(elements['admin-identity-intake'].innerHTML, /&lt;img src=x onerror=alert\(1\)&gt;/);

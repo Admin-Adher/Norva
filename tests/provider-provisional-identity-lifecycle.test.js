@@ -90,12 +90,14 @@ test('provisional overview work uses source-local RPCs and never writes the glob
   assert.doesNotMatch(lane, /skipped: "provider-identity-pending"/);
 });
 
-test('admin renders bounded evidence and a safe retry control', () => {
+test('admin renders bounded evidence and distinguishes recalculation from attestation', () => {
   const identities = section(adminPage, '    _pageIdentites()', '    // ── Page: Moteur');
   const retry = section(adminPage, '    async _retryProviderIdentity(button)', '    _renderIdentities(list)');
   assert.match(identities, /this\._rpc\('admin_identities_v3'\)/);
   assert.match(identities, /Provisoire · \$\{AdminPage\.n\(evidenceCount\)\}\/\$\{AdminPage\.n\(requiredEvidence\)\} signaux/);
-  assert.match(identities, /Relancer la résolution/);
+  assert.match(identities, /Recalculer les signaux/);
+  assert.match(identities, /Valider manuellement/);
+  assert.match(identities, /this\._attestProviderIdentity\(button\)/);
   assert.match(retry, /if \(!\/\^\[0-9a-f\]\{8\}/);
   assert.match(retry, /button\.disabled = true/);
   assert.match(retry, /button\.setAttribute\('aria-busy', 'true'\)/);
