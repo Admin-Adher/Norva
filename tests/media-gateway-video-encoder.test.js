@@ -58,6 +58,7 @@ test('VAAPI is explicit, device-bound and preflighted with one local frame', () 
     assert.deepEqual(preflight, { ready: true, status: 'vaapi-ready' });
     assert.equal(call.binary, '/opt/ffmpeg/ffmpeg');
     assert.equal(call.args[call.args.indexOf('-vaapi_device') + 1], '/dev/dri/renderD128');
+    assert.equal(call.args[call.args.indexOf('-i') + 1], 'color=c=black:s=128x128:r=1');
     assert.equal(call.args[call.args.indexOf('-c:v') + 1], 'h264_vaapi');
     assert.equal(call.args[call.args.indexOf('-frames:v') + 1], '1');
     assert.equal(call.options.timeout, 15_000);

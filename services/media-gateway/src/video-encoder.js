@@ -4,6 +4,10 @@ const VIDEO_ENCODER_PROTOCOL = 1;
 const SOFTWARE_BACKEND = 'software';
 const VAAPI_BACKEND = 'vaapi';
 const DEFAULT_VAAPI_DEVICE = '/dev/dri/renderD128';
+// Modern Mesa/AMD VAAPI drivers advertise a 128x128 minimum H.264 encode
+// surface. Keep the boot preflight representative of that portable floor so a
+// healthy encoder is not rejected by an obsolete 64x64 probe.
+const VAAPI_PREFLIGHT_SURFACE_SIZE = 128;
 
 function videoEncoderConfigError(code) {
     const error = new Error(`Invalid media video encoder configuration (${code})`);
@@ -71,7 +75,7 @@ function preflightVideoEncoder(config, options = {}) {
             '-y',
             '-vaapi_device', config.device,
             '-f', 'lavfi',
-            '-i', 'color=c=black:s=64x64:r=1',
+            '-i', `color=c=black:s=${VAAPI_PREFLIGHT_SURFACE_SIZE}x${VAAPI_PREFLIGHT_SURFACE_SIZE}:r=1`,
             '-frames:v', '1',
             '-vf', 'format=nv12,hwupload',
             '-c:v', 'h264_vaapi',
