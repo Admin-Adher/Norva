@@ -45,6 +45,13 @@ import androidx.webkit.WebViewFeature;
 import tv.norva.analytics.NativeClarity;
 
 import java.lang.ref.WeakReference;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -60,6 +67,8 @@ public class MainActivity extends Activity {
     private static final String PREFS = "norva";
     private static final String PREF_SERVER_URL = "serverUrl";
     private static final String PREF_MODE = "mode"; // "cloud" | "server" | "standalone"
+    private static final String PREF_PENDING_PLAYBACK_CLOSES =
+            "pendingPlaybackSessionCloses";
     private static final String EXTRA_DEBUG_BUNDLED_DPAD_ASSETS =
             "tv.norva.tv.DEBUG_BUNDLED_DPAD_ASSETS";
     private static final String CLOUD_PAIR_URL = "https://norva.tv/cloud-pair.html?device=tv&returnTo=%2Fapp.html%3Fpaired%3D1%23home";
@@ -129,6 +138,19 @@ public class MainActivity extends Activity {
     private static volatile WeakReference<MainActivity> currentRef =
             new WeakReference<>(null);
     private final android.os.Handler uiHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+    private final Object playbackCloseLock = new Object();
+    private final Map<String, NativePlaybackClosePolicy.Entry> pendingPlaybackSessionCloses =
+            new LinkedHashMap<>();
+    // Continuations and retry state are memory-only. Durable storage contains
+    // only the bounded server UUID, close reason and absolute age anchor.
+    private final Map<String, Runnable> pendingPlaybackCloseContinuations =
+            new HashMap<>();
+    private final Map<String, Integer> playbackCloseDeliveryAttempts =
+            new HashMap<>();
+    private final Map<String, Runnable> playbackCloseRetryTasks =
+            new HashMap<>();
+    private final Set<String> acknowledgedPlaybackCloseSessionIds = new LinkedHashSet<>();
+    private boolean playbackCloseDeliveryActive = true;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -156,6 +178,7 @@ public class MainActivity extends Activity {
         showSplash();
         registerPlayerRecoveryBridge();
         registerPlaybackAuthBridge();
+        loadPendingPlaybackSessionCloses();
 
         String mode = prefs().getString(PREF_MODE, null);
         String saved = prefs().getString(PREF_SERVER_URL, null);
@@ -628,7 +651,10 @@ public class MainActivity extends Activity {
                 // window.__norvaNative before we call onProgress; the pump then retries
                 // like the deep-link pump, and only a CONFIRMED cloud save clears the record.
                 view.postDelayed(new Runnable() {
-                    @Override public void run() { flushPendingNativeProgress(); }
+                    @Override public void run() {
+                        flushPendingNativeProgress();
+                        flushPendingPlaybackSessionCloses(true);
+                    }
                 }, 1500);
             }
 
@@ -1314,6 +1340,16 @@ public class MainActivity extends Activity {
                 }
             });
         }
+
+        /** Terminal ACK after standalone.js confirms exact server-side expiry. */
+        @android.webkit.JavascriptInterface
+        public void ackPlaybackSessionClosed(final String sessionId) {
+            runOnUiThread(new Runnable() {
+                @Override public void run() {
+                    acknowledgePlaybackSessionClosed(sessionId);
+                }
+            });
+        }
     }
 
     private static final int REQ_PLAYER = 1001;
@@ -1490,15 +1526,34 @@ public class MainActivity extends Activity {
         if (returnedPlaybackAuthChannel != null) {
             clearPlaybackAuthChannel(returnedPlaybackAuthChannel);
         }
-        if (data == null || webView == null) return;
         // Backup acknowledgement for timeout/Back cancellation. The private
         // cancellation broadcast normally clears this first; the result token
         // covers lifecycle races where MainActivity was not resumed yet.
-        String returnedRecoveryToken =
-                data.getStringExtra(PlayerActivity.EXTRA_RECOVERY_TOKEN);
+        String returnedRecoveryToken = data == null
+                ? null : data.getStringExtra(PlayerActivity.EXTRA_RECOVERY_TOKEN);
         if (returnedRecoveryToken != null && !returnedRecoveryToken.isEmpty()) {
             clearPendingPlayerRecovery(returnedRecoveryToken);
         }
+        // Returning from the native player is terminal for its current recovery
+        // ownership. A late resolver response must be consumed, never relaunched.
+        clearPendingPlayerRecovery(null);
+        if (data == null) return;
+
+        // Progress and track preferences cannot create a provider session. Relay
+        // them immediately while the Activity result is still in memory; actions
+        // that can resolve the next stream remain gated on exact close + ACK.
+        persistPlayerResultState(data);
+        queuePlaybackSessionClose(
+                data.getStringExtra(PlayerActivity.EXTRA_PLAYBACK_SESSION_ID),
+                data.getStringExtra(PlayerActivity.EXTRA_PLAYBACK_CLOSE_REASON),
+                new Runnable() {
+                    @Override public void run() { continuePlayerResult(data); }
+                });
+    }
+
+    /** Relay state writes that cannot create or replace a playback session. */
+    private void persistPlayerResultState(android.content.Intent data) {
+        if (data == null || webView == null) return;
         final String preferenceSourceId = data.getStringExtra("sourceId");
         final String preferenceItemType = data.getStringExtra("itemType");
         final String preferenceItemId = data.getStringExtra("itemId");
@@ -1517,6 +1572,17 @@ public class MainActivity extends Activity {
                 }
             });
         }
+        final long pos = data.getLongExtra("positionSeconds", 0);
+        if (preferenceSourceId != null && preferenceItemId != null && pos > 0) {
+            // PlayerActivity persisted this exact final position to the confirmed
+            // SharedPreferences pump; it is cleared only after the cloud ACK.
+            flushPendingNativeProgress();
+        }
+    }
+
+    /** Continue only after standalone.js confirms terminal expiry with an explicit ACK. */
+    private void continuePlayerResult(android.content.Intent data) {
+        if (data == null || webView == null) return;
         // Viewer picked a different quality variant in the native player: ask the web to
         // re-select it (resolves a fresh stream + relaunches native playback). The position of
         // the segment watched before the switch sits in the prefs net (finish() persists it now)
@@ -1532,7 +1598,6 @@ public class MainActivity extends Activity {
                     try { webView.evaluateJavascript(js, null); } catch (Exception ignored) { }
                 }
             });
-            flushPendingNativeProgress();
             return;
         }
         final String sourceId = data.getStringExtra("sourceId");
@@ -1546,10 +1611,6 @@ public class MainActivity extends Activity {
         final boolean retryPlayback = data.getBooleanExtra("retryPlayback", false);
         final String retryReason = data.getStringExtra("retryReason");
         if (sourceId == null || itemId == null) return;
-        // finish() persisted this same final position into the prefs net; deliver it through the
-        // confirmed pump (retry + onProgressSaved-clears) instead of the old one-shot
-        // evaluateJavascript that rendered false silently on a page without the bridge.
-        if (pos > 0) flushPendingNativeProgress();
         // Direct + signed fallback were exhausted. Keep the current catalogue/detail
         // route open and ask it to mint a fresh provider session, then relaunch the
         // native player at the same VOD timestamp. This prevents a transient Atlas
@@ -1610,13 +1671,286 @@ public class MainActivity extends Activity {
         }
     }
 
+    private void queuePlaybackSessionClose(String rawSessionId, String reason,
+                                           Runnable continuation) {
+        final String sessionId = NativePlaybackClosePolicy.boundedSessionId(rawSessionId);
+        if (sessionId == null) {
+            if (continuation != null) continuation.run();
+            return;
+        }
+        boolean continueNow = false;
+        final long nowEpochMs = System.currentTimeMillis();
+        synchronized (playbackCloseLock) {
+            boolean persistenceChanged = pruneExpiredPlaybackSessionClosesLocked(nowEpochMs);
+            if (acknowledgedPlaybackCloseSessionIds.contains(sessionId)) {
+                continueNow = true;
+            } else {
+                if (!pendingPlaybackSessionCloses.containsKey(sessionId)) {
+                    while (pendingPlaybackSessionCloses.size()
+                            >= NativePlaybackClosePolicy.MAX_PENDING_CLOSES) {
+                        evictOldestPlaybackSessionCloseLocked();
+                    }
+                    pendingPlaybackSessionCloses.put(
+                            sessionId,
+                            new NativePlaybackClosePolicy.Entry(
+                                    sessionId,
+                                    NativePlaybackClosePolicy.boundedReason(reason),
+                                    nowEpochMs));
+                    persistenceChanged = true;
+                }
+                if (continuation != null) {
+                    pendingPlaybackCloseContinuations.put(sessionId, continuation);
+                }
+            }
+            if (persistenceChanged) persistPendingPlaybackSessionClosesLocked();
+        }
+        if (continueNow) {
+            if (continuation != null) continuation.run();
+            return;
+        }
+        dispatchPlaybackSessionClose(sessionId);
+    }
+
+    private void dispatchPlaybackSessionClose(String sessionId) {
+        final String reason;
+        synchronized (playbackCloseLock) {
+            if (!playbackCloseDeliveryActive) return;
+            if (pruneExpiredPlaybackSessionClosesLocked(System.currentTimeMillis())) {
+                persistPendingPlaybackSessionClosesLocked();
+            }
+            NativePlaybackClosePolicy.Entry pending =
+                    pendingPlaybackSessionCloses.get(sessionId);
+            if (pending == null || playbackCloseRetryTasks.containsKey(sessionId)) return;
+            reason = pending.reason;
+            Integer previousAttempts = playbackCloseDeliveryAttempts.get(sessionId);
+            playbackCloseDeliveryAttempts.put(
+                    sessionId,
+                    previousAttempts == null ? 1 : previousAttempts + 1);
+        }
+        if (!isTrustedPlaybackClosePage()) {
+            schedulePlaybackCloseRetry(sessionId, "not_ready");
+            return;
+        }
+        final String js = "(function(){try{var n=window.__norvaNative;"
+                + "if(!n||typeof n.onPlaybackClosed!=='function')return 'not_ready';"
+                + "var s=n.onPlaybackClosed(" + jsStr(sessionId) + ","
+                + jsStr(reason) + ");return s==='accepted'?'accepted':'not_ready';"
+                + "}catch(_){return 'not_ready';}})()";
+        runOnUiThread(new Runnable() {
+            @Override public void run() {
+                try {
+                    if (!isTrustedPlaybackClosePage()) {
+                        schedulePlaybackCloseRetry(sessionId, "not_ready");
+                        return;
+                    }
+                    // Arm before evaluating: a renderer reload may swallow the
+                    // callback. The accepted/not_ready result replaces this timer.
+                    schedulePlaybackCloseRetry(sessionId, "not_ready");
+                    webView.evaluateJavascript(js, new ValueCallback<String>() {
+                        @Override public void onReceiveValue(String value) {
+                            String decodedStatus = decodeJavascriptString(value);
+                            String status = "accepted".equals(decodedStatus)
+                                    ? "accepted" : "not_ready";
+                            // accepted transfers delivery ownership to JS, but the
+                            // resolver gate stays closed until the terminal ACK.
+                            schedulePlaybackCloseRetry(sessionId, status);
+                        }
+                    });
+                } catch (Exception ignored) {
+                    schedulePlaybackCloseRetry(sessionId, "not_ready");
+                }
+            }
+        });
+    }
+
+    private boolean isTrustedPlaybackClosePage() {
+        if (!webAppReady || webView == null || !cloudBridgeAdded
+                || !isTrustedCloudUrl(webView.getUrl())) return false;
+        try {
+            String path = Uri.parse(webView.getUrl()).getPath();
+            return "/app.html".equals(path) || "/app".equals(path);
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    private void acknowledgePlaybackSessionClosed(String rawSessionId) {
+        if (!isTrustedPlaybackClosePage()) return;
+        String sessionId = NativePlaybackClosePolicy.boundedSessionId(rawSessionId);
+        if (sessionId == null) return;
+        synchronized (playbackCloseLock) {
+            if (!pendingPlaybackSessionCloses.containsKey(sessionId)) return;
+            pendingPlaybackSessionCloses.remove(sessionId);
+            playbackCloseDeliveryAttempts.remove(sessionId);
+            cancelPlaybackCloseRetryLocked(sessionId);
+            persistPendingPlaybackSessionClosesLocked();
+        }
+        completePlaybackCloseAcknowledgement(sessionId);
+    }
+
+    private void completePlaybackCloseAcknowledgement(String sessionId) {
+        final Runnable continuation;
+        synchronized (playbackCloseLock) {
+            if (!acknowledgedPlaybackCloseSessionIds.add(sessionId)) return;
+            while (acknowledgedPlaybackCloseSessionIds.size()
+                    > NativePlaybackClosePolicy.MAX_ACKNOWLEDGED_CLOSES) {
+                java.util.Iterator<String> oldest =
+                        acknowledgedPlaybackCloseSessionIds.iterator();
+                if (!oldest.hasNext()) break;
+                oldest.next();
+                oldest.remove();
+            }
+            continuation = pendingPlaybackCloseContinuations.remove(sessionId);
+        }
+        if (continuation != null) continuation.run();
+    }
+
+    private void schedulePlaybackCloseRetry(String sessionId, String status) {
+        final Runnable task;
+        final long delayMs;
+        synchronized (playbackCloseLock) {
+            if (!playbackCloseDeliveryActive
+                    || !pendingPlaybackSessionCloses.containsKey(sessionId)) return;
+            Integer storedAttempts = playbackCloseDeliveryAttempts.get(sessionId);
+            int attempts = storedAttempts == null ? 0 : storedAttempts;
+            delayMs = NativePlaybackClosePolicy.retryDelayMs(attempts, status);
+            if (delayMs < 0L) return;
+            cancelPlaybackCloseRetryLocked(sessionId);
+            task = new Runnable() {
+                @Override public void run() {
+                    synchronized (playbackCloseLock) {
+                        playbackCloseRetryTasks.remove(sessionId);
+                    }
+                    dispatchPlaybackSessionClose(sessionId);
+                }
+            };
+            playbackCloseRetryTasks.put(sessionId, task);
+        }
+        uiHandler.postDelayed(task, delayMs);
+    }
+
+    private void flushPendingPlaybackSessionCloses(boolean resetAttempts) {
+        final ArrayList<String> sessionIds;
+        synchronized (playbackCloseLock) {
+            if (pruneExpiredPlaybackSessionClosesLocked(System.currentTimeMillis())) {
+                persistPendingPlaybackSessionClosesLocked();
+            }
+            if (resetAttempts) playbackCloseDeliveryAttempts.clear();
+            for (String sessionId : new ArrayList<>(playbackCloseRetryTasks.keySet())) {
+                cancelPlaybackCloseRetryLocked(sessionId);
+            }
+            sessionIds = new ArrayList<>(pendingPlaybackSessionCloses.keySet());
+        }
+        for (String sessionId : sessionIds) dispatchPlaybackSessionClose(sessionId);
+    }
+
+    private void cancelPlaybackCloseRetryTimers() {
+        synchronized (playbackCloseLock) {
+            for (String sessionId : new ArrayList<>(playbackCloseRetryTasks.keySet())) {
+                cancelPlaybackCloseRetryLocked(sessionId);
+            }
+        }
+    }
+
+    private void cancelPlaybackCloseRetryLocked(String sessionId) {
+        Runnable task = playbackCloseRetryTasks.remove(sessionId);
+        if (task != null) uiHandler.removeCallbacks(task);
+    }
+
+    private void loadPendingPlaybackSessionCloses() {
+        Set<String> encoded = prefs().getStringSet(
+                PREF_PENDING_PLAYBACK_CLOSES, Collections.<String>emptySet());
+        if (encoded == null) encoded = Collections.emptySet();
+        final long nowEpochMs = System.currentTimeMillis();
+        ArrayList<NativePlaybackClosePolicy.Entry> valid = new ArrayList<>();
+        for (String value : encoded) {
+            NativePlaybackClosePolicy.Entry entry =
+                    NativePlaybackClosePolicy.decode(value, nowEpochMs);
+            if (entry != null) valid.add(entry);
+        }
+        Collections.sort(valid, new java.util.Comparator<NativePlaybackClosePolicy.Entry>() {
+            @Override public int compare(NativePlaybackClosePolicy.Entry left,
+                                         NativePlaybackClosePolicy.Entry right) {
+                return Long.compare(left.createdAtEpochMs, right.createdAtEpochMs);
+            }
+        });
+        int firstRetained = Math.max(
+                0, valid.size() - NativePlaybackClosePolicy.MAX_PENDING_CLOSES);
+        synchronized (playbackCloseLock) {
+            pendingPlaybackSessionCloses.clear();
+            for (int index = firstRetained; index < valid.size(); index++) {
+                NativePlaybackClosePolicy.Entry entry = valid.get(index);
+                pendingPlaybackSessionCloses.put(entry.sessionId, entry);
+            }
+            persistPendingPlaybackSessionClosesLocked();
+        }
+    }
+
+    private void persistPendingPlaybackSessionClosesLocked() {
+        Set<String> encoded = new LinkedHashSet<>();
+        for (NativePlaybackClosePolicy.Entry entry : pendingPlaybackSessionCloses.values()) {
+            String value = NativePlaybackClosePolicy.encode(
+                    entry.sessionId, entry.reason, entry.createdAtEpochMs);
+            if (value != null) encoded.add(value);
+        }
+        prefs().edit().putStringSet(PREF_PENDING_PLAYBACK_CLOSES, encoded).apply();
+    }
+
+    private boolean pruneExpiredPlaybackSessionClosesLocked(long nowEpochMs) {
+        boolean changed = false;
+        java.util.Iterator<Map.Entry<String, NativePlaybackClosePolicy.Entry>> iterator =
+                pendingPlaybackSessionCloses.entrySet().iterator();
+        while (iterator.hasNext()) {
+            Map.Entry<String, NativePlaybackClosePolicy.Entry> mapEntry = iterator.next();
+            NativePlaybackClosePolicy.Entry entry = mapEntry.getValue();
+            long ageMs = nowEpochMs - entry.createdAtEpochMs;
+            if (ageMs >= 0L && ageMs < NativePlaybackClosePolicy.MAX_PENDING_AGE_MS) continue;
+            String sessionId = mapEntry.getKey();
+            iterator.remove();
+            pendingPlaybackCloseContinuations.remove(sessionId);
+            playbackCloseDeliveryAttempts.remove(sessionId);
+            cancelPlaybackCloseRetryLocked(sessionId);
+            changed = true;
+        }
+        return changed;
+    }
+
+    private void evictOldestPlaybackSessionCloseLocked() {
+        String oldestSessionId = null;
+        long oldestCreatedAtEpochMs = Long.MAX_VALUE;
+        for (Map.Entry<String, NativePlaybackClosePolicy.Entry> mapEntry
+                : pendingPlaybackSessionCloses.entrySet()) {
+            if (mapEntry.getValue().createdAtEpochMs < oldestCreatedAtEpochMs) {
+                oldestSessionId = mapEntry.getKey();
+                oldestCreatedAtEpochMs = mapEntry.getValue().createdAtEpochMs;
+            }
+        }
+        if (oldestSessionId == null) return;
+        pendingPlaybackSessionCloses.remove(oldestSessionId);
+        pendingPlaybackCloseContinuations.remove(oldestSessionId);
+        playbackCloseDeliveryAttempts.remove(oldestSessionId);
+        cancelPlaybackCloseRetryLocked(oldestSessionId);
+    }
+
+    private static String decodeJavascriptString(String raw) {
+        try {
+            if (raw == null || "null".equals(raw)) return "";
+            return new org.json.JSONArray("[" + raw + "]").optString(0, "");
+        } catch (Exception ignored) {
+            return "";
+        }
+    }
+
     @Override
     protected void onResume() {
         super.onResume();
         NativeClarity.event("app_open");
         // Web app already loaded and MainActivity came back to front (e.g. the native
         // player was killed by the system): flush any pending native progress now.
-        if (webAppReady) flushPendingNativeProgress();
+        if (webAppReady) {
+            flushPendingNativeProgress();
+            flushPendingPlaybackSessionCloses(true);
+        }
     }
 
     /**
@@ -2171,6 +2505,8 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        playbackCloseDeliveryActive = false;
+        cancelPlaybackCloseRetryTimers();
         if (currentRef.get() == this) {
             currentRef.clear();
             currentRef = new WeakReference<>(null);
