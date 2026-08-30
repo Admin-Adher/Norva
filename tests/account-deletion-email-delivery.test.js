@@ -6,6 +6,9 @@ const path = require('node:path');
 const root = path.resolve(__dirname, '..');
 const read = (name) => fs.readFileSync(path.join(root, name), 'utf8').replace(/\r\n/g, '\n');
 const migration = read('supabase/migrations/20260721235200_account_deletion_email_outbox.sql');
+const cronResume = read(
+  'supabase/migrations/20260830063039_resume_account_deletion_worker_cron.sql',
+);
 const hardening = read('supabase/migrations/20260721235300_account_deletion_email_delivery_hardening.sql');
 const partners = read('supabase/migrations/20260729201447_partners_tv_admin_analytics.sql');
 const revolut = read(
@@ -336,6 +339,36 @@ test('dedicated cron is self-authenticated and managed gateway verification is d
   assert.match(migration, /norva-account-delete\/cron\/run/);
   assert.match(migration, /where exists \([\s\S]*cloud_account_deletion_email_outbox/);
   assert.match(config, /\[functions\.norva-account-delete\]\s*\nverify_jwt = false/);
+});
+
+test('dedicated cron wakes for every actionable deletion queue without retrying terminal failures', () => {
+  assert.match(cronResume, /where job\.jobname = 'norva-account-deletion-email'/);
+  assert.match(cronResume, /cron\.alter_job\([\s\S]*command := v_command[\s\S]*active := true/);
+  assert.match(cronResume, /cron\.schedule\([\s\S]*'norva-account-deletion-email'/);
+  assert.doesNotMatch(cronResume, /update\s+cron\.job/i);
+
+  const command = cronResume.slice(
+    cronResume.indexOf('v_command text := $cron$'),
+    cronResume.indexOf('$cron$;', cronResume.indexOf('v_command text := $cron$')),
+  );
+  assert.match(command, /cloud_account_deletion_workflows/);
+  for (const state of [
+    'stopping',
+    'draining',
+    'purging_analytics',
+    'archiving_legal',
+    'purging_product',
+    'ready_to_finalize',
+    'finalizing',
+  ]) {
+    assert.match(command, new RegExp(`'${state}'`));
+  }
+  assert.doesNotMatch(command, /'failed_retryable'/);
+  assert.doesNotMatch(command, /'completed'/);
+  assert.match(command, /cloud_account_deletion_finalizations[\s\S]*state = 'claimed'/);
+  assert.match(command, /cloud_account_deletion_email_outbox[\s\S]*next_attempt_at <= now\(\)/);
+  assert.match(command, /norva_cron_shared_secret/);
+  assert.match(command, /norva-account-delete\/cron\/run/);
 });
 
 test('confirmation email is accessible multipart content with stable non-PII tags', () => {
