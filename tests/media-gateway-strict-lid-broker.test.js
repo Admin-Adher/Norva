@@ -575,7 +575,7 @@ test('strict LID broker preempts an old local range, awaits close, and never exc
   );
 });
 
-test('finite seek broker buffers and queues overlapping local ranges without overlapping provider sockets', async (t) => {
+test('finite seek broker preserves the latest continuous local range across serial provider windows', async (t) => {
   const { createStrictLidBroker } = brokerHarness();
   const data = Buffer.from(Array.from({ length: 64 }, (_, index) => index));
   const state = { active: 0, maxActive: 0, calls: [], firstResponse: null };
@@ -616,7 +616,7 @@ test('finite seek broker buffers and queues overlapping local ranges without ove
     dispatcher: null,
     pathPrefix: 'finite-mkv-seek',
     finiteWindowBytes: 8,
-    finiteCacheBytes: 16,
+    finiteCacheBytes: 64,
     releaseDelayMs: 0,
     completedReleaseDelayMs: 0,
     supersededReleaseDelayMs: 200,
@@ -624,7 +624,9 @@ test('finite seek broker buffers and queues overlapping local ranges without ove
   });
   t.after(() => broker.close());
 
-  const firstPending = fetch(broker.inputUrl, { headers: { Range: 'bytes=0-31' } });
+  const firstPending = fetch(broker.inputUrl, { headers: { Range: 'bytes=0-31' } })
+    .then(async (response) => ({ response, body: Buffer.from(await response.arrayBuffer()) }))
+    .catch((error) => ({ error }));
   await firstStarted;
   const secondPending = fetch(broker.inputUrl, { headers: { Range: 'bytes=16-31' } });
   await new Promise((resolve) => setTimeout(resolve, 25));
@@ -632,24 +634,26 @@ test('finite seek broker buffers and queues overlapping local ranges without ove
   assert.equal(state.active, 1);
   state.firstResponse.res.end(state.firstResponse.body);
 
-  const [first, second] = await Promise.all([firstPending, secondPending]);
-  assert.equal(first.status, 206);
+  const [firstOutcome, second] = await Promise.all([firstPending, secondPending]);
+  assert.ok(firstOutcome.error, 'the obsolete local range must be closed');
   assert.equal(second.status, 206);
-  assert.deepEqual(Buffer.from(await first.arrayBuffer()), data.subarray(0, 8));
-  assert.deepEqual(Buffer.from(await second.arrayBuffer()), data.subarray(16, 24));
-  assert.deepEqual(state.calls, ['bytes=0-7', 'bytes=16-23']);
+  assert.equal(second.headers.get('content-range'), 'bytes 16-31/64');
+  assert.equal(second.headers.get('content-length'), '16');
+  assert.deepEqual(Buffer.from(await second.arrayBuffer()), data.subarray(16, 32));
+  assert.deepEqual(state.calls, ['bytes=0-7', 'bytes=16-23', 'bytes=24-31']);
   assert.equal(state.maxActive, 1, 'finite windows must never overlap provider bodies');
   assert.equal(state.active, 0);
-  assert.equal(broker.completedProviderFetches, 2);
+  assert.equal(broker.completedProviderFetches, 3);
   assert.equal(broker.interruptedProviderFetches, 0);
   assert.ok(broker.maxQueuedRequests >= 2);
 
   const cached = await fetch(broker.inputUrl, { headers: { Range: 'bytes=0-31' } });
   assert.equal(cached.status, 206);
-  assert.deepEqual(Buffer.from(await cached.arrayBuffer()), data.subarray(0, 8));
-  assert.deepEqual(state.calls, ['bytes=0-7', 'bytes=16-23']);
-  assert.equal(broker.cacheHits, 1);
-  assert.equal(broker.cacheMisses, 2);
+  assert.deepEqual(Buffer.from(await cached.arrayBuffer()), data.subarray(0, 32));
+  assert.deepEqual(state.calls, ['bytes=0-7', 'bytes=16-23', 'bytes=24-31', 'bytes=8-15']);
+  assert.equal(broker.completedProviderFetches, 4);
+  assert.equal(broker.cacheHits, 3);
+  assert.equal(broker.cacheMisses, 4);
 });
 
 for (const fixture of [
@@ -1348,7 +1352,7 @@ test('strict LID rejects invalid exact signed coordinates before creating a serv
   assert.match(route, /detectLanguageRequestPolicy\(req, options\)[\s\S]*validateDetectLanguageCapability\(capabilityToken, policy\.requiredScope\)/);
   assert.match(gatewaySource, /strictLidLoopbackBrokerProtocol: 1/);
   assert.match(gatewaySource, /strictLidFileSizeClaim: 'fileSizeBytes'/);
-  assert.match(gatewaySource, /const GATEWAY_VERSION = 124/);
+  assert.match(gatewaySource, /const GATEWAY_VERSION = 125/);
   assert.match(gatewaySource, /supersededReleaseDelayMs:\s*PROVIDER_SLOT_RELEASE_DELAY_MS/);
   assert.match(gatewaySource, /strictLidProviderDrainProtocol: 1/);
   assert.match(gatewaySource, /strictLidWeakFallbackProtocol: 1/);

@@ -2935,7 +2935,7 @@ test('finite MKV resume spawns FFmpeg against only the loopback URL with pre-inp
     assert.equal(capturedOptions.env.NO_PROXY, '127.0.0.1,localhost,::1');
 });
 
-test('production finite MKV resume uses buffered indexed windows and keeps linear seek only as fallback', () => {
+test('production finite MKV resume uses continuous indexed windows and keeps linear seek only as fallback', () => {
     const source = readGateway();
     const startFfmpeg = sourceBetween(source, 'function startFfmpeg(', '\nfunction seekArgsForSession(');
     assert.match(startFfmpeg, /const seekableMkvInput = usesFiniteMkvSeekBroker\(session\)/);
@@ -2969,7 +2969,7 @@ test('production finite MKV resume uses buffered indexed windows and keeps linea
 
     const createRoute = sourceBetween(source, "app.post('/sessions'", "\napp.delete('/raw-pumps'");
     assert.match(createRoute, /await prepareFiniteMkvSeekBroker/);
-    assert.match(createRoute, /finiteMkvResumeMode = 'buffered-window-indexed-seek'/);
+    assert.match(createRoute, /finiteMkvResumeMode = 'continuous-window-indexed-seek'/);
     const ensurePump = sourceBetween(
         source,
         'async function ensureBoundedMkvInputPump(',
@@ -2996,8 +2996,10 @@ test('production finite MKV resume uses buffered indexed windows and keeps linea
     assert.match(source, /effectiveUrlSha256:\s*session\.vodInputEffectiveUrlSha256/);
     assert.match(source, /effectiveUrlIdentitySha256:\s*session\.vodInputEffectiveUrlIdentitySha256/);
     assert.match(source, /boundedMkvInputPumpProtocol:\s*1/);
-    assert.match(source, /finiteMkvSeekBroker:\s*\{[\s\S]+?protocol:\s*2/);
+    assert.match(source, /finiteMkvSeekBroker:\s*\{[\s\S]+?protocol:\s*3/);
     assert.match(source, /finiteMkvSeekBroker:\s*\{[\s\S]+?bufferedWindowBeforeLocalResponse:\s*true/);
+    assert.match(source, /finiteMkvSeekBroker:\s*\{[\s\S]+?continuousLocalRangeResponse:\s*true/);
     assert.match(source, /finiteMkvSeekBroker:\s*\{[\s\S]+?overlappingLocalRangesQueued:\s*true/);
+    assert.match(source, /finiteMkvSeekBroker:\s*\{[\s\S]+?localSupersessionAfterProviderWindow:\s*true/);
     assert.match(source, /finiteMkvSeekBroker:\s*\{[\s\S]+?providerConnectionsSerialized:\s*true/);
 });
