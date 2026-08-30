@@ -94,6 +94,16 @@ class AdminPage {
         this._notificationRuleEditor = null;
         this._notificationDraft = null;
         this._notificationScheduleFilter = 'active';
+        this._identities = [];
+        this._identitySummary = {};
+        this._identityUnresolvedSources = [];
+        this._identityRecentSources = [];
+        this._identityRecentWindowDays = 30;
+        this._identityGeneratedAt = null;
+        this._identityLegacyFallback = false;
+        this._identityLoadInFlight = false;
+        this._identityRequestSeq = 0;
+        this._identityPoll = null;
     }
 
     // ── direct PostgREST RPC client (mirrors authApi.js config resolution) ──
@@ -164,6 +174,10 @@ class AdminPage {
         this._isVisible = false;
         if (this._clientPoll && typeof window.clearInterval === 'function') window.clearInterval(this._clientPoll);
         this._clientPoll = null;
+        if (this._identityPoll && typeof window.clearInterval === 'function') window.clearInterval(this._identityPoll);
+        this._identityPoll = null;
+        this._identityRequestSeq = (this._identityRequestSeq || 0) + 1;
+        this._identityLoadInFlight = false;
         clearTimeout(this._partnersSearchDebounce);
         clearTimeout(this._partnersRoutesDebounce);
         clearTimeout(this._partnersPayoutOnboardingDebounce);
@@ -590,6 +604,36 @@ class AdminPage {
 #page-admin .id-legend{display:flex;flex-wrap:wrap;gap:7px 18px;background:var(--adm-panel);border:1px solid var(--adm-line);border-radius:12px;padding:11px 15px;margin-bottom:16px;font-size:12px;color:var(--adm-tx2);}
 #page-admin .id-legend b{color:var(--adm-tx);}
 #page-admin .id-legend .lgd{white-space:nowrap;}
+#page-admin .id-integrity{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin:-2px 0 14px;padding:9px 12px;border:1px solid var(--adm-line);border-radius:10px;background:var(--adm-panel);font-size:11.5px;color:var(--adm-tx2);}
+#page-admin .id-integrity strong{color:var(--adm-green);font-weight:700;}
+#page-admin .id-intake{margin:0 0 18px;border:1px solid var(--adm-line);border-radius:14px;background:var(--adm-panel);overflow:hidden;}
+#page-admin .id-intake-head{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;padding:15px 17px;border-bottom:1px solid var(--adm-line);background:var(--adm-card2);}
+#page-admin .id-intake-copy{min-width:0;}
+#page-admin .id-intake-eyebrow{display:block;margin-bottom:3px;color:var(--adm-blue);font-size:10.5px;font-weight:750;letter-spacing:.65px;text-transform:uppercase;}
+#page-admin .id-intake-title{margin:0;color:var(--adm-tx);font-size:15px;font-weight:720;line-height:1.35;}
+#page-admin .id-intake-sub{margin:4px 0 0;color:var(--adm-tx2);font-size:11.5px;line-height:1.45;}
+#page-admin .id-intake-count{display:inline-flex;align-items:center;justify-content:center;min-width:34px;height:30px;padding:0 10px;border:1px solid var(--adm-line);border-radius:16px;background:var(--adm-panel);color:var(--adm-tx);font-size:12px;font-weight:750;white-space:nowrap;}
+#page-admin .id-intake-list{display:flex;flex-direction:column;}
+#page-admin .id-intake-row{display:grid;grid-template-columns:minmax(180px,1.2fr) minmax(170px,.9fr) minmax(155px,.75fr) auto;gap:14px;align-items:center;min-width:0;padding:12px 16px;border-bottom:1px solid var(--adm-line);border-inline-start:3px solid var(--adm-blue);}
+#page-admin .id-intake-row:last-child{border-bottom:0;}
+#page-admin .id-intake-row.is-unresolved{border-inline-start-color:var(--adm-amber);background:var(--adm-panel);}
+#page-admin .id-intake-source,#page-admin .id-intake-owner,#page-admin .id-intake-resolution{min-width:0;}
+#page-admin .id-intake-name{display:block;overflow:hidden;color:var(--adm-tx);font-size:13px;font-weight:680;text-overflow:ellipsis;white-space:nowrap;}
+#page-admin .id-intake-meta,#page-admin .id-intake-owner,#page-admin .id-intake-resolution{color:var(--adm-tx2);font-size:11.5px;line-height:1.45;overflow-wrap:anywhere;}
+#page-admin .id-intake-meta{margin-top:3px;}
+#page-admin .id-intake-badges{display:flex;gap:5px;flex-wrap:wrap;margin-top:5px;}
+#page-admin .id-intake-open{min-height:44px;padding:7px 12px;border:1px solid var(--adm-line);border-radius:8px;background:var(--color-bg-secondary);color:var(--adm-tx);font:inherit;font-size:11.5px;font-weight:650;cursor:pointer;white-space:nowrap;touch-action:manipulation;}
+#page-admin .id-intake-open:hover{border-color:var(--adm-blue);}
+#page-admin .id-intake-open:focus-visible{border-color:var(--adm-blue);outline:2px solid var(--adm-blue);outline-offset:2px;}
+#page-admin #id-search,#page-admin #id-filters .qv-chip,#page-admin .identity-acts .id-actbtn{min-height:44px;}
+#page-admin .id-intake-empty{display:flex;align-items:flex-start;gap:10px;padding:15px 17px;color:var(--adm-tx2);font-size:12px;line-height:1.5;}
+#page-admin .id-intake-empty strong{display:block;color:var(--adm-tx);font-size:12.5px;}
+#page-admin .id-intake-limit{padding:9px 16px;border-top:1px solid var(--adm-line);color:var(--adm-tx3);font-size:11px;line-height:1.45;}
+#page-admin .id-source-time{display:flex;flex-direction:column;gap:2px;color:var(--adm-tx2);font-size:11.5px;white-space:nowrap;}
+#page-admin .id-source-time small{color:var(--adm-tx3);font-size:10.5px;}
+#page-admin .id-sample-note{margin-top:8px;color:var(--adm-tx3);font-size:11px;}
+@media(max-width:920px){#page-admin .id-intake-row{grid-template-columns:minmax(0,1fr) minmax(150px,.8fr) auto;}#page-admin .id-intake-resolution{grid-column:1 / 3;}#page-admin .id-intake-open{grid-column:3;grid-row:1 / 3;}}
+@media(max-width:640px){#page-admin .id-intake-head{padding:14px;}#page-admin .id-intake-row{grid-template-columns:minmax(0,1fr);gap:8px;padding:13px 14px;}#page-admin .id-intake-resolution,#page-admin .id-intake-open{grid-column:auto;grid-row:auto;}#page-admin .id-intake-open{width:100%;}#page-admin .id-integrity{align-items:flex-start;}#page-admin #id-kpis .kpi-group{padding:12px;}#page-admin #id-kpis .admin-cards{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;}#page-admin #id-kpis .kpi{padding:12px;}#page-admin #id-kpis .kpi .v{font-size:22px;}#page-admin #id-kpis .kpi .l{font-size:9.5px;}#page-admin #id-kpis .kpi-ic{width:26px;height:26px;}}
 /* Système: health gauge bar + Services ‖ Activité two-column */
 #page-admin .kpi-bar{height:7px;border-radius:4px;background:rgba(255,255,255,.08);overflow:hidden;margin-top:11px;}
 #page-admin .kpi-bar>i{display:block;height:100%;border-radius:4px;background:linear-gradient(90deg,#5b7cfa,#8b7cff);}
@@ -2363,6 +2407,14 @@ class AdminPage {
     _navigateImpl(route, navigation) {
         const from = this._route;
         if (from === 'mkv-lab' && route !== 'mkv-lab') this._mkvStrategyLab?.unmount?.();
+        if (from === 'identites' && route !== 'identites' && this._identityPoll && typeof window.clearInterval === 'function') {
+            window.clearInterval(this._identityPoll);
+            this._identityPoll = null;
+        }
+        if (from === 'identites' && route !== 'identites') {
+            this._identityRequestSeq = (this._identityRequestSeq || 0) + 1;
+            this._identityLoadInFlight = false;
+        }
         if (from === 'partners' && route !== 'partners') {
             clearTimeout(this._partnersSearchDebounce);
             clearTimeout(this._partnersRoutesDebounce);
@@ -14907,42 +14959,109 @@ class AdminPage {
     }
 
     // ── Page: Identités (canonical provider identities) ──
-    async _pageIdentites() {
+    _pageIdentites() {
         this._setCrumb('Identités');
         const v = this._view();
         const filters = [['', 'Toutes'], ['mirror', 'Miroirs'], ['active', 'Actives'], ['multi', 'Multi-sources'], ['driver', 'Pilotes'], ['dormant', 'Dormantes 30 j']];
         v.innerHTML = `<div class="crm-page">
             <h1 class="crm-h1">🧬 Identités fournisseurs</h1>
-            <p class="crm-sub">Une identité = un panel amont réel (dédup par empreinte de stream IDs). Plusieurs marques sur une même identité = revente miroir — le cache cross-user les fusionne.</p>
+            <p class="crm-sub">Une identité correspond à un panel amont vérifié par le serveur. Les ajouts récents restent visibles avant résolution, sans créer de rapprochement artificiel.</p>
+            <div class="id-integrity" id="id-integrity-status" role="status">
+              <strong>Rattachements vérifiés</strong><span>Chargement de la source de vérité…</span>
+            </div>
+            <div class="src-toolbar">
+              <input class="sup-search" id="id-search" type="search" placeholder="Rechercher : identité, source, compte, marque…" autocomplete="off" value="${AdminPage.esc(this._idSearch || '')}" aria-label="Rechercher une identité ou une source" />
+            </div>
+            <section class="id-intake" aria-labelledby="id-intake-title">
+              <div class="id-intake-head">
+                <div class="id-intake-copy"><span class="id-intake-eyebrow">File de rattachement</span><h2 class="id-intake-title" id="id-intake-title">Sources non résolues / récemment ajoutées</h2><p class="id-intake-sub">Les sources non résolues restent visibles jusqu'à la preuve d'identité. Les ajouts des 30 derniers jours sont épinglés ici.</p></div>
+                <span class="id-intake-count" id="id-intake-count" aria-label="Sources dans la file">—</span>
+              </div>
+              <div id="admin-identity-intake" class="id-intake-list" aria-live="polite" aria-busy="true"><div class="id-intake-empty">Chargement des ajouts récents…</div></div>
+            </section>
             <section id="id-kpis" class="kpi-groups"><div class="ssub">Chargement…</div></section>
             <div class="id-legend">
-              <span class="lgd">🧬 <b>Identité</b> = panel amont réel</span>
+              <span class="lgd">🧬 <b>Identité</b> = panel amont vérifié</span>
               <span class="lgd">🏷️ <b>Marque</b> = revendeur détecté</span>
-              <span class="lgd">📡 <b>Source</b> = playlist d'un client</span>
+              <span class="lgd">📡 <b>Source</b> = playlist non supprimée</span>
               <span class="lgd">🔁 <b>Miroir</b> = plusieurs marques → même panel</span>
             </div>
             <div class="qv-row" id="id-filters" role="tablist" aria-label="Filtres identités">
               ${filters.map(([val, lbl]) => `<button class="qv-chip" data-filter="${val}" role="tab">${lbl}</button>`).join('')}
             </div>
-            <div class="src-toolbar">
-              <input class="sup-search" id="id-search" type="search" placeholder="Rechercher : identité, marque, compte, source…" autocomplete="off" value="${AdminPage.esc(this._idSearch || '')}" aria-label="Rechercher une identité" />
-            </div>
+            <div class="kpi-gtitle">🧬 Identités vérifiées</div>
             <div id="admin-identities"><div class="ssub">Chargement…</div></div>
         </div>`;
         const search = document.getElementById('id-search');
-        if (search) search.addEventListener('input', () => { clearTimeout(this._idSearchDeb); this._idSearchDeb = setTimeout(() => { this._idSearch = search.value.trim(); this._renderIdentities(this._identities || []); }, 200); });
+        if (search) search.addEventListener('input', () => {
+            clearTimeout(this._idSearchDeb);
+            this._idSearchDeb = setTimeout(() => {
+                this._idSearch = search.value.trim();
+                this._renderIdentities(this._identities || []);
+            }, 200);
+        });
         document.querySelectorAll('#id-filters .qv-chip').forEach(chip => chip.addEventListener('click', () => {
-            this._idFilter = chip.dataset.filter || ''; this._syncIdFilters(); this._renderIdentities(this._identities || []);
+            this._idFilter = chip.dataset.filter || '';
+            this._syncIdFilters();
+            this._renderIdentities(this._identities || []);
         }));
         this._syncIdFilters();
+        this._loadIdentities();
+        if (this._identityPoll && typeof window.clearInterval === 'function') window.clearInterval(this._identityPoll);
+        this._identityPoll = typeof window.setInterval === 'function'
+            ? window.setInterval(() => {
+                if (this._route !== 'identites' || document.visibilityState !== 'visible') return;
+                this._loadIdentities({ quiet: true });
+            }, 30000)
+            : null;
+    }
+
+    async _loadIdentities(options = {}) {
+        if (this._identityLoadInFlight) return;
+        this._identityLoadInFlight = true;
+        const seq = this._nav || 0;
+        const requestSeq = (this._identityRequestSeq || 0) + 1;
+        this._identityRequestSeq = requestSeq;
+        const intake = document.getElementById('admin-identity-intake');
+        if (intake && !options.quiet) intake.setAttribute('aria-busy', 'true');
         try {
-            const ids = await this._rpc('admin_identities');
-            this._identities = Array.isArray(ids) ? ids : [];
+            let payload;
+            let legacyFallback = false;
+            try {
+                payload = await this._rpc('admin_identities_v2');
+            } catch (error) {
+                const missing = error?.payload?.code === 'PGRST202' || String(error?.message || '').includes('PGRST202');
+                if (!missing) throw error;
+                const identities = await this._rpc('admin_identities');
+                payload = { schema_version: 1, identities: Array.isArray(identities) ? identities : [], summary: {}, unresolved_sources: [], recent_sources: [], recent_window_days: 30 };
+                legacyFallback = true;
+            }
+            if (!payload || typeof payload !== 'object' || !Array.isArray(payload.identities)) {
+                throw new Error('Contrat Identités invalide');
+            }
+            if ((this._nav || 0) !== seq || this._route !== 'identites' || this._identityRequestSeq !== requestSeq) return;
+            this._identities = payload.identities;
+            this._identitySummary = payload.summary && typeof payload.summary === 'object' ? payload.summary : {};
+            this._identityUnresolvedSources = Array.isArray(payload.unresolved_sources) ? payload.unresolved_sources : [];
+            this._identityRecentSources = Array.isArray(payload.recent_sources) ? payload.recent_sources : [];
+            this._identityRecentWindowDays = Number(payload.recent_window_days) || 30;
+            this._identityGeneratedAt = payload.generated_at || null;
+            this._identityLegacyFallback = legacyFallback;
             this._dressHeader();
             this._renderIdentities(this._identities);
-        } catch (e) {
-            const el = document.getElementById('admin-identities');
-            if (el) el.innerHTML = `<div class="admin-err" role="alert">Erreur : ${AdminPage.esc(e.message)}</div>`;
+        } catch (error) {
+            if ((this._nav || 0) !== seq || this._route !== 'identites' || this._identityRequestSeq !== requestSeq) return;
+            if (!options.quiet || !this._identities?.length) {
+                const message = error?.status === 401 || error?.status === 403
+                    ? 'Accès administrateur refusé.'
+                    : 'Chargement impossible. Réessayez dans quelques instants.';
+                const el = document.getElementById('admin-identities');
+                if (el) el.innerHTML = `<div class="admin-err" role="alert">Identités indisponibles : ${message}</div>`;
+                if (intake) intake.innerHTML = `<div class="admin-err" role="alert">File de rattachement indisponible : ${message}</div>`;
+            }
+        } finally {
+            if (this._identityRequestSeq === requestSeq) this._identityLoadInFlight = false;
+            if (intake) intake.removeAttribute('aria-busy');
         }
     }
 
@@ -14951,109 +15070,197 @@ class AdminPage {
         document.querySelectorAll('#id-filters .qv-chip').forEach(c => c.classList.toggle('active', (c.dataset.filter || '') === cur));
     }
 
+    _renderIdentityIntake(query) {
+        const el = document.getElementById('admin-identity-intake');
+        const countEl = document.getElementById('id-intake-count');
+        if (!el) return;
+        const esc = AdminPage.esc;
+        const byId = new Map();
+        const recent = Array.isArray(this._identityRecentSources) ? this._identityRecentSources : [];
+        const unresolved = Array.isArray(this._identityUnresolvedSources) ? this._identityUnresolvedSources : [];
+        recent.forEach(source => {
+            const key = String(source?.source_id || 'recent:' + byId.size);
+            byId.set(key, { ...(source || {}), is_recent: true, is_unresolved: source?.resolution_state === 'unresolved' });
+        });
+        unresolved.forEach(source => {
+            const key = String(source?.source_id || 'unresolved:' + byId.size);
+            const existing = byId.get(key) || {};
+            byId.set(key, { ...existing, ...(source || {}), is_recent: existing.is_recent === true, is_unresolved: true });
+        });
+        if (this._identityLegacyFallback) {
+            if (countEl) {
+                countEl.textContent = '—';
+                countEl.setAttribute('aria-label', 'File indisponible en mode de compatibilité');
+            }
+            el.innerHTML = '<div class="id-intake-empty" role="status"><span>…</span><div><strong>File temporairement indisponible</strong>Le registre vérifié n’est pas encore chargé ; aucune conclusion n’est tirée sur les sources récentes ou non résolues.</div></div>';
+            el.removeAttribute('aria-busy');
+            return;
+        }
+        const q = String(query || '').toLowerCase();
+        let rows = Array.from(byId.values()).filter(source => !q || [source.display_name, source.owner_email, source.identity_name, source.source_type, source.sync_status]
+            .some(value => String(value || '').toLowerCase().includes(q)));
+        rows = rows.sort((a, b) =>
+            (Number(b.is_unresolved) - Number(a.is_unresolved)) ||
+            (new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()));
+        const exactIntakeCount = !q && Number.isFinite(Number(this._identitySummary?.intake_source_count))
+            ? Number(this._identitySummary.intake_source_count)
+            : rows.length;
+        if (countEl) {
+            countEl.textContent = exactIntakeCount > rows.length ? `${AdminPage.n(rows.length)}/${AdminPage.n(exactIntakeCount)}` : String(rows.length);
+            countEl.setAttribute('aria-label', exactIntakeCount > rows.length
+                ? `${rows.length} sources affichées sur ${exactIntakeCount} dans la file`
+                : `${rows.length} source${rows.length > 1 ? 's' : ''} dans la file`);
+        }
+        if (!rows.length) {
+            el.innerHTML = q
+                ? '<div class="id-intake-empty" role="status"><span>∅</span><div><strong>Aucune source dans la file</strong>La recherche ne correspond à aucun ajout récent ou non résolu.</div></div>'
+                : '<div class="id-intake-empty" role="status"><span>✓</span><div><strong>File de rattachement à jour</strong>Aucune source récente ou non résolue ne demande d’attention.</div></div>';
+            el.removeAttribute('aria-busy');
+            return;
+        }
+        el.innerHTML = rows.map(source => {
+            const unresolvedState = source.is_unresolved === true;
+            const enabled = source.enabled !== false;
+            const ready = source.sync_status === 'ready';
+            const status = !enabled
+                ? '<span class="badge gray">désactivée</span>'
+                : ready ? '<span class="badge green">ready</span>' : `<span class="badge ${source.sync_status === 'error' ? 'red' : 'gray'}">${esc(source.sync_status || 'en attente')}</span>`;
+            const resolution = unresolvedState
+                ? '<strong>Empreinte non résolue</strong><br>Visible ici jusqu’au rattachement serveur.'
+                : `<strong>Identité vérifiée</strong><br>${esc(source.identity_name || 'Rattachement confirmé')}`;
+            const badges = `${source.is_recent ? `<span class="badge blue">ajout ${esc(AdminPage.timeAgo(source.created_at))}</span>` : ''}${unresolvedState ? '<span class="badge amber">non résolue</span>' : ''}${status}`;
+            return `<div class="id-intake-row ${unresolvedState ? 'is-unresolved' : ''}">
+                <div class="id-intake-source"><span class="id-intake-name" title="${esc(source.display_name || 'Source')}">${esc(source.display_name || 'Source sans nom')}</span><div class="id-intake-meta">${esc(String(source.source_type || 'source').toUpperCase())} · ajoutée ${source.created_at ? esc(AdminPage.timeAgo(source.created_at)) : 'à une date inconnue'}</div><div class="id-intake-badges">${badges}</div></div>
+                <div class="id-intake-owner">${esc(source.owner_email || 'Compte indisponible')}${source.is_driver ? '<br><span class="badge blue">pilote</span>' : ''}</div>
+                <div class="id-intake-resolution">${resolution}</div>
+                <button type="button" class="id-intake-open" data-source-name="${esc(source.display_name || '')}">Voir dans Providers</button>
+            </div>`;
+        }).join('') + (exactIntakeCount > rows.length
+            ? `<div class="id-intake-limit">${AdminPage.n(rows.length)} sources affichées sur ${AdminPage.n(exactIntakeCount)} · affinez la recherche ou ouvrez Providers pour la liste complète.</div>`
+            : '');
+        el.removeAttribute('aria-busy');
+        el.querySelectorAll('.id-intake-open').forEach(button => button.addEventListener('click', () => {
+            this._provSearch = button.dataset.sourceName || '';
+            this._provFilter = '';
+            this._navigate('providers');
+        }));
+    }
+
     _renderIdentities(list) {
         const el = document.getElementById('admin-identities');
         if (!el) return;
         list = Array.isArray(list) ? list : [];
+        const summary = this._identitySummary && typeof this._identitySummary === 'object' ? this._identitySummary : {};
         const n = AdminPage.n, esc = AdminPage.esc;
         const now = Date.now(), D30 = 30 * 864e5;
         const brandsOf = (it) => Array.isArray(it.brands) ? it.brands : [];
         const sourcesOf = (it) => Array.isArray(it.sources) ? it.sources : [];
         const isMirror = (it) => brandsOf(it).length > 1;
         const isDormant = (it) => !it.last_seen || (now - new Date(it.last_seen).getTime()) > D30;
-        const acctsOf = (it) => new Set(sourcesOf(it).map(s => s.user_id).filter(Boolean)).size;
+        const exact = (key, fallback) => Number.isFinite(Number(summary[key])) ? Number(summary[key]) : fallback;
+        const sourceCountOf = (it) => Number.isFinite(Number(it.source_count)) ? Number(it.source_count) : sourcesOf(it).length;
+        const accountCountOf = (it) => Number.isFinite(Number(it.account_count)) ? Number(it.account_count) : new Set(sourcesOf(it).map(s => s.user_id).filter(Boolean)).size;
+        const driverSourceCountOf = (it) => Number.isFinite(Number(it.driver_source_count)) ? Number(it.driver_source_count) : sourcesOf(it).filter(source => source.is_driver).length;
+        const q = (this._idSearch || '').toLowerCase();
+        this._renderIdentityIntake(q);
 
-        // ── Synthesis KPIs (computed from the live list) + header status line ──
+        const active = exact('active_identity_count', list.filter(it => it.status === 'active').length);
+        const mirrors = exact('mirror_identity_count', list.filter(isMirror).length);
+        const linkedSources = exact('linked_source_count', list.reduce((total, identity) => total + sourceCountOf(identity), 0));
+        const unresolvedSources = exact('unresolved_source_count', this._identityUnresolvedSources?.length || 0);
+        const recentSources = exact('recent_source_count', this._identityRecentSources?.length || 0);
+        const disabledSources = exact('disabled_source_count', list.reduce((total, identity) => total + sourcesOf(identity).filter(source => source.enabled === false).length, 0));
+        const deletedExcluded = exact('deleted_source_count_excluded', 0);
+        const card = (value, label, cls, icon) => `<div class="kpi ${cls || ''}"><div class="kpi-hd"><div class="v">${value}</div><span class="kpi-ic">${icon}</span></div><div class="l">${label}</div></div>`;
         const kel = document.getElementById('id-kpis');
-        if (kel) {
-            const total = list.length;
-            const active = list.filter(it => it.status === 'active').length;
-            const mirrors = list.filter(isMirror).length;
-            const srcTotal = list.reduce((a, it) => a + sourcesOf(it).length, 0);
-            const brandTotal = list.reduce((a, it) => a + brandsOf(it).length, 0);
-            const dormant = list.filter(isDormant).length;
-            const card = (v, l, cls, icon) => `<div class="kpi ${cls || ''}"><div class="kpi-hd"><div class="v">${v}</div><span class="kpi-ic">${icon}</span></div><div class="l">${l}</div></div>`;
-            kel.innerHTML = `<div class="kpi-group kpi-group--priority"><div class="kpi-gtitle">🧬 Graphe providers</div><div class="admin-cards">
-                ${card(n(active), 'Identités actives', active > 0 ? 'ok' : '', '🧬')}
-                ${card(n(mirrors), 'Miroirs multi-marques', mirrors > 0 ? 'warn' : 'ok', '🔁')}
-                ${card(n(srcTotal), 'Sources rattachées', '', '📡')}
-                ${card(n(brandTotal), 'Marques détectées', '', '🏷️')}
-                ${card(n(dormant), 'Dormantes 30 j', dormant > 0 ? 'warn' : 'ok', '💤')}
-                ${card(n(total), 'Identités', '', '🗂️')}
-            </div></div>`;
-            const tx = document.querySelector('#page-admin .crm-head-tx');
-            if (tx) {
-                let meta = tx.querySelector('.crm-head-meta');
-                if (!meta) { meta = document.createElement('div'); meta.className = 'crm-head-meta'; tx.appendChild(meta); }
-                meta.innerHTML =
-                    `<span class="crm-hpill"><b>${n(active)}</b> actives</span>` +
-                    `<span class="crm-hpill ${mirrors > 0 ? 'bad' : ''}"><b>${n(mirrors)}</b> miroirs</span>` +
-                    `<span class="crm-hpill"><b>${n(srcTotal)}</b> sources</span>` +
-                    `<span class="crm-hpill"><b>${n(brandTotal)}</b> marques</span>`;
-            }
+        if (kel) kel.innerHTML = `<div class="kpi-group kpi-group--priority"><div class="kpi-gtitle">🧬 Graphe providers · source de vérité</div><div class="admin-cards">
+            ${card(n(active), 'Identités actives', active > 0 ? 'ok' : '', '🧬')}
+            ${card(n(linkedSources), 'Sources vérifiées', '', '📡')}
+            ${card(n(unresolvedSources), 'Non résolues', unresolvedSources > 0 ? 'muted' : 'ok', '⌛')}
+            ${card(n(recentSources), `Ajouts ${n(this._identityRecentWindowDays)} j`, '', '✨')}
+            ${card(n(disabledSources), 'Désactivées', disabledSources > 0 ? 'muted' : 'ok', '⏸️')}
+            ${card(n(mirrors), 'Miroirs multi-marques', '', '🔁')}
+        </div></div>`;
+        const integrity = document.getElementById('id-integrity-status');
+        if (integrity) integrity.innerHTML = this._identityLegacyFallback
+            ? '<strong>Mode de compatibilité</strong><span>Le nouveau registre vérifié n’est pas encore disponible.</span>'
+            : `<strong>Rattachements vérifiés</strong><span>${n(deletedExcluded)} source${deletedExcluded > 1 ? 's' : ''} supprimée${deletedExcluded > 1 ? 's' : ''} exclue${deletedExcluded > 1 ? 's' : ''} · actualisation automatique 30 s</span>`;
+        const tx = document.querySelector('#page-admin .crm-head-tx');
+        if (tx) {
+            let meta = tx.querySelector('.crm-head-meta');
+            if (!meta) { meta = document.createElement('div'); meta.className = 'crm-head-meta'; tx.appendChild(meta); }
+            meta.innerHTML =
+                `<span class="crm-hpill"><b>${n(active)}</b> actives</span>` +
+                `<span class="crm-hpill"><b>${n(linkedSources)}</b> vérifiées</span>` +
+                `<span class="crm-hpill ${unresolvedSources > 0 ? 'bad' : ''}"><b>${n(unresolvedSources)}</b> non résolues</span>` +
+                `<span class="crm-hpill"><b>${n(recentSources)}</b> récentes</span>`;
         }
 
-        // ── Filter + search + mirror-first priority sort ──
         const f = this._idFilter || '';
         let view = list.filter(it => {
             if (f === 'mirror') return isMirror(it);
             if (f === 'active') return it.status === 'active';
-            if (f === 'multi') return sourcesOf(it).length > 1;
-            if (f === 'driver') return sourcesOf(it).some(s => s.is_driver);
+            if (f === 'multi') return sourceCountOf(it) > 1;
+            if (f === 'driver') return driverSourceCountOf(it) > 0;
             if (f === 'dormant') return isDormant(it);
             return true;
         });
-        const q = (this._idSearch || '').toLowerCase();
         if (q) view = view.filter(it => {
             if (String(it.display_name || '').toLowerCase().includes(q)) return true;
-            if (brandsOf(it).some(b => String(b || '').toLowerCase().includes(q))) return true;
-            return sourcesOf(it).some(s => String(s.owner_email || '').toLowerCase().includes(q) || String(s.display_name || '').toLowerCase().includes(q));
+            if (brandsOf(it).some(brand => String(brand || '').toLowerCase().includes(q))) return true;
+            return sourcesOf(it).some(source => String(source.owner_email || '').toLowerCase().includes(q) || String(source.display_name || '').toLowerCase().includes(q));
         });
-        // Priority: mirrors first, then most recent activity, then most sources.
         view = view.slice().sort((a, b) =>
             (isMirror(b) - isMirror(a)) ||
             (new Date(b.last_seen || 0).getTime() - new Date(a.last_seen || 0).getTime()) ||
-            (sourcesOf(b).length - sourcesOf(a).length));
+            (sourceCountOf(b) - sourceCountOf(a)));
 
         if (!view.length) {
-            el.innerHTML = `<div class="card"><span class="badge ${q || f ? 'gray' : 'green'}">${q || f ? '∅' : '✓'}</span> ${q || f ? 'Aucune identité ne correspond à ce filtre.' : 'Aucune identité résolue.'}</div>`;
+            el.innerHTML = `<div class="card"><span class="badge ${q || f ? 'gray' : 'green'}">${q || f ? '∅' : '✓'}</span> ${q || f ? 'Aucune identité vérifiée ne correspond à ce filtre.' : 'Aucune identité vérifiée.'}</div>`;
             return;
         }
 
         el.innerHTML = view.map((it, idx) => {
             const brands = brandsOf(it), sources = sourcesOf(it);
+            const sourceCount = sourceCountOf(it), accountCount = accountCountOf(it);
             const dormant = isDormant(it);
             const status = it.status === 'active' ? '<span class="badge green">active</span>' : `<span class="badge gray">${esc(it.status || '—')}</span>`;
             const mirror = isMirror(it) ? ' <span class="badge amber" title="Plusieurs marques revendues pointent vers le même panel amont">🔁 miroir multi-marques</span>' : '';
-            const brandChips = brands.map(b => `<span class="badge blue">${esc(b)}</span>`).join(' ');
-            // Sources: compact rows; collapse beyond 5.
-            const srcRow = (s) => {
-                const cl = s.user_id ? ` class="user-row" data-user-id="${esc(s.user_id)}" tabindex="0" aria-label="Voir la fiche de ${esc(s.owner_email || s.display_name || '')}" title="Voir la fiche client"` : '';
-                return `<tr${cl}>
-                    <td>${esc(s.display_name)}</td>
-                    <td><span class="pacct">${esc(s.owner_email || '—')}</span>${s.is_driver ? ' <span class="badge blue">pilote</span>' : ''}</td>
-                    <td>${s.sync_status === 'ready' ? '<span class="badge green">ready</span>' : `<span class="badge gray">${esc(s.sync_status || '—')}</span>`}</td>
-                    <td>${s.last_synced_at ? esc(AdminPage.timeAgo(s.last_synced_at)) : '—'}</td>
+            const brandChips = brands.map(brand => `<span class="badge blue">${esc(brand)}</span>`).join(' ');
+            const srcRow = (source) => {
+                const rowAttrs = source.user_id ? ` class="user-row" data-user-id="${esc(source.user_id)}" tabindex="0" aria-label="Voir la fiche de ${esc(source.owner_email || source.display_name || '')}" title="Voir la fiche client"` : '';
+                const sourceStatus = source.enabled === false
+                    ? '<span class="badge gray">désactivée</span>'
+                    : source.sync_status === 'ready' ? '<span class="badge green">ready</span>' : `<span class="badge ${source.sync_status === 'error' ? 'red' : 'gray'}">${esc(source.sync_status || '—')}</span>`;
+                return `<tr${rowAttrs}>
+                    <td>${esc(source.display_name)}</td>
+                    <td><span class="pacct">${esc(source.owner_email || '—')}</span>${source.is_driver ? ' <span class="badge blue">pilote</span>' : ''}</td>
+                    <td>${sourceStatus}</td>
+                    <td><span class="id-source-time">${source.created_at ? `ajout ${esc(AdminPage.timeAgo(source.created_at))}` : 'ajout —'}<small>${source.last_synced_at ? `sync ${esc(AdminPage.timeAgo(source.last_synced_at))}` : 'jamais synchronisée'}</small></span></td>
                 </tr>`;
             };
             let srcTable;
-            if (!sources.length) srcTable = '<div class="ssub">Aucune source ne porte cette identité.</div>';
-            else {
-                const head = '<thead><tr><th>Source</th><th>Compte</th><th>Statut</th><th>Dernier sync</th></tr></thead>';
+            if (!sources.length) {
+                srcTable = '<div class="ssub">Aucune source non supprimée n’est rattachée à cette identité.</div>';
+            } else {
+                const head = '<thead><tr><th>Source</th><th>Compte</th><th>Statut</th><th>Ajout / sync</th></tr></thead>';
                 const shown = sources.slice(0, 5).map(srcRow).join('');
                 const hidden = sources.slice(5).map(srcRow).join('');
-                srcTable = `<div class="scroll"><table>${head}<tbody>${shown}${hidden ? `<tbody class="id-more" hidden data-idx="${idx}">${hidden}</tbody>` : ''}</table></div>` +
-                    (hidden ? `<button class="id-actbtn id-more-btn" data-idx="${idx}" style="margin-top:8px">▾ Voir les ${n(sources.length - 5)} autres sources</button>` : '');
+                const remainingSample = Math.max(0, sources.length - 5);
+                srcTable = `<div class="scroll"><table>${head}<tbody>${shown}</tbody>${hidden ? `<tbody class="id-more" hidden data-idx="${idx}">${hidden}</tbody>` : ''}</table></div>` +
+                    (hidden ? `<button class="id-actbtn id-more-btn" data-idx="${idx}" style="margin-top:8px">▾ Voir les ${n(remainingSample)} autres sources chargées</button>` : '') +
+                    (sourceCount > sources.length ? `<div class="id-sample-note">${n(sources.length)} sources affichées sur ${n(sourceCount)} · ouvrir Providers pour la liste complète.</div>` : '');
             }
+            const providerSearch = sources[0]?.display_name || it.display_name || '';
             return `<div class="identity-card ${isMirror(it) ? 'mirror' : ''} ${dormant ? 'dormant' : ''}">
                 <div class="identity-head">
                     <div class="id-ic">${AdminPage.provIcon(it.display_name)}</div>
                     <div class="identity-main">
                         <div class="identity-name">${esc(it.display_name)} ${status}${mirror}${dormant ? ' <span class="badge gray" title="Aucune activité depuis 30 j+">💤 dormante</span>' : ''}</div>
-                        <div class="identity-stats"><b>${n(brands.length)}</b> marque(s) · <b>${n(sources.length)}</b> source(s) · <b>${n(acctsOf(it))}</b> compte(s) · <b>${n(it.key_count)}</b> clé(s) · actif ${it.last_seen ? esc(AdminPage.timeAgo(it.last_seen)) : '—'}</div>
+                        <div class="identity-stats"><b>${n(brands.length)}</b> marque(s) · <b>${n(sourceCount)}</b> source(s) vérifiée(s) · <b>${n(accountCount)}</b> compte(s) · <b>${n(it.key_count)}</b> clé(s) · actif ${it.last_seen ? esc(AdminPage.timeAgo(it.last_seen)) : '—'}</div>
                         ${brandChips ? `<div class="identity-brands">${brandChips}</div>` : ''}
                         <div class="identity-acts">
-                            ${sources.length ? `<button class="id-actbtn id-filter-src" data-name="${esc(it.display_name)}">📡 Voir les sources</button>` : ''}
+                            ${sourceCount ? `<button class="id-actbtn id-filter-src" data-name="${esc(providerSearch)}">📡 Voir dans Providers</button>` : ''}
                             ${it.id ? `<button class="id-actbtn id-copy" data-id="${esc(it.id)}">⧉ Copier l'ID</button>` : ''}
                         </div>
                     </div>
@@ -15062,17 +15269,17 @@ class AdminPage {
             </div>`;
         }).join('');
 
-        // Wire: expand sources, filter Sources on this identity, copy identity id.
-        el.querySelectorAll('.id-more-btn').forEach(b => b.addEventListener('click', () => {
-            const tb = el.querySelector(`tbody.id-more[data-idx="${b.dataset.idx}"]`);
-            if (tb) { tb.hidden = false; b.remove(); }
+        el.querySelectorAll('.id-more-btn').forEach(button => button.addEventListener('click', () => {
+            const body = el.querySelector(`tbody.id-more[data-idx="${button.dataset.idx}"]`);
+            if (body) { body.hidden = false; button.remove(); }
         }));
-        el.querySelectorAll('.id-filter-src').forEach(b => b.addEventListener('click', () => {
-            this._provSearch = b.dataset.name || ''; this._provFilter = '';
+        el.querySelectorAll('.id-filter-src').forEach(button => button.addEventListener('click', () => {
+            this._provSearch = button.dataset.name || '';
+            this._provFilter = '';
             this._navigate('providers');
         }));
-        el.querySelectorAll('.id-copy').forEach(b => b.addEventListener('click', async () => {
-            try { await navigator.clipboard.writeText(b.dataset.id); this._toast('ID identité copié.', 'ok'); }
+        el.querySelectorAll('.id-copy').forEach(button => button.addEventListener('click', async () => {
+            try { await navigator.clipboard.writeText(button.dataset.id); this._toast('ID identité copié.', 'ok'); }
             catch (_) { this._toast('Copie impossible.', 'err'); }
         }));
     }
