@@ -1804,7 +1804,7 @@ if (
 }
 const MULTI_AUDIO_HLS_PROTOCOL = 1;
 const MAX_MULTI_AUDIO_RENDITIONS = 8;
-const GATEWAY_VERSION = 124;
+const GATEWAY_VERSION = 125;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -2024,13 +2024,15 @@ app.get('/health', (req, res) => {
         },
         boundedMkvInputPumpProtocol: 1,
         finiteMkvSeekBroker: {
-            protocol: 2,
+            protocol: 3,
             active: Array.from(sessions.values()).filter((session) => (
                 Boolean(session?.finiteMkvSeekBroker)
             )).length,
             providerConnectionsSerialized: true,
             bufferedWindowBeforeLocalResponse: true,
+            continuousLocalRangeResponse: true,
             overlappingLocalRangesQueued: true,
+            localSupersessionAfterProviderWindow: true,
             exactRangeDrainReopensImmediately: true,
             plannedSupersessionReopensImmediately: false,
             windowBytes: FINITE_MKV_SEEK_WINDOW_BYTES,
@@ -3903,32 +3905,41 @@ function finiteMkvSeekCacheStore(context, range, payload) {
     }
 }
 
-function sendFiniteMkvSeekPayload(context, res, range, payload) {
-    if (!res || res.destroyed || res.writableEnded) return;
+function startFiniteMkvSeekResponse(context, res, range) {
+    if (!res || res.destroyed || res.writableEnded || res.headersSent) return;
     res.statusCode = 206;
     res.setHeader('Accept-Ranges', 'bytes');
     res.setHeader('Content-Type', 'application/octet-stream');
     res.setHeader('Content-Range', `bytes ${range.start}-${range.end}/${range.total}`);
-    res.setHeader('Content-Length', String(payload.length));
+    res.setHeader('Content-Length', String(range.end - range.start + 1));
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     if (context.validator?.kind === 'etag') res.setHeader('ETag', context.validator.value);
     if (context.validator?.kind === 'last-modified') res.setHeader('Last-Modified', context.validator.value);
-    res.end(payload);
 }
 
 async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
     const finiteSeek = context.pathPrefix === 'finite-mkv-seek';
+    if (finiteSeek && requestId !== context.latestRequestId) {
+        // A newer FFmpeg cue arrived while this request was queued. Do not
+        // spend the provider's mono-session slot on an obsolete local range.
+        if (!res.destroyed && !res.writableEnded) {
+            try { res.destroy(); } catch (_) {}
+        }
+        return;
+    }
     if (context.closed || (!finiteSeek && requestId !== context.latestRequestId)) {
         return sendStrictLidBrokerError(res, strictLidBrokerError('STRICT_LID_SUPERSEDED', 'Strict language media request was superseded', { status: 409 }));
     }
     if (finiteSeek && (res.destroyed || res.writableEnded)) return;
     if (context.terminalError) return sendStrictLidBrokerError(res, context.terminalError);
-    if (finiteSeek) {
-        const cached = finiteMkvSeekCacheLookup(context, range);
-        if (cached) return sendFiniteMkvSeekPayload(context, res, range, cached);
-    }
     await waitForStrictLidBrokerSlot(context);
+    if (finiteSeek && requestId !== context.latestRequestId) {
+        if (!res.destroyed && !res.writableEnded) {
+            try { res.destroy(); } catch (_) {}
+        }
+        return;
+    }
     if (context.closed || (!finiteSeek && requestId !== context.latestRequestId)) {
         return sendStrictLidBrokerError(res, strictLidBrokerError('STRICT_LID_SUPERSEDED', 'Strict language media request was superseded', { status: 409 }));
     }
@@ -3948,6 +3959,7 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
         localClosed: false,
         closePromise: null,
         stopReason: null,
+        superseded: false,
         upstreamCompletedExactRange: false,
     };
     attempt.onParentAbort = () => {
@@ -3958,10 +3970,10 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
     const onLocalClose = () => {
         if (!res.writableEnded) {
             attempt.localClosed = true;
-            // A finite seek window is already bounded in memory. Finish draining
-            // its sole provider body even when FFmpeg closes the local range to
-            // ask for another cue; aborting here would recreate the mono-slot
-            // race this broker exists to remove.
+            // Finish the current bounded provider window even when FFmpeg closes
+            // the continuous local range to ask for another cue. Do not open the
+            // next provider window after that close; this drains the mono-slot
+            // without downloading the rest of a potentially multi-gigabyte range.
             if (!finiteSeek) {
                 try { controller.abort(new Error('local reader closed')); } catch (_) {}
             }
@@ -3973,11 +3985,40 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
     try {
         const requestedLength = range.end - range.start + 1;
         const bufferedChunks = finiteSeek ? [] : null;
+        let finiteWindowStartOffset = 0;
+        let finiteWindowRange = null;
         let forwarded = 0;
         let reconnects = 0;
         let consecutiveNoProgressFailures = 0;
         let responseStarted = false;
         while (forwarded < requestedLength) {
+            if (finiteSeek && attempt.superseded) {
+                attempt.localClosed = true;
+                if (!res.destroyed && !res.writableEnded) {
+                    try { res.destroy(); } catch (_) {}
+                }
+                break;
+            }
+            if (finiteSeek && forwarded === finiteWindowStartOffset) {
+                finiteWindowRange = finiteMkvSeekWindowRange({
+                    start: range.start + forwarded,
+                    end: range.end,
+                    total: range.total,
+                }, context.finiteWindowBytes);
+                const cached = finiteMkvSeekCacheLookup(context, finiteWindowRange);
+                if (cached) {
+                    if (attempt.localClosed) break;
+                    if (!responseStarted) {
+                        startFiniteMkvSeekResponse(context, res, range);
+                        responseStarted = true;
+                    }
+                    if (!res.write(cached)) await waitForStrictLidDrain(res, controller.signal);
+                    forwarded += cached.length;
+                    finiteWindowStartOffset = forwarded;
+                    finiteWindowRange = null;
+                    continue;
+                }
+            }
             await waitForStrictLidBrokerSlot(context, controller.signal);
             if (controller.signal.aborted) {
                 throw controller.signal.reason || new Error('strict LID provider read stopped');
@@ -3999,7 +4040,7 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
             const offsetBeforeFetch = forwarded;
             const remainingRange = {
                 start: range.start + forwarded,
-                end: range.end,
+                end: finiteSeek ? finiteWindowRange.end : range.end,
                 total: range.total,
             };
             let upstreamStatus = null;
@@ -4173,6 +4214,11 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                     forwarded += chunk.length;
                     if (finiteSeek) bufferedChunks.push(Buffer.from(chunk));
                     else if (!res.write(chunk)) await waitForStrictLidDrain(res, controller.signal);
+                    // Once every declared byte is present, the range is exact.
+                    // Some provider transports report a reset instead of EOF
+                    // after delivering the complete body; an extra read would
+                    // turn valid media into a false reconnect/failure.
+                    if (forwarded - offsetBeforeFetch === exactRange.length) break;
                 }
                 if (controller.signal.aborted) {
                     throw controller.signal.reason || new Error('strict LID provider read stopped');
@@ -4190,6 +4236,33 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                 }
                 attempt.upstreamCompletedExactRange = true;
                 await closeStrictLidBrokerProviderFetch(context, attempt, 'completed');
+                if (finiteSeek && range.start + forwarded === finiteWindowRange.end + 1) {
+                    const windowLength = finiteWindowRange.end - finiteWindowRange.start + 1;
+                    const payload = Buffer.concat(bufferedChunks, windowLength);
+                    if (payload.length !== windowLength) {
+                        throw strictLidBrokerError(
+                            'RANGE_LENGTH_MISMATCH',
+                            'Provider did not materialize the exact finite MKV seek window.',
+                            { status: 502 },
+                        );
+                    }
+                    finiteMkvSeekCacheStore(context, finiteWindowRange, payload);
+                    bufferedChunks.length = 0;
+                    if (attempt.localClosed || attempt.superseded) {
+                        attempt.localClosed = true;
+                        if (!res.destroyed && !res.writableEnded) {
+                            try { res.destroy(); } catch (_) {}
+                        }
+                        break;
+                    }
+                    if (!responseStarted) {
+                        startFiniteMkvSeekResponse(context, res, range);
+                        responseStarted = true;
+                    }
+                    if (!res.write(payload)) await waitForStrictLidDrain(res, controller.signal);
+                    finiteWindowStartOffset = forwarded;
+                    finiteWindowRange = null;
+                }
             } catch (error) {
                 const progressBytes = forwarded - offsetBeforeFetch;
                 const timeoutKind = attempt.deadline?.timeoutKind || null;
@@ -4266,20 +4339,7 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                 }
             }
         }
-        if (finiteSeek) {
-            const payload = Buffer.concat(bufferedChunks, forwarded);
-            if (payload.length !== requestedLength) {
-                throw strictLidBrokerError(
-                    'RANGE_LENGTH_MISMATCH',
-                    'Provider did not materialize the exact finite MKV seek window.',
-                    { status: 502 },
-                );
-            }
-            finiteMkvSeekCacheStore(context, range, payload);
-            if (!attempt.localClosed) sendFiniteMkvSeekPayload(context, res, range, payload);
-        } else {
-            res.end();
-        }
+        if (!attempt.localClosed) res.end();
     } catch (error) {
         const intentionallyStopped = context.closed
             || attempt.localClosed
@@ -4355,13 +4415,29 @@ function handleStrictLidBrokerRequest(context, expectedPath, req, res) {
     }
 
     const finiteSeek = context.pathPrefix === 'finite-mkv-seek';
-    const range = finiteSeek
-        ? finiteMkvSeekWindowRange(requestedRange, context.finiteWindowBytes)
-        : requestedRange;
+    // Preserve FFmpeg's complete local range. Only provider fetches are split
+    // into bounded windows; clipping this response caused large MKV inputs to
+    // treat every 2 MiB boundary as premature EOF.
+    const range = requestedRange;
     const requestId = ++context.latestRequestId;
     const active = context.activeAttempt;
     if (active && !finiteSeek) {
         void closeStrictLidBrokerAttempt(context, active, 'superseded').catch(() => {});
+    } else if (active && finiteSeek) {
+        // FFmpeg may request a distant cue before it closes the previous local
+        // range. Let the exact provider window already in flight drain, then
+        // terminate only the obsolete loopback response. If no provider socket
+        // is active, close it now so response backpressure cannot block the
+        // newer request queued behind it.
+        active.superseded = true;
+        active.stopReason = 'superseded';
+        if (!active.upstreamController) {
+            active.localClosed = true;
+            try { active.controller.abort(new Error('finite MKV local range superseded')); } catch (_) {}
+            if (active.localResponse && !active.localResponse.destroyed && !active.localResponse.writableEnded) {
+                try { active.localResponse.destroy(); } catch (_) {}
+            }
+        }
     }
     if (finiteSeek) {
         context.finiteQueuedRequests++;
@@ -8535,7 +8611,7 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
                     code: err?.code || 'VOD_SEEK_PREPARE_FAILED',
                 });
             }
-            session.startupTimings.finiteMkvResumeMode = 'buffered-window-indexed-seek';
+            session.startupTimings.finiteMkvResumeMode = 'continuous-window-indexed-seek';
         }
 
         // The exact size preflight above is provider I/O, but it neither starts
@@ -10007,10 +10083,10 @@ async function prepareFiniteMkvSeekBroker(session, parentSignal = null) {
         effectiveUrlSha256: session.vodInputEffectiveUrlSha256,
         effectiveUrlIdentitySha256: session.vodInputEffectiveUrlIdentitySha256,
         pathPrefix: 'finite-mkv-seek',
-        // Every exact response is fully materialized on Hetzner before FFmpeg
-        // receives it, so the next byte range can open immediately. FFmpeg
-        // requests are queued and never supersede an in-flight provider body;
-        // the conservative release grace remains reserved for real failures.
+        // Each exact provider window is fully materialized on Hetzner before it
+        // is appended to FFmpeg's continuous local range. Provider windows and
+        // FFmpeg requests are serialized, so the conservative release grace is
+        // reserved for real failures rather than successful exact drains.
         completedReleaseDelayMs: 0,
         supersededReleaseDelayMs: PROVIDER_SLOT_RELEASE_DELAY_MS,
         abortSignal: parentSignal,
