@@ -94,6 +94,14 @@ class AdminPage {
         this._notificationRuleEditor = null;
         this._notificationDraft = null;
         this._notificationScheduleFilter = 'active';
+        this._providerSourcesMeta = {
+            provisionalSourceCount: 0,
+            provisionalSourcesEmitted: 0,
+            provisionalSourcesTruncated: false,
+            provisionalSampleLimit: 100,
+            generatedAt: null
+        };
+        this._providerSourcesLegacyFallback = false;
         this._identities = [];
         this._identitySummary = {};
         this._identityUnresolvedSources = [];
@@ -561,31 +569,39 @@ class AdminPage {
 #page-admin .tk-ctx h2{font-size:13px;}
 /* Sources triage console: toolbar + ops rows (status left · account/identity/error center · catalogue/sync/actions right) */
 #page-admin .src-toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:14px;}
-#page-admin .src-toolbar .sup-search{margin-bottom:0;flex:1;min-width:220px;}
-#page-admin .src-bulk{background:rgba(248,113,113,.1);border:1px solid rgba(248,113,113,.32);color:#fca5a5;border-radius:10px;padding:9px 13px;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap;}
-#page-admin .src-bulk:hover{background:rgba(248,113,113,.16);}
+#page-admin .src-toolbar .sup-search{min-height:44px;margin-bottom:0;flex:1;min-width:220px;}
+#page-admin .src-bulk{min-height:44px;background:var(--adm-panel);border:1px solid var(--adm-red);color:var(--adm-red);border-radius:10px;padding:9px 13px;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap;}
+#page-admin .src-bulk:hover{background:var(--adm-card2);}
 #page-admin .src-bulk:disabled{opacity:.55;cursor:default;}
+#page-admin .src-scope{margin:-3px 0 14px;padding:10px 12px;border:1px solid var(--adm-line);border-radius:10px;background:var(--adm-panel);color:var(--adm-tx2);font-size:11.5px;line-height:1.5;}
+#page-admin .src-scope[hidden]{display:none;}
+#page-admin .src-scope strong{color:var(--adm-amber);font-weight:720;}
+#page-admin .src-scope.is-warn{border-color:var(--adm-amber);}
 #page-admin .src-rows{display:flex;flex-direction:column;gap:9px;}
 #page-admin .src-row{display:grid;grid-template-columns:158px 1fr auto;gap:14px;align-items:center;background:var(--adm-panel);border:1px solid var(--adm-line);border-left:3px solid transparent;border-radius:12px;padding:12px 15px;}
 #page-admin .src-row.err{border-left-color:var(--adm-red);}
 #page-admin .src-row.inc{border-left-color:var(--adm-amber);}
-#page-admin .src-row.unres{border-left-color:#8b7cff;}
+#page-admin .src-row.unres{border-left-color:var(--adm-blue);}
+#page-admin .src-row.prov{border-left-color:var(--adm-amber);}
 #page-admin .src-st{display:flex;flex-direction:column;gap:6px;align-items:flex-start;min-width:0;}
 #page-admin .src-prov{font-size:13.5px;font-weight:650;color:var(--adm-tx);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;}
 #page-admin .src-main{min-width:0;font-size:12.5px;color:var(--adm-tx2);}
-#page-admin .src-acct{color:#a9bcff;cursor:pointer;font-weight:600;}
+#page-admin .src-acct{color:var(--adm-blue);cursor:pointer;font-weight:600;}
 #page-admin .src-acct:hover{text-decoration:underline;}
 #page-admin .src-id{color:var(--adm-tx3);}
-#page-admin .src-err{color:#fca5a5;margin-top:4px;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:560px;}
+#page-admin .src-resolution{display:inline-flex;align-items:center;gap:7px;flex-wrap:wrap;color:var(--adm-tx2);}
+#page-admin .src-resolution-note{display:block;margin-top:5px;color:var(--adm-tx3);font-size:11px;line-height:1.4;}
+#page-admin .src-err{color:var(--adm-red);margin-top:4px;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:560px;}
 #page-admin .src-cat{font-size:11.5px;color:var(--adm-tx3);margin-top:4px;}
 #page-admin .src-meta{text-align:right;white-space:nowrap;display:flex;flex-direction:column;align-items:flex-end;gap:7px;}
 #page-admin .src-sync{font-size:11.5px;color:var(--adm-tx2);}
-#page-admin .src-acts{display:flex;gap:6px;}
-#page-admin .src-mini{background:var(--color-bg-secondary,#181820);color:#a9bcff;border:1px solid var(--adm-line);border-radius:6px;padding:2px 9px;cursor:pointer;font-size:12px;white-space:nowrap;}
-#page-admin .src-mini:hover{border-color:#5b7cfa;}
+#page-admin .src-acts{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;}
+#page-admin .src-mini,#page-admin .src-acts .resync-btn{min-height:44px;background:var(--color-bg-secondary);color:var(--adm-tx);border:1px solid var(--adm-line);border-radius:8px;padding:7px 11px;cursor:pointer;font-size:12px;white-space:nowrap;touch-action:manipulation;}
+#page-admin .src-mini:hover,#page-admin .src-acts .resync-btn:hover{border-color:var(--adm-blue);}
+#page-admin .src-mini:focus-visible,#page-admin .src-acts .resync-btn:focus-visible,#page-admin .src-bulk:focus-visible,#page-admin .src-toolbar .sup-search:focus-visible{outline:2px solid var(--adm-blue);outline-offset:2px;}
 #page-admin .src-row.ok .resync-btn{opacity:.5;}
 #page-admin .src-row.ok .resync-btn:hover{opacity:1;}
-@media(max-width:820px){#page-admin .src-row{grid-template-columns:1fr;}#page-admin .src-meta{text-align:left;align-items:flex-start;}}
+@media(max-width:820px){#page-admin .src-row{grid-template-columns:1fr;}#page-admin .src-meta{text-align:left;align-items:flex-start;}#page-admin .src-acts{justify-content:flex-start;}}
 /* Identités: leading gradient icon on each identity card */
 #page-admin .id-ic{width:42px;height:42px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0;background:linear-gradient(135deg,rgba(91,124,250,.22),rgba(168,85,247,.18));border:1px solid rgba(120,150,255,.2);}
 /* Identity cards — class-based (replaces inline styles) */
@@ -14866,18 +14882,19 @@ class AdminPage {
     async _pageProviders() {
         this._setCrumb('Sources', this._lastTs);
         const v = this._view();
-        const filters = [['', 'Toutes'], ['problem', 'À traiter'], ['error', 'En erreur'], ['incomplete', 'Sync incomplète'], ['unresolved', 'Identité non résolue'], ['driver', 'Pilotes']];
+        const filters = [['', 'Toutes'], ['problem', 'À traiter'], ['provisional', 'Provisoires'], ['error', 'En erreur'], ['incomplete', 'Sync incomplète'], ['unresolved', 'Non résolues'], ['driver', 'Pilotes']];
         v.innerHTML = `<div class="crm-page">
             <h1 class="crm-h1">📡 Sources providers</h1>
-            <p class="crm-sub">Source = playlist/compte client · identité = panel amont résolu (<a href="#" id="prov-goto-id" style="color:#a9bcff">voir Identités →</a>). Triage des sources en problème + volumétrie catalogue.</p>
+            <p class="crm-sub">Source = playlist/compte client · identité = panel amont vérifié (<a href="#" id="prov-goto-id" style="color:var(--adm-blue)">voir Identités →</a>). Les sources provisoires restent isolées jusqu’à réunir assez de signaux.</p>
             <section id="prov-kpis" class="kpi-groups"><div class="ssub">Chargement…</div></section>
             <div class="qv-row" id="prov-filters" role="tablist" aria-label="Filtres sources">
               ${filters.map(([val, lbl]) => `<button class="qv-chip" data-filter="${val}" role="tab">${lbl}</button>`).join('')}
             </div>
             <div class="src-toolbar">
-              <input class="sup-search" id="prov-search" type="search" placeholder="Rechercher : provider, compte, identité, erreur…" autocomplete="off" value="${AdminPage.esc(this._provSearch || '')}" aria-label="Rechercher une source" />
+              <input class="sup-search" id="prov-search" type="search" placeholder="Rechercher : provider, provisoire, compte, identité, erreur…" autocomplete="off" value="${AdminPage.esc(this._provSearch || '')}" aria-label="Rechercher une source" />
               <button class="src-bulk" id="prov-bulk-resync" hidden>↻ Re-sync des erreurs</button>
             </div>
+            <div class="src-scope" id="prov-scope" role="status" aria-live="polite" hidden></div>
             <div id="admin-sources"><div class="ssub">Chargement…</div></div>
         </div>`;
         const goto = document.getElementById('prov-goto-id');
@@ -14892,13 +14909,14 @@ class AdminPage {
         if (bulk) bulk.addEventListener('click', () => this._resyncAllErrors(bulk));
         try {
             const [sources, ov, sparks] = await Promise.all([
-                this._rpc('admin_sources'),
+                this._loadProviderSources(),
                 this._rpc('admin_overview'),
                 this._rpc('admin_metric_sparks', { p_days: 14 }).catch(() => null) // sparklines non-critical
             ]);
             this._sources = Array.isArray(sources) ? sources : [];
             this._dressHeader();
             this._renderProvKpis(ov || {}, this._sources, sparks && sparks.series);
+            this._renderProviderScope();
             this._renderSources(this._sources);
         } catch (e) {
             const el = document.getElementById('admin-sources');
@@ -14908,7 +14926,69 @@ class AdminPage {
 
     _syncProvFilters() {
         const cur = this._provFilter || '';
-        document.querySelectorAll('#prov-filters .qv-chip').forEach(c => c.classList.toggle('active', (c.dataset.filter || '') === cur));
+        document.querySelectorAll('#prov-filters .qv-chip').forEach(c => {
+            const active = (c.dataset.filter || '') === cur;
+            c.classList.toggle('active', active);
+            c.setAttribute('aria-selected', active ? 'true' : 'false');
+        });
+    }
+
+    async _loadProviderSources() {
+        this._providerSourcesLegacyFallback = false;
+        let payload;
+        try {
+            payload = await this._rpc('admin_sources_v2');
+        } catch (error) {
+            const code = error?.payload?.code || '';
+            if (code !== 'PGRST202' && !String(error?.message || '').includes('PGRST202')) throw error;
+            const legacy = await this._rpc('admin_sources');
+            if (!Array.isArray(legacy)) throw new Error('invalid_admin_sources_response');
+            this._providerSourcesLegacyFallback = true;
+            this._providerSourcesMeta = {
+                provisionalSourceCount: 0,
+                provisionalSourcesEmitted: 0,
+                provisionalSourcesTruncated: false,
+                provisionalSampleLimit: 0,
+                generatedAt: null
+            };
+            return legacy;
+        }
+        if (!payload || Array.isArray(payload) || payload.schema_version !== 2 || !Array.isArray(payload.sources)) {
+            throw new Error('invalid_admin_sources_v2_response');
+        }
+        const count = (value) => Math.max(0, Math.trunc(Number(value) || 0));
+        this._providerSourcesMeta = {
+            provisionalSourceCount: count(payload.provisional_source_count),
+            provisionalSourcesEmitted: count(payload.provisional_sources_emitted),
+            provisionalSourcesTruncated: payload.provisional_sources_truncated === true,
+            provisionalSampleLimit: count(payload.provisional_sample_limit),
+            generatedAt: payload.generated_at || null
+        };
+        return payload.sources;
+    }
+
+    _renderProviderScope() {
+        const el = document.getElementById('prov-scope');
+        if (!el) return;
+        el.classList.toggle('is-warn', this._providerSourcesLegacyFallback === true || this._providerSourcesMeta?.provisionalSourcesTruncated === true);
+        if (this._providerSourcesLegacyFallback) {
+            el.hidden = false;
+            el.innerHTML = '<strong>Vue de compatibilité.</strong> Le nouveau contrat n’est pas encore chargé ; certaines sources provisoires peuvent manquer.';
+            return;
+        }
+        const total = Math.max(0, Number(this._providerSourcesMeta?.provisionalSourceCount) || 0);
+        const emitted = Math.max(0, Number(this._providerSourcesMeta?.provisionalSourcesEmitted) || 0);
+        if (!total) {
+            el.hidden = true;
+            el.textContent = '';
+            return;
+        }
+        el.hidden = false;
+        if (this._providerSourcesMeta?.provisionalSourcesTruncated) {
+            el.innerHTML = `<strong>${AdminPage.n(emitted)} source(s) provisoire(s) affichée(s) sur ${AdminPage.n(total)}.</strong> La file est bornée pour préserver les performances ; la vue Identités conserve le décompte complet.`;
+            return;
+        }
+        el.innerHTML = `<strong>${AdminPage.n(total)} source(s) provisoire(s) incluse(s).</strong> Leurs traitements restent isolés de toute autre source jusqu’à vérification.`;
     }
 
     async _resyncAllErrors(btn) {
@@ -14936,7 +15016,11 @@ class AdminPage {
         const total = sources.length;
         const err = sources.filter(s => s.sync_error || s.sync_status === 'sync_error').length;
         const inc = sources.filter(s => s.incomplete === true).length;
-        const unres = sources.filter(s => !s.identity_name).length;
+        const provisionalVisible = sources.filter(s => s.resolution_state === 'provisional').length;
+        const provisional = this._providerSourcesLegacyFallback
+            ? provisionalVisible
+            : Math.max(provisionalVisible, Number(this._providerSourcesMeta?.provisionalSourceCount) || 0);
+        const unres = sources.filter(s => !s.identity_name && s.resolution_state !== 'provisional').length;
         const pct = total ? Math.round(100 * Math.max(0, total - err - inc) / total) : 100;
         const healthCls = err > 0 ? 'alert' : inc > 0 ? 'warn' : 'ok';
         const catalog = (Number(o.titles_movie) || 0) + (Number(o.titles_series) || 0);
@@ -14948,8 +15032,9 @@ class AdminPage {
             ${card(pct + ' %', 'Sources saines', healthCls, null, '🩺')}
             ${card(n(err), 'En erreur', err > 0 ? 'alert' : 'ok', 'sources_error', '⚠️')}
             ${card(n(inc), 'Sync incomplète', inc > 0 ? 'warn' : 'ok', 'sources_incomplete', '🔄')}
-            ${card(n(unres), 'Identité non résolue', unres > 0 ? 'warn' : 'ok', null, '🧬')}
-            ${card(n(total), 'Sources', '', 'sources_total', '🗂️')}
+            ${card(n(provisional), 'Provisoires', provisional > 0 ? 'warn' : 'ok', null, '⏳')}
+            ${card(n(unres), 'Non résolues', unres > 0 ? 'warn' : 'ok', null, '🧬')}
+            ${card(n(total), 'Sources affichées', '', 'sources_total', '🗂️')}
             ${card(n(catalog), 'Catalogue (titres)', '', null, '🎬')}
         </div></div>`;
         const tx = document.querySelector('#page-admin .crm-head-tx');
@@ -14960,6 +15045,7 @@ class AdminPage {
                 `<span class="crm-hpill"><b>${n(total)}</b> sources</span>` +
                 `<span class="crm-hpill ${err > 0 ? 'bad' : ''}"><b>${n(err)}</b> en erreur</span>` +
                 `<span class="crm-hpill"><b>${n(inc)}</b> sync incomplète(s)</span>` +
+                `<span class="crm-hpill"><b>${n(provisional)}</b> provisoire(s)</span>` +
                 `<span class="crm-hpill"><b>${n(o.identities_active)}</b> identités</span>`;
         }
     }
@@ -16291,7 +16377,11 @@ class AdminPage {
         const el = document.getElementById('admin-sources');
         if (!el) return;
         rows = Array.isArray(rows) ? rows : [];
-        const kind = (s) => (s.sync_error || s.sync_status === 'sync_error') ? 'err' : s.incomplete === true ? 'inc' : !s.identity_name ? 'unres' : 'ok';
+        const isProvisional = (s) => s?.resolution_state === 'provisional';
+        const kind = (s) => (s.sync_error || s.sync_status === 'sync_error') ? 'err'
+            : s.incomplete === true ? 'inc'
+                : isProvisional(s) ? 'prov'
+                    : !s.identity_name ? 'unres' : 'ok';
         // Bulk re-sync button reflects the FULL set (independent of the current filter/search).
         const errCount = rows.filter(s => kind(s) === 'err').length;
         const bulk = document.getElementById('prov-bulk-resync');
@@ -16301,17 +16391,25 @@ class AdminPage {
         let view = rows.filter(s => {
             const k = kind(s);
             if (f === 'problem') return k !== 'ok';
+            if (f === 'provisional') return isProvisional(s);
             if (f === 'error') return k === 'err';
             if (f === 'incomplete') return s.incomplete === true;
-            if (f === 'unresolved') return !s.identity_name;
+            if (f === 'unresolved') return !s.identity_name && !isProvisional(s);
             if (f === 'driver') return s.is_driver === true;
             return true;
         });
         // Search across provider / account / identity / error.
         const q = (this._provSearch || '').toLowerCase();
-        if (q) view = view.filter(s => [s.display_name, s.owner_email, s.identity_name, s.sync_error].some(x => String(x || '').toLowerCase().includes(q)));
-        // Priority sort: errors → incomplete → unresolved → healthy, then account/name.
-        const rank = { err: 0, inc: 1, unres: 2, ok: 3 };
+        if (q) view = view.filter(s => [
+            s.display_name,
+            s.owner_email,
+            s.identity_name,
+            s.sync_error,
+            s.resolution_state,
+            isProvisional(s) ? 'provisoire' : (!s.identity_name ? 'non résolue' : 'vérifiée')
+        ].some(x => String(x || '').toLowerCase().includes(q)));
+        // Priority sort: errors → incomplete → provisional → unresolved → healthy.
+        const rank = { err: 0, inc: 1, prov: 2, unres: 3, ok: 4 };
         view = view.slice().sort((a, b) => (rank[kind(a)] - rank[kind(b)]) ||
             String(a.owner_email).localeCompare(String(b.owner_email)) || String(a.display_name).localeCompare(String(b.display_name)));
         if (!view.length) {
@@ -16324,14 +16422,23 @@ class AdminPage {
             : `<span class="badge green">${esc(s.sync_status || 'ready')}</span>`;
         el.innerHTML = `<div class="src-rows">` + view.map(s => {
             const k = kind(s);
+            const provisional = isProvisional(s);
             const cat = `${n(s.movie_titles)} films · ${n(s.series_titles)} séries · ${n(s.media_items)} items`;
             const sync = s.last_synced_at ? AdminPage.timeAgo(s.last_synced_at) : 'jamais';
-            const idHtml = s.identity_name ? `identité <b style="color:var(--adm-tx2)">${esc(s.identity_name)}</b>` : '<span class="badge gray">identité non résolue</span>';
+            const required = Math.max(1, Math.trunc(Number(s.required_evidence) || 32));
+            const evidence = Math.min(required, Math.max(0, Math.trunc(Number(s.evidence_count) || 0)));
+            const idHtml = s.identity_name
+                ? `identité vérifiée <b style="color:var(--adm-tx2)">${esc(s.identity_name)}</b>`
+                : provisional
+                    ? `<span class="src-resolution">Provisoire · <b>${n(evidence)}/${n(required)} signaux</b></span><span class="src-resolution-note">Traitements isolés à cette source jusqu’à vérification.</span>`
+                    : '<span class="badge gray">identité non résolue</span>';
             const acct = s.user_id
                 ? `<span class="src-acct" data-user-id="${esc(s.user_id)}" title="Ouvrir la fiche client">👤 ${esc(s.owner_email || '—')}</span>`
                 : `<span>👤 ${esc(s.owner_email || '—')}</span>`;
-            return `<div class="src-row ${k}">
-                <div class="src-st">${statusBadge(s, k)}${s.is_driver ? '<span class="badge blue">pilote</span>' : ''}<div class="src-prov" title="${esc(s.display_name)}">${esc(s.display_name)}</div></div>
+            const actionLabel = provisional ? '↻ relancer la résolution' : '↻ re-sync';
+            const actionTitle = provisional ? 'Relancer la synchronisation et la résolution de cette source provisoire' : 'Forcer un re-sync complet de cette source';
+            return `<div class="src-row ${k}${provisional ? ' prov' : ''}">
+                <div class="src-st">${statusBadge(s, k)}${provisional ? '<span class="badge amber">provisoire</span>' : ''}${s.is_driver ? '<span class="badge blue">pilote</span>' : ''}<div class="src-prov" title="${esc(s.display_name)}">${esc(s.display_name)}</div></div>
                 <div class="src-main">
                     ${acct} · <span class="src-id">${idHtml}</span>
                     ${s.sync_error ? `<div class="src-err" title="${esc(s.sync_error)}">${AdminPage.errKindBadge(s.sync_error)} ${esc(s.sync_error)}</div>` : ''}
@@ -16341,7 +16448,7 @@ class AdminPage {
                     <div class="src-sync">sync ${esc(sync)}</div>
                     <div class="src-acts">
                         ${s.user_id ? `<button class="src-mini src-open" data-user-id="${esc(s.user_id)}" title="Ouvrir la fiche client">client →</button>` : ''}
-                        <button class="resync-btn" data-source="${esc(s.source_id)}" title="Forcer un re-sync complet de cette source">↻ re-sync</button>
+                        <button class="resync-btn" data-source="${esc(s.source_id)}" title="${actionTitle}">${actionLabel}</button>
                     </div>
                 </div>
             </div>`;
