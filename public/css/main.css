@@ -11970,6 +11970,71 @@ html.tv-mode .navbar-menu .nav-link.active .norva-ui-icon {
   pointer-events: none;
 }
 
+.watch-subtitle-status {
+  min-height: 28px;
+  padding: 5px 10px;
+  border: 1px solid color-mix(in srgb, var(--color-accent) 42%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--color-bg-secondary) 86%, transparent);
+  color: var(--color-text-primary);
+  font-size: 0.8rem;
+  font-weight: 650;
+  line-height: 1.2;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  backdrop-filter: blur(10px);
+  transition: opacity var(--transition-fast), transform var(--transition-fast);
+}
+
+.watch-subtitle-status::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  flex: 0 0 8px;
+  border-radius: var(--radius-full);
+  background: var(--color-accent);
+}
+
+.watch-subtitle-status.is-applying::before {
+  animation: watch-subtitle-status-pulse 900ms ease-in-out infinite alternate;
+}
+
+.watch-subtitle-status.is-ready {
+  border-color: color-mix(in srgb, var(--color-success) 48%, transparent);
+}
+
+.watch-subtitle-status.is-ready::before {
+  background: var(--color-success);
+}
+
+.watch-subtitle-status.is-error {
+  border-color: color-mix(in srgb, var(--color-error) 50%, transparent);
+}
+
+.watch-subtitle-status.is-error::before {
+  background: var(--color-error);
+}
+
+.watch-subtitle-status.hidden {
+  opacity: 0;
+  transform: translateY(-4px);
+  pointer-events: none;
+}
+
+@keyframes watch-subtitle-status-pulse {
+  from { opacity: 0.45; transform: scale(0.8); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .watch-subtitle-status,
+  .watch-subtitle-status::before {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
 /* Badge Container for right alignment */
 .player-badges {
   display: flex;

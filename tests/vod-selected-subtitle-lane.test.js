@@ -69,7 +69,7 @@ test('Gateway extracts no subtitle by default and at most the exact selected tex
     'function mappedSubtitleStreamIndexForSession(session) {',
   );
 
-  assert.match(gateway, /const GATEWAY_VERSION = 125;/);
+  assert.match(gateway, /const GATEWAY_VERSION = 126;/);
   assert.match(subtitleSelection, /if \(!Number\.isInteger\(requestedIndex\)\) return \[\];/);
   assert.match(subtitleSelection, /\.find\(\(track\) => normalizeAudioStreamIndex\(track\.index\) === requestedIndex\)/);
   assert.match(subtitleSelection, /return selected \? \[selected\] : \[\];/);
@@ -92,6 +92,7 @@ test('Edge binds the requested subtitle index to the actual Gateway mapping', ()
 
 test('Watch clears stale title UI and serializes safe subtitle lane restarts', () => {
   const watch = read('public/js/pages/WatchPage.js');
+  const app = read('public/app.html');
   const playSetup = section(
     watch,
     'async play(content, streamUrl, playback = {}) {',
@@ -107,12 +108,42 @@ test('Watch clears stale title UI and serializes safe subtitle lane restarts', (
     'getSubtitleExtractionTracks() {',
     'attachProbeSubtitles(',
   );
+  const subtitleAttach = section(
+    watch,
+    'waitForManagedSubtitleTrack(trackEl, timeoutMs = 2000) {',
+    'attachProbeSubtitles(',
+  );
+  const engineTracks = section(
+    watch,
+    'applyEngineSubtitleTracks(tracks, playbackAttemptId) {',
+    'async enrichEngineSubtitleTracks()',
+  );
+  const subtitlePolling = section(
+    watch,
+    'startSubtitleSessionPolling(engine) {',
+    '    async subtitleWindowTick(engine, force = false) {',
+  );
+  const captionSelection = section(
+    watch,
+    'async selectCaptionTrack(source, index, streamIndex = null) {',
+    '// === Overlay Auto-Hide ===',
+  );
 
+  assert.match(app, /id="watch-subtitle-status"[^>]+role="status"[^>]+aria-live="polite"/);
   assert.match(playSetup, /recommendedGrid\.replaceChildren\(\)/);
   assert.match(playSetup, /seasonsContainer\.replaceChildren\(\)/);
   assert.match(playSetup, /episodesNavList\.replaceChildren\(\)/);
   assert.match(subtitleRestart, /_subtitleSwitchPromise/);
   assert.match(subtitleRestart, /restartCloudGatewayStreamAt\(position/);
   assert.match(subtitleRestart, /await this\.stopTranscodeSession\(\)/);
+  assert.match(subtitleRestart, /waitForSelectedSubtitleActivation/);
+  assert.match(watch, /resetSubtitleSwitchFeedback\(\)/);
+  assert.match(captionSelection, /setSubtitleSwitchFeedback\('applying'/);
   assert.match(extractionTracks, /return selected \? \[selected\] : \[\];/);
+  assert.match(subtitleAttach, /new Blob\(\['WEBVTT\\n\\n'\], \{ type: 'text\/vtt' \}\)/);
+  assert.match(subtitleAttach, /trackEl\.src = bootstrapUrl/);
+  assert.match(subtitlePolling, /await this\.subtitleSessionTick\(engine\)/);
+  assert.match(subtitleAttach, /lastSuccessfulFetchAt/);
+  assert.match(subtitlePolling, /\? 500 : 150/);
+  assert.doesNotMatch(engineTracks, /5000/);
 });

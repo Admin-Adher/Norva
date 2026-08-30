@@ -23,9 +23,21 @@ const payload = fs.readFileSync(inputPath);
 const requests = [];
 let activeProviderReads = 0;
 let maxActiveProviderReads = 0;
-let brokerQueue = Promise.resolve();
-let activeLocalRequest = null;
-let latestLocalRequestId = 0;
+let providerQueue = Promise.resolve();
+const windowCache = new Map();
+
+async function withProviderSlot(work) {
+    let releaseSlot;
+    const slot = new Promise((resolve) => { releaseSlot = resolve; });
+    const previous = providerQueue;
+    providerQueue = previous.catch(() => {}).then(() => slot);
+    await previous.catch(() => {});
+    try {
+        return await work();
+    } finally {
+        releaseSlot();
+    }
+}
 
 function waitForLocalDrain(res) {
     return new Promise((resolve) => {
@@ -81,50 +93,33 @@ const server = http.createServer(async (req, res) => {
         'Cache-Control': 'no-store',
     });
 
-    // Model protocol 3: FFmpeg receives one continuous local range while every
-    // local request and exact provider window share one serialized queue. A
-    // newer FFmpeg cue supersedes the old loopback response only after the
-    // current provider window has been fully materialized.
-    if (activeLocalRequest) {
-        activeLocalRequest.superseded = true;
-        if (!activeLocalRequest.providerActive && !activeLocalRequest.res.destroyed) {
-            activeLocalRequest.res.destroy();
-        }
-    }
-    const localRequest = {
-        id: ++latestLocalRequestId,
-        providerActive: false,
-        res,
-        superseded: false,
-    };
-    const work = brokerQueue.catch(() => {}).then(async () => {
-        if (localRequest.id !== latestLocalRequestId) {
-            if (!res.destroyed) res.destroy();
-            return;
-        }
-        activeLocalRequest = localRequest;
-        for (let start = range.start; start <= range.end; start += windowBytes) {
-            if (localRequest.superseded || res.destroyed) break;
-            const end = Math.min(range.end, start + windowBytes - 1);
-            localRequest.providerActive = true;
+    // Model protocol 4: every FFmpeg local range keeps the exact declared
+    // Content-Length and may overlap another local response. Only the bounded
+    // provider windows are serialized. The provider slot is released before a
+    // window is written to a potentially backpressured local response.
+    for (let start = range.start; start <= range.end; start += windowBytes) {
+        if (res.destroyed) break;
+        const end = Math.min(range.end, start + windowBytes - 1);
+        const cacheKey = `${start}-${end}`;
+        const body = await withProviderSlot(async () => {
+            const cached = windowCache.get(cacheKey);
+            if (cached) return cached;
             activeProviderReads += 1;
             maxActiveProviderReads = Math.max(maxActiveProviderReads, activeProviderReads);
-            const body = Buffer.from(payload.subarray(start, end + 1));
-            requests.push({ start, end, bytes: body.length });
-            await new Promise((resolve) => setImmediate(resolve));
-            activeProviderReads -= 1;
-            localRequest.providerActive = false;
-            if (localRequest.superseded || res.destroyed) {
-                if (!res.destroyed) res.destroy();
-                break;
+            try {
+                const materialized = Buffer.from(payload.subarray(start, end + 1));
+                requests.push({ start, end, bytes: materialized.length });
+                await new Promise((resolve) => setImmediate(resolve));
+                windowCache.set(cacheKey, materialized);
+                return materialized;
+            } finally {
+                activeProviderReads -= 1;
             }
-            if (!res.write(body)) await waitForLocalDrain(res);
-        }
-        if (!res.destroyed) res.end();
-        if (activeLocalRequest === localRequest) activeLocalRequest = null;
-    });
-    brokerQueue = work.catch(() => {});
-    await work;
+        });
+        if (res.destroyed) break;
+        if (!res.write(body)) await waitForLocalDrain(res);
+    }
+    if (!res.destroyed) res.end();
 });
 
 server.listen(0, '127.0.0.1', () => {
