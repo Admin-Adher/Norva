@@ -801,6 +801,9 @@ class WatchPage {
 
     applyAcknowledgedSubtitleSessionMetadata(options = {}) {
         const gatewaySession = options.gatewaySession || options.gateway_session || {};
+        const pendingSubtitlePreference = this.pendingPlaybackPreferences?.subtitle || {};
+        const pendingSubtitleOff = pendingSubtitlePreference.source === 'off'
+            || pendingSubtitlePreference.mode === 'off';
         const explicitTracks = Array.isArray(options.subtitleTracks)
             ? options.subtitleTracks
             : (Array.isArray(options.subtitle_tracks)
@@ -818,8 +821,16 @@ class WatchPage {
             gatewaySession.subtitleStreamIndex ??
             gatewaySession.subtitle_stream_index
         );
-        if (Number.isInteger(acknowledgedIndex) && acknowledgedIndex >= 0) {
-            const preference = this.pendingPlaybackPreferences?.subtitle || {};
+        if (pendingSubtitleOff) {
+            // "Off" is an explicit user choice. Never let stale session metadata
+            // from the lane being replaced turn captions back on while the new
+            // no-subtitle lane is attaching.
+            this.selectedSubtitleStreamIndex = null;
+            this.selectedSubtitleTrackUserChoice = true;
+            this.subtitleOffsetSeconds = 0;
+            this._pendingSubtitlePreferenceApplied = true;
+        } else if (Number.isInteger(acknowledgedIndex) && acknowledgedIndex >= 0) {
+            const preference = pendingSubtitlePreference;
             const existingIndex = this.subtitleTracks.findIndex(
                 track => Number(track?.index) === acknowledgedIndex
             );
@@ -5899,12 +5910,23 @@ class WatchPage {
         const requestId = Number.isInteger(options.requestId)
             ? options.requestId
             : ++this._gatewaySeekRequestId;
+        const subtitleSwitchRequestId = Number.isInteger(options.subtitleSwitchRequestId)
+            ? options.subtitleSwitchRequestId
+            : null;
+        const isObsoleteRequest = () => requestId !== this._gatewaySeekRequestId
+            || (subtitleSwitchRequestId !== null
+                && this.isStaleSubtitleSwitch(subtitleSwitchRequestId));
         const seekPlan = this.getGatewaySeekPlan(targetTime, options.preRollSeconds ?? 0);
         const { target, preRoll, sessionStart } = seekPlan;
         const autoplay = !this.video?.paused;
         const itemType = this.content.type === 'series' ? 'series' : 'movie';
         const container = this.containerExtension || this.content.containerExtension || 'mp4';
-        const playbackPreferences = this.savePlaybackPreferences(this.getMergedPlaybackPreferences());
+        const requestedPlaybackPreferences = this.normalizePlaybackPreferences(
+            options.playbackPreferences ?? options.playback_preferences
+        );
+        const playbackPreferences = this.savePlaybackPreferences(
+            requestedPlaybackPreferences || this.getMergedPlaybackPreferences()
+        );
         const activeAudioOptions = this.getCurrentAudioPlaybackOptions();
 
         this.showLoading();
@@ -5921,7 +5943,7 @@ class WatchPage {
 
         await this.releasePlaybackPipelineForRetry();
         await this.waitForProviderSlotRelease(900);
-        if (requestId !== this._gatewaySeekRequestId) return;
+        if (isObsoleteRequest()) return;
 
         if (this.video) {
             this.video.pause();
@@ -5957,16 +5979,18 @@ class WatchPage {
                 await this.restartCloudGatewayStreamAt(target, {
                     preRollSeconds: 75,
                     retryLevel: 1,
-                    requestId
+                    requestId,
+                    subtitleSwitchRequestId,
+                    playbackPreferences,
                 });
                 return;
             }
-            if (requestId !== this._gatewaySeekRequestId) return;
+            if (isObsoleteRequest()) return;
             await this.handlePlaybackFailure(error?.message || 'Failed to start seek session.');
             return;
         }
 
-        if (requestId !== this._gatewaySeekRequestId) {
+        if (isObsoleteRequest()) {
             await this.cleanupStaleCloudPlaybackSession(result?.sessionId);
             return;
         }
@@ -9146,8 +9170,11 @@ class WatchPage {
                 }
                 const textTrackReady = engine.trackReady === true
                     && engine.trackEl?.track?.mode === 'showing';
-                const deliveryReady = engine.mode === 'engine-inband'
-                    || Number.isFinite(engine.lastSuccessfulFetchAt);
+                // A successful request can still be the empty WEBVTT bootstrap
+                // while FFmpeg is opening the selected stream. Only announce
+                // captions as ready after at least one real cue reached the
+                // showing TextTrack (network and in-band modes alike).
+                const deliveryReady = Number(engine.trackEl?.track?.cues?.length || 0) > 0;
                 if (textTrackReady && deliveryReady) return true;
             }
             await new Promise(resolve => setTimeout(resolve, 100));
@@ -9189,7 +9216,16 @@ class WatchPage {
         if (this.currentPlaybackMode === 'gateway-session'
             && this.content?.sourceId && this.content?.id) {
             const position = Math.max(0, Math.floor(this.getPlaybackPosition()));
-            await this.restartCloudGatewayStreamAt(position, { subtitleSwitchRequestId: requestId });
+            // Carry this exact selection across teardown. Recomputing preferences
+            // after stop/load resets can otherwise fall back to the previous
+            // content state and mint a Gateway lane without subtitle output.
+            const playbackPreferences = this.savePlaybackPreferences(
+                this.getMergedPlaybackPreferences({ subtitle: preference })
+            );
+            await this.restartCloudGatewayStreamAt(position, {
+                subtitleSwitchRequestId: requestId,
+                playbackPreferences,
+            });
             if (this.isStaleSubtitleSwitch(requestId)) return false;
             if (selectedIsOff) {
                 this.setSubtitleSwitchFeedback('off');

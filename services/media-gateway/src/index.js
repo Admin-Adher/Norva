@@ -1804,7 +1804,7 @@ if (
 }
 const MULTI_AUDIO_HLS_PROTOCOL = 1;
 const MAX_MULTI_AUDIO_RENDITIONS = 8;
-const GATEWAY_VERSION = 126;
+const GATEWAY_VERSION = 127;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -8964,6 +8964,7 @@ app.get('/sessions/:id/:file', requirePlaybackToken, async (req, res) => {
 
     const requested = safeSessionArtifactName(req.params.file);
     if (!requested) return res.status(400).send('Invalid segment path');
+    const isGrowingSubtitle = requested.toLowerCase().endsWith('.vtt');
     if (requested.toLowerCase().endsWith('.m3u8') && !isAllowedSessionPlaylistName(session, requested)) {
         return res.status(404).send('Segment not found');
     }
@@ -8980,7 +8981,7 @@ app.get('/sessions/:id/:file', requirePlaybackToken, async (req, res) => {
                     await handle.close().catch(() => {});
                 }
             }
-            res.setHeader('Cache-Control', 'private, max-age=30');
+            res.setHeader('Cache-Control', isGrowingSubtitle ? 'no-store' : 'private, max-age=30');
             const stream = handle.createReadStream({ autoClose: true });
             stream.once('error', (error) => {
                 failMkvCompleteHlsCacheSession(session, error);
@@ -9004,7 +9005,10 @@ app.get('/sessions/:id/:file', requirePlaybackToken, async (req, res) => {
             res.setHeader('Cache-Control', 'no-store');
             return res.send(rewritePlaylistSegments(playlist, session.accessToken, session));
         }
-        res.setHeader('Cache-Control', 'private, max-age=30');
+        // Selected WebVTT files grow while FFmpeg demuxes the active lane. A
+        // 30-second browser cache makes a valid selection look empty until the
+        // cache expires, so every subtitle poll must revalidate the live file.
+        res.setHeader('Cache-Control', isGrowingSubtitle ? 'no-store' : 'private, max-age=30');
         return res.sendFile(filePath);
     } catch (error) {
         if (session.completeHlsCacheLease) {

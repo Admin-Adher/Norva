@@ -83,7 +83,7 @@ test('Gateway extracts no subtitle by default and at most the exact selected tex
     'function mappedSubtitleStreamIndexForSession(session) {',
   );
 
-  assert.match(gateway, /const GATEWAY_VERSION = 126;/);
+  assert.match(gateway, /const GATEWAY_VERSION = 127;/);
   assert.match(subtitleSelection, /if \(!Number\.isInteger\(requestedIndex\)\) return \[\];/);
   assert.match(subtitleSelection, /\.find\(\(track\) => normalizeAudioStreamIndex\(track\.index\) === requestedIndex\)/);
   assert.match(subtitleSelection, /return selected \? \[selected\] : \[\];/);
@@ -154,6 +154,88 @@ test('Watch immediately restores the exact subtitle lane acknowledged by Gateway
     sessionAcknowledged: true,
   });
   assert.equal(page.currentStreamInfo.subtitles[0].index, 17);
+});
+
+test('Watch keeps an explicit Off choice ahead of stale acknowledged session metadata', () => {
+  const WatchPage = loadWatchPage();
+  const page = Object.create(WatchPage.prototype);
+  page.subtitleTracks = [];
+  page.currentStreamInfo = { subtitles: [] };
+  page.pendingPlaybackPreferences = { subtitle: { source: 'off', mode: 'off' } };
+  page.selectedSubtitleStreamIndex = 17;
+  page.selectedSubtitleTrackUserChoice = false;
+  page.subtitleOffsetSeconds = 0.8;
+  page._pendingSubtitlePreferenceApplied = false;
+  page.updateCaptionsTracks = () => {};
+
+  page.applyAcknowledgedSubtitleSessionMetadata({
+    subtitleStreamIndex: 17,
+    subtitleTracks: [],
+  });
+
+  assert.equal(page.selectedSubtitleStreamIndex, null);
+  assert.equal(page.selectedSubtitleTrackUserChoice, true);
+  assert.equal(page.subtitleOffsetSeconds, 0);
+  assert.equal(page._pendingSubtitlePreferenceApplied, true);
+  assert.equal(page.subtitleTracks.length, 0);
+});
+
+test('Watch carries the selected subtitle lane through the serialized Gateway restart', async () => {
+  const WatchPage = loadWatchPage();
+  const page = Object.create(WatchPage.prototype);
+  const preference = { source: 'probe', streamIndex: 17, language: 'fr' };
+  let captured = null;
+  page._subtitleSwitchRequestId = 9;
+  page.currentPlaybackMode = 'gateway-session';
+  page.content = { sourceId: 'source', id: 'episode' };
+  page.getPlaybackPosition = () => 42;
+  page.subtitleTrackLabel = () => 'French';
+  page.getMergedPlaybackPreferences = (overrides) => ({ audio: { streamIndex: 2 }, ...overrides });
+  page.savePlaybackPreferences = (value) => value;
+  page.restartCloudGatewayStreamAt = async (position, options) => { captured = { position, options }; };
+  page.waitForSelectedSubtitleActivation = async () => true;
+  page.setSubtitleSwitchFeedback = () => {};
+
+  const activated = await page.restartWithSelectedSubtitleTrack(preference, 9);
+
+  assert.equal(activated, true);
+  assert.equal(captured.position, 42);
+  assert.equal(captured.options.subtitleSwitchRequestId, 9);
+  assert.deepEqual(JSON.parse(JSON.stringify(captured.options.playbackPreferences)), {
+    audio: { streamIndex: 2 },
+    subtitle: preference,
+  });
+});
+
+test('Watch does not announce a selected subtitle lane before its first real cue', async () => {
+  const WatchPage = loadWatchPage();
+  const page = Object.create(WatchPage.prototype);
+  const cues = [];
+  page._subtitleSwitchRequestId = 3;
+  page._subEngineReadyPromise = Promise.resolve(true);
+  page._subEngine = {
+    streamIndex: 17,
+    trackReady: true,
+    mode: 'gateway-session',
+    lastSuccessfulFetchAt: Date.now(),
+    trackEl: { track: { mode: 'showing', cues } },
+  };
+
+  assert.equal(await page.waitForSelectedSubtitleActivation(17, 3, 20), false);
+  cues.push({ startTime: 0, endTime: 2, text: 'Bonjour' });
+  assert.equal(await page.waitForSelectedSubtitleActivation(17, 3, 20), true);
+});
+
+test('Gateway never caches a growing selected WebVTT subtitle artifact', () => {
+  const gateway = read('services/media-gateway/src/index.js');
+  const artifactRoute = section(
+    gateway,
+    "app.get('/sessions/:id/:file'",
+    'function failMkvCompleteHlsCacheSession(',
+  );
+
+  assert.match(artifactRoute, /const isGrowingSubtitle = requested\.toLowerCase\(\)\.endsWith\('\.vtt'\)/);
+  assert.match(artifactRoute, /isGrowingSubtitle \? 'no-store' : 'private, max-age=30'/);
 });
 
 test('Watch clears stale title UI and serializes safe subtitle lane restarts', () => {
