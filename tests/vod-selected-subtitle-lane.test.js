@@ -34,6 +34,20 @@ function loadMediaUtils() {
   return window.MediaUtils;
 }
 
+function loadWatchPage() {
+  const window = {};
+  vm.runInNewContext(read('public/js/pages/WatchPage.js'), {
+    window,
+    console,
+    Intl,
+    setTimeout,
+    clearTimeout,
+    Promise,
+    URL,
+  }, { filename: 'WatchPage.js' });
+  return window.WatchPage;
+}
+
 test('playback hints make Gateway subtitle extraction explicit and single-lane', () => {
   const mediaUtils = loadMediaUtils();
 
@@ -90,6 +104,58 @@ test('Edge binds the requested subtitle index to the actual Gateway mapping', ()
   assert.match(gatewaySession, /const cleanup = await cleanupCreatedSession\(\)/);
 });
 
+test('Edge returns a ready Gateway session before best-effort catalog telemetry', () => {
+  const edge = read('supabase/functions/norva-playback/index.ts');
+  const createSession = section(
+    edge,
+    'async function createPlaybackSession(',
+    'type StrictLanguageValidationEvidence',
+  );
+
+  assert.match(createSession, /runBackground\(recordPlaybackStartupObservation\(db,/);
+  assert.doesNotMatch(createSession, /await recordPlaybackStartupObservation\(db,/);
+});
+
+test('Watch immediately restores the exact subtitle lane acknowledged by Gateway', () => {
+  const WatchPage = loadWatchPage();
+  const page = Object.create(WatchPage.prototype);
+  page.subtitleTracks = [];
+  page.currentStreamInfo = { subtitles: [] };
+  page.pendingPlaybackPreferences = {
+    subtitle: {
+      source: 'probe',
+      streamIndex: 17,
+      label: 'French - SDH',
+      language: 'fr',
+      offsetSeconds: 0.35,
+    },
+  };
+  page._pendingSubtitlePreferenceApplied = false;
+  page.updateCaptionsTracks = () => {};
+  page.loadSubtitleOffset = () => 0;
+
+  const tracks = page.applyAcknowledgedSubtitleSessionMetadata({
+    subtitleStreamIndex: 17,
+    subtitleTracks: [],
+  });
+
+  assert.equal(page.selectedSubtitleStreamIndex, 17);
+  assert.equal(page.selectedSubtitleTrackUserChoice, true);
+  assert.equal(page._pendingSubtitlePreferenceApplied, true);
+  assert.equal(page.subtitleOffsetSeconds, 0.4);
+  assert.equal(tracks.length, 1);
+  assert.deepEqual(JSON.parse(JSON.stringify(tracks[0])), {
+    index: 17,
+    title: 'French - SDH',
+    language: 'fr',
+    codec: null,
+    subtitleType: 'text',
+    extractable: true,
+    sessionAcknowledged: true,
+  });
+  assert.equal(page.currentStreamInfo.subtitles[0].index, 17);
+});
+
 test('Watch clears stale title UI and serializes safe subtitle lane restarts', () => {
   const watch = read('public/js/pages/WatchPage.js');
   const app = read('public/app.html');
@@ -128,6 +194,11 @@ test('Watch clears stale title UI and serializes safe subtitle lane restarts', (
     'async selectCaptionTrack(source, index, streamIndex = null) {',
     '// === Overlay Auto-Hide ===',
   );
+  const loadVideo = section(
+    watch,
+    '    async loadVideo(url, options = {}) {',
+    '    gatewayBufferedAheadSeconds() {',
+  );
 
   assert.match(app, /id="watch-subtitle-status"[^>]+role="status"[^>]+aria-live="polite"/);
   assert.match(playSetup, /recommendedGrid\.replaceChildren\(\)/);
@@ -145,5 +216,8 @@ test('Watch clears stale title UI and serializes safe subtitle lane restarts', (
   assert.match(subtitlePolling, /await this\.subtitleSessionTick\(engine\)/);
   assert.match(subtitleAttach, /lastSuccessfulFetchAt/);
   assert.match(subtitlePolling, /\? 500 : 150/);
+  assert.match(loadVideo, /setPendingPlaybackPreferences\(incomingPlaybackPreferences\)/);
+  assert.match(loadVideo, /applyAcknowledgedSubtitleSessionMetadata\(options\)/);
+  assert.match(loadVideo, /attachProbeSubtitles\(url, this\.subtitleTracks, startOffset\)/);
   assert.doesNotMatch(engineTracks, /5000/);
 });
