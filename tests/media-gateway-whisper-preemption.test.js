@@ -116,6 +116,8 @@ function makeHarness({ viewerBusy = false, viewerBusyChecks = null, setPriorityT
     WHISPER_MODEL: '/fake/model.bin',
     WHISPER_BIN: '/fake/whisper',
     WHISPER_THREADS: 2,
+    WHISPER_VAD_MODEL: '',
+    WHISPER_VAD_RUNTIME_VERIFIED: false,
     whisperInferenceActive: 0,
     lidDetectOnlyStats: {
       primaryAttempts: 0, shadowAttempts: 0, totalFastMs: 0, failures: 0, timeouts: 0,

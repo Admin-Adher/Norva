@@ -197,7 +197,7 @@ test('v82 production detect-only is signed-scope only, non-strict and falls back
   assert.notEqual(routeEnd, -1);
   const route = gateway.slice(routeStart, routeEnd);
 
-  assert.match(gateway, /const GATEWAY_VERSION = 127/);
+  assert.match(gateway, /const GATEWAY_VERSION = 128/);
   assert.match(gateway, /const LID_DETECT_ONLY_SCOPE = 'lid-production-detect-only'/);
   assert.match(gateway, /const LID_SHADOW_SCOPE = 'lid-shadow'/);
   assert.match(
@@ -394,6 +394,8 @@ test('LID benchmark is service-only, scoped, read-only and reproducibly pinned',
   assert.match(gateway, /binarySha256: WHISPER_BIN_SHA256/);
   assert.match(gateway, /modelSha256: WHISPER_MODEL_SHA256/);
   assert.match(gateway, /runtimeVerified: WHISPER_RUNTIME_VERIFIED/);
+  assert.match(gateway, /vadRuntimeVerified: WHISPER_VAD_RUNTIME_VERIFIED/);
+  assert.match(gateway, /WHISPER_VAD_RUNTIME_VERIFIED \? \['--vad', '-vm', WHISPER_VAD_MODEL\] : \[\]/);
   assert.match(gateway, /gatewayVersion: GATEWAY_VERSION/);
   assert.match(gateway, /lidProductionCpuBusy\(\)/);
   assert.match(gateway, /digest\('hex'\);\s*\n/);
@@ -414,6 +416,12 @@ test('LID benchmark is service-only, scoped, read-only and reproducibly pinned',
   );
   assert.match(dockerfile, /sha256sum build\/bin\/whisper-cli/);
   assert.match(dockerfile, /sha256sum \/opt\/whisper-model\.bin/);
+  assert.match(dockerfile, /ARG WHISPER_VAD_MODEL_SHA256=[0-9a-f]{64}/);
+  assert.match(dockerfile, /printf '%s  %s\\n'.*WHISPER_VAD_MODEL_SHA256/);
+  assert.match(dockerfile, /-DGGML_VULKAN=ON/);
+  assert.match(dockerfile, /ARG MESA_VULKAN_VERSION=[0-9][^\s]+/);
+  assert.match(dockerfile, /bookworm-backports.*main/);
+  assert.match(dockerfile, /mesa-vulkan-drivers=\$\{MESA_VULKAN_VERSION\}/);
   assert.match(dockerfile, /git fetch --depth 1 origin "\$\{WHISPER_CPP_COMMIT\}"/);
   assert.doesNotMatch(dockerfile, /git clone --depth 1 .*whisper\.cpp/);
   assert.match(runner, /fixedWindowCurrentAcceptance/);

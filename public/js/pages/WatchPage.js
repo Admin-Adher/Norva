@@ -127,6 +127,11 @@ class WatchPage {
         this.aiSubtitleLang = 'und';
         this._aiSubtitleTitleId = null;
         this._aiSubtitlePollTimer = null;
+        this._aiJobId = null;
+        this._aiRequestStartedAt = 0;
+        this._aiFirstCueVisibleReported = false;
+        this._aiServerTimings = null;
+        this._aiLastResponseWasCached = false;
         this._aiCacheProbeKey = null;   // one-shot shared-cache probe marker (per title key)
         this._aiUserRequested = false;  // true after a click — gates every auto-attach
         // "Generating…" UX: a coarse ETA countdown (transcription runs at ~0.4× realtime) plus a
@@ -7742,12 +7747,29 @@ class WatchPage {
         renditions.forEach((entry) => {
             entry.default = entry.streamIndex === defaultStreamIndex;
         });
+        const exactCodecTracks = Array.from(codecByStreamIndex.entries()).map(([streamIndex, track]) => {
+            const verifiedLanguage = verifiedLanguageByStreamIndex.get(streamIndex) || null;
+            return {
+                ...track,
+                index: streamIndex,
+                streamIndex,
+                language: verifiedLanguage,
+                lang: verifiedLanguage,
+                default: streamIndex === defaultStreamIndex,
+            };
+        });
+        const visibleSourceTracks = exactCodecTracks.length >= renditions.length
+            ? exactCodecTracks
+            : renditions;
         this._gatewayAudioRenditionStatus = 'ready';
         this._gatewayAudioRenditions = renditions;
         this._gatewayMultiAudioHls = { defaultHlsIndex, defaultStreamIndex };
-        this.audioTracks = renditions;
+        // Product truth and server capacity are deliberately separate: expose
+        // every exact-file stream to the menu, while only `_gatewayAudioRenditions`
+        // describes the bounded AAC cohort already prepared in this HLS session.
+        this.audioTracks = visibleSourceTracks;
         if (this.currentStreamInfo && typeof this.currentStreamInfo === 'object') {
-            this.currentStreamInfo = { ...this.currentStreamInfo, audioTracks: renditions };
+            this.currentStreamInfo = { ...this.currentStreamInfo, audioTracks: visibleSourceTracks };
         }
 
         const pendingStreamIndex = Number(
@@ -8610,7 +8632,18 @@ class WatchPage {
 
     getVisibleAudioTracks() {
         const hlsTracks = this.getHlsAudioTracks();
-        if (hlsTracks.length > 1) return hlsTracks;
+        if (hlsTracks.length > 1) {
+            const probeTracks = this.getProbeAudioTracks();
+            if (probeTracks.length <= hlsTracks.length) return hlsTracks;
+            const preparedByStreamIndex = new Map(
+                hlsTracks.map((track) => [Number(track.streamIndex), track])
+            );
+            // Prepared rows switch inside HLS. Every other exact-file row stays
+            // visible and uses the existing serialized provider-safe restart.
+            return probeTracks.map((track) => (
+                preparedByStreamIndex.get(Number(track.streamIndex)) || track
+            ));
+        }
         const verifiedMuxedMono = this.getVerifiedGatewayMuxedMonoAudioTrack();
         if (verifiedMuxedMono) return [verifiedMuxedMono];
         const informationalMuxedMono = this.getInformationalGatewayMuxedMonoAudioTrack();
@@ -10485,6 +10518,7 @@ class WatchPage {
         if (this._aiPollExpired) return `⏳ ${this.escapeHtml('Still queued — enable email below, we\'ll let you know')}`;
         // Optimistic pre-network state: the click was registered, the cache lookup is in flight.
         if (stage === 'checking') return `✨ ${this.escapeHtml('Checking for existing subtitles…')}`;
+        if (stage === 'enqueueing') return `✨ ${this.escapeHtml('Starting AI subtitles…')}`;
         if (stage === 'deferred') {
             return this._aiDeferredByYou
                 ? `⏸ ${this.escapeHtml('Waiting for your playback to stop (your provider allows one connection)')}`
@@ -10663,7 +10697,9 @@ class WatchPage {
     _applyAiSubtitleResponse(res, key) {
         if (!res || this._aiSubtitleKey() !== key) return false;
         const status = String(res.status || 'none');
+        if (res.timings && typeof res.timings === 'object') this._aiServerTimings = { ...res.timings };
         if (status === 'ready') {
+            this._aiJobId = null;
             this._aiSubtitleTitleId = key;
             this.stopAiSubtitlePolling();
             const vtt = String(res.vtt || '');
@@ -10702,16 +10738,26 @@ class WatchPage {
             return true;
         }
         if (status === 'failed') {
+            this._aiJobId = null;
             this.aiSubtitleState = 'failed';
             this._aiLastError = String(res.error || ''); // server now exposes the real cause
             this.stopAiSubtitlePolling();
             this.updateCaptionsTracks();
             return false;
         }
-        if (status === 'processing' || status === 'pending-transcript') {
+        if (status === 'starting' || status === 'processing' || status === 'pending-transcript') {
+            const durableJobId = String(res.jobId || res.job_id || '').trim();
+            if (!durableJobId) {
+                this.aiSubtitleState = 'failed';
+                this._aiLastError = 'subtitle job was not durably created';
+                this.stopAiSubtitlePolling();
+                this.updateCaptionsTracks();
+                return false;
+            }
+            this._aiJobId = durableJobId;
             this.aiSubtitleState = 'processing';
             const prevStage = this._aiStage;
-            this._aiStage = String(res.stage || '');
+            this._aiStage = status === 'starting' ? 'enqueueing' : String(res.stage || '');
             this._aiDeferredByYou = res.deferredByYou === true;
             // The ETA anchors on the moment the server actually starts transcribing.
             if (this._aiStage !== 'transcribing') this._aiEtaTargetMs = 0;
@@ -10732,6 +10778,7 @@ class WatchPage {
     }
 
     startAiSubtitlePolling(params, key) {
+        if (!this._aiJobId) return false;
         this.stopAiSubtitlePolling();
         const gen = (this._aiPollGen = (this._aiPollGen || 0) + 1);
         const startedAt = Date.now();
@@ -10740,15 +10787,12 @@ class WatchPage {
         // guaranteed for any >1h watch): we stop hammering and point at the email toggle.
         const MAX_MS = 2 * 60 * 60 * 1000;
         this._aiPollExpired = false;
-        // Adaptive cadence: 20 s while the job is actually producing (extraction/transcription —
-        // partial VTTs land between polls), 60 s while it merely WAITS (deferred slot, queued
-        // behind other jobs: nothing can change for minutes). Over a 2 h deferred wait that is
-        // ~120 GETs instead of ~360, without delaying a single partial delivery.
+        // A first 90-second VTT can now land quickly. Poll active work every two
+        // seconds and queued/deferred work every five, so the UI does not hide a
+        // ready partial for the old 20-second interval.
         const delayMs = () => {
             const stage = String(this._aiStage || '');
-            if (stage === 'deferred') return 60000;
-            if (stage === '' && Number(this._aiQueuePos) > 0) return 60000;
-            return 20000;
+            return stage === 'extracting' || stage === 'transcribing' ? 2000 : 5000;
         };
         const tick = async () => {
             if (this._aiPollGen !== gen) return; // superseded by a newer poll (or stopped)
@@ -10767,6 +10811,7 @@ class WatchPage {
             this._aiSubtitlePollTimer = setTimeout(tick, delayMs());
         };
         this._aiSubtitlePollTimer = setTimeout(tick, delayMs());
+        return true;
     }
 
     // One-shot cache probe per title. A transcript produced in a PRIOR session — or by another
@@ -10790,10 +10835,10 @@ class WatchPage {
         if (!got || this._aiSubtitleKey() !== key || this.aiSubtitleState !== 'idle') return;
         const status = String(got.status || 'none');
         if (status === 'ready') { this._applyAiSubtitleResponse(got, key); return; }
-        if (status === 'processing' || status === 'pending-transcript') {
+        if (status === 'starting' || status === 'processing' || status === 'pending-transcript') {
             this._aiSubtitleTitleId = key;
             this._applyAiSubtitleResponse(got, key);
-            this.startAiSubtitlePolling(params, key);
+            if (this._aiJobId) this.startAiSubtitlePolling(params, key);
         }
     }
 
@@ -10809,6 +10854,9 @@ class WatchPage {
         if (this._aiRequestInFlight) return;
         this._aiRequestInFlight = true;
         this._aiUserRequested = true; // a click — auto-attach is allowed from here on
+        this._aiRequestStartedAt = Date.now();
+        this._aiFirstCueVisibleReported = false;
+        this._aiLastResponseWasCached = false;
         try {
             await this._requestAiSubtitlesInner(this.normalizeTrackLanguage(targetLang) || null);
         } finally {
@@ -10841,6 +10889,8 @@ class WatchPage {
             this._aiPartialCues = 0;
             this._aiPollExpired = false;
             this._aiLastError = '';
+            this._aiJobId = null;
+            this._aiServerTimings = null;
             this._resetTranslations();
         }
         this._aiSubtitleTitleId = key;
@@ -10882,11 +10932,15 @@ class WatchPage {
         // 1) Read the shared cache — another user (or a prior session) may already have it.
         try {
             const got = await api.generatedSubtitle(params);
+            this._aiLastResponseWasCached = String(got?.status || '') === 'ready';
             if (this._applyAiSubtitleResponse(got, key)) return;
             // Decide on the RESPONSE status, not this.aiSubtitleState — the optimistic 'processing'
             // above would otherwise swallow the enqueue when the cache answers 'none'.
             const gotStatus = String(got?.status || 'none');
-            if (gotStatus === 'processing' || gotStatus === 'pending-transcript') { this.startAiSubtitlePolling(params, key); return; }
+            if ((gotStatus === 'starting' || gotStatus === 'processing' || gotStatus === 'pending-transcript') && this._aiJobId) {
+                this.startAiSubtitlePolling(params, key);
+                return;
+            }
         } catch (err) {
             console.warn('[WatchPage] AI subtitles GET failed:', err?.status, err?.message || err, err?.details || '');
             /* fall through to trigger */
@@ -10895,7 +10949,8 @@ class WatchPage {
         // 2) Nothing usable yet → trigger a background transcription (with the chained target
         //    language when one was picked) and poll for it.
         this.aiSubtitleState = 'processing';
-        this._aiStage = '';
+        this._aiStage = 'enqueueing';
+        this._aiLastResponseWasCached = false;
         this.updateCaptionsTracks();
         try {
             const enq = await api.requestGeneratedSubtitle(targetLang ? { ...params, targetLang, chain: true } : params);
@@ -10917,6 +10972,19 @@ class WatchPage {
                 this.updateCaptionsTracks();
                 return;
             }
+            const enqueueStatus = String(enq?.status || 'processing');
+            const enqueuedJobId = String(enq?.jobId || enq?.job_id || '').trim();
+            if (!enqueuedJobId) {
+                this.aiSubtitleState = 'failed';
+                this._aiLastError = 'subtitle job was not durably created';
+                this.updateCaptionsTracks();
+                return;
+            }
+            this._aiJobId = enqueuedJobId;
+            this._aiStage = enqueueStatus === 'starting'
+                ? 'enqueueing'
+                : String(enq?.gateway?.stage || enq?.stage || 'queued');
+            this.updateCaptionsTracks();
         } catch (err) {
             console.warn('[WatchPage] AI subtitles enqueue failed:', err?.status, err?.message || err, '| sent:', JSON.stringify(params), err?.details || '');
             this.aiSubtitleState = 'failed';
@@ -11163,8 +11231,37 @@ class WatchPage {
         this._aiTrackBlobUrl = URL.createObjectURL(new Blob([body], { type: 'text/vtt' }));
         trackEl.src = this._aiTrackBlobUrl;
         if (trackEl.track) trackEl.track.mode = 'showing';
+        const reportFirstVisibleCue = () => {
+            if (!this._aiUserRequested || this._aiFirstCueVisibleReported || !trackEl.isConnected) return;
+            if (!trackEl.track?.activeCues?.length) return;
+            this._aiFirstCueVisibleReported = true;
+            trackEl.track.removeEventListener?.('cuechange', reportFirstVisibleCue);
+            const totalMs = this._aiRequestStartedAt > 0
+                ? Math.max(0, Math.min(10 * 60 * 1000, Date.now() - this._aiRequestStartedAt))
+                : null;
+            const timings = this._aiServerTimings || {};
+            const elapsed = (start, end) => {
+                const a = Date.parse(start || '');
+                const b = Date.parse(end || '');
+                return Number.isFinite(a) && Number.isFinite(b) && b >= a ? b - a : null;
+            };
+            this.sendPlaybackEvent('subtitle_first_cue', {
+                metadata: {
+                    subtitleKind: 'ai',
+                    requestToFirstCueVisibleMs: totalMs,
+                    cacheHit: this._aiLastResponseWasCached === true,
+                    resolutionMs: elapsed(timings.requestedAt, timings.resolvedAt),
+                    enqueueMs: elapsed(timings.resolvedAt, timings.enqueuedAt),
+                    extractionQueueMs: elapsed(timings.enqueuedAt, timings.extractionStartedAt),
+                    whisperQueueMs: elapsed(timings.extractionStartedAt, timings.whisperStartedAt),
+                    firstVttMs: elapsed(timings.whisperStartedAt, timings.firstVttAt),
+                },
+            });
+        };
+        trackEl.track?.addEventListener?.('cuechange', reportFirstVisibleCue);
         setTimeout(() => {
             if (trackEl.track) trackEl.track.mode = 'showing';
+            reportFirstVisibleCue();
             this.updateCaptionsTracks();
         }, 0);
         this._aiActiveLang = trackEl.srclang || null;
