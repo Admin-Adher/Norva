@@ -51,7 +51,7 @@ test('the internal dashboard is admin-JWT-gated and renders P0 distinctly', () =
   assert.match(adminPage, /Provider Access · rollout 30 jours/);
   assert.match(adminPage, /p0Active[\s\S]*P0 · staging visible/);
   assert.match(adminPage, /agrégats uniquement, aucun identifiant utilisateur ou credential/);
-  assert.match(app, /AdminPage\.js\?v=1b494fc9cf/);
+  assert.match(app, /AdminPage\.js\?v=f6dc2c1f95/);
 });
 
 test('notification delivery aggregates use the real outbox terminal state', () => {

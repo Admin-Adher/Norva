@@ -162,6 +162,8 @@ class AdminPage {
     }
     hide() {
         this._isVisible = false;
+        if (this._clientPoll && typeof window.clearInterval === 'function') window.clearInterval(this._clientPoll);
+        this._clientPoll = null;
         clearTimeout(this._partnersSearchDebounce);
         clearTimeout(this._partnersRoutesDebounce);
         clearTimeout(this._partnersPayoutOnboardingDebounce);
@@ -6060,6 +6062,17 @@ class AdminPage {
         });
         this._loadUsers();
         this._loadClientSummary();
+        // Account deletion is asynchronous. Keep the live list and its summary
+        // coherent while this workspace remains visible, without refreshing
+        // heavy Cockpit/catalogue aggregates.
+        if (this._clientPoll && typeof window.clearInterval === 'function') window.clearInterval(this._clientPoll);
+        this._clientPoll = typeof window.setInterval === 'function'
+            ? window.setInterval(() => {
+                if (this._route !== 'clients' || document.visibilityState !== 'visible') return;
+                this._loadUsers();
+                this._loadClientSummary();
+            }, 30000)
+            : null;
     }
 
     // Compact summary only: charts and funnels deliberately stay in the Cockpit.
@@ -6068,7 +6081,15 @@ class AdminPage {
         if (!el) return;
         const seq = this._nav || 0;
         try {
-            const overview = await this._rpc('admin_overview');
+            let overview;
+            try {
+                overview = await this._rpc('admin_clients_summary');
+            } catch (error) {
+                // Safe rolling-deploy fallback while PostgREST reloads the new
+                // function contract or an older database replica is still live.
+                if (error?.payload?.code !== 'PGRST202' && !String(error?.message || '').includes('PGRST202')) throw error;
+                overview = await this._rpc('admin_overview');
+            }
             if ((this._nav || 0) !== seq || this._route !== 'clients') return;
             const pastDue = Number(overview && overview.billing_past_due) || 0;
             const items = [

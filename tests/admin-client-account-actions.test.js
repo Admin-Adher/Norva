@@ -12,6 +12,10 @@ const migration = fs.readFileSync(
   path.join(root, 'supabase/migrations/20260830051646_admin_client_account_actions.sql'),
   'utf8',
 );
+const liveSummaryMigration = fs.readFileSync(
+  path.join(root, 'supabase/migrations/20260830071456_admin_clients_live_refresh.sql'),
+  'utf8',
+);
 
 test('admin client controls require an internal reason and exact deletion confirmation', () => {
   const payloadStart = ui.indexOf('    async _accountControlPayload(action, email)');
@@ -71,4 +75,33 @@ test('session revocation RPC is service-role-only and scoped to one user', () =>
   assert.match(migration, /auth\.sessions[\s\S]*session\.user_id = p_user_id/);
   assert.match(migration, /revoke all on function public\.admin_revoke_user_sessions\(uuid\)[\s\S]*from public, anon, authenticated/);
   assert.match(migration, /grant execute on function public\.admin_revoke_user_sessions\(uuid\)[\s\S]*to service_role/);
+});
+
+test('client counters use a live admin-gated summary instead of the dashboard cache', () => {
+  assert.match(liveSummaryMigration, /create or replace function public\.admin_clients_summary\(\)/);
+  assert.match(liveSummaryMigration, /if not public\.is_admin\(\)/);
+  assert.match(liveSummaryMigration, /security definer[\s\S]*set search_path = ''/);
+  assert.match(liveSummaryMigration, /from auth\.users/);
+  assert.match(liveSummaryMigration, /revoke all on function public\.admin_clients_summary\(\)[\s\S]*from public, anon, authenticated/);
+  assert.match(liveSummaryMigration, /grant execute on function public\.admin_clients_summary\(\)[\s\S]*to authenticated/);
+  assert.match(ui, /this\._rpc\('admin_clients_summary'\)/);
+  assert.match(ui, /error\?\.payload\?\.code !== 'PGRST202'/);
+});
+
+test('Clients refreshes live data while visible and stops polling when hidden', () => {
+  const pageStart = ui.indexOf('    _pageClients()');
+  const pageEnd = ui.indexOf('    // Compact summary only', pageStart);
+  const pageSection = ui.slice(pageStart, pageEnd);
+  const hideStart = ui.indexOf('    hide()');
+  const hideEnd = ui.indexOf('    // Whitelist CRM routes', hideStart);
+  const hideSection = ui.slice(hideStart, hideEnd);
+
+  assert.ok(pageStart >= 0 && pageEnd > pageStart);
+  assert.match(pageSection, /window\.clearInterval\(this\._clientPoll\)/);
+  assert.match(pageSection, /this\._route !== 'clients'/);
+  assert.match(pageSection, /document\.visibilityState !== 'visible'/);
+  assert.match(pageSection, /this\._loadUsers\(\)[\s\S]*this\._loadClientSummary\(\)/);
+  assert.match(pageSection, /}, 30000\)/);
+  assert.ok(hideStart >= 0 && hideEnd > hideStart);
+  assert.match(hideSection, /window\.clearInterval\(this\._clientPoll\)/);
 });

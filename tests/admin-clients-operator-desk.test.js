@@ -113,7 +113,7 @@ test('Clients page renders the approved operator desk without list charts', () =
   assert.deepEqual(calls, [['crumb', 'Clients'], ['users'], ['summary']]);
 });
 
-test('Clients compact summary uses only admin_overview and populates saved-view counts', async () => {
+test('Clients compact summary uses live counters and populates saved-view counts', async () => {
   const summary = fakeElement();
   const counts = Object.fromEntries(['all', 'active', 'trialing', 'past_due', 'cancel_pending'].map((key) => [key, fakeElement()]));
   const document = {
@@ -147,7 +147,7 @@ test('Clients compact summary uses only admin_overview and populates saved-view 
 
   await page._loadClientSummary();
 
-  assert.deepEqual(rpcCalls, ['admin_overview']);
+  assert.deepEqual(rpcCalls, ['admin_clients_summary']);
   assert.match(summary.innerHTML, /Actifs sur 7 j/);
   assert.match(summary.innerHTML, /Paiement à vérifier/);
   assert.equal(summary.attributes.get('aria-busy'), 'false');
