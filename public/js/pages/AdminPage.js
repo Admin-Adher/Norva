@@ -711,11 +711,11 @@ class AdminPage {
 #page-admin .client-filter-note{grid-column:1/-1;margin:0;color:var(--adm-tx3);font-size:10.5px;line-height:1.45;}
 #page-admin .client-export{color:#b8c6ff;}
 #page-admin .client-desk-workspace{display:grid;grid-template-columns:minmax(0,1fr) 340px;align-items:start;min-height:480px;}
-#page-admin .client-desk-list-pane{min-width:0;min-height:480px;border-right:1px solid var(--adm-line);}
+#page-admin .client-desk-list-pane{min-width:0;min-height:480px;overflow:hidden;border-right:1px solid var(--adm-line);}
 #page-admin .client-desk-list-head,#page-admin .client-desk-row{display:grid;grid-template-columns:minmax(190px,1.55fr) minmax(105px,.78fr) minmax(130px,.9fr) minmax(105px,.72fr) minmax(145px,1fr);align-items:center;gap:10px;}
 #page-admin .client-desk-list-head{min-height:38px;padding:0 14px;border-bottom:1px solid var(--adm-line);color:var(--adm-tx3);font-size:9.5px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;}
 #page-admin .client-desk-rows{min-width:0;}
-#page-admin .client-desk-row{position:relative;width:100%;min-height:68px;padding:8px 14px;border:0;border-bottom:1px solid var(--adm-line2);background:transparent;color:var(--adm-tx2);text-align:left;cursor:pointer;}
+#page-admin .client-desk-row{position:relative;width:100%;min-height:68px;overflow:hidden;padding:8px 14px;border:0;border-bottom:1px solid var(--adm-line2);background:transparent;color:var(--adm-tx2);text-align:left;cursor:pointer;}
 #page-admin .client-desk-row:hover{background:rgba(255,255,255,.025);}
 #page-admin .client-desk-row[aria-selected="true"]{background:rgba(91,124,250,.11);box-shadow:inset 3px 0 0 var(--adm-blue);}
 #page-admin .client-desk-row:focus-visible{outline:2px solid #7c96ff;outline-offset:-3px;border-radius:6px;}
@@ -738,7 +738,8 @@ class AdminPage {
 #page-admin .client-status.warn::before{background:var(--adm-amber);}
 #page-admin .client-status.danger::before{background:var(--adm-red);}
 #page-admin .client-status.neutral::before{background:var(--adm-tx3);}
-#page-admin .client-action-main{display:block;color:var(--adm-tx);font-size:11px;font-weight:680;line-height:1.35;}
+#page-admin .client-desk-action{min-width:0;overflow:hidden;}
+#page-admin .client-action-main{display:block;overflow:hidden;color:var(--adm-tx);text-overflow:ellipsis;white-space:nowrap;font-size:11px;font-weight:680;line-height:1.35;}
 #page-admin .client-mobile-status{display:none;}
 #page-admin #admin-users[aria-busy="true"] .client-desk-rows{opacity:.58;}
 #page-admin .client-list-status{min-height:1px;color:var(--adm-tx3);font-size:11px;}
@@ -751,7 +752,7 @@ class AdminPage {
 #page-admin .client-attribution-warning{margin:10px;border:1px solid rgba(251,191,36,.28);border-radius:8px;background:rgba(251,191,36,.06);color:var(--adm-tx2);font-size:11.5px;line-height:1.45;}
 #page-admin .client-sheet-layer{display:contents;}
 #page-admin .client-inspector-backdrop{display:none;}
-#page-admin .client-desk-inspector{min-width:0;min-height:480px;padding:18px;background:var(--adm-card1);}
+#page-admin .client-desk-inspector{min-width:0;min-height:480px;overflow-x:hidden;padding:18px;background:var(--adm-card1);}
 #page-admin .client-inspector-close{display:none;width:44px;padding:0;}
 #page-admin .client-inspector-close img{width:18px;height:18px;}
 #page-admin .client-inspector-kicker{display:block;color:var(--adm-tx3);font-size:9.5px;font-weight:800;letter-spacing:.09em;text-transform:uppercase;}
@@ -760,8 +761,8 @@ class AdminPage {
 #page-admin .client-inspector-badges{display:flex;flex-wrap:wrap;gap:6px;margin:14px 0;}
 #page-admin .client-inspector-facts{margin:0;}
 #page-admin .client-inspector-fact{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:14px;padding:9px 0;border-bottom:1px solid var(--adm-line);}
-#page-admin .client-inspector-fact dt{color:var(--adm-tx3);font-size:11px;}
-#page-admin .client-inspector-fact dd{max-width:190px;margin:0;color:var(--adm-tx);text-align:right;font-size:11.5px;font-weight:700;overflow-wrap:anywhere;}
+#page-admin .client-inspector-fact dt{min-width:0;color:var(--adm-tx3);font-size:11px;overflow-wrap:anywhere;}
+#page-admin .client-inspector-fact dd{min-width:0;max-width:190px;margin:0;color:var(--adm-tx);text-align:right;font-size:11.5px;font-weight:700;overflow-wrap:anywhere;}
 #page-admin .client-next-block{margin-top:16px;padding:12px;border:1px solid rgba(251,191,36,.24);border-radius:8px;background:rgba(251,191,36,.055);}
 #page-admin .client-next-block.ok{border-color:rgba(52,211,153,.22);background:rgba(52,211,153,.045);}
 #page-admin .client-next-block.info,#page-admin .client-next-block.neutral{border-color:var(--adm-line);background:rgba(255,255,255,.025);}
@@ -771,13 +772,26 @@ class AdminPage {
 #page-admin .client-next-block p{margin:6px 0 0;color:var(--adm-tx2);font-size:11px;line-height:1.5;}
 #page-admin .client-inspector-action{width:100%;margin-top:14px;border-color:var(--adm-blue);background:var(--adm-blue);color:#fff;}
 #page-admin .client-inspector-action:hover{filter:brightness(1.08);}
+#page-admin .client-account-panel{display:grid;gap:10px;margin-top:16px;padding-top:16px;border-top:1px solid var(--adm-line);}
+#page-admin .client-account-head{display:flex;align-items:center;justify-content:space-between;gap:10px;}
+#page-admin .client-account-head h3,#page-admin .client-delete-zone h3{margin:0;color:var(--adm-tx);font-size:12px;line-height:1.35;}
+#page-admin .client-account-copy,#page-admin .client-account-self,#page-admin .client-delete-zone p{margin:0;color:var(--adm-tx3);font-size:10.75px;line-height:1.5;}
+#page-admin .client-account-state{display:inline-flex;align-items:center;min-height:24px;padding:2px 8px;border:1px solid var(--adm-line);border-radius:999px;color:var(--adm-green);font-size:10px;font-weight:800;white-space:nowrap;}
+#page-admin .client-account-state.is-banned{border-color:color-mix(in srgb,var(--adm-red) 40%,var(--adm-line));color:var(--adm-red);}
+#page-admin .client-account-buttons{display:grid;grid-template-columns:1fr;gap:8px;}
+#page-admin .client-account-button{display:inline-flex;align-items:center;justify-content:center;width:100%;min-height:44px;padding:8px 12px;border:1px solid var(--adm-line);border-radius:8px;background:var(--adm-bg);color:var(--adm-tx);font:inherit;font-size:11.5px;font-weight:750;cursor:pointer;}
+#page-admin .client-account-button:hover{border-color:color-mix(in srgb,var(--adm-blue) 58%,var(--adm-line));}
+#page-admin .client-account-button:focus-visible{outline:2px solid var(--adm-blue);outline-offset:2px;}
+#page-admin .client-account-button:disabled{opacity:.58;cursor:wait;}
+#page-admin .client-account-button.danger{border-color:color-mix(in srgb,var(--adm-red) 44%,var(--adm-line));background:color-mix(in srgb,var(--adm-red) 7%,var(--adm-bg));color:var(--adm-red);}
+#page-admin .client-delete-zone{display:grid;gap:8px;margin-top:3px;padding:12px;border:1px solid color-mix(in srgb,var(--adm-red) 26%,var(--adm-line));border-radius:8px;background:color-mix(in srgb,var(--adm-red) 4%,var(--adm-card1));}
 #page-admin .client-inspector-empty{min-height:390px;display:grid;place-items:center;text-align:center;color:var(--adm-tx3);font-size:12px;line-height:1.5;}
 #page-admin .client-desk-page .users-pager{justify-content:flex-end;margin:0;padding:10px;border-top:1px solid var(--adm-line);}
 #page-admin .client-desk-page .users-pager button{min-height:44px;padding-inline:14px;}
 @media(max-width:1380px){
-  #page-admin .client-desk-workspace{grid-template-columns:minmax(0,1fr) 310px;}
-  #page-admin .client-desk-list-head,#page-admin .client-desk-row{grid-template-columns:minmax(180px,1.5fr) minmax(100px,.75fr) minmax(125px,.9fr) minmax(140px,1fr);}
-  #page-admin .client-desk-list-head>:nth-child(4),#page-admin .client-desk-row>:nth-child(4){display:none;}
+  #page-admin .client-desk-workspace{grid-template-columns:minmax(0,1fr) 340px;}
+  #page-admin .client-desk-list-head,#page-admin .client-desk-row{grid-template-columns:minmax(0,1.5fr) minmax(0,.75fr) minmax(0,.9fr);}
+  #page-admin .client-desk-list-head>:nth-child(4),#page-admin .client-desk-list-head>:nth-child(5),#page-admin .client-desk-row>:nth-child(4),#page-admin .client-desk-row>:nth-child(5){display:none;}
 }
 @media(max-width:900px){
   #page-admin .client-summary{grid-template-columns:repeat(2,minmax(0,1fr));}
@@ -797,6 +811,7 @@ class AdminPage {
   #page-admin .client-desk-list-head{display:none;}
   #page-admin .client-desk-row{grid-template-columns:minmax(0,1fr) minmax(110px,.52fr);gap:10px;min-height:78px;padding:11px 12px;}
   #page-admin .client-desk-row>:nth-child(2),#page-admin .client-desk-row>:nth-child(3),#page-admin .client-desk-row>:nth-child(4){display:none;}
+  #page-admin .client-desk-row>:nth-child(5){display:block;}
   #page-admin .client-desk-action{text-align:right;}
   #page-admin .client-mobile-status{display:flex;justify-content:flex-end;margin-bottom:5px;}
   #page-admin .client-action-main{font-size:10.5px;}
@@ -1482,6 +1497,9 @@ class AdminPage {
 #page-admin .crm-modal p{margin:0 0 16px;font-size:13.5px;color:var(--color-text-secondary,#9aa);line-height:1.55;white-space:pre-wrap;word-break:break-word;}
 #page-admin .crm-modal-input{width:100%;min-height:44px;background:var(--color-bg-primary,#0d0d0f);border:1px solid var(--color-border,#2a2a38);color:#fff;border-radius:8px;padding:9px 12px;font-size:14px;margin-bottom:16px;}
 #page-admin textarea.crm-modal-input{min-height:180px;resize:vertical;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;line-height:1.45;}
+#page-admin textarea.crm-modal-input.is-compact{min-height:96px;font-family:inherit;}
+#page-admin .crm-modal .crm-modal-hint{margin:-8px 0 8px;color:var(--color-text-secondary,#9aa);font-size:11.5px;}
+#page-admin .crm-modal .crm-modal-validation{min-height:18px;margin:-8px 0 10px;color:var(--adm-red,#f87171);font-size:11.5px;}
 #page-admin .crm-modal .mrow{display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap;}
 #page-admin .crm-modal button{min-height:44px;border-radius:8px;padding:8px 15px;font-size:13px;font-weight:600;cursor:pointer;border:1px solid var(--color-border,#2a2a38);background:var(--color-bg-primary,#0d0d0f);color:var(--color-text-primary,#fff);}
 #page-admin .crm-modal button.primary{background:#5b7cfa;border-color:#5b7cfa;color:#fff;}
@@ -1668,6 +1686,12 @@ class AdminPage {
             if (b) { e.preventDefault(); this._resync(b); return; }
             const clientClose = e.target.closest('[data-client-close]');
             if (clientClose) { e.preventDefault(); this._closeClientSheet(); return; }
+            const clientAccountAction = e.target.closest('[data-client-account-action]');
+            if (clientAccountAction) {
+                e.preventDefault();
+                this._clientAccountAction(clientAccountAction);
+                return;
+            }
             const clientOpen = e.target.closest('[data-client-open]');
             if (clientOpen) {
                 e.preventDefault();
@@ -2236,8 +2260,9 @@ class AdminPage {
             back.setAttribute('aria-describedby', uid + 'd');
             const promptAttrs = o.prompt ? [
                 !o.multiline ? `type="${AdminPage.esc(o.inputType || 'text')}"` : '',
-                'class="crm-modal-input"',
+                `class="crm-modal-input${o.compact ? ' is-compact' : ''}"`,
                 `aria-label="${AdminPage.esc(o.inputLabel || o.message || 'Saisie')}"`,
+                (o.hint || o.validate) ? `aria-describedby="${[o.hint ? uid + 'h' : '', o.validate ? uid + 'v' : ''].filter(Boolean).join(' ')}"` : '',
                 !o.multiline ? `value="${AdminPage.esc(o.def || '')}"` : '',
                 `autocomplete="${AdminPage.esc(o.autocomplete || 'off')}"`,
                 o.inputMode ? `inputmode="${AdminPage.esc(o.inputMode)}"` : '',
@@ -2250,15 +2275,33 @@ class AdminPage {
                     ? `<textarea ${promptAttrs} rows="${Number.isSafeInteger(o.rows) ? Math.min(18, Math.max(4, o.rows)) : 9}">${AdminPage.esc(o.def || '')}</textarea>`
                     : `<input ${promptAttrs} />`)
                 : '';
-            back.innerHTML = `<div class="crm-modal${o.wide ? ' is-wide' : ''}"><h3 id="${uid}t">${AdminPage.esc(o.title || 'Confirmation')}</h3><p id="${uid}d">${AdminPage.esc(o.message)}</p>${promptHtml}
+            const hintHtml = o.prompt && o.hint
+                ? `<p class="crm-modal-hint" id="${uid}h">${AdminPage.esc(o.hint)}</p>` : '';
+            const validationHtml = o.prompt && o.validate
+                ? `<p class="crm-modal-validation" id="${uid}v" aria-live="polite"></p>` : '';
+            back.innerHTML = `<div class="crm-modal${o.wide ? ' is-wide' : ''}"><h3 id="${uid}t">${AdminPage.esc(o.title || 'Confirmation')}</h3><p id="${uid}d">${AdminPage.esc(o.message)}</p>${promptHtml}${hintHtml}${validationHtml}
                 <div class="mrow"><button class="cancel" type="button">Annuler</button><button class="ok ${o.danger ? 'danger' : 'primary'}" type="button">${AdminPage.esc(o.okLabel || 'OK')}</button></div></div>`;
             root.appendChild(back);
             const restoreBackground = this._isolateModalBackground(back);
             const input = back.querySelector('.crm-modal-input');
             const okBtn = back.querySelector('.ok');
             const cancelBtn = back.querySelector('.cancel');
+            const validation = back.querySelector('.crm-modal-validation');
             const cancelVal = o.prompt ? null : false;
             const okVal = () => o.prompt ? (input ? input.value.trim() : '') : true;
+            const isValid = () => !o.validate || Boolean(o.validate(input ? input.value.trim() : ''));
+            const syncValidation = (announce = false) => {
+                const value = input ? input.value.trim() : '';
+                const valid = isValid();
+                okBtn.disabled = !valid;
+                if (validation) {
+                    const message = !valid && (announce || value)
+                        ? (typeof o.validationMessage === 'function' ? o.validationMessage(value) : o.validationMessage)
+                        : '';
+                    validation.textContent = message || '';
+                }
+                return valid;
+            };
             const focusables = () => Array.from(back.querySelectorAll('input,textarea,button')).filter(el => !el.disabled);
             const finish = (val) => {
                 document.removeEventListener('keydown', onKey, true);
@@ -2267,6 +2310,10 @@ class AdminPage {
                 back.remove();
                 if (prev && prev.focus) { try { prev.focus(); } catch (_) { /* gone */ } }
                 resolve(val);
+            };
+            const submit = () => {
+                if (!syncValidation(true)) { input?.focus(); return; }
+                finish(okVal());
             };
             const onKey = (e) => {
                 if (e.key === 'Escape' || e.key === 'GoBack' || e.key === 'BrowserBack') { e.preventDefault(); finish(cancelVal); return; }
@@ -2280,13 +2327,15 @@ class AdminPage {
                 if (e.key === 'Enter') {
                     if (document.activeElement === cancelBtn) return; // let Enter cancel when Cancel is focused
                     if (o.multiline && document.activeElement === input && !e.ctrlKey && !e.metaKey) return;
-                    e.preventDefault(); finish(okVal());
+                    e.preventDefault(); submit();
                 }
             };
-            okBtn.addEventListener('click', () => finish(okVal()));
+            if (input) input.addEventListener('input', () => syncValidation(false));
+            okBtn.addEventListener('click', submit);
             cancelBtn.addEventListener('click', () => finish(cancelVal));
             back.addEventListener('mousedown', (e) => { if (e.target === back) finish(cancelVal); });
             document.addEventListener('keydown', onKey, true); // capture: intercept Tab before it leaves
+            syncValidation(false);
             (input || okBtn).focus();
         });
     }
@@ -6310,6 +6359,27 @@ class AdminPage {
         const driver = row.is_driver ? '<span class="badge blue">Pilote</span>' : '';
         const subscription = row.billing_status ? AdminPage.billingBadge(row.billing_status, row.plan_code) : '<span class="badge gray">Sans abonnement</span>';
         const countrySource = row.country_source === 'card' ? 'Émission de la carte' : row.country_source === 'store' ? 'Storefront mobile' : 'Signal indisponible';
+        const uid = String(row.user_id || '');
+        const isSelf = uid && uid === this._meId();
+        const accountControls = isSelf
+            ? `<section class="client-account-panel" aria-labelledby="client-account-title">
+                <div class="client-account-head"><h3 id="client-account-title">Accès au compte</h3><span class="client-account-state">Votre compte</span></div>
+                <p class="client-account-self">Le bannissement et la suppression sont désactivés sur votre propre compte afin d’éviter un verrouillage de l’administration.</p>
+              </section>`
+            : `<section class="client-account-panel" aria-labelledby="client-account-title">
+                <div class="client-account-head"><h3 id="client-account-title">Accès au compte</h3><span class="client-account-state${row.banned ? ' is-banned' : ''}">${row.banned ? 'Banni' : 'Actif'}</span></div>
+                <p class="client-account-copy">${row.banned
+                    ? 'La connexion et le renouvellement des sessions sont bloqués. La réactivation reste auditée.'
+                    : 'Le bannissement bloque les nouvelles connexions et révoque les renouvellements de session.'}</p>
+                <div class="client-account-buttons">
+                  <button class="client-account-button" type="button" data-client-account-action="${row.banned ? 'unban' : 'ban'}" data-user-id="${AdminPage.esc(uid)}">${row.banned ? 'Lever le bannissement' : 'Bannir le client'}</button>
+                </div>
+                <div class="client-delete-zone">
+                  <h3>Suppression définitive</h3>
+                  <p>Action irréversible : Norva retire le compte, les sources et les données produit via son traitement sécurisé. Les archives légalement obligatoires restent minimisées.</p>
+                  <button class="client-account-button danger" type="button" data-client-account-action="delete" data-user-id="${AdminPage.esc(uid)}">Supprimer définitivement</button>
+                </div>
+              </section>`;
         el.innerHTML = `<button class="client-inspector-close" type="button" data-client-close aria-label="Fermer l’aperçu"><img src="/img/icons/norva-close-simple.svg" alt="" /></button>
             <span class="client-inspector-kicker">Dossier sélectionné</span>
             <h2 id="client-inspector-title">Compte client</h2>
@@ -6324,7 +6394,8 @@ class AdminPage {
               <div class="client-inspector-fact"><dt>Pays de paiement</dt><dd>${AdminPage.flag(row.country_code)}<br><span class="client-meta">${AdminPage.esc(countrySource)}</span></dd></div>
             </dl>
             <div class="client-next-block ${priority.tone}"><strong>Action potentielle</strong><p>${AdminPage.esc(priority.action)}</p></div>
-            <button class="client-inspector-action" type="button" data-client-open="${AdminPage.esc(row.user_id)}">Ouvrir le dossier complet</button>`;
+            <button class="client-inspector-action" type="button" data-client-open="${AdminPage.esc(row.user_id)}">Ouvrir le dossier complet</button>
+            ${accountControls}`;
     }
 
     _selectClientPreview(userId, options = {}) {
@@ -6338,6 +6409,106 @@ class AdminPage {
         });
         this._renderClientInspector(row);
         if (options.openSheet !== false && this._isClientSheetMode()) this._openClientSheet(options.trigger);
+    }
+
+    async _accountControlPayload(action, email) {
+        const deleting = action === 'delete';
+        const unbanning = action === 'unban';
+        // Permanent deletion is a privileged identity operation. Keep the TOTP
+        // step under the operator's control and let the Edge verify the renewed
+        // AAL2 claim again before it changes any account state.
+        if (deleting && !(await this._partnersEnsureAal2('la suppression définitive d’un client'))) return null;
+        const reason = await this._modal({
+            title: deleting ? 'Motif de la suppression' : (unbanning ? 'Motif de la réactivation' : 'Motif du bannissement'),
+            message: deleting
+                ? 'Ce motif reste dans le journal d’audit interne. Il ne sera pas envoyé au client.'
+                : 'Ajoute un motif interne pour que cette décision reste compréhensible et traçable.',
+            prompt: true,
+            multiline: true,
+            compact: true,
+            rows: 4,
+            maxLength: 500,
+            inputLabel: 'Motif interne',
+            hint: '3 à 500 caractères.',
+            validate: value => value.length >= 3 && value.length <= 500,
+            validationMessage: 'Le motif doit contenir entre 3 et 500 caractères.',
+            okLabel: deleting ? 'Continuer' : (unbanning ? 'Réactiver' : 'Bannir'),
+            danger: !unbanning
+        });
+        if (reason == null) return null;
+        if (!deleting) return { suspend: action === 'ban', reason };
+
+        const expected = String(email || '').trim() || 'DELETE';
+        const confirmation = await this._modal({
+            title: 'Confirmer la suppression définitive',
+            message: `Saisis exactement « ${expected} » pour lancer le traitement irréversible. Le compte sera d’abord banni, puis ses données seront supprimées par le workflow sécurisé Norva.`,
+            prompt: true,
+            inputType: email ? 'email' : 'text',
+            inputMode: email ? 'email' : 'text',
+            autocomplete: 'off',
+            inputLabel: email ? 'Adresse e-mail du compte à supprimer' : 'Confirmation DELETE',
+            hint: 'Cette action ne peut pas être annulée.',
+            validate: value => email
+                ? value.toLowerCase() === expected.toLowerCase()
+                : value === expected,
+            validationMessage: email
+                ? 'L’adresse saisie ne correspond pas au client sélectionné.'
+                : 'Saisis DELETE en lettres majuscules.',
+            okLabel: 'Supprimer définitivement',
+            danger: true
+        });
+        if (confirmation == null) return null;
+        return { confirm: confirmation, reason };
+    }
+
+    async _clientAccountAction(btn) {
+        if (!btn || btn.disabled) return;
+        const userId = String(btn.dataset.userId || '');
+        const action = String(btn.dataset.clientAccountAction || '');
+        const row = this._usersRows.find(item => String(item.user_id) === userId);
+        if (!row || !['ban', 'unban', 'delete'].includes(action)) return;
+        if (userId === this._meId()) {
+            this._toast('Cette action est désactivée sur votre propre compte.', 'err');
+            return;
+        }
+        const body = await this._accountControlPayload(action, row.email);
+        if (!body || !btn.isConnected) return;
+
+        const original = btn.textContent;
+        btn.disabled = true;
+        btn.setAttribute('aria-busy', 'true');
+        btn.textContent = action === 'delete' ? 'Suppression en cours…' : 'Mise à jour…';
+        try {
+            const endpointAction = action === 'delete' ? 'delete' : 'suspend';
+            const res = await fetch(`${this._sbUrl()}/functions/v1/norva-admin/user/${userId}/${endpointAction}`, {
+                method: 'POST',
+                headers: { apikey: this._sbKey(), Authorization: `Bearer ${this._token()}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                if (data.suspended === true) row.banned = true;
+                const error = new Error(data.error || 'Action momentanément indisponible.');
+                error.accountStateChanged = data.suspended === true;
+                throw error;
+            }
+            this._toast(data.message || (action === 'delete' ? 'Suppression définitive engagée.' : 'Compte mis à jour.'), 'ok');
+            if (action === 'delete') {
+                this._finishCloseClientSheet({ restoreFocus: false });
+                this._users.selectedId = '';
+                if (this._users.page > 0 && this._usersRows.length === 1) this._users.page -= 1;
+            }
+            await this._loadUsers();
+            if (action === 'delete') this._loadClientSummary();
+        } catch (error) {
+            this._toast(error.message || 'Action momentanément indisponible.', 'err');
+            if (error.accountStateChanged) await this._loadUsers();
+            if (btn.isConnected) {
+                btn.disabled = false;
+                btn.removeAttribute('aria-busy');
+                btn.textContent = original;
+            }
+        }
     }
 
     _isClientSheetMode() {
@@ -6864,8 +7035,13 @@ class AdminPage {
             path = `user/${uid}/role`; body = { role };
         } else if (btn.classList.contains('act-suspend')) {
             const suspend = btn.dataset.suspend === 'true';
-            if (!await this._confirm(suspend ? 'Suspendre ce compte ? Il ne pourra plus se connecter.' : 'Réactiver ce compte ?', { danger: suspend, okLabel: suspend ? 'Suspendre' : 'Réactiver' })) return;
-            path = `user/${uid}/suspend`; body = { suspend };
+            const payload = await this._accountControlPayload(suspend ? 'ban' : 'unban', btn.dataset.userEmail);
+            if (!payload) return;
+            path = `user/${uid}/suspend`; body = payload;
+        } else if (btn.classList.contains('act-delete')) {
+            const payload = await this._accountControlPayload('delete', btn.dataset.userEmail);
+            if (!payload) return;
+            path = `user/${uid}/delete`; body = payload;
         } else return;
         const orig = btn.textContent;
         btn.disabled = true; btn.textContent = '…';
@@ -6878,9 +7054,9 @@ class AdminPage {
             const data = await res.json().catch(() => ({}));
             if (!res.ok) throw new Error(data.error || String(res.status));
             if (data.message) this._toast(data.message, 'ok');
-            this._navigate('client:' + uid);   // reload fiche to reflect the new state
+            this._navigate(path.endsWith('/delete') ? 'clients' : 'client:' + uid);
         } catch (e) {
-            btn.textContent = '✗ ' + AdminPage.esc(e.message);
+            btn.textContent = 'Échec';
             this._toast('Erreur : ' + e.message, 'err');
             setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 3000);
         }
@@ -6936,6 +7112,7 @@ class AdminPage {
         const banned = u.banned ? '<span class="badge red">suspendu</span>' : '';
         const initial = (email[0] || '?').toUpperCase();
         const uid = AdminPage.esc(u.user_id);
+        const userEmail = u.email ? AdminPage.esc(u.email) : '';
         const roleTarget = u.role === 'admin' ? 'user' : 'admin';
         // Common (non-destructive) vs sensitive (role change / suspension) actions, visually isolated.
         const commonActions = !u.email_confirmed
@@ -6946,12 +7123,13 @@ class AdminPage {
         const isSelf = uid && uid === this._meId();
         const sensitiveActions = isSelf
             ? `<div class="act-zone"><div class="act-zone-h">⚠️ Zone sensible</div>
-               <div class="ssub">C'est votre propre compte — le changement de rôle et la suspension sont désactivés (anti-lock-out).</div></div>`
+               <div class="ssub">C'est votre propre compte — le changement de rôle, le bannissement et la suppression sont désactivés (anti-lock-out).</div></div>`
             : `<div class="act-zone">
             <div class="act-zone-h">⚠️ Zone sensible</div>
             <div class="act-row">
               <button class="act-btn act-role" data-user-id="${uid}" data-role="${roleTarget}">🔑 Passer ${roleTarget}</button>
-              <button class="act-btn ${u.banned ? 'act-unsuspend' : 'act-danger'} act-suspend" data-user-id="${uid}" data-suspend="${u.banned ? 'false' : 'true'}">${u.banned ? '✅ Réactiver' : '⛔ Suspendre'}</button>
+              <button class="act-btn ${u.banned ? 'act-unsuspend' : 'act-danger'} act-suspend" data-user-id="${uid}" data-user-email="${userEmail}" data-suspend="${u.banned ? 'false' : 'true'}">${u.banned ? 'Lever le bannissement' : 'Bannir le client'}</button>
+              <button class="act-btn act-danger act-delete" data-user-id="${uid}" data-user-email="${userEmail}">Supprimer définitivement</button>
             </div>
         </div>`;
 
@@ -7439,7 +7617,7 @@ class AdminPage {
         return factors[index];
     }
 
-    async _partnersEnsureAal2() {
+    async _partnersEnsureAal2(contextLabel = 'les actions sensibles Partners') {
         const auth = window.NorvaAuth;
         if (!auth?.getMfaStatus || !auth?.challengeAndVerifyMfa) {
             this._toast('La validation Authenticator n’est pas disponible dans cette version. Rechargez Norva.', 'err');
@@ -7459,7 +7637,7 @@ class AdminPage {
             return true;
         }
         if (status?.nextLevel !== 'aal2' || !Array.isArray(status?.factors) || !status.factors.length) {
-            this._toast('Aucun facteur TOTP vérifié n’est associé à ce compte Admin. Configurez Authenticator avant d’effectuer une action sensible Partners.', 'err');
+            this._toast(`Aucun facteur TOTP vérifié n’est associé à ce compte Admin. Configurez Authenticator avant ${contextLabel}.`, 'err');
             return false;
         }
         const factor = await this._partnersChooseMfaFactor(status.factors);

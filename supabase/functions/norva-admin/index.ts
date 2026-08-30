@@ -1,4 +1,4 @@
-// norva-admin — privileged admin actions on users (resend confirmation · change role · suspend).
+// norva-admin — privileged admin actions on users (resend confirmation · change role · ban · delete).
 //
 // These touch Supabase Auth (app_metadata.role, ban_duration, confirmation emails), which require the
 // SERVICE ROLE key — hence an edge function, not a browser RPC. Every request is gated by an ADMIN
@@ -8,7 +8,8 @@
 // Routes (POST):
 //   /user/:id/resend-confirmation   → re-send the signup confirmation email
 //   /user/:id/role       { role }    → set app_metadata.role to 'admin' | 'user'
-//   /user/:id/suspend    { suspend } → ban (suspend) or unban the account
+//   /user/:id/suspend    { suspend, reason } → ban or unban the account
+//   /user/:id/delete     { confirm, reason } → start the durable permanent-deletion workflow
 //   /user/:id/refund     { pi_id }   → merchant-initiated Revolut refund of a captured charge
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { sendTelegram, tgEscape } from "../_shared/telegram.ts";
@@ -82,6 +83,50 @@ function json(req: Request, data: unknown, status = 200) {
 async function logEvent(userId: string, kind: string, summary: string, actor: string | null, meta: JsonRecord = {}) {
   try { await admin.from("admin_events").insert({ user_id: userId, kind, summary, actor, meta }); }
   catch (_) { /* best-effort audit */ }
+}
+
+// Account-control actions are different from routine timeline events: an audit
+// intent must be durable before Auth or deletion state changes. Completion is
+// then appended to the same event without ever storing the target email.
+async function beginAccountControlAudit(
+  userId: string,
+  summary: string,
+  actor: string | null,
+  action: string,
+  reason: string,
+): Promise<string | null> {
+  const { data, error } = await admin.from("admin_events").insert({
+    user_id: userId,
+    kind: "admin_action",
+    summary,
+    actor,
+    meta: { action, reason, status: "requested" },
+  }).select("id").single();
+  if (error || !data?.id) {
+    console.error("[norva-admin] required account-control audit unavailable", action, error?.message ?? "empty_result");
+    return null;
+  }
+  return String(data.id);
+}
+
+async function finishAccountControlAudit(
+  auditId: string,
+  summary: string,
+  meta: JsonRecord,
+): Promise<void> {
+  const { error } = await admin.from("admin_events").update({ summary, meta }).eq("id", auditId);
+  if (error) console.error("[norva-admin] account-control audit completion unavailable", error.message);
+}
+
+function operatorReason(value: unknown): string | null {
+  const reason = String(value ?? "").replace(/\s+/g, " ").trim();
+  return reason.length >= 3 && reason.length <= 500 ? reason : null;
+}
+
+function hasActiveAuthBan(bannedUntil: unknown): boolean {
+  if (typeof bannedUntil !== "string" || !bannedUntil) return false;
+  const expiry = Date.parse(bannedUntil);
+  return Number.isFinite(expiry) && expiry > Date.now();
 }
 
 async function resolveCapturedResubscribeException(
@@ -1180,20 +1225,27 @@ Deno.serve(async (req) => {
         message: `Remboursement de ${(amountCents / 100).toFixed(2)} ${cur} effectué.` });
     }
 
-    // Anti self-lockout: an admin cannot demote or suspend their OWN account (would strand the panel).
+    // Anti self-lockout: an admin cannot demote, ban or permanently delete
+    // their OWN account (that would strand the operator panel).
     if (userId === actorId && action === "role" && String(body.role) === "user") {
       return json(req, { error: "Vous ne pouvez pas retirer votre propre rôle admin." }, 400);
     }
     if (userId === actorId && action === "suspend" && (body.suspend === true || body.suspend === "true")) {
-      return json(req, { error: "Vous ne pouvez pas suspendre votre propre compte." }, 400);
+      return json(req, { error: "Vous ne pouvez pas bannir votre propre compte." }, 400);
+    }
+    if (userId === actorId && action === "delete") {
+      return json(req, { error: "Vous ne pouvez pas supprimer votre propre compte depuis l’administration." }, 400);
     }
 
-    // Last-admin protection: the self-guard above stops an admin locking THEMSELVES out, but two
-    // admins could demote/suspend each other. Refuse an action that removes the LAST active admin.
+    // Last-admin protection: the self-guard above stops an admin locking
+    // THEMSELVES out, but two admins could demote/ban/delete each other. Refuse
+    // an action that removes the LAST currently active admin.
     const targetRole = ((target.user.app_metadata ?? {}) as JsonRecord).role;
-    const removesAdmin = targetRole === "admin" && (
+    const targetIsActive = !hasActiveAuthBan(target.user.banned_until);
+    const removesAdmin = targetRole === "admin" && targetIsActive && (
       (action === "role" && String(body.role) === "user") ||
-      (action === "suspend" && (body.suspend === true || body.suspend === "true"))
+      (action === "suspend" && (body.suspend === true || body.suspend === "true")) ||
+      action === "delete"
     );
     if (removesAdmin) {
       const { data: activeAdmins } = await admin.rpc("admin_count_active");
@@ -1214,10 +1266,191 @@ Deno.serve(async (req) => {
 
     if (action === "suspend") {
       const suspend = body.suspend === true || body.suspend === "true";
+      const reason = operatorReason(body.reason);
+      if (!reason) return json(req, { error: "Un motif interne de 3 à 500 caractères est requis." }, 400);
+
+      // Never reactivate an account that has already entered permanent
+      // deletion. That workflow is intentionally one-way.
+      if (!suspend) {
+        const { data: deletion, error: deletionReadError } = await admin
+          .from("cloud_account_deletion_workflows")
+          .select("state")
+          .eq("user_id", userId)
+          .maybeSingle();
+        if (deletionReadError) {
+          console.error("[norva-admin] deletion state check failed", deletionReadError.message);
+          return json(req, { error: "Impossible de vérifier l’état de suppression du compte." }, 503);
+        }
+        if (deletion && deletion.state !== "completed") {
+          return json(req, {
+            error: "Ce compte est déjà engagé dans une suppression définitive et ne peut plus être réactivé.",
+            code: "deletion_in_progress",
+          }, 409);
+        }
+      }
+
+      const auditId = await beginAccountControlAudit(
+        userId,
+        suspend ? "Bannissement demandé" : "Levée du bannissement demandée",
+        actorEmail,
+        suspend ? "account_ban" : "account_unban",
+        reason,
+      );
+      if (!auditId) return json(req, { error: "Journal d’audit indisponible. Aucune action n’a été effectuée." }, 503);
+
       const { error } = await admin.auth.admin.updateUserById(userId, { ban_duration: suspend ? "876000h" : "none" });
-      if (error) return json(req, { error: error.message }, 400);
-      await logEvent(userId, "admin_action", suspend ? "Compte suspendu" : "Compte réactivé", actorEmail);
-      return json(req, { ok: true, suspended: suspend });
+      if (error) {
+        await finishAccountControlAudit(auditId, suspend ? "Bannissement échoué" : "Réactivation échouée", {
+          action: suspend ? "account_ban" : "account_unban", reason, status: "failed",
+        });
+        return json(req, { error: "L’état du compte n’a pas pu être modifié." }, 503);
+      }
+
+      if (suspend) {
+        const { error: revokeError } = await admin.rpc("admin_revoke_user_sessions", { p_user_id: userId });
+        if (revokeError) {
+          console.error("[norva-admin] account banned but session revocation failed", revokeError.message);
+          await finishAccountControlAudit(auditId, "Compte banni · révocation des sessions à reprendre", {
+            action: "account_ban", reason, status: "session_revocation_pending",
+          });
+          return json(req, {
+            error: "Le compte est banni, mais la révocation de ses sessions doit être relancée.",
+            code: "session_revocation_pending",
+            suspended: true,
+          }, 503);
+        }
+      }
+
+      await finishAccountControlAudit(auditId, suspend ? "Compte banni" : "Compte réactivé", {
+        action: suspend ? "account_ban" : "account_unban", reason, status: "completed",
+      });
+      return json(req, {
+        ok: true,
+        suspended: suspend,
+        message: suspend ? "Client banni. Les renouvellements de session ont été révoqués." : "Client réactivé.",
+      });
+    }
+
+    if (action === "delete") {
+      const reason = operatorReason(body.reason);
+      if (!reason) return json(req, { error: "Un motif interne de 3 à 500 caractères est requis." }, 400);
+      const confirmation = String(body.confirm ?? "").trim();
+      const confirmed = targetEmail
+        ? confirmation.toLowerCase() === targetEmail.trim().toLowerCase()
+        : confirmation === "DELETE";
+      if (!confirmed) {
+        return json(req, { error: "La confirmation ne correspond pas au compte sélectionné." }, 400);
+      }
+
+      // A permanent deletion is materially more sensitive than a ban. The UI
+      // elevates the operator with Authenticator, and the edge repeats the
+      // assurance check against the signed access token before any audit or
+      // account mutation. This keeps the control fail-closed if the client is
+      // bypassed or the elevated session has expired.
+      const { data: assurance, error: assuranceError } = await admin.auth.mfa
+        .getAuthenticatorAssuranceLevel(token);
+      if (assuranceError || !assurance) {
+        console.error("[norva-admin] deletion assurance unavailable", assuranceError?.message ?? "empty_result");
+        return json(req, {
+          error: "Impossible de vérifier la validation Authenticator. Réessayez avant de supprimer ce compte.",
+          code: "authentication_assurance_unavailable",
+        }, 503);
+      }
+      if (assurance.currentLevel !== "aal2") {
+        return json(req, {
+          error: "Validation Authenticator requise avant une suppression définitive.",
+          code: "aal2_required",
+        }, 403);
+      }
+
+      const auditId = await beginAccountControlAudit(
+        userId,
+        "Suppression définitive demandée",
+        actorEmail,
+        "account_delete",
+        reason,
+      );
+      if (!auditId) return json(req, { error: "Journal d’audit indisponible. Aucune action n’a été effectuée." }, 503);
+
+      // Block authentication before preparing deletion. Retrying the request is
+      // safe: ban, session revocation, Partners preparation and workflow begin
+      // are all idempotent for one account.
+      const { error: banError } = await admin.auth.admin.updateUserById(userId, { ban_duration: "876000h" });
+      if (banError) {
+        await finishAccountControlAudit(auditId, "Suppression bloquée · bannissement indisponible", {
+          action: "account_delete", reason, status: "failed_before_ban",
+        });
+        return json(req, { error: "Le compte n’a pas pu être sécurisé avant sa suppression." }, 503);
+      }
+
+      const { error: revokeError } = await admin.rpc("admin_revoke_user_sessions", { p_user_id: userId });
+      if (revokeError) {
+        console.error("[norva-admin] deletion ban applied but session revocation failed", revokeError.message);
+        await finishAccountControlAudit(auditId, "Suppression en attente · révocation des sessions à reprendre", {
+          action: "account_delete", reason, status: "session_revocation_pending",
+        });
+        return json(req, {
+          error: "Le compte est banni, mais la révocation de ses sessions doit être relancée avant la suppression.",
+          code: "session_revocation_pending",
+          suspended: true,
+        }, 503);
+      }
+
+      const { data: preparationData, error: preparationError } = await admin.rpc(
+        "partners_service_prepare_account_deletion",
+        { p_user_id: userId },
+      );
+      const preparation = (preparationData ?? {}) as JsonRecord;
+      if (!preparationError &&
+        preparation.action === "partners_account_deletion_pending_financial_closure" &&
+        preparation.ready === false) {
+        await finishAccountControlAudit(auditId, "Suppression en attente · opérations financières requises", {
+          action: "account_delete", reason, status: "financial_closure_pending",
+        });
+        return json(req, {
+          error: "Le compte est banni. La suppression attend la clôture des opérations financières obligatoires.",
+          code: "partners_financial_closure_pending",
+          suspended: true,
+        }, 409);
+      }
+      if (preparationError ||
+        preparation.action !== "partners_account_deletion_prepared" ||
+        preparation.ready !== true) {
+        console.error("[norva-admin] account deletion preparation failed", preparationError?.message ?? "invalid_preparation_envelope");
+        await finishAccountControlAudit(auditId, "Suppression en attente · préparation indisponible", {
+          action: "account_delete", reason, status: "preparation_failed",
+        });
+        return json(req, {
+          error: "Le compte est banni, mais la préparation de sa suppression doit être relancée.",
+          code: "deletion_preparation_pending",
+          suspended: true,
+        }, 503);
+      }
+
+      const { data: deletionData, error: deletionError } = await admin.rpc(
+        "norva_begin_account_deletion_workflow",
+        { p_user_id: userId },
+      );
+      if (deletionError || !deletionData || typeof deletionData !== "object") {
+        console.error("[norva-admin] durable account deletion begin failed", deletionError?.message ?? "invalid_begin_envelope");
+        await finishAccountControlAudit(auditId, "Suppression en attente · orchestration à reprendre", {
+          action: "account_delete", reason, status: "workflow_begin_failed",
+        });
+        return json(req, {
+          error: "Le compte est banni, mais le lancement de sa suppression doit être relancé.",
+          code: "deletion_workflow_pending",
+          suspended: true,
+        }, 503);
+      }
+
+      await finishAccountControlAudit(auditId, "Suppression définitive engagée", {
+        action: "account_delete", reason, status: "deletion_pending",
+      });
+      return json(req, {
+        ok: true,
+        deletionPending: true,
+        message: "Suppression définitive engagée. Le compte reste bloqué pendant le traitement.",
+      }, 202);
     }
 
     return json(req, { error: "Unknown action" }, 404);

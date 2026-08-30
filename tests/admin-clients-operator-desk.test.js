@@ -211,7 +211,36 @@ test('Client rows render as a keyboard list with a contextual inspector, not a w
   assert.doesNotMatch(users.innerHTML, /<table/);
   assert.match(inspector.innerHTML, /Action potentielle/);
   assert.match(inspector.innerHTML, /Ouvrir le dossier complet/);
+  assert.match(inspector.innerHTML, /Bannir le client/);
+  assert.match(inspector.innerHTML, /Supprimer définitivement/);
+  assert.match(inspector.innerHTML, /data-client-account-action="delete"/);
   assert.match(inspector.innerHTML, /App Android mobile · Compte/);
+});
+
+test('Client inspector exposes unban instead of ban for an already banned account', () => {
+  const inspector = fakeElement();
+  const document = {
+    getElementById(id) { return id === 'client-desk-inspector' ? inspector : null; },
+    querySelector() { return null; },
+    querySelectorAll() { return []; },
+    addEventListener() {},
+    removeEventListener() {},
+  };
+  const AdminPage = loadAdminPage(document);
+  const page = Object.create(AdminPage.prototype);
+
+  page._renderClientInspector({
+    user_id: '22222222-2222-4222-8222-222222222222',
+    email: 'banni@example.fr',
+    banned: true,
+    email_confirmed: true,
+    sources_count: 0,
+  });
+
+  assert.match(inspector.innerHTML, /client-account-state is-banned">Banni/);
+  assert.match(inspector.innerHTML, /data-client-account-action="unban"/);
+  assert.match(inspector.innerHTML, /Lever le bannissement/);
+  assert.doesNotMatch(inspector.innerHTML, />Bannir le client</);
 });
 
 test('Mobile client inspector contract includes focus isolation and Back handling', () => {
@@ -223,4 +252,13 @@ test('Mobile client inspector contract includes focus isolation and Back handlin
   assert.match(section, /BrowserBack/);
   assert.match(section, /history\.pushState/);
   assert.match(section, /restoreFocus/);
+});
+
+test('Intermediate client layout contains rows before the inspector', () => {
+  assert.match(source, /\.client-desk-list-pane\{[^}]*overflow:hidden/);
+  assert.match(source, /\.client-desk-row\{[^}]*overflow:hidden/);
+  assert.match(source, /@media\(max-width:1380px\)\{[\s\S]*grid-template-columns:minmax\(0,1\.5fr\) minmax\(0,\.75fr\) minmax\(0,\.9fr\)/);
+  assert.match(source, /\.client-desk-list-head>:nth-child\(5\)[^}]*\.client-desk-row>:nth-child\(5\)\{display:none/);
+  assert.match(source, /@media\(max-width:900px\)\{[\s\S]*\.client-desk-row>:nth-child\(5\)\{display:block/);
+  assert.match(source, /\.client-desk-inspector\{[^}]*overflow-x:hidden/);
 });
