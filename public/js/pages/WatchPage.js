@@ -7711,8 +7711,10 @@ class WatchPage {
                 hlsIndex,
                 streamIndex,
                 // HLS LANGUAGE/NAME and the rendition title are provider tags,
-                // not speech verification. Only an exact-file verified catalogue
-                // row joined by absolute stream index may name the language.
+                // not speech verification. Keep the provider language separate
+                // so it can label the menu when verification is unavailable,
+                // while only an exact-file verified catalogue row may populate
+                // the authoritative `language` field.
                 language: verifiedLanguage,
                 renditionLanguage: this.normalizeTrackLanguage(raw.language),
                 renditionTitle: String(raw.title ?? '').trim() || null,
@@ -8002,7 +8004,14 @@ class WatchPage {
     getGatewayAudioRenditionLabel(track, index, allTracks) {
         const buildBase = (candidate, fallbackIndex) => {
             const parts = [];
-            const language = this.getLanguageDisplayName(candidate?.language);
+            // Exact speech/file verification wins. If it has not run yet, the
+            // HLS LANGUAGE tag is still useful presentation metadata and avoids
+            // showing "Unknown language" for correctly tagged provider tracks.
+            // It deliberately stays out of `track.language`, so preferences and
+            // playback decisions never mistake provider metadata for verification.
+            const language = this.getLanguageDisplayName(
+                candidate?.language || candidate?.renditionLanguage,
+            );
             parts.push(language || 'Unknown language');
             const codec = candidate?.codec || candidate?.renditionCodec;
             if (codec) parts.push(String(codec).toUpperCase());
