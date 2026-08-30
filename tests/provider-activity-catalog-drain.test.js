@@ -115,7 +115,7 @@ test('Gateway reports short catalogue holders immediately and drains an active h
   );
   assert.ok(countBeforePreempt >= 0 && countBeforePreempt < preempt);
   assert.ok(preempt < delay, 'the active catalogue class selects the longer release drain');
-  assert.match(gateway, /const GATEWAY_VERSION = 126/);
+  assert.match(gateway, /const GATEWAY_VERSION = 127/);
   assert.match(edgeVersion(gateway), /providerCatalogRefreshSlotReleaseDelayMs/);
 });
 
