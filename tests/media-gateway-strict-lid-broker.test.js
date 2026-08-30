@@ -27,6 +27,8 @@ function brokerHarness() {
       Date,
       Error,
       FFMPEG_USER_AGENT: 'Norva-LID-Test/1',
+      FINITE_MKV_SEEK_WINDOW_BYTES: 2 * 1024 * 1024,
+      FINITE_MKV_SEEK_CACHE_BYTES: 32 * 1024 * 1024,
       Number,
       Object,
       Promise,
@@ -573,25 +575,25 @@ test('strict LID broker preempts an old local range, awaits close, and never exc
   );
 });
 
-test('finite seek broker waits for mono-account release after planned supersession', async (t) => {
+test('finite seek broker buffers and queues overlapping local ranges without overlapping provider sockets', async (t) => {
   const { createStrictLidBroker } = brokerHarness();
-  const data = Buffer.alloc(256, 0x5b);
-  const state = { active: 0, maxActive: 0, calls: 0, firstClosedAt: 0, secondOpenedAt: 0 };
+  const data = Buffer.from(Array.from({ length: 64 }, (_, index) => index));
+  const state = { active: 0, maxActive: 0, calls: [], firstResponse: null };
+  let markFirstStarted;
+  const firstStarted = new Promise((resolve) => { markFirstStarted = resolve; });
   const provider = http.createServer((req, res) => {
-    state.calls++;
+    const { start, end } = exactRange(req, data.length);
+    state.calls.push(req.headers.range);
     state.active++;
     state.maxActive = Math.max(state.maxActive, state.active);
-    if (state.calls === 2) state.secondOpenedAt = Date.now();
     let closed = false;
     const release = () => {
       if (closed) return;
       closed = true;
       state.active--;
-      if (state.calls === 1) state.firstClosedAt = Date.now();
     };
     res.once('close', release);
     res.once('finish', release);
-    const { start, end } = exactRange(req, data.length);
     const length = end - start + 1;
     res.writeHead(206, {
       'Content-Type': 'application/octet-stream',
@@ -599,8 +601,9 @@ test('finite seek broker waits for mono-account release after planned supersessi
       'Content-Length': String(length),
       ETag: '"finite-serial-v1"',
     });
-    if (state.calls === 1) {
-      res.write(data.subarray(start, start + 1));
+    if (state.calls.length === 1) {
+      state.firstResponse = { res, body: data.subarray(start, end + 1) };
+      markFirstStarted();
       return;
     }
     res.end(data.subarray(start, end + 1));
@@ -611,33 +614,42 @@ test('finite seek broker waits for mono-account release after planned supersessi
     sourceUrl,
     fileSizeBytes: data.length,
     dispatcher: null,
-    releaseDelayMs: 200,
+    pathPrefix: 'finite-mkv-seek',
+    finiteWindowBytes: 8,
+    finiteCacheBytes: 16,
+    releaseDelayMs: 0,
     completedReleaseDelayMs: 0,
     supersededReleaseDelayMs: 200,
     openTimeoutMs: 2000,
   });
   t.after(() => broker.close());
 
-  const first = await fetch(broker.inputUrl, { headers: { Range: 'bytes=0-127' } });
+  const firstPending = fetch(broker.inputUrl, { headers: { Range: 'bytes=0-31' } });
+  await firstStarted;
+  const secondPending = fetch(broker.inputUrl, { headers: { Range: 'bytes=16-31' } });
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  assert.deepEqual(state.calls, ['bytes=0-7']);
+  assert.equal(state.active, 1);
+  state.firstResponse.res.end(state.firstResponse.body);
+
+  const [first, second] = await Promise.all([firstPending, secondPending]);
   assert.equal(first.status, 206);
-  const firstReader = first.body.getReader();
-  const firstChunk = await firstReader.read();
-  assert.equal(firstChunk.value.length, 1);
-
-  const second = await fetch(broker.inputUrl, { headers: { Range: 'bytes=128-255' } });
   assert.equal(second.status, 206);
-  assert.equal((await second.arrayBuffer()).byteLength, 128);
-  await firstReader.cancel().catch(() => {});
+  assert.deepEqual(Buffer.from(await first.arrayBuffer()), data.subarray(0, 8));
+  assert.deepEqual(Buffer.from(await second.arrayBuffer()), data.subarray(16, 24));
+  assert.deepEqual(state.calls, ['bytes=0-7', 'bytes=16-23']);
+  assert.equal(state.maxActive, 1, 'finite windows must never overlap provider bodies');
+  assert.equal(state.active, 0);
+  assert.equal(broker.completedProviderFetches, 2);
+  assert.equal(broker.interruptedProviderFetches, 0);
+  assert.ok(broker.maxQueuedRequests >= 2);
 
-  assert.equal(state.calls, 2);
-  assert.equal(state.maxActive, 1, 'planned supersession must remain strictly serialized');
-  assert.ok(state.firstClosedAt > 0 && state.secondOpenedAt >= state.firstClosedAt);
-  assert.ok(
-    state.secondOpenedAt - state.firstClosedAt >= 100,
-    `planned successor opened only ${state.secondOpenedAt - state.firstClosedAt}ms after close`,
-  );
-  assert.equal(broker.completedProviderFetches, 1);
-  assert.equal(broker.interruptedProviderFetches, 1);
+  const cached = await fetch(broker.inputUrl, { headers: { Range: 'bytes=0-31' } });
+  assert.equal(cached.status, 206);
+  assert.deepEqual(Buffer.from(await cached.arrayBuffer()), data.subarray(0, 8));
+  assert.deepEqual(state.calls, ['bytes=0-7', 'bytes=16-23']);
+  assert.equal(broker.cacheHits, 1);
+  assert.equal(broker.cacheMisses, 2);
 });
 
 for (const fixture of [
@@ -1295,8 +1307,8 @@ test('finite MKV seek bounds no-progress reconnects and fails closed on validato
     const response = await fetch(validatorBroker.inputUrl, { headers: { Range: 'bytes=0-19' } })
       .catch(() => null);
     if (response) {
-      assert.equal(response.status, 206);
-      await assert.rejects(response.arrayBuffer());
+      assert.equal(response.status, 502);
+      assert.equal((await response.json()).code, 'VOD_CHANGED');
     }
     assert.equal(validatorCalls, 2);
     assert.equal(validatorBroker.terminalError.code, 'VOD_CHANGED');
@@ -1336,7 +1348,7 @@ test('strict LID rejects invalid exact signed coordinates before creating a serv
   assert.match(route, /detectLanguageRequestPolicy\(req, options\)[\s\S]*validateDetectLanguageCapability\(capabilityToken, policy\.requiredScope\)/);
   assert.match(gatewaySource, /strictLidLoopbackBrokerProtocol: 1/);
   assert.match(gatewaySource, /strictLidFileSizeClaim: 'fileSizeBytes'/);
-  assert.match(gatewaySource, /const GATEWAY_VERSION = 123/);
+  assert.match(gatewaySource, /const GATEWAY_VERSION = 124/);
   assert.match(gatewaySource, /supersededReleaseDelayMs:\s*PROVIDER_SLOT_RELEASE_DELAY_MS/);
   assert.match(gatewaySource, /strictLidProviderDrainProtocol: 1/);
   assert.match(gatewaySource, /strictLidWeakFallbackProtocol: 1/);
