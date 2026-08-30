@@ -6984,6 +6984,7 @@ function normalizeIsoLang(value: string | null): string | null {
     rus: "ru", slo: "sk", slk: "sk", slv: "sl", spa: "es", srp: "sr",
     swe: "sv", tam: "ta", tel: "te", tha: "th", tur: "tr", ukr: "uk",
     urd: "ur", vie: "vi",
+    iw: "he", in: "id", ji: "yi", jw: "jv", mo: "ro", sh: "sr",
   };
   const code = map[v] || v;
   return /^[a-z]{2}$/.test(code) ? code : null;

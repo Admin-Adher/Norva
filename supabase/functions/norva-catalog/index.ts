@@ -1773,6 +1773,10 @@ const FILE_LANGUAGE_ALIASES: Record<string, string> = {
   rus: "ru", slo: "sk", slk: "sk", slv: "sl", spa: "es", srp: "sr",
   swe: "sv", tam: "ta", tel: "te", tha: "th", tur: "tr", ukr: "uk",
   urd: "ur", vie: "vi",
+  // Deprecated ISO-639-1 / Java locale codes still emitted by older provider
+  // catalogues and containers. Keep every catalogue/filter path on the modern
+  // canonical code so one language never appears twice in Movies or Series.
+  iw: "he", in: "id", ji: "yi", jw: "jv", mo: "ro", sh: "sr",
 };
 function canonicalFileLanguage(value: unknown): string | null {
   const raw = String(value ?? "").toLowerCase().trim().split(/[-_]/)[0];
@@ -2232,13 +2236,18 @@ function exactLanguageFacetItems(
   itemType: "movie" | "series",
 ): Array<{ value: string; label: string; count: number }> {
   const counts = recordOrEmpty(raw);
-  return Object.entries(counts)
-    .map(([value, count]) => ({ value: value.toLowerCase(), count: Math.max(0, Number(count) || 0) }))
-    .filter((item) =>
-      /^[a-z]{2,3}$/.test(item.value) &&
-      !["un", "und", "mul", "zxx", "mis", "nar"].includes(item.value) &&
-      item.count > 0
-    )
+  const canonicalCounts = new Map<string, number>();
+  for (const [rawValue, rawCount] of Object.entries(counts)) {
+    const value = canonicalFileLanguage(rawValue);
+    const count = Math.max(0, Number(rawCount) || 0);
+    if (!value || count <= 0) continue;
+    // The SQL migration makes counts exact after deployment. During a rolling
+    // deploy, max avoids double-counting a title present under both a legacy
+    // and canonical key while still collapsing the duplicate menu entry.
+    canonicalCounts.set(value, Math.max(canonicalCounts.get(value) || 0, count));
+  }
+  return [...canonicalCounts.entries()]
+    .map(([value, count]) => ({ value, count }))
     .map((item) => ({ ...item, label: languageFacetLabel(item.value, item.count, itemType) }))
     .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
 }
@@ -2331,13 +2340,7 @@ async function recordObservedLanguages(req: Request, userId: string) {
     requestedSourceId || requestedTypeRaw || requestedExternalId || requestedParentExternalId,
   );
 
-  const cleanLanguage = (value: unknown): string | null => {
-    const lang = typeof value === "string" ? value.toLowerCase().trim() : "";
-    return /^[a-z]{2,3}$/.test(lang) &&
-        !["un", "und", "mul", "zxx", "mis", "nar"].includes(lang)
-      ? lang
-      : null;
-  };
+  const cleanLanguage = (value: unknown): string | null => canonicalFileLanguage(value);
   const incoming = Array.isArray(body.audio) ? body.audio : [];
   const codes = [...new Set(incoming
     .map(cleanLanguage)

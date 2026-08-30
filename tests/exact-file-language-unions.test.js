@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
+const vm = require('node:vm');
 
 const ROOT = path.join(__dirname, '..');
 const read = (file) => fs.readFileSync(path.join(ROOT, file), 'utf8');
@@ -183,4 +184,80 @@ test('all exact-language RPC callers pass variant and file identity', () => {
   assert.ok(migration.includes(
     'uuid, uuid, uuid, text, jsonb, jsonb, boolean, boolean',
   ));
+});
+
+test('audio and subtitle facets share one modern canonical language namespace', () => {
+  const migration = read(
+    'supabase/migrations/20260830153000_catalog_language_canonicalization_v1.sql',
+  );
+  const catalog = read('supabase/functions/norva-catalog/index.ts');
+  const playback = read('supabase/functions/norva-playback/index.ts');
+  const mediaUtils = read('public/js/utils/mediaUtils.js');
+  const record = between(
+    catalog,
+    'async function recordObservedLanguages(',
+    '\nasync function listTitleRail(',
+  );
+  const facetItems = between(
+    catalog,
+    'function exactLanguageFacetItems(',
+    '\nasync function listLanguageFacets(',
+  );
+
+  for (const source of [catalog, playback]) {
+    assert.match(source, /iw:\s*"he"/);
+    assert.match(source, /in:\s*"id"/);
+    assert.match(source, /ji:\s*"yi"/);
+    assert.match(source, /jw:\s*"jv"/);
+    assert.match(source, /mo:\s*"ro"/);
+    assert.match(source, /sh:\s*"sr"/);
+  }
+  for (const [legacy, canonical] of Object.entries({
+    iw: 'he', in: 'id', ji: 'yi', jw: 'jv', mo: 'ro', sh: 'sr',
+  })) {
+    assert.ok(mediaUtils.includes(`${legacy}: '${canonical}'`));
+  }
+
+  assert.ok(record.includes(
+    'const cleanLanguage = (value: unknown): string | null => canonicalFileLanguage(value);',
+  ));
+  assert.ok(facetItems.includes('canonicalFileLanguage(rawValue)'));
+  assert.ok(migration.includes(
+    'create or replace function public.norva_canonical_language_code(p_value text)',
+  ));
+  assert.ok(migration.includes(
+    'create or replace function public.cloud_file_track_languages(p_tracks jsonb)',
+  ));
+  assert.ok(migration.includes('perform public.recompute_cloud_title_file_languages('));
+  assert.ok(migration.includes("set refreshed_at = 'epoch'::timestamptz"));
+  assert.match(migration, /when 'por' then 'pt'/);
+  assert.match(migration, /when 'iw' then 'he'/);
+  assert.match(migration, /when 'in' then 'id'/);
+  assert.match(migration, /where language_code is not null/);
+});
+
+test('Movies, Series and player menus normalize locale and legacy track codes identically', () => {
+  const context = { window: {} };
+  vm.runInNewContext(read('public/js/utils/mediaUtils.js'), context);
+  const normalize = context.window.MediaUtils.normalizeLanguagePreference;
+
+  assert.strictEqual(normalize('iw'), 'he');
+  assert.strictEqual(normalize('jw'), 'jv');
+  assert.strictEqual(normalize('sh'), 'sr');
+  assert.strictEqual(normalize('heb'), 'he');
+  assert.strictEqual(normalize('sqi'), 'sq');
+  assert.strictEqual(normalize('pt-BR'), 'pt');
+  assert.strictEqual(normalize('en_US'), 'en');
+  assert.strictEqual(normalize('true-french'), 'fr');
+
+  for (const playerPath of [
+    'public/js/pages/WatchPage.js',
+    'public/js/components/VideoPlayer.js',
+  ]) {
+    const player = read(playerPath);
+    assert.match(
+      player,
+      /normalizeTrackLanguage\(language\) \{[\s\S]{0,500}MediaUtils\.normalizeLanguagePreference\(language\)/,
+    );
+  }
 });

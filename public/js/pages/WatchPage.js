@@ -9475,7 +9475,11 @@ class WatchPage {
     }
 
     normalizeTrackLanguage(language) {
-        const normalized = String(language || '').toLowerCase();
+        const shared = typeof MediaUtils !== 'undefined' &&
+            typeof MediaUtils.normalizeLanguagePreference === 'function'
+            ? MediaUtils.normalizeLanguagePreference(language)
+            : '';
+        const normalized = shared || String(language || '').toLowerCase();
         const aliases = {
             fre: 'fr',
             fra: 'fr',

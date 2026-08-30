@@ -160,6 +160,32 @@ const MediaUtils = (() => {
         ell: 'el',
         gre: 'el',
         el: 'el',
+        // ISO-639-2/B and ISO-639-2/T aliases found in provider manifests.
+        // The canonical Movies/Series filters and both players use the same
+        // modern ISO-639-1 namespace as the catalogue Edge functions.
+        alb: 'sq', sqi: 'sq',
+        arm: 'hy', hye: 'hy',
+        baq: 'eu', eus: 'eu',
+        ben: 'bn', bos: 'bs', bul: 'bg',
+        bur: 'my', mya: 'my', cat: 'ca',
+        cze: 'cs', ces: 'cs', dan: 'da',
+        est: 'et', fil: 'tl', fin: 'fi',
+        geo: 'ka', kat: 'ka', heb: 'he',
+        hrv: 'hr', hun: 'hu', ice: 'is', isl: 'is',
+        ind: 'id', lav: 'lv', lit: 'lt',
+        mac: 'mk', mkd: 'mk', may: 'ms', msa: 'ms',
+        nob: 'no', nor: 'no', rum: 'ro', ron: 'ro',
+        slo: 'sk', slk: 'sk', slv: 'sl', srp: 'sr',
+        swe: 'sv', tam: 'ta', tel: 'te', tha: 'th',
+        ukr: 'uk', urd: 'ur', vie: 'vi',
+        // Deprecated locale codes that still occur in older provider metadata.
+        // Normalize them before preferences and catalogue filters are stored.
+        iw: 'he',
+        in: 'id',
+        ji: 'yi',
+        jw: 'jv',
+        mo: 'ro',
+        sh: 'sr',
         vo: 'original',
         vost: 'original',
         vostfr: 'original',
@@ -555,10 +581,12 @@ const MediaUtils = (() => {
     }
 
     function normalizeLanguagePreference(value, kind = 'audio') {
-        const raw = stripDiacritics(String(value || '')).toLowerCase().replace(/[^a-z0-9]+/g, '');
+        const source = stripDiacritics(String(value || '')).toLowerCase().trim();
+        const raw = source.replace(/[^a-z0-9]+/g, '');
         if (!raw || raw === 'nopreference' || raw === 'any') return '';
         if (kind === 'subtitle' && ['none', 'off', 'nosubtitles', 'disabled'].includes(raw)) return 'none';
-        return LANGUAGE_ALIASES[raw] || raw;
+        const localeBase = source.split(/[-_]/, 1)[0].replace(/[^a-z0-9]+/g, '');
+        return LANGUAGE_ALIASES[raw] || LANGUAGE_ALIASES[localeBase] || localeBase || raw;
     }
 
     function migrateLegacyLanguagePreference(value) {
