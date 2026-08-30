@@ -26,8 +26,8 @@ const DELIVERY_BATCH = 5;
 const DELIVERY_SPACING_MS = 250;
 const RECENT_AUTH_MAX_AGE_SECONDS = 15 * 60;
 const AUTH_CLOCK_SKEW_SECONDS = 60;
-const MEDIA_GATEWAY_URL = (Deno.env.get("NORVA_MEDIA_GATEWAY_URL") ?? "").replace(/\/+$/, "");
-const MEDIA_GATEWAY_TOKEN = Deno.env.get("NORVA_MEDIA_GATEWAY_TOKEN") ?? "";
+const ENV_MEDIA_GATEWAY_URL = (Deno.env.get("NORVA_MEDIA_GATEWAY_URL") ?? "").replace(/\/+$/, "");
+const ENV_MEDIA_GATEWAY_TOKEN = Deno.env.get("NORVA_MEDIA_GATEWAY_TOKEN") ?? "";
 
 const DEFAULT_ALLOWED_ORIGINS = [
   "https://norva.tv",
@@ -184,6 +184,40 @@ function redactDiagnosticText(value: unknown): string {
 
 function errorText(value: unknown): string {
   return redactDiagnosticText(value) || "unknown_error";
+}
+
+type MediaGatewayConfig = { url: string; token: string };
+let mediaGatewayConfigCache: { value: MediaGatewayConfig; expiresAt: number } | null = null;
+
+async function resolveMediaGatewayConfig(db: SupabaseClient): Promise<MediaGatewayConfig> {
+  if (ENV_MEDIA_GATEWAY_URL && ENV_MEDIA_GATEWAY_TOKEN) {
+    return { url: ENV_MEDIA_GATEWAY_URL, token: ENV_MEDIA_GATEWAY_TOKEN };
+  }
+  if (mediaGatewayConfigCache && mediaGatewayConfigCache.expiresAt > Date.now()) {
+    return mediaGatewayConfigCache.value;
+  }
+
+  let url = ENV_MEDIA_GATEWAY_URL;
+  let token = ENV_MEDIA_GATEWAY_TOKEN;
+  const { data, error } = await db
+    .from("cloud_runtime_config")
+    .select("key,value")
+    .in("key", ["NORVA_MEDIA_GATEWAY_URL", "NORVA_MEDIA_GATEWAY_TOKEN"]);
+  if (error) {
+    console.error("[norva-account-delete] media gateway config unavailable", errorText(error));
+  } else {
+    for (const row of data ?? []) {
+      if (row.key === "NORVA_MEDIA_GATEWAY_URL" && !url && typeof row.value === "string") {
+        url = row.value.replace(/\/+$/, "");
+      } else if (row.key === "NORVA_MEDIA_GATEWAY_TOKEN" && !token && typeof row.value === "string") {
+        token = row.value;
+      }
+    }
+  }
+
+  const value = { url, token };
+  mediaGatewayConfigCache = { value, expiresAt: Date.now() + 30_000 };
+  return value;
 }
 
 function stringOrNull(value: unknown): string | null {
@@ -475,6 +509,11 @@ async function sha256Hex(value: string) {
 }
 
 async function drainProviderTransportStop(db: SupabaseClient, userId: string) {
+  // Self-hosted Edge intentionally keeps these environment variables empty;
+  // cloud_runtime_config is the established secret-backed runtime fallback.
+  // Resolve it before claiming so a transient configuration read cannot strand
+  // an action under a processing lease.
+  const mediaGateway = await resolveMediaGatewayConfig(db);
   const worker = "norva-account-delete-cron-v1";
   const { data, error } = await db.rpc("norva_claim_account_deletion_transport_stop", {
     p_user_id: userId, p_worker: worker, p_lease_seconds: 120,
@@ -489,7 +528,7 @@ async function drainProviderTransportStop(db: SupabaseClient, userId: string) {
   const revision = typeof claim.revision === "number" ? claim.revision : -1;
   const epoch = typeof claim.deletionEpoch === "number" ? claim.deletionEpoch : -1;
   if (claim.state !== "processing" || leaseSequence < 0 || revision < 0 || epoch < 0) return "stale";
-  if (!MEDIA_GATEWAY_URL || !MEDIA_GATEWAY_TOKEN) {
+  if (!mediaGateway.url || !mediaGateway.token) {
     await db.rpc("norva_settle_provider_transport_stop_action", {
       p_user_id: userId, p_worker: worker, p_expected_lease_sequence: leaseSequence,
       p_expected_revision: revision, p_outcome: "retry", p_error_code: "gateway_unconfigured", p_retry_after_seconds: 60,
@@ -530,8 +569,8 @@ async function drainProviderTransportStop(db: SupabaseClient, userId: string) {
     if (settleError) throw new Error(`account_deletion_transport_settle_failed:${settleError.message}`);
     return "completed";
   }
-  const response = await fetch(`${MEDIA_GATEWAY_URL}/sessions/stop-provider-affinities`, {
-    method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${MEDIA_GATEWAY_TOKEN}` },
+  const response = await fetch(`${mediaGateway.url}/sessions/stop-provider-affinities`, {
+    method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${mediaGateway.token}` },
     body: JSON.stringify({ affinityHashes: revalidatedAffinities }),
   });
   const result = await response.json().catch(() => ({})) as JsonRecord;

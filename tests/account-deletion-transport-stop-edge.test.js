@@ -14,13 +14,35 @@ test('transport stop revalidates every durable fence immediately before gateway 
   const end = edge.indexOf('\n// Drive exactly one durable', start);
   const worker = edge.slice(start, end);
   const revalidateAt = worker.indexOf('norva_revalidate_account_deletion_transport_stop');
-  const fetchAt = worker.indexOf('fetch(`${MEDIA_GATEWAY_URL}/sessions/stop-provider-affinities`');
+  const fetchAt = worker.indexOf('fetch(`${mediaGateway.url}/sessions/stop-provider-affinities`');
   assert.ok(revalidateAt > 0 && revalidateAt < fetchAt, 'revalidation must precede gateway fetch');
   assert.match(worker, /isStaleDatabaseConflict\(revalidateError\)\) return "stale"/);
   assert.match(worker, /revalidated\.deletionEpoch !== epoch/);
   assert.match(worker, /revalidated\.leaseSequence !== leaseSequence/);
   assert.match(worker, /revalidated\.revision !== revision/);
   assert.match(worker, /body: JSON\.stringify\(\{ affinityHashes: revalidatedAffinities \}\)/);
+});
+
+test('transport stop resolves the established database runtime config before claiming work', () => {
+  const resolverStart = edge.indexOf('async function resolveMediaGatewayConfig');
+  const resolverEnd = edge.indexOf('\nfunction stringOrNull', resolverStart);
+  const resolver = edge.slice(resolverStart, resolverEnd);
+  assert.match(resolver, /ENV_MEDIA_GATEWAY_URL && ENV_MEDIA_GATEWAY_TOKEN/);
+  assert.match(resolver, /\.from\("cloud_runtime_config"\)/);
+  assert.match(resolver, /\.select\("key,value"\)/);
+  assert.match(
+    resolver,
+    /\.in\("key", \["NORVA_MEDIA_GATEWAY_URL", "NORVA_MEDIA_GATEWAY_TOKEN"\]\)/,
+  );
+  assert.match(resolver, /expiresAt: Date\.now\(\) \+ 30_000/);
+
+  const workerStart = edge.indexOf('async function drainProviderTransportStop');
+  const workerEnd = edge.indexOf('\n// Drive exactly one durable', workerStart);
+  const worker = edge.slice(workerStart, workerEnd);
+  const resolveAt = worker.indexOf('resolveMediaGatewayConfig(db)');
+  const claimAt = worker.indexOf('norva_claim_account_deletion_transport_stop');
+  assert.ok(resolveAt >= 0 && resolveAt < claimAt, 'config resolution must precede the durable claim');
+  assert.match(worker, /Authorization: `Bearer \$\{mediaGateway\.token\}`/);
 });
 
 test('transport stop treats PT409 as stale while retaining rolling 40001 compatibility', () => {
