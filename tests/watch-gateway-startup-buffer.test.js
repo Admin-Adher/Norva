@@ -390,6 +390,13 @@ test('Gateway audio switch expires the prior lane, creates once, and delegates a
         },
         content: { sourceId: 'source-1', id: '90843', type: 'movie', containerExtension: 'mkv' },
         containerExtension: 'mkv',
+        captureVodPlaybackIdentity: () => ({
+            sourceId: 'source-1',
+            itemId: '90843',
+            itemType: 'movie',
+            container: 'mkv',
+            playbackItem: { sourceId: 'source-1', id: '90843', type: 'movie', streamType: 'movie' },
+        }),
         currentStreamInfo: { audioTracks: [{ index: 2, language: 'fra' }] },
         audioTracks: [{ index: 2, language: 'fra' }],
         getSelectedAudioTrack: () => ({ index: 2, language: 'fra' }),

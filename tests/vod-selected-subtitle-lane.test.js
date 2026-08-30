@@ -207,6 +207,75 @@ test('Watch carries the selected subtitle lane through the serialized Gateway re
   });
 });
 
+test('Watch canonicalizes a Continue Watching episode and freezes its exact provider identity', () => {
+  const WatchPage = loadWatchPage();
+  const page = Object.create(WatchPage.prototype);
+  page.containerExtension = 'mkv';
+  const content = {
+    id: '1701192',
+    type: 'episode',
+    sourceId: 'source-1',
+    seriesId: '42142',
+    currentSeason: 4,
+    currentEpisode: 1,
+    containerExtension: 'mkv',
+  };
+
+  page.canonicalizeVodPlaybackContent(content);
+  page.content = content;
+  const identity = page.captureVodPlaybackIdentity();
+
+  assert.equal(content.type, 'series');
+  assert.equal(content.itemType, 'episode');
+  assert.equal(content.streamType, 'series');
+  assert.equal(identity.itemType, 'series');
+  assert.equal(identity.itemId, '1701192');
+  assert.equal(identity.sourceId, 'source-1');
+  assert.equal(identity.container, 'mkv');
+  assert.equal(identity.playbackItem.type, 'episode');
+  assert.equal(identity.playbackItem.streamType, 'series');
+  assert.equal(identity.playbackItem.seriesId, '42142');
+  assert.equal(Object.isFrozen(identity), true);
+  assert.equal(Object.isFrozen(identity.playbackItem), true);
+});
+
+test('Watch freezes episode identity before every serialized subtitle or audio lane teardown', () => {
+  const watch = read('public/js/pages/WatchPage.js');
+  const play = section(
+    watch,
+    '    async play(content, streamUrl, playback = {}) {',
+    '    async loadVideo(url, options = {}) {',
+  );
+  const subtitleRestart = section(
+    watch,
+    '    async restartCloudGatewayStreamAt(targetTime, options = {}) {',
+    '    retryGatewaySeekAfterFatalPlayback(',
+  );
+  const audioRestart = section(
+    watch,
+    '    async restartCloudGatewayWithSelectedAudioTrack(requestId = this._audioSwitchRequestId) {',
+    '    updateGatewayAudioSwitchMetrics(',
+  );
+
+  assert.ok(
+    play.indexOf('this.canonicalizeVodPlaybackContent(content);') < play.indexOf('this.content = content;'),
+    'content type must be canonical before Watch publishes the incoming identity',
+  );
+  assert.ok(
+    subtitleRestart.indexOf('const playbackIdentity =')
+      < subtitleRestart.indexOf('await this.releasePlaybackPipelineForRetry();'),
+    'subtitle restart must capture identity before releasing the old lane',
+  );
+  assert.match(subtitleRestart, /getStreamUrl\(\s*playbackIdentity\.sourceId,\s*playbackIdentity\.itemId,\s*itemType,/);
+  assert.match(subtitleRestart, /playbackIdentity,\s*\}\);/);
+  assert.ok(
+    audioRestart.indexOf('const playbackIdentity = this.captureVodPlaybackIdentity();')
+      < audioRestart.indexOf('await this.releasePlaybackPipelineForRetry();'),
+    'audio restart must capture identity before releasing the old lane',
+  );
+  assert.match(audioRestart, /requestAudioSwitchGatewayUrl\([\s\S]*playbackIdentity\s*\)/);
+});
+
 test('Watch does not announce a selected subtitle lane before its first real cue', async () => {
   const WatchPage = loadWatchPage();
   const page = Object.create(WatchPage.prototype);

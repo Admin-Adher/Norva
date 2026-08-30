@@ -1318,9 +1318,93 @@ class WatchPage {
         return null;
     }
 
+    vodPlaybackItemType(content = this.content) {
+        const rawType = String(
+            content?.type
+            ?? content?.itemType
+            ?? content?.item_type
+            ?? content?.streamType
+            ?? content?.stream_type
+            ?? ''
+        ).trim().toLowerCase();
+        const rawStreamType = String(
+            content?.streamType
+            ?? content?.stream_type
+            ?? content?.itemType
+            ?? content?.item_type
+            ?? ''
+        ).trim().toLowerCase();
+
+        if (
+            rawType === 'series'
+            || rawType === 'episode'
+            || rawStreamType === 'series'
+            || rawStreamType === 'episode'
+            || content?.seriesId
+            || content?.series_id
+        ) {
+            return 'series';
+        }
+        if (rawType === 'movie' || rawStreamType === 'movie') return 'movie';
+        return null;
+    }
+
+    canonicalizeVodPlaybackContent(content) {
+        if (!content || typeof content !== 'object') return content;
+        const rawType = String(content.type ?? content.itemType ?? content.item_type ?? '')
+            .trim()
+            .toLowerCase();
+        const itemType = this.vodPlaybackItemType(content);
+        if (!itemType) return content;
+
+        // Continue Watching can legitimately provide `type: "episode"`, while
+        // every provider playback request must use the Xtream type `series`.
+        // Preserve the UI/history semantic once, then keep Watch canonical.
+        if (rawType === 'episode' && !content.itemType && !content.item_type) {
+            content.itemType = 'episode';
+        }
+        content.type = itemType;
+        content.streamType = itemType;
+        return content;
+    }
+
+    captureVodPlaybackIdentity(content = this.content) {
+        const itemType = this.vodPlaybackItemType(content);
+        const sourceId = content?.sourceId ?? content?.source_id ?? null;
+        const itemId = content?.id
+            ?? content?.itemId
+            ?? content?.item_id
+            ?? content?.streamId
+            ?? content?.stream_id
+            ?? content?.externalId
+            ?? content?.external_id
+            ?? null;
+        if (!itemType || sourceId === null || sourceId === '' || itemId === null || itemId === '') {
+            return null;
+        }
+
+        const container = this.containerExtension
+            || content?.containerExtension
+            || content?.container_extension
+            || 'mp4';
+        const playbackItem = Object.freeze({
+            ...content,
+            id: itemId,
+            sourceId,
+            // Keep the episode semantic for MediaUtils metadata, while the
+            // provider contract remains explicitly `series`.
+            type: itemType === 'series' ? 'episode' : 'movie',
+            streamType: itemType,
+            itemType,
+            containerExtension: container,
+            container_extension: container,
+        });
+        return Object.freeze({ sourceId, itemId, itemType, container, playbackItem });
+    }
+
     buildResumePlaybackHint(snapshot) {
         const content = snapshot?.content || {};
-        const streamType = content.type === 'series' ? 'series' : 'movie';
+        const streamType = this.vodPlaybackItemType(content) || 'movie';
         const container = snapshot.containerExtension || content.containerExtension || 'mp4';
         const resumeEpisode = streamType === 'series' ? this.findResumeSnapshotEpisode(snapshot) : null;
         const item = {
@@ -1618,6 +1702,7 @@ class WatchPage {
         // cooldown can yield. A later click/Back can now stale this invocation
         // instead of letting it resume and declare itself newest after the wait.
         const playbackAttemptId = this.beginPlaybackAttempt();
+        this.canonicalizeVodPlaybackContent(content);
         this._subtitleSwitchRequestId += 1;
         this._subtitleSwitchPromise = null;
         this.resetSubtitleSwitchFeedback();
@@ -5905,7 +5990,12 @@ class WatchPage {
     }
 
     async restartCloudGatewayStreamAt(targetTime, options = {}) {
-        if (!this.content?.sourceId || !this.content?.id) return;
+        // Freeze the exact episode/movie identity before releasing the old lane.
+        // Teardown and provider cooldown both yield, so reading mutable page state
+        // afterwards can otherwise resolve a different title or classify a
+        // Continue Watching episode as a movie.
+        const playbackIdentity = options.playbackIdentity || this.captureVodPlaybackIdentity();
+        if (!playbackIdentity) return;
 
         const requestId = Number.isInteger(options.requestId)
             ? options.requestId
@@ -5919,8 +6009,7 @@ class WatchPage {
         const seekPlan = this.getGatewaySeekPlan(targetTime, options.preRollSeconds ?? 0);
         const { target, preRoll, sessionStart } = seekPlan;
         const autoplay = !this.video?.paused;
-        const itemType = this.content.type === 'series' ? 'series' : 'movie';
-        const container = this.containerExtension || this.content.containerExtension || 'mp4';
+        const { itemType, container } = playbackIdentity;
         const requestedPlaybackPreferences = this.normalizePlaybackPreferences(
             options.playbackPreferences ?? options.playback_preferences
         );
@@ -5953,7 +6042,7 @@ class WatchPage {
 
         let playbackHint = {
             ...(MediaUtils.playbackHintFromItem
-                ? MediaUtils.playbackHintFromItem(this.content, { container, streamType: itemType })
+                ? MediaUtils.playbackHintFromItem(playbackIdentity.playbackItem, { container, streamType: itemType })
                 : { container, streamType: itemType }),
             ...activeAudioOptions,
             seekOffset: sessionStart,
@@ -5967,8 +6056,8 @@ class WatchPage {
         let result = null;
         try {
             result = await API.proxy.xtream.getStreamUrl(
-                this.content.sourceId,
-                this.content.id,
+                playbackIdentity.sourceId,
+                playbackIdentity.itemId,
                 itemType,
                 container,
                 playbackHint
@@ -5982,6 +6071,7 @@ class WatchPage {
                     requestId,
                     subtitleSwitchRequestId,
                     playbackPreferences,
+                    playbackIdentity,
                 });
                 return;
             }
@@ -8874,15 +8964,15 @@ class WatchPage {
 
     async restartCloudGatewayWithSelectedAudioTrack(requestId = this._audioSwitchRequestId) {
         const selected = this.getSelectedAudioTrack();
-        if (!selected || !this.content?.sourceId || !this.content?.id) return false;
+        const playbackIdentity = this.captureVodPlaybackIdentity();
+        if (!selected || !playbackIdentity) return false;
 
         const switchStartedAt = Date.now();
         const targetPosition = Math.max(0, Math.floor(this.getPlaybackPosition()));
         const preRoll = this.getGatewaySeekPreRoll(targetPosition, 0);
         const sessionStart = Math.max(0, targetPosition - preRoll);
         const autoplay = !this.video?.paused;
-        const itemType = this.content.type === 'series' ? 'series' : 'movie';
-        const container = this.containerExtension || this.content.containerExtension || 'mp4';
+        const { itemType, container } = playbackIdentity;
         const audioOptions = this.getAudioProcessingOptions({
             ...(this.currentStreamInfo || {}),
             audioTracks: this.audioTracks
@@ -8923,7 +9013,7 @@ class WatchPage {
 
         let playbackHint = {
             ...(MediaUtils.playbackHintFromItem
-                ? MediaUtils.playbackHintFromItem(this.content, { container, streamType: itemType })
+                ? MediaUtils.playbackHintFromItem(playbackIdentity.playbackItem, { container, streamType: itemType })
                 : { container, streamType: itemType }),
             ...audioOptions,
             seekOffset: sessionStart,
@@ -8940,7 +9030,13 @@ class WatchPage {
                 sessionCreateAttempts: 1,
                 sessionRequestedAt: Date.now(),
             });
-            result = await this.requestAudioSwitchGatewayUrl(itemType, container, playbackHint, requestId);
+            result = await this.requestAudioSwitchGatewayUrl(
+                itemType,
+                container,
+                playbackHint,
+                requestId,
+                playbackIdentity
+            );
         } catch (error) {
             console.error('[WatchPage] Gateway audio switch failed:', error);
             this.updateGatewayAudioSwitchMetrics(requestId, 'failed', {
@@ -9057,12 +9153,18 @@ class WatchPage {
         await new Promise(resolve => setTimeout(resolve, delay));
     }
 
-    async requestAudioSwitchGatewayUrl(itemType, container, playbackHint, requestId) {
+    async requestAudioSwitchGatewayUrl(itemType, container, playbackHint, requestId, playbackIdentity = null) {
         if (this.isStaleAudioSwitch(requestId)) return null;
+        const identity = playbackIdentity
+            || (typeof this.captureVodPlaybackIdentity === 'function'
+                ? this.captureVodPlaybackIdentity()
+                : null);
+        const sourceId = identity?.sourceId ?? this.content?.sourceId;
+        const itemId = identity?.itemId ?? this.content?.id;
         try {
             return await API.proxy.xtream.getStreamUrl(
-                this.content.sourceId,
-                this.content.id,
+                sourceId,
+                itemId,
                 itemType,
                 container,
                 playbackHint
