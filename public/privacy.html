@@ -44,7 +44,7 @@
   <main>
     <div class="brand"><img src="/favicon.png" alt=""><span>Norva</span></div>
     <h1>Privacy Policy</h1>
-    <p class="updated">Last updated: 28 August 2026</p>
+    <p class="updated">Last updated: 30 August 2026</p>
 
     <p>This Privacy Policy explains how Norva (“Norva”, “we”, “us”) collects, uses, stores and
       deletes information when you use the Norva apps (Android phone/tablet and Android TV) and the
@@ -72,6 +72,7 @@
       <tr><td>Partners operations analytics</td><td>Aggregated counts and financial totals by day, payment rail and currency, including referral claims, attributions, verification outcomes, holds, refunds, chargebacks and commission processing. These aggregates exclude names, emails, public referral codes, payment identifiers and raw KYC or payment-provider payloads.</td><td>Monitor the programme, reconcile its ledger and detect operational or fraud-control failures without exposing individual records</td></tr>
       <tr><td>Technical</td><td>IP address, app version, device/model, basic logs and crash data</td><td>Deliver streams from your network, secure the Service, fix bugs</td></tr>
       <tr><td>Analytics &amp; advertising (optional)</td><td>After consent: cookies or local consent state, random SDK identifiers, app/version/device/screen context, performance and diagnostic signals, taps, gestures, scrolling and privacy-masked session-replay events processed by Google Analytics, Microsoft Clarity, Google Ads and Meta Pixel where applicable. Android mobile and Android TV use separate Clarity projects. Native WebView capture keeps layout and interaction geometry while masking its text and images, and native provider-login and playback views are also masked. Norva does not send media-source credentials, provider names, media titles or account identifiers to Clarity.</td><td>Understand friction across web, Android mobile and Android TV, improve the experience and measure how our ads perform</td></tr>
+      <tr><td>Google Ads API administration (operator only)</td><td>Google Ads customer and account identifiers; campaign, ad-group, ad, keyword, asset, budget, bid, schedule and targeting configuration; search terms; performance, conversion, policy and recommendation data; OAuth authorization metadata; and local mutation-audit metadata.</td><td>Allow Norva's authorized operator to report on and manage Norva's own advertising account</td></tr>
       <tr><td>Downloads (on device)</td><td>Media you download is encrypted and stored only on your device</td><td>Offline viewing; this content is not uploaded to us</td></tr>
       </tbody>
     </table>
@@ -87,6 +88,7 @@
       <li>To understand which Norva sign-up journey and device type were used and improve onboarding.</li>
       <li>To diagnose problems and improve reliability.</li>
       <li>With your consent, to measure audience and product friction on web, Android mobile and Android TV, and advertising performance where advertising measurement applies.</li>
+      <li>For Norva's authorized operator only, to analyze and manage Norva's own Google Ads account through Google OAuth and the Google Ads API.</li>
     </ul>
     <p>We do <strong>not</strong> sell your personal information. With your consent, we use analytics
       and advertising cookies on the web app to measure usage and how our ads perform — see
@@ -154,6 +156,30 @@
       <a href="https://privacy.microsoft.com/privacystatement" target="_blank" rel="noopener">Microsoft</a> and
       <a href="https://www.facebook.com/privacy/policy" target="_blank" rel="noopener">Meta</a>.</p>
 
+    <h2 id="google-ads-api">3A. Internal Google Ads API integration</h2>
+    <p>Norva uses a private, operator-only integration to administer Norva's own Google Ads account.
+      This integration is not part of the consumer Service, is not offered to clients or the public,
+      and does not allow third parties to connect their Google Ads accounts. The authorized operator
+      grants access through Google's OAuth consent flow.</p>
+    <p>The Google Ads API provides a single OAuth scope for both reading and changing Google Ads data.
+      Norva therefore enforces least privilege in the local tool: the routine profile is read-only,
+      while the control profile is disabled by default and requires an explicit preview and approval
+      before a change can be applied. The integration may read the data listed in section 1 and may
+      create or update campaigns, ads, keywords, targeting, bids, budgets, schedules, assets and
+      conversion settings only when the authorized operator specifically requests and confirms the change.</p>
+    <p>OAuth client configuration and the refresh token are stored outside Norva's source repository in
+      a user-private directory on the operator's Windows workstation. The local MCP server has no public
+      listening endpoint and does not maintain a customer database. Requested Google Ads API results are
+      returned to OpenAI Codex Desktop for the operator's requested task and may appear in that operator's
+      Codex task history under the applicable OpenAI service terms and account data controls. Local audit
+      logs contain mutation metadata but not OAuth client secrets, refresh tokens or user passwords.</p>
+    <p>Norva does not sell Google Ads API data, expose it to clients or the public, or use it to build a
+      third-party advertising profile. The operator can revoke the OAuth grant in the Google Account,
+      delete the local token and audit files, and reauthorize the integration when required. Norva's use
+      of information received from the Google Ads API adheres to the
+      <a href="https://developers.google.com/terms/api-services-user-data-policy" target="_blank" rel="noopener">Google API Services User Data Policy</a>,
+      including the Limited Use requirements.</p>
+
     <h2>4. Sharing and processors</h2>
     <p>We share data only with providers used to operate the Service or, where applicable, to
       measure analytics and advertising after consent:</p>
@@ -179,6 +205,12 @@
       <li><strong>Google</strong> (Analytics, Ads), <strong>Microsoft</strong> (Clarity) and
         <strong>Meta</strong> (Pixel) — audience measurement, privacy-masked web interaction analysis
         and advertising performance, only after you consent (see section 3).</li>
+      <li><strong>Google Ads API</strong> — OAuth authorization and the advertising account data needed
+        for Norva's internal reporting and operator-approved campaign management described in section 3A.</li>
+      <li><strong>OpenAI Codex Desktop</strong> — the operator interface and MCP host used for the
+        internal Google Ads workflow. It receives the requested Google Ads API results and operator
+        instructions needed for the task; processing and task-history retention follow the applicable
+        OpenAI service terms and the operator's account data controls.</li>
       <li><strong>Google Play</strong> — Android subscription entitlement and, only for an
         attributed Partners account, the Orders API fields needed to record the exact paid total,
         tax, currency and refund state. Norva hashes transaction references and does not copy the
@@ -237,6 +269,12 @@
       private approval record, subject only to a documented applicable legal hold. Norva reassesses
       this period before any broader
       release.</p>
+    <p>For the internal Google Ads API integration, OAuth client configuration and the refresh token
+      remain on the authorized operator's workstation until they are replaced, revoked or deleted.
+      Local mutation-audit metadata is retained for security, accountability and incident review until
+      the operator deletes it. The MCP server does not copy Google Ads data into Norva's customer database;
+      any Google Ads information present in Codex task history is governed by the operator's applicable
+      OpenAI service terms and account data controls.</p>
 
     <h2>6. Your rights &amp; deleting your account</h2>
     <p>You can access or update your information in the app, and you can request deletion of your
@@ -252,6 +290,10 @@
     <p>Traffic to Norva’s cloud is encrypted in transit (HTTPS). Passwords are stored hashed by our
       auth provider. Offline downloads are encrypted on your device with a hardware-backed key where
       available. No system is perfectly secure, but we work to protect your data.</p>
+    <p>The internal Google Ads API integration uses HTTPS to reach Google and local stdio between Codex
+      Desktop and the MCP server. Credential files are excluded from source control and restricted to
+      the signed-in Windows user, SYSTEM and local Administrators. The operator can disable the control
+      profile and revoke or replace OAuth credentials if compromise is suspected.</p>
 
     <h2>8. Children</h2>
     <p>Norva is not directed to children under 13 (or the minimum age in your country) and we do not

@@ -231,12 +231,23 @@ test('Admin CRM clearly distinguishes payment country from signup acquisition', 
 });
 
 test('privacy notice documents first-party signup context and no raw IP retention', () => {
-  assert.match(privacy, /Last updated: 28 August 2026/);
+  assert.match(privacy, /Last updated: 30 August 2026/);
   assert.match(privacy, /Sign-up context/);
   assert.match(privacy, /approximate country\/region\/city supplied by Cloudflare/);
   assert.match(privacy, /does not retain the raw IP address in this record/);
   assert.match(privacy, /kept separate from billing country and your chosen[\s\S]*catalogue region/);
   assert.match(privacy, /city and region stop being available to administrators at 90 days/i);
+});
+
+test('privacy notice documents the operator-only Google Ads API integration', () => {
+  assert.match(privacy, /id="google-ads-api"/);
+  assert.match(privacy, /private, operator-only integration/);
+  assert.match(privacy, /routine profile is read-only/);
+  assert.match(privacy, /control profile is disabled by default/);
+  assert.match(privacy, /OpenAI Codex Desktop/);
+  assert.match(privacy, /does not copy Google Ads data into Norva's customer database/);
+  assert.match(privacy, /Google API Services User Data Policy/);
+  assert.match(privacy, /Limited Use requirements/);
 });
 
 test('fine location has enforceable retention and the trigger closes the rollout race', () => {
