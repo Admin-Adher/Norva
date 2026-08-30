@@ -400,7 +400,7 @@ test('chunked background transcription stops after extraction or inference preem
   );
   assert.match(
     chunkedSource,
-    /if \(w\.preempted\)[\s\S]*return \{ jobId, requeue: true \}/,
+    /if \(w\.preempted\)[\s\S]*return \{ jobId, requeue: true, providerRead: localSource \? false : undefined \}/,
   );
 });
 

@@ -147,6 +147,7 @@ test('global viewer gate defers background without consuming its failure budget'
       JOB_PRIORITY,
       JOB_GATE_MAX_DEFERRALS: 2,
       jobPrio,
+      localViewerTranscriptionSource: () => null,
       backgroundJobBlockedByViewer: (job) => jobPrio(job) !== 0 && viewerBusy,
       accountSlotBusyLocally: () => localSlotBusy,
       storyboardCoolingDown: () => false,
@@ -183,6 +184,115 @@ test('global viewer gate defers background without consuming its failure budget'
   assert.equal(sameAccountViewerQueue[0].gateDeferrals, 2,
     'same-account viewing never burns the auxiliary viewer job budget');
   assert.deepEqual(failed, []);
+});
+
+test('viewer AI subtitles borrow only the exact local title and audio rendition', async () => {
+  const matcherSource = section(
+    'function localViewerTranscriptionSource',
+    'async function waitForLocalTranscriptionPlaylist',
+  );
+  const sessions = new Map([
+    ['single', {
+      id: 'single',
+      status: 'ready',
+      sourceUrl: 'https://provider.invalid/movie/42.mkv',
+      outputDir: 'C:/norva/single',
+      playlistPath: 'C:/norva/single/playlist.m3u8',
+      actualMappedAudioStreamIndex: 2,
+      multiAudioHls: { enabled: false },
+    }],
+    ['multi', {
+      id: 'multi',
+      status: 'starting',
+      sourceUrl: 'https://provider.invalid/movie/99.mkv',
+      outputDir: 'C:/norva/multi',
+      playlistPath: 'C:/norva/multi/playlist.m3u8',
+      multiAudioHls: {
+        enabled: true,
+        audioRenditions: [
+          { hlsIndex: 0, streamIndex: 1 },
+          { hlsIndex: 1, streamIndex: 7 },
+        ],
+      },
+    }],
+  ]);
+  const JOB_PRIORITY = { viewer: 0, service: 1, pregen: 2 };
+  const harness = vm.runInNewContext(
+    `(() => { ${matcherSource}; return { localViewerTranscriptionSource }; })()`,
+    {
+      JOB_PRIORITY,
+      sessions,
+      path,
+      jobPrio: (job) => Number.isInteger(job?.prio) ? job.prio : 1,
+      normalizeAudioStreamIndex: (value) => Number.isInteger(Number(value)) ? Number(value) : null,
+      multiAudioHlsEnabled: (session) => session?.multiAudioHls?.enabled === true,
+      mappedAudioStreamIndexForSession: (session) => session.actualMappedAudioStreamIndex ?? null,
+      isWithin: () => true,
+    },
+  );
+
+  const exactSingle = harness.localViewerTranscriptionSource({
+    prio: 0,
+    dur: 0,
+    url: 'https://provider.invalid/movie/42.mkv',
+    index: 2,
+  });
+  assert.equal(exactSingle.sessionId, 'single');
+  assert.match(exactSingle.playlistPath.replace(/\\/g, '/'), /single\/playlist\.m3u8$/);
+
+  const exactMulti = harness.localViewerTranscriptionSource({
+    prio: 0,
+    dur: 0,
+    url: 'https://provider.invalid/movie/99.mkv',
+    index: 7,
+  });
+  assert.equal(exactMulti.sessionId, 'multi');
+  assert.match(exactMulti.playlistPath.replace(/\\/g, '/'), /multi\/audio_1\.m3u8$/);
+
+  assert.equal(harness.localViewerTranscriptionSource({
+    prio: 0, dur: 0, url: 'https://provider.invalid/movie/42.mkv', index: 7,
+  }), null, 'a different track cannot borrow the current title');
+  assert.equal(harness.localViewerTranscriptionSource({
+    prio: 0, dur: 0, url: 'https://provider.invalid/movie/other.mkv', index: 2,
+  }), null, 'provider affinity alone is insufficient');
+  assert.equal(harness.localViewerTranscriptionSource({
+    prio: 1, dur: 0, url: 'https://provider.invalid/movie/42.mkv', index: 2,
+  }), null, 'background generation cannot borrow a viewer stream');
+  assert.equal(harness.localViewerTranscriptionSource({
+    prio: 0, dur: 0, kind: 'storyboard', url: 'https://provider.invalid/movie/42.mkv', index: 2,
+  }), null, 'storyboards never enter the local audio path');
+  assert.equal(harness.localViewerTranscriptionSource({
+    prio: 0, dur: 0, url: 'https://provider.invalid/movie/42.mkv', index: 2,
+    localHlsFailedSessionId: 'single',
+  }), null, 'one failed local session is not retried in a tight loop');
+
+  const nextRunnableSource = section(
+    'async function nextRunnableJob',
+    '// Phase 3 transcription job queue',
+  );
+  let edgeGateCalls = 0;
+  const queueHarness = vm.runInNewContext(
+    `(() => { ${nextRunnableSource}; return { nextRunnableJob }; })()`,
+    {
+      JOB_PRIORITY,
+      JOB_GATE_MAX_DEFERRALS: 2,
+      jobPrio: (job) => Number.isInteger(job?.prio) ? job.prio : 1,
+      localViewerTranscriptionSource: (job) => job.exactLocal ? exactSingle : null,
+      backgroundJobBlockedByViewer: () => false,
+      accountSlotBusyLocally: () => true,
+      storyboardCoolingDown: () => true,
+      transcribeCoolingDown: () => true,
+      shouldDeferJob: async () => { edgeGateCalls += 1; return true; },
+      postJobHeartbeat() {},
+      postDeferFailCallback: async () => {},
+      insertByPriority: (queueValue, job) => queueValue.push(job),
+      console: { warn() {} },
+    },
+  );
+  const localJob = { jobId: 'local', prio: 0, exactLocal: true };
+  assert.equal((await queueHarness.nextRunnableJob([localJob], 'transcribe')).jobId, 'local');
+  assert.equal(edgeGateCalls, 0, 'the exact local stream opens no provider/edge gate');
+  assert.equal(localJob.localTranscriptionSource.sessionId, 'single');
 });
 
 test('viewer enqueue wakes deferred transcription and OCR drains immediately', async () => {

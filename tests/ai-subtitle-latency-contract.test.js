@@ -146,3 +146,51 @@ test('gateway emits a 60-90 second first chunk then 300-second chunks with hones
   assert.match(gateway, /postJobHeartbeat\(job, 'extracting'\)/);
   assert.match(gateway, /postJobHeartbeat\(job, 'transcribing'\)/);
 });
+
+test('viewer transcription reuses exact local HLS without opening another provider socket', () => {
+  const matcher = between(
+    gateway,
+    'function localViewerTranscriptionSource(job) {',
+    '\nasync function waitForLocalTranscriptionPlaylist',
+  );
+  assert.match(matcher, /jobPrio\(job\) !== JOB_PRIORITY\.viewer/);
+  assert.match(matcher, /session\?\.sourceUrl !== job\.url/);
+  assert.match(matcher, /streamIndex\) === requestedIndex/);
+  assert.match(matcher, /mappedAudioStreamIndexForSession\(session\) === requestedIndex/);
+  assert.match(matcher, /isWithin\(session\.outputDir, playlistPath\)/);
+
+  const localExtract = between(
+    gateway,
+    'async function extractLocalHlsAudioWavChunks(',
+    '\n// Shift every cue',
+  );
+  assert.match(localExtract, /'-i', source\.playlistPath/);
+  assert.match(localExtract, /'-map', '0:a:0'/);
+  assert.match(localExtract, /providerRead: false/);
+  assert.doesNotMatch(localExtract, /-reconnect|proxyEnvFor|registerAccountExtraction|source\.sourceUrl/);
+
+  const queueGate = between(
+    gateway,
+    'async function nextRunnableJob(queue, kind) {',
+    '\n// Phase 3 transcription job queue',
+  );
+  assert.match(queueGate, /!localTranscriptionSource &&[\s\S]*accountSlotBusyLocally/);
+  assert.match(queueGate, /locallyDeferred \|\| localTranscriptionSource/);
+
+  const chunked = between(
+    gateway,
+    'async function runChunkedTranscription(job) {',
+    '\n// Phase 3b translation queue',
+  );
+  assert.match(chunked, /localViewerTranscriptionSource\(job\)/);
+  assert.match(chunked, /localSource[\s\S]*extractLocalHlsAudioWavChunks/);
+  assert.match(chunked, /withAccountJobLock\(accountJobKey\(uid, url\), extractionTask\)/);
+  assert.match(chunked, /providerRead: localSource \? false : true/);
+
+  const terminal = between(
+    gateway,
+    'async function runTranscribeJob(job) {',
+    '\n// ==================== Storyboard',
+  );
+  assert.match(terminal, /payload\?\.providerRead !== false[\s\S]*markTranscribeRun\(url\)/);
+});
