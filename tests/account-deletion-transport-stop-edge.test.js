@@ -45,6 +45,34 @@ test('transport stop resolves the established database runtime config before cla
   assert.match(worker, /Authorization: `Bearer \$\{mediaGateway\.token\}`/);
 });
 
+test('provider cleanup is one claimed bounded batch followed by a resumable checkpoint', () => {
+  const start = edge.indexOf('async function drainProviderAccountDeletionPreparation');
+  const end = edge.indexOf('\n// Drive exactly one durable', start);
+  const preparation = edge.slice(start, end);
+  assert.match(preparation, /norva_claim_provider_account_deletion_prepare/);
+  assert.match(preparation, /p_lease_seconds: 120/);
+  assert.match(preparation, /norva_run_provider_account_deletion_prepare_batch/);
+  assert.match(preparation, /p_expected_lease_sequence: leaseSequence/);
+  assert.match(preparation, /p_expected_revision: revision/);
+  assert.match(preparation, /p_limit: 500/);
+  assert.match(preparation, /norva_checkpoint_provider_account_deletion_prepare/);
+  assert.match(preparation, /p_expected_revision: nextRevision/);
+  assert.match(preparation, /p_retry_after_seconds: 0/);
+  assert.match(preparation, /isStaleDatabaseConflict\(batchError\)/);
+  assert.match(preparation, /isStaleDatabaseConflict\(checkpointError\)/);
+});
+
+test('provider cleanup starts only after a durable transport-stop receipt', () => {
+  const start = edge.indexOf('async function drainAccountDeletionWorkflows');
+  const end = edge.indexOf('\nasync function cronAuthorized', start);
+  const workflow = edge.slice(start, end);
+  const transportAt = workflow.indexOf('drainProviderTransportStop(db, userId)');
+  const completedAt = workflow.indexOf('if (transport === "completed")', transportAt);
+  const preparationAt = workflow.indexOf('drainProviderAccountDeletionPreparation(db, userId)', completedAt);
+  assert.ok(transportAt >= 0 && completedAt > transportAt && preparationAt > completedAt);
+  assert.match(workflow, /providerBatches/);
+});
+
 test('transport stop treats PT409 as stale while retaining rolling 40001 compatibility', () => {
   assert.match(conflictHelper, /code === "PT409" \|\| code === "40001"/);
   assert.match(edge, /isStaleDatabaseConflict\(error\)/);

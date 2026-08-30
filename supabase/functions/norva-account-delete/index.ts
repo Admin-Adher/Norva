@@ -592,11 +592,65 @@ async function drainProviderTransportStop(db: SupabaseClient, userId: string) {
   return "completed";
 }
 
+async function drainProviderAccountDeletionPreparation(db: SupabaseClient, userId: string) {
+  const worker = "norva-account-delete-cron-v1";
+  const { data, error } = await db.rpc("norva_claim_provider_account_deletion_prepare", {
+    p_user_id: userId,
+    p_worker: worker,
+    p_lease_seconds: 120,
+  });
+  if (error) {
+    if (isStaleDatabaseConflict(error)) return "stale";
+    throw new Error(`account_deletion_provider_prepare_claim_failed:${error.message}`);
+  }
+  const claim = (data && typeof data === "object" ? data : {}) as JsonRecord;
+  if (claim.state === "ready" && claim.ready === true) return "completed";
+  const leaseSequence = typeof claim.leaseSequence === "number" ? claim.leaseSequence : -1;
+  const revision = typeof claim.revision === "number" ? claim.revision : -1;
+  if (claim.state !== "processing" || leaseSequence < 0 || revision < 0) return "stale";
+
+  const { data: batchData, error: batchError } = await db.rpc(
+    "norva_run_provider_account_deletion_prepare_batch",
+    {
+      p_user_id: userId,
+      p_worker: worker,
+      p_expected_lease_sequence: leaseSequence,
+      p_expected_revision: revision,
+      p_limit: 500,
+    },
+  );
+  if (batchError) {
+    if (isStaleDatabaseConflict(batchError)) return "stale";
+    throw new Error(`account_deletion_provider_prepare_batch_failed:${batchError.message}`);
+  }
+  const batch = (batchData && typeof batchData === "object" ? batchData : {}) as JsonRecord;
+  if (batch.state === "ready" && batch.ready === true) return "completed";
+  const nextRevision = typeof batch.revision === "number" ? batch.revision : -1;
+  if (batch.state !== "processing" || nextRevision < 0) return "stale";
+
+  // Release the lease after exactly one bounded batch. A later cron tick can
+  // resume from the durable cursor without waiting for lease expiry.
+  const { error: checkpointError } = await db.rpc(
+    "norva_checkpoint_provider_account_deletion_prepare",
+    {
+      p_user_id: userId,
+      p_worker: worker,
+      p_expected_lease_sequence: leaseSequence,
+      p_expected_revision: nextRevision,
+      p_retry_after_seconds: 0,
+    },
+  );
+  if (checkpointError) {
+    if (isStaleDatabaseConflict(checkpointError)) return "stale";
+    throw new Error(`account_deletion_provider_prepare_checkpoint_failed:${checkpointError.message}`);
+  }
+  return "advanced";
+}
+
 // Drive exactly one durable, bounded DB step for each account.  Provider
-// transport-stop execution intentionally remains outside this adapter: it is
-// an external effect with its own claim/receipt protocol.  Until its durable
-// receipt exists the provider preparation stays in DRAINING and this worker
-// cannot advance the account to any purge or Auth-finalization step.
+// transport-stop execution and provider-subgraph cleanup each retain their own
+// claim/CAS protocol. Until both durable proofs exist the account stays in
+// DRAINING and cannot advance to any account purge or Auth-finalization step.
 async function drainAccountDeletionWorkflows(db: SupabaseClient) {
   const { data, error } = await db.rpc("norva_claim_account_deletion_workflows", {
     p_batch: 10,
@@ -609,6 +663,7 @@ async function drainAccountDeletionWorkflows(db: SupabaseClient) {
   let advanced = 0;
   let batches = 0;
   let transportStops = 0;
+  let providerBatches = 0;
   let stale = 0;
   for (const claim of claims) {
     const userId = typeof claim.user_id === "string" ? claim.user_id : "";
@@ -634,7 +689,12 @@ async function drainAccountDeletionWorkflows(db: SupabaseClient) {
     }
     if ((nextData as JsonRecord).nextAction === "provider_drain") {
       const transport = await drainProviderTransportStop(db, userId);
-      if (transport === "completed") transportStops++;
+      if (transport === "completed") {
+        transportStops++;
+        const preparation = await drainProviderAccountDeletionPreparation(db, userId);
+        if (preparation === "completed" || preparation === "advanced") providerBatches++;
+        else if (preparation === "stale") stale++;
+      }
     }
     advanced++;
     const next = nextData as JsonRecord;
@@ -664,7 +724,7 @@ async function drainAccountDeletionWorkflows(db: SupabaseClient) {
       } else batches++;
     }
   }
-  return { claimed: claims.length, advanced, batches, transportStops, stale };
+  return { claimed: claims.length, advanced, batches, transportStops, providerBatches, stale };
 }
 
 async function cronAuthorized(req: Request): Promise<boolean> {
