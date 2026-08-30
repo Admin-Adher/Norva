@@ -112,6 +112,32 @@ test('the player polls only durable jobs at 2-5 seconds and records the first vi
   assert.match(edge, /"subtitle_first_cue"/);
 });
 
+test('original and retry AI subtitle requests never become an und translation target', () => {
+  const request = between(
+    watch,
+    '    async requestAiSubtitles(targetLang = null) {',
+    '\n    async _requestAiSubtitlesInner(',
+  );
+  assert.match(request, /String\(targetLang \?\? ''\)\.trim\(\)\.toLowerCase\(\)/);
+  assert.match(request, /!rawTargetLang \|\| rawTargetLang === 'src'/);
+  assert.match(request, /normalizedTargetLang && normalizedTargetLang !== 'und' \? normalizedTargetLang : null/);
+  assert.doesNotMatch(request, /_requestAiSubtitlesInner\(this\.normalizeTrackLanguage\(targetLang\)/);
+
+  const menuWiring = between(
+    watch,
+    '        // Idle language chooser: "Original" or a translation target',
+    '\n        this.captionsList.querySelectorAll(\'[data-action="ai-translate"]\')',
+  );
+  assert.match(menuWiring, /lang === 'src' \? null : lang/);
+
+  const selection = between(
+    watch,
+    '    async selectCaptionTrack(',
+    '\n    // === Overlay Auto-Hide ===',
+  );
+  assert.match(selection, /if \(source === 'ai'\)[\s\S]*await this\.requestAiSubtitles\(\)/);
+});
+
 test('gateway emits a 60-90 second first chunk then 300-second chunks with honest stages', () => {
   assert.match(gateway, /TRANSCRIBE_FIRST_CHUNK_SEC = clampInt\([^\n]+, 90, 60, 90\)/);
   assert.match(gateway, /TRANSCRIBE_CHUNK_SEC = clampInt\([^\n]+, 300,/);

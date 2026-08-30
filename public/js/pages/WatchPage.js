@@ -10858,7 +10858,17 @@ class WatchPage {
         this._aiFirstCueVisibleReported = false;
         this._aiLastResponseWasCached = false;
         try {
-            await this._requestAiSubtitlesInner(this.normalizeTrackLanguage(targetLang) || null);
+            // `normalizeTrackLanguage(null)` intentionally returns `und` for metadata display, but
+            // `und` is not a valid translation target. Preserve the semantic distinction here:
+            // null / "src" means "transcribe the original spoken language", while only an explicit
+            // supported language may enter the translation branch.
+            const rawTargetLang = String(targetLang ?? '').trim().toLowerCase();
+            const normalizedTargetLang = (!rawTargetLang || rawTargetLang === 'src')
+                ? null
+                : this.normalizeTrackLanguage(rawTargetLang);
+            await this._requestAiSubtitlesInner(
+                normalizedTargetLang && normalizedTargetLang !== 'und' ? normalizedTargetLang : null
+            );
         } finally {
             this._aiRequestInFlight = false;
         }
