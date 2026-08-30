@@ -799,6 +799,70 @@ class WatchPage {
         this._pendingSubtitlePreferenceApplied = false;
     }
 
+    applyAcknowledgedSubtitleSessionMetadata(options = {}) {
+        const gatewaySession = options.gatewaySession || options.gateway_session || {};
+        const explicitTracks = Array.isArray(options.subtitleTracks)
+            ? options.subtitleTracks
+            : (Array.isArray(options.subtitle_tracks)
+                ? options.subtitle_tracks
+                : (Array.isArray(gatewaySession.subtitleTracks)
+                    ? gatewaySession.subtitleTracks
+                    : (Array.isArray(gatewaySession.subtitle_tracks) ? gatewaySession.subtitle_tracks : null)));
+        if (explicitTracks !== null) {
+            this.subtitleTracks = [...explicitTracks];
+        }
+
+        const acknowledgedIndex = Number(
+            options.subtitleStreamIndex ??
+            options.subtitle_stream_index ??
+            gatewaySession.subtitleStreamIndex ??
+            gatewaySession.subtitle_stream_index
+        );
+        if (Number.isInteger(acknowledgedIndex) && acknowledgedIndex >= 0) {
+            const preference = this.pendingPlaybackPreferences?.subtitle || {};
+            const existingIndex = this.subtitleTracks.findIndex(
+                track => Number(track?.index) === acknowledgedIndex
+            );
+            const existing = existingIndex >= 0 ? this.subtitleTracks[existingIndex] : null;
+            // A returned subtitleStreamIndex is not a client guess: Edge only
+            // returns it after the Gateway maps the requested index to one real
+            // text stream. Preserve that acknowledgement even when an older
+            // cached codec profile omitted the track descriptor.
+            const acknowledgedTrack = {
+                ...(existing || {}),
+                index: acknowledgedIndex,
+                title: existing?.title || preference.title || preference.label || null,
+                language: existing?.language || existing?.lang || preference.language || preference.lang || null,
+                codec: existing?.codec || preference.codec || null,
+                subtitleType: 'text',
+                extractable: true,
+                sessionAcknowledged: true,
+            };
+            if (existingIndex >= 0) {
+                this.subtitleTracks[existingIndex] = acknowledgedTrack;
+            } else {
+                this.subtitleTracks.push(acknowledgedTrack);
+            }
+            this.selectedSubtitleStreamIndex = acknowledgedIndex;
+            this.selectedSubtitleTrackUserChoice = true;
+            this.subtitleOffsetSeconds = this.normalizeSubtitleOffset(
+                preference.offsetSeconds ?? preference.offset_seconds ?? this.loadSubtitleOffset?.(acknowledgedIndex) ?? 0
+            );
+            this._pendingSubtitlePreferenceApplied = true;
+        } else {
+            this.restorePendingSubtitlePreference();
+        }
+
+        if (this.currentStreamInfo && typeof this.currentStreamInfo === 'object') {
+            this.currentStreamInfo = {
+                ...this.currentStreamInfo,
+                subtitles: [...this.subtitleTracks],
+            };
+        }
+        this.updateCaptionsTracks?.();
+        return this.subtitleTracks;
+    }
+
     clearPendingPreference(kind) {
         if (kind === 'audio') this._pendingAudioPreferenceApplied = true;
         if (kind === 'subtitle') this._pendingSubtitlePreferenceApplied = true;
@@ -4548,6 +4612,13 @@ class WatchPage {
         this.selectedSubtitleTrackUserChoice = false;
         this.selectedAudioStreamIndex = null;
         this.selectedAudioTrackUserChoice = false;
+        const incomingPlaybackPreferences = options.playbackPreferences ?? options.playback_preferences;
+        if (incomingPlaybackPreferences && typeof incomingPlaybackPreferences === 'object') {
+            // A Gateway lane restart represents the same explicit user choice,
+            // but loadVideo resets all media-track state above. Make the new
+            // lane eligible to restore that choice before applying its profile.
+            this.setPendingPlaybackPreferences(incomingPlaybackPreferences);
+        }
         const playbackAudioStreamIndex = Number(
             options.audioStreamIndex ??
             options.audio_stream_index ??
@@ -4601,6 +4672,7 @@ class WatchPage {
                 );
             }
         }
+        this.applyAcknowledgedSubtitleSessionMetadata(options);
         this.configureGatewayAudioRenditions(
             options.audioRenditions ?? options.audio_renditions ?? options.gatewaySession?.audioRenditions
                 ?? options.gatewaySession?.audio_renditions ?? null,
@@ -4883,7 +4955,7 @@ class WatchPage {
                 : 0;
             this.streamStartOffset = startOffset;
             this.trackPlaybackPosition({ position: startOffset, force: true });
-            this.attachProbeSubtitles(url, (probeInfo || this.currentStreamInfo)?.subtitles, startOffset);
+            this.attachProbeSubtitles(url, this.subtitleTracks, startOffset);
             this.playHls(finalUrl, {
                 playbackAttemptId,
                 autoplay: options.autoplay !== false,

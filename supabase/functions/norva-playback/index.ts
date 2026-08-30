@@ -1584,13 +1584,18 @@ async function createPlaybackSession(
     throw error;
   }
   if (sourceId && gateway.startupMs) {
-    await recordPlaybackStartupObservation(db, {
+    // The Gateway session is already ready at this point. Catalog telemetry is
+    // best-effort and can fan out across grouped title variants, so keeping it
+    // on the response path turns a sub-second MKV seek into a multi-second
+    // blank player. Persist it with EdgeRuntime.waitUntil instead; the client
+    // also reports the observed first frame through the playback event lane.
+    runBackground(recordPlaybackStartupObservation(db, {
       userId,
       sourceId,
       itemType,
       itemId,
       startupMs: gateway.startupMs,
-    });
+    }));
   }
   const originalFastStartItemCas = mkvH264FastStartItemCasFromPlaybackSession(session);
   const gatewayProfileContainer = gatewayCodecProfileContainer(
