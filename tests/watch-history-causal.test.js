@@ -34,8 +34,14 @@ test('the web player timestamps every progress capture, including exit saves', (
     const watch = read('public/js/pages/WatchPage.js');
     const start = watch.indexOf('async saveProgress(options = {})');
     const body = watch.slice(start);
-    assert.ok(body.includes('watchedAt: new Date().toISOString()'));
-    assert.ok(body.includes("window.API.request('POST', '/history', payload)"));
+    assert.ok(body.includes('watchedAt: options.watchedAt || new Date().toISOString()'),
+        'normal ticks need a fresh capture timestamp while exit writes retain their frozen capture time');
+    assert.ok(watch.includes('watchedAt: new Date().toISOString()')
+        && watch.includes('watchedAt: capture.watchedAt'),
+        'exit progress must freeze one causal timestamp before the media clock is torn down');
+    assert.ok(body.includes("'POST',") && body.includes("'/history',")
+        && body.includes('options.keepalive ? { keepalive: true } : {}'),
+        'exit history writes must opt into keepalive without changing normal heartbeats');
 
     const castStart = watch.indexOf('async saveCastProgress()');
     const castBody = watch.slice(castStart, watch.indexOf('\n    }', castStart));

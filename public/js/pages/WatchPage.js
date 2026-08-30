@@ -233,6 +233,13 @@ class WatchPage {
         this._resumeRestorePromise = null;
         this._resumePlaybackMetadata = null;
         this._suspendResumeSnapshotSave = false;
+        // History writes belong to one explicit playback lifecycle. The WatchPage
+        // instance survives SPA navigation, so content/video alone cannot prove
+        // that a history write still belongs to the visible player. In particular,
+        // pagehide/beforeunload may run after stop() reset the media clock to zero.
+        this._historyPersistenceActive = false;
+        this._historyPersistenceGeneration = 0;
+        this._exitHistoryCapture = null;
         this._lastKnownPlaybackPosition = 0;
         this._lastKnownPlaybackDuration = 0;
         this.playbackErrorRefreshKey = 'norva-watch-error-refresh-v1';
@@ -1064,14 +1071,79 @@ class WatchPage {
         const position = Math.floor(rawPosition);
         if (options.force || position >= (this._lastKnownPlaybackPosition || 0) || position <= 2) {
             this._lastKnownPlaybackPosition = position;
+            if (this._exitHistoryCapture
+                && this._exitHistoryCapture.generation === this._historyPersistenceGeneration
+                && this._exitHistoryCapture.position !== position) {
+                this._exitHistoryCapture = null;
+            }
         }
         return this._lastKnownPlaybackPosition || 0;
     }
 
+    activateHistoryPersistence() {
+        this._historyPersistenceGeneration = (this._historyPersistenceGeneration || 0) + 1;
+        this._historyPersistenceActive = true;
+        this._exitHistoryCapture = null;
+        return this._historyPersistenceGeneration;
+    }
+
+    deactivateHistoryPersistence() {
+        this._historyPersistenceActive = false;
+        this._historyPersistenceGeneration = (this._historyPersistenceGeneration || 0) + 1;
+        this._exitHistoryCapture = null;
+    }
+
+    captureHistoryPositionForExit() {
+        if (!this._historyPersistenceActive || !this.content || !this.video) return null;
+        if (this._exitHistoryCapture?.generation === this._historyPersistenceGeneration) {
+            return this._exitHistoryCapture;
+        }
+
+        // A seek handler already updates _lastKnownPlaybackPosition with force,
+        // including a deliberate restart at 00:00. Here we deliberately do not
+        // force-track the media element: teardown can expose a synthetic zero.
+        const hasPendingSeek = this._pendingSeekTarget !== null
+            && this._pendingSeekTarget !== undefined
+            && Number.isFinite(Number(this._pendingSeekTarget));
+        const pendingSeek = hasPendingSeek ? Number(this._pendingSeekTarget) : null;
+        const position = hasPendingSeek
+            ? Math.max(0, Math.floor(pendingSeek))
+            : Math.max(
+                0,
+                Math.floor(Number(this._lastKnownPlaybackPosition) || 0),
+                Math.floor(Number(this.getPlaybackPosition?.()) || 0),
+                Math.floor(Number(this.video?.currentTime) || 0),
+                Math.floor(Number(this.resumeTime) || 0)
+            );
+        const duration = Math.max(0, Math.floor(Number(
+            this.getStablePlaybackDuration?.()
+            || this.getDisplayDuration?.()
+            || this._lastKnownPlaybackDuration
+            || this.durationHint
+            || 0
+        ) || 0));
+        this._exitHistoryCapture = {
+            generation: this._historyPersistenceGeneration,
+            position: duration > 0 ? Math.min(position, duration) : position,
+            duration,
+            watchedAt: new Date().toISOString()
+        };
+        return this._exitHistoryCapture;
+    }
+
     persistPlaybackStateForExit() {
-        this.trackPlaybackPosition({ force: true });
-        this.saveResumeSnapshotThrottled(true);
-        this.saveProgress({ force: true });
+        const capture = this.captureHistoryPositionForExit();
+        if (!capture) return false;
+        this.trackPlaybackPosition({ position: capture.position, force: true });
+        this.saveResumeSnapshot({ position: capture.position });
+        Promise.resolve(this.saveProgress({
+            force: true,
+            position: capture.position,
+            duration: capture.duration,
+            watchedAt: capture.watchedAt,
+            keepalive: true
+        })).catch(() => {});
+        return true;
     }
 
     persistPlaybackStateAndSessionsForExit() {
@@ -1737,9 +1809,8 @@ class WatchPage {
             // Capture the outgoing episode before assigning the incoming identity.
             // Otherwise a same-route handoff can write the old media clock under
             // the next episode's history key.
-            this.trackPlaybackPosition({ force: true });
-            this.saveResumeSnapshotThrottled(true);
-            await Promise.resolve(this.saveProgress({ force: true })).catch(() => {});
+            this.persistPlaybackStateForExit();
+            this.deactivateHistoryPersistence();
             if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
             this._suspendResumeSnapshotSave = true;
             try {
@@ -1907,6 +1978,7 @@ class WatchPage {
         });
         this._lastKnownPlaybackPosition = this.resumeTime || 0;
         this._lastKnownPlaybackDuration = this.durationHint || 0;
+        this.activateHistoryPersistence();
         this.resetTrackSelectionState();
         this.setPendingPlaybackPreferences(
             content.playbackPreferences
@@ -5633,10 +5705,9 @@ class WatchPage {
 
         // Stop history tracking and save final progress
         this.stopHistoryTracking();
-        if (!this._suspendResumeSnapshotSave) {
-            this.trackPlaybackPosition({ force: true });
-            this.saveResumeSnapshotThrottled(true);
-            this.saveProgress({ force: true });
+        if (!this._suspendResumeSnapshotSave && this._historyPersistenceActive) {
+            this.persistPlaybackStateForExit();
+            this.deactivateHistoryPersistence();
             this.reportAbandonedPlayback();
         }
 
@@ -12547,15 +12618,11 @@ class WatchPage {
         this.beginPlaybackAttempt();
 
         // Capture the position synchronously (cheap, local state) so nothing is lost.
-        this.trackPlaybackPosition({ force: true });
-        this.saveResumeSnapshotThrottled(true);
-
-        // Fire-and-forget the final progress save — do NOT await it. Awaiting a network
-        // POST here stalled the exit on TV (slow net + main thread busy decoding), so
-        // BACK felt dead and users hammered it. saveProgress reads the position
-        // synchronously before its own await, so the value is correct; the 10s heartbeat
-        // + the resume snapshot already guarantee durability if this POST is slow/lost.
-        Promise.resolve(this.saveProgress({ force: true })).catch(() => {});
+        // Capture one immutable final position before teardown. The request stays
+        // fire-and-forget so TV Back remains immediate, while the lifecycle gate
+        // prevents later pagehide/pause events from writing the reset media clock.
+        this.persistPlaybackStateForExit();
+        this.deactivateHistoryPersistence();
 
         this._suspendResumeSnapshotSave = true;
         this.stop();
@@ -12585,9 +12652,8 @@ class WatchPage {
         // the sessions that are already known locally. Otherwise a late Gateway
         // result can register and play after the Watch page has disappeared.
         this.beginPlaybackAttempt();
-        this.trackPlaybackPosition({ force: true });
-        this.saveResumeSnapshotThrottled(true);
-        Promise.resolve(this.saveProgress({ force: true })).catch(() => {});
+        this.persistPlaybackStateForExit();
+        this.deactivateHistoryPersistence();
         this._suspendResumeSnapshotSave = true;
         this.stop();
         this._suspendResumeSnapshotSave = false;
@@ -12611,15 +12677,20 @@ class WatchPage {
 
     async saveProgress(options = {}) {
         if (!this.content || !this.video) return;
+        if (!this._historyPersistenceActive || this._suspendResumeSnapshotSave) return;
         if (this.video.paused && !options.force) return;
 
-        const validDuration = this.getStablePlaybackDuration()
-            || this.getDisplayDuration()
-            || this._lastKnownPlaybackDuration;
+        const persistenceGeneration = this._historyPersistenceGeneration;
+        const validDuration = Number.isFinite(Number(options.duration)) && Number(options.duration) > 0
+            ? Number(options.duration)
+            : (this.getStablePlaybackDuration()
+                || this.getDisplayDuration()
+                || this._lastKnownPlaybackDuration);
         const duration = validDuration ? Math.floor(validDuration) : 0;
-        const progress = duration > 0
-            ? Math.min(Math.floor(this.getResumeSnapshotPosition()), duration)
+        const rawProgress = Number.isFinite(Number(options.position))
+            ? Math.max(0, Math.floor(Number(options.position)))
             : Math.floor(this.getResumeSnapshotPosition());
+        const progress = duration > 0 ? Math.min(rawProgress, duration) : rawProgress;
 
         if (isNaN(progress) || isNaN(duration) || duration <= 0) return;
         this.saveResumeSnapshot({ position: progress });
@@ -12642,7 +12713,7 @@ class WatchPage {
                 // Temporal guard: the database only lets a NEWER capture overwrite
                 // progress, atomically across devices. `force` requests an immediate
                 // flush; it no longer bypasses ordering for delayed exit packets.
-                watchedAt: new Date().toISOString(),
+                watchedAt: options.watchedAt || new Date().toISOString(),
                 ...(options.force ? { force: true } : {})
             };
             if (sendMeta) {
@@ -12670,8 +12741,17 @@ class WatchPage {
                 };
             }
 
-            await window.API.request('POST', '/history', payload);
-            if (sendMeta) this._historyMetaSentFor = metaKey;
+            await window.API.request(
+                'POST',
+                '/history',
+                payload,
+                options.keepalive ? { keepalive: true } : {}
+            );
+            if (sendMeta
+                && this._historyPersistenceActive
+                && this._historyPersistenceGeneration === persistenceGeneration) {
+                this._historyMetaSentFor = metaKey;
+            }
             // Continue Watching just changed: bust Home's warm-DOM TTL so returning from
             // playback within 60s shows the fresh position, not the stale card.
             try { const hp = window.app?.pages?.home; if (hp) hp.lastLoadedAt = 0; } catch (_) { /* best-effort */ }

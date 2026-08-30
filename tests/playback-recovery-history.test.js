@@ -116,6 +116,8 @@ test('history keeps exact-file duration while a recovery element exposes only it
   page.currentSeason = null;
   page.currentEpisode = null;
   page.containerExtension = 'mkv';
+  page._historyPersistenceActive = true;
+  page._historyPersistenceGeneration = 1;
   page._historyMetaSentFor = null;
   page.getResumeSnapshotPosition = () => 89;
   page.saveResumeSnapshot = () => {};
