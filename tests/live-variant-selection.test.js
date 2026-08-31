@@ -29,6 +29,34 @@ function loadGrouping() {
   return window.ChannelGrouping;
 }
 
+function loadPlayerClass(overrides = {}) {
+  const window = overrides.window || {};
+  const context = {
+    window,
+    navigator: { userAgent: '' },
+    console,
+    setTimeout: overrides.setTimeout || setTimeout,
+    clearTimeout: overrides.clearTimeout || clearTimeout,
+    requestAnimationFrame: (callback) => callback(),
+    CustomEvent: function CustomEvent() {},
+    Date,
+    URL,
+    Promise,
+    Map,
+    Set,
+    Array,
+    Object,
+    String,
+    Number,
+    Boolean,
+    RegExp,
+    Math,
+    JSON,
+  };
+  vm.runInNewContext(playerSource, context);
+  return { VideoPlayer: window.VideoPlayer, window };
+}
+
 function section(source, startMarker, endMarker) {
   const start = source.indexOf(startMarker);
   assert.notEqual(start, -1, `missing start marker: ${startMarker}`);
@@ -86,9 +114,109 @@ test('live fallback is bounded and never retries shared mono-session failures', 
   assert.match(reasonGuard, /provider\.\?busy\|slot/);
 });
 
+test('duplicate fallback signals share one in-flight sibling resolver', async () => {
+  const { VideoPlayer, window } = loadPlayerClass();
+  const failed = { label: 'HD', sourceId: 'source-a', streamId: '401' };
+  const sibling = { label: 'FHD', sourceId: 'source-a', streamId: '402' };
+  window.ChannelGrouping = {
+    recordVariantOutcome() {},
+    fallbackOrder: () => [sibling],
+  };
+  const player = Object.create(VideoPlayer.prototype);
+  Object.assign(player, {
+    _variantSwitchSeq: 7,
+    _variantFallbackAttempts: 0,
+    _variantFallbackOperationSeq: 0,
+    _variantFallbackInFlight: null,
+    _variantFailureHandledSwitchSeq: -1,
+    _triedVariants: new Set(),
+    currentVariant: failed,
+    qualityGroup: { name: 'TF1', variants: [failed, sibling] },
+  });
+  player.shouldAutoFallbackVariants = () => true;
+  player.canAutoFallbackVariantForReason = () => true;
+  let releaseSwitch;
+  let switchCalls = 0;
+  player.switchVariant = async () => {
+    switchCalls += 1;
+    await new Promise((resolve) => { releaseSwitch = resolve; });
+  };
+
+  assert.equal(player._tryFallback(failed, 'HTTP 502', 7), true);
+  assert.equal(player._tryFallback(failed, 'duplicate media error', 7), true);
+  assert.equal(switchCalls, 1);
+  assert.equal(player._variantFallbackAttempts, 1);
+
+  const task = player._variantFallbackInFlight.task;
+  releaseSwitch();
+  await task;
+  assert.equal(switchCalls, 1);
+  assert.equal(player._variantFallbackInFlight, null);
+});
+
+test('a teardown media error that clears during stabilization does not trigger fallback', () => {
+  let scheduled = null;
+  const { VideoPlayer } = loadPlayerClass({
+    setTimeout(callback) { scheduled = callback; return 91; },
+    clearTimeout() { scheduled = null; },
+  });
+  const player = Object.create(VideoPlayer.prototype);
+  player.video = { error: { message: 'stale teardown error' }, currentSrc: '', src: '', readyState: 0, currentTime: 0 };
+  player._clearingMedia = false;
+  player._variantSwitchSeq = 11;
+  player._mediaElementErrorTimer = null;
+  let errorCalls = 0;
+  player.handlePlaybackError = () => { errorCalls += 1; };
+
+  player._scheduleMediaElementError();
+  assert.equal(typeof scheduled, 'function');
+  player.video.error = null;
+  scheduled();
+  assert.equal(errorCalls, 0);
+});
+
+test('a superseded fallback expires its late cloud session without starting playback', async () => {
+  let resolveStream;
+  const expired = [];
+  const window = {
+    API: { proxy: { xtream: { getStreamUrl: () => new Promise((resolve) => { resolveStream = resolve; }) } } },
+    NorvaCloud: { playback: { expireSession: async (sessionId) => { expired.push(sessionId); } } },
+  };
+  const { VideoPlayer } = loadPlayerClass({ window });
+  const player = Object.create(VideoPlayer.prototype);
+  const sibling = { label: 'FHD', sourceId: 'source-a', streamId: '502', channel: {} };
+  Object.assign(player, {
+    currentChannel: { name: 'TF1' },
+    currentVariant: { streamId: '501' },
+    qualityGroup: { name: 'TF1', variants: [sibling] },
+    qualityMenu: null,
+    video: { readyState: 0 },
+    _variantFallbackOperationSeq: 4,
+    _variantFallbackAttempts: 1,
+    _triedVariants: new Set(),
+  });
+  player.prepareLiveSwitch = async () => {};
+  player.buildVariantChannel = () => ({ name: 'TF1' });
+  let playCalls = 0;
+  player.play = async () => { playCalls += 1; };
+
+  const switching = player.switchVariant(sibling, {
+    automatic: true,
+    fallbackOperationSeq: 4,
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(typeof resolveStream, 'function');
+  player._variantFallbackOperationSeq = 5;
+  resolveStream({ url: 'https://example.test/live.m3u8', sessionId: 'late-session' });
+  await switching;
+
+  assert.deepEqual(expired, ['late-session']);
+  assert.equal(playCalls, 0);
+});
+
 test('variant switch releases the old cloud session before resolving a sibling', () => {
   const switching = section(playerSource, 'async switchVariant(variant', '_clearVariantFallbackTimer()');
-  const release = switching.indexOf('await this.prepareLiveSwitch()');
+  const release = switching.indexOf('await this.prepareLiveSwitch({ preserveVariantFallback: options.automatic })');
   const resolve = switching.indexOf('getStreamUrl(variant.sourceId');
 
   assert.ok(release >= 0, 'strict live teardown is missing');
@@ -97,7 +225,7 @@ test('variant switch releases the old cloud session before resolving a sibling',
 
 test('live switching fails closed if the previous cloud session cannot be released', () => {
   const release = section(playerSource, 'async stopCloudPlaybackSessions(options', '    /**');
-  const prepare = section(playerSource, 'async prepareLiveSwitch()', '    /**');
+  const prepare = section(playerSource, 'async prepareLiveSwitch(options = {})', '    /**');
   const select = section(channelListSource, 'async selectChannel(dataset)', 'async expireStaleCloudPlaybackSession');
 
   assert.match(release, /failedIds\.forEach\(id => this\.activeCloudPlaybackSessionIds\.add\(id\)\)/);
