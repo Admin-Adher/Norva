@@ -65,23 +65,25 @@ test('every user-facing norva-catalog projection reads centralized visible views
 test('source-scoped genre paths remain exact without implicit view relationships', () => {
   const summary = section(catalog, 'async function listGenreSummary(', '\nconst GENRE_RAIL_MIN_ITEMS');
   const items = section(catalog, 'async function listGenreItems(', '\n// Dynamic menu options:');
-  const languageIds = section(
+  const languagePage = section(
     catalog,
-    'async function visibleTitleIdsBySourceLanguages(',
+    'async function visibleTitlePageBySourceLanguages(',
     '\n// Distinct ISO-639 languages',
   );
 
   assert.match(summary, /contains\("visible_source_ids", \[sourceId\]\)/);
   assert.match(items, /contains\("visible_source_ids", \[sourceId\]\)/);
-  assert.match(items, /visibleTitleIdsBySourceLanguages\(userId, itemType, sourceId, audioIso, subIso\)/);
-  assert.match(languageIds, /db\.rpc\("cloud_catalog_visible_title_ids_by_source_languages"/);
-  assert.match(languageIds, /p_source_id: sourceId/);
-  assert.match(languageIds, /p_audio_language: audioIso/);
-  assert.match(languageIds, /p_subtitle_language: subtitleIso/);
-  assert.match(languageIds, /\.order\("title_id", \{ ascending: true \}\)/);
-  assert.match(languageIds, /\.range\(offset, offset \+ VISIBLE_TITLE_ID_PAGE_SIZE - 1\)/);
-  assert.match(languageIds, /if \(rows\.length < VISIBLE_TITLE_ID_PAGE_SIZE\) break/);
-  assert.match(items, /attachSourceObservationLanguages\(rows, userId, sourceId\)/);
+  assert.match(items, /if \(sourceId && needsSourceLanguageEvidence\)/);
+  assert.match(items, /visibleTitlePageBySourceLanguages\(\{/);
+  assert.match(items, /hiddenBuckets: \[\.\.\.hidden\]/);
+  assert.match(items, /page\.titleIds/);
+  assert.match(items, /count: page\.count/);
+  assert.match(languagePage, /db\.rpc\("cloud_catalog_visible_title_language_page"/);
+  assert.match(languagePage, /p_source_id: options\.sourceId/);
+  assert.match(languagePage, /audio: options\.audioIso/);
+  assert.match(languagePage, /subtitle: options\.subtitleIso/);
+  assert.doesNotMatch(items, /sourceLanguageTitleIds/);
+  assert.doesNotMatch(items, /TITLE_VARIANT_QUERY_CHUNK/);
 });
 
 test('playback visibility is fail-closed before sessions and config access', () => {
