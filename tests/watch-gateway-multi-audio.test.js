@@ -258,6 +258,119 @@ test('nested playback metadata preserves the signed rendition/default contract',
     assert.match(watchSource, /configureGatewayAudioRenditions\([\s\S]*?options\.audioRenditions/);
 });
 
+test('exact audio labels render immediately but stay disabled until Hls.js proves the topology', () => {
+    const WatchPage = loadWatchPage();
+    const harness = makePage(WatchPage);
+    const { page } = harness;
+    const listAttributes = {};
+    page.audioList = {
+        innerHTML: '',
+        setAttribute(name, value) { listAttributes[name] = String(value); },
+        querySelectorAll() { return []; },
+    };
+    page.audioStatus = { dataset: {}, textContent: '' };
+    page.updateAudioTracks = WatchPage.prototype.updateAudioTracks;
+
+    assert.equal(page.configureGatewayAudioRenditions(
+        audioRenditions,
+        multiAudioHls,
+        codecTracks,
+        {
+            required: true,
+            playbackAttemptId: 17,
+            audioStreamIndex: 5,
+            verifiedTracks: page.getContentAudioTracks(),
+            audioLanguageValidationStatus: page.audioLanguageValidationStatus,
+        },
+    ), true);
+    page.playHls('https://gateway.example/sessions/session-pending/playlist.m3u8', {
+        playbackAttemptId: 17,
+        autoplay: false,
+    });
+    page.hls.audioTracks = [
+        { id: 0, lang: 'und', name: 'audio_0' },
+        { id: 1, lang: 'eng', name: 'English' },
+        { id: 2, lang: 'jpn', name: 'Japanese' },
+    ];
+    page.updateAudioTracks();
+
+    const pendingTracks = page.getVisibleAudioTracks();
+    assert.equal(page.isGatewayAudioRenditionFailClosed(), true, 'switching remains fail closed before HLS proof');
+    assert.ok(pendingTracks.every(track => track.pending === true && track.source === 'none'));
+    assert.deepEqual(Array.from(pendingTracks, track => track.label), [
+        'French - AC3 - 6ch - Track 1',
+        'French - AC3 - 6ch - Track 2',
+        'Unknown language - AAC - 2ch',
+    ]);
+    assert.match(page.audioList.innerHTML, /data-state="pending" disabled aria-disabled="true"/);
+    assert.equal(listAttributes['aria-busy'], 'true');
+    assert.equal(page.audioStatus.textContent, 'Checking audio tracks…');
+
+    page.hls._audioTrack = 1;
+    page.hls.emit(FakeHls.Events.AUDIO_TRACKS_UPDATED, { audioTracks: page.hls.audioTracks });
+    const readyTracks = page.getVisibleAudioTracks();
+    assert.ok(readyTracks.every(track => !track.pending));
+    assert.ok(readyTracks.some(track => track.source === 'hls'));
+    assert.doesNotMatch(page.audioList.innerHTML, /data-state="pending"|\sdisabled/);
+    assert.equal(listAttributes['aria-busy'], 'false');
+    assert.equal(page.audioStatus.textContent, 'Audio tracks ready.');
+});
+
+test('exact-session language tags name pending Gateway rows without becoming authoritative', () => {
+    const WatchPage = loadWatchPage();
+    const { page } = makePage(WatchPage, { validationStatus: 'pending' });
+    const taggedRenditions = audioRenditions.map((track, index) => ({
+        ...track,
+        language: ['fra', 'jpn', 'eng'][index],
+    }));
+
+    assert.equal(page.configureGatewayAudioRenditions(
+        taggedRenditions,
+        multiAudioHls,
+        codecTracks,
+        {
+            required: true,
+            playbackAttemptId: 17,
+            audioStreamIndex: 5,
+            verifiedTracks: page.getContentAudioTracks(),
+            audioLanguageValidationStatus: page.audioLanguageValidationStatus,
+        },
+    ), true);
+    page.playHls('https://gateway.example/sessions/session-pending-tags/playlist.m3u8', {
+        playbackAttemptId: 17,
+        autoplay: false,
+    });
+
+    const tracks = page.getVisibleAudioTracks();
+    assert.deepEqual(Array.from(tracks, track => track.label), [
+        'French - AC3 - 6ch',
+        'Japanese - AC3 - 6ch',
+        'English - AAC - 2ch',
+    ]);
+    assert.ok(tracks.every(track => track.pending === true && track.source === 'none'));
+    assert.ok(page._gatewayAudioRenditions.every(track => track.language === null));
+    assert.deepEqual(
+        Array.from(page._gatewayAudioRenditions, track => track.renditionLanguage),
+        ['fr', 'ja', 'en'],
+    );
+});
+
+test('the initial player shell uses exact file labels instead of a terminal unavailable state', () => {
+    const WatchPage = loadWatchPage();
+    const { page } = makePage(WatchPage);
+    page.currentPlaybackMode = null;
+    page._gatewayAudioRenditionRequired = false;
+    page._audioTopologyPending = true;
+
+    const tracks = page.getVisibleAudioTracks();
+    assert.deepEqual(Array.from(tracks, track => [track.label, track.pending, track.source]), [
+        ['French - Track 1', true, 'none'],
+        ['French - Track 2', true, 'none'],
+        ['Unknown language', true, 'none'],
+    ]);
+    assert.doesNotMatch(tracks.map(track => track.label).join('|'), /unavailable/i);
+});
+
 test('Gateway menu maps exact HLS indexes to absolute streams and names only verified languages', () => {
     FakeHls.instances.length = 0;
     const WatchPage = loadWatchPage();
@@ -531,6 +644,7 @@ test('verified muxed mono exposes one exact catalogue row and clicking it never 
     let option = null;
     page.audioList = {
         _html: '',
+        setAttribute() {},
         set innerHTML(value) {
             this._html = value;
             const attrs = Object.fromEntries(

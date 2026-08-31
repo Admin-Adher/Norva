@@ -66,6 +66,7 @@ class WatchPage {
         // Captions
         this.audioBtn = document.getElementById('watch-audio-btn');
         this.audioMenu = document.getElementById('watch-audio-menu');
+        this.audioStatus = document.getElementById('watch-audio-status');
         this.audioList = document.getElementById('watch-audio-list');
         this.captionsBtn = document.getElementById('watch-captions-btn');
         this.captionsMenu = document.getElementById('watch-captions-menu');
@@ -164,6 +165,7 @@ class WatchPage {
         this._gatewayAudioRenditionAttemptId = null;
         this._gatewayAudioRenditionRequired = false;
         this._gatewayHlsAudioTracksReady = false;
+        this._audioTopologyPending = false;
         this._pendingHlsAudioSwitch = null;
         this._latestHlsAudioSwitch = null;
         this._pendingGatewayAudioStreamIndex = null;
@@ -1980,6 +1982,12 @@ class WatchPage {
         this._lastKnownPlaybackDuration = this.durationHint || 0;
         this.activateHistoryPersistence();
         this.resetTrackSelectionState();
+        // Exact file-scoped catalogue metadata can already name the audio tracks
+        // while the playback session and HLS topology are still resolving. Paint
+        // those rows immediately, but keep them disabled until the active player
+        // proves the switchable topology for this exact attempt.
+        this._audioTopologyPending = true;
+        this.updateAudioTracks();
         this.setPendingPlaybackPreferences(
             content.playbackPreferences
             || content.playback_preferences
@@ -3116,6 +3124,7 @@ class WatchPage {
 
     resetTrackSelectionState() {
         this.resetGatewayAudioRenditions();
+        this._audioTopologyPending = false;
         this.audioTracks = [];
         this.subtitleTracks = [];
         this.subtitleSourceUrl = null;
@@ -4036,6 +4045,7 @@ class WatchPage {
     applyProbeInfo(info) {
         if (!info) return;
 
+        this._audioTopologyPending = false;
         this.currentStreamInfo = info;
         this.probeDuration = this.normalizeDuration(info.duration);
         this.audioTracks = Array.isArray(info.audioTracks) ? info.audioTracks : [];
@@ -5378,6 +5388,7 @@ class WatchPage {
             if (this.isStalePlaybackAttempt(playbackAttemptId) || this.hls !== activeHls) return;
             console.log('[WatchPage] Audio tracks updated:', data?.audioTracks);
             this._gatewayHlsAudioTracksReady = true;
+            this._audioTopologyPending = false;
             const gatewayContext = this._gatewayAudioRenditionRequired
                 || this.currentPlaybackMode === 'gateway-session';
             const renditions = gatewayContext
@@ -5446,6 +5457,7 @@ class WatchPage {
                 && Array.isArray(activeHls.audioTracks)
                 && activeHls.audioTracks.length === 0) {
                 this._gatewayHlsAudioTracksReady = true;
+                this._audioTopologyPending = false;
                 this.updateAudioTracks();
             }
             // A paused Gateway lane still fills the same proof buffer; it simply
@@ -6604,6 +6616,13 @@ class WatchPage {
 
     onMetadataLoaded() {
         this.updateDurationState();
+
+        const gatewayAudioContext = this._gatewayAudioRenditionRequired
+            || this.currentPlaybackMode === 'gateway-session';
+        if (!gatewayAudioContext && this._audioTopologyPending) {
+            this._audioTopologyPending = false;
+            this.updateAudioTracks();
+        }
 
         // Detect resolution
         if (this.video && this.video.videoHeight > 0) {
@@ -8258,6 +8277,83 @@ class WatchPage {
         }));
     }
 
+    buildPendingAudioTracks(rawTracks = []) {
+        const languageKnown = this.isAudioLanguageKnown();
+        const normalized = (Array.isArray(rawTracks) ? rawTracks : [])
+            .map((track) => {
+                const streamIndex = Number(track?.streamIndex ?? track?.stream_index ?? track?.index);
+                if (!Number.isSafeInteger(streamIndex) || streamIndex < 0) return null;
+                const language = languageKnown
+                    ? this.normalizeTrackLanguage(track?.language || track?.lang)
+                    : null;
+                return {
+                    ...(track && typeof track === 'object' ? track : {}),
+                    streamIndex,
+                    language: language && language !== 'und' ? language : null,
+                };
+            })
+            .filter(Boolean);
+
+        return normalized.map((track, index) => ({
+            source: 'none',
+            index: -1,
+            streamIndex: track.streamIndex,
+            label: this.getGatewayAudioRenditionLabel(track, index, normalized),
+            language: track.language,
+            codec: track.codec || track.renditionCodec || null,
+            active: false,
+            pending: true,
+        }));
+    }
+
+    getPendingContentAudioTracks() {
+        const exactTracks = this.getContentAudioTracks();
+        if (!exactTracks.length) return [];
+        const rawTracks = Array.isArray(this.content?.audioTracks)
+            ? this.content.audioTracks
+            : (Array.isArray(this.content?.audio_tracks) ? this.content.audio_tracks : []);
+        const rawByStreamIndex = new Map();
+        rawTracks.forEach((track) => {
+            const streamIndex = Number(track?.index ?? track?.streamIndex ?? track?.stream_index);
+            if (Number.isSafeInteger(streamIndex) && streamIndex >= 0 && !rawByStreamIndex.has(streamIndex)) {
+                rawByStreamIndex.set(streamIndex, track);
+            }
+        });
+        return this.buildPendingAudioTracks(exactTracks.map((track) => ({
+            ...(rawByStreamIndex.get(track.index) || {}),
+            index: track.index,
+            streamIndex: track.index,
+            language: track.lang,
+            lang: track.lang,
+        })));
+    }
+
+    getPendingGatewayAudioTracks() {
+        const isGatewayContext = this._gatewayAudioRenditionRequired
+            || this.currentPlaybackMode === 'gateway-session';
+        if (!isGatewayContext
+            || this._gatewayAudioRenditionStatus === 'invalid'
+            || this._gatewayHlsAudioTracksReady) {
+            return [];
+        }
+
+        if (this._gatewayAudioRenditionStatus === 'ready'
+            && Array.isArray(this._gatewayAudioRenditions)
+            && this._gatewayAudioRenditions.length) {
+            return this.buildPendingAudioTracks(this._gatewayAudioRenditions);
+        }
+
+        const exactTracks = this.getPendingContentAudioTracks();
+        if (exactTracks.length) return exactTracks;
+        return [{
+            source: 'none',
+            index: -1,
+            label: 'Audio tracks loading',
+            active: false,
+            pending: true,
+        }];
+    }
+
     getProbeAudioTracks() {
         if (!Array.isArray(this.audioTracks) || !this.audioTracks.length) return [];
         const selected = this.getSelectedAudioTrack();
@@ -8728,6 +8824,8 @@ class WatchPage {
         if (verifiedMuxedMono) return [verifiedMuxedMono];
         const informationalMuxedMono = this.getInformationalGatewayMuxedMonoAudioTrack();
         if (informationalMuxedMono) return [informationalMuxedMono];
+        const pendingGatewayTracks = this.getPendingGatewayAudioTracks();
+        if (pendingGatewayTracks.length) return pendingGatewayTracks;
         if (this.isGatewayAudioRenditionFailClosed()) {
             return [{ source: 'none', index: -1, label: 'Audio tracks unavailable', active: true }];
         }
@@ -8740,6 +8838,11 @@ class WatchPage {
 
         if (this.cloudAudioInfo) {
             return [{ source: 'none', index: -1, label: this.getCloudAudioLabel(this.cloudAudioInfo), active: true }];
+        }
+
+        if (this._audioTopologyPending) {
+            const pendingContentTracks = this.getPendingContentAudioTracks();
+            if (pendingContentTracks.length) return pendingContentTracks;
         }
 
         // Browser can't demux video.audioTracks for direct-MP4 play, so there's no
@@ -8802,13 +8905,29 @@ class WatchPage {
         if (!this.audioList) return;
 
         const tracks = this.getVisibleAudioTracks();
+        const pending = tracks.some(track => track.pending === true);
+        const unavailable = tracks.some(track => track.label === 'Audio tracks unavailable');
+        this.audioList.setAttribute('aria-busy', pending ? 'true' : 'false');
+        if (this.audioStatus) {
+            const previousState = this.audioStatus.dataset.state || '';
+            const nextState = pending ? 'pending' : (unavailable ? 'unavailable' : 'ready');
+            this.audioStatus.dataset.state = nextState;
+            this.audioStatus.textContent = pending
+                ? 'Checking audio tracks…'
+                : (unavailable
+                    ? 'Audio tracks unavailable.'
+                    : (previousState === 'pending' ? 'Audio tracks ready.' : ''));
+        }
         this.audioList.innerHTML = tracks.map(track => {
             const streamAttr = track.streamIndex !== undefined ? ` data-stream-index="${track.streamIndex}"` : '';
-            return `<button class="audio-option ${track.active ? 'active' : ''}" data-source="${track.source}" data-index="${track.index}"${streamAttr}>${this.escapeHtml(track.label)}</button>`;
+            const pendingClass = track.pending ? ' pending' : '';
+            const pendingAttr = track.pending ? ' data-state="pending" disabled aria-disabled="true"' : '';
+            return `<button class="audio-option ${track.active ? 'active' : ''}${pendingClass}" data-source="${track.source}" data-index="${track.index}"${streamAttr}${pendingAttr}>${this.escapeHtml(track.label)}</button>`;
         }).join('');
 
         this.audioList.querySelectorAll('.audio-option').forEach(btn => {
             btn.addEventListener('click', () => {
+                if (btn.disabled || btn.dataset.state === 'pending') return;
                 this.selectAudioTrack(
                     btn.dataset.source,
                     parseInt(btn.dataset.index, 10),

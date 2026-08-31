@@ -11136,6 +11136,18 @@ html.tv-mode .navbar-menu .nav-link.active .norva-ui-icon {
   border-bottom: 1px solid var(--glass-border);
 }
 
+.audio-menu-status {
+  padding: var(--space-xs) var(--space-md);
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
+  line-height: 1.4;
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.audio-menu-status:empty {
+  display: none;
+}
+
 .captions-menu-list {
   max-height: 200px;
   overflow-y: auto;
@@ -11160,6 +11172,18 @@ html.tv-mode .navbar-menu .nav-link.active .norva-ui-icon {
 .captions-option:hover,
 .audio-option:hover {
   background: rgba(255, 255, 255, 0.1);
+}
+
+.audio-option.pending,
+.audio-option:disabled {
+  color: var(--color-text-secondary);
+  cursor: default;
+  opacity: 0.78;
+}
+
+.audio-option.pending:hover,
+.audio-option:disabled:hover {
+  background: none;
 }
 
 .captions-option.active,
