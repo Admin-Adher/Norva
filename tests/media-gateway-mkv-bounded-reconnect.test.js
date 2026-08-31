@@ -2777,6 +2777,7 @@ test('finite MKV seek preparation drains the retained provider before opening on
         cacheMisses: 5,
         cacheEvictions: 1,
         maxQueuedRequests: 2,
+        dispatcherRefreshes: 2,
         terminalError: null,
         async close() { events.push('broker-close'); },
     };
@@ -2789,6 +2790,9 @@ test('finite MKV seek preparation drains the retained provider before opening on
             PROVIDER_SLOT_RELEASE_DELAY_MS: 2500,
             FINITE_MKV_SEEK_WINDOW_BYTES: 2 * 1024 * 1024,
             FINITE_MKV_SEEK_CACHE_BYTES: 32 * 1024 * 1024,
+            FINITE_MKV_SEEK_PROXY_AGENT_MAX_AGE_MS: 4 * 60_000,
+            pinnedProxyAgentFactory: () => () => ({ slot: 3 }),
+            proxyKeyFromUrl: () => 'provider.example/user',
             isFiniteMkvVodSession: () => true,
             fileSizeBytesForSession: (session) => session.fileSizeBytes,
             vodInputPumpError: (code, message, options = {}) => Object.assign(new Error(message), { code, ...options }),
@@ -2832,6 +2836,8 @@ test('finite MKV seek preparation drains the retained provider before opening on
     assert.equal(brokerOptions.effectiveUrlSha256, session.vodInputEffectiveUrlSha256);
     assert.equal(brokerOptions.effectiveUrlIdentitySha256, session.vodInputEffectiveUrlIdentitySha256);
     assert.equal(brokerOptions.pathPrefix, 'finite-mkv-seek');
+    assert.equal(typeof brokerOptions.dispatcherFactory, 'function');
+    assert.equal(brokerOptions.dispatcherMaxAgeMs, 4 * 60_000);
     assert.equal(brokerOptions.completedReleaseDelayMs, 0);
     assert.equal(brokerOptions.supersededReleaseDelayMs, 2500);
     assert.equal(harness.usesFiniteMkvSeekBroker(session), true);
@@ -2843,6 +2849,7 @@ test('finite MKV seek preparation drains the retained provider before opening on
     assert.equal(session.startupTimings.finiteMkvSeekInterruptedProviderFetches, 1);
     assert.equal(session.startupTimings.finiteMkvSeekCacheHits, 4);
     assert.equal(session.startupTimings.finiteMkvSeekCacheMisses, 5);
+    assert.equal(session.startupTimings.finiteMkvSeekProxyAgentRefreshes, 2);
     assert.equal(session.startupTimings.finiteMkvSeekCacheEvictions, 1);
     assert.equal(session.startupTimings.finiteMkvSeekMaxQueuedRequests, 2);
     assert.equal(events.at(-1), 'broker-close');
@@ -2999,7 +3006,7 @@ test('production finite MKV resume uses continuous indexed windows and keeps lin
     assert.match(source, /effectiveUrlIdentitySha256:\s*session\.vodInputEffectiveUrlIdentitySha256/);
     assert.match(source, /boundedMkvInputPumpProtocol:\s*1/);
     assert.match(source, /finiteMkvSeekBroker:\s*\{[\s\S]+?protocol:\s*4/);
-    assert.match(source, /finiteMkvSeekBroker:\s*\{[\s\S]+?bufferedWindowBeforeLocalResponse:\s*true/);
+    assert.match(source, /finiteMkvSeekBroker:\s*\{[\s\S]+?bufferedWindowBeforeLocalResponse:\s*false/);
     assert.match(source, /finiteMkvSeekBroker:\s*\{[\s\S]+?continuousLocalRangeResponse:\s*true/);
     assert.match(source, /finiteMkvSeekBroker:\s*\{[\s\S]+?concurrentLocalRanges:\s*true/);
     assert.match(source, /finiteMkvSeekBroker:\s*\{[\s\S]+?prematureLocalRangeTermination:\s*false/);
