@@ -151,6 +151,8 @@ test('repair migration clears poisoned movie probes and prioritizes MULTI safely
   );
   assert.ok(owners.includes('variant.id as variant_id'));
   assert.ok(!owners.includes('observation.audio_observed'));
+  assert.ok(!migration.includes('update public.cloud_title_variants variant'));
+  assert.ok(migration.includes('proof-aware hydration RPC refreshes'));
   assert.ok(migration.includes('revoke all on function public.file_audio_backfill_candidates('));
   assert.ok(migration.includes('to service_role'));
   assert.ok(!migration.includes('subtitle_observed = false'));

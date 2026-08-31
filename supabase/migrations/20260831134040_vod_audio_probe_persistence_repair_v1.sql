@@ -83,14 +83,12 @@ where observation.user_id = poisoned.user_id
   and observation.variant_id = poisoned.variant_id
   and observation.file_external_id = poisoned.file_external_id;
 
-update public.cloud_title_variants variant
-set audio_whisper_attempted_at = null,
-    audio_whisper_retry_at = null,
-    audio_lang_verified_at = null,
-    audio_lang_verify_retry_at = null
-from norva_poisoned_movie_audio_owners poisoned
-where variant.user_id = poisoned.user_id
-  and variant.id = poisoned.variant_id;
+-- Do not update cloud_title_variants directly here. Active-generation rows are
+-- protected by the catalog write-proof trigger, and a maintenance-wide UPDATE
+-- cannot truthfully carry the per-source head/config/visibility proof required
+-- by that boundary. The exact-file queue below is driven by the observation and
+-- canonical-cache state just reset; the proof-aware hydration RPC refreshes the
+-- variant retry/verification fields after each successful replacement probe.
 
 -- Legacy ordered maps are valid only for a true single-variant movie. Clear
 -- those derived markers without touching grouped titles or any subtitle state.
