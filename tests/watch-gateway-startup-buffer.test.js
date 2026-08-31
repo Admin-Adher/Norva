@@ -197,6 +197,32 @@ test('Gateway autoplay gate holds at 56 and 95.9 seconds, then admits 96.1 secon
     assert.equal(await gate, true);
 });
 
+test('Gateway startup gate never tears down playback the viewer already started', async () => {
+    const waitForGatewayStartupBuffer = loadMethod(
+        'waitForGatewayStartupBuffer',
+        'playHls',
+    );
+    const hls = { levels: [{ details: { live: true, totalduration: 24 } }] };
+    const video = { currentTime: 0, paused: false, ended: false };
+    const page = {
+        hls,
+        video,
+        isStalePlaybackAttempt: () => false,
+        gatewayBufferedAheadSeconds: () => 12,
+    };
+
+    const gate = waitForGatewayStartupBuffer.call(
+        page,
+        12,
+        hls,
+        { minimumSeconds: 96, timeoutMs: 500 },
+    );
+    await new Promise(resolve => setTimeout(resolve, 25));
+    video.currentTime = 0.5;
+
+    assert.equal(await gate, true);
+});
+
 test('Gateway autoplay gate is cancellation-safe and admits a fully buffered short VOD', async () => {
     const waitForGatewayStartupBuffer = loadMethod(
         'waitForGatewayStartupBuffer',

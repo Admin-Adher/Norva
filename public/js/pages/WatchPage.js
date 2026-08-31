@@ -5276,6 +5276,19 @@ class WatchPage {
             const bufferedAhead = this.gatewayBufferedAheadSeconds();
             if (bufferedAhead >= minimumSeconds) return true;
 
+            // The viewer may explicitly press Play while a deliberately deep
+            // slow-source gate is still filling. Once media time is genuinely
+            // advancing, the session belongs to that active playback and the
+            // pending gate must settle instead of tearing it down at 6 minutes.
+            const mediaTime = Number(this.video?.currentTime);
+            if (this.video
+                && !this.video.paused
+                && !this.video.ended
+                && Number.isFinite(mediaTime)
+                && mediaTime > 0) {
+                return true;
+            }
+
             // A genuinely complete short item cannot reach the normal movie
             // threshold. Admit it only after virtually all declared media is
             // already resident in the browser buffer.
