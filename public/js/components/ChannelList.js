@@ -3295,15 +3295,24 @@ class ChannelList {
      * Select and play a channel
      */
     buildDynamicLiveChannel(channel, dataset, selectSeq) {
-        let group = null;
-        let variant = null;
+        // Browse/search can already hand us a fully-normalized logical channel.
+        // Keep that authoritative sibling set: recomputing it from `this.channels`
+        // (which may itself contain logical rows) can collapse a five-variant TF1
+        // family back to a singleton, preventing resolver-stage fallback entirely.
+        let group = Array.isArray(channel?.qualityGroup?.variants)
+            && channel.qualityGroup.variants.length > 1
+            ? channel.qualityGroup
+            : null;
+        let variant = channel?.currentVariant || group?.defaultVariant || null;
         try {
-            if (window.ChannelGrouping && this.channels?.length) {
+            if (!group && window.ChannelGrouping && this.channels?.length) {
                 const country = window.app?.player?.getCountry?.() || 'FR';
                 group = window.ChannelGrouping.variantsForChannel(channel, this.channels, country);
                 variant = group?.variants?.length
                     ? window.ChannelGrouping.pickDefault(group.variants)
                     : null;
+            } else if (group && !variant && window.ChannelGrouping) {
+                variant = window.ChannelGrouping.pickDefault?.(group.variants) || group.variants[0] || null;
             }
         } catch (_) { /* grouping remains best-effort */ }
 
