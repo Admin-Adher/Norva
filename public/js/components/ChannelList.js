@@ -3317,9 +3317,43 @@ class ChannelList {
         } catch (_) { /* grouping remains best-effort */ }
 
         const raw = variant?.channel || channel;
+        const sourceId = variant?.sourceId
+            ?? raw?.sourceId
+            ?? raw?.source_id
+            ?? channel?.sourceId
+            ?? channel?.source_id
+            ?? dataset.sourceId;
+        const streamId = variant?.streamId
+            ?? variant?.stream_id
+            ?? raw?.streamId
+            ?? raw?.stream_id
+            ?? channel?.streamId
+            ?? channel?.stream_id
+            ?? dataset.streamId;
+        const sourceType = raw?.sourceType
+            || raw?.source_type
+            || channel?.sourceType
+            || channel?.source_type
+            || dataset.sourceType
+            || null;
+        const streamUrl = raw?.url
+            || raw?.stream_url
+            || channel?.url
+            || channel?.stream_url
+            || dataset.url
+            || undefined;
         const displayName = group?.name || channel.name || channel.title || raw.name || raw.title || '';
         const displayLogo = group?.logo || channel.tvgLogo || channel.stream_icon || channel.logo || raw.tvgLogo || raw.stream_icon || raw.logo || '';
-        return Object.assign({}, raw, {
+        // Cloud logical variants intentionally carry only a bounded identity and
+        // may expose an empty/partial `channel` object. Merge them over the
+        // authoritative logical row instead of letting that partial object erase
+        // sourceType/sourceId and send an Xtream selection down the M3U path.
+        return Object.assign({}, channel, raw, {
+            sourceId,
+            sourceType,
+            streamId,
+            stream_id: streamId,
+            url: streamUrl,
             name: displayName,
             title: displayName,
             tvgName: displayName,
