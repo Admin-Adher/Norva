@@ -743,6 +743,14 @@ function viewerPlaybackActiveLocally() {
 function pickProxyAgent(key) {
     return providerProxyAgents.length ? providerProxyAgents[poolIndexForKey(key)] : null;
 }
+function pinnedProxyAgentFactory(key) {
+    if (!providerProxyUrls.length) return null;
+    const proxyUrl = providerProxyUrls[poolIndexForKey(key)];
+    // The closure pins one provider account to one configured residential slot.
+    // Recreating the dispatcher therefore renews only the local CONNECT tunnel;
+    // it never rotates the account to another exit IP.
+    return () => new ProxyAgent(proxyUrl);
+}
 // Spawn env routing a child (ffmpeg/ffprobe) through this key's sticky pool IP.
 function proxyEnvFor(key) {
     if (!providerProxyAgents.length) return undefined;
@@ -1511,6 +1519,16 @@ const FINITE_MKV_SEEK_CACHE_BYTES = clampInt(
     FINITE_MKV_SEEK_WINDOW_BYTES,
     256 * 1024 * 1024,
 );
+// Static residential CONNECT tunnels can have a shorter lifetime than a movie.
+// Renew the Undici dispatcher at an exact provider-window boundary before the
+// observed six-minute tunnel expiry. The factory remains pinned to the same
+// proxy slot/IP, so this is transport renewal rather than account IP rotation.
+const FINITE_MKV_SEEK_PROXY_AGENT_MAX_AGE_MS = clampInt(
+    process.env.FINITE_MKV_SEEK_PROXY_AGENT_MAX_AGE_MS,
+    4 * 60_000,
+    60_000,
+    5 * 60_000,
+);
 // libav must never abandon the private loopback before either the broker deadline or the outer
 // extraction deadline. This is microseconds (`-rw_timeout`) and intentionally exceeds 45 s.
 const STRICT_LID_FFMPEG_RW_TIMEOUT_US = 50_000_000;
@@ -1819,7 +1837,7 @@ const MULTI_AUDIO_HLS_PROTOCOL = 1;
 // production Ryzen/Radeon host. Keep the operational default evidence-based and configurable,
 // while bounding accidental fan-out. Every exact source track stays visible to the user.
 const MAX_MULTI_AUDIO_RENDITIONS = clampInt(process.env.MAX_MULTI_AUDIO_RENDITIONS, 12, 2, 32);
-const GATEWAY_VERSION = 131;
+const GATEWAY_VERSION = 132;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -2045,7 +2063,7 @@ app.get('/health', (req, res) => {
             )).length,
             providerConnectionsSerialized: true,
             providerWindowQueueSerialized: true,
-            bufferedWindowBeforeLocalResponse: true,
+            bufferedWindowBeforeLocalResponse: false,
             continuousLocalRangeResponse: true,
             concurrentLocalRanges: true,
             prematureLocalRangeTermination: false,
@@ -2057,6 +2075,7 @@ app.get('/health', (req, res) => {
             interruptedRangeReleaseDelayMs: PROVIDER_SLOT_RELEASE_DELAY_MS,
             effectiveUrlPinned: true,
             validatorPinnedWhenAvailable: true,
+            proxyAgentMaxAgeMs: FINITE_MKV_SEEK_PROXY_AGENT_MAX_AGE_MS,
         },
         vodFileSizeProbeTimeoutMs: VOD_FILE_SIZE_PROBE_TIMEOUT_MS,
         vodInputPump: {
@@ -3887,6 +3906,49 @@ async function closeStrictLidBrokerProviderFetch(context, attempt, reason = 'com
     }
 }
 
+async function disposeStrictLidBrokerDispatcher(dispatcher) {
+    if (!dispatcher) return;
+    try {
+        if (typeof dispatcher.destroy === 'function') {
+            await dispatcher.destroy();
+            return;
+        }
+        if (typeof dispatcher.close === 'function') await dispatcher.close();
+    } catch (_) {
+        // A dead CONNECT tunnel is exactly why this dispatcher is being retired.
+        // Cleanup is best-effort; the replacement must remain usable.
+    }
+}
+
+async function refreshStrictLidBrokerDispatcher(context, force = false) {
+    if (!context?.ownsDispatcher || typeof context.dispatcherFactory !== 'function') return false;
+    const nowMs = Number(context.now?.() ?? Date.now());
+    const createdAtMs = Number(context.dispatcherCreatedAtMs || 0);
+    if (
+        !force
+        && Number.isFinite(createdAtMs)
+        && context.dispatcherCreatedAtMs !== null
+        && nowMs - createdAtMs < context.dispatcherMaxAgeMs
+    ) return false;
+
+    const replacement = context.dispatcherFactory();
+    if (!replacement) {
+        throw strictLidBrokerError(
+            'PROXY_REFRESH_FAILED',
+            'The pinned media proxy could not be renewed.',
+            { status: 502 },
+        );
+    }
+    const retired = context.dispatcher;
+    context.dispatcher = replacement;
+    context.dispatcherCreatedAtMs = nowMs;
+    context.dispatcherRefreshes += 1;
+    if (retired && retired !== replacement) {
+        await disposeStrictLidBrokerDispatcher(retired);
+    }
+    return true;
+}
+
 async function closeStrictLidBrokerAttempt(context, attempt, reason = 'completed') {
     if (!attempt) return;
     if (!attempt.closePromise) {
@@ -4137,6 +4199,12 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
             };
             let upstreamStatus = null;
             try {
+                if (finiteSeek) {
+                    // The provider mutex is held and the previous exact window
+                    // is already closed here. Renew an ageing CONNECT tunnel at
+                    // this safe boundary without ever changing proxy slot/IP.
+                    await refreshStrictLidBrokerDispatcher(context, false);
+                }
                 const headers = {
                     Range: `bytes=${remainingRange.start}-${remainingRange.end}`,
                     Accept: '*/*',
@@ -4429,6 +4497,14 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                 );
                 if (!finiteSeek) throw markStrictLidTerminal(context, publicError);
 
+                // A residential tunnel that reaches its provider-side maximum
+                // age can make several immediate retries reuse the same dead
+                // Undici dispatcher. Rebuild it on the same pinned proxy slot
+                // before retrying the exact remaining bytes.
+                if (publicError.code !== 'PROXY_AUTH_FAILED') {
+                    await refreshStrictLidBrokerDispatcher(context, true);
+                }
+
                 consecutiveNoProgressFailures = progressBytes > 0
                     ? 0
                     : consecutiveNoProgressFailures + 1;
@@ -4585,14 +4661,37 @@ async function createStrictLidBroker(options = {}) {
     const expectedEffectiveUrlIdentitySha256 = /^[a-f0-9]{64}$/.test(String(options.effectiveUrlIdentitySha256 || '').toLowerCase())
         ? String(options.effectiveUrlIdentitySha256).toLowerCase()
         : null;
+    const dispatcherFactory = typeof options.dispatcherFactory === 'function'
+        ? options.dispatcherFactory
+        : null;
+    const ownsDispatcher = Boolean(dispatcherFactory);
+    const now = typeof options.now === 'function' ? options.now : Date.now;
+    const initialDispatcher = dispatcherFactory
+        ? dispatcherFactory()
+        : (Object.prototype.hasOwnProperty.call(options, 'dispatcher')
+            ? options.dispatcher
+            : (pickProxyAgent(proxyKeyFromUrl(sourceUrl)) || null));
+    if (dispatcherFactory && !initialDispatcher) {
+        throw strictLidBrokerError(
+            'PROXY_REFRESH_FAILED',
+            'The pinned media proxy could not be initialised.',
+            { status: 502 },
+        );
+    }
     const controller = new AbortController();
     const context = {
         sourceUrl,
         fileSizeBytes,
         userAgent: String(options.userAgent || FFMPEG_USER_AGENT),
-        dispatcher: Object.prototype.hasOwnProperty.call(options, 'dispatcher')
-            ? options.dispatcher
-            : (pickProxyAgent(proxyKeyFromUrl(sourceUrl)) || null),
+        dispatcher: initialDispatcher,
+        dispatcherFactory,
+        ownsDispatcher,
+        dispatcherCreatedAtMs: dispatcherFactory ? Number(now()) : null,
+        dispatcherMaxAgeMs: Number.isFinite(Number(options.dispatcherMaxAgeMs))
+            ? Math.max(1, Number(options.dispatcherMaxAgeMs))
+            : 4 * 60_000,
+        dispatcherRefreshes: 0,
+        now,
         fetchImpl: options.fetchImpl || strictLidProviderRequest,
         releaseDelayMs: Number.isFinite(Number(options.releaseDelayMs))
             ? Math.max(0, Number(options.releaseDelayMs))
@@ -4696,6 +4795,7 @@ async function createStrictLidBroker(options = {}) {
         get cacheEvictions() { return context.finiteCacheEvictions; },
         get maxQueuedRequests() { return context.finiteMaxQueuedRequests; },
         get maxQueuedProviderWindows() { return context.finiteMaxQueuedProviderWindows; },
+        get dispatcherRefreshes() { return context.dispatcherRefreshes; },
         async close(reason = 'broker_closed') {
             if (closePromise) return closePromise;
             closePromise = (async () => {
@@ -4741,6 +4841,11 @@ async function createStrictLidBroker(options = {}) {
                 });
                 try { server.closeAllConnections?.(); } catch (_) {}
                 await closed;
+                if (context.ownsDispatcher) {
+                    const dispatcher = context.dispatcher;
+                    context.dispatcher = null;
+                    await disposeStrictLidBrokerDispatcher(dispatcher);
+                }
                 options.abortSignal?.removeEventListener?.('abort', onAbort);
                 strictLidBrokers.delete(broker);
             })();
@@ -10413,14 +10518,15 @@ async function prepareFiniteMkvSeekBroker(session, parentSignal = null) {
         sourceUrl: session.sourceUrl,
         fileSizeBytes,
         userAgent: session.userAgent || FFMPEG_USER_AGENT,
+        dispatcherFactory: pinnedProxyAgentFactory(proxyKeyFromUrl(session.sourceUrl)),
+        dispatcherMaxAgeMs: FINITE_MKV_SEEK_PROXY_AGENT_MAX_AGE_MS,
         expectedValidator: session.vodInputValidator,
         effectiveUrlSha256: session.vodInputEffectiveUrlSha256,
         effectiveUrlIdentitySha256: session.vodInputEffectiveUrlIdentitySha256,
         pathPrefix: 'finite-mkv-seek',
-        // Each exact provider window is fully materialized on Hetzner before it
-        // is appended to FFmpeg's continuous local range. Provider windows and
-        // FFmpeg requests are serialized, so the conservative release grace is
-        // reserved for real failures rather than successful exact drains.
+        // Provider chunks advance FFmpeg immediately while each exact window is
+        // also materialized for cache/integrity. Provider windows remain
+        // serialized, so release grace is reserved for real failures.
         completedReleaseDelayMs: 0,
         supersededReleaseDelayMs: PROVIDER_SLOT_RELEASE_DELAY_MS,
         abortSignal: parentSignal,
@@ -10467,6 +10573,9 @@ async function closeFiniteMkvSeekBroker(session) {
     session.startupTimings.finiteMkvSeekCacheMisses = Number(broker.cacheMisses || 0);
     session.startupTimings.finiteMkvSeekCacheEvictions = Number(broker.cacheEvictions || 0);
     session.startupTimings.finiteMkvSeekMaxQueuedRequests = Number(broker.maxQueuedRequests || 0);
+    session.startupTimings.finiteMkvSeekProxyAgentRefreshes = Number(
+        broker.dispatcherRefreshes || 0,
+    );
     await broker.close().catch(() => {});
 }
 
@@ -15644,6 +15753,17 @@ function debugSession(session) {
         codecProfileSource: session.codecProfileSource || null,
         startupPolicy: session.startupPolicy || startupPolicyForSession(session),
         startupTimings: session.startupTimings || null,
+        finiteMkvSeekBroker: session.finiteMkvSeekBroker
+            ? {
+                providerFetches: Number(session.finiteMkvSeekBroker.providerFetches || 0),
+                completedProviderFetches: Number(session.finiteMkvSeekBroker.completedProviderFetches || 0),
+                interruptedProviderFetches: Number(session.finiteMkvSeekBroker.interruptedProviderFetches || 0),
+                dispatcherRefreshes: Number(session.finiteMkvSeekBroker.dispatcherRefreshes || 0),
+                cacheBytes: Number(session.finiteMkvSeekBroker.cacheBytes || 0),
+                cacheHits: Number(session.finiteMkvSeekBroker.cacheHits || 0),
+                cacheMisses: Number(session.finiteMkvSeekBroker.cacheMisses || 0),
+            }
+            : null,
         inputProbeMode: session.fastInputProbe === true ? 'known-fast' : 'full',
         fastInputProbeFallbacks: Number(session.fastInputProbeFallbacks || 0),
         createdAt: session.createdAt.toISOString(),

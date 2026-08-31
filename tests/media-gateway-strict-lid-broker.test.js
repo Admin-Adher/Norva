@@ -465,6 +465,116 @@ test('strict LID freezes one sticky provider dispatcher for every sequential ran
   assert.equal(observedDispatchers[1], stickyDispatcher);
 });
 
+test('finite seek broker renews an ageing dispatcher on the same pinned proxy slot', async () => {
+  const { createStrictLidBroker } = brokerHarness();
+  const data = Buffer.from(Array.from({ length: 16 }, (_, index) => index));
+  const observedDispatchers = [];
+  const closedGenerations = [];
+  let generation = 0;
+  let nowMs = 0;
+  const dispatcherFactory = () => {
+    const dispatcher = {
+      slot: 3,
+      generation: ++generation,
+      async close() { closedGenerations.push(this.generation); },
+    };
+    return dispatcher;
+  };
+  const broker = await createStrictLidBroker({
+    sourceUrl: 'https://provider.invalid/movie/account/secret/file.mkv',
+    fileSizeBytes: data.length,
+    pathPrefix: 'finite-mkv-seek',
+    finiteWindowBytes: 8,
+    finiteCacheBytes: 16,
+    releaseDelayMs: 0,
+    completedReleaseDelayMs: 0,
+    dispatcherFactory,
+    dispatcherMaxAgeMs: 5,
+    now: () => nowMs,
+    fetchImpl: async (_url, options) => {
+      observedDispatchers.push(options.dispatcher);
+      const match = /^bytes=(\d+)-(\d+)$/.exec(options.headers.Range);
+      const start = Number(match[1]);
+      const end = Number(match[2]);
+      const body = data.subarray(start, end + 1);
+      nowMs += 10;
+      return new Response(body, {
+        status: 206,
+        headers: {
+          'Content-Range': `bytes ${start}-${end}/${data.length}`,
+          'Content-Length': String(body.length),
+          ETag: '"renew-v1"',
+        },
+      });
+    },
+  });
+
+  try {
+    const response = await fetch(broker.inputUrl, { headers: { Range: 'bytes=0-15' } });
+    assert.equal(response.status, 206);
+    assert.deepEqual(Buffer.from(await response.arrayBuffer()), data);
+    assert.deepEqual(observedDispatchers.map((dispatcher) => dispatcher.slot), [3, 3]);
+    assert.deepEqual(observedDispatchers.map((dispatcher) => dispatcher.generation), [1, 2]);
+    assert.deepEqual(closedGenerations, [1]);
+    assert.equal(broker.dispatcherRefreshes, 1);
+  } finally {
+    await broker.close();
+  }
+  assert.deepEqual(closedGenerations, [1, 2]);
+});
+
+test('finite seek broker replaces a failed tunnel before retrying remaining bytes', async () => {
+  const { createStrictLidBroker } = brokerHarness();
+  const data = Buffer.alloc(8, 0x6a);
+  const observedDispatchers = [];
+  const closedGenerations = [];
+  let generation = 0;
+  let calls = 0;
+  const dispatcherFactory = () => ({
+    slot: 4,
+    generation: ++generation,
+    async close() { closedGenerations.push(this.generation); },
+  });
+  const broker = await createStrictLidBroker({
+    sourceUrl: 'https://provider.invalid/movie/account/secret/file.mkv',
+    fileSizeBytes: data.length,
+    pathPrefix: 'finite-mkv-seek',
+    finiteWindowBytes: 8,
+    finiteCacheBytes: 8,
+    releaseDelayMs: 0,
+    completedReleaseDelayMs: 0,
+    dispatcherFactory,
+    fetchImpl: async (_url, options) => {
+      calls += 1;
+      observedDispatchers.push(options.dispatcher);
+      if (calls === 1) throw new Error('proxy tunnel reset');
+      return new Response(data, {
+        status: 206,
+        headers: {
+          'Content-Range': `bytes 0-7/${data.length}`,
+          'Content-Length': String(data.length),
+          ETag: '"retry-v1"',
+        },
+      });
+    },
+  });
+
+  try {
+    const response = await fetch(broker.inputUrl, { headers: { Range: 'bytes=0-7' } });
+    assert.equal(response.status, 206);
+    assert.deepEqual(Buffer.from(await response.arrayBuffer()), data);
+    assert.deepEqual(observedDispatchers.map((dispatcher) => dispatcher.slot), [4, 4]);
+    assert.deepEqual(observedDispatchers.map((dispatcher) => dispatcher.generation), [1, 2]);
+    assert.deepEqual(closedGenerations, [1]);
+    assert.equal(broker.interruptedProviderFetches, 1);
+    assert.equal(broker.completedProviderFetches, 1);
+    assert.equal(broker.dispatcherRefreshes, 1);
+  } finally {
+    await broker.close();
+  }
+  assert.deepEqual(closedGenerations, [1, 2]);
+});
+
 test('strict broker can reopen immediately only after an exact provider range is fully drained', async (t) => {
   const { createStrictLidBroker } = brokerHarness();
   const data = Buffer.alloc(64, 0x5c);
@@ -1509,7 +1619,7 @@ test('strict LID rejects invalid exact signed coordinates before creating a serv
   assert.match(route, /detectLanguageRequestPolicy\(req, options\)[\s\S]*validateDetectLanguageCapability\(capabilityToken, policy\.requiredScope\)/);
   assert.match(gatewaySource, /strictLidLoopbackBrokerProtocol: 1/);
   assert.match(gatewaySource, /strictLidFileSizeClaim: 'fileSizeBytes'/);
-  assert.match(gatewaySource, /const GATEWAY_VERSION = 131/);
+  assert.match(gatewaySource, /const GATEWAY_VERSION = 132/);
   assert.match(gatewaySource, /supersededReleaseDelayMs:\s*PROVIDER_SLOT_RELEASE_DELAY_MS/);
   assert.match(gatewaySource, /strictLidProviderDrainProtocol: 1/);
   assert.match(gatewaySource, /strictLidWeakFallbackProtocol: 1/);
