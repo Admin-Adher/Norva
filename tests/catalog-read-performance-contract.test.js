@@ -112,7 +112,7 @@ test('Home and phone genre rails bound pre-paint catalogue hydration', () => {
   assert.match(catalog, /variantsByTitle: await variantsPromise/);
   assert.match(read('public/js/pages/MoviesPage.js'), /limit: this\._isTvMode\(\) \? 18 : 12/);
   assert.match(read('public/js/pages/SeriesPage.js'), /limit: this\._isTvMode\(\) \? 18 : 12/);
-  assert.match(appHtml, /MoviesPage\.js\?v=58/);
+  assert.match(appHtml, /MoviesPage\.js\?v=59/);
   assert.match(appHtml, /SeriesPage\.js\?v=58/);
 });
 
