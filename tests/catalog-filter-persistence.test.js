@@ -446,6 +446,45 @@ for (const spec of [
         assert.equal(page.shouldShowRails(), false);
     });
 
+    test(`${spec.className} reopens the same language bucket after returning to Any Audio`, () => {
+        const { Page } = loadPage(spec.file, spec.className);
+        const page = Object.create(Page.prototype);
+        let disconnected = 0;
+        let flatLoads = 0;
+        let bucketOpens = 0;
+
+        Object.assign(page, {
+            audioSelect: { value: '' },
+            subtitleSelect: { value: '' },
+            sortSelect: { value: 'default' },
+            categoryMulti: { getSelected: () => new Set() },
+            activeBucket: 'all',
+            activeBucketLangKey: 'audio=fr',
+            bucketRequestId: 7,
+            bucketObserver: { disconnect: () => { disconnected += 1; } },
+            persistFilters: () => {},
+            renderActiveFilterChips: () => {},
+            isCloudPagedMode: () => true,
+            shouldShowRails: () => false,
+            currentBucketViewKey: () => 'audio=fr',
+            openBucket: () => { bucketOpens += 1; }
+        });
+        page[spec.key === 'movies' ? 'loadMovies' : 'loadSeries'] = () => { flatLoads += 1; };
+
+        page.onFiltersChanged();
+
+        assert.equal(page.activeBucket, null);
+        assert.equal(page.activeBucketLangKey, null);
+        assert.equal(page.bucketRequestId, 8);
+        assert.equal(disconnected, 1);
+        assert.equal(flatLoads, 1);
+
+        page.audioSelect.value = 'fr';
+        page.onFiltersChanged();
+
+        assert.equal(bucketOpens, 1);
+    });
+
     test(`${spec.className} Clear all cannot resurrect pending dynamic filters`, () => {
         const { Page, saves } = loadPage(spec.file, spec.className);
         const page = Object.create(Page.prototype);

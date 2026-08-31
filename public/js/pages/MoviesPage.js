@@ -319,6 +319,15 @@ class MoviesPage {
             // no genre selected → a catalogue-wide grid filtered server-side by each
             // title's available version languages.
             if (this.isLanguageFilterActive()) { this.openLanguageBucket(); return; }
+            // A chip/reset can clear the bucket without pressing its dedicated Back
+            // button. Drop the stale identity so selecting the same genre or language
+            // later cannot be mistaken for an already-open view.
+            if (this.activeBucket) {
+                this.activeBucket = null;
+                this.activeBucketLangKey = null;
+                this.bucketRequestId = (this.bucketRequestId || 0) + 1;
+                this.bucketObserver?.disconnect();
+            }
         }
         if (this.shouldShowRails()) {
             this.renderGenreRails();
