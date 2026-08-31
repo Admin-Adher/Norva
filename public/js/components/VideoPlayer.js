@@ -54,6 +54,10 @@ class VideoPlayer {
         this._playQueue = Promise.resolve();
         this._vfTimer = null;
         this._variantFallbackAttempts = 0;
+        this._variantFallbackInFlight = null;
+        this._variantFallbackOperationSeq = 0;
+        this._variantFailureHandledSwitchSeq = -1;
+        this._mediaElementErrorTimer = null;
         this._lastCommittedVariantSwitchSeq = -1;
         this._pendingVideoFrameCallback = null;
         this._liveSelectionSeq = null;
@@ -1136,11 +1140,13 @@ class VideoPlayer {
             if (this.video.currentTime > 0 && this.video.readyState >= 2) this.markPlaybackUsable();
         });
 
-        this.video.addEventListener('error', () => {
-            const err = this.video?.error;
-            if (!err || this._clearingMedia) return;
-            this.handlePlaybackError(err.message || 'Media error');
-        });
+        // A detached source can emit a late HTMLMediaElement error just as the
+        // replacement source starts loading. Treating that teardown event as a
+        // real failure started a second TF1 fallback while the first sibling was
+        // still resolving; the late switch then expired the healthy session.
+        // Re-check after a short stabilization window. hls.js fatal errors still
+        // reach handlePlaybackError directly and are not delayed here.
+        this.video.addEventListener('error', () => this._scheduleMediaElementError());
 
         // Initialize HLS.js if supported. The runtime may still be loading (vendored
         // file / CDN fallback) — in that case set it up as soon as ensureHls resolves;
@@ -1468,7 +1474,9 @@ class VideoPlayer {
             if (this.isStalePlayRequest(requestSeq)) return;
 
             // Stop current playback
-            await this.stop();
+            await this.stop({
+                preserveVariantFallback: channel?._norvaVariantFallbackOperationSeq === this._variantFallbackOperationSeq
+            });
             if (this.isStalePlayRequest(requestSeq)) return;
             if (cloudPlaybackSessionId) {
                 this.registerCloudPlaybackSession(cloudPlaybackSessionId);
@@ -1916,6 +1924,7 @@ class VideoPlayer {
 
     markPlaybackUsable() {
         if (!this.hasCurrentMedia() || this._playbackStatusOkReported) return;
+        this._clearMediaElementErrorTimer();
         this._playbackStatusOkReported = true;
         this._hideChannelSplash();
         this.resetGatewayHlsRetries();
@@ -1938,6 +1947,7 @@ class VideoPlayer {
             this._liveZapStartedAt = null;
         } catch (_) {}
         this._variantFallbackAttempts = 0;
+        this._variantFailureHandledSwitchSeq = -1;
         this._triedVariants.clear();
         this._clearVariantFallbackTimer();
         if (this._lastCommittedVariantSwitchSeq !== this._variantSwitchSeq) {
@@ -2289,6 +2299,26 @@ class VideoPlayer {
                 }
             })).catch(() => {});
         } catch (_) {}
+    }
+
+    _clearMediaElementErrorTimer() {
+        if (!this._mediaElementErrorTimer) return;
+        clearTimeout(this._mediaElementErrorTimer);
+        this._mediaElementErrorTimer = null;
+    }
+
+    _scheduleMediaElementError() {
+        const err = this.video?.error;
+        if (!err || this._clearingMedia) return;
+        const switchSeq = this._variantSwitchSeq;
+        const message = err.message || 'Media error';
+        this._clearMediaElementErrorTimer();
+        this._mediaElementErrorTimer = setTimeout(() => {
+            this._mediaElementErrorTimer = null;
+            if (switchSeq !== this._variantSwitchSeq || this._clearingMedia) return;
+            if (!this.video?.error || this.hasCurrentMedia()) return;
+            this.handlePlaybackError(message);
+        }, 600);
     }
 
     handlePlaybackError(reason = '') {
@@ -2695,6 +2725,15 @@ class VideoPlayer {
     /** Switch to another variant: release first, then resolve and reload. */
     async switchVariant(variant, options = {}) {
         if (!variant || !this.currentChannel) return;
+        const automaticOperationSeq = options.automatic ? options.fallbackOperationSeq : null;
+        if (!options.automatic) {
+            // A manual quality change supersedes any automatic recovery already
+            // waiting on the network. Its eventual session is expired below.
+            ++this._variantFallbackOperationSeq;
+            this._variantFallbackInFlight = null;
+        }
+        const isStaleAutomaticSwitch = () => options.automatic &&
+            automaticOperationSeq !== this._variantFallbackOperationSeq;
         this.qualityMenu?.classList.add('hidden');
         if (this.currentVariant && String(variant.streamId) === String(this.currentVariant.streamId) && this.video.readyState >= 3) return;
         if (!options.automatic) {
@@ -2707,7 +2746,8 @@ class VideoPlayer {
             // Single-slot invariant: the old transport/session must be fully gone
             // before resolving the sibling. prepareLiveSwitch waits for the cloud
             // session expiry while retaining the loading surface.
-            await this.prepareLiveSwitch();
+            await this.prepareLiveSwitch({ preserveVariantFallback: options.automatic });
+            if (isStaleAutomaticSwitch()) return;
 
             const raw = variant.channel || variant;
             const providerContainer =
@@ -2723,7 +2763,23 @@ class VideoPlayer {
             const url = res && (res.url || res.streamUrl);
             if (!url) throw new Error('no url');
             resolvedSessionId = res.sessionId || null;
+            if (isStaleAutomaticSwitch()) {
+                if (resolvedSessionId) {
+                    try { await window.NorvaCloud?.playback?.expireSession?.(resolvedSessionId); } catch (_) { }
+                }
+                return;
+            }
             const ch = this.buildVariantChannel(variant, res);
+            if (options.automatic) {
+                try {
+                    Object.defineProperty(ch, '_norvaVariantFallbackOperationSeq', {
+                        value: automaticOperationSeq,
+                        configurable: true
+                    });
+                } catch (_) {
+                    ch._norvaVariantFallbackOperationSeq = automaticOperationSeq;
+                }
+            }
             await this.play(ch, url);
             const switchSeq = this._variantSwitchSeq;
             if (this.shouldAutoFallbackVariants()) this._armVariantFallback(variant, switchSeq);
@@ -2732,6 +2788,7 @@ class VideoPlayer {
             if (resolvedSessionId) {
                 try { await window.NorvaCloud?.playback?.expireSession?.(resolvedSessionId); } catch (_) { }
             }
+            if (options.automatic) throw e;
             if (!this._tryFallback(variant, e?.message || 'resolve failed')) {
                 const selectSeq = this.currentChannel?._norvaSelection?.selectSeq;
                 if (selectSeq != null) window.app?.channelList?.failPendingPlaybackSelection?.(selectSeq);
@@ -2781,6 +2838,11 @@ class VideoPlayer {
         if (switchSeq !== this._variantSwitchSeq) return false;
         if (!this.currentVariant || String(this.currentVariant.streamId) !== String(failed.streamId)) return false;
         if (!this.qualityGroup || !window.ChannelGrouping) return false;
+        // Coalesce every error path for the same attempt (HTML media error,
+        // hls.js fatal event and startup timer). Only one sibling resolver may
+        // hold the mono-session provider handoff at a time.
+        if (this._variantFallbackInFlight) return true;
+        if (this._variantFailureHandledSwitchSeq === switchSeq) return true;
         try { window.ChannelGrouping.recordVariantOutcome?.(failed, 'failure', { reason }); } catch (_) { }
         const maxFallbacks = 2; // initial variant + at most two siblings
         if (this._variantFallbackAttempts >= maxFallbacks) {
@@ -2792,8 +2854,39 @@ class VideoPlayer {
             .filter(v => !this._triedVariants.has(String(v.streamId)));
         if (order.length) {
             this._variantFallbackAttempts += 1;
+            this._variantFailureHandledSwitchSeq = switchSeq;
             console.warn('[Quality] fallback (' + reason + ') -> ' + order[0].label);
-            this.switchVariant(order[0], { automatic: true, reason });
+            const target = order[0];
+            const operationSeq = ++this._variantFallbackOperationSeq;
+            const task = (async () => {
+                let followupReason = null;
+                try {
+                    await this.switchVariant(target, {
+                        automatic: true,
+                        reason,
+                        fallbackOperationSeq: operationSeq
+                    });
+                } catch (err) {
+                    followupReason = err?.message || 'resolve failed';
+                } finally {
+                    if (this._variantFallbackInFlight?.operationSeq === operationSeq) {
+                        this._variantFallbackInFlight = null;
+                    }
+                }
+                if (followupReason && operationSeq === this._variantFallbackOperationSeq) {
+                    // The attempted sibling failed before it could start. Advance
+                    // serially; never recurse while the previous operation is live.
+                    this._variantFailureHandledSwitchSeq = -1;
+                    const nextSeq = this._variantSwitchSeq;
+                    if (!this._tryFallback(target, followupReason, nextSeq)) {
+                        const selectSeq = this.currentChannel?._norvaSelection?.selectSeq;
+                        if (selectSeq != null) window.app?.channelList?.failPendingPlaybackSelection?.(selectSeq);
+                        this.showError('No working stream variant is currently available for this channel.<br>Try again later or choose another channel.');
+                        this.handlePlaybackError(followupReason);
+                    }
+                }
+            })();
+            this._variantFallbackInFlight = { operationSeq, switchSeq, target, task };
             return true;
         } else {
             console.warn('[Quality] no healthy fallback left for ' + (this.qualityGroup.name || ''));
@@ -2987,9 +3080,14 @@ class VideoPlayer {
     /**
      * Stop playback
      */
-    stop() {
+    stop(options = {}) {
+        if (!options.preserveVariantFallback) {
+            ++this._variantFallbackOperationSeq;
+            this._variantFallbackInFlight = null;
+        }
         ++this._variantSwitchSeq;
         this._clearVariantFallbackTimer();
+        this._clearMediaElementErrorTimer();
         this.resetGatewayHlsRetries();
         // Reset triggers #1 (VOD launch -> WatchPage calls player.stop()) and
         // #2 (channel change -> _playInternal calls stop()): drop the live badge
@@ -3041,9 +3139,14 @@ class VideoPlayer {
     // to trigger self-heal churn — a cascade of sessions each killing the last,
     // leaving the channel broken until a page refresh. Killing the old player and
     // releasing its session BEFORE creating the new one removes that race.
-    async prepareLiveSwitch() {
+    async prepareLiveSwitch(options = {}) {
+        if (!options.preserveVariantFallback) {
+            ++this._variantFallbackOperationSeq;
+            this._variantFallbackInFlight = null;
+        }
         ++this._variantSwitchSeq;
         this._clearVariantFallbackTimer?.();
+        this._clearMediaElementErrorTimer();
         this.resetGatewayHlsRetries();
         this._gatewayRecreateCount = 0;
         this._gatewayRecreateKey = null;
