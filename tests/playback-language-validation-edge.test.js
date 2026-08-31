@@ -16,6 +16,7 @@ const presenceMigration = read('supabase/migrations/20260816141150_provider_acco
 const activityMigration = read('supabase/migrations/20260816171003_provider_account_language_validation_activity.sql');
 const profileParityMigration = read('supabase/migrations/20260818162200_vod_language_validation_profile_parity.sql');
 const retryWorkerMigration = read('supabase/migrations/20260818165000_vod_language_validation_retry_worker.sql');
+const preemptionMigration = read('supabase/migrations/20260831032956_provider_lid_viewer_preemption_quarantine_v1.sql');
 const edgeDeploy = read('ops/hetzner/scripts/04-deploy-edge-functions.sh');
 
 function between(source, startMarker, endMarker) {
@@ -89,7 +90,7 @@ test('cron-authenticated retry worker schedules a bounded provider-distinct batc
   assert.match(retryWorkerMigration, /norva_cron_shared_secret/);
 });
 
-test('foreground validation ignores presence intent but still blocks real provider activity', () => {
+test('foreground playback preempts background validation and requires an attested Gateway drain', () => {
   const idle = between(
     playback,
     'async function assertLanguageValidationIdle(',
@@ -175,10 +176,11 @@ test('foreground validation ignores presence intent but still blocks real provid
     'transport EOF alone must not release the provider account lease',
   );
   assert.match(worker, /providerAccountLeaseClaimed[\s\S]*providerAccountLeaseReleaseSafe[\s\S]*release_provider_account_language_validation/);
-  assert.match(create, /claimError\.code[\s\S]*55P03[\s\S]*provider language validation in progress[\s\S]*LANGUAGE_VALIDATION_IN_PROGRESS/);
-  assert.match(playback, /version: 62[\s\S]*languageValidationPresenceIntentProtocol: 1[\s\S]*languageValidationPlaybackLeaseProtocol: 1[\s\S]*languageValidationActivityProtocol: 1[\s\S]*languageValidationDurationClaimProtocol: 1[\s\S]*languageValidationWindowCheckpointProtocol: LANGUAGE_VALIDATION_WINDOW_CHECKPOINT_PROTOCOL[\s\S]*languageValidationTaskBudgetMs: LANGUAGE_VALIDATION_TASK_BUDGET_MS[\s\S]*languageValidationFetchTimeoutMs: LANGUAGE_VALIDATION_FETCH_TIMEOUT_MS[\s\S]*languageValidationPostFetchReserveMs: LANGUAGE_VALIDATION_POST_FETCH_RESERVE_MS[\s\S]*languageValidationJobLeaseSeconds: LANGUAGE_VALIDATION_JOB_LEASE_SECONDS[\s\S]*languageValidationSampleDurationSeconds: LANGUAGE_VALIDATION_SAMPLE_DURATION_SECONDS[\s\S]*languageValidationRetryWorkerProtocol: LANGUAGE_VALIDATION_RETRY_WORKER_PROTOCOL[\s\S]*languageValidationRetryWorkerBatch: LANGUAGE_VALIDATION_RETRY_WORKER_BATCH[\s\S]*languageValidationGatewayFailureRetrySeconds:[\s\S]*LANGUAGE_VALIDATION_GATEWAY_FAILURE_RETRY_MS \/ 1000/);
+  assert.match(create, /"claim_cloud_playback_session"[\s\S]*preemptProviderLanguageValidationTransports\([\s\S]*LANGUAGE_VALIDATION_PREEMPTION_DRAIN_FAILED/);
+  assert.match(playback, /async function preemptProviderLanguageValidationTransports[\s\S]*stop-provider-affinities[\s\S]*payload\.protocol !== 1[\s\S]*payload\.providerDrained !== true/);
+  assert.match(playback, /version: 63[\s\S]*languageValidationPresenceIntentProtocol: 1[\s\S]*languageValidationPlaybackLeaseProtocol: 1[\s\S]*languageValidationActivityProtocol: 1[\s\S]*languageValidationDurationClaimProtocol: 1[\s\S]*languageValidationWindowCheckpointProtocol: LANGUAGE_VALIDATION_WINDOW_CHECKPOINT_PROTOCOL[\s\S]*languageValidationTaskBudgetMs: LANGUAGE_VALIDATION_TASK_BUDGET_MS[\s\S]*languageValidationFetchTimeoutMs: LANGUAGE_VALIDATION_FETCH_TIMEOUT_MS[\s\S]*languageValidationPostFetchReserveMs: LANGUAGE_VALIDATION_POST_FETCH_RESERVE_MS[\s\S]*languageValidationJobLeaseSeconds: LANGUAGE_VALIDATION_JOB_LEASE_SECONDS[\s\S]*languageValidationSampleDurationSeconds: LANGUAGE_VALIDATION_SAMPLE_DURATION_SECONDS[\s\S]*languageValidationRetryWorkerProtocol: LANGUAGE_VALIDATION_RETRY_WORKER_PROTOCOL[\s\S]*languageValidationRetryWorkerBatch: LANGUAGE_VALIDATION_RETRY_WORKER_BATCH[\s\S]*languageValidationProviderAttemptProtocol: 1[\s\S]*languageValidationViewerPreemptionProtocol: 1[\s\S]*languageValidationMaxConsecutiveProviderNoProgress:[\s\S]*LANGUAGE_VALIDATION_MAX_CONSECUTIVE_PROVIDER_NO_PROGRESS[\s\S]*languageValidationGatewayFailureRetrySeconds:[\s\S]*LANGUAGE_VALIDATION_GATEWAY_FAILURE_RETRY_MS \/ 1000/);
   assert.match(playback, /const LANGUAGE_VALIDATION_FETCH_TIMEOUT_MS = 240_000/);
-  assert.match(edgeDeploy, /EXPECTED_PLAYBACK_VERSION=62/);
+  assert.match(edgeDeploy, /EXPECTED_PLAYBACK_VERSION=63/);
   assert.match(edgeDeploy, /EXPECTED_LANGUAGE_VALIDATION_TASK_BUDGET_MS=270000/);
   assert.match(edgeDeploy, /EXPECTED_LANGUAGE_VALIDATION_FETCH_TIMEOUT_MS=240000/);
   assert.match(edgeDeploy, /EXPECTED_LANGUAGE_VALIDATION_POST_FETCH_RESERVE_MS=30000/);
@@ -187,6 +189,9 @@ test('foreground validation ignores presence intent but still blocks real provid
   assert.match(edgeDeploy, /EXPECTED_LANGUAGE_VALIDATION_RETRY_WORKER_PROTOCOL=1/);
   assert.match(edgeDeploy, /EXPECTED_LANGUAGE_VALIDATION_RETRY_WORKER_BATCH=2/);
   assert.match(edgeDeploy, /EXPECTED_LANGUAGE_VALIDATION_GATEWAY_FAILURE_RETRY_SECONDS=300/);
+  assert.match(edgeDeploy, /EXPECTED_LANGUAGE_VALIDATION_PROVIDER_ATTEMPT_PROTOCOL=1/);
+  assert.match(edgeDeploy, /EXPECTED_LANGUAGE_VALIDATION_VIEWER_PREEMPTION_PROTOCOL=1/);
+  assert.match(edgeDeploy, /EXPECTED_LANGUAGE_VALIDATION_MAX_CONSECUTIVE_PROVIDER_NO_PROGRESS=4/);
   assert.match(edgeDeploy, /languageValidationSampleDurationSeconds\\\":\$EXPECTED_LANGUAGE_VALIDATION_SAMPLE_DURATION_SECONDS/);
   assert.match(edgeDeploy, /languageValidationRetryWorkerProtocol\\\":\$EXPECTED_LANGUAGE_VALIDATION_RETRY_WORKER_PROTOCOL/);
   assert.match(edgeDeploy, /languageValidationRetryWorkerBatch\\\":\$EXPECTED_LANGUAGE_VALIDATION_RETRY_WORKER_BATCH/);
@@ -453,7 +458,7 @@ test('provider account lease release requires the exact Gateway drain attestatio
   }
 });
 
-test('presence intent cannot hide fresh provider activity and the foreground RPC is service-only', () => {
+test('foreground playback atomically parks validation work and records an opaque preemption audit', () => {
   assert.match(
     presenceMigration,
     /create or replace function public\.provider_account_touch_by_user\(p_user uuid, p_kind text\)/i,
@@ -482,16 +487,33 @@ test('presence intent cannot hide fresh provider activity and the foreground RPC
     presenceMigration,
     /create or replace function public\.claim_provider_account_language_validation[\s\S]*pg_advisory_xact_lock[\s\S]*'provider-session:' \|\| p_provider_account_hash[\s\S]*cloud_playback_sessions/i,
   );
+  assert.match(preemptionMigration, /create or replace function public\.claim_cloud_playback_session[\s\S]*pg_advisory_xact_lock[\s\S]*delete from public\.provider_account_language_validation_leases[\s\S]*LANGUAGE_VALIDATION_VIEWER_PREEMPTED[\s\S]*insert into public\.provider_account_language_validation_preemptions/i);
+  assert.match(preemptionMigration, /validation_lease_owner_sha256[\s\S]*extensions\.digest\(v_validation_owner, 'sha256'\)/i);
   assert.match(
-    presenceMigration,
-    /create or replace function public\.claim_cloud_playback_session[\s\S]*pg_advisory_xact_lock[\s\S]*provider_account_language_validation_leases[\s\S]*errcode = '55P03'/i,
+    preemptionMigration,
+    /norva_quarantine_audio_validation_provider_no_progress[\s\S]*delete from public\.provider_account_language_validation_leases[\s\S]*'language-validation-track:' \|\| v_job\.id::text \|\| ':%'[\s\S]*delete from public\.provider_file_probe_leases/i,
   );
+  assert.match(preemptionMigration, /revoke all on table public\.provider_account_language_validation_preemptions[\s\S]*from public, anon, authenticated/i);
+  assert.match(preemptionMigration, /grant select, insert, update, delete[\s\S]*provider_account_language_validation_preemptions to service_role/i);
   assert.equal(
     (presenceMigration.match(/hashtextextended\('provider-session:' \|\| p_provider_account_hash, 0\)/g) || []).length,
     3,
   );
   assert.match(presenceMigration, /notify pgrst, 'reload schema'/i);
   assert.match(playback, /LANGUAGE_VALIDATION_PROVIDER_LEASE_ERROR[\s\S]*Date\.now\(\) \+ 30_000/);
+});
+
+test('real provider attempts are crash-safe, bounded and quarantined without deleting evidence', () => {
+  assert.match(preemptionMigration, /add column if not exists provider_attempt_count integer not null default 0/i);
+  assert.match(preemptionMigration, /add column if not exists consecutive_provider_no_progress_count integer not null default 0/i);
+  assert.match(preemptionMigration, /create or replace function public\.begin_catalog_file_audio_validation_provider_attempt[\s\S]*p_max_consecutive_no_progress integer default 4[\s\S]*provider_attempt_count = provider_attempt_count \+ 1[\s\S]*consecutive_provider_no_progress_count = consecutive_provider_no_progress_count \+ 1/i);
+  assert.match(preemptionMigration, /create or replace function public\.finish_catalog_file_audio_validation_provider_attempt[\s\S]*viewer_preempted[\s\S]*greatest\([\s\S]*0, consecutive_provider_no_progress_count - 1[\s\S]*LANGUAGE_VALIDATION_NO_PROGRESS_QUARANTINED/i);
+  assert.match(preemptionMigration, /norva_reset_audio_validation_provider_no_progress_on_checkpoint[\s\S]*new\.strict_lid_window_position > old\.strict_lid_window_position[\s\S]*new\.next_track_position > old\.next_track_position/i);
+  assert.match(preemptionMigration, /v_job_id constant uuid := '5df2bccb-cae4-47fb-97f1-95c1efdc95b3'[\s\S]*state = 'failed'[\s\S]*quarantined_at = v_now/i);
+  assert.doesNotMatch(preemptionMigration, /delete from public\.catalog_file_audio_validation_jobs/i);
+  assert.match(playback, /begin_catalog_file_audio_validation_provider_attempt[\s\S]*LANGUAGE_VALIDATION_MAX_CONSECUTIVE_PROVIDER_NO_PROGRESS[\s\S]*fetch\([\s\S]*detectionAccess\.gatewayUrl/);
+  assert.match(playback, /finish_catalog_file_audio_validation_provider_attempt[\s\S]*p_outcome: outcome/);
+  assert.match(playback, /provider_account_language_validation_lease_is_current/);
 });
 
 test('language-validation activity yields to real activity but remains busy for background work', () => {

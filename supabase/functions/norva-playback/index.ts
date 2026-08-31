@@ -202,6 +202,7 @@ const LANGUAGE_VALIDATION_WINDOW_RECEIPT_MAX_CHARS = 98_304;
 const LANGUAGE_VALIDATION_FINALIZE_BODY_MAX_BYTES = 1_048_576;
 const LANGUAGE_VALIDATION_RETRY_WORKER_PROTOCOL = 1;
 const LANGUAGE_VALIDATION_RETRY_WORKER_BATCH = 2;
+const LANGUAGE_VALIDATION_MAX_CONSECUTIVE_PROVIDER_NO_PROGRESS = 4;
 // Persistent media-extraction failures must not consume a single-connection
 // provider twice every minute. Watched files stay prioritized by the durable
 // worker, but a failed Gateway attempt yields the provider lane for five
@@ -278,7 +279,7 @@ async function handleRequest(req: Request): Promise<Response> {
       return json(req, {
         ok: true,
         service: "norva-playback",
-        version: 62,
+        version: 63,
         nativeHeartbeatProtocol: 1,
         providerCircuitProtocol: 1,
         vodContainerSelfHealProtocol: 1,
@@ -297,6 +298,10 @@ async function handleRequest(req: Request): Promise<Response> {
         languageValidationSampleDurationSeconds: LANGUAGE_VALIDATION_SAMPLE_DURATION_SECONDS,
         languageValidationRetryWorkerProtocol: LANGUAGE_VALIDATION_RETRY_WORKER_PROTOCOL,
         languageValidationRetryWorkerBatch: LANGUAGE_VALIDATION_RETRY_WORKER_BATCH,
+        languageValidationProviderAttemptProtocol: 1,
+        languageValidationViewerPreemptionProtocol: 1,
+        languageValidationMaxConsecutiveProviderNoProgress:
+          LANGUAGE_VALIDATION_MAX_CONSECUTIVE_PROVIDER_NO_PROGRESS,
         languageValidationGatewayFailureRetrySeconds:
           LANGUAGE_VALIDATION_GATEWAY_FAILURE_RETRY_MS / 1000,
         languageValidationGatewayMethod: "POST",
@@ -1062,17 +1067,7 @@ async function createPlaybackSession(
       p_expires_at: expiresAt,
     },
   );
-  if (claimError) {
-    if (
-      stringOr(claimError.code, "") === "55P03"
-      && stringOr(claimError.message, "") === "provider language validation in progress"
-    ) {
-      throw new HttpError(409, "Provider account is reserved for language validation", {
-        code: "LANGUAGE_VALIDATION_IN_PROGRESS",
-      });
-    }
-    throwDb(claimError, "Unable to claim provider playback session");
-  }
+  if (claimError) throwDb(claimError, "Unable to claim provider playback session");
 
   const claim = Array.isArray(claimRows)
     ? recordOrEmpty(claimRows[0])
@@ -1091,6 +1086,37 @@ async function createPlaybackSession(
   if (sessionError || !session) {
     if (sessionError) throwDb(sessionError, "Unable to load claimed playback session");
     throw new HttpError(500, "Unable to load claimed playback session");
+  }
+
+  // Viewer playback is authoritative. The DB claim removed the background
+  // validation lease under the provider advisory lock; now close every real
+  // Gateway transport for that provider affinity and require an explicit drain
+  // attestation before returning/opening a new provider URL. Calling all
+  // configured routes also catches an orphaned broker whose DB lease expired.
+  try {
+    await preemptProviderLanguageValidationTransports({
+      db,
+      targetUrl,
+    });
+  } catch (preemptionError) {
+    try {
+      await expirePlaybackSession(sessionId, userId, db);
+    } catch (_) {
+      await db
+        .from("cloud_playback_sessions")
+        .update({
+          status: "expired",
+          expires_at: new Date().toISOString(),
+          superseded_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", sessionId)
+        .eq("user_id", userId);
+    }
+    throw new HttpError(503, "Background provider transport could not be drained", {
+      code: "LANGUAGE_VALIDATION_PREEMPTION_DRAIN_FAILED",
+      cause: preemptionError instanceof Error ? preemptionError.message : "gateway drain failed",
+    });
   }
 
   const playbackCreatedAt = stringOr(session.created_at, new Date().toISOString());
@@ -2421,6 +2447,33 @@ async function processOneLanguageValidationTrack(db: SupabaseClient, jobId: stri
   let providerAccountLeaseHash = "";
   let providerLeaseOwner = "";
   let identityKey = stringOr(claim.identityKey, "");
+  let providerAttemptToken: string | null = null;
+  const settleProviderAttempt = async (outcome: "no_progress" | "viewer_preempted") => {
+    if (!providerAttemptToken) return null;
+    const attemptToken = providerAttemptToken;
+    try {
+      const { data, error } = await db.rpc(
+        "finish_catalog_file_audio_validation_provider_attempt",
+        {
+          p_job_id: jobId,
+          p_lease_owner: leaseOwner,
+          p_attempt_token: attemptToken,
+          p_outcome: outcome,
+          p_max_consecutive_no_progress:
+            LANGUAGE_VALIDATION_MAX_CONSECUTIVE_PROVIDER_NO_PROGRESS,
+        },
+      );
+      if (error || !data) {
+        console.warn("[norva-playback] language validation provider attempt settlement lost ownership");
+        return null;
+      }
+      providerAttemptToken = null;
+      return recordOrEmpty(data);
+    } catch (_) {
+      console.warn("[norva-playback] language validation provider attempt settlement deferred");
+      return null;
+    }
+  };
   try {
     const current = await revalidateLanguageValidationClaim(db, claim);
     identityKey = current.identityKey;
@@ -2634,6 +2687,32 @@ async function processOneLanguageValidationTrack(db: SupabaseClient, jobId: stri
       });
       return;
     }
+    const { data: providerAttempt, error: providerAttemptError } = await db.rpc(
+      "begin_catalog_file_audio_validation_provider_attempt",
+      {
+        p_job_id: jobId,
+        p_lease_owner: leaseOwner,
+        p_provider_account_hash: providerAccountHash,
+        p_provider_lease_owner: providerLeaseOwner,
+        p_stream_index: trackIndex,
+        p_window_ordinal: windowOrdinal,
+        p_max_consecutive_no_progress:
+          LANGUAGE_VALIDATION_MAX_CONSECUTIVE_PROVIDER_NO_PROGRESS,
+      },
+    );
+    const providerAttemptState = recordOrEmpty(providerAttempt);
+    if (providerAttemptError) {
+      throw new HttpError(503, "Unable to journal provider validation attempt", {
+        code: "LANGUAGE_VALIDATION_PROVIDER_ATTEMPT_JOURNAL_ERROR",
+      });
+    }
+    if (providerAttemptState.quarantined === true) return;
+    providerAttemptToken = stringOrNull(providerAttemptState.attemptToken);
+    if (providerAttemptState.allowed !== true || !providerAttemptToken) {
+      throw new HttpError(409, "Provider validation attempt lost ownership", {
+        code: "LANGUAGE_VALIDATION_PROVIDER_ATTEMPT_REJECTED",
+      });
+    }
     providerAccountLeaseReleaseSafe = false;
     try {
       response = await fetch(
@@ -2650,23 +2729,25 @@ async function processOneLanguageValidationTrack(db: SupabaseClient, jobId: stri
         },
       );
     } catch (error) {
+      await settleProviderAttempt("no_progress");
       await failLanguageValidationJob(db, {
         jobId,
         leaseOwner,
         errorCode: error instanceof DOMException && error.name === "TimeoutError"
           ? "LANGUAGE_VALIDATION_GATEWAY_TIMEOUT"
           : "LANGUAGE_VALIDATION_GATEWAY_TRANSPORT",
-        retryAt: new Date(Date.now() + 30_000).toISOString(),
+        retryAt: new Date(Date.now() + LANGUAGE_VALIDATION_GATEWAY_FAILURE_RETRY_MS).toISOString(),
       });
       return;
     }
     const responseRead = await readLanguageValidationGatewayResponse(response);
     if (!responseRead.ok) {
+      await settleProviderAttempt("no_progress");
       await failLanguageValidationJob(db, {
         jobId,
         leaseOwner,
         errorCode: responseRead.errorCode,
-        retryAt: new Date(Date.now() + 30_000).toISOString(),
+        retryAt: new Date(Date.now() + LANGUAGE_VALIDATION_GATEWAY_FAILURE_RETRY_MS).toISOString(),
       });
       return;
     }
@@ -2677,6 +2758,31 @@ async function processOneLanguageValidationTrack(db: SupabaseClient, jobId: stri
     // malformed or interrupted response keeps the crash-safe TTL lease.
     providerAccountLeaseReleaseSafe = strictLanguageProviderDrainAttested(payload);
     const gatewayCode = stringOr(payload.code ?? payload.errorCode ?? payload.error_code, "");
+    const { data: providerLeaseStillCurrent, error: providerLeaseCurrentError } = await db.rpc(
+      "provider_account_language_validation_lease_is_current",
+      {
+        p_provider_account_hash: providerAccountHash,
+        p_lease_owner: providerLeaseOwner,
+      },
+    );
+    const viewerPreempted = gatewayCode === "LANGUAGE_VALIDATION_VIEWER_PREEMPTED"
+      || providerLeaseStillCurrent !== true;
+    if (providerLeaseCurrentError) {
+      await settleProviderAttempt("no_progress");
+      throw new HttpError(503, "Unable to verify provider validation ownership", {
+        code: "LANGUAGE_VALIDATION_PROVIDER_LEASE_VERIFY_ERROR",
+      });
+    }
+    if (viewerPreempted) {
+      await settleProviderAttempt("viewer_preempted");
+      await failLanguageValidationJob(db, {
+        jobId,
+        leaseOwner,
+        errorCode: "LANGUAGE_VALIDATION_VIEWER_PREEMPTED",
+        retryAt: new Date(Date.now() + LANGUAGE_VALIDATION_GATEWAY_FAILURE_RETRY_MS).toISOString(),
+      });
+      return;
+    }
     const upstreamStatus = extractProviderStatus(
       payload,
       sanitizeTelemetryText(textFromGatewayDetails(payload)),
@@ -2685,6 +2791,7 @@ async function processOneLanguageValidationTrack(db: SupabaseClient, jobId: stri
       code: gatewayCode,
       upstreamStatus: upstreamStatus ?? response.status,
     })) {
+      await settleProviderAttempt("no_progress");
       const circuit = await openProviderPlaybackCircuit(providerAccountHash, db, true);
       await failLanguageValidationJob(db, {
         jobId,
@@ -2696,6 +2803,7 @@ async function processOneLanguageValidationTrack(db: SupabaseClient, jobId: stri
       return;
     }
     if (!response.ok) {
+      await settleProviderAttempt("no_progress");
       await failLanguageValidationJob(db, {
         jobId,
         leaseOwner,
@@ -2716,11 +2824,12 @@ async function processOneLanguageValidationTrack(db: SupabaseClient, jobId: stri
       windowState.count,
     );
     if (!receipt || !providerAccountLeaseReleaseSafe) {
+      await settleProviderAttempt("no_progress");
       await failLanguageValidationJob(db, {
         jobId,
         leaseOwner,
         errorCode: "LANGUAGE_VALIDATION_WINDOW_CHECKPOINT_INVALID",
-        retryAt: new Date(Date.now() + 30_000).toISOString(),
+        retryAt: new Date(Date.now() + LANGUAGE_VALIDATION_GATEWAY_FAILURE_RETRY_MS).toISOString(),
       });
       return;
     }
@@ -2741,6 +2850,9 @@ async function processOneLanguageValidationTrack(db: SupabaseClient, jobId: stri
         code: "LANGUAGE_VALIDATION_WINDOW_CHECKPOINT_FAILED",
       });
     }
+    // The checkpoint trigger cleared the crash-safe provider attempt token and
+    // reset the consecutive no-progress budget atomically with this progress.
+    providerAttemptToken = null;
     if (recordOrEmpty(checkpoint).complete === true) {
       const finalCurrent = await revalidateLanguageValidationClaim(db, claim);
       await finalizeLanguageValidationTrackWindows({
@@ -2761,6 +2873,7 @@ async function processOneLanguageValidationTrack(db: SupabaseClient, jobId: stri
       });
     }
   } catch (error) {
+    await settleProviderAttempt("no_progress");
     await failLanguageValidationJob(db, {
       jobId,
       leaseOwner,
@@ -2769,6 +2882,7 @@ async function processOneLanguageValidationTrack(db: SupabaseClient, jobId: stri
       retryAt: languageValidationTaskRetryAt(error),
     });
   } finally {
+    await settleProviderAttempt("no_progress");
     if (
       providerAccountLeaseClaimed
       && providerAccountLeaseReleaseSafe
@@ -6730,6 +6844,76 @@ async function mediaGatewayRouteForPlaybackUser(
     });
   }
   return route;
+}
+
+function mediaGatewayRoutesForProviderPreemption(
+  runtimeConfig: RuntimeConfig,
+): MediaGatewayRoute[] {
+  const routes = new Map<string, MediaGatewayRoute>();
+  for (const route of [
+    runtimeConfig.mediaGatewayRouting.defaultRoute,
+    runtimeConfig.mediaGatewayRouting.canaryRoute,
+  ]) {
+    if (!route?.url || !route.token) continue;
+    // One Gateway process may be configured as both default and canary. A
+    // single authenticated drain call is sufficient and avoids duplicate work.
+    if (!routes.has(route.url)) routes.set(route.url, route);
+  }
+  return [...routes.values()];
+}
+
+async function preemptProviderLanguageValidationTransports(options: {
+  db: SupabaseClient;
+  targetUrl: string;
+}) {
+  const providerTransportKey = providerAccountKeyFromUrl(options.targetUrl);
+  if (!providerTransportKey) {
+    throw new Error("provider transport affinity unavailable");
+  }
+  const affinityHash = await sha256Hex(providerTransportKey);
+  const runtimeConfig = await getRuntimeConfig(options.db);
+  const routes = mediaGatewayRoutesForProviderPreemption(runtimeConfig);
+  if (!routes.length) throw new Error("media gateway preemption route unavailable");
+
+  const outcomes = await Promise.all(routes.map(async (route) => {
+    const response = await fetch(`${route.url}/sessions/stop-provider-affinities`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${route.token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ affinityHashes: [affinityHash] }),
+      signal: AbortSignal.timeout(20_000),
+    });
+    const bytes = await readBoundedResponseBytes(response, 65_536);
+    let payload: JsonRecord = {};
+    try {
+      payload = recordOrEmpty(JSON.parse(new TextDecoder().decode(bytes)));
+    } catch (_) {
+      throw new Error(`media gateway ${route.kind} drain response was invalid`);
+    }
+    if (!response.ok || payload.protocol !== 1 || payload.providerDrained !== true) {
+      throw new Error(`media gateway ${route.kind} did not attest provider drain`);
+    }
+    return {
+      kind: route.kind,
+      stoppedLanguageValidations: boundedInt(
+        payload.stoppedLanguageValidations,
+        0,
+        0,
+        1_000,
+      ),
+    };
+  }));
+  return {
+    protocol: 1,
+    providerDrained: true,
+    routes: outcomes.length,
+    stoppedLanguageValidations: outcomes.reduce(
+      (total, outcome) => total + outcome.stoppedLanguageValidations,
+      0,
+    ),
+  };
 }
 
 function mediaGatewayRouteForStoredSession(

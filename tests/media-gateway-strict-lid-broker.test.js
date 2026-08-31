@@ -20,7 +20,7 @@ function brokerHarness() {
   assert.ok(start >= 0 && end > start, 'strict LID broker source block must remain extractable');
   const source = gatewaySource.slice(start, end);
   return vm.runInNewContext(
-    `(() => { ${source}; return { parseStrictLidRange, createStrictLidBroker, createStrictLidRangeDeadline, strictLidEffectiveUrlIdentitySha256 }; })()`,
+    `(() => { ${source}; return { parseStrictLidRange, createStrictLidBroker, createStrictLidRangeDeadline, strictLidEffectiveUrlIdentitySha256, strictLidBrokers }; })()`,
     {
       AbortController,
       Buffer,
@@ -62,6 +62,7 @@ function brokerHarness() {
       pickProxyAgent: () => null,
       proxyKeyFromUrl: () => 'provider:test',
       setTimeout,
+      strictLidBrokers: new Map(),
       undiciRequest: require('undici').request,
     },
   );
@@ -1441,7 +1442,7 @@ test('strict LID rejects invalid exact signed coordinates before creating a serv
   assert.match(route, /detectLanguageRequestPolicy\(req, options\)[\s\S]*validateDetectLanguageCapability\(capabilityToken, policy\.requiredScope\)/);
   assert.match(gatewaySource, /strictLidLoopbackBrokerProtocol: 1/);
   assert.match(gatewaySource, /strictLidFileSizeClaim: 'fileSizeBytes'/);
-  assert.match(gatewaySource, /const GATEWAY_VERSION = 129/);
+  assert.match(gatewaySource, /const GATEWAY_VERSION = 130/);
   assert.match(gatewaySource, /supersededReleaseDelayMs:\s*PROVIDER_SLOT_RELEASE_DELAY_MS/);
   assert.match(gatewaySource, /strictLidProviderDrainProtocol: 1/);
   assert.match(gatewaySource, /strictLidWeakFallbackProtocol: 1/);
@@ -1720,8 +1721,8 @@ test('v102 keeps the v101 outer extraction invariant: survive 35 s and kill at 4
   assert.equal(clock.timers.size, 0);
 });
 
-test('closing a strict LID broker aborts an active provider body and leaves no live local handle', async (t) => {
-  const { createStrictLidBroker } = brokerHarness();
+test('viewer preemption closes and unregisters a strict LID broker only after provider release', async (t) => {
+  const { createStrictLidBroker, strictLidBrokers } = brokerHarness();
   let providerClosed = false;
   const provider = http.createServer((req, res) => {
     const { start, end } = exactRange(req, 100);
@@ -1743,11 +1744,12 @@ test('closing a strict LID broker aborts an active provider body and leaves no l
     openTimeoutMs: 2000,
   });
   const localUrl = broker.inputUrl;
+  assert.equal(strictLidBrokers.size, 1);
   const response = await fetch(localUrl, { headers: { Range: 'bytes=0-99' } });
   assert.equal(response.status, 206);
   await response.body.getReader().read();
   const closeStartedAt = Date.now();
-  await broker.close();
+  await broker.close('viewer-preempted');
   const closeElapsedMs = Date.now() - closeStartedAt;
   const closedDeadline = Date.now() + 500;
   while (!providerClosed && Date.now() < closedDeadline) {
@@ -1758,5 +1760,7 @@ test('closing a strict LID broker aborts an active provider body and leaves no l
     closeElapsedMs >= 30,
     `broker close acknowledged before provider release grace (${closeElapsedMs}ms)`,
   );
+  assert.equal(broker.terminalError.code, 'LANGUAGE_VALIDATION_VIEWER_PREEMPTED');
+  assert.equal(strictLidBrokers.size, 0);
   await assert.rejects(fetch(localUrl, { headers: { Range: 'bytes=0-1' } }));
 });

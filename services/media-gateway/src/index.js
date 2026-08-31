@@ -157,6 +157,13 @@ function providerAccountKeyFromCredentials(serverUrl, username) {
 // start aborts them all, and the relay's session coordinator can evict them
 // cross-device via DELETE /raw-pumps (keyed by sha256(userId) — no credentials).
 const rawPumps = new Set(); // { ac, sid, proxyKey, providerSlotKey, ownerHash }
+// Strict background LID brokers own real upstream byte-range sockets even
+// before their ffmpeg child is visible in accountExtractions. Keep an explicit
+// provider-affinity ledger so foreground playback can close and drain that
+// transport, including the crash window between broker creation and extraction
+// registration. Finite MKV seek brokers belong to viewer sessions and are
+// already stopped through the session ledger, so they are intentionally absent.
+const strictLidBrokers = new Map(); // broker -> provider account proxy key
 // A transcode request performs asynchronous teardown and codec probing before it can
 // register its session. Reserve viewer priority across that whole window so a
 // service/pregen job cannot win the spawn race and consume the single replica's CPU.
@@ -1812,7 +1819,7 @@ const MULTI_AUDIO_HLS_PROTOCOL = 1;
 // production Ryzen/Radeon host. Keep the operational default evidence-based and configurable,
 // while bounding accidental fan-out. Every exact source track stays visible to the user.
 const MAX_MULTI_AUDIO_RENDITIONS = clampInt(process.env.MAX_MULTI_AUDIO_RENDITIONS, 12, 2, 32);
-const GATEWAY_VERSION = 129;
+const GATEWAY_VERSION = 130;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -2229,6 +2236,8 @@ app.get('/health', (req, res) => {
         whisperInferenceActive,
         backgroundWhisperInferenceActive: backgroundWhisperCount(),
         backgroundWhisperPreemptions,
+        languageValidationPreemptionProtocol: 1,
+        activeStrictLidBrokers: strictLidBrokers.size,
         argosInferenceActive,
         lidBenchmarkBusy,
         inbandHeaderParse: INBAND_HEADER_PARSE,
@@ -2276,6 +2285,7 @@ app.post('/sessions/stop-provider-affinities', requireGatewayAuth, async (req, r
         stoppedSessions: outcome.stoppedSessions,
         abortedRawPumps: outcome.abortedRawPumps,
         stoppedExtractions: outcome.stoppedExtractions,
+        stoppedLanguageValidations: outcome.stoppedLanguageValidations,
     });
 });
 
@@ -4524,6 +4534,7 @@ async function createStrictLidBroker(options = {}) {
     const handle = crypto.randomBytes(32).toString('base64url');
     const pathPrefix = options.pathPrefix === 'finite-mkv-seek' ? 'finite-mkv-seek' : 'strict-lid';
     const expectedPath = `/${pathPrefix}/${handle}`;
+    const providerProxyKey = proxyKeyFromUrl(sourceUrl);
     const expectedValidator = normalizeStrictLidExpectedValidator(options.expectedValidator);
     const expectedEffectiveUrlSha256 = /^[a-f0-9]{64}$/.test(String(options.effectiveUrlSha256 || '').toLowerCase())
         ? String(options.effectiveUrlSha256).toLowerCase()
@@ -4642,16 +4653,27 @@ async function createStrictLidBroker(options = {}) {
         get cacheEvictions() { return context.finiteCacheEvictions; },
         get maxQueuedRequests() { return context.finiteMaxQueuedRequests; },
         get maxQueuedProviderWindows() { return context.finiteMaxQueuedProviderWindows; },
-        async close() {
+        async close(reason = 'broker_closed') {
             if (closePromise) return closePromise;
             closePromise = (async () => {
+                if (reason === 'viewer-preempted') {
+                    markStrictLidTerminal(context, strictLidBrokerError(
+                        'LANGUAGE_VALIDATION_VIEWER_PREEMPTED',
+                        'Background language validation was preempted by viewer playback',
+                        { status: 409 },
+                    ));
+                }
                 context.closed = true;
                 context.latestRequestId++;
-                try { controller.abort(new Error('strict LID broker closed')); } catch (_) {}
-                await closeStrictLidBrokerAttempt(context, context.activeAttempt, 'broker_closed');
+                try { controller.abort(new Error(
+                    reason === 'viewer-preempted'
+                        ? 'strict LID broker viewer preempted'
+                        : 'strict LID broker closed',
+                )); } catch (_) {}
+                await closeStrictLidBrokerAttempt(context, context.activeAttempt, reason);
                 await Promise.allSettled(
                     [...context.activeFiniteAttempts].map((attempt) => (
-                        closeStrictLidBrokerAttempt(context, attempt, 'broker_closed')
+                        closeStrictLidBrokerAttempt(context, attempt, reason)
                     )),
                 );
                 try { await context.queue; } catch (_) {}
@@ -4677,10 +4699,14 @@ async function createStrictLidBroker(options = {}) {
                 try { server.closeAllConnections?.(); } catch (_) {}
                 await closed;
                 options.abortSignal?.removeEventListener?.('abort', onAbort);
+                strictLidBrokers.delete(broker);
             })();
             return closePromise;
         },
     };
+    if (pathPrefix === 'strict-lid' && providerProxyKey) {
+        strictLidBrokers.set(broker, providerProxyKey);
+    }
     const onAbort = () => { void broker.close(); };
     options.abortSignal?.addEventListener?.('abort', onAbort, { once: true });
     if (options.abortSignal?.aborted) onAbort();
@@ -15323,16 +15349,22 @@ async function stopProviderAffinities(affinityHashes) {
         }
     }
     await Promise.allSettled(extractionStops);
+    const languageValidationsToStop = [...strictLidBrokers.entries()]
+        .filter(([, proxyKey]) => matches(proxyKey));
+    await Promise.allSettled(languageValidationsToStop.map(([broker]) => (
+        broker.close('viewer-preempted')
+    )));
     const remaining = Array.from(sessions.values()).some((session) => (
         matches(proxyKeyFromUrl(session?.sourceUrl || '')) && isSessionBlockingProviderSlot(session)
     )) || Array.from(rawPumps).some((pump) => matches(pump?.proxyKey || ''))
       || Array.from(accountExtractions).some(([proxyKey, entries]) => (
         matches(proxyKey) && Array.from(entries).some((entry) => !entry?.preempted)
-    ));
+    )) || [...strictLidBrokers.values()].some((proxyKey) => matches(proxyKey));
     return {
         stoppedSessions: sessionsToStop.length,
         abortedRawPumps: rawPumpsAborted,
         stoppedExtractions: extractionsStopped,
+        stoppedLanguageValidations: languageValidationsToStop.length,
         providerDrained: !remaining,
     };
 }
@@ -17066,6 +17098,18 @@ function activeProviderAccountActivityGroups() {
                         : ACCOUNT_ACTIVITY_KIND_GATEWAY),
             });
         }
+    }
+    // The strict LID broker owns the provider socket itself. Registering only
+    // its downstream FFmpeg child leaves a short blind spot between broker
+    // creation and extraction registration (and after a child failure while
+    // the broker is still draining). Keep the provider busy ledger accurate
+    // for that entire lifetime.
+    for (const providerProxyKey of strictLidBrokers.values()) {
+        if (!providerProxyKey) continue;
+        candidates.push({
+            key: providerProxyKey,
+            kind: ACCOUNT_ACTIVITY_KIND_LANGUAGE_VALIDATION,
+        });
     }
     return groupProviderAccountActivities(candidates, 64);
 }
