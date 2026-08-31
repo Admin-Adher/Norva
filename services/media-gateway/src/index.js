@@ -1837,7 +1837,7 @@ const MULTI_AUDIO_HLS_PROTOCOL = 1;
 // production Ryzen/Radeon host. Keep the operational default evidence-based and configurable,
 // while bounding accidental fan-out. Every exact source track stays visible to the user.
 const MAX_MULTI_AUDIO_RENDITIONS = clampInt(process.env.MAX_MULTI_AUDIO_RENDITIONS, 12, 2, 32);
-const GATEWAY_VERSION = 134;
+const GATEWAY_VERSION = 135;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -2057,7 +2057,7 @@ app.get('/health', (req, res) => {
         },
         boundedMkvInputPumpProtocol: 1,
         finiteMkvSeekBroker: {
-            protocol: 5,
+            protocol: 6,
             active: Array.from(sessions.values()).filter((session) => (
                 Boolean(session?.finiteMkvSeekBroker)
             )).length,
@@ -2072,7 +2072,13 @@ app.get('/health', (req, res) => {
             plannedSupersessionReopensImmediately: false,
             windowBytes: FINITE_MKV_SEEK_WINDOW_BYTES,
             cacheMaxBytes: FINITE_MKV_SEEK_CACHE_BYTES,
-            identityPreflightRange: 'bytes=0-0',
+            identityPreflightRange: BOUNDED_MKV_HEADER_PARSE && INBAND_HEADER_CACHE_MAX > 0
+                ? 'bounded-header-prefix'
+                : 'bytes=0-0',
+            identityPreflightMaxBytes: BOUNDED_MKV_HEADER_PARSE && INBAND_HEADER_CACHE_MAX > 0
+                ? INBAND_HEADER_BYTES
+                : 1,
+            resumeHeaderPrefetch: BOUNDED_MKV_HEADER_PARSE && INBAND_HEADER_CACHE_MAX > 0,
             interruptedRangeReleaseDelayMs: PROVIDER_SLOT_RELEASE_DELAY_MS,
             effectiveUrlPinned: true,
             validatorPinnedWhenAvailable: true,
@@ -9024,13 +9030,22 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             });
         }
         // Cold playback owns a retained provider body from this point. A resumed
-        // playback has instead completed its one-byte identity preflight and
-        // owns no provider socket until the buffered seek broker opens a window.
+        // playback has instead completed its bounded identity/header preflight
+        // and owns no provider socket until the buffered seek broker opens a window.
         // Outer error handling must stop whichever input resource exists if
         // topology freezing or FFmpeg setup throws.
         createdSession = session;
 
         if (finiteMkvPlayback && normalizedSeekOffset > 0) {
+            // The resumed lane has no long-lived byte pump before FFmpeg starts.
+            // Parse the bounded prefix drained by its identity preflight now so
+            // duration and the exact audio/subtitle topology are available before
+            // the rendition graph is frozen and in the initial 201 response.
+            await enrichSessionCodecProfileFromBoundedHeader(
+                session,
+                sessionRequestAbortController.signal,
+            );
+            if (sessionRequestAbortController.signal.aborted) throw new Error('Session request aborted');
             try {
                 await prepareFiniteMkvSeekBroker(session, sessionRequestAbortController.signal);
             } catch (err) {
@@ -9052,7 +9067,7 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             session.startupTimings.finiteMkvResumeMode = 'continuous-window-indexed-seek';
         }
 
-        // The exact size preflight above is provider I/O, but it neither starts
+        // The bounded identity/header preflight above is provider I/O, but it neither starts
         // the byte pump nor spawns FFmpeg. Freeze the rendition graph only now:
         // ensureBoundedMkvInputPump has attached the exact fileSizeBytes to an
         // otherwise complete request/cached profile, making the normal Norva
@@ -9761,8 +9776,9 @@ async function ensureBoundedMkvInputPump(session, parentSignal = null) {
     session.startupTimings = asRecord(session.startupTimings);
     session.startupTimings.boundedMkvInputPump = true;
     // Cold playback retains one full-file provider response for the byte pump.
-    // Resumed playback drains a one-byte identity range instead: that gives the
-    // seek broker an exact size/validator without leaving a provider body open.
+    // Resumed playback drains one bounded identity/header range instead: that
+    // gives the seek broker an exact size/validator and supplies local ffprobe
+    // metadata without leaving a provider body open or opening another socket.
     // FFmpeg then resolves Matroska cues through serialized buffered windows.
     // Complete local HLS cache hits bypass both paths and remain instant.
     const preopenStartedAt = Date.now();
@@ -10395,12 +10411,22 @@ async function preopenBoundedMkvInputPump(session, parentSignal = null, options 
     if (!isFiniteMkvVodSession(session) || session.preopenedVodInputAttempt) return;
     const dispatcher = pickProxyAgent(proxyKeyFromUrl(session.sourceUrl)) || null;
     const drainExactRange = options.drainExactRange === true;
+    const captureResumeHeader = Boolean(
+        drainExactRange &&
+        BOUNDED_MKV_HEADER_PARSE &&
+        INBAND_HEADER_BYTES > 0 &&
+        INBAND_HEADER_CACHE_MAX > 0
+    );
+    const knownFileSizeBytes = fileSizeBytesForSession(session);
+    const identityRangeBytes = captureResumeHeader
+        ? Math.max(1, Math.min(INBAND_HEADER_BYTES, knownFileSizeBytes || INBAND_HEADER_BYTES))
+        : 1;
     const opened = await openBoundedVodInputAttempt(
         session,
         0,
         parentSignal,
         dispatcher,
-        drainExactRange ? { requestEnd: 0 } : { allowFullBodyAtZero: true },
+        drainExactRange ? { requestEnd: identityRangeBytes - 1 } : { allowFullBodyAtZero: true },
     );
     let retained = false;
     try {
@@ -10440,11 +10466,21 @@ async function preopenBoundedMkvInputPump(session, parentSignal = null, options 
             const expectedBytes = opened.range.end - opened.range.start + 1;
             let drainedBytes = 0;
             while (true) {
-                const next = await readRawPrefixChunk(
-                    opened.attempt.reader,
-                    parentSignal,
-                    VOD_INPUT_IDLE_TIMEOUT_MS,
-                );
+                // Container validation may already have consumed and retained
+                // the first provider chunk. Drain that exact byte sequence first
+                // so range accounting and the local metadata prefix stay complete.
+                const next = Array.isArray(opened.attempt.preloadedChunks) && opened.attempt.preloadedChunks.length
+                    ? {
+                        value: opened.attempt.preloadedChunks.shift(),
+                        done: false,
+                        timedOut: false,
+                        aborted: false,
+                    }
+                    : await readRawPrefixChunk(
+                        opened.attempt.reader,
+                        parentSignal,
+                        VOD_INPUT_IDLE_TIMEOUT_MS,
+                    );
                 if (next.aborted || parentSignal?.aborted) throw abortedVodInputPumpError();
                 if (next.timedOut) {
                     throw vodInputPumpError(
@@ -10455,7 +10491,9 @@ async function preopenBoundedMkvInputPump(session, parentSignal = null, options 
                 }
                 if (next.error) throw classifyVodInputFetchError(next.error, false);
                 if (next.done) break;
-                drainedBytes += Buffer.from(next.value || []).length;
+                const chunk = Buffer.from(next.value || []);
+                captureBoundedMkvHeaderBytes(session, drainedBytes, chunk);
+                drainedBytes += chunk.length;
                 if (drainedBytes > expectedBytes) {
                     throw vodInputPumpError(
                         'RANGE_LENGTH_MISMATCH',
@@ -10474,6 +10512,7 @@ async function preopenBoundedMkvInputPump(session, parentSignal = null, options 
             session.startupTimings.providerGetPreopened = false;
             session.startupTimings.providerSeekIdentityPreflight = true;
             session.startupTimings.providerSeekIdentityPreflightBytes = drainedBytes;
+            session.startupTimings.providerSeekHeaderPrefetch = captureResumeHeader;
             return;
         }
 

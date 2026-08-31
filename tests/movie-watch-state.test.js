@@ -186,3 +186,46 @@ test('movie playback never turns a missing saved audio index into stream zero', 
   assert.equal(playbackHints.at(-1).audioStreamIndex, 0,
     'a real stream index zero must remain selectable');
 });
+
+test('movie playback passes the normalized catalogue duration to the watch timeline', async () => {
+  let watchContent = null;
+  context.MediaUtils = {
+    playbackHintFromItem: (_movie, { container }) => ({ container, durationSeconds: 5820 }),
+    versionLabel: () => 'Test version',
+    safeImageUrl: (value) => value,
+    tmdbPosterUrl: () => null,
+    normalizeLanguagePreference: (value) => value,
+  };
+  context.API = {
+    proxy: {
+      xtream: {
+        getStreamUrl: async () => ({ url: 'https://gateway.test/session/playlist.m3u8' }),
+      },
+    },
+  };
+
+  const moviePage = Object.create(context.window.MoviesPage.prototype);
+  const watch = {
+    play: async (content, resolver) => {
+      watchContent = content;
+      await resolver();
+    },
+  };
+  moviePage.app = { pages: { watch } };
+  moviePage.prepareForPlaybackSession = async () => {};
+  moviePage.getMovieDisplayTitle = (movie) => movie.name;
+  moviePage.getItemYear = () => 2026;
+  moviePage.getSourceName = () => 'Test source';
+
+  await moviePage.playMovie({
+    sourceId: 'source-1',
+    stream_id: 'movie-1',
+    container_extension: 'mkv',
+    stream_icon: 'poster.jpg',
+    name: 'Test movie',
+    tmdb: { runtime: 12 },
+  });
+
+  assert.equal(watchContent.durationHint, 5820,
+    'the provider/codec duration must win over an unrelated TMDB fallback');
+});

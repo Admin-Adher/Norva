@@ -395,6 +395,7 @@ test('flat media grid and search keep P display data isolated from global A unde
             ? [{
               provider_tmdb_id: '200', original_language: 'en', trusted: 'true',
               loc_title: 'Global A/G title', loc_overview: 'Global A/G overview',
+              tmdb_runtime: '96',
               poster_url: 'https://images.example/global-a.jpg',
               backdrop_url: 'https://images.example/global-a-bg.jpg',
             }]
@@ -456,6 +457,9 @@ test('flat media grid and search keep P display data isolated from global A unde
   assert.equal(on.p.metadata.categoryName, 'Provider B');
   assert.equal(on.p.metadata.tmdb.runtime, 123);
   assert.equal(on.g.title, 'Global A/G title');
+  assert.equal(on.g.runtime, 96);
+  assert.equal(on.g.runtimeMinutes, 96);
+  assert.equal(on.g.tmdb.runtime, 96);
   assert.ok(globalCalls.length >= 1, 'G still uses the established global lookup');
   for (const call of globalCalls) assert.deepEqual(call.ids, ['200'], 'P TMDB id must never reach global A');
   const serialized = JSON.stringify(on.publicP);
@@ -473,6 +477,8 @@ test('flat media grid and search keep P display data isolated from global A unde
   assert.equal(JSON.stringify(off.p.metadata).includes('runtime'), false);
   assert.equal(JSON.stringify(off.p.metadata).includes('vote_average'), false);
   assert.equal(off.g.title, 'Global A/G title', 'reordered proof binding preserves the legacy G winner');
+  assert.equal(off.g.runtime, 96, 'trusted global TMDB runtime remains available with the full overlay disabled');
+  assert.equal(off.g.tmdb.runtime, 96);
   assert.equal(globalCalls.length, 1, 'flag OFF keeps only the legacy G text/art lookup');
   assert.deepEqual(globalCalls[0].ids, ['200']);
 

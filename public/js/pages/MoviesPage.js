@@ -3276,6 +3276,10 @@ class MoviesPage {
         const playbackHint = MediaUtils.playbackHintFromItem
             ? MediaUtils.playbackHintFromItem(movie, { container })
             : { container };
+        const normalizedDurationHint = Number(playbackHint.durationSeconds);
+        const durationHint = Number.isFinite(normalizedDurationHint) && normalizedDurationHint > 0
+            ? normalizedDurationHint
+            : (movie.tmdb?.runtime ? Number(movie.tmdb.runtime) * 60 : null);
         if (resumePlan.sessionStart > 0) {
             playbackHint.seekOffset = resumePlan.sessionStart;
             playbackHint.startOffset = resumePlan.sessionStart;
@@ -3353,7 +3357,10 @@ class MoviesPage {
             containerExtension: container,
             resumeTime: resumePlan.target,
             playbackPreferences,
-            durationHint: movie.tmdb?.runtime ? movie.tmdb.runtime * 60 : null,
+            // Keep the authoritative catalogue/codec duration in the player.
+            // Gateway EVENT playlists expose only their currently generated
+            // window as video.duration; that value is not the movie runtime.
+            durationHint,
             versions: versionList,
             versionIndex: 0,
             variantCount: Math.max(1, Number(movie.variantCount || movie.variant_count || versionList.length || 1)),

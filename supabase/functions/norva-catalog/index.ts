@@ -1173,6 +1173,7 @@ async function attachMediaLanguages(
       localizedTitle: string | null;
       localizedOverview: string | null;
       fallbackOverview: string | null;
+      runtime: number | null;
       poster: string | null;
       backdrop: string | null;
     }>();
@@ -1185,7 +1186,7 @@ async function attachMediaLanguages(
       // their per-user metadata.tmdb thinned, so the overview only survives here.
       const { data } = await (db as any)
         .from("catalog_titles")
-        .select(`provider_tmdb_id, original_language, poster_url, backdrop_url, trusted:metadata->tmdbValidation->>valid, base_overview:metadata->tmdb->>overview, legacy_overview:metadata->>overview, en_overview:metadata->i18n->en->>overview${localizedFields}`)
+        .select(`provider_tmdb_id, original_language, poster_url, backdrop_url, trusted:metadata->tmdbValidation->>valid, base_overview:metadata->tmdb->>overview, legacy_overview:metadata->>overview, tmdb_runtime:metadata->tmdb->>runtime, legacy_runtime:metadata->>runtime, en_overview:metadata->i18n->en->>overview${localizedFields}`)
         .eq("item_type", itemType)
         .in("provider_tmdb_id", candidateIds.slice(i, i + 500));
       for (const c of data ?? []) {
@@ -1198,6 +1199,7 @@ async function attachMediaLanguages(
           fallbackOverview: stringOrNull((c as JsonRecord).base_overview)
             ?? stringOrNull((c as JsonRecord).legacy_overview)
             ?? stringOrNull((c as JsonRecord).en_overview),
+          runtime: numberOrNull((c as JsonRecord).tmdb_runtime ?? (c as JsonRecord).legacy_runtime),
           poster: stringOrNull((c as JsonRecord).poster_url),
           backdrop: stringOrNull((c as JsonRecord).backdrop_url),
         });
@@ -1229,6 +1231,15 @@ async function attachMediaLanguages(
       if (resolvedOverview && (cat.localizedOverview || !existingOverview)) {
         row.overview = resolvedOverview; row.description = resolvedOverview; row.plot = resolvedOverview;
         row.tmdb = { ...rowTmdb, overview: resolvedOverview };
+      }
+      // A trusted global TMDB runtime is the complete title duration, unlike
+      // the EVENT-HLS playlist window which only describes media generated so
+      // far. Project it into every shape consumed by playbackHintFromItem so
+      // the first Watch render can expose the full seek rail immediately.
+      if (cat.runtime !== null && cat.runtime > 0) {
+        row.runtime = cat.runtime;
+        row.runtimeMinutes = cat.runtime;
+        row.tmdb = { ...recordOrEmpty(row.tmdb), runtime: cat.runtime };
       }
       // Poster/backdrop: catalog_titles is the global enriched source and the freshest
       // authority, so its art WINS over the per-user cloud_titles/provider poster (which

@@ -817,6 +817,48 @@ test('HTTP 200 full-body fallback stays fail-closed outside an exact offset-zero
         assert.equal(tracker.active, 0);
     });
 
+    await t.test('resumed MKV reuses its exact identity request to capture a bounded metadata prefix', async () => {
+        const prefixBytes = 300_000;
+        const largeFixture = mkvFixture(500_000);
+        const tracker = makeTracker();
+        const headerByteCache = new Map();
+        let fetches = 0;
+        const h = pumpHarness({
+            BOUNDED_MKV_HEADER_PARSE: true,
+            INBAND_HEADER_BYTES: prefixBytes,
+            INBAND_HEADER_CACHE_MAX: 2,
+            headerByteCache,
+            fetch: async (_url, options) => {
+                fetches += 1;
+                tracker.calls.push(options.headers);
+                return trackedResponse(tracker, {
+                    status: 206,
+                    chunks: [largeFixture.subarray(0, prefixBytes)],
+                    headers: {
+                        'Content-Range': `bytes 0-${prefixBytes - 1}/${largeFixture.length}`,
+                        'Content-Length': String(prefixBytes),
+                        ETag: '"seek-metadata"',
+                    },
+                });
+            },
+        });
+        const session = mkvSession(largeFixture.length);
+        session.seekOffset = 12;
+
+        await h.ensureBoundedMkvInputPump(session);
+
+        assert.equal(fetches, 1, 'metadata capture must not add a second provider request');
+        assert.equal(tracker.calls[0].Range, `bytes=0-${prefixBytes - 1}`);
+        assert.equal(tracker.maxActive, 1);
+        assert.equal(tracker.active, 0, 'the prefix socket is closed before indexed seek');
+        assert.equal(session.startupTimings.providerSeekIdentityPreflightBytes, prefixBytes);
+        assert.equal(session.startupTimings.providerSeekHeaderPrefetch, true);
+        const captured = headerByteCache.get(session.sourceUrl);
+        assert.equal(captured?.len, prefixBytes);
+        assert.equal(captured?.done, true);
+        assert.equal(Buffer.concat(captured?.chunks || []).equals(largeFixture.subarray(0, prefixBytes)), true);
+    });
+
     await t.test('reconnect at a non-zero offset', async () => {
         const tracker = makeTracker();
         const cut = 19;
@@ -2334,7 +2376,7 @@ test('the ready finite session parses, caches, merges and returns a strict local
 
     const source = readGateway();
     const route = sourceBetween(source, "app.post('/sessions'", "app.delete('/sessions/:id'");
-    const enrichAt = route.indexOf('await enrichSessionCodecProfileFromBoundedHeader(');
+    const enrichAt = route.lastIndexOf('await enrichSessionCodecProfileFromBoundedHeader(');
     assert.match(route, /await enrichSessionCodecProfileFromBoundedHeader\(\s*session,\s*sessionRequestAbortController\.signal,?\s*\)/);
     assert.ok(enrichAt > route.indexOf('const started = await startSessionWithProviderRetry('));
     assert.ok(enrichAt < route.lastIndexOf('res.status(201).json(gatewayCreatedSessionPayload(req, session))'));
@@ -2979,6 +3021,18 @@ test('production finite MKV resume uses continuous indexed windows and keeps lin
     const createRoute = sourceBetween(source, "app.post('/sessions'", "\napp.delete('/raw-pumps'");
     assert.match(createRoute, /await prepareFiniteMkvSeekBroker/);
     assert.match(createRoute, /finiteMkvResumeMode = 'continuous-window-indexed-seek'/);
+    const ensureAt = createRoute.indexOf('await ensureBoundedMkvInputPump');
+    const resumeEnrichAt = createRoute.indexOf('await enrichSessionCodecProfileFromBoundedHeader', ensureAt);
+    const prepareAt = createRoute.indexOf('await prepareFiniteMkvSeekBroker', resumeEnrichAt);
+    const freezeAt = createRoute.indexOf('freezeMultiAudioHlsTopology(session)', prepareAt);
+    assert.ok(
+        resumeEnrichAt > ensureAt && resumeEnrichAt < prepareAt,
+        'resume metadata must be parsed before opening the indexed seek broker',
+    );
+    assert.ok(
+        resumeEnrichAt < freezeAt,
+        'resume audio/subtitle topology must be known before rendition freezing',
+    );
     const ensurePump = sourceBetween(
         source,
         'async function ensureBoundedMkvInputPump(',
@@ -3005,7 +3059,7 @@ test('production finite MKV resume uses continuous indexed windows and keeps lin
     assert.match(source, /effectiveUrlSha256:\s*session\.vodInputEffectiveUrlSha256/);
     assert.match(source, /effectiveUrlIdentitySha256:\s*session\.vodInputEffectiveUrlIdentitySha256/);
     assert.match(source, /boundedMkvInputPumpProtocol:\s*1/);
-    assert.match(source, /finiteMkvSeekBroker:\s*\{[\s\S]+?protocol:\s*5/);
+    assert.match(source, /finiteMkvSeekBroker:\s*\{[\s\S]+?protocol:\s*6/);
     assert.match(source, /finiteMkvSeekBroker:\s*\{[\s\S]+?bufferedWindowBeforeLocalResponse:\s*false/);
     assert.match(source, /finiteMkvSeekBroker:\s*\{[\s\S]+?continuousLocalRangeResponse:\s*true/);
     assert.match(source, /finiteMkvSeekBroker:\s*\{[\s\S]+?concurrentLocalRanges:\s*true/);
@@ -3013,4 +3067,7 @@ test('production finite MKV resume uses continuous indexed windows and keeps lin
     assert.match(source, /finiteMkvSeekBroker:\s*\{[\s\S]+?providerWindowQueueSerialized:\s*true/);
     assert.match(source, /finiteMkvSeekBroker:\s*\{[\s\S]+?providerConnectionsSerialized:\s*true/);
     assert.match(source, /finiteMkvSeekBroker:\s*\{[\s\S]+?providerConnectionReuse:\s*true/);
+    assert.match(source, /finiteMkvSeekBroker:\s*\{[\s\S]+?identityPreflightRange:[\s\S]+?'bounded-header-prefix'/);
+    assert.match(source, /finiteMkvSeekBroker:\s*\{[\s\S]+?identityPreflightMaxBytes:[\s\S]+?INBAND_HEADER_BYTES/);
+    assert.match(source, /finiteMkvSeekBroker:\s*\{[\s\S]+?resumeHeaderPrefetch:[\s\S]+?BOUNDED_MKV_HEADER_PARSE/);
 });
