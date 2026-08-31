@@ -950,6 +950,17 @@
               period: period,
               transaction_id: orderId || currentOrderId || undefined
             });
+          } else if (checkoutKind === 'resubscribe') {
+            // A resubscribe reaches this branch only after the server re-fetches
+            // the Revolut order and confirms the immediate charge. Trials and
+            // scheduled plan changes deliberately remain non-purchase events.
+            window.NorvaMarketing.track('purchase', {
+              currency: commercialQuote ? commercialQuote.currency : undefined,
+              value: commercialQuote ? commercialQuote.amountMinor / 100 : undefined,
+              plan: plan,
+              period: period,
+              transaction_id: orderId || currentOrderId || undefined
+            });
           }
         }
         try { document.getElementById('continue-btn').focus(); } catch (_) {}

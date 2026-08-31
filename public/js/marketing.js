@@ -89,20 +89,24 @@
   function track(name, params) {
     if (!enabled()) return;
     params = compact(params || {});
-    googleEvent(name, params);
+    // Product analytics keeps a platform-neutral funnel vocabulary for Clarity
+    // and native telemetry. Normalize only at the marketing boundary so GA4
+    // and Google Ads receive their canonical registration event.
+    var marketingName = name === 'signup_completed' ? 'sign_up' : name;
+    googleEvent(marketingName, params);
     var metaName = {
       sign_up: 'CompleteRegistration',
       begin_checkout: 'InitiateCheckout',
       start_trial: 'StartTrial',
       purchase: 'Purchase',
       lead: 'Lead'
-    }[name];
+    }[marketingName];
     if (metaName) metaEvent(metaName, params);
-    if (name === 'sign_up') googleConversion('signup', params);
-    if (name === 'begin_checkout') googleConversion('beginCheckout', params);
-    if (name === 'start_trial') googleConversion('trialStart', params);
-    if (name === 'purchase') googleConversion('purchase', params);
-    log('track', name, params);
+    if (marketingName === 'sign_up') googleConversion('signup', params);
+    if (marketingName === 'begin_checkout') googleConversion('beginCheckout', params);
+    if (marketingName === 'start_trial') googleConversion('trialStart', params);
+    if (marketingName === 'purchase') googleConversion('purchase', params);
+    log('track', name, marketingName, params);
   }
 
   function inferCta(el) {

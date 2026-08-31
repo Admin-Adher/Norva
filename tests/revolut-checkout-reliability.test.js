@@ -167,7 +167,14 @@ test('hosted checkout restores server kind, uses truthful profile copy, and neve
   assert.match(html, /Up to 2 profiles/);
   assert.match(html, /Up to 5 profiles/);
   assert.doesNotMatch(html, /simultaneous streams/i);
-  assert.doesNotMatch(html, /NorvaMarketing\.track\('purchase'/);
+  const failedGuard = html.indexOf('if (!done)');
+  const successView = html.indexOf("document.getElementById('checkout-view').style.display = 'none'");
+  const purchaseEvent = html.indexOf("NorvaMarketing.track('purchase'");
+  assert.ok(purchaseEvent > successView && successView > failedGuard,
+    'purchase measurement must remain behind the authoritative server confirmation guard');
+  assert.match(html,
+    /checkoutKind === 'resubscribe'[\s\S]{0,900}NorvaMarketing\.track\('purchase'/,
+    'only an immediately captured resubscribe is a browser-side purchase');
   assert.match(html, /Your current plan stays unchanged until renewal/);
 });
 
