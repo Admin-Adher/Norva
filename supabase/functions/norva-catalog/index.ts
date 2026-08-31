@@ -1495,8 +1495,8 @@ async function listGenreSummary(req: Request, url: URL, userId: string) {
   const counts = new Map<string, number>();
 
   // Fast path: precomputed per-user summary (all sources), refreshed by cron at sync cadence — an
-  // instant single-row read instead of the ~4.6s live group-by over a 335k catalogue. The optional
-  // per-source view (Manage Content) isn't summarised, so it falls back to the live RPC below.
+  // instant single-row read instead of the ~4.6s live group-by over a 335k catalogue. A provider
+  // scope uses the lifecycle/generation-fenced index-first RPC below.
   let usedSummary = false;
   if (!sourceId) {
     try {
@@ -1533,8 +1533,8 @@ async function listGenreSummary(req: Request, url: URL, userId: string) {
     }
   }
 
-  // Older cached summaries and the source-scoped RPC intentionally omitted the
-  // fallback bucket. That made a sizeable part of real provider catalogues
+  // Older cached summaries and legacy RPC versions omitted the fallback bucket.
+  // That made a sizeable part of real provider catalogues
   // impossible to reach from the category picker ("Other" is ~10% for a typical
   // large account). Count it directly through the GIN-indexed genre_buckets
   // column when it is absent. visible_source_ids is computed only from visible
