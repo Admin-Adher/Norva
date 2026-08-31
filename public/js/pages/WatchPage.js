@@ -12860,12 +12860,37 @@ class WatchPage {
                 };
             }
 
+            const moviePage = options.force && payload.type === 'movie'
+                ? window.app?.pages?.movies
+                : null;
+            const movieProgress = moviePage ? {
+                itemId: payload.id,
+                itemType: payload.type,
+                sourceId: payload.sourceId,
+                progress,
+                duration,
+                watchedAt: payload.watchedAt,
+                data: payload.data || {},
+            } : null;
+            // Back must remain immediate, so the final history POST is intentionally
+            // fire-and-forget. Mirror its immutable capture into Movies before the
+            // route changes; otherwise Movies can win the race with an older GET and
+            // keep the open fiche on "Play" until a manual reload.
+            try { moviePage?.applyPlaybackProgress?.(movieProgress); } catch (_) { /* best-effort UI sync */ }
+
             await window.API.request(
                 'POST',
                 '/history',
                 payload,
                 options.keepalive ? { keepalive: true } : {}
             );
+            // Re-apply after the authoritative write, then launch a fresh, ordered
+            // history read if Movies is already visible. Its request generation
+            // supersedes any pre-commit GET still in flight during navigation.
+            try {
+                moviePage?.applyPlaybackProgress?.(movieProgress);
+                moviePage?.refreshWatchStateAfterSave?.();
+            } catch (_) { /* best-effort UI sync */ }
             if (sendMeta
                 && this._historyPersistenceActive
                 && this._historyPersistenceGeneration === persistenceGeneration) {

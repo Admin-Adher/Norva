@@ -31,6 +31,7 @@ class MoviesPage {
         this.pageEl = document.getElementById('page-movies');
         this.detailsPanel = document.getElementById('movie-details');
         this.primaryActionBtn = document.getElementById('movie-primary-action');
+        this.detailProgressEl = document.getElementById('movie-detail-progress');
         this.detailFavoriteBtn = document.getElementById('movie-detail-favorite');
         this.detailDownloadBtn = document.getElementById('movie-detail-download');
         this.versionsList = document.getElementById('movie-versions-list');
@@ -59,6 +60,8 @@ class MoviesPage {
         this.showFavoritesOnly = false;
         this.groupDuplicates = true;
         this.watchState = new Map(); // source_id:item_id -> { progress, duration, ratio }
+        this._watchStateRequestId = 0;
+        this._historyRefreshPromise = null;
         this.serverSettings = {};
         this.hiddenCategoryIds = new Set();
         this._genreFilterHydrated = false;
@@ -860,6 +863,7 @@ class MoviesPage {
         }
         await Promise.all(initialLoads);
         this.renderContinueWatching();
+        this.syncCurrentMovieWatchUi();
         this.renderActiveFilterChips();
         // While the page is visible, refresh the language menus periodically so they
         // track the crawl in near-real-time. Gentle (server-memoized 60s, skips DOM work
@@ -1009,8 +1013,10 @@ class MoviesPage {
     }
 
     async loadWatchState() {
+        const requestId = ++this._watchStateRequestId;
         try {
             const history = await API.history.getAll(5000);
+            if (requestId !== this._watchStateRequestId) return false;
             const activeSourceIds = new Set((this.sources || []).map(source => String(source.id)));
             this.watchState = new Map();
             this.historyItems = (history || []).filter(item => {
@@ -1031,10 +1037,13 @@ class MoviesPage {
                     data: h.data
                 });
             }
+            return true;
         } catch (err) {
+            if (requestId !== this._watchStateRequestId) return false;
             console.warn('Error loading watch history:', err);
             this.watchState = new Map();
             this.historyItems = [];
+            return true;
         }
     }
 
@@ -2259,6 +2268,93 @@ class MoviesPage {
         return 'Play';
     }
 
+    applyPlaybackProgress(update = {}) {
+        const itemType = String(update.itemType || update.type || '').toLowerCase();
+        const itemId = update.itemId ?? update.id;
+        const sourceId = update.sourceId ?? update.source_id;
+        const progress = Math.max(0, Math.floor(Number(update.progressSeconds ?? update.progress) || 0));
+        const duration = Math.max(0, Math.floor(Number(update.durationSeconds ?? update.duration) || 0));
+        if (itemType !== 'movie' || itemId == null || String(itemId) === ''
+            || sourceId == null || String(sourceId) === '' || duration <= 0) return false;
+
+        const watchedAt = String(update.watchedAt || update.watched_at || new Date().toISOString());
+        const sameMovie = (history) => String(history?.item_id ?? history?.itemId ?? '') === String(itemId)
+            && String(this.historySourceId(history) ?? '') === String(sourceId)
+            && String(history?.item_type ?? history?.itemType ?? '') === 'movie';
+        const existing = (this.historyItems || []).find(sameMovie) || null;
+        const completed = update.completed === true || progress >= duration * 0.95;
+        const data = {
+            ...(existing?.data || {}),
+            ...(update.data || {}),
+            sourceId: update.data?.sourceId ?? sourceId,
+        };
+        const history = {
+            ...(existing || {}),
+            item_id: String(itemId),
+            itemId: String(itemId),
+            item_type: 'movie',
+            itemType: 'movie',
+            source_id: sourceId,
+            sourceId,
+            progress,
+            duration,
+            progress_seconds: progress,
+            duration_seconds: duration,
+            completed,
+            updated_at: watchedAt,
+            watched_at: watchedAt,
+            data,
+        };
+
+        this.historyItems = [history, ...(this.historyItems || []).filter(item => !sameMovie(item))];
+        this.watchState.set(this._watchStateKey(sourceId, itemId), {
+            progress,
+            duration,
+            ratio: duration > 0 ? progress / duration : 0,
+            completed,
+            updatedAt: watchedAt,
+            sourceId,
+            data,
+        });
+        this.renderContinueWatching();
+        this.syncCurrentMovieWatchUi();
+        return true;
+    }
+
+    syncCurrentMovieWatchUi() {
+        if (!this.currentMovie) return false;
+        const state = this.getMovieWatchState(this.currentMovie);
+        const progressEl = this.detailProgressEl || document.getElementById('movie-detail-progress');
+        if (progressEl) {
+            progressEl.classList.toggle('hidden', state.status !== 'inprogress');
+            const fill = progressEl.querySelector('div');
+            if (fill) fill.style.width = `${Math.max(0, Math.min(100, Math.round((state.ratio || 0) * 100)))}%`;
+        }
+        if (this.primaryActionBtn) {
+            const label = this.primaryActionBtn.querySelector('[data-movie-action-label]')
+                || this.primaryActionBtn.querySelector('span:last-child');
+            if (label) label.textContent = this.getMovieActionLabel(this.currentMovie);
+        }
+        return true;
+    }
+
+    refreshWatchStateAfterSave() {
+        if (this.app?.currentPage !== 'movies') return Promise.resolve(false);
+        if (this._historyRefreshPromise) return this._historyRefreshPromise;
+        const refresh = (async () => {
+            const applied = await this.loadWatchState();
+            if (!applied || this.app?.currentPage !== 'movies') return false;
+            this.renderContinueWatching();
+            this.syncCurrentMovieWatchUi();
+            return true;
+        })();
+        const tracked = refresh.finally(() => {
+            if (this._historyRefreshPromise === tracked) this._historyRefreshPromise = null;
+        });
+        this._historyRefreshPromise = tracked;
+        return tracked;
+    }
+
     _selectInProgressVersion(items = []) {
         return items
             .map((item, order) => ({ item, order, state: this.getMovieWatchState(item) }))
@@ -2884,7 +2980,7 @@ class MoviesPage {
         if (metaEl) metaEl.innerHTML = metaParts.map(part => `<span>${MediaUtils.escapeHtml(part)}</span>`).join('');
 
         const state = this.getMovieWatchState(movie);
-        const progressEl = document.getElementById('movie-detail-progress');
+        const progressEl = this.detailProgressEl || document.getElementById('movie-detail-progress');
         if (progressEl) {
             progressEl.classList.toggle('hidden', state.status !== 'inprogress');
             const fill = progressEl.querySelector('div');
@@ -2895,7 +2991,7 @@ class MoviesPage {
             this.primaryActionBtn.disabled = false;
             this.primaryActionBtn.dataset.streamId = movie.stream_id;
             this.primaryActionBtn.dataset.sourceId = movie.sourceId;
-            this.primaryActionBtn.innerHTML = `<span class="play-icon">${Icons.play}</span><span>${MediaUtils.escapeHtml(this.getMovieActionLabel(movie))}</span>`;
+            this.primaryActionBtn.innerHTML = `<span class="play-icon">${Icons.play}</span><span data-movie-action-label>${MediaUtils.escapeHtml(this.getMovieActionLabel(movie))}</span>`;
         }
 
         this.syncDetailFavoriteButton();

@@ -248,10 +248,20 @@ for (const spec of [
 
 test('WatchPage persists optional titleId inside rich history metadata', async () => {
   let request = null;
+  const movieUpdates = [];
+  let movieRefreshes = 0;
   const source = fs.readFileSync(path.join(ROOT, 'public/js/pages/WatchPage.js'), 'utf8');
   const context = {
     window: {
       API: { request: async (method, url, payload) => { request = { method, url, payload }; } },
+      app: {
+        pages: {
+          movies: {
+            applyPlaybackProgress: (update) => movieUpdates.push(update),
+            refreshWatchStateAfterSave: () => { movieRefreshes += 1; },
+          },
+        },
+      },
     },
     console,
     setTimeout,
@@ -284,4 +294,7 @@ test('WatchPage persists optional titleId inside rich history metadata', async (
   await vmPage.saveProgress({ force: true });
 
   assert.equal(request?.payload?.data?.titleId, 'title-stable-42');
+  assert.equal(movieUpdates.length, 2, 'the fiche receives an optimistic and a confirmed progress snapshot');
+  assert.equal(movieUpdates.every(update => update.progress === 120 && update.duration === 600), true);
+  assert.equal(movieRefreshes, 1, 'the confirmed write triggers one authoritative Movies refresh');
 });

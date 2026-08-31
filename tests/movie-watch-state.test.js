@@ -62,6 +62,73 @@ test('group details and Play select the actually in-progress provider version', 
   assert.equal(page._selectInProgressVersion([preferred, older, latest]), latest);
 });
 
+test('an exit progress capture updates the open movie fiche to Resume immediately', () => {
+  const label = { textContent: 'Play' };
+  const fill = { style: {} };
+  let progressHidden = true;
+  let continueRenders = 0;
+  Object.assign(page, {
+    historyItems: [],
+    watchState: new Map(),
+    currentMovie: { sourceId: 'source-a', stream_id: '42' },
+    primaryActionBtn: {
+      querySelector: (selector) => selector === '[data-movie-action-label]' ? label : null,
+    },
+    detailProgressEl: {
+      classList: { toggle: (_name, hidden) => { progressHidden = hidden; } },
+      querySelector: () => fill,
+    },
+    renderContinueWatching: () => { continueRenders += 1; },
+  });
+
+  const applied = page.applyPlaybackProgress({
+    itemId: '42',
+    itemType: 'movie',
+    sourceId: 'source-a',
+    progress: 120,
+    duration: 600,
+    watchedAt: '2026-08-31T10:00:00.000Z',
+    data: { title: 'Movie' },
+  });
+
+  assert.equal(applied, true);
+  assert.equal(page.watchState.get('source-a:42').progress, 120);
+  assert.equal(page.historyItems[0].progress, 120);
+  assert.equal(label.textContent, 'Resume');
+  assert.equal(progressHidden, false);
+  assert.equal(fill.style.width, '20%');
+  assert.equal(continueRenders, 1);
+});
+
+test('a newer watch-state read cannot be overwritten by an older in-flight response', async () => {
+  const resolvers = [];
+  context.API = {
+    history: {
+      getAll: () => new Promise(resolve => resolvers.push(resolve)),
+    },
+  };
+  const racePage = Object.create(context.window.MoviesPage.prototype);
+  Object.assign(racePage, {
+    sources: [{ id: 'source-a' }],
+    watchState: new Map(),
+    historyItems: [],
+    _watchStateRequestId: 0,
+  });
+
+  const older = racePage.loadWatchState();
+  const newer = racePage.loadWatchState();
+  resolvers[1]([{
+    item_type: 'movie', item_id: '42', source_id: 'source-a',
+    progress: 180, duration: 600, updated_at: '2026-08-31T10:01:00.000Z', data: {},
+  }]);
+  assert.equal(await newer, true);
+  resolvers[0]([]);
+  assert.equal(await older, false);
+
+  assert.equal(racePage.watchState.get('source-a:42').progress, 180);
+  assert.equal(racePage.historyItems.length, 1);
+});
+
 test('pending audio metadata stays out of the consumer catalogue', () => {
   assert.equal(page.displayLanguageStatus('Audio pending'), '');
   assert.equal(page.displayLanguageStatus('Identifying audio'), '');
