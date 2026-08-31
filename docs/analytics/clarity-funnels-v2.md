@@ -201,15 +201,130 @@ Create these views in each relevant project:
 Watchlist order: checkout completion, provider ready rate, first-frame rate,
 journey errors, recovery success, Core Web Vitals, rage/dead/error clicks.
 
-## Live Web project configuration (2026-08-28)
+## Live Clarity project configuration (2026-08-31)
 
-The production Web project `y8fgihobbx` currently has two page-visit funnels
-that can operate before the v2 API events are deployed:
+The following state was saved and then re-read from the Clarity settings UI.
+It is the handoff point for the Google Ads launch preflight; it is not evidence
+that any campaign has been activated.
 
-- `Acquisition Web - Landing vers App`: landing -> account -> offer ->
-  checkout -> app.
-- `Activation Web - Provider vers lecture`: Settings/Sources -> Home ->
-  Movies or Series -> Watch.
+| Project | Funnel | State on 2026-08-31 |
+|---|---|---|
+| Android mobile `y9fagfyr9a` | `Android | Onboarding | App vers connexion` | Confirmed |
+| Android mobile `y9fagfyr9a` | `Android | Activation | App vers 1re image` | Confirmed |
+| Android mobile `y9fagfyr9a` | `Android | Acquisition | App vers compte` | Pending; required API events unavailable |
+| Android mobile `y9fagfyr9a` | `Android | Conversion | Offre vers achat Play` | Pending; required API events unavailable |
+| Web `y8fgihobbx` | `Web | Activation | App vers 1re image` | Confirmed |
+| Web `y8fgihobbx` | `Web | Acquisition | Landing vers App` | Pending; legacy funnel retained |
+| Android TV `y9fxs54jpc` | Not part of this pass | Not changed |
+
+### Confirmed funnels
+
+The Android mobile project `y9fagfyr9a` (`tv.norva.phone`) has two confirmed
+funnels:
+
+- `Android | Onboarding | App vers connexion`: `app_open` ->
+  `login_started` -> `login_completed`.
+- `Android | Activation | App vers 1re image`: `app_open` ->
+  `content_opened` -> `playback_started` -> `playback_first_frame`.
+
+The production Web project `y8fgihobbx` has one v2 funnel confirmed:
+
+- `Web | Activation | App vers 1re image`: `app_open` -> `content_opened` ->
+  `playback_started` -> `playback_first_frame`.
+
+The Android TV project `y9fxs54jpc` was outside this configuration pass and
+was not changed.
+
+### Pending Android mobile acquisition and Play purchase funnels
+
+Two additional Android mobile funnels are intended:
+
+- `Android | Acquisition | App vers compte`: `app_open` ->
+  `signup_started` -> `signup_completed`.
+- `Android | Conversion | Offre vers achat Play`: `pricing_viewed` ->
+  `plan_selected` -> `checkout_started` -> `checkout_completed`.
+
+They were not saved. On 2026-08-31, the new-funnel editor in project
+`y9fagfyr9a` was opened and each required event was searched by its exact API
+name. All six searches returned no selectable result and no Add Event button:
+
+- `signup_started`
+- `signup_completed`
+- `pricing_viewed`
+- `plan_selected`
+- `checkout_started`
+- `checkout_completed`
+
+The project still exposed only eight observed API events: `app_open`,
+`content_opened`, `login_started`, `login_completed`, `playback_started`,
+`playback_first_frame`, `journey_error` and `journey_retry`. The creation form
+was cancelled, so the two confirmed mobile funnels above remain unchanged and
+no incomplete placeholder funnel was introduced.
+
+The application code already permits and emits the intended event names:
+
+- `public/account.html` emits signup start and completion events.
+- `public/subscribe.html` emits pricing, plan selection, checkout start and
+  verified checkout completion events for the native Google Play path.
+- `public/js/product-analytics.js` forwards consented WebView product events to
+  `public/js/native-analytics.js`, which sends the bounded events to the native
+  Clarity bridge.
+
+This is therefore an unobserved-live-signal gate, not proof that the source
+instrumentation is absent. Resume only after a genuine, consented mobile QA
+journey has produced the signals:
+
+1. Grant analytics consent in the QA journey.
+2. Create a new account to produce `signup_started` and `signup_completed`.
+3. Open the subscription screen, select a plan and use an authorized Google
+   Play license-testing purchase to produce the pricing and checkout events.
+4. Treat `checkout_completed` as valid only after verified entitlement success.
+5. Wait for Clarity ingestion, then confirm all six events are selectable in
+   project `y9fagfyr9a`.
+6. Create both funnels with the names and ordered steps above, save them, and
+   re-read the table preview.
+
+Do not manufacture public sessions, create same-named no-code proxy events,
+substitute screen visits, or incur a real Google Play charge merely to unlock
+the selectors.
+
+### Pending Web acquisition funnel
+
+The intended fourth funnel is:
+
+`landing_view` -> `primary_cta_clicked` -> `signup_started` -> `app_open`
+
+It is not yet saved. Clarity lists `signup_started` in the Web project's Smart
+Events table as an API event, but on 2026-08-31 the funnel editor returned
+`0 results found` when searching for that exact event. The editor therefore
+could not add the required third step.
+
+To avoid silently changing the metric, the automatic Clarity event
+`S'inscrire`, a page-visit proxy, and a shortened three-step funnel were all
+rejected. No synthetic public session was generated to make the selector
+available. The existing legacy funnel remains unchanged:
+
+- `Acquisition Web - Landing vers App`: `1. Landing visitée` ->
+  `2. Compte ouvert` -> `3. Offre choisie` -> `4. Paiement ouvert` ->
+  `5. App ouverte`.
+
+Resume this work only after a genuine, consented production
+`signup_started` event makes the API event selectable in the funnel editor:
+
+1. Open Web project `y8fgihobbx` -> Settings -> Funnels.
+2. Edit `Acquisition Web - Landing vers App`.
+3. Confirm that an exact search for `signup_started` returns the API event.
+4. Replace all legacy page-visit steps with `landing_view`,
+   `primary_cta_clicked`, `signup_started`, then `app_open` in that order.
+5. Rename it `Web | Acquisition | Landing vers App`, save it, and re-read the
+   table preview to verify the name and ordered steps.
+6. Do not substitute `S'inscrire` or manufacture a session if the API event is
+   still unavailable.
+
+The paid-conversion funnel remains deferred until genuine `plan_selected`,
+`checkout_started` and `checkout_completed` signals are available. No Google
+Ads campaign was activated and no advertising spend was authorized during
+this Clarity configuration pass.
 
 The following production-only segments are saved and pinned to the personal
 watchlist:
@@ -235,8 +350,8 @@ or evaluate a commercial baseline. Do not interpret a zero conversion rate as
 a defect until the minimum sample conditions in the executive scorecard are
 met.
 
-Clarity exposes API events as selectable Smart Events only after each event has
-been received at least once. Create the eight event funnels above after the
+Clarity exposes API events as selectable funnel steps only after the UI has a
+genuine signal it can use. Complete the remaining event funnels after their
 first genuine, consented v2 production signals arrive. Do not generate a
 synthetic public session to unlock the selectors.
 
