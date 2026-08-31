@@ -7418,7 +7418,7 @@ class AdminPage {
                 placeholder="Clé partenaire (hexadécimale)" aria-label="Rechercher par clé partenaire"
                 inputmode="text" pattern="[0-9a-f-]{1,64}" autocapitalize="none" spellcheck="false">
               <select id="partners-admin-status" aria-label="Filtrer les partenaires par statut">
-                ${[['', 'Tous les statuts'], ['pending_verification', 'Vérification en attente'], ['active', 'Actifs'], ['held', 'En attente de décision'], ['suspended', 'Suspendus'], ['closed', 'Clôturés']]
+                ${[['', 'Tous les statuts'], ['pending_verification', 'Activation en attente'], ['active', 'Actifs'], ['held', 'En attente de décision'], ['suspended', 'Suspendus'], ['closed', 'Clôturés']]
                     .map(([value, label]) => `<option value="${value}"${status === value ? ' selected' : ''}>${label}</option>`).join('')}
               </select>
             </div>
@@ -7426,10 +7426,10 @@ class AdminPage {
           </section>
 
           <section ${paneAttrs('risk')}>
-            <div class="partners-pane-intro"><div><h2>Risque et vérification</h2><p>KYC individuel, files de revue et décisions minimisées.</p></div></div>
+            <div class="partners-pane-intro"><div><h2>Risque et vérification</h2><p>KYC cash des membres, certification technique Didit et décisions minimisées.</p></div></div>
             <div class="partners-ops-grid">
-              <section id="partners-admin-kyc" class="partners-ops-card" aria-busy="true"><h2>KYC individuel</h2><p>Quota informatif et capacité réelle.</p><div class="ssub">Chargement…</div></section>
-              <section id="partners-admin-kyc-certification" class="partners-ops-card" aria-busy="true"><h2>Validation finale Didit</h2><p>Contrôle ponctuel du parcours d’identité avant ouverture du KYC cash.</p><div class="ssub">Chargement…</div></section>
+              <section id="partners-admin-kyc" class="partners-ops-card" aria-busy="true"><h2>KYC cash des membres</h2><p>Quota informatif et capacité réelle du parcours cash.</p><div class="ssub">Chargement…</div></section>
+              <section id="partners-admin-kyc-certification" class="partners-ops-card" aria-busy="true"><h2>Certification technique Didit</h2><p>Preuve pré-gate isolée du KYC cash et des paiements.</p><div class="ssub">Chargement…</div></section>
               <section id="partners-admin-risk" class="partners-ops-card" aria-busy="true"><h2>Risque</h2><p>Comptes et jobs nécessitant une décision autorisée.</p><div class="ssub">Chargement…</div></section>
             </div>
             <section id="partners-admin-kyc-human-reviews" class="partners-control-card" aria-busy="true">
@@ -7979,7 +7979,7 @@ class AdminPage {
         ]);
         if (view === 'risk') return Promise.allSettled([
             this._partnersLoadCapabilities({ force }),
-            load('kyc', 'admin_partners_kyc_quota', {}, (d) => this._renderPartnersKycQuota(d), 'partners-admin-kyc', 'KYC individuel'),
+            load('kyc', 'admin_partners_kyc_quota', {}, (d) => this._renderPartnersKycQuota(d), 'partners-admin-kyc', 'KYC cash des membres'),
             this._partnersLoadKycCertification({ force }),
             load('risk', 'admin_partners_risk_queue', { p_limit: 8, p_offset: 0, p_status: null }, (d) => this._renderPartnersRisk(d), 'partners-admin-risk', 'Risque'),
             load('kycHumanReviews', 'admin_partners_kyc_human_review_queue', { p_limit: 25, p_offset: 0, p_status: 'all' }, (d) => this._renderPartnersKycHumanReviews(d), 'partners-admin-kyc-human-reviews', 'Recours humains KYC'),
@@ -8010,7 +8010,7 @@ class AdminPage {
             {
                 force,
                 targetId: 'partners-admin-kyc-certification',
-                title: 'Validation finale Didit'
+                title: 'Certification technique Didit'
             }
         );
     }
@@ -8863,7 +8863,7 @@ class AdminPage {
             accounts: () => this._partnersLoadAccounts({ force: true }),
             monitoring: () => load('monitoring', 'admin_partners_monitoring', {}, (d) => this._renderPartnersMonitoring(d), 'partners-admin-monitoring', 'Supervision'),
             analytics: () => load('analytics', 'admin_partners_analytics', { p_days: 30 }, (d) => this._renderPartnersAnalytics(d), 'partners-admin-analytics', 'Performance Partners'),
-            kyc: () => load('kyc', 'admin_partners_kyc_quota', {}, (d) => this._renderPartnersKycQuota(d), 'partners-admin-kyc', 'KYC individuel'),
+            kyc: () => load('kyc', 'admin_partners_kyc_quota', {}, (d) => this._renderPartnersKycQuota(d), 'partners-admin-kyc', 'KYC cash des membres'),
             kycCertification: () => this._partnersLoadKycCertification({ force: true }),
             risk: () => load('risk', 'admin_partners_risk_queue', { p_limit: 8, p_offset: 0, p_status: null }, (d) => this._renderPartnersRisk(d), 'partners-admin-risk', 'Risque'),
             kycHumanReviews: () => load('kycHumanReviews', 'admin_partners_kyc_human_review_queue', { p_limit: 25, p_offset: 0, p_status: 'all' }, (d) => this._renderPartnersKycHumanReviews(d), 'partners-admin-kyc-human-reviews', 'Recours humains KYC'),
@@ -8902,8 +8902,11 @@ class AdminPage {
         const counts = {
             total: overview.accounts_total,
             active: accountStatuses.active,
-            pending_verification: Number(verificationStatuses.pending || 0)
-                + Number(verificationStatuses.not_started || 0),
+            kyc_not_started: Number(verificationStatuses.not_started || 0),
+            kyc_pending: Number(verificationStatuses.pending || 0),
+            kyc_verified: Number(verificationStatuses.verified || 0),
+            kyc_action_required: Number(verificationStatuses.failed || 0)
+                + Number(verificationStatuses.expired || 0),
             held: accountStatuses.held,
             suspended: accountStatuses.suspended,
             links_active: linkStatuses.active
@@ -8918,7 +8921,10 @@ class AdminPage {
         el.innerHTML = [
             metric(counts.total, 'Comptes'),
             metric(counts.active, 'Actifs', 'ok'),
-            metric(counts.pending_verification, 'KYC en attente', Number(counts.pending_verification) > 0 ? 'warn' : ''),
+            metric(counts.kyc_not_started, 'KYC cash non commencé'),
+            metric(counts.kyc_pending, 'KYC cash en cours', Number(counts.kyc_pending) > 0 ? 'warn' : ''),
+            metric(counts.kyc_verified, 'KYC cash vérifié', 'ok'),
+            metric(counts.kyc_action_required, 'KYC cash à relancer', Number(counts.kyc_action_required) > 0 ? 'alert' : ''),
             metric(counts.held, 'En revue', Number(counts.held) > 0 ? 'warn' : ''),
             metric(counts.suspended, 'Suspendus', Number(counts.suspended) > 0 ? 'alert' : ''),
             metric(counts.links_active, 'Liens actifs', 'ok')
@@ -10739,13 +10745,13 @@ class AdminPage {
             || !Number.isSafeInteger(data.remaining)
             || typeof data.utilization_percent !== 'number'
             || data.blocking !== false) {
-            this._partnersOpsUnavailable('partners-admin-kyc', 'KYC individuel');
+            this._partnersOpsUnavailable('partners-admin-kyc', 'KYC cash des membres');
             return;
         }
         const utilization = Math.max(0, Math.min(999, data.utilization_percent));
         el.removeAttribute('aria-busy');
-        el.innerHTML = `<h2>KYC individuel</h2>
-            <p>Fenêtre glissante de ${AdminPage.n(data.window_days)} jours. Le seuil gratuit est informatif et ne bloque jamais automatiquement la vérification 501.</p>
+        el.innerHTML = `<h2>KYC cash des membres</h2>
+            <p>Fenêtre glissante de ${AdminPage.n(data.window_days)} jours. Le seuil gratuit est informatif et ne bloque jamais automatiquement le parcours cash.</p>
             <div class="partners-ops-stats">
               <div class="partners-ops-stat"><strong>${AdminPage.n(data.used)}</strong><span>utilisées</span></div>
               <div class="partners-ops-stat"><strong>${AdminPage.n(data.remaining)}</strong><span>gratuites restantes</span></div>
@@ -10765,7 +10771,9 @@ class AdminPage {
             this._partnersScheduleKycCertificationPoll(3_000);
             return;
         }
+        const schemaVersion = Number(data?.schema_version);
         const certification = data?.certification;
+        const technicalHistory = data?.technical_history;
         const statuses = new Set([
             'reserved', 'pending', 'in_review', 'approved', 'declined',
             'expired', 'quarantined'
@@ -10778,8 +10786,40 @@ class AdminPage {
         const exactKeys = (value, expected) => value && typeof value === 'object'
             && !Array.isArray(value)
             && Object.keys(value).sort().join('|') === expected.slice().sort().join('|');
-        const valid = data?.schema_version === 1
+        const historyKeys = [
+            'last_event_observed_at', 'quarantined_sessions', 'sessions_total',
+            'sessions_with_events', 'sessions_without_events',
+            'verified_live_sessions'
+        ];
+        const historyValid = schemaVersion === 1
+            ? typeof technicalHistory === 'undefined'
+            : (schemaVersion === 2
+                && exactKeys(technicalHistory, historyKeys)
+                && [
+                    technicalHistory.sessions_total,
+                    technicalHistory.sessions_with_events,
+                    technicalHistory.sessions_without_events,
+                    technicalHistory.verified_live_sessions,
+                    technicalHistory.quarantined_sessions
+                ].every((value) => Number.isSafeInteger(value) && value >= 0)
+                && technicalHistory.sessions_with_events
+                    + technicalHistory.sessions_without_events
+                    <= technicalHistory.sessions_total
+                && technicalHistory.verified_live_sessions
+                    <= technicalHistory.sessions_total
+                && technicalHistory.quarantined_sessions
+                    <= technicalHistory.sessions_total
+                && (technicalHistory.last_event_observed_at === null
+                    ? technicalHistory.sessions_with_events === 0
+                    : Number.isFinite(Date.parse(
+                        String(technicalHistory.last_event_observed_at)
+                    ))));
+        const valid = [1, 2].includes(data?.schema_version)
+            && exactKeys(data, schemaVersion === 2
+                ? ['action', 'certification', 'schema_version', 'technical_history']
+                : ['action', 'certification', 'schema_version'])
             && data?.action === 'kyc_certification_status'
+            && historyValid
             && (certification === null || (
                 exactKeys(certification, [
                     'environment', 'expires_at', 'observed_at', 'reason',
@@ -10802,7 +10842,7 @@ class AdminPage {
             this._partnersKycCertificationPollTimer = null;
             this._partnersOpsUnavailable(
                 'partners-admin-kyc-certification',
-                'Validation finale Didit'
+                'Certification technique Didit'
             );
             this._partnersScheduleKycCertificationPoll(3_000);
             return;
@@ -10815,7 +10855,7 @@ class AdminPage {
             pending: 'Vérification en cours',
             in_review: 'Revue Didit en cours',
             approved: certification?.verified
-                ? 'Preuve live vérifiée'
+                ? 'Certification technique live vérifiée'
                 : 'Observation approuvée non autoritaire',
             declined: 'Vérification refusée',
             expired: 'Session expirée',
@@ -10865,15 +10905,39 @@ class AdminPage {
               </div>`
             : `<div class="partners-control-item partners-kyc-certification">
                 <span><strong>Aucune certification enregistrée</strong>
-                  <small>Cette validation concerne uniquement le futur parcours KYC cash. L’adhésion, le partage et les crédits Norva restent séparés.</small>
+                  <small>Cette preuve technique est isolée du KYC cash membre. Elle ne crée aucun compte et n’ouvre aucun paiement.</small>
                 </span>${action}
               </div>`;
+        const historyStatus = technicalHistory
+            ? `<div class="partners-control-item partners-kyc-certification-history">
+                <span><strong>Historique technique sanitisé</strong>
+                  <small>${AdminPage.n(technicalHistory.sessions_total)} session(s) · ${AdminPage.n(technicalHistory.sessions_with_events)} avec événement local · ${AdminPage.n(technicalHistory.verified_live_sessions)} certification(s) live vérifiée(s).</small>
+                  <small>${technicalHistory.sessions_without_events > 0
+        ? `${AdminPage.n(technicalHistory.sessions_without_events)} session(s) liée(s) à Didit sans événement local : écart historique visible, jamais convertible en KYC cash.`
+        : 'Aucune session liée à Didit sans événement local.'}</small>
+                  <small>${technicalHistory.last_event_observed_at
+        ? `Dernier événement local observé ${AdminPage.esc(AdminPage.timeAgo(technicalHistory.last_event_observed_at))}.`
+        : 'Aucun événement technique local enregistré.'}</small>
+                </span><span class="partners-state">${AdminPage.n(technicalHistory.quarantined_sessions)} en quarantaine</span>
+              </div>`
+            : `<div class="partners-control-item partners-kyc-certification-history">
+                <span><strong>Historique technique sanitisé</strong>
+                  <small>Activation de l’historique agrégé en cours. Aucun état KYC cash n’est déduit de cette preuve.</small>
+                </span><span class="partners-state">Lecture compatible</span>
+              </div>`;
         const signature = JSON.stringify([
+            schemaVersion,
             certification?.status || null,
             certification?.verified === true,
             certification?.environment || null,
             certification?.reason || null,
             certification?.expires_at || null,
+            technicalHistory?.sessions_total ?? null,
+            technicalHistory?.sessions_with_events ?? null,
+            technicalHistory?.sessions_without_events ?? null,
+            technicalHistory?.verified_live_sessions ?? null,
+            technicalHistory?.quarantined_sessions ?? null,
+            technicalHistory?.last_event_observed_at ?? null,
             this._partnersCapabilities.risk === true,
             checkingUnknownResult,
             mutationActive
@@ -10887,13 +10951,13 @@ class AdminPage {
         const focusWasInside = el.contains?.(focused) === true;
         const focusedAction = focusWasInside
             ? String(focused?.dataset?.partnersAction || '') : '';
-        el.innerHTML = `<h2>Validation finale Didit</h2>
-            <p>Norva affiche tous les prérequis avant toute saisie, puis regroupe le consentement, le motif et Authenticator dans une seule fenêtre. Une sandbox ne peut jamais valider la preuve live.</p>
+        el.innerHTML = `<h2>Certification technique Didit</h2>
+            <p>Preuve pré-gate exceptionnelle de l’intégration Didit. Elle reste séparée du KYC cash des membres, de l’activation des comptes et de tout paiement.</p>
             <aside class="partners-provider-disclosure" aria-label="Informations juridiques Didit">
-              <strong>Avant d'utiliser votre identité réelle</strong>
-              <span>Norva demande cette certification ponctuelle et Didit fournit le parcours hébergé. Consultez la <a href="/privacy.html#partners" target="_blank" rel="noopener">Privacy Norva</a>, la <a href="https://didit.me/terms/verification-privacy-notice/" target="_blank" rel="noopener noreferrer">notice de confidentialité Didit</a> et les <a href="https://didit.me/terms/identity-verification/" target="_blank" rel="noopener noreferrer">conditions Didit de vérification</a>.</span>
+              <strong>Avant toute certification technique avec votre identité réelle</strong>
+              <span>Norva demande cette preuve ponctuelle et Didit fournit le parcours hébergé. Elle ne constitue jamais le KYC cash d’un partenaire. Consultez la <a href="/privacy.html#partners" target="_blank" rel="noopener">Privacy Norva</a>, la <a href="https://didit.me/terms/verification-privacy-notice/" target="_blank" rel="noopener noreferrer">notice de confidentialité Didit</a> et les <a href="https://didit.me/terms/identity-verification/" target="_blank" rel="noopener noreferrer">conditions Didit de vérification</a>.</span>
             </aside>
-            <div role="status" aria-live="polite" aria-atomic="true">${status}</div>`;
+            <div role="status" aria-live="polite" aria-atomic="true">${status}${historyStatus}</div>`;
         if (el.dataset) el.dataset.partnersKycSignature = signature;
         if (focusWasInside) {
             const generation = this._partnersPageGeneration;
@@ -11730,27 +11794,39 @@ class AdminPage {
             return;
         }
         const labels = {
-            active: 'Actif', pending_verification: 'Vérification en attente', held: 'En revue',
-            suspended: 'Suspendu', closed: 'Clôturé', verified: 'Vérifiée', pending: 'En attente',
-            invited: 'Invité', not_started: 'Non commencée', accepted: 'Accepté', rejected: 'Rejeté',
-            current: 'À jour', none: 'Aucun', expired: 'Expiré', revoked: 'Révoqué', unknown: 'Inconnu'
+            account: {
+                active: 'Actif', pending_verification: 'Activation en attente', held: 'En revue',
+                suspended: 'Suspendu', closed: 'Clôturé', invited: 'Invité'
+            },
+            verification: {
+                not_started: 'KYC cash non commencé', pending: 'KYC cash en cours',
+                verified: 'KYC cash vérifié', failed: 'KYC cash échoué',
+                expired: 'KYC cash expiré'
+            },
+            contract: {
+                not_accepted: 'Non accepté', accepted: 'Accepté', expired: 'Expiré'
+            },
+            link: {
+                active: 'Actif', current: 'À jour', none: 'Aucun', expired: 'Expiré',
+                revoked: 'Révoqué', suspended: 'Suspendu', closed: 'Clôturé'
+            }
         };
-        const valueLabel = (value) => labels[String(value || 'unknown')] || 'Inconnu';
+        const valueLabel = (value, kind) => labels[kind]?.[String(value || '')] || 'Inconnu';
         const cleanRows = rows.map((row) => {
             const id = String(row.account_id || '');
             if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) return null;
             const ref = String(row.partner_key || 'Partenaire');
-            const accountStatus = valueLabel(row.status);
-            const verification = valueLabel(row.verification_status);
-            const contract = valueLabel(row.contract_status);
-            const link = valueLabel(row.link_status || 'none');
+            const accountStatus = valueLabel(row.status, 'account');
+            const verification = valueLabel(row.verification_status, 'verification');
+            const contract = valueLabel(row.contract_status, 'contract');
+            const link = valueLabel(row.link_status || 'none', 'link');
             const created = row.created_at ? AdminPage.timeAgo(row.created_at) : '—';
             return { id, ref, accountStatus, verification, contract, link, created };
         }).filter(Boolean);
         if (cleanRows.length !== rows.length) throw new Error('invalid_partners_accounts_items');
         const tableRows = cleanRows.map((row) => `<tr class="partner-row" data-partner-id="${AdminPage.esc(row.id)}">
             <td><button type="button" class="partner-open" data-partner-id="${AdminPage.esc(row.id)}"
-              aria-label="Ouvrir ${AdminPage.esc(row.ref)}, compte ${AdminPage.esc(row.accountStatus)}, identité ${AdminPage.esc(row.verification)}">${AdminPage.esc(row.ref)}</button></td>
+              aria-label="Ouvrir ${AdminPage.esc(row.ref)}, compte ${AdminPage.esc(row.accountStatus)}, KYC cash ${AdminPage.esc(row.verification)}">${AdminPage.esc(row.ref)}</button></td>
             <td class="partner-meta">${AdminPage.esc(row.accountStatus)}</td>
             <td class="partner-meta">${AdminPage.esc(row.verification)}</td>
             <td class="partner-meta">${AdminPage.esc(row.contract)}</td>
@@ -11762,7 +11838,7 @@ class AdminPage {
               data-partner-id="${AdminPage.esc(row.id)}" aria-label="Ouvrir la fiche ${AdminPage.esc(row.ref)}">Ouvrir</button></header>
             <dl class="partners-account-facts">
               <div><dt>Compte</dt><dd>${AdminPage.esc(row.accountStatus)}</dd></div>
-              <div><dt>Identité</dt><dd>${AdminPage.esc(row.verification)}</dd></div>
+              <div><dt>KYC cash</dt><dd>${AdminPage.esc(row.verification)}</dd></div>
               <div><dt>Contrat</dt><dd>${AdminPage.esc(row.contract)}</dd></div>
               <div><dt>Lien</dt><dd>${AdminPage.esc(row.link)}</dd></div>
               <div><dt>Créé</dt><dd>${AdminPage.esc(row.created)}</dd></div>
@@ -11774,7 +11850,7 @@ class AdminPage {
         const last = Math.min(total, first + cleanRows.length - 1);
         if (el) el.innerHTML = `<div id="partners-account-table-wrap" class="partners-table-wrap">
             <table class="partners-table"><caption>Comptes partenaires correspondant aux filtres</caption>
-              <thead><tr><th scope="col">Partenaire</th><th scope="col">Compte</th><th scope="col">Identité</th><th scope="col">Contrat</th><th scope="col">Lien</th><th scope="col">Créé</th></tr></thead>
+              <thead><tr><th scope="col">Partenaire</th><th scope="col">Compte</th><th scope="col">KYC cash</th><th scope="col">Contrat</th><th scope="col">Lien</th><th scope="col">Créé</th></tr></thead>
               <tbody>${tableRows}</tbody>
             </table>
           </div>

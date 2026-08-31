@@ -403,6 +403,25 @@ jobs:
             psql -X -U postgres -d postgres -v ON_ERROR_STOP=1 \
             < ops/hetzner/backup/verify-partners-restore.sql
 
+      - name: Apply the focused post-prefix Partners status migration
+        shell: bash
+        run: |
+          set -euo pipefail
+          phase123_dir="$RUNNER_TEMP/phase123-online-migrations"
+          migration='20260831103000_partners_didit_status_truth_v1.sql'
+          mapfile -t db_containers < <(
+            docker ps --format '{{.Names}}' | grep '^supabase_db_'
+          )
+          if [[ "${#db_containers[@]}" -ne 1 ]]; then
+            printf 'Expected one disposable Supabase DB, found %s\n' \
+              "${#db_containers[@]}" >&2
+            exit 1
+          fi
+          test -f "$phase123_dir/$migration"
+          docker exec -i "${db_containers[0]}" \
+            psql -X -U supabase_admin -d postgres -v ON_ERROR_STOP=1 \
+            < "$phase123_dir/$migration"
+
       - name: Run exhaustive Partners pgTAP tests on the fresh database
         run: >-
           supabase test db

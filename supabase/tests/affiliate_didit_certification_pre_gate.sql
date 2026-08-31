@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(91);
+select extensions.plan(95);
 
 set local norva.partners_test_purge_envelope =
   'v1.v1.aaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
@@ -1428,6 +1428,59 @@ select extensions.is(
     #>> '{certification,verified}',
   'true',
   'status exposes the authoritative live verification boolean'
+);
+select extensions.is(
+  public.admin_partners_kyc_certification_status() ->> 'schema_version',
+  '2',
+  'status exposes the versioned technical-history contract'
+);
+select extensions.ok(
+  (
+    select
+      (
+        select count(*)
+        from jsonb_object_keys(response -> 'technical_history')
+      ) = 6
+      and response -> 'technical_history' ?& array[
+        'last_event_observed_at',
+        'quarantined_sessions',
+        'sessions_total',
+        'sessions_with_events',
+        'sessions_without_events',
+        'verified_live_sessions'
+      ]
+    from (
+      select public.admin_partners_kyc_certification_status() as response
+    ) status_response
+  ),
+  'status exposes only the exact aggregate technical-history keys'
+);
+select extensions.ok(
+  (
+    select
+      (response #>> '{technical_history,sessions_total}')::integer >= 1
+      and (response #>> '{technical_history,sessions_with_events}')::integer
+        + (response #>> '{technical_history,sessions_without_events}')::integer
+        <= (response #>> '{technical_history,sessions_total}')::integer
+      and (response #>> '{technical_history,verified_live_sessions}')::integer
+        <= (response #>> '{technical_history,sessions_total}')::integer
+      and (response #>> '{technical_history,quarantined_sessions}')::integer
+        <= (response #>> '{technical_history,sessions_total}')::integer
+    from (
+      select public.admin_partners_kyc_certification_status() as response
+    ) status_response
+  ),
+  'technical-history counts remain bounded and internally coherent'
+);
+select extensions.ok(
+  (
+    select response::text !~
+      '(provider_session_id|provider_event_id|account_id|user_id|date_of_birth|document_country|payload)'
+    from (
+      select public.admin_partners_kyc_certification_status() as response
+    ) status_response
+  ),
+  'technical status never exposes identity or provider-binding fields'
 );
 select extensions.ok(
   (
