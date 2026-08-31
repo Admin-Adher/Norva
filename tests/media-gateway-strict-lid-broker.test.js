@@ -431,6 +431,7 @@ test('strict LID freezes one sticky provider dispatcher for every sequential ran
   const data = Buffer.alloc(20, 0x41);
   const stickyDispatcher = { slot: 3 };
   const observedDispatchers = [];
+  const observedConnections = [];
   const broker = await createStrictLidBroker({
     sourceUrl: 'https://provider.invalid/movie/account/secret/file.mkv',
     fileSizeBytes: data.length,
@@ -439,6 +440,7 @@ test('strict LID freezes one sticky provider dispatcher for every sequential ran
     openTimeoutMs: 2000,
     fetchImpl: async (_url, options) => {
       observedDispatchers.push(options.dispatcher);
+      observedConnections.push(options.headers.Connection);
       const match = /^bytes=(\d+)-(\d+)$/.exec(options.headers.Range);
       const start = Number(match[1]);
       const end = Number(match[2]);
@@ -463,6 +465,47 @@ test('strict LID freezes one sticky provider dispatcher for every sequential ran
   assert.equal(observedDispatchers.length, 2);
   assert.equal(observedDispatchers[0], stickyDispatcher);
   assert.equal(observedDispatchers[1], stickyDispatcher);
+  assert.deepEqual(observedConnections, ['close', 'close']);
+});
+
+test('finite MKV seek reuses one provider connection across serialized windows', async (t) => {
+  const { createStrictLidBroker } = brokerHarness();
+  const { Agent } = require('undici');
+  const data = Buffer.from(Array.from({ length: 16 }, (_, index) => index));
+  const providerPorts = [];
+  const connectionHeaders = [];
+  const provider = http.createServer((req, res) => {
+    providerPorts.push(req.socket.remotePort);
+    connectionHeaders.push(req.headers.connection || null);
+    sendExactRange(req, res, data);
+  });
+  const sourceUrl = await listen(provider);
+  const dispatcher = new Agent({ connections: 1, pipelining: 1 });
+  const broker = await createStrictLidBroker({
+    sourceUrl,
+    fileSizeBytes: data.length,
+    dispatcher,
+    pathPrefix: 'finite-mkv-seek',
+    finiteWindowBytes: 8,
+    finiteCacheBytes: 16,
+    releaseDelayMs: 0,
+    completedReleaseDelayMs: 0,
+    openTimeoutMs: 2000,
+  });
+  t.after(async () => {
+    await broker.close();
+    await dispatcher.close();
+    await closeServer(provider);
+  });
+
+  const response = await fetch(broker.inputUrl, { headers: { Range: 'bytes=0-15' } });
+  assert.equal(response.status, 206);
+  assert.deepEqual(Buffer.from(await response.arrayBuffer()), data);
+  assert.equal(providerPorts.length, 2);
+  assert.equal(new Set(providerPorts).size, 1, 'both windows must share one provider TCP connection');
+  assert.deepEqual(connectionHeaders, ['keep-alive', 'keep-alive']);
+  assert.equal(broker.providerFetches, 2);
+  assert.equal(broker.completedProviderFetches, 2);
 });
 
 test('finite seek broker renews an ageing dispatcher on the same pinned proxy slot', async () => {
@@ -1619,7 +1662,7 @@ test('strict LID rejects invalid exact signed coordinates before creating a serv
   assert.match(route, /detectLanguageRequestPolicy\(req, options\)[\s\S]*validateDetectLanguageCapability\(capabilityToken, policy\.requiredScope\)/);
   assert.match(gatewaySource, /strictLidLoopbackBrokerProtocol: 1/);
   assert.match(gatewaySource, /strictLidFileSizeClaim: 'fileSizeBytes'/);
-  assert.match(gatewaySource, /const GATEWAY_VERSION = 132/);
+  assert.match(gatewaySource, /const GATEWAY_VERSION = 134/);
   assert.match(gatewaySource, /supersededReleaseDelayMs:\s*PROVIDER_SLOT_RELEASE_DELAY_MS/);
   assert.match(gatewaySource, /strictLidProviderDrainProtocol: 1/);
   assert.match(gatewaySource, /strictLidWeakFallbackProtocol: 1/);

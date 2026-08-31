@@ -1837,7 +1837,7 @@ const MULTI_AUDIO_HLS_PROTOCOL = 1;
 // production Ryzen/Radeon host. Keep the operational default evidence-based and configurable,
 // while bounding accidental fan-out. Every exact source track stays visible to the user.
 const MAX_MULTI_AUDIO_RENDITIONS = clampInt(process.env.MAX_MULTI_AUDIO_RENDITIONS, 12, 2, 32);
-const GATEWAY_VERSION = 132;
+const GATEWAY_VERSION = 134;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -2057,12 +2057,13 @@ app.get('/health', (req, res) => {
         },
         boundedMkvInputPumpProtocol: 1,
         finiteMkvSeekBroker: {
-            protocol: 4,
+            protocol: 5,
             active: Array.from(sessions.values()).filter((session) => (
                 Boolean(session?.finiteMkvSeekBroker)
             )).length,
             providerConnectionsSerialized: true,
             providerWindowQueueSerialized: true,
+            providerConnectionReuse: true,
             bufferedWindowBeforeLocalResponse: false,
             continuousLocalRangeResponse: true,
             concurrentLocalRanges: true,
@@ -3883,12 +3884,21 @@ async function closeStrictLidBrokerProviderFetch(context, attempt, reason = 'com
     attempt.upstreamCompletedExactRange = false;
     deadline?.close?.();
     attempt.controller.signal.removeEventListener?.('abort', onAttemptAbort);
-    try { controller.abort(new Error(reason)); } catch (_) {}
-    if (reader) {
-        try { await reader.cancel(); } catch (_) {}
-        try { reader.releaseLock(); } catch (_) {}
-    } else if (response?.body && !response.body.locked) {
-        try { await response.body.cancel(); } catch (_) {}
+    const preserveFiniteProviderConnection = completedExactRange
+        && context.pathPrefix === 'finite-mkv-seek';
+    if (preserveFiniteProviderConnection) {
+        // The declared Content-Length has been consumed exactly, so Undici can
+        // return this authenticated tunnel to its pool. Aborting/cancelling here
+        // forced a fresh residential CONNECT/TCP handshake every 2 MiB.
+        try { reader?.releaseLock(); } catch (_) {}
+    } else {
+        try { controller.abort(new Error(reason)); } catch (_) {}
+        if (reader) {
+            try { await reader.cancel(); } catch (_) {}
+            try { reader.releaseLock(); } catch (_) {}
+        } else if (response?.body && !response.body.locked) {
+            try { await response.body.cancel(); } catch (_) {}
+        }
     }
     if (!fetchStarted) return;
     if (completedExactRange) context.completedProviderFetches++;
@@ -4210,8 +4220,11 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                     Accept: '*/*',
                     'Accept-Encoding': 'identity',
                     'User-Agent': context.userAgent,
-                    Connection: 'close',
                 };
+                // Playback windows are serialized on one pinned proxy slot and
+                // reuse its transport. Strict validation remains one-shot and
+                // explicitly closes its provider connection.
+                if (!finiteSeek) headers.Connection = 'close';
                 if (context.validator) headers[context.validator.header] = context.validator.value;
                 attempt.fetchStarted = true;
                 context.providerFetches++;

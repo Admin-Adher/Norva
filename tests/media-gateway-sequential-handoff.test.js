@@ -21,7 +21,7 @@ function section(startMarker, endMarker) {
 }
 
 test('gateway health revision identifies the combined production handoff build', () => {
-  assert.match(source, /const GATEWAY_VERSION = 132;/);
+  assert.match(source, /const GATEWAY_VERSION = 134;/);
 });
 
 test('/raw waits for released provider holders before opening the replacement stream', () => {
