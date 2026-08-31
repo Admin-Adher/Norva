@@ -9,17 +9,24 @@ usage() {
 Usage:
   run_phase123_production_clone_rehearsal.sh \
     --workspace /home/adrien/norva-phase3-proof/source-SHA \
-    --run-id a
+    --run-id a \
+    [--keep-clone-hours 0] \
+    [--failed-clone-hours 72]
 
 The run id must contain only lowercase ASCII letters, digits, or hyphens. The
 script refuses an existing target container, data directory, or artifact
 directory. It never publishes a port and never connects the clone to the
-production Docker network.
+production Docker network. A successful clone is destroyed by default after
+its reports are complete. --keep-clone-hours provides a bounded debugging
+window; failed clones are collected after --failed-clone-hours.
 EOF
 }
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE=""
 RUN_ID=""
+KEEP_CLONE_HOURS=0
+FAILED_CLONE_HOURS=72
 PRODUCTION_CONTAINER="norva-db"
 PROOF_ROOT="/var/lib/norva-phase3-proof"
 PROOF_HOME="/home/adrien/norva-phase3-proof"
@@ -31,6 +38,8 @@ while (($#)); do
   case "$1" in
     --workspace) WORKSPACE="${2:-}"; shift 2 ;;
     --run-id) RUN_ID="${2:-}"; shift 2 ;;
+    --keep-clone-hours) KEEP_CLONE_HOURS="${2:-}"; shift 2 ;;
+    --failed-clone-hours) FAILED_CLONE_HOURS="${2:-}"; shift 2 ;;
     --production-container) PRODUCTION_CONTAINER="${2:-}"; shift 2 ;;
     --proof-root) PROOF_ROOT="${2:-}"; shift 2 ;;
     --proof-home) PROOF_HOME="${2:-}"; shift 2 ;;
@@ -42,9 +51,22 @@ done
 
 fail() { printf 'PHASE123_PRODUCTION_CLONE_REHEARSAL_FAIL: %s\n' "$*" >&2; exit 1; }
 
+finalize_clone_lifecycle() {
+  if [ "$KEEP_CLONE_HOURS" -eq 0 ]; then
+    /usr/bin/bash "$PROOF_GC_SCRIPT" --apply --run-id "$RUN_ID" --force-complete \
+      | tee -a "$REPORT_DIR/timeline.log"
+  else
+    printf 'CLONE_RETAINED %s ttl_hours=%s\n' \
+      "$(date -u +%FT%TZ)" "$KEEP_CLONE_HOURS" | tee -a "$REPORT_DIR/timeline.log"
+  fi
+}
+
 test -n "$WORKSPACE" || { usage >&2; exit 64; }
 case "$RUN_ID" in
   ''|*[!a-z0-9-]*) usage >&2; exit 64 ;;
+esac
+case "$KEEP_CLONE_HOURS:$FAILED_CLONE_HOURS" in
+  *[!0-9:]*|:*|*:) usage >&2; exit 64 ;;
 esac
 case "$WORKSPACE" in
   "$PROOF_HOME"/source-*) ;;
@@ -70,6 +92,7 @@ REPORT_DIR="$PROOF_HOME/artifacts/prod-clone-${RUN_ID}"
 DUMP_DIR="$PROOF_HOME/private-dumps"
 DUMP_FILE="$DUMP_DIR/production-phase123-${RUN_ID}.dump"
 OPS_DB="$PROOF_HOME/ops/hetzner/volumes/db"
+PROOF_GC_SCRIPT="$SCRIPT_DIR/../backup/proof-gc.sh"
 
 case "$TARGET_CONTAINER" in norva-phase123-prod-clone-*-db) ;; *) fail "unsafe target container name" ;; esac
 test "$TARGET_CONTAINER" != "$PRODUCTION_CONTAINER" || fail "target aliases production"
@@ -77,6 +100,7 @@ test -z "$(docker ps -aq --filter "name=^/${TARGET_CONTAINER}$")" || fail "targe
 test ! -e "$DATA_ROOT" || fail "target data directory already exists"
 test ! -e "$REPORT_DIR" || fail "target report directory already exists"
 test ! -e "$DUMP_FILE" || fail "target dump already exists"
+test -f "$PROOF_GC_SCRIPT" || fail "proof garbage collector is missing"
 for file in jwt.sql webhooks.sql roles.sql _supabase.sql logs.sql pooler.sql realtime.sql; do
   test -f "$OPS_DB/$file" || fail "missing proof bootstrap file $file"
 done
@@ -86,6 +110,7 @@ mkdir -p "$REPORT_DIR" "$DUMP_DIR"
 chmod 700 "$REPORT_DIR" "$DUMP_DIR"
 
 HEAD="$(git -C "$WORKSPACE" rev-parse HEAD)"
+CREATED_AT_EPOCH="$(date -u +%s)"
 MIGRATION_TREE_SHA="$(find "$WORKSPACE/supabase/migrations" -maxdepth 1 -type f -name '*.sql' -print0 | sort -z | xargs -0 sha256sum | sha256sum | awk '{print $1}')"
 PROD_IMAGE="$(docker inspect -f '{{.Config.Image}}' "$PRODUCTION_CONTAINER")"
 PROD_DATA_MOUNT="$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/var/lib/postgresql/data"}}{{.Source}}{{end}}{{end}}' "$PRODUCTION_CONTAINER")"
@@ -100,6 +125,8 @@ production_image=$PROD_IMAGE
 production_data_mount=$PROD_DATA_MOUNT
 target_container=$TARGET_CONTAINER
 target_data_root=$DATA_ROOT
+success_ttl_hours=$KEEP_CLONE_HOURS
+failed_ttl_hours=$FAILED_CLONE_HOURS
 first_phase123_migration=20260822220000_cloud_sources_owner_index_online.sql
 pre_contraction_head=20260823179920_catalog_generation_flag_gate.sql
 contraction_definition=20260823180000_provider_catalog_generation_online_rollout.sql
@@ -327,6 +354,12 @@ docker run -d \
   --network "$PROOF_NETWORK" \
   --label norva.phase123.production-clone=true \
   --label "norva.phase123.run=$RUN_ID" \
+  --label "norva.phase123.created-at-epoch=$CREATED_AT_EPOCH" \
+  --label "norva.phase123.success-ttl-hours=$KEEP_CLONE_HOURS" \
+  --label "norva.phase123.failed-ttl-hours=$FAILED_CLONE_HOURS" \
+  --label "norva.phase123.data-root=$DATA_ROOT" \
+  --label "norva.phase123.report-dir=$REPORT_DIR" \
+  --label "norva.phase123.dump-file=$DUMP_FILE" \
   -e POSTGRES_DB=postgres \
   -e POSTGRES_USER=supabase_admin \
   -e POSTGRES_PASSWORD="$password" \
@@ -592,6 +625,7 @@ SQL
 
   sha256sum "$REPORT_DIR"/*.tsv "$REPORT_DIR"/*.txt "$REPORT_DIR"/*.log >"$REPORT_DIR/artifact-sha256.txt"
   printf 'REHEARSAL_COMPLETE %s\n' "$(date -u +%FT%TZ)" | tee -a "$REPORT_DIR/timeline.log"
+  finalize_clone_lifecycle
   printf 'PHASE123_PRODUCTION_CLONE_REHEARSAL_PASS\nmode=%s\ncommit=%s\ncontainer=%s\nreport=%s\n' \
     "$REHEARSAL_MODE" "$HEAD" "$TARGET_CONTAINER" "$REPORT_DIR"
   exit 0
@@ -849,4 +883,5 @@ done
 
 sha256sum "$REPORT_DIR"/*.tsv "$REPORT_DIR"/*.txt "$REPORT_DIR"/*.log >"$REPORT_DIR/artifact-sha256.txt"
 printf 'REHEARSAL_COMPLETE %s\n' "$(date -u +%FT%TZ)" | tee -a "$REPORT_DIR/timeline.log"
+finalize_clone_lifecycle
 printf 'PHASE123_PRODUCTION_CLONE_REHEARSAL_PASS\ncommit=%s\ncontainer=%s\nreport=%s\n' "$HEAD" "$TARGET_CONTAINER" "$REPORT_DIR"

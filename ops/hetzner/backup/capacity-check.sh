@@ -36,8 +36,18 @@ USER_WARN_MIB="${CAPACITY_USER_WARN_MIB:-1200}"
 # current compact baseline; this remains a growth signal, not a bloat estimate.
 TITLE_WARN_BYTES="${CAPACITY_TITLE_WARN_BYTES:-12000}"
 DISK_WARN_PCT="${CAPACITY_DISK_WARN_PCT:-70}"
+PROOF_WARN_GIB="${CAPACITY_PROOF_WARN_GIB:-25}"
+BUILD_CACHE_WARN_GIB="${CAPACITY_BUILD_CACHE_WARN_GIB:-20}"
+IMAGE_RECLAIMABLE_WARN_GIB="${CAPACITY_IMAGE_RECLAIMABLE_WARN_GIB:-15}"
+PROOF_ROOT="${PROOF_GC_ROOT:-/var/lib/norva-phase3-proof}"
 
 q() { docker exec "$DB_CONTAINER" psql -U postgres -Atc "$1"; }
+
+metric_to_bytes() {
+  local value="$1"
+  value="${value/B/}"
+  numfmt --from=si "$value"
+}
 
 telegram() {
   local token chat env_file="$NORVA_OPS_DIR/.env"
@@ -100,15 +110,36 @@ log "db ${DB_GIB} GiB · ${USERS} users avec catalogue · ${PER_USER_MIB} MiB/us
 log "catalogue ${TITLES} titres · ${BYTES_PER_TITLE} o/titre (seuil ${TITLE_WARN_BYTES})"
 log "disk ${USE_PCT}% used · ${AVAIL_GIB} GiB free · base backup needs ${NEEDED_GIB} GiB"
 
+# ---- 4. disposable proof and Docker growth ---------------------------------
+# These are independent of PostgreSQL growth and were the source of the
+# 2026-08-31 disk incident. Alert on the producer, before aggregate disk usage
+# becomes critical.
+PROOF_BYTES="$(du -sb "$PROOF_ROOT" 2>/dev/null | awk '{print $1}' || printf '0')"
+PROOF_GIB="$(awk -v b="$PROOF_BYTES" 'BEGIN{printf "%.1f", b/1073741824}')"
+DOCKER_DF="$(docker system df --format '{{.Type}}|{{.Size}}|{{.Reclaimable}}')"
+BUILD_CACHE_HUMAN="$(awk -F '|' '$1=="Build Cache"{print $2}' <<<"$DOCKER_DF")"
+IMAGE_RECLAIMABLE_HUMAN="$(awk -F '|' '$1=="Images"{split($3,a," "); print a[1]}' <<<"$DOCKER_DF")"
+BUILD_CACHE_BYTES="$(metric_to_bytes "${BUILD_CACHE_HUMAN:-0B}")"
+IMAGE_RECLAIMABLE_BYTES="$(metric_to_bytes "${IMAGE_RECLAIMABLE_HUMAN:-0B}")"
+BUILD_CACHE_GIB="$(awk -v b="$BUILD_CACHE_BYTES" 'BEGIN{printf "%.1f", b/1073741824}')"
+IMAGE_RECLAIMABLE_GIB="$(awk -v b="$IMAGE_RECLAIMABLE_BYTES" 'BEGIN{printf "%.1f", b/1073741824}')"
+log "temp proof ${PROOF_GIB} GiB (seuil ${PROOF_WARN_GIB}) · build cache ${BUILD_CACHE_GIB} GiB (seuil ${BUILD_CACHE_WARN_GIB}) · images recuperables ${IMAGE_RECLAIMABLE_GIB} GiB (seuil ${IMAGE_RECLAIMABLE_WARN_GIB})"
 
-# ---- 4. the other backup units: failed, or silently not running --------------
+
+# ---- 5. the other backup units: failed, or silently not running --------------
 # Nothing watched these until now. wal-sync.sh has exited non-zero "so systemd
 # marks the unit failed (visible in monitoring)" since day one, but nothing was
 # actually looking: Netdata's go.d here has no systemdunits collector, and adding
-# one means granting the container host D-Bus. This script already runs daily as
-# root and already has a Telegram channel, so it asks systemd directly.
+# one means granting the container host D-Bus. This script runs every six hours
+# as root and already has a Telegram channel, so it asks systemd directly.
 # Format: "unit:max_hours_since_last_run".
 UNIT_CHECKS="${CAPACITY_UNIT_CHECKS:-norva-backup-nightly:36 norva-basebackup:36 norva-wal-prune-r2:36 norva-wal-sync:1}"
+if systemctl cat norva-proof-gc.service >/dev/null 2>&1; then
+  case " $UNIT_CHECKS " in *" norva-proof-gc:"*) ;; *) UNIT_CHECKS="$UNIT_CHECKS norva-proof-gc:8" ;; esac
+fi
+if systemctl cat norva-docker-gc.service >/dev/null 2>&1; then
+  case " $UNIT_CHECKS " in *" norva-docker-gc:"*) ;; *) UNIT_CHECKS="$UNIT_CHECKS norva-docker-gc:36" ;; esac
+fi
 UNIT_PROBLEMS=""
 for spec in $UNIT_CHECKS; do
   u="${spec%%:*}"; max_h="${spec##*:}"
@@ -171,6 +202,15 @@ if [ "$AVAIL_BYTES" -lt "$NEEDED_BYTES" ]; then
   ALERTS+=("Disque insuffisant pour le base backup: ${AVAIL_GIB} GiB libres, ${NEEDED_GIB} GiB necessaires (staging = 2x la base). Le prochain norva-basebackup echouera.")
 elif [ "$USE_PCT" -gt "$DISK_WARN_PCT" ]; then
   ALERTS+=("Disque a ${USE_PCT}% (seuil ${DISK_WARN_PCT}%). ${AVAIL_GIB} GiB libres.")
+fi
+if [ "$PROOF_BYTES" -gt $((PROOF_WARN_GIB * 1073741824)) ]; then
+  ALERTS+=("Preuves jetables a ${PROOF_GIB} GiB (seuil ${PROOF_WARN_GIB}). Verifier norva-proof-gc avant toute suppression manuelle.")
+fi
+if [ "$BUILD_CACHE_BYTES" -gt $((BUILD_CACHE_WARN_GIB * 1073741824)) ]; then
+  ALERTS+=("Cache BuildKit a ${BUILD_CACHE_GIB} GiB (seuil ${BUILD_CACHE_WARN_GIB}). Verifier norva-docker-gc.")
+fi
+if [ "$IMAGE_RECLAIMABLE_BYTES" -gt $((IMAGE_RECLAIMABLE_WARN_GIB * 1073741824)) ]; then
+  ALERTS+=("Images Docker recuperables: ${IMAGE_RECLAIMABLE_GIB} GiB (seuil ${IMAGE_RECLAIMABLE_WARN_GIB}). Verifier les images actives et de rollback avant purge.")
 fi
 
 if [ "${#ALERTS[@]}" -eq 0 ]; then

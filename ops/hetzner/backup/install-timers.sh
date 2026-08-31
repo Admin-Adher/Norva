@@ -10,6 +10,11 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 write_unit() { echo "  /etc/systemd/system/$1"; cat > "/etc/systemd/system/$1"; }
 
+if [ ! -e /etc/norva-gc.env ]; then
+  install -o root -g root -m 0644 "$HERE/norva-gc.env.example" /etc/norva-gc.env
+  echo "  /etc/norva-gc.env (created from safe defaults)"
+fi
+
 echo ">> writing units"
 write_unit norva-backup-nightly.service <<EOF
 [Unit]
@@ -122,10 +127,62 @@ EOF
 
 write_unit norva-capacity-check.timer <<'EOF'
 [Unit]
-Description=Daily Norva capacity + WAL rate check (06:40 UTC)
+Description=Norva capacity + WAL rate check every 6 hours
 [Timer]
-OnCalendar=*-*-* 06:40:00 UTC
+OnCalendar=*-*-* 00,06,12,18:40:00 UTC
 RandomizedDelaySec=300
+Persistent=true
+[Install]
+WantedBy=timers.target
+EOF
+
+write_unit norva-proof-gc.service <<EOF
+[Unit]
+Description=Norva disposable proof clone garbage collector
+After=docker.service
+Requires=docker.service
+[Service]
+Type=oneshot
+User=adrien
+Group=adrien
+EnvironmentFile=-/etc/norva-gc.env
+ExecStart=/usr/bin/bash $HERE/proof-gc.sh --apply
+Nice=15
+IOSchedulingClass=idle
+EOF
+
+write_unit norva-proof-gc.timer <<'EOF'
+[Unit]
+Description=Norva disposable proof clone GC every 6 hours
+[Timer]
+OnCalendar=*-*-* 00,06,12,18:17:00 UTC
+RandomizedDelaySec=600
+Persistent=true
+[Install]
+WantedBy=timers.target
+EOF
+
+write_unit norva-docker-gc.service <<EOF
+[Unit]
+Description=Norva bounded Docker build and media image GC
+After=docker.service
+Requires=docker.service
+[Service]
+Type=oneshot
+User=adrien
+Group=adrien
+EnvironmentFile=-/etc/norva-gc.env
+ExecStart=/usr/bin/bash $HERE/docker-gc.sh --apply
+Nice=15
+IOSchedulingClass=idle
+EOF
+
+write_unit norva-docker-gc.timer <<'EOF'
+[Unit]
+Description=Daily Norva bounded Docker GC
+[Timer]
+OnCalendar=*-*-* 01:35:00 UTC
+RandomizedDelaySec=600
 Persistent=true
 [Install]
 WantedBy=timers.target
@@ -155,6 +212,6 @@ EOF
 
 echo ">> enabling timers"
 systemctl daemon-reload
-systemctl enable --now norva-backup-nightly.timer norva-wal-sync.timer norva-basebackup.timer norva-wal-prune-r2.timer norva-capacity-check.timer norva-reindex.timer
+systemctl enable --now norva-backup-nightly.timer norva-wal-sync.timer norva-basebackup.timer norva-wal-prune-r2.timer norva-capacity-check.timer norva-proof-gc.timer norva-docker-gc.timer norva-reindex.timer
 systemctl list-timers 'norva-*' --no-pager
 echo ">> done. Manual runs: systemctl start norva-backup-nightly.service (etc.)"

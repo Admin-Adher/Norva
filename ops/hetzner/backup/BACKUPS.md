@@ -46,6 +46,8 @@ sudo apt install -y rclone age
 sudo cp backup/norva-backup.env.example /etc/norva-backup.env
 sudo chmod 600 /etc/norva-backup.env
 sudo nano /etc/norva-backup.env          # remplir R2_*, BACKUP_AGE_RECIPIENT, vérifier NORVA_OPS_DIR
+# install-timers.sh crée aussi /etc/norva-gc.env depuis des valeurs sans secret;
+# le personnaliser seulement si les bornes de preuve/cache doivent changer.
 # Conserver BACKUP_ENCRYPTION_REQUIRED=true en production. Le destinataire
 # age1... est public ; ne jamais copier la clé privée de déchiffrement sur la box.
 
@@ -82,7 +84,9 @@ sudo journalctl -u norva-basebackup.service -n 20 --no-pager
 | WAL → R2 | toutes les 5 min | `norva-wal-sync` |
 | Base backup → R2 | 04:10 UTC | `norva-basebackup` |
 | Rétention WAL sur R2 | 02:20 UTC | `norva-wal-prune-r2` |
-| Veille capacité + débit WAL | 06:40 UTC | `norva-capacity-check` |
+| GC des clones de preuve jetables | toutes les 6 h | `norva-proof-gc` |
+| Veille capacité + débit WAL | toutes les 6 h | `norva-capacity-check` |
+| GC Docker borné | 01:35 UTC | `norva-docker-gc` |
 | Réindexation | 1er du mois, 01:00 UTC | `norva-reindex` |
 
 - État : `systemctl list-timers 'norva-*'` · logs : `journalctl -u <unité> -n 30`.
@@ -121,10 +125,31 @@ sudo journalctl -u norva-basebackup.service -n 20 --no-pager
   `X-Amz-Meta-Mtime` : sur un préfixe de ~8k segments c'est ~8k opérations classe B
   par passage. D'où `--use-server-modtime` dans `wal-prune-r2.sh` et `--no-traverse`
   dans `wal-sync.sh`. Ces deux flags valent 15 M d'opérations classe B par mois.
-- **Veille capacité (`capacity-check.sh`).** Trois seuils, réglables dans
+- **Cycle de vie des preuves jetables.** Une répétition réussie conserve les
+  rapports et leurs sommes de contrôle, puis retire par défaut son conteneur,
+  son répertoire `prod-clone-*` et son dump privé. `--keep-clone-hours N`
+  ouvre une fenêtre de diagnostic bornée. Les exécutions échouées expirent au
+  bout de 72 h. `proof-gc.sh` exige simultanément le label Docker jetable, le
+  préfixe de conteneur, l'identité exacte du bind mount, aucun port publié,
+  aucune session SQL cliente et les chemins canoniques sous
+  `/var/lib/norva-phase3-proof` avant de supprimer. Il ne touche jamais à
+  `/var/lib/norva/db`, aux sources ou aux rapports.
+- **GC Docker borné.** `docker-gc.sh` maintient BuildKit sous 12 GB avec 8 GB
+  réservés et vise au moins 120 GB libres. Pour les images média/Whisper non
+  référencées, il conserve deux images de rollback et une grâce de sept jours;
+  les images utilisées par un conteneur ou portant `norva.retention=protected`
+  sont exclues. Le mode par défaut des deux scripts GC est `--dry-run`;
+  systemd est le seul appelant configuré avec `--apply`.
+- **Surveillance sans privilèges.** `storage-watch.sh` contrôle toutes les six
+  heures le disque, les preuves, BuildKit et les images récupérables. Il peut
+  être lancé par le cron de l'opérateur quand l'installation des unités
+  systemd attend encore une authentification root; les alertes utilisent le
+  même bot Telegram que le watchdog complet.
+- **Veille capacité (`capacity-check.sh`).** Six seuils, réglables dans
   `/etc/norva-backup.env` : débit de WAL (GiB/jour, calculé sur le delta de
   `pg_current_wal_lsn()` depuis la veille), coût par utilisateur porteur de
-  catalogue, et place disque face aux 2x que réclame le staging du base backup.
+  catalogue, place disque face aux 2x que réclame le staging du base backup,
+  taille des preuves jetables, cache BuildKit et images Docker récupérables.
   Dépassement → message Telegram (même bot que Netdata, identifiants lus dans le
   `.env` de la stack) **et** sortie non nulle, donc unité en `failed`. Le premier
   run ne fait qu'amorcer son fichier d'état et reste muet.

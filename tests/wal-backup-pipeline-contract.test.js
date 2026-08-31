@@ -14,6 +14,9 @@ const walPrune = read('ops/hetzner/backup/wal-prune-r2.sh');
 const capacityCheck = read('ops/hetzner/backup/capacity-check.sh');
 const timerInstaller = read('ops/hetzner/backup/install-timers.sh');
 const reindexMonthly = read('ops/hetzner/backup/reindex-monthly.sh');
+const proofGc = read('ops/hetzner/backup/proof-gc.sh');
+const dockerGc = read('ops/hetzner/backup/docker-gc.sh');
+const storageWatch = read('ops/hetzner/backup/storage-watch.sh');
 
 function bashBinary() {
   if (process.platform !== 'win32') return 'bash';
@@ -202,4 +205,27 @@ test('WAL maintenance scripts share a lock and the oneshot has hard resource bou
     /REINDEX_TABLES:-public\.cloud_titles public\.cloud_media_items public\.cloud_title_variants}/
   );
   assert.doesNotMatch(reindexMonthly, /REINDEX_TABLES:-[^\n]*catalog_titles/);
+});
+
+test('storage lifecycle jobs remain scoped and fail closed', () => {
+  assert.match(proofGc, /MODE=dry-run/);
+  assert.match(proofGc, /unexpected proof root/);
+  assert.match(proofGc, /norva\.phase123\.production-clone/);
+  assert.match(proofGc, /database mount identity mismatch/);
+  assert.match(proofGc, /host ports are published/);
+  assert.match(proofGc, /client sessions=\$sessions/);
+  assert.match(proofGc, /rm -rf -- "\$resolved"/);
+  assert.match(proofGc, /\[ "\$resolved" != \/proof-root \]/);
+
+  assert.match(dockerGc, /MODE=dry-run/);
+  assert.match(dockerGc, /used_ids\["\$image_id"\]=1/);
+  assert.match(dockerGc, /norva\.retention/);
+  assert.match(dockerGc, /norva-media-gateway:vaapi-\*/);
+  assert.match(dockerGc, /norva-whisper-bench:\*/);
+  assert.match(dockerGc, /--max-used-space "\$MAX_CACHE_SPACE"/);
+
+  assert.match(storageWatch, /CAPACITY_PROOF_WARN_GIB:-25/);
+  assert.match(storageWatch, /CAPACITY_BUILD_CACHE_WARN_GIB:-20/);
+  assert.match(storageWatch, /CAPACITY_IMAGE_RECLAIMABLE_WARN_GIB:-15/);
+  assert.match(timerInstaller, /User=adrien\nGroup=adrien\nEnvironmentFile=-\/etc\/norva-gc\.env/g);
 });
