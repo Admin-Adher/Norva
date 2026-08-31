@@ -26,7 +26,7 @@ FUNCS_DIR="$REPO/supabase/functions"
 CONFIG="$REPO/supabase/config.toml"
 COMPOSE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/docker-compose.supabase.yml"
 ENV_FILE="$(dirname "$COMPOSE")/.env"
-EXPECTED_PLAYBACK_VERSION=62
+EXPECTED_PLAYBACK_VERSION=63
 EXPECTED_PLAYBACK_PROTOCOL=1
 EXPECTED_VOD_CONTAINER_SELF_HEAL_PROTOCOL=1
 EXPECTED_MEDIA_GATEWAY_CANARY_ROUTING_PROTOCOL=1
@@ -48,6 +48,9 @@ EXPECTED_LANGUAGE_VALIDATION_SAMPLE_DURATION_SECONDS=20
 EXPECTED_LANGUAGE_VALIDATION_RETRY_WORKER_PROTOCOL=1
 EXPECTED_LANGUAGE_VALIDATION_RETRY_WORKER_BATCH=2
 EXPECTED_LANGUAGE_VALIDATION_GATEWAY_FAILURE_RETRY_SECONDS=300
+EXPECTED_LANGUAGE_VALIDATION_PROVIDER_ATTEMPT_PROTOCOL=1
+EXPECTED_LANGUAGE_VALIDATION_VIEWER_PREEMPTION_PROTOCOL=1
+EXPECTED_LANGUAGE_VALIDATION_MAX_CONSECUTIVE_PROVIDER_NO_PROGRESS=4
 EXPECTED_CLOUD_VERSION=25
 EXPECTED_CLOUD_PROTOCOL=1
 EXPECTED_CATALOG_VERSION=6
@@ -266,7 +269,10 @@ if command -v docker >/dev/null 2>&1 && [[ -f "$COMPOSE" ]]; then
         && "$playback_health" == *"\"languageValidationSampleDurationSeconds\":$EXPECTED_LANGUAGE_VALIDATION_SAMPLE_DURATION_SECONDS"* \
         && "$playback_health" == *"\"languageValidationRetryWorkerProtocol\":$EXPECTED_LANGUAGE_VALIDATION_RETRY_WORKER_PROTOCOL"* \
         && "$playback_health" == *"\"languageValidationRetryWorkerBatch\":$EXPECTED_LANGUAGE_VALIDATION_RETRY_WORKER_BATCH"* \
-        && "$playback_health" == *"\"languageValidationGatewayFailureRetrySeconds\":$EXPECTED_LANGUAGE_VALIDATION_GATEWAY_FAILURE_RETRY_SECONDS"* ]] || {
+        && "$playback_health" == *"\"languageValidationGatewayFailureRetrySeconds\":$EXPECTED_LANGUAGE_VALIDATION_GATEWAY_FAILURE_RETRY_SECONDS"* \
+        && "$playback_health" == *"\"languageValidationProviderAttemptProtocol\":$EXPECTED_LANGUAGE_VALIDATION_PROVIDER_ATTEMPT_PROTOCOL"* \
+        && "$playback_health" == *"\"languageValidationViewerPreemptionProtocol\":$EXPECTED_LANGUAGE_VALIDATION_VIEWER_PREEMPTION_PROTOCOL"* \
+        && "$playback_health" == *"\"languageValidationMaxConsecutiveProviderNoProgress\":$EXPECTED_LANGUAGE_VALIDATION_MAX_CONSECUTIVE_PROVIDER_NO_PROGRESS"* ]] || {
       echo "ERROR: $service norva-playback protocol marker mismatch" >&2
       exit 1
     }

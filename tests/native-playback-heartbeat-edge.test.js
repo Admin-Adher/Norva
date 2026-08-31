@@ -145,7 +145,7 @@ test('native heartbeat is a versioned authenticated REST route with a bounded re
   const edge = read(edgePath);
   const router = section(edge, 'Deno.serve(async (req) => {', 'async function requireIdentity');
 
-  assert.match(router, /version:\s*62/);
+  assert.match(router, /version:\s*63/);
   assert.match(router, /nativeHeartbeatProtocol:\s*1/);
   assert.match(router, /providerCircuitProtocol:\s*1/);
   assert.match(

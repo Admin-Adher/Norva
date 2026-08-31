@@ -354,6 +354,10 @@ test('account activity groups exact canonical keys with real gateway work taking
     })()`,
     {
       accountExtractions,
+      strictLidBrokers: new Map([
+        ['lid-broker', 'provider/lid-broker'],
+        ['shared-lid-broker', 'provider/shared'],
+      ]),
       sessions: new Map([['viewer', { sourceUrl: 'provider/shared', status: 'ready' }]]),
       rawPumps: new Set([{ proxyKey: 'provider/raw' }]),
       isSessionBlockingProviderSlot: (session) => session.status === 'ready',
@@ -367,7 +371,10 @@ test('account activity groups exact canonical keys with real gateway work taking
     'provider/raw',
     'provider/shared',
   ]);
-  assert.deepEqual([...grouped.languageValidation], ['provider/lid-only']);
+  assert.deepEqual([...grouped.languageValidation].sort(), [
+    'provider/lid-broker',
+    'provider/lid-only',
+  ]);
   assert.deepEqual([...grouped.catalogRefresh], ['provider/catalog']);
   assert.equal(grouped.gateway.includes('provider/disabled'), false);
   assert.equal(grouped.languageValidation.includes('provider/shared'), false,
@@ -427,7 +434,7 @@ test('gateway fails proxy 407 safely before provider 458 handling', () => {
 });
 
 test('gateway advertises targeted operator override support without identities or secrets', () => {
-  assert.match(gateway, /const GATEWAY_VERSION = 129;/);
+  assert.match(gateway, /const GATEWAY_VERSION = 130;/);
   assert.match(gateway, /providerProxyAffinityProtocol:\s*1/);
   assert.match(gateway, /providerProxyAffinityKey:\s*'provider-account'/);
   assert.match(gateway, /providerProxySlotOverrideProtocol:\s*1/);

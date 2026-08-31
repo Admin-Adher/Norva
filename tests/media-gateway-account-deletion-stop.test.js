@@ -16,4 +16,8 @@ test('account deletion stop endpoint is authenticated and drains every provider 
   assert.match(helper, /abortRawPumps/);
   assert.match(helper, /accountExtractions/);
   assert.match(helper, /stopChildProcess/);
+  assert.match(helper, /strictLidBrokers/);
+  assert.match(helper, /broker\.close\('viewer-preempted'\)/);
+  assert.match(helper, /stoppedLanguageValidations/);
+  assert.match(helper, /providerDrained: !remaining/);
 });
