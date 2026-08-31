@@ -190,9 +190,9 @@ test('initial live resolution tries the primary then one healthy sibling seriall
 
 test('dynamic selection preserves an existing logical sibling family', () => {
   const variants = [
-    { label: 'HD', sourceId: 'source-a', streamId: '611', channel: { id: 'tf1-hd', sourceType: 'xtream' } },
-    { label: 'FHD', sourceId: 'source-a', streamId: '612', channel: { id: 'tf1-fhd', sourceType: 'xtream' } },
-    { label: 'SD', sourceId: 'source-a', streamId: '613', channel: { id: 'tf1-sd', sourceType: 'xtream' } },
+    { label: 'HD', sourceId: 'source-a', streamId: '611', channel: { id: 'tf1-hd' } },
+    { label: 'FHD', sourceId: 'source-a', streamId: '612', channel: { id: 'tf1-fhd' } },
+    { label: 'SD', sourceId: 'source-a', streamId: '613', channel: { id: 'tf1-sd' } },
   ];
   const logicalGroup = { name: 'TF1', variants, defaultVariant: variants[0] };
   let recomputations = 0;
@@ -227,6 +227,9 @@ test('dynamic selection preserves an existing logical sibling family', () => {
   assert.equal(recomputations, 0);
   assert.equal(selected.qualityGroup, logicalGroup);
   assert.equal(selected.currentVariant, variants[0]);
+  assert.equal(selected.sourceType, 'xtream');
+  assert.equal(selected.sourceId, 'source-a');
+  assert.equal(selected.streamId, '611');
   assert.deepEqual(
     Array.from(list.getInitialLiveResolveCandidates(selected), (candidate) => candidate.streamId),
     ['611', '612', '613'],
