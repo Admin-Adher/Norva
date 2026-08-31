@@ -62,19 +62,21 @@ test('every user-facing norva-catalog projection reads centralized visible views
   assert.match(catalog, /\.from\("cloud_titles"\)\s*\.update\(update\)/);
 });
 
-test('source-scoped genre paths remain exact without implicit view relationships', () => {
+test('source-scoped and all-source genre language paths stay bounded and exact', () => {
   const summary = section(catalog, 'async function listGenreSummary(', '\nconst GENRE_RAIL_MIN_ITEMS');
   const items = section(catalog, 'async function listGenreItems(', '\n// Dynamic menu options:');
   const languagePage = section(
     catalog,
-    'async function visibleTitlePageBySourceLanguages(',
+    'async function visibleTitlePageByLanguages(',
     '\n// Distinct ISO-639 languages',
   );
 
   assert.match(summary, /contains\("visible_source_ids", \[sourceId\]\)/);
   assert.match(items, /contains\("visible_source_ids", \[sourceId\]\)/);
-  assert.match(items, /if \(sourceId && needsSourceLanguageEvidence\)/);
-  assert.match(items, /visibleTitlePageBySourceLanguages\(\{/);
+  assert.match(items, /const needsLanguagePage = Boolean\(/);
+  assert.match(items, /!sourceId && hasStrictLanguageFilter && !langSort/);
+  assert.match(items, /if \(needsLanguagePage\)/);
+  assert.match(items, /visibleTitlePageByLanguages\(\{/);
   assert.match(items, /hiddenBuckets: \[\.\.\.hidden\]/);
   assert.match(items, /page\.titleIds/);
   assert.match(items, /count: page\.count/);
