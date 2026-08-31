@@ -675,6 +675,42 @@ locale est non autoritaire et ne peut jamais satisfaire la gate. Même une
 décision live approuvée reste une preuve à corréler : elle ne promeut jamais
 automatiquement `individual_verification_coverage_confirmed`.
 
+#### Lire et réconcilier les trois états sans les fusionner
+
+L'Admin doit toujours présenter séparément :
+
+1. l'activation du compte partenaire (`pending_verification`, `active`, etc.) ;
+2. le KYC cash membre (`not_started`, `pending`, `verified`, `failed`,
+   `expired`) ;
+3. la certification technique Didit pré-gate (`reserved`, `pending`,
+   `in_review`, `approved`, `declined`, `expired`, `quarantined`).
+
+`not_started` est affiché « KYC cash non commencé » et ne doit jamais être
+additionné à `pending`. Une certification technique `approved` n'est jamais un
+KYC cash `verified`, même lorsque la même personne a réalisé les deux parcours.
+La finalité du consentement, le binding et les données conservées sont
+différents.
+
+La carte « Certification technique Didit » expose un historique agrégé. Une
+valeur `sessions_without_events > 0` signifie qu'une session liée à Didit ne
+possède aucun événement local, par exemple après une ancienne indisponibilité
+du webhook. Cet indicateur est une anomalie de livraison historique, pas une
+invitation à écrire rétroactivement un résultat KYC. Ne jamais :
+
+- injecter directement une décision dans les tables privées ;
+- convertir une certification en KYC cash ou en activation de compte ;
+- restaurer des données d'identité déjà purgées ;
+- rejouer une notification non signée ou dont le binding n'est plus vérifiable ;
+- ouvrir une gate, un paiement ou un payout pour « corriger » l'affichage.
+
+Pour une livraison récente et encore dans la fenêtre de reprise Didit, utiliser
+uniquement la reprise signée et idempotente documentée par le webhook, puis
+relire la RPC JWT-scoped. Au-delà de cette fenêtre ou après purge, conserver
+l'écart dans l'historique agrégé. Si un partenaire doit bénéficier du KYC cash,
+il démarre un nouveau parcours membre via `/kyc/sessions`, avec son consentement
+biométrique versionné, sa capacité confirmée et le binding de son compte. Les
+rails de paiement restent fail-closed jusqu'à ce parcours autoritaire.
+
 Avant toute création ou reprise, l'Edge lit la liste Didit filtrée par
 `vendor_data`, `workflow_id` et `session_kind=user`, avec `limit=2` et un corps
 strictement borné. En `pending`, il ne recrée jamais de session : une RPC

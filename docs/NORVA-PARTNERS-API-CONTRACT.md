@@ -620,11 +620,25 @@ modifie un compte, un lien, une commission, un paiement, un flag ou une gate.
 L'Admin lit ensuite directement la RPC JWT-scoped
 `admin_partners_kyc_certification_status()`. Cette lecture exige toujours
 l'Admin live et la capacité Risk, mais reste disponible après fermeture du kill
-switch ou évolution des gates. Sa réponse fermée est `certification=null`
-ou uniquement : `status`, `verified`, `environment`, `expires_at`,
-`observed_at` et une `reason` nullable choisie dans l'enum public borné. L'Admin
-poll pendant au plus 60 secondes au retour de Didit et n'affiche jamais les
-identifiants provider ni les résultats documentaires détaillés. Après un
+switch ou évolution des gates. Son enveloppe fermée `schema_version=2` contient
+`certification=null` ou uniquement : `status`, `verified`, `environment`,
+`expires_at`, `observed_at` et une `reason` nullable choisie dans l'enum public
+borné. Elle ajoute un objet `technical_history` strictement agrégé :
+`sessions_total`, `sessions_with_events`, `sessions_without_events`,
+`verified_live_sessions`, `quarantined_sessions` et
+`last_event_observed_at`. Une session n'est comptée « sans événement » que si
+elle possède déjà une liaison Didit hashée ; une simple réservation locale
+jamais envoyée ne crée donc pas de faux incident.
+
+Cet historique ne contient aucun identifiant provider, compte ou utilisateur,
+aucune donnée documentaire et aucun résultat d'identité. Il sert uniquement à
+rendre visible un écart historique de livraison. Il ne peut ni créer ni mettre
+à jour un KYC cash membre, activer un compte, ouvrir un paiement ou satisfaire
+une gate. Les trois machines d'état restent indépendantes : activation du
+compte, KYC cash du membre et certification technique Didit.
+
+L'Admin poll pendant au plus 60 secondes au retour de Didit et n'affiche jamais
+les identifiants provider ni les résultats documentaires détaillés. Après un
 résultat réseau inconnu, ce polling continue pendant toute la fenêtre même si
 la première lecture retourne `certification=null`; le bouton de création reste
 masqué jusqu'à la fin de la réconciliation.

@@ -1844,11 +1844,53 @@ test('Admin Partners uses a semantic desktop table and explicit mobile cards', (
   assert.match(list.innerHTML, /<table class="partners-table">/);
   assert.match(list.innerHTML, /<caption>Comptes partenaires correspondant aux filtres<\/caption>/);
   assert.match(list.innerHTML, /<th scope="col">Partenaire<\/th>/);
+  assert.match(list.innerHTML, /<th scope="col">KYC cash<\/th>/);
+  assert.match(list.innerHTML, /KYC cash vérifié/);
+  assert.doesNotMatch(list.innerHTML, /<th scope="col">Identité<\/th>/);
   assert.match(list.innerHTML, /<button type="button" class="partner-open"/);
   assert.match(list.innerHTML, /<ul id="partners-account-cards" class="partners-account-cards" role="list">/);
   assert.match(list.innerHTML, /<dl class="partners-account-facts">/);
   assert.doesNotMatch(list.innerHTML, /role="button" tabindex="0"/);
   assert.match(source, /@media\(max-width:700px\)[\s\S]*\.partners-account-cards\{display:grid/);
+});
+
+test('Admin Partners keeps not-started cash KYC distinct from pending cash KYC', () => {
+  const summary = {
+    innerHTML: '',
+    removeAttribute() {},
+    classList: { remove() {} },
+  };
+  const readiness = { innerHTML: '', removeAttribute() {} };
+  const AdminPage = loadAdminPage({
+    getElementById(id) {
+      return {
+        'partners-admin-summary': summary,
+        'partners-admin-readiness': readiness,
+      }[id] || null;
+    },
+    querySelector() { return null; },
+    querySelectorAll() { return []; },
+  });
+  const page = new AdminPage({});
+  page._partnersCapabilityCards = () => '';
+  page._renderPartnersAdminSummary({
+    accounts_total: 7,
+    account_statuses: { active: 7, held: 0, suspended: 0 },
+    verification_statuses: {
+      not_started: 5,
+      pending: 1,
+      verified: 1,
+      failed: 0,
+      expired: 0,
+    },
+    link_statuses: { active: 2 },
+    readiness: {},
+  });
+
+  assert.match(summary.innerHTML, />5<\/div><div class="cs-l">KYC cash non commencé/);
+  assert.match(summary.innerHTML, />1<\/div><div class="cs-l">KYC cash en cours/);
+  assert.match(summary.innerHTML, />1<\/div><div class="cs-l">KYC cash vérifié/);
+  assert.doesNotMatch(summary.innerHTML, /KYC en attente/);
 });
 
 test('Admin Partners renders a sanitized access-request queue with Risk-only decisions', () => {
@@ -3230,8 +3272,8 @@ test('Admin Partners exposes guided Didit certification only to Risk operators',
     certification: null,
   });
   assert.match(certification.innerHTML, /data-partners-action="kyc-certification-start"/);
-  assert.match(certification.innerHTML, /adhésion, le partage et les crédits Norva restent séparés/);
-  assert.match(certification.innerHTML, /tous les prérequis avant toute saisie/);
+  assert.match(certification.innerHTML, /ne crée aucun compte et n’ouvre aucun paiement/);
+  assert.match(certification.innerHTML, /séparée du KYC cash des membres/);
   assert.match(certification.innerHTML, /verification-privacy-notice/);
   assert.match(certification.innerHTML, /identity-verification/);
 });
@@ -3277,7 +3319,7 @@ test('Admin Partners renders authoritative, sandbox and quarantined Didit proof 
       verified: true,
     },
   });
-  assert.match(certification.innerHTML, /Preuve live vérifiée/);
+  assert.match(certification.innerHTML, /Certification technique live vérifiée/);
   assert.match(certification.innerHTML, /Environnement live/);
   assert.doesNotMatch(certification.innerHTML, /kyc-certification-start/);
 
@@ -3308,6 +3350,46 @@ test('Admin Partners renders authoritative, sandbox and quarantined Didit proof 
   });
   assert.match(certification.innerHTML, /mise en quarantaine/);
   assert.match(certification.innerHTML, /configuration fournisseur incohérente/);
+});
+
+test('Admin Partners renders only sanitized Didit history without promoting cash KYC', () => {
+  const certification = { innerHTML: '', removeAttribute() {}, dataset: {} };
+  const AdminPage = loadAdminPage({
+    getElementById(id) {
+      return id === 'partners-admin-kyc-certification' ? certification : null;
+    },
+    querySelector() { return null; },
+    querySelectorAll() { return []; },
+  });
+  const page = new AdminPage({});
+  page._partnersCapabilities = { support: false, risk: true, finance: false };
+  page._renderPartnersKycCertification({
+    schema_version: 2,
+    action: 'kyc_certification_status',
+    certification: {
+      status: 'approved',
+      environment: 'live',
+      expires_at: '2026-08-10T18:00:00Z',
+      observed_at: '2026-08-10T17:00:00Z',
+      verified: true,
+      reason: null,
+    },
+    technical_history: {
+      sessions_total: 3,
+      sessions_with_events: 2,
+      sessions_without_events: 1,
+      verified_live_sessions: 1,
+      quarantined_sessions: 1,
+      last_event_observed_at: '2026-08-10T17:00:00Z',
+    },
+  });
+
+  assert.match(certification.innerHTML, /Historique technique sanitisé/);
+  assert.match(certification.innerHTML, /3 session\(s\)/);
+  assert.match(certification.innerHTML, /1 session\(s\) liée\(s\) à Didit sans événement local/);
+  assert.match(certification.innerHTML, /jamais convertible en KYC cash/);
+  assert.match(certification.innerHTML, /1 en quarantaine/);
+  assert.doesNotMatch(certification.innerHTML, /provider_session|account_id|user_id/);
 });
 
 function validCertificationPreflight() {
