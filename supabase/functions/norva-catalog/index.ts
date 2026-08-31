@@ -61,7 +61,6 @@ const HOME_RAIL_VARIANT_LIMIT = 10;
 // small prevents genre rails with many selected titles from exceeding proxy URL
 // limits before their variants can be materialized.
 const TITLE_VARIANT_QUERY_CHUNK = 50;
-const VISIBLE_TITLE_ID_PAGE_SIZE = 1_000;
 
 if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
   throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
@@ -1826,94 +1825,61 @@ function titleSubtitleLanguages(title: JsonRecord): string[] {
   const raw = (title as { file_subtitle_languages?: unknown }).file_subtitle_languages;
   return canonicalFileLanguages(raw);
 }
-// When the catalogue is scoped to one provider, the title-level arrays above
-// are too broad: they are the union of every owned variant. Load exact per-file
-// observations through explicit visible-variant keys; views deliberately do
-// not rely on PostgREST embedded relationships.
-function titleSourceObservationLanguages(title: JsonRecord, key: "audio_languages" | "subtitle_languages"): string[] {
-  return canonicalFileLanguages(title[`__source_${key}`]);
-}
-
-async function attachSourceObservationLanguages(
-  titles: JsonRecord[],
-  userId: string,
-  sourceId: string,
-): Promise<void> {
-  const titleIds = [...new Set(titles.map((title) => String(title.id ?? "")).filter(Boolean))];
-  if (!titleIds.length) return;
-
-  const variantTitleById = new Map<string, string>();
-  for (let index = 0; index < titleIds.length; index += TITLE_VARIANT_QUERY_CHUNK) {
-    const { data, error } = await db
-      .from("cloud_catalog_visible_title_variants")
-      .select("id,title_id")
-      .eq("user_id", userId)
-      .eq("source_id", sourceId)
-      .in("title_id", titleIds.slice(index, index + TITLE_VARIANT_QUERY_CHUNK));
-    if (error) throwDb(error, "Unable to load source language variants");
-    for (const variant of (data ?? []) as JsonRecord[]) {
-      const variantId = String(variant.id ?? "");
-      const titleId = String(variant.title_id ?? "");
-      if (variantId && titleId) variantTitleById.set(variantId, titleId);
-    }
-  }
-
-  const audioByTitle = new Map<string, unknown[]>();
-  const subtitlesByTitle = new Map<string, unknown[]>();
-  const variantIds = [...variantTitleById.keys()];
-  for (let index = 0; index < variantIds.length; index += TITLE_VARIANT_QUERY_CHUNK) {
-    const { data, error } = await db
-      .from("cloud_title_file_language_observations")
-      .select("variant_id,audio_languages,subtitle_languages")
-      .eq("user_id", userId)
-      .in("variant_id", variantIds.slice(index, index + TITLE_VARIANT_QUERY_CHUNK));
-    if (error) throwDb(error, "Unable to load source language observations");
-    for (const observation of (data ?? []) as JsonRecord[]) {
-      const titleId = variantTitleById.get(String(observation.variant_id ?? ""));
-      if (!titleId) continue;
-      const audio = audioByTitle.get(titleId) ?? [];
-      if (Array.isArray(observation.audio_languages)) audio.push(...observation.audio_languages);
-      audioByTitle.set(titleId, audio);
-      const subtitles = subtitlesByTitle.get(titleId) ?? [];
-      if (Array.isArray(observation.subtitle_languages)) subtitles.push(...observation.subtitle_languages);
-      subtitlesByTitle.set(titleId, subtitles);
-    }
-  }
-
-  for (const title of titles) {
-    const titleId = String(title.id ?? "");
-    title.__source_audio_languages = canonicalFileLanguages(audioByTitle.get(titleId) ?? []);
-    title.__source_subtitle_languages = canonicalFileLanguages(subtitlesByTitle.get(titleId) ?? []);
-  }
-}
-
-async function visibleTitleIdsBySourceLanguages(
-  userId: string,
-  itemType: "movie" | "series",
-  sourceId: string,
-  audioIso: string | null,
-  subtitleIso: string | null,
-): Promise<string[]> {
-  const titleIds = new Set<string>();
-  for (let offset = 0;; offset += VISIBLE_TITLE_ID_PAGE_SIZE) {
-    const { data, error } = await db.rpc("cloud_catalog_visible_title_ids_by_source_languages", {
-      p_user_id: userId,
-      p_item_type: itemType,
-      p_source_id: sourceId,
-      p_audio_language: audioIso,
-      p_subtitle_language: subtitleIso,
-    })
-      .order("title_id", { ascending: true })
-      .range(offset, offset + VISIBLE_TITLE_ID_PAGE_SIZE - 1);
-    if (error) throwDb(error, "Unable to filter visible source languages");
-    const rows = (data ?? []) as JsonRecord[];
-    for (const row of rows) {
-      const titleId = String(row.title_id ?? "");
-      if (titleId) titleIds.add(titleId);
-    }
-    if (rows.length < VISIBLE_TITLE_ID_PAGE_SIZE) break;
-  }
-  return [...titleIds];
+async function visibleTitlePageBySourceLanguages(options: {
+  userId: string;
+  itemType: "movie" | "series";
+  sourceId: string;
+  audioIso: string | null;
+  subtitleIso: string | null;
+  buckets: string[];
+  hiddenBuckets: string[];
+  search: string;
+  yearMin: number | null;
+  yearMax: number | null;
+  minRating: number | null;
+  addedAfter: string | null;
+  sort: string;
+  preferredAudio: string | null;
+  preferredSubtitle: string | null;
+  candidateLimit: number;
+  limit: number;
+  offset: number;
+}): Promise<{ titleIds: string[]; count: number }> {
+  const { data, error } = await db.rpc("cloud_catalog_visible_title_language_page", {
+    p_user_id: options.userId,
+    p_item_type: options.itemType,
+    p_source_id: options.sourceId,
+    p_filters: {
+      audio: options.audioIso,
+      subtitle: options.subtitleIso,
+      buckets: options.buckets,
+      hiddenBuckets: options.hiddenBuckets,
+      search: options.search,
+      yearMin: options.yearMin,
+      yearMax: options.yearMax,
+      minRating: options.minRating,
+      addedAfter: options.addedAfter,
+      sort: options.sort,
+      prefAudio: options.preferredAudio,
+      prefSubtitle: options.preferredSubtitle,
+      candidateLimit: options.candidateLimit,
+      limit: options.limit,
+      offset: options.offset,
+    },
+  });
+  if (error) throwDb(error, "Unable to page visible source languages");
+  const payload = recordOrEmpty(data);
+  const rawIds = Array.isArray(payload.titleIds)
+    ? payload.titleIds
+    : Array.isArray(payload.title_ids) ? payload.title_ids : [];
+  const titleIds = [...new Set(rawIds
+    .map((value) => String(value ?? ""))
+    .filter((value) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value))
+  )];
+  return {
+    titleIds,
+    count: Math.max(titleIds.length, Number(payload.count) || 0),
+  };
 }
 // Distinct ISO-639 languages from a legacy title-level ordered map. Exact menus,
 // filters, and sorting use file_audio_languages instead.
@@ -1971,33 +1937,6 @@ function applyGenreTitleOrder(q: any, sort: string) {
     })
     .order(sort === "default" ? "created_at" : "id", { ascending: sort !== "default" })
     .order("id", { ascending: true });
-}
-
-function compareGenreTitleValues(left: unknown, right: unknown, ascending: boolean): number {
-  const leftMissing = left === null || left === undefined;
-  const rightMissing = right === null || right === undefined;
-  if (leftMissing || rightMissing) return leftMissing === rightMissing ? 0 : leftMissing ? 1 : -1;
-  const leftNumber = typeof left === "number" ? left : Number.NaN;
-  const rightNumber = typeof right === "number" ? right : Number.NaN;
-  const comparison = Number.isFinite(leftNumber) && Number.isFinite(rightNumber)
-    ? leftNumber - rightNumber
-    : String(left) < String(right) ? -1 : String(left) > String(right) ? 1 : 0;
-  return ascending ? comparison : -comparison;
-}
-
-function compareGenreTitles(left: JsonRecord, right: JsonRecord, sort: string): number {
-  const primaryAscending = sort === "year-asc" || sort === "name";
-  const primary = compareGenreTitleValues(
-    left[genreTitleSortColumn(sort)],
-    right[genreTitleSortColumn(sort)],
-    primaryAscending,
-  );
-  if (primary) return primary;
-  if (sort === "default") {
-    const created = compareGenreTitleValues(left.created_at, right.created_at, false);
-    if (created) return created;
-  }
-  return compareGenreTitleValues(left.id, right.id, true);
 }
 
 async function listGenreItems(req: Request, url: URL, userId: string) {
@@ -2081,47 +2020,73 @@ async function listGenreItems(req: Request, url: URL, userId: string) {
   };
 
   try {
-    const sourceLanguageTitleIds = sourceId && hasStrictLanguageFilter
-      ? await visibleTitleIdsBySourceLanguages(userId, itemType, sourceId, audioIso, subIso)
-      : null;
-    if (sourceLanguageTitleIds && !sourceLanguageTitleIds.length) {
-      return { items: [], count: 0, limit, offset, hasMore: false };
+    // A selected provider plus an exact language filter (or provider-scoped
+    // language preference) used to return every matching id to Edge and fan it
+    // back into PostgREST batches. Large catalogues exceeded the isolate wall
+    // clock before the first page could render. Keep evidence, filtering,
+    // ordering and count in one bounded SQL page, then hydrate only those ids.
+    if (sourceId && needsSourceLanguageEvidence) {
+      const page = await visibleTitlePageBySourceLanguages({
+        userId,
+        itemType,
+        sourceId,
+        audioIso,
+        subtitleIso: subIso,
+        buckets,
+        hiddenBuckets: [...hidden],
+        search,
+        yearMin: yearRange?.min ?? null,
+        yearMax: yearRange?.max ?? null,
+        minRating,
+        addedAfter: addedAfterDate,
+        sort,
+        preferredAudio: prefAudioIso,
+        preferredSubtitle: prefSubIso,
+        candidateLimit,
+        limit,
+        offset,
+      });
+      const pageRows = await hydrateVisibleCatalogTitlesByIds(
+        userId,
+        page.titleIds,
+        requiredCatalogTitleVisibilityEpoch(userId),
+      );
+      const variantsByTitle = await listVariantsByTitleIds(
+        pageRows.map((row) => String(row.id)),
+        userId,
+        audioIso ? 24 : HOME_RAIL_VARIANT_LIMIT,
+        audioIso,
+        sourceId,
+      );
+      await applyCatalogOverlay(pageRows, itemType, lang);
+      return {
+        items: pageRows.map((row) => titleRailItem(row, variantsByTitle.get(String(row.id)) ?? [], lang)),
+        count: page.count,
+        limit,
+        offset,
+        hasMore: offset + limit < page.count,
+      };
     }
 
     // "Best for my languages" sort needs an in-memory rank over the filtered set;
     // it's bounded by the (usually language/genre-narrowed) filter. Every other
     // view uses exact SQL count + range pagination over the whole catalogue.
     if (langSort && (prefAudioIso || prefSubIso)) {
-      let rows: JsonRecord[] = [];
-      const idBatches = sourceLanguageTitleIds
-        ? Array.from({ length: Math.ceil(sourceLanguageTitleIds.length / TITLE_VARIANT_QUERY_CHUNK) }, (_, index) =>
-          sourceLanguageTitleIds.slice(index * TITLE_VARIANT_QUERY_CHUNK, (index + 1) * TITLE_VARIANT_QUERY_CHUNK))
-        : [null];
-      for (const ids of idBatches) {
-        let query = applyFilters(db.from("cloud_catalog_visible_titles").select("*"));
-        if (ids) query = query.in("id", ids);
-        const { data, error } = await query
-          .order("created_at", { ascending: false })
-          .limit(candidateLimit);
-        if (error) {
-          if (isMissingMaterialization(error)) return { items: [], count: 0, limit, offset, hasMore: false };
-          throwDb(error, "Unable to list genre items");
-        }
-        rows.push(...((data ?? []) as JsonRecord[]));
+      const { data, error } = await applyFilters(db.from("cloud_catalog_visible_titles").select("*"))
+        .order("created_at", { ascending: false })
+        .limit(candidateLimit);
+      if (error) {
+        if (isMissingMaterialization(error)) return { items: [], count: 0, limit, offset, hasMore: false };
+        throwDb(error, "Unable to list genre items");
       }
-      rows = rows
-        .sort((left, right) => compareGenreTitleValues(left.created_at, right.created_at, false))
-        .slice(0, candidateLimit);
-      if (sourceId && needsSourceLanguageEvidence) {
-        await attachSourceObservationLanguages(rows, userId, sourceId);
-      }
+      const rows = (data ?? []) as JsonRecord[];
       const ranked = rows
         .map((title, index) => ({
           title,
           index,
           rank: languageMatchRank(
-            sourceId ? titleSourceObservationLanguages(title, "subtitle_languages") : titleSubtitleLanguages(title),
-            sourceId ? titleSourceObservationLanguages(title, "audio_languages") : titleAudioLanguages(title),
+            titleSubtitleLanguages(title),
+            titleAudioLanguages(title),
             prefAudioIso,
             prefSubIso,
           ),
@@ -2151,39 +2116,16 @@ async function listGenreItems(req: Request, url: URL, userId: string) {
 
     let pageRows: JsonRecord[];
     let total: number | null;
-    if (sourceLanguageTitleIds) {
-      const mergedRows: JsonRecord[] = [];
-      let exactTotal = 0;
-      const requiredRowsPerBatch = offset + limit;
-      for (let index = 0; index < sourceLanguageTitleIds.length; index += TITLE_VARIANT_QUERY_CHUNK) {
-        const ids = sourceLanguageTitleIds.slice(index, index + TITLE_VARIANT_QUERY_CHUNK);
-        const query = applyGenreTitleOrder(
-          applyFilters(db.from("cloud_catalog_visible_titles").select("*", { count: "exact" })).in("id", ids),
-          sort,
-        );
-        const { data, count, error } = await query.range(0, requiredRowsPerBatch - 1);
-        if (error) {
-          if (isMissingMaterialization(error)) return { items: [], count: 0, limit, offset, hasMore: false };
-          throwDb(error, "Unable to list genre items");
-        }
-        exactTotal += count ?? 0;
-        mergedRows.push(...((data ?? []) as JsonRecord[]));
-      }
-      mergedRows.sort((left, right) => compareGenreTitles(left, right, sort));
-      pageRows = mergedRows.slice(offset, offset + limit);
-      total = exactTotal;
-    } else {
-      const { data, count, error } = await applyGenreTitleOrder(
-        applyFilters(db.from("cloud_catalog_visible_titles").select("*", { count: "exact" })),
-        sort,
-      ).range(offset, offset + limit - 1);
-      if (error) {
-        if (isMissingMaterialization(error)) return { items: [], count: 0, limit, offset, hasMore: false };
-        throwDb(error, "Unable to list genre items");
-      }
-      pageRows = (data ?? []) as JsonRecord[];
-      total = count ?? null;
+    const { data, count, error } = await applyGenreTitleOrder(
+      applyFilters(db.from("cloud_catalog_visible_titles").select("*", { count: "exact" })),
+      sort,
+    ).range(offset, offset + limit - 1);
+    if (error) {
+      if (isMissingMaterialization(error)) return { items: [], count: 0, limit, offset, hasMore: false };
+      throwDb(error, "Unable to list genre items");
     }
+    pageRows = (data ?? []) as JsonRecord[];
+    total = count ?? null;
     pageRows = await hydrateVisibleCatalogTitlesByIds(
       userId,
       pageRows.map((row) => String(row.id)),

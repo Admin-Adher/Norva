@@ -19,17 +19,34 @@ test('genre-items keeps title and returned versions scoped to the selected sourc
   const src = read('supabase/functions/norva-catalog/index.ts');
   assert.match(src, /\.from\("cloud_catalog_visible_titles"\)/);
   assert.match(src, /out = out\.contains\("visible_source_ids", \[sourceId\]\)/);
-  assert.match(src, /db\.rpc\("cloud_catalog_visible_title_ids_by_source_languages"/);
-  assert.match(src, /p_source_id: sourceId/);
-  assert.match(src, /p_audio_language: audioIso/);
-  assert.match(src, /p_subtitle_language: subtitleIso/);
-  assert.match(src, /attachSourceObservationLanguages\(rows, userId, sourceId\)/);
-  assert.match(src, /titleSourceObservationLanguages\(title, "audio_languages"\)/);
+  assert.match(src, /db\.rpc\("cloud_catalog_visible_title_language_page"/);
+  assert.match(src, /p_source_id: options\.sourceId/);
+  assert.match(src, /audio: options\.audioIso/);
+  assert.match(src, /subtitle: options\.subtitleIso/);
+  assert.match(src, /if \(sourceId && needsSourceLanguageEvidence\)/);
+  assert.match(src, /visibleTitlePageBySourceLanguages\(\{/);
+  assert.match(src, /listVariantsByTitleIds\([\s\S]*audioIso,[\s\S]*sourceId/);
+  assert.doesNotMatch(src, /sourceLanguageTitleIds/);
   assert.doesNotMatch(src, /cloud_title_variants!inner/);
   assert.match(src, /if \(sourceId\) query = query\.eq\("source_id", sourceId\)/);
 
   const migration = read('supabase/migrations/20260721100000_genre_items_source_index.sql');
   assert.match(migration, /cloud_title_variants \(source_id, title_id\)/);
+});
+
+test('source-language pagination stays bounded and service-role only', () => {
+  const migration = read('supabase/migrations/20260831175207_catalog_language_filter_page_v1.sql');
+  assert.match(migration, /create or replace function public\.cloud_catalog_visible_title_language_page/);
+  assert.match(migration, /security invoker/);
+  assert.match(migration, /set search_path = ''/);
+  assert.match(migration, /cloud_catalog_visible_title_ids_by_source_languages/);
+  assert.match(migration, /display_owners as materialized/);
+  assert.match(migration, /limit \(select parameter\.page_limit/);
+  assert.match(migration, /offset \(select parameter\.page_offset/);
+  assert.match(migration, /'titleIds'/);
+  assert.match(migration, /'count'/);
+  assert.match(migration, /revoke all on function[\s\S]*from public, anon, authenticated/);
+  assert.match(migration, /grant execute on function[\s\S]*to service_role/);
 });
 
 test('genre summary exposes Other and excludes hidden categories', () => {

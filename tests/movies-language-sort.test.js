@@ -187,7 +187,7 @@ test('genre-items respects explicit Newest/Recently Added ordering instead of po
   assert.match(src, /sort === "name" \? "title"/);
   const orderBlock = src.slice(
     src.indexOf('function genreTitleSortColumn('),
-    src.indexOf('function compareGenreTitleValues('),
+    src.indexOf('async function listGenreItems('),
   );
   const posterOrder = orderBlock.indexOf('"has_poster"');
   const sortOrder = orderBlock.indexOf('sort === "year-asc" ? "release_year"');

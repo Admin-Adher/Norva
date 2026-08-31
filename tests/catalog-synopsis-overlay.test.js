@@ -46,7 +46,7 @@ test('empty cloud strings fall back and existing provider summaries are preserve
 test('all title rails forward the requested synopsis language', () => {
   const src = read('supabase/functions/norva-catalog/index.ts');
   assert.match(src, /applyCatalogOverlay\(selectedRows, itemType, lang\)/);
-  assert.equal((src.match(/applyCatalogOverlay\(pageRows, itemType, lang\)/g) || []).length, 2);
+  assert.equal((src.match(/applyCatalogOverlay\(pageRows, itemType, lang\)/g) || []).length, 3);
   assert.match(src, /applyCatalogOverlay\(titles, itemType, lang\)/);
   assert.equal((src.match(/applyCatalogOverlay\(titles, itemType, lang\)/g) || []).length, 2);
   assert.match(src, /listVerifiedTitleCandidatePool\(userId, type, lang\)/);
