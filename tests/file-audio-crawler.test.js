@@ -59,7 +59,7 @@ test('untagged Whisper queue is exact-file scoped and reuses every canonical cac
   assert.ok(!queue.includes('config_hint'));
 });
 
-test('audio crawler hydrates cache before provider I/O and persists exact empty maps', () => {
+test('audio crawler hydrates valid cache and keeps parser misses retryable', () => {
   const playback = read('supabase/functions/norva-playback/index.ts');
   const crawler = between(
     playback,
@@ -76,15 +76,84 @@ test('audio crawler hydrates cache before provider I/O and persists exact empty 
   assert.ok(crawler.includes('releaseProviderFileProbe'));
   assert.ok(crawler.includes('provider_probe_circuit_record_tick'));
   assert.ok(crawler.includes('candidateFootprint?.lowFootprint'));
+  assert.ok(crawler.includes('cachedAudioTracks.length > 0'));
+  assert.ok(crawler.includes('versionTags.includes("multi")'));
+  assert.ok(crawler.includes('await new Promise((resolve) => setTimeout(resolve, 2_500))'));
+  assert.ok(crawler.includes('const relaySubtitleComplete = relayInfo.subtitleProbeComplete === true'));
+  assert.ok(crawler.includes('if (!gatewayFallback)'));
+  assert.ok(crawler.includes('if (!relaySubtitleComplete) return;'));
+  assert.ok(crawler.includes('info = relayInfo;'));
+  assert.ok(crawler.includes('subtitles: relaySubtitleTracks'));
+  assert.ok(crawler.includes('subtitleProbeComplete: true'));
 
   const exactEmpty = between(
     crawler,
-    'if (!incoming.length && !hasTracks)',
+    'if (!audioProbeComplete && !subtitleProbeComplete)',
+    '\n        if (!audioProbeComplete)',
+  );
+  assert.ok(exactEmpty.includes('diag.relayEmpty++'));
+  assert.ok(exactEmpty.includes('return;'));
+  assert.ok(!exactEmpty.includes('shareFileTracks('));
+  assert.ok(!exactEmpty.includes('markProbed('));
+
+  const subtitleOnly = between(
+    crawler,
+    'if (!audioProbeComplete) {',
     '\n        for (const code of incoming)',
   );
-  assert.ok(exactEmpty.includes('if (exactFileScope)'));
-  assert.ok(exactEmpty.includes('shareFileTracks('));
-  assert.ok(exactEmpty.includes('true,'));
+  assert.ok(subtitleOnly.includes('shareFileTracks('));
+  assert.match(subtitleOnly, /orderedSubtitles,\s*\n\s*false,\s*\n\s*true,/);
+});
+
+test('relay and gateway expose independent authoritative probe markers', () => {
+  const relay = read('services/norva-relay/src/index.js');
+  const gateway = read('services/media-gateway/src/index.js');
+
+  assert.ok(relay.includes('/__probeaudio/v4/'));
+  assert.ok(relay.includes('audioProbeComplete: false'));
+  assert.ok(relay.includes('out.audioProbeComplete = tracks.length > 0'));
+  assert.ok(relay.includes(
+    'out.subtitleProbeComplete = tracks.length > 0 || container.subtitleTracks.length > 0',
+  ));
+  assert.ok(relay.includes('if (cacheKey && out.audioProbeComplete)'));
+
+  const endpoint = between(
+    gateway,
+    "app.post('/probe-audio'",
+    '\n// ── Strict LID loopback broker',
+  );
+  assert.ok(endpoint.includes('hasCompleteMkvPlaybackProfile(profile)'));
+  assert.ok(endpoint.includes('probeCodecProfileUncached(url, ua, { background: true })'));
+  assert.ok(endpoint.includes('audioProbeComplete: authoritativeTrackMap && audioTracks.length > 0'));
+  assert.ok(endpoint.includes('subtitleProbeComplete: authoritativeTrackMap'));
+});
+
+test('repair migration clears poisoned movie probes and prioritizes MULTI safely', () => {
+  const migration = read(
+    'supabase/migrations/20260831134040_vod_audio_probe_persistence_repair_v1.sql',
+  );
+
+  assert.ok(migration.includes('norva_poisoned_movie_audio_cache'));
+  assert.ok(migration.includes('audio_probed_at = null'));
+  assert.ok(migration.includes('audio_observed = false'));
+  assert.ok(migration.includes('catalog_file_tracks_movie_audio_probe_nonempty_ck'));
+  assert.ok(migration.includes('jsonb_array_length(audio_tracks) > 0'));
+  assert.ok(migration.includes("title.version_languages @> array['multi']::text[]"));
+  assert.ok(migration.includes('schedule.dispatch_count - mod(schedule.dispatch_count, 12)'));
+  assert.ok(migration.includes("affected.source_id::text || ':movie:probe'"));
+  assert.ok(migration.includes('schedule.lease_until is null'));
+  assert.ok(migration.includes('from public.cloud_title_variants variant'));
+  assert.ok(migration.includes('join public.cloud_catalog_visible_sources source'));
+  const owners = between(
+    migration,
+    'create temporary table norva_poisoned_movie_audio_owners',
+    '\ncreate unique index norva_poisoned_movie_audio_owners_pk',
+  );
+  assert.ok(owners.includes('variant.id as variant_id'));
+  assert.ok(!owners.includes('observation.audio_observed'));
+  assert.ok(migration.includes('revoke all on function public.file_audio_backfill_candidates('));
+  assert.ok(migration.includes('to service_role'));
+  assert.ok(!migration.includes('subtitle_observed = false'));
 });
 
 test('catalog canonicalizes ISO-639-2 evidence before an audio-filter match', () => {
@@ -248,10 +317,11 @@ test('unknown audio tracks accept explicit basic-LID evidence with resumable bou
 
   assert.ok(detector.includes('.slice(0, 2)'));
   assert.ok(detector.includes('for (const track of pending)'));
-  assert.ok(detector.includes('`${detectBase}?index=${track.index}&dur=20`'));
-  assert.ok(detector.includes('AbortSignal.timeout(120_000)'));
+  assert.ok(detector.includes('`${detectBase}?index=${track.index}&dur=20&consensus=2`'));
+  assert.ok(detector.includes('AbortSignal.timeout(180_000)'));
   assert.ok(detector.includes('const evidence = basicLidEvidence(det)'));
-  assert.ok(detector.includes('if (evidence.accepted && evidence.lang)'));
+  assert.ok(detector.includes('const multiWindowConsensus = Number(det?.consensus ?? 0) >= 2'));
+  assert.ok(detector.includes('if (evidence.accepted && evidence.lang && multiWindowConsensus)'));
   assert.ok(detector.includes('track.lidMethod = evidence.method'));
   assert.ok(detector.includes('track.lidConfidence = evidence.confidence'));
   assert.ok(detector.includes('enriched.map((t) => t.lidMethod)'));
@@ -263,6 +333,8 @@ test('unknown audio tracks accept explicit basic-LID evidence with resumable bou
   assert.ok(detector.includes('lidAttemptedAt'));
   assert.ok(detector.includes('if (!res.ok) continue'));
   assert.ok(detector.includes('record_catalog_file_audio_whisper_outcome'));
+  assert.ok(detector.includes('consensus: 2'));
+  assert.ok(detector.includes('two-window-gateway-consensus-v3'));
   assert.ok(!playback.includes('if (verificationWork > 0)'));
   assert.ok(playback.includes('}).slice(0, Math.max(1, Math.min(limit, 4)))'));
   assert.ok(playback.includes('const fileExpiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString()'));

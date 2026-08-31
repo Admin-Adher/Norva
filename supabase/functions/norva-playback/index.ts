@@ -8137,11 +8137,10 @@ async function detectUntaggedAudioLanguages(opts: {
       if (cascadeHandled) return;
     }
   }
-  // The proven basic detector sweeps bounded offsets inside the gateway and stops on the first
-  // clear 20s speech window. Two tracks per file keep a two-file fleet claim inside its 540s
-  // request budget even when every gateway call reaches the 120s shadow-safe timeout. Per-track
-  // cursors make
-  // larger multi-audio files resumable without forcing strict multi-window consensus.
+  // The basic detector sweeps bounded offsets inside the gateway and now requires
+  // two independent 20s windows to agree before an unknown language is published.
+  // Two tracks per file keep work bounded and per-track cursors make larger
+  // multi-audio files resumable. A low-confidence or split verdict remains pending.
   const pending = unknownTracks.filter((t) => !t.lidAttemptedAt).slice(0, 2);
 
   // Gateway byte-pipe token → derive the /detect-language base from the /raw URL. The gateway
@@ -8168,18 +8167,19 @@ async function detectUntaggedAudioLanguages(opts: {
       for (const track of pending) {
         try {
           const res = await fetch(
-            `${detectBase}?index=${track.index}&dur=20`,
-            { signal: AbortSignal.timeout(120_000) },
+            `${detectBase}?index=${track.index}&dur=20&consensus=2`,
+            { signal: AbortSignal.timeout(180_000) },
           );
           // Transport/provider failures are not observations. Leave only this track due instead
           // of suppressing it for the retry window; another track may still be readable.
           if (!res.ok) continue;
           const det = await res.json().catch(() => null) as JsonRecord | null;
           const evidence = basicLidEvidence(det);
+          const multiWindowConsensus = Number(det?.consensus ?? 0) >= 2;
           track.lidAttemptedAt = nowIso;
           // The legacy path still needs >=4 transcript words. Detect-only instead carries
           // an explicit high-confidence evidence contract and correctly reports zero words.
-          if (evidence.accepted && evidence.lang) {
+          if (evidence.accepted && evidence.lang && multiWindowConsensus) {
             track.lang = evidence.lang;
             track.lidVerdict = "detected";
             track.lidMethod = evidence.method;
@@ -8298,8 +8298,8 @@ async function detectUntaggedAudioLanguages(opts: {
           detectionMethods,
           status: completed ? "detected" : "pending",
           sampleDurationSeconds: 20,
-          consensus: 1,
-          acceptance: "explicit-gateway-evidence-v2",
+          consensus: 2,
+          acceptance: "two-window-gateway-consensus-v3",
           detectOnlyDetectedCount,
           transcriptDetectedCount,
           trackCount: unknownTracks.length,
@@ -12542,6 +12542,27 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
     };
   }
 
+  // The exact-file candidate RPC intentionally returns a narrow shape. Load the
+  // release-language hints in one tenant-scoped query so MULTI and genuinely
+  // untagged files can use the robust gateway ffprobe as their first (and only)
+  // provider probe instead of first failing the bounded relay parser.
+  const versionLanguagesByTitleId = new Map<string, string[]>();
+  try {
+    const { data: languageRows } = await db
+      .from("cloud_catalog_visible_titles")
+      .select("id,version_languages")
+      .eq("user_id", userId)
+      .in("id", titles.map((title) => title.id));
+    for (const row of languageRows ?? []) {
+      versionLanguagesByTitleId.set(
+        String(row.id),
+        (Array.isArray(row.version_languages) ? row.version_languages : [])
+          .map((value) => String(value || "").trim().toLowerCase())
+          .filter(Boolean),
+      );
+    }
+  } catch (_) { /* missing hints fall back to robust unknown-file routing */ }
+
   const variantIds = titles.map((t) => t.default_variant_id).filter(Boolean) as string[];
   const variantById = new Map<string, JsonRecord>();
   if (variantIds.length) {
@@ -12663,9 +12684,8 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
   };
 
   const processOne = async (title: JsonRecord) => {
-    // Mark a title as probed (resolved or genuinely-empty) so the progression filter
-    // advances past it. Only called after a SUCCESSFUL relay response — never on a
-    // transient relayNotOk (429), so those retry on the next pass. Best-effort.
+    // Mark a title as audio-probed only after at least one real audio stream was
+    // observed. Parser misses and transport failures stay retryable. Best-effort.
     const markProbed = async (extra: JsonRecord = {}) => {
       try {
         await db.from("cloud_titles").update({ audio_probed_at: new Date().toISOString(), ...extra })
@@ -12695,8 +12715,12 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
               .maybeSingle();
             const fileRow = cached as JsonRecord | null;
             const audioAt = Date.parse(stringOr(fileRow?.audio_probed_at, ""));
+            const cachedAudioTracks = Array.isArray(fileRow?.audio_tracks)
+              ? fileRow.audio_tracks
+              : [];
             const hasFreshAudio = Number.isFinite(audioAt) &&
-              audioAt >= Date.now() - 180 * 24 * 3600 * 1000;
+              audioAt >= Date.now() - 180 * 24 * 3600 * 1000 &&
+              cachedAudioTracks.length > 0;
             const hasSubtitles = Boolean(fileRow?.subtitle_probed_at);
             const satisfiesTarget = subtitleTarget ? hasSubtitles : hasFreshAudio;
             if (fileRow && satisfiesTarget) {
@@ -12705,8 +12729,8 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
                 p_title_id: String(title.id),
                 p_variant_id: String(variant.id),
                 p_file_external_id: externalId,
-                p_audio_tracks: hasFreshAudio && Array.isArray(fileRow.audio_tracks)
-                  ? fileRow.audio_tracks
+                p_audio_tracks: hasFreshAudio
+                  ? cachedAudioTracks
                   : [],
                 p_subtitle_tracks: hasSubtitles && Array.isArray(fileRow.subtitle_tracks)
                   ? fileRow.subtitle_tracks
@@ -12848,112 +12872,180 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
       try {
         let info: JsonRecord | null = null;
         let token = "";
-      if (candidateFootprint?.lowFootprint && mode === "probe") {
-        // Low-footprint provider (anti-ban): route the header-probe through the gateway's
-        // RESIDENTIAL IP instead of the Cloudflare relay, so a mono-connection anti-abuse
-        // account is seen from ONE household IP (probe + metadata + playback). Same JSON shape.
-        // Human-like spacing between provider hits (concurrency is forced to 1 here).
-        await new Promise((r) => setTimeout(r, 200 + Math.floor(Math.random() * 1000)));
-        try {
-          const gw = await fetch(`${runtimeConfig.mediaGatewayUrl}/probe-audio`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json", Authorization: `Bearer ${runtimeConfig.mediaGatewayToken}` },
-            body: JSON.stringify({ url: targetUrl, userAgent: "VLC/3.0.20 LibVLC/3.0.20" }),
-          });
-          const gatewayInfo = recordOrEmpty(await gw.json().catch(() => ({})));
+        let usedGatewayProbe = false;
+        const gatewayConfigured = Boolean(
+          runtimeConfig.mediaGatewayUrl && runtimeConfig.mediaGatewayToken,
+        );
+        const versionTags = versionLanguagesByTitleId.get(String(title.id)) ?? [];
+        const preferGatewayProbe = mode === "probe" && gatewayConfigured && (
+          candidateFootprint?.lowFootprint === true ||
+          versionTags.length === 0 ||
+          versionTags.includes("multi")
+        );
+        const fetchGatewayProbe = async (stage: string): Promise<JsonRecord | null> => {
+          try {
+            const gw = await fetch(`${runtimeConfig.mediaGatewayUrl}/probe-audio`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json", Authorization: `Bearer ${runtimeConfig.mediaGatewayToken}` },
+              body: JSON.stringify({ url: targetUrl, userAgent: "VLC/3.0.20 LibVLC/3.0.20" }),
+            });
+            const gatewayInfo = recordOrEmpty(await gw.json().catch(() => ({})));
+            const terminalCode = await recordTerminalProbeFailure(
+              providerAccountKey,
+              candidateIdentityKey,
+              targetUrl,
+              gw.status,
+              gatewayInfo,
+            );
+            if (terminalCode) {
+              diag.relayNotOk++;
+              if (debug && !sample) {
+                sample = { stage: `${stage}Terminal`, status: gw.status, code: terminalCode };
+              }
+              return null;
+            }
+            if (!gw.ok) {
+              diag.relayNotOk++;
+              if (isBanishStatus(gw.status)) noteProbeHealth(false);
+              if (debug && !sample) sample = { stage: `${stage}NotOk`, status: gw.status, host: new URL(targetUrl).host };
+              return null;
+            }
+            const observedProfile = recordOrEmpty(gatewayInfo.codecProfile ?? gatewayInfo.codec_profile);
+            if (variantItemType === "movie" && hasReliableVodCodecProfile(observedProfile)) {
+              try {
+                await persistObservedCodecProfile(db, {
+                  userId,
+                  sourceId,
+                  itemType: "movie",
+                  itemId: externalId,
+                  codecProfile: observedProfile,
+                  startupMs: null,
+                  audioMode: null,
+                  variantId: stringOr(variant.id, ""),
+                  strict: true,
+                });
+              } catch (_) {
+                // The audio/subtitle map below remains independently useful. Keep
+                // the profile write observable and let the next probe repair it.
+                diag.persistenceFailed++;
+              }
+            }
+            noteProbeHealth(true);
+            usedGatewayProbe = true;
+            return gatewayInfo;
+          } catch (_) {
+            diag.relayNotOk++;
+            noteProbeHealth(false);
+            return null;
+          }
+        };
+
+        if (preferGatewayProbe) {
+          // MULTI/unknown files and low-footprint accounts go straight to one
+          // authoritative ffprobe. The low-footprint lane keeps its human-like
+          // pacing and residential egress.
+          if (candidateFootprint?.lowFootprint) {
+            await new Promise((r) => setTimeout(r, 200 + Math.floor(Math.random() * 1000)));
+          }
+          info = await fetchGatewayProbe("gatewayProbe");
+          if (!info) return;
+          if (candidateFootprint?.lowFootprint) {
+            try {
+              await db.rpc("provider_footprint_record_hit", {
+                p_identity_key: candidateFootprint.identityKey,
+              });
+            } catch (_) { /* best-effort */ }
+          }
+        } else {
+          const payload = JSON.stringify({ v: 1, sid: "audio-backfill", uid: userId, url: targetUrl, exp: Math.floor(Date.now() / 1000) + 120 });
+          const signature = await hmacBase64Url(runtimeConfig.relayTokenSecret, payload);
+          token = `${base64Url(encoder.encode(payload))}.${signature}`;
+
+          const endpoint = mode === "probe" ? "probe-audio" : "vod-info";
+          const res = await fetch(`${runtimeConfig.relayBaseUrl}/${endpoint}/${token}`, { headers: { accept: "application/json" } });
+          const relayInfo = recordOrEmpty(await res.json().catch(() => ({})));
           const terminalCode = await recordTerminalProbeFailure(
             providerAccountKey,
             candidateIdentityKey,
             targetUrl,
-            gw.status,
-            gatewayInfo,
+            res.status,
+            relayInfo,
           );
           if (terminalCode) {
             diag.relayNotOk++;
             if (debug && !sample) {
-              sample = { stage: "gatewayProbeTerminal", status: gw.status, code: terminalCode };
+              sample = { stage: "relayProbeTerminal", status: res.status, code: terminalCode };
             }
             return;
           }
-          if (!gw.ok) {
+          if (!res.ok) {
             diag.relayNotOk++;
-            if (isBanishStatus(gw.status)) noteProbeHealth(false);
-            if (debug && !sample) sample = { stage: "gatewayProbeNotOk", status: gw.status, host: new URL(targetUrl).host };
+            if (isBanishStatus(res.status)) noteProbeHealth(false);
+            if (debug && !sample) sample = { stage: "relayNotOk", status: res.status, host: new URL(targetUrl).host };
             return;
           }
-          info = gatewayInfo;
-          const observedProfile = recordOrEmpty(info?.codecProfile ?? info?.codec_profile);
-          if (variantItemType === "movie" && hasReliableVodCodecProfile(observedProfile)) {
-            try {
-              await persistObservedCodecProfile(db, {
-                userId,
-                sourceId,
-                itemType: "movie",
-                itemId: externalId,
-                codecProfile: observedProfile,
-                startupMs: null,
-                audioMode: null,
-                variantId: stringOr(variant.id, ""),
-                strict: true,
-              });
-            } catch (_) {
-              // The audio/subtitle map below remains independently useful. Keep
-              // the profile write observable and let the next probe repair it.
-              diag.persistenceFailed++;
+          info = relayInfo;
+          noteProbeHealth(true);
+
+          const relayAudioTracks = Array.isArray(relayInfo.audioTracks)
+            ? relayInfo.audioTracks
+            : [];
+          const relayAudioComplete = relayInfo.audioProbeComplete === true || relayAudioTracks.length > 0;
+          const relaySubtitleTracks = Array.isArray(relayInfo.subtitles)
+            ? relayInfo.subtitles
+            : [];
+          const relaySubtitleComplete = relayInfo.subtitleProbeComplete === true ||
+            relayAudioComplete || relaySubtitleTracks.length > 0;
+          if (mode === "probe" && gatewayConfigured && !relayAudioComplete) {
+            // The relay request is fully consumed before this fallback begins.
+            // Give provider-side connection accounting its normal release grace,
+            // then open exactly one ffprobe connection; the distributed file
+            // lease remains held throughout, so replicas cannot overlap it.
+            await new Promise((resolve) => setTimeout(resolve, 2_500));
+            const gatewayFallback = await fetchGatewayProbe("gatewayFallback");
+            if (!gatewayFallback) {
+              // Subtitle evidence is independent of audio. A failed ffprobe must
+              // leave audio due, but it must not discard an authoritative relay
+              // subtitle map that was already obtained without another provider
+              // connection.
+              if (!relaySubtitleComplete) return;
+              info = relayInfo;
+            } else {
+              const gatewayAudioTracks = Array.isArray(gatewayFallback.audioTracks)
+                ? gatewayFallback.audioTracks
+                : [];
+              const gatewaySubtitleTracks = Array.isArray(gatewayFallback.subtitles)
+                ? gatewayFallback.subtitles
+                : [];
+              const gatewaySubtitleComplete = gatewayFallback.subtitleProbeComplete === true ||
+                gatewayFallback.audioProbeComplete === true ||
+                gatewayAudioTracks.length > 0 || gatewaySubtitleTracks.length > 0;
+              // Prefer the full ffprobe facet whenever it is authoritative. A
+              // partial 200 response may still carry useful audio metadata; in
+              // that case retain the already-complete relay subtitle facet.
+              info = relaySubtitleComplete && !gatewaySubtitleComplete
+                ? {
+                  ...gatewayFallback,
+                  subtitles: relaySubtitleTracks,
+                  subtitleProbeComplete: true,
+                }
+                : gatewayFallback;
             }
           }
-          noteProbeHealth(true);
-        } catch (_) { diag.relayNotOk++; noteProbeHealth(false); return; }
-        // Count the provider hit against the identity's hourly budget (observability + cap).
-        try {
-          await db.rpc("provider_footprint_record_hit", {
-            p_identity_key: candidateFootprint.identityKey,
-          });
-        } catch (_) { /* best-effort */ }
-      } else {
-        const payload = JSON.stringify({ v: 1, sid: "audio-backfill", uid: userId, url: targetUrl, exp: Math.floor(Date.now() / 1000) + 120 });
-        const signature = await hmacBase64Url(runtimeConfig.relayTokenSecret, payload);
-        token = `${base64Url(encoder.encode(payload))}.${signature}`;
-
-        const endpoint = mode === "probe" ? "probe-audio" : "vod-info";
-        const res = await fetch(`${runtimeConfig.relayBaseUrl}/${endpoint}/${token}`, { headers: { accept: "application/json" } });
-        const relayInfo = recordOrEmpty(await res.json().catch(() => ({})));
-        const terminalCode = await recordTerminalProbeFailure(
-          providerAccountKey,
-          candidateIdentityKey,
-          targetUrl,
-          res.status,
-          relayInfo,
-        );
-        if (terminalCode) {
-          diag.relayNotOk++;
-          if (debug && !sample) {
-            sample = { stage: "relayProbeTerminal", status: res.status, code: terminalCode };
-          }
-          return;
         }
-        if (!res.ok) {
-          diag.relayNotOk++;
-          if (isBanishStatus(res.status)) noteProbeHealth(false);
-          if (debug && !sample) sample = { stage: "relayNotOk", status: res.status, host: new URL(targetUrl).host };
-          return;
+        if (debug && !sample && token && !usedGatewayProbe) {
+          let relayHead: JsonRecord = {};
+          try {
+            const rr = await fetch(`${runtimeConfig.relayBaseUrl}/relay/${token}`, { headers: { range: "bytes=0-400" } });
+            const u8 = new Uint8Array(await rr.arrayBuffer());
+            relayHead = { status: rr.status, len: u8.length, hex: [...u8.slice(0, 16)].map((b) => b.toString(16).padStart(2, "0")).join(""), cr: rr.headers.get("content-range"), path: rr.headers.get("x-norva-relay-path") };
+          } catch (e) { relayHead = { error: String(e).slice(0, 120) }; }
+          sample = { stage: "relayOk", mode, info, relayHead };
         }
-        info = relayInfo;
-        noteProbeHealth(true);
-      }
-      if (debug && !sample && token) {
-        let relayHead: JsonRecord = {};
-        try {
-          const rr = await fetch(`${runtimeConfig.relayBaseUrl}/relay/${token}`, { headers: { range: "bytes=0-400" } });
-          const u8 = new Uint8Array(await rr.arrayBuffer());
-          relayHead = { status: rr.status, len: u8.length, hex: [...u8.slice(0, 16)].map((b) => b.toString(16).padStart(2, "0")).join(""), cr: rr.headers.get("content-range"), path: rr.headers.get("x-norva-relay-path") };
-        } catch (e) { relayHead = { error: String(e).slice(0, 120) }; }
-        sample = { stage: "relayOk", mode, info, relayHead };
-      }
-      // Subtitles ride along with the probe-mode header-parse: the relay returns audio AND
-      // subtitle tracks in ONE call, so the crawl persists subtitles for free wherever it
-      // probes audio (and the dedicated subtitle sweep, target=subtitle, uses the same path).
-      const orderedSubtitles = mode === "probe" && info && Array.isArray(info.subtitles)
+        // Subtitles ride along with the probe-mode header-parse: the relay returns audio AND
+        // subtitle tracks in ONE call, so the crawl persists subtitles for free wherever it
+        // probes audio (and the dedicated subtitle sweep, target=subtitle, uses the same path).
+        const orderedSubtitles = mode === "probe" && info && Array.isArray(info.subtitles)
         ? (info.subtitles as JsonRecord[])
             .map((s) => ({
               index: Number(s?.index),
@@ -12965,9 +13057,6 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
             }))
             .filter((s) => Number.isInteger(s.index))
         : [];
-      const subtitleFields: JsonRecord = mode === "probe"
-        ? { subtitle_tracks: orderedSubtitles, subtitle_probed_at: new Date().toISOString() }
-        : {};
       // Absolute stream indexes are exact-file data. Keep untagged entries so
       // the offline Whisper queue can name them later without re-probing.
       const orderedTracks = mode === "probe" && info && Array.isArray(info.audioTracks)
@@ -12979,14 +13068,36 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
             .filter((t) => Number.isInteger(t.index))
         : [];
 
+      const vodTracks = mode !== "probe" && info && Array.isArray(info.audioTracks)
+        ? info.audioTracks as JsonRecord[]
+        : [];
+      const audioProbeComplete = mode === "probe"
+        ? info?.audioProbeComplete === true || orderedTracks.length > 0
+        : vodTracks.length > 0;
+      // Backward compatibility: pre-marker relay/gateway responses with an
+      // audio map necessarily parsed the whole stream table. A subtitle-only
+      // map is retained independently but can never validate audio.
+      const subtitleProbeComplete = mode === "probe" && (
+        info?.subtitleProbeComplete === true ||
+        audioProbeComplete ||
+        orderedSubtitles.length > 0
+      );
+      const subtitleFields: JsonRecord = subtitleProbeComplete
+        ? { subtitle_tracks: orderedSubtitles, subtitle_probed_at: new Date().toISOString() }
+        : {};
+
       const codes = new Set<string>();
       if (mode === "probe") {
         const incoming = info && Array.isArray(info.audioLanguages) ? info.audioLanguages : [];
-        const hasTracks = (Array.isArray(info?.audioTracks) && info.audioTracks.length) || orderedSubtitles.length;
-        // Truly empty (no langs AND no tracks at all) = header-parse failed → mark probed
-        // (incl. subtitles) so the crawl advances, mirroring the audio progression marker.
-        if (!incoming.length && !hasTracks) {
+        // No authoritative facet means parser/transport failure. Leave both
+        // cursors retryable; never turn it into a 180-day negative.
+        if (!audioProbeComplete && !subtitleProbeComplete) {
           diag.relayEmpty++;
+          return;
+        }
+        if (!audioProbeComplete) {
+          // A successfully parsed subtitle map remains valuable, but audio is
+          // still unknown and must stay eligible for the next probe.
           if (exactFileScope) {
             const persisted = await shareFileTracks(
               db,
@@ -12994,22 +13105,30 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
               variantItemType,
               externalId,
               [],
-              [],
-              true,
+              orderedSubtitles,
+              false,
               true,
             );
             if (persisted) updated++;
             else diag.persistenceFailed++;
-          } else {
-            await markProbed(subtitleFields);
+          } else if (Object.keys(subtitleFields).length) {
+            try {
+              await db.from("cloud_titles").update(subtitleFields)
+                .eq("user_id", userId).eq("id", String(title.id));
+            } catch (_) { /* best-effort subtitle-only observation */ }
           }
           return;
         }
-        for (const code of incoming) { const normalized = normalizeIsoLang(stringOrNull(code)); if (normalized) codes.add(normalized); }
+        for (const code of incoming) {
+          const normalized = normalizeIsoLang(stringOrNull(code));
+          if (normalized) codes.add(normalized);
+        }
       } else {
-        const tracks = info && Array.isArray(info.audioTracks) ? info.audioTracks : [];
-        if (!tracks.length) { diag.relayEmpty++; await markProbed(); return; }
-        for (const track of tracks) { const normalized = normalizeIsoLang(stringOrNull((track as JsonRecord)?.language)); if (normalized) codes.add(normalized); }
+        if (!vodTracks.length) { diag.relayEmpty++; return; }
+        for (const track of vodTracks) {
+          const normalized = normalizeIsoLang(stringOrNull(track?.language));
+          if (normalized) codes.add(normalized);
+        }
       }
       // No audio language resolved, but the probe SUCCEEDED (tracks/subs present): still
       // persist subtitles + advance the audio marker so we don't re-probe forever.
@@ -13024,7 +13143,7 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
             orderedTracks,
             orderedSubtitles,
             true,
-            true,
+            subtitleProbeComplete,
           );
           if (persisted) updated++;
           else diag.persistenceFailed++;
@@ -13048,7 +13167,7 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
           orderedTracks,
           orderedSubtitles,
           true,
-          true,
+          subtitleProbeComplete,
         );
         if (persisted) updated++;
         else diag.persistenceFailed++;
@@ -13090,7 +13209,16 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
       // Cross-user share: store the file map in the global per-file cache + fan out to every
       // owner (probe mode only — it carries the full ordered track list; subtitles ride along).
       if (mode === "probe") {
-        await shareFileTracks(db, await resolveFileTracksKey(sourceId, userId, db, targetUrl), variantItemType, externalId, orderedTracks, orderedSubtitles, orderedTracks.length > 0, true);
+        await shareFileTracks(
+          db,
+          await resolveFileTracksKey(sourceId, userId, db, targetUrl),
+          variantItemType,
+          externalId,
+          orderedTracks,
+          orderedSubtitles,
+          audioProbeComplete,
+          subtitleProbeComplete,
+        );
       }
       } finally {
         await releaseProviderFileProbe(db, candidateIdentityKey, itemProbeLeaseOwner);

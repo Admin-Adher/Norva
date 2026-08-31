@@ -87,7 +87,7 @@ test('low-footprint movie audio probes persist only reliable Gateway codec profi
   const edge = read('supabase/functions/norva-playback/index.ts');
   const crawler = between(edge, 'async function runOneDimension(', '\nasync function runCatalogMirrorVerify');
 
-  assert.match(crawler, /const observedProfile = recordOrEmpty\(info\?\.codecProfile \?\? info\?\.codec_profile\)/);
+  assert.match(crawler, /const observedProfile = recordOrEmpty\(gatewayInfo\.codecProfile \?\? gatewayInfo\.codec_profile\)/);
   assert.match(crawler, /hasReliableVodCodecProfile\(observedProfile\)/);
   assert.match(crawler, /persistObservedCodecProfile\(db, \{[\s\S]*variantId:[\s\S]*strict: true/);
   assert.doesNotMatch(crawler, /firstUsefulCodecProfile\(info\?\.codecProfile[\s\S]*persistObservedCodecProfile/);

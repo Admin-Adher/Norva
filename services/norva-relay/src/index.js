@@ -1772,9 +1772,10 @@ async function relayProbeAudio(request, env, claims, ctx) {
     const p0 = su0.pathname.split("/").filter(Boolean);
     const vid0 = p0[3] ? p0[3].replace(/\.[a-z0-9]+$/i, "") : p0[3];
     // The /vN segment is a cache-version bump: it bypasses entries cached before a
-    // probe-shape change. v2 = the 'elng' language fix; v3 = subtitle tracks added
-    // to the response (so audio-only entries cached pre-subtitle don't stick 24h).
-    cacheKey = new Request(`https://edge.norva.tv/__probeaudio/v3/${encodeURIComponent(su0.host)}/${encodeURIComponent(vid0 || su0.pathname)}`);
+    // probe-shape change. v2 = the 'elng' language fix; v3 = subtitle tracks; v4 =
+    // explicit per-facet completion markers so a parser miss can never be persisted
+    // as an authoritative empty audio map.
+    cacheKey = new Request(`https://edge.norva.tv/__probeaudio/v4/${encodeURIComponent(su0.host)}/${encodeURIComponent(vid0 || su0.pathname)}`);
     const cached = await cache.match(cacheKey);
     if (cached) {
       const hit = await cached.json().catch(() => null);
@@ -1782,7 +1783,15 @@ async function relayProbeAudio(request, env, claims, ctx) {
     }
   } catch (_) { cacheKey = null; }
 
-  const out = { audioLanguages: [], audioTracks: [], audioDefaultLanguage: null, subtitles: [] };
+  const out = {
+    audioLanguages: [],
+    audioTracks: [],
+    audioDefaultLanguage: null,
+    subtitles: [],
+    probeSource: "relay_header",
+    audioProbeComplete: false,
+    subtitleProbeComplete: false,
+  };
   try {
     const su = new URL(claims.url);
     const ua = String(claims.ua || "VLC/3.0.20 LibVLC/3.0.20");
@@ -1813,6 +1822,13 @@ async function relayProbeAudio(request, env, claims, ctx) {
     out.subtitles = container.subtitleTracks;
     out.audioDefaultLanguage = defaultLang;
     out.audioLanguages = [...langs];
+    // A Norva VOD is expected to contain at least one audio stream. Therefore an
+    // empty audio map from this bounded custom parser is a parser miss, not a
+    // deterministic "no audio" result. Subtitle evidence is independent: a
+    // parsed audio table proves that an empty subtitle array is authoritative,
+    // while a subtitle-only result may still be retained without validating audio.
+    out.audioProbeComplete = tracks.length > 0;
+    out.subtitleProbeComplete = tracks.length > 0 || container.subtitleTracks.length > 0;
   } catch (_) { /* never throw */ }
 
   // Cache ONLY a successful container probe (audioTracks non-empty). An empty
@@ -1823,7 +1839,7 @@ async function relayProbeAudio(request, env, claims, ctx) {
   // track list, so the engine-path audio menu fell back to "Audio 1, Audio 2…"
   // instead of real per-track language names. A miss re-probes next time (cheap
   // at this scale; the precompute path handles provider load when it matters).
-  if (cacheKey && out.audioTracks.length) {
+  if (cacheKey && out.audioProbeComplete) {
     try {
       const body = JSON.stringify(out);
       ctx.waitUntil(cache.put(cacheKey, new Response(body, {

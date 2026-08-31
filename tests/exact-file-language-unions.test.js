@@ -31,6 +31,100 @@ test('Watch reports only a complete exact-file audio map', () => {
   assert.ok(!report.includes('content?.audio_languages'));
   assert.ok(!report.includes('cloudAudioInfo.language'));
   assert.ok(!report.includes('audio:'));
+  assert.ok(report.includes('this._observedLangsPending === key'));
+  assert.ok(report.includes(
+    'result?.ok === true && result?.updated === true && result?.exact === true',
+  ));
+  assert.ok(
+    report.indexOf('result?.ok === true && result?.updated === true && result?.exact === true') <
+      report.lastIndexOf('this._observedLangsSent = key'),
+  );
+  assert.ok(!report.includes('this._observedLangsSent = key;\n            window.API'));
+});
+
+test('Watch retries exact-file reporting until the server confirms a persisted update', async () => {
+  const watch = read('public/js/pages/WatchPage.js');
+  const context = {
+    window: {},
+    console,
+    setTimeout,
+    clearTimeout,
+    setInterval,
+    clearInterval,
+    URL,
+    Promise,
+  };
+  vm.runInNewContext(watch, context, { filename: 'public/js/pages/WatchPage.js' });
+
+  const outcomes = [
+    () => Promise.reject(new Error('temporary 500')),
+    () => Promise.resolve({ ok: true, updated: false, exact: true }),
+    () => Promise.resolve({ ok: true, updated: true, exact: true }),
+  ];
+  let calls = 0;
+  context.window.API = {
+    isCloudMode: () => true,
+    media: {
+      reportObservedLanguages: () => outcomes[calls++](),
+    },
+  };
+  const page = Object.create(context.window.WatchPage.prototype);
+  Object.assign(page, {
+    content: {
+      titleId: '11111111-1111-4111-8111-111111111111',
+      sourceId: 'source-local',
+      cloudSourceId: '22222222-2222-4222-8222-222222222222',
+      externalId: 'movie-42',
+      type: 'movie',
+    },
+    _relayAudioTracks: [
+      { index: 1, lang: 'fr' },
+      { index: 2, lang: 'ja' },
+    ],
+  });
+
+  for (let attempt = 0; attempt < outcomes.length; attempt += 1) {
+    page.reportObservedAudioLanguages();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(page._observedLangsPending, null);
+    if (attempt < outcomes.length - 1) {
+      assert.equal(page._observedLangsSent, undefined);
+      const callsBeforeThrottleCheck = calls;
+      page.reportObservedAudioLanguages();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      assert.equal(calls, callsBeforeThrottleCheck, 'a failed write is backoff-throttled');
+      page._observedLangsRetryAt = 0;
+    }
+  }
+
+  assert.equal(calls, 3);
+  assert.match(page._observedLangsSent, /movie-42:1:fr\|2:ja$/);
+
+  page.reportObservedAudioLanguages();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(calls, 3, 'a confirmed exact update is sent only once');
+});
+
+test('catalog resolves a missing title id from complete tenant file coordinates', () => {
+  const catalog = read('supabase/functions/norva-catalog/index.ts');
+  const record = between(
+    catalog,
+    'async function recordObservedLanguages(',
+    '\nasync function listTitleRail(',
+  );
+
+  assert.ok(record.includes('let preResolvedVariant: JsonRecord | null = null'));
+  assert.ok(record.includes('.from("cloud_catalog_visible_title_variants")'));
+  assert.ok(record.includes('.eq("user_id", userId)'));
+  assert.ok(record.includes('.eq("source_id", requestedSourceId)'));
+  assert.ok(record.includes('.eq("item_type", requestedTypeRaw)'));
+  assert.ok(record.includes('.eq("external_id", variantExternalId)'));
+  assert.ok(record.includes('titleId = stringOrNull(preResolvedVariant.title_id)'));
+  assert.ok(record.includes('reason: variants.length ? "variant_ambiguous" : "variant_not_owned"'));
+  assert.ok(
+    record.indexOf('titleId = stringOrNull(preResolvedVariant.title_id)') <
+      record.indexOf('.from("cloud_catalog_visible_titles")'),
+  );
 });
 
 test('gateway enrichment preserves unknown tracks before exact-file reporting', () => {

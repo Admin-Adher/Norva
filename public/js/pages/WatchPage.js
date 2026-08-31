@@ -8885,9 +8885,28 @@ class WatchPage {
                 .map((track) => `${track.index}:${track.lang || ''}`)
                 .join('|');
             const key = `${titleId || ''}:${cloudSourceId || sourceId || ''}:${itemType}:${externalId || ''}:${mapFingerprint}`;
-            if (this._observedLangsSent === key) return;
-            this._observedLangsSent = key;
-            window.API?.media?.reportObservedLanguages?.({
+            if (this._observedLangsSent === key || this._observedLangsPending === key) return;
+            const now = Date.now();
+            if (this._observedLangsRetryKey === key && Number(this._observedLangsRetryAt || 0) > now) return;
+            if (this._observedLangsRetryKey !== key) {
+                this._observedLangsRetryKey = key;
+                this._observedLangsRetryCount = 0;
+                this._observedLangsRetryAt = 0;
+            }
+            const deferRetry = () => {
+                if (this._observedLangsRetryKey !== key) {
+                    this._observedLangsRetryKey = key;
+                    this._observedLangsRetryCount = 0;
+                }
+                const attempts = Math.min(6, Number(this._observedLangsRetryCount || 0) + 1);
+                this._observedLangsRetryCount = attempts;
+                // markPlaybackUsable can run several times per second. Retry a
+                // failed exact write without turning a persistent 400/5xx into
+                // a request storm for the rest of the film.
+                this._observedLangsRetryAt = Date.now() + Math.min(60_000, 2_000 * (2 ** (attempts - 1)));
+            };
+            this._observedLangsPending = key;
+            const request = window.API?.media?.reportObservedLanguages?.({
                 titleId: titleId || null,
                 sourceId,
                 cloudSourceId,
@@ -8897,7 +8916,23 @@ class WatchPage {
                 parentExternalId: this.content?.parentExternalId || this.content?.parent_external_id || this.content?.seriesId || null,
                 audioTracks: orderedTracks,
                 audioTracksScope: 'file',
-            }).catch(() => { });
+            });
+            Promise.resolve(request).then((result) => {
+                if (this._observedLangsPending === key) this._observedLangsPending = null;
+                // Only a server-validated exact-file write suppresses later
+                // attempts. HTTP 400/5xx, transport errors and incomplete
+                // coordinates remain retryable during this playback.
+                if (result?.ok === true && result?.updated === true && result?.exact === true) {
+                    this._observedLangsSent = key;
+                    this._observedLangsRetryCount = 0;
+                    this._observedLangsRetryAt = 0;
+                } else {
+                    deferRetry();
+                }
+            }).catch(() => {
+                if (this._observedLangsPending === key) this._observedLangsPending = null;
+                deferRetry();
+            });
         } catch (_) { /* best-effort capture; never disrupt playback */ }
     }
 

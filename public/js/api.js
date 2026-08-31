@@ -204,6 +204,23 @@ function _catalogFacetCacheScope() {
     return '';
 }
 
+function _clearCatalogLanguageFacetCache(params = {}) {
+    const scope = _catalogFacetCacheScope();
+    if (!scope) return 0;
+    const type = params && params.type === 'series' ? 'series' : 'movie';
+    const prefix = `norva-facets4-${scope}-${type}-`;
+    let removed = 0;
+    try {
+        for (let index = localStorage.length - 1; index >= 0; index -= 1) {
+            const key = localStorage.key(index);
+            if (!key || !key.startsWith(prefix)) continue;
+            localStorage.removeItem(key);
+            removed += 1;
+        }
+    } catch (_) { /* best-effort cache invalidation */ }
+    return removed;
+}
+
 function _cloudAvailable() {
     return Boolean(window.NorvaCloud) && (_hasCloudUserSession() || _hasCloudDeviceSession());
 }
@@ -2970,9 +2987,21 @@ const API = {
         },
         // Best-effort capture of real audio-track languages observed at playback.
         reportObservedLanguages: (body) => {
-            try { return CloudAdapter.cloudHomeApi().reportObservedLanguages(body); }
+            let request;
+            try { request = CloudAdapter.cloudHomeApi().reportObservedLanguages(body); }
             catch (_) { return Promise.resolve({ ok: false }); }
+            return Promise.resolve(request).then((value) => {
+                // The server already invalidates its in-isolate memo. Drop every
+                // local provider/all-source facet entry for this account + media
+                // type as soon as exact evidence changed, so Back to Movies does
+                // not display the old menu for another 60 seconds.
+                if (value?.ok === true && value?.updated === true) {
+                    _clearCatalogLanguageFacetCache({ type: body?.itemType || body?.item_type });
+                }
+                return value;
+            });
         },
+        clearLanguageFacetCache: (params = {}) => _clearCatalogLanguageFacetCache(params),
         // Drop the cached home/genre rails so a hidden-genre change shows on the
         // browse pages immediately instead of after the 2-min TTL.
         clearRailCache: () => CloudAdapter.clearRailCache(),

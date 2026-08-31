@@ -3439,7 +3439,22 @@ app.post('/probe-audio', requireGatewayAuth, async (req, res) => {
         // Register the provider-connected ffprobe in the same preemption ledger
         // as LID/transcription. A viewer pressing Play can therefore kill this
         // short background probe immediately instead of waiting for its timeout.
-        const profile = await probeCodecProfile(url, ua, { background: true });
+        let profile = await probeCodecProfile(url, ua, { background: true });
+        let profileSource = normalizeCodecToken(profile?.probeSource || profile?.probe_source);
+        let authoritativeTrackMap = profileSource === 'gatewayprobe'
+            || hasCompleteMkvPlaybackProfile(profile);
+        // A cached/in-band prefix can be useful for startup without containing
+        // the complete stream table. The background catalogue route promises an
+        // exact file map, so fall through to one full provider ffprobe when that
+        // local evidence is incomplete. This still opens at most one provider
+        // connection because the first pass was cache/local-only.
+        if (hasUsefulCodecProfile(profile) && !authoritativeTrackMap) {
+            profile = await probeCodecProfileUncached(url, ua, { background: true });
+            cacheCodecProfile(url, profile);
+            profileSource = normalizeCodecToken(profile?.probeSource || profile?.probe_source);
+            authoritativeTrackMap = profileSource === 'gatewayprobe'
+                || hasCompleteMkvPlaybackProfile(profile);
+        }
         const audioTracks = Array.isArray(profile?.audioTracks) ? profile.audioTracks : [];
         const subtitles = Array.isArray(profile?.subtitles) ? profile.subtitles : [];
         const audioLanguages = [];
@@ -3453,6 +3468,13 @@ app.post('/probe-audio', requireGatewayAuth, async (req, res) => {
             audioTracks,
             audioDefaultLanguage,
             subtitles,
+            probeSource: profile?.probeSource || profile?.probe_source || 'gateway_ffprobe',
+            probeComplete: authoritativeTrackMap,
+            // Audio and subtitles are deliberately independent. A full ffprobe
+            // with no audio does not satisfy Norva's VOD-audio invariant, while
+            // its empty subtitle list is still authoritative.
+            audioProbeComplete: authoritativeTrackMap && audioTracks.length > 0,
+            subtitleProbeComplete: authoritativeTrackMap,
             codecProfile: publicMkvCodecProfile(profile),
         });
     } catch (err) {

@@ -28,11 +28,15 @@ function session(userId) {
     });
 }
 
-function loadApi(storage, languageFacets) {
+function loadApi(
+    storage,
+    languageFacets,
+    reportObservedLanguages = async () => ({ ok: true, updated: false, exact: true })
+) {
     const NorvaCloud = {
-        home: { languageFacets },
+        home: { languageFacets, reportObservedLanguages },
         device: {
-            home: { languageFacets },
+            home: { languageFacets, reportObservedLanguages },
             sources: {},
             mediaItems: {},
             live: {},
@@ -193,4 +197,50 @@ test('paired-device facet caches are isolated when a screen is paired to another
     const firstAgain = await API.media.languageFacets({ type: 'series' });
     assert.equal(firstAgain.audio[0].value, 'screen-link-a');
     assert.equal(requests, 2);
+});
+
+test('a successful exact observation immediately clears movie facet caches only', async () => {
+    const storage = createStorage({
+        'norva-cloud-session': session('account-a')
+    });
+    let writes = 0;
+    const API = loadApi(
+        storage,
+        async ({ type, source = 'all' }) => ({
+            audio: [{ value: `${type}-${source}`, label: `${type}-${source}` }],
+            subtitles: []
+        }),
+        async () => {
+            writes += 1;
+            return { ok: true, updated: true, exact: true };
+        }
+    );
+
+    await API.media.languageFacets({ type: 'movie' });
+    await API.media.languageFacets({ type: 'movie', source: 'provider-a' });
+    await API.media.languageFacets({ type: 'series' });
+
+    await API.media.reportObservedLanguages({ itemType: 'movie' });
+
+    assert.equal(writes, 1);
+    const keys = [...storage.values.keys()].filter((key) => key.startsWith('norva-facets4-'));
+    assert.deepEqual(keys, ['norva-facets4-user-account-a-series-all']);
+});
+
+test('failed or non-updating observations preserve local facet caches for retry', async () => {
+    const storage = createStorage({
+        'norva-cloud-session': session('account-a')
+    });
+    const API = loadApi(
+        storage,
+        async () => ({ audio: [{ value: 'fr', label: 'French' }], subtitles: [] }),
+        async () => ({ ok: true, updated: false, reason: 'variant_not_owned' })
+    );
+
+    await API.media.languageFacets({ type: 'movie' });
+    const before = [...storage.values.keys()].filter((key) => key.startsWith('norva-facets4-'));
+    await API.media.reportObservedLanguages({ itemType: 'movie' });
+    const after = [...storage.values.keys()].filter((key) => key.startsWith('norva-facets4-'));
+
+    assert.deepEqual(after, before);
 });

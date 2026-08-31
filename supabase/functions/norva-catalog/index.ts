@@ -2319,8 +2319,8 @@ async function listLanguageFacets(req: Request, url: URL, userId: string) {
 async function recordObservedLanguages(req: Request, userId: string) {
   let body: JsonRecord;
   try { body = recordOrEmpty(await req.json()); } catch (_) { throw new HttpError(400, "Invalid JSON body"); }
-  const titleId = stringOrNull(body.titleId ?? body.title_id);
-  if (!titleId || !/^[0-9a-f-]{36}$/i.test(titleId)) throw new HttpError(400, "Missing or invalid titleId");
+  let titleId = stringOrNull(body.titleId ?? body.title_id);
+  const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
   const requestedSourceId = stringOrNull(
     body.cloudSourceId ?? body.cloud_source_id ?? body.sourceId ?? body.source_id,
@@ -2339,6 +2339,49 @@ async function recordObservedLanguages(req: Request, userId: string) {
   const hasFileCoordinates = Boolean(
     requestedSourceId || requestedTypeRaw || requestedExternalId || requestedParentExternalId,
   );
+  let preResolvedVariant: JsonRecord | null = null;
+
+  // Player cards can legitimately carry exact provider-file coordinates before
+  // the logical title id is hydrated. Resolve that id server-side through the
+  // tenant-visible variant projection; never trust a client-supplied source/file
+  // pair outside the authenticated user's catalogue.
+  if (!titleId) {
+    if (
+      !requestedSourceId ||
+      !requestedTypeRaw ||
+      !requestedExternalId ||
+      (requestedTypeRaw === "series" && !requestedParentExternalId)
+    ) {
+      throw new HttpError(400, "titleId or complete file coordinates are required");
+    }
+    if (!uuidPattern.test(requestedSourceId)) {
+      throw new HttpError(400, "Invalid cloudSourceId");
+    }
+    const variantExternalId = requestedTypeRaw === "series"
+      ? requestedParentExternalId
+      : requestedExternalId;
+    const { data, error } = await db.from("cloud_catalog_visible_title_variants")
+      .select("id,user_id,title_id,source_id,item_type,external_id")
+      .eq("user_id", userId)
+      .eq("source_id", requestedSourceId)
+      .eq("item_type", requestedTypeRaw)
+      .eq("external_id", variantExternalId)
+      .limit(2);
+    if (error) throwDb(error, "Unable to resolve observed-language title");
+    const variants = (data ?? []) as JsonRecord[];
+    if (variants.length !== 1) {
+      return {
+        ok: true,
+        updated: false,
+        reason: variants.length ? "variant_ambiguous" : "variant_not_owned",
+      };
+    }
+    preResolvedVariant = variants[0];
+    titleId = stringOrNull(preResolvedVariant.title_id);
+  }
+  if (!titleId || !uuidPattern.test(titleId)) {
+    throw new HttpError(400, "Missing or invalid titleId");
+  }
 
   const cleanLanguage = (value: unknown): string | null => canonicalFileLanguage(value);
   const incoming = Array.isArray(body.audio) ? body.audio : [];
@@ -2401,7 +2444,7 @@ async function recordObservedLanguages(req: Request, userId: string) {
   const itemType = requestedTypeRaw ?? titleType;
   if (itemType !== titleType) return { ok: true, updated: false, reason: "title_type_mismatch" };
 
-  let variant: JsonRecord | null = null;
+  let variant: JsonRecord | null = preResolvedVariant;
   let sourceId: string | null = requestedSourceId;
   let fileExternalId: string | null = requestedExternalId;
   let legacyDerived = false;
@@ -2410,21 +2453,23 @@ async function recordObservedLanguages(req: Request, userId: string) {
     if (!sourceId || !fileExternalId || (itemType === "series" && !requestedParentExternalId)) {
       return { ok: true, updated: false, reason: "incomplete_file_coordinates" };
     }
-    if (!/^[0-9a-f-]{36}$/i.test(sourceId)) {
+    if (!uuidPattern.test(sourceId)) {
       throw new HttpError(400, "Invalid cloudSourceId");
     }
     const variantExternalId = itemType === "series" ? requestedParentExternalId : fileExternalId;
-    const { data, error } = await db.from("cloud_catalog_visible_title_variants")
-      .select("id,user_id,title_id,source_id,item_type,external_id")
-      .eq("user_id", userId)
-      .eq("title_id", titleId)
-      .eq("source_id", sourceId)
-      .eq("item_type", itemType)
-      .eq("external_id", variantExternalId)
-      .limit(1)
-      .maybeSingle();
-    if (error) throwDb(error, "Unable to validate observed-language variant");
-    variant = (data as JsonRecord | null) ?? null;
+    if (!variant) {
+      const { data, error } = await db.from("cloud_catalog_visible_title_variants")
+        .select("id,user_id,title_id,source_id,item_type,external_id")
+        .eq("user_id", userId)
+        .eq("title_id", titleId)
+        .eq("source_id", sourceId)
+        .eq("item_type", itemType)
+        .eq("external_id", variantExternalId)
+        .limit(1)
+        .maybeSingle();
+      if (error) throwDb(error, "Unable to validate observed-language variant");
+      variant = (data as JsonRecord | null) ?? null;
+    }
     if (!variant) return { ok: true, updated: false, reason: "variant_not_owned" };
   } else {
     // Old clients only sent titleId. Derive a file only when the title has one
