@@ -6,8 +6,10 @@
  * canonicalises each raw name, groups the variants into one logical channel,
  * and (for the user's country) orders them by the national channel number.
  *
- * It is intentionally framework-agnostic and side-effect free so the same
- * logic can later run server-side at sync time. Exposed as window.ChannelGrouping.
+ * It is intentionally framework-agnostic. Catalogue grouping remains pure;
+ * only short-lived playback evidence is stored in sessionStorage so dead
+ * variants are demoted without permanently poisoning the catalogue.
+ * Exposed as window.ChannelGrouping.
  */
 (function () {
     'use strict';
@@ -582,6 +584,95 @@
         return 1; // unknown
     }
 
+    // Runtime evidence is deliberately session-scoped: a variant that failed a
+    // few minutes ago should not remain the default for the rest of the tab, but
+    // stale provider incidents must not permanently poison the catalogue either.
+    const RUNTIME_HEALTH_KEY = 'norva-live-variant-health-v1';
+    const RUNTIME_HEALTH_TTL_MS = 6 * 60 * 60 * 1000;
+    const RUNTIME_HEALTH_MAX_ENTRIES = 256;
+    let runtimeHealth = null;
+
+    function variantKey(variant) {
+        if (!variant) return '';
+        const sourceId = variant.sourceId ?? variant.source_id ?? variant.channel?.sourceId ?? variant.channel?.source_id ?? '';
+        const streamId = variant.streamId ?? variant.stream_id ?? variant.channel?.streamId ?? variant.channel?.stream_id ?? variant.channel?.id ?? '';
+        return `${String(sourceId)}:${String(streamId)}`;
+    }
+
+    function loadRuntimeHealth() {
+        if (runtimeHealth) return runtimeHealth;
+        runtimeHealth = {};
+        try {
+            const raw = window.sessionStorage?.getItem(RUNTIME_HEALTH_KEY);
+            const parsed = raw ? JSON.parse(raw) : null;
+            if (parsed && typeof parsed === 'object') runtimeHealth = parsed;
+        } catch (_) { /* private mode / malformed state: memory-only fallback */ }
+        pruneRuntimeHealth(Date.now());
+        return runtimeHealth;
+    }
+
+    function pruneRuntimeHealth(now = Date.now()) {
+        if (!runtimeHealth) return;
+        const fresh = Object.entries(runtimeHealth)
+            .filter(([, value]) => value && Number.isFinite(Number(value.updatedAt)) && now - Number(value.updatedAt) <= RUNTIME_HEALTH_TTL_MS)
+            .sort((a, b) => Number(b[1].updatedAt) - Number(a[1].updatedAt))
+            .slice(0, RUNTIME_HEALTH_MAX_ENTRIES);
+        runtimeHealth = Object.fromEntries(fresh);
+    }
+
+    function saveRuntimeHealth() {
+        try { window.sessionStorage?.setItem(RUNTIME_HEALTH_KEY, JSON.stringify(runtimeHealth || {})); } catch (_) { }
+    }
+
+    function recordVariantOutcome(variant, outcome, details = {}) {
+        const key = variantKey(variant);
+        if (!key || (outcome !== 'success' && outcome !== 'failure')) return;
+        const now = Number(details.at) || Date.now();
+        const state = loadRuntimeHealth();
+        const previous = state[key] || {};
+        if (outcome === 'success') {
+            state[key] = {
+                ...previous,
+                successes: Number(previous.successes || 0) + 1,
+                failureStreak: 0,
+                lastSuccessAt: now,
+                lastTtffMs: Number.isFinite(Number(details.ttffMs)) ? Math.max(0, Number(details.ttffMs)) : previous.lastTtffMs,
+                updatedAt: now
+            };
+        } else {
+            state[key] = {
+                ...previous,
+                failures: Number(previous.failures || 0) + 1,
+                failureStreak: Math.min(8, Number(previous.failureStreak || 0) + 1),
+                lastFailureAt: now,
+                updatedAt: now
+            };
+        }
+        pruneRuntimeHealth(now);
+        saveRuntimeHealth();
+    }
+
+    function runtimePenalty(variant, now = Date.now()) {
+        const entry = loadRuntimeHealth()[variantKey(variant)];
+        if (!entry) return 0;
+        let score = 0;
+        const successAge = now - Number(entry.lastSuccessAt || 0);
+        const failureAge = now - Number(entry.lastFailureAt || 0);
+        if (entry.lastSuccessAt) {
+            if (successAge <= 30 * 60 * 1000) score -= 240;
+            else if (successAge <= 2 * 60 * 60 * 1000) score -= 120;
+            else if (successAge <= RUNTIME_HEALTH_TTL_MS) score -= 40;
+        }
+        if (entry.lastFailureAt && Number(entry.lastFailureAt) >= Number(entry.lastSuccessAt || 0)) {
+            const streak = Math.max(1, Number(entry.failureStreak || 1));
+            if (failureAge <= 10 * 60 * 1000) score += 260 + Math.min(240, streak * 45);
+            else if (failureAge <= 60 * 60 * 1000) score += 120 + Math.min(120, streak * 25);
+            else if (failureAge <= RUNTIME_HEALTH_TTL_MS) score += 45;
+        }
+        if (Number.isFinite(Number(entry.lastTtffMs))) score += Math.min(55, Number(entry.lastTtffMs) / 1000 * 3);
+        return score;
+    }
+
     /**
      * Default-pick preference (lower = preferred as the auto-start variant).
      * HD is the safe default the list advertises: lightest, fastest to start,
@@ -606,11 +697,19 @@
      * by default), preferring healthy ones, then FHD/SD, never auto-opening 4K.
      * Falls back to the best available.
      */
+    function rankVariants(variants, now = Date.now()) {
+        const list = Array.isArray(variants) ? variants.slice() : [];
+        return list.sort((a, b) => {
+            const aScore = Number(a.healthRank || 0) * 100 + defaultPref(a) * 10 + Number(a.rank || 0) + runtimePenalty(a, now);
+            const bScore = Number(b.healthRank || 0) * 100 + defaultPref(b) * 10 + Number(b.rank || 0) + runtimePenalty(b, now);
+            return (aScore - bScore) || variantKey(a).localeCompare(variantKey(b));
+        });
+    }
+
     function pickDefault(variants) {
-        const ok = variants.filter(v => v.healthRank < 3);
-        const pool = (ok.length ? ok : variants).slice();
-        pool.sort((a, b) => (a.healthRank - b.healthRank) || (defaultPref(a) - defaultPref(b)) || (a.rank - b.rank));
-        return pool[0] || variants[0] || null;
+        const ranked = rankVariants(variants);
+        const healthy = ranked.filter(v => Number(v.healthRank || 0) < 3);
+        return healthy[0] || ranked[0] || null;
     }
 
     /**
@@ -619,9 +718,9 @@
      * the HD feed is always tried first.
      */
     function fallbackOrder(variants, currentStreamId) {
-        return variants
-            .filter(v => String(v.streamId) !== String(currentStreamId))
-            .sort((a, b) => (a.healthRank - b.healthRank) || (defaultPref(a) - defaultPref(b)) || (a.rank - b.rank));
+        return rankVariants(variants)
+            .filter(v => Number(v.healthRank || 0) < 3)
+            .filter(v => String(v.streamId) !== String(currentStreamId));
     }
 
     function variantFrom(ch, p) {
@@ -640,8 +739,9 @@
     function dedupeVariants(variants) {
         const seen = new Set(); const out = [];
         for (const v of variants.slice().sort((a, b) => a.rank - b.rank)) {
-            if (seen.has(v.label)) continue;
-            seen.add(v.label); out.push(v);
+            const key = variantKey(v);
+            if (!key || seen.has(key)) continue;
+            seen.add(key); out.push(v);
         }
         return out;
     }
@@ -784,6 +884,9 @@
         variantsForChannel,
         logoForName,
         pickDefault,
-        fallbackOrder
+        fallbackOrder,
+        rankVariants,
+        recordVariantOutcome,
+        variantKey
     };
 })();

@@ -65,6 +65,7 @@ class ChannelList {
         this.liveResumeInFlight = null;
         this._selectRequestSeq = 0;
         this._streamResolveQueue = Promise.resolve();
+        this._pendingPlaybackSelection = null;
 
         this.loadCollapsedState();
         this.init();
@@ -3293,12 +3294,113 @@ class ChannelList {
     /**
      * Select and play a channel
      */
+    buildDynamicLiveChannel(channel, dataset, selectSeq) {
+        let group = null;
+        let variant = null;
+        try {
+            if (window.ChannelGrouping && this.channels?.length) {
+                const country = window.app?.player?.getCountry?.() || 'FR';
+                group = window.ChannelGrouping.variantsForChannel(channel, this.channels, country);
+                variant = group?.variants?.length
+                    ? window.ChannelGrouping.pickDefault(group.variants)
+                    : null;
+            }
+        } catch (_) { /* grouping remains best-effort */ }
+
+        const raw = variant?.channel || channel;
+        const displayName = group?.name || channel.name || channel.title || raw.name || raw.title || '';
+        const displayLogo = group?.logo || channel.tvgLogo || channel.stream_icon || channel.logo || raw.tvgLogo || raw.stream_icon || raw.logo || '';
+        return Object.assign({}, raw, {
+            name: displayName,
+            title: displayName,
+            tvgName: displayName,
+            tvgLogo: displayLogo,
+            qualityGroup: group?.variants?.length > 1 ? group : null,
+            currentVariant: variant || null,
+            itemType: 'channel',
+            _norvaSelection: {
+                selectSeq,
+                logicalChannelId: channel.id,
+                logicalSourceId: channel.sourceId,
+                renderId: dataset.renderId || null,
+                renderGroup: dataset.renderGroup || null
+            }
+        });
+    }
+
+    beginPlaybackTeardown(selectSeq) {
+        if (this._pendingPlaybackSelection?.selectSeq !== selectSeq) return;
+        this.currentChannel = null;
+        this.currentRenderId = null;
+        this.currentRenderGroup = null;
+        this.container?.querySelectorAll('.channel-item.active').forEach(el => el.classList.remove('active'));
+        try { window.app?.liveGuideFusion?.updateHighlights?.(); } catch (_) { }
+    }
+
+    commitPlaybackChannel(channel) {
+        const context = channel?._norvaSelection;
+        const pending = this._pendingPlaybackSelection;
+        if (!context || !pending || context.selectSeq !== pending.selectSeq || context.selectSeq !== this._selectRequestSeq) return false;
+
+        this.currentChannel = channel;
+        this.currentRenderId = context.renderId;
+        this.currentRenderGroup = context.renderGroup;
+        this.rememberLastLiveChannel(channel);
+        this.rememberRecentChannel(channel);
+
+        this.container?.querySelectorAll('.channel-item.pending, .channel-item.active').forEach(el => {
+            el.classList.remove('pending', 'active', 'nav-active');
+            el.removeAttribute('aria-busy');
+        });
+        const activeItem = (context.renderId && this.container?.querySelector(`[data-render-id="${context.renderId}"]`))
+            || this.container?.querySelector(`[data-channel-id="${context.logicalChannelId}"]`)
+            || this.container?.querySelector(`[data-channel-id="${channel.id}"]`);
+        activeItem?.classList.add('active', 'nav-active');
+
+        this._pendingPlaybackSelection = null;
+        window.app?.liveGuideFusion?.setActiveChannel?.(channel);
+        try { window.app?.liveGuideFusion?.updateHighlights?.(); } catch (_) { }
+        return true;
+    }
+
+    failPendingPlaybackSelection(selectSeq, options = {}) {
+        if (this._pendingPlaybackSelection?.selectSeq !== selectSeq) return false;
+        this._pendingPlaybackSelection = null;
+        this.container?.querySelectorAll('.channel-item.pending').forEach(el => {
+            el.classList.remove('pending', 'nav-active');
+            el.removeAttribute('aria-busy');
+        });
+        if (options.clearCommitted !== false) {
+            this.currentChannel = null;
+            this.currentRenderId = null;
+            this.currentRenderGroup = null;
+            this.container?.querySelectorAll('.channel-item.active').forEach(el => {
+                el.classList.remove('active', 'nav-active');
+            });
+        } else {
+            const committedItem = (this.currentRenderId && this.container?.querySelector(`[data-render-id="${this.currentRenderId}"]`))
+                || (this.currentChannel?.id != null && this.container?.querySelector(`[data-channel-id="${this.currentChannel.id}"]`));
+            committedItem?.classList.add('active', 'nav-active');
+        }
+        try { window.app?.liveGuideFusion?.updateHighlights?.(); } catch (_) { }
+        return true;
+    }
+
     async selectChannel(dataset) {
-        const channel = this.channels.find(c =>
+        const requestedChannel = this.channels.find(c =>
             c.id === dataset.channelId &&
             (!dataset.sourceId || String(c.sourceId) === String(dataset.sourceId))
         );
-        if (!channel) return;
+        if (!requestedChannel) return;
+        const selectSeq = ++this._selectRequestSeq;
+        const channel = this.buildDynamicLiveChannel(requestedChannel, dataset, selectSeq);
+        this._pendingPlaybackSelection = {
+            selectSeq,
+            channel,
+            requestedChannel,
+            renderId: dataset.renderId || null,
+            renderGroup: dataset.renderGroup || null
+        };
         // Native shells resolve provider sessions before opening PlayerActivity.
         // Claim the intent before that async work so a double tap cannot create
         // two provider/Gateway sessions, and so it cancels any delayed recovery
@@ -3311,7 +3413,13 @@ class ChannelList {
                     nativeItemId
                 )
             : null;
-        if (nativeIntentClaim === false) return;
+        if (nativeIntentClaim === false) {
+            // The native shell rejected a duplicate/in-flight intent before the
+            // previous channel was torn down. Preserve that genuinely playing
+            // channel instead of making the list look idle.
+            this.failPendingPlaybackSelection(selectSeq, { clearCommitted: false });
+            return;
+        }
         if (nativeIntentClaim) {
             // One-shot handoff to standalone VideoPlayer.play. Keep it
             // non-enumerable so channel spreads/telemetry cannot copy a stale claim.
@@ -3325,36 +3433,34 @@ class ChannelList {
                 channel.__norvaNativeIntentClaim = nativeIntentClaim;
             }
         }
-        const selectSeq = ++this._selectRequestSeq;
-
         // Stamp the zap start (user click) so the player can measure the full
         // perceived switch latency (click -> first frame) in telemetry.
         try { if (window.app?.player) window.app.player._liveZapStartedAt = Date.now(); } catch (_) {}
 
-        this.currentChannel = channel;
-        this.currentRenderId = dataset.renderId; // Track which visual instance is active
-        this.currentRenderGroup = dataset.renderGroup; // Track which group the selection came from
-
-        this.rememberLastLiveChannel(channel);
-        this.rememberRecentChannel(channel);
-        window.app?.liveGuideFusion?.setActiveChannel?.(channel);
+        const pendingRenderId = dataset.renderId || null;
+        // Preview follows the user's intent immediately; "playing" only commits
+        // after the player reports a real decoded frame (or native launch accepts).
+        window.app?.liveGuideFusion?.setActiveChannel?.(requestedChannel);
 
         // Flat search/zero-state results: refresh the highlight only —
         // the group expansion / focus-mode logic below doesn't apply
         if (this.searchMode || this.zeroState) {
-            this.container.querySelectorAll('.channel-item.active').forEach(el => el.classList.remove('active'));
-            this.container.querySelector(`[data-render-id="${this.currentRenderId}"]`)?.classList.add('active');
+            this.container.querySelectorAll('.channel-item.pending').forEach(el => el.classList.remove('pending'));
+            const pendingItem = this.container.querySelector(`[data-render-id="${pendingRenderId}"]`);
+            pendingItem?.classList.add('pending', 'nav-active');
+            pendingItem?.setAttribute('aria-busy', 'true');
         } else {
 
         // Update active state in DOM
-        this.container.querySelectorAll('.channel-item.active').forEach(el => {
-            el.classList.remove('active');
+        this.container.querySelectorAll('.channel-item.pending, .channel-item.nav-active').forEach(el => {
+            el.classList.remove('pending');
             el.classList.remove('nav-active');
+            el.removeAttribute('aria-busy');
         });
 
         // Try to find specific render instance first
         let activeItem;
-        activeItem = this.container.querySelector(`[data-render-id="${this.currentRenderId}"]`);
+        activeItem = this.container.querySelector(`[data-render-id="${pendingRenderId}"]`);
 
         // If not found in DOM, it might be in a future batch not yet rendered
         // Render batches until we find it or run out
@@ -3362,8 +3468,8 @@ class ChannelList {
             let safety = 0;
             while (!activeItem && this.currentBatch * this.batchSize < this.sortedGroups.length && safety < 20) {
                 this.renderNextBatch();
-                if (this.currentRenderId) {
-                    activeItem = this.container.querySelector(`[data-render-id="${this.currentRenderId}"]`);
+                if (pendingRenderId) {
+                    activeItem = this.container.querySelector(`[data-render-id="${pendingRenderId}"]`);
                 }
                 safety++;
             }
@@ -3371,16 +3477,13 @@ class ChannelList {
 
         // Fallback checks if still not found
         if (!activeItem) {
-            activeItem = this.container.querySelector(`[data-channel-id="${channel.id}"]`);
-            // If we fell back to channel ID, update currentRenderId to match what we found
-            if (activeItem && activeItem.dataset.renderId) {
-                this.currentRenderId = activeItem.dataset.renderId;
-            }
+            activeItem = this.container.querySelector(`[data-channel-id="${requestedChannel.id}"]`);
         }
 
         if (activeItem) {
-            activeItem.classList.add('active');
+            activeItem.classList.add('pending');
             activeItem.classList.add('nav-active'); // Add specific class for navigation tracking
+            activeItem.setAttribute('aria-busy', 'true');
 
             // Handle Group Expansion & Scrolling (Focus Mode)
             const groupHeader = activeItem.closest('.channel-group')?.querySelector('.group-header');
@@ -3472,8 +3575,9 @@ class ChannelList {
                 // switch behave like the fresh page-load case, which works.
                 const switchPlayer = window.app?.player;
                 if (switchPlayer && (switchPlayer.hls || switchPlayer.currentUrl) && typeof switchPlayer.prepareLiveSwitch === 'function') {
-                    try { await switchPlayer.prepareLiveSwitch(); } catch (_) { /* best-effort */ }
+                    await switchPlayer.prepareLiveSwitch();
                     if (selectSeq !== this._selectRequestSeq) return;
+                    this.beginPlaybackTeardown(selectSeq);
                 }
                 const result = await API.proxy.xtream.getStreamUrl(channel.sourceId, channel.streamId, 'live', providerContainer, {
                     gatewayMode,
@@ -3499,7 +3603,7 @@ class ChannelList {
             // Attach the channel's quality variants so the player can build its
             // quality menu (all HD/FHD/4K/H265 feeds of the same logical channel).
             try {
-                if (window.ChannelGrouping && this.channels && this.channels.length) {
+                if (!channel.qualityGroup && window.ChannelGrouping && this.channels && this.channels.length) {
                     const country = window.app?.player?.getCountry?.() || 'FR';
                     const grp = window.ChannelGrouping.variantsForChannel(channel, this.channels, country);
                     if (grp && grp.variants && grp.variants.length > 1) channel.qualityGroup = grp;
@@ -3512,28 +3616,20 @@ class ChannelList {
             // ignores the extra argument.
             if (window.app?.player) {
                 await window.app.player.play(channel, streamUrl, playbackPayload);
+                if (nativeIntentClaim) this.commitPlaybackChannel(channel);
             }
         });
         this._streamResolveQueue = resolveTask.catch((err) => {
             console.error('[ChannelList] Failed to resolve live stream:', err);
-            // The selection is marked active before the async resolver runs so the
-            // guide can react immediately. If playback never reaches a playable
-            // state, keeping currentChannel makes the preview claim the channel is
-            // "Playing" indefinitely. Only clear/report the still-current request:
+            // The guide preview follows the user intent while the list remains in a
+            // pending state. If playback never reaches a playable state, clear that
+            // pending intent instead of ever claiming the channel is "Playing".
+            // Only clear/report the still-current request:
             // an older rejected request must not disturb a newer successful zap.
             // Keep LiveGuideFusion.currentChannel as the preview selection, but
             // rebuild its button/highlights from the now-idle playback state.
             const isCurrentSelection = selectSeq === this._selectRequestSeq;
-            if (isCurrentSelection &&
-                this.currentChannel &&
-                String(this.currentChannel.id) === String(channel.id) &&
-                String(this.currentChannel.sourceId) === String(channel.sourceId)) {
-                this.currentChannel = null;
-                this.currentRenderId = null;
-                this.currentRenderGroup = null;
-                this.container?.querySelectorAll('.channel-item.active').forEach(el => {
-                    el.classList.remove('active', 'nav-active');
-                });
+            if (isCurrentSelection && this.failPendingPlaybackSelection(selectSeq)) {
                 const guide = window.app?.liveGuideFusion;
                 try { guide?.refreshPreview?.(guide.currentChannel || channel); } catch (_) { /* best-effort */ }
                 try { guide?.updateHighlights?.(); } catch (_) { /* best-effort */ }
