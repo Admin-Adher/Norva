@@ -1819,7 +1819,7 @@ const MULTI_AUDIO_HLS_PROTOCOL = 1;
 // production Ryzen/Radeon host. Keep the operational default evidence-based and configurable,
 // while bounding accidental fan-out. Every exact source track stays visible to the user.
 const MAX_MULTI_AUDIO_RENDITIONS = clampInt(process.env.MAX_MULTI_AUDIO_RENDITIONS, 12, 2, 32);
-const GATEWAY_VERSION = 130;
+const GATEWAY_VERSION = 131;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -4058,6 +4058,7 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
         let reconnects = 0;
         let consecutiveNoProgressFailures = 0;
         let responseStarted = false;
+        let finiteLocalBackpressured = false;
         while (forwarded < requestedLength) {
             if (attempt.localClosed) break;
             if (finiteSeek && forwarded === finiteWindowStartOffset) {
@@ -4303,8 +4304,24 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                         ));
                     }
                     forwarded += chunk.length;
-                    if (finiteSeek) bufferedChunks.push(Buffer.from(chunk));
-                    else if (!res.write(chunk)) await waitForStrictLidDrain(res, controller.signal);
+                    if (finiteSeek) {
+                        bufferedChunks.push(Buffer.from(chunk));
+                        // Forward provider progress immediately. Waiting for a
+                        // complete finite window before writing left FFmpeg's
+                        // loopback socket silent for longer than rw_timeout on
+                        // residential routes, so libav closed an otherwise
+                        // healthy broad range exactly at a window boundary.
+                        // Keep materialising the bounded window for the cache
+                        // and mono-slot guarantee, but defer local backpressure
+                        // only until that provider window is fully drained.
+                        if (!responseStarted) {
+                            startFiniteMkvSeekResponse(context, res, range);
+                            responseStarted = true;
+                        }
+                        if (!res.write(chunk)) finiteLocalBackpressured = true;
+                    } else if (!res.write(chunk)) {
+                        await waitForStrictLidDrain(res, controller.signal);
+                    }
                     // Once every declared byte is present, the range is exact.
                     // Some provider transports report a reset instead of EOF
                     // after delivering the complete body; an extra read would
@@ -4349,11 +4366,15 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                         attempt.localClosed = true;
                         break;
                     }
-                    if (!responseStarted) {
-                        startFiniteMkvSeekResponse(context, res, range);
-                        responseStarted = true;
+                    if (
+                        finiteLocalBackpressured
+                        && !attempt.localClosed
+                        && !res.destroyed
+                        && res.writableNeedDrain
+                    ) {
+                        await waitForStrictLidDrain(res, controller.signal);
                     }
-                    if (!res.write(payload)) await waitForStrictLidDrain(res, controller.signal);
+                    finiteLocalBackpressured = false;
                     finiteWindowStartOffset = forwarded;
                     finiteWindowRange = null;
                 }
@@ -11408,7 +11429,11 @@ function startFfmpeg(session) {
     const { preInputSeek, postInputSeek } = seekArgsForSession(session, encodeVideo);
     const providerHttpInputArgs = pumpedMkvInput ? [] : (seekableMkvInput ? [
         '-seekable', '1',
-        '-rw_timeout', '15000000',
+        // The finite broker serializes upstream provider windows. A loopback
+        // request may therefore wait behind the window already being drained;
+        // libav must not abandon that local response before the broker's own
+        // first-byte/idle deadlines can reconnect or fail it explicitly.
+        '-rw_timeout', String(STRICT_LID_FFMPEG_RW_TIMEOUT_US),
     ] : [
         '-reconnect', '1',
         '-reconnect_streamed', '1',

@@ -2906,6 +2906,7 @@ test('finite MKV resume spawns FFmpeg against only the loopback URL with pre-inp
         stopChildProcess: async () => {},
         waitForPlaylist: async () => {},
         STARTUP_TIMEOUT_MS: 60_000,
+        STRICT_LID_FFMPEG_RW_TIMEOUT_US: 50_000_000,
         EXACT_MATROSKA_H264_HLS_TARGET_SECONDS: 2,
     });
     const session = {
@@ -2931,6 +2932,7 @@ test('finite MKV resume spawns FFmpeg against only the loopback URL with pre-inp
     assert.equal(capturedArgs.includes(session.sourceUrl), false, 'FFmpeg must never receive the credential-bearing provider URL');
     assert.equal(capturedArgs.includes('pipe:0'), false);
     assert.equal(capturedArgs[capturedArgs.indexOf('-seekable') + 1], '1');
+    assert.equal(capturedArgs[capturedArgs.indexOf('-rw_timeout') + 1], '50000000');
     assert.equal(capturedOptions.stdio[0], 'ignore');
     assert.equal(capturedOptions.env.NO_PROXY, '127.0.0.1,localhost,::1');
 });

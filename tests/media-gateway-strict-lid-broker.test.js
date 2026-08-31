@@ -662,6 +662,73 @@ test('finite seek broker preserves every continuous local range across serial pr
   assert.equal(broker.cacheMisses, 5);
 });
 
+test('finite seek broker streams provider progress before a window is fully materialized', async (t) => {
+  const { createStrictLidBroker } = brokerHarness();
+  const data = Buffer.from(Array.from({ length: 16 }, (_, index) => 0x40 + index));
+  let releaseProviderTail;
+  const providerTailGate = new Promise((resolve) => { releaseProviderTail = resolve; });
+  let markProviderPrefix;
+  const providerPrefixSent = new Promise((resolve) => { markProviderPrefix = resolve; });
+  const provider = http.createServer(async (req, res) => {
+    const { start, end } = exactRange(req, data.length);
+    res.writeHead(206, {
+      'Content-Type': 'application/octet-stream',
+      'Content-Range': `bytes ${start}-${end}/${data.length}`,
+      'Content-Length': String(end - start + 1),
+      ETag: '"finite-stream-v1"',
+    });
+    res.write(data.subarray(start, start + 4));
+    markProviderPrefix();
+    await providerTailGate;
+    res.end(data.subarray(start + 4, end + 1));
+  });
+  const sourceUrl = await listen(provider);
+  t.after(() => closeServer(provider));
+  const broker = await createStrictLidBroker({
+    sourceUrl,
+    fileSizeBytes: data.length,
+    dispatcher: null,
+    pathPrefix: 'finite-mkv-seek',
+    finiteWindowBytes: 8,
+    finiteCacheBytes: 16,
+    releaseDelayMs: 0,
+    completedReleaseDelayMs: 0,
+    openTimeoutMs: 2000,
+  });
+  t.after(() => broker.close());
+
+  const localResponsePending = fetch(broker.inputUrl, { headers: { Range: 'bytes=0-7' } });
+  await providerPrefixSent;
+  const localResponse = await Promise.race([
+    localResponsePending,
+    new Promise((_, reject) => setTimeout(
+      () => reject(new Error('broker withheld the provider prefix until the full window completed')),
+      500,
+    )),
+  ]);
+  assert.equal(localResponse.status, 206);
+  assert.equal(localResponse.headers.get('content-length'), '8');
+  const reader = localResponse.body.getReader();
+  const prefix = await Promise.race([
+    reader.read(),
+    new Promise((_, reject) => setTimeout(
+      () => reject(new Error('broker did not stream provider progress to the local reader')),
+      500,
+    )),
+  ]);
+  assert.deepEqual(Buffer.from(prefix.value), data.subarray(0, 4));
+
+  releaseProviderTail();
+  const chunks = [Buffer.from(prefix.value)];
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    chunks.push(Buffer.from(value));
+  }
+  assert.deepEqual(Buffer.concat(chunks), data.subarray(0, 8));
+  assert.equal(broker.completedProviderFetches, 1);
+});
+
 test('finite seek broker serves a newer cue while an older local response is backpressured', async (t) => {
   const { createStrictLidBroker } = brokerHarness();
   const MiB = 1024 * 1024;
@@ -1442,7 +1509,7 @@ test('strict LID rejects invalid exact signed coordinates before creating a serv
   assert.match(route, /detectLanguageRequestPolicy\(req, options\)[\s\S]*validateDetectLanguageCapability\(capabilityToken, policy\.requiredScope\)/);
   assert.match(gatewaySource, /strictLidLoopbackBrokerProtocol: 1/);
   assert.match(gatewaySource, /strictLidFileSizeClaim: 'fileSizeBytes'/);
-  assert.match(gatewaySource, /const GATEWAY_VERSION = 130/);
+  assert.match(gatewaySource, /const GATEWAY_VERSION = 131/);
   assert.match(gatewaySource, /supersededReleaseDelayMs:\s*PROVIDER_SLOT_RELEASE_DELAY_MS/);
   assert.match(gatewaySource, /strictLidProviderDrainProtocol: 1/);
   assert.match(gatewaySource, /strictLidWeakFallbackProtocol: 1/);
