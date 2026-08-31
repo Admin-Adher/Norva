@@ -57,6 +57,36 @@ function loadPlayerClass(overrides = {}) {
   return { VideoPlayer: window.VideoPlayer, window };
 }
 
+function loadChannelListClass(overrides = {}) {
+  const window = overrides.window || {};
+  const context = {
+    window,
+    document: overrides.document || {},
+    navigator: { language: 'fr-FR' },
+    console,
+    setTimeout,
+    clearTimeout,
+    requestAnimationFrame: (callback) => callback(),
+    Date,
+    URL,
+    Promise,
+    Map,
+    Set,
+    Array,
+    Object,
+    String,
+    Number,
+    Boolean,
+    RegExp,
+    Math,
+    JSON,
+    API: overrides.API,
+    MediaUtils: overrides.MediaUtils || { liveGatewayMode: () => 'transcode' },
+  };
+  vm.runInNewContext(channelListSource, context);
+  return { ChannelList: window.ChannelList, window };
+}
+
 function section(source, startMarker, endMarker) {
   const start = source.indexOf(startMarker);
   assert.notEqual(start, -1, `missing start marker: ${startMarker}`);
@@ -101,6 +131,182 @@ test('known-broken catalogue variants are never automatic fallbacks', () => {
     Array.from(grouping.fallbackOrder([current, broken, healthy], current.streamId), (variant) => variant.streamId),
     ['303'],
   );
+});
+
+test('initial live resolution tries the primary then one healthy sibling serially', async () => {
+  const attempts = [];
+  const lifecycle = [];
+  const variants = [
+    { label: 'HD', sourceId: 'source-a', streamId: '601', channel: { id: 'tf1-hd', sourceType: 'xtream' } },
+    { label: 'FHD', sourceId: 'source-a', streamId: '602', channel: { id: 'tf1-fhd', sourceType: 'xtream' } },
+    { label: 'SD', sourceId: 'source-a', streamId: '603', channel: { id: 'tf1-sd', sourceType: 'xtream' } },
+  ];
+  const window = {
+    ChannelGrouping: {
+      fallbackOrder: () => variants.slice(1),
+      recordVariantOutcome() {},
+    },
+    app: { player: { canAutoFallbackVariantForReason: () => true } },
+  };
+  const API = { proxy: { xtream: { getStreamUrl: async (_sourceId, streamId) => {
+    attempts.push(String(streamId));
+    lifecycle.push(`resolve-${streamId}`);
+    if (String(streamId) === '601') {
+      lifecycle.push('failed-601');
+      const error = new Error('Service temporarily unavailable');
+      error.status = 503;
+      throw error;
+    }
+    return { url: `https://example.test/${streamId}.m3u8`, sessionId: `session-${streamId}` };
+  } } } };
+  const { ChannelList } = loadChannelListClass({ window, API });
+  const list = Object.create(ChannelList.prototype);
+  Object.assign(list, { _selectRequestSeq: 9, _forceTranscode: new Set() });
+  list.expireStaleCloudPlaybackSession = async () => {};
+  list.releaseInitialLiveResolveSession = async () => {};
+  const switchPlayer = {
+    async prepareLiveSwitch() { lifecycle.push('strict-drain'); },
+  };
+  const channel = {
+    id: 'tf1-hd',
+    sourceId: 'source-a',
+    sourceType: 'xtream',
+    streamId: '601',
+    name: 'TF1',
+    currentVariant: variants[0],
+    qualityGroup: { name: 'TF1', variants },
+    _norvaSelection: { selectSeq: 9 },
+  };
+
+  const resolved = await list.resolveInitialLiveStream(channel, { selectSeq: 9, switchPlayer });
+
+  assert.deepEqual(attempts, ['601', '602']);
+  assert.deepEqual(lifecycle, ['resolve-601', 'failed-601', 'strict-drain', 'resolve-602']);
+  assert.equal(resolved.channel.streamId, '602');
+  assert.equal(resolved.channel.cloudPlaybackSessionId, 'session-602');
+  assert.deepEqual(Array.from(resolved.channel._norvaInitialVariantFailures), ['601']);
+  assert.equal(resolved.channel._norvaInitialVariantFallbackAttempts, 1);
+});
+
+test('initial live resolution is bounded to three total variants', async () => {
+  const attempts = [];
+  let drains = 0;
+  const variants = ['701', '702', '703', '704'].map((streamId, index) => ({
+    label: `Variant ${index + 1}`,
+    sourceId: 'source-a',
+    streamId,
+    channel: { id: `tf1-${streamId}`, sourceType: 'xtream' },
+  }));
+  const window = {
+    ChannelGrouping: {
+      fallbackOrder: () => variants.slice(1),
+      recordVariantOutcome() {},
+    },
+    app: { player: { canAutoFallbackVariantForReason: () => true } },
+  };
+  const API = { proxy: { xtream: { getStreamUrl: async (_sourceId, streamId) => {
+    attempts.push(String(streamId));
+    const error = new Error('gateway refused');
+    error.status = 502;
+    throw error;
+  } } } };
+  const { ChannelList } = loadChannelListClass({ window, API });
+  const list = Object.create(ChannelList.prototype);
+  Object.assign(list, { _selectRequestSeq: 10, _forceTranscode: new Set() });
+  list.expireStaleCloudPlaybackSession = async () => {};
+  list.releaseInitialLiveResolveSession = async () => {};
+  const channel = {
+    id: 'tf1-701', sourceId: 'source-a', sourceType: 'xtream', streamId: '701', name: 'TF1',
+    currentVariant: variants[0], qualityGroup: { name: 'TF1', variants },
+  };
+
+  await assert.rejects(
+    list.resolveInitialLiveStream(channel, {
+      selectSeq: 10,
+      switchPlayer: { async prepareLiveSwitch() { drains += 1; } },
+    }),
+    /gateway refused/,
+  );
+  assert.deepEqual(attempts, ['701', '702', '703']);
+  assert.equal(drains, 2);
+});
+
+test('initial live resolution never retries a shared provider slot failure', async () => {
+  const attempts = [];
+  const variants = [
+    { label: 'HD', sourceId: 'source-a', streamId: '801', channel: { id: 'tf1-hd', sourceType: 'xtream' } },
+    { label: 'FHD', sourceId: 'source-a', streamId: '802', channel: { id: 'tf1-fhd', sourceType: 'xtream' } },
+  ];
+  const window = {
+    ChannelGrouping: { fallbackOrder: () => variants.slice(1), recordVariantOutcome() {} },
+    app: { player: { canAutoFallbackVariantForReason(reason) { return !/458|provider.?busy|slot/i.test(reason); } } },
+  };
+  const API = { proxy: { xtream: { getStreamUrl: async (_sourceId, streamId) => {
+    attempts.push(String(streamId));
+    const error = new Error('This TV service is busy');
+    error.status = 458;
+    error.code = 'PROVIDER_BUSY';
+    throw error;
+  } } } };
+  const { ChannelList } = loadChannelListClass({ window, API });
+  const list = Object.create(ChannelList.prototype);
+  Object.assign(list, { _selectRequestSeq: 11, _forceTranscode: new Set() });
+  list.expireStaleCloudPlaybackSession = async () => {};
+  list.releaseInitialLiveResolveSession = async () => {};
+  const channel = {
+    id: 'tf1-hd', sourceId: 'source-a', sourceType: 'xtream', streamId: '801', name: 'TF1',
+    currentVariant: variants[0], qualityGroup: { name: 'TF1', variants },
+  };
+
+  await assert.rejects(
+    list.resolveInitialLiveStream(channel, { selectSeq: 11, switchPlayer: { async prepareLiveSwitch() {} } }),
+    /busy/,
+  );
+  assert.deepEqual(attempts, ['801']);
+});
+
+test('initial live resolution expires a returned session with no playable URL before fallback', async () => {
+  const expired = [];
+  const events = [];
+  const variants = [
+    { label: 'HD', sourceId: 'source-a', streamId: '901', channel: { id: 'tf1-hd', sourceType: 'xtream' } },
+    { label: 'FHD', sourceId: 'source-a', streamId: '902', channel: { id: 'tf1-fhd', sourceType: 'xtream' } },
+  ];
+  const window = {
+    ChannelGrouping: { fallbackOrder: () => variants.slice(1), recordVariantOutcome() {} },
+    app: { player: { canAutoFallbackVariantForReason: () => true } },
+  };
+  const API = { proxy: { xtream: { getStreamUrl: async (_sourceId, streamId) => {
+    events.push(`resolve-${streamId}`);
+    return String(streamId) === '901'
+      ? { sessionId: 'orphan-session' }
+      : { url: 'https://example.test/902.m3u8', sessionId: 'healthy-session' };
+  } } } };
+  const { ChannelList } = loadChannelListClass({ window, API });
+  const list = Object.create(ChannelList.prototype);
+  Object.assign(list, { _selectRequestSeq: 12, _forceTranscode: new Set() });
+  list.releaseInitialLiveResolveSession = async (sessionId) => {
+    expired.push(sessionId);
+    events.push(`expire-${sessionId}`);
+  };
+  const channel = {
+    id: 'tf1-hd', sourceId: 'source-a', sourceType: 'xtream', streamId: '901', name: 'TF1',
+    currentVariant: variants[0], qualityGroup: { name: 'TF1', variants },
+  };
+
+  const resolved = await list.resolveInitialLiveStream(channel, {
+    selectSeq: 12,
+    switchPlayer: { async prepareLiveSwitch() { events.push('strict-drain'); } },
+  });
+
+  assert.equal(resolved.channel.streamId, '902');
+  assert.deepEqual(expired, ['orphan-session']);
+  assert.deepEqual(events, [
+    'resolve-901',
+    'expire-orphan-session',
+    'strict-drain',
+    'resolve-902',
+  ]);
 });
 
 test('live fallback is bounded and never retries shared mono-session failures', () => {
@@ -237,7 +443,7 @@ test('live switching fails closed if the previous cloud session cannot be releas
 test('native duplicate intent rejection preserves the already playing channel', () => {
   const select = section(channelListSource, 'async selectChannel(dataset)', 'async expireStaleCloudPlaybackSession');
   assert.match(select, /failPendingPlaybackSelection\(selectSeq, \{ clearCommitted: false \}\)/);
-  assert.match(select, /if \(nativeIntentClaim\) this\.commitPlaybackChannel\(channel\)/);
+  assert.match(select, /if \(nativeIntentClaim\) this\.commitPlaybackChannel\(playbackChannel\)/);
 });
 
 test('web title and playing state commit from a rendered frame, not resolver completion', () => {
@@ -250,4 +456,11 @@ test('web title and playing state commit from a rendered frame, not resolver com
   assert.equal(dispatches.length, 1, 'channelChanged must be emitted exactly once, after first frame');
   assert.doesNotMatch(select, /classList\.add\('active'/, 'resolver must not claim the channel is already playing');
   assert.match(select, /classList\.add\('pending'/);
+});
+
+test('player-level fallback inherits initial resolver failures and the shared three-variant budget', () => {
+  const playInternal = section(playerSource, 'async _playInternal(channel', '    hasCurrentMedia()');
+  assert.match(playInternal, /_norvaInitialVariantFallbackAttempts/);
+  assert.match(playInternal, /_norvaInitialVariantFailures/);
+  assert.match(playInternal, /slice\(0, 2\)/);
 });

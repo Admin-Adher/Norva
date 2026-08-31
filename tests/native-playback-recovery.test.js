@@ -1319,7 +1319,7 @@ test('standalone rejects duplicate playback intent before asynchronous resolutio
   assert.ok(liveIntent >= 0 && liveIntent < liveResolution, 'Live intent guard must run before native launch resolution');
 });
 
-test('ChannelList playback claim is consumed once and still launches VideoPlayer', async () => {
+test('ChannelList playback claim survives initial live sibling resolution and is consumed once', async () => {
   const channelListSource = read('public/js/components/ChannelList.js');
   const selectFlow = section(
     channelListSource,
@@ -1328,6 +1328,7 @@ test('ChannelList playback claim is consumed once and still launches VideoPlayer
   );
   assert.match(selectFlow, /const nativeIntentClaim = window\.__norvaNative\?\.beginPlaybackIntent/);
   assert.match(selectFlow, /Object\.defineProperty\(channel, '__norvaNativeIntentClaim'/);
+  assert.match(selectFlow, /__norvaNativeIntentClaimMeta/);
 
   let onDomReady = null;
   const launches = [];
@@ -1397,8 +1398,8 @@ test('ChannelList playback claim is consumed once and still launches VideoPlayer
   const channel = {
     sourceId: 'provider-7',
     sourceType: 'xtream',
-    id: 'channel-42',
-    streamId: '42',
+    id: 'channel-43',
+    streamId: '43',
     name: 'Test channel',
   };
   const claim = window.__norvaNative.beginPlaybackIntent('provider-7', 'channel', '42');
@@ -1408,13 +1409,18 @@ test('ChannelList playback claim is consumed once and still launches VideoPlayer
     configurable: true,
     writable: true,
   });
+  Object.defineProperty(channel, '__norvaNativeIntentClaimMeta', {
+    value: { sourceId: 'provider-7', itemType: 'channel', itemId: '42' },
+    configurable: true,
+  });
 
   const player = new VideoPlayer();
   await player.play(channel, 'https://provider.example/live/42.ts', {});
 
   assert.equal(launches.length, 1, 'the claimed ChannelList selection must reach the native player');
-  assert.equal(launches[0].itemId, '42');
+  assert.equal(launches[0].itemId, '43', 'native playback must launch the resolved sibling');
   assert.equal(channel.__norvaNativeIntentClaim, undefined, 'the forwarded claim must be one-shot');
+  assert.equal(channel.__norvaNativeIntentClaimMeta, undefined, 'the forwarded claim metadata must be one-shot');
   assert.equal(
     window.__norvaNative.beginPlaybackIntent('provider-7', 'channel', '42'),
     false,

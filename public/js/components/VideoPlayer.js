@@ -1455,8 +1455,15 @@ class VideoPlayer {
         const selectionSeq = channel?._norvaSelection?.selectSeq ?? null;
         if (selectionSeq !== null && selectionSeq !== this._liveSelectionSeq) {
             this._liveSelectionSeq = selectionSeq;
-            this._variantFallbackAttempts = 0;
+            this._variantFallbackAttempts = Math.max(
+                0,
+                Math.min(2, Number(channel?._norvaInitialVariantFallbackAttempts) || 0)
+            );
             this._triedVariants.clear();
+            const initialFailures = Array.isArray(channel?._norvaInitialVariantFailures)
+                ? channel._norvaInitialVariantFailures.slice(0, 2)
+                : [];
+            initialFailures.forEach((streamId) => this._triedVariants.add(String(streamId)));
         }
         ++this._variantSwitchSeq;
         const cloudPlaybackSessionId = channel.cloudPlaybackSessionId || channel.playbackSessionId || null;

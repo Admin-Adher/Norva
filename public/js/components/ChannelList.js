@@ -3328,6 +3328,207 @@ class ChannelList {
         });
     }
 
+    describeInitialLiveResolveFailure(error = {}) {
+        const payload = error?.payload && typeof error.payload === 'object'
+            ? error.payload
+            : {};
+        const upstreamStatus = Number(
+            error?.upstreamStatus ??
+            payload.upstreamStatus ??
+            payload.providerStatus
+        );
+        const status = Number(error?.status ?? payload.status);
+        const code = String(error?.code || payload.code || payload.errorCode || '').trim();
+        const message = String(error?.message || '').trim();
+        return [
+            Number.isFinite(upstreamStatus) && upstreamStatus > 0 ? `upstream ${upstreamStatus}` : '',
+            Number.isFinite(status) && status > 0 ? `http ${status}` : '',
+            code,
+            error?.liveProviderBackoff ? 'provider busy' : '',
+            message
+        ].filter(Boolean).join(' ');
+    }
+
+    initialLiveResolveFailureLabel(error = {}) {
+        const payload = error?.payload && typeof error.payload === 'object'
+            ? error.payload
+            : {};
+        const upstreamStatus = Number(error?.upstreamStatus ?? payload.upstreamStatus);
+        const status = Number(error?.status ?? payload.status);
+        const code = String(error?.code || payload.code || payload.errorCode || '').trim();
+        if (Number.isFinite(upstreamStatus) && upstreamStatus > 0) return `upstream-${upstreamStatus}`;
+        if (Number.isFinite(status) && status > 0) return `http-${status}`;
+        return code.slice(0, 80) || 'resolve-failed';
+    }
+
+    canFallbackInitialLiveVariant(error = {}) {
+        if (error?.liveProviderBackoff) return false;
+        const reason = this.describeInitialLiveResolveFailure(error);
+        const guard = window.app?.player?.canAutoFallbackVariantForReason;
+        if (typeof guard === 'function') {
+            try { return guard.call(window.app.player, reason); } catch (_) { /* local guard below */ }
+        }
+        // Keep the initial resolver aligned with VideoPlayer: a sibling may
+        // replace a stream-local 403/5xx, but never a shared account/session
+        // condition, where another attempt would only hammer the same slot.
+        return !/(\b458\b|playback_superseded|\b401\b|\b429\b|unauthori[sz]ed|too many|rate.?limit|concurr|max.?connection|provider.?busy|gateway.?startup.?busy|capacity.?busy|coordinator.?unavailable|slot)/i
+            .test(reason);
+    }
+
+    buildInitialLiveVariantChannel(logicalChannel, variant) {
+        const raw = variant?.channel || {};
+        const group = logicalChannel?.qualityGroup || null;
+        const logicalName = group?.name || logicalChannel?.name || logicalChannel?.title || raw.name || raw.title || '';
+        const logicalLogo = group?.logo || logicalChannel?.tvgLogo || logicalChannel?.stream_icon || logicalChannel?.logo || raw.tvgLogo || raw.stream_icon || raw.logo || '';
+        return Object.assign({}, logicalChannel, raw, {
+            name: logicalName,
+            title: logicalName,
+            tvgName: logicalName,
+            tvgLogo: logicalLogo,
+            sourceId: variant?.sourceId ?? raw.sourceId ?? raw.source_id ?? logicalChannel?.sourceId,
+            streamId: variant?.streamId ?? raw.streamId ?? raw.stream_id ?? logicalChannel?.streamId,
+            currentVariant: variant || logicalChannel?.currentVariant || null,
+            qualityGroup: group,
+            itemType: 'channel',
+            cloudPlaybackSessionId: null,
+            playbackSessionId: null,
+            _norvaSelection: logicalChannel?._norvaSelection || null
+        });
+    }
+
+    getInitialLiveResolveCandidates(channel) {
+        const group = channel?.qualityGroup;
+        const variants = Array.isArray(group?.variants) ? group.variants : [];
+        if (!window.ChannelGrouping || variants.length < 2) return [channel];
+
+        const streamId = String(channel?.streamId ?? channel?.stream_id ?? '');
+        const initial = channel?.currentVariant
+            || variants.find((variant) => String(variant?.streamId ?? '') === streamId)
+            || window.ChannelGrouping.pickDefault?.(variants)
+            || variants[0];
+        const siblings = window.ChannelGrouping.fallbackOrder?.(variants, initial?.streamId) || [];
+        const ordered = [initial, ...siblings];
+        const seen = new Set();
+        const candidates = [];
+        for (const variant of ordered) {
+            if (!variant) continue;
+            const variantStreamId = variant.streamId ?? variant.stream_id;
+            const key = `${variant.sourceId ?? channel.sourceId}:${variantStreamId ?? ''}`;
+            if (variantStreamId == null || String(variantStreamId) === '' || seen.has(key)) continue;
+            seen.add(key);
+            candidates.push(this.buildInitialLiveVariantChannel(channel, variant));
+            if (candidates.length === 3) break; // primary + at most two siblings
+        }
+        return candidates.length ? candidates : [channel];
+    }
+
+    async resolveInitialLiveStream(channel, options = {}) {
+        const selectSeq = options.selectSeq;
+        const switchPlayer = options.switchPlayer || window.app?.player || null;
+        const candidates = this.getInitialLiveResolveCandidates(channel).slice(0, 3);
+        const failedVariantIds = [];
+        let lastError = null;
+
+        for (let index = 0; index < candidates.length; index += 1) {
+            if (selectSeq !== this._selectRequestSeq) return null;
+
+            // A failed Gateway POST only rejects after its server-side session
+            // has been stopped. Also drain every client-tracked session before
+            // opening the next sibling, keeping the mono-session handoff strict.
+            if (index > 0 && typeof switchPlayer?.prepareLiveSwitch !== 'function') {
+                throw lastError || new Error('Strict live playback release is unavailable');
+            }
+            if (index > 0) {
+                await switchPlayer.prepareLiveSwitch({ preserveVariantFallback: true });
+                if (selectSeq !== this._selectRequestSeq) return null;
+            }
+
+            const candidate = candidates[index];
+            const providerContainer =
+                candidate.container_extension ||
+                candidate.containerExtension ||
+                candidate.container ||
+                'ts';
+            const transcodeKey = `${candidate.sourceId}:${candidate.id}`;
+            const forceLiveTranscode = Boolean(this._forceTranscode?.has?.(transcodeKey));
+            const gatewayMode = forceLiveTranscode
+                ? 'transcode'
+                : ((typeof MediaUtils !== 'undefined' && MediaUtils.liveGatewayMode)
+                    ? MediaUtils.liveGatewayMode(candidate)
+                    : 'transcode');
+
+            let resolvedSessionId = null;
+            try {
+                const result = await API.proxy.xtream.getStreamUrl(
+                    candidate.sourceId,
+                    candidate.streamId,
+                    'live',
+                    providerContainer,
+                    {
+                        gatewayMode,
+                        ...(forceLiveTranscode ? { liveForceTranscode: '1' } : {})
+                    }
+                );
+                resolvedSessionId = result?.sessionId || null;
+                const streamUrl = result?.url || result?.streamUrl;
+                if (!streamUrl) throw new Error('Live resolver returned no URL');
+                if (selectSeq !== this._selectRequestSeq) {
+                    await this.expireStaleCloudPlaybackSession(resolvedSessionId);
+                    return null;
+                }
+                candidate.cloudPlaybackSessionId = resolvedSessionId;
+                if (result?.cloudSourceId) candidate.cloudSourceId = result.cloudSourceId;
+                candidate._norvaInitialVariantFailures = failedVariantIds.slice(0, 2);
+                candidate._norvaInitialVariantFallbackAttempts = Math.min(2, failedVariantIds.length);
+                return {
+                    channel: candidate,
+                    streamUrl,
+                    playbackPayload: result,
+                    staleSessionId: resolvedSessionId
+                };
+            } catch (error) {
+                if (resolvedSessionId) {
+                    await this.releaseInitialLiveResolveSession(resolvedSessionId);
+                    resolvedSessionId = null;
+                }
+                lastError = error;
+                const variant = candidate.currentVariant;
+                const failureLabel = this.initialLiveResolveFailureLabel(error);
+                const fallbackAllowed = this.canFallbackInitialLiveVariant(error);
+                try {
+                    if (fallbackAllowed && variant) {
+                        window.ChannelGrouping?.recordVariantOutcome?.(variant, 'failure', { reason: failureLabel });
+                    }
+                } catch (_) { /* runtime ranking remains best-effort */ }
+                if (fallbackAllowed && variant?.streamId != null) {
+                    failedVariantIds.push(String(variant.streamId));
+                }
+
+                const canContinue = index + 1 < candidates.length
+                    && fallbackAllowed;
+                if (!canContinue) throw error;
+                const label = String(variant?.label || `variant ${index + 1}`).slice(0, 80);
+                console.warn(
+                    `[ChannelList] Initial live ${label} unavailable (${failureLabel}); trying sibling ${index + 2}/${candidates.length}.`
+                );
+            }
+        }
+        throw lastError || new Error('No live variant could be resolved');
+    }
+
+    async releaseInitialLiveResolveSession(sessionId) {
+        const id = sessionId ? String(sessionId).trim() : '';
+        if (!id) return;
+        const playback = window.NorvaCloud?.playback;
+        const expireSession = playback?.expireSession;
+        if (typeof expireSession !== 'function') {
+            throw new Error('Cloud playback release is unavailable');
+        }
+        // This is not stale-result housekeeping: a replacement variant must not
+        // open until the exact partially-resolved session is confirmed expired.
+        await expireSession.call(playback, id);
+    }
+
     beginPlaybackTeardown(selectSeq) {
         if (this._pendingPlaybackSelection?.selectSeq !== selectSeq) return;
         this.currentChannel = null;
@@ -3542,30 +3743,8 @@ class ChannelList {
             let streamUrl;
             let playbackPayload = null; // resolver payload (carries the gateway fallbackUrl)
             let staleSessionId = null;
+            let playbackChannel = channel;
             if (channel.sourceType === 'xtream') {
-                // Get stream format from player settings (server-side) or fallback
-                const providerContainer =
-                    channel.container_extension ||
-                    channel.containerExtension ||
-                    channel.container ||
-                    'ts';
-                // Live H.264 → lightweight remux (copy video, transcode audio only);
-                // H.265/HEVC → full transcode (browsers can't decode copied HEVC).
-                // H.265/HEVC → full transcode; H.264 → remux. Live channels carry
-                // no codec info up front, so an HEVC channel whose name doesn't say
-                // "hevc" defaults to remux and fails to decode — once that happens
-                // the player flags it here so it's transcoded on every later play.
-                const transcodeKey = `${channel.sourceId}:${channel.id}`;
-                // Default live path = provider HLS via the Cloudflare relay (no
-                // Railway). Only channels the browser can't decode (flagged after a
-                // failure) take the gateway transcode — liveForceTranscode skips the
-                // relay-HLS attempt in api.getStreamUrl.
-                const forceLiveTranscode = Boolean(this._forceTranscode && this._forceTranscode.has(transcodeKey));
-                const gatewayMode = forceLiveTranscode
-                    ? 'transcode'
-                    : ((typeof MediaUtils !== 'undefined' && MediaUtils.liveGatewayMode)
-                        ? MediaUtils.liveGatewayMode(channel)
-                        : 'transcode');
                 // Channel SWITCH: tear down the currently-playing channel BEFORE
                 // creating the new gateway session. The provider grants one slot,
                 // so creating the new session closes the old one; if the old
@@ -3579,17 +3758,15 @@ class ChannelList {
                     if (selectSeq !== this._selectRequestSeq) return;
                     this.beginPlaybackTeardown(selectSeq);
                 }
-                const result = await API.proxy.xtream.getStreamUrl(channel.sourceId, channel.streamId, 'live', providerContainer, {
-                    gatewayMode,
-                    ...(forceLiveTranscode ? { liveForceTranscode: '1' } : {})
+                const resolution = await this.resolveInitialLiveStream(channel, {
+                    selectSeq,
+                    switchPlayer
                 });
-                streamUrl = result.url;
-                playbackPayload = result;
-                channel.cloudPlaybackSessionId = result.sessionId || null;
-                // Cloud source UUID resolved during session creation — used for
-                // live telemetry (the player must send the UUID, not the local id).
-                if (result.cloudSourceId) channel.cloudSourceId = result.cloudSourceId;
-                staleSessionId = channel.cloudPlaybackSessionId;
+                if (!resolution) return;
+                playbackChannel = resolution.channel;
+                streamUrl = resolution.streamUrl;
+                playbackPayload = resolution.playbackPayload;
+                staleSessionId = resolution.staleSessionId;
             } else {
                 streamUrl = channel.url;
                 channel.cloudPlaybackSessionId = null;
@@ -3603,20 +3780,44 @@ class ChannelList {
             // Attach the channel's quality variants so the player can build its
             // quality menu (all HD/FHD/4K/H265 feeds of the same logical channel).
             try {
-                if (!channel.qualityGroup && window.ChannelGrouping && this.channels && this.channels.length) {
+                if (!playbackChannel.qualityGroup && window.ChannelGrouping && this.channels && this.channels.length) {
                     const country = window.app?.player?.getCountry?.() || 'FR';
-                    const grp = window.ChannelGrouping.variantsForChannel(channel, this.channels, country);
-                    if (grp && grp.variants && grp.variants.length > 1) channel.qualityGroup = grp;
+                    const grp = window.ChannelGrouping.variantsForChannel(playbackChannel, this.channels, country);
+                    if (grp && grp.variants && grp.variants.length > 1) playbackChannel.qualityGroup = grp;
                 }
             } catch (e) { /* grouping is best-effort */ }
+
+            // The native duplicate-intent claim was minted before asynchronous
+            // resolution. Preserve it on the resolved sibling while retaining
+            // the original claim identity used by the standalone guard.
+            if (nativeIntentClaim && playbackChannel !== channel) {
+                try {
+                    Object.defineProperty(playbackChannel, '__norvaNativeIntentClaim', {
+                        value: nativeIntentClaim,
+                        configurable: true,
+                        writable: true
+                    });
+                    Object.defineProperty(playbackChannel, '__norvaNativeIntentClaimMeta', {
+                        value: { sourceId: channel.sourceId, itemType: 'channel', itemId: nativeItemId },
+                        configurable: true
+                    });
+                } catch (_) {
+                    playbackChannel.__norvaNativeIntentClaim = nativeIntentClaim;
+                    playbackChannel.__norvaNativeIntentClaimMeta = {
+                        sourceId: channel.sourceId,
+                        itemType: 'channel',
+                        itemId: nativeItemId
+                    };
+                }
+            }
 
             // Play channel. Pass the resolver payload (3rd arg) so the native player
             // receives the gateway byte-pipe fallbackUrl for LIVE too — the standalone
             // VideoPlayer.play override reads playback.fallbackUrl. The browser player
             // ignores the extra argument.
             if (window.app?.player) {
-                await window.app.player.play(channel, streamUrl, playbackPayload);
-                if (nativeIntentClaim) this.commitPlaybackChannel(channel);
+                await window.app.player.play(playbackChannel, streamUrl, playbackPayload);
+                if (nativeIntentClaim) this.commitPlaybackChannel(playbackChannel);
             }
         });
         this._streamResolveQueue = resolveTask.catch((err) => {

@@ -1303,16 +1303,25 @@
             VideoPlayer.prototype.play = async function (channel, streamUrl, playback) {
                 const meta = channelMeta(channel);
                 const forwardedIntentClaim = channel?.__norvaNativeIntentClaim || '';
+                const forwardedIntentClaimMeta = channel?.__norvaNativeIntentClaimMeta || null;
                 if (forwardedIntentClaim) {
                     try { delete channel.__norvaNativeIntentClaim; } catch (_) {
                         channel.__norvaNativeIntentClaim = null;
                     }
+                    try { delete channel.__norvaNativeIntentClaimMeta; } catch (_) {
+                        channel.__norvaNativeIntentClaimMeta = null;
+                    }
                 }
-                const consumedIntentClaim = meta && forwardedIntentClaim
+                const claimMeta = forwardedIntentClaimMeta?.sourceId
+                    && forwardedIntentClaimMeta?.itemType
+                    && forwardedIntentClaimMeta?.itemId != null
+                    ? forwardedIntentClaimMeta
+                    : meta;
+                const consumedIntentClaim = claimMeta && forwardedIntentClaim
                     ? consumeNativePlaybackIntent(
-                        meta.sourceId,
-                        meta.itemType,
-                        meta.itemId,
+                        claimMeta.sourceId,
+                        claimMeta.itemType,
+                        claimMeta.itemId,
                         forwardedIntentClaim
                     )
                     : false;
