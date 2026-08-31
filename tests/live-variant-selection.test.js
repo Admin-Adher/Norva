@@ -485,6 +485,59 @@ test('live switching fails closed if the previous cloud session cannot be releas
   assert.doesNotMatch(select, /prepareLiveSwitch\(\); \} catch/, 'a release failure must stop the next resolver');
 });
 
+test('web player recovers a missing positional URL from the authoritative resolver payload', async () => {
+  const { VideoPlayer } = loadPlayerClass();
+  const player = Object.create(VideoPlayer.prototype);
+  Object.assign(player, {
+    _playRequestSeq: 0,
+    _playQueue: null,
+    activeCloudPlaybackSessionIds: new Set(),
+  });
+  let receivedUrl = null;
+  player._playInternal = async (_channel, url) => { receivedUrl = url; };
+
+  await player.play(
+    { name: 'France 4', cloudPlaybackSessionId: 'session-france-4' },
+    undefined,
+    { url: 'https://media.example.test/live/playlist.m3u8', sessionId: 'session-france-4' },
+  );
+
+  assert.equal(receivedUrl, 'https://media.example.test/live/playlist.m3u8');
+});
+
+test('a superseded queued play expires its unattached cloud session exactly', async () => {
+  const { VideoPlayer } = loadPlayerClass();
+  const player = Object.create(VideoPlayer.prototype);
+  Object.assign(player, {
+    _playRequestSeq: 0,
+    _playQueue: Promise.resolve(),
+    activeCloudPlaybackSessionIds: new Set(),
+  });
+  const expired = [];
+  const played = [];
+  player.expireDetachedCloudPlaybackSession = async (sessionId) => { expired.push(sessionId); };
+  player._playInternal = async (channel) => { played.push(channel.name); };
+
+  const stale = player.play(
+    { name: 'France 2', cloudPlaybackSessionId: 'stale-session' },
+    'https://media.example.test/stale.m3u8',
+  );
+  const current = player.play(
+    { name: 'France 3', cloudPlaybackSessionId: 'current-session' },
+    'https://media.example.test/current.m3u8',
+  );
+  await Promise.all([stale, current]);
+
+  assert.deepEqual(expired, ['stale-session']);
+  assert.deepEqual(played, ['France 3']);
+});
+
+test('a new xtream selection always cancels pending player fallback state', () => {
+  const select = section(channelListSource, 'async selectChannel(dataset)', 'async expireStaleCloudPlaybackSession');
+  assert.match(select, /if \(switchPlayer && typeof switchPlayer\.prepareLiveSwitch === 'function'\)/);
+  assert.doesNotMatch(select, /switchPlayer\.hls \|\| switchPlayer\.currentUrl/);
+});
+
 test('native duplicate intent rejection preserves the already playing channel', () => {
   const select = section(channelListSource, 'async selectChannel(dataset)', 'async expireStaleCloudPlaybackSession');
   assert.match(select, /failPendingPlaybackSelection\(selectSeq, \{ clearCommitted: false \}\)/);

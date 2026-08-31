@@ -3762,7 +3762,7 @@ class ChannelList {
                 // the previous — the broken-switch symptom). Stopping first makes a
                 // switch behave like the fresh page-load case, which works.
                 const switchPlayer = window.app?.player;
-                if (switchPlayer && (switchPlayer.hls || switchPlayer.currentUrl) && typeof switchPlayer.prepareLiveSwitch === 'function') {
+                if (switchPlayer && typeof switchPlayer.prepareLiveSwitch === 'function') {
                     await switchPlayer.prepareLiveSwitch();
                     if (selectSeq !== this._selectRequestSeq) return;
                     this.beginPlaybackTeardown(selectSeq);
