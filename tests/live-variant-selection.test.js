@@ -188,6 +188,51 @@ test('initial live resolution tries the primary then one healthy sibling seriall
   assert.equal(resolved.channel._norvaInitialVariantFallbackAttempts, 1);
 });
 
+test('dynamic selection preserves an existing logical sibling family', () => {
+  const variants = [
+    { label: 'HD', sourceId: 'source-a', streamId: '611', channel: { id: 'tf1-hd', sourceType: 'xtream' } },
+    { label: 'FHD', sourceId: 'source-a', streamId: '612', channel: { id: 'tf1-fhd', sourceType: 'xtream' } },
+    { label: 'SD', sourceId: 'source-a', streamId: '613', channel: { id: 'tf1-sd', sourceType: 'xtream' } },
+  ];
+  const logicalGroup = { name: 'TF1', variants, defaultVariant: variants[0] };
+  let recomputations = 0;
+  const window = {
+    ChannelGrouping: {
+      variantsForChannel() {
+        recomputations += 1;
+        return { name: 'TF1', variants: [variants[0]] };
+      },
+      pickDefault: (items) => items[0],
+      fallbackOrder: (items, currentStreamId) => items.filter(
+        (item) => String(item.streamId) !== String(currentStreamId),
+      ),
+    },
+    app: { player: { getCountry: () => 'FR' } },
+  };
+  const { ChannelList } = loadChannelListClass({ window });
+  const list = Object.create(ChannelList.prototype);
+  list.channels = [{ id: 'logical-tf1' }];
+  const logical = {
+    id: 'logical-tf1',
+    sourceId: 'source-a',
+    sourceType: 'xtream',
+    streamId: '611',
+    name: 'TF1',
+    qualityGroup: logicalGroup,
+    currentVariant: variants[0],
+  };
+
+  const selected = list.buildDynamicLiveChannel(logical, {}, 21);
+
+  assert.equal(recomputations, 0);
+  assert.equal(selected.qualityGroup, logicalGroup);
+  assert.equal(selected.currentVariant, variants[0]);
+  assert.deepEqual(
+    Array.from(list.getInitialLiveResolveCandidates(selected), (candidate) => candidate.streamId),
+    ['611', '612', '613'],
+  );
+});
+
 test('initial live resolution is bounded to three total variants', async () => {
   const attempts = [];
   let drains = 0;
