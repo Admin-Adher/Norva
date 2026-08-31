@@ -1440,8 +1440,14 @@ test('ChannelList clears a failed live selection instead of showing a ghost Play
     /const isCurrentSelection = selectSeq === this\._selectRequestSeq;/,
     'a stale rejection must not clear a newer channel selection',
   );
-  assert.match(failureFlow, /this\.currentChannel = null;/);
-  assert.match(failureFlow, /classList\.remove\('active', 'nav-active'\)/);
+  assert.match(failureFlow, /this\.failPendingPlaybackSelection\(selectSeq\)/);
+  const clearPendingFlow = section(
+    source,
+    'failPendingPlaybackSelection(selectSeq, options = {})',
+    'async selectChannel(dataset)',
+  );
+  assert.match(clearPendingFlow, /this\.currentChannel = null;/);
+  assert.match(clearPendingFlow, /classList\.remove\('active', 'nav-active'\)/);
   assert.match(failureFlow, /guide\?\.refreshPreview\?\./);
   assert.match(failureFlow, /guide\?\.updateHighlights\?\./);
   assert.match(

@@ -53,6 +53,10 @@ class VideoPlayer {
         this._playRequestSeq = 0;
         this._playQueue = Promise.resolve();
         this._vfTimer = null;
+        this._variantFallbackAttempts = 0;
+        this._lastCommittedVariantSwitchSeq = -1;
+        this._pendingVideoFrameCallback = null;
+        this._liveSelectionSeq = null;
         this._gatewayHlsRetryCount = 0;
         this._gatewayHlsRetryTimer = null;
         // Self-heal a live gateway session that vanished (404 = gone from the
@@ -1122,11 +1126,14 @@ class VideoPlayer {
                 };
                 this.updateQualityBadge();
             }
-            this.markPlaybackUsable();
         });
 
-        ['loadeddata', 'playing', 'canplay'].forEach(eventName => {
-            this.video.addEventListener(eventName, () => this.markPlaybackUsable());
+        // Metadata/canplay can fire before a decoded frame is visible. Commit the
+        // channel title, list state and runtime health only from a rendered-frame
+        // signal (or the timeupdate fallback on older engines).
+        this.video.addEventListener('playing', () => this.markPlaybackOnRenderedFrame());
+        this.video.addEventListener('timeupdate', () => {
+            if (this.video.currentTime > 0 && this.video.readyState >= 2) this.markPlaybackUsable();
         });
 
         this.video.addEventListener('error', () => {
@@ -1382,7 +1389,7 @@ class VideoPlayer {
         this.activeCloudPlaybackSessionIds.add(id);
     }
 
-    async stopCloudPlaybackSessions() {
+    async stopCloudPlaybackSessions(options = {}) {
         const sessionIds = new Set(this.activeCloudPlaybackSessionIds);
         if (this.currentCloudPlaybackSessionId) {
             sessionIds.add(this.currentCloudPlaybackSessionId);
@@ -1390,21 +1397,34 @@ class VideoPlayer {
 
         this.currentCloudPlaybackSessionId = null;
         this.activeCloudPlaybackSessionIds.clear();
-        if (!sessionIds.size) return;
+        if (!sessionIds.size) return { released: true, count: 0 };
 
         const expireSession = window.NorvaCloud?.playback?.expireSession;
-        if (typeof expireSession !== 'function') return;
+        if (typeof expireSession !== 'function') {
+            sessionIds.forEach(id => this.activeCloudPlaybackSessionIds.add(id));
+            this.currentCloudPlaybackSessionId = Array.from(sessionIds)[0] || null;
+            if (options.strict) throw new Error('Cloud playback release API is unavailable');
+            return { released: false, count: sessionIds.size };
+        }
 
-        await Promise.allSettled(Array.from(sessionIds).map(async (sessionId) => {
+        const ids = Array.from(sessionIds);
+        const results = await Promise.allSettled(ids.map(async (sessionId) => {
             console.log('[Player] Expiring cloud playback session:', sessionId);
             await expireSession(sessionId);
-        })).then(results => {
-            results.forEach(result => {
-                if (result.status === 'rejected') {
-                    console.error(result.reason?.message || 'Failed to expire cloud playback session');
-                }
-            });
+        }));
+        const failedIds = [];
+        results.forEach((result, index) => {
+            if (result.status === 'rejected') {
+                failedIds.push(ids[index]);
+                console.error(result.reason?.message || 'Failed to expire cloud playback session');
+            }
         });
+        failedIds.forEach(id => this.activeCloudPlaybackSessionIds.add(id));
+        if (failedIds.length) this.currentCloudPlaybackSessionId = failedIds[0];
+        if (options.strict && failedIds.length) {
+            throw new Error(`Cloud playback release failed for ${failedIds.length} session(s)`);
+        }
+        return { released: failedIds.length === 0, count: ids.length, failedIds };
     }
 
     /**
@@ -1426,13 +1446,19 @@ class VideoPlayer {
     }
 
     async _playInternal(channel, streamUrl, requestSeq = this._playRequestSeq) {
+        const selectionSeq = channel?._norvaSelection?.selectSeq ?? null;
+        if (selectionSeq !== null && selectionSeq !== this._liveSelectionSeq) {
+            this._liveSelectionSeq = selectionSeq;
+            this._variantFallbackAttempts = 0;
+            this._triedVariants.clear();
+        }
         ++this._variantSwitchSeq;
         const cloudPlaybackSessionId = channel.cloudPlaybackSessionId || channel.playbackSessionId || null;
         this.currentChannel = channel;
         this._showChannelSplash(channel);
         this._playbackStatusOkReported = false;
         this._liveErrorReported = false;
-        this.applyQualityGroup(channel);
+        this.applyQualityGroup(channel, { deferUi: true });
         this._livePlayRequestedAt = Date.now();
         try { this._sendLiveEvent('play_requested'); } catch (_) {}
 
@@ -1497,7 +1523,6 @@ class VideoPlayer {
                     this.updateNowPlaying(channel);
                     this.showNowPlayingOverlay();
                     this.fetchEpgData(channel);
-                    window.dispatchEvent(new CustomEvent('channelChanged', { detail: channel }));
                     return;
                 }
 
@@ -1547,7 +1572,6 @@ class VideoPlayer {
                         this.updateNowPlaying(channel);
                         this.showNowPlayingOverlay();
                         this.fetchEpgData(channel);
-                        window.dispatchEvent(new CustomEvent('channelChanged', { detail: channel }));
                         return;
                     } else if (info.needsRemux) {
                         // MPEG-TS often carries AAC in ADTS form, which cannot be
@@ -1564,7 +1588,6 @@ class VideoPlayer {
                         this.updateNowPlaying(channel);
                         this.showNowPlayingOverlay();
                         this.fetchEpgData(channel);
-                        window.dispatchEvent(new CustomEvent('channelChanged', { detail: channel }));
                         return;
                     }
                     // Compatible - fall through to normal HLS.js path
@@ -1648,7 +1671,6 @@ class VideoPlayer {
                 this.updateNowPlaying(channel);
                 this.showNowPlayingOverlay();
                 this.fetchEpgData(channel);
-                window.dispatchEvent(new CustomEvent('channelChanged', { detail: channel }));
                 return; // Exit early
             }
 
@@ -1691,7 +1713,6 @@ class VideoPlayer {
                 this.updateNowPlaying(channel);
                 this.showNowPlayingOverlay();
                 this.fetchEpgData(channel);
-                window.dispatchEvent(new CustomEvent('channelChanged', { detail: channel }));
                 return;
             }
 
@@ -1804,9 +1825,6 @@ class VideoPlayer {
             // Fetch EPG data for this channel
             this.fetchEpgData(channel);
 
-            // Dispatch event
-            window.dispatchEvent(new CustomEvent('channelChanged', { detail: channel }));
-
         } catch (err) {
             console.error('Error playing channel:', err);
             this.showError('Failed to play channel');
@@ -1878,6 +1896,24 @@ class VideoPlayer {
             (video.readyState >= 2 || video.currentTime > 0);
     }
 
+    markPlaybackOnRenderedFrame() {
+        const switchSeq = this._variantSwitchSeq;
+        const video = this.video;
+        if (!video) return;
+        if (typeof video.requestVideoFrameCallback === 'function') {
+            try {
+                this._pendingVideoFrameCallback = video.requestVideoFrameCallback(() => {
+                    this._pendingVideoFrameCallback = null;
+                    if (switchSeq === this._variantSwitchSeq) this.markPlaybackUsable();
+                });
+                return;
+            } catch (_) { /* older WebView implementation: animation-frame fallback */ }
+        }
+        requestAnimationFrame(() => {
+            if (switchSeq === this._variantSwitchSeq && !video.paused && video.readyState >= 2) this.markPlaybackUsable();
+        });
+    }
+
     markPlaybackUsable() {
         if (!this.hasCurrentMedia() || this._playbackStatusOkReported) return;
         this._playbackStatusOkReported = true;
@@ -1896,8 +1932,22 @@ class VideoPlayer {
             const ttff = this._livePlayRequestedAt ? Math.max(1, Date.now() - this._livePlayRequestedAt) : undefined;
             const zapMs = this._liveZapStartedAt ? Math.max(1, Date.now() - this._liveZapStartedAt) : undefined;
             this._sendLiveEvent('first_frame', { timeToFirstFrameMs: ttff, metadata: { zapMs } });
+            if (this.currentVariant && window.ChannelGrouping?.recordVariantOutcome) {
+                window.ChannelGrouping.recordVariantOutcome(this.currentVariant, 'success', { ttffMs: ttff });
+            }
             this._liveZapStartedAt = null;
         } catch (_) {}
+        this._variantFallbackAttempts = 0;
+        this._triedVariants.clear();
+        this._clearVariantFallbackTimer();
+        if (this._lastCommittedVariantSwitchSeq !== this._variantSwitchSeq) {
+            this._lastCommittedVariantSwitchSeq = this._variantSwitchSeq;
+            if (this.qualityGroup && this.qualityWrapper) this.qualityWrapper.style.display = '';
+            this.populateQualityMenu();
+            this.updateQualityBadge();
+            try { window.app?.channelList?.commitPlaybackChannel?.(this.currentChannel); } catch (_) { }
+            try { window.dispatchEvent(new CustomEvent('channelChanged', { detail: this.currentChannel })); } catch (_) { }
+        }
         const target = this.getPlaybackHealthTarget();
         if (target && window.PlaybackHealth?.report) {
             PlaybackHealth.report({ ...target, status: 'ok' }).catch(() => { });
@@ -2242,7 +2292,7 @@ class VideoPlayer {
     }
 
     handlePlaybackError(reason = '') {
-        if (this._clearingMedia || this.hasCurrentMedia()) return;
+        if (this._clearingMedia || (this._playbackStatusOkReported && this.hasCurrentMedia())) return;
         if (!this.currentUrl || /empty src/i.test(String(reason))) return;
         if (this.tryCurrentVariantFallback(reason)) return;
 
@@ -2302,9 +2352,15 @@ class VideoPlayer {
 
     shouldAutoFallbackVariants() {
         if (!this.currentVariant || !this.qualityGroup) return false;
-        if (this.isLivePlayback()) return false;
-        if (this.isGatewayPlaybackUrl()) return false;
-        return true;
+        return Array.isArray(this.qualityGroup.variants) && this.qualityGroup.variants.length > 1;
+    }
+
+    canAutoFallbackVariantForReason(reason = '') {
+        // These failures are shared account/session conditions. Trying siblings
+        // would only hammer the same mono-session provider and can evict a real
+        // viewer. Variant fallback is reserved for stream-local startup failures.
+        return !/(\b458\b|playback_superseded|\b401\b|\b429\b|unauthori[sz]ed|too many|rate.?limit|concurr|max.?connection|provider.?busy|slot)/i
+            .test(String(reason || ''));
     }
 
     isProviderTransientPlaybackError(reason = '') {
@@ -2574,7 +2630,7 @@ class VideoPlayer {
     }
 
     /** Wire the quality menu from a channel's variant group (set by ChannelList, or derived on the fly). */
-    applyQualityGroup(channel) {
+    applyQualityGroup(channel, options = {}) {
         let group = channel && channel.qualityGroup;
         if (!group && channel && window.ChannelGrouping) {
             const catalog = window.app?.channelList?.channels || window.app?.pages?.live?.channelList?.channels;
@@ -2591,6 +2647,12 @@ class VideoPlayer {
             || this.qualityGroup.variants.find(v => String(v.streamId) === sid)
             || this.qualityGroup.defaultVariant
             || this.qualityGroup.variants[0];
+        if (options.deferUi) {
+            if (this.qualityWrapper) this.qualityWrapper.style.display = 'none';
+            const badge = document.getElementById('player-quality-badge');
+            badge?.classList.add('hidden');
+            return;
+        }
         if (this.qualityWrapper) this.qualityWrapper.style.display = '';
         this.populateQualityMenu();
         this.updateQualityBadge();
@@ -2609,43 +2671,73 @@ class VideoPlayer {
         });
     }
 
-    /** Switch to another variant: re-resolve its stream and reload, with auto-fallback. */
-    async switchVariant(variant) {
+    buildVariantChannel(variant, playback = {}) {
+        const previous = this.currentChannel || {};
+        const raw = variant?.channel || {};
+        const logicalName = this.qualityGroup?.name || previous.name || previous.title || raw.name || raw.title || '';
+        const logicalLogo = this.qualityGroup?.logo || previous.tvgLogo || previous.stream_icon || previous.logo || raw.tvgLogo || raw.stream_icon || raw.logo || '';
+        return Object.assign({}, previous, raw, {
+            name: logicalName,
+            title: logicalName,
+            tvgName: logicalName,
+            tvgLogo: logicalLogo,
+            sourceId: variant.sourceId ?? raw.sourceId ?? raw.source_id ?? previous.sourceId,
+            streamId: variant.streamId,
+            currentVariant: variant,
+            qualityGroup: this.qualityGroup,
+            itemType: 'channel',
+            cloudPlaybackSessionId: playback.sessionId || null,
+            cloudSourceId: playback.cloudSourceId || previous.cloudSourceId || null,
+            _norvaSelection: previous._norvaSelection || null
+        });
+    }
+
+    /** Switch to another variant: release first, then resolve and reload. */
+    async switchVariant(variant, options = {}) {
         if (!variant || !this.currentChannel) return;
         this.qualityMenu?.classList.add('hidden');
         if (this.currentVariant && String(variant.streamId) === String(this.currentVariant.streamId) && this.video.readyState >= 3) return;
+        if (!options.automatic) {
+            this._variantFallbackAttempts = 0;
+            this._triedVariants.clear();
+        }
         this.currentVariant = variant;
-        this.populateQualityMenu();
-        this.updateQualityBadge();
+        let resolvedSessionId = null;
         try {
-            const previousChannel = this.currentChannel;
-            await this.stop();
-            if (previousChannel) this.currentChannel = previousChannel;
+            // Single-slot invariant: the old transport/session must be fully gone
+            // before resolving the sibling. prepareLiveSwitch waits for the cloud
+            // session expiry while retaining the loading surface.
+            await this.prepareLiveSwitch();
 
+            const raw = variant.channel || variant;
             const providerContainer =
-                variant.container_extension ||
-                variant.containerExtension ||
-                variant.container ||
+                raw.container_extension ||
+                raw.containerExtension ||
+                raw.container ||
                 'ts';
             // Match ChannelList: H.264 variant → remux, H.265/HEVC variant → transcode.
             const gatewayMode = (typeof MediaUtils !== 'undefined' && MediaUtils.liveGatewayMode)
-                ? MediaUtils.liveGatewayMode(variant)
+                ? MediaUtils.liveGatewayMode(raw)
                 : 'transcode';
             const res = await window.API.proxy.xtream.getStreamUrl(variant.sourceId, variant.streamId, 'live', providerContainer, { gatewayMode });
             const url = res && (res.url || res.streamUrl);
             if (!url) throw new Error('no url');
-            const ch = Object.assign({}, this.currentChannel, {
-                streamId: variant.streamId,
-                currentVariant: variant,
-                qualityGroup: this.qualityGroup,
-                cloudPlaybackSessionId: res.sessionId || null
-            });
+            resolvedSessionId = res.sessionId || null;
+            const ch = this.buildVariantChannel(variant, res);
             await this.play(ch, url);
             const switchSeq = this._variantSwitchSeq;
             if (this.shouldAutoFallbackVariants()) this._armVariantFallback(variant, switchSeq);
         } catch (e) {
             console.warn('[Quality] switch failed:', e.message);
-            this._tryFallback(variant, 'resolve failed');
+            if (resolvedSessionId) {
+                try { await window.NorvaCloud?.playback?.expireSession?.(resolvedSessionId); } catch (_) { }
+            }
+            if (!this._tryFallback(variant, e?.message || 'resolve failed')) {
+                const selectSeq = this.currentChannel?._norvaSelection?.selectSeq;
+                if (selectSeq != null) window.app?.channelList?.failPendingPlaybackSelection?.(selectSeq);
+                this.showError('No working stream variant is currently available for this channel.<br>Try again later or choose another channel.');
+                this.handlePlaybackError(e?.message || 'Variant resolve failed');
+            }
         }
     }
 
@@ -2674,21 +2766,34 @@ class VideoPlayer {
             if (switchSeq !== this._variantSwitchSeq) return;
             if (!this.currentVariant || String(this.currentVariant.streamId) !== String(variant.streamId)) return;
             const progressed = this.video.currentTime > this._vfStartCt + 0.3 && this.video.readyState >= 3;
-            if (!progressed) this._tryFallback(variant, 'no start in time', switchSeq);
+            if (!progressed && !this._tryFallback(variant, 'no start in time', switchSeq)) {
+                const selectSeq = this.currentChannel?._norvaSelection?.selectSeq;
+                if (selectSeq != null) window.app?.channelList?.failPendingPlaybackSelection?.(selectSeq);
+                this.showError('No working stream variant is currently available for this channel.<br>Try again later or choose another channel.');
+                this.handlePlaybackError('No live variant produced a playable frame');
+            }
         }, this.isGatewayPlaybackUrl() ? 18000 : 9000);
     }
 
     _tryFallback(failed, reason, switchSeq = this._variantSwitchSeq) {
         if (!this.shouldAutoFallbackVariants()) return false;
+        if (!this.canAutoFallbackVariantForReason(reason)) return false;
         if (switchSeq !== this._variantSwitchSeq) return false;
         if (!this.currentVariant || String(this.currentVariant.streamId) !== String(failed.streamId)) return false;
         if (!this.qualityGroup || !window.ChannelGrouping) return false;
+        try { window.ChannelGrouping.recordVariantOutcome?.(failed, 'failure', { reason }); } catch (_) { }
+        const maxFallbacks = 2; // initial variant + at most two siblings
+        if (this._variantFallbackAttempts >= maxFallbacks) {
+            console.warn(`[Quality] bounded fallback exhausted (${maxFallbacks + 1} total variants)`);
+            return false;
+        }
         this._triedVariants.add(String(failed.streamId));
         const order = window.ChannelGrouping.fallbackOrder(this.qualityGroup.variants, failed.streamId)
             .filter(v => !this._triedVariants.has(String(v.streamId)));
         if (order.length) {
+            this._variantFallbackAttempts += 1;
             console.warn('[Quality] fallback (' + reason + ') -> ' + order[0].label);
-            this.switchVariant(order[0]);
+            this.switchVariant(order[0], { automatic: true, reason });
             return true;
         } else {
             console.warn('[Quality] no healthy fallback left for ' + (this.qualityGroup.name || ''));
@@ -2698,6 +2803,7 @@ class VideoPlayer {
 
     tryCurrentVariantFallback(reason) {
         if (!this.shouldAutoFallbackVariants()) return false;
+        if (!this.canAutoFallbackVariantForReason(reason)) return false;
         if (!this.currentVariant || !this.qualityGroup) return false;
         return this._tryFallback(this.currentVariant, reason || 'playback failed');
     }
@@ -2960,7 +3066,7 @@ class VideoPlayer {
         // the old and new sessions briefly overlap = two provider connections =
         // more slot contention. The latency is dominated by the provider's
         // variable slot-release time regardless, so sequential is the safe choice.
-        try { await this.stopCloudPlaybackSessions(); } catch (_) {}
+        await this.stopCloudPlaybackSessions({ strict: true });
     }
 
     /**
