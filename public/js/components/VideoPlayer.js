@@ -1395,6 +1395,33 @@ class VideoPlayer {
         this.activeCloudPlaybackSessionIds.add(id);
     }
 
+    async expireDetachedCloudPlaybackSession(sessionId) {
+        const id = sessionId ? String(sessionId).trim() : '';
+        if (!id) return { released: true };
+
+        const expireSession = window.NorvaCloud?.playback?.expireSession;
+        if (typeof expireSession !== 'function') {
+            this.activeCloudPlaybackSessionIds ??= new Set();
+            this.activeCloudPlaybackSessionIds.add(id);
+            if (!this.currentCloudPlaybackSessionId) this.currentCloudPlaybackSessionId = id;
+            return { released: false };
+        }
+
+        try {
+            await expireSession(id);
+            this.activeCloudPlaybackSessionIds?.delete?.(id);
+            if (this.currentCloudPlaybackSessionId === id) this.currentCloudPlaybackSessionId = null;
+            return { released: true };
+        } catch (err) {
+            // Retain failed releases so the next strict teardown retries them.
+            this.activeCloudPlaybackSessionIds ??= new Set();
+            this.activeCloudPlaybackSessionIds.add(id);
+            if (!this.currentCloudPlaybackSessionId) this.currentCloudPlaybackSessionId = id;
+            console.error(err?.message || 'Failed to expire detached cloud playback session');
+            return { released: false };
+        }
+    }
+
     async stopCloudPlaybackSessions(options = {}) {
         const sessionIds = new Set(this.activeCloudPlaybackSessionIds);
         if (this.currentCloudPlaybackSessionId) {
@@ -1436,12 +1463,27 @@ class VideoPlayer {
     /**
      * Play a channel
      */
-    async play(channel, streamUrl) {
+    async play(channel, streamUrl, playback = null) {
         const requestSeq = ++this._playRequestSeq;
+        const resolvedStreamUrl = [streamUrl, playback?.url, playback?.streamUrl]
+            .find((candidate) => typeof candidate === 'string' && candidate.trim())
+            ?.trim() || '';
+        const detachedSessionId = channel?.cloudPlaybackSessionId
+            || channel?.playbackSessionId
+            || playback?.sessionId
+            || playback?.cloudPlaybackSessionId
+            || null;
         const previous = this._playQueue || Promise.resolve();
         const task = previous.catch(() => { }).then(async () => {
-            if (this.isStalePlayRequest(requestSeq)) return;
-            return this._playInternal(channel, streamUrl, requestSeq);
+            if (this.isStalePlayRequest(requestSeq)) {
+                await this.expireDetachedCloudPlaybackSession(detachedSessionId);
+                return;
+            }
+            if (!resolvedStreamUrl) {
+                await this.expireDetachedCloudPlaybackSession(detachedSessionId);
+                throw new Error('Live playback URL unavailable');
+            }
+            return this._playInternal(channel, resolvedStreamUrl, requestSeq);
         });
         this._playQueue = task.catch(() => { });
         return task;
@@ -1478,13 +1520,19 @@ class VideoPlayer {
         try {
             // Stop any WatchPage playback (movies/series) before starting Live TV
             await window.app?.pages?.watch?.stop?.();
-            if (this.isStalePlayRequest(requestSeq)) return;
+            if (this.isStalePlayRequest(requestSeq)) {
+                await this.expireDetachedCloudPlaybackSession(cloudPlaybackSessionId);
+                return;
+            }
 
             // Stop current playback
             await this.stop({
                 preserveVariantFallback: channel?._norvaVariantFallbackOperationSeq === this._variantFallbackOperationSeq
             });
-            if (this.isStalePlayRequest(requestSeq)) return;
+            if (this.isStalePlayRequest(requestSeq)) {
+                await this.expireDetachedCloudPlaybackSession(cloudPlaybackSessionId);
+                return;
+            }
             if (cloudPlaybackSessionId) {
                 this.registerCloudPlaybackSession(cloudPlaybackSessionId);
             }
