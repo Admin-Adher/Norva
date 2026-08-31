@@ -23,8 +23,10 @@ test('genre-items keeps title and returned versions scoped to the selected sourc
   assert.match(src, /p_source_id: options\.sourceId/);
   assert.match(src, /audio: options\.audioIso/);
   assert.match(src, /subtitle: options\.subtitleIso/);
-  assert.match(src, /if \(sourceId && needsSourceLanguageEvidence\)/);
-  assert.match(src, /visibleTitlePageBySourceLanguages\(\{/);
+  assert.match(src, /const needsLanguagePage = Boolean\(/);
+  assert.match(src, /!sourceId && hasStrictLanguageFilter && !langSort/);
+  assert.match(src, /if \(needsLanguagePage\)/);
+  assert.match(src, /visibleTitlePageByLanguages\(\{/);
   assert.match(src, /listVariantsByTitleIds\([\s\S]*audioIso,[\s\S]*sourceId/);
   assert.doesNotMatch(src, /sourceLanguageTitleIds/);
   assert.doesNotMatch(src, /cloud_title_variants!inner/);
@@ -45,6 +47,20 @@ test('source-language pagination stays bounded and service-role only', () => {
   assert.match(migration, /offset \(select parameter\.page_offset/);
   assert.match(migration, /'titleIds'/);
   assert.match(migration, /'count'/);
+  assert.match(migration, /revoke all on function[\s\S]*from public, anon, authenticated/);
+  assert.match(migration, /grant execute on function[\s\S]*to service_role/);
+});
+
+test('all-source language pagination uses the visible variant union', () => {
+  const migration = read('supabase/migrations/20260831184600_catalog_language_filter_all_sources_v1.sql');
+  assert.match(migration, /create or replace function public\.cloud_catalog_visible_title_ids_by_source_languages/);
+  assert.match(migration, /p_source_id is null or variant\.source_id = p_source_id/);
+  assert.match(migration, /p_source_id is null[\s\S]*norva_source_catalog_visible/);
+  assert.match(migration, /cloud_title_file_language_observations/);
+  assert.match(migration, /observation\.audio_observed/);
+  assert.match(migration, /observation\.subtitle_observed/);
+  assert.match(migration, /security invoker/);
+  assert.match(migration, /set search_path = ''/);
   assert.match(migration, /revoke all on function[\s\S]*from public, anon, authenticated/);
   assert.match(migration, /grant execute on function[\s\S]*to service_role/);
 });

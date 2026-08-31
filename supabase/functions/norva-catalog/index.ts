@@ -1825,10 +1825,10 @@ function titleSubtitleLanguages(title: JsonRecord): string[] {
   const raw = (title as { file_subtitle_languages?: unknown }).file_subtitle_languages;
   return canonicalFileLanguages(raw);
 }
-async function visibleTitlePageBySourceLanguages(options: {
+async function visibleTitlePageByLanguages(options: {
   userId: string;
   itemType: "movie" | "series";
-  sourceId: string;
+  sourceId: string | null;
   audioIso: string | null;
   subtitleIso: string | null;
   buckets: string[];
@@ -1867,7 +1867,7 @@ async function visibleTitlePageBySourceLanguages(options: {
       offset: options.offset,
     },
   });
-  if (error) throwDb(error, "Unable to page visible source languages");
+  if (error) throwDb(error, "Unable to page visible catalogue languages");
   const payload = recordOrEmpty(data);
   const rawIds = Array.isArray(payload.titleIds)
     ? payload.titleIds
@@ -1984,8 +1984,9 @@ async function listGenreItems(req: Request, url: URL, userId: string) {
   const search = (url.searchParams.get("q") || "").trim();
 
   const hasStrictLanguageFilter = Boolean(audioIso || subIso);
-  const needsSourceLanguageEvidence = Boolean(
-    sourceId && (hasStrictLanguageFilter || prefAudioIso || prefSubIso),
+  const needsLanguagePage = Boolean(
+    (sourceId && (hasStrictLanguageFilter || prefAudioIso || prefSubIso)) ||
+      (!sourceId && hasStrictLanguageFilter && !langSort),
   );
 
   const hidden = await getHiddenGenres(req, userId);
@@ -2025,8 +2026,8 @@ async function listGenreItems(req: Request, url: URL, userId: string) {
     // back into PostgREST batches. Large catalogues exceeded the isolate wall
     // clock before the first page could render. Keep evidence, filtering,
     // ordering and count in one bounded SQL page, then hydrate only those ids.
-    if (sourceId && needsSourceLanguageEvidence) {
-      const page = await visibleTitlePageBySourceLanguages({
+    if (needsLanguagePage) {
+      const page = await visibleTitlePageByLanguages({
         userId,
         itemType,
         sourceId,
