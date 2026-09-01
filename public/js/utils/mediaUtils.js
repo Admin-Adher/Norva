@@ -473,6 +473,32 @@ const MediaUtils = (() => {
         return out || raw;
     }
 
+    // Shared display normalizer for provider episode labels. It deliberately returns
+    // only presentation copy: callers keep the untouched provider title/id for playback.
+    // A label ending at its SxxExx / 1x01 coordinate is a storage slug, not an editorial
+    // title, so it becomes the semantic fallback. When a real suffix follows the
+    // coordinate, preserve it after removing scene-release metadata.
+    function cleanEpisodeReleaseName(value, episodeNumber = '') {
+        const raw = String(value || '').trim();
+        const initial = cleanReleaseName(raw) || raw;
+        const coordinate = initial.match(/(?:^|[\s._-])S0*(\d{1,3})[\s._-]*E0*(\d{1,4})(?=$|[\s._-])/i)
+            || initial.match(/(?:^|[\s._-])(\d{1,3})x0*(\d{1,4})(?=$|[\s._-])/i);
+        const fallbackNumber = episodeNumber || coordinate?.[2] || '';
+        const fallback = `Episode ${fallbackNumber}`.trim();
+        if (!initial) return fallback;
+        if (!coordinate) return initial;
+
+        let suffix = initial.slice((coordinate.index || 0) + coordinate[0].length)
+            .replace(/^[\s._\-–—:|]+/, '')
+            .trim();
+        // Only coordinate-bearing scene slugs take this path. Human titles such as
+        // "Spider-Man" therefore keep their intentional punctuation.
+        suffix = suffix.replace(/[._-]+/g, ' ').replace(/\s+/g, ' ').trim();
+        suffix = cleanReleaseName(suffix) || suffix;
+        const metadataOnly = /^(?:(?:nf|us|uk|ar|latam|latino|fr|en|eng|english|french|truefrench|vostfr|vost|vff|vfq|vf|vo|multi|subfrench|webrip|webdl|web|hdrip|brrip|bdrip|dvdrip|hdtv|hdlight|bluray|x264|x265|h264|h265|hevc|avc|aac|ac3|eac3|dts|10bit|8bit|2160p|1080p|720p|480p)\s*)+$/i.test(suffix);
+        return suffix && !metadataOnly ? suffix : fallback;
+    }
+
     function parseVersionInfo(name) {
         const raw = String(name || '');
         let quality = null, qualityScore = 0;
@@ -1929,7 +1955,7 @@ const MediaUtils = (() => {
 
     return {
         skeletonCards,
-        stripDiacritics, extractYear, normalizeTitle, computeDedupKey, cleanReleaseName,
+        stripDiacritics, extractYear, normalizeTitle, computeDedupKey, cleanReleaseName, cleanEpisodeReleaseName,
         parseVersionInfo, deriveTrackIntel, scanLanguageMarkers, parseLeadingRegionTag, searchableText, groupItems, pickRepresentative,
         normalizeLanguagePreference, normalizeContentPreferences, migrateLegacyLanguagePreference,
         resolveContentLanguage,

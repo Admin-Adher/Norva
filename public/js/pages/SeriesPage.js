@@ -2786,12 +2786,14 @@ class SeriesPage {
     }
 
     cleanEpisodeTitle(ep, seasonNum) {
-        let title = String(ep?.title || ep?.name || '').trim();
         const episodeNum = ep?.episode_num || ep?.episodeNumber || '';
-        if (!title) return `Episode ${episodeNum || ''}`.trim();
+        const fallbackTitle = `Episode ${episodeNum || ''}`.trim();
+        let title = String(ep?.title || ep?.name || '').trim();
+        if (!title) return fallbackTitle;
         // Scene-release episode names ("[ Torrent911.my ] Station.19.S07E08.FRENCH.WEBRip.x264")
-        // come straight from the panel's series-info payload — display-clean them first.
-        title = MediaUtils.cleanReleaseName(title) || title;
+        // come straight from the panel's series-info payload. The shared normalizer
+        // removes their provider coordinates/metadata without touching playback data.
+        title = MediaUtils.cleanEpisodeReleaseName(title, episodeNum) || fallbackTitle;
 
         // The "<series name> - " strip patterns depend only on currentSeries, not the
         // episode, so compile them ONCE per fiche (memoized) rather than recompiling the
@@ -2802,7 +2804,7 @@ class SeriesPage {
             .replace(/^S\d{1,2}E\d{1,3}\s*[-:–—|]+\s*/i, '')
             .trim();
 
-        return title || `Episode ${episodeNum || ''}`.trim();
+        return title || fallbackTitle;
     }
 
     // Compile the leading "<series name> - " strip patterns once per series and memoize
@@ -3289,13 +3291,18 @@ class SeriesPage {
             const marker = inProgress
                 ? '<span class="episode-watched inprogress" title="In progress">◐</span>' : '';
             const cleanTitle = this.cleanEpisodeTitle(ep, seasonNum);
+            const episodeNum = ep.episode_num || ep.episodeNumber || '';
+            const accessibleTitle = [
+                `Season ${seasonNum}, episode ${episodeNum}`,
+                /^Episode\s*\d*$/i.test(cleanTitle) ? '' : cleanTitle
+            ].filter(Boolean).join(': ');
             const duration = this.formatEpisodeDuration(ep.duration);
             const description = ep.plot || ep.info?.plot || ep.overview || '';
             const thumb = this.getEpisodeImage(ep, series);
             const isUpNext = featured && String(ep.id) === String(featured.episode.id);
             return `
-                            <div class="episode-item ${isUpNext ? 'episode-up-next' : ''}" role="button" tabindex="0" aria-label="${MediaUtils.escapeHtml(cleanTitle)}" data-episode-id="${MediaUtils.escapeHtml(ep.id)}" data-source-id="${series.sourceId}" data-container="${MediaUtils.escapeHtml(ep.container_extension || 'mp4')}" data-season="${MediaUtils.escapeHtml(seasonNum)}" data-episode-num="${MediaUtils.escapeHtml(ep.episode_num || '')}">
-                                <span class="episode-number">${MediaUtils.escapeHtml(ep.episode_num || '')}</span>
+                            <div class="episode-item ${isUpNext ? 'episode-up-next' : ''}" role="button" tabindex="0" aria-label="${MediaUtils.escapeHtml(accessibleTitle)}" data-episode-id="${MediaUtils.escapeHtml(ep.id)}" data-source-id="${series.sourceId}" data-container="${MediaUtils.escapeHtml(ep.container_extension || 'mp4')}" data-season="${MediaUtils.escapeHtml(seasonNum)}" data-episode-num="${MediaUtils.escapeHtml(episodeNum)}">
+                                <span class="episode-number">${MediaUtils.escapeHtml(episodeNum)}</span>
                                 <div class="episode-thumb">
                                     <img src="${MediaUtils.escapeHtml(thumb)}" alt="" onerror="this.onerror=null;this.srcset='';this.src='/img/norva-media-placeholder.png'" loading="lazy" decoding="async">
                                     <span class="episode-play">${Icons.play}</span>
@@ -3361,7 +3368,10 @@ class SeriesPage {
                     const cur = (titleEl?.textContent || '').trim();
                     if (titleEl && (/^Episode\s*\d*$/i.test(cur) || !cur)) {
                         titleEl.textContent = te.name;
-                        row.setAttribute('aria-label', te.name);
+                        row.setAttribute(
+                            'aria-label',
+                            `Season ${seasonNum}, episode ${row.dataset.episodeNum}: ${te.name}`
+                        );
                     }
                 }
                 if (te.air_date && !row.querySelector('.episode-airdate')) {

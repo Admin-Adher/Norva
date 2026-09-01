@@ -787,6 +787,11 @@
     const ENTITLEMENTS_TTL_MS = 30 * 1000;
     const PROFILES_TTL_MS = 60 * 1000;
     const PROFILE_TTL_MS = 60 * 1000;
+    // Episode metadata is editorial and slow-changing. Keep one response per
+    // (TMDB series, season, language) for the tab session, and let cachedGet join
+    // concurrent fiche opens onto the same in-flight request. The catalog Edge
+    // adds a 6h isolate tier and a shared 14-day Postgres tier underneath this.
+    const TMDB_EPISODES_TTL_MS = 6 * 60 * 60 * 1000;
     function invalidateSourcesCache() { invalidateCache('sources'); }
     function listSourcesCached() { return cachedGet('sources', SOURCES_TTL_MS, () => request('GET', '/sources')); }
 
@@ -899,6 +904,18 @@
             }
             throw error;
         }
+    }
+
+    function tmdbEpisodesRequest(params = {}) {
+        const tmdbId = String(params?.tmdbId || '').trim();
+        const season = String(params?.season ?? '').trim();
+        const lang = String(params?.lang || resolveLang() || 'en').slice(0, 2).toLowerCase();
+        const cacheKey = `tmdb-episodes:${tmdbId}:${season}:${lang}`;
+        return cachedGet(
+            cacheKey,
+            TMDB_EPISODES_TTL_MS,
+            () => catalogRequest('/tmdb-episodes', params)
+        );
     }
 
     async function catalogMutate(path, body, options = {}) {
@@ -4613,10 +4630,11 @@
 
         media: {
             // Live TMDB extras (videos/credits) for the fiches — proxied by the
-            // edge so the TMDB key never reaches the browser; cached CDN-side.
+            // edge so the TMDB key never reaches the browser.
             tmdbMeta: (params = {}) => catalogRequest('/tmdb-meta', params),
-            // Per-episode TMDB data (stills / localized names / air dates) for one season.
-            tmdbEpisodes: (params = {}) => catalogRequest('/tmdb-episodes', params),
+            // Per-season metadata is joined/cached in this tab, then read through
+            // the Edge's shared persistent cache before any live TMDB request.
+            tmdbEpisodes: (params = {}) => tmdbEpisodesRequest(params),
             // Crowd-learned skip-intro markers, keyed on tmdbId+season.
             introMarkers: (params = {}) => catalogRequest('/intro-markers', params),
             introSignal: (body = {}) => catalogMutate('/intro-signal', body)
