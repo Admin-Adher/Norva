@@ -177,6 +177,7 @@ function pumpHarness(overrides = {}) {
             parseProviderFileSize,
             probeProviderFileSize,
             ensureBoundedMkvInputPump,
+            prefetchRetainedBoundedMkvHeader,
             parseBoundedProviderContentRange,
             boundedVodResponseValidator,
             writeVodInputChunk,
@@ -343,6 +344,7 @@ function startRetryHarness(overrides = {}) {
         removeSessionDir: async () => {},
         fsp: { mkdir: async () => {} },
         isInsufficientInputProbeFailure,
+        isVaapiHardwareDecodeFailure: () => false,
         applyFiniteMkvSeekBrokerFailure: () => false,
         console: { warn() {} },
         ...overrides,
@@ -622,6 +624,64 @@ test('cold offset-zero MKV accepts one exact HTTP 200 body without losing pre-re
     assert.equal(session.fileSizeBytes, fixture.length);
     assert.equal(result.bytesForwarded, fixture.length);
     assert.deepEqual(writable.bytes(), fixture, 'the bytes consumed for EBML validation are replayed exactly once');
+    assert.equal(tracker.maxActive, 1);
+    assert.equal(tracker.active, 0);
+});
+
+test('cold MKV preloads one bounded metadata prefix and replays every byte on the same provider socket', async () => {
+    const prefixBytes = 300_000;
+    const fixture = mkvFixture(500_000);
+    const tracker = makeTracker();
+    const headerByteCache = new Map();
+    let fetches = 0;
+    const h = pumpHarness({
+        BOUNDED_MKV_HEADER_PARSE: true,
+        INBAND_HEADER_BYTES: prefixBytes,
+        INBAND_HEADER_CACHE_MAX: 2,
+        headerByteCache,
+        fetch: async (_url, options) => {
+            fetches += 1;
+            tracker.calls.push(options.headers);
+            return trackedResponse(tracker, {
+                status: 206,
+                chunks: [
+                    fixture.subarray(0, 12),
+                    fixture.subarray(12, 100_000),
+                    fixture.subarray(100_000, prefixBytes),
+                    fixture.subarray(prefixBytes),
+                ],
+                headers: {
+                    'Content-Range': `bytes 0-${fixture.length - 1}/${fixture.length}`,
+                    'Content-Length': String(fixture.length),
+                    ETag: '"cold-metadata-v1"',
+                },
+            });
+        },
+    });
+    const session = mkvSession(fixture.length);
+
+    await h.ensureBoundedMkvInputPump(session);
+
+    assert.equal(fetches, 1, 'metadata prefetch must reuse the retained playback GET');
+    assert.equal(tracker.active, 1, 'the retained provider body remains the sole active socket');
+    assert.equal(session.startupTimings.providerColdHeaderPrefetch, true);
+    assert.equal(session.startupTimings.providerColdHeaderPrefetchBytes, prefixBytes);
+    const captured = headerByteCache.get(session.sourceUrl);
+    assert.equal(captured?.len, prefixBytes);
+    assert.equal(captured?.done, true);
+    assert.equal(Buffer.concat(captured?.chunks || []).equals(fixture.subarray(0, prefixBytes)), true);
+
+    const writable = new CapturingWritable();
+    const result = await h.runBoundedMkvInputPump(
+        session,
+        writable,
+        new AbortController().signal,
+        null,
+    );
+
+    assert.equal(fetches, 1, 'FFmpeg replay must not open a second provider connection');
+    assert.equal(result.bytesForwarded, fixture.length);
+    assert.deepEqual(writable.bytes(), fixture, 'prefetched bytes are replayed exactly once and in order');
     assert.equal(tracker.maxActive, 1);
     assert.equal(tracker.active, 0);
 });
@@ -2376,10 +2436,19 @@ test('the ready finite session parses, caches, merges and returns a strict local
 
     const source = readGateway();
     const route = sourceBetween(source, "app.post('/sessions'", "app.delete('/sessions/:id'");
-    const enrichAt = route.lastIndexOf('await enrichSessionCodecProfileFromBoundedHeader(');
+    const ensureAt = route.indexOf('await ensureBoundedMkvInputPump(');
+    const enrichAt = route.indexOf('await enrichSessionCodecProfileFromBoundedHeader(', ensureAt);
+    const freezeAt = route.indexOf('freezeMultiAudioHlsTopology(session);', ensureAt);
+    const startAt = route.indexOf('const started = await startSessionWithProviderRetry(', ensureAt);
     assert.match(route, /await enrichSessionCodecProfileFromBoundedHeader\(\s*session,\s*sessionRequestAbortController\.signal,?\s*\)/);
-    assert.ok(enrichAt > route.indexOf('const started = await startSessionWithProviderRetry('));
-    assert.ok(enrichAt < route.lastIndexOf('res.status(201).json(gatewayCreatedSessionPayload(req, session))'));
+    assert.ok(ensureAt >= 0 && enrichAt > ensureAt, 'the bounded prefix must exist before local probing');
+    assert.ok(freezeAt > enrichAt, 'the exact local profile must exist before topology freeze');
+    assert.ok(startAt > freezeAt, 'FFmpeg must start only after the rendition graph is immutable');
+    assert.equal(
+        route.indexOf('await enrichSessionCodecProfileFromBoundedHeader(', enrichAt + 1),
+        -1,
+        'cold metadata enrichment must not be deferred until after FFmpeg startup',
+    );
 });
 
 test('cold 0:a:0 fallback reports the first actual audio index instead of the requested later index', async () => {
@@ -2934,6 +3003,7 @@ test('finite MKV resume spawns FFmpeg against only the loopback URL with pre-inp
         videoEncoderInputArgs: () => [],
         videoEncoderOutputArgs: () => ['-c:v', 'h264'],
         VIDEO_ENCODER_CONFIG: { backend: 'software' },
+        vaapiHardwareDecodeCodecForSession: () => null,
         isFiniteMkvVodSession,
         usesFiniteMkvSeekBroker,
         usesSourceTimestampedCopySeek: () => false,

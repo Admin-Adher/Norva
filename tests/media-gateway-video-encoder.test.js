@@ -30,6 +30,7 @@ test('software encoding remains the default and preserves the libx264 graph', ()
         protocol: 1,
         backend: 'software',
         hardware: false,
+        hardwareDecode: false,
         device: null,
         preflight: 'not-required',
     });
@@ -78,6 +79,46 @@ test('VAAPI graph uploads NV12, requests HLS-boundary IDRs and never affects cop
     assert.equal(args.includes('libx264'), false);
 });
 
+test('VAAPI hardware decode is explicit, exact-profile scoped and keeps a software-decode graph available', () => {
+    const config = resolveVideoEncoderConfig({
+        MEDIA_GATEWAY_VIDEO_ENCODER: 'vaapi',
+        MEDIA_GATEWAY_VAAPI_DECODE: 'true',
+    }, characterDeviceFileSystem());
+    assert.equal(config.hardwareDecode, true);
+    assert.deepEqual(videoEncoderInputArgs(config, false, { hardwareDecode: true }), []);
+    const input = videoEncoderInputArgs(config, true, { hardwareDecode: true });
+    assert.equal(input[input.indexOf('-hwaccel') + 1], 'vaapi');
+    assert.equal(input[input.indexOf('-hwaccel_device') + 1], '/dev/dri/renderD128');
+    assert.equal(input[input.indexOf('-hwaccel_output_format') + 1], 'vaapi');
+    const hardwareOutput = videoEncoderOutputArgs(config, { hardwareDecode: true, targetSeconds: 2 });
+    assert.equal(hardwareOutput[hardwareOutput.indexOf('-vf') + 1], 'scale_vaapi=format=nv12');
+    const softwareOutput = videoEncoderOutputArgs(config, { hardwareDecode: false, targetSeconds: 2 });
+    assert.equal(softwareOutput[softwareOutput.indexOf('-vf') + 1], 'format=nv12,hwupload');
+    assert.match(publicVideoEncoderStatus(config, { ready: true, status: 'vaapi-ready' }).decode, /software-fallback/);
+});
+
+test('Gateway admits hardware decode only from exact H264 or HEVC metadata and falls back once before demux retry', () => {
+    const gateway = fs.readFileSync(path.join(__dirname, '..', 'services/media-gateway/src/index.js'), 'utf8')
+        .replace(/\r\n?/g, '\n');
+    const policyStart = gateway.indexOf('function vaapiHardwareDecodeCodecForSession(');
+    const policyEnd = gateway.indexOf('\nfunction isVaapiHardwareDecodeFailure(', policyStart);
+    const policy = gateway.slice(policyStart, policyEnd);
+    assert.match(policy, /VIDEO_ENCODER_CONFIG\.hardwareDecode !== true/);
+    assert.match(policy, /!hasCompleteMkvPlaybackProfile\(session\?\.codecProfile\)/);
+    assert.match(policy, /session\?\.forceSoftwareVideoDecode === true/);
+    assert.match(policy, /codec\.includes\('h264'\).*codec\.includes\('avc'\)/s);
+    assert.match(policy, /codec\.includes\('hevc'\).*codec\.includes\('h265'\)/s);
+
+    const retryStart = gateway.indexOf('async function startSessionWithProviderRetry(');
+    const retryEnd = gateway.indexOf('\nfunction normalizeFileSizeBytes(', retryStart);
+    const retry = gateway.slice(retryStart, retryEnd);
+    const hardwareFallbackAt = retry.indexOf('isVaapiHardwareDecodeFailure(session)');
+    const probeFallbackAt = retry.indexOf('isInsufficientInputProbeFailure(session)');
+    assert.ok(hardwareFallbackAt >= 0 && probeFallbackAt > hardwareFallbackAt);
+    assert.match(retry, /session\.forceSoftwareVideoDecode = true/);
+    assert.match(retry, /const maxTotalAttempts = 3/);
+});
+
 test('invalid or unavailable VAAPI configuration fails closed without software fallback', () => {
     assert.throws(
         () => resolveVideoEncoderConfig({ MEDIA_GATEWAY_VIDEO_ENCODER: 'cuda' }),
@@ -95,6 +136,13 @@ test('invalid or unavailable VAAPI configuration fails closed without software f
             statSync() { throw new Error('missing'); },
         }),
         { code: 'VIDEO_ENCODER_VAAPI_DEVICE_MISSING' },
+    );
+    assert.throws(
+        () => resolveVideoEncoderConfig({
+            MEDIA_GATEWAY_VIDEO_ENCODER: 'vaapi',
+            MEDIA_GATEWAY_VAAPI_DECODE: 'sometimes',
+        }),
+        { code: 'VIDEO_ENCODER_VAAPI_DECODE_INVALID' },
     );
     const config = resolveVideoEncoderConfig({ MEDIA_GATEWAY_VIDEO_ENCODER: 'vaapi' }, characterDeviceFileSystem());
     assert.throws(
@@ -161,6 +209,7 @@ test('shared-host VAAPI compose is private, single-instance and resource bounded
     assert.deepEqual(gateway.cap_drop, ['ALL']);
     assert.equal(gateway.privileged, undefined);
     assert.equal(gateway.environment.MEDIA_GATEWAY_VIDEO_ENCODER, 'vaapi');
+    assert.equal(gateway.environment.MEDIA_GATEWAY_VAAPI_DECODE, '${MEDIA_GATEWAY_VAAPI_DECODE:-true}');
     assert.equal(gateway.environment.MAX_ACTIVE_VIDEO_ENCODER_SESSIONS, '${MAX_ACTIVE_VIDEO_ENCODER_SESSIONS:-4}');
     assert.equal(gateway.environment.MKV_CACHE_COORDINATION_MODE, 'local');
     assert.equal(gateway.environment.MKV_CACHE_SINGLE_INSTANCE_ATTESTED, 'true');

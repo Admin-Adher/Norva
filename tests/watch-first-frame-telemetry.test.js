@@ -130,6 +130,63 @@ test('requestVideoFrameCallback is authoritative and first_frame is emitted exac
   assert.equal(events[0].extra.metadata.frameEvidence, 'video-frame-callback');
 });
 
+test('advancing playback recovers when an armed video-frame callback is lost during HLS re-attachment', () => {
+  const video = {
+    readyState: 3,
+    paused: false,
+    seeking: false,
+    ended: false,
+    error: null,
+    src: 'blob:https://norva.tv/recovered-media-source',
+    currentSrc: 'blob:https://norva.tv/recovered-media-source',
+    currentTime: 15,
+    duration: 7200,
+    videoWidth: 1920,
+    videoHeight: 1080,
+  };
+  const { page, events } = makeTelemetryPage(video);
+  let hiddenErrors = 0;
+  page._firstFrameObserverAvailable = true;
+  page._firstFrameObserverAttemptId = 4;
+  page.hidePlaybackError = () => { hiddenErrors += 1; };
+
+  page.markPlaybackUsable({ allowPlaybackProgressFallback: true });
+  assert.equal(events.length, 0, 'one post-seek timeupdate only establishes the media baseline');
+  video.currentTime = 15.25;
+  page.markPlaybackUsable({ allowPlaybackProgressFallback: true });
+
+  assert.equal(events.filter(({ type }) => type === 'first_frame').length, 1);
+  assert.equal(events[0].extra.metadata.frameEvidence, 'playback-progress-fallback');
+  assert.equal(hiddenErrors, 1, 'real playback progress retires a stale failure banner');
+});
+
+test('autoplay policy rejection keeps the prepared media and exposes an explicit Play action without an error', () => {
+  const WatchPage = loadWatchPage();
+  const page = Object.create(WatchPage.prototype);
+  const classes = new Set();
+  let hiddenErrors = 0;
+  let hiddenLoading = 0;
+  let overlayShown = 0;
+  Object.assign(page, {
+    centerPlayBtn: {
+      classList: {
+        add(value) { classes.add(value); },
+      },
+    },
+    overlayTimeout: null,
+    hidePlaybackError() { hiddenErrors += 1; },
+    hideLoading() { hiddenLoading += 1; },
+    showOverlay() { overlayShown += 1; },
+  });
+
+  page.handleAutoplayError({ name: 'NotAllowedError' });
+
+  assert.equal(hiddenErrors, 1);
+  assert.equal(hiddenLoading, 1);
+  assert.equal(classes.has('show'), true);
+  assert.equal(overlayShown, 1);
+});
+
 test('gateway HLS telemetry keeps Gateway authority when hls.js exposes a blob media source', () => {
   const WatchPage = loadWatchPage();
   const page = Object.create(WatchPage.prototype);

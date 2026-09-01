@@ -9036,16 +9036,20 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
         // topology freezing or FFmpeg setup throws.
         createdSession = session;
 
-        if (finiteMkvPlayback && normalizedSeekOffset > 0) {
-            // The resumed lane has no long-lived byte pump before FFmpeg starts.
-            // Parse the bounded prefix drained by its identity preflight now so
-            // duration and the exact audio/subtitle topology are available before
-            // the rendition graph is frozen and in the initial 201 response.
+        if (finiteMkvPlayback) {
+            // Cold and resumed lanes now both own a bounded local prefix before
+            // FFmpeg starts. Parse it before topology freeze so the initial 201
+            // response and the HLS master expose the exact audio/subtitle graph.
+            // Cold startup replays these same bytes into FFmpeg from the retained
+            // provider body; no second provider connection is opened.
             await enrichSessionCodecProfileFromBoundedHeader(
                 session,
                 sessionRequestAbortController.signal,
             );
             if (sessionRequestAbortController.signal.aborted) throw new Error('Session request aborted');
+        }
+
+        if (finiteMkvPlayback && normalizedSeekOffset > 0) {
             try {
                 await prepareFiniteMkvSeekBroker(session, sessionRequestAbortController.signal);
             } catch (err) {
@@ -9138,15 +9142,6 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
                 details: detail
             });
         }
-        // The pump has already forwarded several megabytes by the time the HLS
-        // readiness buffer exists. Parse that local prefix now, while retaining
-        // the same provider socket, so the 201 response carries duration and all
-        // audio tracks even on a cold exact-file cache.
-        await enrichSessionCodecProfileFromBoundedHeader(
-            session,
-            sessionRequestAbortController.signal,
-        );
-        if (sessionRequestAbortController.signal.aborted) throw new Error('Session request aborted');
         const startOffsetProbeStartedAt = Date.now();
         await observeSessionStartOffset(session);
         if (sessionRequestAbortController.signal.aborted) throw new Error('Session request aborted');
@@ -9495,14 +9490,47 @@ function isProviderSlotBusyFailure(session) {
         || text.includes('4xx client error, but not one of');
 }
 
+function vaapiHardwareDecodeCodecForSession(session, encodeVideo = true) {
+    if (
+        !encodeVideo ||
+        VIDEO_ENCODER_CONFIG.backend !== 'vaapi' ||
+        VIDEO_ENCODER_CONFIG.hardwareDecode !== true ||
+        VIDEO_ENCODER_PREFLIGHT.ready !== true ||
+        session?.forceSoftwareVideoDecode === true ||
+        !hasCompleteMkvPlaybackProfile(session?.codecProfile)
+    ) return null;
+    const codec = normalizeCodecToken(
+        session?.codecProfile?.videoCodec ??
+        session?.codecProfile?.video_codec ??
+        session?.codecProfile?.video,
+    );
+    if (codec.includes('h264') || codec.includes('avc')) return 'h264';
+    if (codec.includes('hevc') || codec.includes('h265')) return 'hevc';
+    return null;
+}
+
+function isVaapiHardwareDecodeFailure(session) {
+    if (session?.vaapiHardwareDecode !== true) return false;
+    const text = `${session?.lastError || ''}\n${session?.logTail || ''}`.toLowerCase();
+    return [
+        'failed setup for format vaapi',
+        'device setup failed for decoder',
+        'no device available for decoder',
+        'failed to initialise vaapi',
+        'failed to initialize vaapi',
+        'hardware accelerator failed to decode',
+        'failed to retrieve data from the hardware',
+        'av_hwdevice_ctx_create',
+        'impossible to convert between the formats supported by the filter',
+    ].some((marker) => text.includes(marker));
+}
+
 // Start FFmpeg and wait for the first playlist. Provider/account failures are
-// terminal. The only second attempt is a local demux probe-budget correction for
-// an already-known file profile; it is not a gateway/direct or account retry.
+// terminal. The only extra attempts are local graph corrections: exact-profile
+// VAAPI decode can fall back once to software decode, and a reduced demux probe
+// can fall back once to the full budget. Neither path overlaps provider sockets.
 async function startSessionWithProviderRetry(session, abortSignal = null) {
-    // A known-profile probe fallback is a local demux retry, not a provider
-    // concurrency failure. Give it one separate attempt so it cannot consume
-    // a provider/account retry budget.
-    const maxTotalAttempts = 2;
+    const maxTotalAttempts = 3;
     for (let totalAttempt = 1; totalAttempt <= maxTotalAttempts; totalAttempt += 1) {
         if (abortSignal?.aborted) throw abortedVodInputPumpError();
         if (totalAttempt > 1) {
@@ -9534,6 +9562,15 @@ async function startSessionWithProviderRetry(session, abortSignal = null) {
         } catch (err) {
             if (abortSignal?.aborted) throw abortedVodInputPumpError();
             applyFiniteMkvSeekBrokerFailure(session);
+            if (
+                session.forceSoftwareVideoDecode !== true &&
+                isVaapiHardwareDecodeFailure(session)
+            ) {
+                session.forceSoftwareVideoDecode = true;
+                session.vaapiHardwareDecodeFallbacks = Number(session.vaapiHardwareDecodeFallbacks || 0) + 1;
+                console.warn(`[media-gateway] VAAPI decode was incompatible for ${session.id}; retrying once with software decode`);
+                continue;
+            }
             if (
                 !session.inputFailure
                 &&
@@ -10516,6 +10553,7 @@ async function preopenBoundedMkvInputPump(session, parentSignal = null, options 
             return;
         }
 
+        await prefetchRetainedBoundedMkvHeader(session, opened, parentSignal);
         session.preopenedVodInputAttempt = {
             ...opened,
             dispatcher,
@@ -10525,6 +10563,90 @@ async function preopenBoundedMkvInputPump(session, parentSignal = null, options 
     } finally {
         if (!retained) await closeVodInputAttempt(opened.attempt).catch(() => {});
     }
+}
+
+async function prefetchRetainedBoundedMkvHeader(session, opened, parentSignal = null) {
+    if (
+        !BOUNDED_MKV_HEADER_PARSE ||
+        INBAND_HEADER_BYTES <= 0 ||
+        INBAND_HEADER_CACHE_MAX <= 0 ||
+        !opened?.attempt?.reader ||
+        (hasCompleteMkvPlaybackProfile(session?.codecProfile) && !needsMkvH264CurrentHeaderAuthority(session))
+    ) return 0;
+
+    const attempt = opened.attempt;
+    const range = opened.range;
+    const maximumRangeBytes = Math.max(0, Number(range?.end) - Number(range?.start) + 1);
+    const targetBytes = Math.max(1, Math.min(
+        INBAND_HEADER_BYTES,
+        maximumRangeBytes || INBAND_HEADER_BYTES,
+    ));
+    const retained = Array.isArray(attempt.preloadedChunks)
+        ? attempt.preloadedChunks
+        : (attempt.preloadedChunks = []);
+    let prefetchedBytes = 0;
+    for (const retainedChunk of retained) {
+        const chunk = Buffer.from(retainedChunk || []);
+        if (!chunk.length) continue;
+        if (maximumRangeBytes && prefetchedBytes + chunk.length > maximumRangeBytes) {
+            throw vodInputPumpError(
+                'RANGE_UNSUPPORTED',
+                'Provider exceeded the declared MKV byte range during header prefetch.',
+                { status: 502 },
+            );
+        }
+        captureBoundedMkvHeaderBytes(session, prefetchedBytes, chunk);
+        prefetchedBytes += chunk.length;
+    }
+
+    const startedAt = Date.now();
+    let reachedEof = false;
+    while (prefetchedBytes < targetBytes) {
+        const next = await readRawPrefixChunk(
+            attempt.reader,
+            parentSignal,
+            VOD_INPUT_IDLE_TIMEOUT_MS,
+        );
+        if (next.aborted || parentSignal?.aborted) throw abortedVodInputPumpError();
+        if (next.timedOut) {
+            throw vodInputPumpError(
+                'PROVIDER_IDLE_TIMEOUT',
+                'Provider did not finish the MKV metadata prefix in time.',
+                { status: 504, retryable: true },
+            );
+        }
+        if (next.error) throw classifyVodInputFetchError(next.error, false);
+        if (next.done) {
+            reachedEof = true;
+            break;
+        }
+        const chunk = Buffer.from(next.value || []);
+        if (!chunk.length) continue;
+        if (maximumRangeBytes && prefetchedBytes + chunk.length > maximumRangeBytes) {
+            throw vodInputPumpError(
+                'RANGE_UNSUPPORTED',
+                'Provider exceeded the declared MKV byte range during header prefetch.',
+                { status: 502 },
+            );
+        }
+        retained.push(chunk);
+        captureBoundedMkvHeaderBytes(session, prefetchedBytes, chunk);
+        prefetchedBytes += chunk.length;
+    }
+
+    if (reachedEof && range?.fullBodyUnknownSize !== true && prefetchedBytes < maximumRangeBytes) {
+        throw vodInputPumpError(
+            'RANGE_LENGTH_MISMATCH',
+            'Provider truncated the MKV body during metadata prefetch.',
+            { status: 502 },
+        );
+    }
+    session.startupTimings = asRecord(session.startupTimings);
+    session.startupTimings.providerColdHeaderPrefetch = true;
+    session.startupTimings.providerColdHeaderPrefetchBytes = prefetchedBytes;
+    session.startupTimings.providerColdHeaderPrefetchMs = Math.max(0, Date.now() - startedAt);
+    session.startupTimings.providerColdHeaderPrefetchReachedEof = reachedEof;
+    return prefetchedBytes;
 }
 
 async function closePreopenedBoundedMkvInput(session) {
@@ -11575,6 +11697,10 @@ function startFfmpeg(session) {
         ? normalizeAudioStreamIndex(explicitAudioMap[1])
         : null;
     const encodeVideo = videoModeForSession(session) === 'encode';
+    const vaapiHardwareDecodeCodec = vaapiHardwareDecodeCodecForSession(session, encodeVideo);
+    const vaapiHardwareDecode = Boolean(vaapiHardwareDecodeCodec);
+    session.vaapiHardwareDecode = vaapiHardwareDecode;
+    session.vaapiHardwareDecodeCodec = vaapiHardwareDecodeCodec;
     if (encodeVideo && !reserveVideoEncoderAdmission(session)) {
         const error = new Error('Video encoder capacity is busy');
         error.code = 'VIDEO_ENCODER_CAPACITY_BUSY';
@@ -11611,7 +11737,9 @@ function startFfmpeg(session) {
         '-loglevel', 'warning',
         '-nostdin',
         '-y',
-        ...videoEncoderInputArgs(VIDEO_ENCODER_CONFIG, encodeVideo),
+        ...videoEncoderInputArgs(VIDEO_ENCODER_CONFIG, encodeVideo, {
+            hardwareDecode: vaapiHardwareDecode,
+        }),
         ...providerHttpInputArgs,
         '-fflags', '+genpts',
         ...(preserveCopySeekTimestamps ? ['-copyts'] : []),
@@ -11643,6 +11771,7 @@ function startFfmpeg(session) {
             ...videoEncoderOutputArgs(VIDEO_ENCODER_CONFIG, {
                 forceAligned: forceAlignedHlsVideoEncode,
                 targetSeconds: session.hlsTargetSeconds || 4,
+                hardwareDecode: vaapiHardwareDecode,
             }),
             ...audioArgs
         );
@@ -11700,6 +11829,8 @@ function startFfmpeg(session) {
     session.startupTimings = asRecord(session.startupTimings);
     session.startupTimings.ffmpegSpawnCount = Number(session.startupTimings.ffmpegSpawnCount || 0) + 1;
     session.startupTimings.videoEncoder = VIDEO_ENCODER_CONFIG.backend;
+    session.startupTimings.videoDecode = vaapiHardwareDecode ? 'vaapi' : 'software';
+    session.startupTimings.vaapiHardwareDecodeFallbacks = Number(session.vaapiHardwareDecodeFallbacks || 0);
     session.status = 'starting';
     let inputPump = null;
 

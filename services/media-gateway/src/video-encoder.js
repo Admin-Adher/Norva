@@ -28,6 +28,7 @@ function resolveVideoEncoderConfig(env = process.env, fileSystem = null) {
             protocol: VIDEO_ENCODER_PROTOCOL,
             backend,
             hardware: false,
+            hardwareDecode: false,
             device: null,
             preflight: 'not-required',
         });
@@ -48,10 +49,15 @@ function resolveVideoEncoderConfig(env = process.env, fileSystem = null) {
             throw videoEncoderConfigError('VIDEO_ENCODER_VAAPI_DEVICE_NOT_CHARACTER');
         }
     }
+    const hardwareDecodeValue = String(env.MEDIA_GATEWAY_VAAPI_DECODE || 'false').trim().toLowerCase();
+    if (hardwareDecodeValue !== 'true' && hardwareDecodeValue !== 'false') {
+        throw videoEncoderConfigError('VIDEO_ENCODER_VAAPI_DECODE_INVALID');
+    }
     return Object.freeze({
         protocol: VIDEO_ENCODER_PROTOCOL,
         backend,
         hardware: true,
+        hardwareDecode: hardwareDecodeValue === 'true',
         device,
         preflight: 'required',
     });
@@ -98,9 +104,17 @@ function preflightVideoEncoder(config, options = {}) {
     return Object.freeze({ ready: true, status: 'vaapi-ready' });
 }
 
-function videoEncoderInputArgs(config, encodeVideo) {
+function videoEncoderInputArgs(config, encodeVideo, options = {}) {
     if (!encodeVideo || config?.backend !== VAAPI_BACKEND) return [];
-    return ['-vaapi_device', config.device];
+    const hardwareDecode = config.hardwareDecode === true && options.hardwareDecode === true;
+    return [
+        '-vaapi_device', config.device,
+        ...(hardwareDecode ? [
+            '-hwaccel', 'vaapi',
+            '-hwaccel_device', config.device,
+            '-hwaccel_output_format', 'vaapi',
+        ] : []),
+    ];
 }
 
 function videoEncoderOutputArgs(config, options = {}) {
@@ -110,12 +124,15 @@ function videoEncoderOutputArgs(config, options = {}) {
         ? targetSeconds
         : 4;
     if (config?.backend === VAAPI_BACKEND) {
-        // Decode stays in software for broad old-codec compatibility. Only the
-        // final colorspace conversion/upload and H.264 encode use the iGPU.
+        // Hardware decode is admitted separately for an exact, supported source
+        // profile. Unknown/legacy codecs keep the broad software-decode path.
+        // A runtime VAAPI decode failure is retried once with software decode by
+        // the Gateway without changing the H.264 hardware encoder.
         // A keyframe request at every segment boundary keeps HLS fragments
         // independently decodable without relying on scene-cut heuristics.
+        const hardwareDecode = config.hardwareDecode === true && options.hardwareDecode === true;
         return [
-            '-vf', 'format=nv12,hwupload',
+            '-vf', hardwareDecode ? 'scale_vaapi=format=nv12' : 'format=nv12,hwupload',
             '-c:v', 'h264_vaapi',
             '-profile:v', 'high',
             '-qp', '23',
@@ -147,7 +164,9 @@ function publicVideoEncoderStatus(config, preflight) {
         ready: preflight?.ready === true,
         preflight: String(preflight?.status || 'unknown'),
         deviceConfigured: config?.backend === VAAPI_BACKEND,
-        decode: config?.backend === VAAPI_BACKEND ? 'software-compatible' : 'software',
+        decode: config?.backend === VAAPI_BACKEND && config?.hardwareDecode === true
+            ? 'vaapi-exact-profile-with-software-fallback'
+            : (config?.backend === VAAPI_BACKEND ? 'software-compatible' : 'software'),
         outputCodec: 'h264',
     };
 }

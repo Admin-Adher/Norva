@@ -245,6 +245,7 @@ test('one FFmpeg maps absolute input indexes to audio-only ordinals and keeps th
             videoEncoderInputArgs,
             videoEncoderOutputArgs,
             VIDEO_ENCODER_CONFIG: { backend: 'software' },
+            vaapiHardwareDecodeCodecForSession: () => null,
             reserveVideoEncoderAdmission: () => true,
             releaseVideoEncoderAdmission: () => {},
             isFiniteMkvVodSession: () => true,

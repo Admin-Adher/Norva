@@ -136,7 +136,7 @@ test('Gateway fast-start policy accepts only a measured file-exact or complete-c
 test('Gateway startup buffer shortens to six seconds only for an admitted fast path', () => {
     const gatewayStartupBufferOptions = loadMethod(
         'gatewayStartupBufferOptions',
-        'waitForGatewayStartupBuffer',
+        'gatewayRecoveryBufferOptions',
     );
     const valid = {
         protocol: 2,
@@ -163,6 +163,65 @@ test('Gateway startup buffer shortens to six seconds only for an admitted fast p
         timeoutMs: 360000,
         policy: null,
     });
+});
+
+test('Gateway recovery builds a larger reserve than startup without returning to the 96-second legacy gate', () => {
+    const gatewayRecoveryBufferOptions = loadMethod(
+        'gatewayRecoveryBufferOptions',
+        'waitForGatewayRecoveryBuffer',
+    );
+    const policy = {
+        protocol: 2,
+        eligible: true,
+        pipeline: 'video-transcode',
+        reason: 'vaapi-transcode-ready',
+        targetBufferSeconds: 6,
+        minimumEncodeRateX: 2,
+        observedEncodeRateX: 3.2,
+    };
+    const page = {
+        normalizeGatewayStartupPolicy(value) { return value === policy ? policy : null; },
+    };
+
+    assert.deepEqual(gatewayRecoveryBufferOptions.call(page, policy), {
+        minimumSeconds: 12,
+        timeoutMs: 60000,
+        policy,
+    });
+    assert.deepEqual(gatewayRecoveryBufferOptions.call(page, null), {
+        minimumSeconds: 24,
+        timeoutMs: 60000,
+        policy: null,
+    });
+});
+
+test('Gateway recovery waits for the reserve even when media time was already advancing', async () => {
+    const waitForGatewayRecoveryBuffer = loadMethod(
+        'waitForGatewayRecoveryBuffer',
+        'waitForGatewayStartupBuffer',
+    );
+    const hls = { levels: [{ details: { live: true, totalduration: 120 } }] };
+    let ahead = 2;
+    const page = {
+        hls,
+        video: { currentTime: 30, paused: false, ended: false },
+        isStalePlaybackAttempt: () => false,
+        gatewayBufferedAheadSeconds: () => ahead,
+    };
+    let settled = false;
+    const gate = waitForGatewayRecoveryBuffer.call(
+        page,
+        15,
+        hls,
+        { minimumSeconds: 12, timeoutMs: 500 },
+    ).then((value) => { settled = true; return value; });
+
+    await new Promise(resolve => setTimeout(resolve, 25));
+    page.video.currentTime = 31;
+    await new Promise(resolve => setTimeout(resolve, 110));
+    assert.equal(settled, false, 'prior playback progress must not bypass the recovery floor');
+    ahead = 12.2;
+    assert.equal(await gate, true);
 });
 
 test('Gateway autoplay gate holds at 56 and 95.9 seconds, then admits 96.1 seconds', async () => {
@@ -317,7 +376,9 @@ test('Gateway media recovery cannot play before the startup buffer gate settles'
         isGatewayPlaybackUrl: () => true,
         isStalePlaybackAttempt: () => false,
         gatewayStartupBufferOptions: () => ({ minimumSeconds: 96, timeoutMs: 360000, policy: null }),
+        gatewayRecoveryBufferOptions: () => ({ minimumSeconds: 24, timeoutMs: 60000, policy: null }),
         waitForGatewayStartupBuffer: () => gate,
+        waitForGatewayRecoveryBuffer: async () => true,
         gatewayBufferedAheadSeconds: () => 96.25,
         updateGatewayAudioSwitchMetrics: (requestId, status, details) => {
             switchMetrics.push({ requestId, status, details });
@@ -361,6 +422,106 @@ test('Gateway media recovery cannot play before the startup buffer gate settles'
     assert.deepEqual(switchMetrics.map(metric => metric.status), ['gateway_gate_ready', 'playing']);
     assert.equal(switchMetrics[0].details.bufferedAheadSeconds, 96.25);
     assert.equal(switchMetrics[0].details.startupPolicy, null);
+});
+
+test('Gateway non-fatal starvation pauses once and resumes only after the recovery reserve is rebuilt', async () => {
+    let resolveRecovery;
+    const recoveryGate = new Promise(resolve => { resolveRecovery = resolve; });
+    let playCalls = 0;
+    let pauseCalls = 0;
+    let recoveryCalls = 0;
+
+    class FakeHls {
+        static Events = {
+            MEDIA_ATTACHED: 'media-attached',
+            AUDIO_TRACKS_UPDATED: 'audio-tracks-updated',
+            AUDIO_TRACK_SWITCHED: 'audio-track-switched',
+            SUBTITLE_TRACKS_UPDATED: 'subtitle-tracks-updated',
+            SUBTITLE_TRACK_SWITCH: 'subtitle-track-switch',
+            MANIFEST_PARSED: 'manifest-parsed',
+            ERROR: 'error',
+        };
+        static ErrorTypes = { MEDIA_ERROR: 'media-error', NETWORK_ERROR: 'network-error' };
+        constructor() { this.handlers = new Map(); this.audioTracks = []; }
+        loadSource() {}
+        attachMedia() {}
+        on(event, handler) { this.handlers.set(event, handler); }
+        recoverMediaError() {}
+        swapAudioCodec() {}
+        destroy() {}
+        emit(event, data) { return this.handlers.get(event)?.(event, data); }
+    }
+
+    const playHls = loadMethod('playHls', 'playHlsOrDirect', {
+        Hls: FakeHls,
+        setTimeout: (callback) => { queueMicrotask(callback); return 1; },
+        console,
+    });
+    const video = {
+        paused: true,
+        ended: false,
+        currentTime: 20,
+        canPlayType: () => '',
+        play() { playCalls += 1; this.paused = false; return Promise.resolve(); },
+        pause() { pauseCalls += 1; this.paused = true; },
+    };
+    const page = {
+        video,
+        hls: null,
+        _playbackAttemptId: 22,
+        _gatewayAutomaticRebuffering: false,
+        isGatewayPlaybackUrl: () => true,
+        isStalePlaybackAttempt: () => false,
+        gatewayStartupBufferOptions: () => ({ minimumSeconds: 6, timeoutMs: 45000, policy: null }),
+        gatewayRecoveryBufferOptions: () => ({ minimumSeconds: 12, timeoutMs: 60000, policy: null }),
+        waitForGatewayStartupBuffer: async () => true,
+        waitForGatewayRecoveryBuffer: async () => { recoveryCalls += 1; return recoveryGate; },
+        gatewayBufferedAheadSeconds: () => 1,
+        _reattachAiTrackIfActive: () => {},
+        restorePendingAudioPreference: () => {},
+        updateAudioTracks: () => {},
+        restorePendingSubtitlePreference: () => {},
+        updateCaptionsTracks: () => {},
+        showLoading: () => {},
+        hideLoading: () => {},
+        showOverlay: () => {},
+        releasePlaybackPipelineForRetry: async () => {},
+        showPlaybackError: () => {},
+        retryGatewaySeekAfterFatalPlayback: () => false,
+        sendPlaybackEvent: () => {},
+        handlePlaybackFailure: async () => {},
+        handleAutoplayError: () => {},
+        canUseLocalProxy: () => false,
+        isGatewaySessionGoneError: () => false,
+        centerPlayBtn: { classList: { add() {} } },
+    };
+
+    playHls.call(page, 'https://norva-production.up.railway.app/sessions/test/playlist.m3u8', {
+        playbackAttemptId: 22,
+    });
+    const activeHls = page.hls;
+    await activeHls.emit(FakeHls.Events.MANIFEST_PARSED, { audioTracks: [] });
+    assert.equal(playCalls, 1);
+    assert.equal(video.paused, false);
+
+    activeHls.emit(FakeHls.Events.ERROR, {
+        fatal: false,
+        type: FakeHls.ErrorTypes.MEDIA_ERROR,
+        details: 'bufferStalledError',
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    assert.equal(pauseCalls, 1);
+    assert.equal(playCalls, 1, 'the empty edge must not be replayed immediately');
+    assert.equal(page._gatewayAutomaticRebuffering, true);
+    assert.equal(recoveryCalls, 1);
+
+    resolveRecovery(true);
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    assert.equal(playCalls, 2);
+    assert.equal(page._gatewayAutomaticRebuffering, false);
 });
 
 test('Playback metadata forwards Gateway fast-start policy into the HLS attachment only', () => {

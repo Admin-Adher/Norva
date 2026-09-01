@@ -1661,6 +1661,7 @@ test('an admitted replay starts one FFmpeg graph with copied video and proof-sel
     audioMapForSession: () => '0:1',
     normalizeAudioStreamIndex: (value) => Number(value),
     videoModeForSession: (value) => value.videoMode,
+    vaapiHardwareDecodeCodecForSession: () => null,
     videoEncoderInputArgs,
     videoEncoderOutputArgs,
     VIDEO_ENCODER_CONFIG: { backend: 'software' },

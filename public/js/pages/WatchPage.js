@@ -217,6 +217,8 @@ class WatchPage {
         this._firstFrameCallbackId = null;
         this._firstFrameObserverAttemptId = null;
         this._firstFrameObserverAvailable = null;
+        this._firstFrameProgressSample = null;
+        this._gatewayAutomaticRebuffering = false;
         this._watchedLanguageValidationIntent = null;
         this._deferredEngineTrackEnrichment = null;
         this._deferredEngineTrackEnrichmentTimer = null;
@@ -384,7 +386,7 @@ class WatchPage {
         // Video events
         this.video?.addEventListener('timeupdate', () => {
             this.updateProgress();
-            this.markPlaybackUsable();
+            this.markPlaybackUsable({ allowPlaybackProgressFallback: true });
             this.trackPlaybackPosition();
             this.saveResumeSnapshotThrottled();
         });
@@ -2819,6 +2821,7 @@ class WatchPage {
         this._firstFrameCallbackId = null;
         this._firstFrameObserverAttemptId = null;
         this._firstFrameObserverAvailable = null;
+        this._firstFrameProgressSample = null;
     }
 
     armFirstFrameTelemetry(playbackAttemptId = this._playbackAttemptId) {
@@ -5267,6 +5270,43 @@ class WatchPage {
         };
     }
 
+    gatewayRecoveryBufferOptions(startupPolicy = null) {
+        const policy = this.normalizeGatewayStartupPolicy(startupPolicy);
+        const minimumSeconds = policy
+            ? Math.max(12, Math.min(24, policy.targetBufferSeconds * 2))
+            : 24;
+        return {
+            minimumSeconds,
+            timeoutMs: 60000,
+            policy,
+        };
+    }
+
+    async waitForGatewayRecoveryBuffer(playbackAttemptId, hls, options = {}) {
+        const minimumSeconds = Math.max(4, Number(options.minimumSeconds) || 12);
+        const timeoutMs = Math.max(1000, Number(options.timeoutMs) || 60000);
+        const deadline = Date.now() + timeoutMs;
+        while (Date.now() < deadline) {
+            if (this.isStalePlaybackAttempt(playbackAttemptId) || this.hls !== hls) return false;
+            const bufferedAhead = this.gatewayBufferedAheadSeconds();
+            if (bufferedAhead >= minimumSeconds) return true;
+
+            const levels = Array.isArray(hls?.levels) ? hls.levels : [];
+            const currentLevel = Number.isInteger(hls?.currentLevel) && hls.currentLevel >= 0
+                ? hls.currentLevel
+                : 0;
+            const details = levels[currentLevel]?.details || levels[0]?.details || null;
+            const totalDuration = Number(details?.totalduration);
+            if (details?.live === false && Number.isFinite(totalDuration) && totalDuration > 0) {
+                const remaining = Math.max(0, totalDuration - (Number(this.video?.currentTime) || 0));
+                const completeTarget = Math.max(0.5, Math.min(minimumSeconds, remaining) - 0.5);
+                if (bufferedAhead >= completeTarget) return true;
+            }
+            await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        return false;
+    }
+
     async waitForGatewayStartupBuffer(playbackAttemptId, hls, options = {}) {
         const minimumSeconds = Math.max(1, Number(options.minimumSeconds) || 24);
         const timeoutMs = Math.max(1000, Number(options.timeoutMs) || 45000);
@@ -5331,6 +5371,7 @@ class WatchPage {
             this.cancelPendingHlsAudioSwitch(false);
             this.hls.destroy();
         }
+        this._gatewayAutomaticRebuffering = false;
 
         // Local transcode sessions are VOD: always start from the beginning of
         // the playlist (never the live edge), even before EXT-X-ENDLIST exists.
@@ -5372,15 +5413,61 @@ class WatchPage {
         const gatewayStartupBuffer = isGatewaySession
             ? this.gatewayStartupBufferOptions(options.startupPolicy)
             : null;
+        const gatewayRecoveryBuffer = isGatewaySession
+            ? this.gatewayRecoveryBufferOptions(options.startupPolicy)
+            : null;
         let gatewayStartupBufferReady = !isGatewaySession;
-        const resumeAfterHlsRecovery = () => {
-            setTimeout(() => {
+        let gatewayRecoveryRunning = false;
+        let gatewayRecoveryGeneration = 0;
+        const resumeAfterHlsRecovery = (forceResume = false) => {
+            if (!forceResume && this.video?.paused) return;
+            if (!isGatewaySession) {
+                setTimeout(() => {
+                    if (this.isStalePlaybackAttempt(playbackAttemptId) || this.hls !== activeHls) return;
+                    if (autoplay) this.video?.play().catch(e => this.handleAutoplayError(e, 'Recovery autoplay error'));
+                    this._reattachAiTrackIfActive();
+                }, 500);
+                return;
+            }
+            if (!autoplay || !gatewayStartupBufferReady || gatewayRecoveryRunning) return;
+            gatewayRecoveryRunning = true;
+            const generation = ++gatewayRecoveryGeneration;
+            this._gatewayAutomaticRebuffering = true;
+            this.showLoading();
+            if (this.video && !this.video.paused) {
+                try { this.video.pause(); } catch (_) {}
+            }
+            setTimeout(async () => {
                 if (this.isStalePlaybackAttempt(playbackAttemptId) || this.hls !== activeHls) return;
-                if (autoplay && gatewayStartupBufferReady) {
-                    this.video?.play().catch(() => { });
+                let bufferReady = false;
+                try {
+                    bufferReady = await this.waitForGatewayRecoveryBuffer(
+                        playbackAttemptId,
+                        activeHls,
+                        gatewayRecoveryBuffer,
+                    );
+                } catch (error) {
+                    console.warn('[WatchPage] Gateway recovery buffer inspection failed:', error?.message || error);
+                }
+                if (generation !== gatewayRecoveryGeneration
+                    || this.isStalePlaybackAttempt(playbackAttemptId)
+                    || this.hls !== activeHls) return;
+                gatewayRecoveryRunning = false;
+                if (!this._gatewayAutomaticRebuffering) return;
+                this._gatewayAutomaticRebuffering = false;
+                if (bufferReady) {
+                    this._stallSince = Date.now();
+                    this.video?.play().catch(e => this.handleAutoplayError(e, 'Recovery autoplay error'));
+                } else {
+                    // Keep the prepared session available for an explicit retry;
+                    // a slow fill is not a terminal provider/playback failure.
+                    this.hideLoading();
+                    this.centerPlayBtn?.classList.add('show');
+                    this.showOverlay();
+                    clearTimeout(this.overlayTimeout);
                 }
                 this._reattachAiTrackIfActive();
-            }, 500);
+            }, 250);
         };
 
         this.hls.loadSource(url);
@@ -5537,9 +5624,20 @@ class WatchPage {
 
         this.hls.on(Hls.Events.ERROR, (event, data) => {
             if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
+            const SOFT_MEDIA_DETAILS = ['bufferStalledError', 'bufferNudgeOnStall', 'bufferSeekOverHole', 'fragParsingError'];
             // Non-fatal errors (incl. most bufferStalledError occurrences) are
-            // recovered automatically by hls.js — never surface them
-            if (!data.fatal) return;
+            // recovered automatically by hls.js. On Gateway VOD, deliberately
+            // hold playback until a useful recovery reserve exists instead of
+            // bouncing at the live edge through repeated visible micro-stalls.
+            if (!data.fatal) {
+                if (isGatewaySession
+                    && gatewayStartupBufferReady
+                    && SOFT_MEDIA_DETAILS.includes(data.details)
+                    && this.gatewayBufferedAheadSeconds() < 2) {
+                    resumeAfterHlsRecovery();
+                }
+                return;
+            }
 
             console.error('[WatchPage] HLS fatal error:', data.type, data.details);
 
@@ -5547,7 +5645,6 @@ class WatchPage {
             // terminal error: show the buffering spinner and keep recovering,
             // exactly like streaming platforms do. Only give up after 45s with
             // zero playback progress.
-            const SOFT_MEDIA_DETAILS = ['bufferStalledError', 'bufferNudgeOnStall', 'bufferSeekOverHole', 'fragParsingError'];
             if (data.type === Hls.ErrorTypes.MEDIA_ERROR && SOFT_MEDIA_DETAILS.includes(data.details)) {
                 const pos = this.video?.currentTime || 0;
                 if (pos !== this._stallPos) {
@@ -5556,6 +5653,7 @@ class WatchPage {
                 }
                 if (Date.now() - this._stallSince < 45000) {
                     this.showLoading();
+                    if (isGatewaySession && gatewayRecoveryRunning) return;
                     // THROTTLED: a starving realtime transcode emits fatal stalls every few
                     // seconds, and each recoverMediaError() is a full media detach/attach —
                     // the browser drops text-track rendering during the swap, so back-to-back
@@ -5569,7 +5667,7 @@ class WatchPage {
                             this.hls.recoverMediaError();
                             // recoverMediaError re-attaches the media element and
                             // leaves it paused — resume playback explicitly
-                            resumeAfterHlsRecovery();
+                            resumeAfterHlsRecovery(true);
                         } catch (e) { /* destroyed */ }
                     }
                     return;
@@ -5586,7 +5684,7 @@ class WatchPage {
                     console.warn(`[WatchPage] Recovering media error (attempt ${this._mediaRecoveries}/${maxMediaRecoveries})`);
                     if (this._mediaRecoveries === 2) this.hls.swapAudioCodec();
                     this.hls.recoverMediaError();
-                    resumeAfterHlsRecovery();
+                    resumeAfterHlsRecovery(true);
                     return;
                 }
             } else if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
@@ -5682,6 +5780,7 @@ class WatchPage {
         }
         if (this._stopPromise) return this._stopPromise;
 
+        this._gatewayAutomaticRebuffering = false;
         this.cancelPendingHlsAudioSwitch(false);
         this.cancelFirstFrameTelemetryObserver();
         this.cancelDeferredEngineTrackEnrichment();
@@ -5792,14 +5891,19 @@ class WatchPage {
 
     handleAutoplayError(error, label = 'Autoplay error') {
         if (error?.name === 'AbortError') return;
-        console.error(`[WatchPage] ${label}:`, error);
-
         if (error?.name === 'NotAllowedError') {
+            // A long Gateway preparation can outlive the browser's transient user
+            // activation. This is an expected interaction state, not a playback
+            // failure: keep the prepared session and offer one explicit Play tap.
+            console.info(`[WatchPage] ${label}: user interaction is required.`);
+            this.hidePlaybackError();
             this.hideLoading();
             this.centerPlayBtn?.classList.add('show');
             this.showOverlay();
             clearTimeout(this.overlayTimeout);
+            return;
         }
+        console.error(`[WatchPage] ${label}:`, error);
     }
 
     togglePlay() {
@@ -5807,6 +5911,13 @@ class WatchPage {
             // Nothing loaded yet (e.g. mid media-switch, before the engine attaches its
             // MediaSource) → play() would reject with NotSupportedError. No-op instead.
             if (!this.video.src && !this.video.currentSrc) return;
+            if (this._gatewayAutomaticRebuffering) {
+                // The viewer explicitly chooses immediate playback over the
+                // automatic reserve refill. The pending gate observes this flag
+                // and cannot issue a later duplicate play.
+                this._gatewayAutomaticRebuffering = false;
+                this.hideLoading();
+            }
             this.video.play().catch((e) => {
                 // These are benign here: NotSupportedError = source not ready/torn down,
                 // AbortError = a newer load() superseded this play. Don't spam the console.
@@ -6696,6 +6807,11 @@ class WatchPage {
     onPause() {
         this.playPauseBtn?.querySelector('.icon-play')?.classList.remove('hidden');
         this.playPauseBtn?.querySelector('.icon-pause')?.classList.add('hidden');
+        if (this._gatewayAutomaticRebuffering) {
+            this.centerPlayBtn?.classList.remove('show');
+            this.showLoading();
+            return;
+        }
         this.centerPlayBtn?.classList.add('show');
         try { if (navigator.mediaSession) navigator.mediaSession.playbackState = 'paused'; } catch (_) { }
         this.trackPlaybackPosition({ force: true });
@@ -7420,6 +7536,7 @@ class WatchPage {
     markPlaybackUsable(options = {}) {
         if (!this.hasCurrentMedia()) return;
         const allowFirstFrameFallback = options.allowFirstFrameFallback === true;
+        const allowPlaybackProgressFallback = options.allowPlaybackProgressFallback === true;
         const fallbackHasRenderedFrame = allowFirstFrameFallback
             && this._firstFrameObserverAvailable !== true
             && !this.video.paused
@@ -7432,9 +7549,40 @@ class WatchPage {
                 'playing-ready-state'
             );
         }
-        // loadeddata/canplay/timeupdate prove decoded data, not compositor
-        // presentation. Keep loading/error state until rVFC (or the strict
-        // playing fallback on browsers without rVFC) confirms a visible frame.
+        if (!this._firstFrameReported && allowPlaybackProgressFallback) {
+            const mediaTime = Number(this.video.currentTime);
+            const progressReady = this._firstFrameObserverAvailable === true
+                && this._firstFrameObserverAttemptId === this._playbackAttemptId
+                && !this.video.paused
+                && !this.video.seeking
+                && this.video.readyState >= 2
+                && this.video.videoWidth > 0
+                && this.video.videoHeight > 0
+                && Number.isFinite(mediaTime);
+            const previous = this._firstFrameProgressSample;
+            if (!progressReady) {
+                this._firstFrameProgressSample = null;
+            } else if (!previous
+                || previous.playbackAttemptId !== this._playbackAttemptId
+                || mediaTime < previous.mediaTime
+                || mediaTime - previous.mediaTime > 5) {
+                // The first timeupdate after attach/seek establishes a baseline;
+                // it is not by itself proof that a frame was presented.
+                this._firstFrameProgressSample = {
+                    playbackAttemptId: this._playbackAttemptId,
+                    mediaTime,
+                };
+            } else if (mediaTime - previous.mediaTime >= 0.05) {
+                this.reportFirstRenderedFrame(
+                    this._playbackAttemptId,
+                    'playback-progress-fallback',
+                    { mediaTime },
+                );
+            }
+        }
+        // loadeddata/canplay alone prove decoded data, not compositor
+        // presentation. Keep loading/error state until rVFC, the strict playing
+        // fallback, or two advancing timeupdates confirm active presentation.
         if (!this._firstFrameReported) return;
         this.hideLoading();
         this.hidePlaybackError();
