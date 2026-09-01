@@ -10,7 +10,8 @@ const { PassThrough } = require('stream');
 const { TextDecoder } = require('util');
 const { spawn, spawnSync } = require('child_process');
 const express = require('express');
-const { Agent, ProxyAgent, request: undiciRequest } = require('undici');
+const { Agent, request: undiciRequest } = require('undici');
+const { createProviderProxyAgent } = require('./providerProxyAgent');
 const { parseWhisperLid, runWhisperDetectOnly } = require('./whisper-lid');
 const {
     buildStrictLidExtractionObservability,
@@ -116,7 +117,7 @@ const providerProxySlotOverrides = parseProviderProxySlotOverrides(
 let providerProxyAgents = [];
 if (providerProxyUrls.length) {
     try {
-        providerProxyAgents = providerProxyUrls.map((u) => new ProxyAgent(u));
+        providerProxyAgents = providerProxyUrls.map((u) => createProviderProxyAgent(u));
         // Fetch receives an explicit dispatcher and every provider-connected child receives
         // an explicit env. There is intentionally no process-wide "slot 1" fallback: it would
         // silently break account affinity whenever a provider spawn forgot its routing key.
@@ -796,7 +797,7 @@ function pinnedProxyAgentFactory(key) {
     // The closure pins one provider account to one configured residential slot.
     // Recreating the dispatcher therefore renews only the local CONNECT tunnel;
     // it never rotates the account to another exit IP.
-    return () => new ProxyAgent(proxyUrl);
+    return () => createProviderProxyAgent(proxyUrl);
 }
 // Spawn env routing a child (ffmpeg/ffprobe) through this key's sticky pool IP.
 function proxyEnvFor(key) {
@@ -16868,8 +16869,7 @@ async function openXtreamProviderResponse(url, options = {}) {
     const target = await resolveXtreamEgressTarget(url);
     const proxyIndex = providerProxyUrls.length ? poolIndexForKey(proxyKeyFromUrl(url)) : -1;
     const dispatcher = proxyIndex >= 0
-        ? new ProxyAgent({
-            uri: providerProxyUrls[proxyIndex],
+        ? createProviderProxyAgent(providerProxyUrls[proxyIndex], {
             requestTls: target.protocol === 'https:' ? { servername: target.hostname } : undefined,
         })
         : new Agent({

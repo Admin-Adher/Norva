@@ -306,7 +306,7 @@ test('gateway uses the canonical provider key on every provider network lane', (
   );
   assert.match(
     gateway,
-    /new ProxyAgent\(\{[\s\S]{0,120}uri: providerProxyUrls\[proxyIndex\]/,
+    /createProviderProxyAgent\(providerProxyUrls\[proxyIndex\], \{[\s\S]{0,120}requestTls:/,
     'pinned metadata must retain the selected sticky proxy while enforcing request-time DNS pinning',
   );
   assert.match(
