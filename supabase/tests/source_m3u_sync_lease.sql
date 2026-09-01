@@ -596,7 +596,8 @@ select extensions.is(
 select extensions.is(
   (select count(*)::integer
    from cron.job
-   where jobname = 'norva-resume-stuck-sync'),
+   where jobname in ('norva-resume-stuck-sync', 'norva-resume-stuck')
+      or command like '%/norva-source-sync/cron/resume-stuck%'),
   1,
   'fresh install or repair leaves exactly one source-resume cron job'
 );

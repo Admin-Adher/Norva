@@ -296,6 +296,10 @@ test('source resume watchdog is repaired onto the canonical self-hosted ingress'
   );
   assert.match(selfHostedResumeCronMigration, /pg_advisory_xact_lock/);
   assert.match(selfHostedResumeCronMigration, /v_job_count > 1/);
+  assert.match(
+    selfHostedResumeCronMigration,
+    /jobname in \('norva-resume-stuck-sync', 'norva-resume-stuck'\)[\s\S]*command like '%\/norva-source-sync\/cron\/resume-stuck%'/,
+  );
   assert.match(selfHostedResumeCronMigration, /cron\.alter_job\([\s\S]*command => v_command[\s\S]*\);/);
   assert.doesNotMatch(
     selfHostedResumeCronMigration,
