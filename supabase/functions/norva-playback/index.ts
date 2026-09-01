@@ -279,7 +279,7 @@ async function handleRequest(req: Request): Promise<Response> {
       return json(req, {
         ok: true,
         service: "norva-playback",
-        version: 65,
+        version: 66,
         nativeHeartbeatProtocol: 1,
         providerCircuitProtocol: 1,
         exactTrackCrawlerProtocol: 2,
@@ -1003,6 +1003,7 @@ async function createPlaybackSession(
   const authoritativeVodContainer = resolvedVodContainerAuthority(
     resolved.playbackHint,
     resolvedContainerObservation,
+    itemType === "movie",
   );
   const browserNativeMp4 = (itemType === "movie" || itemType === "series") &&
     authoritativeVodContainer === "mp4";
@@ -6700,6 +6701,7 @@ function authoritativeVodGatewayTier(
 function resolvedVodContainerAuthority(
   playbackHintValue: unknown,
   containerObservationValue: unknown = {},
+  allowServerIsoBmffInference = false,
 ) {
   const observedContainer = canonicalVodContainer(
     recordOrEmpty(containerObservationValue).container,
@@ -6721,6 +6723,18 @@ function resolvedVodContainerAuthority(
       const resolvedContainer = canonicalVodContainer(playbackHint.container);
       if (resolvedContainer === "mp4" || resolvedContainer === "mov") {
         return resolvedContainer;
+      }
+      // Some Xtream catalogues advertise `.mkv` even though the provider
+      // bytes are ISO-BMFF. Only a Norva-owned Gateway probe may overrule that
+      // stale extension, and callers must opt in after resolving the movie
+      // profile from an owned server-side row. Browser/caller hints and exact
+      // episode echoes remain fail-closed.
+      const probeSource = normalizeCodecToken(profile.probeSource);
+      if (
+        allowServerIsoBmffInference &&
+        (probeSource === "gatewayprobe" || probeSource === "gatewayinband")
+      ) {
+        return "mp4";
       }
     }
   }

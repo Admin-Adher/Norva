@@ -470,7 +470,7 @@ test('Edge rollout is signed, dynamically reversible and keeps fast evidence sco
   assert.ok(migration.includes('observation.audio_verified_at is null'));
   assert.ok(detector.includes(': "whisper-basic-v1"'));
 
-  assert.ok(health.includes('version: 65'));
+  assert.ok(health.includes('version: 66'));
   assert.ok(health.includes('exactTrackCrawlerProtocol: 2'));
   assert.ok(health.includes('basicLidConsensusProtocol: 2'));
   assert.ok(health.includes('lidDetectOnlyProtocol: 1'));
@@ -1123,7 +1123,7 @@ test('LID cascade rollout is exact-file, bounded, fail-closed and atomically aud
   assert.ok(!rpc.includes('merge_catalog_title_audio'));
   assert.ok(!rpc.includes('audio_lang_verified_at ='));
 
-  assert.ok(health.includes('version: 65'));
+  assert.ok(health.includes('version: 66'));
   assert.ok(health.includes('exactTrackCrawlerProtocol: 2'));
   assert.ok(health.includes('lidCascadeProtocol: 2'));
   assert.ok(health.includes('lidCascadeMode: lidPolicy.cascadeMode'));

@@ -111,6 +111,48 @@ function containerMismatchPersister() {
   );
 }
 
+function vodContainerAuthority() {
+  const edge = read(EDGE_PATH);
+  const source = sourceBetween(
+    edge,
+    'function resolvedVodContainerAuthority(',
+    '\nfunction playbackCostScoreForObservation(',
+  );
+  const executable = stripTypeScriptTypes(source, { mode: 'strip' });
+  const recordOrEmpty = (value) => value && typeof value === 'object' && !Array.isArray(value)
+    ? value
+    : {};
+  const normalizeCodecToken = (value) => String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+  const canonicalVodContainer = (value) => {
+    const token = normalizeCodecToken(value);
+    const canonical = token === 'matroska'
+      ? 'mkv'
+      : token === 'mpeg'
+        ? 'mpg'
+        : token === 'm4v'
+          ? 'mp4'
+          : token;
+    return ['mkv', 'mp4', 'mov', 'avi', 'ogg', 'flv', 'mpg', 'ts'].includes(canonical)
+      ? canonical
+      : null;
+  };
+  return vm.runInNewContext(
+    `(() => { ${executable}; return resolvedVodContainerAuthority; })()`,
+    {
+      canonicalVodContainer,
+      firstUsefulCodecProfile: (...values) => values.find((value) => Object.keys(recordOrEmpty(value)).length) || {},
+      hasReliableVodCodecProfile: (value) => {
+        const profile = recordOrEmpty(value);
+        return Array.isArray(profile.audioTracks) &&
+          Array.isArray(profile.subtitles) &&
+          Boolean(profile.videoCodec && profile.audioCodec && profile.container && profile.probeSource && profile.probedAt);
+      },
+      normalizeCodecToken,
+      recordOrEmpty,
+    },
+  );
+}
+
 test('Gateway container mismatch evidence is exact, typed, and bound to the requested source', () => {
   const normalize = mismatchNormalizer();
   const valid = validMismatch();
@@ -193,7 +235,7 @@ test('a real MP4 stays on Relay while a mismatched unsafe container still promot
   );
   assert.match(create, /const clientMode = choosePlaybackMode/);
   assert.match(create, /itemType === "movie"[\s\S]*authoritativeVodGatewayTier\(resolved\.playbackHint/);
-  assert.match(create, /resolvedVodContainerAuthority\([\s\S]*resolved\.playbackHint[\s\S]*resolvedContainerObservation/);
+  assert.match(create, /resolvedVodContainerAuthority\([\s\S]*resolved\.playbackHint[\s\S]*resolvedContainerObservation[\s\S]*itemType === "movie"/);
   assert.match(create, /const browserNativeMp4 =[\s\S]*authoritativeVodContainer === "mp4"/);
   assert.match(create, /const serverDemotedAutomaticMp4 =[\s\S]*clientMode === "transcode"[\s\S]*body\.gatewayAutoMode === true/);
   assert.match(create, /clientMode === "relay" &&[\s\S]*!browserNativeMp4 &&[\s\S]*authoritativeVodTier === "video_transcode"/);
@@ -205,6 +247,35 @@ test('a real MP4 stays on Relay while a mismatched unsafe container still promot
   assert.match(helper, /if \(observedContainer\) return observedContainer/);
   assert.match(helper, /hasReliableVodCodecProfile\(profile\)[\s\S]*canonicalVodContainer\(profile\.container\)/);
   assert.match(helper, /profileToken === "movmp4m4a3gp3g2mj2"/);
+});
+
+test('a Gateway-owned ISO-BMFF probe repairs a stale MKV catalogue extension for movies only', () => {
+  const resolveContainer = vodContainerAuthority();
+  const crescentCity = {
+    container: 'mkv',
+    codecProfile: {
+      videoCodec: 'h264',
+      audioCodec: 'aac',
+      audioTracks: [{ index: 1, codec: 'aac', language: 'und' }],
+      subtitles: [],
+      container: 'mov,mp4,m4a,3gp,3g2,mj2',
+      probeSource: 'gateway_probe',
+      probedAt: '2026-09-01T10:00:00.000Z',
+      metadataComplete: false,
+    },
+  };
+
+  assert.equal(resolveContainer(crescentCity, {}, true), 'mp4');
+  assert.equal(resolveContainer(crescentCity, {}, false), 'mkv');
+  assert.equal(resolveContainer({
+    ...crescentCity,
+    codecProfile: { ...crescentCity.codecProfile, probeSource: 'request' },
+  }, {}, true), 'mkv');
+  assert.equal(resolveContainer(crescentCity, { container: 'mkv' }, true), 'mkv');
+  assert.equal(resolveContainer({
+    ...crescentCity,
+    container: 'mov',
+  }, {}, false), 'mov');
 });
 
 test('only a Norva-built Xtream URL has its terminal container rewritten', () => {
@@ -316,8 +387,8 @@ test('Gateway emits only redacted hashes and recognizes MP4 or MPEG-TS before FF
   const edge = read(EDGE_PATH);
   const deploy = read(path.join(ROOT, 'ops/hetzner/scripts/04-deploy-edge-functions.sh'));
   assert.match(gateway, /version: GATEWAY_VERSION,[\s\S]*vodContainerSelfHealProtocol: 1/);
-  assert.match(edge, /version: 65,[\s\S]*vodContainerSelfHealProtocol: 1/);
-  assert.match(deploy, /EXPECTED_PLAYBACK_VERSION=65/);
+  assert.match(edge, /version: 66,[\s\S]*vodContainerSelfHealProtocol: 1/);
+  assert.match(deploy, /EXPECTED_PLAYBACK_VERSION=66/);
   assert.match(deploy, /EXPECTED_VOD_CONTAINER_SELF_HEAL_PROTOCOL=1/);
   assert.match(deploy, /vodContainerSelfHealProtocol\\\":\$EXPECTED_VOD_CONTAINER_SELF_HEAL_PROTOCOL/);
   const classifier = sourceBetween(
