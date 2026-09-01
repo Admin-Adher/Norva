@@ -1104,6 +1104,53 @@ async function ackCatalogBackgroundBatch(
   return normalizeCatalogBackgroundAck(data, mode, processedTitleIds.length);
 }
 
+type CatalogBackgroundYield = {
+  checkpointRevision: string;
+  leaseUntil: string;
+};
+
+function normalizeCatalogBackgroundYield(
+  value: unknown,
+  mode: CatalogBackgroundMode,
+  worker: string,
+): CatalogBackgroundYield {
+  if (!isRecord(value) || value.contract !== "catalog-title-background-mode-v1"
+      || value.mode !== mode || value.worker !== worker || value.yielded !== true) {
+    throw backgroundProjectionUnavailable();
+  }
+  const leaseUntil = typeof value.leaseUntil === "string" ? value.leaseUntil : "";
+  if (!leaseUntil || !Number.isFinite(Date.parse(leaseUntil))) {
+    throw backgroundProjectionUnavailable();
+  }
+  return {
+    checkpointRevision: bigintProofOrThrow(
+      value.checkpointRevision,
+      "background checkpoint revision",
+    ),
+    leaseUntil,
+  };
+}
+
+// A successful bounded invocation has no work left in memory. Expire only its
+// own lease by exact worker/sequence/revision CAS so the next invocation can
+// continue immediately from the durable cursor. Crashes and partial pages keep
+// the full lease: they still rely on the existing timeout recovery contract.
+async function yieldCatalogBackgroundMode(
+  db: SupabaseClient,
+  mode: CatalogBackgroundMode,
+  claim: CatalogBackgroundClaim,
+  checkpointRevision: string,
+): Promise<CatalogBackgroundYield> {
+  const { data, error } = await db.rpc("norva_yield_catalog_title_background_mode", {
+    p_mode: mode,
+    p_worker: claim.worker,
+    p_expected_lease_sequence: claim.leaseSequence,
+    p_expected_revision: checkpointRevision,
+  });
+  if (error) throw backgroundProjectionUnavailable();
+  return normalizeCatalogBackgroundYield(data, mode, claim.worker);
+}
+
 // Provider VOD/series lists carry no release year, and many cloud_titles rows are
 // "provider_unverified" (TMDB id known, details never fetched) so their
 // release_year is null — leaving blanks on the browse grid even after the
@@ -1158,7 +1205,6 @@ async function cronBackfillYears(db: SupabaseClient, limit: number, reset: boole
   let stale = 0;
   let acknowledgedTitles = 0;
   let retryPending = 0;
-  let tmdbFailureHalted = false;
   let emptyTransitions = 0;
   let done = false;
 
@@ -1227,6 +1273,15 @@ async function cronBackfillYears(db: SupabaseClient, limit: number, reset: boole
     if (acknowledged.remainingTitles > 0) break;
   }
 
+  let cooperativeYielded = false;
+  if (!done && retryPending === 0) {
+    const yielded = await yieldCatalogBackgroundMode(
+      db, "year_pending", claim, checkpointRevision,
+    );
+    checkpointRevision = yielded.checkpointRevision;
+    cooperativeYielded = true;
+  }
+
   return {
     scanned,
     distinct: distinctFetched,
@@ -1239,6 +1294,7 @@ async function cronBackfillYears(db: SupabaseClient, limit: number, reset: boole
     done,
     resetDeferred: reset,
     checkpointRevision,
+    cooperativeYielded,
     emptyTransitions,
     budgetExhausted: !done && remaining > 0
       && Date.now() - startedAt >= CATALOG_BACKGROUND_DRAIN_DEADLINE_MS,
@@ -1263,6 +1319,7 @@ async function cronRevalidate(db: SupabaseClient, limit: number, reset: boolean,
   let stale = 0;
   let acknowledgedTitles = 0;
   let retryPending = 0;
+  let tmdbFailureHalted = false;
   let emptyTransitions = 0;
   let done = false;
 
@@ -1350,6 +1407,15 @@ async function cronRevalidate(db: SupabaseClient, limit: number, reset: boolean,
     if (acknowledged.remainingTitles > 0) break;
   }
 
+  let cooperativeYielded = false;
+  if (!done && retryPending === 0) {
+    const yielded = await yieldCatalogBackgroundMode(
+      db, "revalidate_pending", claim, checkpointRevision,
+    );
+    checkpointRevision = yielded.checkpointRevision;
+    cooperativeYielded = true;
+  }
+
   return {
     scanned,
     revalidated,
@@ -1361,6 +1427,7 @@ async function cronRevalidate(db: SupabaseClient, limit: number, reset: boolean,
     done,
     resetDeferred: reset,
     checkpointRevision,
+    cooperativeYielded,
     emptyTransitions,
     budgetExhausted: !done && remaining > 0
       && Date.now() - startedAt >= CATALOG_BACKGROUND_DRAIN_DEADLINE_MS,
@@ -1546,6 +1613,15 @@ async function cronSearchMatch(db: SupabaseClient, limit: number, reset: boolean
     if (acknowledged.remainingTitles > 0) break;
   }
 
+  let cooperativeYielded = false;
+  if (!done && retryPending === 0) {
+    const yielded = await yieldCatalogBackgroundMode(
+      db, "search_pending", claim, checkpointRevision,
+    );
+    checkpointRevision = yielded.checkpointRevision;
+    cooperativeYielded = true;
+  }
+
   // Match-driven merge and grid propagation remain in the separate reconcile
   // pipeline; this worker commits only the durable matching outcome.
   return {
@@ -1559,6 +1635,7 @@ async function cronSearchMatch(db: SupabaseClient, limit: number, reset: boolean
     focused: false,
     resetDeferred: reset,
     checkpointRevision,
+    cooperativeYielded,
     emptyTransitions,
     budgetExhausted: !done && remaining > 0
       && Date.now() - startedAt >= CATALOG_BACKGROUND_DRAIN_DEADLINE_MS,
