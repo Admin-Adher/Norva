@@ -279,7 +279,7 @@ async function handleRequest(req: Request): Promise<Response> {
       return json(req, {
         ok: true,
         service: "norva-playback",
-        version: 67,
+        version: 68,
         nativeHeartbeatProtocol: 1,
         providerCircuitProtocol: 1,
         exactTrackCrawlerProtocol: 2,
@@ -8522,7 +8522,18 @@ async function providerAccountBusyForCrawler(
 ): Promise<boolean> {
   if (!accountKey) return true;
   try {
-    const { data, error } = await db.rpc("provider_account_busy", { p_key: accountKey });
+    // A completed crawler probe records `catalog-refresh` activity for the
+    // generic playback/validation fences.  Re-reading that generic fence here
+    // makes the next sequential fleet lane mistake its own already-drained
+    // activity for a viewer and starves the dedicated repair lanes.  The
+    // catalog-refresh fence ignores only passive presence and the crawler's
+    // own released activity; playback, language validation and unknown fresh
+    // holders still fail closed.  File-probe leases and the Gateway drain
+    // attestation continue to serialize the actual provider connection.
+    const { data, error } = await db.rpc(
+      "provider_account_busy_for_catalog_refresh",
+      { p_key: accountKey },
+    );
     if (error) return true;
     // Only an explicit false is permission to open a new provider connection.
     return data !== false;
