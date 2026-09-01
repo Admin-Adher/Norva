@@ -162,6 +162,7 @@ class WatchPage {
         this._gatewayAudioRenditionStatus = 'absent';
         this._gatewayAudioRenditions = [];
         this._gatewayMultiAudioHls = null;
+        this._gatewayMuxedMonoStreamIndex = null;
         this._gatewayAudioRenditionAttemptId = null;
         this._gatewayAudioRenditionRequired = false;
         this._gatewayHlsAudioTracksReady = false;
@@ -7890,6 +7891,7 @@ class WatchPage {
         this._gatewayAudioRenditionStatus = 'absent';
         this._gatewayAudioRenditions = [];
         this._gatewayMultiAudioHls = null;
+        this._gatewayMuxedMonoStreamIndex = null;
         this._gatewayAudioRenditionAttemptId = null;
         this._gatewayAudioRenditionRequired = false;
         this._gatewayHlsAudioTracksReady = false;
@@ -7905,6 +7907,40 @@ class WatchPage {
         const declared = rawRenditions !== null && rawRenditions !== undefined
             || rawMultiAudioHls !== null && rawMultiAudioHls !== undefined;
         if (!declared) return false;
+
+        // Gateway v135 explicitly serializes a disabled multi-audio topology for
+        // a genuine muxed-mono MKV: [] renditions plus one exact source track.
+        // Treat that signed shape as the normal mono contract, not as a malformed
+        // rollout. The absolute stream identity remains fail-closed and is used
+        // only to label the already-selected muxed track; it never enables an HLS
+        // switch or a provider-session restart.
+        const codecTrackList = Array.isArray(codecTracks) ? codecTracks : [];
+        const monoCodecStreamIndex = Number(
+            codecTrackList[0]?.index
+                ?? codecTrackList[0]?.streamIndex
+                ?? codecTrackList[0]?.stream_index,
+        );
+        const declaredAudioStreamIndex = Number(options.audioStreamIndex);
+        const disabledMonoContract = Array.isArray(rawRenditions)
+            && rawRenditions.length === 0
+            && codecTrackList.length === 1
+            && Number.isSafeInteger(monoCodecStreamIndex)
+            && monoCodecStreamIndex >= 0
+            && Number.isSafeInteger(declaredAudioStreamIndex)
+            && declaredAudioStreamIndex === monoCodecStreamIndex
+            && rawMultiAudioHls
+            && typeof rawMultiAudioHls === 'object'
+            && Number(rawMultiAudioHls.protocol) === 1
+            && rawMultiAudioHls.enabled === false
+            && String(rawMultiAudioHls.reason || '') === 'audio_track_count_below_minimum'
+            && Number(rawMultiAudioHls.sourceTrackCount ?? rawMultiAudioHls.source_track_count) === 1
+            && Number(rawMultiAudioHls.preparedTrackCount ?? rawMultiAudioHls.prepared_track_count) === 0
+            && (rawMultiAudioHls.defaultHlsIndex ?? rawMultiAudioHls.default_hls_index) == null
+            && (rawMultiAudioHls.defaultStreamIndex ?? rawMultiAudioHls.default_stream_index) == null;
+        if (disabledMonoContract) {
+            this._gatewayMuxedMonoStreamIndex = monoCodecStreamIndex;
+            return false;
+        }
 
         // A partially rolled-out or malformed multi-audio contract must never
         // fall back to a relative HLS index or to a session-restarting probe row.
@@ -8114,10 +8150,15 @@ class WatchPage {
         const readyState = Number(video?.readyState);
         const videoWidth = Number(video?.videoWidth);
         const videoHeight = Number(video?.videoHeight);
-        if (!video || video.error
+        const contractStreamIndex = Number(this._gatewayMuxedMonoStreamIndex);
+        const hasExactDisabledMonoContract = this._gatewayMuxedMonoStreamIndex !== null
+            && this._gatewayMuxedMonoStreamIndex !== undefined
+            && Number.isSafeInteger(contractStreamIndex)
+            && contractStreamIndex >= 0;
+        if (!hasExactDisabledMonoContract && (!video || video.error
             || !Number.isFinite(readyState) || readyState < 3
             || !Number.isFinite(videoWidth) || videoWidth <= 0
-            || !Number.isFinite(videoHeight) || videoHeight <= 0) {
+            || !Number.isFinite(videoHeight) || videoHeight <= 0)) {
             return null;
         }
 
@@ -8179,7 +8220,8 @@ class WatchPage {
             || !verifiedLanguage || verifiedLanguage === 'und'
             || probeLanguage !== verifiedLanguage
             || directStreamIndex !== streamIndex
-            || selectedStreamIndex !== streamIndex) {
+            || selectedStreamIndex !== streamIndex
+            || (hasExactDisabledMonoContract && contractStreamIndex !== streamIndex)) {
             return null;
         }
 
@@ -8211,10 +8253,15 @@ class WatchPage {
         const readyState = Number(video?.readyState);
         const videoWidth = Number(video?.videoWidth);
         const videoHeight = Number(video?.videoHeight);
-        if (!video || video.error
+        const contractStreamIndex = Number(this._gatewayMuxedMonoStreamIndex);
+        const hasExactDisabledMonoContract = this._gatewayMuxedMonoStreamIndex !== null
+            && this._gatewayMuxedMonoStreamIndex !== undefined
+            && Number.isSafeInteger(contractStreamIndex)
+            && contractStreamIndex >= 0;
+        if (!hasExactDisabledMonoContract && (!video || video.error
             || !Number.isFinite(readyState) || readyState < 3
             || !Number.isFinite(videoWidth) || videoWidth <= 0
-            || !Number.isFinite(videoHeight) || videoHeight <= 0) {
+            || !Number.isFinite(videoHeight) || videoHeight <= 0)) {
             return null;
         }
 
@@ -8240,7 +8287,8 @@ class WatchPage {
         const streamIndex = Number(rawTracks[0]?.index);
         if (!Number.isSafeInteger(streamIndex) || streamIndex < 0
             || Number(this.directAudioStreamIndex) !== streamIndex
-            || Number(this.selectedAudioStreamIndex) !== streamIndex) {
+            || Number(this.selectedAudioStreamIndex) !== streamIndex
+            || (hasExactDisabledMonoContract && contractStreamIndex !== streamIndex)) {
             return null;
         }
 

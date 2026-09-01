@@ -715,6 +715,88 @@ test('verified muxed mono exposes one exact catalogue row and clicking it never 
     assert.equal(restartCalls, 0);
 });
 
+test('the explicit Gateway disabled-mono contract exposes its exact track before the first frame', () => {
+    const WatchPage = loadWatchPage();
+    const harness = makePage(WatchPage);
+    const { page } = harness;
+    page.content = {
+        id: 'movie-mono-cold',
+        type: 'movie',
+        audioTracksScope: 'file',
+        audioLanguageValidationStatus: 'verified',
+        audioTracks: [{ index: 7, lang: 'eng' }],
+    };
+    page.audioLanguageValidationStatus = 'verified';
+    page.audioTracks = [{ index: 7, language: 'en', codec: 'aac', channels: 2, default: true }];
+    page.selectedAudioStreamIndex = 7;
+    page.directAudioStreamIndex = 7;
+    Object.assign(page.video, { readyState: 1, videoWidth: 0, videoHeight: 0, error: null });
+
+    const disabledMono = {
+        protocol: 1,
+        enabled: false,
+        reason: 'audio_track_count_below_minimum',
+        sourceTrackCount: 1,
+        preparedTrackCount: 0,
+        defaultHlsIndex: null,
+        defaultStreamIndex: null,
+    };
+    assert.equal(page.configureGatewayAudioRenditions([], disabledMono, page.audioTracks, {
+        required: true,
+        playbackAttemptId: 17,
+        audioStreamIndex: 7,
+        verifiedTracks: page.getContentAudioTracks(),
+        audioLanguageValidationStatus: page.audioLanguageValidationStatus,
+    }), false);
+    assert.equal(page._gatewayAudioRenditionStatus, 'absent');
+    assert.equal(page._gatewayMuxedMonoStreamIndex, 7);
+
+    page.playHls('https://gateway.example/sessions/session-mono-cold/playlist.m3u8', {
+        playbackAttemptId: 17,
+        autoplay: false,
+    });
+    page.hls.audioTracks = [];
+    page.hls.emit(FakeHls.Events.MANIFEST_PARSED, { audioTracks: [] });
+
+    const tracks = page.getVisibleAudioTracks();
+    assert.deepEqual(Array.from(tracks, (track) => [track.source, track.streamIndex, track.label]), [
+        ['gateway-muxed-mono', 7, 'English'],
+    ]);
+});
+
+test('malformed disabled-mono declarations remain visibly fail closed', () => {
+    const WatchPage = loadWatchPage();
+    const cases = [
+        ['wrong reason', { reason: 'profile_incomplete' }],
+        ['wrong source count', { sourceTrackCount: 2 }],
+        ['prepared rendition mismatch', { preparedTrackCount: 1 }],
+        ['default stream present', { defaultStreamIndex: 7 }],
+    ];
+    for (const [label, mutation] of cases) {
+        const { page } = makePage(WatchPage);
+        page.audioTracks = [{ index: 7, language: 'en', codec: 'aac', channels: 2 }];
+        page.selectedAudioStreamIndex = 7;
+        page.directAudioStreamIndex = 7;
+        const declaration = {
+            protocol: 1,
+            enabled: false,
+            reason: 'audio_track_count_below_minimum',
+            sourceTrackCount: 1,
+            preparedTrackCount: 0,
+            defaultHlsIndex: null,
+            defaultStreamIndex: null,
+            ...mutation,
+        };
+        assert.equal(page.configureGatewayAudioRenditions([], declaration, page.audioTracks, {
+            required: true,
+            playbackAttemptId: 17,
+            audioStreamIndex: 7,
+        }), false, label);
+        assert.equal(page._gatewayAudioRenditionStatus, 'invalid', label);
+        assert.equal(page._gatewayMuxedMonoStreamIndex, null, label);
+    }
+});
+
 test('unverified muxed mono exposes one honest informational row without enabling a restart', async () => {
     const WatchPage = loadWatchPage();
     const harness = makePage(WatchPage);
