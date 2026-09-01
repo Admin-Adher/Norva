@@ -91,10 +91,13 @@ test('background title enrichment uses the head-aware selector and fenced writer
   assert.match(helpers, /db\.rpc\("norva_select_catalog_title_background_claim_page"/);
   assert.match(helpers, /db\.rpc\("norva_ack_catalog_title_background_claim_page"/);
   assert.match(helpers, /db\.rpc\("norva_apply_catalog_title_background_result"/);
+  assert.match(helpers, /db\.rpc\("norva_yield_catalog_title_background_mode"/);
   assert.doesNotMatch(helpers, /norva_select_catalog_title_background_page"/);
   for (const [name, block] of Object.entries(blocks)) {
     assert.match(block, /selectCatalogBackgroundBatch\(/, `${name} must use the head-aware RPC selector`);
     assert.match(block, /applyCatalogBackgroundOutcomes\(/, `${name} must use the fenced RPC writer`);
+    assert.match(block, /yieldCatalogBackgroundMode\(/, `${name} must release a completed bounded slice`);
+    assert.match(block, /cooperativeYielded/, `${name} must expose cooperative-yield evidence`);
     assert.doesNotMatch(block, /\.from\("cloud_catalog_visible_titles"\)/);
     assert.doesNotMatch(block, /\.from\("cloud_titles"\)/);
     assert.doesNotMatch(block, /\.from\("catalog_titles"\)\.upsert/);
@@ -195,6 +198,7 @@ test('background RPC path rolls its own epoch, rejects an interleaved transition
       selectCatalogBackgroundBatch,
       applyCatalogBackgroundOutcomes,
       ackCatalogBackgroundBatch,
+      yieldCatalogBackgroundMode,
     };`,
     { loader: 'ts', format: 'cjs', target: 'es2022' },
   ).code;
@@ -278,6 +282,43 @@ test('background RPC path rolls its own epoch, rejects an interleaved transition
   assert.deepEqual({ ...ack }, {
     complete: false, checkpointRevision: '4', acknowledgedTitles: 1, remainingTitles: 1,
   });
+
+  const yieldCalls = [];
+  const yielded = await runtime.yieldCatalogBackgroundMode(
+    {
+      async rpc(name, args) {
+        yieldCalls.push({ name, args: structuredClone(args) });
+        return { data: {
+          contract: 'catalog-title-background-mode-v1', mode: 'search_pending',
+          worker: 'edge-search-test', leaseSequence: 9, checkpointRevision: 12,
+          leaseUntil: '2026-09-01T08:00:00.000Z', yielded: true,
+        }, error: null };
+      },
+    },
+    'search_pending',
+    { worker: 'edge-search-test', leaseSequence: 9, checkpointRevision: '11', retryBefore: '2026-01-01T00:00:00.000Z' },
+    '11',
+  );
+  assert.deepEqual(yieldCalls, [{
+    name: 'norva_yield_catalog_title_background_mode',
+    args: {
+      p_mode: 'search_pending', p_worker: 'edge-search-test',
+      p_expected_lease_sequence: 9, p_expected_revision: '11',
+    },
+  }]);
+  assert.deepEqual({ ...yielded }, {
+    checkpointRevision: '12', leaseUntil: '2026-09-01T08:00:00.000Z',
+  });
+
+  await assert.rejects(
+    runtime.yieldCatalogBackgroundMode(
+      { async rpc() { return { data: { yielded: false }, error: null }; } },
+      'search_pending',
+      { worker: 'edge-search-test', leaseSequence: 9, checkpointRevision: '11', retryBefore: '2026-01-01T00:00:00.000Z' },
+      '11',
+    ),
+    (error) => error && error.status === 503 && !String(error.message).includes('schema'),
+  );
 
   const missingDb = {
     from() { throw new Error('direct table fallback is forbidden'); },
@@ -365,6 +406,9 @@ test('year enrichment runtime sends only the selected P/G payload through the CA
         remainingTitles: 0,
       };
     },
+    yieldCatalogBackgroundMode: async () => {
+      throw new Error('completed cycles must not yield a stale lease');
+    },
     CATALOG_BACKGROUND_DRAIN_DEADLINE_MS: 45_000,
     CATALOG_BACKGROUND_PAGE_LIMIT: 100,
     HttpError: class HttpError extends Error {},
@@ -379,6 +423,76 @@ test('year enrichment runtime sends only the selected P/G payload through the CA
   assert.equal(result.done, true);
   assert.deepEqual(appliedItems, [activeA, activeC]);
   assert.equal(appliedItems.some((item) => item.id === candidateB.id), false);
+});
+
+test('bounded enrichment yields only its empty acknowledged lease and resumes from the returned revision', async () => {
+  const source = read('supabase/functions/norva-source-sync/index.ts');
+  const start = source.indexOf('async function cronBackfillYears(');
+  const end = source.indexOf('// Re-validate titles', start);
+  const compiled = transformSync(
+    `${source.slice(start, end)}\nmodule.exports = cronBackfillYears;`,
+    { loader: 'ts', format: 'cjs', target: 'es2022' },
+  ).code;
+  const title = {
+    id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    userId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+    itemType: 'movie', providerTmdbId: '42', visibilityEpoch: '7',
+  };
+  const claim = {
+    worker: 'edge-year-yield-test', leaseSequence: 4, checkpointRevision: '1',
+    retryBefore: '2026-01-01T00:00:00.000Z',
+  };
+  const yields = [];
+  const sandbox = {
+    module: { exports: {} }, exports: {},
+    tmdbApiKey: () => 'tmdb-key',
+    fetchTmdbYear: async () => 2024,
+    stringOr: (value, fallback) => typeof value === 'string' && value ? value : fallback,
+    claimCatalogBackgroundMode: async () => claim,
+    selectCatalogBackgroundBatch: async () => ({
+      items: [title], complete: false, ackRequired: true,
+      pageDigest: 'a'.repeat(64), checkpointRevision: '2', emptyTransitions: 0,
+    }),
+    applyCatalogBackgroundOutcomes: async () => ({
+      applied: 1, matched: 1, visibleChanged: 1, stale: 0,
+      processedTitleIds: [title.id],
+    }),
+    ackCatalogBackgroundBatch: async () => ({
+      complete: false, checkpointRevision: '3', acknowledgedTitles: 1, remainingTitles: 0,
+    }),
+    yieldCatalogBackgroundMode: async (_db, mode, actualClaim, revision) => {
+      yields.push({ mode, actualClaim, revision });
+      return { checkpointRevision: '4', leaseUntil: '2026-09-01T08:00:00.000Z' };
+    },
+    CATALOG_BACKGROUND_DRAIN_DEADLINE_MS: 45_000,
+    CATALOG_BACKGROUND_PAGE_LIMIT: 100,
+    HttpError: class HttpError extends Error {},
+  };
+  vm.runInNewContext(compiled, sandbox, { filename: 'norva-source-sync/year-cooperative-yield.ts' });
+  const result = await sandbox.module.exports({}, 1, false, 1);
+
+  assert.equal(result.scanned, 1);
+  assert.equal(result.acknowledged, 1);
+  assert.equal(result.retryPending, 0);
+  assert.equal(result.done, false);
+  assert.equal(result.cooperativeYielded, true);
+  assert.equal(result.checkpointRevision, '4');
+  assert.deepEqual(yields, [{ mode: 'year_pending', actualClaim: claim, revision: '3' }]);
+
+  claim.checkpointRevision = '1';
+  let prematureYields = 0;
+  sandbox.ackCatalogBackgroundBatch = async () => ({
+    complete: false, checkpointRevision: '3', acknowledgedTitles: 0, remainingTitles: 1,
+  });
+  sandbox.yieldCatalogBackgroundMode = async () => {
+    prematureYields += 1;
+    return { checkpointRevision: '4', leaseUntil: '2026-09-01T08:00:00.000Z' };
+  };
+  const partial = await sandbox.module.exports({}, 1, false, 1);
+  assert.equal(partial.retryPending, 1);
+  assert.equal(partial.cooperativeYielded, false);
+  assert.equal(partial.checkpointRevision, '3');
+  assert.equal(prematureYields, 0, 'a partial inflight page must retain its recovery lease');
 });
 
 test('operator source-error reporting retains hidden and staging failures', () => {
