@@ -213,6 +213,10 @@ test('shared-host VAAPI compose is private, single-instance and resource bounded
     assert.equal(gateway.environment.MAX_ACTIVE_VIDEO_ENCODER_SESSIONS, '${MAX_ACTIVE_VIDEO_ENCODER_SESSIONS:-4}');
     assert.equal(gateway.environment.MKV_CACHE_COORDINATION_MODE, 'local');
     assert.equal(gateway.environment.MKV_CACHE_SINGLE_INSTANCE_ATTESTED, 'true');
+    assert.equal(
+        gateway.environment.MKV_COMPLETE_HLS_BACKGROUND_CONTINUATION_ENABLED,
+        '${MKV_COMPLETE_HLS_BACKGROUND_CONTINUATION_ENABLED:-false}',
+    );
     assert.equal(compose.networks['norva-internal'].external, true);
     assert.equal(compose.networks['norva-internal'].name, '${NORVA_DOCKER_NETWORK:-norva_default}');
     assert.deepEqual(gateway.command.slice(0, 6), ['ionice', '-c2', '-n7', 'nice', '-n', '10']);
