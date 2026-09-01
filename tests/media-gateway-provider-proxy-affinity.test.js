@@ -449,3 +449,18 @@ test('gateway advertises targeted operator override support without identities o
   assert.doesNotMatch(gateway, /providerProxySlotOverrides[\s\S]{0,100}res\.json/);
   assert.doesNotMatch(gateway, /providerProxyUrls[\s\S]{0,100}res\.json/);
 });
+
+test('service-only session diagnostics expose only the proxy slot and one-way affinity hash', () => {
+  assert.match(
+    gateway,
+    /app\.get\('\/debug\/sessions', requireGatewayAuth,[\s\S]{0,220}sessions: Array\.from\(sessions\.values\(\)\)\.map\(debugSession\)/,
+  );
+  assert.match(
+    gateway,
+    /providerProxy:\s*providerProxyAgents\.length[\s\S]{0,320}slot:\s*poolIndexForKey\(providerProxyAffinity\) \+ 1,[\s\S]{0,160}affinitySha256:\s*providerProxyAffinitySha256,[\s\S]{0,160}overridden:\s*providerProxySlotOverrides\.has\(providerProxyAffinitySha256\)/,
+  );
+  assert.doesNotMatch(
+    gateway,
+    /providerProxy:\s*providerProxyAgents\.length[\s\S]{0,500}(sourceUrl|username|password):/,
+  );
+});

@@ -15933,6 +15933,10 @@ function serializeSession(req, session) {
 function debugSession(session) {
     const mappedIndex = mappedAudioStreamIndexForSession(session);
     const exactTracks = audioTracksForSession(session);
+    const providerProxyAffinity = proxyKeyFromUrl(session.sourceUrl || '');
+    const providerProxyAffinitySha256 = providerProxyAffinity
+        ? sha256Hex(providerProxyAffinity)
+        : null;
     const selectedTrack = Number.isInteger(mappedIndex)
         ? exactTracks.find((track) => normalizeAudioStreamIndex(track?.index) === mappedIndex) || null
         : selectedAudioTrackForSession(session);
@@ -15941,6 +15945,14 @@ function debugSession(session) {
         playbackSessionId: session.playbackSessionId,
         status: session.status,
         mode: session.mode,
+        providerProxy: providerProxyAgents.length && providerProxyAffinitySha256
+            ? {
+                protocol: 1,
+                slot: poolIndexForKey(providerProxyAffinity) + 1,
+                affinitySha256: providerProxyAffinitySha256,
+                overridden: providerProxySlotOverrides.has(providerProxyAffinitySha256),
+            }
+            : null,
         audioMode: audioModeForSession(session),
         audioStreamIndex: mappedAudioStreamIndexForSession(session),
         subtitleStreamIndex: mappedSubtitleStreamIndexForSession(session),
