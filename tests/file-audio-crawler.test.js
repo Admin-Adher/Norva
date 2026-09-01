@@ -470,7 +470,7 @@ test('Edge rollout is signed, dynamically reversible and keeps fast evidence sco
   assert.ok(migration.includes('observation.audio_verified_at is null'));
   assert.ok(detector.includes(': "whisper-basic-v1"'));
 
-  assert.ok(health.includes('version: 67'));
+  assert.ok(health.includes('version: 68'));
   assert.ok(health.includes('exactTrackCrawlerProtocol: 2'));
   assert.ok(health.includes('basicLidConsensusProtocol: 2'));
   assert.ok(health.includes('lidDetectOnlyProtocol: 1'));
@@ -619,6 +619,8 @@ test('crawler provider guards and gateway handoff are fail closed', () => {
   assert.ok(claim.includes('if (error) return false'));
   assert.match(claim, /catch \(_\) \{\s*return false;/);
   assert.ok(busy.includes('if (!accountKey) return true'));
+  assert.ok(busy.includes('db.rpc(\n      "provider_account_busy_for_catalog_refresh"'));
+  assert.ok(!busy.includes('db.rpc("provider_account_busy"'));
   assert.ok(busy.includes('if (error) return true'));
   assert.ok(busy.includes('return data !== false'));
   assert.ok(live.includes('if (!userId) return true'));
@@ -1140,7 +1142,7 @@ test('LID cascade rollout is exact-file, bounded, fail-closed and atomically aud
   assert.ok(!rpc.includes('merge_catalog_title_audio'));
   assert.ok(!rpc.includes('audio_lang_verified_at ='));
 
-  assert.ok(health.includes('version: 67'));
+  assert.ok(health.includes('version: 68'));
   assert.ok(health.includes('exactTrackCrawlerProtocol: 2'));
   assert.ok(health.includes('lidCascadeProtocol: 2'));
   assert.ok(health.includes('lidCascadeMode: lidPolicy.cascadeMode'));
