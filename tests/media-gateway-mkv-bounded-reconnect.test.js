@@ -180,6 +180,7 @@ function pumpHarness(overrides = {}) {
             prefetchRetainedBoundedMkvHeader,
             parseBoundedProviderContentRange,
             boundedVodResponseValidator,
+            openBoundedVodInputAttempt,
             writeVodInputChunk,
             finishVodInput,
             captureBoundedMkvHeaderBytes,
@@ -998,6 +999,12 @@ test('HTTP 200 full-body fallback stays fail-closed outside an exact offset-zero
         assert.equal(tracker.active, 0, 'the prefix socket is closed before indexed seek');
         assert.equal(session.startupTimings.providerSeekIdentityPreflightBytes, prefixBytes);
         assert.equal(session.startupTimings.providerSeekHeaderPrefetch, true);
+        assert.equal(session.vodInputPrefixIdentityBytes, 512);
+        assert.equal(
+            session.vodInputPrefixIdentitySha256,
+            crypto.createHash('sha256').update(largeFixture.subarray(0, 512)).digest('hex'),
+        );
+        assert.equal(session.startupTimings.providerSeekPrefixIdentityBytes, 512);
         const captured = headerByteCache.get(session.sourceUrl);
         assert.equal(captured?.len, prefixBytes);
         assert.equal(captured?.done, true);
@@ -1594,6 +1601,7 @@ test('exhausted indexed MKV resume falls back once after releasing the broker an
         lastError: null,
         logTail: '',
         status: 'starting',
+        fastInputProbe: true,
     };
     const startSessionWithProviderRetry = startRetryHarness({
         PROVIDER_SLOT_RELEASE_DELAY_MS: 2500,
@@ -1647,6 +1655,9 @@ test('exhausted indexed MKV resume falls back once after releasing the broker an
     assert.equal(session.startupTimings.boundedMkvInputPump, true);
     assert.equal(session.startupTimings.finiteMkvLinearFallbackReleaseWaitMs, 2500);
     assert.equal(session.startupTimings.slotReleaseWaitMs, 5000);
+    assert.equal(session.forceFullInputProbe, true);
+    assert.equal(session.fastInputProbeFallbacks, 1);
+    assert.equal(session.startupTimings.finiteMkvLinearFallbackFullProbe, true);
     assert.equal(session.inputFailure, null);
 });
 
@@ -1995,6 +2006,88 @@ test('changed ETag and compressed ranges are terminal before their bytes reach F
         );
         assert.equal(fetches, 1);
         assert.equal(writable.bytes().length, 0);
+        assert.equal(tracker.active, 0);
+    });
+});
+
+test('linear resume fault harness revalidates byte zero before accepting a rotated CDN target', async (t) => {
+    const fixture = mkvFixture(1024);
+    const originalTarget = 'https://cdn.example/media/title.mkv?expires=100&signature=old';
+    const rotatedTarget = 'https://cdn.example/media/title.mkv?signature=new&expires=200';
+    const prefixBytes = 512;
+    const prefixSha256 = crypto.createHash('sha256')
+        .update(fixture.subarray(0, prefixBytes))
+        .digest('hex');
+
+    await t.test('matching prefix permits one exact byte-zero stream without a validator', async () => {
+        const tracker = makeTracker();
+        const session = mkvSession(fixture.length);
+        session.finiteMkvLinearFallbacks = 1;
+        session.vodInputPrefixIdentityBytes = prefixBytes;
+        session.vodInputPrefixIdentitySha256 = prefixSha256;
+        session.vodInputEffectiveUrlSha256 = crypto.createHash('sha256').update(originalTarget).digest('hex');
+        const h = pumpHarness({
+            fetch: async (_url, options) => {
+                tracker.calls.push(options.headers);
+                return trackedResponse(tracker, {
+                    url: rotatedTarget,
+                    chunks: [fixture],
+                    headers: {
+                        'Content-Range': `bytes 0-${fixture.length - 1}/${fixture.length}`,
+                        'Content-Length': String(fixture.length),
+                    },
+                });
+            },
+        });
+        const writable = new CapturingWritable();
+
+        const result = await h.runBoundedMkvInputPump(
+            session,
+            writable,
+            new AbortController().signal,
+            null,
+        );
+
+        assert.equal(result.bytesForwarded, fixture.length);
+        assert.deepEqual(writable.bytes(), fixture);
+        assert.equal(session.finiteMkvLinearFallbackIdentityVerified, true);
+        assert.equal(
+            session.vodInputEffectiveUrlSha256,
+            crypto.createHash('sha256').update(rotatedTarget).digest('hex'),
+        );
+        assert.equal(tracker.calls.length, 1);
+        assert.equal(tracker.maxActive, 1);
+        assert.equal(tracker.active, 0);
+    });
+
+    await t.test('same-size changed media is rejected before one byte reaches FFmpeg', async () => {
+        const changedFixture = Buffer.from(fixture);
+        changedFixture[128] ^= 0xff;
+        const tracker = makeTracker();
+        const session = mkvSession(fixture.length);
+        session.finiteMkvLinearFallbacks = 1;
+        session.vodInputPrefixIdentityBytes = prefixBytes;
+        session.vodInputPrefixIdentitySha256 = prefixSha256;
+        session.vodInputEffectiveUrlSha256 = crypto.createHash('sha256').update(originalTarget).digest('hex');
+        const h = pumpHarness({
+            fetch: async () => trackedResponse(tracker, {
+                url: rotatedTarget,
+                chunks: [changedFixture],
+                headers: {
+                    'Content-Range': `bytes 0-${changedFixture.length - 1}/${changedFixture.length}`,
+                    'Content-Length': String(changedFixture.length),
+                },
+            }),
+        });
+        const writable = new CapturingWritable();
+
+        await assert.rejects(
+            h.runBoundedMkvInputPump(session, writable, new AbortController().signal, null),
+            (error) => error?.code === 'VOD_CHANGED' && error?.status === 502,
+        );
+        assert.equal(writable.bytes().length, 0);
+        assert.equal(session.finiteMkvLinearFallbackIdentityVerified, undefined);
+        assert.equal(tracker.maxActive, 1);
         assert.equal(tracker.active, 0);
     });
 });

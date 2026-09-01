@@ -1873,7 +1873,7 @@ const MULTI_AUDIO_HLS_PROTOCOL = 1;
 // production Ryzen/Radeon host. Keep the operational default evidence-based and configurable,
 // while bounding accidental fan-out. Every exact source track stays visible to the user.
 const MAX_MULTI_AUDIO_RENDITIONS = clampInt(process.env.MAX_MULTI_AUDIO_RENDITIONS, 12, 2, 32);
-const GATEWAY_VERSION = 137;
+const GATEWAY_VERSION = 138;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -8924,6 +8924,9 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             finiteMkvSeekBroker: null,
             inputFailure: null,
             vodInputValidator: null,
+            vodInputPrefixIdentityBytes: null,
+            vodInputPrefixIdentitySha256: null,
+            finiteMkvLinearFallbackIdentityVerified: false,
             completeHlsCacheLease: completeHlsCacheLookup.hit ? completeHlsCacheLookup.lease : null,
             completeHlsCacheBinding: completeHlsCacheLookup.hit ? completeHlsCacheLookup.assessment.binding : null,
             completeHlsCacheRootPlaylist: completeHlsCacheLookup.hit ? completeHlsCacheLookup.lease.rootPlaylist : null,
@@ -9630,6 +9633,15 @@ async function startSessionWithProviderRetry(session, abortSignal = null) {
                 session.startupTimings.finiteMkvSeekFallbackCode = finiteMkvSeekFailureCode;
                 session.startupTimings.finiteMkvResumeMode = 'linear-byte-zero-fallback';
                 session.startupTimings.boundedMkvInputPump = true;
+                // Indexed input can demux from a cue with the reduced known-file
+                // probe. The byte-zero pipe is deliberately non-seekable, so give
+                // its one fallback attempt the full demux budget immediately.
+                if (session.fastInputProbe === true && session.forceFullInputProbe !== true) {
+                    session.forceFullInputProbe = true;
+                    session.fastInputProbeFallbacks = Number(session.fastInputProbeFallbacks || 0) + 1;
+                    sessionStartupStats.fastInputProbeFallbacks += 1;
+                    session.startupTimings.finiteMkvLinearFallbackFullProbe = true;
+                }
                 session.inputFailure = null;
                 session.lastError = null;
                 session.logTail = '';
@@ -10091,6 +10103,38 @@ async function primeFullBodyMatroskaAttempt(attempt, parentSignal, session = nul
     attempt.reader = attempt.response.body.getReader();
     attempt.preloadedChunks = [];
     let inspectionPrefix = Buffer.alloc(0);
+    const fallbackIdentityBytes = Number(session?.finiteMkvLinearFallbacks || 0) > 0
+        ? Number(session?.vodInputPrefixIdentityBytes || 0)
+        : 0;
+    const fallbackIdentitySha256 = String(session?.vodInputPrefixIdentitySha256 || '').toLowerCase();
+    const requiresFallbackIdentity = Boolean(
+        Number.isSafeInteger(fallbackIdentityBytes)
+        && fallbackIdentityBytes >= 4
+        && fallbackIdentityBytes <= RAW_PREFIX_SNIFF_BYTES
+        && /^[a-f0-9]{64}$/.test(fallbackIdentitySha256)
+    );
+    const verifyFallbackIdentity = () => {
+        if (!requiresFallbackIdentity) return true;
+        if (inspectionPrefix.length < fallbackIdentityBytes) {
+            throw vodInputPumpError(
+                'VOD_CHANGED',
+                'Provider returned too few bytes to revalidate the resumed MKV identity.',
+                { status: 502 },
+            );
+        }
+        const observedSha256 = crypto.createHash('sha256')
+            .update(inspectionPrefix.subarray(0, fallbackIdentityBytes))
+            .digest('hex');
+        if (observedSha256 !== fallbackIdentitySha256) {
+            throw vodInputPumpError(
+                'VOD_CHANGED',
+                'The MKV prefix changed before the linear resume fallback.',
+                { status: 502 },
+            );
+        }
+        session.finiteMkvLinearFallbackIdentityVerified = true;
+        return true;
+    };
     const readAndRetain = async () => {
         const next = await readRawPrefixChunk(
             attempt.reader,
@@ -10119,16 +10163,23 @@ async function primeFullBodyMatroskaAttempt(attempt, parentSignal, session = nul
         }
         return true;
     };
-    while (inspectionPrefix.length < 377) {
+    while (inspectionPrefix.length < Math.max(377, requiresFallbackIdentity ? fallbackIdentityBytes : 0)) {
         if (!await readAndRetain()) break;
         const observed = classifyMediaContainerPrefix(inspectionPrefix);
-        if (observed?.container === 'mkv') return;
+        if (observed?.container === 'mkv') {
+            if (requiresFallbackIdentity && inspectionPrefix.length < fallbackIdentityBytes) continue;
+            verifyFallbackIdentity();
+            return;
+        }
         if (observed && observed.container !== 'mkv') {
             throw sourceContainerMismatchError(attempt, session, range, inspectionPrefix, observed);
         }
     }
     const observed = classifyMediaContainerPrefix(inspectionPrefix);
-    if (observed?.container === 'mkv') return;
+    if (observed?.container === 'mkv') {
+        verifyFallbackIdentity();
+        return;
+    }
     if (observed && observed.container !== 'mkv') {
         throw sourceContainerMismatchError(attempt, session, range, inspectionPrefix, observed);
     }
@@ -10487,11 +10538,26 @@ async function openBoundedVodInputAttempt(session, offset, parentSignal, dispatc
             throw vodInputPumpError('VOD_CHANGED', 'The MKV file changed while it was playing.', { status: 502 });
         }
         const effectiveUrlSha256 = sha256Hex(String(attempt.response?.url || session.sourceUrl || ''));
+        const verifiedLinearFallback = Boolean(
+            Number(session.finiteMkvLinearFallbacks || 0) > 0
+            && session.finiteMkvLinearFallbackIdentityVerified === true
+        );
         if (
             session.vodInputEffectiveUrlSha256 &&
-            effectiveUrlSha256 !== session.vodInputEffectiveUrlSha256
+            effectiveUrlSha256 !== session.vodInputEffectiveUrlSha256 &&
+            !verifiedLinearFallback
         ) {
             throw vodInputPumpError('VOD_CHANGED', 'The MKV provider target changed while it was playing.', { status: 502 });
+        }
+        if (verifiedLinearFallback) {
+            // The source prefix and exact total were revalidated against byte
+            // zero before any byte reached FFmpeg. Bind the newest signed CDN
+            // target for observability while later reconnects remain fenced by
+            // the same total and If-Range validator when one is available.
+            session.vodInputEffectiveUrlSha256 = effectiveUrlSha256;
+            session.vodInputEffectiveUrlIdentitySha256 = strictLidEffectiveUrlIdentitySha256(
+                attempt.response?.url || session.sourceUrl,
+            );
         }
         const observedValidator = boundedVodResponseValidator(attempt.response);
         if (offset > 0 && !session.vodInputValidator) {
@@ -10586,6 +10652,7 @@ async function preopenBoundedMkvInputPump(session, parentSignal = null, options 
             if (drainExactRange) {
                 const expectedBytes = opened.range.end - opened.range.start + 1;
                 let drainedBytes = 0;
+                let identityPrefix = Buffer.alloc(0);
                 while (true) {
                     // Container validation may already have consumed and retained
                     // the first provider chunk. Drain that exact byte sequence first
@@ -10613,6 +10680,13 @@ async function preopenBoundedMkvInputPump(session, parentSignal = null, options 
                     if (next.error) throw classifyVodInputFetchError(next.error, false);
                     if (next.done) break;
                     const chunk = Buffer.from(next.value || []);
+                    if (identityPrefix.length < RAW_PREFIX_SNIFF_BYTES) {
+                        const remainingIdentityBytes = RAW_PREFIX_SNIFF_BYTES - identityPrefix.length;
+                        const identityPart = chunk.subarray(0, remainingIdentityBytes);
+                        identityPrefix = identityPrefix.length
+                            ? Buffer.concat([identityPrefix, identityPart])
+                            : Buffer.from(identityPart);
+                    }
                     captureBoundedMkvHeaderBytes(session, drainedBytes, chunk);
                     drainedBytes += chunk.length;
                     if (drainedBytes > expectedBytes) {
@@ -10634,6 +10708,13 @@ async function preopenBoundedMkvInputPump(session, parentSignal = null, options 
                 session.startupTimings.providerSeekIdentityPreflight = true;
                 session.startupTimings.providerSeekIdentityPreflightBytes = drainedBytes;
                 session.startupTimings.providerSeekHeaderPrefetch = captureResumeHeader;
+                if (identityPrefix.length >= 4) {
+                    session.vodInputPrefixIdentityBytes = identityPrefix.length;
+                    session.vodInputPrefixIdentitySha256 = crypto.createHash('sha256')
+                        .update(identityPrefix)
+                        .digest('hex');
+                    session.startupTimings.providerSeekPrefixIdentityBytes = identityPrefix.length;
+                }
                 return;
             }
 
