@@ -1567,6 +1567,18 @@ const KNOWN_VOD_INPUT_PROBE_SIZE_BYTES = clampInt(process.env.KNOWN_VOD_INPUT_PR
 // opt into a deeper buffer without changing the session or provider socket.
 const MIN_HLS_STARTUP_BUFFER_SECONDS = clampInt(process.env.MIN_HLS_STARTUP_BUFFER_SECONDS, 10, 1, 180);
 const MIN_HLS_STARTUP_SEGMENTS = clampInt(process.env.MIN_HLS_STARTUP_SEGMENTS, 3, 1, 10);
+// Multi-audio MKV playback always transcodes an aligned video rendition plus
+// every prepared audio rendition. A short leading prefix can encode much
+// faster than the sustained provider stream and make the startup policy sign a
+// false-positive production rate. Require a longer proof window before the
+// graph is advertised; healthy VAAPI sessions can still produce it quickly,
+// while a collapsing upstream falls back to the conservative client buffer.
+const MULTI_AUDIO_HLS_STARTUP_PROOF_SECONDS = clampInt(
+    process.env.MULTI_AUDIO_HLS_STARTUP_PROOF_SECONDS,
+    20,
+    10,
+    60,
+);
 const MAX_SUBTITLE_TRACKS = clampInt(process.env.MAX_SUBTITLE_TRACKS, 32, 1, 64);
 const MAX_ACTIVE_VIEWER_SUBTITLE_OPERATIONS = clampInt(process.env.MAX_ACTIVE_VIEWER_SUBTITLE_OPERATIONS, 1, 1, 4);
 const MAX_VIEWER_SUBTITLE_REQUESTS_PER_MINUTE = clampInt(process.env.MAX_VIEWER_SUBTITLE_REQUESTS_PER_MINUTE, 30, 1, 120);
@@ -1957,7 +1969,7 @@ const MULTI_AUDIO_HLS_PROTOCOL = 1;
 // production Ryzen/Radeon host. Keep the operational default evidence-based and configurable,
 // while bounding accidental fan-out. Every exact source track stays visible to the user.
 const MAX_MULTI_AUDIO_RENDITIONS = clampInt(process.env.MAX_MULTI_AUDIO_RENDITIONS, 12, 2, 32);
-const GATEWAY_VERSION = 140;
+const GATEWAY_VERSION = 141;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -14989,7 +15001,13 @@ function freezeMultiAudioHlsTopology(session) {
         ? path.join(session.outputDir, plan.videoPlaylistName)
         : session.playlistPath;
     session.forceAlignedMultiAudioVideoEncode = plan.enabled === true;
-    if (plan.enabled) session.hlsTargetSeconds = EXACT_MATROSKA_H264_HLS_TARGET_SECONDS;
+    if (plan.enabled) {
+        session.hlsTargetSeconds = EXACT_MATROSKA_H264_HLS_TARGET_SECONDS;
+        session.minHlsStartupBufferSeconds = Math.max(
+            Number(session.minHlsStartupBufferSeconds) || 0,
+            MULTI_AUDIO_HLS_STARTUP_PROOF_SECONDS,
+        );
+    }
     session.startupTimings = asRecord(session.startupTimings);
     session.startupTimings.multiAudioHls = multiAudioHlsDiagnosticsForSession(session);
     return plan;

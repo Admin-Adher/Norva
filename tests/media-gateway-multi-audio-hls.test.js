@@ -63,6 +63,7 @@ function loadPlanHarness() {
         {
             MAX_MULTI_AUDIO_RENDITIONS: 12,
             MULTI_AUDIO_HLS_PROTOCOL: 1,
+            MULTI_AUDIO_HLS_STARTUP_PROOF_SECONDS: 20,
             EXACT_MATROSKA_H264_MAX_WIDTH: 1_920,
             EXACT_MATROSKA_H264_MAX_HEIGHT: 1_080,
             EXACT_MATROSKA_H264_MAX_PIXELS: 1_920 * 1_080,
@@ -171,6 +172,7 @@ test('normal exact-size preflight freezes a reachable gateway-inband multi graph
     session.playlistPath = path.join(session.outputDir, 'playlist.m3u8');
     session.startupTimings = {};
     session.hlsTargetSeconds = 4;
+    session.minHlsStartupBufferSeconds = 10;
 
     assert.equal(h.buildMultiAudioHlsPlan(session).reason, 'profile_incomplete');
     session.codecProfile.fileSizeBytes = 987_654_321;
@@ -178,6 +180,7 @@ test('normal exact-size preflight freezes a reachable gateway-inband multi graph
     assert.equal(plan.enabled, true);
     assert.equal(session.forceAlignedMultiAudioVideoEncode, true);
     assert.equal(session.hlsTargetSeconds, 2);
+    assert.equal(session.minHlsStartupBufferSeconds, 20);
     assert.match(session.videoPlaylistPath, /video\.m3u8$/);
 
     const route = sourceBetween("app.post('/sessions'", "\n// Cross-device kill-switch");
@@ -352,13 +355,14 @@ test('master validation requires one video, every ordered audio rendition and on
     assert.equal(inspect(master.replace('video.m3u8', 'other.m3u8'), plan).reason, 'video_variant_contract_mismatch');
 });
 
-function mediaPlaylist(prefix) {
+function mediaPlaylist(prefix, segmentCount = 3) {
     return [
         '#EXTM3U',
         '#EXT-X-TARGETDURATION:4',
-        '#EXTINF:4.000000,', `${prefix}-00000.ts`,
-        '#EXTINF:4.000000,', `${prefix}-00001.ts`,
-        '#EXTINF:4.000000,', `${prefix}-00002.ts`,
+        ...Array.from({ length: segmentCount }, (_, index) => [
+            '#EXTINF:4.000000,',
+            `${prefix}-${String(index).padStart(5, '0')}.ts`,
+        ]).flat(),
         '',
     ].join('\n');
 }
@@ -411,12 +415,13 @@ test('readiness waits for the video and every non-empty audio playlist and segme
         playlistPath,
         multiAudioHls: plan,
         startupTimings: {},
+        minHlsStartupBufferSeconds: 20,
     };
-    const writeSegments = (prefix, emptyLast = false) => {
-        for (let index = 0; index < 3; index += 1) {
+    const writeSegments = (prefix, segmentCount = 3, emptyLast = false) => {
+        for (let index = 0; index < segmentCount; index += 1) {
             fs.writeFileSync(
                 path.join(dir, `${prefix}-${String(index).padStart(5, '0')}.ts`),
-                Buffer.alloc(emptyLast && index === 2 ? 0 : 11 + index),
+                Buffer.alloc(emptyLast && index === segmentCount - 1 ? 0 : 11 + index),
             );
         }
     };
@@ -430,7 +435,7 @@ test('readiness waits for the video and every non-empty audio playlist and segme
         await assert.rejects(waitForPlaylist(session, 15), /Playlist timeout/, 'missing audio child blocks 201');
 
         fs.writeFileSync(path.join(dir, 'audio_1.m3u8'), mediaPlaylist('audio_1'));
-        writeSegments('audio_1', true);
+        writeSegments('audio_1', 3, true);
         await assert.rejects(waitForPlaylist(session, 15), /Playlist timeout/, 'empty audio segment blocks 201');
 
         fs.writeFileSync(path.join(dir, 'audio_1-00002.ts'), Buffer.alloc(17));
@@ -441,16 +446,26 @@ test('readiness waits for the video and every non-empty audio playlist and segme
         await assert.rejects(waitForPlaylist(session, 15), /Playlist timeout/, 'network-path segment cannot alias a local basename');
 
         fs.writeFileSync(path.join(dir, 'audio_1.m3u8'), mediaPlaylist('audio_1'));
+        await assert.rejects(
+            waitForPlaylist(session, 15),
+            /Playlist timeout/,
+            'a fast 12-second prefix cannot prove sustained multi-audio production',
+        );
+
+        for (const prefix of ['video', 'audio_0', 'audio_1']) {
+            fs.writeFileSync(path.join(dir, `${prefix}.m3u8`), mediaPlaylist(prefix, 5));
+            writeSegments(prefix, 5);
+        }
         await waitForPlaylist(session, 100);
-        assert.equal(session.startupTimings.playlistSegmentCount, 3);
+        assert.equal(session.startupTimings.playlistSegmentCount, 5);
         assert.equal(session.startupTimings.multiAudioHls.ready, true);
         assert.deepStrictEqual(
             plain(session.startupTimings.multiAudioHls.audio.map(({ hlsIndex, streamIndex, segmentCount }) => ({
                 hlsIndex, streamIndex, segmentCount,
             }))),
             [
-                { hlsIndex: 0, streamIndex: 1, segmentCount: 3 },
-                { hlsIndex: 1, streamIndex: 4, segmentCount: 3 },
+                { hlsIndex: 0, streamIndex: 1, segmentCount: 5 },
+                { hlsIndex: 1, streamIndex: 4, segmentCount: 5 },
             ],
         );
     } finally {

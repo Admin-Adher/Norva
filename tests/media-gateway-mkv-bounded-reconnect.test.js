@@ -3179,7 +3179,10 @@ test('ffprobe timeout preserves terminal 458/407 stderr, waits for pipe close, a
         const pending = runFfprobe([], 2, 'https://provider.example/movie/account/title.mkv')
             .finally(() => { settled = true; });
         child.stderr.emit('data', Buffer.from(scenario.stderr));
-        await new Promise((resolve) => setTimeout(resolve, 50));
+        const forceKillDeadline = Date.now() + 250;
+        while (child.kills.length < 2 && Date.now() < forceKillDeadline) {
+            await new Promise((resolve) => setTimeout(resolve, 5));
+        }
         assert.deepEqual(child.kills, ['SIGTERM', 'SIGKILL']);
         assert.equal(settled, false, 'no next provider request may start before ffprobe exits');
         child.emit('exit', null, 'SIGKILL');
