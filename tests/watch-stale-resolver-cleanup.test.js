@@ -77,6 +77,31 @@ test('Back invalidates an in-flight playback resolver before teardown starts', (
     assert.strictEqual(page._playbackAttemptId, 8);
 });
 
+test('Back still navigates and releases its latch when teardown throws synchronously', () => {
+    const WatchPage = loadWatchPage({});
+    const page = Object.create(WatchPage.prototype);
+    const navigations = [];
+    page._playbackAttemptId = 3;
+    page._cloudPlaybackLaneAttemptId = 3;
+    page._goingBack = false;
+    page._suspendResumeSnapshotSave = false;
+    page.beginPlaybackAttempt = WatchPage.prototype.beginPlaybackAttempt;
+    page.persistPlaybackStateForExit = () => {};
+    page.deactivateHistoryPersistence = () => {};
+    page.stop = () => { throw new Error('synthetic teardown failure'); };
+    page.clearResumeSnapshot = () => { throw new Error('must not run after stop throws'); };
+    page.cancelNextEpisode = () => {};
+    page.app = { navigateTo: (pageName) => navigations.push(pageName) };
+    page.returnPage = 'movies';
+
+    page.goBack();
+
+    assert.deepStrictEqual(navigations, ['movies']);
+    assert.strictEqual(page._goingBack, false);
+    assert.strictEqual(page._suspendResumeSnapshotSave, false);
+    assert.strictEqual(page._playbackAttemptId, 4);
+});
+
 test('route hide invalidates an in-flight playback resolver before teardown starts', () => {
     const WatchPage = loadWatchPage({});
     const page = Object.create(WatchPage.prototype);

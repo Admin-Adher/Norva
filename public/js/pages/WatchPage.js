@@ -12927,28 +12927,41 @@ class WatchPage {
         if (this._goingBack) return;
         this._goingBack = true;
 
-        // Invalidate a resolver that is still waiting for the Edge/Gateway. Its
-        // response may already own a provider session even though stop() cannot
-        // know its id yet; the late-result guard will expire it exactly.
-        this.beginPlaybackAttempt();
+        try {
+            // Invalidate a resolver that is still waiting for the Edge/Gateway. Its
+            // response may already own a provider session even though stop() cannot
+            // know its id yet; the late-result guard will expire it exactly.
+            this.beginPlaybackAttempt();
 
-        // Capture the position synchronously (cheap, local state) so nothing is lost.
-        // Capture one immutable final position before teardown. The request stays
-        // fire-and-forget so TV Back remains immediate, while the lifecycle gate
-        // prevents later pagehide/pause events from writing the reset media clock.
-        this.persistPlaybackStateForExit();
-        this.deactivateHistoryPersistence();
+            // Capture the position synchronously (cheap, local state) so nothing is lost.
+            // Capture one immutable final position before teardown. The request stays
+            // fire-and-forget so TV Back remains immediate, while the lifecycle gate
+            // prevents later pagehide/pause events from writing the reset media clock.
+            this.persistPlaybackStateForExit();
+            this.deactivateHistoryPersistence();
 
-        this._suspendResumeSnapshotSave = true;
-        this.stop();
-        this._suspendResumeSnapshotSave = false;
-        this.clearResumeSnapshot();
-        this.cancelNextEpisode();
-
-        // Navigate to the page we came from (stored in returnPage) IMMEDIATELY.
-        // We don't use history.back() because we used replaceHistory when navigating here.
-        this.app.navigateTo(this.returnPage || 'movies');
-        this._goingBack = false;
+            this._suspendResumeSnapshotSave = true;
+            try {
+                this.stop();
+            } finally {
+                this._suspendResumeSnapshotSave = false;
+            }
+            this.clearResumeSnapshot();
+            this.cancelNextEpisode();
+        } catch (_) {
+            // A synchronous teardown failure must never trap the viewer on Watch or
+            // leave the re-entrancy latch armed. Late resolver/session guards still
+            // own best-effort server cleanup after this immediate route exit.
+            console.warn('[WatchPage] Back teardown did not complete cleanly; navigating away.');
+        } finally {
+            // Navigate to the page we came from (stored in returnPage) IMMEDIATELY.
+            // We don't use history.back() because we used replaceHistory when navigating here.
+            try {
+                this.app.navigateTo(this.returnPage || 'movies');
+            } finally {
+                this._goingBack = false;
+            }
+        }
     }
 
     show() {
