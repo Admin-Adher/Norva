@@ -2230,31 +2230,23 @@ async function listLanguageFacets(req: Request, url: URL, userId: string) {
 
   // The facet set math runs in Postgres over file_audio_languages and
   // file_subtitle_languages. Counts are exact per title and deserialize as jsonb.
-  let value: { audio: unknown[]; subtitles: unknown[] } = { audio: [], subtitles: [] };
-  try {
-    const rpcName = sourceId
-      ? "cloud_exact_language_counts_by_source"
-      : "cloud_exact_language_counts";
-    const rpcArgs = sourceId
-      ? { p_user_id: userId, p_item_type: itemType, p_source_id: sourceId }
-      : { p_user_id: userId, p_item_type: itemType };
-    const { data, error } = await db.rpc(rpcName, rpcArgs);
-    if (!error && data && typeof data === "object") {
-      const d = data as { audio?: unknown; subtitles?: unknown };
-      value = {
-        audio: exactLanguageFacetItems(d.audio, itemType),
-        subtitles: exactLanguageFacetItems(d.subtitles, itemType),
-      };
-    } else if (!sourceId) {
-      // Rolling-deploy compatibility while the database migration lands.
-      const legacy = await db.rpc("cloud_language_facets", { p_user_id: userId, p_item_type: itemType });
-      const d = legacy.data as { audio?: unknown; subtitles?: unknown } | null;
-      value = {
-        audio: Array.isArray(d?.audio) ? d.audio : [],
-        subtitles: Array.isArray(d?.subtitles) ? d.subtitles : [],
-      };
-    }
-  } catch (_) { /* leave the menus empty (falls back to the static <option>s) on any failure */ }
+  const rpcName = sourceId
+    ? "cloud_exact_language_counts_by_source"
+    : "cloud_exact_language_counts";
+  const rpcArgs = sourceId
+    ? { p_user_id: userId, p_item_type: itemType, p_source_id: sourceId }
+    : { p_user_id: userId, p_item_type: itemType };
+  const { data, error } = await db.rpc(rpcName, rpcArgs);
+  if (error) throwDb(error, "Unable to load exact language facets");
+  // A successful RPC may legitimately return no counts. Only that successful
+  // empty result is cacheable; transport/RPC failures must stay retryable.
+  const d = data && typeof data === "object"
+    ? data as { audio?: unknown; subtitles?: unknown }
+    : {};
+  const value: { audio: unknown[]; subtitles: unknown[] } = {
+    audio: exactLanguageFacetItems(d.audio, itemType),
+    subtitles: exactLanguageFacetItems(d.subtitles, itemType),
+  };
 
   if (cacheKey) {
     FACET_CACHE.set(cacheKey, { value, exp: nowMs + FACET_CACHE_TTL_MS });
@@ -2264,6 +2256,101 @@ async function listLanguageFacets(req: Request, url: URL, userId: string) {
     }
   }
   return value;
+}
+
+function normalizeObservedSubtitleTracks(value: unknown): JsonRecord[] {
+  if (!Array.isArray(value)) return [];
+  return (value as unknown[])
+    .map((entry) => {
+      const track = recordOrEmpty(entry);
+      const index = Number(track.index);
+      return {
+        index,
+        lang: canonicalFileLanguage(track.lang ?? track.language),
+        codec: stringOrNull(track.codec ?? track.codecName ?? track.codec_name),
+        subtitleType: stringOrNull(track.subtitleType ?? track.subtitle_type),
+        extractable: track.extractable === true,
+        forced: track.forced === true,
+        default: track.default === true,
+      };
+    })
+    .filter((track) => Number.isInteger(track.index) && track.index >= 0 && track.index <= 1024);
+}
+
+function exactTenantEpisodeCoordinatesMatch(
+  value: unknown,
+  expected: {
+    userId: string;
+    sourceId: string;
+    titleId: string;
+    variantId: string;
+    parentSeriesId: string;
+    episodeId: string;
+  },
+): boolean {
+  const row = recordOrEmpty(Array.isArray(value) ? value[0] : value);
+  return Boolean(
+    stringOrNull(row.user_id) === expected.userId &&
+    stringOrNull(row.source_id) === expected.sourceId &&
+    stringOrNull(row.title_id) === expected.titleId &&
+    stringOrNull(row.variant_id) === expected.variantId &&
+    stringOrNull(row.parent_series_id) === expected.parentSeriesId &&
+    stringOrNull(row.episode_id) === expected.episodeId
+  );
+}
+
+async function mergeObservedExactFileLanguages(
+  db: SupabaseClient,
+  values: {
+    userId: string;
+    sourceId: string;
+    titleId: string;
+    variantId: string;
+    itemType: string;
+    parentSeriesId: string | null;
+    fileExternalId: string;
+    audioTracks: JsonRecord[];
+    subtitleTracks: JsonRecord[];
+    hasAudio: boolean;
+    hasSubtitle: boolean;
+  },
+): Promise<"merged" | "episode-not-owned"> {
+  if (values.itemType === "series") {
+    if (!values.parentSeriesId) return "episode-not-owned";
+    const { data: episodeCoordinates, error: episodeError } = await db.rpc(
+      "catalog_series_episode_coordinates",
+      {
+        p_user_id: values.userId,
+        p_source_id: values.sourceId,
+        p_parent_series_id: values.parentSeriesId,
+        p_episode_id: values.fileExternalId,
+      },
+    );
+    if (episodeError) throwDb(episodeError, "Unable to validate observed episode coordinates");
+    if (!exactTenantEpisodeCoordinatesMatch(episodeCoordinates, {
+      userId: values.userId,
+      sourceId: values.sourceId,
+      titleId: values.titleId,
+      variantId: values.variantId,
+      parentSeriesId: values.parentSeriesId,
+      episodeId: values.fileExternalId,
+    })) {
+      return "episode-not-owned";
+    }
+  }
+
+  const { error } = await db.rpc("merge_cloud_title_file_languages", {
+    p_user_id: values.userId,
+    p_title_id: values.titleId,
+    p_variant_id: values.variantId,
+    p_file_external_id: values.fileExternalId,
+    p_audio_tracks: values.audioTracks,
+    p_subtitle_tracks: values.subtitleTracks,
+    p_has_audio: values.hasAudio,
+    p_has_subtitle: values.hasSubtitle,
+  });
+  if (error) throwDb(error, "Unable to merge exact file languages");
+  return "merged";
 }
 
 // Capture audio/subtitle languages observed by a client for one owned provider
@@ -2360,22 +2447,7 @@ async function recordObservedLanguages(req: Request, userId: string) {
     body.subtitleTracksScope ?? body.subtitle_tracks_scope,
   )?.toLowerCase() ?? null;
   const subtitleTracksArrayProvided = Array.isArray(rawSubtitleTracks);
-  const orderedSubtitleTracks = subtitleTracksArrayProvided
-    ? (rawSubtitleTracks as unknown[])
-        .map((entry) => {
-          const track = recordOrEmpty(entry);
-          const index = Number(track.index);
-          return {
-            index,
-            lang: cleanLanguage(track.lang ?? track.language),
-            codec: stringOrNull(track.codec ?? track.codecName ?? track.codec_name),
-            subtitleType: stringOrNull(track.subtitleType ?? track.subtitle_type),
-            extractable: track.extractable === true,
-            forced: track.forced === true,
-          };
-        })
-        .filter((track) => Number.isInteger(track.index) && track.index >= 0 && track.index <= 1024)
-    : [];
+  const orderedSubtitleTracks = normalizeObservedSubtitleTracks(rawSubtitleTracks);
 
   const observedCodes = [...new Set([
     ...codes,
@@ -2467,19 +2539,23 @@ async function recordObservedLanguages(req: Request, userId: string) {
   // Selected-language codes and title/global hints are never authoritative.
   let unionMerged = false;
   if (hasExactAudioMap || hasExactSubtitleMap) {
-    try {
-      const { error } = await db.rpc("merge_cloud_title_file_languages", {
-        p_user_id: userId,
-        p_title_id: titleId,
-        p_variant_id: variant.id,
-        p_file_external_id: fileExternalId,
-        p_audio_tracks: orderedTracks,
-        p_subtitle_tracks: orderedSubtitleTracks,
-        p_has_audio: hasExactAudioMap,
-        p_has_subtitle: hasExactSubtitleMap,
-      });
-      unionMerged = !error;
-    } catch (_) { /* rolling deploy: legacy single-movie update below remains safe */ }
+    const mergeOutcome = await mergeObservedExactFileLanguages(db, {
+      userId,
+      sourceId,
+      titleId,
+      variantId: String(variant.id),
+      itemType,
+      parentSeriesId: itemType === "series" ? stringOrNull(variant.external_id) : null,
+      fileExternalId,
+      audioTracks: orderedTracks,
+      subtitleTracks: orderedSubtitleTracks,
+      hasAudio: hasExactAudioMap,
+      hasSubtitle: hasExactSubtitleMap,
+    });
+    if (mergeOutcome === "episode-not-owned") {
+      return { ok: true, updated: false, reason: "episode_not_owned" };
+    }
+    unionMerged = true;
   }
 
   // Legacy ordered maps remain valid only when title == exact movie file.

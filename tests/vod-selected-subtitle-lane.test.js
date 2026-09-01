@@ -389,7 +389,7 @@ test('Watch clears stale title UI and serializes safe subtitle lane restarts', (
   );
   const engineTracks = section(
     watch,
-    'applyEngineSubtitleTracks(tracks, playbackAttemptId) {',
+    'applyEngineSubtitleTracks(tracks, playbackAttemptId, evidence = {}) {',
     'async enrichEngineSubtitleTracks()',
   );
   const subtitlePolling = section(

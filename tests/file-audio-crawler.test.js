@@ -4,6 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
+const vm = require('node:vm');
 
 const ROOT = path.join(__dirname, '..');
 const read = (file) => fs
@@ -72,19 +73,23 @@ test('audio crawler hydrates valid cache and keeps parser misses retryable', () 
   assert.ok(crawler.includes('db.rpc("merge_cloud_title_file_languages"'));
   assert.ok(crawler.includes('diag.cacheHydrated++'));
   assert.ok(crawler.indexOf('diag.cacheHydrated++') < crawler.indexOf('resolvePlaybackTarget('));
-  assert.ok(crawler.includes('claimProviderFileProbe'));
-  assert.ok(crawler.includes('releaseProviderFileProbe'));
+  assert.ok(crawler.includes('runProviderProbeWithLease'));
+  assert.ok(playback.includes('await releaseProviderFileProbe(db, identityKey, owner)'));
   assert.ok(crawler.includes('provider_probe_circuit_record_tick'));
   assert.ok(crawler.includes('candidateFootprint?.lowFootprint'));
   assert.ok(crawler.includes('cachedAudioTracks.length > 0'));
   assert.ok(crawler.includes('versionTags.includes("multi")'));
   assert.ok(crawler.includes('await new Promise((resolve) => setTimeout(resolve, 2_500))'));
-  assert.ok(crawler.includes('const relaySubtitleComplete = relayInfo.subtitleProbeComplete === true'));
+  assert.ok(crawler.includes('const relaySubtitleComplete = authoritativeProbeFacetComplete('));
   assert.ok(crawler.includes('if (!gatewayFallback)'));
   assert.ok(crawler.includes('if (!relaySubtitleComplete) return;'));
   assert.ok(crawler.includes('info = relayInfo;'));
   assert.ok(crawler.includes('subtitles: relaySubtitleTracks'));
   assert.ok(crawler.includes('subtitleProbeComplete: true'));
+  assert.ok(crawler.includes('const gatewaySubtitleComplete = authoritativeProbeFacetComplete('));
+  assert.ok(crawler.includes('const subtitleObservation = mode === "probe"'));
+  assert.ok(crawler.includes('subtitleProbeObservation('));
+  assert.ok(crawler.includes('const subtitleProbeComplete = subtitleObservation.complete'));
 
   const exactEmpty = between(
     crawler,
@@ -119,13 +124,17 @@ test('relay and gateway expose independent authoritative probe markers', () => {
 
   const endpoint = between(
     gateway,
-    "app.post('/probe-audio'",
-    '\n// ── Strict LID loopback broker',
+    'async function handleProbeAudioRequest',
+    "\napp.post('/probe-audio'",
   );
   assert.ok(endpoint.includes('hasCompleteMkvPlaybackProfile(profile)'));
-  assert.ok(endpoint.includes('probeCodecProfileUncached(url, ua, { background: true })'));
+  assert.match(
+    endpoint,
+    /probeCodecProfileUncached\(url, ua, \{\s*background: true,\s*backgroundActivityKind: ACCOUNT_ACTIVITY_KIND_CATALOG_REFRESH,\s*providerDrainState,/,
+  );
   assert.ok(endpoint.includes('audioProbeComplete: authoritativeTrackMap && audioTracks.length > 0'));
   assert.ok(endpoint.includes('subtitleProbeComplete: authoritativeTrackMap'));
+  assert.ok(endpoint.includes('providerProbeDrainAttestation(providerDrainState)'));
 });
 
 test('repair migration clears poisoned movie probes and prioritizes MULTI safely', () => {
@@ -266,7 +275,7 @@ test('tagged-language verification keeps the historical transcript verdict varia
   assert.ok(detectedFanout.includes('v_owner_verified'));
   assert.ok(detectedFanout.includes('v_cache_verified or not v_owner_verified'));
   assert.ok(detectedFanout.includes('and observation.audio_verified_at is null'));
-  assert.ok(verifier.includes('`${detectBase}?index=${t.index}&dur=20`'));
+  assert.ok(verifier.includes('`${detectBase}?index=${t.index}&dur=20&consensus=2`'));
   assert.ok(verifier.includes('AbortSignal.timeout(120_000)'));
   assert.ok(verifier.includes('const evidence = basicLidEvidence(det)'));
   assert.ok(verifier.includes('if (!evidence.accepted || !lang)'));
@@ -287,14 +296,18 @@ test('tagged-language verification keeps the historical transcript verdict varia
   assert.ok(playback.includes('verificationWork += 1'));
   assert.ok(playback.includes('p_title_ids: explicitVerifyIds.length ? explicitVerifyIds : null'));
   assert.ok(playback.includes('fileScoped: fileWhisperScope'));
-  assert.ok(playback.includes('claimProviderFileProbe(db, identityKey, whisperLeaseOwner, 600)'));
+  assert.ok(playback.includes('claimProviderFileProbe(db, identityKey, candidateLeaseOwner, 600)'));
   assert.ok(playback.includes('claimProviderFileProbe(db, identityKey, verifyLeaseOwner, 900)'));
   assert.ok(migration.includes('least(900, coalesce(p_ttl_seconds, 150))'));
   assert.ok(migration.includes('add column if not exists audio_lang_verification jsonb'));
   assert.ok(migration.includes('add column if not exists audio_lang_retry_at timestamptz'));
   assert.ok(migration.includes('create or replace function public.record_catalog_file_audio_verification('));
   assert.ok(verifier.includes('pendingVerdictCount'));
-  assert.ok(verifier.includes('minWords: 4'));
+  assert.ok(verifier.includes('consensus: 2'));
+  assert.ok(verifier.includes('minConfidence: 0.95'));
+  assert.ok(verifier.includes('minWords: 12'));
+  assert.ok(verifier.includes('minUniqueWords: 8'));
+  assert.ok(!verifier.includes('db.rpc("merge_catalog_title_audio"'));
   assert.ok(gatewaySource.includes('const consensusNeeded ='));
   assert.ok(gatewaySource.includes('WHISPER_STRICT_MIN_PROBABILITY'));
   assert.ok(gatewaySource.includes('WHISPER_STRICT_MIN_WORDS'));
@@ -360,7 +373,7 @@ test('Edge rollout is signed, dynamically reversible and keeps fast evidence sco
   );
   const evidence = between(
     playback,
-    'function basicLidEvidence(',
+    'function basicLidConsensusSampleAccepted(',
     '\n// Probe a title',
   );
   const detector = between(
@@ -423,33 +436,30 @@ test('Edge rollout is signed, dynamically reversible and keeps fast evidence sco
   assert.match(migration, /'lid_detect_only_production_enabled',\s*\n\s*false/);
   assert.ok(migration.includes('on conflict (key) do nothing'));
 
-  // Legacy transcripts retain their >=4-word guard. Detect-only must carry
-  // every explicit contract field and may never impersonate verification.
-  assert.ok(evidence.includes('det?.method === "whisper-detect-only-v1"'));
-  assert.ok(evidence.includes('det?.evidence === "lid-only-high-confidence"'));
-  assert.ok(evidence.includes('det?.fastPathAccepted === true'));
-  assert.ok(evidence.includes('det?.confident === true'));
-  assert.ok(evidence.includes('det?.verified === false'));
-  assert.ok(evidence.includes('det?.fallbackUsed === false'));
-  assert.ok(evidence.includes('det?.validationStatus === "pending"'));
-  assert.ok(evidence.includes('confidence >= 0.95'));
+  // Transcript evidence is conservative and multi-window. Detect-only keeps
+  // its distinct signed contract and may never impersonate verification.
+  assert.ok(evidence.includes('method === "whisper-detect-only-v1"'));
+  assert.ok(evidence.includes('sample?.evidence === "lid-only-high-confidence"'));
+  assert.ok(evidence.includes('sample?.fastPathAccepted === true'));
+  assert.ok(evidence.includes('sample?.confident !== true'));
+  assert.ok(evidence.includes('sample?.verified === false'));
+  assert.ok(evidence.includes('sample?.fallbackUsed === false'));
+  assert.ok(evidence.includes('sample?.validationStatus === "pending"'));
+  assert.ok(evidence.includes('confidence < 0.95'));
   assert.ok(evidence.includes('words === 0'));
-  assert.ok(evidence.includes('det?.confident === true && words >= 4'));
+  assert.ok(evidence.includes('whisperConfidence >= 0.95'));
+  assert.ok(evidence.includes('words >= 12'));
+  assert.ok(evidence.includes('uniqueWords >= 8'));
+  assert.ok(evidence.includes('consensus >= 2'));
 
-  // A fast canary result stays exact-file/tenant scoped. The irreversible
-  // title-wide union is reserved for historical transcript detections. Method
-  // evidence survives resumable multi-pass files, so a later fallback pass
-  // cannot accidentally merge an earlier fast language.
+  // All basic/provisional evidence stays exact-file/tenant scoped. Only the
+  // strict certification path may populate the irreversible global union.
   assert.ok(detector.includes('track.lidMethod = evidence.method'));
   assert.ok(detector.includes('lidMethod: t.lidMethod'));
   assert.ok(detector.includes('enriched.map((t) => t.lidMethod)'));
   assert.ok(detector.includes('t.lidMethod === "whisper-detect-only-v1"'));
-  assert.ok(detector.includes('detectOnlyDetectedCount === 0'));
-  assert.ok(detector.includes('db.rpc("merge_catalog_title_audio"'));
-  assert.ok(
-    detector.indexOf('detectOnlyDetectedCount === 0') <
-      detector.indexOf('db.rpc("merge_catalog_title_audio"'),
-  );
+  assert.ok(!detector.includes('db.rpc("merge_catalog_title_audio"'));
+  assert.ok(!verifier.includes('db.rpc("merge_catalog_title_audio"'));
   assert.ok(detector.includes('method: detectOnlyDetectedCount > 0'));
   assert.ok(detector.includes('? "whisper-detect-only-v1"'));
   assert.ok(playback.includes('lidMethod: stringOrNull(x?.lidMethod ?? x?.lid_method)'));
@@ -464,6 +474,481 @@ test('Edge rollout is signed, dynamically reversible and keeps fast evidence sco
   assert.ok(health.includes('lidDetectOnlyProtocol: 1'));
   assert.ok(health.includes('audioLidEnabled: lidPolicy.enabled'));
   assert.ok(health.includes('lidDetectOnlyMode: lidPolicy.mode'));
+});
+
+test('basic transcript LID requires two individually strong windows', () => {
+  const playback = read('supabase/functions/norva-playback/index.ts');
+  const source = between(
+    playback,
+    'function basicLidConsensusSampleAccepted(',
+    '\n// Probe a title',
+  )
+    .replace(/: JsonRecord \| null/g, '')
+    .replace(/: string/g, '')
+    .replace(/: boolean/g, '')
+    .replace(/\): BasicLidEvidence/g, ')')
+    .replace(/ as JsonRecord\[\]/g, '');
+  const basicLidEvidence = vm.runInNewContext(
+    `(() => {
+      const stringOrNull = (value) => value == null || value === '' ? null : String(value);
+      const normalizeIsoLang = (value) => /^[a-z]{2,3}$/i.test(String(value || ''))
+        ? String(value).toLowerCase()
+        : null;
+      ${source}
+      return basicLidEvidence;
+    })()`,
+  );
+  const strongSample = {
+    language: 'fr', method: 'whisper-transcript-agreement-v1',
+    confident: true, confidence: 0.95, whisperConfidence: 0.97,
+    transcriptAgrees: true, wordCount: 12, uniqueWordCount: 8,
+  };
+  const strong = {
+    ...strongSample,
+    consensus: 2,
+    samples: [{ ...strongSample }, { ...strongSample }],
+  };
+  const weakSample = { ...strongSample, wordCount: 4, uniqueWordCount: 3 };
+
+  assert.equal(basicLidEvidence(strong).accepted, true);
+  assert.equal(basicLidEvidence({ ...strong, confidence: 0.949 }).accepted, false);
+  assert.equal(basicLidEvidence({ ...strong, wordCount: 11 }).accepted, false);
+  assert.equal(basicLidEvidence({ ...strong, uniqueWordCount: 7 }).accepted, false);
+  assert.equal(basicLidEvidence({ ...strong, consensus: 1 }).accepted, false);
+  assert.equal(basicLidEvidence({
+    ...strong,
+    samples: [weakSample, { ...strongSample }],
+  }).accepted, false, 'one weak vote cannot borrow the final window evidence');
+});
+
+test('gateway method calibration reaches Edge for strong ja/zh/ar/ru Whisper agreement', () => {
+  const gateway = read('services/media-gateway/src/index.js');
+  const playback = read('supabase/functions/norva-playback/index.ts');
+  const gatewaySource = between(
+    gateway,
+    'const BASIC_LID_MIN_CONFIDENCE',
+    '\nfunction strictLanguageBatchSampleResult',
+  );
+  const edgeSource = between(
+    playback,
+    'function basicLidConsensusSampleAccepted(',
+    '\n// Probe a title',
+  )
+    .replace(/: JsonRecord \| null/g, '')
+    .replace(/: string/g, '')
+    .replace(/: boolean/g, '')
+    .replace(/\): BasicLidEvidence/g, ')')
+    .replace(/ as JsonRecord\[\]/g, '');
+  const qualifyGatewaySample = vm.runInNewContext(
+    `(() => { ${gatewaySource}; return basicLidConsensusSample; })()`,
+  );
+  const acceptAtEdge = vm.runInNewContext(
+    `(() => {
+      const stringOrNull = (value) => value == null || value === '' ? null : String(value);
+      const normalizeIsoLang = (value) => /^[a-z]{2,3}$/i.test(String(value || ''))
+        ? String(value).toLowerCase()
+        : null;
+      ${edgeSource}
+      return basicLidEvidence;
+    })()`,
+  );
+
+  for (const [language, transcriptConfidence, evidenceBasis] of [
+    ['ja', 0.90, 'cjk-character-bigrams'],
+    ['zh', 0.82, 'cjk-character-bigrams'],
+    ['ar', 0.85, 'whitespace-words'],
+    ['ru', 0.78, 'whitespace-words'],
+  ]) {
+    const window = {
+      language,
+      method: 'whisper-transcript-agreement-v1',
+      confident: true,
+      confidence: 0.98,
+      whisperConfidence: 0.98,
+      transcriptConfidence,
+      transcriptAgrees: true,
+      wordCount: 12,
+      uniqueWordCount: 8,
+      transcriptEvidenceBasis: evidenceBasis,
+      verified: false,
+      validationStatus: 'pending',
+    };
+    const first = qualifyGatewaySample(window);
+    const second = qualifyGatewaySample({ ...window });
+    assert.ok(first, `${language} first gateway window must qualify`);
+    assert.ok(second, `${language} second gateway window must qualify`);
+    assert.equal(acceptAtEdge({
+      ...window,
+      consensus: 2,
+      samples: [first, second],
+    }).accepted, true, `${language} must cross the gateway-to-Edge contract`);
+  }
+});
+
+test('crawler provider guards and gateway handoff are fail closed', () => {
+  const playback = read('supabase/functions/norva-playback/index.ts');
+  const claim = between(
+    playback,
+    'async function claimProviderFileProbe(',
+    '\nasync function providerAccountBusyForCrawler(',
+  );
+  const busy = between(
+    playback,
+    'async function providerAccountBusyForCrawler(',
+    '\nasync function releaseProviderFileProbe(',
+  );
+  const live = between(
+    playback,
+    'async function userHasLiveSession(',
+    '\n// Crons ↔ pregen coordination',
+  );
+  const crawler = between(
+    playback,
+    'const exactFileScope =',
+    '\n// Read-cutover trust artifact',
+  );
+  const gatewayProbe = between(
+    playback,
+    'const fetchGatewayProbe = async (stage: string)',
+    '\n\n        if (preferGatewayProbe)',
+  );
+
+  assert.ok(claim.includes('if (!identityKey || !owner) return false'));
+  assert.ok(claim.includes('if (error) return false'));
+  assert.match(claim, /catch \(_\) \{\s*return false;/);
+  assert.ok(busy.includes('if (!accountKey) return true'));
+  assert.ok(busy.includes('if (error) return true'));
+  assert.ok(busy.includes('return data !== false'));
+  assert.ok(live.includes('if (!userId) return true'));
+  for (const guard of ['evError', 'histError', 'sessError']) {
+    assert.ok(live.includes(`if (${guard}) return true`));
+  }
+  assert.ok(crawler.includes('providerAccountBusyForCrawler(db, accountKey)'));
+  assert.ok(crawler.includes('skipped: "provider-guard-unavailable"'));
+  assert.ok(gatewayProbe.includes('acceptGatewayProviderDrain(gatewayInfo, leaseControl.retainUntilExpiry)'));
+  assert.ok(gatewayProbe.includes('return null'));
+});
+
+test('vod candidates are circuit-guarded and serialized by provider identity without dropping work', async () => {
+  const playback = read('supabase/functions/norva-playback/index.ts');
+  const drainSource = between(
+    playback,
+    'function gatewayProviderDrainAttested(',
+    '\nfunction strictLanguageProviderDrainAttested(',
+  )
+    .replace(/: JsonRecord/g, '')
+    .replace(/: \(\) => void/g, '')
+    .replace(/\): boolean/g, ')');
+  const identitySource = between(
+    playback,
+    'async function resolveCandidateProviderIdentityKey(',
+    '\nfunction newProviderProbeLeaseOwner(',
+  )
+    .replace(/: SupabaseClient/g, '')
+    .replace(/: string/g, '')
+    .replace(/\): Promise<string>/g, ')');
+  const ownerSource = between(
+    playback,
+    'function newProviderProbeLeaseOwner(',
+    '\nfunction authoritativeProbeFacetComplete(',
+  )
+    .replace(/: string/g, '');
+  const facetSource = between(
+    playback,
+    'function authoritativeProbeFacetComplete(',
+    '\nfunction createProviderIdentitySerialQueue(',
+  )
+    .replace(/: unknown/g, '')
+    .replace(/: boolean/g, '')
+    .replace(/: JsonRecord\[\]/g, '')
+    .replace(/: string/g, '');
+  const queueSource = between(
+    playback,
+    'function createProviderIdentitySerialQueue()',
+    '\ntype ProviderProbeLeaseOutcome',
+  )
+    .replace('new Map<string, Promise<void>>()', 'new Map()')
+    .replace('let unlock: () => void', 'let unlock')
+    .replace(
+      'return async function runSerial<T>(identityKey: string, task: () => Promise<T>): Promise<T>',
+      'return async function runSerial(identityKey, task)',
+    )
+    .replace('new Promise<void>', 'new Promise');
+  const guardSource = between(
+    playback,
+    'async function runProviderProbeWithLease<T>(',
+    '\nasync function providerAccountBusyForCrawler(',
+  )
+    .replace('async function runProviderProbeWithLease<T>(', 'async function runProviderProbeWithLease(')
+    .replace('db: SupabaseClient', 'db')
+    .replace('identityKey: string', 'identityKey')
+    .replace('owner: string', 'owner')
+    .replace('ttlSeconds: number', 'ttlSeconds')
+    .replace('task: (control: { retainUntilExpiry: () => void }) => Promise<T>', 'task')
+    .replace('): Promise<ProviderProbeLeaseOutcome<T>>', ')')
+    .replace('let circuit: { open: boolean; openUntil: string | null };', 'let circuit;');
+  let identityLookups = 0;
+  let randomOrdinal = 0;
+  const leases = new Map();
+  const lifecycle = [];
+  const helpers = vm.runInNewContext(
+    `(() => {
+      const resolveSourceIdentity = async (sourceId, userId) => {
+        identityLookups += 1;
+        return { key: 'identity:' + userId + ':' + sourceId };
+      };
+      const claimProviderFileProbe = async (_db, identityKey, owner) => {
+        lifecycle.push('claim:' + identityKey + ':' + owner);
+        if (leases.has(identityKey)) return false;
+        leases.set(identityKey, owner);
+        return true;
+      };
+      const releaseProviderFileProbe = async (_db, identityKey, owner) => {
+        lifecycle.push('release:' + identityKey + ':' + owner);
+        if (leases.get(identityKey) === owner) leases.delete(identityKey);
+      };
+      const readProviderProbeCircuitStateStrict = async (db, identityKey) => {
+        lifecycle.push('circuit:' + identityKey);
+        if (db.failCircuit) throw new Error('circuit unavailable');
+        return { open: db.circuitOpen === true, openUntil: db.circuitOpen ? 'later' : null };
+      };
+      ${identitySource}
+      ${ownerSource}
+      ${drainSource}
+      ${facetSource}
+      ${queueSource}
+      ${guardSource}
+      return {
+        resolveCandidateProviderIdentityKey,
+        newProviderProbeLeaseOwner,
+        gatewayProviderDrainAttested,
+        acceptGatewayProviderDrain,
+        authoritativeProbeFacetComplete,
+        subtitleProbeObservation,
+        queue: createProviderIdentitySerialQueue(),
+        runProviderProbeWithLease,
+      };
+    })()`,
+    {
+      identityLookups,
+      leases,
+      lifecycle,
+      crypto: { randomUUID: () => `uuid-${++randomOrdinal}` },
+    },
+  );
+
+  const vodIdentity = await helpers.resolveCandidateProviderIdentityKey(
+    {},
+    'source-vod',
+    'user-vod',
+    '',
+  );
+  assert.equal(vodIdentity, 'identity:user-vod:source-vod');
+
+  const firstOwner = helpers.newProviderProbeLeaseOwner('whisper-tick', 'variant-1');
+  const secondOwner = helpers.newProviderProbeLeaseOwner('whisper-tick', 'variant-1');
+  assert.notEqual(firstOwner, secondOwner);
+
+  let active = 0;
+  let maxActive = 0;
+  let providerCalls = 0;
+  const runCandidate = (identityKey, owner, label) => helpers.queue(identityKey, () => (
+    helpers.runProviderProbeWithLease({}, identityKey, owner, 150, async () => {
+      lifecycle.push('provider:' + label);
+      providerCalls += 1;
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      await new Promise((resolve) => setImmediate(resolve));
+      active -= 1;
+      return label;
+    })
+  ));
+  const sameIdentity = await Promise.all([
+    runCandidate(vodIdentity, firstOwner, 'first'),
+    runCandidate(vodIdentity, secondOwner, 'second'),
+  ]);
+  assert.deepEqual(sameIdentity.map((outcome) => outcome.status), ['completed', 'completed']);
+  assert.equal(providerCalls, 2, 'serialization must not drop the queued candidate');
+  assert.equal(maxActive, 1, 'same-identity provider callbacks never overlap');
+  assert.ok(lifecycle.indexOf('circuit:' + vodIdentity) < lifecycle.indexOf('provider:first'));
+  assert.equal(leases.size, 0);
+
+  active = 0;
+  maxActive = 0;
+  let releaseDistinct;
+  const distinctGate = new Promise((resolve) => { releaseDistinct = resolve; });
+  const distinctTask = (identityKey, owner) => helpers.queue(identityKey, () => (
+    helpers.runProviderProbeWithLease({}, identityKey, owner, 150, async () => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      if (active === 2) releaseDistinct();
+      await distinctGate;
+      active -= 1;
+    })
+  ));
+  await Promise.all([
+    distinctTask('identity:a', 'owner-a'),
+    distinctTask('identity:b', 'owner-b'),
+  ]);
+  assert.equal(maxActive, 2, 'different provider identities may make progress concurrently');
+
+  providerCalls = 0;
+  const unavailable = await helpers.runProviderProbeWithLease(
+    { failCircuit: true }, 'identity:closed', 'owner-c', 150,
+    async () => { providerCalls += 1; },
+  );
+  assert.equal(unavailable.status, 'guard-unavailable');
+  assert.equal(providerCalls, 0, 'circuit RPC failure must perform zero provider I/O');
+  assert.equal(leases.size, 0, 'failed circuit reads still release the distributed lease');
+
+  let retained = 0;
+  let writes = 0;
+  if (helpers.acceptGatewayProviderDrain(
+    { providerDrained: true, providerDrainProtocol: 0 },
+    () => { retained += 1; },
+  )) writes += 1;
+  assert.equal(writes, 0, 'an unattested 2xx Gateway payload cannot reach persistence');
+  assert.equal(retained, 1, 'an unattested 2xx Gateway payload must retain provider exclusion');
+  assert.equal(helpers.gatewayProviderDrainAttested({
+    providerDrained: true,
+    providerDrainProtocol: 1,
+  }), true);
+
+  const retainedOutcome = await helpers.runProviderProbeWithLease(
+    {}, 'identity:unattested', 'owner-retained', 150,
+    async ({ retainUntilExpiry }) => {
+      providerCalls += 1;
+      retainUntilExpiry();
+      return null;
+    },
+  );
+  assert.equal(retainedOutcome.status, 'completed');
+  assert.equal(leases.get('identity:unattested'), 'owner-retained',
+    'unattested success must keep the distributed lease until database TTL expiry');
+  assert.equal(
+    lifecycle.some((entry) => entry === 'release:identity:unattested:owner-retained'),
+    false,
+  );
+
+  assert.equal(helpers.authoritativeProbeFacetComplete(false, true), false,
+    'explicit facet incompleteness must dominate track/legacy evidence');
+  assert.equal(helpers.authoritativeProbeFacetComplete(undefined, true), true,
+    'marker-less legacy responses retain their compatibility fallback');
+  assert.equal(helpers.authoritativeProbeFacetComplete(true, false), true);
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(helpers.subtitleProbeObservation(
+      false,
+      true,
+      [{ index: 2, lang: 'fr' }],
+      '2026-09-01T12:00:00.000Z',
+    ))),
+    { complete: false, fields: {} },
+    'audio or subtitle rows cannot stamp an explicitly incomplete subtitle facet',
+  );
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(helpers.subtitleProbeObservation(
+      undefined,
+      true,
+      [{ index: 2, lang: 'fr' }],
+      '2026-09-01T12:00:00.000Z',
+    ))),
+    {
+      complete: true,
+      fields: {
+        subtitle_tracks: [{ index: 2, lang: 'fr' }],
+        subtitle_probed_at: '2026-09-01T12:00:00.000Z',
+      },
+    },
+    'only marker-less legacy payloads retain the compatibility promotion',
+  );
+
+  const crawler = between(playback, 'const exactFileScope =', '\n// Read-cutover trust artifact');
+  const codecBackfill = between(
+    playback,
+    'async function runCodecProfileBackfill(',
+    '\nasync function runLidBenchmarkEndpoint',
+  );
+  const episodeBackfill = between(
+    playback,
+    'async function runEpisodeAudioBackfill(',
+    '\nasync function runOneDimension(',
+  );
+  assert.ok(crawler.includes('resolveCandidateProviderIdentityKey('));
+  assert.ok(crawler.includes('newProviderProbeLeaseOwner('));
+  assert.ok(crawler.indexOf('runProviderProbeWithLease(') < crawler.indexOf('resolveSeriesEpisode('),
+    'identity lease and circuit check must enclose target resolution');
+  assert.ok(playback.includes('candidateLeaseOwner'));
+  assert.ok(crawler.includes('authoritativeProbeFacetComplete(info?.audioProbeComplete, orderedTracks.length > 0)'),
+    'audioProbeComplete:false must not be promoted by returned tracks');
+  for (const [name, consumer, writeMarker] of [
+    ['codec backfill', codecBackfill, 'persistObservedCodecProfile(db, {'],
+    ['episode backfill', episodeBackfill, 'const stored = await shareFileTracks('],
+  ]) {
+    const gateAt = consumer.indexOf('acceptGatewayProviderDrain(info, () => { releaseLeaseOnExit = false; })');
+    assert.ok(gateAt >= 0, `${name} must apply the shared drain gate`);
+    assert.ok(gateAt < consumer.indexOf(writeMarker), `${name} drain gate must precede persistence`);
+    assert.match(consumer, /if \(releaseLeaseOnExit\) \{[\s\S]*releaseProviderFileProbe/,
+      `${name} must retain the lease when drainage is unattested`);
+  }
+});
+
+test('provider circuit RPC failure prevents the guarded provider call', async () => {
+  const playback = read('supabase/functions/norva-playback/index.ts');
+  const source = between(
+    playback,
+    'async function readProviderProbeCircuitStateStrict(',
+    '\nasync function assertProviderProbeCircuitClosedStrict(',
+  )
+    .replace(
+      '): Promise<{ open: boolean; openUntil: string | null }> {',
+      ') {',
+    )
+    .replace('db: SupabaseClient', 'db')
+    .replace('identityKey: string', 'identityKey')
+    .replace(/ as JsonRecord \| null/g, '');
+  const readCircuit = vm.runInNewContext(
+    `(() => { ${source}; return readProviderProbeCircuitStateStrict; })()`,
+    {
+      HttpError: class HttpError extends Error {},
+      throwDb(error) { throw error; },
+      stringOrNull(value) { return value == null || value === '' ? null : String(value); },
+    },
+  );
+  let providerCalls = 0;
+  const guardedProviderCall = async (db) => {
+    const state = await readCircuit(db, 'identity-1');
+    if (state.open) return 'open';
+    providerCalls += 1;
+    return 'fetched';
+  };
+
+  await assert.rejects(
+    guardedProviderCall({ rpc: async () => ({ data: null, error: new Error('RPC unavailable') }) }),
+    /RPC unavailable/,
+  );
+  assert.equal(providerCalls, 0);
+  assert.equal(await guardedProviderCall({
+    rpc: async () => ({ data: [], error: null }),
+  }), 'fetched');
+  assert.equal(providerCalls, 1);
+
+  const crawler = between(playback, 'const exactFileScope =', '\n// Read-cutover trust artifact');
+  const leaseGuard = between(
+    playback,
+    'async function runProviderProbeWithLease<T>(',
+    '\nasync function providerAccountBusyForCrawler(',
+  );
+  assert.ok(leaseGuard.includes('readProviderProbeCircuitStateStrict('));
+  assert.ok(crawler.includes('runProviderProbeWithLease('));
+  assert.ok(crawler.includes('diag.circuitUnavailable++'));
+  assert.ok(crawler.includes('skipped: "provider-guard-unavailable"'));
+  const episode = between(
+    playback,
+    'async function episodeProbeCircuitState(',
+    '\nasync function episodeProbeRetryBlocked(',
+  );
+  assert.ok(episode.includes('readProviderProbeCircuitStateStrict'));
+  assert.ok(!episode.includes('open: false'));
 });
 
 test('LID cascade rollout is exact-file, bounded, fail-closed and atomically audited', () => {
@@ -487,7 +972,7 @@ test('LID cascade rollout is exact-file, bounded, fail-closed and atomically aud
   const cascade = between(
     playback,
     'async function runLidCascadeAttempt(',
-    '\n// Keep the old >=4-word contract',
+    '\n// Detect-only and transcript evidence stay explicitly distinct.',
   );
   const detector = between(
     playback,

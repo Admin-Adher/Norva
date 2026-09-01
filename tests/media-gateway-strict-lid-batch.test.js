@@ -1156,7 +1156,7 @@ test('v102 route exposes the bounded budget rebalance and fails a broken Whisper
   assert.match(route, /runStrictWhisperBatch\([\s\S]*strictWavSamples\.map/);
   assert.match(route, /strictLanguageBatchSampleResult\(batch\.samples\[index\], sample\.offset\)/);
   assert.equal((gateway.match(/evaluateStrictTranscriptEvidence\(/g) || []).length, 2);
-  assert.match(route, /const transcriptEvidence = strict[\s\S]*\? evaluateStrictTranscriptEvidence\(/);
+  assert.match(route, /const transcriptEvidence = evaluateStrictTranscriptEvidence\(/);
   assert.match(route, /strictConsensusVerified = summary\.verified/);
   assert.match(route, /strict &&[\s\S]*strictConsensusVerified &&[\s\S]*bestStrictAccepted/);
   assert.match(gateway, /method: 'whisper-strict-consensus-v4'/);

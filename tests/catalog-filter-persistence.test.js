@@ -208,6 +208,98 @@ for (const spec of [
         });
     });
 
+    test(`${spec.className} immediately reloads facets after a matching exact observation`, async () => {
+        const { Page } = loadPage(spec.file, spec.className);
+        const page = Object.create(Page.prototype);
+        const calls = [];
+        let filteredRefreshes = 0;
+        Object.assign(page, {
+            app: { currentPage: spec.key },
+            _facetsLoadedAt: Date.now(),
+            _viewRenderedAt: Date.now(),
+            activeBucket: 'all',
+            activeBucketLangKey: 'audio=fr',
+            audioSelect: { value: 'fr' },
+            subtitleSelect: { value: '' },
+            sortSelect: { value: 'default' },
+            populateLanguageFacets: async (options) => { calls.push(options); },
+            onFiltersChanged: () => { filteredRefreshes += 1; }
+        });
+
+        const handled = await page.handleCatalogLanguageFacetsInvalidated({
+            detail: { type: spec.key === 'movies' ? 'movie' : 'series', source: 'provider-a' }
+        });
+
+        assert.equal(handled, true);
+        assert.equal(page._facetsLoadedAt, 0);
+        assert.equal(page._viewRenderedAt, 0);
+        assert.equal(page.activeBucketLangKey, null);
+        assert.equal(filteredRefreshes, 1);
+        assert.deepEqual(JSON.parse(JSON.stringify(calls)), [{ force: true }]);
+    });
+
+    test(`${spec.className} invalidates a hidden matching page without fetching until show`, async () => {
+        const { Page } = loadPage(spec.file, spec.className);
+        const page = Object.create(Page.prototype);
+        let calls = 0;
+        Object.assign(page, {
+            app: { currentPage: 'watch' },
+            _facetsLoadedAt: Date.now(),
+            populateLanguageFacets: async () => { calls += 1; }
+        });
+
+        const handled = await page.handleCatalogLanguageFacetsInvalidated({
+            detail: { type: spec.key === 'movies' ? 'movie' : 'series' }
+        });
+
+        assert.equal(handled, false);
+        assert.equal(page._facetsLoadedAt, 0);
+        assert.equal(calls, 0);
+    });
+
+    test(`${spec.className} invalidates a hidden language-filtered warm view`, async () => {
+        const { Page } = loadPage(spec.file, spec.className);
+        const page = Object.create(Page.prototype);
+        Object.assign(page, {
+            app: { currentPage: 'watch' },
+            _facetsLoadedAt: Date.now(),
+            _viewRenderedAt: Date.now(),
+            activeBucket: 'all',
+            activeBucketLangKey: 'audio=fr',
+            audioSelect: { value: 'fr' },
+            subtitleSelect: { value: '' },
+            sortSelect: { value: 'default' },
+            populateLanguageFacets: async () => { throw new Error('hidden page must not fetch'); },
+            onFiltersChanged: () => { throw new Error('hidden page must not render'); }
+        });
+
+        const handled = await page.handleCatalogLanguageFacetsInvalidated({
+            detail: { type: spec.key === 'movies' ? 'movie' : 'series' }
+        });
+
+        assert.equal(handled, false);
+        assert.equal(page._facetsLoadedAt, 0);
+        assert.equal(page._viewRenderedAt, 0);
+        assert.equal(page.activeBucketLangKey, null);
+    });
+
+    test(`${spec.className} ignores facet invalidation for the other media type`, async () => {
+        const { Page } = loadPage(spec.file, spec.className);
+        const page = Object.create(Page.prototype);
+        Object.assign(page, {
+            app: { currentPage: spec.key },
+            _facetsLoadedAt: 123,
+            populateLanguageFacets: async () => { throw new Error('must not fetch'); }
+        });
+
+        const handled = await page.handleCatalogLanguageFacetsInvalidated({
+            detail: { type: spec.key === 'movies' ? 'series' : 'movie' }
+        });
+
+        assert.equal(handled, false);
+        assert.equal(page._facetsLoadedAt, 123);
+    });
+
     test(`${spec.className} keeps a selected language visible at zero for a provider without it`, () => {
         const { Page } = loadPage(spec.file, spec.className);
         const page = Object.create(Page.prototype);

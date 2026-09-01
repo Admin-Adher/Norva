@@ -32,7 +32,9 @@ test('catalog facets route scopes RPC, memo and labels to provider plus media ty
     assert.match(catalog, /`\$\{userId\}:\$\{cacheEpoch\}:\$\{itemType\}:\$\{sourceId \|\| "all"\}`/);
     assert.match(catalog, /itemType === "series" \? "series" : "movies"/);
     assert.match(catalog, /`\$\{name\} · \$\{FACET_NUMBER\.format\(count\)\} \$\{noun\}`/);
-    assert.match(catalog, /else if \(!sourceId\)/);
+    assert.match(catalog, /if \(error\) throwDb\(error, "Unable to load exact language facets"\)/);
+    assert.doesNotMatch(catalog, /else if \(!sourceId\)/);
+    assert.doesNotMatch(catalog, /cloud_language_facets/);
 });
 
 test('mobile catalog sheet exposes accessible language controls and counts them as filters', () => {

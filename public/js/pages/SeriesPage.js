@@ -78,6 +78,16 @@ class SeriesPage {
         this._genreFilterHydrated = false;
         this._categoriesRestored = false;
 
+        this._onCatalogLanguageFacetsInvalidated = (event) => {
+            void this.handleCatalogLanguageFacetsInvalidated(event);
+        };
+        if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+            window.addEventListener(
+                'norva:catalog-language-facets-invalidated',
+                this._onCatalogLanguageFacetsInvalidated
+            );
+        }
+
         this.restoreFilters();
         this.init();
     }
@@ -432,6 +442,27 @@ class SeriesPage {
         } catch (_) {
             if (requestId === this._facetRequestId) this._facetsLoadedAt = 0; // allow a retry on the next show
         }
+    }
+
+    async handleCatalogLanguageFacetsInvalidated(event) {
+        if (event?.detail?.type !== 'series') return false;
+        // API.localStorage invalidation is not enough: this singleton also owns
+        // an independent 60-second request throttle.
+        this._facetsLoadedAt = 0;
+        const refreshFilteredView = this.isLanguageFilterActive();
+        if (refreshFilteredView) {
+            // The active bucket and the five-minute warm-view shortcut both cache
+            // membership/order derived from exact language evidence. Force the
+            // next visible render to rebuild them, even when this page is hidden.
+            this._viewRenderedAt = 0;
+            this.activeBucketLangKey = null;
+        }
+        if (this.app?.currentPage !== 'series') return false;
+        await this.populateLanguageFacets({ force: true });
+        if (refreshFilteredView && this.app?.currentPage === 'series') {
+            this.onFiltersChanged();
+        }
+        return true;
     }
 
     facetLanguageName(value, label = '') {
