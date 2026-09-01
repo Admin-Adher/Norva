@@ -220,6 +220,7 @@ class WatchPage {
         this._firstFrameObserverAvailable = null;
         this._firstFrameProgressSample = null;
         this._gatewayAutomaticRebuffering = false;
+        this._gatewayUserPaused = false;
         this._watchedLanguageValidationIntent = null;
         this._deferredEngineTrackEnrichment = null;
         this._deferredEngineTrackEnrichmentTimer = null;
@@ -2207,8 +2208,14 @@ class WatchPage {
         const safe = (action, handler) => {
             try { ms.setActionHandler(action, handler); } catch (_) { /* unsupported action */ }
         };
-        safe('play', () => { try { this.video?.play(); } catch (_) { } });
-        safe('pause', () => { try { this.video?.pause(); } catch (_) { } });
+        safe('play', () => {
+            this._gatewayUserPaused = false;
+            try { this.video?.play(); } catch (_) { }
+        });
+        safe('pause', () => {
+            this._gatewayUserPaused = true;
+            try { this.video?.pause(); } catch (_) { }
+        });
         safe('seekbackward', (d) => this.skip(-(d?.seekOffset || 10)));
         safe('seekforward', (d) => this.skip(d?.seekOffset || 10));
         safe('seekto', (d) => {
@@ -5391,6 +5398,7 @@ class WatchPage {
             this.hls.destroy();
         }
         this._gatewayAutomaticRebuffering = false;
+        this._gatewayUserPaused = false;
 
         // Local transcode sessions are VOD: always start from the beginning of
         // the playlist (never the live edge), even before EXT-X-ENDLIST exists.
@@ -5439,7 +5447,12 @@ class WatchPage {
         let gatewayRecoveryRunning = false;
         let gatewayRecoveryGeneration = 0;
         const resumeAfterHlsRecovery = (forceResume = false) => {
-            if (!forceResume && this.video?.paused) return;
+            // hls.js/the browser may set `video.paused=true` immediately before
+            // reporting bufferStalledError. That state is not a viewer pause: if
+            // we return here, the buffer can refill indefinitely without playback
+            // ever resuming. Only an explicit transport-control pause suppresses
+            // automatic recovery.
+            if (!forceResume && this._gatewayUserPaused) return;
             if (!isGatewaySession) {
                 setTimeout(() => {
                     if (this.isStalePlaybackAttempt(playbackAttemptId) || this.hls !== activeHls) return;
@@ -5930,6 +5943,7 @@ class WatchPage {
             // Nothing loaded yet (e.g. mid media-switch, before the engine attaches its
             // MediaSource) → play() would reject with NotSupportedError. No-op instead.
             if (!this.video.src && !this.video.currentSrc) return;
+            this._gatewayUserPaused = false;
             if (this._gatewayAutomaticRebuffering) {
                 // The viewer explicitly chooses immediate playback over the
                 // automatic reserve refill. The pending gate observes this flag
@@ -5944,6 +5958,7 @@ class WatchPage {
                 console.error(e);
             });
         } else {
+            this._gatewayUserPaused = true;
             this.video.pause();
         }
     }

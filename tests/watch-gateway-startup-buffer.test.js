@@ -470,6 +470,7 @@ test('Gateway non-fatal starvation pauses once and resumes only after the recove
         hls: null,
         _playbackAttemptId: 22,
         _gatewayAutomaticRebuffering: false,
+        _gatewayUserPaused: false,
         isGatewayPlaybackUrl: () => true,
         isStalePlaybackAttempt: () => false,
         gatewayStartupBufferOptions: () => ({ minimumSeconds: 6, timeoutMs: 45000, policy: null }),
@@ -504,6 +505,9 @@ test('Gateway non-fatal starvation pauses once and resumes only after the recove
     assert.equal(playCalls, 1);
     assert.equal(video.paused, false);
 
+    // Chromium can expose paused=true before hls.js dispatches the soft-stall
+    // event. This is still an automatic starvation, not a viewer pause.
+    video.paused = true;
     activeHls.emit(FakeHls.Events.ERROR, {
         fatal: false,
         type: FakeHls.ErrorTypes.MEDIA_ERROR,
@@ -511,7 +515,7 @@ test('Gateway non-fatal starvation pauses once and resumes only after the recove
     });
     await Promise.resolve();
     await Promise.resolve();
-    assert.equal(pauseCalls, 1);
+    assert.equal(pauseCalls, 0, 'an already-paused stalled element is not paused twice');
     assert.equal(playCalls, 1, 'the empty edge must not be replayed immediately');
     assert.equal(page._gatewayAutomaticRebuffering, true);
     assert.equal(recoveryCalls, 1);
@@ -521,6 +525,92 @@ test('Gateway non-fatal starvation pauses once and resumes only after the recove
     await Promise.resolve();
     await Promise.resolve();
     assert.equal(playCalls, 2);
+    assert.equal(page._gatewayAutomaticRebuffering, false);
+});
+
+test('Gateway starvation never overrides an explicit viewer pause', async () => {
+    let recoveryCalls = 0;
+    let playCalls = 0;
+
+    class FakeHls {
+        static Events = {
+            MEDIA_ATTACHED: 'media-attached',
+            AUDIO_TRACKS_UPDATED: 'audio-tracks-updated',
+            AUDIO_TRACK_SWITCHED: 'audio-track-switched',
+            SUBTITLE_TRACKS_UPDATED: 'subtitle-tracks-updated',
+            SUBTITLE_TRACK_SWITCH: 'subtitle-track-switch',
+            MANIFEST_PARSED: 'manifest-parsed',
+            ERROR: 'error',
+        };
+        static ErrorTypes = { MEDIA_ERROR: 'media-error', NETWORK_ERROR: 'network-error' };
+        constructor() { this.handlers = new Map(); this.audioTracks = []; }
+        loadSource() {}
+        attachMedia() {}
+        on(event, handler) { this.handlers.set(event, handler); }
+        recoverMediaError() {}
+        swapAudioCodec() {}
+        destroy() {}
+        emit(event, data) { return this.handlers.get(event)?.(event, data); }
+    }
+
+    const playHls = loadMethod('playHls', 'playHlsOrDirect', {
+        Hls: FakeHls,
+        setTimeout: (callback) => { queueMicrotask(callback); return 1; },
+        console,
+    });
+    const page = {
+        video: {
+            paused: true,
+            ended: false,
+            currentTime: 20,
+            canPlayType: () => '',
+            play() { playCalls += 1; this.paused = false; return Promise.resolve(); },
+            pause() {},
+        },
+        hls: null,
+        _playbackAttemptId: 23,
+        _gatewayAutomaticRebuffering: false,
+        _gatewayUserPaused: true,
+        isGatewayPlaybackUrl: () => true,
+        isStalePlaybackAttempt: () => false,
+        gatewayStartupBufferOptions: () => ({ minimumSeconds: 6, timeoutMs: 45000, policy: null }),
+        gatewayRecoveryBufferOptions: () => ({ minimumSeconds: 12, timeoutMs: 60000, policy: null }),
+        waitForGatewayStartupBuffer: async () => true,
+        waitForGatewayRecoveryBuffer: async () => { recoveryCalls += 1; return true; },
+        gatewayBufferedAheadSeconds: () => 1,
+        _reattachAiTrackIfActive: () => {},
+        restorePendingAudioPreference: () => {},
+        updateAudioTracks: () => {},
+        restorePendingSubtitlePreference: () => {},
+        updateCaptionsTracks: () => {},
+        showLoading: () => {},
+        hideLoading: () => {},
+        showOverlay: () => {},
+        releasePlaybackPipelineForRetry: async () => {},
+        showPlaybackError: () => {},
+        retryGatewaySeekAfterFatalPlayback: () => false,
+        sendPlaybackEvent: () => {},
+        handlePlaybackFailure: async () => {},
+        handleAutoplayError: () => {},
+        canUseLocalProxy: () => false,
+        isGatewaySessionGoneError: () => false,
+        centerPlayBtn: { classList: { add() {} } },
+    };
+
+    playHls.call(page, 'https://norva-production.up.railway.app/sessions/test/playlist.m3u8', {
+        playbackAttemptId: 23,
+    });
+    await page.hls.emit(FakeHls.Events.MANIFEST_PARSED, { audioTracks: [] });
+    assert.equal(playCalls, 1);
+    page.video.paused = true;
+    page._gatewayUserPaused = true;
+    page.hls.emit(FakeHls.Events.ERROR, {
+        fatal: false,
+        type: FakeHls.ErrorTypes.MEDIA_ERROR,
+        details: 'bufferStalledError',
+    });
+    await Promise.resolve();
+    assert.equal(recoveryCalls, 0);
     assert.equal(page._gatewayAutomaticRebuffering, false);
 });
 
