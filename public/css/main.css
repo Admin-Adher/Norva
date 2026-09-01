@@ -14666,6 +14666,29 @@ html.tv-mode #page-series .series-controls .search-wrapper .search-input {
   display: none;
 }
 
+/* A terminal error must never trap the viewer in Watch. Lift the controls shell
+   just above the error scrim, make it transparent to hit-testing, and expose only
+   the canonical Back button. The retry card remains the sole interactive element
+   in the error layer while every transport control stays hidden/inert. */
+.watch-video-section.has-playback-error .watch-overlay {
+  z-index: 16;
+  pointer-events: none;
+  opacity: 1;
+}
+
+.watch-video-section.has-playback-error .watch-overlay > :not(.watch-top-bar) {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.watch-video-section.has-playback-error .watch-top-bar > * {
+  pointer-events: none;
+}
+
+.watch-video-section.has-playback-error .watch-back-btn {
+  pointer-events: auto;
+}
+
 .watch-error-box {
   max-width: 480px;
   text-align: center;

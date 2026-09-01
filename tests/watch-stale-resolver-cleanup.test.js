@@ -186,6 +186,15 @@ test('an initial resolver failure disables silent retry while keeping the explic
     let retryClick = null;
     let scheduled = 0;
     let explicitRetries = 0;
+    const videoSectionClasses = new Set();
+    const videoSection = {
+        appendChild() {},
+        classList: {
+            add(value) { videoSectionClasses.add(value); },
+            remove(value) { videoSectionClasses.delete(value); },
+            contains(value) { return videoSectionClasses.has(value); },
+        },
+    };
     const errorEl = {
         innerHTML: '',
         classList: { add() {}, remove() {}, contains() { return false; } },
@@ -203,7 +212,9 @@ test('an initial resolver failure disables silent retry while keeping the explic
             return null;
         },
         createElement() { return errorEl; },
-        querySelector() { return { appendChild() {} }; },
+        querySelector(selector) {
+            return selector === '.watch-video-section' ? videoSection : null;
+        },
     };
     const context = {
         window: { NorvaCloud: {} },
@@ -238,8 +249,22 @@ test('an initial resolver failure disables silent retry while keeping the explic
 
     assert.strictEqual(scheduled, 0, 'no timer-driven retry may be armed');
     assert.strictEqual(typeof retryClick, 'function', 'the visible Retry button must stay wired');
+    assert.strictEqual(videoSectionClasses.has('has-playback-error'), true,
+        'the player shell must expose an error state so Back can stay above the blocking panel');
     retryClick();
     assert.strictEqual(explicitRetries, 1, 'only the explicit click starts a new attempt');
+
+    page.hidePlaybackError();
+    assert.strictEqual(videoSectionClasses.has('has-playback-error'), false,
+        'clearing the error must restore the ordinary player stacking order');
+});
+
+test('terminal playback errors keep only Back interactive above the retry panel', () => {
+    const css = fs.readFileSync(path.join(ROOT, 'public', 'css', 'main.css'), 'utf8');
+    assert.match(css, /\.watch-video-section\.has-playback-error\s+\.watch-overlay\s*\{[^}]*z-index:\s*16[^}]*pointer-events:\s*none/s);
+    assert.match(css, /\.watch-video-section\.has-playback-error\s+\.watch-overlay\s*>\s*:not\(\.watch-top-bar\)\s*\{[^}]*visibility:\s*hidden/s);
+    assert.match(css, /\.watch-video-section\.has-playback-error\s+\.watch-top-bar\s*>\s*\*\s*\{[^}]*pointer-events:\s*none/s);
+    assert.match(css, /\.watch-video-section\.has-playback-error\s+\.watch-back-btn\s*\{[^}]*pointer-events:\s*auto/s);
 });
 
 test('stale-session cleanup keeps the JWT playback API when a user token is present', async () => {

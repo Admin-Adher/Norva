@@ -7379,12 +7379,13 @@ class WatchPage {
         this.hideLoading();
         this.updateTranscodeStatus('hidden');
 
+        const videoSection = document.querySelector('.watch-video-section');
         let errorEl = document.getElementById('watch-error');
         if (!errorEl) {
             errorEl = document.createElement('div');
             errorEl.id = 'watch-error';
             errorEl.className = 'watch-error';
-            document.querySelector('.watch-video-section')?.appendChild(errorEl);
+            videoSection?.appendChild(errorEl);
         }
 
         const friendly = this.getFriendlyPlaybackError(safeMessage);
@@ -7441,6 +7442,7 @@ class WatchPage {
         errorEl.setAttribute('role', 'alert');
         errorEl.setAttribute('aria-live', 'assertive');
         errorEl.classList.remove('hidden');
+        videoSection?.classList.add('has-playback-error');
         document.getElementById('watch-error-refresh-btn')?.addEventListener('click', () => {
             this.clearPlaybackErrorRefreshTimer();
             this._nextProductRetrySource = 'manual';
@@ -7458,6 +7460,7 @@ class WatchPage {
         this.clearDeferredPlaybackError();
         this.clearPlaybackErrorRefreshTimer();
         document.getElementById('watch-error')?.classList.add('hidden');
+        document.querySelector('.watch-video-section')?.classList.remove('has-playback-error');
     }
 
     getPlaybackErrorRefreshGuardKey() {
