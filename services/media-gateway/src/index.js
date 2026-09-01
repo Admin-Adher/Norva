@@ -1969,7 +1969,7 @@ const MULTI_AUDIO_HLS_PROTOCOL = 1;
 // production Ryzen/Radeon host. Keep the operational default evidence-based and configurable,
 // while bounding accidental fan-out. Every exact source track stays visible to the user.
 const MAX_MULTI_AUDIO_RENDITIONS = clampInt(process.env.MAX_MULTI_AUDIO_RENDITIONS, 12, 2, 32);
-const GATEWAY_VERSION = 141;
+const GATEWAY_VERSION = 142;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -11003,7 +11003,43 @@ async function prefetchRetainedBoundedMkvHeader(session, opened, parentSignal = 
 
     const startedAt = Date.now();
     let reachedEof = false;
-    while (prefetchedBytes < targetBytes) {
+    let metadataComplete = false;
+    let lastMetadataCheckBytes = 0;
+    const metadataCheckIntervalBytes = Math.min(targetBytes, 64 * 1024);
+    const detectCompleteMetadata = (force = false) => {
+        const captured = headerByteCache.get(String(session?.sourceUrl || ''));
+        if (
+            !captured ||
+            captured.captureOwner !== String(session?.id || session?.sourceUrl || '') ||
+            captured.len <= 0
+        ) return false;
+        if (captured.metadataComplete === true) return true;
+        if (
+            !force &&
+            captured.len < targetBytes &&
+            captured.len - lastMetadataCheckBytes < metadataCheckIntervalBytes
+        ) return false;
+
+        lastMetadataCheckBytes = captured.len;
+        const complete = hasCompleteMatroskaMetadataPrefix(
+            Buffer.concat(captured.chunks, captured.len),
+        );
+        if (!complete) return false;
+
+        // Info + Tracks are the complete topology authority needed by the
+        // local ffprobe. Mark the bounded capture complete immediately instead
+        // of waiting for an arbitrary 4 MiB prefix; the unread bytes remain on
+        // this same provider socket and are replayed to FFmpeg exactly once.
+        captured.metadataComplete = true;
+        captured.done = true;
+        captured.capturing = false;
+        captured.completionReason = 'matroska-info-tracks-complete';
+        captured.updatedAt = Date.now();
+        return true;
+    };
+
+    metadataComplete = detectCompleteMetadata(prefetchedBytes >= targetBytes);
+    while (prefetchedBytes < targetBytes && !metadataComplete) {
         const next = await readRawPrefixChunk(
             attempt.reader,
             parentSignal,
@@ -11034,6 +11070,7 @@ async function prefetchRetainedBoundedMkvHeader(session, opened, parentSignal = 
         retained.push(chunk);
         captureBoundedMkvHeaderBytes(session, prefetchedBytes, chunk);
         prefetchedBytes += chunk.length;
+        metadataComplete = detectCompleteMetadata(prefetchedBytes >= targetBytes);
     }
 
     if (reachedEof && range?.fullBodyUnknownSize !== true && prefetchedBytes < maximumRangeBytes) {
@@ -11045,9 +11082,15 @@ async function prefetchRetainedBoundedMkvHeader(session, opened, parentSignal = 
     }
     session.startupTimings = asRecord(session.startupTimings);
     session.startupTimings.providerColdHeaderPrefetch = true;
+    session.startupTimings.providerColdHeaderPrefetchTargetBytes = targetBytes;
     session.startupTimings.providerColdHeaderPrefetchBytes = prefetchedBytes;
     session.startupTimings.providerColdHeaderPrefetchMs = Math.max(0, Date.now() - startedAt);
     session.startupTimings.providerColdHeaderPrefetchReachedEof = reachedEof;
+    session.startupTimings.providerColdHeaderMetadataComplete = metadataComplete;
+    session.startupTimings.providerColdHeaderPrefetchAvoidedBytes = Math.max(
+        0,
+        targetBytes - prefetchedBytes,
+    );
     return prefetchedBytes;
 }
 
@@ -13936,6 +13979,22 @@ function needsMkvH264CurrentHeaderAuthority(session) {
         Number(session?.seekOffset || 0) > 0 ||
         session?.forceAlignedMultiAudioVideoEncode === true ||
         !mkvH264FastStartIdentityContext(session)
+    ) return false;
+
+    // Do not force a cold 4 MiB proof capture for graphs that can never use
+    // the H.264 copy fast-start lane (multi-audio, HEVC, unsafe dimensions,
+    // incomplete profiles, ...). Their exact topology is handled separately.
+    const staticContext = mkvH264FastStartStaticContext(session);
+    if (!staticContext.ok) return false;
+
+    // Local enrichment may run before the bounded pump starts. Once this exact
+    // session already owns an authority for the current profile fingerprint,
+    // continuing to capture provider bytes cannot strengthen the proof.
+    const authority = asRecord(session?.mkvH264CurrentHeaderAuthority);
+    if (
+        authority.source === 'gateway-inband-current' &&
+        authority.captureOwner === String(session?.id || '') &&
+        authority.profileFingerprint === staticContext.profileFingerprint
     ) return false;
     return asRecord(session?.mkvH264FastStart).eligible !== true;
 }

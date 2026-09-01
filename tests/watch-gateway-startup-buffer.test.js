@@ -9,6 +9,8 @@ const vm = require('node:vm');
 const ROOT = path.join(__dirname, '..');
 const WATCH_PATH = path.join(ROOT, 'public/js/pages/WatchPage.js');
 const source = fs.readFileSync(WATCH_PATH, 'utf8').replace(/\r\n/g, '\n');
+const appHtml = fs.readFileSync(path.join(ROOT, 'public/app.html'), 'utf8').replace(/\r\n/g, '\n');
+const mainCss = fs.readFileSync(path.join(ROOT, 'public/css/main.css'), 'utf8').replace(/\r\n/g, '\n');
 
 function loadMethod(name, nextName, globals = {}) {
     const starts = [
@@ -69,6 +71,121 @@ test('Gateway buffered-ahead measurement fails closed when live TimeRanges mutat
     };
 
     assert.equal(gatewayBufferedAheadSeconds.call(page), 0);
+});
+
+test('watch timeline paints only the contiguous buffered range on cold start and resume', () => {
+    const setBufferedProgressValue = loadMethod(
+        'setBufferedProgressValue',
+        'updateBufferedTimeline',
+    );
+    const updateBufferedTimeline = loadMethod(
+        'updateBufferedTimeline',
+        'setProgressState',
+    );
+    const properties = new Map();
+    const status = { textContent: '' };
+    const page = {
+        progressSlider: {
+            style: { setProperty: (name, value) => properties.set(name, value) },
+        },
+        bufferStatus: status,
+        streamStartOffset: 0,
+        video: {
+            currentTime: 10,
+            buffered: {
+                length: 2,
+                start: (index) => [0, 70][index],
+                end: (index) => [30, 90][index],
+            },
+        },
+        getDisplayDuration: () => 100,
+        getCurrentTime: () => page.video.currentTime,
+        getPlaybackPosition: () => page.streamStartOffset + page.video.currentTime,
+        setBufferedProgressValue(percent) {
+            return setBufferedProgressValue.call(this, percent);
+        },
+        formatTime: (seconds) => `${Math.floor(seconds)}s`,
+    };
+
+    assert.equal(updateBufferedTimeline.call(page), 30);
+    assert.equal(properties.get('--buffered'), '30%');
+    assert.equal(status.textContent, 'Loaded to 30s of 100s');
+
+    page.streamStartOffset = 60;
+    page.video.buffered = {
+        length: 1,
+        start: () => 0,
+        end: () => 20,
+    };
+    page.getDisplayDuration = () => 120;
+    assert.equal(updateBufferedTimeline.call(page), 80);
+    assert.equal(properties.get('--buffered'), `${(80 / 120) * 100}%`);
+
+    page.streamStartOffset = 0;
+    page.video.buffered = {
+        length: 1,
+        start: () => 50,
+        end: () => 80,
+    };
+    page.getDisplayDuration = () => 100;
+    assert.equal(updateBufferedTimeline.call(page), 10, 'a disjoint future range is not painted as contiguous');
+    assert.equal(properties.get('--buffered'), '10%');
+});
+
+test('watch timeline fails closed on a mutating TimeRanges and resets without duration', () => {
+    const setBufferedProgressValue = loadMethod(
+        'setBufferedProgressValue',
+        'updateBufferedTimeline',
+    );
+    const updateBufferedTimeline = loadMethod(
+        'updateBufferedTimeline',
+        'setProgressState',
+    );
+    const properties = new Map();
+    const status = { textContent: 'stale' };
+    const page = {
+        progressSlider: {
+            style: { setProperty: (name, value) => properties.set(name, value) },
+        },
+        bufferStatus: status,
+        streamStartOffset: 0,
+        video: {
+            currentTime: 10,
+            buffered: {
+                length: 2,
+                start: (index) => {
+                    if (index === 1) throw new DOMException('mutated', 'IndexSizeError');
+                    return 0;
+                },
+                end: () => 20,
+            },
+        },
+        getDisplayDuration: () => 100,
+        getCurrentTime: () => 10,
+        getPlaybackPosition: () => 10,
+        setBufferedProgressValue(percent) {
+            return setBufferedProgressValue.call(this, percent);
+        },
+        formatTime: (seconds) => `${Math.floor(seconds)}s`,
+    };
+
+    assert.equal(updateBufferedTimeline.call(page), 10);
+    assert.equal(properties.get('--buffered'), '10%');
+
+    page.getDisplayDuration = () => null;
+    assert.equal(updateBufferedTimeline.call(page), 0);
+    assert.equal(properties.get('--buffered'), '0%');
+    assert.equal(status.textContent, '');
+});
+
+test('watch timeline exposes loaded state visually, natively and to assistive technology', () => {
+    assert.match(appHtml, /id="watch-progress"[^>]+aria-describedby="watch-buffer-status"/);
+    assert.match(appHtml, /id="watch-buffer-status"[^>]+role="status"[^>]+aria-live="polite"/);
+    assert.match(mainCss, /--buffered:\s*0%/);
+    assert.match(mainCss, /var\(--color-text-secondary\) var\(--buffered\)/);
+    assert.match(mainCss, /var\(--color-border\) var\(--buffered\)/);
+    assert.match(source, /addEventListener\('progress', \(\) => this\.updateBufferedTimeline\(\)\)/);
+    assert.match(source, /Hls\.Events\?\.BUFFER_APPENDED/);
 });
 
 test('Gateway fast-start policy accepts only a measured file-exact or complete-cache graph', () => {

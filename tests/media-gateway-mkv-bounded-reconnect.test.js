@@ -69,6 +69,11 @@ function pumpHarness(overrides = {}) {
         'function normalizeFileSizeBytes(',
         '\nfunction startFfmpeg(',
     );
+    const matroskaMetadataHelpers = sourceBetween(
+        source,
+        'function readEbmlElementSize(',
+        '\nasync function probeFromHeaderBytes(',
+    );
     const globals = {
         URL,
         crypto,
@@ -94,6 +99,7 @@ function pumpHarness(overrides = {}) {
         BOUNDED_MKV_HEADER_PARSE: false,
         INBAND_HEADER_BYTES: 4_000_000,
         INBAND_HEADER_CACHE_MAX: 16,
+        MAX_MATROSKA_METADATA_ELEMENTS: 4_096,
         headerByteCache: new Map(),
         MKV_H264_FAST_START_PROOF_CURRENT_KEY: null,
         MKV_H264_FAST_START_COPY_ACTIVATION_READY: false,
@@ -168,7 +174,7 @@ function pumpHarness(overrides = {}) {
         ...overrides,
     };
     return vm.runInNewContext(
-        `(() => { ${helpers}; return {
+        `(() => { ${helpers}\n${matroskaMetadataHelpers}; return {
             normalizeFileSizeBytes,
             fileSizeBytesForSession,
             normalizeSourceContainerAuthority,
@@ -701,6 +707,70 @@ test('cold MKV preloads one bounded metadata prefix and replays every byte on th
     assert.equal(fetches, 1, 'FFmpeg replay must not open a second provider connection');
     assert.equal(result.bytesForwarded, fixture.length);
     assert.deepEqual(writable.bytes(), fixture, 'prefetched bytes are replayed exactly once and in order');
+    assert.equal(tracker.maxActive, 1);
+    assert.equal(tracker.active, 0);
+});
+
+test('cold MKV stops prefix prefetch as soon as complete Info and Tracks are available', async () => {
+    const targetBytes = 300_000;
+    const metadataBytes = 100_000;
+    const fixture = Buffer.concat([
+        completeMatroskaPrefix(metadataBytes),
+        Buffer.alloc(400_000, 0x5a),
+    ]);
+    const tracker = makeTracker();
+    const headerByteCache = new Map();
+    let fetches = 0;
+    const h = pumpHarness({
+        BOUNDED_MKV_HEADER_PARSE: true,
+        INBAND_HEADER_BYTES: targetBytes,
+        INBAND_HEADER_CACHE_MAX: 2,
+        headerByteCache,
+        fetch: async (_url, options) => {
+            fetches += 1;
+            tracker.calls.push(options.headers);
+            return trackedResponse(tracker, {
+                status: 206,
+                chunks: [
+                    fixture.subarray(0, 12),
+                    fixture.subarray(12, metadataBytes),
+                    fixture.subarray(metadataBytes, targetBytes),
+                    fixture.subarray(targetBytes),
+                ],
+                headers: {
+                    'Content-Range': `bytes 0-${fixture.length - 1}/${fixture.length}`,
+                    'Content-Length': String(fixture.length),
+                    ETag: '"cold-adaptive-v1"',
+                },
+            });
+        },
+    });
+    const session = mkvSession(fixture.length);
+
+    await h.ensureBoundedMkvInputPump(session);
+
+    assert.equal(fetches, 1, 'adaptive metadata detection reuses the retained provider GET');
+    assert.equal(session.startupTimings.providerColdHeaderPrefetchBytes, metadataBytes);
+    assert.equal(session.startupTimings.providerColdHeaderPrefetchTargetBytes, targetBytes);
+    assert.equal(session.startupTimings.providerColdHeaderMetadataComplete, true);
+    assert.equal(session.startupTimings.providerColdHeaderPrefetchAvoidedBytes, targetBytes - metadataBytes);
+    const captured = headerByteCache.get(session.sourceUrl);
+    assert.equal(captured?.len, metadataBytes);
+    assert.equal(captured?.done, true);
+    assert.equal(captured?.metadataComplete, true);
+    assert.equal(captured?.completionReason, 'matroska-info-tracks-complete');
+
+    const writable = new CapturingWritable();
+    const result = await h.runBoundedMkvInputPump(
+        session,
+        writable,
+        new AbortController().signal,
+        null,
+    );
+
+    assert.equal(fetches, 1, 'FFmpeg replay keeps the original provider socket');
+    assert.equal(result.bytesForwarded, fixture.length);
+    assert.deepEqual(writable.bytes(), fixture, 'early-stopped metadata bytes are replayed exactly once');
     assert.equal(tracker.maxActive, 1);
     assert.equal(tracker.active, 0);
 });

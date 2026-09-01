@@ -1797,7 +1797,9 @@
             <div class="watch-bottom-bar">
               <div class="watch-progress-container">
                 <span id="watch-time-current" class="watch-time">0:00</span>
-                <input type="range" class="watch-progress" id="watch-progress" min="0" max="100" value="0" step="0.1">
+                <input type="range" class="watch-progress" id="watch-progress" min="0" max="100" value="0" step="0.1"
+                  aria-label="Playback position" aria-describedby="watch-buffer-status">
+                <span id="watch-buffer-status" class="watch-buffer-status" role="status" aria-live="polite"></span>
                 <span id="watch-time-total" class="watch-time watch-time-total">0:00</span>
               </div>
               <div class="watch-controls">

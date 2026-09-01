@@ -173,6 +173,7 @@ function loadFastStartHarness(overrides = {}) {
       finalize: maybeFinalizeMkvH264FastStartProof,
       assess: assessMkvH264FastStart,
       freeze: freezeMkvH264FastStart,
+      needsCurrentHeader: needsMkvH264CurrentHeaderAuthority,
       policy: startupPolicyForSession,
       analyzerGate: shouldCreateMkvH264FullFilePacketAnalyzer,
       buildCompleteCacheLocator: buildMkvCompleteHlsCacheLocator,
@@ -848,6 +849,32 @@ test('cold full EOF mints a signed full-file proof; only the next request may co
   assert.equal(h.freeze(replay).eligible, true);
   assert.equal(replay.mkvH264FastStartAudioAuthority, true);
   assert.equal(replay.forceMkvH264FastStartAudioTranscode, false);
+});
+
+test('current-header capture is limited to eligible H.264 copy graphs and one authority per session', () => {
+  const h = loadFastStartHarness();
+  const eligible = proofSession(h);
+  eligible.mkvH264FastStart = { eligible: false };
+  delete eligible.mkvH264CurrentHeaderAuthority;
+  assert.equal(h.needsCurrentHeader(eligible), true, 'an unproven eligible H.264 graph needs current bytes');
+
+  const multiAudio = proofSession(h, {
+    codecProfile: {
+      audioTracks: [
+        exactProfile().audioTracks[0],
+        { index: 2, codec: 'aac', profile: 'LC', channels: 2, sampleRate: 48_000 },
+      ],
+    },
+  });
+  multiAudio.mkvH264FastStart = { eligible: false };
+  delete multiAudio.mkvH264CurrentHeaderAuthority;
+  assert.equal(h.needsCurrentHeader(multiAudio), false, 'multi-audio can never enter the copy lane');
+
+  const enriched = proofSession(h);
+  enriched.mkvH264FastStart = { eligible: false };
+  assert.equal(h.needsCurrentHeader(enriched), false, 'matching current-session authority is not recaptured');
+  enriched.mkvH264CurrentHeaderAuthority.profileFingerprint = 'f'.repeat(64);
+  assert.equal(h.needsCurrentHeader(enriched), true, 'a stale profile fingerprint must be recaptured');
 });
 
 test('HMAC v2 rejects malformed/cross-key/canonical aliases and accepts the previous key grace slot', () => {

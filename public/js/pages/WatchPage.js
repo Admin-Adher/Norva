@@ -32,6 +32,7 @@ class WatchPage {
         this.fullscreenBtn = document.getElementById('watch-fullscreen');
         this.progressSlider = document.getElementById('watch-progress');
         this.progressContainer = document.querySelector('.watch-progress-container');
+        this.bufferStatus = document.getElementById('watch-buffer-status');
         this.timeCurrent = document.getElementById('watch-time-current');
         this.timeTotal = document.getElementById('watch-time-total');
         this.scrollHint = document.getElementById('watch-scroll-hint');
@@ -406,15 +407,20 @@ class WatchPage {
         });
         this.video?.addEventListener('loadedmetadata', () => {
             this.onMetadataLoaded();
+            this.updateBufferedTimeline();
             this.restorePendingAudioPreference();
             this.restorePendingSubtitlePreference();
             this.applyPendingLocalSeek();
             this.trackPlaybackPosition({ force: true });
             this.saveResumeSnapshotThrottled(true);
         });
-        this.video?.addEventListener('seeking', () => this.trackPlaybackPosition({ force: true }));
+        this.video?.addEventListener('seeking', () => {
+            this.trackPlaybackPosition({ force: true });
+            this.updateBufferedTimeline();
+        });
         this.video?.addEventListener('seeked', () => {
             this.trackPlaybackPosition({ force: true });
+            this.updateBufferedTimeline();
             this.saveResumeSnapshotThrottled(true);
             Promise.resolve(this.saveProgress({ force: true })).catch(() => {});
             if (this._subEngine) {
@@ -425,7 +431,11 @@ class WatchPage {
             this.applyPendingLocalSeek();
             this.markPlaybackUsable();
         });
-        this.video?.addEventListener('durationchange', () => this.updateDurationState());
+        this.video?.addEventListener('durationchange', () => {
+            const duration = this.updateDurationState();
+            this.updateBufferedTimeline(duration);
+        });
+        this.video?.addEventListener('progress', () => this.updateBufferedTimeline());
         this.video?.addEventListener('play', () => this.onPlay());
         this.video?.addEventListener('playing', () => this.markPlaybackUsable({ allowFirstFrameFallback: true }));
         this.video?.addEventListener('pause', () => this.onPause());
@@ -437,6 +447,7 @@ class WatchPage {
         this.video?.addEventListener('waiting', () => this.showLoading());
         this.video?.addEventListener('canplay', () => {
             this.applyPendingLocalSeek();
+            this.updateBufferedTimeline();
             this.markPlaybackUsable();
         });
 
@@ -4956,6 +4967,9 @@ class WatchPage {
         this.currentProcessingOptions = {};
         this.probeDuration = null;
         this.streamStartOffset = 0;
+        this.setBufferedProgressValue(0);
+        this._bufferStatusStamp = null;
+        if (this.bufferStatus) this.bufferStatus.textContent = '';
         this.gatewaySourceTimestamps = options.sourceTimestamps === true
             || options.source_timestamps === true;
         this._videoEncodeFallbackTried = false;
@@ -5673,6 +5687,14 @@ class WatchPage {
             this._reattachAiTrackIfActive();
             this._subEngine?.seenCues?.clear(); // probe engine: let its ticks re-add wiped cues
         });
+
+        const bufferAppendedEvent = Hls.Events?.BUFFER_APPENDED;
+        if (bufferAppendedEvent) {
+            this.hls.on(bufferAppendedEvent, () => {
+                if (this.isStalePlaybackAttempt(playbackAttemptId) || this.hls !== activeHls) return;
+                this.updateBufferedTimeline();
+            });
+        }
 
         this.hls.on(Hls.Events.AUDIO_TRACKS_UPDATED, (event, data) => {
             if (this.isStalePlaybackAttempt(playbackAttemptId) || this.hls !== activeHls) return;
@@ -6815,6 +6837,69 @@ class WatchPage {
         this.progressSlider.style.setProperty('--progress', `${value}%`);
     }
 
+    setBufferedProgressValue(percent) {
+        if (!this.progressSlider) return;
+
+        const value = Number.isFinite(percent) ? Math.max(0, Math.min(100, percent)) : 0;
+        this.progressSlider.style.setProperty('--buffered', `${value}%`);
+    }
+
+    updateBufferedTimeline(durationOverride = null) {
+        const reportedDuration = Number(durationOverride);
+        const duration = Number.isFinite(reportedDuration) && reportedDuration > 0
+            ? reportedDuration
+            : this.getDisplayDuration();
+        if (!duration) {
+            this.setBufferedProgressValue(0);
+            this._bufferStatusStamp = null;
+            if (this.bufferStatus) this.bufferStatus.textContent = '';
+            return 0;
+        }
+
+        const localPosition = this.getCurrentTime();
+        let contiguousEnd = localPosition;
+        try {
+            // TimeRanges is live and may mutate between getters. Read one
+            // snapshot defensively and use only the range containing the play
+            // head: a later disjoint range must not look fully available.
+            const ranges = this.video?.buffered;
+            const length = Number(ranges?.length) || 0;
+            for (let index = 0; index < length; index += 1) {
+                const start = Number(ranges.start(index));
+                const end = Number(ranges.end(index));
+                if (!Number.isFinite(start) || !Number.isFinite(end)) continue;
+                if (
+                    start <= localPosition + 0.25 &&
+                    end >= localPosition - 0.25 &&
+                    end > contiguousEnd
+                ) contiguousEnd = end;
+            }
+        } catch (_) {
+            contiguousEnd = localPosition;
+        }
+
+        const watchedPosition = Math.max(0, Math.min(duration, this.getPlaybackPosition()));
+        const bufferedPosition = Math.max(
+            watchedPosition,
+            Math.min(duration, Math.max(0, Number(this.streamStartOffset || 0) + contiguousEnd)),
+        );
+        this.setBufferedProgressValue((bufferedPosition / duration) * 100);
+
+        // Keep the assistive announcement useful while a paused video fills,
+        // without speaking on every small append. The visual bar still updates
+        // on every progress/BUFFER_APPENDED event.
+        const complete = bufferedPosition >= duration - 0.25;
+        const statusBucket = complete ? 'complete' : Math.floor(bufferedPosition / 10) * 10;
+        const statusStamp = `${statusBucket}|${Math.floor(duration)}`;
+        if (statusStamp !== this._bufferStatusStamp) {
+            this._bufferStatusStamp = statusStamp;
+            if (this.bufferStatus) {
+                this.bufferStatus.textContent = `Loaded to ${this.formatTime(bufferedPosition)} of ${this.formatTime(duration)}`;
+            }
+        }
+        return bufferedPosition;
+    }
+
     setProgressState(hasDuration, isSeekable) {
         this.progressContainer?.classList.toggle('duration-unknown', !hasDuration);
         this.progressContainer?.classList.toggle('duration-readonly', hasDuration && !isSeekable);
@@ -6872,6 +6957,7 @@ class WatchPage {
             if (this.timeTotal) this.timeTotal.textContent = '';
             this.setProgressState(false, false);
             this.setProgressValue(0);
+            this.setBufferedProgressValue(0);
             return null;
         }
         if (this._timelineDiagLogged !== 'shown') {
@@ -6914,6 +7000,7 @@ class WatchPage {
         }
 
         const duration = this.updateDurationState();
+        this.updateBufferedTimeline(duration);
         if (!duration) return;
 
         // Show "Up Next" panel early for series (like streaming services do during credits)
@@ -6939,7 +7026,8 @@ class WatchPage {
     }
 
     onMetadataLoaded() {
-        this.updateDurationState();
+        const duration = this.updateDurationState();
+        this.updateBufferedTimeline(duration);
 
         const gatewayAudioContext = this._gatewayAudioRenditionRequired
             || this.currentPlaybackMode === 'gateway-session';
