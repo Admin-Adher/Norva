@@ -14671,6 +14671,7 @@ html.tv-mode #page-series .series-controls .search-wrapper .search-input {
    the canonical Back button. The retry card remains the sole interactive element
    in the error layer while every transport control stays hidden/inert. */
 .watch-video-section.has-playback-error .watch-overlay {
+  display: flex !important;
   z-index: 16;
   pointer-events: none;
   opacity: 1;

@@ -261,6 +261,8 @@ test('an initial resolver failure disables silent retry while keeping the explic
 
 test('terminal playback errors keep only Back interactive above the retry panel', () => {
     const css = fs.readFileSync(path.join(ROOT, 'public', 'css', 'main.css'), 'utf8');
+    assert.match(css, /\.watch-video-section\.has-playback-error\s+\.watch-overlay\s*\{[^}]*display:\s*flex\s*!important/s,
+        'the error state must override the global .hidden display rule so Back keeps real geometry');
     assert.match(css, /\.watch-video-section\.has-playback-error\s+\.watch-overlay\s*\{[^}]*z-index:\s*16[^}]*pointer-events:\s*none/s);
     assert.match(css, /\.watch-video-section\.has-playback-error\s+\.watch-overlay\s*>\s*:not\(\.watch-top-bar\)\s*\{[^}]*visibility:\s*hidden/s);
     assert.match(css, /\.watch-video-section\.has-playback-error\s+\.watch-top-bar\s*>\s*\*\s*\{[^}]*pointer-events:\s*none/s);
