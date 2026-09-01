@@ -3522,9 +3522,27 @@ class SeriesPage {
         }
 
         this.seasonsContainer.innerHTML = `
-            <div class="loading series-episode-loading" role="status" aria-live="polite" aria-label="Loading episodes">
-                <div class="loading-spinner" aria-hidden="true"></div>
-                <span class="hint">Loading episodes...</span>
+            <div class="series-episode-loading" role="status" aria-live="polite" aria-atomic="true"
+                 aria-label="Loading episodes. Please wait.">
+                <div class="series-episode-loader-art" aria-hidden="true">
+                    <span class="series-episode-loader-glow"></span>
+                    <span class="series-episode-loader-card series-episode-loader-card-left">
+                        <span class="series-episode-loader-number">2</span>
+                        <span class="series-episode-loader-lines"><i></i><i></i></span>
+                    </span>
+                    <span class="series-episode-loader-card series-episode-loader-card-right">
+                        <span class="series-episode-loader-number">3</span>
+                        <span class="series-episode-loader-lines"><i></i><i></i></span>
+                    </span>
+                    <span class="series-episode-loader-card series-episode-loader-card-primary">
+                        <span class="series-episode-loader-number">1</span>
+                        <span class="series-episode-loader-lines"><i></i><i></i></span>
+                    </span>
+                </div>
+                <div class="series-episode-loader-copy">
+                    <strong>Gathering this season</strong>
+                    <span>Settle in — your episodes are loading. This can take a few seconds.</span>
+                </div>
             </div>`;
         const tvEpisodeCount = this._ensureTvEpisodeCount();
         if (tvEpisodeCount) tvEpisodeCount.textContent = '';
