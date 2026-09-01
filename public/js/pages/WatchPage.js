@@ -4100,6 +4100,18 @@ class WatchPage {
         return hasUsefulInfo ? info : null;
     }
 
+    resolvePlaybackAudioTracks(codecProfileInfo, options = {}) {
+        const candidates = [
+            codecProfileInfo?.audioTracks,
+            options.audioTracks,
+            options.audio_tracks,
+        ];
+        for (const candidate of candidates) {
+            if (Array.isArray(candidate) && candidate.length > 0) return candidate;
+        }
+        return [];
+    }
+
     async probeStreamInfo(url, settings = {}) {
         const ua = settings.userAgentPreset === 'custom' ? settings.userAgentCustom : settings.userAgentPreset;
         const probeRes = await fetch(`/api/probe?url=${encodeURIComponent(url)}&ua=${encodeURIComponent(ua || '')}&timeout=7000`);
@@ -4851,7 +4863,13 @@ class WatchPage {
         this.updateCaptionsTracks();
         this.updateDurationState();
         const codecProfileInfo = this.normalizePlaybackCodecProfile(options.codecProfile);
+        const resolvedPlaybackAudioTracks = this.resolvePlaybackAudioTracks(codecProfileInfo, options);
         if (codecProfileInfo) {
+            // Some Edge responses carry a useful video codec profile whose
+            // audioTracks field is intentionally empty, while the exact session
+            // track map is serialized alongside it. An empty array must not mask
+            // that stronger playback-scoped evidence.
+            codecProfileInfo.audioTracks = resolvedPlaybackAudioTracks;
             this.applyProbeInfo(codecProfileInfo);
             const hasExactEmbeddedLanguage = Boolean(
                 codecProfileInfo.probeSource && codecProfileInfo.probedAt &&
@@ -4874,7 +4892,7 @@ class WatchPage {
                 ?? options.gatewaySession?.audio_renditions ?? null,
             options.multiAudioHls ?? options.multi_audio_hls ?? options.gatewaySession?.multiAudioHls
                 ?? options.gatewaySession?.multi_audio_hls ?? null,
-            codecProfileInfo?.audioTracks || options.audioTracks || options.audio_tracks || [],
+            resolvedPlaybackAudioTracks,
             {
                 required: this.isGatewayPlaybackUrl(url),
                 playbackAttemptId,

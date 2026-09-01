@@ -727,7 +727,13 @@ test('the explicit Gateway disabled-mono contract exposes its exact track before
         audioTracks: [{ index: 7, lang: 'eng' }],
     };
     page.audioLanguageValidationStatus = 'verified';
-    page.audioTracks = [{ index: 7, language: 'en', codec: 'aac', channels: 2, default: true }];
+    const sessionAudioTracks = [{ index: 7, language: 'en', codec: 'aac', channels: 2, default: true }];
+    page.audioTracks = page.resolvePlaybackAudioTracks(
+        { video: 'h264', audioTracks: [] },
+        { audioTracks: sessionAudioTracks },
+    );
+    assert.equal(page.audioTracks, sessionAudioTracks,
+        'an empty codec-profile list must not mask the exact session track map');
     page.selectedAudioStreamIndex = 7;
     page.directAudioStreamIndex = 7;
     Object.assign(page.video, { readyState: 1, videoWidth: 0, videoHeight: 0, error: null });
