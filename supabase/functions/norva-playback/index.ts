@@ -279,7 +279,7 @@ async function handleRequest(req: Request): Promise<Response> {
       return json(req, {
         ok: true,
         service: "norva-playback",
-        version: 69,
+        version: 70,
         nativeHeartbeatProtocol: 1,
         providerCircuitProtocol: 1,
         exactTrackCrawlerProtocol: 2,
@@ -453,6 +453,12 @@ async function handleRequest(req: Request): Promise<Response> {
     }
     if (req.method === "POST" && segments[0] === "provider-route" && segments[1] === "resolve") {
       return json(req, await runProviderRouteResolve(req, supabase));
+    }
+    if (req.method === "POST" && segments[0] === "provider-route" && segments[1] === "activity") {
+      return json(req, await runProviderRouteActivity(req, supabase));
+    }
+    if (req.method === "POST" && segments[0] === "provider-route" && segments[1] === "benchmark") {
+      return json(req, await runProviderRouteBenchmark(req, supabase));
     }
     if (req.method === "POST" && segments[0] === "complete-cache-callback") {
       return json(req, await runCompleteHlsCacheCallback(req, supabase));
@@ -11000,6 +11006,726 @@ async function runProviderRouteResolve(req: Request, db: SupabaseClient): Promis
       benchmarkLeaseSeconds: providerRouteNumberOrNull(policy.benchmark_lease_seconds),
     },
   };
+}
+
+const PROVIDER_ROUTE_FINGERPRINT_PATTERN = /^[0-9a-f]{64}$/;
+const PROVIDER_ROUTE_BENCHMARK_MEASUREMENT_KEYS = [
+  "first16MiBMs",
+  "first4MiBMs",
+  "http5xx",
+  "nodeTransport",
+  "phase",
+  "provider458",
+  "proxy407",
+  "rangeSeekOk",
+  "resets",
+  "sampleBytes",
+  "slot",
+  "success",
+  "throughputBytesPerSecond",
+  "timeouts",
+  "ttfbMs",
+  "varianceRatio",
+];
+
+type ProviderRouteMeasurement = ProviderRouteCoordinate & {
+  phase: "tiny" | "sustained";
+  sampleBytes: number;
+  success: boolean;
+  ttfbMs: number | null;
+  first4MiBMs: number | null;
+  first16MiBMs: number | null;
+  throughputBytesPerSecond: number | null;
+  varianceRatio: number | null;
+  rangeSeekOk: boolean;
+  resets: number;
+  timeouts: number;
+  proxy407: number;
+  provider458: number;
+  http5xx: number;
+};
+
+type ProviderRouteAggregate = ProviderRouteCoordinate & {
+  score: number;
+  confidence: number;
+  sampleCount: number;
+  metrics: ProviderRouteMeasurement;
+};
+
+function providerRouteBoundedNumber(
+  value: unknown,
+  minimum: number,
+  maximum: number,
+  nullable = false,
+): number | null {
+  if (nullable && (value === null || value === undefined)) return null;
+  const number = Number(value);
+  if (!Number.isFinite(number) || number < minimum || number > maximum) return null;
+  return number;
+}
+
+function providerRouteBoundedInteger(
+  value: unknown,
+  minimum: number,
+  maximum: number,
+  nullable = false,
+): number | null {
+  const number = providerRouteBoundedNumber(value, minimum, maximum, nullable);
+  return number === null || !Number.isInteger(number) ? null : number;
+}
+
+function parseProviderRouteMeasurement(value: unknown): ProviderRouteMeasurement | null {
+  const record = recordOrEmpty(value);
+  if (!exactJsonKeys(record, PROVIDER_ROUTE_BENCHMARK_MEASUREMENT_KEYS)) return null;
+  const coordinate = providerRouteCoordinate(record);
+  const phase = stringOr(record.phase, "");
+  const sampleBytes = providerRouteBoundedInteger(record.sampleBytes, 0, 16 * 1024 * 1024);
+  const ttfbMs = providerRouteBoundedInteger(record.ttfbMs, 0, 300_000, true);
+  const first4MiBMs = providerRouteBoundedInteger(record.first4MiBMs, 0, 600_000, true);
+  const first16MiBMs = providerRouteBoundedInteger(record.first16MiBMs, 0, 1_200_000, true);
+  const throughputBytesPerSecond = providerRouteBoundedInteger(
+    record.throughputBytesPerSecond,
+    0,
+    10_737_418_240,
+    true,
+  );
+  const varianceRatio = providerRouteBoundedNumber(record.varianceRatio, 0, 100, true);
+  const resets = providerRouteBoundedInteger(record.resets, 0, 32_767);
+  const timeouts = providerRouteBoundedInteger(record.timeouts, 0, 32_767);
+  const proxy407 = providerRouteBoundedInteger(record.proxy407, 0, 32_767);
+  const provider458 = providerRouteBoundedInteger(record.provider458, 0, 32_767);
+  const http5xx = providerRouteBoundedInteger(record.http5xx, 0, 32_767);
+  if (
+    !coordinate || !["tiny", "sustained"].includes(phase) || sampleBytes === null ||
+    typeof record.success !== "boolean" || typeof record.rangeSeekOk !== "boolean" ||
+    resets === null || timeouts === null || proxy407 === null || provider458 === null || http5xx === null ||
+    (record.ttfbMs !== null && ttfbMs === null) ||
+    (record.first4MiBMs !== null && first4MiBMs === null) ||
+    (record.first16MiBMs !== null && first16MiBMs === null) ||
+    (record.throughputBytesPerSecond !== null && throughputBytesPerSecond === null) ||
+    (record.varianceRatio !== null && varianceRatio === null)
+  ) return null;
+  return {
+    ...coordinate,
+    phase: phase as "tiny" | "sustained",
+    sampleBytes,
+    success: record.success,
+    ttfbMs,
+    first4MiBMs,
+    first16MiBMs,
+    throughputBytesPerSecond,
+    varianceRatio,
+    rangeSeekOk: record.rangeSeekOk,
+    resets,
+    timeouts,
+    proxy407,
+    provider458,
+    http5xx,
+  };
+}
+
+function providerRouteClamp(value: number, minimum: number, maximum: number): number {
+  return Math.min(maximum, Math.max(minimum, value));
+}
+
+function scoreProviderRouteEdge(measurement: ProviderRouteMeasurement): number {
+  if (measurement.proxy407 > 0) return 0;
+  const ttfbMs = measurement.ttfbMs ?? 30_000;
+  const first4MiBMs = Math.max(ttfbMs, measurement.first4MiBMs ?? 60_000);
+  const first16MiBMs = Math.max(first4MiBMs, measurement.first16MiBMs ?? 120_000);
+  const throughput = Math.max(0, measurement.throughputBytesPerSecond ?? 0);
+  const varianceRatio = providerRouteClamp(measurement.varianceRatio ?? 1, 0, 4);
+  const base = (
+    0.2 * Math.exp(-ttfbMs / 3_000) +
+    0.18 * Math.exp(-first4MiBMs / 8_000) +
+    0.2 * Math.exp(-first16MiBMs / 20_000) +
+    0.27 * providerRouteClamp(Math.log2(1 + throughput / (1024 * 1024)) / Math.log2(65), 0, 1) +
+    0.1 * (1 - providerRouteClamp(varianceRatio, 0, 1)) +
+    0.05 * (measurement.rangeSeekOk ? 1 : 0)
+  );
+  const penalty = Math.min(
+    0.95,
+    measurement.resets * 0.12 + measurement.timeouts * 0.3 +
+      measurement.http5xx * 0.16 + measurement.provider458 * 0.01,
+  );
+  return Number((100 * Math.max(0, base - penalty)).toFixed(3));
+}
+
+function providerRouteMedian(values: Array<number | null>): number {
+  const sorted = values.filter((value): value is number => Number.isFinite(value)).sort((a, b) => a - b);
+  if (!sorted.length) return 0;
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+}
+
+function providerRouteConfidence(measurements: ProviderRouteMeasurement[]): number {
+  if (!measurements.length) return 0;
+  const complete = measurements.filter((measurement) =>
+    Number(measurement.first16MiBMs || 0) > 0 &&
+    Number(measurement.throughputBytesPerSecond || 0) > 0 &&
+    measurement.rangeSeekOk
+  ).length;
+  const sampleConfidence = providerRouteClamp(measurements.length / 5, 0, 1);
+  const completeness = complete / measurements.length;
+  return Number(providerRouteClamp(0.2 + sampleConfidence * 0.5 + completeness * 0.3, 0, 1).toFixed(4));
+}
+
+function aggregateProviderRouteEdge(
+  coordinate: ProviderRouteCoordinate,
+  measurements: ProviderRouteMeasurement[],
+): ProviderRouteAggregate | null {
+  const matching = measurements.filter((measurement) =>
+    measurement.slot === coordinate.slot && measurement.nodeTransport === coordinate.nodeTransport
+  );
+  if (!matching.length) return null;
+  const aggregate: ProviderRouteMeasurement = {
+    ...coordinate,
+    phase: "sustained",
+    sampleBytes: Math.max(...matching.map((measurement) => measurement.sampleBytes)),
+    success: matching.filter((measurement) => measurement.success).length >= Math.ceil(matching.length / 2),
+    ttfbMs: providerRouteMedian(matching.map((measurement) => measurement.ttfbMs)),
+    first4MiBMs: providerRouteMedian(matching.map((measurement) => measurement.first4MiBMs)),
+    first16MiBMs: providerRouteMedian(matching.map((measurement) => measurement.first16MiBMs)),
+    throughputBytesPerSecond: providerRouteMedian(
+      matching.map((measurement) => measurement.throughputBytesPerSecond),
+    ),
+    varianceRatio: providerRouteMedian(matching.map((measurement) => measurement.varianceRatio)),
+    rangeSeekOk: matching.filter((measurement) => measurement.rangeSeekOk).length >= Math.ceil(matching.length / 2),
+    resets: matching.reduce((sum, measurement) => sum + measurement.resets, 0),
+    timeouts: matching.reduce((sum, measurement) => sum + measurement.timeouts, 0),
+    proxy407: matching.reduce((sum, measurement) => sum + measurement.proxy407, 0),
+    provider458: matching.reduce((sum, measurement) => sum + measurement.provider458, 0),
+    http5xx: matching.reduce((sum, measurement) => sum + measurement.http5xx, 0),
+  };
+  return {
+    ...coordinate,
+    score: scoreProviderRouteEdge(aggregate),
+    confidence: providerRouteConfidence(matching),
+    sampleCount: matching.length,
+    metrics: aggregate,
+  };
+}
+
+function rankProviderRouteEdge(measurements: ProviderRouteMeasurement[]): ProviderRouteAggregate[] {
+  const coordinates = new Map<string, ProviderRouteCoordinate>();
+  for (const measurement of measurements) {
+    coordinates.set(providerRouteCoordinateKey(measurement), {
+      slot: measurement.slot,
+      nodeTransport: measurement.nodeTransport,
+    });
+  }
+  return [...coordinates.values()]
+    .map((coordinate) => aggregateProviderRouteEdge(coordinate, measurements))
+    .filter((aggregate): aggregate is ProviderRouteAggregate => Boolean(aggregate))
+    .sort((left, right) =>
+      right.score - left.score || right.confidence - left.confidence ||
+      providerRouteCoordinateKey(left).localeCompare(providerRouteCoordinateKey(right))
+    );
+}
+
+function providerRoutePolicyNumber(policy: JsonRecord, key: string, fallback: number): number {
+  if (policy[key] === null || policy[key] === undefined) return fallback;
+  const value = Number(policy[key]);
+  return Number.isFinite(value) ? value : fallback;
+}
+
+function evaluateProviderRouteTransitionEdge(
+  current: (ProviderRouteCoordinate & {
+    score?: number;
+    expiresAt?: string;
+    consecutiveFailures?: number;
+  }) | null,
+  candidate: (ProviderRouteAggregate & { consecutiveWins?: number }) | null,
+  policy: JsonRecord = {},
+  nowMs = Date.now(),
+): { switch: boolean; reason: string; relativeGain?: number } {
+  if (!candidate) return { switch: false, reason: "no-candidate" };
+  if (!current) return { switch: true, reason: "no-current-route" };
+  if (providerRouteCoordinateKey(current) === providerRouteCoordinateKey(candidate)) {
+    return { switch: false, reason: "same-route" };
+  }
+  const minimumConfidence = providerRoutePolicyNumber(policy, "minimumConfidence", 0.65);
+  const minimumRelativeGain = providerRoutePolicyNumber(policy, "minimumRelativeGain", 0.2);
+  const sustainedCandidateWins = providerRoutePolicyNumber(policy, "sustainedCandidateWins", 3);
+  const consecutiveFailureThreshold = providerRoutePolicyNumber(
+    policy,
+    "consecutiveFailureThreshold",
+    3,
+  );
+  const expiresAt = Date.parse(stringOr(current.expiresAt, ""));
+  if (Number.isFinite(expiresAt) && expiresAt <= nowMs && candidate.confidence >= minimumConfidence) {
+    return { switch: true, reason: "current-expired" };
+  }
+  const consecutiveFailures = Math.max(0, Math.trunc(Number(current.consecutiveFailures) || 0));
+  if (
+    consecutiveFailures >= consecutiveFailureThreshold &&
+    candidate.confidence >= minimumConfidence && candidate.score > 0
+  ) return { switch: true, reason: "repeated-route-degradation" };
+  const currentScore = Math.max(1, Number(current.score) || 0);
+  const candidateScore = Math.max(0, Number(candidate.score) || 0);
+  const relativeGain = (candidateScore - currentScore) / currentScore;
+  const consecutiveWins = Math.max(0, Math.trunc(Number(candidate.consecutiveWins) || 0));
+  if (
+    candidate.confidence >= minimumConfidence &&
+    consecutiveWins >= sustainedCandidateWins &&
+    relativeGain >= minimumRelativeGain
+  ) return { switch: true, reason: "sustained-significant-gain", relativeGain };
+  return { switch: false, reason: "hysteresis-hold", relativeGain };
+}
+
+function providerRouteMeasurementFromRow(value: unknown): ProviderRouteMeasurement | null {
+  const row = recordOrEmpty(value);
+  return parseProviderRouteMeasurement({
+    first16MiBMs: row.first_16mib_ms ?? null,
+    first4MiBMs: row.first_4mib_ms ?? null,
+    http5xx: row.http_5xx ?? 0,
+    nodeTransport: row.node_transport,
+    phase: row.phase,
+    provider458: row.provider_458 ?? 0,
+    proxy407: row.proxy_407 ?? 0,
+    rangeSeekOk: row.range_seek_ok === true,
+    resets: row.resets ?? 0,
+    sampleBytes: row.sample_bytes ?? 0,
+    slot: row.route_slot,
+    success: row.success === true,
+    throughputBytesPerSecond: row.throughput_bytes_per_second ?? null,
+    timeouts: row.timeouts ?? 0,
+    ttfbMs: row.ttfb_ms ?? null,
+    varianceRatio: row.variance_ratio ?? null,
+  });
+}
+
+async function getProviderRoutePolicy(db: SupabaseClient): Promise<JsonRecord | null> {
+  try {
+    const { data, error } = await db
+      .from("provider_route_policies")
+      .select("enabled,shadow_mode,route_ttl_seconds,minimum_confidence,minimum_relative_gain,sustained_candidate_wins,consecutive_failure_threshold,tiny_probe_bytes,sustained_probe_bytes,top_candidate_count,benchmark_lease_seconds,measurement_retention_seconds")
+      .eq("policy_key", "default")
+      .maybeSingle();
+    return error || !data ? null : recordOrEmpty(data);
+  } catch (_) {
+    return null;
+  }
+}
+
+function publicProviderRoutePolicy(policy: JsonRecord): JsonRecord {
+  return {
+    shadowMode: policy.shadow_mode !== false,
+    routeTtlSeconds: providerRouteNumberOrNull(policy.route_ttl_seconds),
+    minimumConfidence: providerRouteNumberOrNull(policy.minimum_confidence),
+    minimumRelativeGain: providerRouteNumberOrNull(policy.minimum_relative_gain),
+    sustainedCandidateWins: providerRouteNumberOrNull(policy.sustained_candidate_wins),
+    consecutiveFailureThreshold: providerRouteNumberOrNull(policy.consecutive_failure_threshold),
+    tinyProbeBytes: providerRouteNumberOrNull(policy.tiny_probe_bytes),
+    sustainedProbeBytes: providerRouteNumberOrNull(policy.sustained_probe_bytes),
+    topCandidateCount: providerRouteNumberOrNull(policy.top_candidate_count),
+    benchmarkLeaseSeconds: providerRouteNumberOrNull(policy.benchmark_lease_seconds),
+  };
+}
+
+async function runProviderRouteActivity(req: Request, db: SupabaseClient): Promise<JsonRecord> {
+  const runtimeConfig = await getRuntimeConfig(db);
+  requireConfiguredMediaGatewayCallback(req, runtimeConfig);
+  const body = await req.json().then(recordOrEmpty).catch(() => {
+    throw new HttpError(400, "Invalid provider route activity JSON");
+  });
+  if (!exactJsonKeys(body, ["accountFingerprints", "activityKind", "protocol"]) || body.protocol !== 1) {
+    throw new HttpError(400, "Invalid provider route activity shape");
+  }
+  const activityKind = stringOr(body.activityKind, "");
+  const fingerprints = Array.isArray(body.accountFingerprints)
+    ? [...new Set(body.accountFingerprints.map((value) => stringOr(value, "")))]
+    : [];
+  if (
+    activityKind !== "viewer" || !fingerprints.length || fingerprints.length > 64 ||
+    fingerprints.some((value) => !PROVIDER_ROUTE_FINGERPRINT_PATTERN.test(value))
+  ) throw new HttpError(400, "Invalid provider route activity");
+  try {
+    const { data, error } = await db.rpc("norva_touch_provider_route_activity", {
+      p_account_fingerprints: fingerprints,
+      p_activity_kind: activityKind,
+      p_ttl_seconds: 90,
+    });
+    if (error) return { protocol: 1, ok: true, touched: 0, warn: "migration-lag" };
+    return { protocol: 1, ok: true, touched: Number(data || 0) };
+  } catch (_) {
+    return { protocol: 1, ok: true, touched: 0, warn: "migration-lag" };
+  }
+}
+
+async function providerRouteBenchmarkLease(
+  db: SupabaseClient,
+  accountFingerprint: string,
+  leaseToken: string,
+): Promise<JsonRecord | null> {
+  try {
+    const { data, error } = await db
+      .from("provider_route_leases")
+      .select("host_fingerprint,lease_token,preempt_requested,expires_at")
+      .eq("account_fingerprint", accountFingerprint)
+      .eq("lease_token", leaseToken)
+      .maybeSingle();
+    if (error || !data) return null;
+    const lease = recordOrEmpty(data);
+    const expiresAt = Date.parse(stringOr(lease.expires_at, ""));
+    return Number.isFinite(expiresAt) && expiresAt > Date.now() ? lease : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+async function recentProviderRouteMeasurements(
+  db: SupabaseClient,
+  column: "account_fingerprint" | "host_fingerprint",
+  fingerprint: string,
+  retentionSeconds: number,
+): Promise<ProviderRouteMeasurement[]> {
+  try {
+    const since = new Date(Date.now() - retentionSeconds * 1000).toISOString();
+    const { data, error } = await db
+      .from("provider_route_measurements")
+      .select("route_slot,node_transport,phase,sample_bytes,success,ttfb_ms,first_4mib_ms,first_16mib_ms,throughput_bytes_per_second,variance_ratio,range_seek_ok,resets,timeouts,proxy_407,provider_458,http_5xx")
+      .eq(column, fingerprint)
+      .gte("observed_at", since)
+      .order("observed_at", { ascending: false })
+      .limit(512);
+    if (error) return [];
+    return (data || []).map(providerRouteMeasurementFromRow)
+      .filter((value): value is ProviderRouteMeasurement => Boolean(value));
+  } catch (_) {
+    return [];
+  }
+}
+
+async function persistProviderRouteState(
+  db: SupabaseClient,
+  accountFingerprint: string,
+  hostFingerprint: string,
+  policy: JsonRecord,
+  rankings: ProviderRouteAggregate[],
+): Promise<JsonRecord | null> {
+  const recommendation = rankings[0];
+  if (!recommendation) return null;
+  const now = new Date();
+  const ttlSeconds = providerRoutePolicyNumber(policy, "route_ttl_seconds", 604_800);
+  const expiresAt = new Date(now.getTime() + ttlSeconds * 1000).toISOString();
+  let current: JsonRecord | null = null;
+  try {
+    const { data } = await db.from("provider_route_state").select("*")
+      .eq("scope", "account").eq("route_identity", accountFingerprint).maybeSingle();
+    if (data) current = recordOrEmpty(data);
+  } catch (_) { /* first observation */ }
+
+  const currentCoordinate = current ? providerRouteCoordinate({
+    slot: current.route_slot,
+    nodeTransport: current.node_transport,
+  }) : null;
+  const currentRanking = currentCoordinate
+    ? rankings.find((ranking) => providerRouteCoordinateKey(ranking) === providerRouteCoordinateKey(currentCoordinate)) || null
+    : null;
+  const sameRoute = currentCoordinate &&
+    providerRouteCoordinateKey(currentCoordinate) === providerRouteCoordinateKey(recommendation);
+  const priorFailures = Number(current?.consecutive_failures || 0);
+  const currentFailed = Boolean(currentCoordinate) && (
+    !currentRanking || currentRanking.score <= 0 || currentRanking.metrics.proxy407 > 0 ||
+    currentRanking.metrics.timeouts > 0 || currentRanking.metrics.http5xx > 0
+  );
+  const consecutiveFailures = currentFailed ? Math.min(32_767, priorFailures + 1) : 0;
+  const priorCandidateMatches = current &&
+    Number(current.candidate_slot) === recommendation.slot &&
+    stringOr(current.candidate_node_transport, "") === recommendation.nodeTransport;
+  const candidateWins = sameRoute ? 0 : Math.min(32_767, priorCandidateMatches
+    ? Number(current?.candidate_wins || 0) + 1
+    : 1);
+  const currentExpiresAt = Date.parse(stringOr(current?.expires_at, ""));
+  const currentScore = Math.max(1, Number(currentRanking?.score ?? current?.score ?? 0));
+  const transition = evaluateProviderRouteTransitionEdge(
+    currentCoordinate ? {
+      ...currentCoordinate,
+      score: currentScore,
+      expiresAt: Number.isFinite(currentExpiresAt) ? new Date(currentExpiresAt).toISOString() : undefined,
+      consecutiveFailures,
+    } : null,
+    { ...recommendation, consecutiveWins: candidateWins },
+    {
+      minimumConfidence: providerRoutePolicyNumber(policy, "minimum_confidence", 0.65),
+      minimumRelativeGain: providerRoutePolicyNumber(policy, "minimum_relative_gain", 0.2),
+      sustainedCandidateWins: providerRoutePolicyNumber(policy, "sustained_candidate_wins", 3),
+      consecutiveFailureThreshold: providerRoutePolicyNumber(
+        policy,
+        "consecutive_failure_threshold",
+        3,
+      ),
+    },
+    now.getTime(),
+  );
+  const shouldSwitch = transition.switch;
+  const selectedReason = shouldSwitch ? transition.reason : "account-sticky";
+
+  const selected = shouldSwitch || sameRoute ? recommendation : currentRanking;
+  const selectedCoordinate = shouldSwitch || sameRoute
+    ? recommendation
+    : currentCoordinate;
+  if (!selectedCoordinate) return null;
+  const state = {
+    scope: "account",
+    route_identity: accountFingerprint,
+    host_fingerprint: hostFingerprint,
+    route_slot: selectedCoordinate.slot,
+    node_transport: selectedCoordinate.nodeTransport,
+    ffmpeg_slot: selectedCoordinate.slot,
+    score: Number(selected?.score ?? current?.score ?? 0),
+    confidence: Number(selected?.confidence ?? current?.confidence ?? 0),
+    sample_count: Number(selected?.sampleCount ?? current?.sample_count ?? 0),
+    consecutive_failures: shouldSwitch ? 0 : consecutiveFailures,
+    candidate_slot: !shouldSwitch && !sameRoute ? recommendation.slot : null,
+    candidate_node_transport: !shouldSwitch && !sameRoute ? recommendation.nodeTransport : null,
+    candidate_wins: !shouldSwitch && !sameRoute ? candidateWins : 0,
+    selected_reason: sameRoute ? "account-sticky" : selectedReason,
+    selected_at: now.toISOString(),
+    last_measured_at: now.toISOString(),
+    expires_at: expiresAt,
+    version: Math.max(1, Number(current?.version || 0) + 1),
+    updated_at: now.toISOString(),
+  };
+  const { error } = await db.from("provider_route_state").upsert(state, {
+    onConflict: "scope,route_identity",
+  });
+  if (error) return null;
+  return state;
+}
+
+async function persistProviderHostRouteState(
+  db: SupabaseClient,
+  hostFingerprint: string,
+  policy: JsonRecord,
+  rankings: ProviderRouteAggregate[],
+): Promise<void> {
+  const recommendation = rankings[0];
+  if (
+    !recommendation ||
+    recommendation.confidence < providerRoutePolicyNumber(policy, "minimum_confidence", 0.65)
+  ) return;
+  const now = new Date();
+  const expiresAt = new Date(
+    now.getTime() + providerRoutePolicyNumber(policy, "route_ttl_seconds", 604_800) * 1000,
+  ).toISOString();
+  await db.from("provider_route_state").upsert({
+    scope: "host",
+    route_identity: hostFingerprint,
+    host_fingerprint: hostFingerprint,
+    route_slot: recommendation.slot,
+    node_transport: recommendation.nodeTransport,
+    ffmpeg_slot: recommendation.slot,
+    score: recommendation.score,
+    confidence: recommendation.confidence,
+    sample_count: recommendation.sampleCount,
+    consecutive_failures: 0,
+    candidate_slot: null,
+    candidate_node_transport: null,
+    candidate_wins: 0,
+    selected_reason: "host-learned",
+    selected_at: now.toISOString(),
+    last_measured_at: now.toISOString(),
+    expires_at: expiresAt,
+    version: 1,
+    updated_at: now.toISOString(),
+  }, { onConflict: "scope,route_identity" });
+}
+
+async function reportProviderRouteBenchmark(
+  db: SupabaseClient,
+  body: JsonRecord,
+  accountFingerprint: string,
+  hostFingerprint: string,
+  leaseToken: string,
+  policy: JsonRecord,
+): Promise<JsonRecord> {
+  const lease = await providerRouteBenchmarkLease(db, accountFingerprint, leaseToken);
+  if (
+    !lease || lease.preempt_requested === true ||
+    stringOr(lease.host_fingerprint, "") !== hostFingerprint
+  ) throw new HttpError(409, "Provider route benchmark lease was preempted");
+  const rawMeasurements = Array.isArray(body.measurements) ? body.measurements : [];
+  if (!rawMeasurements.length || rawMeasurements.length > 80) {
+    throw new HttpError(400, "Invalid provider route measurements");
+  }
+  const measurements = rawMeasurements.map(parseProviderRouteMeasurement);
+  if (measurements.some((measurement) => !measurement)) {
+    throw new HttpError(400, "Invalid provider route measurements");
+  }
+  const acceptedMeasurements = measurements as ProviderRouteMeasurement[];
+  const batchRankings = rankProviderRouteEdge(acceptedMeasurements);
+  const confidenceByRoute = new Map(batchRankings.map((ranking) => [
+    providerRouteCoordinateKey(ranking),
+    ranking.confidence,
+  ]));
+  const rows = acceptedMeasurements.map((measurement) => ({
+    account_fingerprint: accountFingerprint,
+    host_fingerprint: hostFingerprint,
+    route_slot: measurement.slot,
+    node_transport: measurement.nodeTransport,
+    phase: measurement.phase,
+    sample_bytes: measurement.sampleBytes,
+    success: measurement.success,
+    ttfb_ms: measurement.ttfbMs,
+    first_4mib_ms: measurement.first4MiBMs,
+    first_16mib_ms: measurement.first16MiBMs,
+    throughput_bytes_per_second: measurement.throughputBytesPerSecond,
+    variance_ratio: measurement.varianceRatio,
+    range_seek_ok: measurement.rangeSeekOk,
+    resets: measurement.resets,
+    timeouts: measurement.timeouts,
+    proxy_407: measurement.proxy407,
+    provider_458: measurement.provider458,
+    http_5xx: measurement.http5xx,
+    route_score: scoreProviderRouteEdge(measurement),
+    route_confidence: confidenceByRoute.get(providerRouteCoordinateKey(measurement)) || 0,
+  }));
+  const { error: insertError } = await db.from("provider_route_measurements").insert(rows);
+  if (insertError) throw new HttpError(503, "Provider route measurement store unavailable");
+
+  const retentionSeconds = providerRoutePolicyNumber(policy, "measurement_retention_seconds", 2_592_000);
+  const accountMeasurements = await recentProviderRouteMeasurements(
+    db,
+    "account_fingerprint",
+    accountFingerprint,
+    retentionSeconds,
+  );
+  const accountRankings = rankProviderRouteEdge(accountMeasurements.length
+    ? accountMeasurements
+    : acceptedMeasurements);
+  const accountState = await persistProviderRouteState(
+    db,
+    accountFingerprint,
+    hostFingerprint,
+    policy,
+    accountRankings,
+  );
+  const hostMeasurements = await recentProviderRouteMeasurements(
+    db,
+    "host_fingerprint",
+    hostFingerprint,
+    retentionSeconds,
+  );
+  await persistProviderHostRouteState(db, hostFingerprint, policy, rankProviderRouteEdge(hostMeasurements));
+  if (!accountState) throw new HttpError(503, "Provider route state store unavailable");
+  const candidates = new Map<string, ProviderRouteCoordinate>();
+  for (const measurement of acceptedMeasurements) {
+    candidates.set(providerRouteCoordinateKey(measurement), {
+      slot: measurement.slot,
+      nodeTransport: measurement.nodeTransport,
+    });
+  }
+  return {
+    protocol: 1,
+    accepted: true,
+    decision: publicProviderRouteDecision(accountState, candidates),
+    measurementCount: acceptedMeasurements.length,
+  };
+}
+
+async function runProviderRouteBenchmark(req: Request, db: SupabaseClient): Promise<JsonRecord> {
+  const runtimeConfig = await getRuntimeConfig(db);
+  requireConfiguredMediaGatewayCallback(req, runtimeConfig);
+  const body = await req.json().then(recordOrEmpty).catch(() => {
+    throw new HttpError(400, "Invalid provider route benchmark JSON");
+  });
+  const action = stringOr(body.action, "");
+  if (body.protocol !== 1 || !["claim", "pulse", "report", "release"].includes(action)) {
+    throw new HttpError(400, "Invalid provider route benchmark action");
+  }
+  const expectedKeys: Record<string, string[]> = {
+    claim: ["accountFingerprint", "action", "hostFingerprint", "ownerInstanceFingerprint", "protocol"],
+    pulse: ["accountFingerprint", "action", "leaseToken", "protocol"],
+    report: ["accountFingerprint", "action", "hostFingerprint", "leaseToken", "measurements", "protocol"],
+    release: ["accountFingerprint", "action", "leaseToken", "protocol"],
+  };
+  if (!exactJsonKeys(body, expectedKeys[action])) {
+    throw new HttpError(400, "Invalid provider route benchmark shape");
+  }
+  const accountFingerprint = stringOr(body.accountFingerprint, "");
+  const hostFingerprint = stringOr(body.hostFingerprint, "");
+  const leaseToken = stringOr(body.leaseToken, "");
+  if (!PROVIDER_ROUTE_FINGERPRINT_PATTERN.test(accountFingerprint)) {
+    throw new HttpError(400, "Invalid provider route identity");
+  }
+  if (["claim", "report"].includes(action) && !PROVIDER_ROUTE_FINGERPRINT_PATTERN.test(hostFingerprint)) {
+    throw new HttpError(400, "Invalid provider route identity");
+  }
+  if (["pulse", "report", "release"].includes(action) && !PLAYBACK_SESSION_UUID_PATTERN.test(leaseToken)) {
+    throw new HttpError(400, "Invalid provider route lease");
+  }
+  if (action === "claim") {
+    const ownerInstanceFingerprint = stringOr(body.ownerInstanceFingerprint, "");
+    if (!PROVIDER_ROUTE_FINGERPRINT_PATTERN.test(ownerInstanceFingerprint)) {
+      throw new HttpError(400, "Invalid provider route owner");
+    }
+    const policy = await getProviderRoutePolicy(db);
+    if (!policy || policy.enabled !== true) {
+      return { protocol: 1, granted: false, reason: "control-disabled" };
+    }
+    try {
+      const { data, error } = await db.rpc("norva_claim_provider_route_lease", {
+        p_account_fingerprint: accountFingerprint,
+        p_host_fingerprint: hostFingerprint,
+        p_owner_instance_fingerprint: ownerInstanceFingerprint,
+        p_ttl_seconds: providerRoutePolicyNumber(policy, "benchmark_lease_seconds", 120),
+      });
+      const token = stringOr(data, "");
+      if (error || !PLAYBACK_SESSION_UUID_PATTERN.test(token)) {
+        return { protocol: 1, granted: false, reason: "viewer-active-or-leased" };
+      }
+      return {
+        protocol: 1,
+        granted: true,
+        leaseToken: token,
+        policy: publicProviderRoutePolicy(policy),
+      };
+    } catch (_) {
+      return { protocol: 1, granted: false, reason: "control-unavailable" };
+    }
+  }
+  if (action === "pulse") {
+    const lease = await providerRouteBenchmarkLease(db, accountFingerprint, leaseToken);
+    if (!lease) return { protocol: 1, active: false, preemptRequested: false };
+    if (lease.preempt_requested === true) {
+      return { protocol: 1, active: false, preemptRequested: true };
+    }
+    const policy = await getProviderRoutePolicy(db);
+    if (!policy) return { protocol: 1, active: false, preemptRequested: false };
+    try {
+      const { data, error } = await db.rpc("norva_renew_provider_route_lease", {
+        p_account_fingerprint: accountFingerprint,
+        p_lease_token: leaseToken,
+        p_ttl_seconds: providerRoutePolicyNumber(policy, "benchmark_lease_seconds", 120),
+      });
+      return { protocol: 1, active: !error && data === true, preemptRequested: false };
+    } catch (_) {
+      return { protocol: 1, active: false, preemptRequested: false };
+    }
+  }
+  if (action === "report") {
+    const policy = await getProviderRoutePolicy(db);
+    if (!policy || policy.enabled !== true) throw new HttpError(409, "Provider route control is disabled");
+    return reportProviderRouteBenchmark(
+      db,
+      body,
+      accountFingerprint,
+      hostFingerprint,
+      leaseToken,
+      policy,
+    );
+  }
+  try {
+    const { data, error } = await db.rpc("norva_release_provider_route_lease", {
+      p_account_fingerprint: accountFingerprint,
+      p_lease_token: leaseToken,
+    });
+    return { protocol: 1, released: !error && data === true };
+  } catch (_) {
+    return { protocol: 1, released: false };
+  }
 }
 
 function requireConfiguredMediaGatewayCallback(

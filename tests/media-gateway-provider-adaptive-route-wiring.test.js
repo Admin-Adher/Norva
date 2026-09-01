@@ -10,9 +10,10 @@ const gateway = fs.readFileSync(path.join(
   '../services/media-gateway/src/index.js',
 ), 'utf8');
 
-test('Gateway v143 keeps adaptive routing behind a dedicated-key activation gate', () => {
-  assert.match(gateway, /const GATEWAY_VERSION = 143;/);
+test('Gateway v144 keeps adaptive routing behind dedicated route and benchmark gates', () => {
+  assert.match(gateway, /const GATEWAY_VERSION = 144;/);
   assert.match(gateway, /process\.env\.PROVIDER_ADAPTIVE_ROUTE_ENABLED === 'true'/);
+  assert.match(gateway, /process\.env\.PROVIDER_ROUTE_BENCHMARK_ENABLED === 'true'/);
   assert.match(gateway, /process\.env\.PROVIDER_ROUTE_FINGERPRINT_HMAC_KEY/);
   assert.match(gateway, /function decodeProviderRouteFingerprintKey[\s\S]{0,180}\^\[a-f0-9\]\{64\}\$/);
   assert.doesNotMatch(
@@ -20,6 +21,7 @@ test('Gateway v143 keeps adaptive routing behind a dedicated-key activation gate
     /PROVIDER_ROUTE_FINGERPRINT_(HMAC_)?KEY\s*(?:\|\||\?\?)\s*GATEWAY_TOKEN/,
   );
   assert.match(gateway, /providerAdaptiveRoute: providerAdaptiveRouteControl\.publicStatus\(\)/);
+  assert.match(gateway, /providerRouteBenchmark: providerRouteBenchmarkPublicStatus\(\)/);
 });
 
 test('Node can choose HTTP or SOCKS5 while child processes retain the same HTTP slot', () => {
@@ -63,6 +65,34 @@ test('raw playback preempts route benchmarking before freezing its one dispatche
   const dispatcherFreeze = rawRoute.indexOf('const rawProxyAgent = pickProxyAgent(pumpProxyKey)');
   assert.ok(localPreemption >= 0 && routeResolution > localPreemption && dispatcherFreeze > routeResolution);
   assert.match(rawRoute, /if \(ac\.signal\.aborted \|\| res\.destroyed \|\| res\.writableEnded\) return;/);
+  assert.ok(rawRoute.indexOf('scheduleProviderRouteBenchmark(', routeResolution) < dispatcherFreeze);
+});
+
+test('benchmark learning is bounded, sequential, service-only, and locally preemptable', () => {
+  const start = gateway.indexOf('const providerRouteBenchmarkEnabled');
+  const end = gateway.indexOf('const activeVideoEncoderAdmissions', start);
+  const benchmark = gateway.slice(start, end);
+  assert.match(benchmark, /PROVIDER_ROUTE_BENCHMARK_MAX_PENDING/);
+  assert.match(benchmark, /runLeasedProviderRouteBenchmark/);
+  assert.match(benchmark, /measureProviderRoute/);
+  assert.match(benchmark, /providerRouteBenchmarkDispatcher/);
+  assert.match(benchmark, /viewerPlaybackActiveLocally\(\)/);
+  assert.match(benchmark, /registerAccountExtraction/);
+  assert.match(benchmark, /PROVIDER_SLOT_RELEASE_DELAY_MS/);
+  assert.match(benchmark, /setViewerPreemptHandler/);
+  assert.match(gateway, /app\.post\('\/provider-route\/benchmark', requireGatewayAuth/);
+});
+
+test('distributed activity reports only HMAC route identities for active viewers', () => {
+  const reporter = gateway.slice(
+    gateway.indexOf('function activeProviderRouteAccountFingerprints'),
+    gateway.indexOf('let _accountActivityLastErrorAt'),
+  );
+  assert.match(reporter, /fingerprintsForSource/);
+  assert.match(reporter, /routeAccountFingerprint/);
+  assert.match(reporter, /\^\[0-9a-f\]\{64\}\$/);
+  assert.doesNotMatch(reporter, /return .*sourceUrl|return .*affinityKey/);
+  assert.match(gateway, /reportViewerActivity\(routeFingerprints/);
 });
 
 test('adaptive diagnostics expose coordinates and scores but no control-plane identities', () => {

@@ -55,6 +55,8 @@ class ProviderAdaptiveRouteControl {
         this.now = options.now || Date.now;
         this.appliedByAffinity = new Map();
         this.shadowByAffinity = new Map();
+        this.fingerprintsByAffinity = new Map();
+        this.viewerPreemptHandler = null;
         this.stats = {
             resolves: 0,
             applied: 0,
@@ -72,6 +74,84 @@ class ProviderAdaptiveRouteControl {
             typeof this.fetchImpl === 'function' &&
             typeof this.slotIndexForKey === 'function'
         );
+    }
+
+    setViewerPreemptHandler(handler) {
+        this.viewerPreemptHandler = typeof handler === 'function' ? handler : null;
+    }
+
+    rememberFingerprints(affinityKey, fingerprints) {
+        const key = String(affinityKey || '');
+        if (!key || !fingerprints) return;
+        if (!this.fingerprintsByAffinity.has(key) && this.fingerprintsByAffinity.size >= 5_000) {
+            this.fingerprintsByAffinity.delete(this.fingerprintsByAffinity.keys().next().value);
+        }
+        this.fingerprintsByAffinity.set(key, fingerprints);
+    }
+
+    fingerprintsForSource(sourceUrl, affinityKey = '') {
+        if (!this.active) return null;
+        try {
+            const fingerprints = providerRouteFingerprints(sourceUrl, this.fingerprintKey);
+            this.rememberFingerprints(affinityKey, fingerprints);
+            return fingerprints;
+        } catch (_) {
+            return null;
+        }
+    }
+
+    fingerprintsForAffinity(affinityKey) {
+        return this.fingerprintsByAffinity.get(String(affinityKey || '')) || null;
+    }
+
+    async postControl(path, body, options = {}) {
+        if (!this.active) throw new Error('provider-route-control-inactive');
+        const controller = new AbortController();
+        const parentSignal = options.signal;
+        const onAbort = () => controller.abort(parentSignal?.reason);
+        if (parentSignal?.aborted) onAbort();
+        else parentSignal?.addEventListener('abort', onAbort, { once: true });
+        const timeoutMs = Math.max(500, Math.min(15_000, Number(options.timeoutMs) || 10_000));
+        const timeout = setTimeout(() => controller.abort(new Error('provider-route-control-timeout')), timeoutMs);
+        timeout.unref?.();
+        try {
+            const response = await this.fetchImpl(`${this.edgeBase}${path}`, {
+                method: 'POST',
+                headers: {
+                    'content-type': 'application/json',
+                    authorization: `Bearer ${this.gatewayToken}`,
+                },
+                body: JSON.stringify(body),
+                signal: controller.signal,
+            });
+            if (!response?.ok) throw new Error('provider-route-control-http');
+            const payload = await response.json();
+            if (payload?.protocol !== 1) throw new Error('provider-route-control-protocol');
+            return payload;
+        } finally {
+            clearTimeout(timeout);
+            parentSignal?.removeEventListener('abort', onAbort);
+        }
+    }
+
+    requestBenchmark(action, payload, options = {}) {
+        return this.postControl('/provider-route/benchmark', {
+            protocol: 1,
+            action,
+            ...payload,
+        }, options);
+    }
+
+    reportViewerActivity(accountFingerprints, options = {}) {
+        const values = [...new Set((Array.isArray(accountFingerprints) ? accountFingerprints : [])
+            .map((value) => String(value || '').trim().toLowerCase())
+            .filter((value) => /^[0-9a-f]{64}$/.test(value)))].slice(0, 64);
+        if (!values.length) return Promise.resolve({ protocol: 1, ok: true, touched: 0 });
+        return this.postControl('/provider-route/activity', {
+            protocol: 1,
+            accountFingerprints: values,
+            activityKind: 'viewer',
+        }, options);
     }
 
     fallback(affinityKey, reason = 'adaptive-disabled') {
@@ -94,12 +174,11 @@ class ProviderAdaptiveRouteControl {
     }
 
     async resolveForPlayback(sourceUrl, affinityKey, options = {}) {
+        try { this.viewerPreemptHandler?.(String(affinityKey || '')); } catch (_) { /* viewer still wins remotely */ }
         if (!this.active) return this.decisionForAffinity(affinityKey);
         this.stats.resolves += 1;
-        let fingerprints;
-        try {
-            fingerprints = providerRouteFingerprints(sourceUrl, this.fingerprintKey);
-        } catch (_) {
+        const fingerprints = this.fingerprintsForSource(sourceUrl, affinityKey);
+        if (!fingerprints) {
             this.stats.failures += 1;
             return this.fallback(affinityKey, 'fingerprint-unavailable');
         }
@@ -163,6 +242,7 @@ class ProviderAdaptiveRouteControl {
             candidates: this.candidates.length,
             appliedAccounts: this.appliedByAffinity.size,
             shadowAccounts: this.shadowByAffinity.size,
+            trackedAccounts: this.fingerprintsByAffinity.size,
             ...this.stats,
         };
     }

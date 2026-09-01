@@ -187,6 +187,20 @@ create index provider_route_measurements_host_rank_idx
 create index provider_route_measurements_retention_idx
   on public.provider_route_measurements (observed_at);
 
+create table public.provider_route_activity (
+  account_fingerprint text primary key,
+  activity_kind text not null,
+  expires_at timestamptz not null,
+  updated_at timestamptz not null default clock_timestamp(),
+  constraint provider_route_activity_identity_check
+    check (account_fingerprint ~ '^[0-9a-f]{64}$'),
+  constraint provider_route_activity_kind_check
+    check (activity_kind in ('viewer', 'gateway'))
+);
+
+create index provider_route_activity_expiry_idx
+  on public.provider_route_activity (expires_at);
+
 create table public.provider_route_leases (
   account_fingerprint text primary key,
   host_fingerprint text not null,
@@ -218,18 +232,22 @@ alter table public.provider_route_state enable row level security;
 alter table public.provider_route_state force row level security;
 alter table public.provider_route_measurements enable row level security;
 alter table public.provider_route_measurements force row level security;
+alter table public.provider_route_activity enable row level security;
+alter table public.provider_route_activity force row level security;
 alter table public.provider_route_leases enable row level security;
 alter table public.provider_route_leases force row level security;
 
 revoke all on table public.provider_route_policies from public, anon, authenticated;
 revoke all on table public.provider_route_state from public, anon, authenticated;
 revoke all on table public.provider_route_measurements from public, anon, authenticated;
+revoke all on table public.provider_route_activity from public, anon, authenticated;
 revoke all on table public.provider_route_leases from public, anon, authenticated;
 revoke all on sequence public.provider_route_measurements_id_seq from public, anon, authenticated;
 
 grant select, insert, update, delete on table public.provider_route_policies to service_role;
 grant select, insert, update, delete on table public.provider_route_state to service_role;
 grant select, insert, update, delete on table public.provider_route_measurements to service_role;
+grant select, insert, update, delete on table public.provider_route_activity to service_role;
 grant select, insert, update, delete on table public.provider_route_leases to service_role;
 grant usage, select on sequence public.provider_route_measurements_id_seq to service_role;
 
@@ -257,6 +275,18 @@ begin
      or p_host_fingerprint !~ '^[0-9a-f]{64}$'
      or p_owner_instance_fingerprint !~ '^[0-9a-f]{64}$'
      or p_ttl_seconds not between 15 and 600 then
+    return null;
+  end if;
+
+  perform pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended(p_account_fingerprint, 691752902764108185::bigint)
+  );
+  if exists (
+    select 1
+      from public.provider_route_activity
+     where account_fingerprint = p_account_fingerprint
+       and expires_at > v_now
+  ) then
     return null;
   end if;
 
@@ -343,6 +373,27 @@ declare
 begin
   if p_account_fingerprint is null
      or p_account_fingerprint !~ '^[0-9a-f]{64}$' then return false; end if;
+  perform pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended(p_account_fingerprint, 691752902764108185::bigint)
+  );
+  insert into public.provider_route_activity (
+    account_fingerprint,
+    activity_kind,
+    expires_at,
+    updated_at
+  ) values (
+    p_account_fingerprint,
+    'viewer',
+    clock_timestamp() + interval '90 seconds',
+    clock_timestamp()
+  )
+  on conflict (account_fingerprint) do update
+     set activity_kind = 'viewer',
+         expires_at = greatest(
+           public.provider_route_activity.expires_at,
+           excluded.expires_at
+         ),
+         updated_at = excluded.updated_at;
   update public.provider_route_leases
      set preempt_requested = true,
          updated_at = clock_timestamp()
@@ -350,6 +401,71 @@ begin
      and expires_at > clock_timestamp()
   returning true into v_preempted;
   return coalesce(v_preempted, false);
+end
+$function$;
+
+create or replace function public.norva_touch_provider_route_activity(
+  p_account_fingerprints text[],
+  p_activity_kind text default 'viewer',
+  p_ttl_seconds integer default 90
+) returns integer
+language plpgsql
+volatile
+security definer
+set search_path = ''
+as $function$
+declare
+  v_fingerprint text;
+  v_fingerprints text[];
+  v_now timestamptz := clock_timestamp();
+  v_touched integer := 0;
+begin
+  if p_account_fingerprints is null
+     or cardinality(p_account_fingerprints) not between 1 and 64
+     or p_activity_kind not in ('viewer', 'gateway')
+     or p_ttl_seconds not between 30 and 300
+     or exists (
+       select 1
+         from unnest(p_account_fingerprints) as value
+        where value is null or value !~ '^[0-9a-f]{64}$'
+     ) then
+    return 0;
+  end if;
+
+  select array_agg(value order by value)
+    into v_fingerprints
+    from (select distinct unnest(p_account_fingerprints) as value) unique_values;
+
+  foreach v_fingerprint in array v_fingerprints loop
+    perform pg_catalog.pg_advisory_xact_lock(
+      pg_catalog.hashtextextended(v_fingerprint, 691752902764108185::bigint)
+    );
+    insert into public.provider_route_activity (
+      account_fingerprint,
+      activity_kind,
+      expires_at,
+      updated_at
+    ) values (
+      v_fingerprint,
+      p_activity_kind,
+      v_now + make_interval(secs => p_ttl_seconds),
+      v_now
+    )
+    on conflict (account_fingerprint) do update
+       set activity_kind = excluded.activity_kind,
+           expires_at = greatest(
+             public.provider_route_activity.expires_at,
+             excluded.expires_at
+           ),
+           updated_at = excluded.updated_at;
+    update public.provider_route_leases
+       set preempt_requested = true,
+           updated_at = v_now
+     where account_fingerprint = v_fingerprint
+       and expires_at > v_now;
+    v_touched := v_touched + 1;
+  end loop;
+  return v_touched;
 end
 $function$;
 
@@ -382,6 +498,8 @@ revoke all on function public.norva_renew_provider_route_lease(text, uuid, integ
   from public, anon, authenticated;
 revoke all on function public.norva_preempt_provider_route_lease(text)
   from public, anon, authenticated;
+revoke all on function public.norva_touch_provider_route_activity(text[], text, integer)
+  from public, anon, authenticated;
 revoke all on function public.norva_release_provider_route_lease(text, uuid)
   from public, anon, authenticated;
 
@@ -391,6 +509,8 @@ grant execute on function public.norva_renew_provider_route_lease(text, uuid, in
   to service_role;
 grant execute on function public.norva_preempt_provider_route_lease(text)
   to service_role;
+grant execute on function public.norva_touch_provider_route_activity(text[], text, integer)
+  to service_role;
 grant execute on function public.norva_release_provider_route_lease(text, uuid)
   to service_role;
 
@@ -398,6 +518,8 @@ comment on table public.provider_route_state is
   'Server-only sticky route state keyed exclusively by HMAC fingerprints; never provider labels or Norva users.';
 comment on table public.provider_route_measurements is
   'Bounded server-only route telemetry without provider URLs, credentials, proxy endpoints, or user identities.';
+comment on table public.provider_route_activity is
+  'Short HMAC-only viewer activity fence that prevents a distributed benchmark from opening beside playback.';
 comment on table public.provider_route_leases is
   'Distributed benchmark coordination only; real playback retains priority through immediate preemption.';
 

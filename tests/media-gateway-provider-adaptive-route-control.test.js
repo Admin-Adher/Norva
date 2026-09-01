@@ -155,3 +155,35 @@ test('an already aborted viewer never installs a route decision', async () => {
   assert.equal(decision.selectionReason, 'playback-aborted');
   assert.equal(control.publicStatus().appliedAccounts, 0);
 });
+
+test('benchmark control and activity transmit hashes only, and a viewer preempts locally first', async () => {
+  const requests = [];
+  let preemptedAffinity = null;
+  const control = controller({
+    fetchImpl: async (url, options) => {
+      requests.push({ url, body: JSON.parse(options.body) });
+      if (url.endsWith('/provider-route/resolve')) {
+        return response({ protocol: 1, enabled: true, apply: false, decision: null });
+      }
+      return response({ protocol: 1, ok: true, touched: 1, granted: false });
+    },
+  });
+  control.setViewerPreemptHandler((affinity) => { preemptedAffinity = affinity; });
+  await control.resolveForPlayback(sourceUrl, 'provider/account');
+  const fingerprints = control.fingerprintsForAffinity('provider/account');
+  await control.requestBenchmark('claim', {
+    accountFingerprint: fingerprints.accountFingerprint,
+    hostFingerprint: fingerprints.hostFingerprint,
+    ownerInstanceFingerprint: 'c'.repeat(64),
+  });
+  await control.reportViewerActivity([fingerprints.accountFingerprint]);
+
+  assert.equal(preemptedAffinity, 'provider/account');
+  assert.equal(control.publicStatus().trackedAccounts, 1);
+  assert.equal(requests.some((request) => request.url.endsWith('/provider-route/benchmark')), true);
+  assert.equal(requests.some((request) => request.url.endsWith('/provider-route/activity')), true);
+  const serialized = JSON.stringify(requests.slice(1));
+  for (const forbidden of ['provider.example', 'raw-user-needle', 'raw-secret-needle']) {
+    assert.equal(serialized.includes(forbidden), false);
+  }
+});

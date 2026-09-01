@@ -49,6 +49,10 @@ const {
 } = require('./providerProxyPool');
 const { ProviderAdaptiveRouteControl } = require('./providerAdaptiveRouteControl');
 const {
+    measureProviderRoute,
+    runLeasedProviderRouteBenchmark,
+} = require('./providerRouteBenchmark');
+const {
     CompleteMkvHlsCache,
     MkvHlsCacheError,
 } = require('./mkv-hls-cache');
@@ -86,6 +90,8 @@ const app = express();
 //                        pinned Edge callback are also configured.
 //   PROVIDER_ROUTE_FINGERPRINT_HMAC_KEY  dedicated 32-byte key as 64 lowercase
 //                        hexadecimal characters. It is never replaced by GATEWAY_TOKEN.
+//   PROVIDER_ROUTE_BENCHMARK_ENABLED  separately enables the idle, leased and
+//                        viewer-preemptable tiny-sweep + sustained-top-two learner.
 //
 // Each provider ACCOUNT is pinned to ONE pool IP (sticky by the canonical provider
 // host+username identity). The Norva user id is deliberately never part of proxy affinity:
@@ -911,6 +917,37 @@ const PROVIDER_ADAPTIVE_ROUTE_LOOKUP_TIMEOUT_MS = clampInt(
 const PROVIDER_ROUTE_FINGERPRINT_KEY = decodeProviderRouteFingerprintKey(
     process.env.PROVIDER_ROUTE_FINGERPRINT_HMAC_KEY,
 );
+const PROVIDER_ROUTE_BENCHMARK_REQUESTED = process.env.PROVIDER_ROUTE_BENCHMARK_ENABLED === 'true';
+const PROVIDER_ROUTE_BENCHMARK_SETTLE_MS = clampInt(
+    process.env.PROVIDER_ROUTE_BENCHMARK_SETTLE_MS,
+    5_000,
+    1_000,
+    300_000,
+);
+const PROVIDER_ROUTE_BENCHMARK_RETRY_MS = clampInt(
+    process.env.PROVIDER_ROUTE_BENCHMARK_RETRY_MS,
+    30_000,
+    5_000,
+    300_000,
+);
+const PROVIDER_ROUTE_BENCHMARK_COOLDOWN_MS = clampInt(
+    process.env.PROVIDER_ROUTE_BENCHMARK_COOLDOWN_MS,
+    6 * 60 * 60 * 1000,
+    60_000,
+    7 * 24 * 60 * 60 * 1000,
+);
+const PROVIDER_ROUTE_BENCHMARK_MAX_PENDING = clampInt(
+    process.env.PROVIDER_ROUTE_BENCHMARK_MAX_PENDING,
+    32,
+    1,
+    64,
+);
+const providerRouteBenchmarkInstanceFingerprint = PROVIDER_ROUTE_FINGERPRINT_KEY
+    ? crypto.createHmac('sha256', PROVIDER_ROUTE_FINGERPRINT_KEY)
+        .update('norva-provider-route-instance-v1\0')
+        .update(String(process.env.RAILWAY_REPLICA_ID || process.env.HOSTNAME || crypto.randomUUID()))
+        .digest('hex')
+    : null;
 providerAdaptiveRouteControl = new ProviderAdaptiveRouteControl({
     enabled: PROVIDER_ADAPTIVE_ROUTE_REQUESTED,
     httpProxyUrls: providerHttpProxyUrls,
@@ -2053,7 +2090,7 @@ const MULTI_AUDIO_HLS_PROTOCOL = 1;
 // production Ryzen/Radeon host. Keep the operational default evidence-based and configurable,
 // while bounding accidental fan-out. Every exact source track stays visible to the user.
 const MAX_MULTI_AUDIO_RENDITIONS = clampInt(process.env.MAX_MULTI_AUDIO_RENDITIONS, 12, 2, 32);
-const GATEWAY_VERSION = 143;
+const GATEWAY_VERSION = 144;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -2093,6 +2130,231 @@ const TRANSCODE_AUDIO_ARGS = [
 ];
 
 const sessions = new Map();
+const providerRouteBenchmarkEnabled = Boolean(
+    PROVIDER_ROUTE_BENCHMARK_REQUESTED &&
+    providerAdaptiveRouteControl.active &&
+    providerRouteBenchmarkInstanceFingerprint &&
+    providerAdaptiveRouteControl.candidates.length > 0
+);
+const providerRouteBenchmarkPending = new Map();
+const providerRouteBenchmarkCooldowns = new Map();
+let providerRouteBenchmarkActive = null;
+let providerRouteBenchmarkTimer = null;
+const providerRouteBenchmarkStats = {
+    scheduled: 0,
+    deduplicated: 0,
+    completed: 0,
+    preempted: 0,
+    leaseDeferrals: 0,
+    failed: 0,
+    measurements: 0,
+};
+
+function providerRouteBenchmarkPublicStatus() {
+    return {
+        protocol: 1,
+        requested: PROVIDER_ROUTE_BENCHMARK_REQUESTED,
+        enabled: providerRouteBenchmarkEnabled,
+        pending: providerRouteBenchmarkPending.size,
+        active: Boolean(providerRouteBenchmarkActive),
+        ...providerRouteBenchmarkStats,
+    };
+}
+
+function abortableProviderRouteDelay(ms, signal) {
+    if (!ms || signal?.aborted) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+        const timer = setTimeout(done, ms);
+        timer.unref?.();
+        function done() {
+            signal?.removeEventListener('abort', aborted);
+            resolve();
+        }
+        function aborted() {
+            clearTimeout(timer);
+            signal?.removeEventListener('abort', aborted);
+            const error = new Error('Provider route benchmark preempted');
+            error.name = 'AbortError';
+            reject(error);
+        }
+        signal?.addEventListener('abort', aborted, { once: true });
+    });
+}
+
+function providerRouteBenchmarkDispatcher(candidate) {
+    const urls = candidate?.nodeTransport === 'socks5'
+        ? providerSocksProxyUrls
+        : providerHttpProxyUrls;
+    const proxyUrl = urls[Number(candidate?.slot || 0) - 1];
+    if (!proxyUrl) throw new Error('provider-route-candidate-unavailable');
+    return createProviderProxyAgent(proxyUrl);
+}
+
+async function runProviderRouteBenchmarkJob(job, controller) {
+    let extractionRegistration = null;
+    const otherProviderWorkActive = () => {
+        const entries = accountExtractions.get(job.affinityKey);
+        return Boolean(entries && [...entries].some((entry) => (
+            entry !== extractionRegistration && !entry.preempted
+        )));
+    };
+    return runLeasedProviderRouteBenchmark({
+        accountFingerprint: job.accountFingerprint,
+        hostFingerprint: job.hostFingerprint,
+        ownerInstanceFingerprint: providerRouteBenchmarkInstanceFingerprint,
+        candidates: providerAdaptiveRouteControl.candidates,
+        signal: controller.signal,
+        control: (action, payload, options) => providerAdaptiveRouteControl.requestBenchmark(
+            action,
+            payload,
+            options,
+        ),
+        isAccountIdle: async () => (
+            !controller.signal.aborted &&
+            !viewerPlaybackActiveLocally() &&
+            !accountKeyBusyLocally(job.affinityKey) &&
+            !otherProviderWorkActive()
+        ),
+        onLeaseAcquired: async () => {
+            extractionRegistration = registerAccountExtraction(
+                job.affinityKey,
+                { kill: () => controller.abort(new Error('viewer-preempted-route-benchmark')) },
+                ACCOUNT_ACTIVITY_KIND_GATEWAY,
+            );
+            if (extractionRegistration.preempted || controller.signal.aborted) {
+                const error = new Error('Provider route benchmark preempted');
+                error.name = 'AbortError';
+                throw error;
+            }
+        },
+        onLeaseReleased: async () => {
+            extractionRegistration?.release?.();
+            extractionRegistration = null;
+        },
+        probe: async (candidate, options) => {
+            const measurement = await measureProviderRoute({
+                candidate,
+                createDispatcher: providerRouteBenchmarkDispatcher,
+                sampleBytes: options.sampleBytes,
+                signal: options.signal,
+                sourceUrl: job.sourceUrl,
+                timeoutMs: options.phase === 'sustained' ? 120_000 : 30_000,
+                userAgent: job.userAgent,
+            });
+            if (PROVIDER_SLOT_RELEASE_DELAY_MS > 0) {
+                await abortableProviderRouteDelay(PROVIDER_SLOT_RELEASE_DELAY_MS, options.signal);
+            }
+            return measurement;
+        },
+    });
+}
+
+function armProviderRouteBenchmarkDrain() {
+    if (!providerRouteBenchmarkEnabled || providerRouteBenchmarkActive || providerRouteBenchmarkTimer) return;
+    const nextAt = Math.min(...[...providerRouteBenchmarkPending.values()].map((job) => job.nextAt));
+    if (!Number.isFinite(nextAt)) return;
+    providerRouteBenchmarkTimer = setTimeout(() => {
+        providerRouteBenchmarkTimer = null;
+        drainProviderRouteBenchmarkQueue().catch(() => {});
+    }, Math.max(0, nextAt - Date.now()));
+    providerRouteBenchmarkTimer.unref?.();
+}
+
+function requeueProviderRouteBenchmark(job, delayMs = PROVIDER_ROUTE_BENCHMARK_RETRY_MS) {
+    if (job.attempts >= 5) {
+        providerRouteBenchmarkStats.failed += 1;
+        return;
+    }
+    job.nextAt = Date.now() + delayMs;
+    providerRouteBenchmarkPending.set(job.accountFingerprint, job);
+}
+
+async function drainProviderRouteBenchmarkQueue() {
+    if (!providerRouteBenchmarkEnabled || providerRouteBenchmarkActive) return;
+    const now = Date.now();
+    const job = [...providerRouteBenchmarkPending.values()]
+        .filter((candidate) => candidate.nextAt <= now)
+        .sort((left, right) => left.nextAt - right.nextAt)[0];
+    if (!job) {
+        armProviderRouteBenchmarkDrain();
+        return;
+    }
+    providerRouteBenchmarkPending.delete(job.accountFingerprint);
+    if (viewerPlaybackActiveLocally() || accountKeyBusyLocally(job.affinityKey)) {
+        requeueProviderRouteBenchmark(job);
+        armProviderRouteBenchmarkDrain();
+        return;
+    }
+    job.attempts += 1;
+    const controller = new AbortController();
+    providerRouteBenchmarkActive = { job, controller };
+    try {
+        const outcome = await runProviderRouteBenchmarkJob(job, controller);
+        providerRouteBenchmarkStats.measurements += Number(outcome?.measurements?.length || 0);
+        if (outcome?.status === 'completed') {
+            providerRouteBenchmarkStats.completed += 1;
+            providerRouteBenchmarkCooldowns.set(job.accountFingerprint, Date.now());
+        } else if (outcome?.status === 'preempted') {
+            providerRouteBenchmarkStats.preempted += 1;
+            requeueProviderRouteBenchmark(job);
+        } else if (['viewer-active-or-leased', 'lease-unavailable'].includes(outcome?.status)) {
+            providerRouteBenchmarkStats.leaseDeferrals += 1;
+            requeueProviderRouteBenchmark(job);
+        } else if (outcome?.status !== 'control-disabled') {
+            requeueProviderRouteBenchmark(job);
+        }
+    } catch (_) {
+        if (controller.signal.aborted) providerRouteBenchmarkStats.preempted += 1;
+        requeueProviderRouteBenchmark(job);
+    } finally {
+        providerRouteBenchmarkActive = null;
+        armProviderRouteBenchmarkDrain();
+    }
+}
+
+function scheduleProviderRouteBenchmark(sourceUrl, affinityKey, userAgent) {
+    if (!providerRouteBenchmarkEnabled || !isHttpUrl(sourceUrl) || !affinityKey) {
+        return { queued: false, reason: 'benchmark-disabled' };
+    }
+    const fingerprints = providerAdaptiveRouteControl.fingerprintsForSource(sourceUrl, affinityKey);
+    if (!fingerprints) return { queued: false, reason: 'fingerprint-unavailable' };
+    const lastCompletedAt = providerRouteBenchmarkCooldowns.get(fingerprints.accountFingerprint) || 0;
+    if (Date.now() - lastCompletedAt < PROVIDER_ROUTE_BENCHMARK_COOLDOWN_MS) {
+        return { queued: false, reason: 'cooldown' };
+    }
+    const existing = providerRouteBenchmarkPending.get(fingerprints.accountFingerprint);
+    if (existing || providerRouteBenchmarkActive?.job?.accountFingerprint === fingerprints.accountFingerprint) {
+        providerRouteBenchmarkStats.deduplicated += 1;
+        return { queued: true, reason: 'deduplicated' };
+    }
+    if (providerRouteBenchmarkPending.size >= PROVIDER_ROUTE_BENCHMARK_MAX_PENDING) {
+        return { queued: false, reason: 'queue-full' };
+    }
+    providerRouteBenchmarkPending.set(fingerprints.accountFingerprint, {
+        accountFingerprint: fingerprints.accountFingerprint,
+        hostFingerprint: fingerprints.hostFingerprint,
+        affinityKey,
+        sourceUrl,
+        userAgent: sanitizeUserAgent(userAgent) || FFMPEG_USER_AGENT,
+        attempts: 0,
+        nextAt: Date.now() + PROVIDER_ROUTE_BENCHMARK_SETTLE_MS,
+    });
+    providerRouteBenchmarkStats.scheduled += 1;
+    armProviderRouteBenchmarkDrain();
+    return { queued: true, reason: 'scheduled' };
+}
+
+function preemptProviderRouteBenchmarkForViewer() {
+    const active = providerRouteBenchmarkActive;
+    if (!active || active.controller.signal.aborted) return false;
+    active.controller.abort(new Error('viewer-preempted-route-benchmark'));
+    return true;
+}
+
+providerAdaptiveRouteControl.setViewerPreemptHandler(() => {
+    preemptProviderRouteBenchmarkForViewer();
+});
+
 const activeVideoEncoderAdmissions = new Set();
 function reserveVideoEncoderAdmission(session) {
     if (videoModeForSession(session) !== 'encode') return true;
@@ -2473,6 +2735,7 @@ app.get('/health', (req, res) => {
         providerProxySlotOverrideProtocol: 1,
         providerProxySlotOverrideConfigured: providerProxySlotOverrides.size > 0,
         providerAdaptiveRoute: providerAdaptiveRouteControl.publicStatus(),
+        providerRouteBenchmark: providerRouteBenchmarkPublicStatus(),
         transcribeQueueDepth: transcribeQueue.length,
         transcribeBusy,
         ocrQueueDepth: ocrQueue.length,
@@ -2529,6 +2792,39 @@ app.get('/debug/sessions', requireGatewayAuth, (req, res) => {
         version: GATEWAY_VERSION,
         lastProviderProxySelection,
         sessions: Array.from(sessions.values()).map(debugSession)
+    });
+});
+
+// Service-only import/playback hook. The signed provider capability stays in the
+// authenticated request body and is retained only in the bounded in-memory queue;
+// responses, diagnostics and route-control telemetry contain HMAC identities only.
+app.post('/provider-route/benchmark', requireGatewayAuth, async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    const body = req.body && typeof req.body === 'object' ? req.body : {};
+    const keys = Object.keys(body).sort();
+    if (
+        !keys.length || keys.some((key) => !['sourceUrl', 'userAgent'].includes(key)) ||
+        !body.sourceUrl || !isHttpUrl(body.sourceUrl)
+    ) return res.status(400).json({ error: 'sourceUrl is required' });
+    if (!providerRouteBenchmarkEnabled) {
+        return res.status(503).json({ error: 'Provider route benchmark is disabled' });
+    }
+    try {
+        await assertXtreamEgressTarget(body.sourceUrl);
+    } catch (_) {
+        return res.status(400).json({ error: 'Provider endpoint is not allowed' });
+    }
+    const scheduled = scheduleProviderRouteBenchmark(
+        String(body.sourceUrl),
+        proxyKeyFromUrl(String(body.sourceUrl)),
+        body.userAgent,
+    );
+    const status = scheduled.queued ? 202 : (scheduled.reason === 'queue-full' ? 429 : 409);
+    return res.status(status).json({
+        ok: scheduled.queued,
+        protocol: 1,
+        reason: scheduled.reason,
+        queueDepth: providerRouteBenchmarkPending.size,
     });
 });
 
@@ -3206,6 +3502,8 @@ app.get('/raw/:token', async (req, res) => {
     if (Number(claims.exp) * 1000 < Date.now()) return res.status(401).json({ error: 'Byte-pipe token expired' });
 
     const pumpProxyKey = proxyKeyFromUrl(claims.url);
+    const pumpRouteFingerprint = providerAdaptiveRouteControl
+        .fingerprintsForSource(claims.url, pumpProxyKey)?.accountFingerprint || null;
     const pumpOwnerHash = claims.uid ? sha256Hex(claims.uid) : null;
     const pumpProviderSlotKey = providerSlotKeyFromUrl(claims.url, pumpOwnerHash);
     // Check and register synchronously before the first await. If a transcode
@@ -3225,6 +3523,7 @@ app.get('/raw/:token', async (req, res) => {
         ac,
         sid: claims.sid || null,
         proxyKey: pumpProxyKey,
+        routeAccountFingerprint: pumpRouteFingerprint,
         providerSlotKey: pumpProviderSlotKey,
         ownerHash: pumpOwnerHash,
     });
@@ -3255,6 +3554,7 @@ app.get('/raw/:token', async (req, res) => {
     });
     if (ac.signal.aborted || res.destroyed || res.writableEnded) return;
     observeProviderProxySelection(pumpProxyKey);
+    scheduleProviderRouteBenchmark(claims.url, pumpProxyKey, claims.ua);
     const headers = { 'user-agent': claims.ua || FFMPEG_USER_AGENT };
     if (req.headers.range) headers.range = req.headers.range;
     if (req.headers.accept) headers.accept = req.headers.accept;
@@ -9036,6 +9336,7 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             adaptiveRouteLookupMs = Math.max(0, Date.now() - adaptiveRouteLookupStartedAt);
             if (sessionRequestAbortController.signal.aborted) return;
             observeProviderProxySelection(playbackProxyKey);
+            scheduleProviderRouteBenchmark(sourceUrl, playbackProxyKey, userAgent);
         }
         const cleanupStartedAt = Date.now();
         let stoppedConflictingSessions = 0;
@@ -18287,6 +18588,23 @@ function activeProviderAccountActivityGroups() {
     }
     return groupProviderAccountActivities(candidates, 64);
 }
+function activeProviderRouteAccountFingerprints() {
+    const values = new Set();
+    for (const session of sessions.values()) {
+        if (!session?.sourceUrl || !isSessionBlockingProviderSlot(session)) continue;
+        const affinityKey = proxyKeyFromUrl(session.sourceUrl);
+        const fingerprints = providerAdaptiveRouteControl.fingerprintsForSource(
+            session.sourceUrl,
+            affinityKey,
+        );
+        if (fingerprints?.accountFingerprint) values.add(fingerprints.accountFingerprint);
+    }
+    for (const pump of rawPumps) {
+        const fingerprint = String(pump?.routeAccountFingerprint || '');
+        if (/^[0-9a-f]{64}$/.test(fingerprint)) values.add(fingerprint);
+    }
+    return [...values].slice(0, 64);
+}
 let _accountActivityLastErrorAt = 0;
 async function reportAccountActivityKind(keys, kind) {
     if (!keys.length) return;
@@ -18311,6 +18629,7 @@ async function reportAccountActivityKind(keys, kind) {
 async function reportAccountActivity() {
     if (!ACCOUNT_ACTIVITY_REPORT_MS || !GATEWAY_TOKEN || !edgeCallbackBase) return;
     const groups = activeProviderAccountActivityGroups();
+    const routeFingerprints = activeProviderRouteAccountFingerprints();
     await Promise.all([
         reportAccountActivityKind(groups.gateway, ACCOUNT_ACTIVITY_KIND_GATEWAY),
         reportAccountActivityKind(
@@ -18321,6 +18640,10 @@ async function reportAccountActivity() {
             groups.catalogRefresh,
             ACCOUNT_ACTIVITY_KIND_CATALOG_REFRESH,
         ),
+        routeFingerprints.length
+            ? providerAdaptiveRouteControl.reportViewerActivity(routeFingerprints, { timeoutMs: 10_000 })
+                .catch(() => null)
+            : Promise.resolve(),
     ]);
 }
 if (ACCOUNT_ACTIVITY_REPORT_MS > 0) {

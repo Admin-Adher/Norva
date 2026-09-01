@@ -16,6 +16,7 @@ test('adaptive provider routing control plane defines policies, state, measureme
     'provider_route_policies',
     'provider_route_state',
     'provider_route_measurements',
+    'provider_route_activity',
     'provider_route_leases',
   ]) {
     assert.match(migration, new RegExp(`create table public\\.${table} \\(`));
@@ -53,8 +54,11 @@ test('route benchmark lease is distributed, bounded, service-only, and preemptab
   assert.match(migration, /create or replace function public\.norva_renew_provider_route_lease/);
   assert.match(migration, /and not preempt_requested/);
   assert.match(migration, /create or replace function public\.norva_preempt_provider_route_lease/);
+  assert.match(migration, /create or replace function public\.norva_touch_provider_route_activity/);
   assert.match(migration, /create or replace function public\.norva_release_provider_route_lease/);
   assert.match(migration, /purpose = 'route-benchmark'/);
+  assert.match(migration, /pg_advisory_xact_lock[\s\S]*provider_route_activity[\s\S]*expires_at > v_now/);
+  assert.match(migration, /provider_route_activity[\s\S]*activity_kind in \('viewer', 'gateway'\)/);
   assert.doesNotMatch(migration, /grant execute[\s\S]{0,180}to (anon|authenticated)/i);
 });
 
@@ -67,9 +71,14 @@ test('route control stores only one-way identities and no supplier-specific exce
     migration.indexOf('create table public.provider_route_measurements'),
     migration.indexOf('create index provider_route_measurements_account_recent_idx'),
   );
+  const activityBlock = migration.slice(
+    migration.indexOf('create table public.provider_route_activity'),
+    migration.indexOf('create index provider_route_activity_expiry_idx'),
+  );
   for (const unsafeColumn of ['user_id', 'source_id', 'server_url', 'provider_url', 'username', 'password', 'proxy_url']) {
     assert.doesNotMatch(stateBlock, new RegExp(`\\b${unsafeColumn}\\b`, 'i'));
     assert.doesNotMatch(measurementBlock, new RegExp(`\\b${unsafeColumn}\\b`, 'i'));
+    assert.doesNotMatch(activityBlock, new RegExp(`\\b${unsafeColumn}\\b`, 'i'));
   }
   for (const forbidden of ['KING365', 'GOTV', 'STRNG', 'Promax', 'Opplex', 'Airysat']) {
     assert.equal(migration.includes(forbidden), false);
