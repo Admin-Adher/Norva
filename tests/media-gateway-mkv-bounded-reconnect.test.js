@@ -202,6 +202,7 @@ function trackedResponse(tracker, options = {}) {
     tracker.active += 1;
     tracker.maxActive = Math.max(tracker.maxActive, tracker.active);
     let index = 0;
+    const readErrorAt = Number.isInteger(options.readErrorAt) ? options.readErrorAt : -1;
     let settled = false;
     const settle = () => {
         if (settled) return;
@@ -210,6 +211,11 @@ function trackedResponse(tracker, options = {}) {
     };
     const reader = {
         async read() {
+            if (index === readErrorAt) {
+                index += 1;
+                settle();
+                throw options.readError || Object.assign(new Error('provider connection reset'), { code: 'ECONNRESET' });
+            }
             if (index < chunks.length) return { value: chunks[index++], done: false };
             settle();
             return { value: undefined, done: true };
@@ -682,6 +688,74 @@ test('cold MKV preloads one bounded metadata prefix and replays every byte on th
     assert.equal(fetches, 1, 'FFmpeg replay must not open a second provider connection');
     assert.equal(result.bytesForwarded, fixture.length);
     assert.deepEqual(writable.bytes(), fixture, 'prefetched bytes are replayed exactly once and in order');
+    assert.equal(tracker.maxActive, 1);
+    assert.equal(tracker.active, 0);
+});
+
+test('cold MKV retries one interrupted metadata prefetch without overlapping provider sockets or replaying stale bytes', async () => {
+    const prefixBytes = 300_000;
+    const fixture = mkvFixture(500_000);
+    const tracker = makeTracker();
+    const headerByteCache = new Map();
+    let fetches = 0;
+    const h = pumpHarness({
+        BOUNDED_MKV_HEADER_PARSE: true,
+        INBAND_HEADER_BYTES: prefixBytes,
+        INBAND_HEADER_CACHE_MAX: 2,
+        headerByteCache,
+        fetch: async (_url, options) => {
+            fetches += 1;
+            tracker.calls.push(options.headers);
+            if (fetches === 1) {
+                return trackedResponse(tracker, {
+                    status: 206,
+                    chunks: [fixture.subarray(0, 12)],
+                    readErrorAt: 1,
+                    headers: {
+                        'Content-Range': `bytes 0-${fixture.length - 1}/${fixture.length}`,
+                        'Content-Length': String(fixture.length),
+                        ETag: '"cold-retry-v1"',
+                    },
+                });
+            }
+            return trackedResponse(tracker, {
+                status: 206,
+                chunks: [
+                    fixture.subarray(0, 12),
+                    fixture.subarray(12, prefixBytes),
+                    fixture.subarray(prefixBytes),
+                ],
+                headers: {
+                    'Content-Range': `bytes 0-${fixture.length - 1}/${fixture.length}`,
+                    'Content-Length': String(fixture.length),
+                    ETag: '"cold-retry-v1"',
+                },
+            });
+        },
+    });
+    const session = mkvSession(fixture.length);
+
+    await h.ensureBoundedMkvInputPump(session);
+
+    assert.equal(fetches, 2);
+    assert.equal(session.startupTimings.providerPreopenRetries, 1);
+    assert.equal(session.startupTimings.providerPreopenLastRetryCode, 'PROVIDER_CONNECTION_RESET');
+    assert.equal(tracker.maxActive, 1, 'the failed provider body is closed before retry');
+    assert.equal(tracker.active, 1, 'only the successful retained body stays open');
+    const captured = headerByteCache.get(session.sourceUrl);
+    assert.equal(captured?.len, prefixBytes);
+    assert.equal(Buffer.concat(captured?.chunks || []).equals(fixture.subarray(0, prefixBytes)), true);
+
+    const writable = new CapturingWritable();
+    const result = await h.runBoundedMkvInputPump(
+        session,
+        writable,
+        new AbortController().signal,
+        null,
+    );
+
+    assert.equal(result.bytesForwarded, fixture.length);
+    assert.deepEqual(writable.bytes(), fixture, 'only the successful prefetch is replayed');
     assert.equal(tracker.maxActive, 1);
     assert.equal(tracker.active, 0);
 });

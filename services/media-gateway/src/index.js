@@ -10458,110 +10458,140 @@ async function preopenBoundedMkvInputPump(session, parentSignal = null, options 
     const identityRangeBytes = captureResumeHeader
         ? Math.max(1, Math.min(INBAND_HEADER_BYTES, knownFileSizeBytes || INBAND_HEADER_BYTES))
         : 1;
-    const opened = await openBoundedVodInputAttempt(
-        session,
-        0,
-        parentSignal,
-        dispatcher,
-        drainExactRange ? { requestEnd: identityRangeBytes - 1 } : { allowFullBodyAtZero: true },
-    );
-    let retained = false;
-    try {
-        const existingFileSizeBytes = fileSizeBytesForSession(session);
-        if (existingFileSizeBytes && opened.range.total !== existingFileSizeBytes) {
-            throw vodInputPumpError('VOD_CHANGED', 'The MKV file changed before playback started.', { status: 502 });
-        }
-        if (opened.range.total) {
-            session.fileSizeBytes = opened.range.total;
-            session.codecProfile = compactRecord({
-                ...asRecord(session.codecProfile),
-                fileSizeBytes: opened.range.total,
-            });
-        }
-        const strongValidator = strongBoundedVodResponseValidator(opened.attempt.response);
-        const validatorEvidence = strongValidator
-            ? 'strong-etag'
-            : (boundedVodResponseValidator(opened.attempt.response)?.kind === 'last-modified'
-                ? 'last-modified'
-                : 'weak-or-absent');
-        if (validatorEvidence === 'strong-etag') vodInputPumpStats.validatorEvidence.strongEtag += 1;
-        else if (validatorEvidence === 'last-modified') vodInputPumpStats.validatorEvidence.lastModified += 1;
-        else vodInputPumpStats.validatorEvidence.weakOrAbsent += 1;
-        session.vodInputStrongValidator = strongValidator;
-        session.vodInputEffectiveUrlSha256 = sha256Hex(String(
-            opened.attempt.response?.url || session.sourceUrl || '',
-        ));
-        session.vodInputEffectiveUrlIdentitySha256 = strictLidEffectiveUrlIdentitySha256(
-            opened.attempt.response?.url || session.sourceUrl || '',
-        );
-        session.startupTimings = asRecord(session.startupTimings);
-        session.startupTimings.providerValidatorEvidence = validatorEvidence;
-        session.startupTimings.providerFullBodyAtZero = opened.range.fullBody === true;
-        session.startupTimings.providerFullBodyBoundary = opened.range.fullBodyBoundary || null;
+    let retryCount = 0;
+    while (true) {
+        let opened = null;
+        let retained = false;
+        try {
+            opened = await openBoundedVodInputAttempt(
+                session,
+                0,
+                parentSignal,
+                dispatcher,
+                drainExactRange ? { requestEnd: identityRangeBytes - 1 } : { allowFullBodyAtZero: true },
+            );
+            const existingFileSizeBytes = fileSizeBytesForSession(session);
+            if (existingFileSizeBytes && opened.range.total !== existingFileSizeBytes) {
+                throw vodInputPumpError('VOD_CHANGED', 'The MKV file changed before playback started.', { status: 502 });
+            }
+            if (opened.range.total) {
+                session.fileSizeBytes = opened.range.total;
+                session.codecProfile = compactRecord({
+                    ...asRecord(session.codecProfile),
+                    fileSizeBytes: opened.range.total,
+                });
+            }
+            const strongValidator = strongBoundedVodResponseValidator(opened.attempt.response);
+            const validatorEvidence = strongValidator
+                ? 'strong-etag'
+                : (boundedVodResponseValidator(opened.attempt.response)?.kind === 'last-modified'
+                    ? 'last-modified'
+                    : 'weak-or-absent');
+            if (validatorEvidence === 'strong-etag') vodInputPumpStats.validatorEvidence.strongEtag += 1;
+            else if (validatorEvidence === 'last-modified') vodInputPumpStats.validatorEvidence.lastModified += 1;
+            else vodInputPumpStats.validatorEvidence.weakOrAbsent += 1;
+            session.vodInputStrongValidator = strongValidator;
+            session.vodInputEffectiveUrlSha256 = sha256Hex(String(
+                opened.attempt.response?.url || session.sourceUrl || '',
+            ));
+            session.vodInputEffectiveUrlIdentitySha256 = strictLidEffectiveUrlIdentitySha256(
+                opened.attempt.response?.url || session.sourceUrl || '',
+            );
+            session.startupTimings = asRecord(session.startupTimings);
+            session.startupTimings.providerValidatorEvidence = validatorEvidence;
+            session.startupTimings.providerFullBodyAtZero = opened.range.fullBody === true;
+            session.startupTimings.providerFullBodyBoundary = opened.range.fullBodyBoundary || null;
 
-        if (drainExactRange) {
-            const expectedBytes = opened.range.end - opened.range.start + 1;
-            let drainedBytes = 0;
-            while (true) {
-                // Container validation may already have consumed and retained
-                // the first provider chunk. Drain that exact byte sequence first
-                // so range accounting and the local metadata prefix stay complete.
-                const next = Array.isArray(opened.attempt.preloadedChunks) && opened.attempt.preloadedChunks.length
-                    ? {
-                        value: opened.attempt.preloadedChunks.shift(),
-                        done: false,
-                        timedOut: false,
-                        aborted: false,
+            if (drainExactRange) {
+                const expectedBytes = opened.range.end - opened.range.start + 1;
+                let drainedBytes = 0;
+                while (true) {
+                    // Container validation may already have consumed and retained
+                    // the first provider chunk. Drain that exact byte sequence first
+                    // so range accounting and the local metadata prefix stay complete.
+                    const next = Array.isArray(opened.attempt.preloadedChunks) && opened.attempt.preloadedChunks.length
+                        ? {
+                            value: opened.attempt.preloadedChunks.shift(),
+                            done: false,
+                            timedOut: false,
+                            aborted: false,
+                        }
+                        : await readRawPrefixChunk(
+                            opened.attempt.reader,
+                            parentSignal,
+                            VOD_INPUT_IDLE_TIMEOUT_MS,
+                        );
+                    if (next.aborted || parentSignal?.aborted) throw abortedVodInputPumpError();
+                    if (next.timedOut) {
+                        throw vodInputPumpError(
+                            'PROVIDER_IDLE_TIMEOUT',
+                            'Provider did not finish the MKV identity range in time.',
+                            { status: 504, retryable: true },
+                        );
                     }
-                    : await readRawPrefixChunk(
-                        opened.attempt.reader,
-                        parentSignal,
-                        VOD_INPUT_IDLE_TIMEOUT_MS,
-                    );
-                if (next.aborted || parentSignal?.aborted) throw abortedVodInputPumpError();
-                if (next.timedOut) {
-                    throw vodInputPumpError(
-                        'PROVIDER_IDLE_TIMEOUT',
-                        'Provider did not finish the MKV identity range in time.',
-                        { status: 504 },
-                    );
+                    if (next.error) throw classifyVodInputFetchError(next.error, false);
+                    if (next.done) break;
+                    const chunk = Buffer.from(next.value || []);
+                    captureBoundedMkvHeaderBytes(session, drainedBytes, chunk);
+                    drainedBytes += chunk.length;
+                    if (drainedBytes > expectedBytes) {
+                        throw vodInputPumpError(
+                            'RANGE_LENGTH_MISMATCH',
+                            'Provider exceeded the exact MKV identity range.',
+                            { status: 502 },
+                        );
+                    }
                 }
-                if (next.error) throw classifyVodInputFetchError(next.error, false);
-                if (next.done) break;
-                const chunk = Buffer.from(next.value || []);
-                captureBoundedMkvHeaderBytes(session, drainedBytes, chunk);
-                drainedBytes += chunk.length;
-                if (drainedBytes > expectedBytes) {
+                if (drainedBytes !== expectedBytes) {
                     throw vodInputPumpError(
                         'RANGE_LENGTH_MISMATCH',
-                        'Provider exceeded the exact MKV identity range.',
+                        'Provider truncated the exact MKV identity range.',
                         { status: 502 },
                     );
                 }
+                session.startupTimings.providerGetPreopened = false;
+                session.startupTimings.providerSeekIdentityPreflight = true;
+                session.startupTimings.providerSeekIdentityPreflightBytes = drainedBytes;
+                session.startupTimings.providerSeekHeaderPrefetch = captureResumeHeader;
+                return;
             }
-            if (drainedBytes !== expectedBytes) {
-                throw vodInputPumpError(
-                    'RANGE_LENGTH_MISMATCH',
-                    'Provider truncated the exact MKV identity range.',
-                    { status: 502 },
-                );
-            }
-            session.startupTimings.providerGetPreopened = false;
-            session.startupTimings.providerSeekIdentityPreflight = true;
-            session.startupTimings.providerSeekIdentityPreflightBytes = drainedBytes;
-            session.startupTimings.providerSeekHeaderPrefetch = captureResumeHeader;
-            return;
-        }
 
-        await prefetchRetainedBoundedMkvHeader(session, opened, parentSignal);
-        session.preopenedVodInputAttempt = {
-            ...opened,
-            dispatcher,
-        };
-        session.startupTimings.providerGetPreopened = true;
-        retained = true;
-    } finally {
-        if (!retained) await closeVodInputAttempt(opened.attempt).catch(() => {});
+            await prefetchRetainedBoundedMkvHeader(session, opened, parentSignal);
+            session.preopenedVodInputAttempt = {
+                ...opened,
+                dispatcher,
+            };
+            session.startupTimings.providerGetPreopened = true;
+            session.startupTimings.providerPreopenRetries = retryCount;
+            retained = true;
+            return;
+        } catch (error) {
+            if (opened) {
+                await closeVodInputAttempt(opened.attempt).catch(() => {});
+                opened = null;
+            }
+            if (parentSignal?.aborted || error?.code === 'VOD_INPUT_ABORTED') {
+                throw abortedVodInputPumpError();
+            }
+            if (error?.retryable !== true || retryCount >= VOD_INPUT_RETRY_LIMIT) throw error;
+            retryCount += 1;
+            session.startupTimings = asRecord(session.startupTimings);
+            session.startupTimings.providerPreopenRetries = retryCount;
+            session.startupTimings.providerPreopenLastRetryCode = error?.code || 'VOD_INPUT_FAILED';
+            const captured = headerByteCache.get(session.sourceUrl);
+            if (captured?.captureOwner === String(session?.id || session.sourceUrl)) {
+                headerByteCache.delete(session.sourceUrl);
+            }
+            const retryDelayMs = VOD_INPUT_RETRY_DELAYS_MS[Math.max(0, retryCount - 1)] || 0;
+            const requiresProviderReleaseWait = error?.networkCause === 'timeout'
+                || [502, 503, 504].includes(Number(error?.upstreamStatus));
+            const delayMs = requiresProviderReleaseWait
+                ? Math.max(retryDelayMs, PROVIDER_SLOT_RELEASE_DELAY_MS)
+                : retryDelayMs;
+            if (!await waitForVodInputRetry(delayMs, parentSignal)) throw abortedVodInputPumpError();
+        } finally {
+            if (!retained && opened) await closeVodInputAttempt(opened.attempt).catch(() => {});
+        }
     }
 }
 
