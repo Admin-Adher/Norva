@@ -77,6 +77,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -1517,7 +1518,18 @@ public class MainActivity extends Activity {
 
     private void setFirebaseAnalyticsCollection(boolean granted) {
         try {
-            FirebaseAnalytics.getInstance(this).setAnalyticsCollectionEnabled(granted);
+            FirebaseAnalytics analytics = FirebaseAnalytics.getInstance(this);
+            FirebaseAnalytics.ConsentStatus status = granted
+                    ? FirebaseAnalytics.ConsentStatus.GRANTED
+                    : FirebaseAnalytics.ConsentStatus.DENIED;
+            Map<FirebaseAnalytics.ConsentType, FirebaseAnalytics.ConsentStatus> settings =
+                    new EnumMap<>(FirebaseAnalytics.ConsentType.class);
+            settings.put(FirebaseAnalytics.ConsentType.ANALYTICS_STORAGE, status);
+            settings.put(FirebaseAnalytics.ConsentType.AD_STORAGE, status);
+            settings.put(FirebaseAnalytics.ConsentType.AD_USER_DATA, status);
+            settings.put(FirebaseAnalytics.ConsentType.AD_PERSONALIZATION, status);
+            analytics.setConsent(settings);
+            analytics.setAnalyticsCollectionEnabled(granted);
         } catch (Throwable ignored) { }
     }
 

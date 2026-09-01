@@ -6,13 +6,13 @@ const vm = require('node:vm');
 
 const root = path.join(__dirname, '..');
 
-function loadMarketing() {
+function loadMarketing({ consentMode = 'granted' } = {}) {
   const script = fs.readFileSync(path.join(root, 'public/js/marketing.js'), 'utf8');
   const appendedScripts = [];
   const window = {
     NORVA_MARKETING_CONFIG: {
       enabled: true,
-      consentMode: 'granted',
+      consentMode,
       debug: false,
       googleAnalytics: { measurementId: 'G-TEST', sendPageView: false },
       googleAds: {
@@ -67,8 +67,33 @@ test('completed account signup emits the GA4 sign_up event and the configured Go
     && entry[2] && entry[2].send_to === 'AW-TEST/SIGNUP-LABEL').length, 1);
 
   const account = fs.readFileSync(path.join(root, 'public/account.html'), 'utf8');
-  assert.match(account, /\/js\/marketing\.js\?v=3/,
+  assert.match(account, /\/js\/marketing\.js\?v=4/,
     'the account page must invalidate cached marketing adapters');
+});
+
+test('Google Consent Mode v2 stays fail-closed until explicit opt-in', () => {
+  const { window, appendedScripts } = loadMarketing({ consentMode: 'denied' });
+  const initialCalls = window.dataLayer.map((entry) => Array.from(entry));
+  const defaultConsent = initialCalls.find((entry) => entry[0] === 'consent' && entry[1] === 'default');
+
+  assert.deepEqual(JSON.parse(JSON.stringify(defaultConsent[2])), {
+    ad_storage: 'denied',
+    ad_user_data: 'denied',
+    ad_personalization: 'denied',
+    analytics_storage: 'denied',
+  });
+  assert.equal(appendedScripts.length, 0, 'the Google tag must not load before opt-in');
+
+  window.NorvaMarketing.setConsent('granted');
+  const calls = window.dataLayer.map((entry) => Array.from(entry));
+  const updateConsent = calls.find((entry) => entry[0] === 'consent' && entry[1] === 'update');
+  assert.deepEqual(JSON.parse(JSON.stringify(updateConsent[2])), {
+    ad_storage: 'granted',
+    ad_user_data: 'granted',
+    ad_personalization: 'granted',
+    analytics_storage: 'granted',
+  });
+  assert.equal(appendedScripts.length, 1, 'the Google tag should load after explicit opt-in');
 });
 
 test('commercial funnel events route to their dedicated Google Ads actions', () => {
@@ -101,4 +126,17 @@ test('commercial funnel events route to their dedicated Google Ads actions', () 
   assert.doesNotMatch(checkout,
     /checkoutKind === 'trial_setup'[\s\S]{0,500}NorvaMarketing\.track\('purchase'/,
     'a free-trial card setup must never be counted as a purchase');
+});
+
+test('landing acquisition placements survive the bounded analytics allowlist', () => {
+  const landing = fs.readFileSync(path.join(root, 'public/js/landing.js'), 'utf8');
+  const productAnalytics = fs.readFileSync(path.join(root, 'public/js/product-analytics.js'), 'utf8');
+  const nativeAnalytics = fs.readFileSync(path.join(root, 'public/js/native-analytics.js'), 'utf8');
+
+  assert.match(landing, /closest\('\.landing-nav'\) \? 'nav'/,
+    'navigation signup intent must use the canonical nav source');
+  for (const source of ['nav', 'final_cta', 'footer']) {
+    assert.match(productAnalytics, new RegExp(`source:[^\\n]+['\"]${source}['\"]`));
+    assert.match(nativeAnalytics, new RegExp(`source:[^\\n]+['\"]${source}['\"]`));
+  }
 });

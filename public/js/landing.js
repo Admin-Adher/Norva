@@ -1613,7 +1613,7 @@
       document.querySelectorAll('a[data-auth-action], a[href*="/account.html"]:not([data-plan])').forEach(link => {
         if (link.matches('[data-plan]')) return;
         link.addEventListener('click', () => emitLandingEvent('signup_started', {
-          source: link.closest('.landing-nav') ? 'navigation'
+          source: link.closest('.landing-nav') ? 'nav'
             : link.closest('.hero-section, .hero') ? 'hero'
               : link.closest('.final-cta') ? 'final_cta'
                 : link.closest('.landing-footer, .premium-footer') ? 'footer' : 'landing',

@@ -84,6 +84,7 @@ test('Android shells are analytics-eligible only through the native consent brid
   const adapter = read('clients/android-common/src/main/java/tv/norva/analytics/NativeClarity.java');
   const phoneGradle = read('clients/android-phone/app/build.gradle');
   const tvGradle = read('clients/android-tv/app/build.gradle');
+  const phoneMain = read('clients/android-phone/app/src/main/java/tv/norva/phone/MainActivity.java');
   assert.match(html, /native-analytics\.js\?v=2[\s\S]*product-analytics\.js\?v=2[\s\S]*consent-banner\.js\?v=3/);
   assert.doesNotMatch(consent, /isTvSurface\(\)\)\s*\{\s*apply\('granted'/);
   assert.match(consent, /NorvaNativeAnalytics\.setConsent\(status\)/);
@@ -93,6 +94,19 @@ test('Android shells are analytics-eligible only through the native consent brid
   assert.match(adapter, /PENDING_EVENTS\.size\(\) < EVENTS\.size\(\)/);
   assert.match(phoneGradle, /CLARITY_PROJECT_ID[^\n]*y9fagfyr9a/);
   assert.match(tvGradle, /CLARITY_PROJECT_ID[^\n]*y9fxs54jpc/);
+  for (const consentType of [
+    'ANALYTICS_STORAGE',
+    'AD_STORAGE',
+    'AD_USER_DATA',
+    'AD_PERSONALIZATION'
+  ]) {
+    assert.match(phoneMain, new RegExp(`ConsentType\\.${consentType}`));
+  }
+  assert.ok(
+    phoneMain.indexOf('analytics.setConsent(settings)')
+      < phoneMain.indexOf('analytics.setAnalyticsCollectionEnabled(granted)'),
+    'Firebase Consent Mode v2 must be set before collection is enabled'
+  );
 });
 
 test('native context is split into bounded identifier-free bridge messages', () => {

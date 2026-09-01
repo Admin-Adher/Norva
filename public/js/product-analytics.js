@@ -54,7 +54,7 @@
     authenticated: { key: 'visitor_state', values: ['signed_in', 'anonymous'] },
     period: { key: 'billing_period', values: ['monthly', 'annual'] },
     plan: { key: 'selected_plan', values: ['plus', 'family', 'unknown'] },
-    source: { key: 'event_source', values: ['landing', 'hero', 'nav', 'pricing', 'context_widget', 'manual', 'automatic', 'settings', 'onboarding', 'player', 'unknown'] },
+    source: { key: 'event_source', values: ['landing', 'hero', 'nav', 'pricing', 'context_widget', 'final_cta', 'footer', 'manual', 'automatic', 'settings', 'onboarding', 'player', 'unknown'] },
     target: { key: 'event_target', values: ['signup', 'login', 'pricing', 'android_mobile', 'android_tv', 'app', 'checkout', 'unknown'] },
     state: { key: 'event_state', values: ['started', 'completed', 'ready', 'action_required', 'error', 'cancelled', 'unknown'] },
     method: { key: 'auth_method', values: ['email_password', 'email_magic_link', 'google', 'unknown'] },

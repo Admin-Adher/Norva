@@ -4,6 +4,7 @@
   var cfg = window.NORVA_MARKETING_CONFIG || {};
   var loaded = { google: false, meta: false };
   var consent = cfg.consentMode || 'granted';
+  var googleConsentDefaulted = false;
   var debug = Boolean(cfg.debug || /[?&]norva_marketing_debug=1\b/.test(location.search));
 
   function compact(obj) {
@@ -23,6 +24,33 @@
     return Boolean(cfg.enabled && consent === 'granted');
   }
 
+  function ensureGoogleCommandQueue() {
+    window.dataLayer = window.dataLayer || [];
+    window.gtag = window.gtag || function () { window.dataLayer.push(arguments); };
+  }
+
+  function googleConsentState(status) {
+    var value = status === 'granted' ? 'granted' : 'denied';
+    return {
+      ad_storage: value,
+      ad_user_data: value,
+      ad_personalization: value,
+      analytics_storage: value
+    };
+  }
+
+  function ensureGoogleConsentDefault() {
+    if (googleConsentDefaulted) return;
+    ensureGoogleCommandQueue();
+    window.gtag('consent', 'default', googleConsentState('denied'));
+    googleConsentDefaulted = true;
+  }
+
+  function updateGoogleConsent(status) {
+    ensureGoogleConsentDefault();
+    window.gtag('consent', 'update', googleConsentState(status));
+  }
+
   function appendScript(src, attrs) {
     if (!src) return;
     var s = document.createElement('script');
@@ -38,8 +66,8 @@
     var adsId = cfg.googleAds && cfg.googleAds.conversionId;
     var id = gaId || adsId;
     if (!id) return;
-    window.dataLayer = window.dataLayer || [];
-    window.gtag = window.gtag || function () { window.dataLayer.push(arguments); };
+    ensureGoogleConsentDefault();
+    updateGoogleConsent('granted');
     window.gtag('js', new Date());
     if (gaId) window.gtag('config', gaId, { send_page_view: cfg.googleAnalytics.sendPageView !== false });
     if (adsId && adsId !== gaId) window.gtag('config', adsId, { send_page_view: false });
@@ -130,9 +158,17 @@
   window.NorvaMarketing = {
     init: init,
     track: track,
-    setConsent: function (next) { consent = next === 'denied' ? 'denied' : 'granted'; init(); },
+    setConsent: function (next) {
+      consent = next === 'denied' ? 'denied' : 'granted';
+      updateGoogleConsent(consent);
+      init();
+    },
     config: cfg
   };
+
+  // Basic consent mode: queue a denied default immediately, but keep the
+  // network tag itself unloaded until the visitor explicitly opts in.
+  ensureGoogleConsentDefault();
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init, { once: true });
   else init();

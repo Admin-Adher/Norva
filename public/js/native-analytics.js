@@ -24,7 +24,7 @@
     authenticated: ['visitor_state', ['signed_in', 'anonymous']],
     period: ['billing_period', ['monthly', 'annual']],
     plan: ['selected_plan', ['plus', 'family', 'unknown']],
-    source: ['event_source', ['landing', 'hero', 'nav', 'pricing', 'context_widget', 'manual', 'automatic', 'settings', 'onboarding', 'player', 'unknown']],
+    source: ['event_source', ['landing', 'hero', 'nav', 'pricing', 'context_widget', 'final_cta', 'footer', 'manual', 'automatic', 'settings', 'onboarding', 'player', 'unknown']],
     target: ['event_target', ['signup', 'login', 'pricing', 'android_mobile', 'android_tv', 'app', 'checkout', 'unknown']],
     state: ['event_state', ['started', 'completed', 'ready', 'action_required', 'error', 'cancelled', 'unknown']],
     method: ['auth_method', ['email_password', 'email_magic_link', 'google', 'unknown']],
