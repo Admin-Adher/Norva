@@ -2707,8 +2707,17 @@ class SeriesPage {
         // Rail responses project the user's localized title at the top level while
         // tmdb can intentionally retain the catalogue default language.
         const hasCatalogTitle = Boolean(series?.titleId || series?.title_id || series?.data?.titleId);
-        if (hasCatalogTitle && series?.title) return series.title;
-        return series?.tmdb?.title || series?.tmdb?.name || series?.title || MediaUtils.cleanReleaseName(series?.name || '') || 'Series';
+        const candidate = (hasCatalogTitle && series?.title)
+            || series?.tmdb?.title
+            || series?.tmdb?.name
+            || series?.title
+            || series?.name
+            || '';
+        // Catalogue projections can intentionally retain the raw provider title
+        // for identity/audit purposes. Apply the same display-only normalization
+        // used by the grid so a fiche never reintroduces prefixes such as
+        // "MULTI ▎" after its card was rendered correctly.
+        return MediaUtils.cleanReleaseName(candidate) || String(candidate).trim() || 'Series';
     }
 
     getSeriesOverview(series = this.currentSeries) {

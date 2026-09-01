@@ -18,7 +18,7 @@ function loadPage(file, className) {
     setInterval,
     clearInterval,
     MediaUtils: {
-      cleanReleaseName: (value) => String(value || ''),
+      cleanReleaseName: (value) => String(value || '').replace(/^MULTI ▎\s*/, ''),
     },
   };
   vm.runInNewContext(read(file), context, { filename: file });
@@ -67,5 +67,13 @@ for (const spec of [
     delete legacyProviderItem.titleId;
     assert.equal(page[spec.titleMethod](legacyProviderItem), 'English title');
     assert.equal(page[spec.overviewMethod](legacyProviderItem), 'English synopsis');
+
+    if (spec.label === 'series') {
+      assert.equal(page[spec.titleMethod]({
+        titleId: 'promax-series',
+        title: 'MULTI ▎ Badly in Love',
+        name: 'MULTI ▎ Badly in Love',
+      }), 'Badly in Love');
+    }
   });
 }
