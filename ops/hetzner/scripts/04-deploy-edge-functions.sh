@@ -55,8 +55,9 @@ EXPECTED_CLOUD_VERSION=25
 EXPECTED_CLOUD_PROTOCOL=1
 EXPECTED_CATALOG_VERSION=6
 EXPECTED_FLAT_CODEC_PROFILE_PROTOCOL=1
-EXPECTED_SOURCE_SYNC_VERSION=14
+EXPECTED_SOURCE_SYNC_VERSION=15
 EXPECTED_CLOUD_AUTO_REFRESH_CLAIM_PROTOCOL=1
+EXPECTED_TMDB_SEARCH_POLICY=promax-multilang-v2
 EXPECTED_AUTH_EMAIL_CHALLENGE_PROTOCOL=1
 
 [[ -d "$FUNCS_DIR" ]] || { echo "ERROR: $FUNCS_DIR not found" >&2; exit 1; }
@@ -294,7 +295,8 @@ if command -v docker >/dev/null 2>&1 && [[ -f "$COMPOSE" ]]; then
       exit 1
     }
     [[ "$source_sync_health" == *"\"version\":$EXPECTED_SOURCE_SYNC_VERSION"* \
-        && "$source_sync_health" == *"\"cloudAutoRefreshClaimProtocol\":$EXPECTED_CLOUD_AUTO_REFRESH_CLAIM_PROTOCOL"* ]] || {
+        && "$source_sync_health" == *"\"cloudAutoRefreshClaimProtocol\":$EXPECTED_CLOUD_AUTO_REFRESH_CLAIM_PROTOCOL"* \
+        && "$source_sync_health" == *"\"tmdbSearchPolicy\":\"$EXPECTED_TMDB_SEARCH_POLICY\""* ]] || {
       echo "ERROR: $service norva-source-sync protocol marker mismatch" >&2
       exit 1
     }

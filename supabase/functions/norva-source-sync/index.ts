@@ -10,6 +10,7 @@ import {
   upsertLiveVariantRows,
 } from "../_shared/live-materialization.ts";
 import { refreshVodTitleProjection, validateTmdbCandidate, searchTmdbMatch } from "../_shared/vod-title-projection.ts";
+import { TMDB_SEARCH_POLICY_VERSION } from "../_shared/tmdb-search-policy.mjs";
 import { backfillProviderOverviews } from "../_shared/provider-overview-backfill.ts";
 import { classifyOpsSourceError, formatSourceSyncError } from "../_shared/source-sync-error.mjs";
 import {
@@ -113,7 +114,7 @@ Deno.serve(async (req) => {
       return json(req, {
         ok: true,
         service: "norva-source-sync",
-        version: 14,
+        version: 15,
         liveMaterialization: true,
         syncProgress: true,
         catalogFinalize: true,
@@ -128,6 +129,7 @@ Deno.serve(async (req) => {
         episodeProbeBatchCanary: "4/5",
         exactTailDrainSafe: true,
         cloudAutoRefreshClaimProtocol: 1,
+        tmdbSearchPolicy: TMDB_SEARCH_POLICY_VERSION,
       });
     }
     // Premium per-user background refresh (pg_cron → here). Drives a small batch
@@ -1156,6 +1158,7 @@ async function cronBackfillYears(db: SupabaseClient, limit: number, reset: boole
   let stale = 0;
   let acknowledgedTitles = 0;
   let retryPending = 0;
+  let tmdbFailureHalted = false;
   let emptyTransitions = 0;
   let done = false;
 
@@ -1280,7 +1283,12 @@ async function cronRevalidate(db: SupabaseClient, limit: number, reset: boolean,
     const outcomes: Array<JsonRecord | null> = Array.from({ length: rows.length }, () => null);
     let next = 0;
     const worker = async () => {
-      while (next < rows.length) {
+      // A TMDB outage must not let every worker spend the full three-attempt
+      // budget on every remaining title. Stop distributing new work on the
+      // first thrown request: at most the already-running concurrency cohort
+      // finishes, keeping the page inside the checkpoint lease. Null outcomes
+      // remain durably inflight and are retried by a later invocation.
+      while (!tmdbFailureHalted && next < rows.length) {
         const index = next++;
         const row = rows[index];
         const tmdbId = stringOr(row.providerTmdbId, "");
@@ -1313,7 +1321,10 @@ async function cronRevalidate(db: SupabaseClient, limit: number, reset: boolean,
               revalidatedAt: new Date().toISOString(),
             },
           } : { matched: false };
-        } catch (_) { /* transient TMDB failure remains durably inflight */ }
+        } catch (_) {
+          tmdbFailureHalted = true;
+          // Transient TMDB failure remains durably inflight.
+        }
       }
     };
     await Promise.all(Array.from({ length: Math.min(Math.max(1, concurrency), rows.length) }, worker));
@@ -1345,6 +1356,7 @@ async function cronRevalidate(db: SupabaseClient, limit: number, reset: boolean,
     stale,
     acknowledged: acknowledgedTitles,
     retryPending,
+    tmdbFailureHalted,
     busy: false,
     done,
     resetDeferred: reset,
