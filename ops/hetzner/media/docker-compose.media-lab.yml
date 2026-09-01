@@ -39,6 +39,7 @@ services:
       # returned by authenticated DELETE and never callback into production.
       NORVA_EDGE_CALLBACK_BASE: http://127.0.0.1:9
       PROVIDER_PROXY_URLS: ""
+      PROVIDER_PROXY_SOCKS_URLS: ""
       PROVIDER_PROXY_SLOT_OVERRIDES: ""
       MEDIA_GATEWAY_VIDEO_ENCODER: vaapi
       MEDIA_GATEWAY_VAAPI_DEVICE: /dev/dri/renderD128

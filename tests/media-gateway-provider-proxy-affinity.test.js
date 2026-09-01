@@ -9,6 +9,7 @@ const vm = require('node:vm');
 const root = path.join(__dirname, '..');
 const gatewayPath = path.join(root, 'services/media-gateway/src/index.js');
 const gateway = fs.readFileSync(gatewayPath, 'utf8');
+const gatewayPackage = require('../services/media-gateway/package.json');
 const proxyPool = require('../services/media-gateway/src/providerProxyPool.js');
 const providerFailure = require('../services/media-gateway/src/providerFailure.js');
 
@@ -218,6 +219,13 @@ test('proxy authentication failures stay distinct from provider slot-busy HTTP 4
   });
 
   assert.equal(providerFailure.isProxyAuthenticationFailure(undiciProxy407), true);
+  assert.equal(
+    providerFailure.isProxyAuthenticationFailure(Object.assign(
+      new Error('Authentication failed'),
+      { code: 'UND_ERR_SOCKS5_AUTH_FAILED' },
+    )),
+    true,
+  );
   assert.deepEqual(
     providerFailure.classifyProviderFetchFailure(undiciProxy407),
     { code: 'PROXY_AUTH_FAILED', category: 'proxy_auth' },
@@ -310,6 +318,35 @@ test('gateway uses the canonical provider key on every provider network lane', (
     gateway,
     /function proxyEnvFor\(key\) \{[\s\S]{0,160}poolIndexForKey\(key\)/,
     'FFmpeg and FFprobe lanes must resolve the same targeted slot as HTTP',
+  );
+  assert.match(
+    gateway,
+    /function proxyEnvFor\(key\) \{[\s\S]{0,220}providerHttpProxyUrls\[poolIndexForKey\(key\)\]/,
+    'FFmpeg and FFprobe must retain the matching HTTP proxy slot',
+  );
+});
+
+test('Gateway separates the SOCKS5 Node pool from the HTTP child-process pool', () => {
+  assert.equal(gatewayPackage.dependencies.undici, '7.29.0');
+  assert.equal(gatewayPackage.engines.node, '>=20.18.1');
+  assert.match(gateway, /process\.env\.PROVIDER_PROXY_SOCKS_URLS/);
+  assert.match(
+    gateway,
+    /const providerProxyUrls = providerSocksProxyUrls\.length[\s\S]{0,120}providerHttpProxyUrls/,
+  );
+  assert.match(
+    gateway,
+    /PROVIDER_PROXY_SOCKS_URLS requires PROVIDER_PROXY_URLS for FFmpeg and FFprobe/,
+  );
+  assert.match(
+    gateway,
+    /providerSocksProxyUrls\.length !== providerHttpProxyUrls\.length/,
+  );
+  assert.match(gateway, /providerProxyTransport,[\s\S]{0,120}providerProxyAffinityProtocol/);
+  assert.doesNotMatch(
+    gateway,
+    /function proxyEnvFor\(key\) \{[\s\S]{0,260}providerProxyUrls\[/,
+    'SOCKS credentials must never be passed to FFmpeg or FFprobe proxy environment variables',
   );
 });
 
@@ -434,7 +471,7 @@ test('gateway fails proxy 407 safely before provider 458 handling', () => {
 });
 
 test('gateway advertises targeted operator override support without identities or secrets', () => {
-  assert.match(gateway, /const GATEWAY_VERSION = 135;/);
+  assert.match(gateway, /const GATEWAY_VERSION = 136;/);
   assert.match(gateway, /providerProxyAffinityProtocol:\s*1/);
   assert.match(gateway, /providerProxyAffinityKey:\s*'provider-account'/);
   assert.match(gateway, /providerProxySlotOverrideProtocol:\s*1/);
@@ -448,6 +485,28 @@ test('gateway advertises targeted operator override support without identities o
   assert.doesNotMatch(gateway, /console\.(log|warn|error)\([^\n]*providerProxySlotOverrides/);
   assert.doesNotMatch(gateway, /providerProxySlotOverrides[\s\S]{0,100}res\.json/);
   assert.doesNotMatch(gateway, /providerProxyUrls[\s\S]{0,100}res\.json/);
+});
+
+test('the Node transport pool accepts SOCKS5 while rejecting unsupported SOCKS variants', () => {
+  const five = Array.from(
+    { length: proxyPool.STATIC_PROXY_SLOT_COUNT },
+    (_, index) => `socks5://u:p@proxy-${index + 1}.example:12346`,
+  ).join('\n');
+  const parsed = proxyPool.parseProviderProxyUrls(five, 'PROVIDER_PROXY_SOCKS_URLS');
+
+  assert.equal(parsed.length, 5);
+  assert.equal(parsed[0], 'socks5://u:p@proxy-1.example:12346');
+  assert.equal(
+    proxyPool.parseProviderProxyUrls('socks://u:p@proxy.example:12346')[0],
+    'socks://u:p@proxy.example:12346',
+  );
+  assert.throws(
+    () => proxyPool.parseProviderProxyUrls(
+      'socks4://u:p@proxy.example:12346',
+      'PROVIDER_PROXY_SOCKS_URLS',
+    ),
+    /PROVIDER_PROXY_SOCKS_URLS supports only http\(s\) or socks5 proxy URLs/,
+  );
 });
 
 test('service-only session diagnostics expose only the proxy slot and one-way affinity hash', () => {

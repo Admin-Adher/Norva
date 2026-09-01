@@ -127,14 +127,14 @@ function proxySlotIndexForAccount(accountKey, slotCount, overrides = new Map()) 
     return stableProxySlotIndex(accountKey, slotCount);
 }
 
-function normalizeProxyUrl(candidate) {
-    if (/^https?:\/\//i.test(candidate)) {
+function normalizeProxyUrl(candidate, variableName = 'PROVIDER_PROXY_URLS') {
+    if (/^[a-z][a-z0-9+.-]*:\/\//i.test(candidate)) {
         let parsed;
         try { parsed = new URL(candidate); } catch (_) {
-            throw new Error('PROVIDER_PROXY_URLS contains an invalid proxy URL');
+            throw new Error(`${variableName} contains an invalid proxy URL`);
         }
-        if (!['http:', 'https:'].includes(parsed.protocol) || !parsed.hostname) {
-            throw new Error('PROVIDER_PROXY_URLS supports only http(s) proxy URLs');
+        if (!['http:', 'https:', 'socks:', 'socks5:'].includes(parsed.protocol) || !parsed.hostname) {
+            throw new Error(`${variableName} supports only http(s) or socks5 proxy URLs`);
         }
         return parsed.href;
     }
@@ -144,18 +144,18 @@ function normalizeProxyUrl(candidate) {
     // required percent-encoding without ever logging the raw credentials.
     const legacy = candidate.match(/^(\[[^\]]+\]|[^:\s/]+):(\d{1,5}):([^:\s]+):(.+)$/);
     if (!legacy) {
-        throw new Error('PROVIDER_PROXY_URLS contains an invalid proxy URL');
+        throw new Error(`${variableName} contains an invalid proxy URL`);
     }
     let parsed;
     try { parsed = new URL(`http://${legacy[1]}:${legacy[2]}`); } catch (_) {
-        throw new Error('PROVIDER_PROXY_URLS contains an invalid legacy proxy endpoint');
+        throw new Error(`${variableName} contains an invalid legacy proxy endpoint`);
     }
     parsed.username = legacy[3];
     parsed.password = legacy[4];
     return parsed.href;
 }
 
-function parseProviderProxyUrls(value) {
+function parseProviderProxyUrls(value, variableName = 'PROVIDER_PROXY_URLS') {
     // Legacy host:port:user:pass entries cannot contain commas or whitespace because those
     // delimit the pool. Use a percent-encoded URL whenever credentials contain delimiters.
     const candidates = String(value || '')
@@ -164,13 +164,13 @@ function parseProviderProxyUrls(value) {
         .filter(Boolean);
     if (!candidates.length) return [];
 
-    const urls = candidates.map(normalizeProxyUrl);
+    const urls = candidates.map((candidate) => normalizeProxyUrl(candidate, variableName));
 
     if (new Set(urls).size !== urls.length) {
-        throw new Error('PROVIDER_PROXY_URLS contains duplicate static proxy slots');
+        throw new Error(`${variableName} contains duplicate static proxy slots`);
     }
     if (urls.length !== 1 && urls.length !== STATIC_PROXY_SLOT_COUNT) {
-        throw new Error(`PROVIDER_PROXY_URLS must contain one backward-compatible proxy or exactly ${STATIC_PROXY_SLOT_COUNT} static proxy slots`);
+        throw new Error(`${variableName} must contain one backward-compatible proxy or exactly ${STATIC_PROXY_SLOT_COUNT} static proxy slots`);
     }
     return urls;
 }

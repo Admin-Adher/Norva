@@ -65,9 +65,13 @@ const app = express();
 // the gateway's provider requests through residential proxies makes the provider see a
 // residential exit IP.
 //
-//   PROVIDER_PROXY_URLS  comma/space/newline-separated list of proxy URLs
-//                        (e.g. http://user:pass@host:port). Used as a POOL.
+//   PROVIDER_PROXY_URLS  comma/space/newline-separated list of HTTP proxy URLs
+//                        (e.g. http://user:pass@host:port). Used by FFmpeg/FFprobe
+//                        and as the Node transport when no SOCKS pool is set.
 //   PROVIDER_PROXY_URL   single URL (back-compat fallback when the plural is absent).
+//   PROVIDER_PROXY_SOCKS_URLS  optional same-shape SOCKS5 pool used only by Node
+//                        fetch/undici lanes. Child processes keep the matching
+//                        HTTP slot because FFmpeg's proxy support is HTTP-only here.
 //   PROVIDER_PROXY_SLOT_OVERRIDES  optional service-only JSON map whose keys are
 //                        sha256(provider-account) and whose values are slots 1..5.
 //                        Used only for bounded operator A/B and emergency egress repair.
@@ -80,9 +84,27 @@ const app = express();
 // per account looks normal. Across many users the pool spreads load over the IPs (less
 // density per IP, more aggregate bandwidth). undici is only loaded when a proxy is set.
 // Secrets live in env only — never commit them.
-const providerProxyUrls = parseProviderProxyUrls(
+const providerHttpProxyUrls = parseProviderProxyUrls(
     process.env.PROVIDER_PROXY_URLS || process.env.PROVIDER_PROXY_URL || '',
+    'PROVIDER_PROXY_URLS',
 );
+const providerSocksProxyUrls = parseProviderProxyUrls(
+    process.env.PROVIDER_PROXY_SOCKS_URLS || '',
+    'PROVIDER_PROXY_SOCKS_URLS',
+);
+if (providerSocksProxyUrls.length && !providerHttpProxyUrls.length) {
+    throw new Error('PROVIDER_PROXY_SOCKS_URLS requires PROVIDER_PROXY_URLS for FFmpeg and FFprobe');
+}
+if (providerSocksProxyUrls.length
+    && providerSocksProxyUrls.length !== providerHttpProxyUrls.length) {
+    throw new Error('PROVIDER_PROXY_SOCKS_URLS must have the same slot count as PROVIDER_PROXY_URLS');
+}
+const providerProxyUrls = providerSocksProxyUrls.length
+    ? providerSocksProxyUrls
+    : providerHttpProxyUrls;
+const providerProxyTransport = providerProxyUrls.length
+    ? (providerSocksProxyUrls.length ? 'socks5' : 'http')
+    : 'direct';
 const providerProxySlotOverrides = parseProviderProxySlotOverrides(
     process.env.PROVIDER_PROXY_SLOT_OVERRIDES || '',
     providerProxyUrls.length,
@@ -94,7 +116,7 @@ if (providerProxyUrls.length) {
         // Fetch receives an explicit dispatcher and every provider-connected child receives
         // an explicit env. There is intentionally no process-wide "slot 1" fallback: it would
         // silently break account affinity whenever a provider spawn forgot its routing key.
-        console.log(`[media-gateway] provider proxy ENABLED — pool of ${providerProxyAgents.length} residential IP(s), sticky per account`);
+        console.log(`[media-gateway] provider proxy ENABLED — ${providerProxyTransport} pool of ${providerProxyAgents.length} residential IP(s), sticky per account`);
     } catch (err) {
         // Fail closed. Falling back to Railway's direct datacenter IP after a proxy
         // configuration error can trigger provider bans and makes a 407 look like a 458.
@@ -114,6 +136,7 @@ function observeProviderProxySelection(key) {
     const affinitySha256 = sha256Hex(affinity);
     lastProviderProxySelection = {
         protocol: 1,
+        transport: providerProxyTransport,
         slot: poolIndexForKey(affinity) + 1,
         affinitySha256,
         overridden: providerProxySlotOverrides.has(affinitySha256),
@@ -766,8 +789,8 @@ function pinnedProxyAgentFactory(key) {
 }
 // Spawn env routing a child (ffmpeg/ffprobe) through this key's sticky pool IP.
 function proxyEnvFor(key) {
-    if (!providerProxyAgents.length) return undefined;
-    const url = providerProxyUrls[poolIndexForKey(key)];
+    if (!providerHttpProxyUrls.length) return undefined;
+    const url = providerHttpProxyUrls[poolIndexForKey(key)];
     return { ...process.env, http_proxy: url, https_proxy: url, HTTP_PROXY: url, HTTPS_PROXY: url };
 }
 // A strict LID ffmpeg reads only the private 127.0.0.1 broker. Explicitly remove every
@@ -1850,7 +1873,7 @@ const MULTI_AUDIO_HLS_PROTOCOL = 1;
 // production Ryzen/Radeon host. Keep the operational default evidence-based and configurable,
 // while bounding accidental fan-out. Every exact source track stays visible to the user.
 const MAX_MULTI_AUDIO_RENDITIONS = clampInt(process.env.MAX_MULTI_AUDIO_RENDITIONS, 12, 2, 32);
-const GATEWAY_VERSION = 135;
+const GATEWAY_VERSION = 136;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -2245,6 +2268,7 @@ app.get('/health', (req, res) => {
         ocrLangs: OCR_ENABLED ? OCR_LANGS : '',
         providerProxy: providerProxyAgents.length > 0,
         providerProxyPool: providerProxyAgents.length,
+        providerProxyTransport,
         providerProxyAffinityProtocol: 1,
         providerProxyAffinityKey: 'provider-account',
         providerProxySlotOverrideProtocol: 1,
@@ -15970,6 +15994,7 @@ function debugSession(session) {
         providerProxy: providerProxyAgents.length && providerProxyAffinitySha256
             ? {
                 protocol: 1,
+                transport: providerProxyTransport,
                 slot: poolIndexForKey(providerProxyAffinity) + 1,
                 affinitySha256: providerProxyAffinitySha256,
                 overridden: providerProxySlotOverrides.has(providerProxyAffinitySha256),

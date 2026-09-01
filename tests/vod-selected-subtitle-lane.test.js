@@ -88,7 +88,7 @@ test('Gateway extracts no subtitle by default and at most the exact selected tex
     'function mappedSubtitleStreamIndexForSession(session) {',
   );
 
-  assert.match(gateway, /const GATEWAY_VERSION = 135;/);
+  assert.match(gateway, /const GATEWAY_VERSION = 136;/);
   assert.match(subtitleSelection, /if \(!Number\.isInteger\(requestedIndex\)\) return \[\];/);
   assert.match(subtitleSelection, /\.find\(\(track\) => normalizeAudioStreamIndex\(track\.index\) === requestedIndex\)/);
   assert.match(subtitleSelection, /return selected \? \[selected\] : \[\];/);

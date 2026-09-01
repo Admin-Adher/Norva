@@ -579,7 +579,7 @@ test('production rollout proves the provider circuit protocol on every runtime',
   const cloud = read('supabase/functions/norva-cloud/index.ts');
   const deploy = read('ops/hetzner/scripts/04-deploy-edge-functions.sh');
 
-  assert.match(gateway, /const GATEWAY_VERSION = 135/);
+  assert.match(gateway, /const GATEWAY_VERSION = 136/);
   assert.match(gateway, /providerCircuitProtocol:\s*1/);
   assert.match(gateway, /providerProxyAffinityProtocol:\s*1/);
   assert.match(gateway, /exactFileCodecProfileProtocol:\s*1/);

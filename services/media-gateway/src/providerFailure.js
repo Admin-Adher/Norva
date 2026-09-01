@@ -54,6 +54,11 @@ function failureChainText(error) {
 }
 
 function isProxyAuthenticationFailure(error) {
+    const failureCode = normalizedFailureCode(error);
+    if (failureCode === 'UND_ERR_SOCKS5_AUTH_FAILED'
+        || failureCode === 'UND_ERR_SOCKS5_AUTH_REJECTED') {
+        return true;
+    }
     const text = failureChainText(error);
     return text.includes('proxy_auth_failed')
         || /proxy[^\n]{0,120}(?:authentication required|auth(?:entication)? failed|response[^\n]{0,40}\b407\b)/i.test(text)
