@@ -352,6 +352,8 @@ function startRetryHarness(overrides = {}) {
         isInsufficientInputProbeFailure,
         isVaapiHardwareDecodeFailure: () => false,
         applyFiniteMkvSeekBrokerFailure: () => false,
+        closeFiniteMkvSeekBroker: async () => {},
+        asRecord: (value) => value && typeof value === 'object' && !Array.isArray(value) ? value : {},
         console: { warn() {} },
         ...overrides,
     });
@@ -1577,6 +1579,109 @@ test('typed finite-input failures never trigger the local FFmpeg probe fallback'
         assert.equal(fetches, 1, `${scenario.inputFailure.code} must consume exactly one provider request`);
         assert.deepEqual(session.inputFailure, expectedFailure, 'the authoritative typed failure must survive unchanged');
         assert.equal(session.forceFullInputProbe, false);
+    }
+});
+
+test('exhausted indexed MKV resume falls back once after releasing the broker and provider slot', async () => {
+    const events = [];
+    let starts = 0;
+    const session = {
+        id: 'indexed-resume-fallback',
+        outputDir: '/tmp/indexed-resume-fallback',
+        startupTimings: { slotReleaseWaitMs: 2500 },
+        finiteMkvSeekBroker: { inputUrl: 'http://127.0.0.1/private' },
+        inputFailure: null,
+        lastError: null,
+        logTail: '',
+        status: 'starting',
+    };
+    const startSessionWithProviderRetry = startRetryHarness({
+        PROVIDER_SLOT_RELEASE_DELAY_MS: 2500,
+        startFfmpeg: (activeSession) => {
+            starts += 1;
+            events.push(`start:${activeSession.finiteMkvSeekBroker ? 'indexed' : 'linear'}`);
+            return { attempt: starts };
+        },
+        waitForPlaylist: async (activeSession) => {
+            if (starts === 1) {
+                activeSession.finiteMkvSeekBroker.terminalError = {
+                    status: 502,
+                    code: 'PROVIDER_RECONNECT_EXHAUSTED',
+                };
+                throw new Error('indexed seek failed');
+            }
+        },
+        applyFiniteMkvSeekBrokerFailure: (activeSession) => {
+            const failure = activeSession.finiteMkvSeekBroker?.terminalError;
+            if (!failure) return false;
+            activeSession.inputFailure = { ...failure };
+            activeSession.lastError = failure.code;
+            return true;
+        },
+        closeFiniteMkvSeekBroker: async (activeSession) => {
+            events.push('broker-close');
+            activeSession.finiteMkvSeekBroker = null;
+        },
+        stopChildProcess: async (child) => {
+            if (child) events.push(`child-stop:${child.attempt}`);
+        },
+        waitForVodInputRetry: async (delayMs) => {
+            events.push(`release-wait:${delayMs}`);
+            return true;
+        },
+    });
+
+    assert.equal(await startSessionWithProviderRetry(session), true);
+    assert.equal(starts, 2);
+    assert.deepEqual(events.slice(0, 5), [
+        'start:indexed',
+        'broker-close',
+        'child-stop:1',
+        'release-wait:2500',
+        'start:linear',
+    ]);
+    assert.equal(session.finiteMkvSeekBroker, null);
+    assert.equal(session.finiteMkvLinearFallbacks, 1);
+    assert.equal(session.startupTimings.finiteMkvSeekFallbackCode, 'PROVIDER_RECONNECT_EXHAUSTED');
+    assert.equal(session.startupTimings.finiteMkvResumeMode, 'linear-byte-zero-fallback');
+    assert.equal(session.startupTimings.boundedMkvInputPump, true);
+    assert.equal(session.startupTimings.finiteMkvLinearFallbackReleaseWaitMs, 2500);
+    assert.equal(session.startupTimings.slotReleaseWaitMs, 5000);
+    assert.equal(session.inputFailure, null);
+});
+
+test('indexed MKV resume preserves terminal provider and integrity failures', async () => {
+    for (const code of ['PROVIDER_BUSY', 'PROXY_AUTH_FAILED', 'VOD_CHANGED', 'RANGE_UNSUPPORTED']) {
+        let starts = 0;
+        let brokerCloses = 0;
+        const session = {
+            id: `indexed-terminal-${code}`,
+            outputDir: '/tmp/indexed-terminal',
+            startupTimings: {},
+            finiteMkvSeekBroker: { inputUrl: 'http://127.0.0.1/private' },
+            inputFailure: null,
+            lastError: null,
+            logTail: '',
+            status: 'starting',
+        };
+        const startSessionWithProviderRetry = startRetryHarness({
+            startFfmpeg: () => {
+                starts += 1;
+                return { attempt: starts };
+            },
+            waitForPlaylist: async () => { throw new Error(code); },
+            applyFiniteMkvSeekBrokerFailure: (activeSession) => {
+                activeSession.inputFailure = { code, status: code === 'PROVIDER_BUSY' ? 458 : 502 };
+                activeSession.lastError = code;
+                return true;
+            },
+            closeFiniteMkvSeekBroker: async () => { brokerCloses += 1; },
+        });
+
+        assert.equal(await startSessionWithProviderRetry(session), false, `${code} must remain terminal`);
+        assert.equal(starts, 1, `${code} must not open a fallback provider input`);
+        assert.equal(brokerCloses, 0, `${code} must not close-and-rearm the broker as a retry`);
+        assert.equal(session.inputFailure.code, code);
     }
 });
 

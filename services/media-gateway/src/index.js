@@ -9600,7 +9600,42 @@ async function startSessionWithProviderRetry(session, abortSignal = null) {
             return true;
         } catch (err) {
             if (abortSignal?.aborted) throw abortedVodInputPumpError();
-            applyFiniteMkvSeekBrokerFailure(session);
+            const finiteMkvSeekBrokerFailed = applyFiniteMkvSeekBrokerFailure(session);
+            const finiteMkvSeekFailureCode = String(session.inputFailure?.code || '').trim();
+            if (
+                finiteMkvSeekBrokerFailed
+                && finiteMkvSeekFailureCode === 'PROVIDER_RECONNECT_EXHAUSTED'
+                && Number(session.finiteMkvLinearFallbacks || 0) < 1
+            ) {
+                // The indexed loopback path has already exhausted its bounded
+                // same-slot reconnect budget. Release that broker completely,
+                // then fall back once to the proven byte-zero pump plus
+                // post-input seek. This stays single-provider: no replacement
+                // socket may open until the broker and its FFmpeg client are
+                // closed and the provider release grace has elapsed.
+                await closeFiniteMkvSeekBroker(session);
+                await stopChildProcess(session.ffmpeg).catch(() => {});
+                session.ffmpeg = null;
+                if (PROVIDER_SLOT_RELEASE_DELAY_MS > 0) {
+                    if (!await waitForVodInputRetry(PROVIDER_SLOT_RELEASE_DELAY_MS, abortSignal)) {
+                        throw abortedVodInputPumpError();
+                    }
+                    session.startupTimings = asRecord(session.startupTimings);
+                    session.startupTimings.finiteMkvLinearFallbackReleaseWaitMs = PROVIDER_SLOT_RELEASE_DELAY_MS;
+                    session.startupTimings.slotReleaseWaitMs = Number(session.startupTimings.slotReleaseWaitMs || 0)
+                        + PROVIDER_SLOT_RELEASE_DELAY_MS;
+                }
+                session.finiteMkvLinearFallbacks = Number(session.finiteMkvLinearFallbacks || 0) + 1;
+                session.startupTimings = asRecord(session.startupTimings);
+                session.startupTimings.finiteMkvSeekFallbackCode = finiteMkvSeekFailureCode;
+                session.startupTimings.finiteMkvResumeMode = 'linear-byte-zero-fallback';
+                session.startupTimings.boundedMkvInputPump = true;
+                session.inputFailure = null;
+                session.lastError = null;
+                session.logTail = '';
+                console.warn(`[media-gateway] indexed MKV seek was interrupted for ${session.id}; retrying once with the linear single-pump fallback`);
+                continue;
+            }
             if (
                 session.forceSoftwareVideoDecode !== true &&
                 isVaapiHardwareDecodeFailure(session)
