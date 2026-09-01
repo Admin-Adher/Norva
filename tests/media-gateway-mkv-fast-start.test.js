@@ -805,12 +805,18 @@ test('codec profile binds the exact first uppercase-V stream and excludes cover/
         width: 320, height: 180, pix_fmt: 'yuv420p', disposition: {},
       },
       { index: 6, codec_type: 'video', codec_name: 'hevc', disposition: {} },
+      {
+        index: 7, codec_type: 'subtitle', codec_name: 'subrip',
+        disposition: { default: 1 },
+      },
     ],
     format: { format_name: 'matroska,webm', duration: '8.0' },
   }, Date.now(), 'gateway_inband');
   assert.equal(profile.videoStreamIndex, 5);
   assert.equal(profile.videoCodec, 'h264');
   assert.equal(profile.videoWidth, 320);
+  assert.equal(profile.subtitles[0].default, true,
+    'ffprobe subtitle disposition.default survives the gateway profile boundary');
 
   const noPlayableVideo = buildCodecProfile({
     streams: [{ index: 0, codec_type: 'video', codec_name: 'mjpeg', disposition: { attached_pic: 1 } }],

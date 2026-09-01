@@ -204,10 +204,31 @@ function _catalogFacetCacheScope() {
     return '';
 }
 
+// A cache deletion alone cannot stop an older in-flight request from writing
+// its now-obsolete response after the exact-file observation has completed.
+// Fence writes by account + media type so invalidation remains atomic even
+// when the old request resolves after the replacement request.
+const _catalogLanguageFacetGenerations = new Map();
+
+function _catalogLanguageFacetGenerationKey(scope, type) {
+    return scope ? `${scope}:${type === 'series' ? 'series' : 'movie'}` : '';
+}
+
+function _catalogLanguageFacetGeneration(generationKey) {
+    return generationKey
+        ? Number(_catalogLanguageFacetGenerations.get(generationKey) || 0)
+        : 0;
+}
+
 function _clearCatalogLanguageFacetCache(params = {}) {
     const scope = _catalogFacetCacheScope();
     if (!scope) return 0;
     const type = params && params.type === 'series' ? 'series' : 'movie';
+    const generationKey = _catalogLanguageFacetGenerationKey(scope, type);
+    _catalogLanguageFacetGenerations.set(
+        generationKey,
+        _catalogLanguageFacetGeneration(generationKey) + 1
+    );
     const prefix = `norva-facets4-${scope}-${type}-`;
     let removed = 0;
     try {
@@ -219,6 +240,28 @@ function _clearCatalogLanguageFacetCache(params = {}) {
         }
     } catch (_) { /* best-effort cache invalidation */ }
     return removed;
+}
+
+function _emitCatalogLanguageFacetInvalidation(params = {}) {
+    try {
+        if (typeof window?.dispatchEvent !== 'function') return false;
+        const EventCtor = window.CustomEvent || (typeof CustomEvent === 'function' ? CustomEvent : null);
+        if (!EventCtor) return false;
+        const type = params?.type === 'series' ? 'series' : 'movie';
+        const source = String(
+            params?.cloudSourceId ?? params?.cloud_source_id ?? params?.sourceId ?? params?.source_id ?? ''
+        ).trim();
+        window.dispatchEvent(new EventCtor('norva:catalog-language-facets-invalidated', {
+            detail: {
+                type,
+                source: source || null,
+                removed: Math.max(0, Number(params?.removed || 0)),
+            }
+        }));
+        return true;
+    } catch (_) {
+        return false;
+    }
 }
 
 function _cloudAvailable() {
@@ -2943,6 +2986,8 @@ const API = {
             const source = String(params?.source || params?.sourceId || '').trim().toLowerCase();
             const sourceScope = source || 'all';
             const scope = _catalogFacetCacheScope();
+            const generationKey = _catalogLanguageFacetGenerationKey(scope, type);
+            const requestGeneration = _catalogLanguageFacetGeneration(generationKey);
             const facetCacheKey = () => {
                 let visibilityEpoch = '';
                 try { visibilityEpoch = String(CloudAdapter.visibilityEpoch?.() || ''); } catch (_) { /* legacy adapter */ }
@@ -2973,18 +3018,21 @@ const API = {
             // why the Audio/Subtitle menus were always empty (the endpoint was never even reached).
             // Reach it through the exposed handle, like clearRailCache below.
             try { p = CloudAdapter.cloudHomeApi().languageFacets(params); }
-            catch (_) { return Promise.resolve({ audio: [], subtitles: [] }); }
+            catch (error) { return Promise.reject(error); }
             return Promise.resolve(p).then((value) => {
                 try {
                     // Cache ONLY a non-empty result. An empty set is treated as "not ready" so the
-                    // next call re-fetches instead of serving a stale blank menu.
+                    // next call re-fetches instead of serving a stale blank menu. An exact-file
+                    // invalidation also fences requests that started before it, otherwise a slow
+                    // old response can repopulate the entry after it was cleared.
                     const writeKey = facetCacheKey();
-                    if (writeKey && nonEmpty(value)) {
+                    const generationIsCurrent = requestGeneration === _catalogLanguageFacetGeneration(generationKey);
+                    if (writeKey && generationIsCurrent && nonEmpty(value)) {
                         localStorage.setItem(writeKey, JSON.stringify({ exp: Date.now() + TTL, value }));
                     }
                 } catch (_) { /* ignore quota */ }
                 return value;
-            }).catch(() => ({ audio: [], subtitles: [] }));
+            });
         },
         // Best-effort capture of real audio-track languages observed at playback.
         reportObservedLanguages: (body) => {
@@ -2997,7 +3045,14 @@ const API = {
                 // type as soon as exact evidence changed, so Back to Movies does
                 // not display the old menu for another 60 seconds.
                 if (value?.ok === true && value?.updated === true) {
-                    _clearCatalogLanguageFacetCache({ type: body?.itemType || body?.item_type });
+                    const type = body?.itemType || body?.item_type;
+                    const removed = _clearCatalogLanguageFacetCache({ type });
+                    _emitCatalogLanguageFacetInvalidation({
+                        type,
+                        cloudSourceId: body?.cloudSourceId || body?.cloud_source_id,
+                        sourceId: body?.sourceId || body?.source_id,
+                        removed,
+                    });
                 }
                 return value;
             });

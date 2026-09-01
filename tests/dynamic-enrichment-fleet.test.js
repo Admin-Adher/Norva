@@ -321,7 +321,7 @@ test('self-hosted Edge workers outlive every bounded enrichment request', () => 
   );
   assert.match(sourceSync, /episodeProbe \? 390_000/);
   assert.match(sourceSync, /version: 15[\s\S]*exactTailDrainSafe: true/);
-  assert.match(playback, /version: 63[\s\S]*exactTailDrainSafe: true/);
+  assert.match(playback, /version: 64[\s\S]*exactTailDrainSafe: true/);
 
   const playbackWorkerMs = 20 * 60 * 1000;
   const playbackPerWorkerGuaranteedMs = playbackWorkerMs / 2;
@@ -421,9 +421,11 @@ test('episode lanes are exact, individually bounded, flag-gated, and fail closed
   assert.match(exactWorker, /\.select\("audio_tracks,audio_whisper_attempted_at,audio_whisper_retry_at"\)/);
   assert.match(exactWorker, /if \(cacheAdvanced\) \{\s*processed \+= 1;\s*persisted \+= 1/);
   assert.match(exactWorker, /deferred \+= 1/);
+  assert.match(exactWorker, /let releaseLeaseOnExit = true/);
+  assert.match(exactWorker, /releaseLeaseOnExit = false/);
   assert.match(
     exactWorker,
-    /finally \{\s*await releaseProviderFileProbe\(db, sourceIdentity\.key, leaseOwner\)/,
+    /finally \{\s*if \(releaseLeaseOnExit\) \{\s*await releaseProviderFileProbe\(db, sourceIdentity\.key, leaseOwner\)/,
   );
 });
 

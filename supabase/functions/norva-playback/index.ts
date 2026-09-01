@@ -279,9 +279,11 @@ async function handleRequest(req: Request): Promise<Response> {
       return json(req, {
         ok: true,
         service: "norva-playback",
-        version: 63,
+        version: 64,
         nativeHeartbeatProtocol: 1,
         providerCircuitProtocol: 1,
+        exactTrackCrawlerProtocol: 2,
+        basicLidConsensusProtocol: 2,
         vodContainerSelfHealProtocol: 1,
         exactFileCodecProfileProtocol: 1,
         relayCoordinatorLockTtlMs: EDGE_SESSION_COORDINATOR_LOCK_TTL_MS,
@@ -2257,7 +2259,26 @@ async function revalidateLanguageValidationClaim(
   };
 }
 
+function gatewayProviderDrainAttested(payload: JsonRecord) {
+  return payload.providerDrained === true
+    && payload.providerDrainProtocol === 1;
+}
+
+function acceptGatewayProviderDrain(
+  payload: JsonRecord,
+  retainLeaseUntilExpiry: () => void,
+): boolean {
+  if (gatewayProviderDrainAttested(payload)) return true;
+  // A successful HTTP response is not proof that the provider-side process and
+  // socket have exited. Keep the distributed exclusion until its TTL whenever
+  // the gateway cannot attest protocol-v1 drainage.
+  retainLeaseUntilExpiry();
+  return false;
+}
+
 function strictLanguageProviderDrainAttested(payload: JsonRecord) {
+  // Keep this helper self-contained: the strict-LID worker and its contract
+  // tests evaluate it independently from the catalogue probe helpers.
   return payload.providerDrained === true
     && payload.providerDrainProtocol === 1;
 }
@@ -6562,6 +6583,7 @@ function normalizeCodecProfileTracks(value: unknown, kind: "audio" | "subtitle")
         codec: stringOrNull(track.codec ?? track.codecName ?? track.codec_name),
         subtitleType,
         extractable,
+        default: booleanOrNull(track.default),
         burnInRequired: booleanOrNull(track.burnInRequired ?? track.burn_in_required),
         unsupportedReason: stringOrNull(track.unsupportedReason ?? track.unsupported_reason),
       });
@@ -7822,27 +7844,65 @@ async function runLidCascadeAttempt(opts: {
   return cascadeClaimed;
 }
 
-// Keep the old >=4-word contract and add a distinct detect-only contract. In particular,
-// wordCount=0 is correct for -dl and can never be confused with a transcript. The Edge
-// independently enforces the 0.95 floor even if a gateway replica is misconfigured lower.
+function basicLidConsensusSampleAccepted(
+  sample: JsonRecord | null,
+  expectedLang: string,
+  fastPath: boolean,
+): boolean {
+  const lang = normalizeIsoLang(stringOrNull(sample?.language));
+  const method = stringOrNull(sample?.method);
+  const confidence = Number(sample?.confidence ?? 0);
+  const whisperConfidence = Number(sample?.whisperConfidence ?? 0);
+  const words = Number(sample?.wordCount ?? 0);
+  const uniqueWords = Number(sample?.uniqueWordCount ?? 0);
+  if (!lang || lang !== expectedLang || sample?.confident !== true) return false;
+  if (!Number.isFinite(confidence) || confidence < 0.95 || confidence > 1) return false;
+  if (fastPath) {
+    return Boolean(
+      method === "whisper-detect-only-v1" &&
+      sample?.verified === false &&
+      sample?.fastPathAccepted === true &&
+      sample?.fallbackUsed === false &&
+      sample?.validationStatus === "pending" &&
+      sample?.evidence === "lid-only-high-confidence" &&
+      words === 0
+    );
+  }
+  const methodCalibrated = method === "whisper-transcript-agreement-v1"
+    ? sample?.transcriptAgrees === true &&
+      Number.isFinite(whisperConfidence) &&
+      whisperConfidence >= 0.95 &&
+      whisperConfidence <= 1
+    : method === "whisper" || method === "transcript";
+  return Boolean(
+    methodCalibrated &&
+    Number.isFinite(words) &&
+    words >= 12 &&
+    Number.isFinite(uniqueWords) &&
+    uniqueWords >= 8
+  );
+}
+
+// Detect-only and transcript evidence stay explicitly distinct. wordCount=0 is correct
+// for -dl and can never be confused with a transcript. Transcript evidence must itself
+// be information-rich and agree across at least two windows before it can change a
+// tenant-scoped exact-file map.
 function basicLidEvidence(det: JsonRecord | null): BasicLidEvidence {
   const lang = normalizeIsoLang(stringOrNull(det?.language));
-  const words = Number(det?.wordCount ?? 0);
   const confidence = Number(det?.confidence ?? 0);
+  const consensus = Number(det?.consensus ?? 0);
   const fastPath = det?.method === "whisper-detect-only-v1";
+  const samples = Array.isArray(det?.samples) ? det.samples as JsonRecord[] : [];
+  const matchingSamples = lang
+    ? samples.filter((sample) => basicLidConsensusSampleAccepted(sample, lang, fastPath))
+    : [];
   if (fastPath) {
     const accepted = Boolean(
       lang &&
-      det?.confident === true &&
-      det?.verified === false &&
-      det?.fastPathAccepted === true &&
-      det?.fallbackUsed === false &&
-      det?.validationStatus === "pending" &&
-      det?.evidence === "lid-only-high-confidence" &&
-      Number.isFinite(confidence) &&
-      confidence >= 0.95 &&
-      confidence <= 1 &&
-      words === 0,
+      basicLidConsensusSampleAccepted(det, lang, true) &&
+      Number.isFinite(consensus) &&
+      consensus >= 2 &&
+      matchingSamples.length >= 2,
     );
     return {
       accepted,
@@ -7853,7 +7913,13 @@ function basicLidEvidence(det: JsonRecord | null): BasicLidEvidence {
     };
   }
   return {
-    accepted: Boolean(lang && det?.confident === true && words >= 4),
+    accepted: Boolean(
+      lang &&
+      basicLidConsensusSampleAccepted(det, lang, false) &&
+      Number.isFinite(consensus) &&
+      consensus >= 2 &&
+      matchingSamples.length >= 2,
+    ),
     lang,
     method: "whisper-basic-v1",
     fastPath: false,
@@ -8074,23 +8140,136 @@ async function shareFileTracks(
 
 // Distributed crawler lease: provider_account_busy protects human playback,
 // while this prevents two autonomous workers from probing one canonical provider
-// identity at the same time. Fail-open during a rolling migration so an older DB
-// cannot take the whole enrichment fleet down; the viewer lock still applies.
+// identity at the same time. New provider I/O is fail-closed: a missing identity,
+// unavailable RPC or ambiguous response must defer the crawler rather than risk a
+// second connection beside human playback.
 async function claimProviderFileProbe(
   db: SupabaseClient,
   identityKey: string,
   owner: string,
   ttlSeconds = 150,
 ): Promise<boolean> {
-  if (!identityKey || !owner) return true;
+  if (!identityKey || !owner) return false;
   try {
     const { data, error } = await db.rpc("claim_provider_file_probe", {
       p_identity_key: identityKey,
       p_lease_owner: owner,
       p_ttl_seconds: Math.max(30, Math.min(900, Math.round(ttlSeconds))),
     });
-    if (error) return true;
+    if (error) return false;
     return data === true;
+  } catch (_) {
+    return false;
+  }
+}
+
+async function resolveCandidateProviderIdentityKey(
+  db: SupabaseClient,
+  sourceId: string,
+  userId: string,
+  preResolvedIdentityKey = "",
+): Promise<string> {
+  if (preResolvedIdentityKey) return preResolvedIdentityKey;
+  return (await resolveSourceIdentity(sourceId, userId, db)).key || "";
+}
+
+function newProviderProbeLeaseOwner(prefix: string, candidateId: string): string {
+  const boundedCandidate = String(candidateId || "candidate").slice(0, 128);
+  // claim_provider_file_probe deliberately allows same-owner re-entry. Every
+  // concurrent candidate therefore needs its own owner, even inside one tick.
+  return `${prefix}:${boundedCandidate}:${crypto.randomUUID()}`;
+}
+
+function authoritativeProbeFacetComplete(marker: unknown, legacyEvidence: boolean): boolean {
+  if (marker === true) return true;
+  if (marker === false) return false;
+  // Compatibility is limited to old responses that omitted the marker. An
+  // explicit false is authoritative and can never be promoted by another facet.
+  return marker == null && legacyEvidence === true;
+}
+
+function subtitleProbeObservation(
+  marker: unknown,
+  legacyEvidence: boolean,
+  tracks: JsonRecord[],
+  probedAt: string,
+) {
+  const complete = authoritativeProbeFacetComplete(marker, legacyEvidence);
+  return {
+    complete,
+    fields: complete
+      ? { subtitle_tracks: tracks, subtitle_probed_at: probedAt }
+      : {},
+  };
+}
+
+function createProviderIdentitySerialQueue() {
+  const tails = new Map<string, Promise<void>>();
+  return async function runSerial<T>(identityKey: string, task: () => Promise<T>): Promise<T> {
+    const previous = tails.get(identityKey) ?? Promise.resolve();
+    let unlock: () => void = () => {};
+    const current = new Promise<void>((resolve) => { unlock = () => resolve(); });
+    tails.set(identityKey, current);
+    await previous.catch(() => {});
+    try {
+      return await task();
+    } finally {
+      unlock();
+      if (tails.get(identityKey) === current) tails.delete(identityKey);
+    }
+  };
+}
+
+type ProviderProbeLeaseOutcome<T> =
+  | { status: "completed"; value: T }
+  | { status: "lease-busy" }
+  | { status: "guard-unavailable" }
+  | { status: "circuit-open"; openUntil: string | null };
+
+async function runProviderProbeWithLease<T>(
+  db: SupabaseClient,
+  identityKey: string,
+  owner: string,
+  ttlSeconds: number,
+  task: (control: { retainUntilExpiry: () => void }) => Promise<T>,
+): Promise<ProviderProbeLeaseOutcome<T>> {
+  if (!identityKey || !await claimProviderFileProbe(db, identityKey, owner, ttlSeconds)) {
+    return { status: "lease-busy" };
+  }
+  let releaseLeaseOnExit = true;
+  try {
+    let circuit: { open: boolean; openUntil: string | null };
+    try {
+      circuit = await readProviderProbeCircuitStateStrict(db, identityKey);
+    } catch (_) {
+      // The task is the only callback allowed to touch the provider. Returning
+      // here gives an RPC failure a mechanically testable zero-I/O boundary.
+      return { status: "guard-unavailable" };
+    }
+    if (circuit.open) {
+      return { status: "circuit-open", openUntil: circuit.openUntil };
+    }
+    return {
+      status: "completed",
+      value: await task({ retainUntilExpiry: () => { releaseLeaseOnExit = false; } }),
+    };
+  } finally {
+    if (releaseLeaseOnExit) {
+      await releaseProviderFileProbe(db, identityKey, owner);
+    }
+  }
+}
+
+async function providerAccountBusyForCrawler(
+  db: SupabaseClient,
+  accountKey: string,
+): Promise<boolean> {
+  if (!accountKey) return true;
+  try {
+    const { data, error } = await db.rpc("provider_account_busy", { p_key: accountKey });
+    if (error) return true;
+    // Only an explicit false is permission to open a new provider connection.
+    return data !== false;
   } catch (_) {
     return true;
   }
@@ -8326,18 +8505,9 @@ async function detectUntaggedAudioLanguages(opts: {
         .eq("user_id", userId).eq("id", titleId);
     } catch (_) { /* best-effort legacy title persist */ }
   }
-  // A global title-language UNION cannot cheaply unlearn one wrong canary result. Keep
-  // detect-only evidence exact-file/tenant scoped until calibration promotes the engine;
-  // historical transcript results retain the existing global merge.
-  if (
-    itemType === "movie" &&
-    detectOnlyDetectedCount === 0 &&
-    codes.length &&
-    tmdbId &&
-    !/^(tt)?0+$/i.test(tmdbId)
-  ) {
-    try { await db.rpc("merge_catalog_title_audio", { p_item_type: itemType, p_provider_tmdb_id: tmdbId, p_codes: codes }); } catch (_) { /* best-effort global mirror */ }
-  }
+  // Basic/provisional LID remains exact-file and tenant scoped. A global
+  // title-language UNION cannot unlearn a false positive; only the strict LID
+  // certification path may promote verified language evidence globally.
   if (!fileScoped) {
     try {
       await shareFileTracks(
@@ -8397,7 +8567,7 @@ async function detectUntaggedAudioLanguages(opts: {
 // and whisper LID only ever ran on UNTAGGED tracks, so a wrong tag was permanent and
 // user-visible (player audio menu prefers cloud audio_tracks; language filters use
 // audio_languages). This listens to the ACTUAL speech via the gateway's whisper.cpp and
-// rewrites the track lang after the basic detector finds a clear speech window (at least 4 words).
+// rewrites the track lang only after two high-confidence, information-rich speech windows agree.
 // Returns "corrected" | "detected" | "pending" — or null on a TRANSIENT failure (byte-pipe
 // down, every clip 503/timeout), which must NOT mark the title verified (retry next tick).
 // A non-verdict is a retryable "pending" state, never a guessed language.
@@ -8425,7 +8595,7 @@ async function verifyTaggedAudioLanguages(opts: {
 }): Promise<"corrected" | "detected" | "pending" | "partial" | null> {
   const {
     db, runtimeConfig, userId, sourceId, targetUrl, audioTracks, suspectLangs, titleId,
-    tmdbId, serverHost, itemType, fileExternalId, expiresAt, variantId,
+    serverHost, itemType, fileExternalId, expiresAt, variantId,
     fileScoped = false,
   } = opts;
   if (!runtimeConfig.mediaGatewayUrl || !runtimeConfig.mediaGatewayToken) return null;
@@ -8509,16 +8679,19 @@ async function verifyTaggedAudioLanguages(opts: {
       pendingVerdictCount === 0 &&
       audioTracks.every((track) => Boolean(track.lang)) &&
       confirmedCount + correctedCount + detectedCount === taggedTracks.length;
-    // Basic one-window LID is valuable detection evidence, not a strict
-    // certificate. Persist the corrected map and a long retry cursor, but never
-    // create audio_verified_at or a user-facing "confirmed" claim.
+    // Conservative two-window basic LID is useful tenant-scoped detection
+    // evidence, not a strict certificate. Persist the corrected exact-file map
+    // and a long retry cursor, but never create audio_verified_at, a global title
+    // union or a user-facing "confirmed" claim.
     await recordDetection(classified, {
       method: "whisper-basic-v1",
       detectionMethods: [...detectionMethods].sort(),
       status: classified ? "detected" : "pending",
       sampleDurationSeconds: 20,
-      consensus: 1,
-      minWords: 4,
+      consensus: 2,
+      minConfidence: 0.95,
+      minWords: 12,
+      minUniqueWords: 8,
       trackCount: taggedTracks.length,
       confirmedCount,
       correctedCount,
@@ -8545,11 +8718,11 @@ async function verifyTaggedAudioLanguages(opts: {
     detectBase = pipe.url.replace("/raw/", "/detect-language/");
   } catch (_) { return null; }
 
-  let changed = false, transient = 0, attempted = 0;
+  let transient = 0, attempted = 0;
   for (const t of suspects) {
     try {
       const res = await fetch(
-        `${detectBase}?index=${t.index}&dur=20`,
+        `${detectBase}?index=${t.index}&dur=20&consensus=2`,
         { signal: AbortSignal.timeout(120_000) },
       );
       if (!res.ok) { transient++; continue; } // incl. the gateway's 503 account-slot-busy
@@ -8568,7 +8741,6 @@ async function verifyTaggedAudioLanguages(opts: {
       attempted++;
       if (lang === t.lang) continue;
       t.lang = lang;
-      changed = true;
     } catch (_) { transient++; }
   }
 
@@ -8608,11 +8780,8 @@ async function verifyTaggedAudioLanguages(opts: {
           .eq("user_id", userId).eq("id", titleId);
       } catch (_) { return null; }
     }
-    // NOTE: the global mirror is a race-safe UNION — it gains the corrected lang but cannot
-    // unlearn the wrong one (union semantics protect other panels' genuinely-foreign files).
-    if (itemType === "movie" && changed && codes.length && tmdbId && !/^(tt)?0+$/i.test(tmdbId)) {
-      try { await db.rpc("merge_catalog_title_audio", { p_item_type: itemType, p_provider_tmdb_id: tmdbId, p_codes: codes }); } catch (_) { /* best-effort */ }
-    }
+    // Basic mistag correction is still provisional. Keep it tenant/file scoped;
+    // strict LID owns the only verified global promotion path.
     if (!fileScoped) {
       try {
         await shareFileTracks(
@@ -10150,24 +10319,31 @@ const CRAWL_VIEWER_GRACE_MS = boundedInt(Deno.env.get("NORVA_CRAWL_VIEWER_GRACE_
 // gateway's residential proxy IP, a relay probe from Cloudflare, and the provider's single-IP panel
 // ("user_multi_ip") then 429s one of them. Enrichment resumes a few minutes after playback stops.
 async function userHasLiveSession(db: SupabaseClient, userId: string): Promise<boolean> {
-  if (!userId) return false;
-  // OFF => original 4-min window (byte-identical). ON => widened grace tail.
-  const windowMs = CRAWL_YIELD_TO_VIEWERS ? Math.max(4 * 60 * 1000, CRAWL_VIEWER_GRACE_MS) : 4 * 60 * 1000;
-  const sinceIso = new Date(Date.now() - windowMs).toISOString();
-  const { data: ev } = await db.from("cloud_playback_events")
-    .select("id").eq("user_id", userId).gt("created_at", sinceIso).limit(1);
-  if (ev && ev.length) return true;
-  // Steady playback emits NO event between first_frame and pause/ended, and the session rows are
-  // rotated/expired within seconds of start — both signals go dark ~4 min into every real viewing
-  // (proven 2026-07-04: a pregen ffmpeg opened the account's 2nd provider connection at 08:11
-  // while watch-history was still bumping at 08:13). The watch-progress save (every 10 s while
-  // actually playing) IS the live heartbeat, so read it here.
-  const { data: hist } = await db.from("cloud_watch_history")
-    .select("id").eq("user_id", userId).gt("updated_at", sinceIso).limit(1);
-  if (hist && hist.length) return true;
-  const { data: sess } = await db.from("cloud_playback_sessions")
-    .select("id").eq("user_id", userId).eq("status", "ready").gt("expires_at", new Date().toISOString()).limit(1);
-  return Boolean(sess && sess.length);
+  if (!userId) return true;
+  try {
+    // OFF => original 4-min window (byte-identical). ON => widened grace tail.
+    const windowMs = CRAWL_YIELD_TO_VIEWERS ? Math.max(4 * 60 * 1000, CRAWL_VIEWER_GRACE_MS) : 4 * 60 * 1000;
+    const sinceIso = new Date(Date.now() - windowMs).toISOString();
+    const { data: ev, error: evError } = await db.from("cloud_playback_events")
+      .select("id").eq("user_id", userId).gt("created_at", sinceIso).limit(1);
+    if (evError) return true;
+    if (ev && ev.length) return true;
+    // Steady playback emits NO event between first_frame and pause/ended, and the session rows are
+    // rotated/expired within seconds of start — both signals go dark ~4 min into every real viewing
+    // (proven 2026-07-04: a pregen ffmpeg opened the account's 2nd provider connection at 08:11
+    // while watch-history was still bumping at 08:13). The watch-progress save (every 10 s while
+    // actually playing) IS the live heartbeat, so read it here.
+    const { data: hist, error: histError } = await db.from("cloud_watch_history")
+      .select("id").eq("user_id", userId).gt("updated_at", sinceIso).limit(1);
+    if (histError) return true;
+    if (hist && hist.length) return true;
+    const { data: sess, error: sessError } = await db.from("cloud_playback_sessions")
+      .select("id").eq("user_id", userId).eq("status", "ready").gt("expires_at", new Date().toISOString()).limit(1);
+    if (sessError) return true;
+    return Boolean(sess && sess.length);
+  } catch (_) {
+    return true;
+  }
 }
 
 // Crons ↔ pregen coordination (subtitle-failures audit, fix #3). Two independent directions:
@@ -10657,20 +10833,31 @@ function sanitizeLidBenchmarkResult(payload: JsonRecord): JsonRecord {
   };
 }
 
-async function assertProviderProbeCircuitClosedStrict(
+async function readProviderProbeCircuitStateStrict(
   db: SupabaseClient,
   identityKey: string,
-) {
+): Promise<{ open: boolean; openUntil: string | null }> {
   if (!identityKey) throw new HttpError(422, "Provider identity is unavailable");
   const { data, error } = await db.rpc("provider_probe_circuit_state", {
     p_identity_key: identityKey,
   });
   if (error) throwDb(error, "Unable to verify provider probe availability");
   const state = (Array.isArray(data) ? data[0] : data) as JsonRecord | null;
-  if (state?.open !== true) return;
+  return {
+    open: state?.open === true,
+    openUntil: stringOrNull(state?.open_until),
+  };
+}
+
+async function assertProviderProbeCircuitClosedStrict(
+  db: SupabaseClient,
+  identityKey: string,
+) {
+  const state = await readProviderProbeCircuitStateStrict(db, identityKey);
+  if (!state.open) return;
   throw new HttpError(409, "Provider probe circuit is open", {
     code: "PROVIDER_PROBE_CIRCUIT_OPEN",
-    openUntil: stringOrNull(state.open_until),
+    openUntil: state.openUntil,
   });
 }
 
@@ -10765,11 +10952,19 @@ async function runCodecProfileBackfill(
     if (!targetUrl) throw new HttpError(404, "Playback target unavailable");
     const providerAccountHash = await providerAccountHashFromUrl(targetUrl);
 
-    const persistTrackMaps = async (profileValue: unknown) => {
+    const persistTrackMaps = async (
+      profileValue: unknown,
+      audioMarker: unknown,
+      subtitleMarker: unknown,
+    ) => {
       const rawProfile = recordOrEmpty(profileValue);
-      const hasAudioMap = Array.isArray(rawProfile.audioTracks ?? rawProfile.audio_tracks);
-      const hasSubtitleMap = Array.isArray(
-        rawProfile.subtitles ?? rawProfile.subtitleTracks ?? rawProfile.subtitle_tracks,
+      const hasAudioMap = authoritativeProbeFacetComplete(
+        audioMarker,
+        Array.isArray(rawProfile.audioTracks ?? rawProfile.audio_tracks),
+      );
+      const hasSubtitleMap = authoritativeProbeFacetComplete(
+        subtitleMarker,
+        Array.isArray(rawProfile.subtitles ?? rawProfile.subtitleTracks ?? rawProfile.subtitle_tracks),
       );
       if (!hasAudioMap && !hasSubtitleMap) {
         throw new HttpError(502, "Media gateway omitted exact-file track maps");
@@ -10791,6 +10986,7 @@ async function runCodecProfileBackfill(
           subtitleType: stringOrNull(track.subtitleType ?? track.subtitle_type),
           extractable: booleanOrNull(track.extractable),
           forced: booleanOrNull(track.forced),
+          default: booleanOrNull(track.default),
         }));
       const tracksPersisted = await shareFileTracks(
         db,
@@ -10823,6 +11019,7 @@ async function runCodecProfileBackfill(
       break;
     }
 
+    let releaseLeaseOnExit = true;
     try {
       const raceBlock = await episodeBackgroundBlockReason(db, userId, targetUrl);
       if (raceBlock) {
@@ -10886,6 +11083,11 @@ async function runCodecProfileBackfill(
           code: providerCode || "gateway_probe_failed",
         });
       }
+      if (!acceptGatewayProviderDrain(info, () => { releaseLeaseOnExit = false; })) {
+        stopped = "provider-drain-unattested";
+        results.push({ variantId, status: "deferred", code: stopped });
+        break;
+      }
 
       const observedProfile = recordOrEmpty(info.codecProfile ?? info.codec_profile);
       if (!hasReliableVodCodecProfile(observedProfile)) {
@@ -10904,11 +11106,17 @@ async function runCodecProfileBackfill(
         variantId,
         strict: true,
       });
-      await persistTrackMaps(observedProfile);
+      await persistTrackMaps(
+        observedProfile,
+        info.audioProbeComplete,
+        info.subtitleProbeComplete,
+      );
       persisted += 1;
       results.push({ variantId, status: "persisted" });
     } finally {
-      await releaseProviderFileProbe(db, identityKey, leaseOwner);
+      if (releaseLeaseOnExit) {
+        await releaseProviderFileProbe(db, identityKey, leaseOwner);
+      }
     }
   }
 
@@ -11339,21 +11547,10 @@ async function episodeProbeCircuitState(
   db: SupabaseClient,
   providerIdentityKey: string,
 ): Promise<{ open: boolean; openUntil: string | null }> {
-  try {
-    const { data, error } = await db.rpc("provider_probe_circuit_state", {
-      p_identity_key: providerIdentityKey,
-    });
-    if (error) return { open: false, openUntil: null };
-    const state = (Array.isArray(data) ? data[0] : data) as JsonRecord | null;
-    return {
-      open: state?.open === true,
-      openUntil: stringOrNull(state?.open_until),
-    };
-  } catch (_) {
-    // Fail open on bookkeeping unavailability. Viewer/account/lease guards
-    // remain authoritative and no circuit read failure may strand the fleet.
-    return { open: false, openUntil: null };
-  }
+  // This guard sits immediately before provider I/O. An unavailable circuit
+  // read is not evidence that the provider is safe, so let the typed DB error
+  // abort the request before a URL is fetched or an extraction lease is used.
+  return await readProviderProbeCircuitStateStrict(db, providerIdentityKey);
 }
 
 async function episodeProbeRetryBlocked(
@@ -11643,6 +11840,7 @@ async function runEpisodeAudioBackfill(
       skipped = "provider-lease-busy";
       break;
     }
+    let releaseLeaseOnExit = true;
     try {
       const raceBlock = await episodeBackgroundBlockReason(db, userId, targetUrl);
       if (raceBlock) {
@@ -11741,9 +11939,27 @@ async function runEpisodeAudioBackfill(
           }
           continue;
         }
+        if (!acceptGatewayProviderDrain(info, () => { releaseLeaseOnExit = false; })) {
+          await recordEpisodeProbeOutcome(db, {
+            userId,
+            sourceId,
+            variantId,
+            episodeId,
+            success: false,
+            status: 502,
+            code: "provider_drain_unattested",
+          });
+          deferred += 1;
+          skipped = "provider-drain-unattested";
+          break;
+        }
         probeHealthOk += 1;
         const audioTracks = episodeAudioTracks(info.audioTracks);
-        if (!audioTracks.length) {
+        const audioProbeComplete = authoritativeProbeFacetComplete(
+          info.audioProbeComplete,
+          audioTracks.length > 0,
+        );
+        if (!audioProbeComplete || !audioTracks.length) {
           await recordEpisodeProbeOutcome(db, {
             userId,
             sourceId,
@@ -11765,8 +11981,13 @@ async function runEpisodeAudioBackfill(
               || (track?.extractable ? "text" : "image"),
             extractable: track?.extractable === true,
             forced: track?.forced === true,
+            default: track?.default === true,
           }))
           .filter((track) => Number.isInteger(track.index));
+        const subtitleProbeComplete = authoritativeProbeFacetComplete(
+          info.subtitleProbeComplete,
+          audioProbeComplete || subtitles.length > 0,
+        );
         const stored = await shareFileTracks(
           db,
           sourceIdentity.key,
@@ -11774,8 +11995,8 @@ async function runEpisodeAudioBackfill(
           episodeId,
           audioTracks,
           subtitles,
-          true,
-          true,
+          audioProbeComplete,
+          subtitleProbeComplete,
         );
         processed += 1;
         if (stored) {
@@ -11884,7 +12105,9 @@ async function runEpisodeAudioBackfill(
       }
       failed += 1;
     } finally {
-      await releaseProviderFileProbe(db, sourceIdentity.key, leaseOwner);
+      if (releaseLeaseOnExit) {
+        await releaseProviderFileProbe(db, sourceIdentity.key, leaseOwner);
+      }
     }
   }
   if (mode === "probe" && (probeHealthOk > 0 || probeHealthBanish > 0)) {
@@ -12263,7 +12486,7 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
           // viewer/device on this account before starting the extraction. Skip (not fail) when busy.
           if (body.ignoreLiveSession !== true) {
             const ak = providerAccountKeyFromUrl(targetUrl);
-            if (ak) { try { const { data: b } = await db.rpc("provider_account_busy", { p_key: ak }); if (b === true) continue; } catch (_) { /* fail-open */ } }
+            if (await providerAccountBusyForCrawler(db, ak)) continue;
           }
           const tracks = ((t.audio_tracks as JsonRecord[]) || [])
             .map((x) => ({
@@ -12403,12 +12626,7 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
         if (!targetUrl) return;
         if (body.ignoreLiveSession !== true) {
           const accountKey = providerAccountKeyFromUrl(targetUrl);
-          if (accountKey) {
-            try {
-              const { data: busy } = await db.rpc("provider_account_busy", { p_key: accountKey });
-              if (busy === true) return;
-            } catch (_) { /* fail-open */ }
-          }
+          if (await providerAccountBusyForCrawler(db, accountKey)) return;
         }
         let footprint = footprintBySource.get(variantSourceId);
         if (footprint === undefined) {
@@ -12423,7 +12641,11 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
         const identityKey = (await resolveSourceIdentity(variantSourceId, userId, db)).key;
         // Up to five sequential 90s language detections can run for one file.
         // Keep the distributed lease longer than that worst-case provider hold.
-        if (!await claimProviderFileProbe(db, identityKey, whisperLeaseOwner, 600)) return;
+        const candidateLeaseOwner = newProviderProbeLeaseOwner(
+          whisperLeaseOwner,
+          variantId || titleId,
+        );
+        if (!await claimProviderFileProbe(db, identityKey, candidateLeaseOwner, 600)) return;
         if (footprint?.lowFootprint) {
           footprintHitsThisTick.set(
             footprint.identityKey,
@@ -12467,7 +12689,7 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
             } catch (_) { /* best-effort budget accounting */ }
           }
         } finally {
-          await releaseProviderFileProbe(db, identityKey, whisperLeaseOwner);
+          await releaseProviderFileProbe(db, identityKey, candidateLeaseOwner);
         }
         if (audioTracks.filter((x) => x.lang).length > before) detected += 1;
       } catch (_) { /* best-effort per title */ }
@@ -12510,19 +12732,28 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
   // auth/rate/5xx rejections, its breaker is OPEN — skip the whole tick so we stop hammering a
   // provider that's actively refusing us (persistent failed auth only deepens an IPTV ban). The
   // `skipped` return stops the fallthrough chain (every dimension is the same identity) and does
-  // not mark the panel exhausted. Fail-open: a breaker read error must never halt probing.
+  // not mark the panel exhausted. The read is fail-closed: an unavailable breaker cannot authorize
+  // a provider connection whose ban/cooldown state is unknown.
   let probeIdentityKey = "";
   if (sourceId && mode === "probe") {
     try {
       probeIdentityKey = (await resolveSourceIdentity(sourceId, userId, db)).key || "";
       if (probeIdentityKey) {
-        const { data: cbState } = await db.rpc("provider_probe_circuit_state", { p_identity_key: probeIdentityKey });
-        const cb = (Array.isArray(cbState) ? cbState[0] : cbState) as JsonRecord | null;
-        if (cb?.open === true) {
-          return { mode, updated: 0, processed: 0, skipped: "circuit_open", identityKey: probeIdentityKey, openUntil: cb.open_until ?? null };
+        const cb = await readProviderProbeCircuitStateStrict(db, probeIdentityKey);
+        if (cb.open) {
+          return { mode, updated: 0, processed: 0, skipped: "circuit_open", identityKey: probeIdentityKey, openUntil: cb.openUntil };
         }
       }
-    } catch (_) { /* fail-open: never let the breaker read stop the crawl */ }
+    } catch (_) {
+      return {
+        mode,
+        updated: 0,
+        processed: 0,
+        skipped: "provider-guard-unavailable",
+        identityKey: probeIdentityKey || null,
+        hasMore: true,
+      };
+    }
   }
 
   // untaggedOnly = titles with NO version tag (e.g. plain French films). These carry no
@@ -12649,14 +12880,15 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
     relayEmpty: 0, noLang: 0, exception: 0, footprintCapped: 0,
     accountBusy: 0, cacheHydrated: 0, identityBusy: 0, circuitOpen: 0,
     persistenceFailed: 0, providerBusy: 0, proxyAuthFailed: 0,
+    circuitUnavailable: 0,
   };
   // Circuit-breaker tallies for this tick: cbOk = provider served us at least once; cbBanish =
   // auth/rate/5xx rejections. Recorded once at the end of the tick (see below).
   let cbOk = 0;
   let cbBanish = 0;
   const probeHealthByIdentity = new Map<string, { ok: number; banish: number }>();
-  const circuitOpenByIdentity = new Map<string, boolean>();
   const providerProbeTickGuard = createProviderProbeTickGuard();
+  const providerIdentitySerialQueue = createProviderIdentitySerialQueue();
   let sample: JsonRecord | null = null;
   const lastId = String(titles[titles.length - 1].id);
 
@@ -12683,17 +12915,18 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
   // from the source config (DB-only, no provider hit); key mirrors provider_account_touch_by_source
   // (lower host + '/' + raw username). Skipped (not stamped, not counted as work) so the exhausted
   // mark and the fallthrough chain treat it as a no-op. Account-wide ticks (no sourceId — crons
-  // 10/36, movie-type, DB-only resolution) fall through to the per-title gate below. Fail-open.
+  // 10/36, movie-type, DB-only resolution) fall through to the per-title gate below. Fail-closed.
   if (sourceId && body.ignoreLiveSession !== true) {
     try {
       const sc = await loadSourceConfig(sourceId, userId, db);
       const host = sc?.serverUrl ? new URL(normalizeBaseUrl(String(sc.serverUrl))).host : "";
       const key = host && sc?.username ? host + "/" + String(sc.username) : "";
-      if (key) {
-        const { data } = await db.rpc("provider_account_busy", { p_key: key });
-        if (data === true) return { mode, processed: 0, updated: 0, skipped: "account-busy", sourceId, lastId: afterId, hasMore: true };
+      if (await providerAccountBusyForCrawler(db, key)) {
+        return { mode, processed: 0, updated: 0, skipped: "account-busy", sourceId, lastId: afterId, hasMore: true };
       }
-    } catch (_) { /* fail-open: never let the lock read halt the crawl */ }
+    } catch (_) {
+      return { mode, processed: 0, updated: 0, skipped: "provider-guard-unavailable", sourceId, lastId: afterId, hasMore: true };
+    }
   }
 
   // Account busy-lock READER (2026-07-10 458 incident): before ANY provider hit (relay header
@@ -12701,22 +12934,19 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
   // when a human is watching the same account), consult provider_account_activity. Keyed per
   // TITLE's target URL so account-wide ticks (no sourceId — e.g. cron 36) are covered per panel,
   // not per user. Cached in-tick for 20s per key: fresh enough to catch a viewer who starts
-  // mid-tick, cheap enough to add ~1 read per 20s per account. Fail-open: an RPC error must
-  // never halt the crawl (busy=false). Skipped titles are NOT stamped → retried next tick.
+  // mid-tick, cheap enough to add ~1 read per 20s per account. Fail-closed: an RPC error or
+  // unresolved account key defers new I/O. Skipped titles are NOT stamped → retried next tick.
   const accountBusyCache = new Map<string, { busy: boolean; at: number }>();
   // 10s: short enough that a probe stops STARTING within ~10s of a viewer's first touch (keeps
   // the worst-case slot-contention window under the web VOD retry budget), cheap enough to add
   // at most ~1 indexed RPC read per account per 10s of a tick.
   const ACCOUNT_BUSY_CACHE_MS = 10_000;
   const accountBusyCached = async (accountKey: string): Promise<boolean> => {
+    if (!accountKey) return true;
     const now = Date.now();
     const hit = accountBusyCache.get(accountKey);
     if (hit && (now - hit.at) < ACCOUNT_BUSY_CACHE_MS) return hit.busy;
-    let busy = false;
-    try {
-      const { data } = await db.rpc("provider_account_busy", { p_key: accountKey });
-      busy = data === true;
-    } catch (_) { /* fail-open */ }
+    const busy = await providerAccountBusyForCrawler(db, accountKey);
     accountBusyCache.set(accountKey, { busy, at: now });
     return busy;
   };
@@ -12743,7 +12973,6 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
 
     if (terminalCode === "provider_busy") {
       diag.providerBusy++;
-      if (candidateIdentityKey) circuitOpenByIdentity.set(candidateIdentityKey, true);
       // This is trusted Gateway/Relay evidence, not a client report: open the
       // server-owned playback circuit immediately and stop this account's tick.
       const providerAccountHash = await providerAccountHashFromUrl(targetUrl);
@@ -12817,6 +13046,29 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
         } catch (_) { /* cache miss/unavailable => probe normally */ }
       }
 
+      const candidateIdentityKey = await resolveCandidateProviderIdentityKey(
+        db,
+        sourceId,
+        userId,
+        probeIdentityKey,
+      );
+      if (!candidateIdentityKey) {
+        diag.identityBusy++;
+        return;
+      }
+      const itemProbeLeaseOwner = newProviderProbeLeaseOwner(
+        probeLeaseOwner,
+        stringOr(variant.id, "candidate"),
+      );
+      const guardedOutcome = await providerIdentitySerialQueue(
+        candidateIdentityKey,
+        () => runProviderProbeWithLease(
+          db,
+          candidateIdentityKey,
+          itemProbeLeaseOwner,
+          150,
+          async (leaseControl) => {
+
       // Series have no directly-streamable id (provider 406s on a series id) — resolve a
       // representative episode first. A series' audio is consistent across episodes.
       let targetUrl: string | null;
@@ -12858,34 +13110,12 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
       // (ignoreLiveSession), which crons never send.
       if (body.ignoreLiveSession !== true) {
         const accountKey = providerAccountKeyFromUrl(targetUrl);
-        if (accountKey && await accountBusyCached(accountKey)) {
+        if (await accountBusyCached(accountKey)) {
           diag.accountBusy++;
           return;
         }
       }
 
-      const candidateIdentityKey = mode === "probe"
-        ? (probeIdentityKey || (await resolveSourceIdentity(sourceId, userId, db)).key)
-        : "";
-      if (mode === "probe" && !probeIdentityKey && candidateIdentityKey) {
-        let circuitOpen = circuitOpenByIdentity.get(candidateIdentityKey);
-        if (circuitOpen === undefined) {
-          try {
-            const { data: state } = await db.rpc("provider_probe_circuit_state", {
-              p_identity_key: candidateIdentityKey,
-            });
-            const row = (Array.isArray(state) ? state[0] : state) as JsonRecord | null;
-            circuitOpen = row?.open === true;
-          } catch (_) {
-            circuitOpen = false;
-          }
-          circuitOpenByIdentity.set(candidateIdentityKey, circuitOpen);
-        }
-        if (circuitOpen) {
-          diag.circuitOpen++;
-          return;
-        }
-      }
       let candidateFootprint = footprint;
       if (!candidateFootprint && mode === "probe") {
         candidateFootprint = footprintByCandidateSource.get(sourceId) ?? null;
@@ -12915,12 +13145,6 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
         if (blockedCode === "provider_busy") diag.providerBusy++;
         else if (blockedCode === "proxy_auth_failed") diag.proxyAuthFailed++;
         else diag.identityBusy++;
-        return;
-      }
-      const itemProbeLeaseOwner = `${probeLeaseOwner}:${stringOr(variant.id, crypto.randomUUID())}`;
-      if (!await claimProviderFileProbe(db, candidateIdentityKey, itemProbeLeaseOwner)) {
-        providerProbeTickGuard.leave(providerAccountKey);
-        diag.identityBusy++;
         return;
       }
       if (candidateFootprint?.lowFootprint) {
@@ -12977,6 +13201,14 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
               diag.relayNotOk++;
               if (isBanishStatus(gw.status)) noteProbeHealth(false);
               if (debug && !sample) sample = { stage: `${stage}NotOk`, status: gw.status, host: new URL(targetUrl).host };
+              return null;
+            }
+            if (!acceptGatewayProviderDrain(gatewayInfo, leaseControl.retainUntilExpiry)) {
+              diag.relayNotOk++;
+              noteProbeHealth(false);
+              if (debug && !sample) {
+                sample = { stage: `${stage}DrainUnattested`, status: gw.status };
+              }
               return null;
             }
             const observedProfile = recordOrEmpty(gatewayInfo.codecProfile ?? gatewayInfo.codec_profile);
@@ -13059,12 +13291,17 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
           const relayAudioTracks = Array.isArray(relayInfo.audioTracks)
             ? relayInfo.audioTracks
             : [];
-          const relayAudioComplete = relayInfo.audioProbeComplete === true || relayAudioTracks.length > 0;
+          const relayAudioComplete = authoritativeProbeFacetComplete(
+            relayInfo.audioProbeComplete,
+            relayAudioTracks.length > 0,
+          );
           const relaySubtitleTracks = Array.isArray(relayInfo.subtitles)
             ? relayInfo.subtitles
             : [];
-          const relaySubtitleComplete = relayInfo.subtitleProbeComplete === true ||
-            relayAudioComplete || relaySubtitleTracks.length > 0;
+          const relaySubtitleComplete = authoritativeProbeFacetComplete(
+            relayInfo.subtitleProbeComplete,
+            relayAudioComplete || relaySubtitleTracks.length > 0,
+          );
           if (mode === "probe" && gatewayConfigured && !relayAudioComplete) {
             // The relay request is fully consumed before this fallback begins.
             // Give provider-side connection accounting its normal release grace,
@@ -13086,9 +13323,14 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
               const gatewaySubtitleTracks = Array.isArray(gatewayFallback.subtitles)
                 ? gatewayFallback.subtitles
                 : [];
-              const gatewaySubtitleComplete = gatewayFallback.subtitleProbeComplete === true ||
-                gatewayFallback.audioProbeComplete === true ||
-                gatewayAudioTracks.length > 0 || gatewaySubtitleTracks.length > 0;
+              const gatewayAudioComplete = authoritativeProbeFacetComplete(
+                gatewayFallback.audioProbeComplete,
+                gatewayAudioTracks.length > 0,
+              );
+              const gatewaySubtitleComplete = authoritativeProbeFacetComplete(
+                gatewayFallback.subtitleProbeComplete,
+                gatewayAudioComplete || gatewaySubtitleTracks.length > 0,
+              );
               // Prefer the full ffprobe facet whenever it is authoritative. A
               // partial 200 response may still carry useful audio metadata; in
               // that case retain the already-complete relay subtitle facet.
@@ -13123,6 +13365,7 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
               subtitleType: stringOrNull(s?.subtitleType) || (s?.extractable ? "text" : "image"),
               extractable: s?.extractable === true,
               forced: s?.forced === true,
+              default: s?.default === true,
             }))
             .filter((s) => Number.isInteger(s.index))
         : [];
@@ -13141,19 +13384,21 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
         ? info.audioTracks as JsonRecord[]
         : [];
       const audioProbeComplete = mode === "probe"
-        ? info?.audioProbeComplete === true || orderedTracks.length > 0
+        ? authoritativeProbeFacetComplete(info?.audioProbeComplete, orderedTracks.length > 0)
         : vodTracks.length > 0;
       // Backward compatibility: pre-marker relay/gateway responses with an
       // audio map necessarily parsed the whole stream table. A subtitle-only
       // map is retained independently but can never validate audio.
-      const subtitleProbeComplete = mode === "probe" && (
-        info?.subtitleProbeComplete === true ||
-        audioProbeComplete ||
-        orderedSubtitles.length > 0
-      );
-      const subtitleFields: JsonRecord = subtitleProbeComplete
-        ? { subtitle_tracks: orderedSubtitles, subtitle_probed_at: new Date().toISOString() }
-        : {};
+      const subtitleObservation = mode === "probe"
+        ? subtitleProbeObservation(
+          info?.subtitleProbeComplete,
+          audioProbeComplete || orderedSubtitles.length > 0,
+          orderedSubtitles,
+          new Date().toISOString(),
+        )
+        : { complete: false, fields: {} as JsonRecord };
+      const subtitleProbeComplete = subtitleObservation.complete;
+      const subtitleFields: JsonRecord = subtitleObservation.fields;
 
       const codes = new Set<string>();
       if (mode === "probe") {
@@ -13290,9 +13535,14 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
         );
       }
       } finally {
-        await releaseProviderFileProbe(db, candidateIdentityKey, itemProbeLeaseOwner);
         providerProbeTickGuard.leave(providerAccountKey);
       }
+          },
+        ),
+      );
+      if (guardedOutcome.status === "lease-busy") diag.identityBusy++;
+      else if (guardedOutcome.status === "guard-unavailable") diag.circuitUnavailable++;
+      else if (guardedOutcome.status === "circuit-open") diag.circuitOpen++;
     } catch (e) {
       diag.exception++;
       if (debug && !sample) sample = { stage: "exception", error: String(e).slice(0, 200) };
@@ -13347,6 +13597,9 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
   // progress. hasMore keeps the cursor so the same titles are retried once the viewer stops.
   if (diag.accountBusy > 0 && updated === 0 && cbOk === 0 && cbBanish === 0) {
     return { mode, processed: 0, updated: 0, diag, skipped: "account-busy", lastId: afterId, hasMore: true };
+  }
+  if (diag.circuitUnavailable > 0 && updated === 0 && cbOk === 0 && cbBanish === 0) {
+    return { mode, processed: 0, updated: 0, diag, skipped: "provider-guard-unavailable", lastId: afterId, hasMore: true };
   }
   if (diag.identityBusy > 0 && updated === 0 && cbOk === 0 && cbBanish === 0) {
     return { mode, processed: 0, updated: 0, diag, skipped: "identity-busy", lastId: afterId, hasMore: true };

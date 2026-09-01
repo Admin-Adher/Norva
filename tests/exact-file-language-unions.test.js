@@ -5,7 +5,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const ROOT = path.join(__dirname, '..');
-const read = (file) => fs.readFileSync(path.join(ROOT, file), 'utf8');
+const read = (file) => fs.readFileSync(path.join(ROOT, file), 'utf8').replace(/\r\n?/g, '\n');
 const between = (source, start, end) => {
   const from = source.indexOf(start);
   assert.notStrictEqual(from, -1, `missing start anchor: ${start}`);
@@ -14,7 +14,7 @@ const between = (source, start, end) => {
   return source.slice(from, to);
 };
 
-test('Watch reports only a complete exact-file audio map', () => {
+test('Watch reports only complete exact-file audio/subtitle maps', () => {
   const watch = read('public/js/pages/WatchPage.js');
   const report = between(
     watch,
@@ -23,14 +23,16 @@ test('Watch reports only a complete exact-file audio map', () => {
   );
 
   assert.ok(report.includes('Array.isArray(this._relayAudioTracks)'));
-  assert.ok(report.includes('if (!orderedTracks.length) return;'));
+  assert.ok(report.includes('if (!hasExactAudioMap && !hasExactSubtitleMap) return;'));
   assert.ok(report.includes("audioTracksScope: 'file'"));
   assert.ok(report.includes('audioTracks: orderedTracks'));
+  assert.ok(report.includes("subtitleTracksScope: 'file'"));
+  assert.ok(report.includes('subtitleTracks: orderedSubtitleTracks'));
   assert.ok(!report.includes('const codes = new Set()'));
   assert.ok(!report.includes('content?.audioLanguages'));
   assert.ok(!report.includes('content?.audio_languages'));
   assert.ok(!report.includes('cloudAudioInfo.language'));
-  assert.ok(!report.includes('audio:'));
+  assert.ok(!report.includes('\n                audio:'));
   assert.ok(report.includes('this._observedLangsPending === key'));
   assert.ok(report.includes(
     'result?.ok === true && result?.updated === true && result?.exact === true',
@@ -98,11 +100,326 @@ test('Watch retries exact-file reporting until the server confirms a persisted u
   }
 
   assert.equal(calls, 3);
-  assert.match(page._observedLangsSent, /movie-42:1:fr\|2:ja$/);
+  assert.match(page._observedLangsSent, /movie-42:audio:1:fr\|2:ja:subtitles:-$/);
 
   page.reportObservedAudioLanguages();
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(calls, 3, 'a confirmed exact update is sent only once');
+});
+
+test('Watch persists an explicitly complete empty subtitle map without manufacturing audio', async () => {
+  const watch = read('public/js/pages/WatchPage.js');
+  const context = {
+    window: {},
+    console,
+    setTimeout,
+    clearTimeout,
+    setInterval,
+    clearInterval,
+    URL,
+    Promise,
+  };
+  vm.runInNewContext(watch, context, { filename: 'public/js/pages/WatchPage.js' });
+
+  const payloads = [];
+  context.window.API = {
+    isCloudMode: () => true,
+    media: {
+      reportObservedLanguages: async (payload) => {
+        payloads.push(payload);
+        return { ok: true, updated: true, exact: true };
+      },
+    },
+  };
+  const page = Object.create(context.window.WatchPage.prototype);
+  Object.assign(page, {
+    content: {
+      cloudSourceId: '22222222-2222-4222-8222-222222222222',
+      externalId: 'movie-no-subs',
+      type: 'movie',
+    },
+    _relayAudioTracks: null,
+  });
+
+  assert.equal(page.captureExactSubtitleTrackMap([], {}), false);
+  page.reportObservedAudioLanguages();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(payloads.length, 0, 'an unproven empty list is not file evidence');
+
+  assert.equal(page.captureExactSubtitleTrackMap([], { subtitleProbeComplete: true }), true);
+  page.reportObservedAudioLanguages();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(payloads.length, 1);
+  assert.deepEqual(JSON.parse(JSON.stringify(payloads[0].subtitleTracks)), []);
+  assert.equal(payloads[0].subtitleTracksScope, 'file');
+  assert.equal(Object.hasOwn(payloads[0], 'audioTracks'), false);
+  assert.equal(Object.hasOwn(payloads[0], 'audioTracksScope'), false);
+});
+
+test('Watch treats a successful gateway subtitle enumeration as exact file evidence', async () => {
+  const watch = read('public/js/pages/WatchPage.js');
+  let requestedUrl = null;
+  const context = {
+    window: {},
+    console,
+    setTimeout,
+    clearTimeout,
+    setInterval,
+    clearInterval,
+    URL,
+    Promise,
+    fetch: async (url) => {
+      requestedUrl = url;
+      return {
+        ok: true,
+        json: async () => ({
+          // This is the production gateway shape: it intentionally has no
+          // subtitleProbeComplete/subtitleTracksScope compatibility fields.
+          subtitles: [{ index: 7, language: 'fr', codec: 'subrip', extractable: true }],
+          audioTracks: [],
+        }),
+      };
+    },
+  };
+  vm.runInNewContext(watch, context, { filename: 'public/js/pages/WatchPage.js' });
+
+  let payload = null;
+  context.window.API = {
+    isCloudMode: () => true,
+    media: {
+      reportObservedLanguages: async (value) => {
+        payload = value;
+        return { ok: true, updated: true, exact: true };
+      },
+    },
+  };
+  const page = Object.create(context.window.WatchPage.prototype);
+  Object.assign(page, {
+    content: {
+      cloudSourceId: '22222222-2222-4222-8222-222222222222',
+      externalId: 'movie-engine-subs',
+      type: 'movie',
+    },
+    contentType: 'movie',
+    baseStreamUrl: 'https://gateway.example/raw/playback-token',
+    _playbackAttemptId: 'attempt-1',
+    _relayAudioTracks: null,
+    norvaEngine: {
+      subtitleStreams: () => [7],
+      audioStreamIndices: () => [],
+    },
+    isStalePlaybackAttempt: () => false,
+    normalizeTrackLanguage: (language) => language,
+    updateCaptionsTracks: () => {},
+  });
+
+  await page.enrichEngineSubtitleTracks();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(requestedUrl, 'https://gateway.example/subtitle/playback-token');
+  assert.equal(page._observedSubtitleProbeComplete, true);
+  assert.deepEqual(JSON.parse(JSON.stringify(payload.subtitleTracks)), [{
+    index: 7,
+    lang: 'fr',
+    codec: 'subrip',
+    subtitleType: 'text',
+    extractable: true,
+    forced: false,
+    default: false,
+  }]);
+  assert.equal(payload.subtitleTracksScope, 'file');
+});
+
+test('Watch episode handoffs preserve cloud title and exact file coordinates', async () => {
+  const watch = read('public/js/pages/WatchPage.js');
+  const context = {
+    window: {},
+    console,
+    setTimeout,
+    clearTimeout,
+    setInterval,
+    clearInterval,
+    URL,
+    Promise,
+    MediaUtils: {
+      playbackHintFromItem: () => ({}),
+    },
+  };
+  vm.runInNewContext(watch, context, { filename: 'public/js/pages/WatchPage.js' });
+
+  const played = [];
+  const reports = [];
+  context.window.API = {
+    isCloudMode: () => true,
+    media: {
+      reportObservedLanguages: async (payload) => {
+        reports.push(payload);
+        return { ok: true, updated: true, exact: true };
+      },
+    },
+  };
+  const page = Object.create(context.window.WatchPage.prototype);
+  Object.assign(page, {
+    content: {
+      sourceId: 'provider-local-id',
+      cloud_source_id: '22222222-2222-4222-8222-222222222222',
+      title_id: '11111111-1111-4111-8111-111111111111',
+      series_id: 'series-9',
+      title: 'Series title',
+    },
+    seriesInfo: { episodes: {} },
+    findEpisodeById: (id) => ({ id, container_extension: 'mkv' }),
+    getPlaybackPreferences: () => ({}),
+    applyPlaybackPreferencesToHint: (hint) => hint,
+    play: async function play(content) {
+      played.push(content);
+      this.content = content;
+    },
+  });
+  const episodeEl = {
+    dataset: {
+      episodeId: 'episode-list',
+      season: '1',
+      episode: '2',
+      container: 'mkv',
+    },
+    querySelector: () => ({ textContent: 'Second episode' }),
+  };
+
+  await page.playEpisodeFromList(episodeEl);
+  await page.playEpisode({
+    id: 'episode-next',
+    seasonNum: 1,
+    episode_num: 3,
+    title: 'Third episode',
+    container_extension: 'mkv',
+  });
+
+  assert.equal(played.length, 2);
+  for (const [content, externalId] of [
+    [played[0], 'episode-list'],
+    [played[1], 'episode-next'],
+  ]) {
+    assert.equal(content.cloudSourceId, '22222222-2222-4222-8222-222222222222');
+    assert.equal(content.titleId, '11111111-1111-4111-8111-111111111111');
+    assert.equal(content.type, 'series');
+    assert.equal(content.externalId, externalId);
+    assert.equal(content.parentExternalId, 'series-9');
+
+    page.content = content;
+    page.resetObservedTrackPersistenceState();
+    page._relayAudioTracks = [{ index: 1, lang: 'fr' }];
+    page.reportObservedAudioLanguages();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+
+  assert.equal(reports.length, 2, 'both real handoff shapes remain eligible for exact reporting');
+  assert.deepEqual(reports.map((payload) => ({
+    titleId: payload.titleId,
+    cloudSourceId: payload.cloudSourceId,
+    itemType: payload.itemType,
+    externalId: payload.externalId,
+    parentExternalId: payload.parentExternalId,
+  })), [
+    {
+      titleId: '11111111-1111-4111-8111-111111111111',
+      cloudSourceId: '22222222-2222-4222-8222-222222222222',
+      itemType: 'series',
+      externalId: 'episode-list',
+      parentExternalId: 'series-9',
+    },
+    {
+      titleId: '11111111-1111-4111-8111-111111111111',
+      cloudSourceId: '22222222-2222-4222-8222-222222222222',
+      itemType: 'series',
+      externalId: 'episode-next',
+      parentExternalId: 'series-9',
+    },
+  ]);
+});
+
+test('Watch combines independently proven audio and subtitle maps and completes series coordinates', async () => {
+  const watch = read('public/js/pages/WatchPage.js');
+  const context = {
+    window: {},
+    console,
+    setTimeout,
+    clearTimeout,
+    setInterval,
+    clearInterval,
+    URL,
+    Promise,
+  };
+  vm.runInNewContext(watch, context, { filename: 'public/js/pages/WatchPage.js' });
+
+  let payload;
+  context.window.API = {
+    isCloudMode: () => true,
+    media: {
+      reportObservedLanguages: async (value) => {
+        payload = value;
+        return { ok: true, updated: true, exact: true };
+      },
+    },
+  };
+  const page = Object.create(context.window.WatchPage.prototype);
+  Object.assign(page, {
+    contentType: 'series',
+    content: {
+      cloudSourceId: '22222222-2222-4222-8222-222222222222',
+      externalId: 'episode-4',
+      series_id: 'series-9',
+      type: 'series',
+    },
+    _relayAudioTracks: [{ index: 1, lang: 'fr' }],
+  });
+  page.captureExactSubtitleTrackMap([
+    { index: 3, language: 'en', codec: 'subrip', extractable: true },
+  ], { subtitleTracksScope: 'file' });
+
+  page.reportObservedAudioLanguages();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(payload.parentExternalId, 'series-9');
+  assert.deepEqual(JSON.parse(JSON.stringify(payload.audioTracks)), [{ index: 1, lang: 'fr' }]);
+  assert.deepEqual(JSON.parse(JSON.stringify(payload.subtitleTracks)), [{
+    index: 3,
+    lang: 'en',
+    codec: 'subrip',
+    subtitleType: null,
+    extractable: true,
+    forced: false,
+    default: false,
+  }]);
+});
+
+test('Watch resets exact observation state when playback identity changes', () => {
+  const watch = read('public/js/pages/WatchPage.js');
+  const context = { window: {}, console, setTimeout, clearTimeout, setInterval, clearInterval };
+  vm.runInNewContext(watch, context, { filename: 'public/js/pages/WatchPage.js' });
+  const page = Object.create(context.window.WatchPage.prototype);
+  Object.assign(page, {
+    _observedExactSubtitleTracks: [],
+    _observedSubtitleProbeComplete: true,
+    _observedLangsSent: 'old',
+    _observedLangsPending: 'old',
+    _observedLangsRetryKey: 'old',
+    _observedLangsRetryCount: 4,
+    _observedLangsRetryAt: 123,
+    _observedLangsGeneration: 8,
+  });
+
+  page.resetObservedTrackPersistenceState();
+
+  assert.equal(page._observedLangsGeneration, 9);
+  assert.equal(page._observedExactSubtitleTracks, null);
+  assert.equal(page._observedSubtitleProbeComplete, false);
+  assert.equal(page._observedLangsSent, null);
+  assert.equal(page._observedLangsPending, null);
+  assert.equal(page._observedLangsRetryKey, null);
+  assert.equal(page._observedLangsRetryCount, 0);
+  assert.equal(page._observedLangsRetryAt, 0);
 });
 
 test('catalog resolves a missing title id from complete tenant file coordinates', () => {
@@ -127,6 +444,191 @@ test('catalog resolves a missing title id from complete tenant file coordinates'
   );
 });
 
+test('catalog preserves subtitle default and rejects non-member series episodes before merge', async () => {
+  const catalog = read('supabase/functions/norva-catalog/index.ts');
+  const normalizeSource = between(
+    catalog,
+    'function normalizeObservedSubtitleTracks(',
+    '\nfunction exactTenantEpisodeCoordinatesMatch(',
+  )
+    .replace(
+      'function normalizeObservedSubtitleTracks(value: unknown): JsonRecord[]',
+      'function normalizeObservedSubtitleTracks(value)',
+    )
+    .replace('value: unknown', 'value')
+    .replace(/\(value as unknown\[\]\)/g, 'value');
+  const matcherSource = between(
+    catalog,
+    'function exactTenantEpisodeCoordinatesMatch(',
+    '\nasync function mergeObservedExactFileLanguages(',
+  )
+    .replace('value: unknown', 'value')
+    .replace(
+      /,\n  expected: \{[\s\S]*?\n  \},\n\): boolean \{/,
+      ', expected\n) {',
+    );
+  const mergeSource = between(
+    catalog,
+    'async function mergeObservedExactFileLanguages(',
+    '\n// Capture audio/subtitle languages observed by a client',
+  ).replace(
+    /async function mergeObservedExactFileLanguages\([\s\S]*?\n\): Promise<"merged" \| "episode-not-owned"> \{/,
+    'async function mergeObservedExactFileLanguages(db, values) {',
+  );
+  const helpers = vm.runInNewContext(
+    `(() => {
+      const recordOrEmpty = (value) => value && typeof value === 'object' && !Array.isArray(value)
+        ? value
+        : {};
+      const stringOrNull = (value) => value == null || value === '' ? null : String(value);
+      const canonicalFileLanguage = (value) => stringOrNull(value)?.toLowerCase() || null;
+      const throwDb = (error) => { throw error; };
+      ${normalizeSource}
+      ${matcherSource}
+      ${mergeSource}
+      return {
+        normalizeObservedSubtitleTracks,
+        exactTenantEpisodeCoordinatesMatch,
+        mergeObservedExactFileLanguages,
+      };
+    })()`,
+  );
+
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(helpers.normalizeObservedSubtitleTracks([
+      { index: 3, language: 'FR', codecName: 'subrip', default: true, forced: false },
+      { index: 4, lang: 'en', codec: 'ass', default: false, forced: true },
+    ]))),
+    [
+      {
+        index: 3, lang: 'fr', codec: 'subrip', subtitleType: null,
+        extractable: false, forced: false, default: true,
+      },
+      {
+        index: 4, lang: 'en', codec: 'ass', subtitleType: null,
+        extractable: false, forced: true, default: false,
+      },
+    ],
+  );
+
+  const expected = {
+    userId: 'user-1', sourceId: 'source-1', titleId: 'title-1',
+    variantId: 'variant-1', parentSeriesId: 'series-1', episodeId: 'episode-1',
+  };
+  const row = {
+    user_id: 'user-1', source_id: 'source-1', title_id: 'title-1',
+    variant_id: 'variant-1', parent_series_id: 'series-1', episode_id: 'episode-1',
+  };
+  assert.equal(helpers.exactTenantEpisodeCoordinatesMatch([row], expected), true);
+  assert.equal(helpers.exactTenantEpisodeCoordinatesMatch([
+    { ...row, user_id: 'other-user' },
+  ], expected), false);
+  assert.equal(helpers.exactTenantEpisodeCoordinatesMatch([
+    { ...row, episode_id: 'forged-episode' },
+  ], expected), false);
+
+  const mergeValues = {
+    ...expected,
+    itemType: 'series',
+    fileExternalId: expected.episodeId,
+    audioTracks: [{ index: 1, lang: 'fr' }],
+    subtitleTracks: [{ index: 2, lang: 'en', default: true }],
+    hasAudio: true,
+    hasSubtitle: true,
+  };
+  delete mergeValues.episodeId;
+  const invokeMerge = async ({ coordinates = [row], coordinateError = null } = {}) => {
+    const calls = [];
+    const db = {
+      async rpc(name, args) {
+        calls.push({ name, args });
+        if (name === 'catalog_series_episode_coordinates') {
+          return { data: coordinates, error: coordinateError };
+        }
+        if (name === 'merge_cloud_title_file_languages') {
+          return { data: null, error: null };
+        }
+        throw new Error(`unexpected RPC ${name}`);
+      },
+    };
+    const result = await helpers.mergeObservedExactFileLanguages(db, mergeValues);
+    return { result, calls };
+  };
+
+  const accepted = await invokeMerge();
+  assert.equal(accepted.result, 'merged');
+  assert.deepEqual(accepted.calls.map((call) => call.name), [
+    'catalog_series_episode_coordinates',
+    'merge_cloud_title_file_languages',
+  ]);
+  for (const forged of [
+    { ...row, user_id: 'other-user' },
+    { ...row, source_id: 'other-source' },
+    { ...row, title_id: 'other-title' },
+    { ...row, variant_id: 'other-variant' },
+    { ...row, parent_series_id: 'other-series' },
+    { ...row, episode_id: 'other-episode' },
+  ]) {
+    const rejected = await invokeMerge({ coordinates: [forged] });
+    assert.equal(rejected.result, 'episode-not-owned');
+    assert.deepEqual(rejected.calls.map((call) => call.name), [
+      'catalog_series_episode_coordinates',
+    ], 'a forged episode tuple must never reach the merge RPC');
+  }
+  const errorCalls = [];
+  await assert.rejects(
+    helpers.mergeObservedExactFileLanguages({
+      async rpc(name) {
+        errorCalls.push(name);
+        return { data: null, error: new Error('membership unavailable') };
+      },
+    }, mergeValues),
+    /membership unavailable/,
+  );
+  assert.deepEqual(errorCalls, ['catalog_series_episode_coordinates']);
+
+  const record = between(
+    catalog,
+    'async function recordObservedLanguages(',
+    '\nasync function listTitleRail(',
+  );
+  const membershipCheck = mergeSource.indexOf('"catalog_series_episode_coordinates"');
+  const merge = mergeSource.indexOf('db.rpc("merge_cloud_title_file_languages"');
+  assert.ok(membershipCheck >= 0 && membershipCheck < merge,
+    'tenant episode membership must be proven before the series merge');
+  assert.ok(record.includes('mergeObservedExactFileLanguages(db'));
+  assert.ok(record.includes('reason: "episode_not_owned"'));
+});
+
+test('catalog exact-language writes and facet reads fail closed without caching false empties', () => {
+  const catalog = read('supabase/functions/norva-catalog/index.ts');
+  const facets = between(
+    catalog,
+    'async function listLanguageFacets(',
+    '\n// Capture audio/subtitle languages observed by a client',
+  );
+  const record = between(
+    catalog,
+    'async function recordObservedLanguages(',
+    '\nasync function listTitleRail(',
+  );
+
+  assert.ok(facets.includes('if (error) throwDb(error, "Unable to load exact language facets")'));
+  assert.ok(!facets.includes('cloud_language_facets'));
+  assert.ok(!facets.includes('leave the menus empty'));
+  assert.ok(
+    facets.indexOf('if (error) throwDb(error, "Unable to load exact language facets")') <
+      facets.lastIndexOf('FACET_CACHE.set(cacheKey'),
+    'an RPC failure must throw before a new cache entry can be written',
+  );
+  assert.ok(facets.includes('const value: { audio: unknown[]; subtitles: unknown[] }'));
+
+  assert.ok(catalog.includes('if (error) throwDb(error, "Unable to merge exact file languages")'));
+  assert.ok(record.includes('unionMerged = true'));
+  assert.ok(!record.includes('unionMerged = !error'));
+  assert.ok(!record.includes('rolling deploy: legacy single-movie update below remains safe'));
+});
+
 test('gateway enrichment preserves unknown tracks before exact-file reporting', () => {
   const watch = read('public/js/pages/WatchPage.js');
   const enrichment = between(
@@ -139,6 +641,14 @@ test('gateway enrichment preserves unknown tracks before exact-file reporting', 
   assert.ok(enrichment.includes('lang: this.normalizeTrackLanguage(a.language || a.lang) || null'));
   assert.ok(enrichment.includes('const gatewayHasLang = gwAudio.some'));
   assert.ok(enrichment.includes('if (gatewayHasLang && !relayHasLang)'));
+  assert.ok(enrichment.includes('subtitleProbeComplete: true'));
+  assert.ok(enrichment.includes("subtitleTracksScope: 'file'"));
+  assert.ok(enrichment.includes('this.captureExactSubtitleTrackMap(tracks, exactSubtitleEvidence)'));
+  assert.ok(
+    enrichment.indexOf('this.captureExactSubtitleTrackMap(tracks, exactSubtitleEvidence)') <
+      enrichment.indexOf('if (!tracks.length) return;'),
+    'a complete empty subtitle probe must be persisted before the UI early return',
+  );
   assert.ok(!enrichment.includes('Number.isInteger(Number(a.index)) && a.language'));
   assert.ok(!enrichment.includes('.filter((a) => a.lang && a.lang !== \'und\')'));
 });
@@ -154,9 +664,12 @@ test('catalog never promotes code-only or title hints to exact file evidence', (
   assert.ok(record.includes('audioTracksScope === "file" && orderedTracks.length > 0'));
   assert.ok(record.includes('subtitleTracksScope === "file" && subtitleTracksArrayProvided'));
   assert.ok(record.includes('if (hasExactAudioMap || hasExactSubtitleMap)'));
-  assert.ok(record.includes('p_audio_tracks: orderedTracks'));
-  assert.ok(record.includes('p_has_audio: hasExactAudioMap'));
-  assert.ok(record.includes('p_has_subtitle: hasExactSubtitleMap'));
+  assert.ok(record.includes('audioTracks: orderedTracks'));
+  assert.ok(record.includes('hasAudio: hasExactAudioMap'));
+  assert.ok(record.includes('hasSubtitle: hasExactSubtitleMap'));
+  assert.ok(catalog.includes('p_audio_tracks: values.audioTracks'));
+  assert.ok(catalog.includes('p_has_audio: values.hasAudio'));
+  assert.ok(catalog.includes('p_has_subtitle: values.hasSubtitle'));
   assert.ok(!record.includes('unionAudioTracks'));
   assert.ok(!record.includes('upsert_catalog_file_tracks'));
   assert.ok(!record.includes('fanout_file_tracks_to_users'));

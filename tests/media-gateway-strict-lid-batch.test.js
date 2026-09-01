@@ -1112,7 +1112,7 @@ test('v102 route exposes the bounded budget rebalance and fails a broken Whisper
   const routeStart = gateway.indexOf('async function handleDetectLanguageRequest(');
   const routeEnd = gateway.indexOf('// Service-only A/B benchmark.', routeStart);
   const route = gateway.slice(routeStart, routeEnd);
-  assert.match(gateway, /const GATEWAY_VERSION = 139;/);
+  assert.match(gateway, /const GATEWAY_VERSION = 140;/);
   assert.match(gateway, /const STRICT_LID_REQUEST_BUDGET_MS = clampInt\([\s\S]*225_000,[\s\S]*225_000,/);
   assert.match(gateway, /strictLidBatchProtocol: 1/);
   assert.match(gateway, /strictLidActivityKindProtocol: 1/);
@@ -1156,7 +1156,7 @@ test('v102 route exposes the bounded budget rebalance and fails a broken Whisper
   assert.match(route, /runStrictWhisperBatch\([\s\S]*strictWavSamples\.map/);
   assert.match(route, /strictLanguageBatchSampleResult\(batch\.samples\[index\], sample\.offset\)/);
   assert.equal((gateway.match(/evaluateStrictTranscriptEvidence\(/g) || []).length, 2);
-  assert.match(route, /const transcriptEvidence = strict[\s\S]*\? evaluateStrictTranscriptEvidence\(/);
+  assert.match(route, /const transcriptEvidence = evaluateStrictTranscriptEvidence\(/);
   assert.match(route, /strictConsensusVerified = summary\.verified/);
   assert.match(route, /strict &&[\s\S]*strictConsensusVerified &&[\s\S]*bestStrictAccepted/);
   assert.match(gateway, /method: 'whisper-strict-consensus-v4'/);

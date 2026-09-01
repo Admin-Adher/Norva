@@ -26,10 +26,19 @@ const registrationSource = sourceBetween(
   'function preemptExtractionEntry',
   '// True while THIS box holds',
 );
-const probeRoute = sourceBetween(
-  "app.post('/probe-audio'",
-  '// Phase 2: detect the language',
+const probeDrainSource = sourceBetween(
+  'function createProviderProbeDrainState',
+  '// Audio-language probe',
 );
+const probeHandlerSource = sourceBetween(
+  'async function handleProbeAudioRequest',
+  "app.post('/probe-audio'",
+);
+const probeRouteRegistration = sourceBetween(
+  "app.post('/probe-audio'",
+  '// ── Strict LID loopback broker',
+);
+const probeRoute = `${probeHandlerSource}\n${probeRouteRegistration}`;
 const seriesMetadataRoutes = sourceBetween(
   "app.post('/xtream/series-info'",
   '// Raw byte-range passthrough',
@@ -42,6 +51,7 @@ const runnerSource = sourceBetween(
 class FakeChild extends EventEmitter {
   constructor() {
     super();
+    this.pid = 4242;
     this.stdout = new EventEmitter();
     this.stderr = new EventEmitter();
     this.killSignals = [];
@@ -128,6 +138,147 @@ function makeHarness({ globalViewerBusyChecks = null } = {}) {
   };
 }
 
+function makeProbeRouteHarness() {
+  const children = [];
+  const events = [];
+  let releaseDelay = null;
+  const context = {
+    Error,
+    JSON,
+    Map,
+    Set,
+    URL,
+    Buffer,
+    events,
+    clearTimeout,
+    setTimeout,
+    PROVIDER_SLOT_RELEASE_DELAY_MS: 2_500,
+    ACCOUNT_ACTIVITY_KIND_LANGUAGE_VALIDATION: 'language-validation',
+    ACCOUNT_ACTIVITY_KIND_CATALOG_REFRESH: 'catalog-refresh',
+    ACCOUNT_ACTIVITY_KIND_GATEWAY: 'gateway',
+    FFPROBE_PATH: '/fake/ffprobe',
+    lastNonEmptyLine(value) {
+      return String(value || '').trim().split(/\r?\n/).filter(Boolean).at(-1) || '';
+    },
+    proxyKeyFromUrl(url) {
+      const parsed = new URL(url);
+      const segments = parsed.pathname.split('/').filter(Boolean);
+      return `${parsed.host}/${segments[1] || ''}`;
+    },
+    proxyEnvFor() {
+      return undefined;
+    },
+    isProxyAuthenticationFailure: providerFailure.isProxyAuthenticationFailure,
+    sanitizeLog(value) {
+      return String(value || '');
+    },
+    accountSlotBusyLocally() {
+      return false;
+    },
+    viewerPlaybackActiveLocally() {
+      return false;
+    },
+    isHttpUrl(value) {
+      try {
+        return ['http:', 'https:'].includes(new URL(value).protocol);
+      } catch (_) {
+        return false;
+      }
+    },
+    sanitizeUserAgent(value) {
+      return String(value || '');
+    },
+    normalizeCodecToken(value) {
+      return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+    },
+    publicMkvCodecProfile(profile) {
+      return profile;
+    },
+    sleep(ms) {
+      events.push(`delay:${ms}`);
+      return new Promise((resolve) => {
+        releaseDelay = () => {
+          events.push('delay-released');
+          resolve();
+        };
+      });
+    },
+    spawn(command, args, options) {
+      events.push('spawn');
+      const child = new FakeChild();
+      children.push(child);
+      return child;
+    },
+  };
+  const harness = vm.runInNewContext(
+    `(() => {
+      const accountExtractions = new Map();
+      ${registrationSource}
+      const baseRegisterAccountExtraction = registerAccountExtraction;
+      registerAccountExtraction = function (...args) {
+        events.push('registration');
+        const registration = baseRegisterAccountExtraction(...args);
+        const baseRelease = registration.release;
+        registration.release = () => {
+          events.push('registration-release');
+          baseRelease?.();
+        };
+        return registration;
+      };
+      ${probeDrainSource}
+      ${runnerSource}
+      function hasUsefulCodecProfile(profile) {
+        return Array.isArray(profile?.audioTracks) && profile.audioTracks.length > 0;
+      }
+      function hasCompleteMkvPlaybackProfile() { return false; }
+      function cacheCodecProfile() {}
+      async function probeCodecProfile(url, userAgent, options) {
+        await runFfprobe(['-show_streams'], 1_000, url, options);
+        return {
+          probeSource: 'gateway_probe',
+          audioTracks: [{ index: 1, language: 'fr', default: true }],
+          subtitles: [],
+        };
+      }
+      async function probeCodecProfileUncached() {
+        throw new Error('unexpected second provider probe');
+      }
+      ${probeHandlerSource}
+      return {
+        accountExtractions,
+        preemptAccountExtractions,
+        handleProbeAudioRequest,
+      };
+    })()`,
+    context,
+  );
+  const response = {
+    statusCode: 200,
+    payload: null,
+    status(value) {
+      this.statusCode = value;
+      return this;
+    },
+    json(value) {
+      events.push('response');
+      this.payload = value;
+      return value;
+    },
+  };
+  return {
+    ...harness,
+    children,
+    events,
+    response,
+    releaseDelay() {
+      assert.equal(typeof releaseDelay, 'function', 'provider release delay has not started');
+      const release = releaseDelay;
+      releaseDelay = null;
+      release();
+    },
+  };
+}
+
 const providerUrl = 'https://provider.test/movie/alice/secret/42.mkv';
 const providerKey = 'provider.test/alice';
 
@@ -141,19 +292,69 @@ test('background ffprobe is registered and released after a successful exit', as
   assert.equal(harness.accountExtractions.get(providerKey)?.size, 1);
   harness.children[0].stdout.emit('data', Buffer.from('{"streams":[]}'));
   harness.children[0].emit('exit', 0, null);
+  harness.children[0].emit('close', 0, null);
 
   assert.deepEqual(await pending, { streams: [] });
   assert.equal(harness.accountExtractions.has(providerKey), false);
 });
 
-test('background ffprobe is released on child error and timeout', async (t) => {
-  await t.test('child error', async () => {
+test('background ffprobe waits for pipe close before parsing late stdout', async () => {
+  const harness = makeHarness();
+  const pending = harness.runFfprobe(['-show_streams'], 1_000, providerUrl, {
+    background: true,
+  });
+  let settled = false;
+  pending.then(() => { settled = true; }, () => { settled = true; });
+
+  const child = harness.children[0];
+  child.stdout.emit('data', Buffer.from('{"streams":['));
+  child.emit('exit', 0, null);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(settled, false, 'process exit must not parse before stdout is closed');
+  child.stdout.emit('data', Buffer.from('{"index":1,"tags":{"language":"fra"}}]}'));
+  child.emit('close', 0, null);
+
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(await pending)),
+    { streams: [{ index: 1, tags: { language: 'fra' } }] },
+  );
+});
+
+test('background ffprobe distinguishes spawn failure from a live-child error', async (t) => {
+  await t.test('spawn failure', async () => {
     const harness = makeHarness();
     const pending = harness.runFfprobe([], 1_000, providerUrl, { background: true });
+    let settled = false;
+    pending.then(() => { settled = true; }, () => { settled = true; });
 
+    harness.children[0].pid = undefined;
     harness.children[0].emit('error', new Error('spawn failed'));
+    await new Promise((resolve) => setImmediate(resolve));
 
+    assert.equal(settled, false, 'spawn error alone is not a definitive child close');
+    assert.equal(harness.accountExtractions.get(providerKey)?.size, 1);
+    harness.children[0].emit('close', null, null);
     await assert.rejects(pending, /spawn failed/);
+    assert.equal(harness.accountExtractions.has(providerKey), false);
+  });
+
+  await t.test('error after spawn retains the provider ledger until exit', async () => {
+    const harness = makeHarness();
+    const pending = harness.runFfprobe([], 1_000, providerUrl, { background: true });
+    let settled = false;
+    pending.then(() => { settled = true; }, () => { settled = true; });
+
+    harness.children[0].emit('error', new Error('kill failed'));
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.equal(settled, false, 'a live-child error is not a process-exit signal');
+    assert.equal(harness.accountExtractions.get(providerKey)?.size, 1);
+    assert.deepEqual(harness.children[0].killSignals, ['SIGKILL']);
+
+    harness.children[0].emit('exit', null, 'SIGKILL');
+    harness.children[0].emit('close', null, 'SIGKILL');
+    await assert.rejects(pending, /kill failed/);
     assert.equal(harness.accountExtractions.has(providerKey), false);
   });
 
@@ -166,6 +367,7 @@ test('background ffprobe is released on child error and timeout', async (t) => {
     assert.equal(harness.accountExtractions.get(providerKey)?.size, 1,
       'the provider ledger remains held until the timed-out child actually exits');
     harness.children[0].emit('exit', null, 'SIGTERM');
+    harness.children[0].emit('close', null, 'SIGTERM');
     await assert.rejects(pending, /Codec probe timeout/);
     assert.equal(harness.accountExtractions.has(providerKey), false);
   });
@@ -179,6 +381,7 @@ test('viewer preemption kills the background child and returns a stable 409 code
   assert.equal(harness.preemptAccountExtractions(providerKey, 'viewer play'), 1);
   assert.deepEqual(child.killSignals, ['SIGKILL']);
   child.emit('exit', null, 'SIGKILL');
+  child.emit('close', null, 'SIGKILL');
 
   await assert.rejects(pending, (error) => {
     assert.equal(error.status, 409);
@@ -197,6 +400,12 @@ test('viewer preemption remains typed when child error wins the event race', asy
   harness.preemptAccountExtractions(providerKey, 'viewer play');
   child.emit('error', new Error('killed'));
 
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(harness.accountExtractions.get(providerKey)?.size, 1,
+    'child error alone must not release the provider reservation');
+  child.emit('exit', null, 'SIGKILL');
+  child.emit('close', null, 'SIGKILL');
+
   await assert.rejects(pending, (error) => {
     assert.equal(error.status, 409);
     assert.equal(error.code, 'viewer_preempted');
@@ -212,6 +421,7 @@ test('viewer preemption remains typed when timeout wins the event race', async (
   harness.preemptAccountExtractions(providerKey, 'viewer play');
   await new Promise((resolve) => setTimeout(resolve, 20));
   harness.children[0].emit('exit', null, 'SIGKILL');
+  harness.children[0].emit('close', null, 'SIGKILL');
 
   await assert.rejects(pending, (error) => {
     assert.equal(error.status, 409);
@@ -253,6 +463,7 @@ test('the spawn boundary prevents concurrent background probes for one account',
 
   harness.children[0].stdout.emit('data', Buffer.from('{}'));
   harness.children[0].emit('exit', 0, null);
+  harness.children[0].emit('close', 0, null);
   await first;
 });
 
@@ -264,6 +475,7 @@ test('a global viewer winning the spawn race preempts and types a background pro
   assert.deepEqual(harness.children[0].killSignals, ['SIGKILL']);
   assert.equal(harness.viewerQosStats.globalExtractionPreemptions, 1);
   harness.children[0].emit('exit', null, 'SIGKILL');
+  harness.children[0].emit('close', null, 'SIGKILL');
 
   await assert.rejects(pending, (error) => {
     assert.equal(error.status, 409);
@@ -285,6 +497,7 @@ test('ordinary ffprobes keep their original unregistered behavior', async () => 
   );
   harness.children[0].stdout.emit('data', Buffer.from('{"format":{"duration":"12"}}'));
   harness.children[0].emit('exit', 0, null);
+  harness.children[0].emit('close', 0, null);
 
   assert.deepEqual(
     JSON.parse(JSON.stringify(await pending)),
@@ -294,9 +507,11 @@ test('ordinary ffprobes keep their original unregistered behavior', async () => 
 });
 
 test('/probe-audio exposes the typed background backpressure contract', () => {
+  assert.match(gateway, /providerProbeDrainProtocol:\s*1/);
+  assert.match(gateway, /basicLidConsensusProtocol:\s*1/);
   assert.match(
     probeRoute,
-    /probeCodecProfile\(url, ua, \{ background: true \}\)/,
+    /probeCodecProfile\(url, ua, \{\s*background: true,\s*backgroundActivityKind: ACCOUNT_ACTIVITY_KIND_CATALOG_REFRESH,\s*providerDrainState,/,
   );
   assert.match(
     probeRoute,
@@ -306,6 +521,122 @@ test('/probe-audio exposes the typed background backpressure contract', () => {
     probeRoute,
     /code: err\.code \|\| undefined/,
   );
+  assert.match(
+    probeRoute,
+    /const drainAttestation = await providerProbeDrainAttestation\(providerDrainState\);[\s\S]*\.\.\.drainAttestation/,
+  );
+});
+
+test('/probe-audio keeps the shared provider reservation through the release delay', async () => {
+  const harness = makeProbeRouteHarness();
+  const pending = harness.handleProbeAudioRequest({
+    body: { url: providerUrl, userAgent: 'Norva/Test' },
+  }, harness.response);
+
+  assert.equal(harness.children.length, 1);
+  assert.equal(harness.accountExtractions.get(providerKey)?.size, 1);
+  assert.equal(
+    [...harness.accountExtractions.get(providerKey)][0].activityKind,
+    'catalog-refresh',
+    '/probe-audio cooldown must be visible to the shared long-drain activity class',
+  );
+  assert.equal(harness.response.payload, null);
+
+  harness.events.push('ffprobe-exit');
+  harness.children[0].stdout.emit('data', Buffer.from('{"streams":[]}'));
+  harness.children[0].emit('exit', 0, null);
+  harness.children[0].emit('close', 0, null);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(harness.accountExtractions.get(providerKey)?.size, 1,
+    'the cooldown remains visible to viewer and background admission guards');
+  assert.deepEqual(harness.events, [
+    'spawn',
+    'registration',
+    'ffprobe-exit',
+    'delay:2500',
+  ]);
+  assert.equal(harness.response.payload, null,
+    'no positive drain response is emitted while the release delay is pending');
+
+  harness.releaseDelay();
+  await pending;
+
+  assert.equal(harness.response.statusCode, 200);
+  assert.equal(harness.response.payload.providerDrained, true);
+  assert.equal(harness.response.payload.providerDrainProtocol, 1);
+  assert.deepEqual(harness.events, [
+    'spawn',
+    'registration',
+    'ffprobe-exit',
+    'delay:2500',
+    'delay-released',
+    'registration-release',
+    'response',
+  ]);
+  assert.equal(harness.accountExtractions.has(providerKey), false);
+});
+
+test('a viewer starting during probe cooldown observes the holder and waits', async () => {
+  const harness = makeProbeRouteHarness();
+  const pending = harness.handleProbeAudioRequest({
+    body: { url: providerUrl, userAgent: 'Norva/Test' },
+  }, harness.response);
+
+  harness.children[0].stdout.emit('data', Buffer.from('{"streams":[]}'));
+  harness.children[0].emit('exit', 0, null);
+  harness.children[0].emit('close', 0, null);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const stoppedForHandoff = harness.preemptAccountExtractions(providerKey, 'viewer play');
+  assert.equal(stoppedForHandoff, 1,
+    'the real viewer handoff counter must force its provider release delay');
+  assert.equal(harness.accountExtractions.get(providerKey)?.size, 1);
+  const [cooldownHolder] = harness.accountExtractions.get(providerKey);
+  assert.equal(cooldownHolder.providerCooldown, true);
+  assert.equal(cooldownHolder.preempted, false,
+    'cooldown remains reportable to the cross-replica account-activity ledger');
+  assert.deepEqual(harness.children[0].killSignals, [],
+    'viewer handoff must not signal an ffprobe child that already exited');
+  assert.equal(harness.response.payload, null);
+
+  harness.releaseDelay();
+  await pending;
+  assert.equal(harness.accountExtractions.has(providerKey), false);
+  assert.equal(harness.response.payload.providerDrained, true);
+});
+
+test('/probe-audio keeps a failed ffprobe response safe and drain-attested', async () => {
+  const harness = makeProbeRouteHarness();
+  const pending = harness.handleProbeAudioRequest({
+    body: { url: providerUrl, userAgent: 'Norva/Test' },
+  }, harness.response);
+
+  harness.children[0].stderr.emit('data', Buffer.from('provider refused request'));
+  harness.events.push('ffprobe-exit');
+  harness.children[0].emit('exit', 1, null);
+  harness.children[0].emit('close', 1, null);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(harness.accountExtractions.get(providerKey)?.size, 1);
+  assert.equal(harness.response.payload, null);
+  assert.deepEqual(harness.events, [
+    'spawn',
+    'registration',
+    'ffprobe-exit',
+    'delay:2500',
+  ]);
+
+  harness.releaseDelay();
+  await pending;
+
+  assert.equal(harness.response.statusCode, 502);
+  assert.equal(harness.response.payload.error, 'Audio probe failed');
+  assert.equal(harness.response.payload.providerDrained, true);
+  assert.equal(harness.response.payload.providerDrainProtocol, 1);
+  assert.equal(JSON.stringify(harness.response.payload).includes(providerUrl), false);
+  assert.equal(harness.accountExtractions.has(providerKey), false);
+  assert.deepEqual(harness.events.at(-1), 'response');
 });
 
 test('metadata uses the same decoded provider-account key and is viewer-preemptible', () => {

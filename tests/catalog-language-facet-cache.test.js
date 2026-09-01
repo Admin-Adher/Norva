@@ -31,8 +31,15 @@ function session(userId) {
 function loadApi(
     storage,
     languageFacets,
-    reportObservedLanguages = async () => ({ ok: true, updated: false, exact: true })
+    reportObservedLanguages = async () => ({ ok: true, updated: false, exact: true }),
+    emittedEvents = []
 ) {
+    class TestCustomEvent {
+        constructor(type, init = {}) {
+            this.type = type;
+            this.detail = init.detail;
+        }
+    }
     const NorvaCloud = {
         home: { languageFacets, reportObservedLanguages },
         device: {
@@ -58,7 +65,12 @@ function loadApi(
             hash: '#movies',
             replace: () => {}
         },
-        matchMedia: () => ({ matches: false })
+        matchMedia: () => ({ matches: false }),
+        CustomEvent: TestCustomEvent,
+        dispatchEvent: (event) => {
+            emittedEvents.push(event);
+            return true;
+        }
     };
     const context = {
         window,
@@ -70,6 +82,7 @@ function loadApi(
         fetch: async () => { throw new Error('unexpected fetch'); },
         AbortController,
         Headers,
+        CustomEvent: TestCustomEvent,
         console,
         setTimeout,
         clearTimeout
@@ -204,6 +217,7 @@ test('a successful exact observation immediately clears movie facet caches only'
         'norva-cloud-session': session('account-a')
     });
     let writes = 0;
+    const emittedEvents = [];
     const API = loadApi(
         storage,
         async ({ type, source = 'all' }) => ({
@@ -213,7 +227,8 @@ test('a successful exact observation immediately clears movie facet caches only'
         async () => {
             writes += 1;
             return { ok: true, updated: true, exact: true };
-        }
+        },
+        emittedEvents
     );
 
     await API.media.languageFacets({ type: 'movie' });
@@ -225,16 +240,63 @@ test('a successful exact observation immediately clears movie facet caches only'
     assert.equal(writes, 1);
     const keys = [...storage.values.keys()].filter((key) => key.startsWith('norva-facets4-'));
     assert.deepEqual(keys, ['norva-facets4-user-account-a-series-all']);
+    assert.deepEqual(
+        JSON.parse(JSON.stringify(emittedEvents.map((event) => ({ type: event.type, detail: event.detail })))),
+        [{
+            type: 'norva:catalog-language-facets-invalidated',
+            detail: { type: 'movie', source: null, removed: 2 }
+        }]
+    );
+});
+
+test('an invalidated in-flight facet response cannot overwrite the replacement cache', async () => {
+    const storage = createStorage({
+        'norva-cloud-session': session('account-a')
+    });
+    const resolvers = [];
+    let requests = 0;
+    const API = loadApi(
+        storage,
+        () => new Promise((resolve) => {
+            requests += 1;
+            resolvers.push(resolve);
+        }),
+        async () => ({ ok: true, updated: true, exact: true })
+    );
+
+    const staleRequest = API.media.languageFacets({ type: 'movie' });
+    assert.equal(resolvers.length, 1);
+
+    await API.media.reportObservedLanguages({ itemType: 'movie' });
+    const replacementRequest = API.media.languageFacets({ type: 'movie' });
+    assert.equal(resolvers.length, 2);
+
+    resolvers[1]({ audio: [{ value: 'fresh', label: 'Fresh' }], subtitles: [] });
+    const replacement = await replacementRequest;
+    assert.equal(replacement.audio[0].value, 'fresh');
+
+    // Resolve the pre-invalidation request last: it must neither overwrite the
+    // replacement entry nor force a third transport request on the next read.
+    resolvers[0]({ audio: [{ value: 'stale', label: 'Stale' }], subtitles: [] });
+    await staleRequest;
+    const cached = await API.media.languageFacets({ type: 'movie' });
+
+    assert.equal(requests, 2);
+    assert.equal(cached.audio[0].value, 'fresh');
+    const stored = JSON.parse(storage.getItem('norva-facets4-user-account-a-movie-all'));
+    assert.equal(stored.value.audio[0].value, 'fresh');
 });
 
 test('failed or non-updating observations preserve local facet caches for retry', async () => {
     const storage = createStorage({
         'norva-cloud-session': session('account-a')
     });
+    const emittedEvents = [];
     const API = loadApi(
         storage,
         async () => ({ audio: [{ value: 'fr', label: 'French' }], subtitles: [] }),
-        async () => ({ ok: true, updated: false, reason: 'variant_not_owned' })
+        async () => ({ ok: true, updated: false, reason: 'variant_not_owned' }),
+        emittedEvents
     );
 
     await API.media.languageFacets({ type: 'movie' });
@@ -243,4 +305,51 @@ test('failed or non-updating observations preserve local facet caches for retry'
     const after = [...storage.values.keys()].filter((key) => key.startsWith('norva-facets4-'));
 
     assert.deepEqual(after, before);
+    assert.deepEqual(emittedEvents, []);
+});
+
+test('language facet transport errors propagate and remain immediately retryable', async () => {
+    const storage = createStorage({
+        'norva-cloud-session': session('account-a')
+    });
+    let requests = 0;
+    const API = loadApi(storage, async () => {
+        requests += 1;
+        if (requests === 1) throw new Error('temporary facet failure');
+        return { audio: [{ value: 'fr', label: 'French' }], subtitles: [] };
+    });
+
+    await assert.rejects(
+        API.media.languageFacets({ type: 'movie' }),
+        /temporary facet failure/
+    );
+    const recovered = await API.media.languageFacets({ type: 'movie' });
+
+    assert.equal(requests, 2);
+    assert.equal(recovered.audio[0].value, 'fr');
+});
+
+test('facet invalidation event identifies the exact media and provider scope', async () => {
+    const storage = createStorage({
+        'norva-cloud-session': session('account-a')
+    });
+    const emittedEvents = [];
+    const API = loadApi(
+        storage,
+        async () => ({ audio: [], subtitles: [] }),
+        async () => ({ ok: true, updated: true, exact: true }),
+        emittedEvents
+    );
+
+    await API.media.reportObservedLanguages({
+        itemType: 'series',
+        cloudSourceId: '22222222-2222-4222-8222-222222222222'
+    });
+
+    assert.equal(emittedEvents.length, 1);
+    assert.deepEqual(JSON.parse(JSON.stringify(emittedEvents[0].detail)), {
+        type: 'series',
+        source: '22222222-2222-4222-8222-222222222222',
+        removed: 0
+    });
 });

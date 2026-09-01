@@ -4,6 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const vm = require('node:vm');
 
 const root = path.join(__dirname, '..');
 const read = (...segments) => fs.readFileSync(path.join(root, ...segments), 'utf8');
@@ -77,6 +78,65 @@ test('playback reserves the opaque holder before a bounded catalogue drain and n
   );
 });
 
+test('a fresh shared catalog-refresh observation actually blocks viewer provider I/O', async () => {
+  const edge = read('supabase', 'functions', 'norva-playback', 'index.ts');
+  const source = section(
+    edge,
+    'async function providerCatalogRefreshDrainRemainingMs(',
+    '\nasync function touchProviderAccountBySource(',
+  )
+    .replace('db: SupabaseClient', 'db')
+    .replace('providerAccountHash: string', 'providerAccountHash');
+  const now = Date.parse('2026-09-01T12:00:00.000Z');
+  const FakeDate = class extends Date {
+    static now() { return now; }
+  };
+  const remaining = vm.runInNewContext(
+    `(() => { ${source}; return providerCatalogRefreshDrainRemainingMs; })()`,
+    {
+      Date: FakeDate,
+      Number,
+      Math,
+      PROVIDER_CATALOG_REFRESH_DRAIN_MS: 45_000,
+      stringOr: (value, fallback) => value == null ? fallback : String(value),
+    },
+  );
+  const dbFor = (kind, lastSeenAt) => ({
+    from() {
+      return {
+        select() { return this; },
+        eq() { return this; },
+        async maybeSingle() {
+          return { data: { kind, last_seen_at: lastSeenAt }, error: null };
+        },
+      };
+    },
+  });
+
+  const waitMs = await remaining(
+    dbFor('catalog-refresh', new Date(now - 5_000).toISOString()),
+    'opaque-account-hash',
+  );
+  assert.equal(waitMs, 40_000);
+  assert.equal(await remaining(
+    dbFor('gateway', new Date(now - 5_000).toISOString()),
+    'opaque-account-hash',
+  ), 0);
+
+  let releaseWait;
+  let providerOpened = false;
+  const sleep = () => new Promise((resolve) => { releaseWait = resolve; });
+  const viewer = (async () => {
+    if (waitMs > 0) await sleep(waitMs);
+    providerOpened = true;
+  })();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(providerOpened, false, 'viewer provider I/O stays closed during shared drain');
+  releaseWait();
+  await viewer;
+  assert.equal(providerOpened, true);
+});
+
 test('Gateway reports short catalogue holders immediately and drains an active handoff', () => {
   const gateway = read('services', 'media-gateway', 'src', 'index.js');
   const registration = section(
@@ -115,7 +175,7 @@ test('Gateway reports short catalogue holders immediately and drains an active h
   );
   assert.ok(countBeforePreempt >= 0 && countBeforePreempt < preempt);
   assert.ok(preempt < delay, 'the active catalogue class selects the longer release drain');
-  assert.match(gateway, /const GATEWAY_VERSION = 139/);
+  assert.match(gateway, /const GATEWAY_VERSION = 140/);
   assert.match(edgeVersion(gateway), /providerCatalogRefreshSlotReleaseDelayMs/);
 });
 

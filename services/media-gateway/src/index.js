@@ -535,6 +535,12 @@ function groupProviderAccountActivities(candidates, maxKeys = 64) {
 }
 function preemptExtractionEntry(entry) {
     if (!entry || entry.preempted) return 0;
+    // Once ffprobe has exited, the ledger entry becomes a provider cooldown
+    // reservation rather than a killable process. Keep it reportable until the
+    // attested release delay expires, and make the viewer wait for that same
+    // reservation instead of marking it preempted (which would hide it from the
+    // cross-replica account-activity reporter).
+    if (entry.providerCooldown === true) return 1;
     entry.preempted = true;
     try { entry.child.kill('SIGKILL'); } catch (_) { /* already gone */ }
     return 1;
@@ -555,6 +561,7 @@ function registerAccountExtraction(proxyKey, child, reportActivity = true, globa
         reportActivity: activityKind !== null,
         activityKind,
         globalPreemptible: globalPreemptible !== false,
+        providerCooldown: false,
     };
     if (!proxyKey) return entry;
     let set = accountExtractions.get(proxyKey);
@@ -1172,6 +1179,64 @@ function strictLanguageSampleDisposition({
     if (transcriptDisagrees) return 'conflict';
     return 'accepted';
 }
+
+const BASIC_LID_MIN_CONFIDENCE = 0.95;
+const BASIC_LID_MIN_WORDS = 12;
+const BASIC_LID_MIN_UNIQUE_WORDS = 8;
+
+function basicLidConsensusSample(result) {
+    const language = String(result?.language || '').toLowerCase();
+    const method = String(result?.method || '');
+    const confidence = Number(result?.confidence || 0);
+    const whisperConfidence = Number(result?.whisperConfidence || 0);
+    const wordCount = Number(result?.wordCount || 0);
+    const uniqueWordCount = Number(result?.uniqueWordCount || 0);
+    if (!/^[a-z]{2,3}$/.test(language) || result?.confident !== true) return null;
+
+    const fastPath = method === 'whisper-detect-only-v1';
+    const methodCalibrated = fastPath
+        ? result?.fastPathAccepted === true
+            && result?.verified === false
+            && result?.fallbackUsed === false
+            && result?.validationStatus === 'pending'
+            && result?.evidence === 'lid-only-high-confidence'
+            && confidence >= BASIC_LID_MIN_CONFIDENCE
+            && confidence <= 1
+            && wordCount === 0
+        : method === 'whisper-transcript-agreement-v1'
+            ? result?.transcriptAgrees === true
+                && whisperConfidence >= BASIC_LID_MIN_CONFIDENCE
+                && whisperConfidence <= 1
+                && confidence >= BASIC_LID_MIN_CONFIDENCE
+                && confidence <= 1
+            : (method === 'whisper' || method === 'transcript')
+                && confidence >= BASIC_LID_MIN_CONFIDENCE
+                && confidence <= 1;
+    if (!methodCalibrated) return null;
+    if (!fastPath && (
+        wordCount < BASIC_LID_MIN_WORDS ||
+        uniqueWordCount < BASIC_LID_MIN_UNIQUE_WORDS
+    )) return null;
+
+    return {
+        language,
+        method,
+        confidence,
+        confident: true,
+        whisperConfidence,
+        transcriptConfidence: Number(result?.transcriptConfidence || 0),
+        transcriptAgrees: result?.transcriptAgrees === true,
+        wordCount,
+        uniqueWordCount,
+        transcriptEvidenceBasis: String(result?.transcriptEvidenceBasis || ''),
+        fastPathAccepted: result?.fastPathAccepted === true,
+        verified: result?.verified === true,
+        fallbackUsed: result?.fallbackUsed === true,
+        validationStatus: String(result?.validationStatus || ''),
+        evidence: String(result?.evidence || ''),
+    };
+}
+
 function strictLanguageBatchSampleResult(whisper, offset) {
     const det = detectLanguageFromText(whisper?.text || '');
     const whisperLang = String(whisper?.lang || '').toLowerCase() || null;
@@ -1892,7 +1957,7 @@ const MULTI_AUDIO_HLS_PROTOCOL = 1;
 // production Ryzen/Radeon host. Keep the operational default evidence-based and configurable,
 // while bounding accidental fan-out. Every exact source track stays visible to the user.
 const MAX_MULTI_AUDIO_RENDITIONS = clampInt(process.env.MAX_MULTI_AUDIO_RENDITIONS, 12, 2, 32);
-const GATEWAY_VERSION = 139;
+const GATEWAY_VERSION = 140;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -2019,6 +2084,8 @@ app.get('/health', (req, res) => {
         service: 'norva-media-gateway',
         version: GATEWAY_VERSION,
         providerCircuitProtocol: 1,
+        providerProbeDrainProtocol: 1,
+        basicLidConsensusProtocol: 1,
         vodContainerSelfHealProtocol: 1,
         codecProbe: true,
         codecProbeTimeoutMs: CODEC_PROBE_TIMEOUT_MS,
@@ -3512,6 +3579,55 @@ app.get('/subtitle/:token', async (req, res) => {
     });
 });
 
+function createProviderProbeDrainState() {
+    return {
+        providerProbeStarted: false,
+        ffprobeExited: false,
+        registrationReleased: false,
+        releaseDelayCompleted: false,
+        releaseRegistration: null,
+        drainPromise: null,
+    };
+}
+
+async function providerProbeDrainAttestation(state) {
+    // Cache and complete in-band hits never open the provider, so they are
+    // already safe to hand off. Once ffprobe has started, however, do not make
+    // a positive drain claim until the child is gone, its account registration
+    // has been released, and the provider's logical slot-release grace elapsed.
+    if (!state?.providerProbeStarted) {
+        return { providerDrained: true, providerDrainProtocol: 1 };
+    }
+    if (!state.ffprobeExited || typeof state.releaseRegistration !== 'function') {
+        throw backgroundProbeError(
+            502,
+            'provider_drain_unconfirmed',
+            'Audio probe cleanup could not be confirmed.',
+        );
+    }
+    // Keep the account reservation visible to every viewer/background guard for
+    // the complete provider release grace. A shared promise makes repeated error
+    // handling idempotent without shortening that interval.
+    if (!state.drainPromise) {
+        state.drainPromise = (async () => {
+            if (PROVIDER_SLOT_RELEASE_DELAY_MS > 0) {
+                await sleep(PROVIDER_SLOT_RELEASE_DELAY_MS);
+            }
+            state.releaseDelayCompleted = true;
+            state.releaseRegistration();
+        })();
+    }
+    await state.drainPromise;
+    if (!state.registrationReleased) {
+        throw backgroundProbeError(
+            502,
+            'provider_drain_unconfirmed',
+            'Audio probe cleanup could not be confirmed.',
+        );
+    }
+    return { providerDrained: true, providerDrainProtocol: 1 };
+}
+
 // Audio-language probe over the RESIDENTIAL proxy IP (anti-ban « faible empreinte »). The
 // audio-backfill crawl normally header-probes via the Cloudflare relay, so a mono-connection
 // anti-abuse account is seen from Cloudflare (probes) AND the residential proxy (metadata) at
@@ -3519,7 +3635,8 @@ app.get('/subtitle/:token', async (req, res) => {
 // probe HERE instead: ffprobe egresses the same sticky residential IP as everything else, so the
 // provider sees one household. Returns the SAME shape as norva-relay /probe-audio so the
 // edge runner consumes it unchanged (audioLanguages / audioTracks / subtitles).
-app.post('/probe-audio', requireGatewayAuth, async (req, res) => {
+async function handleProbeAudioRequest(req, res) {
+    const providerDrainState = createProviderProbeDrainState();
     try {
         const { url, userAgent } = req.body || {};
         if (!url || !isHttpUrl(url)) {
@@ -3539,7 +3656,11 @@ app.post('/probe-audio', requireGatewayAuth, async (req, res) => {
         // Register the provider-connected ffprobe in the same preemption ledger
         // as LID/transcription. A viewer pressing Play can therefore kill this
         // short background probe immediately instead of waiting for its timeout.
-        let profile = await probeCodecProfile(url, ua, { background: true });
+        let profile = await probeCodecProfile(url, ua, {
+            background: true,
+            backgroundActivityKind: ACCOUNT_ACTIVITY_KIND_CATALOG_REFRESH,
+            providerDrainState,
+        });
         let profileSource = normalizeCodecToken(profile?.probeSource || profile?.probe_source);
         let authoritativeTrackMap = profileSource === 'gatewayprobe'
             || hasCompleteMkvPlaybackProfile(profile);
@@ -3549,7 +3670,11 @@ app.post('/probe-audio', requireGatewayAuth, async (req, res) => {
         // local evidence is incomplete. This still opens at most one provider
         // connection because the first pass was cache/local-only.
         if (hasUsefulCodecProfile(profile) && !authoritativeTrackMap) {
-            profile = await probeCodecProfileUncached(url, ua, { background: true });
+            profile = await probeCodecProfileUncached(url, ua, {
+                background: true,
+                backgroundActivityKind: ACCOUNT_ACTIVITY_KIND_CATALOG_REFRESH,
+                providerDrainState,
+            });
             cacheCodecProfile(url, profile);
             profileSource = normalizeCodecToken(profile?.probeSource || profile?.probe_source);
             authoritativeTrackMap = profileSource === 'gatewayprobe'
@@ -3563,7 +3688,8 @@ app.post('/probe-audio', requireGatewayAuth, async (req, res) => {
             if (t.language && !audioLanguages.includes(t.language)) audioLanguages.push(t.language);
             if (t.default && !audioDefaultLanguage) audioDefaultLanguage = t.language || null;
         }
-        res.json({
+        const drainAttestation = await providerProbeDrainAttestation(providerDrainState);
+        return res.json({
             audioLanguages,
             audioTracks,
             audioDefaultLanguage,
@@ -3576,12 +3702,30 @@ app.post('/probe-audio', requireGatewayAuth, async (req, res) => {
             audioProbeComplete: authoritativeTrackMap && audioTracks.length > 0,
             subtitleProbeComplete: authoritativeTrackMap,
             codecProfile: publicMkvCodecProfile(profile),
+            ...drainAttestation,
         });
     } catch (err) {
+        let drainAttestation = {};
+        if (providerDrainState.providerProbeStarted) {
+            try {
+                drainAttestation = await providerProbeDrainAttestation(providerDrainState);
+            } catch (_) {
+                return res.status(502).json({
+                    error: 'Audio probe cleanup could not be confirmed.',
+                    code: 'provider_drain_unconfirmed',
+                });
+            }
+        }
         const status = Number.isInteger(err.status) ? err.status : 502;
-        res.status(status).json({ error: err.publicMessage || 'Audio probe failed', code: err.code || undefined });
+        return res.status(status).json({
+            error: err.publicMessage || 'Audio probe failed',
+            code: err.code || undefined,
+            ...drainAttestation,
+        });
     }
-});
+}
+
+app.post('/probe-audio', requireGatewayAuth, handleProbeAudioRequest);
 
 // ── Strict LID loopback broker (mono-account provider barrier) ───────────────
 // Strict multi-window language validation must seek through one finite file several times.
@@ -5199,6 +5343,7 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
         let extractions = 0;      // bound the provider connections
         let lastExtractErr = '';  // surfaced when EVERY offset failed (was an opaque constant string)
         const votes = new Map();
+        const basicSamples = [];
         const strictSamples = [];
         let bestStrictAccepted = null;
         let strictRejectedSpeechSamples = 0;
@@ -5343,6 +5488,8 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
                             language: fast.lang,
                             candidate: fast.lang,
                             confidence: fast.prob,
+                            whisperConfidence: fast.prob,
+                            transcriptConfidence: 0,
                             confident: true,
                             verified: false,
                             validationStatus: 'pending',
@@ -5358,6 +5505,7 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
                             minProbability: WHISPER_DETECT_ONLY_MIN_PROBABILITY,
                             wordCount: 0,
                             uniqueWordCount: 0,
+                            transcriptEvidenceBasis: 'detect-only',
                             sample: '',
                             offset: off,
                         };
@@ -5386,26 +5534,27 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
                     // leaves the file pending rather than choosing a majority.
                     const whisperLang = String(whisper.lang || '').toLowerCase() || null;
                     const whisperProbability = Number(whisper.prob || 0);
-                    const rawUniqueWordCount = new Set(
-                        String(whisper.text || '').toLowerCase().match(/\p{L}+/gu) || [],
-                    ).size;
-                    const transcriptEvidence = strict
-                        ? evaluateStrictTranscriptEvidence({
-                            text: whisper.text || '',
-                            wordCount: det.words,
-                            minWords: WHISPER_STRICT_MIN_WORDS,
-                            minUniqueWords: WHISPER_STRICT_MIN_UNIQUE_WORDS,
-                            whisperLanguage: whisperLang,
-                            transcriptLanguage: det.lang,
-                            transcriptConfident: det.confident,
-                        })
-                        : null;
+                    const transcriptEvidence = evaluateStrictTranscriptEvidence({
+                        text: whisper.text || '',
+                        wordCount: det.words,
+                        minWords: WHISPER_STRICT_MIN_WORDS,
+                        minUniqueWords: WHISPER_STRICT_MIN_UNIQUE_WORDS,
+                        whisperLanguage: whisperLang,
+                        transcriptLanguage: det.lang,
+                        transcriptConfident: det.confident,
+                    });
                     const transcriptDisagrees = det.confident === true
                         && Boolean(det.lang)
                         && det.lang !== whisperLang;
                     const whisperConfident = Boolean(whisperLang) && whisperProbability >= (
                         strict ? WHISPER_STRICT_MIN_PROBABILITY : 0.75
                     );
+                    const whisperStrong = Boolean(whisperLang)
+                        && whisperProbability >= BASIC_LID_MIN_CONFIDENCE;
+                    const transcriptAgrees = det.confident === true
+                        && Boolean(det.lang)
+                        && det.lang === whisperLang;
+                    const basicAgreement = !strict && whisperStrong && transcriptAgrees;
                     const enoughWords = Number(det.words || 0) >= 4;
                     const enoughTranscriptEvidence = strict ? transcriptEvidence.enough : enoughWords;
                     const strictDisposition = strict
@@ -5423,36 +5572,40 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
                         : (det.confident === true || whisperConfident);
                     const candidate = strict
                         ? whisperLang
-                        : (det.confident ? det.lang : (whisperLang || det.lang || null));
+                        : (basicAgreement
+                            ? whisperLang
+                            : (det.confident ? det.lang : (whisperLang || det.lang || null)));
                     const language = confident ? candidate : null;
                     result = {
                         language,
                         candidate,
                         confidence: strict
                             ? whisperProbability
-                            : (det.confident ? det.score : whisperProbability),
+                            : (basicAgreement
+                                ? whisperProbability
+                                : (det.confident ? det.score : whisperProbability)),
+                        whisperConfidence: whisperProbability,
+                        transcriptConfidence: det.confident ? Number(det.score || 0) : 0,
                         confident,
                         verified: false,
                         validationStatus: 'pending',
                         method: strict
                             ? 'whisper-strict-consensus-v4'
-                            : (det.confident ? 'transcript' : (whisperConfident ? 'whisper' : 'pending')),
+                            : (basicAgreement
+                                ? 'whisper-transcript-agreement-v1'
+                                : (det.confident ? 'transcript' : (whisperConfident ? 'whisper' : 'pending'))),
                         consensus: 0,
                         whisperLang,
                         transcriptLang: det.confident ? det.lang : null,
                         transcriptAgrees: det.confident ? det.lang === whisperLang : null,
                         minProbability: strict ? WHISPER_STRICT_MIN_PROBABILITY : 0.75,
-                        wordCount: strict ? transcriptEvidence.compatibleWordCount : det.words,
-                        uniqueWordCount: strict
-                            ? transcriptEvidence.compatibleUniqueWordCount
-                            : rawUniqueWordCount,
-                        ...(strict ? {
-                            transcriptEvidenceBasis: transcriptEvidence.basis,
-                            scriptCharacterCount: transcriptEvidence.scriptCharacterCount,
-                            uniqueScriptCharacterCount: transcriptEvidence.uniqueScriptCharacterCount,
-                            uniqueScriptBigramCount: transcriptEvidence.uniqueScriptBigramCount,
-                            scriptDensity: transcriptEvidence.scriptDensity,
-                        } : {}),
+                        wordCount: transcriptEvidence.compatibleWordCount,
+                        uniqueWordCount: transcriptEvidence.compatibleUniqueWordCount,
+                        transcriptEvidenceBasis: transcriptEvidence.basis,
+                        scriptCharacterCount: transcriptEvidence.scriptCharacterCount,
+                        uniqueScriptCharacterCount: transcriptEvidence.uniqueScriptCharacterCount,
+                        uniqueScriptBigramCount: transcriptEvidence.uniqueScriptBigramCount,
+                        scriptDensity: transcriptEvidence.scriptDensity,
                         sample: String(whisper.text || '').slice(0, 160),
                         offset: off,
                         ...(detectOnlyMode === 'primary' ? { fallbackUsed: true } : {}),
@@ -5512,12 +5665,10 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
                     }
                 }
                 const language = result.language;
-                // "Good" = a clear transcript with a language → real speech. Stop sweeping. A
-                // silent/music clip yields ~no words → keep the best partial and try the next offset.
-                if (
-                    language &&
-                    (result.fastPathAccepted === true || Number(result.wordCount || 0) >= 4)
-                ) {
+                const basicSample = strict ? null : basicLidConsensusSample(result);
+                // Every non-strict vote now carries its own complete evidence contract. A weak
+                // first window can no longer borrow the confidence/diversity of a later window.
+                if (language && (strict || basicSample)) {
                     const voteCount = (votes.get(language) || 0) + 1;
                     votes.set(language, voteCount);
                     result.consensus = voteCount;
@@ -5534,12 +5685,21 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
                             bestStrictAccepted = result;
                         }
                     }
+                    if (basicSample) basicSamples.push(basicSample);
                     // Non-strict discovery may stop as soon as its requested vote count is met.
                     // Strict certification deliberately consumes every configured window: a
                     // fifth/sixth accepted sample that disagrees must veto four earlier votes.
                     if (!strict && voteCount >= consensusNeeded) {
+                        const consensusSamples = basicSamples.filter(
+                            (sample) => sample.language === language,
+                        );
                         res.setHeader('Cache-Control', 'private, max-age=3600');
-                        return sendDetectionJson(200, result);
+                        return sendDetectionJson(200, {
+                            ...result,
+                            consensus: consensusSamples.length,
+                            sampleCount: consensusSamples.length,
+                            samples: consensusSamples,
+                        });
                     }
                 }
                 if (!best || result.wordCount > best.wordCount) best = result;
@@ -5687,7 +5847,7 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
                 validationStatus: 'verified',
                 consensus: strictSamples.length,
                 samples: strictSamples,
-                sampleCount: strictSamples.length,
+                sampleCount: strict ? strictSamples.length : basicSamples.length,
                 rejectedSpeechSampleCount: 0,
                 ignoredWeakSpeechSampleCount: strictIgnoredWeakSpeechSamples,
                 repeatedSpeechSampleCount: strictRepeatedSpeechSamples,
@@ -5717,7 +5877,7 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
                 ignoredWeakSpeechSampleCount: strict ? strictIgnoredWeakSpeechSamples : undefined,
                 repeatedSpeechSampleCount: strict ? strictRepeatedSpeechSamples : undefined,
                 missingDiversitySampleCount: strict ? strictMissingDiversitySamples : undefined,
-                samples: strict ? strictSamples : undefined,
+                samples: strict ? strictSamples : basicSamples,
             };
         }
         res.setHeader('Cache-Control', 'private, max-age=3600');
@@ -5726,7 +5886,7 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
             verified: false, validationStatus: 'pending',
             method: strict ? 'whisper-strict-consensus-v4' : 'pending',
             consensus: 0, whisperLang: null, transcriptLang: null,
-            wordCount: 0, sampleCount: 0,
+            wordCount: 0, sampleCount: 0, samples: [],
             rejectedSpeechSampleCount: strict ? strictRejectedSpeechSamples : undefined,
             ignoredWeakSpeechSampleCount: strict ? strictIgnoredWeakSpeechSamples : undefined,
             repeatedSpeechSampleCount: strict ? strictRepeatedSpeechSamples : undefined,
@@ -15093,6 +15253,7 @@ function buildCodecProfile(payload, startedAt, probeSource) {
                 codec,
                 subtitleType,
                 extractable,
+                default: stream.disposition?.default === 1,
                 burnInRequired: subtitleType === 'image',
                 unsupportedReason: extractable
                     ? null
@@ -15401,6 +15562,10 @@ function isFfprobeProviderBusyFailure(value) {
 function runFfprobe(args, timeoutMs, sourceUrl, options = {}) {
     return new Promise((resolve, reject) => {
         const abortSignal = options?.signal || null;
+        const providerDrainState = options?.providerDrainState
+            && typeof options.providerDrainState === 'object'
+            ? options.providerDrainState
+            : null;
         const abortedError = () => {
             const error = new Error('Codec probe aborted');
             error.code = 'VOD_INPUT_ABORTED';
@@ -15435,10 +15600,36 @@ function runFfprobe(args, timeoutMs, sourceUrl, options = {}) {
             stdio: ['ignore', 'pipe', 'pipe'],
             env: proxyEnvFor(proxyKeyFromUrl(sourceUrl)),
         });
+        if (backgroundKey && providerDrainState) {
+            providerDrainState.providerProbeStarted = true;
+            providerDrainState.ffprobeExited = false;
+            providerDrainState.registrationReleased = false;
+            providerDrainState.releaseDelayCompleted = false;
+        }
         const registration = options.background === true
-            ? registerAccountExtraction(backgroundKey, child)
+            ? registerAccountExtraction(
+                backgroundKey,
+                child,
+                options.backgroundActivityKind || true,
+            )
             : null;
-        const releaseRegistration = () => registration?.release?.();
+        let registrationReleased = false;
+        const releaseRegistration = () => {
+            if (registrationReleased) return;
+            registrationReleased = true;
+            registration?.release?.();
+            if (backgroundKey && providerDrainState?.providerProbeStarted) {
+                providerDrainState.registrationReleased = true;
+            }
+        };
+        const releaseRegistrationAfterProviderDrain = () => {
+            if (backgroundKey && providerDrainState?.providerProbeStarted) {
+                if (registration) registration.providerCooldown = true;
+                providerDrainState.releaseRegistration = releaseRegistration;
+                return;
+            }
+            releaseRegistration();
+        };
         const terminalError = (fallback) => {
             if (registration?.preempted) {
                 return backgroundProbeError(
@@ -15466,7 +15657,11 @@ function runFfprobe(args, timeoutMs, sourceUrl, options = {}) {
         let stdout = '';
         let stderr = '';
         let finished = false;
+        let exitSeen = false;
+        let exitCode = null;
+        let exitSignal = null;
         let terminatingError = null;
+        let spawnFailureWithoutProcess = false;
         let forceKillTimer = null;
         const clearTimers = () => {
             clearTimeout(timer);
@@ -15512,23 +15707,57 @@ function runFfprobe(args, timeoutMs, sourceUrl, options = {}) {
         });
         child.on('error', (err) => {
             if (finished) return;
-            finished = true;
-            clearTimers();
-            releaseRegistration();
-            reject(terminatingError || terminalError(err));
+            const spawnFailed = !Number.isInteger(child.pid) || child.pid <= 0;
+            if (spawnFailed) {
+                // Node emits `close` after a failed spawn. The error event is
+                // not a lifecycle completion signal, so keep the reservation
+                // until that definitive close arrives.
+                spawnFailureWithoutProcess = true;
+                if (!terminatingError) terminatingError = terminalError(err);
+                return;
+            }
+            // `error` also covers a failed kill/abort. A live pid means this is
+            // not proof of exit: retain the account reservation and wait for the
+            // real `exit` event before resolving, rejecting, or attesting drain.
+            if (!terminatingError) beginTermination(terminalError(err), 'SIGKILL');
         });
-        child.on('exit', (code, signal) => {
+        const markChildExited = (code, signal) => {
+            if (exitSeen || spawnFailureWithoutProcess) return;
+            exitSeen = true;
+            exitCode = code;
+            exitSignal = signal;
+            clearTimers();
+            if (backgroundKey && providerDrainState?.providerProbeStarted) {
+                providerDrainState.ffprobeExited = true;
+                releaseRegistrationAfterProviderDrain();
+            } else {
+                releaseRegistrationAfterProviderDrain();
+            }
+        };
+        const finishChildLifecycle = (code, signal) => {
             if (finished) return;
             finished = true;
+            if (!spawnFailureWithoutProcess) markChildExited(code, signal);
             clearTimers();
-            releaseRegistration();
+            if (spawnFailureWithoutProcess) {
+                if (backgroundKey && providerDrainState) {
+                    // The close event proved that no child/provider socket was
+                    // created, so no provider release grace is required.
+                    providerDrainState.providerProbeStarted = false;
+                    providerDrainState.ffprobeExited = false;
+                    providerDrainState.releaseRegistration = null;
+                }
+                releaseRegistration();
+            }
             if (terminatingError) {
                 reject(terminatingError);
                 return;
             }
-            if (code !== 0) {
+            const finalCode = exitSeen ? exitCode : code;
+            const finalSignal = exitSeen ? exitSignal : signal;
+            if (finalCode !== 0) {
                 const failure = new Error(
-                    `Codec probe exited with code ${code ?? 'null'} signal ${signal ?? 'none'}${stderr ? `: ${lastNonEmptyLine(stderr)}` : ''}`,
+                    `Codec probe exited with code ${finalCode ?? 'null'} signal ${finalSignal ?? 'none'}${stderr ? `: ${lastNonEmptyLine(stderr)}` : ''}`,
                 );
                 failure.ffprobeLog = stderr;
                 failure.logTail = stderr;
@@ -15540,7 +15769,14 @@ function runFfprobe(args, timeoutMs, sourceUrl, options = {}) {
             } catch (err) {
                 reject(new Error(`Codec probe returned invalid JSON: ${err.message}`));
             }
-        });
+        };
+        // `exit` proves the provider process is gone but not that stdout/stderr
+        // pipes are drained. Record provider exit immediately, then wait for
+        // `close` before parsing JSON or settling the caller.
+        child.on('exit', markChildExited);
+        // Spawn failures have no `exit`; `close` is also their definitive proof
+        // that no child/provider socket exists.
+        child.on('close', finishChildLifecycle);
     });
 }
 

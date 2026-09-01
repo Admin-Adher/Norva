@@ -115,6 +115,17 @@ class WatchPage {
         this.gatewaySourceTimestamps = false;
         this.audioTracks = [];
         this.subtitleTracks = [];
+        // Exact subtitle evidence is kept separately from the render list. The
+        // latter can also contain native/browser/preference-derived tracks and
+        // must never be promoted to an exact provider-file observation.
+        this._observedExactSubtitleTracks = null;
+        this._observedSubtitleProbeComplete = false;
+        this._observedLangsGeneration = 0;
+        this._observedLangsSent = null;
+        this._observedLangsPending = null;
+        this._observedLangsRetryKey = null;
+        this._observedLangsRetryCount = 0;
+        this._observedLangsRetryAt = 0;
         this.subtitleSourceUrl = null;
         this.subtitleStartOffset = 0;
         this.selectedSubtitleStreamIndex = null;
@@ -832,6 +843,10 @@ class WatchPage {
                     : (Array.isArray(gatewaySession.subtitle_tracks) ? gatewaySession.subtitle_tracks : null)));
         if (explicitTracks !== null) {
             this.subtitleTracks = [...explicitTracks];
+            this.captureExactSubtitleTracksFromMetadata({
+                ...options,
+                subtitleTracks: explicitTracks,
+            });
         }
 
         const acknowledgedIndex = this.nullablePlaybackStreamIndex(
@@ -2014,6 +2029,8 @@ class WatchPage {
         this._lastKnownPlaybackDuration = this.durationHint || 0;
         this.activateHistoryPersistence();
         this.resetTrackSelectionState();
+        this.captureExactSubtitleTracksFromMetadata(content);
+        this.captureExactSubtitleTracksFromMetadata(playbackMetadata);
         // Exact file-scoped catalogue metadata can already name the audio tracks
         // while the playback session and HLS topology are still resolving. Paint
         // those rows immediately, but keep them disabled until the active player
@@ -3195,6 +3212,7 @@ class WatchPage {
     }
 
     resetTrackSelectionState() {
+        this.resetObservedTrackPersistenceState();
         this.resetGatewayAudioRenditions();
         this._audioTopologyPending = false;
         this.audioTracks = [];
@@ -3209,6 +3227,68 @@ class WatchPage {
         this.closeCaptionsMenu();
         this.updateAudioTracks();
         this.updateCaptionsTracks();
+    }
+
+    resetObservedTrackPersistenceState() {
+        this._observedLangsGeneration = Number(this._observedLangsGeneration || 0) + 1;
+        this._observedExactSubtitleTracks = null;
+        this._observedSubtitleProbeComplete = false;
+        this._observedLangsSent = null;
+        this._observedLangsPending = null;
+        this._observedLangsRetryKey = null;
+        this._observedLangsRetryCount = 0;
+        this._observedLangsRetryAt = 0;
+    }
+
+    captureExactSubtitleTrackMap(tracks, evidence = {}) {
+        const gatewaySession = evidence?.gatewaySession || evidence?.gateway_session || {};
+        const scope = String(
+            evidence?.subtitleTracksScope ??
+            evidence?.subtitle_tracks_scope ??
+            gatewaySession?.subtitleTracksScope ??
+            gatewaySession?.subtitle_tracks_scope ??
+            ''
+        ).trim().toLowerCase();
+        const probeComplete = evidence?.subtitleProbeComplete === true
+            || evidence?.subtitle_probe_complete === true
+            || gatewaySession?.subtitleProbeComplete === true
+            || gatewaySession?.subtitle_probe_complete === true;
+        // An empty array is authoritative only when a complete exact-file probe
+        // explicitly says that the file contains no subtitle streams.
+        if (!Array.isArray(tracks) || (!probeComplete && scope !== 'file')) return false;
+
+        this._observedExactSubtitleTracks = tracks
+            .map((track) => {
+                const index = Number(track?.index);
+                const language = this.normalizeTrackLanguage(track?.lang || track?.language);
+                return {
+                    index,
+                    lang: language && language !== 'und' ? language : null,
+                    codec: track?.codec || track?.codecName || track?.codec_name || null,
+                    subtitleType: track?.subtitleType || track?.subtitle_type || null,
+                    extractable: track?.extractable === true,
+                    forced: track?.forced === true,
+                    default: track?.default === true,
+                };
+            })
+            .filter((track) => Number.isInteger(track.index));
+        this._observedSubtitleProbeComplete = true;
+        return true;
+    }
+
+    captureExactSubtitleTracksFromMetadata(metadata = {}) {
+        if (!metadata || typeof metadata !== 'object') return false;
+        const gatewaySession = metadata.gatewaySession || metadata.gateway_session || {};
+        const tracks = Array.isArray(metadata.subtitleTracks)
+            ? metadata.subtitleTracks
+            : (Array.isArray(metadata.subtitle_tracks)
+                ? metadata.subtitle_tracks
+                : (Array.isArray(metadata.subtitles)
+                    ? metadata.subtitles
+                    : (Array.isArray(gatewaySession.subtitleTracks)
+                        ? gatewaySession.subtitleTracks
+                        : (Array.isArray(gatewaySession.subtitle_tracks) ? gatewaySession.subtitle_tracks : null))));
+        return this.captureExactSubtitleTrackMap(tracks, metadata);
     }
 
     /**
@@ -4122,6 +4202,7 @@ class WatchPage {
         this.probeDuration = this.normalizeDuration(info.duration);
         this.audioTracks = Array.isArray(info.audioTracks) ? info.audioTracks : [];
         this.subtitleTracks = Array.isArray(info.subtitles) ? info.subtitles : [];
+        this.captureExactSubtitleTracksFromMetadata(info);
         this.restorePendingAudioPreference(info);
         this.restorePendingSubtitlePreference();
         this.ensureSelectedAudioTrack();
@@ -4888,6 +4969,7 @@ class WatchPage {
         this.subtitleTracks = [];
         this.subtitleSourceUrl = null;
         this.subtitleStartOffset = 0;
+        this.captureExactSubtitleTracksFromMetadata(options);
         this.selectedSubtitleStreamIndex = null;
         this.selectedSubtitleTrackUserChoice = false;
         this.selectedAudioStreamIndex = null;
@@ -5031,7 +5113,7 @@ class WatchPage {
             // enrich on menu-open still applies (toggleAudioMenu/toggleCaptionsMenu).
             const sessionSubtitleTracks = Array.isArray(options.subtitleTracks) ? options.subtitleTracks : null;
             if (sessionSubtitleTracks && sessionSubtitleTracks.length) {
-                try { this.applyEngineSubtitleTracks(sessionSubtitleTracks, playbackAttemptId); } catch (_) { /* best-effort */ }
+                try { this.applyEngineSubtitleTracks(sessionSubtitleTracks, playbackAttemptId, options); } catch (_) { /* best-effort */ }
             }
             return;
         }
@@ -7907,6 +7989,7 @@ class WatchPage {
                 const exactAudioLanguages = resultAudioLanguages !== null ? resultAudioLanguages : nextAudioLanguages;
                 const exactSubtitleTracks = resultSubtitleTracks !== null ? resultSubtitleTracks : nextSubtitleTracks;
 
+                this.resetObservedTrackPersistenceState();
                 this.versionIndex = nextIndex;
                 this.updateTranscodeStatus('transcoding', `Switched: ${next.label}`);
                 if (this.subtitleEl) {
@@ -7939,6 +8022,7 @@ class WatchPage {
                 this.content.subtitle_tracks = exactSubtitleTracks;
                 this.content.subtitleTracksScope = exactSubtitleTracks !== null ? 'file' : null;
                 this.content.subtitle_tracks_scope = exactSubtitleTracks !== null ? 'file' : null;
+                this.captureExactSubtitleTracksFromMetadata(this.content);
                 this.content.cloudPlaybackSessionId = resultSessionId || null;
                 this.content.playbackPreferences = playbackPreferences;
                 this.content.playback_preferences = playbackPreferences;
@@ -9224,9 +9308,9 @@ class WatchPage {
         return [{ source: 'none', index: -1, label: contentLabel || 'Audio track', active: true }];
     }
 
-    // Persist only a COMPLETE ordered map already returned by the trusted
-    // playback/gateway probe for this exact file. A selected language,
-    // title-level union, or browser hint is never file-level evidence.
+    // Persist only COMPLETE ordered maps returned by a trusted file-scoped
+    // playback/gateway probe. Audio and subtitles are independent: a complete
+    // empty subtitle probe is evidence, while an absent probe is not.
     reportObservedAudioLanguages() {
         try {
             if (!window.API?.isCloudMode?.()) return;
@@ -9235,8 +9319,9 @@ class WatchPage {
             const cloudSourceId = this.content?.cloudSourceId
                 || this.content?.cloud_source_id
                 || this.content?.data?.cloudSourceId
+                || this.content?.data?.cloud_source_id
                 || null;
-            const itemType = this.content?.type === 'series' ? 'series' : 'movie';
+            const itemType = this.content?.type === 'series' || this.contentType === 'series' ? 'series' : 'movie';
             const externalId = this.content?.externalId
                 || this.content?.external_id
                 || this.content?.itemId
@@ -9247,17 +9332,37 @@ class WatchPage {
                 || null;
             if (!titleId && !(cloudSourceId && externalId)) return;
             const orderedTracks = (Array.isArray(this._relayAudioTracks) ? this._relayAudioTracks : [])
-                .filter((t) => Number.isInteger(t.index))
                 .map((t) => ({
-                    index: t.index,
+                    index: Number(t.index),
                     lang: (t.lang && t.lang !== 'und') ? this.normalizeTrackLanguage(t.lang) : null
-                }));
-            if (!orderedTracks.length) return;
-            const mapFingerprint = orderedTracks
+                }))
+                .filter((track) => Number.isInteger(track.index));
+            const orderedSubtitleTracks = this._observedSubtitleProbeComplete === true
+                && Array.isArray(this._observedExactSubtitleTracks)
+                ? this._observedExactSubtitleTracks.map((track) => ({ ...track }))
+                : null;
+            const hasExactAudioMap = orderedTracks.length > 0;
+            const hasExactSubtitleMap = orderedSubtitleTracks !== null;
+            if (!hasExactAudioMap && !hasExactSubtitleMap) return;
+
+            const audioFingerprint = orderedTracks
                 .map((track) => `${track.index}:${track.lang || ''}`)
                 .join('|');
-            const key = `${titleId || ''}:${cloudSourceId || sourceId || ''}:${itemType}:${externalId || ''}:${mapFingerprint}`;
+            const subtitleFingerprint = hasExactSubtitleMap
+                ? orderedSubtitleTracks.map((track) => [
+                    track.index,
+                    track.lang || '',
+                    track.codec || '',
+                    track.subtitleType || '',
+                    track.extractable ? 1 : 0,
+                    track.forced ? 1 : 0,
+                    track.default ? 1 : 0,
+                ].join(':')).join('|')
+                : '-';
+            const key = `${titleId || ''}:${cloudSourceId || sourceId || ''}:${itemType}:${externalId || ''}:audio:${hasExactAudioMap ? audioFingerprint : '-'}:subtitles:${subtitleFingerprint}`;
             if (this._observedLangsSent === key || this._observedLangsPending === key) return;
+            const generation = Number(this._observedLangsGeneration || 0);
+            const stateIsCurrent = () => Number(this._observedLangsGeneration || 0) === generation;
             const now = Date.now();
             if (this._observedLangsRetryKey === key && Number(this._observedLangsRetryAt || 0) > now) return;
             if (this._observedLangsRetryKey !== key) {
@@ -9266,6 +9371,7 @@ class WatchPage {
                 this._observedLangsRetryAt = 0;
             }
             const deferRetry = () => {
+                if (!stateIsCurrent()) return;
                 if (this._observedLangsRetryKey !== key) {
                     this._observedLangsRetryKey = key;
                     this._observedLangsRetryCount = 0;
@@ -9285,11 +9391,26 @@ class WatchPage {
                 itemType,
                 itemId: externalId,
                 externalId,
-                parentExternalId: this.content?.parentExternalId || this.content?.parent_external_id || this.content?.seriesId || null,
-                audioTracks: orderedTracks,
-                audioTracksScope: 'file',
+                parentExternalId: this.content?.parentExternalId
+                    || this.content?.parent_external_id
+                    || this.content?.data?.parentExternalId
+                    || this.content?.data?.parent_external_id
+                    || this.content?.seriesId
+                    || this.content?.series_id
+                    || this.content?.data?.seriesId
+                    || this.content?.data?.series_id
+                    || null,
+                ...(hasExactAudioMap ? {
+                    audioTracks: orderedTracks,
+                    audioTracksScope: 'file',
+                } : {}),
+                ...(hasExactSubtitleMap ? {
+                    subtitleTracks: orderedSubtitleTracks,
+                    subtitleTracksScope: 'file',
+                } : {}),
             });
             Promise.resolve(request).then((result) => {
+                if (!stateIsCurrent()) return;
                 if (this._observedLangsPending === key) this._observedLangsPending = null;
                 // Only a server-validated exact-file write suppresses later
                 // attempts. HTTP 400/5xx, transport errors and incomplete
@@ -9302,6 +9423,7 @@ class WatchPage {
                     deferRetry();
                 }
             }).catch(() => {
+                if (!stateIsCurrent()) return;
                 if (this._observedLangsPending === key) this._observedLangsPending = null;
                 deferRetry();
             });
@@ -10365,7 +10487,7 @@ class WatchPage {
     // back as OFF (because the lazy client enum populated the list too late to restore).
     // Enumeration is provider-free (payload data). The restore-ATTACH extracts via the
     // gateway lane selected for this same playback session. Returns true when tracks applied.
-    applyEngineSubtitleTracks(tracks, playbackAttemptId) {
+    applyEngineSubtitleTracks(tracks, playbackAttemptId, evidence = {}) {
         if (!Array.isArray(tracks) || !tracks.length) return false;
         const mapped = tracks
             .filter((s) => Number.isInteger(Number(s.index)))
@@ -10381,6 +10503,7 @@ class WatchPage {
             }));
         if (!mapped.length) return false;
         this.subtitleTracks = mapped;
+        this.captureExactSubtitleTrackMap(mapped, evidence);
         this.subtitleSourceUrl = this.baseStreamUrl || this.currentUrl;
         this.subtitleStartOffset = 0;
         this._engineSubsEnriched = true; // server-provided → skip the client gateway probe
@@ -10449,9 +10572,6 @@ class WatchPage {
             if (gatewayHasLang && !relayHasLang) {
                 this._relayAudioTracks = gwAudio;
                 try { this.syncEngineAudioTracks(); } catch (_) { /* best-effort */ }
-                // Self-heal: persist the gateway-discovered languages now so the next play
-                // of this title is served the map and needs no probe at all (deterministic).
-                try { this.reportObservedAudioLanguages(); } catch (_) { /* best-effort capture */ }
             }
             const tracks = (Array.isArray(data.subtitles) ? data.subtitles : [])
                 .filter((s) => Number.isInteger(Number(s.index)))
@@ -10465,6 +10585,19 @@ class WatchPage {
                     forced: s.forced === true,
                     default: s.default === true,
                 }));
+            // A successful response from this token-scoped endpoint is the complete
+            // ffprobe enumeration for the exact playback file. The gateway's legacy
+            // JSON shape has no explicit completion fields, so add that evidence at
+            // this trusted call site (including the authoritative empty-map case).
+            const exactSubtitleEvidence = {
+                ...data,
+                subtitleProbeComplete: true,
+                subtitleTracksScope: 'file',
+            };
+            this.captureExactSubtitleTrackMap(tracks, exactSubtitleEvidence);
+            // Self-heal both independent exact maps. A complete gateway probe
+            // with zero subtitles is evidence too; an absent/incomplete probe is not.
+            try { this.reportObservedAudioLanguages(); } catch (_) { /* best-effort capture */ }
             if (!tracks.length) return;
             this.subtitleTracks = tracks;
             // Windowed extraction reads from the engine /raw URL → gateway /subtitle.
@@ -12619,6 +12752,16 @@ class WatchPage {
         try {
             const outgoingContent = this.content || {};
             const sourceId = outgoingContent.sourceId;
+            const cloudSourceId = outgoingContent.cloudSourceId
+                || outgoingContent.cloud_source_id
+                || outgoingContent.data?.cloudSourceId
+                || outgoingContent.data?.cloud_source_id
+                || null;
+            const titleId = outgoingContent.titleId
+                || outgoingContent.title_id
+                || outgoingContent.data?.titleId
+                || outgoingContent.data?.title_id
+                || null;
             const seriesId = outgoingContent.seriesId || outgoingContent.series_id;
             const seriesInfo = this.seriesInfo;
             const playbackPreferences = this.getPlaybackPreferences();
@@ -12645,7 +12788,11 @@ class WatchPage {
                 year: outgoingContent.year,
                 rating: outgoingContent.rating,
                 sourceId,
+                cloudSourceId,
+                titleId,
                 seriesId,
+                externalId: episodeId,
+                parentExternalId: seriesId,
                 seriesInfo,
                 currentSeason: seasonNum,
                 currentEpisode: episodeNum,
@@ -12979,6 +13126,16 @@ class WatchPage {
         try {
             const outgoingContent = this.content || {};
             const sourceId = outgoingContent.sourceId;
+            const cloudSourceId = outgoingContent.cloudSourceId
+                || outgoingContent.cloud_source_id
+                || outgoingContent.data?.cloudSourceId
+                || outgoingContent.data?.cloud_source_id
+                || null;
+            const titleId = outgoingContent.titleId
+                || outgoingContent.title_id
+                || outgoingContent.data?.titleId
+                || outgoingContent.data?.title_id
+                || null;
             const seriesId = outgoingContent.seriesId || outgoingContent.series_id;
             const seriesInfo = this.seriesInfo;
             const container = ep.container_extension || 'mp4';
@@ -13005,7 +13162,11 @@ class WatchPage {
                 year: outgoingContent.year,
                 rating: outgoingContent.rating,
                 sourceId,
+                cloudSourceId,
+                titleId,
                 seriesId,
+                externalId: ep.id,
+                parentExternalId: seriesId,
                 seriesInfo,
                 currentSeason: ep.seasonNum,
                 currentEpisode: ep.episode_num,
