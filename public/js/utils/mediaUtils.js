@@ -482,7 +482,11 @@ const MediaUtils = (() => {
         const raw = String(value || '').trim();
         const initial = cleanReleaseName(raw) || raw;
         const coordinate = initial.match(/(?:^|[\s._-])S0*(\d{1,3})[\s._-]*E0*(\d{1,4})(?=$|[\s._-])/i)
-            || initial.match(/(?:^|[\s._-])(\d{1,3})x0*(\d{1,4})(?=$|[\s._-])/i);
+            || initial.match(/(?:^|[\s._-])(\d{1,3})x0*(\d{1,4})(?=$|[\s._-])/i)
+            // Some panels concatenate the series slug and coordinate without any
+            // separator ("ArcaneS01E01"). A terminal/suffix-delimited SxxExx is still
+            // structured provider metadata, never an editorial episode title.
+            || initial.match(/S0*(\d{1,3})[\s._-]*E0*(\d{1,4})(?=$|[\s._-])/i);
         const fallbackNumber = episodeNumber || coordinate?.[2] || '';
         const fallback = `Episode ${fallbackNumber}`.trim();
         if (!initial) return fallback;

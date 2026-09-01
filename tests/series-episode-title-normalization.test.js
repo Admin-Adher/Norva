@@ -44,6 +44,10 @@ test('provider-only Promax episode slugs become semantic fallbacks', () => {
     title: 'NF-50-Seconds-The-Fernando-Baez-Sosa-Case-2025-AR-S1E3',
     episode_num: 3,
   }, 1), 'Episode 3');
+  assert.equal(page.cleanEpisodeTitle({
+    title: 'ArcaneS01E01',
+    episode_num: 1,
+  }, 1), 'Episode 1');
 });
 
 test('real episode titles survive while scene metadata is removed', () => {
@@ -68,6 +72,7 @@ test('every episode surface gets one structured display label', () => {
     { season: 1, episode: 1 }
   ), 'S1 · E1');
   assert.equal(format('S01E02 - Pilot', { season: '01', episode: '02' }), 'S1 · E2 · Pilot');
+  assert.equal(format('ArcaneS01E01', { season: 1, episode: 1 }), 'S1 · E1');
   assert.equal(format('Any.Series.S02E04.The-Big-Day.1080p.WEBRip.x264', {
     season: 2, episode: 4
   }), 'S2 · E4 · The Big Day');
