@@ -592,7 +592,13 @@ class MoviesPage {
         const loaderEl = this.container.querySelector('.genre-bucket-loader');
         this.bucketObserver = new IntersectionObserver((entries) => {
             if (entries.some((e) => e.isIntersecting)) this.loadBucketPage();
-        }, { rootMargin: '700px' });
+        }, {
+            // #movies-grid is the single vertical scroll owner. Observing against
+            // the viewport made the sentinel depend on how much variable chrome
+            // (filters + Continue Watching) happened to sit above the grid.
+            root: this.container,
+            rootMargin: '0px 0px 700px 0px'
+        });
         this.loadBucketPage().then(() => {
             if (loaderEl) this.bucketObserver.observe(loaderEl);
         });
