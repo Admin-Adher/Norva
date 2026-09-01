@@ -341,6 +341,7 @@ function startRetryHarness(overrides = {}) {
         startFfmpeg: () => ({}),
         waitForPlaylist: async () => { throw new Error('playlist failed'); },
         stopBoundedMkvInputPump: async () => {},
+        stopFiniteMkvLinearSeekBridge: async () => {},
         stopChildProcess: async () => {},
         sleep: async () => {},
         waitForVodInputRetry: async (_delayMs, signal) => !signal?.aborted,
@@ -3385,7 +3386,10 @@ test('production finite MKV resume uses continuous indexed windows and keeps lin
     assert.match(startFfmpeg, /session\.finiteMkvSeekBroker\.inputUrl/);
     assert.match(startFfmpeg, /stdio: \[pumpedMkvInput \? 'pipe' : 'ignore', 'ignore', 'pipe'\]/);
     assert.match(startFfmpeg, /seekableMkvInput[\s\S]+?loopbackOnlyEnv\(\)/);
-    assert.match(startFfmpeg, /startBoundedMkvInputPump\(session, child\.stdin\)/);
+    assert.match(startFfmpeg, /const pumpWritable = linearSeekBridge \? linearSeekBridge\.child\.stdin : child\.stdin/);
+    assert.match(startFfmpeg, /startBoundedMkvInputPump\(session, pumpWritable\)/);
+    assert.match(startFfmpeg, /linearSeekBridge\.child\.stdout\.pipe\(child\.stdin\)/);
+    assert.match(startFfmpeg, /stopFiniteMkvLinearSeekBridge\(session\)/);
 
     const seekSource = sourceBetween(source, 'function seekArgsForSession(', '\nfunction usesSourceTimestampedCopySeek(').trim();
     const seekArgsForSession = vm.runInNewContext(`(${seekSource})`, {
@@ -3405,6 +3409,15 @@ test('production finite MKV resume uses continuous indexed windows and keeps lin
         JSON.parse(JSON.stringify(seekArgsForSession({ sourceUrl: 'https://p/title.mkv', seekOffset: 120 }, true))),
         { preInputSeek: [], postInputSeek: ['-ss', '120'] },
         'a missing seek broker fails safe to the legacy linear pipe seek',
+    );
+    assert.deepEqual(
+        JSON.parse(JSON.stringify(seekArgsForSession(
+            { sourceUrl: 'https://p/title.mkv', seekOffset: 120 },
+            true,
+            { fineSeekOffsetSeconds: 30 },
+        ))),
+        { preInputSeek: [], postInputSeek: ['-ss', '30'] },
+        'the packet-copy bridge leaves only a bounded accurate-seek preroll to the encoder',
     );
 
     const createRoute = sourceBetween(source, "app.post('/sessions'", "\napp.delete('/raw-pumps'");

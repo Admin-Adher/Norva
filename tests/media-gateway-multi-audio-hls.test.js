@@ -250,6 +250,7 @@ test('one FFmpeg maps absolute input indexes to audio-only ordinals and keeps th
             releaseVideoEncoderAdmission: () => {},
             isFiniteMkvVodSession: () => true,
             usesFiniteMkvSeekBroker: () => false,
+            finiteMkvLinearSeekBridgePlanForSession: () => null,
             usesSourceTimestampedCopySeek: () => false,
             seekArgsForSession: () => ({ preInputSeek: [], postInputSeek: [] }),
             appendSubtitleOutputs: () => {},
@@ -546,11 +547,24 @@ test('serialization, health and cleanup retain the bounded single-provider contr
     assert.match(gatewaySource, /multiAudioHls:\s*\{\s*protocol:\s*MULTI_AUDIO_HLS_PROTOCOL[\s\S]*maxAudioRenditions:\s*MAX_MULTI_AUDIO_RENDITIONS/);
     assert.ok((gatewaySource.match(/audioRenditions:\s*audioRenditionsForSession\(session\)/g) || []).length >= 3);
     const stop = sourceBetween('async function stopSession(', '\nasync function stopConflictingSourceSessions(');
-    assert.ok(stop.indexOf('await stopBoundedMkvInputPump(session)') < stop.indexOf('await stopChildProcess(child)'));
+    const pumpStopIndex = stop.indexOf('await stopBoundedMkvInputPump(session)');
+    const bridgeStopIndex = stop.indexOf('await stopFiniteMkvLinearSeekBridge(session)');
+    const ffmpegStopIndex = stop.indexOf('await stopChildProcess(child)');
+    assert.ok(pumpStopIndex >= 0 && pumpStopIndex < bridgeStopIndex);
+    assert.ok(bridgeStopIndex < ffmpegStopIndex);
     const retry = sourceBetween('async function startSessionWithProviderRetry(', '\nfunction normalizeFileSizeBytes(');
     assert.match(retry, /removeSessionDir\(session\.outputDir\)[\s\S]*fsp\.mkdir\(session\.outputDir/,
         'a local probe retry cannot reuse a stale master or rendition');
-    assert.match(gatewaySource, /inputPump\s*=\s*startBoundedMkvInputPump\(session, child\.stdin\)/);
+    assert.match(
+        gatewaySource,
+        /const pumpWritable\s*=\s*linearSeekBridge\s*\?\s*linearSeekBridge\.child\.stdin\s*:\s*child\.stdin;[\s\S]*inputPump\s*=\s*startBoundedMkvInputPump\(session, pumpWritable\)/,
+        'one provider pump feeds either the local packet-copy bridge or the primary FFmpeg pipe',
+    );
+    assert.match(
+        gatewaySource,
+        /finiteMkvLinearSeekBridge:\s*\{[\s\S]*active:\s*finiteMkvLinearSeekBridges\.size[\s\S]*providerConnections:\s*0/,
+        'health exposes the local bridge without attributing a second provider connection',
+    );
     assert.match(gatewaySource, /upstream\.status === 458[\s\S]*PROVIDER_BUSY/,
         'the first upstream 458 remains terminal provider-busy evidence');
 });

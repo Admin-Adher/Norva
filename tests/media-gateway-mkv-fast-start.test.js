@@ -1672,6 +1672,7 @@ test('an admitted replay starts one FFmpeg graph with copied video and proof-sel
     releaseVideoEncoderAdmission: () => {},
     isFiniteMkvVodSession: () => true,
     usesFiniteMkvSeekBroker: () => false,
+    finiteMkvLinearSeekBridgePlanForSession: () => null,
     usesSourceTimestampedCopySeek: () => false,
     seekArgsForSession: () => ({ preInputSeek: [], postInputSeek: [] }),
     appendSubtitleOutputs: () => {},

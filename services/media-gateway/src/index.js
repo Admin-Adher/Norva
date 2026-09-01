@@ -57,6 +57,10 @@ const {
     videoEncoderInputArgs,
     videoEncoderOutputArgs,
 } = require('./video-encoder');
+const {
+    finiteMkvLinearSeekBridgeArgs,
+    finiteMkvLinearSeekBridgePlan,
+} = require('./finite-mkv-linear-seek-bridge');
 
 const app = express();
 
@@ -1565,6 +1569,21 @@ const FINITE_MKV_SEEK_PROXY_AGENT_MAX_AGE_MS = clampInt(
     60_000,
     5 * 60_000,
 );
+// When the indexed range broker is temporarily unavailable, reading a resumed
+// MKV from byte zero is still the safest single-provider fallback. A direct
+// post-input seek makes the HLS encoder decode and discard the entire elapsed
+// movie, though, so a long resume can exceed the public startup timeout. Insert
+// a local packet-copy Matroska bridge on that one fallback: it discards old
+// packets without decoding, retains every stream in its original order, and
+// leaves only a short accurate-seek preroll to the main encoder.
+const FINITE_MKV_LINEAR_SEEK_BRIDGE_ENABLED =
+    (process.env.FINITE_MKV_LINEAR_SEEK_BRIDGE_ENABLED || 'true') !== 'false';
+const FINITE_MKV_LINEAR_SEEK_BRIDGE_PREROLL_SECONDS = clampInt(
+    process.env.FINITE_MKV_LINEAR_SEEK_BRIDGE_PREROLL_SECONDS,
+    30,
+    5,
+    120,
+);
 // libav must never abandon the private loopback before either the broker deadline or the outer
 // extraction deadline. This is microseconds (`-rw_timeout`) and intentionally exceeds 45 s.
 const STRICT_LID_FFMPEG_RW_TIMEOUT_US = 50_000_000;
@@ -1873,7 +1892,7 @@ const MULTI_AUDIO_HLS_PROTOCOL = 1;
 // production Ryzen/Radeon host. Keep the operational default evidence-based and configurable,
 // while bounding accidental fan-out. Every exact source track stays visible to the user.
 const MAX_MULTI_AUDIO_RENDITIONS = clampInt(process.env.MAX_MULTI_AUDIO_RENDITIONS, 12, 2, 32);
-const GATEWAY_VERSION = 138;
+const GATEWAY_VERSION = 139;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -1977,6 +1996,13 @@ const vodInputPumpStats = {
         lastModified: 0,
         weakOrAbsent: 0,
     },
+    last: null,
+};
+const finiteMkvLinearSeekBridges = new Set();
+const finiteMkvLinearSeekBridgeStats = {
+    starts: 0,
+    completed: 0,
+    failures: 0,
     last: null,
 };
 const mkvH264FullFileAnalyzers = new Set();
@@ -2119,6 +2145,16 @@ app.get('/health', (req, res) => {
             effectiveUrlPinned: true,
             validatorPinnedWhenAvailable: true,
             proxyAgentMaxAgeMs: FINITE_MKV_SEEK_PROXY_AGENT_MAX_AGE_MS,
+        },
+        finiteMkvLinearSeekBridge: {
+            protocol: 1,
+            enabled: FINITE_MKV_LINEAR_SEEK_BRIDGE_ENABLED,
+            active: finiteMkvLinearSeekBridges.size,
+            prerollSeconds: FINITE_MKV_LINEAR_SEEK_BRIDGE_PREROLL_SECONDS,
+            providerConnections: 0,
+            input: 'local-pipe',
+            output: 'local-matroska-pipe',
+            stats: { ...finiteMkvLinearSeekBridgeStats },
         },
         vodFileSizeProbeTimeoutMs: VOD_FILE_SIZE_PROBE_TIMEOUT_MS,
         vodInputPump: {
@@ -8922,6 +8958,7 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             ffmpeg: null,
             inputPump: null,
             finiteMkvSeekBroker: null,
+            linearSeekBridge: null,
             inputFailure: null,
             vodInputValidator: null,
             vodInputPrefixIdentityBytes: null,
@@ -9578,6 +9615,7 @@ async function startSessionWithProviderRetry(session, abortSignal = null) {
         if (totalAttempt > 1) {
             const stoppedProviderPump = Boolean(session.inputPump);
             await stopBoundedMkvInputPump(session).catch(() => {});
+            await stopFiniteMkvLinearSeekBridge(session).catch(() => {});
             await stopChildProcess(session.ffmpeg).catch(() => {});
             session.ffmpeg = null;
             if (stoppedProviderPump && PROVIDER_SLOT_RELEASE_DELAY_MS > 0) {
@@ -11862,6 +11900,74 @@ async function stopBoundedMkvInputPump(session) {
     if (session.inputPump === pump) session.inputPump = null;
 }
 
+function finiteMkvLinearSeekBridgePlanForSession(session) {
+    return finiteMkvLinearSeekBridgePlan({
+        enabled: FINITE_MKV_LINEAR_SEEK_BRIDGE_ENABLED,
+        finiteMkv: isFiniteMkvVodSession(session),
+        indexedInput: usesFiniteMkvSeekBroker(session),
+        linearFallbacks: Number(session?.finiteMkvLinearFallbacks || 0),
+        seekOffsetSeconds: Number(session?.seekOffset || 0),
+        prerollSeconds: FINITE_MKV_LINEAR_SEEK_BRIDGE_PREROLL_SECONDS,
+    });
+}
+
+function spawnFiniteMkvLinearSeekBridge(session, plan, inputProbeArgs) {
+    const args = finiteMkvLinearSeekBridgeArgs(plan, inputProbeArgs);
+    const child = spawn(FFMPEG_PATH, args, {
+        stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    const bridge = {
+        child,
+        plan,
+        stopping: false,
+        completed: false,
+        failureHandled: false,
+        settled: false,
+    };
+    session.linearSeekBridge = bridge;
+    finiteMkvLinearSeekBridges.add(child);
+    finiteMkvLinearSeekBridgeStats.starts += 1;
+    session.startupTimings = asRecord(session.startupTimings);
+    session.startupTimings.finiteMkvResumeMode = 'linear-packet-copy-seek-bridge';
+    session.startupTimings.linearSeekBridgeSpawnCount =
+        Number(session.startupTimings.linearSeekBridgeSpawnCount || 0) + 1;
+    session.startupTimings.linearSeekBridgeSourceOffsetSeconds = plan.bridgeSeekOffsetSeconds;
+    session.startupTimings.linearSeekBridgeFineSeekSeconds = plan.fineSeekOffsetSeconds;
+
+    const settle = (ok, detail = {}) => {
+        if (bridge.settled) return;
+        bridge.settled = true;
+        bridge.completed = ok;
+        finiteMkvLinearSeekBridges.delete(child);
+        const expectedStop = !ok && bridge.stopping && !bridge.failureHandled;
+        if (ok) finiteMkvLinearSeekBridgeStats.completed += 1;
+        else if (!expectedStop) finiteMkvLinearSeekBridgeStats.failures += 1;
+        finiteMkvLinearSeekBridgeStats.last = {
+            ok: ok || expectedStop,
+            stopped: expectedStop,
+            ...detail,
+            at: new Date().toISOString(),
+        };
+    };
+    child.once('error', (error) => settle(false, { code: error?.code || 'SPAWN_ERROR' }));
+    child.once('close', (code, signal) => settle(code === 0, {
+        code: Number.isInteger(code) ? code : null,
+        signal: signal || null,
+    }));
+    return bridge;
+}
+
+async function stopFiniteMkvLinearSeekBridge(session) {
+    const bridge = session?.linearSeekBridge;
+    if (!bridge) return;
+    bridge.stopping = true;
+    try { bridge.child?.stdout?.unpipe?.(); } catch (_) {}
+    try { bridge.child?.stdin?.destroy?.(); } catch (_) {}
+    await stopChildProcess(bridge.child).catch(() => {});
+    finiteMkvLinearSeekBridges.delete(bridge.child);
+    if (session.linearSeekBridge === bridge) session.linearSeekBridge = null;
+}
+
 function startFfmpeg(session) {
     const multiAudioPlan = multiAudioHlsEnabled(session) ? session.multiAudioHls : null;
     const segmentPattern = path.join(
@@ -11904,8 +12010,11 @@ function startFfmpeg(session) {
     );
     const seekableMkvInput = usesFiniteMkvSeekBroker(session);
     const pumpedMkvInput = isFiniteMkvVodSession(session) && !seekableMkvInput;
+    const linearSeekBridgePlan = pumpedMkvInput
+        ? finiteMkvLinearSeekBridgePlanForSession(session)
+        : null;
     const preserveCopySeekTimestamps = usesSourceTimestampedCopySeek(session, encodeVideo, copyAudio);
-    const { preInputSeek, postInputSeek } = seekArgsForSession(session, encodeVideo);
+    const { preInputSeek, postInputSeek } = seekArgsForSession(session, encodeVideo, linearSeekBridgePlan);
     const providerHttpInputArgs = pumpedMkvInput ? [] : (seekableMkvInput ? [
         '-seekable', '1',
         // The finite broker serializes upstream provider windows. A loopback
@@ -12005,7 +12114,11 @@ function startFfmpeg(session) {
     appendSubtitleOutputs(args, session, postInputSeek);
 
     let child;
+    let linearSeekBridge = null;
     try {
+        if (linearSeekBridgePlan) {
+            linearSeekBridge = spawnFiniteMkvLinearSeekBridge(session, linearSeekBridgePlan, inputProbeArgs);
+        }
         child = spawn(FFMPEG_PATH, args, {
             stdio: [pumpedMkvInput ? 'pipe' : 'ignore', 'ignore', 'pipe'],
             env: pumpedMkvInput
@@ -12015,6 +12128,10 @@ function startFfmpeg(session) {
                     : proxyEnvFor(proxyKeyFromUrl(session.sourceUrl))),
         });
     } catch (error) {
+        if (linearSeekBridge) {
+            linearSeekBridge.stopping = true;
+            stopFiniteMkvLinearSeekBridge(session).catch(() => {});
+        }
         releaseVideoEncoderAdmission(session);
         throw error;
     }
@@ -12026,6 +12143,59 @@ function startFfmpeg(session) {
     session.status = 'starting';
     let inputPump = null;
 
+    if (linearSeekBridge) {
+        linearSeekBridge.child.stdin.on('error', () => {});
+        linearSeekBridge.child.stdout.on('error', () => {});
+        child.stdin.on('error', () => {});
+        linearSeekBridge.child.stdout.pipe(child.stdin);
+        linearSeekBridge.child.stderr.on('data', (chunk) => {
+            const text = sanitizeLog(chunk.toString(), session.sourceUrl);
+            appendLogTail(session, `[linear-seek-bridge] ${text}`);
+            if (text.trim()) console.warn(`[ffmpeg-seek-bridge:${session.id}] ${text.trim()}`);
+        });
+        const failLinearSeekBridge = (error) => {
+            if (
+                linearSeekBridge.failureHandled ||
+                linearSeekBridge.stopping ||
+                session.status === 'stopping' ||
+                session.status === 'failed' ||
+                session.status === 'ended' ||
+                (child.exitCode !== null && child.exitCode !== undefined) ||
+                child.signalCode
+            ) return;
+            linearSeekBridge.failureHandled = true;
+            const safeMessage = sanitizeLog(
+                error?.message || 'The local linear seek bridge failed',
+                session.sourceUrl,
+            );
+            if (!session.inputFailure) {
+                session.inputFailure = {
+                    status: 502,
+                    code: 'LINEAR_SEEK_BRIDGE_FAILED',
+                    upstreamStatus: null,
+                    networkCause: error?.code || null,
+                };
+            }
+            session.lastError = `${session.inputFailure.code}: ${safeMessage}`;
+            appendLogTail(session, session.lastError);
+            session.status = 'stopping';
+            try { inputPump?.controller.abort(); } catch (_) {}
+            try { child.stdin.destroy(); } catch (_) {}
+            stopChildProcess(child).catch(() => {}).finally(() => {
+                if (session.status === 'stopping') session.status = 'failed';
+                wakePlaybackBlockedQueues();
+            });
+        };
+        linearSeekBridge.child.on('error', failLinearSeekBridge);
+        linearSeekBridge.child.on('exit', (code, signal) => {
+            if (code !== 0) {
+                failLinearSeekBridge(new Error(
+                    `Linear seek bridge exited with code ${code ?? 'null'} signal ${signal ?? 'none'}`,
+                ));
+            }
+        });
+    }
+
     child.stderr.on('data', (chunk) => {
         const text = sanitizeLog(chunk.toString(), session.sourceUrl);
         appendLogTail(session, text);
@@ -12034,6 +12204,7 @@ function startFfmpeg(session) {
 
     child.on('error', (err) => {
         try { inputPump?.controller.abort(); } catch (_) {}
+        if (linearSeekBridge) stopFiniteMkvLinearSeekBridge(session).catch(() => {});
         const brokerFailure = applyFiniteMkvSeekBrokerFailure(session);
         releaseVideoEncoderAdmission(session);
         session.status = 'failed';
@@ -12052,6 +12223,7 @@ function startFfmpeg(session) {
         const completedCleanly = code === 0 && !inputEndedEarly && !session.inputFailure && !session.lastError;
         session.completeHlsCacheFfmpegCompletedCleanly = completedCleanly;
         try { inputPump?.controller.abort(); } catch (_) {}
+        if (linearSeekBridge) stopFiniteMkvLinearSeekBridge(session).catch(() => {});
         if (session.status !== 'ended' && (code !== 0 || inputEndedEarly)) {
             session.status = 'failed';
             if (!session.inputFailure) {
@@ -12082,7 +12254,8 @@ function startFfmpeg(session) {
         // Prevent an EPIPE emitted during an explicit stop from becoming an
         // unhandled stream error; the pump's write/drain races own classification.
         child.stdin.on('error', () => {});
-        inputPump = startBoundedMkvInputPump(session, child.stdin);
+        const pumpWritable = linearSeekBridge ? linearSeekBridge.child.stdin : child.stdin;
+        inputPump = startBoundedMkvInputPump(session, pumpWritable);
         inputPump.promise.catch(async (error) => {
             if (
                 error?.code === 'VOD_INPUT_ABORTED' ||
@@ -12099,7 +12272,8 @@ function startFfmpeg(session) {
             session.lastError = `${session.inputFailure.code}: ${safeMessage}`;
             appendLogTail(session, session.lastError);
             session.status = 'stopping';
-            try { child.stdin.destroy(); } catch (_) {}
+            try { pumpWritable.destroy(); } catch (_) {}
+            if (linearSeekBridge) await stopFiniteMkvLinearSeekBridge(session).catch(() => {});
             await stopChildProcess(child).catch(() => {});
             if (session.status === 'stopping') session.status = 'failed';
             wakePlaybackBlockedQueues();
@@ -12119,7 +12293,7 @@ function startFfmpeg(session) {
     return child;
 }
 
-function seekArgsForSession(session, encodeVideo) {
+function seekArgsForSession(session, encodeVideo, linearSeekBridgePlan = null) {
     const seekOffset = Number(session.seekOffset) > 0 ? Math.floor(Number(session.seekOffset)) : 0;
     if (seekOffset <= 0) return { preInputSeek: [], postInputSeek: [] };
     // A resumed finite MKV is exposed to FFmpeg only through the private,
@@ -12130,6 +12304,16 @@ function seekArgsForSession(session, encodeVideo) {
     if (isFiniteMkvVodSession(session)) {
         if (usesFiniteMkvSeekBroker(session)) {
             return { preInputSeek: ['-ss', String(seekOffset)], postInputSeek: [] };
+        }
+        if (linearSeekBridgePlan) {
+            const fineSeekOffset = Math.max(
+                0,
+                Math.floor(Number(linearSeekBridgePlan.fineSeekOffsetSeconds) || 0),
+            );
+            return {
+                preInputSeek: [],
+                postInputSeek: fineSeekOffset > 0 ? ['-ss', String(fineSeekOffset)] : [],
+            };
         }
         // Fail-safe fallback for incomplete setup/tests: a finite MKV without
         // its broker retains the historical linear post-input seek.
@@ -15825,6 +16009,7 @@ async function stopSession(session, options = {}) {
         // mono-account connection has fully settled.
         await closePreopenedBoundedMkvInput(session);
         await stopBoundedMkvInputPump(session);
+        await stopFiniteMkvLinearSeekBridge(session);
         await closeFiniteMkvSeekBroker(session);
         await stopChildProcess(child);
         releaseVideoEncoderAdmission(session);
@@ -16150,6 +16335,14 @@ function debugSession(session) {
                 cacheBytes: Number(session.finiteMkvSeekBroker.cacheBytes || 0),
                 cacheHits: Number(session.finiteMkvSeekBroker.cacheHits || 0),
                 cacheMisses: Number(session.finiteMkvSeekBroker.cacheMisses || 0),
+            }
+            : null,
+        finiteMkvLinearSeekBridge: session.linearSeekBridge
+            ? {
+                active: finiteMkvLinearSeekBridges.has(session.linearSeekBridge.child),
+                completed: session.linearSeekBridge.completed === true,
+                sourceOffsetSeconds: Number(session.linearSeekBridge.plan?.bridgeSeekOffsetSeconds || 0),
+                fineSeekSeconds: Number(session.linearSeekBridge.plan?.fineSeekOffsetSeconds || 0),
             }
             : null,
         inputProbeMode: session.fastInputProbe === true ? 'known-fast' : 'full',
