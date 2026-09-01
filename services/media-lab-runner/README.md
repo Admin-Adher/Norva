@@ -24,6 +24,21 @@ makes the physical result fail. Range requests, ETag strength, provider delay,
 GET concurrency, bytes and 458 responses are measured by the simulator rather
 than accepted from the execution adapter.
 
+Local tests may attach a strictly validated provider scenario directly to the
+simulator. This internal-only control can shape initial latency and sustained
+bandwidth, emit a bounded sequence of `407`, `408`, `429`, `458`, or `5xx`
+responses, and cut a configured number of bodies after an exact byte count.
+These controls are never accepted by the runner's HTTP API, so the deployed
+eleven-case corpus remains fixed and cannot become an arbitrary provider relay.
+
+The local shared-cache lab also includes a private file-backed R2 simulator. It
+provides immutable, immediately readable objects, deterministic availability
+failures, and manifest-last publication. Its multi-tenant model stores one HLS
+graph globally while keeping source visibility and variant bindings separate;
+disabling one tenant's source denies that tenant without removing another
+tenant's authorized access. This is a test boundary only and does not make the
+production cache shared by itself.
+
 The preferred deployment co-locates the physical executor with this runner.
 Set `MEDIA_LAB_GATEWAY_URL`, `MEDIA_LAB_GATEWAY_TOKEN`,
 `MEDIA_LAB_CHROMIUM_EXECUTABLE_PATH`, and `MEDIA_LAB_HLS_JS_PATH`; the runner

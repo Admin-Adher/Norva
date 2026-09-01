@@ -13,41 +13,12 @@ const {
 const { projectResult } = require('../src/result-projection');
 const { MediaLabRunner, provisionalResult } = require('../src/runner');
 const { readManifest, buildPlan, main } = require('../scripts/generate-fixtures');
+const { canonicalSourceBytes, runnerSourceDigest } = require('../scripts/source-marker');
 const dockerfile = fs.readFileSync(path.join(__dirname, '..', 'Dockerfile'), 'utf8');
 const pgsSeedGenerator = fs.readFileSync(
     path.join(__dirname, '..', 'scripts', 'generate-pgs-seed.py'),
     'utf8',
 );
-
-function runnerSourceDigest() {
-    const projectRoot = path.join(__dirname, '..', '..', '..');
-    const files = [
-        'services/media-lab-runner/Dockerfile',
-        'services/media-lab-runner/package.json',
-        'services/media-lab-runner/package-lock.json',
-        'services/media-gateway/src/ocr_pgs.py',
-        'public/js/vendor/hls-1.5.7.min.js',
-    ];
-    const walk = (relativeDirectory) => {
-        for (const entry of fs.readdirSync(path.join(projectRoot, relativeDirectory), { withFileTypes: true })) {
-            const relativePath = path.posix.join(relativeDirectory, entry.name);
-            if (entry.isDirectory()) walk(relativePath);
-            else if (entry.isFile()) files.push(relativePath);
-        }
-    };
-    for (const directory of [
-        'services/media-lab-runner/src',
-        'services/media-lab-runner/scripts',
-        'services/media-lab-runner/fixtures',
-    ]) walk(directory);
-    const manifest = files.sort().map((relativePath) => {
-        const digest = require('node:crypto').createHash('sha256')
-            .update(fs.readFileSync(path.join(projectRoot, relativePath)))
-            .digest('hex');
-        return `${digest}  ${relativePath}\n`;
-    }).join('');
-    return require('node:crypto').createHash('sha256').update(manifest).digest('hex');
-}
 
 test('the registry is an exact fixed eleven-fixture corpus', () => {
     assert.equal(FIXTURE_IDS.length, 11);
@@ -305,4 +276,17 @@ test('the immutable runner source marker covers every file copied into its image
     const expected = fs.readFileSync(markerPath, 'utf8').trim();
     assert.match(expected, /^[0-9a-f]{64}$/);
     assert.equal(runnerSourceDigest(), expected);
+});
+
+test('the immutable runner source marker is stable across Windows and Unix line endings', () => {
+    const root = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'norva-source-marker-'));
+    try {
+        const unix = path.join(root, 'unix.txt');
+        const windows = path.join(root, 'windows.txt');
+        fs.writeFileSync(unix, 'alpha\nbeta\n');
+        fs.writeFileSync(windows, 'alpha\r\nbeta\r\n');
+        assert.deepEqual(canonicalSourceBytes(unix), canonicalSourceBytes(windows));
+    } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+    }
 });

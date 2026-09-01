@@ -4,9 +4,9 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const path = require('node:path');
-const { Transform } = require('node:stream');
-const { pipeline } = require('node:stream/promises');
+const { once } = require('node:events');
 const { fixtureAssetPath } = require('./fixture-registry');
+const { normalizeProviderScenario } = require('./provider-scenario');
 
 const FIXED_LAST_MODIFIED = 'Mon, 17 Aug 2026 00:00:00 GMT';
 const CAPABILITY_PATTERN = /^[a-f0-9]{64}$/;
@@ -89,7 +89,7 @@ class ProviderSimulator {
         }
     }
 
-    async openFixture(fixture, providerBaseUrl) {
+    async openFixture(fixture, providerBaseUrl, scenarioOverride = null) {
         const origin = new URL(providerBaseUrl);
         if (!['http:', 'https:'].includes(origin.protocol) || origin.username || origin.password) {
             throw new Error('MEDIA_LAB_PROVIDER_ORIGIN_INVALID');
@@ -110,6 +110,7 @@ class ProviderSimulator {
         }
 
         const capability = crypto.randomBytes(32).toString('hex');
+        const scenario = normalizeProviderScenario(fixture.provider, scenarioOverride);
         const etag = fixture.provider.etag === 'weak'
             ? `W/\"${digest}\"`
             : `\"${digest}\"`;
@@ -117,7 +118,10 @@ class ProviderSimulator {
             providerGets: 0,
             providerHeads: 0,
             rangeGets: 0,
+            http407: 0,
             http458: 0,
+            http5xx: 0,
+            forcedDisconnects: 0,
             activeGets: 0,
             maximumConcurrentProviderGets: 0,
             bytesServed: 0,
@@ -129,6 +133,8 @@ class ProviderSimulator {
             totalBytes,
             etag,
             etagMode: fixture.provider.etag,
+            scenario,
+            disconnectsRemaining: scenario.disconnectCount,
             counters,
             closed: false,
         };
@@ -203,12 +209,20 @@ class ProviderSimulator {
         response.once('close', () => abortController.abort());
 
         try {
-            await wait(record.fixture.provider.delayMs, abortController.signal);
-            if (record.fixture.provider.first458 && requestOrdinal === 1) {
-                record.counters.http458 += 1;
-                response.statusCode = 458;
-                response.setHeader('Retry-After', '120');
-                response.end(JSON.stringify({ error: 'Provider busy' }));
+            await wait(record.scenario.delayMs, abortController.signal);
+            const scriptedStatus = record.scenario.statusSequence[requestOrdinal - 1] || 0;
+            if (scriptedStatus) {
+                if (scriptedStatus === 407) {
+                    record.counters.http407 += 1;
+                    response.setHeader('Proxy-Authenticate', 'Basic realm="norva-media-lab"');
+                }
+                if (scriptedStatus === 458) {
+                    record.counters.http458 += 1;
+                    response.setHeader('Retry-After', '120');
+                }
+                if (scriptedStatus >= 500) record.counters.http5xx += 1;
+                response.statusCode = scriptedStatus;
+                response.end(JSON.stringify({ error: providerStatusLabel(scriptedStatus) }));
                 return true;
             }
             if (!record.assetPath) {
@@ -246,13 +260,17 @@ class ProviderSimulator {
                 return true;
             }
 
-            const byteCounter = new Transform({
-                transform(chunk, _encoding, callback) {
-                    record.counters.bytesServed += chunk.length;
-                    callback(null, chunk);
-                },
+            response.flushHeaders();
+            const disconnected = await serveProviderBody({
+                record,
+                response,
+                start,
+                end,
+                signal: abortController.signal,
+                onTerminal: finish,
             });
-            await pipeline(fs.createReadStream(record.assetPath, { start, end }), byteCounter, response);
+            finish();
+            if (!disconnected) response.end();
             return true;
         } catch (error) {
             if (error?.code !== 'ABORT_ERR' && !response.headersSent) {
@@ -266,6 +284,59 @@ class ProviderSimulator {
     }
 }
 
+function providerStatusLabel(status) {
+    if (status === 407) return 'Proxy authentication required';
+    if (status === 408) return 'Provider timeout';
+    if (status === 429) return 'Provider rate limited';
+    if (status === 458) return 'Provider busy';
+    return 'Provider temporarily unavailable';
+}
+
+async function serveProviderBody({ record, response, start, end, signal, onTerminal = () => {} }) {
+    const input = fs.createReadStream(record.assetPath, { start, end });
+    const startedAt = Date.now();
+    const expectedBytes = end - start + 1;
+    let responseBytes = 0;
+    try {
+        for await (const chunk of input) {
+            if (signal.aborted) throw Object.assign(new Error('request aborted'), { code: 'ABORT_ERR' });
+            const disconnectAt = record.disconnectsRemaining > 0
+                ? record.scenario.disconnectAfterBytes
+                : 0;
+            const bytesUntilDisconnect = disconnectAt > 0
+                ? Math.max(0, disconnectAt - responseBytes)
+                : chunk.length;
+            const output = bytesUntilDisconnect < chunk.length
+                ? chunk.subarray(0, bytesUntilDisconnect)
+                : chunk;
+
+            if (record.scenario.bandwidthBytesPerSecond > 0 && output.length > 0) {
+                const expectedElapsedMs = ((responseBytes + output.length) * 1000)
+                    / record.scenario.bandwidthBytesPerSecond;
+                const remainingDelayMs = Math.ceil(expectedElapsedMs - (Date.now() - startedAt));
+                if (remainingDelayMs > 0) await wait(remainingDelayMs, signal);
+            }
+            if (output.length > 0) {
+                record.counters.bytesServed += output.length;
+                responseBytes += output.length;
+                if (responseBytes >= expectedBytes) onTerminal();
+                if (!response.write(output)) await once(response, 'drain', { signal });
+            }
+            if (disconnectAt > 0 && responseBytes >= disconnectAt && end - start + 1 > responseBytes) {
+                record.disconnectsRemaining -= 1;
+                record.counters.forcedDisconnects += 1;
+                onTerminal();
+                response.destroy();
+                input.destroy();
+                return true;
+            }
+        }
+        return false;
+    } finally {
+        input.destroy();
+    }
+}
+
 function setPrivateHeaders(response) {
     response.setHeader('Cache-Control', 'no-store');
     response.setHeader('X-Content-Type-Options', 'nosniff');
@@ -275,4 +346,5 @@ module.exports = Object.freeze({
     ProviderSimulator,
     FIXED_LAST_MODIFIED,
     parseSingleRange,
+    serveProviderBody,
 });
