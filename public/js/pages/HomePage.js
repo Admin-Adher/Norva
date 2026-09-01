@@ -2367,7 +2367,12 @@ class HomePage {
         const itemId = item.item_id || item.itemId || item.id || '';
         const type = item.item_type || item.itemType || item.type || 'movie';
         const title = this.displayTitle(item);
-        const subtitle = data.subtitle || this.typeLabel(type);
+        const subtitle = type === 'episode'
+            ? MediaUtils.formatEpisodeDisplayLabel(data.subtitle || '', {
+                season: data.currentSeason,
+                episode: data.currentEpisode
+            })
+            : (data.subtitle || this.typeLabel(type));
         const posterUrl = this.resolveImageUrl(this.posterFromItem(item), '/img/norva-media-placeholder.png');
         const remainingMin = duration > progress ? Math.max(1, Math.round((duration - progress) / 60)) : 0;
         const timeLeft = item._upNext ? 'Next episode' : (remainingMin > 0 ? `${remainingMin} min left` : '');
@@ -3059,7 +3064,12 @@ class HomePage {
             title: this.displayTitle(item),
             rawTitle: item.raw_title || item.rawTitle || item.name || item.title
                 || data.rawTitle || data.raw_title || null,
-            subtitle: data.subtitle || this.typeLabel(type),
+            subtitle: type === 'episode'
+                ? MediaUtils.formatEpisodeDisplayLabel(data.subtitle || '', {
+                    season: data.currentSeason,
+                    episode: data.currentEpisode
+                })
+                : (data.subtitle || this.typeLabel(type)),
             poster: item.stream_icon || item.poster_url || item.posterUrl || data.poster || data.posterUrl,
             sourceId,
             cloudSourceId: item.cloudSourceId || data.cloudSourceId || null,

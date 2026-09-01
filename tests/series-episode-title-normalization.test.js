@@ -61,6 +61,18 @@ test('real episode titles survive while scene metadata is removed', () => {
   assert.equal(page.cleanEpisodeTitle({ title: 'Mind over Matter', episode_num: 4 }, 1), 'Mind over Matter');
 });
 
+test('every episode surface gets one structured display label', () => {
+  const format = mediaWindow.MediaUtils.formatEpisodeDisplayLabel;
+  assert.equal(format(
+    'S1 E1 - NF-Badly-in-Love-2025-JP-S1E1',
+    { season: 1, episode: 1 }
+  ), 'S1 · E1');
+  assert.equal(format('S01E02 - Pilot', { season: '01', episode: '02' }), 'S1 · E2 · Pilot');
+  assert.equal(format('Any.Series.S02E04.The-Big-Day.1080p.WEBRip.x264', {
+    season: 2, episode: 4
+  }), 'S2 · E4 · The Big Day');
+});
+
 test('episode rows expose season and episode coordinates to assistive technology', () => {
   const source = read('public/js/pages/SeriesPage.js');
   assert.match(source, /Season \$\{seasonNum\}, episode \$\{episodeNum\}/);
@@ -80,4 +92,15 @@ test('episode metadata is reused in-browser and through the shared cloud cache',
   assert.match(catalogEdge, /readEpisodeI18n\(tmdbId, seasonNum, lang2\)/);
   assert.match(catalogEdge, /writeEpisodeI18n\(tmdbId, seasonNum, lang2, episodes\)/);
   assert.match(migration, /primary key \(provider_tmdb_id, season, lang\)/);
+});
+
+test('series, home, and watch history surfaces share the episode formatter', () => {
+  for (const file of [
+    'public/js/pages/SeriesPage.js',
+    'public/js/pages/HomePage.js',
+    'public/js/pages/WatchPage.js',
+  ]) {
+    assert.match(read(file), /MediaUtils\.formatEpisodeDisplayLabel\(/, file);
+  }
+  assert.match(read('public/js/pages/SeriesPage.js'), /cleanReleaseName\(h\.data\?\.title/);
 });

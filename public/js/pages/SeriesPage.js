@@ -2033,13 +2033,18 @@ class SeriesPage {
         this.continueList.innerHTML = inProgress.map(h => {
             const ratio = h.duration > 0 ? Math.round((h.progress / h.duration) * 100) : 0;
             const historyKey = this.historyEpisodeProgressKey(h);
+            const title = MediaUtils.cleanReleaseName(h.data?.title || '') || 'Unknown';
+            const subtitle = MediaUtils.formatEpisodeDisplayLabel(h.data?.subtitle || '', {
+                season: h.data?.currentSeason,
+                episode: h.data?.currentEpisode
+            });
             return `
             <div class="continue-card" data-history-key="${MediaUtils.escapeHtml(historyKey || '')}">
                 <img src="${MediaUtils.escapeHtml(MediaUtils.safeImageUrl(h.data?.poster, '/img/norva-media-placeholder.png'))}"
                      onerror="this.onerror=null;this.srcset='';this.src='/img/norva-media-placeholder.png'" loading="lazy" decoding="async" alt="">
                 <div class="continue-card-info">
-                    <p class="continue-card-title">${MediaUtils.escapeHtml(h.data?.title || 'Unknown')}</p>
-                    <p class="continue-card-subtitle">${MediaUtils.escapeHtml(h.data?.subtitle || '')}</p>
+                    <p class="continue-card-title">${MediaUtils.escapeHtml(title)}</p>
+                    <p class="continue-card-subtitle">${MediaUtils.escapeHtml(subtitle)}</p>
                     <div class="card-progress"><div class="card-progress-fill" style="width:${ratio}%"></div></div>
                 </div>
             </div>`;
@@ -2095,8 +2100,11 @@ class SeriesPage {
         const content = {
             type: 'series',
             id: h.item_id,
-            title: h.data?.title || 'Series',
-            subtitle: h.data?.currentSeason ? `S${h.data.currentSeason} E${h.data.currentEpisode || ''}` : 'Series',
+            title: MediaUtils.cleanReleaseName(h.data?.title || '') || 'Series',
+            subtitle: MediaUtils.formatEpisodeDisplayLabel(h.data?.subtitle || '', {
+                season: h.data?.currentSeason,
+                episode: h.data?.currentEpisode
+            }),
             poster: MediaUtils.safeImageUrl(h.data?.poster),
             sourceId,
             seriesId,
@@ -2155,7 +2163,10 @@ class SeriesPage {
 
             // Enrich content now that we know the exact episode (play() re-renders these).
             content.id = episode.id;
-            content.subtitle = `S${seasonNum} E${episodeNum} - ${episode.title || `Episode ${episodeNum}`}`;
+            content.subtitle = MediaUtils.formatEpisodeDisplayLabel(episode.title || '', {
+                season: seasonNum,
+                episode: episodeNum
+            });
             content.seriesInfo = info;
             content.currentSeason = seasonNum;
             content.currentEpisode = episodeNum;
@@ -2890,7 +2901,7 @@ class SeriesPage {
             const titleId = series.titleId || series.title_id || null;
             const data = {
                 title: this.getSeriesDisplayTitle(series),
-                subtitle: `S${seasonNum} E${episodeNum}`,
+                subtitle: MediaUtils.formatEpisodeDisplayLabel('', { season: seasonNum, episode: episodeNum }),
                 poster: this.getSeriesPoster(series),
                 sourceId,
                 seriesId: rawSeriesId,
@@ -4126,7 +4137,7 @@ class SeriesPage {
             || episodeEl.closest('.season-group')?.querySelector('.season-name')
                 ?.textContent?.match(/Season (\d+)/)?.[1]
             || fallbackSeason;
-        return `S${season} E${episode}${title ? ' - ' + title : ''}`;
+        return MediaUtils.formatEpisodeDisplayLabel(title, { season, episode });
     }
 
     // Native-player autoplay: when an episode finishes in the native player, queue
@@ -4278,8 +4289,11 @@ class SeriesPage {
         const content = {
             type: 'series',
             id: episodeId,
-            title: this.currentSeries?.tmdb?.title || this.currentSeries?.name || 'Series',
-            subtitle: `S${seasonNum} E${episodeNum} - ${episodeTitle}`,
+            title: this.getSeriesDisplayTitle(this.currentSeries),
+            subtitle: MediaUtils.formatEpisodeDisplayLabel(episodeTitle, {
+                season: seasonNum,
+                episode: episodeNum
+            }),
             poster: MediaUtils.safeImageUrl(this.currentSeries?.cover || this.currentSeries?.stream_icon || MediaUtils.tmdbPosterUrl(this.currentSeries?.tmdb)),
             description: this.currentSeries?.plot || this.currentSeries?.tmdb?.overview || '',
             year: this.currentSeries?.year,
@@ -4398,14 +4412,17 @@ class SeriesPage {
             : { container, streamType: 'series' };
         const result = await API.proxy.xtream.getStreamUrl(sourceId, episodeId, 'series', container, playbackHint);
         if (!result || !result.url) throw new Error('No stream URL');
-        const showTitle = this.currentSeries?.tmdb?.title || this.currentSeries?.name || 'Series';
+        const showTitle = this.getSeriesDisplayTitle(this.currentSeries);
         return {
             url: result.url,
             sourceId: String(sourceId),
             itemId: String(episodeId),
             itemType: 'episode',
             title: showTitle,
-            subtitle: `S${seasonNum}E${episodeNum} · ${episodeTitle}`,
+            subtitle: MediaUtils.formatEpisodeDisplayLabel(episodeTitle, {
+                season: seasonNum,
+                episode: episodeNum
+            }),
             season: parseInt(seasonNum, 10) || 0,
             episode: parseInt(episodeNum, 10) || 0,
             episodeTitle,

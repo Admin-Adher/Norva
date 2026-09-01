@@ -499,6 +499,33 @@ const MediaUtils = (() => {
         return suffix && !metadataOnly ? suffix : fallback;
     }
 
+    // One user-facing episode label for rows, Continue Watching, the player, and
+    // downloads. Coordinates are structured metadata ("S1 · E2"); a genuine
+    // editorial title is appended once, while a provider-only/generic title is not
+    // repeated as "S1 · E2 · Episode 2".
+    function formatEpisodeDisplayLabel(value, { season = '', episode = '' } = {}) {
+        let raw = String(value || '').trim();
+        const prefix = raw.match(/^\s*S(?:eason)?\s*0*(\d{1,3})\s*(?:[·:./|\-]\s*)?E(?:pisode)?\s*0*(\d{1,4})\s*(?:[-–—·:|]\s*)?/i);
+        if (prefix) {
+            season = season || prefix[1];
+            episode = episode || prefix[2];
+            raw = raw.slice(prefix[0].length).trim();
+        }
+        const compactCoordinate = (part) => {
+            const text = String(part ?? '').trim();
+            return /^\d+$/.test(text) ? String(Number(text)) : text;
+        };
+        const seasonLabel = compactCoordinate(season);
+        const episodeLabel = compactCoordinate(episode);
+        const coordinate = [seasonLabel ? `S${seasonLabel}` : '', episodeLabel ? `E${episodeLabel}` : '']
+            .filter(Boolean)
+            .join(' · ');
+        const title = cleanEpisodeReleaseName(raw, episodeLabel);
+        const editorialTitle = title && !/^Episode\s*\d*$/i.test(title) ? title : '';
+        if (coordinate) return editorialTitle ? `${coordinate} · ${editorialTitle}` : coordinate;
+        return editorialTitle || title || 'Episode';
+    }
+
     function parseVersionInfo(name) {
         const raw = String(name || '');
         let quality = null, qualityScore = 0;
@@ -1955,7 +1982,8 @@ const MediaUtils = (() => {
 
     return {
         skeletonCards,
-        stripDiacritics, extractYear, normalizeTitle, computeDedupKey, cleanReleaseName, cleanEpisodeReleaseName,
+        stripDiacritics, extractYear, normalizeTitle, computeDedupKey, cleanReleaseName,
+        cleanEpisodeReleaseName, formatEpisodeDisplayLabel,
         parseVersionInfo, deriveTrackIntel, scanLanguageMarkers, parseLeadingRegionTag, searchableText, groupItems, pickRepresentative,
         normalizeLanguagePreference, normalizeContentPreferences, migrateLegacyLanguagePreference,
         resolveContentLanguage,

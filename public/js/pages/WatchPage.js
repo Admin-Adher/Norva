@@ -1368,8 +1368,15 @@ class WatchPage {
             if (!item) return null;
 
             const data = item.data || {};
-            const title = data.title || item.title || item.name || item.item_name || '';
-            const subtitle = data.subtitle || '';
+            const type = item.item_type || item.itemType || item.type || '';
+            const rawTitle = data.title || item.title || item.name || item.item_name || '';
+            const title = MediaUtils.cleanReleaseName(rawTitle) || rawTitle;
+            const subtitle = type === 'episode'
+                ? MediaUtils.formatEpisodeDisplayLabel(data.subtitle || '', {
+                    season: data.currentSeason,
+                    episode: data.currentEpisode
+                })
+                : (data.subtitle || '');
             this.titleEl.textContent = title;
             this.subtitleEl.textContent = subtitle;
             this.showLoading();

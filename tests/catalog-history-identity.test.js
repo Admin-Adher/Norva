@@ -79,6 +79,11 @@ function loadPage(file, className) {
     clearInterval,
     MediaUtils: {
       cleanReleaseName: (value) => String(value || ''),
+      formatEpisodeDisplayLabel: (value, { season = '', episode = '' } = {}) => {
+        const coordinate = [season ? `S${season}` : '', episode ? `E${episode}` : '']
+          .filter(Boolean).join(' · ');
+        return String(value || coordinate || 'Episode');
+      },
       escapeHtml: (value) => String(value ?? ''),
       safeImageUrl: (value, fallback = '') => value || fallback,
     },
