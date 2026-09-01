@@ -33,8 +33,8 @@ function loadNormalizer() {
     .replace('const normalized: JsonRecord[] = [];', 'const normalized = [];')
     .replace('new Set<number>()', 'new Set()')
     .replace(
-      /function normalizeGatewayMultiAudioHls\(\n  value: unknown,\n  renditions: JsonRecord\[\] \| null,\n  selectedStreamIndex: number \| null,\n\)/,
-      'function normalizeGatewayMultiAudioHls(\n  value,\n  renditions,\n  selectedStreamIndex,\n)',
+      /function normalizeGatewayMultiAudioHls\(\n  value: unknown,\n  renditions: JsonRecord\[\] \| null,\n  selectedStreamIndex: number \| null,\n  codecProfileValue: unknown = null,\n\)/,
+      'function normalizeGatewayMultiAudioHls(\n  value,\n  renditions,\n  selectedStreamIndex,\n  codecProfileValue = null,\n)',
     );
   const context = {
     Number,
@@ -110,6 +110,42 @@ test('valid Gateway renditions round-trip exactly from absolute streams to playb
   assert.match(response, /multiAudioHls: gateway\.multiAudioHls \?\? null/);
   assert.match(response, /multi_audio_hls: gateway\.multiAudioHls \?\? null/);
   assert.ok((response.match(/multiAudioHls: gateway\.multiAudioHls \?\? null/g) || []).length >= 2);
+});
+
+test('the Edge preserves a complete muxed-mono Gateway contract and binds it to the exact stream', () => {
+  const { normalize, normalizeMetadata } = loadNormalizer();
+  const renditions = normalize([], 1);
+  assert.deepEqual(JSON.parse(JSON.stringify(renditions)), []);
+  const metadata = {
+    protocol: 1,
+    enabled: false,
+    reason: 'audio_track_count_below_minimum',
+    maxAudioRenditions: 12,
+    sourceTrackCount: 1,
+    preparedTrackCount: 0,
+    masterPlaylist: 'playlist.m3u8',
+    videoPlaylist: 'playlist.m3u8',
+    defaultHlsIndex: null,
+    defaultStreamIndex: null,
+  };
+  const codecProfile = {
+    audioTracks: [{ index: 1, language: 'eng', codec: 'eac3', channels: 2 }],
+  };
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(normalizeMetadata(metadata, renditions, 1, codecProfile))),
+    metadata,
+  );
+
+  const invalid = [
+    [{ ...metadata, sourceTrackCount: 2 }, renditions, 1, codecProfile],
+    [{ ...metadata, preparedTrackCount: 1 }, renditions, 1, codecProfile],
+    [{ ...metadata, defaultStreamIndex: 1 }, renditions, 1, codecProfile],
+    [metadata, renditions, 2, codecProfile],
+    [metadata, renditions, 1, { audioTracks: [] }],
+    [metadata, renditions, 1, { audioTracks: [{ index: 2 }] }],
+    [metadata, null, 1, codecProfile],
+  ];
+  for (const args of invalid) assert.equal(normalizeMetadata(...args), null);
 });
 
 test('the Edge drops the whole rendition map on any cardinality, index, label or codec mismatch', () => {

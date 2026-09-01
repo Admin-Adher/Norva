@@ -5764,6 +5764,7 @@ async function createGatewaySession(
     gatewayBody.multiAudioHls,
     normalizedAudioRenditions,
     audioStreamIndex,
+    codecProfile,
   );
   // The two Gateway fields form one topology. Never expose a partial contract:
   // hls.js indexes are safe only when the diagnostics bind the default absolute
@@ -6380,7 +6381,12 @@ function normalizeGatewayAudioRenditions(value: unknown, selectedStreamIndex: nu
   // validator compatible with every supported Gateway cohort instead of
   // hard-coding an older deployment default (8) and silently discarding a
   // valid 12-track topology.
-  if (!Array.isArray(value) || value.length < 2 || value.length > 32) return null;
+  if (!Array.isArray(value) || value.length > 32) return null;
+  // Gateway v135 deliberately returns an empty rendition cohort for a muxed
+  // mono MKV. Keep that empty array distinct from a missing/malformed contract;
+  // normalizeGatewayMultiAudioHls binds it to the exact codec-profile stream.
+  if (value.length === 0) return [];
+  if (value.length < 2) return null;
   const normalized: JsonRecord[] = [];
   const streamIndices = new Set<number>();
   for (let position = 0; position < value.length; position += 1) {
@@ -6422,14 +6428,51 @@ function normalizeGatewayMultiAudioHls(
   value: unknown,
   renditions: JsonRecord[] | null,
   selectedStreamIndex: number | null,
+  codecProfileValue: unknown = null,
 ) {
-  if (!renditions || renditions.length < 2 || renditions.length > 32) return null;
   const raw = recordOrEmpty(value);
+  const codecProfile = recordOrEmpty(codecProfileValue);
+  const exactAudioTracks = Array.isArray(codecProfile.audioTracks)
+    ? codecProfile.audioTracks
+    : (Array.isArray(codecProfile.audio_tracks) ? codecProfile.audio_tracks : []);
+  const exactMonoStreamIndex = Number(exactAudioTracks[0]?.index);
+  const maxAudioRenditions = Number(raw.maxAudioRenditions);
+
+  // A muxed mono playlist has no alternate HLS renditions, but it still has one
+  // exact source-audio stream. Preserve only the complete signed Gateway shape
+  // and bind it to the absolute stream index in the same response's codec
+  // profile. This is display-only in WatchPage; it cannot enable track switching.
+  if (Array.isArray(renditions) && renditions.length === 0) {
+    if (
+      raw.protocol !== 1 || raw.enabled !== false ||
+      raw.reason !== "audio_track_count_below_minimum" ||
+      !Number.isSafeInteger(maxAudioRenditions) || maxAudioRenditions < 2 || maxAudioRenditions > 32 ||
+      raw.sourceTrackCount !== 1 || raw.preparedTrackCount !== 0 ||
+      raw.masterPlaylist !== "playlist.m3u8" || raw.videoPlaylist !== "playlist.m3u8" ||
+      raw.defaultHlsIndex !== null || raw.defaultStreamIndex !== null ||
+      !Number.isSafeInteger(selectedStreamIndex) || selectedStreamIndex < 0 || selectedStreamIndex > 1024 ||
+      exactAudioTracks.length !== 1 || !Number.isSafeInteger(exactMonoStreamIndex) ||
+      exactMonoStreamIndex !== selectedStreamIndex
+    ) return null;
+    return {
+      protocol: 1,
+      enabled: false,
+      reason: "audio_track_count_below_minimum",
+      maxAudioRenditions,
+      sourceTrackCount: 1,
+      preparedTrackCount: 0,
+      masterPlaylist: "playlist.m3u8",
+      videoPlaylist: "playlist.m3u8",
+      defaultHlsIndex: null,
+      defaultStreamIndex: null,
+    };
+  }
+
+  if (!renditions || renditions.length < 2 || renditions.length > 32) return null;
   const defaultHlsIndex = Number(raw.defaultHlsIndex);
   const defaultStreamIndex = Number(raw.defaultStreamIndex);
   const sourceTrackCount = Number(raw.sourceTrackCount);
   const preparedTrackCount = Number(raw.preparedTrackCount);
-  const maxAudioRenditions = Number(raw.maxAudioRenditions);
   const defaultRendition = Number.isSafeInteger(defaultHlsIndex)
     ? renditions[defaultHlsIndex]
     : null;
