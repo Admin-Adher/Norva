@@ -464,3 +464,22 @@ test('service-only session diagnostics expose only the proxy slot and one-way af
     /providerProxy:\s*providerProxyAgents\.length[\s\S]{0,500}(sourceUrl|username|password):/,
   );
 });
+
+test('service-only diagnostics retain the last proxy selection before a session exists', () => {
+  assert.match(
+    gateway,
+    /function observeProviderProxySelection\(key\)[\s\S]{0,420}slot:\s*poolIndexForKey\(affinity\) \+ 1,[\s\S]{0,180}affinitySha256,[\s\S]{0,180}overridden:\s*providerProxySlotOverrides\.has\(affinitySha256\)/,
+  );
+  assert.match(
+    gateway,
+    /const playbackProxyKey = proxyKeyFromUrl\(sourceUrl\);\s*observeProviderProxySelection\(playbackProxyKey\);/,
+  );
+  assert.match(
+    gateway,
+    /app\.get\('\/debug\/sessions', requireGatewayAuth,[\s\S]{0,220}lastProviderProxySelection,[\s\S]{0,120}sessions:/,
+  );
+  assert.doesNotMatch(
+    gateway,
+    /lastProviderProxySelection\s*=\s*\{[\s\S]{0,420}(sourceUrl|username|password):/,
+  );
+});

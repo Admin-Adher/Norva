@@ -107,6 +107,19 @@ function poolIndexForKey(key) {
     if (providerProxyAgents.length <= 1) return 0;
     return proxySlotIndexForAccount(key, providerProxyAgents.length, providerProxySlotOverrides);
 }
+let lastProviderProxySelection = null;
+function observeProviderProxySelection(key) {
+    const affinity = String(key || '');
+    if (!providerProxyAgents.length || !affinity) return;
+    const affinitySha256 = sha256Hex(affinity);
+    lastProviderProxySelection = {
+        protocol: 1,
+        slot: poolIndexForKey(affinity) + 1,
+        affinitySha256,
+        overridden: providerProxySlotOverrides.has(affinitySha256),
+        selectedAt: new Date().toISOString(),
+    };
+}
 // Per-account sticky key from a provider stream URL: host + the username path segment
 // (Xtream: /movie|series|live/USER/PASS/ID.ext → USER), falling back to the host.
 function proxyKeyFromUrl(url) {
@@ -2290,6 +2303,7 @@ app.get('/debug/sessions', requireGatewayAuth, (req, res) => {
         ok: true,
         service: 'norva-media-gateway',
         version: GATEWAY_VERSION,
+        lastProviderProxySelection,
         sessions: Array.from(sessions.values()).map(debugSession)
     });
 });
@@ -8591,6 +8605,7 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
 
         const normalizedOwnerKey = normalizeSessionKey(ownerKey);
         const playbackProxyKey = proxyKeyFromUrl(sourceUrl);
+        observeProviderProxySelection(playbackProxyKey);
         const playbackProviderSlotKey = providerSlotKeyFromUrl(sourceUrl, normalizedOwnerKey);
         // Observe abandonment before admission or lock allocation. A queued
         // browser navigation must release immediately rather than wait behind a
