@@ -10,8 +10,8 @@ const edge = fs.readFileSync(path.join(
   '../supabase/functions/norva-playback/index.ts',
 ), 'utf8');
 
-test('Edge v71 exposes one authenticated renewable media-cache ticket route', () => {
-  assert.match(edge, /version: 71,[\s\S]*privateMediaCacheTicketProtocol: 1/);
+test('Edge v72 exposes one authenticated renewable media-cache ticket route', () => {
+  assert.match(edge, /version: 72,[\s\S]*privateMediaCacheTicketProtocol: 1/);
   assert.match(edge, /segments\[3\] === "media-cache-ticket"[\s\S]*issueMediaCachePlaybackTicket/);
   assert.match(edge, /const identity = await requireIdentity\(req, supabase\)/);
   assert.match(edge, /import \{ createMediaCacheTicket \} from "\.\.\/_shared\/media-cache-ticket\.ts"/);

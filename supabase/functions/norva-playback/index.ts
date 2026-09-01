@@ -295,7 +295,7 @@ async function handleRequest(req: Request): Promise<Response> {
       return json(req, {
         ok: true,
         service: "norva-playback",
-        version: 71,
+        version: 72,
         nativeHeartbeatProtocol: 1,
         providerCircuitProtocol: 1,
         exactTrackCrawlerProtocol: 2,
@@ -363,6 +363,7 @@ async function handleRequest(req: Request): Promise<Response> {
         completeHlsCacheCallbackProtocol: 1,
         providerAdaptiveRouteControlProtocol: 1,
         privateMediaCacheTicketProtocol: 1,
+        sharedMediaCachePublicationProtocol: 1,
         privateMediaCacheDelivery: {
           enabled: config.mediaCacheEnabled,
           workerConfigured: Boolean(config.mediaCacheWorkerUrl && config.mediaCacheWorkerToken),
@@ -496,6 +497,9 @@ async function handleRequest(req: Request): Promise<Response> {
     }
     if (req.method === "POST" && segments[0] === "provider-route" && segments[1] === "benchmark") {
       return json(req, await runProviderRouteBenchmark(req, supabase));
+    }
+    if (req.method === "POST" && segments[0] === "media-cache" && segments[1] === "publication") {
+      return json(req, await runMediaCachePublicationCallback(req, supabase));
     }
     if (req.method === "POST" && segments[0] === "complete-cache-callback") {
       return json(req, await runCompleteHlsCacheCallback(req, supabase));
@@ -11962,6 +11966,120 @@ function requireConfiguredMediaGatewayCallback(
     : [];
   if (!matchedRoutes.length) throw new HttpError(401, "Unauthorized");
   return new Set(matchedRoutes.map((route) => stringOrNull(route.gatewayId)));
+}
+
+async function runMediaCachePublicationCallback(
+  req: Request,
+  db: SupabaseClient,
+): Promise<JsonRecord> {
+  const runtimeConfig = await getRuntimeConfig(db);
+  if (!runtimeConfig.mediaCacheEnabled) {
+    throw new HttpError(503, "Shared media cache publication is disabled", {
+      code: "MEDIA_CACHE_DISABLED",
+    });
+  }
+  const authorizedGatewayIds = requireConfiguredMediaGatewayCallback(req, runtimeConfig);
+  const body = await req.json().then(recordOrEmpty).catch(() => {
+    throw new HttpError(400, "Invalid media cache publication JSON");
+  });
+  if (!exactJsonKeys(body, [
+    "gatewaySessionId", "object", "playbackSessionId", "protocol", "status",
+  ]) || body.protocol !== 1 || body.status !== "ready") {
+    throw new HttpError(400, "Invalid media cache publication shape");
+  }
+  const playbackSessionId = stringOr(body.playbackSessionId, "").toLowerCase();
+  const gatewaySessionId = stringOr(body.gatewaySessionId, "").toLowerCase();
+  if (!PLAYBACK_SESSION_UUID_PATTERN.test(playbackSessionId)
+    || !PLAYBACK_SESSION_UUID_PATTERN.test(gatewaySessionId)) {
+    throw new HttpError(400, "Invalid media cache publication session");
+  }
+  const object = recordOrEmpty(body.object);
+  if (!exactJsonKeys(object, [
+    "audioTopologySha256", "contentSha256", "durationMilliseconds", "expiresAt",
+    "fileCount", "fileSizeBytes", "manifestSha256", "objectKey", "pipelineBuild",
+    "rootPlaylist", "segmenterBuild", "storageBackend", "subtitleTopologySha256",
+    "totalBytes", "videoProfileSha256",
+  ])) {
+    throw new HttpError(400, "Invalid media cache publication object");
+  }
+  const objectKey = stringOr(object.objectKey, "").toLowerCase();
+  const digests = [
+    object.contentSha256,
+    object.videoProfileSha256,
+    object.audioTopologySha256,
+    object.subtitleTopologySha256,
+    object.manifestSha256,
+  ].map((value) => stringOr(value, "").toLowerCase());
+  const rootPlaylist = stringOr(object.rootPlaylist, "");
+  const pipelineBuild = stringOr(object.pipelineBuild, "").trim();
+  const segmenterBuild = stringOr(object.segmenterBuild, "").trim();
+  const expiresAt = stringOr(object.expiresAt, "");
+  const expiresAtMs = Date.parse(expiresAt);
+  const nowMs = Date.now();
+  if (!MEDIA_CACHE_OBJECT_KEY_PATTERN.test(objectKey)
+    || digests.some((digest) => !MEDIA_CACHE_OBJECT_KEY_PATTERN.test(digest))
+    || object.storageBackend !== "r2"
+    || !MEDIA_CACHE_ROOT_PLAYLIST_PATTERN.test(rootPlaylist)
+    || /(^|\/)\.{1,2}(\/|$)|\/\//.test(rootPlaylist)
+    || !pipelineBuild || pipelineBuild.length > 256 || /[\u0000-\u001f\u007f]/.test(pipelineBuild)
+    || !segmenterBuild || segmenterBuild.length > 256 || /[\u0000-\u001f\u007f]/.test(segmenterBuild)
+    || !Number.isSafeInteger(object.fileSizeBytes) || Number(object.fileSizeBytes) <= 0
+    || !Number.isSafeInteger(object.durationMilliseconds) || Number(object.durationMilliseconds) <= 0
+    || !Number.isSafeInteger(object.totalBytes) || Number(object.totalBytes) <= 0
+    || !Number.isSafeInteger(object.fileCount) || Number(object.fileCount) < 1 || Number(object.fileCount) > 20_000
+    || !Number.isFinite(expiresAtMs) || expiresAtMs < nowMs + 5 * 60_000
+    || expiresAtMs > nowMs + 90 * 24 * 60 * 60_000) {
+    throw new HttpError(400, "Invalid media cache publication object");
+  }
+
+  const { data: gatewaySession, error: gatewayError } = await db
+    .from("cloud_gateway_sessions")
+    .select("id,user_id,playback_session_id,gateway_id,external_session_id,status")
+    .eq("external_session_id", gatewaySessionId)
+    .eq("playback_session_id", playbackSessionId)
+    .maybeSingle();
+  if (gatewayError) throwDb(gatewayError, "Unable to verify media cache Gateway session");
+  if (!gatewaySession
+    || !authorizedGatewayIds.has(stringOrNull(gatewaySession.gateway_id))
+    || stringOr(gatewaySession.status, "") === "failed") {
+    throw new HttpError(404, "Media cache publication session not found");
+  }
+  const userId = stringOr(gatewaySession.user_id, "");
+  if (!PLAYBACK_SESSION_UUID_PATTERN.test(userId)) {
+    throw new HttpError(404, "Media cache publication session not found");
+  }
+
+  const { data, error } = await db.rpc("norva_commit_media_cache_publication", {
+    p_playback_session_id: playbackSessionId,
+    p_gateway_session_id: gatewaySessionId,
+    p_user_id: userId,
+    p_object_key: objectKey,
+    p_content_sha256: digests[0],
+    p_file_size_bytes: Number(object.fileSizeBytes),
+    p_video_profile_sha256: digests[1],
+    p_audio_topology_sha256: digests[2],
+    p_subtitle_topology_sha256: digests[3],
+    p_duration_milliseconds: Number(object.durationMilliseconds),
+    p_pipeline_build: pipelineBuild,
+    p_segmenter_build: segmenterBuild,
+    p_storage_backend: "r2",
+    p_root_playlist: rootPlaylist,
+    p_manifest_sha256: digests[4],
+    p_total_bytes: Number(object.totalBytes),
+    p_file_count: Number(object.fileCount),
+    p_expires_at: new Date(expiresAtMs).toISOString(),
+  });
+  if (error) throwDb(error, "Unable to commit shared media cache publication");
+  const rows = Array.isArray(data) ? data : (data ? [data] : []);
+  const committed = rows.length === 1 ? recordOrEmpty(rows[0]) : {};
+  const bindingId = stringOr(committed.binding_id, "").toLowerCase();
+  if (!PLAYBACK_SESSION_UUID_PATTERN.test(bindingId)
+    || stringOr(committed.object_key, "") !== objectKey) {
+    throw new HttpError(409, "Shared media cache publication authority changed", {
+      code: "MEDIA_CACHE_PUBLICATION_REJECTED",
+    });
+  }
+  return { ok: true, protocol: 1, objectKey, bindingId };
 }
 
 async function runCompleteHlsCacheCallback(

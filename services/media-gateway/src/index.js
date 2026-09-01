@@ -48,6 +48,9 @@ const {
     proxySlotIndexForAccount,
 } = require('./providerProxyPool');
 const { ProviderAdaptiveRouteControl } = require('./providerAdaptiveRouteControl');
+const { PrivateMediaCacheStoreClient } = require('./privateMediaCacheStoreClient');
+const { SharedHlsObjectPublisher } = require('./sharedHlsObjectPublisher');
+const { publishSharedMediaCacheSession } = require('./sharedMediaCachePublication');
 const {
     measureProviderRoute,
     runLeasedProviderRouteBenchmark,
@@ -2085,12 +2088,74 @@ if (
         ? 'shared-coordination-unavailable'
         : (MKV_COMPLETE_HLS_CACHE_SINGLE_INSTANCE_ATTESTED ? 'activation-unavailable' : 'single-instance-not-attested');
 }
+// Global complete-HLS publication. The Gateway never receives R2 credentials:
+// it uploads immutable assets through the private Worker, writes the signed
+// manifest last, then asks Edge to bind only that object to the playback
+// session's live catalogue authority. This path is independently dark by
+// default and does not alter the local v2 cache rollout.
+const SHARED_MEDIA_CACHE_PROTOCOL = 1;
+const SHARED_MEDIA_CACHE_REQUESTED = process.env.NORVA_SHARED_MEDIA_CACHE_ENABLED === 'true';
+const SHARED_MEDIA_CACHE_SEGMENTER_BUILD = 'ffmpeg-hls-mpegts-v1';
+const SHARED_MEDIA_CACHE_TTL_MS = clampInt(
+    process.env.NORVA_SHARED_MEDIA_CACHE_TTL_MS,
+    30 * 24 * 60 * 60 * 1_000,
+    5 * 60 * 1_000,
+    90 * 24 * 60 * 60 * 1_000,
+);
+const SHARED_MEDIA_CACHE_CALLBACK_TIMEOUT_MS = clampInt(
+    process.env.NORVA_SHARED_MEDIA_CACHE_CALLBACK_TIMEOUT_MS,
+    10_000,
+    1_000,
+    30_000,
+);
+const sharedMediaCacheStats = {
+    publications: 0,
+    alreadyReady: 0,
+    failures: 0,
+    callbackFailures: 0,
+    bytesPublished: 0,
+    filesPublished: 0,
+};
+let sharedMediaCachePublisher = null;
+let sharedMediaCacheStatus = SHARED_MEDIA_CACHE_REQUESTED ? 'disabled' : 'not-requested';
+if (SHARED_MEDIA_CACHE_REQUESTED) {
+    try {
+        if (!edgeCallbackBase || !GATEWAY_TOKEN) throw new Error('edge-callback-unavailable');
+        const objectStore = new PrivateMediaCacheStoreClient({
+            baseUrl: process.env.NORVA_MEDIA_CACHE_WORKER_URL,
+            serviceToken: process.env.NORVA_MEDIA_CACHE_WORKER_TOKEN,
+            timeoutMs: 30_000,
+            maxPutBytes: Math.min(
+                MKV_COMPLETE_HLS_CACHE_MAX_ENTRY_BYTES,
+                256 * 1024 * 1024,
+            ),
+            maxGetBytes: MKV_COMPLETE_HLS_CACHE_MAX_PLAYLIST_BYTES,
+        });
+        sharedMediaCachePublisher = new SharedHlsObjectPublisher({
+            objectStore,
+            manifestHmacKey: process.env.NORVA_MEDIA_CACHE_MANIFEST_HMAC_KEY,
+            ttlMs: SHARED_MEDIA_CACHE_TTL_MS,
+            maxFiles: MKV_COMPLETE_HLS_CACHE_MAX_FILES,
+            maxFileBytes: Math.min(
+                MKV_COMPLETE_HLS_CACHE_MAX_ENTRY_BYTES,
+                256 * 1024 * 1024,
+            ),
+            maxEntryBytes: MKV_COMPLETE_HLS_CACHE_MAX_ENTRY_BYTES,
+            maxPlaylistBytes: MKV_COMPLETE_HLS_CACHE_MAX_PLAYLIST_BYTES,
+        });
+        sharedMediaCacheStatus = 'enabled-private-worker-r2';
+    } catch (error) {
+        sharedMediaCachePublisher = null;
+        sharedMediaCacheStatus = String(error?.code || error?.message || 'invalid-config')
+            .toLowerCase().replace(/[^a-z0-9_-]+/g, '-').slice(0, 80) || 'invalid-config';
+    }
+}
 const MULTI_AUDIO_HLS_PROTOCOL = 1;
 // Twelve exact-file renditions add roughly 0.2 s to first-HLS readiness versus eight on the
 // production Ryzen/Radeon host. Keep the operational default evidence-based and configurable,
 // while bounding accidental fan-out. Every exact source track stays visible to the user.
 const MAX_MULTI_AUDIO_RENDITIONS = clampInt(process.env.MAX_MULTI_AUDIO_RENDITIONS, 12, 2, 32);
-const GATEWAY_VERSION = 144;
+const GATEWAY_VERSION = 145;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -2534,6 +2599,23 @@ app.get('/health', (req, res) => {
             minFreeBytes: MKV_COMPLETE_HLS_CACHE_MIN_FREE_BYTES,
             maxEntryBytes: MKV_COMPLETE_HLS_CACHE_MAX_ENTRY_BYTES,
             stats: { ...mkvCompleteHlsCacheStats },
+        },
+        sharedMediaCache: {
+            protocol: SHARED_MEDIA_CACHE_PROTOCOL,
+            requested: SHARED_MEDIA_CACHE_REQUESTED,
+            enabled: Boolean(sharedMediaCachePublisher),
+            status: sharedMediaCacheStatus,
+            scope: 'global-private-complete-hls-only',
+            storageBackend: 'r2-via-private-worker',
+            manifestLast: true,
+            exactContentSha256: true,
+            exactAudioTopology: true,
+            exactSubtitleTopologyInIdentity: true,
+            embeddedSubtitleAssets: false,
+            pipelineBuild: MKV_COMPLETE_HLS_CACHE_PIPELINE_BUILD,
+            segmenterBuild: SHARED_MEDIA_CACHE_SEGMENTER_BUILD,
+            ttlMs: SHARED_MEDIA_CACHE_TTL_MS,
+            stats: { ...sharedMediaCacheStats },
         },
         multiAudioHls: {
             protocol: MULTI_AUDIO_HLS_PROTOCOL,
@@ -9543,6 +9625,9 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             completeHlsCacheBinding: completeHlsCacheLookup.hit ? completeHlsCacheLookup.assessment.binding : null,
             completeHlsCacheRootPlaylist: completeHlsCacheLookup.hit ? completeHlsCacheLookup.lease.rootPlaylist : null,
             completeHlsCachePromotionPromise: null,
+            completeHlsGraphPromise: null,
+            sharedMediaCachePublicationPromise: null,
+            sharedMediaCachePublication: null,
             completeHlsCacheMediaReady: false,
             completeHlsCacheProfileReady: false,
             completeHlsCacheFfmpegCompletedCleanly: false,
@@ -9812,6 +9897,7 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
         // request profile. Never sign the pre-enrichment profile in that race.
         session.completeHlsCacheProfileReady = true;
         scheduleMkvCompleteHlsCachePromotion(session);
+        scheduleSharedMediaCachePublication(session);
         sessionStartupStats.successes += 1;
         sessionStartupStats.totalMs += session.startupTimings.totalMs;
         if (session.fastInputProbe === true) sessionStartupStats.fastInputProbeSuccesses += 1;
@@ -9943,6 +10029,7 @@ app.delete('/sessions/:id', requireGatewayAuth, async (req, res) => {
     const session = sessions.get(req.params.id);
     if (!session) return res.status(404).json({ error: 'Session not found' });
     await session.completeHlsCachePromotionPromise?.catch(() => null);
+    await session.sharedMediaCachePublicationPromise?.catch(() => null);
     const finalCodecProfile = privateFinalCodecProfileForSession(session);
     const continuationRequested = String(
         req.query?.completeCache ?? req.query?.complete_cache ?? '',
@@ -12877,6 +12964,7 @@ function startFfmpeg(session) {
         if (session.completeHlsCacheFfmpegCompletedCleanly === true) {
             session.completeHlsCacheMediaReady = true;
             scheduleMkvCompleteHlsCachePromotion(session);
+            scheduleSharedMediaCachePublication(session);
             if (session.backgroundCacheContinuation === true) {
                 setImmediate(() => finishMkvCompleteHlsBackgroundContinuation(session));
             }
@@ -13488,6 +13576,65 @@ function mkvCompleteHlsCacheStaticContext(session) {
         profileFingerprint,
         audioTopology: audioTopology.topology,
     };
+}
+
+function sharedMediaCacheStaticContext(session) {
+    const reject = (reason) => ({ eligible: false, reason });
+    if (!sharedMediaCachePublisher) return reject('shared-cache-disabled');
+    if (!isFiniteMkvVodSession(session) || isLiveSession(session)) return reject('not-finite-mkv');
+    if (Number(session?.seekOffset || 0) > 0) return reject('seek');
+    const playbackIdentity = asRecord(session?.playbackIdentity);
+    if (!['movie', 'series', 'episode'].includes(String(playbackIdentity.itemType || ''))) {
+        return reject('unsupported-item-type');
+    }
+    const profile = asRecord(session?.codecProfile);
+    if (profile.metadataComplete !== true && profile.metadata_complete !== true) {
+        return reject('incomplete-profile');
+    }
+    const fileSizeBytes = Number(
+        profile.fileSizeBytes ?? profile.file_size_bytes ?? session?.startupTimings?.fileSizeBytes,
+    );
+    if (!Number.isSafeInteger(fileSizeBytes) || fileSizeBytes <= 0) return reject('unknown-file-size');
+    const audioTracks = Array.isArray(profile.audioTracks)
+        ? profile.audioTracks
+        : (Array.isArray(profile.audio_tracks) ? profile.audio_tracks : []);
+    const subtitles = Array.isArray(profile.subtitles)
+        ? profile.subtitles
+        : (Array.isArray(profile.subtitleTracks)
+            ? profile.subtitleTracks
+            : (Array.isArray(profile.subtitle_tracks) ? profile.subtitle_tracks : []));
+    // Embedded subtitle extraction is the next cache milestone. Until those
+    // assets are part of the authenticated HLS graph, never publish an object
+    // that would advertise tracks it cannot actually serve.
+    if (subtitles.length > 0) return reject('subtitle-assets-not-cacheable');
+    const audioTopology = mkvCompleteHlsCacheAudioTopology(session, audioTracks);
+    if (!audioTopology.eligible) return reject(audioTopology.reason);
+    return {
+        eligible: true,
+        reason: 'shared-cache-profile-accepted',
+        profile,
+        fileSizeBytes,
+        audioTopology: audioTopology.topology,
+    };
+}
+
+function sharedMediaCachePipelineBuildForSession(session, staticContext = null) {
+    const context = staticContext?.eligible === true
+        ? staticContext
+        : sharedMediaCacheStaticContext(session);
+    if (!context?.eligible) return null;
+    const multiAudio = context.audioTopology?.kind === 'multi-audio';
+    const videoMode = multiAudio ? 'encode' : videoModeForSession(session);
+    const audioMode = multiAudio
+        ? `multi-aac-${context.audioTopology.audioRenditions.length}`
+        : audioModeForSession(session);
+    const targetSeconds = multiAudio
+        ? EXACT_MATROSKA_H264_HLS_TARGET_SECONDS
+        : Number(session?.hlsTargetSeconds || 4);
+    if (!['copy', 'encode'].includes(videoMode)) return null;
+    if (!multiAudio && !['copy', 'transcode'].includes(audioMode)) return null;
+    if (!Number.isInteger(targetSeconds) || targetSeconds < 1 || targetSeconds > 30) return null;
+    return `${MKV_COMPLETE_HLS_CACHE_PIPELINE_BUILD}:video-${videoMode}:audio-${audioMode}:target-${targetSeconds}`;
 }
 
 function cloneMkvCompleteHlsCacheProfile(profile) {
@@ -14170,6 +14317,159 @@ async function collectCompleteHlsSessionAssets(session) {
     return { rootPlaylist, files: Array.from(files).sort() };
 }
 
+function completeHlsGraphForSession(session) {
+    if (!session || typeof session !== 'object') {
+        return Promise.reject(new Error('CACHE_SESSION_INVALID'));
+    }
+    if (!session.completeHlsGraphPromise) {
+        session.completeHlsGraphPromise = collectCompleteHlsSessionAssets(session);
+    }
+    return session.completeHlsGraphPromise;
+}
+
+async function readBoundedSharedMediaCacheCallback(response, maxBytes = 64 * 1024) {
+    const declared = Number(response?.headers?.get?.('content-length') || 0);
+    if (Number.isFinite(declared) && declared > maxBytes) {
+        await response?.body?.cancel?.().catch(() => {});
+        throw new Error('SHARED_MEDIA_CACHE_CALLBACK_TOO_LARGE');
+    }
+    if (!response?.body?.getReader) {
+        const text = await response.text();
+        if (Buffer.byteLength(text, 'utf8') > maxBytes) {
+            throw new Error('SHARED_MEDIA_CACHE_CALLBACK_TOO_LARGE');
+        }
+        return JSON.parse(text || '{}');
+    }
+    const reader = response.body.getReader();
+    const chunks = [];
+    let total = 0;
+    try {
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            const chunk = Buffer.from(value);
+            total += chunk.length;
+            if (total > maxBytes) {
+                await reader.cancel().catch(() => {});
+                throw new Error('SHARED_MEDIA_CACHE_CALLBACK_TOO_LARGE');
+            }
+            chunks.push(chunk);
+        }
+    } finally {
+        reader.releaseLock?.();
+    }
+    return JSON.parse(Buffer.concat(chunks, total).toString('utf8') || '{}');
+}
+
+async function registerSharedMediaCachePublication(payload) {
+    const body = JSON.stringify(payload);
+    if (Buffer.byteLength(body, 'utf8') > 64 * 1024) {
+        const error = new Error('shared media cache publication callback is too large');
+        error.code = 'SHARED_MEDIA_CACHE_CALLBACK_TOO_LARGE';
+        throw error;
+    }
+    const delays = [0, 1_000, 5_000];
+    let lastError = null;
+    for (const delayMs of delays) {
+        if (delayMs > 0) await sleep(delayMs);
+        try {
+            const response = await fetch(`${edgeCallbackBase}/media-cache/publication`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${GATEWAY_TOKEN}`,
+                },
+                body,
+                signal: AbortSignal.timeout(SHARED_MEDIA_CACHE_CALLBACK_TIMEOUT_MS),
+            });
+            if (response.ok) return await readBoundedSharedMediaCacheCallback(response);
+            await response.body?.cancel?.().catch(() => {});
+            const error = new Error(`shared media cache publication callback rejected with HTTP ${response.status}`);
+            error.code = 'SHARED_MEDIA_CACHE_CALLBACK_REJECTED';
+            error.status = response.status;
+            if (response.status >= 400 && response.status < 500 && response.status !== 408 && response.status !== 429) {
+                sharedMediaCacheStats.callbackFailures += 1;
+                throw error;
+            }
+            lastError = error;
+        } catch (error) {
+            if (
+                error?.code === 'SHARED_MEDIA_CACHE_CALLBACK_REJECTED'
+                && Number(error?.status) >= 400
+                && Number(error?.status) < 500
+                && Number(error?.status) !== 408
+                && Number(error?.status) !== 429
+            ) throw error;
+            lastError = error;
+        }
+    }
+    sharedMediaCacheStats.callbackFailures += 1;
+    const error = new Error('shared media cache publication callback failed');
+    error.code = 'SHARED_MEDIA_CACHE_CALLBACK_FAILED';
+    error.cause = lastError;
+    throw error;
+}
+
+async function maybePublishSharedMediaCache(session) {
+    if (!sharedMediaCachePublisher || session?.assetSource === 'complete-hls-cache') return null;
+    if (
+        session?.inputFailure || session?.lastError
+        || session?.inputPump?.completed !== true
+        || session?.completeHlsCacheFfmpegCompletedCleanly !== true
+    ) return null;
+    const staticContext = sharedMediaCacheStaticContext(session);
+    if (!staticContext.eligible) return null;
+    const pipelineBuild = sharedMediaCachePipelineBuildForSession(session, staticContext);
+    if (!pipelineBuild) return null;
+    const graph = await completeHlsGraphForSession(session);
+    try {
+        const result = await publishSharedMediaCacheSession({
+            session,
+            publisher: sharedMediaCachePublisher,
+            pipelineBuild,
+            segmenterBuild: SHARED_MEDIA_CACHE_SEGMENTER_BUILD,
+            sourceDirectory: session.outputDir,
+            rootPlaylist: graph.rootPlaylist,
+            files: graph.files,
+            registerPublication: registerSharedMediaCachePublication,
+        });
+        session.sharedMediaCachePublication = result;
+        if (result.status === 'published') {
+            sharedMediaCacheStats.publications += 1;
+            sharedMediaCacheStats.bytesPublished += Number(result.totalBytes || 0);
+            sharedMediaCacheStats.filesPublished += Number(result.fileCount || 0);
+        } else if (result.status === 'already-ready') {
+            sharedMediaCacheStats.alreadyReady += 1;
+        }
+        session.startupTimings = asRecord(session.startupTimings);
+        session.startupTimings.sharedMediaCachePublished = result.status === 'published';
+        session.startupTimings.sharedMediaCacheAlreadyReady = result.status === 'already-ready';
+        return result;
+    } catch (error) {
+        sharedMediaCacheStats.failures += 1;
+        throw error;
+    }
+}
+
+function scheduleSharedMediaCachePublication(session) {
+    if (!session || session.assetSource === 'complete-hls-cache') return null;
+    if (session.sharedMediaCachePublicationPromise) return session.sharedMediaCachePublicationPromise;
+    if (
+        session.completeHlsCacheMediaReady !== true
+        || session.completeHlsCacheProfileReady !== true
+    ) return null;
+    const publication = Promise.resolve()
+        .then(() => maybePublishSharedMediaCache(session))
+        .catch((error) => {
+            const reason = String(error?.code || error?.message || 'validation-failed')
+                .toLowerCase().replace(/[^a-z0-9_-]+/g, '-').slice(0, 120);
+            console.warn(`[media-gateway] shared HLS publication skipped for ${session.id}: ${reason}`);
+            return null;
+        });
+    session.sharedMediaCachePublicationPromise = publication;
+    return publication;
+}
+
 async function maybePublishMkvCompleteHlsCache(session) {
     if (!mkvCompleteHlsCache || session?.assetSource === 'complete-hls-cache') return null;
     if (
@@ -14178,7 +14478,7 @@ async function maybePublishMkvCompleteHlsCache(session) {
     ) return null;
     const locator = buildMkvCompleteHlsCacheLocator(session);
     if (!locator) return null;
-    const graph = await collectCompleteHlsSessionAssets(session);
+    const graph = await completeHlsGraphForSession(session);
     try {
         const result = await mkvCompleteHlsCache.publishCompleteVerified({
             binding: locator.binding,
@@ -15714,13 +16014,18 @@ function buildCodecProfile(payload, startedAt, probeSource) {
     const subtitleStreams = streams.filter((stream) => stream?.codec_type === 'subtitle');
     const audio = audioStreams[0] || {};
     const format = asRecord(payload.format);
+    const videoFrameRate = strictMkvAnalyzerRational(video.avg_frame_rate)
+        || strictMkvAnalyzerRational(video.r_frame_rate);
     return compactRecord({
         videoStreamIndex: nullableInt(video.index),
         videoCodec: stringOrNull(video.codec_name),
         videoProfile: stringOrNull(video.profile),
+        videoLevel: nullableInt(video.level),
         videoWidth: nullableInt(video.width),
         videoHeight: nullableInt(video.height),
         videoPixelFormat: stringOrNull(video.pix_fmt),
+        videoFrameRateNumerator: videoFrameRate?.numerator ?? null,
+        videoFrameRateDenominator: videoFrameRate?.denominator ?? null,
         audioCodec: stringOrNull(audio.codec_name),
         audioProfile: stringOrNull(audio.profile),
         audioChannels: nullableInt(audio.channels),
@@ -15736,7 +16041,8 @@ function buildCodecProfile(payload, startedAt, probeSource) {
             channels: nullableInt(stream.channels),
             sampleRate: nullableInt(stream.sample_rate),
             channelLayout: stringOrNull(stream.channel_layout),
-            default: stream.disposition?.default === 1
+            default: stream.disposition?.default === 1,
+            forced: stream.disposition?.forced === 1,
         })),
         subtitles: subtitleStreams.map((stream, order) => {
             const codec = stringOrNull(stream.codec_name);
@@ -15751,6 +16057,8 @@ function buildCodecProfile(payload, startedAt, probeSource) {
                 subtitleType,
                 extractable,
                 default: stream.disposition?.default === 1,
+                forced: stream.disposition?.forced === 1,
+                hearingImpaired: stream.disposition?.hearing_impaired === 1,
                 burnInRequired: subtitleType === 'image',
                 unsupportedReason: extractable
                     ? null
@@ -16747,6 +17055,7 @@ async function stopSession(session, options = {}) {
         await stopChildProcess(child);
         releaseVideoEncoderAdmission(session);
         await session.completeHlsCachePromotionPromise?.catch(() => null);
+        await session.sharedMediaCachePublicationPromise?.catch(() => null);
         session.status = 'ended';
         sessions.delete(session.id);
         wakePlaybackBlockedQueues();
