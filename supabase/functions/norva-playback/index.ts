@@ -64,6 +64,7 @@ import {
   BoundedProviderResponseError,
   fetchBoundedProviderJson,
 } from "../_shared/bounded-provider-response.mjs";
+import { createMediaCacheTicket } from "../_shared/media-cache-ticket.ts";
 
 type JsonRecord = Record<string, unknown>;
 type MediaGatewayRoute = {
@@ -89,6 +90,11 @@ type RuntimeConfig = {
   lidWorkerToken: string;
   sourceConfigKey: string;
   whisperDetect: boolean; // Phase 2: detect untagged audio-track languages via the relay (Workers AI). Off by default.
+  mediaCacheWorkerUrl: string;
+  mediaCacheWorkerToken: string;
+  mediaCacheTicketHmacKey: string;
+  mediaCacheEnabled: boolean;
+  mediaCacheTicketTtlSeconds: number;
 };
 type CloudIdentity = { userId: string; deviceId?: string };
 type LidDetectionPolicy = {
@@ -142,6 +148,11 @@ const RUNTIME_CONFIG_KEYS = [
   "NORVA_LID_WORKER_TOKEN",
   "NORVA_SOURCE_CONFIG_KEY",
   "NORVA_WHISPER_DETECT",
+  "NORVA_MEDIA_CACHE_WORKER_URL",
+  "NORVA_MEDIA_CACHE_WORKER_TOKEN",
+  "NORVA_MEDIA_CACHE_TICKET_HMAC_KEY",
+  "NORVA_MEDIA_CACHE_ENABLED",
+  "NORVA_MEDIA_CACHE_TICKET_TTL_SECONDS",
 ];
 const PROVIDER_SLOT_RELEASE_DELAY_MS = boundedInt(
   Deno.env.get("NORVA_PROVIDER_SLOT_RELEASE_DELAY_MS") ?? Deno.env.get("PROVIDER_SLOT_RELEASE_DELAY_MS"),
@@ -234,6 +245,11 @@ const ENV_LID_WORKER_URL = trimTrailingSlash(Deno.env.get("NORVA_LID_WORKER_URL"
 const ENV_LID_WORKER_TOKEN = Deno.env.get("NORVA_LID_WORKER_TOKEN") ?? "";
 const ENV_SOURCE_CONFIG_KEY = Deno.env.get("NORVA_SOURCE_CONFIG_KEY") ?? "";
 const ENV_WHISPER_DETECT = Deno.env.get("NORVA_WHISPER_DETECT") ?? "";
+const ENV_MEDIA_CACHE_WORKER_URL = trimTrailingSlash(Deno.env.get("NORVA_MEDIA_CACHE_WORKER_URL") ?? "");
+const ENV_MEDIA_CACHE_WORKER_TOKEN = Deno.env.get("NORVA_MEDIA_CACHE_WORKER_TOKEN") ?? "";
+const ENV_MEDIA_CACHE_TICKET_HMAC_KEY = Deno.env.get("NORVA_MEDIA_CACHE_TICKET_HMAC_KEY") ?? "";
+const ENV_MEDIA_CACHE_ENABLED = Deno.env.get("NORVA_MEDIA_CACHE_ENABLED") ?? "";
+const ENV_MEDIA_CACHE_TICKET_TTL_SECONDS = Deno.env.get("NORVA_MEDIA_CACHE_TICKET_TTL_SECONDS") ?? "";
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY") ?? "";
 const SUBTITLE_EMAIL_FROM = Deno.env.get("NORVA_SUBTITLE_EMAIL_FROM") ?? "Norva Updates <updates@norva.tv>";
 const EMAIL_REPLY_TO = Deno.env.get("NORVA_EMAIL_REPLY_TO") ?? "support@norva.tv";
@@ -279,7 +295,7 @@ async function handleRequest(req: Request): Promise<Response> {
       return json(req, {
         ok: true,
         service: "norva-playback",
-        version: 70,
+        version: 71,
         nativeHeartbeatProtocol: 1,
         providerCircuitProtocol: 1,
         exactTrackCrawlerProtocol: 2,
@@ -346,6 +362,13 @@ async function handleRequest(req: Request): Promise<Response> {
         providerCatalogRefreshDrainMs: PROVIDER_CATALOG_REFRESH_DRAIN_MS,
         completeHlsCacheCallbackProtocol: 1,
         providerAdaptiveRouteControlProtocol: 1,
+        privateMediaCacheTicketProtocol: 1,
+        privateMediaCacheDelivery: {
+          enabled: config.mediaCacheEnabled,
+          workerConfigured: Boolean(config.mediaCacheWorkerUrl && config.mediaCacheWorkerToken),
+          ticketKeyConfigured: /^[0-9a-f]{64}$/i.test(config.mediaCacheTicketHmacKey),
+          ticketTtlSeconds: config.mediaCacheTicketTtlSeconds,
+        },
       });
     }
     if (req.method === "GET" && segments[0] === "telemetry" && segments[1] === "summary") {
@@ -396,6 +419,20 @@ async function handleRequest(req: Request): Promise<Response> {
     ) {
       const identity = await requireIdentity(req, supabase);
       return json(req, await heartbeatPlaybackSession(segments[2], identity.userId, supabase));
+    }
+    if (
+      req.method === "POST" &&
+      segments[0] === "playback" &&
+      segments[1] === "sessions" &&
+      segments[2] &&
+      segments[3] === "media-cache-ticket" &&
+      !segments[4]
+    ) {
+      const identity = await requireIdentity(req, supabase);
+      return json(
+        req,
+        await issueMediaCachePlaybackTicket(req, segments[2], identity.userId, supabase),
+      );
     }
     if (
       req.method === "POST" &&
@@ -2228,7 +2265,8 @@ async function revalidateLanguageValidationClaim(
   const userId = stringOr(claim.requestedBy, "");
   const sourceId = stringOr(claim.sourceId, "");
   const itemId = stringOr(claim.itemId, "");
-  const itemType = stringOr(claim.itemType, "");
+  const rawItemType = stringOr(claim.itemType, "");
+  const itemType = rawItemType === "movie" || rawItemType === "episode" ? rawItemType : null;
   const variantId = stringOr(claim.variantId, "");
   const identityKey = stringOr(claim.identityKey, "");
   const expectedAudioIndices = exactLanguageValidationIndices(claim.expectedAudioIndices)
@@ -2237,7 +2275,7 @@ async function revalidateLanguageValidationClaim(
   if (
     !PLAYBACK_SESSION_UUID_PATTERN.test(jobId) ||
     !userId || !sourceId || !itemId || !variantId || !identityKey ||
-    !["movie", "episode"].includes(itemType) || !expectedFileSizeBytes
+    !itemType || !expectedFileSizeBytes
   ) {
     throw new HttpError(409, "Language validation job coordinates are invalid", {
       code: "LANGUAGE_VALIDATION_JOB_INVALID",
@@ -3934,6 +3972,149 @@ function languageValidationResponse(options: {
   };
 }
 
+const MEDIA_CACHE_OBJECT_KEY_PATTERN = /^[0-9a-f]{64}$/;
+const MEDIA_CACHE_ROOT_PLAYLIST_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,1023}$/;
+
+function validatedMediaCacheWorkerUrl(value: string): string | null {
+  try {
+    const parsed = new URL(value);
+    const loopback = parsed.hostname === "127.0.0.1" || parsed.hostname === "localhost" || parsed.hostname === "::1";
+    if (parsed.protocol !== "https:" && !(loopback && parsed.protocol === "http:")) return null;
+    if (parsed.username || parsed.password || parsed.search || parsed.hash) return null;
+    return trimTrailingSlash(parsed.toString());
+  } catch (_) {
+    return null;
+  }
+}
+
+function mediaCacheAssetUrl(baseUrl: string, objectKey: string, logicalPath: string): string {
+  const encodedPath = logicalPath.split("/").map((segment) => encodeURIComponent(segment)).join("/");
+  return `${baseUrl}/v1/hls/${objectKey}/${encodedPath}`;
+}
+
+async function issueMediaCachePlaybackTicket(
+  req: Request,
+  playbackSessionId: string,
+  userId: string,
+  db: SupabaseClient,
+) {
+  if (!PLAYBACK_SESSION_UUID_PATTERN.test(playbackSessionId)) {
+    throw new HttpError(400, "Invalid playback session id");
+  }
+  const body = await readJson(req);
+  if (!exactJsonKeys(body, ["objectKey", "protocol"]) || body.protocol !== 1) {
+    throw new HttpError(400, "Invalid media cache ticket request");
+  }
+  const objectKey = stringOr(body.objectKey, "").toLowerCase();
+  if (!MEDIA_CACHE_OBJECT_KEY_PATTERN.test(objectKey)) {
+    throw new HttpError(400, "Invalid media cache object key");
+  }
+
+  const runtimeConfig = await getRuntimeConfig(db);
+  const workerUrl = validatedMediaCacheWorkerUrl(runtimeConfig.mediaCacheWorkerUrl);
+  if (!runtimeConfig.mediaCacheEnabled || !workerUrl
+    || runtimeConfig.mediaCacheWorkerToken.length < 32
+    || !/^[0-9a-f]{64}$/i.test(runtimeConfig.mediaCacheTicketHmacKey)) {
+    throw new HttpError(503, "Private media cache is unavailable", {
+      code: "MEDIA_CACHE_DISABLED_OR_MISCONFIGURED",
+    });
+  }
+
+  const { data, error } = await db.rpc("norva_authorize_media_cache_playback", {
+    p_playback_session_id: playbackSessionId,
+    p_user_id: userId,
+    p_object_key: objectKey,
+    p_ticket_ttl_seconds: runtimeConfig.mediaCacheTicketTtlSeconds,
+  });
+  if (error) throwDb(error, "Unable to authorize private media cache playback");
+  const rows = Array.isArray(data) ? data : (data ? [data] : []);
+  if (rows.length !== 1) {
+    throw new HttpError(403, "Private media cache access is unavailable", {
+      code: "MEDIA_CACHE_ACCESS_DENIED",
+    });
+  }
+  const authorization = recordOrEmpty(rows[0]);
+  const bindingId = stringOr(authorization.binding_id, "");
+  const authorizedObjectKey = stringOr(authorization.object_key, "");
+  const rootPlaylist = stringOr(authorization.root_playlist, "");
+  const ticketExpiresAt = stringOr(authorization.ticket_expires_at, "");
+  const hardExpiresAt = stringOr(authorization.hard_expires_at, "");
+  const ticketExpiresAtMs = Date.parse(ticketExpiresAt);
+  const hardExpiresAtMs = Date.parse(hardExpiresAt);
+  const nowMs = Date.now();
+  if (!PLAYBACK_SESSION_UUID_PATTERN.test(bindingId)
+    || authorizedObjectKey !== objectKey
+    || authorization.storage_backend !== "r2"
+    || !MEDIA_CACHE_ROOT_PLAYLIST_PATTERN.test(rootPlaylist)
+    || /(^|\/)\.{1,2}(\/|$)|\/\//.test(rootPlaylist)
+    || !Number.isSafeInteger(ticketExpiresAtMs) || ticketExpiresAtMs <= nowMs + 5_000
+    || !Number.isSafeInteger(hardExpiresAtMs) || hardExpiresAtMs < ticketExpiresAtMs) {
+    throw new HttpError(503, "Private media cache authorization is invalid", {
+      code: "MEDIA_CACHE_AUTHORIZATION_INVALID",
+    });
+  }
+
+  const ticket = await createMediaCacheTicket(runtimeConfig.mediaCacheTicketHmacKey, {
+    objectKey,
+    bindingId,
+    playbackSessionId,
+    expiresAtMs: ticketExpiresAtMs,
+  }, nowMs);
+  const remainingMs = ticketExpiresAtMs - nowMs;
+  const refreshAfterMs = Math.min(
+    ticketExpiresAtMs - 5_000,
+    nowMs + Math.max(5_000, Math.floor(remainingMs / 2)),
+  );
+  return {
+    protocol: 1,
+    transport: "private-r2-hls",
+    objectKey,
+    playlistUrl: mediaCacheAssetUrl(workerUrl, objectKey, rootPlaylist),
+    authorization: { scheme: "Bearer", token: ticket },
+    ticketExpiresAt,
+    refreshAfter: new Date(refreshAfterMs).toISOString(),
+    hardExpiresAt,
+  };
+}
+
+async function revokeMediaCachePlaybackGrant(
+  playbackSessionId: string,
+  userId: string,
+  db: SupabaseClient,
+  runtimeConfig: RuntimeConfig,
+) {
+  const { data, error } = await db.rpc("norva_revoke_media_cache_playback_grant", {
+    p_playback_session_id: playbackSessionId,
+    p_user_id: userId,
+  });
+  if (error) throw error;
+  if (data !== true) return { grantRevoked: false, workerRevoked: false };
+
+  const workerUrl = validatedMediaCacheWorkerUrl(runtimeConfig.mediaCacheWorkerUrl);
+  if (!workerUrl || runtimeConfig.mediaCacheWorkerToken.length < 32) {
+    throw new Error("private media cache revocation route is unavailable");
+  }
+  let lastError: unknown = null;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const response = await fetch(
+        `${workerUrl}/internal/v1/revocations/${encodeURIComponent(playbackSessionId)}`,
+        {
+          method: "PUT",
+          headers: { Authorization: `Bearer ${runtimeConfig.mediaCacheWorkerToken}` },
+          signal: AbortSignal.timeout(5_000),
+        },
+      );
+      if (!response.ok) throw new Error(`private media cache revocation returned ${response.status}`);
+      await response.body?.cancel().catch(() => {});
+      return { grantRevoked: true, workerRevoked: true };
+    } catch (workerError) {
+      lastError = workerError;
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error("private media cache revocation failed");
+}
+
 async function getPlaybackSession(id: string, userId: string, db: SupabaseClient) {
   const { data, error } = await db
     .from("cloud_playback_sessions")
@@ -4073,8 +4254,25 @@ async function expirePlaybackSession(id: string, userId: string, db: SupabaseCli
   const runtimeConfig = await getRuntimeConfig(db);
   const closedGatewayIds: string[] = [];
   const gatewayErrors: unknown[] = [];
+  const mediaCacheErrors: unknown[] = [];
   let rawPumpsAborted = 0;
   let fastStartProofPersisted = false;
+  let mediaCacheGrantRevoked = false;
+  let mediaCacheWorkerRevoked = false;
+
+  // Revoke browser access before allowing any provider-backed continuation to
+  // detach. The immutable shared object remains reusable by another authorized
+  // session; only this playback session receives a strongly consistent marker.
+  if (runtimeConfig.mediaCacheEnabled) {
+    try {
+      const revocation = await revokeMediaCachePlaybackGrant(id, userId, db, runtimeConfig);
+      mediaCacheGrantRevoked = revocation.grantRevoked;
+      mediaCacheWorkerRevoked = revocation.workerRevoked;
+    } catch (mediaCacheError) {
+      mediaCacheErrors.push(mediaCacheError);
+      console.warn("[norva-playback] private media cache revocation failed");
+    }
+  }
 
   if (
     runtimeConfig.mediaGatewayRouting.defaultRoute ||
@@ -4205,6 +4403,9 @@ async function expirePlaybackSession(id: string, userId: string, db: SupabaseCli
     rawPumpsAborted,
     fastStartProofPersisted,
     gatewayErrors: gatewayErrors.length,
+    mediaCacheGrantRevoked,
+    mediaCacheWorkerRevoked,
+    mediaCacheErrors: mediaCacheErrors.length,
   };
 }
 
@@ -6720,6 +6921,7 @@ function normalizeGatewayMultiAudioHls(
       raw.sourceTrackCount !== 1 || raw.preparedTrackCount !== 0 ||
       raw.masterPlaylist !== "playlist.m3u8" || raw.videoPlaylist !== "playlist.m3u8" ||
       raw.defaultHlsIndex !== null || raw.defaultStreamIndex !== null ||
+      typeof selectedStreamIndex !== "number" ||
       !Number.isSafeInteger(selectedStreamIndex) || selectedStreamIndex < 0 || selectedStreamIndex > 1024 ||
       exactAudioTracks.length !== 1 || !Number.isSafeInteger(exactMonoStreamIndex) ||
       exactMonoStreamIndex !== selectedStreamIndex
@@ -7146,7 +7348,12 @@ async function getRuntimeConfig(db: SupabaseClient): Promise<RuntimeConfig> {
     !ENV_MEDIA_GATEWAY_CANARY_USER_HASHES ||
     !ENV_LID_WORKER_URL ||
     !ENV_LID_WORKER_TOKEN ||
-    !ENV_SOURCE_CONFIG_KEY;
+    !ENV_SOURCE_CONFIG_KEY ||
+    !ENV_MEDIA_CACHE_WORKER_URL ||
+    !ENV_MEDIA_CACHE_WORKER_TOKEN ||
+    !ENV_MEDIA_CACHE_TICKET_HMAC_KEY ||
+    !ENV_MEDIA_CACHE_ENABLED ||
+    !ENV_MEDIA_CACHE_TICKET_TTL_SECONDS;
 
   if (needsDb) {
     const { data, error } = await db
@@ -7183,6 +7390,19 @@ async function getRuntimeConfig(db: SupabaseClient): Promise<RuntimeConfig> {
     lidWorkerToken: ENV_LID_WORKER_TOKEN || fromDb.get("NORVA_LID_WORKER_TOKEN") || "",
     sourceConfigKey: ENV_SOURCE_CONFIG_KEY || fromDb.get("NORVA_SOURCE_CONFIG_KEY") || "",
     whisperDetect: (ENV_WHISPER_DETECT || fromDb.get("NORVA_WHISPER_DETECT") || "") === "true",
+    mediaCacheWorkerUrl: trimTrailingSlash(
+      ENV_MEDIA_CACHE_WORKER_URL || fromDb.get("NORVA_MEDIA_CACHE_WORKER_URL") || "",
+    ),
+    mediaCacheWorkerToken: ENV_MEDIA_CACHE_WORKER_TOKEN || fromDb.get("NORVA_MEDIA_CACHE_WORKER_TOKEN") || "",
+    mediaCacheTicketHmacKey: ENV_MEDIA_CACHE_TICKET_HMAC_KEY ||
+      fromDb.get("NORVA_MEDIA_CACHE_TICKET_HMAC_KEY") || "",
+    mediaCacheEnabled: (ENV_MEDIA_CACHE_ENABLED || fromDb.get("NORVA_MEDIA_CACHE_ENABLED") || "") === "true",
+    mediaCacheTicketTtlSeconds: boundedInt(
+      ENV_MEDIA_CACHE_TICKET_TTL_SECONDS || fromDb.get("NORVA_MEDIA_CACHE_TICKET_TTL_SECONDS"),
+      90,
+      30,
+      300,
+    ),
   };
   runtimeConfigCache = { value, expiresAt: Date.now() + 30_000 };
   return value;

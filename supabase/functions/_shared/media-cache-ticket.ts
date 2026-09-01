@@ -80,9 +80,12 @@ function base64UrlDecode(value: string): Uint8Array {
 }
 
 async function hmac(secretHex: string, encodedPayload: string): Promise<Uint8Array> {
+  const secretBytes = decodeHexKey(secretHex);
+  const secretBuffer = new ArrayBuffer(secretBytes.byteLength);
+  new Uint8Array(secretBuffer).set(secretBytes);
   const key = await crypto.subtle.importKey(
     "raw",
-    decodeHexKey(secretHex),
+    secretBuffer,
     { name: "HMAC", hash: "SHA-256" },
     false,
     ["sign"],

@@ -135,7 +135,7 @@ export async function finalizeCatalogVisibilityResponse(
   req,
   response,
   db,
-  { service = "edge", corsHeaders = () => ({}) } = {},
+  { service = "edge", corsHeaders = (_req) => ({}) } = {},
 ) {
   const binding = bindings.get(req);
   if (!binding) return response;
