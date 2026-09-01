@@ -8,6 +8,10 @@ const migration = fs.readFileSync(path.join(
   root,
   'supabase/migrations/20260901143000_source_reenable_enrichment_wake_v1.sql',
 ), 'utf8');
+const selfHostedResumeCronMigration = fs.readFileSync(path.join(
+  root,
+  'supabase/migrations/20260901181000_source_resume_stuck_selfhost_cron_v1.sql',
+), 'utf8');
 const cloud = fs.readFileSync(path.join(
   root,
   'supabase/functions/norva-cloud/index.ts',
@@ -279,6 +283,28 @@ test('fair auto-refresh settles only the exact M3U quarantine action', () => {
   assert.match(autoRefreshM3uQuarantineMigration, /grant execute on function public\.norva_settle_cloud_auto_refresh_source[\s\S]*to service_role/);
   assert.doesNotMatch(autoRefreshM3uQuarantineMigration, /40001/);
   assert.match(autoRefreshM3uQuarantineMigration, /cloud auto refresh lease is stale'[\s\S]*errcode = 'PT409'/);
+});
+
+test('source resume watchdog is repaired onto the canonical self-hosted ingress', () => {
+  assert.match(
+    selfHostedResumeCronMigration,
+    /https:\/\/api\.norva\.tv\/functions\/v1\/norva-source-sync\/cron\/resume-stuck/,
+  );
+  assert.doesNotMatch(
+    selfHostedResumeCronMigration,
+    /url := 'https:\/\/oupsceccxsonaalhueff\.supabase\.co/,
+  );
+  assert.match(selfHostedResumeCronMigration, /pg_advisory_xact_lock/);
+  assert.match(selfHostedResumeCronMigration, /v_job_count > 1/);
+  assert.match(
+    selfHostedResumeCronMigration,
+    /jobname in \('norva-resume-stuck-sync', 'norva-resume-stuck'\)[\s\S]*command like '%\/norva-source-sync\/cron\/resume-stuck%'/,
+  );
+  assert.match(selfHostedResumeCronMigration, /cron\.alter_job\([\s\S]*command => v_command[\s\S]*\);/);
+  assert.doesNotMatch(
+    selfHostedResumeCronMigration,
+    /cron\.alter_job\([\s\S]*active => true[\s\S]*\);/,
+  );
 });
 
 test('quiesced deploy proves the installed M3U quarantine settlement body, not only its legacy signature', () => {
