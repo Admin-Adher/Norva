@@ -1179,5 +1179,8 @@ module.exports = {
     deriveCompleteHlsCacheKeyFromVerifiedBinding,
     deriveGlobalMediaCacheObjectKey,
     deriveMediaCacheBindingKey,
+    openRegularNoFollow,
     parseDedicatedManifestHmacKey,
+    safeRelativeAsset,
+    validateCompleteHlsDirectory,
 };
