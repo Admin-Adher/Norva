@@ -12,6 +12,8 @@ const {
   MkvHlsCacheError,
   deriveCompleteHlsCacheKey,
   deriveCompleteHlsCacheKeyFromVerifiedBinding,
+  deriveGlobalMediaCacheObjectKey,
+  deriveMediaCacheBindingKey,
   parseDedicatedManifestHmacKey,
 } = require('../services/media-gateway/src/mkv-hls-cache');
 
@@ -63,6 +65,47 @@ function verifiedBinding(overrides = {}) {
     fileSizeBytes: 123456,
     pipelineBuild: 'mkv-h264-hls-fmp4-v2',
     proofBuild: 2,
+    ...overrides,
+  };
+}
+
+function globalObjectIdentity(overrides = {}) {
+  return {
+    contentSha256: '81'.repeat(32),
+    fileSizeBytes: 987_654_321,
+    videoProfile: {
+      streamIndex: 0,
+      codec: 'h264',
+      profile: 'high',
+      level: 41,
+      width: 1920,
+      height: 1080,
+      pixelFormat: 'yuv420p',
+      frameRateNumerator: 24_000,
+      frameRateDenominator: 1_001,
+    },
+    audioTopology: [
+      { streamIndex: 1, codec: 'aac', language: 'eng', channels: 2, sampleRate: 48_000, title: 'English', default: true, forced: false },
+      { streamIndex: 2, codec: 'aac', language: 'fra', channels: 2, sampleRate: 48_000, title: 'Français', default: false, forced: false },
+    ],
+    subtitleTopology: [
+      { streamIndex: 3, codec: 'webvtt', language: 'fra', title: null, default: false, forced: false, hearingImpaired: false },
+    ],
+    durationMilliseconds: 7_200_000,
+    pipelineBuild: 'mkv-h264-hls-fmp4-v3',
+    segmenterBuild: 'ffmpeg-8.0-norva-4',
+    ...overrides,
+  };
+}
+
+function globalBinding(overrides = {}) {
+  return {
+    tenantScopeSha256: '91'.repeat(32),
+    sourceScopeSha256: '92'.repeat(32),
+    mediaItemScopeSha256: '93'.repeat(32),
+    variantScopeSha256: '94'.repeat(32),
+    itemType: 'movie',
+    targetUrlSha256: '95'.repeat(32),
     ...overrides,
   };
 }
@@ -484,4 +527,116 @@ test('symlinked staging assets are rejected when the platform permits symlink cr
     assert.ok(['UNSAFE_CACHE_ASSET', 'UNSAFE_CACHE_PATH'].includes(error.code), error.code);
     return true;
   });
+});
+
+test('two authorized tenants share one immutable global object through separate signed bindings', async (t) => {
+  const root = await tempDirectory(t, 'norva-global-hls-cache-');
+  const stage = await makeSimpleHls(t);
+  const identity = globalObjectIdentity();
+  const tenantA = globalBinding();
+  const tenantB = globalBinding({
+    tenantScopeSha256: 'a1'.repeat(32),
+    sourceScopeSha256: 'a2'.repeat(32),
+    mediaItemScopeSha256: 'a3'.repeat(32),
+    variantScopeSha256: 'a4'.repeat(32),
+    targetUrlSha256: 'a5'.repeat(32),
+  });
+  const cache = new CompleteMkvHlsCache(cacheOptions(root));
+  const published = await cache.publishGlobalObject({
+    ...publishOptions(stage),
+    identity,
+  });
+  assert.equal(published.key, deriveGlobalMediaCacheObjectKey(identity).key);
+  assert.equal((await cache.bindGlobalObject({ identity, binding: tenantA })).status, 'bound');
+  assert.equal((await cache.bindGlobalObject({ identity, binding: tenantB })).status, 'bound');
+
+  const hitA = await cache.acquireBound({ identity, binding: tenantA });
+  const hitB = await cache.acquireBound({ identity, binding: tenantB });
+  assert.equal(hitA.hit, true);
+  assert.equal(hitB.hit, true);
+  assert.equal(hitA.key, hitB.key, 'both bindings lease exactly one global object');
+  assert.notEqual(hitA.bindingKey, hitB.bindingKey, 'each authority remains independently revocable');
+  hitA.release();
+  hitB.release();
+
+  const objectKey = deriveGlobalMediaCacheObjectKey(identity).key;
+  const entryParent = path.join(root, 'entries', objectKey.slice(0, 2));
+  assert.deepEqual(await fsp.readdir(entryParent), [objectKey]);
+  const envelope = JSON.parse(await fsp.readFile(path.join(entryParent, objectKey, 'manifest.auth.json'), 'utf8'));
+  const payload = JSON.parse(Buffer.from(envelope.payload, 'base64url').toString('utf8'));
+  assert.equal(payload.schema, 2);
+  assert.equal(payload.identityKind, 'global-media-object');
+  const serialized = JSON.stringify(payload).toLowerCase();
+  for (const forbidden of ['tenant', 'provider', 'tmdb', 'multi', 'https://']) {
+    assert.equal(serialized.includes(forbidden), false, forbidden);
+  }
+});
+
+test('an unbound or tampered tenant fails closed without quarantining the shared object', async (t) => {
+  const root = await tempDirectory(t, 'norva-global-hls-binding-auth-');
+  const stage = await makeSimpleHls(t);
+  const identity = globalObjectIdentity();
+  const binding = globalBinding();
+  const stranger = globalBinding({ tenantScopeSha256: 'b1'.repeat(32) });
+  const cache = new CompleteMkvHlsCache(cacheOptions(root));
+  await cache.publishGlobalObject({ ...publishOptions(stage), identity });
+  await cache.bindGlobalObject({ identity, binding });
+
+  assert.equal((await cache.acquireBound({ identity, binding: stranger })).reason, 'binding-miss');
+  const derived = deriveMediaCacheBindingKey(binding, deriveGlobalMediaCacheObjectKey(identity).key);
+  const bindingPath = path.join(root, 'bindings', derived.key.slice(0, 2), `${derived.key}.auth.json`);
+  const envelope = JSON.parse(await fsp.readFile(bindingPath, 'utf8'));
+  envelope.mac = `${envelope.mac.slice(0, -1)}${envelope.mac.endsWith('A') ? 'B' : 'A'}`;
+  await fsp.writeFile(bindingPath, JSON.stringify(envelope));
+  assert.equal((await cache.acquireBound({ identity, binding })).reason, 'binding-invalid');
+
+  const direct = await cache.acquireGlobalObject(identity);
+  assert.equal(direct.hit, true, 'binding corruption never deletes the globally valid object');
+  direct.release();
+});
+
+test('rebinding one authority replaces only its object pointer and revocation preserves both objects', async (t) => {
+  const root = await tempDirectory(t, 'norva-global-hls-rebind-');
+  const stages = [await makeSimpleHls(t), await makeSimpleHls(t)];
+  const firstIdentity = globalObjectIdentity();
+  const secondIdentity = globalObjectIdentity({ contentSha256: '82'.repeat(32) });
+  const binding = globalBinding();
+  const cache = new CompleteMkvHlsCache(cacheOptions(root));
+  await cache.publishGlobalObject({ ...publishOptions(stages[0]), identity: firstIdentity });
+  await cache.publishGlobalObject({ ...publishOptions(stages[1]), identity: secondIdentity });
+  await cache.bindGlobalObject({ identity: firstIdentity, binding });
+  await cache.bindGlobalObject({ identity: secondIdentity, binding });
+
+  assert.equal((await cache.acquireBound({ identity: firstIdentity, binding })).reason, 'binding-invalid');
+  const secondHit = await cache.acquireBound({ identity: secondIdentity, binding });
+  assert.equal(secondHit.hit, true);
+  secondHit.release();
+  assert.equal((await cache.revokeGlobalBinding({ identity: secondIdentity, binding })).status, 'revoked');
+  assert.equal((await cache.acquireBound({ identity: secondIdentity, binding })).reason, 'binding-revoked');
+
+  for (const identity of [firstIdentity, secondIdentity]) {
+    const object = await cache.acquireGlobalObject(identity);
+    assert.equal(object.hit, true, 'revocation affects no immutable object');
+    object.release();
+  }
+});
+
+test('binding TTL expires independently before a still-valid global object', async (t) => {
+  const root = await tempDirectory(t, 'norva-global-hls-binding-ttl-');
+  const stage = await makeSimpleHls(t);
+  const identity = globalObjectIdentity();
+  const binding = globalBinding();
+  let now = 1_000_000;
+  const cache = new CompleteMkvHlsCache(cacheOptions(root, {
+    now: () => now,
+    ttlMs: 60_000,
+    bindingTtlMs: 5_000,
+  }));
+  await cache.publishGlobalObject({ ...publishOptions(stage), identity });
+  await cache.bindGlobalObject({ identity, binding });
+  now += 5_001;
+  assert.equal((await cache.acquireBound({ identity, binding })).reason, 'binding-expired');
+  const object = await cache.acquireGlobalObject(identity);
+  assert.equal(object.hit, true);
+  object.release();
 });

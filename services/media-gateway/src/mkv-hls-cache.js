@@ -9,11 +9,17 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const path = require('node:path');
+const {
+    deriveGlobalMediaCacheObjectKey,
+    deriveMediaCacheBindingKey,
+} = require('./mediaCacheIdentity');
 
 const CACHE_KEY_SCHEMA = 1;
 const VERIFIED_CACHE_KEY_SCHEMA = 2;
 const MANIFEST_SCHEMA = 1;
+const GLOBAL_MANIFEST_SCHEMA = 2;
 const ENVELOPE_SCHEMA = 1;
+const BINDING_PAYLOAD_SCHEMA = 1;
 const PRIVATE_DIRECTORY_MODE = 0o700;
 const PRIVATE_FILE_MODE = 0o600;
 const DEFAULT_MAX_ENTRY_BYTES = 128 * 1024 * 1024 * 1024;
@@ -298,6 +304,16 @@ function signManifest(payload, key) {
     return { schema: ENVELOPE_SCHEMA, keyId, payload: encoded, mac };
 }
 
+function signBindingPayload(payload, key) {
+    const payloadJson = canonicalJson(payload);
+    const encoded = Buffer.from(payloadJson).toString('base64url');
+    const keyId = sha256(key).slice(0, 16);
+    const mac = crypto.createHmac('sha256', key)
+        .update(`norva-media-cache-binding\0${keyId}\0${encoded}`)
+        .digest('base64url');
+    return { schema: ENVELOPE_SCHEMA, keyId, payload: encoded, mac };
+}
+
 function decodeManifestEnvelope(envelope, key) {
     if (!exactKeys(envelope, ['schema', 'keyId', 'payload', 'mac']) || envelope.schema !== ENVELOPE_SCHEMA
         || !/^[0-9a-f]{16}$/.test(envelope.keyId) || !base64urlCanonical(envelope.payload)
@@ -324,6 +340,36 @@ function decodeManifestEnvelope(envelope, key) {
     }
     if (canonicalJson(payload) !== payloadJson) {
         throw new MkvHlsCacheError('INVALID_CACHE_MANIFEST', 'cache manifest payload is not canonical');
+    }
+    return payload;
+}
+
+function decodeBindingEnvelope(envelope, key) {
+    if (!exactKeys(envelope, ['schema', 'keyId', 'payload', 'mac']) || envelope.schema !== ENVELOPE_SCHEMA
+        || !/^[0-9a-f]{16}$/.test(envelope.keyId) || !base64urlCanonical(envelope.payload)
+        || !base64urlCanonical(envelope.mac)) {
+        throw new MkvHlsCacheError('INVALID_CACHE_BINDING', 'cache binding envelope is invalid');
+    }
+    const expectedKeyId = sha256(key).slice(0, 16);
+    if (!timingSafeTextEqual(envelope.keyId, expectedKeyId)) {
+        throw new MkvHlsCacheError('INVALID_CACHE_BINDING', 'cache binding key is unknown');
+    }
+    const expectedMac = crypto.createHmac('sha256', key)
+        .update(`norva-media-cache-binding\0${envelope.keyId}\0${envelope.payload}`)
+        .digest('base64url');
+    if (!timingSafeTextEqual(envelope.mac, expectedMac)) {
+        throw new MkvHlsCacheError('INVALID_CACHE_BINDING', 'cache binding authentication failed');
+    }
+    let payloadJson;
+    let payload;
+    try {
+        payloadJson = Buffer.from(envelope.payload, 'base64url').toString('utf8');
+        payload = JSON.parse(payloadJson);
+    } catch (error) {
+        throw new MkvHlsCacheError('INVALID_CACHE_BINDING', 'cache binding payload is invalid', { cause: error });
+    }
+    if (canonicalJson(payload) !== payloadJson) {
+        throw new MkvHlsCacheError('INVALID_CACHE_BINDING', 'cache binding payload is not canonical');
     }
     return payload;
 }
@@ -400,11 +446,17 @@ async function validateCompleteHlsDirectory(directory, rootPlaylist, files, maxP
 }
 
 function validateManifestPayload(payload, expectedKey) {
-    const keys = ['schema', 'key', 'components', 'rootPlaylist', 'files', 'totalBytes', 'createdAtMs', 'expiresAtMs', 'completion'];
-    if (!exactKeys(payload, keys) || payload.schema !== MANIFEST_SCHEMA || payload.key !== expectedKey
+    const commonKeys = ['schema', 'key', 'components', 'rootPlaylist', 'files', 'totalBytes', 'createdAtMs', 'expiresAtMs', 'completion'];
+    const legacy = exactKeys(payload, commonKeys)
+        && payload.schema === MANIFEST_SCHEMA
+        && exactKeys(payload.components, ['tenant', 'provider', 'item', 'variant', 'initialUrl', 'effectiveUrl', 'strongEtag', 'profile', 'pipelineBuild']);
+    const global = exactKeys(payload, [...commonKeys, 'identityKind'])
+        && payload.schema === GLOBAL_MANIFEST_SCHEMA
+        && payload.identityKind === 'global-media-object'
+        && exactKeys(payload.components, ['content', 'size', 'video', 'audio', 'subtitles', 'duration', 'pipeline', 'segmenter']);
+    if ((!legacy && !global) || payload.key !== expectedKey
         || !/^[0-9a-f]{64}$/.test(payload.key)
-        || !exactKeys(payload.components, ['tenant', 'provider', 'item', 'variant', 'initialUrl', 'effectiveUrl', 'strongEtag', 'profile', 'pipelineBuild'])
-        || Object.values(payload.components).some((value) => !/^[0-9a-f]{64}$/.test(value))
+        || Object.values(payload.components || {}).some((value) => !/^[0-9a-f]{64}$/.test(value))
         || !Array.isArray(payload.files) || payload.files.length === 0
         || !Number.isSafeInteger(payload.totalBytes) || payload.totalBytes <= 0
         || !Number.isSafeInteger(payload.createdAtMs) || !Number.isSafeInteger(payload.expiresAtMs)
@@ -428,6 +480,31 @@ function validateManifestPayload(payload, expectedKey) {
         if (!Number.isSafeInteger(total)) throw new MkvHlsCacheError('INVALID_CACHE_MANIFEST', 'cache size overflow');
     }
     if (total !== payload.totalBytes) throw new MkvHlsCacheError('INVALID_CACHE_MANIFEST', 'cache manifest total is invalid');
+    return payload;
+}
+
+function validateBindingPayload(payload, derived, nowMs) {
+    const keys = ['schema', 'key', 'objectKey', 'components', 'state', 'createdAtMs', 'expiresAtMs'];
+    if (!exactKeys(payload, keys)
+        || payload.schema !== BINDING_PAYLOAD_SCHEMA
+        || payload.key !== derived.key
+        || payload.objectKey !== derived.objectKey
+        || !/^[0-9a-f]{64}$/.test(payload.key)
+        || !/^[0-9a-f]{64}$/.test(payload.objectKey)
+        || !exactKeys(payload.components, ['tenant', 'source', 'mediaItem', 'variant', 'itemType', 'targetUrl'])
+        || Object.values(payload.components).some((value) => !/^[0-9a-f]{64}$/.test(value))
+        || canonicalJson(payload.components) !== canonicalJson(derived.components)
+        || !['active', 'revoked'].includes(payload.state)
+        || !Number.isSafeInteger(payload.createdAtMs)
+        || !Number.isSafeInteger(payload.expiresAtMs)
+        || payload.createdAtMs <= 0
+        || payload.expiresAtMs <= payload.createdAtMs
+        || payload.expiresAtMs > payload.createdAtMs + MAX_CACHE_TTL_MS) {
+        throw new MkvHlsCacheError('INVALID_CACHE_BINDING', 'cache binding payload shape is invalid');
+    }
+    if (Number.isSafeInteger(nowMs) && payload.expiresAtMs <= nowMs) {
+        throw new MkvHlsCacheError('CACHE_BINDING_EXPIRED', 'cache binding has expired');
+    }
     return payload;
 }
 
@@ -536,6 +613,8 @@ class CompleteMkvHlsCache {
         this.minFreeBytes = strictNonNegativeInteger(options.minFreeBytes || 0, 'minFreeBytes');
         this.ttlMs = strictPositiveInteger(options.ttlMs, 'ttlMs');
         if (this.ttlMs > MAX_CACHE_TTL_MS) throw new MkvHlsCacheError('INVALID_CACHE_CONFIG', 'ttlMs exceeds the 90-day bound');
+        this.bindingTtlMs = strictPositiveInteger(options.bindingTtlMs ?? this.ttlMs, 'bindingTtlMs');
+        if (this.bindingTtlMs > MAX_CACHE_TTL_MS) throw new MkvHlsCacheError('INVALID_CACHE_CONFIG', 'bindingTtlMs exceeds the 90-day bound');
         this.maxEntryBytes = strictPositiveInteger(options.maxEntryBytes || DEFAULT_MAX_ENTRY_BYTES, 'maxEntryBytes');
         this.maxFiles = strictPositiveInteger(options.maxFiles || DEFAULT_MAX_FILES, 'maxFiles');
         this.maxPlaylistBytes = strictPositiveInteger(options.maxPlaylistBytes || DEFAULT_MAX_PLAYLIST_BYTES, 'maxPlaylistBytes');
@@ -547,6 +626,7 @@ class CompleteMkvHlsCache {
         this.initialized = false;
         this.rootReal = '';
         this.entriesRoot = '';
+        this.bindingsRoot = '';
         this.tempRoot = '';
     }
 
@@ -560,8 +640,10 @@ class CompleteMkvHlsCache {
         if (this.initialized) return;
         this.rootReal = await ensurePrivateDirectory(this.root);
         this.entriesRoot = await ensurePrivateDirectory(path.join(this.rootReal, 'entries'));
+        this.bindingsRoot = await ensurePrivateDirectory(path.join(this.rootReal, 'bindings'));
         this.tempRoot = await ensurePrivateDirectory(path.join(this.rootReal, 'tmp'));
         assertInsideRoot(this.rootReal, this.entriesRoot);
+        assertInsideRoot(this.rootReal, this.bindingsRoot);
         assertInsideRoot(this.rootReal, this.tempRoot);
         const tempEntries = await fsp.readdir(this.tempRoot, { withFileTypes: true });
         for (const entry of tempEntries) {
@@ -581,6 +663,11 @@ class CompleteMkvHlsCache {
         return path.join(this.entriesRoot, key.slice(0, 2), key);
     }
 
+    _bindingPath(key) {
+        if (!/^[0-9a-f]{64}$/.test(key)) throw new MkvHlsCacheError('INVALID_CACHE_BINDING', 'cache binding key is invalid');
+        return path.join(this.bindingsRoot, key.slice(0, 2), `${key}.auth.json`);
+    }
+
     async _readManifest(entryDirectory, expectedKey) {
         const entryStat = await fsp.lstat(entryDirectory);
         if (!entryStat.isDirectory() || entryStat.isSymbolicLink()) throw new MkvHlsCacheError('UNSAFE_CACHE_PATH', 'cache entry is not a real directory');
@@ -597,6 +684,53 @@ class CompleteMkvHlsCache {
         }
         const payload = validateManifestPayload(decodeManifestEnvelope(envelope, this.manifestKey), expectedKey);
         return { payload, entryReal };
+    }
+
+    async _readBinding(bindingPath, derived, nowMs) {
+        const stat = await fsp.lstat(bindingPath);
+        if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 256 * 1024) {
+            throw new MkvHlsCacheError('INVALID_CACHE_BINDING', 'cache binding file is invalid');
+        }
+        const real = await fsp.realpath(bindingPath);
+        assertInsideRoot(this.bindingsRoot, real);
+        let envelope;
+        try { envelope = JSON.parse(await fsp.readFile(real, 'utf8')); } catch (error) {
+            throw new MkvHlsCacheError('INVALID_CACHE_BINDING', 'cache binding JSON is invalid', { cause: error });
+        }
+        return validateBindingPayload(decodeBindingEnvelope(envelope, this.manifestKey), derived, nowMs);
+    }
+
+    async _writeBindingPayload(bindingPath, payload) {
+        const shardDirectory = await ensurePrivateDirectory(path.dirname(bindingPath));
+        assertInsideRoot(this.bindingsRoot, shardDirectory);
+        const tempPath = path.join(shardDirectory, `${payload.key}.${crypto.randomUUID()}.tmp`);
+        const envelope = signBindingPayload(payload, this.manifestKey);
+        const handle = await fsp.open(tempPath,
+            fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL,
+            PRIVATE_FILE_MODE);
+        let promoted = false;
+        try {
+            await writeAll(handle, Buffer.from(`${JSON.stringify(envelope)}\n`));
+            await handle.sync();
+        } finally {
+            await handle.close();
+        }
+        try {
+            try {
+                await fsp.rename(tempPath, bindingPath);
+            } catch (error) {
+                if (!error || !['EEXIST', 'EPERM'].includes(error.code)) throw error;
+                // Windows cannot always atomically replace a closed file. The
+                // exact binding is removed first, leaving only a fail-closed
+                // miss if the process terminates in this narrow replacement.
+                await fsp.rm(bindingPath, { force: false });
+                await fsp.rename(tempPath, bindingPath);
+            }
+            promoted = true;
+            await fsyncDirectory(shardDirectory);
+        } finally {
+            if (!promoted) await fsp.rm(tempPath, { force: true }).catch(() => {});
+        }
     }
 
     async _validateEntryFiles(entryReal, payload) {
@@ -639,9 +773,8 @@ class CompleteMkvHlsCache {
         });
     }
 
-    async _acquireDerived(derived) {
-        return this._serial(async () => {
-            await this._init();
+    async _acquireDerivedUnlocked(derived) {
+        await this._init();
             if (this.quarantined.has(derived.key)) {
                 await this._removeQuarantinedEntry(derived.key);
                 if (this.quarantined.has(derived.key)) {
@@ -655,6 +788,9 @@ class CompleteMkvHlsCache {
                 const { payload, entryReal } = await this._readManifest(entryDirectory, derived.key);
                 if (canonicalJson(payload.components) !== canonicalJson(derived.components)) {
                     throw new MkvHlsCacheError('CACHE_KEY_COLLISION', 'cache entry bindings do not match the derived key');
+                }
+                if (derived.identityKind && payload.identityKind !== derived.identityKind) {
+                    throw new MkvHlsCacheError('CACHE_KEY_COLLISION', 'cache entry identity kind does not match the derived key');
                 }
                 if (payload.expiresAtMs <= Number(this.now())) {
                     return { hit: false, reason: 'expired', key: derived.key };
@@ -701,7 +837,10 @@ class CompleteMkvHlsCache {
                 }
                 throw error;
             }
-        });
+    }
+
+    async _acquireDerived(derived) {
+        return this._serial(() => this._acquireDerivedUnlocked(derived));
     }
 
     async acquire(identity) {
@@ -710,6 +849,10 @@ class CompleteMkvHlsCache {
 
     async acquireVerified(binding) {
         return this._acquireDerived(deriveCompleteHlsCacheKeyFromVerifiedBinding(binding));
+    }
+
+    async acquireGlobalObject(identity) {
+        return this._acquireDerived(deriveGlobalMediaCacheObjectKey(identity));
     }
 
     async _availableBytes() {
@@ -803,6 +946,9 @@ class CompleteMkvHlsCache {
                     if (canonicalJson(payload.components) !== canonicalJson(derived.components)) {
                         throw new MkvHlsCacheError('CACHE_KEY_COLLISION', 'existing cache entry has different bindings');
                     }
+                    if (derived.identityKind && payload.identityKind !== derived.identityKind) {
+                        throw new MkvHlsCacheError('CACHE_KEY_COLLISION', 'existing cache entry has a different identity kind');
+                    }
                     if (payload.expiresAtMs > Number(this.now())) {
                         await this._validateEntryFiles(entryReal, payload);
                         return { status: 'already-exists', key: derived.key, totalBytes: payload.totalBytes };
@@ -859,8 +1005,10 @@ class CompleteMkvHlsCache {
                 if (!Number.isSafeInteger(createdAtMs) || createdAtMs <= 0 || createdAtMs + this.ttlMs > Number.MAX_SAFE_INTEGER) {
                     throw new MkvHlsCacheError('INVALID_CACHE_CLOCK', 'cache clock is invalid');
                 }
+                const isGlobalObject = derived.identityKind === 'global-media-object';
                 const payload = {
-                    schema: MANIFEST_SCHEMA,
+                    schema: isGlobalObject ? GLOBAL_MANIFEST_SCHEMA : MANIFEST_SCHEMA,
+                    ...(isGlobalObject ? { identityKind: derived.identityKind } : {}),
                     key: derived.key,
                     components: derived.components,
                     rootPlaylist,
@@ -907,6 +1055,109 @@ class CompleteMkvHlsCache {
         return this._publishCompleteDerived(options, deriveCompleteHlsCacheKeyFromVerifiedBinding(options.binding));
     }
 
+    async publishGlobalObject(options) {
+        if (!options || typeof options !== 'object') throw new TypeError('publish options are required');
+        return this._publishCompleteDerived(options, deriveGlobalMediaCacheObjectKey(options.identity));
+    }
+
+    // This local binding is a signed cache of a server-authoritative grant, not
+    // an authorization oracle. Callers must first validate the live cloud
+    // source/media/variant relationship (and later the private Worker ticket).
+    async bindGlobalObject(options) {
+        if (!options || typeof options !== 'object') throw new TypeError('binding options are required');
+        const objectDerived = deriveGlobalMediaCacheObjectKey(options.identity);
+        const bindingDerived = deriveMediaCacheBindingKey(options.binding, objectDerived.key);
+        return this._serial(async () => {
+            await this._init();
+            const entryDirectory = this._entryDirectory(objectDerived.key);
+            if (!await optionalLstat(entryDirectory)) {
+                return { status: 'object-miss', key: bindingDerived.key, objectKey: objectDerived.key };
+            }
+            const { payload, entryReal } = await this._readManifest(entryDirectory, objectDerived.key);
+            if (payload.identityKind !== objectDerived.identityKind
+                || canonicalJson(payload.components) !== canonicalJson(objectDerived.components)) {
+                throw new MkvHlsCacheError('CACHE_KEY_COLLISION', 'global cache object does not match its derived identity');
+            }
+            const nowMs = Number(this.now());
+            if (!Number.isSafeInteger(nowMs) || nowMs <= 0) {
+                throw new MkvHlsCacheError('INVALID_CACHE_CLOCK', 'cache clock is invalid');
+            }
+            if (payload.expiresAtMs <= nowMs) {
+                return { status: 'object-expired', key: bindingDerived.key, objectKey: objectDerived.key };
+            }
+            await this._validateEntryFiles(entryReal, payload);
+            const expiresAtMs = Math.min(payload.expiresAtMs, nowMs + this.bindingTtlMs);
+            const bindingPayload = {
+                schema: BINDING_PAYLOAD_SCHEMA,
+                key: bindingDerived.key,
+                objectKey: objectDerived.key,
+                components: bindingDerived.components,
+                state: 'active',
+                createdAtMs: nowMs,
+                expiresAtMs,
+            };
+            validateBindingPayload(bindingPayload, bindingDerived, nowMs - 1);
+            await this._writeBindingPayload(this._bindingPath(bindingDerived.key), bindingPayload);
+            return {
+                status: 'bound',
+                key: bindingDerived.key,
+                objectKey: objectDerived.key,
+                expiresAtMs,
+            };
+        });
+    }
+
+    async acquireBound(options) {
+        if (!options || typeof options !== 'object') throw new TypeError('binding options are required');
+        const objectDerived = deriveGlobalMediaCacheObjectKey(options.identity);
+        const bindingDerived = deriveMediaCacheBindingKey(options.binding, objectDerived.key);
+        return this._serial(async () => {
+            await this._init();
+            const bindingPath = this._bindingPath(bindingDerived.key);
+            if (!await optionalLstat(bindingPath)) {
+                return { hit: false, reason: 'binding-miss', key: objectDerived.key, bindingKey: bindingDerived.key };
+            }
+            let payload;
+            try {
+                payload = await this._readBinding(bindingPath, bindingDerived, Number(this.now()));
+            } catch (error) {
+                if (error instanceof MkvHlsCacheError) {
+                    return {
+                        hit: false,
+                        reason: error.code === 'CACHE_BINDING_EXPIRED' ? 'binding-expired' : 'binding-invalid',
+                        key: objectDerived.key,
+                        bindingKey: bindingDerived.key,
+                    };
+                }
+                throw error;
+            }
+            if (payload.state !== 'active') {
+                return { hit: false, reason: 'binding-revoked', key: objectDerived.key, bindingKey: bindingDerived.key };
+            }
+            const acquired = await this._acquireDerivedUnlocked(objectDerived);
+            return { ...acquired, bindingKey: bindingDerived.key };
+        });
+    }
+
+    async revokeGlobalBinding(options) {
+        if (!options || typeof options !== 'object') throw new TypeError('binding options are required');
+        const objectDerived = deriveGlobalMediaCacheObjectKey(options.identity);
+        const bindingDerived = deriveMediaCacheBindingKey(options.binding, objectDerived.key);
+        return this._serial(async () => {
+            await this._init();
+            const bindingPath = this._bindingPath(bindingDerived.key);
+            if (!await optionalLstat(bindingPath)) {
+                return { status: 'binding-miss', key: bindingDerived.key, objectKey: objectDerived.key };
+            }
+            const payload = await this._readBinding(bindingPath, bindingDerived);
+            if (payload.state === 'revoked') {
+                return { status: 'already-revoked', key: bindingDerived.key, objectKey: objectDerived.key };
+            }
+            await this._writeBindingPayload(bindingPath, { ...payload, state: 'revoked' });
+            return { status: 'revoked', key: bindingDerived.key, objectKey: objectDerived.key };
+        });
+    }
+
     async prune() {
         return this._serial(async () => {
             await this._init();
@@ -926,5 +1177,7 @@ module.exports = {
     canonicalJson,
     deriveCompleteHlsCacheKey,
     deriveCompleteHlsCacheKeyFromVerifiedBinding,
+    deriveGlobalMediaCacheObjectKey,
+    deriveMediaCacheBindingKey,
     parseDedicatedManifestHmacKey,
 };

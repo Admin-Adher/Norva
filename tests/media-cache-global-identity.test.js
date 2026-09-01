@@ -124,6 +124,16 @@ test('bindings vary per authority while leaving the global object key unchanged'
   assert.equal(deriveGlobalMediaCacheObjectKey(globalIdentity()).key, object.key);
 });
 
+test('one authority binding key replaces its object target without changing global object identity', () => {
+  const firstObject = deriveGlobalMediaCacheObjectKey(globalIdentity()).key;
+  const secondObject = deriveGlobalMediaCacheObjectKey(globalIdentity({ contentSha256: '99'.repeat(32) })).key;
+  const first = deriveMediaCacheBindingKey(bindingIdentity(), firstObject);
+  const replacement = deriveMediaCacheBindingKey(bindingIdentity(), secondObject);
+  assert.equal(first.key, replacement.key, 'the authority slot is stable across content replacement');
+  assert.notEqual(first.objectKey, replacement.objectKey, 'the signed binding payload points at the current object');
+  assert.notEqual(firstObject, secondObject, 'global immutable objects never change identity');
+});
+
 test('binding schemas reject missing authority, unsupported item types and raw identifiers', () => {
   const objectKey = deriveGlobalMediaCacheObjectKey(globalIdentity()).key;
   const missing = bindingIdentity();

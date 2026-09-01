@@ -222,7 +222,6 @@ function deriveMediaCacheBindingKey(binding, objectKey) {
         key: sha256(canonicalMediaJson({
             schema: MEDIA_CACHE_BINDING_SCHEMA,
             namespace: 'norva-media-cache-binding',
-            objectKey: normalizedObjectKey,
             components,
         })),
         objectKey: normalizedObjectKey,
