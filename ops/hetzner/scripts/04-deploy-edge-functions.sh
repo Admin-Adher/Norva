@@ -12,6 +12,15 @@
 #   2. validates the rendered Compose configuration without printing it,
 #   3. recreates every configured edge-runtime replica one at a time.
 #
+# A DB/Edge protocol change must not use the rolling path while an older
+# replica could still perform provider I/O. For that case:
+#   docker compose --env-file .env -f docker-compose.supabase.yml stop functions functions2
+#   # apply the reviewed migrations while both runtimes are stopped
+#   NORVA_EDGE_QUIESCED_DEPLOY=1 bash ops/hetzner/scripts/04-deploy-edge-functions.sh
+# Quiesced mode refuses to start unless every runtime is stopped and the M3U
+# single-flight RPC is already present. This closes the old-code/new-schema
+# window instead of relying on health markers after the fact.
+#
 # GitHub CI validates the functions but does not deploy them to the Hetzner
 # runtime. Until an explicit SSH deploy workflow exists, production deployment
 # is a reviewed manual operation: update the checkout, then run this script.
@@ -26,7 +35,7 @@ FUNCS_DIR="$REPO/supabase/functions"
 CONFIG="$REPO/supabase/config.toml"
 COMPOSE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/docker-compose.supabase.yml"
 ENV_FILE="$(dirname "$COMPOSE")/.env"
-EXPECTED_PLAYBACK_VERSION=66
+EXPECTED_PLAYBACK_VERSION=67
 EXPECTED_PLAYBACK_PROTOCOL=1
 EXPECTED_EXACT_TRACK_CRAWLER_PROTOCOL=2
 EXPECTED_BASIC_LID_CONSENSUS_PROTOCOL=2
@@ -53,15 +62,23 @@ EXPECTED_LANGUAGE_VALIDATION_GATEWAY_FAILURE_RETRY_SECONDS=300
 EXPECTED_LANGUAGE_VALIDATION_PROVIDER_ATTEMPT_PROTOCOL=1
 EXPECTED_LANGUAGE_VALIDATION_VIEWER_PREEMPTION_PROTOCOL=1
 EXPECTED_LANGUAGE_VALIDATION_MAX_CONSECUTIVE_PROVIDER_NO_PROGRESS=4
-EXPECTED_CLOUD_VERSION=25
+EXPECTED_AUTOMATIC_STRICT_UND_AUDIO_PROTOCOL=1
+EXPECTED_AUTOMATIC_STRICT_UND_AUDIO_CONSENSUS=4/6
+EXPECTED_CLOUD_VERSION=27
 EXPECTED_CLOUD_PROTOCOL=1
+EXPECTED_SOURCE_DESIRED_STATE_PROTOCOL=1
+EXPECTED_LEGACY_SOURCE_TOGGLE_BRIDGE=1
 EXPECTED_CATALOG_VERSION=7
 EXPECTED_FLAT_CODEC_PROFILE_PROTOCOL=1
 EXPECTED_EXACT_TRACK_PERSISTENCE_PROTOCOL=2
-EXPECTED_SOURCE_SYNC_VERSION=15
+EXPECTED_SOURCE_SYNC_VERSION=17
 EXPECTED_CLOUD_AUTO_REFRESH_CLAIM_PROTOCOL=1
+EXPECTED_SOURCE_REENABLE_RESUME_PROTOCOL=1
+EXPECTED_M3U_SYNC_LEASE_PROTOCOL=2
+EXPECTED_FILE_AUDIO_REPAIR_COHORT_PROTOCOL=2
 EXPECTED_TMDB_SEARCH_POLICY=promax-multilang-v2
 EXPECTED_AUTH_EMAIL_CHALLENGE_PROTOCOL=1
+REQUIRE_QUIESCED_EDGE_DEPLOY=1
 
 [[ -d "$FUNCS_DIR" ]] || { echo "ERROR: $FUNCS_DIR not found" >&2; exit 1; }
 
@@ -115,6 +132,72 @@ if command -v docker >/dev/null 2>&1 && [[ -f "$COMPOSE" ]]; then
   if [[ ${#function_services[@]} -eq 0 ]]; then
     echo "ERROR: no edge-runtime service found in $COMPOSE" >&2
     exit 1
+  fi
+
+  if [[ "$REQUIRE_QUIESCED_EDGE_DEPLOY" == "1" \
+      && "${NORVA_EDGE_QUIESCED_DEPLOY:-0}" != "1" ]]; then
+    echo "ERROR: this Edge/DB protocol release requires NORVA_EDGE_QUIESCED_DEPLOY=1; rolling deploy is refused" >&2
+    exit 1
+  fi
+
+  if [[ "${NORVA_EDGE_QUIESCED_DEPLOY:-0}" == "1" ]]; then
+    running_services=()
+    for service in "${function_services[@]}"; do
+      if [[ -n "$(docker compose --env-file "$ENV_FILE" -f "$COMPOSE" ps -q "$service")" ]]; then
+        running_services+=("$service")
+      fi
+    done
+    if [[ ${#running_services[@]} -ne 0 ]]; then
+      echo "ERROR: quiesced deploy requires every edge-runtime replica to be stopped first: ${running_services[*]}" >&2
+      exit 1
+    fi
+
+    protocol_rpcs_ready="$({
+      docker compose --env-file "$ENV_FILE" -f "$COMPOSE" exec -T db \
+        psql -X -A -t -v ON_ERROR_STOP=1 -U supabase_admin -d postgres \
+        -c "select bool_and(to_regprocedure(signature) is not null) from unnest(array[
+          'public.norva_claim_source_m3u_sync_lease(uuid,uuid,uuid,integer)',
+          'public.norva_claim_source_m3u_diagnostic_lease(uuid,uuid,uuid,integer)',
+          'public.norva_renew_source_m3u_sync_lease(uuid,uuid,uuid,integer)',
+          'public.norva_settle_source_m3u_sync_lease(uuid,uuid,uuid,text,text)',
+          'public.norva_settle_cloud_auto_refresh_source(uuid,uuid,text,bigint,text,timestamptz,integer,text)',
+          'public.catalog_file_audio_repair_candidates(uuid,uuid,integer)',
+          'public.norva_start_catalog_file_audio_repair_attempt(uuid,uuid,uuid,uuid)',
+          'public.norva_cancel_catalog_file_audio_repair_pre_spawn_attempt(uuid,uuid,uuid,uuid,text,integer)',
+          'public.norva_defer_catalog_file_audio_repair_candidate(uuid,uuid,uuid,uuid,text,integer)',
+          'public.start_automatic_catalog_file_audio_validation_job(uuid,uuid,uuid,text,text,text,integer[],jsonb,text,timestamptz,bigint,jsonb,boolean)'
+        ]) as required(signature);"
+    } | tr -d '[:space:]')"
+    [[ "$protocol_rpcs_ready" == "t" ]] || {
+      echo "ERROR: quiesced deploy requires every reviewed M3U/repair RPC signature before edge-runtime restart" >&2
+      exit 1
+    }
+
+    auto_refresh_settle_contract_ready="$({
+      docker compose --env-file "$ENV_FILE" -f "$COMPOSE" exec -T db \
+        psql -X -A -t -v ON_ERROR_STOP=1 -U supabase_admin -d postgres \
+        -c "with installed as (
+          select lower(regexp_replace(
+            pg_get_functiondef(to_regprocedure('public.norva_settle_cloud_auto_refresh_source(uuid,uuid,text,bigint,text,timestamptz,integer,text)')),
+            '[[:space:]]+', ' ', 'g'
+          )) as definition
+        )
+        select coalesce(
+          position('p_outcome is null' in definition) > 0
+          and position('p_http_status is null' in definition) > 0
+          and position('p_error_kind is null' in definition) > 0
+          and position('p_outcome = ''action_required''' in definition) > 0
+          and position('p_http_status = 409 and p_error_kind = ''m3u_quarantined''' in definition) > 0
+          and position('when p_error_kind = ''m3u_quarantined'' then ''toggle_source''' in definition) > 0,
+          false
+        )
+        from installed;"
+    } | tr -d '[:space:]')"
+    [[ "$auto_refresh_settle_contract_ready" == "t" ]] || {
+      echo "ERROR: quiesced deploy requires the reviewed fail-closed M3U quarantine settlement body before edge-runtime restart" >&2
+      exit 1
+    }
+    echo ">> Quiesced protocol deployment verified: all Edge replicas stopped; exact M3U/repair RPC schema and quarantine settlement body present"
   fi
 
   file_digest_in_service() {
@@ -278,7 +361,9 @@ if command -v docker >/dev/null 2>&1 && [[ -f "$COMPOSE" ]]; then
         && "$playback_health" == *"\"languageValidationGatewayFailureRetrySeconds\":$EXPECTED_LANGUAGE_VALIDATION_GATEWAY_FAILURE_RETRY_SECONDS"* \
         && "$playback_health" == *"\"languageValidationProviderAttemptProtocol\":$EXPECTED_LANGUAGE_VALIDATION_PROVIDER_ATTEMPT_PROTOCOL"* \
         && "$playback_health" == *"\"languageValidationViewerPreemptionProtocol\":$EXPECTED_LANGUAGE_VALIDATION_VIEWER_PREEMPTION_PROTOCOL"* \
-        && "$playback_health" == *"\"languageValidationMaxConsecutiveProviderNoProgress\":$EXPECTED_LANGUAGE_VALIDATION_MAX_CONSECUTIVE_PROVIDER_NO_PROGRESS"* ]] || {
+        && "$playback_health" == *"\"languageValidationMaxConsecutiveProviderNoProgress\":$EXPECTED_LANGUAGE_VALIDATION_MAX_CONSECUTIVE_PROVIDER_NO_PROGRESS"* \
+        && "$playback_health" == *"\"automaticStrictUndAudioProtocol\":$EXPECTED_AUTOMATIC_STRICT_UND_AUDIO_PROTOCOL"* \
+        && "$playback_health" == *"\"automaticStrictUndAudioConsensus\":\"$EXPECTED_AUTOMATIC_STRICT_UND_AUDIO_CONSENSUS\""* ]] || {
       echo "ERROR: $service norva-playback protocol marker mismatch" >&2
       exit 1
     }
@@ -289,6 +374,9 @@ if command -v docker >/dev/null 2>&1 && [[ -f "$COMPOSE" ]]; then
     }
     [[ "$cloud_health" == *"\"version\":$EXPECTED_CLOUD_VERSION"* \
         && "$cloud_health" == *"\"playbackCreationProtocol\":$EXPECTED_CLOUD_PROTOCOL"* \
+        && "$cloud_health" == *"\"sourceDesiredStateProtocol\":$EXPECTED_SOURCE_DESIRED_STATE_PROTOCOL"* \
+        && "$cloud_health" == *"\"legacySourceToggleBridge\":$EXPECTED_LEGACY_SOURCE_TOGGLE_BRIDGE"* \
+        && "$cloud_health" == *"\"m3uSyncLeaseProtocol\":$EXPECTED_M3U_SYNC_LEASE_PROTOCOL"* \
         && "$cloud_health" == *"\"relayTakeoverProtocol\":$EXPECTED_RELAY_TAKEOVER_PROTOCOL"* \
         && "$cloud_health" == *"\"relayCoordinatorLockTtlMs\":$EXPECTED_RELAY_COORDINATOR_LOCK_TTL_MS"* ]] || {
       echo "ERROR: $service norva-cloud protocol marker mismatch" >&2
@@ -302,6 +390,9 @@ if command -v docker >/dev/null 2>&1 && [[ -f "$COMPOSE" ]]; then
     }
     [[ "$source_sync_health" == *"\"version\":$EXPECTED_SOURCE_SYNC_VERSION"* \
         && "$source_sync_health" == *"\"cloudAutoRefreshClaimProtocol\":$EXPECTED_CLOUD_AUTO_REFRESH_CLAIM_PROTOCOL"* \
+        && "$source_sync_health" == *"\"sourceReenableResumeProtocol\":$EXPECTED_SOURCE_REENABLE_RESUME_PROTOCOL"* \
+        && "$source_sync_health" == *"\"m3uSyncLeaseProtocol\":$EXPECTED_M3U_SYNC_LEASE_PROTOCOL"* \
+        && "$source_sync_health" == *"\"fileAudioRepairCohortProtocol\":$EXPECTED_FILE_AUDIO_REPAIR_COHORT_PROTOCOL"* \
         && "$source_sync_health" == *"\"tmdbSearchPolicy\":\"$EXPECTED_TMDB_SEARCH_POLICY\""* ]] || {
       echo "ERROR: $service norva-source-sync protocol marker mismatch" >&2
       exit 1
@@ -351,6 +442,10 @@ if command -v docker >/dev/null 2>&1 && [[ -f "$COMPOSE" ]]; then
   done
   echo ">> edge-runtime replicas recreated: ${function_services[*]}."
 else
+  if [[ "$REQUIRE_QUIESCED_EDGE_DEPLOY" == "1" ]]; then
+    echo "ERROR: required quiesced Edge deployment cannot run without Docker and the Compose file" >&2
+    exit 1
+  fi
   echo "   (docker/compose not found here — run on the box:"
   echo "    docker compose --env-file .env -f docker-compose.supabase.yml up -d --no-deps --force-recreate functions"
   echo "    then verify health before recreating functions2 )"

@@ -308,6 +308,63 @@ test('failed or non-updating observations preserve local facet caches for retry'
     assert.deepEqual(emittedEvents, []);
 });
 
+test('HTTP 400/503 observation failures invalidate facets only after a later exact success', async () => {
+    const storage = createStorage({
+        'norva-cloud-session': session('account-a')
+    });
+    const emittedEvents = [];
+    let writeAttempt = 0;
+    const outcomes = [
+        () => Promise.reject(Object.assign(new Error('HTTP 400'), { status: 400 })),
+        () => Promise.reject(Object.assign(new Error('HTTP 503'), { status: 503 })),
+        () => Promise.resolve({ ok: true, updated: true, exact: true })
+    ];
+    const API = loadApi(
+        storage,
+        async ({ type, source = 'all' }) => ({
+            audio: [{ value: `${type}-${source}`, label: `${type}-${source}` }],
+            subtitles: []
+        }),
+        () => outcomes[writeAttempt++](),
+        emittedEvents
+    );
+    const facetKeys = () => [...storage.values.keys()]
+        .filter((key) => key.startsWith('norva-facets4-'))
+        .sort();
+
+    await API.media.languageFacets({ type: 'movie' });
+    await API.media.languageFacets({ type: 'movie', source: 'provider-a' });
+    await API.media.languageFacets({ type: 'series' });
+    const before = facetKeys();
+
+    for (const status of [400, 503]) {
+        await assert.rejects(
+            API.media.reportObservedLanguages({
+                itemType: 'movie',
+                cloudSourceId: 'provider-a'
+            }),
+            (error) => error?.status === status
+        );
+        assert.deepEqual(facetKeys(), before, `HTTP ${status} must preserve every facet cache`);
+        assert.deepEqual(emittedEvents, [], `HTTP ${status} must not emit invalidation`);
+    }
+
+    const result = await API.media.reportObservedLanguages({
+        itemType: 'movie',
+        cloudSourceId: 'provider-a'
+    });
+
+    assert.deepEqual(result, { ok: true, updated: true, exact: true });
+    assert.deepEqual(facetKeys(), ['norva-facets4-user-account-a-series-all']);
+    assert.deepEqual(
+        JSON.parse(JSON.stringify(emittedEvents.map((event) => ({ type: event.type, detail: event.detail })))),
+        [{
+            type: 'norva:catalog-language-facets-invalidated',
+            detail: { type: 'movie', source: 'provider-a', removed: 2 }
+        }]
+    );
+});
+
 test('language facet transport errors propagate and remain immediately retryable', async () => {
     const storage = createStorage({
         'norva-cloud-session': session('account-a')

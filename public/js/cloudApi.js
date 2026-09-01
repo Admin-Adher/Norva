@@ -4534,7 +4534,7 @@
             list: () => listSourcesCached(),
             create: (source) => request('POST', '/sources', source).then((r) => { invalidateSourcesCache(); return r; }),
             update: (id, patch) => request('PATCH', `/sources/${encodeURIComponent(id)}`, patch).then((r) => { invalidateSourcesCache(); return r; }),
-            toggle: (id) => request('POST', `/sources/${encodeURIComponent(id)}/toggle`).then((r) => { invalidateSourcesCache(); return r; }),
+            toggle: (id, enabled) => request('POST', `/sources/${encodeURIComponent(id)}/toggle`, { enabled }).then((r) => { invalidateSourcesCache(); return r; }),
             test: (id) => request('POST', `/sources/${encodeURIComponent(id)}/test`),
             seriesInfo: (id, seriesId) => seriesInfoRequest(id, seriesId),
             shortEpg: (id, streamId, limit = 8) => request(

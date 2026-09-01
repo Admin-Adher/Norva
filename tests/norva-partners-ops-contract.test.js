@@ -1410,6 +1410,11 @@ test('offsite Partners backup is scheduled, least-privilege and secret-backed', 
   assert.match(workflow, /permissions:\s*\n\s+contents: read/);
   assert.match(workflow, /appleboy\/ssh-action/);
   assert.match(workflow, /19-backup-db-to-r2\.sh/);
+  assert.doesNotMatch(workflow, /git pull --ff-only/);
+  assert.match(workflow, /mktemp -d \/home\/adrien\/norva-backup-candidate\.XXXXXX/);
+  assert.match(workflow, /git -C "\$repo" archive --format=tar origin\/main/);
+  assert.match(workflow, /ln -s "\$repo\/ops\/hetzner\/\.env" "\$candidate\/ops\/hetzner\/\.env"/);
+  assert.match(workflow, /Refusing unsafe backup candidate path/);
   assert.match(workflow, /BACKUP_ENCRYPTION_REQUIRED=true/);
   assert.match(hetzner, /OPENSSL_CONF=\/tmp\/openssl-tls12\.cnf/);
   assert.match(hetzner, /docker exec -i norva-db pg_dump/);

@@ -40,19 +40,42 @@ export async function refreshMaterializedLiveCatalog(
     rows: LiveCatalogItem[];
     country?: string;
     generation: CatalogGenerationWriteContext;
+    heartbeat?: () => Promise<void>;
   },
 ) {
   const plan = buildLiveMaterializationPlan(input);
-  const cleared = await clearLiveMaterialization(db, input.sourceId, input.userId, input.generation);
+  await input.heartbeat?.();
+  const cleared = await clearLiveMaterialization(
+    db,
+    input.sourceId,
+    input.userId,
+    input.generation,
+    input.heartbeat,
+  );
   if (!cleared.complete) throw new LiveMaterializationClearIncompleteError(cleared);
 
   if (!plan.rawLive) {
     return { rawLive: 0, logicalChannels: 0, liveVariants: 0 };
   }
 
-  const insertedChannels = await upsertLiveChannelRows(db, plan.channelRows, input.generation);
+  const insertedChannels = await upsertLiveChannelRows(
+    db,
+    plan.channelRows,
+    input.generation,
+    0,
+    plan.channelRows.length,
+    input.heartbeat,
+  );
   const channelIdByLogicalId = new Map(insertedChannels.map((row) => [String(row.logical_id), String(row.id)]));
-  await upsertLiveVariantRows(db, plan.variantRows, channelIdByLogicalId, input.generation);
+  await upsertLiveVariantRows(
+    db,
+    plan.variantRows,
+    channelIdByLogicalId,
+    input.generation,
+    0,
+    plan.variantRows.length,
+    input.heartbeat,
+  );
 
   return {
     rawLive: plan.rawLive,
@@ -168,6 +191,7 @@ export async function clearLiveMaterialization(
   sourceId: string,
   userId: string,
   generation: CatalogGenerationWriteContext,
+  heartbeat?: () => Promise<void>,
 ) {
   if (generation.kind !== "active") {
     throw new Error("BUILDING live materialization cannot be cleared outside its reset RPC");
@@ -175,6 +199,7 @@ export async function clearLiveMaterialization(
   const deadline = Date.now() + LIVE_CLEAR_BUDGET_MS;
   let deletedRows = 0;
   for (let batch = 0; batch < LIVE_CLEAR_MAX_BATCHES_PER_INVOCATION; batch += 1) {
+    await heartbeat?.();
     const { data, error } = await db.rpc("norva_clear_catalog_generation_live_materialization_batch", {
       p_source_id: sourceId,
       p_user_id: userId,
@@ -247,9 +272,10 @@ export async function upsertLiveChannelRows(
   generation: CatalogGenerationWriteContext,
   offset = 0,
   limit = rows.length,
+  heartbeat?: () => Promise<void>,
 ) {
   const slice = rows.slice(offset, offset + Math.max(0, limit));
-  const merged = await mergeExistingLiveChannelSummaries(db, slice, generation);
+  const merged = await mergeExistingLiveChannelSummaries(db, slice, generation, heartbeat);
   return await writeRows(db, "cloud_live_logical_channels", withCatalogGenerationRows(merged, generation), {
     selectColumns: "id,logical_id",
     onConflict: "source_id,generation_id,logical_id",
@@ -257,6 +283,7 @@ export async function upsertLiveChannelRows(
     // level generation/account-deletion fences make larger active-catalog
     // statements exceed the Edge budget; the caller checkpoints after this slice.
     chunkSize: 10,
+    heartbeat,
   });
 }
 
@@ -270,6 +297,7 @@ async function mergeExistingLiveChannelSummaries(
   db: SupabaseLike,
   rows: JsonRecord[],
   generation: CatalogGenerationWriteContext,
+  heartbeat?: () => Promise<void>,
 ) {
   if (!rows.length) return rows;
   const ids = [...new Set(rows.map((row) => stringValue(row.logical_id)).filter(Boolean))];
@@ -277,6 +305,7 @@ async function mergeExistingLiveChannelSummaries(
   const userId = exactSharedValue(rows, "user_id");
   const existingByLogicalId = new Map<string, JsonRecord>();
   for (let index = 0; index < ids.length; index += 500) {
+    await heartbeat?.();
     const { data, error } = await db.rpc("norva_get_generation_live_channel_summaries", {
       p_source_id: sourceId,
       p_user_id: userId,
@@ -390,6 +419,7 @@ export async function upsertLiveVariantRows(
   generation: CatalogGenerationWriteContext,
   offset = 0,
   limit = rows.length,
+  heartbeat?: () => Promise<void>,
 ) {
   const slice = rows
     .slice(offset, offset + Math.max(0, limit))
@@ -401,6 +431,7 @@ export async function upsertLiveVariantRows(
   await writeRows(db, "cloud_live_variants", withCatalogGenerationRows(slice, generation), {
     onConflict: "source_id,generation_id,logical_id,stream_id,label",
     chunkSize: 10,
+    heartbeat,
   });
   return slice.length;
 }
@@ -413,12 +444,14 @@ type WriteRowsOptions = {
   selectColumns?: string;
   onConflict?: string;
   chunkSize?: number;
+  heartbeat?: () => Promise<void>;
 };
 
 async function writeRows(db: SupabaseLike, table: string, rows: JsonRecord[], options: WriteRowsOptions = {}) {
   const inserted: JsonRecord[] = [];
   const chunkSize = Math.max(1, Math.min(500, Math.trunc(options.chunkSize ?? 500)));
   for (let index = 0; index < rows.length; index += chunkSize) {
+    await options.heartbeat?.();
     const chunk = rows.slice(index, index + chunkSize);
     if (!chunk.length) continue;
     const query = options.onConflict

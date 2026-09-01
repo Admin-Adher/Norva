@@ -1891,7 +1891,8 @@ const CloudAdapter = (() => {
         if (method === 'POST' && /^\/sources\/[^/]+\/toggle$/.test(path)) {
             const id = await resolveSourceId(path.split('/')[2]);
             if (!hasUserSession()) throw new Error('Sign in to change this TV provider.');
-            const payload = await NorvaCloud.sources.toggle(id);
+            if (typeof data?.enabled !== 'boolean') throw new Error('The desired source state is required.');
+            const payload = await NorvaCloud.sources.toggle(id, data.enabled);
             clearMediaCaches();
             return payload;
         }
@@ -2872,7 +2873,7 @@ const API = {
         create: (data) => API.request('POST', '/sources', data),
         update: (id, data) => API.request('PUT', `/sources/${id}`, data),
         delete: (id) => API.request('DELETE', `/sources/${id}`),
-        toggle: (id) => API.request('POST', `/sources/${id}/toggle`),
+        toggle: (id, enabled) => API.request('POST', `/sources/${id}/toggle`, { enabled }),
         test: (id) => API.request('POST', `/sources/${id}/test`),
         sync: (id) => API.request('POST', `/sources/${id}/sync`), // Manual sync
         finalize: (id, params = {}) => API.request('POST', `/sources/${id}/finalize`, params), // Resume catalog finalization

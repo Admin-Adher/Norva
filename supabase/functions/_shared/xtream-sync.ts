@@ -669,6 +669,8 @@ export async function driveXtreamSyncToReady(sourceId: string, userId: string, d
     .select("*")
     .eq("id", sourceId)
     .eq("user_id", userId)
+    .eq("enabled", true)
+    .is("deleted_at", null)
     .maybeSingle();
   if (error) { console.error("[xtream-sync] sync driver load failed", sourceId, error.message); return; }
   if (!source) return;

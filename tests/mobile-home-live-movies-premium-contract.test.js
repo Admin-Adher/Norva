@@ -87,12 +87,12 @@ test('cache versions publish the changed phone surfaces', () => {
   assert.match(appHtml, /main\.css\?v=4a3c14b9a1/);
   assert.match(appHtml, /MultiSelect\.js\?v=4/);
   assert.match(appHtml, /ChannelList\.js\?v=49/);
-  assert.match(appHtml, /SourceManager\.js\?v=dedefaf3cf/);
+  assert.match(appHtml, /SourceManager\.js\?v=7fcc0560f4/);
   assert.match(appHtml, /LiveGuideFusion\.js\?v=30/);
-  assert.match(appHtml, /api\.js\?v=92/);
+  assert.match(appHtml, /api\.js\?v=93/);
   assert.match(appHtml, /HomePage\.js\?v=6016cf63fb/);
   assert.match(appHtml, /LivePage\.js\?v=9/);
   assert.match(appHtml, /MoviesPage\.js\?v=61/);
-  assert.match(appHtml, /SeriesPage\.js\?v=59/);
+  assert.match(appHtml, /SeriesPage\.js\?v=60/);
   assert.match(appHtml, /WatchPage\.js\?v=155/);
 });

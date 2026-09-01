@@ -132,6 +132,10 @@ const PUBLIC_SOURCE_CONNECTION_CODES = new Set([
   "PROVIDER_NETWORK_UNREACHABLE",
   "PROVIDER_REQUEST_FAILED",
   "PROVIDER_DIRECT_FALLBACK_RETRYABLE",
+  "M3U_SYNC_BUSY",
+  "M3U_SYNC_BACKOFF",
+  "M3U_SYNC_QUARANTINED",
+  "M3U_SYNC_UNAVAILABLE",
   "SOURCE_CONFIG_REVISION_CHANGED",
 ]);
 const PUBLIC_SOURCE_CONNECTION_STATUSES = new Set([
@@ -356,6 +360,14 @@ export function sanitizeSourceConnectionResult(value) {
         : "PROVIDER_REQUEST_FAILED";
   const error = code === "PROVIDER_BUSY" || code === "PROVIDER_ACCOUNT_BUSY"
     ? "This TV service is busy. Wait a few seconds, then try again."
+    : code === "M3U_SYNC_BUSY"
+      ? "A source operation is already in progress."
+      : code === "M3U_SYNC_BACKOFF"
+        ? "This source is cooling down after a failed synchronization attempt."
+        : code === "M3U_SYNC_QUARANTINED"
+          ? "Disable and enable this source before trying again."
+          : code === "M3U_SYNC_UNAVAILABLE"
+            ? "Source synchronization is temporarily unavailable."
     : code === "PROVIDER_CONNECT_TIMEOUT" || code === "PROVIDER_RESPONSE_TIMEOUT"
       ? "The TV service did not respond before the connection timed out."
       : code === "PROVIDER_DNS_FAILURE"

@@ -3188,7 +3188,7 @@ class SourceManager {
 
         try {
             await this.releasePlaybackForSourceChange();
-            await API.sources.toggle(id);
+            await API.sources.toggle(id, !currentlyEnabled);
         } catch (err) {
             console.warn('[SourceManager] Source toggle failed before commit:', err);
             NorvaModal.toast('Could not change this source right now. Try again.', 'error');

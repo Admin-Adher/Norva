@@ -881,7 +881,10 @@ test('every existing-source Xtream direct rail is wired through the atomic lease
   assert.match(projection, /fetchVodInfo\([\s\S]*runDirectFallback[\s\S]*fetchJson\(xtreamApiUrl/);
   assert.match(projection, /fetchJsonWithHeaders[\s\S]*fetchBoundedProviderJson\(url[\s\S]*maxBytes: 8 \* 1024 \* 1024/);
   assert.doesNotMatch(extractFunction(projection, 'projectVodTitleGenerationIsolated'), /fetchVodInfo|fetchJson|xtreamConfig/);
-  assert.match(cloud, /testSourceConnection[\s\S]*buildProviderDirectFallbackSnapshot[\s\S]*validateCloudSource\([^;]*directFallback\)/);
+  const sourceConnection = extractFunction(cloud, 'testSourceConnection');
+  assert.match(sourceConnection, /buildProviderDirectFallbackSnapshot/);
+  assert.match(sourceConnection, /validateCloudSource\([\s\S]*directFallback/);
+  assert.match(sourceConnection, /type === "m3u"[\s\S]*withM3uSourceLease[\s\S]*else[\s\S]*await validate\(\)/);
   assert.match(cloud, /withExistingXtreamDirectFallback[\s\S]*cloud-series-info/);
   assert.match(cloud, /directEpg[\s\S]*withExistingXtreamDirectFallback/);
   const sourceEpg = extractFunction(cloud, 'getSourceEpg');

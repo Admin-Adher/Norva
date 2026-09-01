@@ -117,6 +117,6 @@ test('source warning confirmation is single-flight and every caller settles', as
 });
 
 test('modal concurrency fixes are cache-busted in the app shell', () => {
-  assert.match(appHtml, /SourceManager\.js\?v=dedefaf3cf/);
+  assert.match(appHtml, /SourceManager\.js\?v=7fcc0560f4/);
   assert.match(appHtml, /profiles\.js\?v=d2b1662711/);
 });
