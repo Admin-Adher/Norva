@@ -8728,9 +8728,10 @@ kbd {
   flex-wrap: wrap;
   gap: var(--space-md);
   padding: var(--space-lg);
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
-  height: calc(100vh - 120px - var(--safe-area-inset-top) - var(--bottom-nav-h));
-  height: calc(100dvh - 120px - var(--safe-area-inset-top) - var(--bottom-nav-h));
+  height: auto;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
   justify-content: center;
