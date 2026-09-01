@@ -12193,6 +12193,11 @@ async function runBoundedMkvInputPump(session, writable, signal, dispatcher) {
     let consecutiveNoProgressFailures = 0;
     let reconnects = 0;
     let unknownLengthFullBodyEof = false;
+    // Hash the authoritative byte stream while it is already crossing the
+    // single bounded provider connection. Reconnects resume at the exact
+    // logical offset, so every source byte enters this digest exactly once and
+    // no second provider read is required to identify a globally shared object.
+    const contentDigest = crypto.createHash('sha256');
     const fullFileAnalyzer = createMkvH264FullFilePacketAnalyzer(session);
     let fullFileAnalyzerSettled = false;
     try {
@@ -12262,6 +12267,7 @@ async function runBoundedMkvInputPump(session, writable, signal, dispatcher) {
                         throw vodInputPumpError('INVALID_MKV_INPUT', 'Provider response is not a Matroska file.', { status: 502 });
                     }
                     await writeVodInputChunk(writable, prefixBuffer, signal);
+                    contentDigest.update(prefixBuffer);
                     writeMkvH264FullFileAnalyzerChunk(fullFileAnalyzer, prefixBuffer);
                     forwardedBytes += prefixBuffer.length;
                     vodInputPumpStats.bytesForwarded += prefixBuffer.length;
@@ -12270,6 +12276,7 @@ async function runBoundedMkvInputPump(session, writable, signal, dispatcher) {
                 }
                 if (chunk.length) {
                     await writeVodInputChunk(writable, chunk, signal);
+                    contentDigest.update(chunk);
                     writeMkvH264FullFileAnalyzerChunk(fullFileAnalyzer, chunk);
                     offset += chunk.length;
                     forwardedBytes += chunk.length;
@@ -12367,7 +12374,14 @@ async function runBoundedMkvInputPump(session, writable, signal, dispatcher) {
     fullFileAnalyzerSettled = true;
     session.mkvH264FullFilePacketMetrics = fullFilePacketMetrics;
     maybeFinalizeMkvH264FastStartProof(session);
-    return { bytesForwarded: forwardedBytes, reconnects, fullFilePacketProof: Boolean(session.mkvH264FastStartProofFinalized) };
+    const contentSha256 = contentDigest.digest('hex');
+    session.vodInputContentSha256 = contentSha256;
+    return {
+        bytesForwarded: forwardedBytes,
+        reconnects,
+        contentSha256,
+        fullFilePacketProof: Boolean(session.mkvH264FastStartProofFinalized),
+    };
     } finally {
         if (!fullFileAnalyzerSettled) {
             // Never replace the provider/primary/abort error with optional proof

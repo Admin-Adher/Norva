@@ -558,9 +558,10 @@ test('bounded MKV pump forwards exact bytes, resumes at the exact offset, and ne
     });
     const writable = new CapturingWritable({ backpressureFirstWrite: true });
     const controller = new AbortController();
+    const session = mkvSession(fixture.length);
 
     const result = await h.runBoundedMkvInputPump(
-        mkvSession(fixture.length),
+        session,
         writable,
         controller.signal,
         dispatcher,
@@ -569,6 +570,8 @@ test('bounded MKV pump forwards exact bytes, resumes at the exact offset, and ne
     assert.deepEqual(writable.bytes(), fixture, 'the pipe must contain no duplicated or missing byte');
     assert.equal(result.bytesForwarded, fixture.length);
     assert.equal(result.reconnects, 1);
+    assert.equal(result.contentSha256, crypto.createHash('sha256').update(fixture).digest('hex'));
+    assert.equal(session.vodInputContentSha256, result.contentSha256);
     assert.equal(writable.drainCount, 1, 'backpressure must be awaited before forwarding continues');
     assert.equal(writable.endCount, 1, 'exact EOF closes FFmpeg stdin once');
     assert.equal(tracker.maxActive, 1, 'a mono-account must never have two active upstream bodies');
@@ -608,6 +611,8 @@ test('cold unknown-size MKV discovers total from the retained playback GET and o
     assert.equal(fetches, 1);
     assert.equal(tracker.maxActive, 1);
     assert.equal(result.bytesForwarded, fixture.length);
+    assert.equal(result.contentSha256, crypto.createHash('sha256').update(fixture).digest('hex'));
+    assert.equal(session.vodInputContentSha256, result.contentSha256);
     assert.deepEqual(writable.bytes(), fixture);
     assert.equal(session.startupTimings.fileSizeDiscoveredFromPlaybackGet, true);
 });
