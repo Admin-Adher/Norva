@@ -14,6 +14,11 @@ import {
   withSourceDirectFallbackLease,
 } from "./provider-direct-fallback-lease.mjs";
 import { fetchBoundedProviderJson } from "./bounded-provider-response.mjs";
+import {
+  cleanTmdbSearchQuery,
+  stripProviderSearchPrefix,
+  tmdbSearchLocalesForTitle,
+} from "./tmdb-search-policy.mjs";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -1138,14 +1143,88 @@ function extractTitleYear(title: string): string | null {
   return m ? m[1] : null;
 }
 
-// Search language for MATCHING. The catalogue is French-dominant, so we search in
-// French: TMDB then returns each result's title localized to French, which is what
-// the provider titles actually are ("Le Prince de Sicile", not the English original
-// "Jane Austen's Mafia!"). We still score against original_title too, so English- or
-// native-titled entries match via that field. (Stored metadata language stays
-// NORVA_TMDB_LANGUAGE — search language only affects candidate selection here.)
+// Configured fallback language for matching. Multilingual provider panels are
+// searched in the locale inferred from their prefix first; this value remains the
+// product-level fallback and does not affect stored metadata language.
 function tmdbSearchLanguage(): string {
   return stringOr(Deno.env.get("NORVA_TMDB_SEARCH_LANGUAGE"), "fr-FR");
+}
+
+const TMDB_REQUEST_INTERVAL_MS = Math.ceil(
+  1000 / boundedInt(Deno.env.get("NORVA_TMDB_MAX_REQUESTS_PER_SECOND"), 30, 1, 40),
+);
+let tmdbRequestGate: Promise<void> = Promise.resolve();
+let tmdbNextRequestAt = 0;
+
+class TmdbRequestError extends Error {
+  status: number | null;
+  retryable: boolean;
+
+  constructor(message: string, status: number | null, retryable: boolean) {
+    super(message);
+    this.name = "TmdbRequestError";
+    this.status = status;
+    this.retryable = retryable;
+  }
+}
+
+function delay(ms: number) {
+  return new Promise<void>((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForTmdbRequestBudget() {
+  const previous = tmdbRequestGate;
+  let release = () => {};
+  tmdbRequestGate = new Promise<void>((resolve) => { release = resolve; });
+  await previous;
+  const waitMs = Math.max(0, tmdbNextRequestAt - Date.now());
+  if (waitMs > 0) await delay(waitMs);
+  tmdbNextRequestAt = Date.now() + TMDB_REQUEST_INTERVAL_MS;
+  release();
+}
+
+function tmdbRetryAfterMs(response: Response, attempt: number) {
+  const raw = response.headers.get("retry-after")?.trim() ?? "";
+  if (/^\d+(?:\.\d+)?$/.test(raw)) {
+    return Math.min(3000, Math.max(250, Math.ceil(Number(raw) * 1000)));
+  }
+  const retryAt = Date.parse(raw);
+  if (Number.isFinite(retryAt)) {
+    return Math.min(3000, Math.max(250, retryAt - Date.now()));
+  }
+  return 250 * (2 ** attempt);
+}
+
+// Do not turn a timeout, 429 or 5xx into an authoritative empty search. The
+// background writer treats thrown requests as durably inflight and retries them;
+// only a real HTTP 200 with results:[] may be stamped as a definitive miss.
+async function fetchTmdbJsonWithRetry(url: string, headers: Record<string, string>): Promise<JsonRecord> {
+  let lastError: unknown = new TmdbRequestError("TMDB request failed", null, true);
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    let retryDelayMs = 250 * (2 ** attempt);
+    try {
+      await waitForTmdbRequestBudget();
+      const { response, value } = await fetchBoundedProviderJson(url, {
+        timeoutMs: 8000,
+        maxBytes: 8 * 1024 * 1024,
+        headers,
+      });
+      if (!response.ok) {
+        const retryable = response.status === 429 || response.status >= 500;
+        retryDelayMs = tmdbRetryAfterMs(response, attempt);
+        throw new TmdbRequestError(`TMDB refused ${response.status}`, response.status, retryable);
+      }
+      if (!value || typeof value !== "object" || Array.isArray(value)) {
+        throw new TmdbRequestError("TMDB returned an invalid payload", response.status, true);
+      }
+      return value as JsonRecord;
+    } catch (error) {
+      if (error instanceof TmdbRequestError && !error.retryable) throw error;
+      lastError = error;
+    }
+    if (attempt < 2) await delay(retryDelayMs);
+  }
+  throw lastError;
 }
 
 async function tmdbSearchResults(
@@ -1159,8 +1238,9 @@ async function tmdbSearchResults(
   const headers: Record<string, string> = {};
   if (apiKey.startsWith("eyJ")) headers.Authorization = `Bearer ${apiKey}`;
   else url.searchParams.set("api_key", apiKey);
-  const payload = recordOrEmpty(await fetchJsonWithHeaders(url.toString(), 8000, headers).catch(() => null));
-  return Array.isArray(payload.results) ? payload.results as JsonRecord[] : [];
+  const payload = await fetchTmdbJsonWithRetry(url.toString(), headers);
+  if (!Array.isArray(payload.results)) throw new Error("TMDB search returned an invalid payload");
+  return payload.results as JsonRecord[];
 }
 
 // A provider poster is often TMDB's own artwork (image.tmdb.org/t/p/<size>/<hash>.jpg).
@@ -1187,10 +1267,15 @@ export async function searchTmdbMatch(
   // gate, rescuing renamed/prefixed titles ("4K-AR - La Bête") the text search would miss.
   posterHint: string | null = null,
 ): Promise<(TmdbValidation & { tmdbId: string }) | null> {
-  const query = cleanSearchQuery(rawTitle);
+  const query = cleanTmdbSearchQuery(rawTitle);
   if (query.length < 2) return null;
   const endpoint = itemType === "series" ? "tv" : "movie";
-  const language = tmdbSearchLanguage();
+  // Promax is a multilingual panel: the prefix describes the title market
+  // (ES/DE/TR/ALB/EXYU/…), while a single fr-FR search localizes candidate names
+  // away from the provider title and makes a real result look unrelated. Search
+  // the inferred locale first, then the configured locale and en-US, stopping as
+  // soon as the same strong gate used below is met.
+  const languages = tmdbSearchLocalesForTitle(rawTitle, tmdbSearchLanguage());
   // Recover a year from the title when the row has none — most unmatched rows do.
   const effYear = year ?? extractTitleYear(rawTitle);
   const providerPosterPath = tmdbPosterPath(posterHint);
@@ -1198,7 +1283,7 @@ export async function searchTmdbMatch(
   type Pick = { id: string; score: number; posterConfirmed: boolean };
   const pickBest = (results: JsonRecord[]): Pick | null => {
     let best: Pick | null = null;
-    for (const result of results.slice(0, 8)) {
+    for (const result of results.slice(0, 20)) {
       const rec = recordOrEmpty(result);
       const id = stringOr(rec.id, "");
       if (!id) continue;
@@ -1220,11 +1305,28 @@ export async function searchTmdbMatch(
     return best;
   };
 
-  // Pass 1: French search with the year when known.
-  let best = pickBest(await tmdbSearchResults(apiKey, endpoint, query, language, effYear));
+  const betterPick = (left: Pick | null, right: Pick | null): Pick | null => {
+    if (!left) return right;
+    if (!right) return left;
+    if (right.posterConfirmed !== left.posterConfirmed) return right.posterConfirmed ? right : left;
+    return right.score > left.score ? right : left;
+  };
+
+  const searchAcrossLocales = async (candidateYear: string | null): Promise<Pick | null> => {
+    let bestAcrossLocales: Pick | null = null;
+    for (const language of languages) {
+      const candidate = pickBest(await tmdbSearchResults(apiKey, endpoint, query, language, candidateYear));
+      bestAcrossLocales = betterPick(bestAcrossLocales, candidate);
+      if (candidate?.posterConfirmed || (candidate?.score ?? 0) >= 0.72) return candidate;
+    }
+    return bestAcrossLocales;
+  };
+
+  // Pass 1: locale-aware search with the year when known.
+  let best = await searchAcrossLocales(effYear);
   // Pass 2: drop the year if it filtered the right result out (provider year off by 1+).
   if ((!best || (!best.posterConfirmed && best.score < 0.72)) && effYear) {
-    best = pickBest(await tmdbSearchResults(apiKey, endpoint, query, language, null));
+    best = betterPick(best, await searchAcrossLocales(null));
   }
   // Demand a strong title match (search is fuzzier than a provider-supplied id) — UNLESS the
   // poster confirms identity, which is stronger than any title heuristic.
@@ -1241,31 +1343,6 @@ export async function searchTmdbMatch(
   return validation.valid ? { ...validation, tmdbId: best.id } : null;
 }
 
-// Strip bracketed segments, quality/language tags and a trailing year so the
-// title is a clean search query ("Le Roi Lion (1994) FHD MULTI" -> "Le Roi Lion").
-// Also flattens punctuation (":", ",", "'", "-"…) to spaces: TMDB's search is
-// token-based and a long punctuated title ("Le Monde de Narnia : Le Lion, la
-// Sorcière blanche et l'Armoire magique") matches far more reliably as plain words.
-function cleanSearchQuery(title: string): string {
-  return String(title || "")
-    // Drop a leading provider market/language prefix ("DK ▎ A Hijacking", "FR - Title", "AR-SUBS - …")
-    // FIRST — before the punctuation-flatten below turns the "▎"/"-" separator into a space and hides
-    // the boundary. Otherwise "DK ▎ A Hijacking" is searched on TMDB as "DK A Hijacking" and never
-    // matches (this is why box-bar panels sit at ~50% verified). Search-query only: identity_key comes
-    // from normalizeTitle(raw), so nothing is re-keyed. The head is EITHER two leading uppercase letters
-    // (so a plain digit-led title "007 - …" or a hyphenated word "X-Men" is never mistaken for a prefix)
-    // OR a digit-led quality token (4K/8K/2160P… — the "Strng IPTV 8K" panel tags titles "4K-AR - ",
-    // "4K-D+ - ", "8K-FR - "); "8 Mile"/"4Kids"/"2160 -" stay safe (no K/P + separator). Keep the head
-    // set identical across cleanDisplayTitle (:928) and normalizeTitle (:897) — the three stay in sync.
-    .replace(/^(?:[A-Z]{2}|4K|8K|3D|2160P|1440P|1080P|720P|480P|360P|007)(?:-[A-Z0-9+]{1,6})*(?: [-–—▎▏▍▌│┃┆┊｜|] | -[A-Z0-9+]{1,6}- )/, "")
-    .replace(/[\[({][^\])}]*[\])}]/g, " ")
-    .replace(/\b(4k|uhd|2160p|1080p|720p|480p|fhd|hd|sd|multi|vostfr|vost|vff|vf|vo|truefrench|subt?\s*ar|sub|dub|dv)\b/gi, " ")
-    .replace(/(?:^|\s)((?:19|20)\d{2})\s*$/, " ")
-    .replace(/[^\p{L}\p{N}\s]+/gu, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
 async function fetchTmdbDetails(apiKey: string, itemType: "movie" | "series", tmdbId: string) {
   const endpoint = itemType === "series" ? "tv" : "movie";
   const url = new URL(`https://api.themoviedb.org/3/${endpoint}/${encodeURIComponent(tmdbId)}`);
@@ -1278,13 +1355,12 @@ async function fetchTmdbDetails(apiKey: string, itemType: "movie" | "series", tm
   const headers: Record<string, string> = {};
   if (apiKey.startsWith("eyJ")) headers.Authorization = `Bearer ${apiKey}`;
   else url.searchParams.set("api_key", apiKey);
-  const payload = await fetchJsonWithHeaders(url.toString(), 8000, headers);
-  return recordOrEmpty(payload);
+  return await fetchTmdbJsonWithRetry(url.toString(), headers);
 }
 
 function titleConfidence(providerTitle: string, tmdbTitle: string, providerYear: string | null, tmdbYear: string | null) {
-  const provider = normalizeTitle(providerTitle, providerYear);
-  const tmdb = normalizeTitle(tmdbTitle, tmdbYear);
+  const provider = normalizeMatchTitle(providerTitle, providerYear);
+  const tmdb = normalizeMatchTitle(tmdbTitle, tmdbYear);
   if (!provider || !tmdb) return 0;
   const titleScore = provider === tmdb
     ? 1
@@ -1295,6 +1371,17 @@ function titleConfidence(providerTitle: string, tmdbTitle: string, providerYear:
     ? Math.abs(Number(providerYear) - Number(tmdbYear)) <= 1 ? 1 : 0
     : 0.65;
   return Number((titleScore * 0.78 + yearScore * 0.22).toFixed(3));
+}
+
+// Matching is allowed to be more forgiving than identity construction. Strip
+// strong provider separators of any supported market length and collapse
+// apostrophes before tokenization ("Charlies" and "Charlie's" are equivalent),
+// without changing identity_key or re-keying an existing catalogue.
+function normalizeMatchTitle(value: string, year: string | null = null) {
+  return normalizeTitle(
+    stripProviderSearchPrefix(String(value || "")).replace(/[’']/g, ""),
+    year,
+  );
 }
 
 function tokenOverlap(a: string, b: string) {
