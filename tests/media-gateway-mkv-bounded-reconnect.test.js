@@ -2339,7 +2339,13 @@ test('one-byte size preflight is strict, sequential, and preserves in-band size 
 
     const source = readGateway();
     const buildSource = sourceBetween(source, 'function buildCodecProfile(', '\nfunction cacheCodecProfile(').trim();
-    const buildCodecProfile = vm.runInNewContext(`(${buildSource}\n)`, {
+    const rationalSource = sourceBetween(
+        source,
+        'function strictMkvAnalyzerRational(',
+        '\nfunction sameMkvAnalyzerRational(',
+    );
+    const buildCodecProfile = vm.runInNewContext(
+        `(() => { ${rationalSource}\n${buildSource}\nreturn buildCodecProfile; })()`, {
         asRecord: (value) => value && typeof value === 'object' && !Array.isArray(value) ? value : {},
         compactRecord: (record) => Object.fromEntries(Object.entries(record || {}).filter(([, value]) => (
             value !== undefined && value !== null && value !== ''
@@ -2530,6 +2536,7 @@ function completeMatroskaPrefix(byteLength) {
 function metadataHarness(overrides = {}) {
     const source = readGateway();
     const snippets = [
+        sourceBetween(source, 'function strictMkvAnalyzerRational(', '\nfunction sameMkvAnalyzerRational('),
         sourceBetween(source, 'function buildCodecProfile(', '\n// Store a successful profile'),
         sourceBetween(source, 'function cacheCodecProfile(', '\n// Run ffprobe on the in-band-captured'),
         sourceBetween(source, 'function readEbmlElementSize(', '\nasync function probeFromHeaderBytes('),

@@ -242,11 +242,18 @@ function loadAnalyzerHarness(overrides = {}) {
 }
 
 function loadBuildCodecProfileHarness() {
-  const source = between(
-    GATEWAY,
-    'function buildCodecProfile(',
-    '\n// Store a successful profile in the codec-profile cache',
-  );
+  const source = [
+    between(
+      GATEWAY,
+      'function strictMkvAnalyzerRational(',
+      '\nfunction sameMkvAnalyzerRational(',
+    ),
+    between(
+      GATEWAY,
+      'function buildCodecProfile(',
+      '\n// Store a successful profile in the codec-profile cache',
+    ),
+  ].join('\n');
   const compactRecord = (record) => Object.fromEntries(Object.entries(record || {}).filter(([, value]) => (
     value !== undefined && value !== null && value !== ''
   )));
@@ -2533,7 +2540,7 @@ test('signed video copy is active while the local HLS cache remains explicitly d
   assert.match(GATEWAY, /const MKV_H264_HLS_CACHE_ACTIVATION_READY = false/);
   assert.match(GATEWAY, /scope: 'local-replica'/);
   assert.doesNotMatch(
-    between(GATEWAY, 'const MKV_H264_HLS_CACHE_SECRET', '\nconst MULTI_AUDIO_HLS_PROTOCOL'),
+    between(GATEWAY, 'const MKV_H264_HLS_CACHE_SECRET', '\nconst MKV_COMPLETE_HLS_CACHE_PROTOCOL'),
     /GATEWAY_TOKEN/,
   );
 });

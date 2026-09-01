@@ -94,7 +94,7 @@ test('movies and episodes use one durable strict 4/6-window worker', () => {
   );
   assert.match(enqueue, /requireStrictLidWindowCount/);
   assert.match(enqueue, /"start_automatic_catalog_file_audio_validation_job"/);
-  assert.match(revalidate, /\["movie", "episode"\]/);
+  assert.match(revalidate, /rawItemType === "movie" \|\| rawItemType === "episode"/);
   assert.match(revalidate, /loadExactEpisodeLanguageValidationProfile/);
   assert.match(worker, /current\.itemType === "episode"[\s\S]*resolveExactEpisodePlaybackTarget\([\s\S]*current\.exactProfile\.episodeCoordinates/);
   assert.doesNotMatch(worker, /resolveSeriesEpisodeUrl/);
@@ -326,7 +326,7 @@ test('exact movie probes enqueue strict und certification before releasing the f
 });
 
 test('production health and deploy verification expose the strict und protocol', () => {
-  assert.match(playback, /version:\s*68/);
+  assert.match(playback, /version:\s*73/);
   assert.match(playback, /automaticStrictUndAudioProtocol:\s*1/);
   assert.match(playback, /automaticStrictUndAudioConsensus:\s*"4\/6"/);
   assert.match(deployEdge, /EXPECTED_PLAYBACK_VERSION=68/);

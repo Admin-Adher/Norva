@@ -295,7 +295,7 @@ async function handleRequest(req: Request): Promise<Response> {
       return json(req, {
         ok: true,
         service: "norva-playback",
-        version: 72,
+        version: 73,
         nativeHeartbeatProtocol: 1,
         providerCircuitProtocol: 1,
         exactTrackCrawlerProtocol: 2,
@@ -363,6 +363,7 @@ async function handleRequest(req: Request): Promise<Response> {
         completeHlsCacheCallbackProtocol: 1,
         providerAdaptiveRouteControlProtocol: 1,
         privateMediaCacheTicketProtocol: 1,
+        sharedMediaCacheHotPlaybackProtocol: 1,
         sharedMediaCachePublicationProtocol: 1,
         privateMediaCacheDelivery: {
           enabled: config.mediaCacheEnabled,
@@ -691,16 +692,26 @@ async function bindCatalogVisibilityEpoch(req: Request, userId: string, db: Supa
   }
 }
 
-async function requirePlaybackCapacity(
+async function requirePlaybackEntitlement(
   userId: string,
   db: SupabaseClient,
-  replacingProviderAccountHash: string | null = null,
 ) {
   const decision = await getEntitlementDecision(db, userId);
   if (!decision.allowed) throwEntitlementRequired("playback", decision);
 
   const limit = limitNumber(decision.limits, "concurrent_streams", 0);
   if (limit <= 0) throwEntitlementRequired("concurrent_streams", decision, { limit, current: 0 });
+  return { decision, limit };
+}
+
+async function requirePlaybackCapacity(
+  userId: string,
+  db: SupabaseClient,
+  replacingProviderAccountHash: string | null = null,
+  entitlement: Awaited<ReturnType<typeof requirePlaybackEntitlement>> | null = null,
+) {
+  const capacity = entitlement ?? await requirePlaybackEntitlement(userId, db);
+  const { decision, limit } = capacity;
 
   let activeQuery = db
     .from("cloud_playback_sessions")
@@ -722,6 +733,7 @@ async function requirePlaybackCapacity(
   if ((count ?? 0) >= limit) {
     throwEntitlementRequired("concurrent_streams", decision, { limit, current: count ?? 0 });
   }
+  return capacity;
 }
 
 function throwEntitlementRequired(feature: string, decision: unknown, usage?: unknown): never {
@@ -966,6 +978,112 @@ function playbackRequestAbortError(): Error {
   return error;
 }
 
+async function tryCreateHotMediaCachePlayback(options: {
+  req: Request;
+  db: SupabaseClient;
+  runtimeConfig: RuntimeConfig;
+  entitlement: Awaited<ReturnType<typeof requirePlaybackEntitlement>>;
+  sessionId: string;
+  userId: string;
+  sourceId: string;
+  deviceId: string | null;
+  itemType: string;
+  itemId: string;
+  targetUrlHash: string;
+  streamMime: string | null;
+  playbackHint: JsonRecord;
+  expiresAt: string;
+}) {
+  const {
+    req, db, runtimeConfig, entitlement, sessionId, userId, sourceId,
+    deviceId, itemType, itemId, targetUrlHash, streamMime, playbackHint, expiresAt,
+  } = options;
+  if (!mediaCachePlaybackWorkerUrl(runtimeConfig)) return null;
+
+  const { data, error } = await db.rpc("norva_claim_media_cache_playback", {
+    p_session_id: sessionId,
+    p_user_id: userId,
+    p_source_id: sourceId,
+    p_device_id: deviceId,
+    p_item_type: itemType,
+    p_item_id: itemId,
+    p_target_url_hash: targetUrlHash,
+    p_stream_mime: streamMime,
+    p_playback_hint: playbackHint,
+    p_expires_at: expiresAt,
+    p_ticket_ttl_seconds: runtimeConfig.mediaCacheTicketTtlSeconds,
+    p_concurrent_limit: entitlement.limit,
+  });
+  // The claim is a write RPC. An ambiguous database failure must never fall
+  // through to a provider-backed session, because the cache session may already
+  // have committed and would then own a second entitlement generation.
+  if (error) throwDb(error, "Unable to claim shared media cache playback");
+  const rows = Array.isArray(data) ? data : (data ? [data] : []);
+  if (rows.length === 0) return null;
+  if (rows.length !== 1) {
+    throw new HttpError(503, "Private media cache claim is ambiguous", {
+      code: "MEDIA_CACHE_CLAIM_INVALID",
+    });
+  }
+  const claim = recordOrEmpty(rows[0]);
+  if (claim.cache_hit !== true) return null;
+  if (claim.capacity_exceeded === true) {
+    throwEntitlementRequired("concurrent_streams", entitlement.decision, {
+      limit: entitlement.limit,
+      current: boundedInt(claim.current_streams, entitlement.limit, 0, 64),
+    });
+  }
+
+  const claimedSessionId = stringOr(claim.new_session_id, "");
+  if (claimedSessionId !== sessionId) {
+    throw new HttpError(503, "Private media cache claim is invalid", {
+      code: "MEDIA_CACHE_CLAIM_INVALID",
+    });
+  }
+  const supersededSessionIds = Array.isArray(claim.superseded_session_ids)
+    ? claim.superseded_session_ids
+      .map((value) => stringOrNull(value))
+      .filter((value): value is string => Boolean(value))
+    : [];
+
+  try {
+    if (req.signal.aborted) throw playbackRequestAbortError();
+    const mediaCache = await createAuthorizedMediaCachePlayback(runtimeConfig, sessionId, claim);
+    const { data: session, error: sessionError } = await db
+      .from("cloud_playback_sessions")
+      .select("*")
+      .eq("id", sessionId)
+      .eq("user_id", userId)
+      .single();
+    if (sessionError || !session) {
+      if (sessionError) throwDb(sessionError, "Unable to load shared media cache playback session");
+      throw new HttpError(500, "Unable to load shared media cache playback session");
+    }
+    await releaseSupersededPlaybackSessions(supersededSessionIds, db);
+    if (req.signal.aborted) throw playbackRequestAbortError();
+    return {
+      session: publicPlaybackSession(session),
+      playback: {
+        mode: "shared-cache",
+        status: "ready",
+        url: mediaCache.playlistUrl,
+        transport: mediaCache.transport,
+        mediaCache,
+        gatewayRequired: false,
+        transportExpiresAt: expiresAt,
+        sessionExpiresAt: expiresAt,
+      },
+    };
+  } catch (claimError) {
+    try {
+      await expirePlaybackSession(sessionId, userId, db);
+    } catch (_) {
+      console.warn("[norva-playback] unable to roll back shared media cache playback claim");
+    }
+    throw claimError;
+  }
+}
+
 async function createPlaybackSession(
   req: Request,
   userId: string,
@@ -1121,6 +1239,31 @@ async function createPlaybackSession(
       }
       : {}),
   });
+  const entitlement = await requirePlaybackEntitlement(userId, db);
+  const sessionId = crypto.randomUUID();
+  // Only exact Matroska VOD enters the shared HLS lane. Browser-native MP4
+  // remains byte-preserving Relay/direct even if a stale historical binding
+  // exists, preserving the zero-Gateway MP4 contract.
+  if (authoritativeVodContainer === "mkv") {
+    const runtimeConfig = await getRuntimeConfig(db);
+    const hotPlayback = await tryCreateHotMediaCachePlayback({
+      req,
+      db,
+      runtimeConfig,
+      entitlement,
+      sessionId,
+      userId,
+      sourceId,
+      deviceId,
+      itemType,
+      itemId,
+      targetUrlHash,
+      streamMime: stringOrNull(body.streamMime ?? body.stream_mime),
+      playbackHint: requestedPlaybackHint,
+      expiresAt: transportExpiresAt,
+    });
+    if (hotPlayback) return hotPlayback;
+  }
   const providerAccountScope = "providerAccountScope" in resolved
     ? stringOr(resolved.providerAccountScope, "")
     : "";
@@ -1129,9 +1272,8 @@ async function createPlaybackSession(
     : await providerAccountHashFromUrl(targetUrl);
   await assertProviderCircuitClosed(providerAccountHash, db);
 
-  await requirePlaybackCapacity(userId, db, providerAccountHash);
+  await requirePlaybackCapacity(userId, db, providerAccountHash, entitlement);
 
-  const sessionId = crypto.randomUUID();
   const sessionStatus = mode === "transcode" ? "pending" : "ready";
   const { data: claimRows, error: claimError } = await db.rpc(
     "claim_cloud_playback_session",
@@ -3996,58 +4138,37 @@ function mediaCacheAssetUrl(baseUrl: string, objectKey: string, logicalPath: str
   return `${baseUrl}/v1/hls/${objectKey}/${encodedPath}`;
 }
 
-async function issueMediaCachePlaybackTicket(
-  req: Request,
-  playbackSessionId: string,
-  userId: string,
-  db: SupabaseClient,
-) {
-  if (!PLAYBACK_SESSION_UUID_PATTERN.test(playbackSessionId)) {
-    throw new HttpError(400, "Invalid playback session id");
-  }
-  const body = await readJson(req);
-  if (!exactJsonKeys(body, ["objectKey", "protocol"]) || body.protocol !== 1) {
-    throw new HttpError(400, "Invalid media cache ticket request");
-  }
-  const objectKey = stringOr(body.objectKey, "").toLowerCase();
-  if (!MEDIA_CACHE_OBJECT_KEY_PATTERN.test(objectKey)) {
-    throw new HttpError(400, "Invalid media cache object key");
-  }
-
-  const runtimeConfig = await getRuntimeConfig(db);
+function mediaCachePlaybackWorkerUrl(runtimeConfig: RuntimeConfig): string | null {
   const workerUrl = validatedMediaCacheWorkerUrl(runtimeConfig.mediaCacheWorkerUrl);
   if (!runtimeConfig.mediaCacheEnabled || !workerUrl
     || runtimeConfig.mediaCacheWorkerToken.length < 32
-    || !/^[0-9a-f]{64}$/i.test(runtimeConfig.mediaCacheTicketHmacKey)) {
+    || !/^[0-9a-f]{64}$/i.test(runtimeConfig.mediaCacheTicketHmacKey)) return null;
+  return workerUrl;
+}
+
+async function createAuthorizedMediaCachePlayback(
+  runtimeConfig: RuntimeConfig,
+  playbackSessionId: string,
+  authorizationValue: unknown,
+) {
+  const workerUrl = mediaCachePlaybackWorkerUrl(runtimeConfig);
+  if (!workerUrl) {
     throw new HttpError(503, "Private media cache is unavailable", {
       code: "MEDIA_CACHE_DISABLED_OR_MISCONFIGURED",
     });
   }
-
-  const { data, error } = await db.rpc("norva_authorize_media_cache_playback", {
-    p_playback_session_id: playbackSessionId,
-    p_user_id: userId,
-    p_object_key: objectKey,
-    p_ticket_ttl_seconds: runtimeConfig.mediaCacheTicketTtlSeconds,
-  });
-  if (error) throwDb(error, "Unable to authorize private media cache playback");
-  const rows = Array.isArray(data) ? data : (data ? [data] : []);
-  if (rows.length !== 1) {
-    throw new HttpError(403, "Private media cache access is unavailable", {
-      code: "MEDIA_CACHE_ACCESS_DENIED",
-    });
-  }
-  const authorization = recordOrEmpty(rows[0]);
+  const authorization = recordOrEmpty(authorizationValue);
   const bindingId = stringOr(authorization.binding_id, "");
-  const authorizedObjectKey = stringOr(authorization.object_key, "");
+  const objectKey = stringOr(authorization.object_key, "");
   const rootPlaylist = stringOr(authorization.root_playlist, "");
   const ticketExpiresAt = stringOr(authorization.ticket_expires_at, "");
   const hardExpiresAt = stringOr(authorization.hard_expires_at, "");
   const ticketExpiresAtMs = Date.parse(ticketExpiresAt);
   const hardExpiresAtMs = Date.parse(hardExpiresAt);
   const nowMs = Date.now();
-  if (!PLAYBACK_SESSION_UUID_PATTERN.test(bindingId)
-    || authorizedObjectKey !== objectKey
+  if (!PLAYBACK_SESSION_UUID_PATTERN.test(playbackSessionId)
+    || !PLAYBACK_SESSION_UUID_PATTERN.test(bindingId)
+    || !MEDIA_CACHE_OBJECT_KEY_PATTERN.test(objectKey)
     || authorization.storage_backend !== "r2"
     || !MEDIA_CACHE_ROOT_PLAYLIST_PATTERN.test(rootPlaylist)
     || /(^|\/)\.{1,2}(\/|$)|\/\//.test(rootPlaylist)
@@ -4079,6 +4200,53 @@ async function issueMediaCachePlaybackTicket(
     refreshAfter: new Date(refreshAfterMs).toISOString(),
     hardExpiresAt,
   };
+}
+
+async function issueMediaCachePlaybackTicket(
+  req: Request,
+  playbackSessionId: string,
+  userId: string,
+  db: SupabaseClient,
+) {
+  if (!PLAYBACK_SESSION_UUID_PATTERN.test(playbackSessionId)) {
+    throw new HttpError(400, "Invalid playback session id");
+  }
+  const body = await readJson(req);
+  if (!exactJsonKeys(body, ["objectKey", "protocol"]) || body.protocol !== 1) {
+    throw new HttpError(400, "Invalid media cache ticket request");
+  }
+  const objectKey = stringOr(body.objectKey, "").toLowerCase();
+  if (!MEDIA_CACHE_OBJECT_KEY_PATTERN.test(objectKey)) {
+    throw new HttpError(400, "Invalid media cache object key");
+  }
+
+  const runtimeConfig = await getRuntimeConfig(db);
+  if (!mediaCachePlaybackWorkerUrl(runtimeConfig)) {
+    throw new HttpError(503, "Private media cache is unavailable", {
+      code: "MEDIA_CACHE_DISABLED_OR_MISCONFIGURED",
+    });
+  }
+
+  const { data, error } = await db.rpc("norva_authorize_media_cache_playback", {
+    p_playback_session_id: playbackSessionId,
+    p_user_id: userId,
+    p_object_key: objectKey,
+    p_ticket_ttl_seconds: runtimeConfig.mediaCacheTicketTtlSeconds,
+  });
+  if (error) throwDb(error, "Unable to authorize private media cache playback");
+  const rows = Array.isArray(data) ? data : (data ? [data] : []);
+  if (rows.length !== 1) {
+    throw new HttpError(403, "Private media cache access is unavailable", {
+      code: "MEDIA_CACHE_ACCESS_DENIED",
+    });
+  }
+  const authorization = recordOrEmpty(rows[0]);
+  if (stringOr(authorization.object_key, "") !== objectKey) {
+    throw new HttpError(503, "Private media cache authorization is invalid", {
+      code: "MEDIA_CACHE_AUTHORIZATION_INVALID",
+    });
+  }
+  return await createAuthorizedMediaCachePlayback(runtimeConfig, playbackSessionId, authorization);
 }
 
 async function revokeMediaCachePlaybackGrant(

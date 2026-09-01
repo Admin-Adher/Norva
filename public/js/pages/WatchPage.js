@@ -224,6 +224,10 @@ class WatchPage {
         this._cloudPlaybackHeartbeatGeneration = 0;
         this._cloudPlaybackHeartbeatInFlight = false;
         this._cloudPlaybackSupersededHandled = false;
+        this._privateMediaCacheAccess = null;
+        this._privateMediaCacheTicketTimer = null;
+        this._privateMediaCacheTicketPromise = null;
+        this._privateMediaCacheTicketGeneration = 0;
         this._reportedProviderFailureKeys = new Set();
         this.playbackTelemetry = null;
         this._playRequestedAt = 0;
@@ -2217,7 +2221,10 @@ class WatchPage {
             // Subtitle tracks the SERVER probed (same relay header-parse as audio).
             // Known at load → the CC menu lists them AND the saved subtitle pref can
             // be restored, without a client-side gateway probe during streaming.
-            subtitleTracks: playbackMetadata.subtitleTracks || playbackMetadata.subtitle_tracks || null
+            subtitleTracks: playbackMetadata.subtitleTracks || playbackMetadata.subtitle_tracks || null,
+            // Short-lived private-cache authorization is kept only in memory and
+            // attached to HLS requests as a header; it is never copied to a URL.
+            mediaCache: playbackMetadata.mediaCache || playbackMetadata.media_cache || null
         });
         if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
 
@@ -3537,6 +3544,158 @@ class WatchPage {
         };
         void pulse();
         this._cloudPlaybackHeartbeatTimer = setInterval(() => { void pulse(); }, 5000);
+    }
+
+    normalizePrivateMediaCacheAccess(value, sessionId, expectedPlaylistUrl = null) {
+        const access = value && typeof value === 'object' && !Array.isArray(value) ? value : null;
+        const authorization = access?.authorization && typeof access.authorization === 'object'
+            ? access.authorization
+            : null;
+        const objectKey = String(access?.objectKey || '').trim().toLowerCase();
+        const playlistUrl = String(access?.playlistUrl || '').trim();
+        const token = String(authorization?.token || '').trim();
+        const ticketExpiresAtMs = Date.parse(String(access?.ticketExpiresAt || ''));
+        const refreshAfterMs = Date.parse(String(access?.refreshAfter || ''));
+        const hardExpiresAtMs = Date.parse(String(access?.hardExpiresAt || ''));
+        const id = String(sessionId || '').trim().toLowerCase();
+        if (Number(access?.protocol) !== 1
+            || access?.transport !== 'private-r2-hls'
+            || !/^[0-9a-f]{64}$/.test(objectKey)
+            || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)
+            || authorization?.scheme !== 'Bearer'
+            || !/^mc1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(token)
+            || token.length > 4096
+            || !Number.isFinite(ticketExpiresAtMs)
+            || !Number.isFinite(refreshAfterMs)
+            || !Number.isFinite(hardExpiresAtMs)
+            || refreshAfterMs >= ticketExpiresAtMs
+            || hardExpiresAtMs < ticketExpiresAtMs) return null;
+
+        let parsed;
+        try { parsed = new URL(playlistUrl, window.location.href); } catch (_) { return null; }
+        const expectedPrefix = `/v1/hls/${objectKey}/`;
+        if (parsed.protocol !== 'https:'
+            || parsed.username || parsed.password || parsed.search || parsed.hash
+            || !parsed.pathname.startsWith(expectedPrefix)
+            || (expectedPlaylistUrl && playlistUrl !== String(expectedPlaylistUrl))) return null;
+        return {
+            protocol: 1,
+            transport: 'private-r2-hls',
+            objectKey,
+            playlistUrl: parsed.toString(),
+            origin: parsed.origin,
+            pathPrefix: expectedPrefix,
+            token,
+            sessionId: id,
+            ticketExpiresAtMs,
+            refreshAfterMs,
+            hardExpiresAtMs
+        };
+    }
+
+    clearPrivateMediaCacheAccess() {
+        this._privateMediaCacheTicketGeneration += 1;
+        if (this._privateMediaCacheTicketTimer) {
+            clearTimeout(this._privateMediaCacheTicketTimer);
+            this._privateMediaCacheTicketTimer = null;
+        }
+        this._privateMediaCacheTicketPromise = null;
+        this._privateMediaCacheAccess = null;
+    }
+
+    configurePrivateMediaCacheAccess(value, sessionId, expectedPlaylistUrl) {
+        this.clearPrivateMediaCacheAccess();
+        if (!value) return null;
+        const access = this.normalizePrivateMediaCacheAccess(value, sessionId, expectedPlaylistUrl);
+        if (!access) return null;
+        this._privateMediaCacheAccess = access;
+        this.schedulePrivateMediaCacheTicketRefresh();
+        return access;
+    }
+
+    schedulePrivateMediaCacheTicketRefresh(delayOverrideMs = null) {
+        if (this._privateMediaCacheTicketTimer) clearTimeout(this._privateMediaCacheTicketTimer);
+        this._privateMediaCacheTicketTimer = null;
+        const access = this._privateMediaCacheAccess;
+        if (!access) return;
+        const now = Date.now();
+        const latestSafeRefresh = Math.max(now + 250, access.ticketExpiresAtMs - 5000);
+        const target = delayOverrideMs === null
+            ? Math.min(access.refreshAfterMs, latestSafeRefresh)
+            : Math.min(now + Math.max(250, Number(delayOverrideMs) || 0), latestSafeRefresh);
+        const delay = Math.max(250, target - now);
+        const generation = this._privateMediaCacheTicketGeneration;
+        this._privateMediaCacheTicketTimer = setTimeout(() => {
+            this._privateMediaCacheTicketTimer = null;
+            if (generation !== this._privateMediaCacheTicketGeneration) return;
+            void this.refreshPrivateMediaCacheTicket('scheduled');
+        }, delay);
+    }
+
+    async refreshPrivateMediaCacheTicket(reason = 'scheduled') {
+        if (this._privateMediaCacheTicketPromise) return this._privateMediaCacheTicketPromise;
+        const access = this._privateMediaCacheAccess;
+        if (!access) return false;
+        const generation = this._privateMediaCacheTicketGeneration;
+        const refresh = (async () => {
+            const cloud = window.NorvaCloud;
+            const playbackApi = cloud?.token
+                ? cloud.playback
+                : (cloud?.deviceToken ? cloud.device?.playback : cloud?.playback);
+            if (typeof playbackApi?.refreshMediaCacheTicket !== 'function') {
+                throw new Error('Private media cache ticket refresh is unavailable');
+            }
+            const renewed = await playbackApi.refreshMediaCacheTicket(access.sessionId, access.objectKey);
+            if (generation !== this._privateMediaCacheTicketGeneration
+                || this._privateMediaCacheAccess !== access) return false;
+            const normalized = this.normalizePrivateMediaCacheAccess(
+                renewed,
+                access.sessionId,
+                access.playlistUrl
+            );
+            if (!normalized || normalized.objectKey !== access.objectKey) {
+                throw new Error('Private media cache ticket refresh is invalid');
+            }
+            this._privateMediaCacheAccess = normalized;
+            this.schedulePrivateMediaCacheTicketRefresh();
+            if (reason === 'http-auth') {
+                try { this.hls?.startLoad(); } catch (_) { /* player may already be gone */ }
+            }
+            return true;
+        })().catch(error => {
+            if (generation !== this._privateMediaCacheTicketGeneration
+                || this._privateMediaCacheAccess !== access) return false;
+            const remainingMs = access.ticketExpiresAtMs - Date.now();
+            if (remainingMs > 1500) {
+                this.schedulePrivateMediaCacheTicketRefresh(Math.min(2000, Math.max(250, remainingMs - 1000)));
+            } else {
+                console.warn('[WatchPage] Private media cache authorization could not be renewed.');
+                if (this.isPlaybackSupersededError(error)) {
+                    void this.handlePlaybackSuperseded(access.sessionId);
+                } else {
+                    this.showPlaybackError(
+                        'Secure cached playback authorization expired. Please retry.',
+                        { immediate: true }
+                    );
+                }
+            }
+            return false;
+        }).finally(() => {
+            if (this._privateMediaCacheTicketPromise === refresh) {
+                this._privateMediaCacheTicketPromise = null;
+            }
+        });
+        this._privateMediaCacheTicketPromise = refresh;
+        return refresh;
+    }
+
+    privateMediaCacheAuthorizationForUrl(url) {
+        const access = this._privateMediaCacheAccess;
+        if (!access || Date.now() >= access.ticketExpiresAtMs) return null;
+        let parsed;
+        try { parsed = new URL(String(url || ''), window.location.href); } catch (_) { return null; }
+        if (parsed.origin !== access.origin || !parsed.pathname.startsWith(access.pathPrefix)) return null;
+        return `Bearer ${access.token}`;
     }
 
     async handlePlaybackSuperseded(sessionId) {
@@ -4957,6 +5116,16 @@ class WatchPage {
         this.recordPlaybackStartupPhase('teardownComplete', playbackAttemptId);
         this.registerCloudPlaybackSession(options.cloudPlaybackSessionId);
         this.updatePlaybackTelemetrySession(options.cloudPlaybackSessionId, playbackAttemptId);
+        const privateMediaCacheAccess = this.configurePrivateMediaCacheAccess(
+            options.mediaCache ?? options.media_cache ?? null,
+            options.cloudPlaybackSessionId,
+            url
+        );
+        if ((options.mediaCache || options.media_cache) && !privateMediaCacheAccess) {
+            await this.cleanupStaleCloudPlaybackSession(options.cloudPlaybackSessionId);
+            await this.handlePlaybackFailure('Private media cache authorization is invalid.');
+            return;
+        }
         if (this.video) {
             this.video.dataset.playbackAttemptId = String(playbackAttemptId);
         }
@@ -5075,7 +5244,7 @@ class WatchPage {
         // mobile player uses. Best-effort, display-only; never touches playback.
         // The engine path AWAITS this below (before opening the stream) so the header
         // probe doesn't fight the engine for the provider's single connection.
-        if (options.mode !== 'engine') this.enrichCloudPlaybackTracks(url);
+        if (options.mode !== 'engine' && !privateMediaCacheAccess) this.enrichCloudPlaybackTracks(url);
 
         // Show loading spinner
         this.showLoading();
@@ -5151,7 +5320,9 @@ class WatchPage {
 
         try {
             console.log('[WatchPage] Probing stream...');
-            probeInfo = isGatewaySessionUrl ? null : await this.probeStreamInfo(url, settings);
+            probeInfo = (isGatewaySessionUrl || privateMediaCacheAccess)
+                ? null
+                : await this.probeStreamInfo(url, settings);
             if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
             if (probeInfo) {
                 console.log(`[WatchPage] Probe result: video=${probeInfo.video}, audio=${probeInfo.audio}, ` +
@@ -5321,9 +5492,21 @@ class WatchPage {
         if (looksLikeHls && typeof Hls === 'undefined' && window.ensureHls) {
             try { await window.ensureHls(); } catch (_) { /* degrade below */ }
         }
-        if (looksLikeHls && typeof Hls !== 'undefined' && Hls.isSupported()) {
+        const hlsSupported = typeof Hls !== 'undefined' && Hls.isSupported();
+        if (looksLikeHls && privateMediaCacheAccess && !hlsSupported) {
+            this.clearPrivateMediaCacheAccess();
+            await this.cleanupStaleCloudPlaybackSession(options.cloudPlaybackSessionId);
+            this.showPlaybackError('Secure cached playback is not supported by this browser.', { immediate: true });
+            return;
+        }
+        if (looksLikeHls && hlsSupported) {
             if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
-            this.updateTranscodeStatus(isGatewaySessionUrl ? 'transcoding' : 'direct', isGatewaySessionUrl ? 'Norva Gateway' : 'Direct HLS');
+            this.updateTranscodeStatus(
+                isGatewaySessionUrl ? 'transcoding' : 'direct',
+                isGatewaySessionUrl
+                    ? 'Norva Gateway'
+                    : (privateMediaCacheAccess ? 'Norva Cache' : 'Direct HLS')
+            );
             this.currentPlaybackMode = isGatewaySessionUrl ? 'gateway-session' : 'direct-hls';
             this.currentProcessingOptions = {};
             const startOffset = isGatewaySessionUrl
@@ -5342,7 +5525,8 @@ class WatchPage {
                 playbackAttemptId,
                 autoplay: options.autoplay !== false,
                 audioSwitchRequestId: options.audioSwitchRequestId,
-                startupPolicy: options.startupPolicy ?? options.startup_policy ?? null
+                startupPolicy: options.startupPolicy ?? options.startup_policy ?? null,
+                privateMediaCache: Boolean(privateMediaCacheAccess)
             });
             const requestedOffset = Number(
                 options.requestedSeekOffset ??
@@ -5590,7 +5774,7 @@ class WatchPage {
         this._stallPos = -1;
         this._stallSince = Date.now();
 
-        this.hls = new Hls({
+        const hlsConfig = {
             // Local transcode sessions: buffer aggressively ahead — segments are
             // already on disk, so a large forward buffer absorbs slow/erratic
             // upstream downloads on the encoder side
@@ -5606,7 +5790,24 @@ class WatchPage {
             // the beginning, never the live edge (otherwise hls.js chases the
             // edge on the growing EVENT playlist and never loads a fragment).
             ...((isTranscodeSession || isGatewaySession) ? { startPosition: 0 } : {})
-        });
+        };
+        if (options.privateMediaCache === true) {
+            // Every master/media playlist, audio rendition, subtitle rendition
+            // and segment stays private. The short-lived ticket is attached only
+            // to the pinned Worker object path and is never serialized into a URL.
+            hlsConfig.xhrSetup = (xhr, requestUrl) => {
+                const authorization = this.privateMediaCacheAuthorizationForUrl(requestUrl);
+                if (authorization) xhr.setRequestHeader('Authorization', authorization);
+            };
+            hlsConfig.fetchSetup = (context, initParams = {}) => {
+                const requestUrl = context?.url || context;
+                const authorization = this.privateMediaCacheAuthorizationForUrl(requestUrl);
+                const headers = new Headers(initParams.headers || {});
+                if (authorization) headers.set('Authorization', authorization);
+                return new Request(requestUrl, { ...initParams, headers });
+            };
+        }
+        this.hls = new Hls(hlsConfig);
 
         const activeHls = this.hls;
         const gatewayStartupBuffer = isGatewaySession
@@ -5837,6 +6038,21 @@ class WatchPage {
         this.hls.on(Hls.Events.ERROR, (event, data) => {
             if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
             const SOFT_MEDIA_DETAILS = ['bufferStalledError', 'bufferNudgeOnStall', 'bufferSeekOverHole', 'fragParsingError'];
+            const responseStatus = Number(
+                data?.response?.code ?? data?.response?.status ?? data?.networkDetails?.status ?? 0
+            );
+            const privateCacheAuthorizationExpired = Boolean(
+                options.privateMediaCache === true
+                && this._privateMediaCacheAccess
+                && Date.now() >= this._privateMediaCacheAccess.ticketExpiresAtMs - 1000
+            );
+            if (options.privateMediaCache === true
+                && data.type === Hls.ErrorTypes.NETWORK_ERROR
+                && ([401, 403].includes(responseStatus) || privateCacheAuthorizationExpired)) {
+                this.showLoading();
+                void this.refreshPrivateMediaCacheTicket('http-auth');
+                return;
+            }
             // Non-fatal errors (incl. most bufferStalledError occurrences) are
             // recovered automatically by hls.js. On Gateway VOD, deliberately
             // hold playback until a useful recovery reserve exists instead of
@@ -5998,6 +6214,7 @@ class WatchPage {
         this.cancelPendingHlsAudioSwitch(false);
         this.cancelFirstFrameTelemetryObserver();
         this.cancelDeferredEngineTrackEnrichment();
+        this.clearPrivateMediaCacheAccess();
         // requestVideoFrameCallback is best-effort telemetry: a browser may lose
         // that callback even though decoded media is visibly progressing. Preserve
         // the stricter first-frame gate for storyboard work, but do not lose the

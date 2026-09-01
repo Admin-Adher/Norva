@@ -974,6 +974,19 @@
         );
     }
 
+    // Private cache tickets are security-sensitive and renewable. Never fall
+    // back to an older edge function that does not implement the same binding,
+    // revocation and Authorization-header contract.
+    function playbackMediaCacheTicketRequest(id, objectKey, options = {}) {
+        return requestToBase(
+            playbackBase(),
+            'POST',
+            `/playback/sessions/${encodeURIComponent(id)}/media-cache-ticket`,
+            { protocol: 1, objectKey },
+            options
+        );
+    }
+
     // Pull the deepest upstream detail out of an error payload so callers see
     // the real cause (e.g. the provider "401 Unauthorized" the cloud gateway
     // reports) instead of only the generic top-level "Media gateway refused the
@@ -4712,6 +4725,7 @@
             validateLanguages: validatePlaybackLanguages,
             getSession: (id) => playbackSessionRequest('GET', `/playback/sessions/${encodeURIComponent(id)}`),
             heartbeatSession: (id) => playbackHeartbeatRequest(id),
+            refreshMediaCacheTicket: (id, objectKey) => playbackMediaCacheTicketRequest(id, objectKey),
             expireSession: (id, options = {}) => playbackSessionRequest(
                 'POST',
                 `/playback/sessions/${encodeURIComponent(id)}/expire`,
@@ -4801,6 +4815,11 @@
                     { ...options, token: getDeviceToken() }
                 ),
                 heartbeatSession: (id) => playbackHeartbeatRequest(id, { token: getDeviceToken() }),
+                refreshMediaCacheTicket: (id, objectKey) => playbackMediaCacheTicketRequest(
+                    id,
+                    objectKey,
+                    { token: getDeviceToken() }
+                ),
                 expireSession: (id, options = {}) => playbackSessionRequest(
                     'POST',
                     `/playback/sessions/${encodeURIComponent(id)}/expire`,

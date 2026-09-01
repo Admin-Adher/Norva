@@ -514,6 +514,7 @@ begin
   if not found
      or v_session.status not in ('pending', 'ready')
      or v_session.superseded_at is not null
+     or v_session.expires_at <= v_now
      or v_session.source_id is null
      or v_session.target_url_hash is null
      or v_session.target_url_hash !~ '^[0-9a-f]{64}$' then

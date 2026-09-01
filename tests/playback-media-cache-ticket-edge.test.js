@@ -9,9 +9,13 @@ const edge = fs.readFileSync(path.join(
   __dirname,
   '../supabase/functions/norva-playback/index.ts',
 ), 'utf8');
+const grantMigration = fs.readFileSync(path.join(
+  __dirname,
+  '../supabase/migrations/20260901220000_media_cache_exact_playback_grants_v1.sql',
+), 'utf8');
 
-test('Edge v72 exposes one authenticated renewable media-cache ticket route', () => {
-  assert.match(edge, /version: 72,[\s\S]*privateMediaCacheTicketProtocol: 1/);
+test('Edge v73 exposes one authenticated renewable media-cache ticket route', () => {
+  assert.match(edge, /version: 73,[\s\S]*privateMediaCacheTicketProtocol: 1/);
   assert.match(edge, /segments\[3\] === "media-cache-ticket"[\s\S]*issueMediaCachePlaybackTicket/);
   assert.match(edge, /const identity = await requireIdentity\(req, supabase\)/);
   assert.match(edge, /import \{ createMediaCacheTicket \} from "\.\.\/_shared\/media-cache-ticket\.ts"/);
@@ -32,7 +36,7 @@ test('ticket request accepts only protocol and object key while SQL derives ever
 
 test('ticket stays in the Authorization header contract and is never placed in a URL', () => {
   const issue = edge.slice(
-    edge.indexOf('async function issueMediaCachePlaybackTicket'),
+    edge.indexOf('async function createAuthorizedMediaCachePlayback'),
     edge.indexOf('async function revokeMediaCachePlaybackGrant'),
   );
   assert.match(issue, /createMediaCacheTicket\([\s\S]*objectKey,[\s\S]*bindingId,[\s\S]*playbackSessionId/);
@@ -45,6 +49,12 @@ test('ticket stays in the Authorization header contract and is never placed in a
 });
 
 test('session expiry revokes the database grant and the Worker marker without deleting shared bytes', () => {
+  const authorize = grantMigration.slice(
+    grantMigration.indexOf('create function public.norva_authorize_media_cache_playback'),
+    grantMigration.indexOf('create function public.norva_revoke_media_cache_playback_grant'),
+  );
+  assert.match(authorize, /v_session\.expires_at <= v_now/);
+
   const revoke = edge.slice(
     edge.indexOf('async function revokeMediaCachePlaybackGrant'),
     edge.indexOf('async function getPlaybackSession'),
