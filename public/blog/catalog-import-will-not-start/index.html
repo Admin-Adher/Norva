@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#05080f">
+  <title>Catalog Import Will Not Start? First Checks | Norva Blog</title>
+  <meta name="description" content="Diagnose an import that does not begin by recording the request, checking source access, account context, device state, network, storage, and visible messages.">
+  <link rel="canonical" href="https://norva.tv/blog/catalog-import-will-not-start/">
+  <meta name="robots" content="index,follow">
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/css/blog.css?v=1">
+  <meta property="og:type" content="article">
+  <meta property="og:site_name" content="Norva">
+  <meta property="og:title" content="Catalog Import Will Not Start? First Checks | Norva Blog">
+  <meta property="og:description" content="Diagnose an import that does not begin by recording the request, checking source access, account context, device state, network, storage, and visible messages.">
+  <meta property="og:url" content="https://norva.tv/blog/catalog-import-will-not-start/">
+  <meta property="og:image" content="https://norva.tv/img/devices/norva-device-tv.webp">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Catalog Import Will Not Start? First Checks | Norva Blog">
+  <meta name="twitter:description" content="Diagnose an import that does not begin by recording the request, checking source access, account context, device state, network, storage, and visible messages.">
+  <meta name="twitter:image" content="https://norva.tv/img/devices/norva-device-tv.webp">
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "headline": "Catalog Import Will Not Start? First Checks",
+  "description": "Diagnose an import that does not begin by recording the request, checking source access, account context, device state, network, storage, and visible messages.",
+  "inLanguage": "en",
+  "datePublished": "2026-09-01T20:00:00+02:00",
+  "dateModified": "2026-09-01T20:00:00+02:00",
+  "author": {
+    "@type": "Organization",
+    "name": "Norva"
+  },
+  "publisher": {
+    "@type": "Organization",
+    "name": "Norva",
+    "logo": {
+      "@type": "ImageObject",
+      "url": "https://norva.tv/img/norva-app-icon-96.png"
+    }
+  },
+  "image": [
+    "https://norva.tv/img/devices/norva-device-tv.webp"
+  ],
+  "mainEntityOfPage": {
+    "@type": "WebPage",
+    "@id": "https://norva.tv/blog/catalog-import-will-not-start/"
+  }
+}
+  </script>
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    {
+      "@type": "ListItem",
+      "position": 1,
+      "name": "Home",
+      "item": "https://norva.tv/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 2,
+      "name": "Blog",
+      "item": "https://norva.tv/blog/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 3,
+      "name": "Catalog Import Will Not Start? First Checks",
+      "item": "https://norva.tv/blog/catalog-import-will-not-start/"
+    }
+  ]
+}
+  </script>
+  <script src="/js/marketing-config.js?v=1"></script>
+  <script defer src="/js/marketing.js?v=1"></script>
+  <script defer src="/js/consent-banner.js?v=1"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="blog-nav">
+    <a class="brand" href="/" aria-label="Norva home">
+      <img src="/img/norva-app-icon-96.png" width="34" height="34" alt="" decoding="async">
+      <span>Norva</span>
+    </a>
+    <nav class="nav-right" aria-label="Primary">
+      <a href="/blog/">Blog</a>
+      <a class="hide-sm" href="/#how-it-works">How it works</a>
+      <a class="cta" href="/account.html?returnTo=%2Fapp%23home" data-cta="blog-nav" data-auth-action>Start free trial</a>
+    </nav>
+  </header>
+  <main id="main-content">
+    <nav class="breadcrumb" aria-label="Breadcrumb"><a href="/">Home</a><span class="sep">›</span><a href="/blog/">Blog</a><span class="sep">›</span><span aria-current="page">Catalog Import Will Not Start? First Checks</span></nav>
+    <article>
+      <div class="article-meta">
+        <span class="tag">Import &amp; Sync Troubleshooting</span>
+        <span>By Norva Editorial Team</span>
+        <span class="dot">·</span>
+        <time datetime="2026-09-01T20:00:00+02:00">1 September 2026</time>
+        <span class="dot">·</span>
+        <span>8 min read</span>
+      </div>
+      <h1>Catalog Import Will Not Start? First Checks</h1>
+      <p class="lede">A first-pass import-start check preserves the original request, verifies authorization and source reachability, and records account, device, network, storage, and message context before retrying.</p>
+      <nav class="toc" aria-label="On this page">
+      <strong>On this page</strong>
+      <ul><li><a href="#preserve-the-first-request">Preserve the first request</a></li><li><a href="#reconfirm-authorization">Reconfirm authorization</a></li><li><a href="#check-the-source-independently">Check the source independently</a></li><li><a href="#verify-account-and-profile-context">Verify account and profile context</a></li><li><a href="#record-device-and-application-state">Record device and application state</a></li><li><a href="#compare-network-context-safely">Compare network context safely</a></li><li><a href="#look-for-an-operation-already-in-progress">Look for an operation already in progress</a></li><li><a href="#distinguish-no-start-from-zero-results">Distinguish no start from zero results</a></li><li><a href="#retry-with-a-defined-boundary">Retry with a defined boundary</a></li><li><a href="#original-evidence-import-start-gate-record">Original evidence: import start gate record</a></li><li><a href="#common-mistakes-and-limitations">Common mistakes and limitations</a></li><li><a href="#frequently-asked-questions">Frequently asked questions</a></li><li><a href="#your-next-step">Your next step</a></li><li><a href="#sources">Sources</a></li></ul>
+    </nav>
+      <blockquote><strong>In short:</strong> Stop repeated taps and record the original request time, screen, account, profile, device, application version, network, authorized source label, and exact message. Confirm the source is reachable through its official route, access remains authorized, required details are current, the device has reasonable storage, and no visible operation is already active. Retry only through current guidance, then escalate redacted evidence.</blockquote>
+<p>“Will not start” should describe an observable state: no acknowledgment, no displayed stage, or an immediate message after a request. It should not become a guess about an undocumented background process.</p>
+<h2 id="preserve-the-first-request">Preserve the first request</h2>
+<p>Record the local timestamp with timezone, page or screen, control used, visible response, and whether the control remained enabled. If a message appeared, copy its exact text or capture a redacted screenshot. Do not keep activating the control; multiple requests make the sequence ambiguous.</p>
+<p>The <a href="/blog/catalog-import-sync-troubleshooting-handbook/">troubleshooting handbook</a> explains how to keep later observations in separate evidence layers.</p>
+<h2 id="reconfirm-authorization">Reconfirm authorization</h2>
+<p>Verify that the household still has permission to use the connected source and that the source owner recognizes the attempted operation. Working credentials do not prove continuing authorization. If access was revoked, expired, or transferred, stop and resolve ownership through the source provider.</p>
+<p>Never include credentials in the diagnostic record.</p>
+<h2 id="check-the-source-independently">Check the source independently</h2>
+<p>Use the provider's current official route to confirm service availability and account access. Record whether the source responds, rejects access, redirects, or reports maintenance. A source result is one signal, not proof of Norva's internal state.</p>
+<p>If the source request times out, follow the connection-timeout triage before changing credentials.</p>
+<h2 id="verify-account-and-profile-context">Verify account and profile context</h2>
+<p>Confirm the expected Norva account and profile are active and that the source label matches the intended connection. Record whether another trusted household administrator sees the same source under an authorized context. Do not switch accounts mid-test without labeling the comparison.</p>
+<h2 id="record-device-and-application-state">Record device and application state</h2>
+<p>Capture device model, operating system version, Norva application version, foreground or resumed state, and available storage as displayed by the device. Low storage or an outdated environment is worth recording, but neither should be declared the cause without evidence.</p>
+<p>Avoid clearing application data or reinstalling before support has the original state.</p>
+<h2 id="compare-network-context-safely">Compare network context safely</h2>
+<p>Record connection type and whether ordinary authorized Norva and source pages load. If practical, compare once on another trusted network without bypassing security controls. Do not disable certificate validation, change DNS settings, or install unknown profiles merely to force a result.</p>
+<p>HTTP response semantics can help describe a provider response, but they do not identify a Norva implementation fault by themselves.</p>
+<h2 id="look-for-an-operation-already-in-progress">Look for an operation already in progress</h2>
+<p>Inspect the current interface for a visible stage, activity indicator, disabled control, queue, or recent result. Do not assume a hidden queue exists. Record only what is shown. If a stage is visible but unchanged, move to the stalled-stage timeline rather than issuing another request.</p>
+<h2 id="distinguish-no-start-from-zero-results">Distinguish no start from zero results</h2>
+<p>An operation that completes and displays zero items did start. That case requires a different investigation of source content, filters, account scope, categories, and visible results. Use the zero-item guide and preserve the completion evidence.</p>
+<h2 id="retry-with-a-defined-boundary">Retry with a defined boundary</h2>
+<p>Follow current Norva support instructions for any retry. Before acting, record what changed since the first request and define the result that will end the test. If the same state recurs, stop. Credential edits, source removal, repeated imports, and device resets are not neutral retries.</p>
+<h2 id="original-evidence-import-start-gate-record">Original evidence: import start gate record</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>Gate</th><th>Observation</th><th>Time</th><th>Result</th></tr></thead>
+<tbody><tr><td>Authorization and owner</td><td></td><td></td><td></td></tr><tr><td>Original request and response</td><td></td><td></td><td></td></tr><tr><td>Source official route</td><td></td><td></td><td></td></tr><tr><td>Account, profile, source label</td><td></td><td></td><td></td></tr><tr><td>Device, version, storage</td><td></td><td></td><td></td></tr><tr><td>Network comparison</td><td></td><td></td><td></td></tr><tr><td>Visible active operation</td><td></td><td></td><td></td></tr><tr><td>Guided retry, if any</td><td></td><td></td><td></td></tr></tbody>
+</table></div>
+<h2 id="common-mistakes-and-limitations">Common mistakes and limitations</h2>
+<ul><li>Activating the request repeatedly before recording evidence.</li><li>Rotating credentials without an access or exposure signal.</li><li>Calling a completed zero-item result “not started.”</li><li>Clearing local data before comparing another supported device.</li><li>Treating one HTTP response as a complete root cause.</li><li>Sending passwords, tokens, or full source addresses to support.</li></ul>
+<h2 id="frequently-asked-questions">Frequently asked questions</h2>
+<h3 id="should-i-keep-pressing-the-import-control">Should I keep pressing the import control?</h3>
+<p>No. Preserve the first response and use current support guidance. Repetition can obscure which request produced a later result.</p>
+<h3 id="does-a-working-source-prove-norva-can-begin-the-operation">Does a working source prove Norva can begin the operation?</h3>
+<p>It confirms only one layer. Account, profile, device, application, and visible operation state still need separate observations.</p>
+<h3 id="should-i-reinstall-the-application-first">Should I reinstall the application first?</h3>
+<p>Not as a first evidence step. Reinstallation can remove useful local context and does not establish the original cause.</p>
+<h2 id="your-next-step">Your next step</h2>
+<p><a href="https://norva.tv/support" target="_blank" rel="noopener">Check Norva Support</a></p>
+<h2 id="sources">Sources</h2>
+<ul><li><a href="https://norva.tv/support" target="_blank" rel="noopener">Norva support</a></li><li><a href="https://norva.tv/privacy" target="_blank" rel="noopener">Norva privacy policy</a></li><li><a href="https://norva.tv/terms" target="_blank" rel="noopener">Norva terms of service</a></li><li><a href="https://www.rfc-editor.org/rfc/rfc9110" target="_blank" rel="noopener">RFC 9110: HTTP Semantics</a></li></ul>
+      <section class="article-cta">
+      <a class="btn" href="https://norva.tv/support" data-cta="blog-article">Check Norva Support</a>
+    </section>
+      <section class="sources">
+      <h2>Sources</h2>
+      <ul><li><a href="https://norva.tv/support" target="_blank" rel="noopener">https://norva.tv/support</a></li><li><a href="https://norva.tv/privacy" target="_blank" rel="noopener">https://norva.tv/privacy</a></li><li><a href="https://norva.tv/terms" target="_blank" rel="noopener">https://norva.tv/terms</a></li><li><a href="https://www.rfc-editor.org/rfc/rfc9110" target="_blank" rel="noopener">https://www.rfc-editor.org/rfc/rfc9110</a></li></ul>
+    </section>
+      <section class="related">
+      <h2>Related reading</h2>
+      <div class="related-grid">
+        <a class="card" href="/blog/catalog-import-sync-troubleshooting-handbook/">
+          <span class="tag">Import &amp; Sync Troubleshooting</span>
+          <div class="card-title">The Complete Catalog Import and Sync Troubleshooting Handbook</div>
+          <p>A disciplined import and sync investigation preserves one timeline, freezes viewing context, and separates source response from account, profile, device, filter, metadata, and item-identity signals.</p>
+        </a>
+      </div>
+    </section>
+    </article>
+  </main>
+  <footer class="blog-footer">
+    <div class="foot-inner">
+      <nav class="foot-links" aria-label="Footer">
+        <a href="/">Home</a>
+        <a href="/blog/">Blog</a>
+        <a href="/#features">Benefits</a>
+        <a href="/#pricing">Pricing</a>
+        <a href="/support.html?returnTo=%2Fblog%2F">Support</a>
+        <a href="/terms.html">Terms</a>
+        <a href="/privacy.html">Privacy</a>
+        <a href="/mentions-legales.html">Legal notice</a>
+      </nav>
+      <p class="disclaimer">&copy; 2026 Norva. Norva is a media player and organiser. It does not provide media. Use requires a compatible source you own or are authorised to access.</p>
+    </div>
+  </footer>
+</body>
+</html>
