@@ -2109,9 +2109,9 @@ class SeriesPage {
             durationHint: h.duration || 0
         };
 
-        await watch.play(content, async () => {
+        await watch.play(content, async ({ signal } = {}) => {
             await this.prepareForPlaybackSession();
-            const info = await API.proxy.xtream.seriesInfo(sourceId, seriesId);
+            const info = await API.proxy.xtream.seriesInfo(sourceId, seriesId, { signal });
             if (!info?.episodes) return null;
 
             // Find the episode in seriesInfo
@@ -2148,7 +2148,8 @@ class SeriesPage {
                 episode.id,
                 'series',
                 container,
-                playbackHint
+                playbackHint,
+                { signal }
             );
             if (!result?.url) return null;
 
@@ -4281,14 +4282,15 @@ class SeriesPage {
         };
 
         // Open the player immediately, then resolve the stream URL into the shell.
-        await watch.play(content, async () => {
+        await watch.play(content, async ({ signal } = {}) => {
             await this.prepareForPlaybackSession();
             const result = await API.proxy.xtream.getStreamUrl(
                 sourceId,
                 episodeId,
                 'series',
                 container,
-                playbackHint
+                playbackHint,
+                { signal }
             );
             if (!result || !result.url) return null;
             return {

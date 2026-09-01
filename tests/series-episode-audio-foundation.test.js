@@ -111,7 +111,7 @@ test('membership registry is service-role-only and proves exact provider episode
 test('legacy host cache remains display-only and exact playback uses canonical coordinates', () => {
   assert.match(
     seriesInfoSource,
-    /if \(seriesInfoResult\.exactInventorySafe\) \{\s*await registerSeriesEpisodes/,
+    /if \(seriesInfoResult\.exactInventorySafe\) \{\s*scheduleSeriesEpisodeRegistration/,
   );
   assert.match(
     seriesInfoSource,

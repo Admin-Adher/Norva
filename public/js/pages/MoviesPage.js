@@ -3390,14 +3390,15 @@ class MoviesPage {
 
         // Open the player immediately (poster + loading animation), then resolve
         // the stream URL into the already-visible shell.
-        await watch.play(content, async () => {
+        await watch.play(content, async ({ signal } = {}) => {
             await this.prepareForPlaybackSession();
             const result = await API.proxy.xtream.getStreamUrl(
                 movie.sourceId,
                 movie.stream_id,
                 'movie',
                 container,
-                playbackHint
+                playbackHint,
+                { signal }
             );
             if (!result || !result.url) return null;
             return {

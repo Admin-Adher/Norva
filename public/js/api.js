@@ -1976,7 +1976,7 @@ const CloudAdapter = (() => {
                             mode: 'direct',
                             clientMetadata: _cloudClientTelemetryMetadata(),
                             ...(userAgent ? { userAgent } : {})
-                        });
+                        }, options);
                         const providerUrl = direct?.playback?.url || direct?.url;
                         if (!providerUrl) throw new Error('Cloud did not return a direct stream URL');
                         const seekOffset = Math.max(0, Math.floor(Number(
@@ -1985,7 +1985,8 @@ const CloudAdapter = (() => {
                         const transcodeRes = await fetch(`${localTranscoder}/api/transcode/session`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ url: providerUrl, seekOffset })
+                            body: JSON.stringify({ url: providerUrl, seekOffset }),
+                            ...(options.signal ? { signal: options.signal } : {})
                         });
                         if (!transcodeRes.ok) {
                             const detail = await transcodeRes.json().catch(() => ({}));
@@ -2080,7 +2081,7 @@ const CloudAdapter = (() => {
                             ttlSeconds: 7200,
                             clientMetadata: _cloudClientTelemetryMetadata(),
                             ...(liveUserAgent ? { userAgent: liveUserAgent } : {})
-                        });
+                        }, options);
                         const relayUrl = relayPayload.playback?.url || relayPayload.url;
                         if (relayUrl) {
                             _clearSourceCloudBlock(sourceId);
@@ -2235,7 +2236,7 @@ const CloudAdapter = (() => {
                         mode: 'relay',
                         requiresRelay: true,
                         enginePipe: true
-                    });
+                    }, options);
                     const engineUrl = enginePayload.playback?.url || enginePayload.url;
                     if (!engineUrl) {
                         const e = new Error('Engine: relay unavailable (raw URL missing).');
@@ -2264,7 +2265,7 @@ const CloudAdapter = (() => {
                         mode,
                         requiresRelay: mode === 'relay',
                         requiresTranscode: mode === 'transcode'
-                    });
+                    }, options);
                 } catch (sessionError) {
                     if (type === 'live') {
                         if (_looksProviderSlotBusy(sessionError)) {
@@ -2644,9 +2645,9 @@ const CloudAdapter = (() => {
         // first play on the free browse tier — routes to the subscribe screen.
         // These calls bypass API.request, so they need their own guard.
         return Object.assign({}, api, {
-            createSession: async (session) => {
+            createSession: async (session, requestOptions = {}) => {
                 try {
-                    return await api.createSession(session);
+                    return await api.createSession(session, requestOptions);
                 } catch (error) {
                     if (window.NorvaCloud?.entitlements?.isSubscriptionError?.(error)) {
                         routeToSubscribeWall(error);
@@ -3106,7 +3107,7 @@ const API = {
             // cloud request. Make it resilient: serve from a short cache, dedupe
             // concurrent calls (double-taps), and retry the transient 429 a couple
             // of times — the collision clears within a second or two.
-            seriesInfo: (sourceId, seriesId) => {
+            seriesInfo: (sourceId, seriesId, requestOptions = {}) => {
                 const key = `${sourceId}:${seriesId}`;
                 const cache = (API._seriesInfoCache = API._seriesInfoCache || new Map());
                 const cached = cache.get(key);
@@ -3117,7 +3118,12 @@ const API = {
                     let lastErr;
                     for (let attempt = 0; attempt < 3; attempt++) {
                         try {
-                            const data = await API.request('GET', `/proxy/xtream/${sourceId}/series_info?series_id=${seriesId}`);
+                            const data = await API.request(
+                                'GET',
+                                `/proxy/xtream/${sourceId}/series_info?series_id=${seriesId}`,
+                                null,
+                                requestOptions
+                            );
                             cache.set(key, { at: Date.now(), data });
                             return data;
                         } catch (err) {
@@ -3156,13 +3162,25 @@ const API = {
                     throw err;
                 }
             },
-            getStreamUrl: (sourceId, streamId, type = 'live', container = defaultProviderContainerForType(type), options = {}) => {
+            getStreamUrl: (
+                sourceId,
+                streamId,
+                type = 'live',
+                container = defaultProviderContainerForType(type),
+                options = {},
+                requestOptions = {}
+            ) => {
                 const params = new URLSearchParams({ container });
                 Object.entries(compactPlaybackHint(options)).forEach(([key, value]) => {
                     if (key === 'container') return;
                     params.set(key, value === true ? '1' : String(value));
                 });
-                return API.request('GET', `/proxy/xtream/${sourceId}/stream/${streamId}/${type}?${params.toString()}`);
+                return API.request(
+                    'GET',
+                    `/proxy/xtream/${sourceId}/stream/${streamId}/${type}?${params.toString()}`,
+                    null,
+                    requestOptions
+                );
             }
         },
 

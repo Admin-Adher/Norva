@@ -175,6 +175,7 @@ class WatchPage {
         this._pendingSubtitlePreferenceApplied = false;
         this._videoEncodeFallbackTried = false;
         this._playbackAttemptId = 0;
+        this._playbackResolveAbortController = null;
         this._cloudPlaybackLaneAttemptId = null;
         this._preferredExplicitCloudMode = null;
         this._failoverAttemptId = null;
@@ -1355,7 +1356,11 @@ class WatchPage {
         const homePage = this.app?.pages?.home;
         if (!homePage?.playItem) return null;
 
+        let restoreAttemptId = null;
+        let restoreSignal = null;
         this._resumeRestorePromise = (async () => {
+            restoreAttemptId = this.beginPlaybackAttempt();
+            restoreSignal = this.playbackResolveSignalForAttempt(restoreAttemptId);
             const history = window.API?.history?.getAll
                 ? await window.API.history.getAll(20)
                 : await window.API.request('GET', '/history?limit=20');
@@ -1548,13 +1553,18 @@ class WatchPage {
 
             if (content.type === 'series' && !content.seriesInfo && content.seriesId && content.sourceId) {
                 try {
-                    content.seriesInfo = await API.proxy.xtream.seriesInfo(content.sourceId, content.seriesId);
+                    content.seriesInfo = await API.proxy.xtream.seriesInfo(
+                        content.sourceId,
+                        content.seriesId,
+                        { signal: restoreSignal }
+                    );
                 } catch (error) {
                     console.warn('[WatchPage] Could not reload series info for restored playback:', error?.message || error);
                 }
             }
 
             await this.releasePlaybackPipelineForRetry();
+            if (this.isStalePlaybackAttempt(restoreAttemptId) || restoreSignal?.aborted) return false;
             const resumePlan = this.getGatewaySeekPlan(snapshotResumePosition);
             let playbackHint = {
                 ...this.buildResumePlaybackHint(snapshot),
@@ -1567,8 +1577,15 @@ class WatchPage {
                 content.id,
                 content.type === 'series' ? 'series' : 'movie',
                 content.containerExtension || 'mp4',
-                playbackHint
+                playbackHint,
+                { signal: restoreSignal }
             );
+
+            const resultSessionId = this.playbackMetadataFromResult(result).sessionId;
+            if (this.isStalePlaybackAttempt(restoreAttemptId) || restoreSignal?.aborted) {
+                await this.cleanupStaleCloudPlaybackSession(resultSessionId);
+                return false;
+            }
 
             if (!result?.url) {
                 throw new Error('Restored playback did not return a media URL');
@@ -1577,11 +1594,14 @@ class WatchPage {
             result.seekOffset = resumePlan.sessionStart;
             result.startOffset = resumePlan.sessionStart;
             result.resumeTarget = resumePlan.target;
-            content.cloudPlaybackSessionId = result.sessionId || null;
+            content.cloudPlaybackSessionId = resultSessionId || null;
             await this.play(content, result.url, result);
             return true;
         })()
             .catch(error => {
+                if (restoreSignal?.aborted
+                    || error?.name === 'AbortError'
+                    || (restoreAttemptId !== null && this.isStalePlaybackAttempt(restoreAttemptId))) return false;
                 console.warn('[WatchPage] Could not restore playback after refresh:', error?.message || error);
                 this.showPlaybackError('Playback failed after refresh. Try opening the title again.');
                 return false;
@@ -1794,6 +1814,7 @@ class WatchPage {
         // cooldown can yield. A later click/Back can now stale this invocation
         // instead of letting it resume and declare itself newest after the wait.
         const playbackAttemptId = this.beginPlaybackAttempt();
+        const playbackResolveSignal = this.playbackResolveSignalForAttempt(playbackAttemptId);
         this.canonicalizeVodPlaybackContent(content);
         this._subtitleSwitchRequestId += 1;
         this._subtitleSwitchPromise = null;
@@ -1820,7 +1841,7 @@ class WatchPage {
             if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
             this._suspendResumeSnapshotSave = true;
             try {
-                await this.stop();
+                await this.stop({ preservePlaybackResolutionAttempt: true });
             } finally {
                 this._suspendResumeSnapshotSave = false;
             }
@@ -2050,9 +2071,14 @@ class WatchPage {
         if (streamUrlResolver) {
             let resolved;
             try {
-                resolved = await streamUrlResolver();
+                resolved = await streamUrlResolver({
+                    signal: playbackResolveSignal,
+                    playbackAttemptId,
+                });
             } catch (err) {
-                if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
+                if (this.isStalePlaybackAttempt(playbackAttemptId)
+                    || playbackResolveSignal?.aborted
+                    || err?.name === 'AbortError') return;
                 const errorText = this.getErrorText(err) || 'This title could not be started. Please try again.';
                 // The initial resolver has not handed this attempt a playable
                 // Gateway lane. A timer-driven retry would silently mint a new
@@ -2332,7 +2358,9 @@ class WatchPage {
                     gatewayMode: 'transcode', audioMode: 'transcode',
                     ...activeAudioOptions,
                     seekOffset: position, startOffset: position, resumeTime: position
-                });
+                },
+                { signal: this.playbackResolveSignalForAttempt?.() || null }
+            );
             if (!result?.url || !/^https?:\/\//i.test(result.url)) {
                 throw new Error('No castable stream URL');
             }
@@ -2576,7 +2604,14 @@ class WatchPage {
                 seekOffset: 0, startOffset: 0, resumeTime: 0
             };
             hint = this.applyPlaybackPreferencesToHint(hint, prefs);
-            const result = await API.proxy.xtream.getStreamUrl(this.content.sourceId, nextEp.id, 'series', container, hint);
+            const result = await API.proxy.xtream.getStreamUrl(
+                this.content.sourceId,
+                nextEp.id,
+                'series',
+                container,
+                hint,
+                { signal: this.playbackResolveSignalForAttempt?.() || null }
+            );
             if (!result?.url || !/^https?:\/\//i.test(result.url)) throw new Error('No stream for next episode');
             // Advance the episode context so the bar + progress target the new episode.
             this.currentSeason = nextEp.seasonNum ?? this.currentSeason;
@@ -2747,9 +2782,28 @@ class WatchPage {
     }
 
     beginPlaybackAttempt() {
+        this.abortPlaybackResolution();
         this._playbackAttemptId += 1;
         this._cloudPlaybackLaneAttemptId = null;
+        const AbortControllerCtor = typeof window !== 'undefined' && typeof window.AbortController === 'function'
+            ? window.AbortController
+            : (typeof AbortController === 'function' ? AbortController : null);
+        this._playbackResolveAbortController = AbortControllerCtor
+            ? new AbortControllerCtor()
+            : null;
         return this._playbackAttemptId;
+    }
+
+    abortPlaybackResolution() {
+        const controller = this._playbackResolveAbortController;
+        this._playbackResolveAbortController = null;
+        if (!controller || controller.signal?.aborted) return;
+        try { controller.abort(); } catch (_) { }
+    }
+
+    playbackResolveSignalForAttempt(attemptId = this._playbackAttemptId) {
+        if (this.isStalePlaybackAttempt(attemptId)) return null;
+        return this._playbackResolveAbortController?.signal || null;
     }
 
     noteCloudPlaybackLaneForAttempt(sessionId, playbackAttemptId = this._playbackAttemptId) {
@@ -4353,7 +4407,8 @@ class WatchPage {
                 c.id,
                 type,
                 c.containerExtension || 'mp4',
-                playbackHint
+                playbackHint,
+                { signal: this.playbackResolveSignalForAttempt(playbackAttemptId) }
             );
         } catch (err) {
             console.warn('[WatchPage] transcode fallback resolve failed:', err?.message || err);
@@ -4789,7 +4844,10 @@ class WatchPage {
         // single-connection IPTV account rejects the new one with 401.
         this._suspendResumeSnapshotSave = true;
         try {
-            await this.stop({ enqueueStoryboard: false });
+            await this.stop({
+                enqueueStoryboard: false,
+                preservePlaybackResolutionAttempt: true,
+            });
         } finally {
             this._suspendResumeSnapshotSave = false;
         }
@@ -5804,7 +5862,9 @@ class WatchPage {
         if (this.volumeSlider) this.volumeSlider.value = savedVolume;
     }
 
-    stop({ enqueueStoryboard = true } = {}) {
+    stop({ enqueueStoryboard = true, preservePlaybackResolutionAttempt = false } = {}) {
+        this.clearPlaybackErrorRefreshTimer();
+        if (!preservePlaybackResolutionAttempt) this.abortPlaybackResolution();
         if (enqueueStoryboard) {
             this._subtitleSwitchRequestId += 1;
             this._subtitleSwitchPromise = null;
@@ -6255,10 +6315,14 @@ class WatchPage {
         const requestId = Number.isInteger(options.requestId)
             ? options.requestId
             : ++this._gatewaySeekRequestId;
+        const playbackAttemptId = this._playbackAttemptId;
+        const playbackResolveSignal = this.playbackResolveSignalForAttempt(playbackAttemptId);
         const subtitleSwitchRequestId = Number.isInteger(options.subtitleSwitchRequestId)
             ? options.subtitleSwitchRequestId
             : null;
         const isObsoleteRequest = () => requestId !== this._gatewaySeekRequestId
+            || this.isStalePlaybackAttempt(playbackAttemptId)
+            || playbackResolveSignal?.aborted
             || (subtitleSwitchRequestId !== null
                 && this.isStaleSubtitleSwitch(subtitleSwitchRequestId));
         const seekPlan = this.getGatewaySeekPlan(targetTime, options.preRollSeconds ?? 0);
@@ -6315,9 +6379,11 @@ class WatchPage {
                 playbackIdentity.itemId,
                 itemType,
                 container,
-                playbackHint
+                playbackHint,
+                { signal: playbackResolveSignal }
             );
         } catch (error) {
+            if (isObsoleteRequest() || error?.name === 'AbortError') return;
             console.error('[WatchPage] Gateway seek session failed:', error);
             if (!options.retryLevel && this.isRangeSeekFailure(error?.message || error?.details || '')) {
                 await this.restartCloudGatewayStreamAt(target, {
@@ -7106,6 +7172,8 @@ class WatchPage {
             || this.isGatewayPlaybackUrl(this.baseStreamUrl)) {
             return false;
         }
+        const playbackAttemptId = this._playbackAttemptId;
+        const playbackResolveSignal = this.playbackResolveSignalForAttempt(playbackAttemptId);
 
         this._cloudRelayFallbackTried = true;
         console.warn('[WatchPage] Gateway media append failed. Retrying through Relay.');
@@ -7115,14 +7183,20 @@ class WatchPage {
 
         try {
             await this.releasePlaybackPipelineForRetry();
+            if (this.isStalePlaybackAttempt(playbackAttemptId) || playbackResolveSignal?.aborted) return true;
             const result = await API.proxy.xtream.getStreamUrl(
                 this.content.sourceId,
                 this.content.id,
                 this.content.type === 'series' ? 'series' : 'movie',
                 this.containerExtension || 'mp4',
-                { mode: 'relay' }
+                { mode: 'relay' },
+                { signal: playbackResolveSignal }
             );
 
+            if (this.isStalePlaybackAttempt(playbackAttemptId) || playbackResolveSignal?.aborted) {
+                await this.cleanupStaleCloudPlaybackSession(result?.sessionId);
+                return true;
+            }
             if (!result?.url) return false;
             this.content.cloudPlaybackSessionId = result.sessionId || null;
             await this.loadVideo(result.url, this.playbackMetadataFromResult(result, {
@@ -7130,6 +7204,9 @@ class WatchPage {
             }));
             return true;
         } catch (error) {
+            if (this.isStalePlaybackAttempt(playbackAttemptId)
+                || playbackResolveSignal?.aborted
+                || error?.name === 'AbortError') return true;
             if (this.isPlaybackSupersededError(error)) {
                 await this.handlePlaybackSuperseded(this.currentCloudPlaybackSessionId);
                 return true;
@@ -7146,6 +7223,8 @@ class WatchPage {
         if (!this.isFormatPlaybackError(message)) return false;
         if (!this.content?.sourceId || !this.content?.id) return false;
         if (this.content.type !== 'movie' && this.content.type !== 'series') return false;
+        const playbackAttemptId = this._playbackAttemptId;
+        const playbackResolveSignal = this.playbackResolveSignalForAttempt(playbackAttemptId);
 
         this._cloudGatewayTranscodeFallbackTried = true;
         console.warn('[WatchPage] Gateway remux failed. Retrying with full Gateway transcode.');
@@ -7157,6 +7236,7 @@ class WatchPage {
         const position = Math.max(0, Math.floor(this.getResumeSnapshotPosition()));
         try {
             await this.releasePlaybackPipelineForRetry();
+            if (this.isStalePlaybackAttempt(playbackAttemptId) || playbackResolveSignal?.aborted) return true;
             const itemType = this.content.type === 'series' ? 'series' : 'movie';
             const container = this.containerExtension || 'mp4';
             const playbackPreferences = this.savePlaybackPreferences(this.getMergedPlaybackPreferences());
@@ -7177,6 +7257,7 @@ class WatchPage {
             playbackHint = this.applyPlaybackPreferencesToHint(playbackHint, playbackPreferences);
 
             await this.waitForProviderSlotRelease(1400);
+            if (this.isStalePlaybackAttempt(playbackAttemptId) || playbackResolveSignal?.aborted) return true;
             let result;
             try {
                 result = await API.proxy.xtream.getStreamUrl(
@@ -7184,7 +7265,8 @@ class WatchPage {
                     this.content.id,
                     itemType,
                     container,
-                    playbackHint
+                    playbackHint,
+                    { signal: playbackResolveSignal }
                 );
             } catch (error) {
                 if (this.isProviderBusyError(this.getErrorText(error))) {
@@ -7193,6 +7275,10 @@ class WatchPage {
                 throw error;
             }
 
+            if (this.isStalePlaybackAttempt(playbackAttemptId) || playbackResolveSignal?.aborted) {
+                await this.cleanupStaleCloudPlaybackSession(result?.sessionId);
+                return true;
+            }
             if (!result?.url) return false;
             this.content.cloudPlaybackSessionId = result.sessionId || null;
             await this.loadVideo(result.url, this.playbackMetadataFromResult(result, {
@@ -7203,6 +7289,9 @@ class WatchPage {
             }));
             return true;
         } catch (error) {
+            if (this.isStalePlaybackAttempt(playbackAttemptId)
+                || playbackResolveSignal?.aborted
+                || error?.name === 'AbortError') return true;
             if (this.isPlaybackSupersededError(error)) {
                 await this.handlePlaybackSuperseded(this.currentCloudPlaybackSessionId);
                 return true;
@@ -7376,9 +7465,11 @@ class WatchPage {
     schedulePlaybackErrorRefresh(delayMs = this.playbackErrorRefreshDelayMs) {
         this.clearPlaybackErrorRefreshTimer();
         if (this.isCloudPlaybackMode() && this.hasOpenedCloudPlaybackLaneForAttempt()) return false;
+        if (this.app?.currentPage && this.app.currentPage !== 'watch') return false;
 
         const key = this.getPlaybackErrorRefreshGuardKey();
         const now = Date.now();
+        const scheduledAttemptId = this._playbackAttemptId;
         try {
             const previous = JSON.parse(sessionStorage.getItem(this.playbackErrorRefreshKey) || 'null');
             if (previous?.key === key && now - Number(previous.at || 0) < this.playbackErrorRefreshGuardMs) {
@@ -7394,7 +7485,10 @@ class WatchPage {
             this._playbackErrorRefreshTimer = null;
             const errorEl = document.getElementById('watch-error');
             const errorVisible = errorEl && !errorEl.classList.contains('hidden');
-            if (!errorVisible || this.hasCurrentMedia()) return;
+            if (!errorVisible
+                || this.hasCurrentMedia()
+                || this.isStalePlaybackAttempt(scheduledAttemptId)
+                || (this.app?.currentPage && this.app.currentPage !== 'watch')) return;
             try {
                 this.trackPlaybackPosition({ force: true });
                 this.saveResumeSnapshotThrottled(true);
@@ -7416,6 +7510,7 @@ class WatchPage {
     async retryPlaybackInPlace(positionOverride = null) {
         const playbackRequestedAt = Date.now();
         if (this._inPlaceRetryRunning) return;
+        if (this.app?.currentPage && this.app.currentPage !== 'watch') return;
         const retrySource = this._nextProductRetrySource === 'manual' ? 'manual' : 'automatic';
         this._nextProductRetrySource = '';
         this.trackProduct('journey_retry', {
@@ -7431,6 +7526,8 @@ class WatchPage {
             : Math.max(0, Math.floor(this.getResumeSnapshotPosition()));
         this._inPlaceRetryRunning = true;
         const playbackAttemptId = this.beginPlaybackAttempt();
+        const playbackResolveSignal = this.playbackResolveSignalForAttempt(playbackAttemptId);
+        const contentAtStart = this.content;
         this.beginPlaybackTelemetry(null, playbackAttemptId, {
             requestedAt: playbackRequestedAt,
         });
@@ -7445,7 +7542,15 @@ class WatchPage {
             this._handlingPlaybackFailure = false;
 
             await this.releasePlaybackPipelineForRetry();
+            if (this.isStalePlaybackAttempt(playbackAttemptId)
+                || playbackResolveSignal?.aborted
+                || this.content !== contentAtStart
+                || (this.app?.currentPage && this.app.currentPage !== 'watch')) return;
             await this.waitForProviderSlotRelease(800);
+            if (this.isStalePlaybackAttempt(playbackAttemptId)
+                || playbackResolveSignal?.aborted
+                || this.content !== contentAtStart
+                || (this.app?.currentPage && this.app.currentPage !== 'watch')) return;
 
             const position = retryPosition;
             const itemType = this.content.type === 'series' ? 'series' : 'movie';
@@ -7465,9 +7570,18 @@ class WatchPage {
             };
             playbackHint = this.applyPlaybackPreferencesToHint(playbackHint, playbackPreferences);
             const result = await API.proxy.xtream.getStreamUrl(
-                this.content.sourceId, this.content.id, itemType, container, playbackHint);
+                this.content.sourceId,
+                this.content.id,
+                itemType,
+                container,
+                playbackHint,
+                { signal: playbackResolveSignal }
+            );
             const resultSessionId = this.playbackMetadataFromResult(result).sessionId;
-            if (this.isStalePlaybackAttempt(playbackAttemptId)) {
+            if (this.isStalePlaybackAttempt(playbackAttemptId)
+                || playbackResolveSignal?.aborted
+                || this.content !== contentAtStart
+                || (this.app?.currentPage && this.app.currentPage !== 'watch')) {
                 await this.cleanupStaleCloudPlaybackSession(resultSessionId);
                 return;
             }
@@ -7481,6 +7595,11 @@ class WatchPage {
                 ...activeAudioOptions,
             }));
         } catch (error) {
+            if (this.isStalePlaybackAttempt(playbackAttemptId)
+                || playbackResolveSignal?.aborted
+                || error?.name === 'AbortError'
+                || this.content !== contentAtStart
+                || (this.app?.currentPage && this.app.currentPage !== 'watch')) return;
             // A slot still busy after the retry is a provider-side state — a full page
             // reload would just replay the whole cascade against the same busy slot.
             const errorText = this.getErrorText(error);
@@ -7751,7 +7870,8 @@ class WatchPage {
                 nextStreamId,
                 next.type || 'movie',
                 nextContainer,
-                failoverHint
+                failoverHint,
+                { signal: this.playbackResolveSignalForAttempt(playbackAttemptId) }
             );
             const resultSessionId = this.playbackMetadataFromResult(result).sessionId;
             if (this.isStalePlaybackAttempt(playbackAttemptId) || this.content !== contentAtStart) {
@@ -9685,7 +9805,8 @@ class WatchPage {
                 itemId,
                 itemType,
                 container,
-                playbackHint
+                playbackHint,
+                { signal: this.playbackResolveSignalForAttempt?.() || null }
             );
         } catch (error) {
             if (this.isPlaybackSupersededError(error)) {
@@ -12392,13 +12513,14 @@ class WatchPage {
 
             // Let play() expire the outgoing mono-account session before this
             // resolver claims the provider slot for the recommended title.
-            await this.play(content, async () => {
+            await this.play(content, async ({ signal } = {}) => {
                 const result = await API.proxy.xtream.getStreamUrl(
                     sourceId,
                     streamId,
                     'movie',
                     container,
-                    playbackHint
+                    playbackHint,
+                    { signal }
                 );
                 return result;
             });
@@ -12521,13 +12643,14 @@ class WatchPage {
                 playbackPreferences
             };
 
-            await this.play(content, async () => {
+            await this.play(content, async ({ signal } = {}) => {
                 const result = await API.proxy.xtream.getStreamUrl(
                     sourceId,
                     episodeId,
                     'series',
                     container,
-                    playbackHint
+                    playbackHint,
+                    { signal }
                 );
                 return result;
             });
@@ -12880,13 +13003,14 @@ class WatchPage {
                 playbackPreferences
             };
 
-            await this.play(content, async () => {
+            await this.play(content, async ({ signal } = {}) => {
                 const result = await API.proxy.xtream.getStreamUrl(
                     sourceId,
                     ep.id,
                     'series',
                     container,
-                    playbackHint
+                    playbackHint,
+                    { signal }
                 );
                 return result;
             });

@@ -55,6 +55,15 @@ test('cleanReleaseName still strips alpha-led provider prefixes', () => {
   assert.strictEqual(M.cleanReleaseName('DK ▎ A Hijacking'), 'A Hijacking');
 });
 
+test('cleanReleaseName strips Promax MULTI provider markers without losing the real title', () => {
+  // Production Promax rows use MULTI as a language/category tag, not as the title.
+  // MULTI is allow-listed narrowly; arbitrary 3-5 letter all-caps title words remain safe below.
+  assert.strictEqual(M.cleanReleaseName('MULTI ▎ Girls Incarcerated'), 'Girls Incarcerated');
+  assert.strictEqual(M.cleanReleaseName('MULTI ▎ Sugar Rush'), 'Sugar Rush');
+  assert.strictEqual(M.cleanReleaseName('MULTI ▎ The Lying Life of Adults'), 'The Lying Life of Adults');
+  assert.strictEqual(M.normalizeTitle('MULTI ▎ Sugar Rush'), M.normalizeTitle('Sugar Rush'));
+});
+
 test('cleanReleaseName never mangles a real title', () => {
   const keep = [
     '1917 - La Révolution Russe',                   // leading "1917 -" is a real title, not a prefix

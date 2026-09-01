@@ -3088,18 +3088,25 @@ class HomePage {
         // Open the player immediately (poster + loading animation), then resolve
         // the stream URL — and, for episodes, the series info for next-episode
         // handoff — into the already-visible shell.
-        await watch.play(content, async () => {
+        await watch.play(content, async ({ signal } = {}) => {
             const result = await window.API.proxy.xtream.getStreamUrl(
                 sourceId,
                 streamId,
                 streamType,
                 container,
-                playbackHint
+                playbackHint,
+                { signal }
             );
             if (!result || !result.url) return null;
+            if (signal?.aborted) return result;
             if (type === 'episode' && content.seriesId && sourceId) {
                 try {
-                    const seriesInfo = await window.API.request('GET', `/proxy/xtream/${sourceId}/series_info?series_id=${content.seriesId}`);
+                    const seriesInfo = await window.API.request(
+                        'GET',
+                        `/proxy/xtream/${sourceId}/series_info?series_id=${content.seriesId}`,
+                        null,
+                        { signal }
+                    );
                     if (seriesInfo) content.seriesInfo = seriesInfo;
                 } catch (e) {
                     console.warn('[Dashboard] Could not fetch seriesInfo for next episode:', e);

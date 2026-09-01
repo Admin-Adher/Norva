@@ -385,14 +385,15 @@ const MediaUtils = (() => {
 
     function normalizeTitle(name, knownYear = null) {
         if (!name) return '';
-        // Strip a leading provider region/language/category prefix ("EN - ", "AR-SUBS - ", "DK ▎ ", plus
+        // Strip a leading provider region/language/category prefix ("EN - ", "AR-SUBS - ", "DK ▎ ", "MULTI ▎ ", plus
         // the digit-led quality prefixes "4K-AR - " / "8K-FR - " the "Strng IPTV 8K" panel emits) on the
         // RAW-CASED string FIRST — the head guard (two uppercase letters, sparing "IT"/"US"/"007 - "…, OR
-        // a quality token 4K/8K/2160P…) is destroyed by toLowerCase(). Mirrors the server
+        // the explicit MULTI provider marker or a quality token 4K/8K/2160P…) is destroyed by
+        // toLowerCase(). Mirrors the server
         // vod-title-projection.normalizeTitle so the client-computed dedup key agrees with the server's,
         // collapsing cross-region/quality copies of one film. Falls back to the raw name if stripping empties it.
         const raw = String(name);
-        const deprefixed = raw.replace(/^(?:[A-Z]{2}|4K|8K|3D|2160P|1440P|1080P|720P|480P|360P|007)(?:-[A-Z0-9+]{1,6})*(?: [-–—▎▏▍▌│┃┆┊｜|] | -[A-Z0-9+]{1,6}- )/, '');
+        const deprefixed = raw.replace(/^(?:[A-Z]{2}|MULTI|4K|8K|3D|2160P|1440P|1080P|720P|480P|360P|007)(?:-[A-Z0-9+]{1,6})*(?: [-–—▎▏▍▌│┃┆┊｜|] | -[A-Z0-9+]{1,6}- )/, '');
         let s = stripDiacritics(deprefixed.length >= 2 ? deprefixed : raw).toLowerCase();
         s = s.replace(/[[{(][^\])}]*[\])}]/g, ' ');
         let changed = true;
@@ -432,20 +433,25 @@ const MediaUtils = (() => {
         const raw = String(value || '').trim();
         if (!raw) return raw;
         let text = raw.replace(/^\s*(?:[\[(][^\])]{0,60}[\])]\s*)+/, '').trim();
-        // Strip a leading provider region/language/category prefix ("FR - ", "AR-SUBS - ", "SOC - ",
+        // Strip a leading provider region/language/category prefix ("FR - ", "AR-SUBS - ", "MULTI ▎ ",
         // the box-bar variants some panels use ("DK ▎ A Hijacking", "ALB ▎ Source Code"), and the
         // digit-led quality prefixes the "Strng IPTV 8K" panel emits ("4K-AR - La Bête", "4K-D+ - The
         // Muppet Show", "8K - …"). Head = two uppercase letters (so "007 - …"/"1917 - …" are never
-        // mistaken for a prefix) OR a quality token 4K/8K/2160P… ("8 Mile"/"4Kids"/"2160 -" stay safe).
+        // mistaken for a prefix) OR the explicit MULTI provider marker OR a quality token
+        // 4K/8K/2160P… ("8 Mile"/"4Kids"/"2160 -" stay safe).
         // Mirrors the server cleanDisplayTitle — keep the two in sync.
-        const deprefixed = text.replace(/^(?:[A-Z]{2}|4K|8K|3D|2160P|1440P|1080P|720P|480P|360P|007)(?:-[A-Z0-9+]{1,6})*(?: [-–—▎▏▍▌│┃┆┊｜|] | -[A-Z0-9+]{1,6}- )/, '').trim();
+        const deprefixed = text.replace(/^(?:[A-Z]{2}|MULTI|4K|8K|3D|2160P|1440P|1080P|720P|480P|360P|007)(?:-[A-Z0-9+]{1,6})*(?: [-–—▎▏▍▌│┃┆┊｜|] | -[A-Z0-9+]{1,6}- )/, '').trim();
         if (deprefixed.length >= 2) text = deprefixed;
         // Strip a trailing second-script title providers append after the Latin name, e.g.
         // "Checkered Ninja 3 (2026) نينجاى شطرنجى 3" → "Checkered Ninja 3 (2026)" (the year-strip
         // below then drops the now-trailing "(2026)"). Cut at the first Arabic/Hebrew/Cyrillic/
         // Greek/CJK/Kana/Hangul/Thai character, but only when a Latin title remains in front, so a
         // natively non-Latin title is left untouched. Mirrors the server cleanDisplayTitle — keep in sync.
-        const nlAt = text.search(/[֐-׿؀-ۿݐ-ݿࢠ-ࣿיִ-﷿ﹰ-﻿Ѐ-ӿͰ-Ͽ぀-ヿ㐀-鿿가-힯฀-๿]/);
+        // Keep these ranges escaped. A previous source-encoding drift turned the intended
+        // Hebrew presentation-form range (FB1D-FDFF) into a range starting near U+05B4;
+        // that accidentally included the provider separator U+258E ("▎") and reduced
+        // "MULTI ▎ Sugar Rush" to the bogus display title "MULTI".
+        const nlAt = text.search(/[\u0590-\u05FF\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF\u0400-\u04FF\u0370-\u03FF\u3040-\u30FF\u3400-\u9FFF\uAC00-\uD7AF\u0E00-\u0E7F]/);
         if (nlAt > 0) {
             const head = text.slice(0, nlAt).replace(/[\s\-–—:|.،؛]+$/, '').trim();
             if (head.length >= 2 && /[A-Za-z]/.test(head)) text = head;

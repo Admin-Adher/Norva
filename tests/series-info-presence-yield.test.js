@@ -17,6 +17,24 @@ test('series-info waits for background jobs then retries a busy provider slot', 
   assert.match(source, /await sleep\(8000\)/);
 });
 
+test('series-info returns cold episode payloads before best-effort inventory RPCs finish', () => {
+  const source = read('supabase/functions/norva-series-info/index.ts');
+  const routeStart = source.indexOf('segments[2] === "series-info"');
+  const routeEnd = source.indexOf('throw new HttpError(404', routeStart);
+  const route = source.slice(routeStart, routeEnd);
+  const finalGuard = route.lastIndexOf('await assertSourceSnapshotCurrent(');
+  const schedule = route.indexOf('scheduleSeriesEpisodeRegistration(', finalGuard);
+  const response = route.indexOf('return json(req', schedule);
+
+  assert.ok(finalGuard >= 0 && schedule > finalGuard && response > schedule);
+  assert.doesNotMatch(route, /await scheduleSeriesEpisodeRegistration/);
+  assert.match(source, /Promise\.resolve\(\)\s*\.then\(\(\) => registerSeriesEpisodes/);
+  assert.match(source, /EdgeRuntime\?: \{ waitUntil\?:/);
+  assert.match(source, /runtime\?\.waitUntil/);
+  assert.match(source, /runtime\.waitUntil\(task\)/);
+  assert.match(source, /if \(isCatalogAccessGuardError\(error\) \|\| isCatalogGenerationSuperseded\(error\)\) return;/);
+});
+
 test('series prewarm yields between titles when the viewer is present', () => {
   const source = read('supabase/functions/norva-series-prewarm/index.ts');
   assert.match(source, /provider_account_busy/);

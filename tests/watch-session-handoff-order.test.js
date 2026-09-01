@@ -35,7 +35,7 @@ function assertDeferredSessionResolver(body, label) {
     assert.ok(resolveAt > playAt, `${label} must resolve only inside play()`);
     assert.equal(resolutions.length, 1, `${label} must open exactly one new lane`);
     assert.doesNotMatch(body.slice(0, playAt), /API\.proxy\.xtream\.getStreamUrl/);
-    assert.match(body.slice(playAt, resolveAt), /async \(\) => \{/);
+    assert.match(body.slice(playAt, resolveAt), /async \((?:\{ signal \} = \{\})?\) => \{/);
     assert.match(body.slice(resolveAt), /return result;/);
     assert.doesNotMatch(body.slice(0, playAt), /cloudPlaybackSessionId\s*:/);
 }

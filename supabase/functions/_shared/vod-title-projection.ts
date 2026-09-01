@@ -1424,16 +1424,17 @@ function identityForTitle(itemType: string, title: string, year: string | null, 
 }
 
 function normalizeTitle(value: string, year: string | null = null) {
-  // Strip a leading provider region/language/category prefix ("EN - ", "AR-SUBS - ", "DK ▎ ", plus the
+  // Strip a leading provider region/language/category prefix ("EN - ", "AR-SUBS - ", "DK ▎ ", "MULTI ▎ ", plus the
   // digit-led quality prefixes "4K-AR - " / "8K-FR - " the "Strng IPTV 8K" panel emits) on the RAW-CASED
   // string FIRST. The head guard is two leading UPPERCASE letters (so a plain digit-led "007 - " or
-  // one-word real title "IT"/"US" is never mistaken for a prefix) OR a quality token (4K/8K/2160P…, which
+  // one-word real title "IT"/"US" is never mistaken for a prefix) OR the explicit MULTI provider marker
+  // OR a quality token (4K/8K/2160P…, which
   // "8 Mile"/"2160 -" can't be). It MUST run before toLowerCase() below (lowercasing destroys the guard).
   // This makes identity_key prefix-free so cross-region/quality copies of one film collapse instead of
   // showing 8+ cards (EN-/AR-/FR-/4K-AR- The Hunger Games -> one norm: key). Fall back to the raw value if
   // stripping would empty it. Regex kept identical to cleanDisplayTitle and cleanSearchQuery — keep the three in sync.
   const rawValue = String(value || "");
-  const deprefixed = rawValue.replace(/^(?:[A-Z]{2}|4K|8K|3D|2160P|1440P|1080P|720P|480P|360P|007)(?:-[A-Z0-9+]{1,6})*(?: [-–—▎▏▍▌│┃┆┊｜|] | -[A-Z0-9+]{1,6}- )/, "");
+  const deprefixed = rawValue.replace(/^(?:[A-Z]{2}|MULTI|4K|8K|3D|2160P|1440P|1080P|720P|480P|360P|007)(?:-[A-Z0-9+]{1,6})*(?: [-–—▎▏▍▌│┃┆┊｜|] | -[A-Z0-9+]{1,6}- )/, "");
   let text = stripDiacritics(deprefixed.length >= 2 ? deprefixed : rawValue)
     .toLowerCase()
     .replace(/[\[({][^\])}]*[\])}]/g, " ")
@@ -1458,22 +1459,25 @@ const SOFT_RELEASE_TOKENS = /^(french|truefrench|vostfr|vost|vff|vfq|vf|vo|multi
 function cleanDisplayTitle(value: string) {
   const raw = String(value || "Norva").replace(/\s+/g, " ").trim();
   let text = raw.replace(/^\s*(?:[\[(][^\])]{0,60}[\])]\s*)+/, "").trim();
-  // Strip a leading provider region/language/category prefix ("FR - ", "AR-SUBS - ", "SOC - ", the
+  // Strip a leading provider region/language/category prefix ("FR - ", "AR-SUBS - ", "MULTI ▎ ", the
   // box-bar variants some panels use ("DK ▎ A Hijacking", "ALB ▎ Source Code"), and the digit-led
   // quality prefixes the "Strng IPTV 8K" panel emits: "4K-AR - La Bête", "4K-D+ - The Muppet Show",
   // "8K - Transformers One", "8K-FR - Inception"). The head is two leading UPPERCASE letters (so a plain
   // digit-leading real title "007 - Die Another Day" / "1917 - La Révolution Russe" is never mistaken
-  // for a prefix) OR a quality token (4K/8K/2160P… — "8 Mile"/"4Kids"/"2160 -" stay safe). Display only —
+  // for a prefix) OR the explicit MULTI provider marker OR a quality token
+  // (4K/8K/2160P… — "8 Mile"/"4Kids"/"2160 -" stay safe). Display only —
   // original_title keeps the raw provider name, and identity_key comes from normalizeTitle(raw), so no
   // re-keying. Mirrors the frontend MediaUtils.cleanReleaseName — keep the two in sync.
-  const deprefixed = text.replace(/^(?:[A-Z]{2}|4K|8K|3D|2160P|1440P|1080P|720P|480P|360P|007)(?:-[A-Z0-9+]{1,6})*(?: [-–—▎▏▍▌│┃┆┊｜|] | -[A-Z0-9+]{1,6}- )/, "").trim();
+  const deprefixed = text.replace(/^(?:[A-Z]{2}|MULTI|4K|8K|3D|2160P|1440P|1080P|720P|480P|360P|007)(?:-[A-Z0-9+]{1,6})*(?: [-–—▎▏▍▌│┃┆┊｜|] | -[A-Z0-9+]{1,6}- )/, "").trim();
   if (deprefixed.length >= 2) text = deprefixed;
   // Strip a trailing second-script title providers append after the Latin name, e.g.
   // "Checkered Ninja 3 (2026) نينجاى شطرنجى 3" → "Checkered Ninja 3 (2026)" (the year-strip
   // below then drops the now-trailing "(2026)"). Cut at the first Arabic/Hebrew/Cyrillic/
   // Greek/CJK/Kana/Hangul/Thai character, but only when a Latin title remains in front, so a
   // natively non-Latin title is left untouched. Mirrors MediaUtils.cleanReleaseName — keep in sync.
-  const nlAt = text.search(/[֐-׿؀-ۿݐ-ݿࢠ-ࣿיִ-﷿ﹰ-﻿Ѐ-ӿͰ-Ͽ぀-ヿ㐀-鿿가-힯฀-๿]/);
+  // Explicit escapes keep the server and browser byte-independent and prevent a
+  // source-encoding drift from widening one range over provider separators such as U+258E.
+  const nlAt = text.search(/[\u0590-\u05FF\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF\u0400-\u04FF\u0370-\u03FF\u3040-\u30FF\u3400-\u9FFF\uAC00-\uD7AF\u0E00-\u0E7F]/);
   if (nlAt > 0) {
     const head = text.slice(0, nlAt).replace(/[\s\-–—:|.،؛]+$/, "").trim();
     if (head.length >= 2 && /[A-Za-z]/.test(head)) text = head;

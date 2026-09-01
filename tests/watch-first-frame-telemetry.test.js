@@ -66,9 +66,9 @@ test('TTFF clock is captured at play intent before resume, teardown and session 
 
   assert.ok(intent >= 0, 'play() must capture the user intent timestamp');
   for (const marker of [
-    'await this.stop()',
+    'await this.stop({ preservePlaybackResolutionAttempt: true })',
     'await this._fetchServerResumeInfo(content)',
-    'await streamUrlResolver()',
+    'await streamUrlResolver({',
     'await this.loadVideo(streamUrl',
   ]) {
     const index = playBody.indexOf(marker);

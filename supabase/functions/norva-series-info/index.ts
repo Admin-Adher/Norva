@@ -114,6 +114,11 @@ async function handleRequest(req: Request): Promise<Response> {
       await bindCatalogVisibilityEpoch(req, identity.userId, supabase);
       const sourceId = segments[1];
       const sourceSnapshot = await assertVisibleSource(sourceId, identity.userId, supabase);
+      const seriesId = url.searchParams.get("series_id") ?? url.searchParams.get("seriesId") ?? "";
+      // This lookup is response-critical but independent from the provider call. Start it
+      // immediately so a cold provider request does not pay another database round trip after
+      // the episode payload has arrived.
+      const originalLanguagePromise = lookupSeriesOriginalLanguage(supabase, sourceId, seriesId);
       const seriesInfoResult = await getXtreamSeriesInfo(
         url,
         sourceId,
@@ -125,14 +130,18 @@ async function handleRequest(req: Request): Promise<Response> {
       // Augment with the title's TMDB source language (global, from catalog_titles) so the player
       // can resolve a VOSTFR/VO ("original") audio track to its real language. Best-effort; it
       // sits next to the provider payload and never replaces a provider field.
-      const seriesId = url.searchParams.get("series_id") ?? url.searchParams.get("seriesId") ?? "";
       // Build the server-trusted parent-series -> exact-episode inventory on
-      // both cache hits and provider fetches. This is deliberately best-effort:
+      // exact provider fetches. This is deliberately best-effort:
       // a rolling migration must never make a series fiche unavailable, while
       // playback/LID will stay fail-closed for cross-user episode sharing until
       // the corresponding inventory row exists.
+      const originalLanguage = await originalLanguagePromise;
+      // The provider/cache work above can take tens of seconds. A promotion that
+      // hid A during that work must win over this response, even if the payload
+      // itself was already fetched and sanitized.
+      await assertSourceSnapshotCurrent(sourceId, identity.userId, sourceSnapshot, supabase);
       if (seriesInfoResult.exactInventorySafe) {
-        await registerSeriesEpisodes(
+        scheduleSeriesEpisodeRegistration(
           supabase,
           identity.userId,
           sourceId,
@@ -141,11 +150,6 @@ async function handleRequest(req: Request): Promise<Response> {
           sourceSnapshot,
         );
       }
-      const originalLanguage = await lookupSeriesOriginalLanguage(supabase, segments[1], seriesId);
-      // The provider/cache work above can take tens of seconds. A promotion that
-      // hid A during that work must win over this response, even if the payload
-      // itself was already fetched and sanitized.
-      await assertSourceSnapshotCurrent(sourceId, identity.userId, sourceSnapshot, supabase);
       return json(req, originalLanguage ? { ...seriesInfo, original_language: originalLanguage } : seriesInfo);
     }
     throw new HttpError(404, "Route not found");
@@ -211,6 +215,39 @@ async function bindCatalogVisibilityEpoch(req: Request, userId: string, db: Supa
       code: "CATALOG_VISIBILITY_UNAVAILABLE",
     });
   }
+}
+
+function scheduleSeriesEpisodeRegistration(
+  db: SupabaseClient,
+  userId: string,
+  sourceId: string,
+  parentSeriesId: string,
+  payload: JsonRecord,
+  expectedSnapshot: SourceAccessSnapshot,
+): void {
+  // Inventory registration/hydration can involve three fenced RPCs. It must complete for
+  // exact playback sharing, but it is not needed to render the episode list. Keep the work
+  // alive after the response without adding those RPCs to the cold fiche latency.
+  const task = Promise.resolve()
+    .then(() => registerSeriesEpisodes(db, userId, sourceId, parentSeriesId, payload, expectedSnapshot))
+    .catch((error) => {
+      // A source disabled or promoted after the final response guard is an expected abort;
+      // every mutation is independently generation-fenced inside registerSeriesEpisodes.
+      if (isCatalogAccessGuardError(error) || isCatalogGenerationSuperseded(error)) return;
+      console.warn("[norva-series-info] background episode inventory deferred");
+    });
+  try {
+    const runtime = (globalThis as typeof globalThis & {
+      EdgeRuntime?: { waitUntil?: (promise: Promise<unknown>) => void };
+    }).EdgeRuntime;
+    if (runtime?.waitUntil) {
+      runtime.waitUntil(task);
+      return;
+    }
+  } catch (_) {
+    // A detached, already-caught promise is the development-runtime fallback.
+  }
+  void task;
 }
 
 async function registerSeriesEpisodes(

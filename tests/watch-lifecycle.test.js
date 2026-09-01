@@ -90,7 +90,7 @@ test('same-route episode handoff saves the outgoing identity without hiding Watc
   const assignContent = playBody.indexOf('this.content = content');
   const outgoingSave = playBody.indexOf('this.persistPlaybackStateForExit()');
   const outgoingDeactivate = playBody.indexOf('this.deactivateHistoryPersistence()');
-  const outgoingStop = playBody.indexOf('await this.stop()');
+  const outgoingStop = playBody.indexOf('await this.stop({ preservePlaybackResolutionAttempt: true })');
   assert.ok(outgoingSave >= 0 && outgoingSave < assignContent,
     'the old episode must be saved before the new content id is assigned');
   assert.ok(outgoingStop > outgoingSave && outgoingStop < assignContent,

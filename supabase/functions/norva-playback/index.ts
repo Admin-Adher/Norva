@@ -902,6 +902,12 @@ async function reportProviderPlaybackFailure(
   };
 }
 
+function playbackRequestAbortError(): Error {
+  const error = new Error("Playback request aborted");
+  error.name = "AbortError";
+  return error;
+}
+
 async function createPlaybackSession(
   req: Request,
   userId: string,
@@ -1546,7 +1552,9 @@ async function createPlaybackSession(
       gatewayVideoTranscodeExplicit,
       releasedSuperseded,
       resolvedContainerObservation,
+      req.signal,
     );
+    if (req.signal.aborted) throw playbackRequestAbortError();
     const gatewayCommit = await commitEdgeSessionCoordinator(edgeCoordination, {
       playbackSessionId: session.id,
       gatewaySessionId: stringOrNull(gateway.session?.external_session_id),
@@ -1566,6 +1574,7 @@ async function createPlaybackSession(
         code: "PLAYBACK_COORDINATOR_UNAVAILABLE",
       });
     }
+    if (req.signal.aborted) throw playbackRequestAbortError();
   } catch (error) {
     const gatewayExternalSessionId = stringOrNull(gateway?.session?.external_session_id);
     if (gatewayExternalSessionId) {
@@ -1678,6 +1687,14 @@ async function createPlaybackSession(
       startup_policy: gateway.startupPolicy ?? null,
     }
     : gateway.session;
+  if (req.signal.aborted) {
+    try {
+      await expirePlaybackSession(session.id, userId, db);
+    } catch (_) {
+      await gateway.cleanupCreatedSession?.().catch(() => null);
+    }
+    throw playbackRequestAbortError();
+  }
   return {
     session: publicPlaybackSession(session),
     playback: {
@@ -5494,6 +5511,7 @@ async function createGatewaySession(
   forceVideoTranscode: boolean,
   releasedSuperseded = 0,
   sourceContainerObservation: JsonRecord = {},
+  requestSignal: AbortSignal | null = null,
 ) {
   const gatewayMode = gatewayModeForPlayback(mode, playbackHint, forceVideoTranscode);
   const gatewayHints = gatewayPlaybackHints(playbackHint);
@@ -5565,6 +5583,7 @@ async function createGatewaySession(
     gatewayRoute.url,
     gatewayRoute.token,
     baseGatewayBody,
+    requestSignal,
   );
   let containerCorrectionRetried = false;
   if (!response.ok) {
@@ -5613,6 +5632,7 @@ async function createGatewaySession(
             prefixSha256: mismatch.evidence.prefixSha256,
           },
         },
+        requestSignal,
       );
       response = retry.response;
       gatewayBody = retry.body;
@@ -5649,6 +5669,7 @@ async function createGatewaySession(
             gatewayRoute.url,
             gatewayRoute.token,
             baseGatewayBody,
+            requestSignal,
           );
           response = retry.response;
           gatewayBody = retry.body;
@@ -5825,6 +5846,7 @@ async function requestGatewaySession(
   baseUrl: string,
   token: string,
   body: JsonRecord,
+  signal: AbortSignal | null = null,
 ) {
   const response = await fetch(`${baseUrl}/sessions`, {
     method: "POST",
@@ -5833,6 +5855,7 @@ async function requestGatewaySession(
       Authorization: `Bearer ${token}`,
     },
     body: JSON.stringify(body),
+    ...(signal ? { signal } : {}),
   });
   return {
     response,

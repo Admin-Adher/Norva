@@ -4686,7 +4686,7 @@
         },
 
         playback: {
-            createSession: (session) => playbackRequest(session),
+            createSession: (session, options = {}) => playbackRequest(session, options),
             // Server-owned strict language validation. The browser submits only
             // catalog identity + expected absolute audio indexes; playback/raw
             // tokens remain inside norva-playback and the media gateway.
@@ -4778,7 +4778,10 @@
                 reportObservedLanguages: (body) => catalogMutate('/device/media-observed-languages', body, { token: getDeviceToken() })
             },
             playback: {
-                createSession: (session) => playbackRequest(session, { token: getDeviceToken() }),
+                createSession: (session, options = {}) => playbackRequest(
+                    session,
+                    { ...options, token: getDeviceToken() }
+                ),
                 heartbeatSession: (id) => playbackHeartbeatRequest(id, { token: getDeviceToken() }),
                 expireSession: (id, options = {}) => playbackSessionRequest(
                     'POST',

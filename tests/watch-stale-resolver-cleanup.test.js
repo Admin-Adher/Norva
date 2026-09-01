@@ -22,6 +22,7 @@ function loadWatchPage(cloud) {
         setTimeout,
         clearTimeout,
         Promise,
+        AbortController,
     };
     vm.runInNewContext(source, context, { filename: 'WatchPage.js' });
     return context.window.WatchPage;
@@ -37,7 +38,7 @@ function makeSessionPage(WatchPage, sessionIds = ['session-a']) {
 
 test('a playback session resolved after Back is expired before the stale result is ignored', () => {
     const play = methodBody('async play(content, streamUrl, playback = {})', '\n    async ');
-    const resolver = play.indexOf('resolved = await streamUrlResolver()');
+    const resolver = play.indexOf('resolved = await streamUrlResolver({');
     const metadata = play.indexOf('const resolvedPlaybackMetadata = this.playbackMetadataFromResult');
     const session = play.indexOf('const resolvedSessionId = resolvedPlaybackMetadata.sessionId');
     const stale = play.indexOf('if (this.isStalePlaybackAttempt(playbackAttemptId))', session);
@@ -75,6 +76,22 @@ test('Back invalidates an in-flight playback resolver before teardown starts', (
     page.goBack();
 
     assert.strictEqual(page._playbackAttemptId, 8);
+});
+
+test('a newer playback attempt actively aborts the previous resolver request', () => {
+    const WatchPage = loadWatchPage({});
+    const page = Object.create(WatchPage.prototype);
+    page._playbackAttemptId = 4;
+    page._cloudPlaybackLaneAttemptId = 4;
+    page._playbackResolveAbortController = new AbortController();
+    const previousSignal = page._playbackResolveAbortController.signal;
+
+    const attemptId = page.beginPlaybackAttempt();
+
+    assert.strictEqual(attemptId, 5);
+    assert.strictEqual(previousSignal.aborted, true,
+        'the request owned by the previous attempt must be cancelled, not merely ignored later');
+    assert.strictEqual(page.playbackResolveSignalForAttempt(attemptId).aborted, false);
 });
 
 test('Back still navigates and releases its latch when teardown throws synchronously', () => {
@@ -129,7 +146,7 @@ test('an explicit conversion resolved after Back expires its exact late session'
     const retry = methodBody('async retryPlaybackInPlace(positionOverride = null)', '\n    clearPlaybackErrorRefreshTimer()');
     const resolve = retry.indexOf('const result = await API.proxy.xtream.getStreamUrl');
     const session = retry.indexOf('const resultSessionId = this.playbackMetadataFromResult(result).sessionId', resolve);
-    const stale = retry.indexOf('if (this.isStalePlaybackAttempt(playbackAttemptId))', session);
+    const stale = retry.indexOf('if (this.isStalePlaybackAttempt(playbackAttemptId)', session);
     const cleanup = retry.indexOf('await this.cleanupStaleCloudPlaybackSession(resultSessionId)', stale);
     const register = retry.indexOf('this.content.cloudPlaybackSessionId = resultSessionId || null', cleanup);
     const load = retry.indexOf('await this.loadVideo(', register);
