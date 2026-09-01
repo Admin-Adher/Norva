@@ -142,6 +142,7 @@ const PUBLIC_SOURCE_CONNECTION_STATUSES = new Set([
   400,
   401,
   403,
+  404,
   408,
   409,
   429,
@@ -150,6 +151,18 @@ const PUBLIC_SOURCE_CONNECTION_STATUSES = new Set([
   502,
   503,
   504,
+]);
+const PUBLIC_AUTO_REFRESH_ACTIONS = new Set([
+  "renew_access",
+  "update_login",
+  "check_provider",
+  "toggle_source",
+]);
+const PUBLIC_AUTO_REFRESH_ERROR_KINDS = new Set([
+  "expired",
+  "auth",
+  "not_found",
+  "m3u_quarantined",
 ]);
 
 const PUBLIC_SYNC_ERRORS = Object.freeze({
@@ -385,6 +398,28 @@ export function sanitizeSourceConnectionResult(value) {
   return compact({ success: false, code, status, error, checkedAt });
 }
 
+export function sanitizeSourceAutoRefreshState(value) {
+  const source = record(value);
+  const terminalStatus = boundedInteger(source.terminalHttpStatus, 599);
+  return compact({
+    actionRequired: source.actionRequired === true ? true : null,
+    actionRequiredReason: publicEnum(
+      source.actionRequiredReason,
+      PUBLIC_AUTO_REFRESH_ACTIONS,
+    )?.toUpperCase(),
+    terminalHttpStatus: terminalStatus !== null
+        && PUBLIC_SOURCE_CONNECTION_STATUSES.has(terminalStatus)
+      ? terminalStatus
+      : null,
+    terminalErrorKind: publicEnum(
+      source.terminalErrorKind,
+      PUBLIC_AUTO_REFRESH_ERROR_KINDS,
+    ),
+    terminalFailureCount: boundedInteger(source.terminalFailureCount, 20),
+    suspended: source.suspended === true ? true : null,
+  });
+}
+
 export function sanitizeSource(sourceValue) {
   const source = record(sourceValue);
   const safe = {};
@@ -392,6 +427,9 @@ export function sanitizeSource(sourceValue) {
     if (Object.prototype.hasOwnProperty.call(source, field)) safe[field] = source[field];
   }
   safe.config_hint = sanitizeSourceConfigHint(source.config_hint ?? source.configHint);
+  safe.auto_refresh_state = sanitizeSourceAutoRefreshState(
+    source.auto_refresh_state ?? source.autoRefreshState,
+  );
   const publicError = publicSourceSyncError(source.sync_error ?? source.syncError);
   safe.sync_error = publicError.message;
   safe.sync_error_code = publicError.code;
@@ -405,6 +443,9 @@ export function sanitizeCatalogSource(sourceValue) {
     if (Object.prototype.hasOwnProperty.call(source, field)) safe[field] = source[field];
   }
   safe.config_hint = sanitizeSourceConfigHint(source.config_hint ?? source.configHint);
+  safe.auto_refresh_state = sanitizeSourceAutoRefreshState(
+    source.auto_refresh_state ?? source.autoRefreshState,
+  );
   const publicError = publicSourceSyncError(source.sync_error ?? source.syncError);
   safe.sync_error = publicError.message;
   safe.sync_error_code = publicError.code;

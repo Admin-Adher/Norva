@@ -249,7 +249,7 @@ test('catalog policy keeps a hard login failure actionable without hiding an unc
   assert.equal(availability.browsable, true);
 });
 
-test('401 and 404 scheduler evidence require user action while only confirmed Provider Access hides', () => {
+test('one scheduler terminal observation keeps a completed catalog ready until confirmation', () => {
   const health = sourceHealthHarness();
   const completed = { lastSync: { syncedAt: '2026-08-10T08:00:00.000Z', total: 42 } };
   const missing = {
@@ -259,6 +259,8 @@ test('401 and 404 scheduler evidence require user action while only confirmed Pr
       actionRequired: true,
       terminalHttpStatus: 404,
       terminalErrorKind: 'not_found',
+      terminalFailureCount: 1,
+      suspended: false,
     },
     configHint: completed,
     provider_access_status: 'unknown',
@@ -270,23 +272,58 @@ test('401 and 404 scheduler evidence require user action while only confirmed Pr
       actionRequired: true,
       terminalHttpStatus: 401,
       terminalErrorKind: 'auth',
+      terminalFailureCount: 1,
+      suspended: false,
     },
     configHint: completed,
     provider_access_status: 'unknown',
   };
 
-  assert.equal(health.classifySource(missing).state, 'provider_changed');
-  assert.equal(health.classifySource(rejected).state, 'auth_failed');
+  assert.equal(health.classifySource(missing).state, 'ready');
+  assert.equal(health.classifySource(missing).retrying, true);
+  assert.equal(health.classifySource(rejected).state, 'ready');
+  assert.equal(health.classifySource(rejected).retrying, true);
   assert.equal(health.catalogAvailability(health.summarize([missing])).browsable, true);
   assert.equal(health.catalogAvailability(health.summarize([rejected])).browsable, true);
 
-  const confirmed = {
+  const confirmedScheduler = {
     ...missing,
+    auto_refresh_state: {
+      ...missing.auto_refresh_state,
+      terminalFailureCount: 2,
+      suspended: true,
+    },
+  };
+  assert.equal(health.classifySource(confirmedScheduler).state, 'provider_changed');
+
+  const confirmedAccess = {
+    id: 'source-confirmed',
+    sync_status: 'ready',
+    configHint: completed,
     provider_access_status: 'expired_confirmed',
   };
-  const availability = health.catalogAvailability(health.summarize([confirmed]));
+  assert.equal(health.classifySource(confirmedAccess).state, 'expired');
+  const availability = health.catalogAvailability(health.summarize([confirmedAccess]));
   assert.equal(availability.gate, true);
   assert.equal(availability.browsable, false);
+});
+
+test('a first terminal observation remains actionable for an initial import with no catalog', () => {
+  const health = sourceHealthHarness();
+  const source = {
+    id: 'source-initial-404',
+    sync_status: 'ready',
+    auto_refresh_state: {
+      actionRequired: true,
+      terminalHttpStatus: 404,
+      terminalErrorKind: 'not_found',
+      terminalFailureCount: 1,
+      suspended: false,
+    },
+    provider_access_status: 'unknown',
+  };
+
+  assert.equal(health.classifySource(source).state, 'provider_changed');
 });
 
 test('TV service handoff uses safe public copy and omits provider diagnostics', () => {

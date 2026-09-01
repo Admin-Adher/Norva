@@ -80,7 +80,8 @@ test('provisional overview work uses source-local RPCs and never writes the glob
   assert.doesNotMatch(localRecord, /where link\.identity_id/);
 
   assert.match(overviewWorker, /identityScope\?: "verified" \| "source"/);
-  assert.match(overviewWorker, /claim_source_provider_overview_candidates/);
+  assert.match(overviewWorker, /norva_claim_provider_overview_candidates_v2/);
+  assert.match(overviewWorker, /p_identity_scope: identityScope/);
   assert.match(overviewWorker, /record_source_provider_overview_outcome/);
   assert.match(overviewWorker, /source-provider-cache/);
 

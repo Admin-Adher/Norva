@@ -8,8 +8,12 @@ type JsonRecord = Record<string, unknown>;
 
 type ProviderOverviewCandidate = {
   external_id?: unknown;
+  title_id?: unknown;
   cached_overview?: unknown;
   cached_status?: unknown;
+  scan_cursor?: unknown;
+  scan_generation_id?: unknown;
+  scan_has_more?: unknown;
 };
 
 type ProviderOverviewFetch = (externalId: string) => Promise<unknown>;
@@ -161,17 +165,27 @@ export async function backfillProviderOverviews(options: ProviderOverviewBackfil
   const limit = Math.max(1, Math.min(8, Number(options.limit) || 4));
   const concurrency = Math.max(1, Math.min(2, Number(options.concurrency) || 2));
   const identityScope = options.identityScope === "source" ? "source" : "verified";
-  const claimRpc = identityScope === "source"
-    ? "claim_source_provider_overview_candidates"
-    : "claim_provider_overview_candidates";
+  // Keep the legacy six-column claim RPCs intact for rolling deploys. The v2
+  // RPC owns the generation-scoped cursor metadata and is service-role only,
+  // so the migration can land before this worker without breaking old Edge
+  // isolates (and this worker will fail closed if v2 is not installed yet).
+  const claimRpc = "norva_claim_provider_overview_candidates_v2";
   const { data, error } = await options.db.rpc(claimRpc, {
     p_user_id: options.userId,
     p_source_id: options.sourceId,
     p_limit: limit,
+    p_identity_scope: identityScope,
   });
   if (error) throw new Error(`${claimRpc} failed: ${error.message}`);
 
-  const candidates = (Array.isArray(data) ? data : []) as ProviderOverviewCandidate[];
+  const rows = (Array.isArray(data) ? data : []) as ProviderOverviewCandidate[];
+  const scan = rows[0] ?? {};
+  const scanCursor = stringOrNull(scan.scan_cursor);
+  const scanGenerationId = stringOrNull(scan.scan_generation_id);
+  const scanHasMore = scan.scan_has_more === true;
+  // A no-work keyset page is represented by one metadata-only row so the
+  // durable scheduler can reset its sweep without rescanning the same tail.
+  const candidates = rows.filter((candidate) => stringOrNull(candidate.external_id));
   if (!candidates.length) {
     return {
       mode: "provider-overview",
@@ -183,6 +197,10 @@ export async function backfillProviderOverviews(options: ProviderOverviewBackfil
       retried: 0,
       hasMore: false,
       exhausted: true,
+      overviewCursor: null,
+      overviewGenerationId: scanGenerationId,
+      overviewSweepComplete: true,
+      overviewCursorProtocol: 1,
       identityScope,
     };
   }
@@ -197,13 +215,18 @@ export async function backfillProviderOverviews(options: ProviderOverviewBackfil
   let lastId: string | null = null;
   let paused = false;
   let stoppedAt: string | null = null;
+  const completedIndexes = new Set<number>();
 
   const worker = async () => {
     while (!paused) {
-      const candidate = candidates[cursor++];
+      const candidateIndex = cursor++;
+      const candidate = candidates[candidateIndex];
       if (!candidate) return;
       const externalId = stringOrNull(candidate.external_id);
-      if (!externalId) continue;
+      if (!externalId) {
+        completedIndexes.add(candidateIndex);
+        continue;
+      }
 
       const cachedOverview = boundedProviderText(candidate.cached_overview);
       if (cachedOverview && stringOrNull(candidate.cached_status) === "resolved") {
@@ -229,6 +252,7 @@ export async function backfillProviderOverviews(options: ProviderOverviewBackfil
         resolved += 1;
         updated += Math.max(0, Number(result.titles_updated) || 0);
         lastId = externalId;
+        completedIndexes.add(candidateIndex);
         await options.assertSourceCurrent?.();
         continue;
       }
@@ -267,6 +291,7 @@ export async function backfillProviderOverviews(options: ProviderOverviewBackfil
         processed += 1;
         retried += 1;
         lastId = externalId;
+        completedIndexes.add(candidateIndex);
         if (providerWide) {
           // Stop after at most the already-running second request. Continuing a
           // batch after an auth/rate-limit response would be hostile to the panel.
@@ -305,6 +330,7 @@ export async function backfillProviderOverviews(options: ProviderOverviewBackfil
       processed += 1;
       updated += Math.max(0, Number(result.titles_updated) || 0);
       lastId = externalId;
+      completedIndexes.add(candidateIndex);
       if (overview) resolved += 1;
       else missing += 1;
       await options.assertSourceCurrent?.();
@@ -316,6 +342,21 @@ export async function backfillProviderOverviews(options: ProviderOverviewBackfil
   );
   await options.assertSourceCurrent?.();
 
+  // Concurrency may complete item 2 before item 1. Advance only through the
+  // contiguous durable prefix so a crash or provider-wide pause can never skip
+  // an exact file. When the whole returned page committed, the SQL cursor is
+  // authoritative and points at the final ordered candidate.
+  let contiguousIndex = -1;
+  while (completedIndexes.has(contiguousIndex + 1)) contiguousIndex += 1;
+  const contiguousCursor = contiguousIndex >= 0
+    ? stringOrNull(candidates[contiguousIndex]?.external_id)
+    : null;
+  const pageCommitted = contiguousIndex === candidates.length - 1;
+  const sweepComplete = pageCommitted && !paused && !scanHasMore;
+  const overviewCursor = sweepComplete
+    ? null
+    : (pageCommitted ? scanCursor ?? contiguousCursor : contiguousCursor);
+
   return {
     mode: "provider-overview",
     processed,
@@ -324,11 +365,15 @@ export async function backfillProviderOverviews(options: ProviderOverviewBackfil
     cached,
     missing,
     retried,
-    lastId,
+    lastId: contiguousCursor ?? lastId,
     paused,
     skipped: stoppedAt,
-    hasMore: paused || candidates.length >= limit,
-    exhausted: !paused && candidates.length < limit,
+    hasMore: !sweepComplete,
+    exhausted: sweepComplete,
+    overviewCursor,
+    overviewGenerationId: scanGenerationId,
+    overviewSweepComplete: sweepComplete,
+    overviewCursorProtocol: 1,
     identityScope,
   };
 }

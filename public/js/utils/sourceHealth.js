@@ -261,6 +261,15 @@
         return KIND_TO_STATE[classifyErrorKind(error)] || 'degraded';
     }
 
+    function providerAccessActionState(source = {}) {
+        const status = lower(
+            source.provider_access_status || source.providerAccessStatus || ''
+        );
+        if (status === 'expired_confirmed') return 'expired';
+        if (status === 'access_unavailable_confirmed') return 'provider_changed';
+        return '';
+    }
+
     function autoRefreshActionState(source = {}) {
         const state = source.auto_refresh_state || source.autoRefreshState || {};
         if (!state || typeof state !== 'object' || Array.isArray(state) || state.actionRequired !== true) return '';
@@ -290,7 +299,14 @@
         const lastSync = completedSyncAt(source, status);
         const managementEnabled = sourceManagementEnabled(source);
         const revoked = source.revoked === true;
+        const providerAccessAction = providerAccessActionState(source);
         const autoRefreshAction = autoRefreshActionState(source);
+        const autoRefreshState = source.auto_refresh_state || source.autoRefreshState || {};
+        const terminalFailureCount = Number(autoRefreshState.terminalFailureCount ?? 0);
+        const autoRefreshActionConfirmed = autoRefreshAction && (
+            autoRefreshState.suspended === true ||
+            (Number.isFinite(terminalFailureCount) && terminalFailureCount >= 2)
+        );
 
         let state = 'degraded';
         let refreshing = false;
@@ -299,8 +315,24 @@
             state = 'disabled';
         } else if (revoked) {
             state = 'degraded';
-        } else if (autoRefreshAction) {
+        } else if (providerAccessAction) {
+            // Provider Access is the account-level authority. Only its
+            // confirmed terminal states block a catalogue that was previously
+            // ready; a first scheduler observation is deliberately retried by
+            // the database before Norva asks the user to repair anything.
+            state = providerAccessAction;
+        } else if (autoRefreshAction && (
+            autoRefreshActionConfirmed || !hasCompletedCatalog(source, status)
+        )) {
             state = autoRefreshAction;
+        } else if (autoRefreshAction) {
+            // The fair-refresh contract confirms the same terminal response a
+            // second time after its cooldown before suspending the source. Keep
+            // the already-built catalogue usable and show the quiet retry state
+            // until that confirmation exists. This prevents one stale 404/401
+            // response from turning a healthy provider into "Review service".
+            state = 'ready';
+            retrying = true;
         } else if (EXPLICIT_ATTENTION_STATES.has(rawStatus) || EXPLICIT_ATTENTION_STATES.has(progressStatus)) {
             const explicitState = EXPLICIT_ATTENTION_STATES.has(progressStatus) ? progressStatus : rawStatus;
             if (explicitState === 'unreachable' && hasCompletedCatalog(source, status)) {

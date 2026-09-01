@@ -4,6 +4,8 @@ const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
+const vm = require('node:vm');
+const { buildSync } = require('esbuild');
 
 const ROOT = path.join(__dirname, '..');
 const read = (file) => fs.readFileSync(path.join(ROOT, file), 'utf8');
@@ -28,6 +30,33 @@ const latestMigrationContaining = (marker) => {
   return candidates.at(-1);
 };
 
+const bundledOverviewWorker = () => {
+  const output = buildSync({
+    entryPoints: [path.join(ROOT, 'supabase/functions/_shared/provider-overview-backfill.ts')],
+    bundle: true,
+    platform: 'node',
+    format: 'cjs',
+    target: 'es2022',
+    write: false,
+  }).outputFiles[0].text;
+  const module = { exports: {} };
+  vm.runInNewContext(output, {
+    module,
+    exports: module.exports,
+    require,
+    console,
+    Date,
+    Error,
+    Math,
+    Number,
+    Object,
+    Promise,
+    Set,
+    String,
+  }, { filename: 'provider-overview-backfill.cjs' });
+  return module.exports;
+};
+
 test('overview candidates are exact-file, bounded, resumable, and identity verified', () => {
   const migration = read('supabase/migrations/20260719190000_provider_overview_crawler.sql');
   const claim = between(
@@ -48,6 +77,41 @@ test('overview candidates are exact-file, bounded, resumable, and identity verif
   assert.match(claim, /catalog\.metadata #>> '\{tmdbValidation,valid\}' = 'true'/);
   assert.doesNotMatch(claim, /config_hint|providerKey|serverHost/);
   assert.doesNotMatch(claim, /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+});
+
+test('latest overview claim uses a generation-scoped durable keyset instead of a full-catalog sort', () => {
+  const latest = latestMigrationContaining(
+    'create or replace function public.norva_claim_provider_overview_candidates_v2(',
+  );
+  const helper = between(
+    latest.source,
+    'create or replace function public.norva_claim_provider_overview_candidates_v2(',
+    '\nrevoke all on function public.norva_claim_provider_overview_candidates_v2(',
+  );
+  const finish = between(
+    latest.source,
+    'create or replace function public.finish_catalog_enrichment_source(',
+    '\nrevoke all on function public.finish_catalog_enrichment_source(',
+  );
+
+  assert.match(latest.source, /add column if not exists provider_overview_cursor text/);
+  assert.match(latest.source, /provider_overview_generation_id uuid/);
+  assert.match(latest.source, /cloud_title_variants_provider_overview_keyset_idx/);
+  assert.match(helper, /if v_generation_id is null then\s+return/);
+  assert.match(helper, /variant\.generation_id = v_generation_id/);
+  assert.doesNotMatch(helper, /v_generation_id is null and variant\.generation_id is null/);
+  assert.match(helper, /variant\.external_id > v_after_external_id/);
+  assert.match(helper, /order by variant\.external_id\s+limit v_limit \+ 1/);
+  assert.match(helper, /scan_generation_id uuid/);
+  assert.match(helper, /scan_has_more boolean/);
+  assert.doesNotMatch(helper, /row_number\(\) over|order by[\s\S]*coalesce\(media\.added_at/);
+  assert.doesNotMatch(latest.source, /create or replace function public\.claim_provider_overview_candidates\(/);
+  assert.doesNotMatch(latest.source, /create or replace function public\.claim_source_provider_overview_candidates\(/);
+  assert.match(finish, /p_result->>'overviewCursor'/);
+  assert.match(finish, /p_result->>'overviewGenerationId'/);
+  assert.match(finish, /p_result->>'overviewSweepComplete'/);
+  assert.match(finish, /p_result->>'overviewCursorProtocol'/);
+  assert.match(finish, /when current_lane <> 11/);
 });
 
 test('recording fans out only through canonical identity and never overwrites text', () => {
@@ -96,7 +160,104 @@ test('worker parses only known vod-info synopsis fields and uses conservative re
   assert.match(worker, /90 \* 24 \* 60 \* 60 \* 1000/);
   assert.match(worker, /canonical-provider-cache/);
   assert.match(worker, /record_provider_overview_outcome/);
+  assert.match(worker, /completedIndexes/);
+  assert.match(worker, /overviewSweepComplete/);
+  assert.match(worker, /overviewCursorProtocol/);
+  assert.match(worker, /scan_has_more/);
   assert.match(backfill, /claim_provider_overview_candidates/);
+});
+
+test('overview worker checkpoints an ordered page and resets only after a complete sweep', async () => {
+  const { backfillProviderOverviews } = bundledOverviewWorker();
+  const generation = {
+    kind: 'active',
+    generationId: '10000000-0000-4000-8000-000000000001',
+    headRevision: '1',
+    configRevision: '1',
+    sourceVisibilityEpoch: '1',
+    userVisibilityEpoch: '1',
+  };
+  const recordCalls = [];
+  const db = {
+    async rpc(name, args) {
+      if (name === 'claim_provider_overview_candidates') {
+        throw new Error('legacy claim RPC must not be used by the v2 worker');
+      }
+      if (name === 'norva_claim_provider_overview_candidates_v2') {
+        assert.equal(args.p_identity_scope, 'verified');
+        return {
+          data: [
+            {
+              external_id: '0010',
+              title_id: '20000000-0000-4000-8000-000000000001',
+              scan_cursor: '0020',
+              scan_generation_id: generation.generationId,
+              scan_has_more: true,
+            },
+            {
+              external_id: '0020',
+              title_id: '20000000-0000-4000-8000-000000000002',
+              scan_cursor: '0020',
+              scan_generation_id: generation.generationId,
+              scan_has_more: true,
+            },
+          ],
+          error: null,
+        };
+      }
+      if (name === 'record_provider_overview_outcome') {
+        recordCalls.push(args);
+        return { data: { titles_updated: 1 }, error: null };
+      }
+      throw new Error(`unexpected RPC ${name}`);
+    },
+  };
+
+  const page = await backfillProviderOverviews({
+    db,
+    userId: '30000000-0000-4000-8000-000000000001',
+    sourceId: '40000000-0000-4000-8000-000000000001',
+    generation,
+    limit: 2,
+    concurrency: 2,
+    fetchVodInfo: async (externalId) => ({ info: { plot: `Synopsis ${externalId}` } }),
+  });
+
+  assert.equal(page.processed, 2);
+  assert.equal(page.overviewCursor, '0020');
+  assert.equal(page.overviewGenerationId, generation.generationId);
+  assert.equal(page.overviewSweepComplete, false);
+  assert.equal(page.overviewCursorProtocol, 1);
+  assert.equal(page.hasMore, true);
+  assert.equal(recordCalls.length, 2);
+
+  db.rpc = async (name) => {
+    if (name === 'norva_claim_provider_overview_candidates_v2') {
+      return {
+        data: [{
+          external_id: null,
+          scan_cursor: null,
+          scan_generation_id: generation.generationId,
+          scan_has_more: false,
+        }],
+        error: null,
+      };
+    }
+    throw new Error(`unexpected RPC ${name}`);
+  };
+  const complete = await backfillProviderOverviews({
+    db,
+    userId: '30000000-0000-4000-8000-000000000001',
+    sourceId: '40000000-0000-4000-8000-000000000001',
+    generation,
+    fetchVodInfo: async () => ({}),
+  });
+
+  assert.equal(complete.processed, 0);
+  assert.equal(complete.overviewCursor, null);
+  assert.equal(complete.overviewSweepComplete, true);
+  assert.equal(complete.overviewCursorProtocol, 1);
+  assert.equal(complete.exhausted, true);
 });
 
 test('dynamic fleet keeps provider overview as the final twelfth lane', () => {

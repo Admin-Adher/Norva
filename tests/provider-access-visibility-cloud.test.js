@@ -306,6 +306,7 @@ test('source plan capacity counts only commercially visible logical sources', ()
 test('source payload sanitizer exposes only host-level connection hints and bounded progress', async () => {
   const {
     sanitizeSource,
+    sanitizeSourceAutoRefreshState,
     sanitizeSourceValidation,
   } = await import(pathToFileURL(SOURCE_PUBLIC_PATH).href);
 
@@ -319,6 +320,17 @@ test('source payload sanitizer exposes only host-level connection hints and boun
     username: 'alice',
     serverUrl: 'https://alice:secret@provider.example/player_api.php',
     sync_error: '[502] request failed (https://alice:secret@provider.example/player_api.php?username=alice&token=secret timeout)',
+    auto_refresh_state: {
+      actionRequired: true,
+      actionRequiredReason: 'CHECK_PROVIDER',
+      terminalHttpStatus: 404,
+      terminalErrorKind: 'not_found',
+      terminalFailureCount: 1,
+      suspended: false,
+      lockedAt: '2026-08-22T18:30:00Z',
+      leaseOwner: 'private-worker',
+      internalError: 'https://alice:secret@provider.example/private',
+    },
     config_hint: {
       serverHost: 'https://alice:secret@provider.example:8443/player_api.php?username=alice&password=secret',
       playlistHost: 'https://playlist.example/private/list.m3u?token=secret',
@@ -370,6 +382,13 @@ test('source payload sanitizer exposes only host-level connection hints and boun
   assert.equal(source.config_hint.finalizeCursor.afterId, '30000000-0000-4000-8000-000000000003');
   assert.equal(source.sync_error_code, 'PROVIDER_TEMPORARILY_UNAVAILABLE');
   assert.equal(source.sync_error, 'The TV service is temporarily unavailable.');
+  assert.deepEqual(source.auto_refresh_state, {
+    actionRequired: true,
+    actionRequiredReason: 'CHECK_PROVIDER',
+    terminalHttpStatus: 404,
+    terminalErrorKind: 'not_found',
+    terminalFailureCount: 1,
+  });
 
   const serialized = JSON.stringify(source);
   for (const forbidden of [
@@ -383,7 +402,26 @@ test('source payload sanitizer exposes only host-level connection hints and boun
     'finalizeLease',
     'tokenRef',
     'raw provider exploded',
+    'private-worker',
+    'internalError',
   ]) assert.equal(serialized.includes(forbidden), false, `public source leaked ${forbidden}`);
+
+  assert.deepEqual(sanitizeSourceAutoRefreshState({
+    actionRequired: true,
+    actionRequiredReason: 'TOGGLE_SOURCE',
+    terminalHttpStatus: 409,
+    terminalErrorKind: 'm3u_quarantined',
+    terminalFailureCount: 999,
+    suspended: true,
+    nextInternalAttempt: 'private',
+  }), {
+    actionRequired: true,
+    actionRequiredReason: 'TOGGLE_SOURCE',
+    terminalHttpStatus: 409,
+    terminalErrorKind: 'm3u_quarantined',
+    terminalFailureCount: 20,
+    suspended: true,
+  });
 
   const validation = sanitizeSourceValidation({
     serverUrl: 'https://alice:secret@provider.example/player_api.php?username=alice',

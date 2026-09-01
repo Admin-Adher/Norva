@@ -1897,6 +1897,12 @@ function enrichmentFleetSummary(payload: unknown): JsonRecord {
     failureClass: stringOrNull(body.failureClass ?? body.failure_class),
     probeHealth: isRecord(body.probeHealth) ? body.probeHealth : null,
     lastId: processed > 0 ? stringOrNull(body.lastId) : null,
+    overviewCursor: stringOrNull(body.overviewCursor ?? body.overview_cursor),
+    overviewGenerationId: stringOrNull(
+      body.overviewGenerationId ?? body.overview_generation_id,
+    ),
+    overviewSweepComplete: body.overviewSweepComplete === true,
+    overviewCursorProtocol: Number(body.overviewCursorProtocol) === 1 ? 1 : null,
     skipped,
     paused: body.paused === true,
     hasMore,
