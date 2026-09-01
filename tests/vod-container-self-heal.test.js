@@ -183,7 +183,7 @@ test('the exact owner variant profile outranks lagging item and global catalogue
   assert.match(resolver, /const storedCodecProfile = hasReliableVodCodecProfile\(exactVariantCodecProfile\)[\s\S]*\? exactVariantCodecProfile/);
 });
 
-test('a reliable server profile promotes only unsafe browser relays to the Gateway', () => {
+test('a real MP4 stays on Relay while a mismatched unsafe container still promotes to Gateway', () => {
   const edge = read(EDGE_PATH);
   const create = sourceBetween(edge, 'async function createPlaybackSession(', '\nasync function getPlaybackSession(');
   const helper = sourceBetween(
@@ -193,11 +193,18 @@ test('a reliable server profile promotes only unsafe browser relays to the Gatew
   );
   assert.match(create, /const clientMode = choosePlaybackMode/);
   assert.match(create, /itemType === "movie"[\s\S]*authoritativeVodGatewayTier\(resolved\.playbackHint/);
-  assert.match(create, /clientMode === "relay"[\s\S]*authoritativeVodTier === "video_transcode"/);
+  assert.match(create, /resolvedVodContainerAuthority\([\s\S]*resolved\.playbackHint[\s\S]*resolvedContainerObservation/);
+  assert.match(create, /const browserNativeMp4 =[\s\S]*authoritativeVodContainer === "mp4"/);
+  assert.match(create, /const serverDemotedAutomaticMp4 =[\s\S]*clientMode === "transcode"[\s\S]*body\.gatewayAutoMode === true/);
+  assert.match(create, /clientMode === "relay" &&[\s\S]*!browserNativeMp4 &&[\s\S]*authoritativeVodTier === "video_transcode"/);
   assert.match(create, /gatewayMode: authoritativeVodTier === "video_transcode" \? "transcode" : "remux"/);
   assert.doesNotMatch(create, /clientMode === "direct"\s*&&\s*serverPromotedRelay/);
   assert.match(helper, /container: profile\.container/);
   assert.match(helper, /\["avi", "flv", "mpg", "ogg"\]/);
+  assert.match(helper, /function resolvedVodContainerAuthority\(/);
+  assert.match(helper, /if \(observedContainer\) return observedContainer/);
+  assert.match(helper, /hasReliableVodCodecProfile\(profile\)[\s\S]*canonicalVodContainer\(profile\.container\)/);
+  assert.match(helper, /profileToken === "movmp4m4a3gp3g2mj2"/);
 });
 
 test('only a Norva-built Xtream URL has its terminal container rewritten', () => {
@@ -309,8 +316,8 @@ test('Gateway emits only redacted hashes and recognizes MP4 or MPEG-TS before FF
   const edge = read(EDGE_PATH);
   const deploy = read(path.join(ROOT, 'ops/hetzner/scripts/04-deploy-edge-functions.sh'));
   assert.match(gateway, /version: GATEWAY_VERSION,[\s\S]*vodContainerSelfHealProtocol: 1/);
-  assert.match(edge, /version: 64,[\s\S]*vodContainerSelfHealProtocol: 1/);
-  assert.match(deploy, /EXPECTED_PLAYBACK_VERSION=64/);
+  assert.match(edge, /version: 65,[\s\S]*vodContainerSelfHealProtocol: 1/);
+  assert.match(deploy, /EXPECTED_PLAYBACK_VERSION=65/);
   assert.match(deploy, /EXPECTED_VOD_CONTAINER_SELF_HEAL_PROTOCOL=1/);
   assert.match(deploy, /vodContainerSelfHealProtocol\\\":\$EXPECTED_VOD_CONTAINER_SELF_HEAL_PROTOCOL/);
   const classifier = sourceBetween(

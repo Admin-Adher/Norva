@@ -431,7 +431,7 @@ function memoryStorage(seed = {}) {
     };
 }
 
-function loadCloudApi({ native = false, createSessionError = null } = {}) {
+function loadCloudApi({ native = false, engine = true, createSessionError = null } = {}) {
     const calls = [];
     const localStorage = memoryStorage({
         'norva-cloud-session': JSON.stringify({
@@ -462,7 +462,7 @@ function loadCloudApi({ native = false, createSessionError = null } = {}) {
     };
     const window = {
         NorvaCloud,
-        NorvaEngine: function NorvaEngine() {},
+        ...(engine ? { NorvaEngine: function NorvaEngine() {} } : {}),
         ...(native ? { NodeCastNative: {} } : {}),
         innerWidth: 1280,
         innerHeight: 720,
@@ -763,6 +763,33 @@ test('unknown-codec MP4/M4V optimistically opens one relay lane and never pre-op
         assert.strictEqual(calls[0].requiresTranscode, false);
         assert.strictEqual(calls[0].enginePipe, undefined);
         assert.strictEqual(calls[0].playbackHint.gatewayMode, 'remux');
+    }
+});
+
+test('probed HEVC/AC-3 MP4/M4V still opens Relay first with or without the Engine bundle', async () => {
+    for (const container of ['mp4', 'm4v']) {
+        for (const engine of [true, false]) {
+            const { API, calls } = loadCloudApi({ engine });
+            const result = await API.proxy.xtream.getStreamUrl(
+                '00000000-0000-4000-8000-000000000001',
+                `unsafe-${container}-${engine ? 'engine' : 'no-engine'}`,
+                'movie',
+                container,
+                {
+                    videoCodec: 'hevc',
+                    audioCodec: 'ac3',
+                    audioChannels: 6
+                }
+            );
+
+            assert.strictEqual(result.mode, 'relay', `${container} must bypass Gateway on its initial browser attempt`);
+            assert.strictEqual(calls.length, 1);
+            assert.strictEqual(calls[0].mode, 'relay');
+            assert.strictEqual(calls[0].requiresRelay, true);
+            assert.strictEqual(calls[0].requiresTranscode, false);
+            assert.strictEqual(calls[0].gatewayAutoMode, false);
+            assert.strictEqual(calls[0].enginePipe, undefined);
+        }
     }
 });
 

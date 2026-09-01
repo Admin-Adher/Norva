@@ -279,7 +279,7 @@ async function handleRequest(req: Request): Promise<Response> {
       return json(req, {
         ok: true,
         service: "norva-playback",
-        version: 64,
+        version: 65,
         nativeHeartbeatProtocol: 1,
         providerCircuitProtocol: 1,
         exactTrackCrawlerProtocol: 2,
@@ -1000,9 +1000,28 @@ async function createPlaybackSession(
   const authoritativeVodTier = itemType === "movie"
     ? authoritativeVodGatewayTier(resolved.playbackHint, resolvedContainerObservation)
     : null;
+  const authoritativeVodContainer = resolvedVodContainerAuthority(
+    resolved.playbackHint,
+    resolvedContainerObservation,
+  );
+  const browserNativeMp4 = (itemType === "movie" || itemType === "series") &&
+    authoritativeVodContainer === "mp4";
+  // Old cached web bundles may still ask for an automatic Gateway lane when a
+  // reliable codec probe reports HEVC/AC-3. The real MP4 container remains
+  // browser-native: demote only that automatic request to the byte-preserving
+  // Relay. An explicit conversion action (`gatewayAutoMode !== true`) remains
+  // available after a genuine browser media rejection.
+  const serverDemotedAutomaticMp4 = browserNativeMp4 &&
+    clientMode === "transcode" &&
+    body.gatewayAutoMode === true;
   const serverPromotedRelay = clientMode === "relay" &&
+    !browserNativeMp4 &&
     (authoritativeVodTier === "video_transcode" || authoritativeVodTier === "audio_transcode");
-  const mode = serverPromotedRelay ? "transcode" : clientMode;
+  const mode = serverDemotedAutomaticMp4
+    ? "relay"
+    : serverPromotedRelay
+    ? "transcode"
+    : clientMode;
   if (serverPromotedRelay) {
     // The browser may still be holding a catalogue extension (for example MP4)
     // while a server-owned probe has already identified an AVI/MPEG-4/AC-3
@@ -5289,7 +5308,13 @@ function exactJsonKeys(value: JsonRecord, expected: string[]) {
 
 function canonicalVodContainer(value: unknown): string | null {
   const token = normalizeCodecToken(value);
-  const canonical = token === "matroska" ? "mkv" : token === "mpeg" ? "mpg" : token;
+  const canonical = token === "matroska"
+    ? "mkv"
+    : token === "mpeg"
+    ? "mpg"
+    : token === "m4v"
+    ? "mp4"
+    : token;
   return ["mkv", "mp4", "mov", "avi", "ogg", "flv", "mpg", "ts"].includes(canonical)
     ? canonical
     : null;
@@ -6670,6 +6695,36 @@ function authoritativeVodGatewayTier(
     return "video_transcode";
   }
   return null;
+}
+
+function resolvedVodContainerAuthority(
+  playbackHintValue: unknown,
+  containerObservationValue: unknown = {},
+) {
+  const observedContainer = canonicalVodContainer(
+    recordOrEmpty(containerObservationValue).container,
+  );
+  if (observedContainer) return observedContainer;
+
+  const playbackHint = recordOrEmpty(playbackHintValue);
+  const profile = firstUsefulCodecProfile(
+    playbackHint.codecProfile,
+    playbackHint.codec_profile,
+  );
+  if (hasReliableVodCodecProfile(profile)) {
+    const profiledContainer = canonicalVodContainer(profile.container);
+    if (profiledContainer) return profiledContainer;
+    // FFprobe reports ISO-BMFF as `mov,mp4,m4a,3gp,3g2,mj2`. Preserve the
+    // server-resolved file extension to distinguish a real MP4 from MOV.
+    const profileToken = normalizeCodecToken(profile.container);
+    if (profileToken === "movmp4m4a3gp3g2mj2") {
+      const resolvedContainer = canonicalVodContainer(playbackHint.container);
+      if (resolvedContainer === "mp4" || resolvedContainer === "mov") {
+        return resolvedContainer;
+      }
+    }
+  }
+  return canonicalVodContainer(playbackHint.container);
 }
 
 function playbackCostScoreForObservation(tier: string, startupMs: number | null) {

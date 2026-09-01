@@ -1679,6 +1679,11 @@ const CloudAdapter = (() => {
         return normalized === 'mkv';
     }
 
+    function isBrowserNativeMp4Container(container) {
+        const normalized = String(container || '').split('?')[0].split('#')[0].toLowerCase();
+        return normalized === 'mp4' || normalized === 'm4v';
+    }
+
     function hasReliableVodCodecHint(playbackHint) {
         const hint = playbackHint && typeof playbackHint === 'object' ? playbackHint : {};
         const profile = hint.codecProfile && typeof hint.codecProfile === 'object'
@@ -2163,6 +2168,14 @@ const CloudAdapter = (() => {
                 const browserMkv = isVodPlayback
                     && !nativePlayer
                     && isMatroskaContainer(container);
+                // MP4/M4V is a browser-native container. Always let the browser
+                // try the byte-preserving Relay first, even when an old probe says
+                // HEVC/AC-3 or the local Engine bundle has not loaded yet. A real
+                // media rejection may still expose the explicit conversion action,
+                // but initial playback must never pay Gateway/FFmpeg startup cost.
+                const browserNativeMp4 = isVodPlayback
+                    && !nativePlayer
+                    && isBrowserNativeMp4Container(container);
                 const denseTrackVod = isVodPlayback
                     && !nativePlayer
                     && shouldDenseVodUseGateway(container, playbackHint);
@@ -2188,7 +2201,7 @@ const CloudAdapter = (() => {
                 // containers (MOV/AVI/...) keep the bounded Engine/Gateway path below.
                 const browserSafeVod = isVodPlayback
                     && !needsGateway
-                    && !shouldVodUseGatewayTranscode(container, playbackHint);
+                    && (browserNativeMp4 || !shouldVodUseGatewayTranscode(container, playbackHint));
                 // Browser VOD that needs container/codec help (avi/mov, HEVC,
                 // AC-3/DTS/TrueHD audio, …): play it with the in-browser engine
                 // (NorvaEngine remuxes the container + transcodes the audio to
