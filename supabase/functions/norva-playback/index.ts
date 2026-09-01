@@ -3900,7 +3900,6 @@ async function expirePlaybackSession(id: string, userId: string, db: SupabaseCli
           audioMode: null,
           requireItemCas: true,
           expectedItemCas: mkvH264FastStartItemCasFromPlaybackSession(session),
-          itemOnly: true,
           allowProofReplacement: Boolean(finalProof || finalCompleteCacheProof),
         });
         fastStartProofPersisted = fastStartProofPersisted || persisted;
@@ -4331,7 +4330,6 @@ async function closeOpenGatewaySessionsForUser(userId: string, db: SupabaseClien
             audioMode: null,
             requireItemCas: true,
             expectedItemCas: mkvH264FastStartItemCasFromPlaybackSession(playbackSession),
-            itemOnly: true,
             allowProofReplacement: Boolean(finalProof || finalCompleteCacheProof),
           });
         }
@@ -6084,8 +6082,13 @@ async function persistObservedCodecProfile(
   if (options.itemOnly) return Boolean(item?.id);
 
   const tier = compatibilityTierForCodecProfile(codecProfile, mergedPlaybackHint);
+  // Exact variants are owner-readable catalogue rows. They need the final
+  // in-band stream inventory so post-playback language validation can bind to
+  // the file, but never the private fast-start/cache attestations stored on the
+  // CAS-protected media item.
+  const variantCodecProfile = stripMkvH264FastStartProof(codecProfile);
   const variantPatch: JsonRecord = compactRecord({
-    codec_profile: codecProfile,
+    codec_profile: variantCodecProfile,
     compatibility_tier: tier,
     playback_cost_score: playbackCostScoreForObservation(tier, options.startupMs),
   });
@@ -10331,7 +10334,6 @@ async function runCompleteHlsCacheCallback(
     audioMode: null,
     requireItemCas: true,
     expectedItemCas: mkvH264FastStartItemCasFromPlaybackSession(playbackSession),
-    itemOnly: true,
     allowProofReplacement: true,
   });
   return { ok: true, protocol: 1, persisted };

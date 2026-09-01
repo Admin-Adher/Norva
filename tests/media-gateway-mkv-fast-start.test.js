@@ -498,7 +498,7 @@ function runMediaTool(executable, args, options = {}) {
   });
 }
 
-function loadEdgeHarness() {
+function loadEdgeHarness(overrides = {}) {
   const snippets = [
     between(EDGE, 'function publicPlaybackSession(', '\nasync function providerAccountHashFromUrl('),
     between(EDGE, 'async function persistObservedCodecProfile(', '\nfunction mergePlaybackHints('),
@@ -554,6 +554,8 @@ function loadEdgeHarness() {
       const profile = { ...recordOrEmpty(value) };
       delete profile.mkvH264FastStartProof;
       delete profile.mkv_h264_fast_start_proof;
+      delete profile.mkvCompleteHlsCacheProof;
+      delete profile.mkv_complete_hls_cache_proof;
       return compactRecord(profile);
     },
     firstUsefulCodecProfile: (...values) => values.map(normalizeProfile).find((profile) => (
@@ -598,6 +600,7 @@ function loadEdgeHarness() {
         this.details = details;
       }
     },
+    ...overrides,
   };
   const harness = vm.runInNewContext(
     `(() => { ${js}; return {
@@ -2241,9 +2244,13 @@ test('Edge authority, response redaction, original-item CAS and protocol-2 Web c
   assert.match(publicSession, /mkv_complete_hls_cache_proof/);
   assert.match(cleanup, /finalCodecProfile[\s\S]*expectedItemCas/);
   assert.match(cleanup, /finalCompleteCacheProof[\s\S]*allowProofReplacement/);
+  assert.doesNotMatch(cleanup, /itemOnly:\s*true/,
+    'normal exit must publish the exact stream inventory to the variant for post-playback LID');
   assert.match(cleanup, /searchParams\.set\("completeCache", "continue"\)/);
   assert.match(closeAll, /finalCodecProfile[\s\S]*expectedItemCas/);
   assert.match(closeAll, /finalCompleteCacheProof[\s\S]*allowProofReplacement/);
+  assert.doesNotMatch(closeAll, /itemOnly:\s*true/,
+    'orphan cleanup must publish the exact stream inventory to the variant for post-playback LID');
   assert.match(EDGE, /protocol !== 2/);
   assert.match(WATCH, /Number\(policy\.protocol\) !== 2/);
   assert.match(WATCH, /protocol: 2/);
@@ -2314,6 +2321,35 @@ test('Edge runtime strips forged proofs and persists partial/EOF profiles only a
   }), true);
   assert.equal(eofDb.state.patches[0].playback_hint.codecProfile.videoStreamIndex, 5);
   assert.equal(JSON.stringify(eofDb.state.patches).includes(proof), true);
+
+  const variantPatches = [];
+  const variantEdge = loadEdgeHarness({
+    patchActiveCatalogTitleVariants: async (_db, options) => {
+      variantPatches.push(options.patch);
+      return { data: [{ id: 'variant-1' }], error: null, superseded: false };
+    },
+  });
+  const variantDb = mediaItemDb(item);
+  assert.equal(await variantEdge.persistObservedCodecProfile(variantDb.db, {
+    ...baseOptions,
+    itemOnly: false,
+    codecProfile: {
+      container: 'mkv',
+      videoCodec: 'h264',
+      audioCodec: 'aac',
+      audioTracks: [{ index: 1, codec: 'aac', channels: 6 }],
+      mkvH264FastStartProof: proof,
+      mkvCompleteHlsCacheProof: cacheProof,
+    },
+    allowProofReplacement: true,
+  }), true);
+  assert.equal(variantPatches.length, 1);
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(variantPatches[0].codec_profile.audioTracks)),
+    [{ index: 1, order: 0, codec: 'aac', channels: 6 }],
+  );
+  assert.equal(variantPatches[0].codec_profile.mkvH264FastStartProof, undefined);
+  assert.equal(variantPatches[0].codec_profile.mkvCompleteHlsCacheProof, undefined);
 
   const completeCacheDb = mediaItemDb(item);
   assert.equal(await edge.persistObservedCodecProfile(completeCacheDb.db, {
