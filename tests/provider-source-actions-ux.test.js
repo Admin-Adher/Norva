@@ -128,7 +128,7 @@ function sourceManagerHarness({
         calls.test.push(id);
         return testResult || { success: true };
       },
-      async toggle(id) { calls.toggle.push(id); },
+      async toggle(id, enabled) { calls.toggle.push({ id, enabled }); },
     },
   };
   const modal = {
@@ -481,7 +481,7 @@ test('Disable service cancels without mutation and confirms before hiding the ca
 
   const accepted = sourceManagerHarness({ enabled: true, confirm: true });
   await accepted.manager.toggleSource('source-1');
-  assert.deepEqual(accepted.calls.toggle, ['source-1']);
+  assert.deepEqual(accepted.calls.toggle, [{ id: 'source-1', enabled: false }]);
   assert.equal(accepted.calls.release, 1);
   assert.deepEqual(accepted.calls.toast.at(-1), {
     message: 'Service disabled. Its catalog is still saved.',
@@ -495,7 +495,7 @@ test('Enable service is direct, reversible and acknowledged', async () => {
   await manager.toggleSource('source-1');
 
   assert.equal(calls.confirm.length, 0);
-  assert.deepEqual(calls.toggle, ['source-1']);
+  assert.deepEqual(calls.toggle, [{ id: 'source-1', enabled: true }]);
   assert.deepEqual(calls.toast.at(-1), { message: 'Service enabled.', tone: 'success' });
 });
 
@@ -508,7 +508,7 @@ test('a committed service toggle never becomes a false failure when only card re
 
   await manager.toggleSource('source-1');
 
-  assert.deepEqual(calls.toggle, ['source-1']);
+  assert.deepEqual(calls.toggle, [{ id: 'source-1', enabled: false }]);
   assert.equal(calls.load, 1);
   assert.equal(calls.notify, 1);
   assert.deepEqual(calls.toast, [{

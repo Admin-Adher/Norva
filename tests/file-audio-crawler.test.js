@@ -470,7 +470,7 @@ test('Edge rollout is signed, dynamically reversible and keeps fast evidence sco
   assert.ok(migration.includes('observation.audio_verified_at is null'));
   assert.ok(detector.includes(': "whisper-basic-v1"'));
 
-  assert.ok(health.includes('version: 66'));
+  assert.ok(health.includes('version: 67'));
   assert.ok(health.includes('exactTrackCrawlerProtocol: 2'));
   assert.ok(health.includes('basicLidConsensusProtocol: 2'));
   assert.ok(health.includes('lidDetectOnlyProtocol: 1'));
@@ -627,8 +627,25 @@ test('crawler provider guards and gateway handoff are fail closed', () => {
   }
   assert.ok(crawler.includes('providerAccountBusyForCrawler(db, accountKey)'));
   assert.ok(crawler.includes('skipped: "provider-guard-unavailable"'));
-  assert.ok(gatewayProbe.includes('acceptGatewayProviderDrain(gatewayInfo, leaseControl.retainUntilExpiry)'));
+  const transportStart = gatewayProbe.indexOf('providerTransportMayBeActive = true');
+  const gatewayFetch = gatewayProbe.indexOf('fetch(`${runtimeConfig.mediaGatewayUrl}/probe-audio`');
+  const drainGate = gatewayProbe.indexOf('providerProbeResponseAllowsLeaseRelease(');
+  const terminalGate = gatewayProbe.indexOf('recordTerminalProbeFailure(');
+  assert.ok(transportStart >= 0 && transportStart < gatewayFetch);
+  assert.ok(drainGate > gatewayFetch && drainGate < terminalGate,
+    'every Gateway response must resolve lease safety before terminal/non-2xx handling');
+  assert.match(gatewayProbe, /catch \(_\) \{\s*if \(providerTransportMayBeActive\) leaseControl\.retainUntilExpiry\(\)/);
   assert.ok(gatewayProbe.includes('return null'));
+
+  const relayProbe = between(
+    crawler,
+    'const endpoint = mode === "probe" ? "probe-audio" : "vod-info";',
+    '\n        if (debug && !sample && token && !usedGatewayProbe)',
+  );
+  assert.ok(relayProbe.indexOf('acceptGatewayProviderDrain(relayInfo, leaseControl.retainUntilExpiry)')
+    < relayProbe.indexOf('recordTerminalProbeFailure('));
+  assert.match(relayProbe, /catch \(error\) \{\s*leaseControl\.retainUntilExpiry\(\);\s*throw error/,
+    'Relay fetch/body exceptions must retain the file lease to TTL');
 });
 
 test('vod candidates are circuit-guarded and serialized by provider identity without dropping work', async () => {
@@ -886,7 +903,7 @@ test('vod candidates are circuit-guarded and serialized by provider identity wit
     ['codec backfill', codecBackfill, 'persistObservedCodecProfile(db, {'],
     ['episode backfill', episodeBackfill, 'const stored = await shareFileTracks('],
   ]) {
-    const gateAt = consumer.indexOf('acceptGatewayProviderDrain(info, () => { releaseLeaseOnExit = false; })');
+    const gateAt = consumer.indexOf('providerProbeResponseAllowsLeaseRelease(');
     assert.ok(gateAt >= 0, `${name} must apply the shared drain gate`);
     assert.ok(gateAt < consumer.indexOf(writeMarker), `${name} drain gate must precede persistence`);
     assert.match(consumer, /if \(releaseLeaseOnExit\) \{[\s\S]*releaseProviderFileProbe/,
@@ -1123,7 +1140,7 @@ test('LID cascade rollout is exact-file, bounded, fail-closed and atomically aud
   assert.ok(!rpc.includes('merge_catalog_title_audio'));
   assert.ok(!rpc.includes('audio_lang_verified_at ='));
 
-  assert.ok(health.includes('version: 66'));
+  assert.ok(health.includes('version: 67'));
   assert.ok(health.includes('exactTrackCrawlerProtocol: 2'));
   assert.ok(health.includes('lidCascadeProtocol: 2'));
   assert.ok(health.includes('lidCascadeMode: lidPolicy.cascadeMode'));

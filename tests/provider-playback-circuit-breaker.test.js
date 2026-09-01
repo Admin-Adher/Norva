@@ -324,7 +324,7 @@ test('playback edge checks the circuit, claims one account session and reports s
   assert.match(heartbeat, /PLAYBACK_SUPERSEDED/);
   assert.match(edge, /open_provider_playback_circuit/);
   assert.match(edge, /PROVIDER_ACCOUNT_BUSY/);
-  assert.match(edge, /version:\s*66/);
+  assert.match(edge, /version:\s*67/);
   assert.match(edge, /providerCircuitProtocol:\s*1/);
   assert.match(edge, /exactFileCodecProfileProtocol:\s*1/);
 });
@@ -583,18 +583,18 @@ test('production rollout proves the provider circuit protocol on every runtime',
   assert.match(gateway, /providerCircuitProtocol:\s*1/);
   assert.match(gateway, /providerProxyAffinityProtocol:\s*1/);
   assert.match(gateway, /exactFileCodecProfileProtocol:\s*1/);
-  assert.match(playback, /version:\s*66/);
+  assert.match(playback, /version:\s*67/);
   assert.match(playback, /providerCircuitProtocol:\s*1/);
   assert.match(playback, /exactFileCodecProfileProtocol:\s*1/);
   assert.match(playback, /relayTakeoverProtocol:\s*1/);
   assert.match(playback, /relayCoordinatorLockTtlMs:\s*EDGE_SESSION_COORDINATOR_LOCK_TTL_MS/);
-  assert.match(cloud, /version:\s*25/);
+  assert.match(cloud, /version:\s*27/);
   assert.match(cloud, /playbackCreationProtocol:\s*1/);
   assert.match(cloud, /relayTakeoverProtocol:\s*1/);
   assert.match(cloud, /relayCoordinatorLockTtlMs:\s*EDGE_SESSION_COORDINATOR_LOCK_TTL_MS/);
 
   assert.match(deploy, /verify_function_protocol "\$service"/);
-  assert.match(deploy, /EXPECTED_PLAYBACK_VERSION=66/);
+  assert.match(deploy, /EXPECTED_PLAYBACK_VERSION=67/);
   assert.match(deploy, /EXPECTED_RELAY_COORDINATOR_LOCK_TTL_MS=120000/);
   assert.match(deploy, /EXPECTED_ENGINE_TRACK_PROBE_BLOCKING=false/);
   assert.match(deploy, /EXPECTED_EXACT_FILE_CODEC_PROFILE_PROTOCOL=1/);

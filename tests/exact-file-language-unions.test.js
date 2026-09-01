@@ -44,7 +44,7 @@ test('Watch reports only complete exact-file audio/subtitle maps', () => {
   assert.ok(!report.includes('this._observedLangsSent = key;\n            window.API'));
 });
 
-test('Watch retries exact-file reporting until the server confirms a persisted update', async () => {
+test('Watch retries HTTP 400/503 exact-file reports until the server confirms a persisted update', async () => {
   const watch = read('public/js/pages/WatchPage.js');
   const context = {
     window: {},
@@ -58,8 +58,13 @@ test('Watch retries exact-file reporting until the server confirms a persisted u
   };
   vm.runInNewContext(watch, context, { filename: 'public/js/pages/WatchPage.js' });
 
+  const httpFailure = (status) => () => Promise.reject(
+    Object.assign(new Error(`HTTP ${status}`), { status }),
+  );
   const outcomes = [
-    () => Promise.reject(new Error('temporary 500')),
+    httpFailure(400),
+    httpFailure(503),
+    () => Promise.resolve({ ok: false, updated: false, exact: false }),
     () => Promise.resolve({ ok: true, updated: false, exact: true }),
     () => Promise.resolve({ ok: true, updated: true, exact: true }),
   ];
@@ -99,12 +104,152 @@ test('Watch retries exact-file reporting until the server confirms a persisted u
     }
   }
 
-  assert.equal(calls, 3);
+  assert.equal(calls, outcomes.length);
   assert.match(page._observedLangsSent, /movie-42:audio:1:fr\|2:ja:subtitles:-$/);
 
   page.reportObservedAudioLanguages();
   await new Promise((resolve) => setTimeout(resolve, 0));
-  assert.equal(calls, 3, 'a confirmed exact update is sent only once');
+  assert.equal(calls, outcomes.length, 'a confirmed exact update is sent only once');
+});
+
+test('catalog resolves a missing titleId only through one tenant-owned exact variant', async () => {
+  const catalog = read('supabase/functions/norva-catalog/index.ts');
+  const source = between(
+    catalog,
+    'async function recordObservedLanguages(',
+    '\ntype CatalogTitleSelectorMode',
+  )
+    .replace(
+      'async function recordObservedLanguages(req: Request, userId: string)',
+      'async function recordObservedLanguages(req, userId)',
+    )
+    .replace(/: JsonRecord \| null/g, '')
+    .replace(/: JsonRecord/g, '')
+    .replace(/: unknown/g, '')
+    .replace(/: string \| null/g, '')
+    .replace(/ as JsonRecord\[\]/g, '')
+    .replace(/ as unknown\[\]/g, '')
+    .replace(/ as JsonRecord/g, '')
+    .replace(/\.filter\(\(code\): code is string =>/g, '.filter((code) =>');
+
+  const helpers = vm.runInNewContext(
+    `(() => {
+      class HttpError extends Error {
+        constructor(status, message) { super(message); this.status = status; }
+      }
+      const recordOrEmpty = (value) => value && typeof value === 'object' && !Array.isArray(value)
+        ? value
+        : {};
+      const stringOrNull = (value) => value == null || String(value).trim() === ''
+        ? null
+        : String(value).trim();
+      const canonicalFileLanguage = (value) => stringOrNull(value)?.toLowerCase() || null;
+      const normalizeObservedSubtitleTracks = () => [];
+      const throwDb = (error) => { throw error; };
+      const FACET_CACHE = new Map();
+      let mergeCalls = [];
+      const mergeObservedExactFileLanguages = async (_db, values) => {
+        mergeCalls.push(values);
+        return 'merged';
+      };
+      let scenario = 'owned';
+      let queryLog = [];
+      const ownedVariant = {
+        id: '33333333-3333-4333-8333-333333333333',
+        user_id: 'tenant-a',
+        title_id: '11111111-1111-4111-8111-111111111111',
+        source_id: '22222222-2222-4222-8222-222222222222',
+        item_type: 'movie',
+        external_id: 'movie-42',
+      };
+      class Query {
+        constructor(table) { this.table = table; this.filters = []; this.operation = 'select'; }
+        select() { return this; }
+        update(value) { this.operation = 'update'; this.value = value; return this; }
+        eq(column, value) { this.filters.push([column, value]); return this; }
+        limit(value) { this.limitValue = value; return this; }
+        maybeSingle() { return Promise.resolve(this.execute(true)); }
+        then(resolve, reject) { return Promise.resolve(this.execute(false)).then(resolve, reject); }
+        execute(single) {
+          queryLog.push({ table: this.table, operation: this.operation, filters: this.filters.slice() });
+          if (this.operation === 'update') return { data: null, error: null };
+          if (this.table === 'cloud_catalog_visible_title_variants') {
+            const resolving = !this.filters.some(([column]) => column === 'title_id');
+            if (resolving) {
+              if (scenario === 'foreign') return { data: [], error: null };
+              if (scenario === 'ambiguous') return { data: [ownedVariant, { ...ownedVariant, id: '44444444-4444-4444-8444-444444444444' }], error: null };
+              return { data: [ownedVariant], error: null };
+            }
+            return { data: [ownedVariant, { ...ownedVariant, id: '55555555-5555-4555-8555-555555555555' }], error: null };
+          }
+          if (this.table === 'cloud_catalog_visible_titles') {
+            return {
+              data: single ? {
+                id: ownedVariant.title_id,
+                item_type: 'movie',
+                variant_count: 2,
+                audio_languages: [],
+                audio_tracks: null,
+                audio_probed_at: null,
+                subtitle_tracks: null,
+                subtitle_probed_at: null,
+              } : [],
+              error: null,
+            };
+          }
+          throw new Error('unexpected table ' + this.table);
+        }
+      }
+      const db = { from: (table) => new Query(table) };
+      ${source}
+      return {
+        async run(nextScenario) {
+          scenario = nextScenario;
+          queryLog = [];
+          mergeCalls = [];
+          const req = { json: async () => ({
+            cloudSourceId: ownedVariant.source_id,
+            itemType: 'movie',
+            externalId: ownedVariant.external_id,
+            audioTracksScope: 'file',
+            audioTracks: [{ index: 1, lang: 'fr' }],
+          }) };
+          const result = await recordObservedLanguages(req, 'tenant-a');
+          return { result, queryLog, mergeCalls };
+        },
+      };
+    })()`,
+  );
+
+  const owned = await helpers.run('owned');
+  assert.equal(owned.result.updated, true);
+  assert.equal(owned.result.exact, true);
+  assert.equal(owned.mergeCalls.length, 1);
+  assert.equal(owned.mergeCalls[0].titleId, '11111111-1111-4111-8111-111111111111');
+  assert.equal(owned.mergeCalls[0].userId, 'tenant-a');
+  const resolvingQuery = owned.queryLog.find((query) =>
+    query.table === 'cloud_catalog_visible_title_variants' &&
+    !query.filters.some(([column]) => column === 'title_id'));
+  assert.ok(resolvingQuery);
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(resolvingQuery.filters)),
+    [
+      ['user_id', 'tenant-a'],
+      ['source_id', '22222222-2222-4222-8222-222222222222'],
+      ['item_type', 'movie'],
+      ['external_id', 'movie-42'],
+    ],
+  );
+
+  const foreign = await helpers.run('foreign');
+  assert.equal(foreign.result.updated, false);
+  assert.equal(foreign.result.reason, 'variant_not_owned');
+  assert.equal(foreign.mergeCalls.length, 0);
+
+  const ambiguous = await helpers.run('ambiguous');
+  assert.equal(ambiguous.result.updated, false);
+  assert.equal(ambiguous.result.reason, 'variant_ambiguous');
+  assert.equal(ambiguous.mergeCalls.length, 0);
 });
 
 test('Watch persists an explicitly complete empty subtitle map without manufacturing audio', async () => {

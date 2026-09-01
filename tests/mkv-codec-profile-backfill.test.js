@@ -17,7 +17,7 @@ test('MKV codec backfill is service-gated, exact-owner scoped and bounded to ten
   const route = between(edge, 'async function runCodecProfileBackfill(', '\nasync function runLidBenchmarkEndpoint');
 
   assert.match(edge, /segments\[0\] === "codec-profile-backfill"/);
-  assert.match(edge, /version:\s*66[\s\S]*exactFileCodecProfileProtocol:\s*1/);
+  assert.match(edge, /version:\s*67[\s\S]*exactFileCodecProfileProtocol:\s*1/);
   assert.match(route, /NORVA_BACKFILL_TOKEN/);
   assert.match(route, /uniqueVariantIds\.slice\(0, 10\)/);
   assert.match(route, /PLAYBACK_SESSION_UUID_PATTERN\.test/);
@@ -40,6 +40,12 @@ test('MKV codec backfill is sequential and fails closed around viewers, circuits
   assert.ok((route.match(/assertProviderCircuitClosed\(providerAccountHash, db\)/g) || []).length >= 2);
   assert.ok((route.match(/assertProviderProbeCircuitClosedStrict\(db, identityKey\)/g) || []).length >= 2);
   assert.match(route, /finally \{[\s\S]*releaseProviderFileProbe\(db, identityKey, leaseOwner\)/);
+  const gatewayFetch = route.indexOf('fetch(`${runtimeConfig.mediaGatewayUrl}/probe-audio`');
+  const drainGate = route.indexOf('providerProbeResponseAllowsLeaseRelease(', gatewayFetch);
+  const terminalGate = route.indexOf('providerProbeTerminalCode(', gatewayFetch);
+  assert.ok(gatewayFetch >= 0 && drainGate > gatewayFetch && drainGate < terminalGate,
+    'codec-profile terminal/non-2xx responses must pass the lease drain gate first');
+  assert.match(route, /catch \(error\) \{[\s\S]*if \(providerTransportMayBeActive\) releaseLeaseOnExit = false;[\s\S]*throw error/);
   assert.equal((route.match(/\/probe-audio/g) || []).length, 1);
   assert.doesNotMatch(route, /\/sessions|\/raw\/|relayBaseUrl|Promise\.race/);
 });

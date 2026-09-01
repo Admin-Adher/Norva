@@ -208,8 +208,9 @@ test('twelve-lane cycle doubles every exact-file series stage without raising pr
   assert.match(dispatcher, /dispatch_count\) \|\| 0\) % 12/);
   assert.match(
     dispatcher,
-    /const speechVerification = lane === 1 \|\| lane === 4 \|\| lane === 8/,
+    /const speechLane = lane === 1 \|\| lane === 4 \|\| lane === 8/,
   );
+  assert.match(dispatcher, /let speechVerification = speechLane/);
   assert.match(dispatcher, /const seriesInventory = lane === 5 \|\| lane === 9/);
   assert.match(dispatcher, /const episodeProbe = lane === 2 \|\| lane === 7/);
   assert.match(dispatcher, /const episodeSpeech = lane === 6 \|\| lane === 10/);
@@ -226,6 +227,41 @@ test('twelve-lane cycle doubles every exact-file series stage without raising pr
     '\nrevoke all on function public.finish_catalog_enrichment_source(',
   );
   assert.match(finish, /dispatch_count = schedule\.dispatch_count \+ 1/);
+});
+
+test('two speech lanes lend bounded capacity only to a durable exact-audio repair cohort', () => {
+  const sourceSync = read('supabase/functions/norva-source-sync/index.ts');
+  const dispatcher = between(
+    sourceSync,
+    'async function runEnrichmentFleetClaim(',
+    '\n// Claim a bounded, fair batch',
+  );
+  assert.match(sourceSync, /async function sourceHasPendingMovieAudioRepair\(/);
+  assert.match(sourceSync, /db\.rpc\("catalog_file_audio_repair_pending"/);
+  assert.doesNotMatch(sourceSync, /sourceHasPendingMovieAudioRepair[\s\S]*file_audio_backfill_candidates/);
+  assert.match(
+    dispatcher,
+    /const repairCohortPending = \(lane === 1 \|\| lane === 4 \|\| lane === 8\)[\s\S]*await sourceHasPendingMovieAudioRepair/,
+  );
+  assert.match(dispatcher, /lane === 8 && repairCohortPending\) \? "untagged" : "tagged"/);
+  assert.match(dispatcher, /speechVerification = false/);
+  assert.match(dispatcher, /repairCohort = true/);
+  assert.match(dispatcher, /repairCohort,/);
+  assert.ok(
+    dispatcher.indexOf('speechVerification = false') < dispatcher.indexOf('timeout = setTimeout('),
+    'a borrowed probe lane must receive the ordinary probe timeout',
+  );
+  assert.ok(
+    dispatcher.indexOf('speechVerification = false') < dispatcher.indexOf('speechTarget = speechVerification'),
+    'a borrowed probe lane must not retain a Whisper target',
+  );
+  assert.match(
+    dispatcher,
+    /limit: episodeProbe \? episodeProbeLimit : episodeSpeech \? 1 : speechVerification \? 2 : 4/,
+  );
+  assert.match(dispatcher, /concurrency: 1/);
+  assert.match(dispatcher, /fallthrough: false/);
+  assert.match(dispatcher, /const speechLane = lane === 1 \|\| lane === 4 \|\| lane === 8/);
 });
 
 test('drained audio lanes rotate promptly to subtitles before the full sweep rests', () => {
@@ -320,8 +356,8 @@ test('self-hosted Edge workers outlive every bounded enrichment request', () => 
     /\(speechVerification \|\| episodeSpeech\)\s*\? 540_000/,
   );
   assert.match(sourceSync, /episodeProbe \? 390_000/);
-  assert.match(sourceSync, /version: 15[\s\S]*exactTailDrainSafe: true/);
-  assert.match(playback, /version: 66[\s\S]*exactTailDrainSafe: true/);
+  assert.match(sourceSync, /version: 17[\s\S]*exactTailDrainSafe: true/);
+  assert.match(playback, /version: 67[\s\S]*exactTailDrainSafe: true/);
 
   const playbackWorkerMs = 20 * 60 * 1000;
   const playbackPerWorkerGuaranteedMs = playbackWorkerMs / 2;
@@ -404,10 +440,17 @@ test('episode lanes are exact, individually bounded, flag-gated, and fail closed
     'const locallyRejected = (',
     '\n        );',
   );
-  assert.doesNotMatch(localRejectGuard, /viewer_preempted|response\.status === 409/);
+  assert.match(localRejectGuard, /response\.status === 409 && providerCode === "account_busy"/);
+  assert.match(localRejectGuard, /response\.status === 429 && providerCode === "background_busy"/);
+  assert.doesNotMatch(localRejectGuard, /viewer_preempted/);
+  const episodeFetch = exactWorker.indexOf('fetch(`${runtimeConfig.mediaGatewayUrl}/probe-audio`');
+  const episodeDrainGate = exactWorker.indexOf('providerProbeResponseAllowsLeaseRelease(', episodeFetch);
+  const episodeTerminalBranch = exactWorker.indexOf('response.status === 409', episodeDrainGate);
+  assert.ok(episodeFetch >= 0 && episodeDrainGate > episodeFetch && episodeDrainGate < episodeTerminalBranch,
+    'episode non-2xx paths must apply the drain gate before returning');
   assert.match(
     exactWorker,
-    /catch \(error\) \{\s*if \(mode === "probe"\) \{[\s\S]*await recordFootprintHit\(\)/,
+    /catch \(error\) \{\s*if \(providerTransportMayBeActive\) releaseLeaseOnExit = false;\s*if \(mode === "probe"\) \{[\s\S]*await recordFootprintHit\(\)/,
   );
   assert.match(exactWorker, /episode probe retry state unavailable/);
   assert.match(
@@ -418,11 +461,22 @@ test('episode lanes are exact, individually bounded, flag-gated, and fail closed
   assert.match(exactWorker, /providerCode === "background_busy"/);
   assert.match(exactWorker, /catalog_episode_probe_retry_state/);
   assert.match(exactWorker, /record_catalog_episode_probe_outcome/);
-  assert.match(exactWorker, /\.select\("audio_tracks,audio_whisper_attempted_at,audio_whisper_retry_at"\)/);
+  assert.match(
+    exactWorker,
+    /\.select\("audio_tracks,audio_whisper_attempted_at,audio_whisper_retry_at,audio_lang_verification"\)/,
+  );
+  assert.match(
+    exactWorker,
+    /audio_lang_verification\)\.status, ""\) === "validating"/,
+  );
   assert.match(exactWorker, /if \(cacheAdvanced\) \{\s*processed \+= 1;\s*persisted \+= 1/);
   assert.match(exactWorker, /deferred \+= 1/);
   assert.match(exactWorker, /let releaseLeaseOnExit = true/);
   assert.match(exactWorker, /releaseLeaseOnExit = false/);
+  assert.match(
+    exactWorker,
+    /catch \(error\) \{\s*if \(providerTransportMayBeActive\) releaseLeaseOnExit = false;\s*if \(mode === "probe"\)/,
+  );
   assert.match(
     exactWorker,
     /finally \{\s*if \(releaseLeaseOnExit\) \{\s*await releaseProviderFileProbe\(db, sourceIdentity\.key, leaseOwner\)/,

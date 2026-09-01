@@ -139,6 +139,7 @@ test('Series serializes a multi-genre bucket into the existing genre-items contr
 });
 
 test('Series grid is bounded by its single visible scroll container', () => {
+  const source = read('public/js/pages/SeriesPage.js');
   const css = read('public/css/main.css');
   const contentStart = css.indexOf('.series-content {');
   const gridStart = css.indexOf('.series-grid {', contentStart);
@@ -152,6 +153,11 @@ test('Series grid is bounded by its single visible scroll container', () => {
   assert.match(gridRule, /height:\s*auto/);
   assert.doesNotMatch(gridRule, /100d?vh/,
     'the Series scroller must not extend below its clipped parent');
+  assert.match(
+    source,
+    /new IntersectionObserver\([\s\S]*?\}, \{ root: this\.container, rootMargin: '700px' \}\)/,
+    'the infinite-scroll sentinel must observe the actual Series scroll owner',
+  );
 });
 
 test('Series genre summary is provider-scoped and honors the profile genre mask', () => {
@@ -196,6 +202,6 @@ test('Xtream discovery honors the gateway single-flight contract and retries bac
 test('changed Series assets are cache-busted together', () => {
   const html = read('public/app.html');
   assert.match(html, /main\.css\?v=4a3c14b9a1/);
-  assert.match(html, /api\.js\?v=92/);
-  assert.match(html, /SeriesPage\.js\?v=59/);
+  assert.match(html, /api\.js\?v=93/);
+  assert.match(html, /SeriesPage\.js\?v=60/);
 });

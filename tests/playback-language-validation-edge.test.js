@@ -17,6 +17,7 @@ const activityMigration = read('supabase/migrations/20260816171003_provider_acco
 const profileParityMigration = read('supabase/migrations/20260818162200_vod_language_validation_profile_parity.sql');
 const retryWorkerMigration = read('supabase/migrations/20260818165000_vod_language_validation_retry_worker.sql');
 const preemptionMigration = read('supabase/migrations/20260831032956_provider_lid_viewer_preemption_quarantine_v1.sql');
+const strictUndMigration = read('supabase/migrations/20260901143200_strict_und_audio_validation_v1.sql');
 const edgeDeploy = read('ops/hetzner/scripts/04-deploy-edge-functions.sh');
 
 function between(source, startMarker, endMarker) {
@@ -54,7 +55,7 @@ test('POST starts quickly and GET polls one caller-owned durable job', () => {
   assert.match(start, /scheduleLanguageValidationJob\(waitUntil, db, jobId\)/);
   assert.match(start, /status: 202/);
   assert.match(poll, /eq\("requested_by", userId\)/);
-  assert.match(poll, /assertOwnedSource\(sourceId, userId, db\)/);
+  assert.match(poll, /assertSourceCatalogVisible\(sourceId, userId, db\)/);
   assert.match(poll, /requireLanguageValidationEntitlement\(userId, db\)/);
   assert.match(poll, /scheduleLanguageValidationJob\(waitUntil, db, jobId\)/);
 });
@@ -178,9 +179,9 @@ test('foreground playback preempts background validation and requires an atteste
   assert.match(worker, /providerAccountLeaseClaimed[\s\S]*providerAccountLeaseReleaseSafe[\s\S]*release_provider_account_language_validation/);
   assert.match(create, /"claim_cloud_playback_session"[\s\S]*preemptProviderLanguageValidationTransports\([\s\S]*LANGUAGE_VALIDATION_PREEMPTION_DRAIN_FAILED/);
   assert.match(playback, /async function preemptProviderLanguageValidationTransports[\s\S]*stop-provider-affinities[\s\S]*payload\.protocol !== 1[\s\S]*payload\.providerDrained !== true/);
-  assert.match(playback, /version: 66[\s\S]*languageValidationPresenceIntentProtocol: 1[\s\S]*languageValidationPlaybackLeaseProtocol: 1[\s\S]*languageValidationActivityProtocol: 1[\s\S]*languageValidationDurationClaimProtocol: 1[\s\S]*languageValidationWindowCheckpointProtocol: LANGUAGE_VALIDATION_WINDOW_CHECKPOINT_PROTOCOL[\s\S]*languageValidationTaskBudgetMs: LANGUAGE_VALIDATION_TASK_BUDGET_MS[\s\S]*languageValidationFetchTimeoutMs: LANGUAGE_VALIDATION_FETCH_TIMEOUT_MS[\s\S]*languageValidationPostFetchReserveMs: LANGUAGE_VALIDATION_POST_FETCH_RESERVE_MS[\s\S]*languageValidationJobLeaseSeconds: LANGUAGE_VALIDATION_JOB_LEASE_SECONDS[\s\S]*languageValidationSampleDurationSeconds: LANGUAGE_VALIDATION_SAMPLE_DURATION_SECONDS[\s\S]*languageValidationRetryWorkerProtocol: LANGUAGE_VALIDATION_RETRY_WORKER_PROTOCOL[\s\S]*languageValidationRetryWorkerBatch: LANGUAGE_VALIDATION_RETRY_WORKER_BATCH[\s\S]*languageValidationProviderAttemptProtocol: 1[\s\S]*languageValidationViewerPreemptionProtocol: 1[\s\S]*languageValidationMaxConsecutiveProviderNoProgress:[\s\S]*LANGUAGE_VALIDATION_MAX_CONSECUTIVE_PROVIDER_NO_PROGRESS[\s\S]*languageValidationGatewayFailureRetrySeconds:[\s\S]*LANGUAGE_VALIDATION_GATEWAY_FAILURE_RETRY_MS \/ 1000/);
+  assert.match(playback, /version: 67[\s\S]*languageValidationPresenceIntentProtocol: 1[\s\S]*languageValidationPlaybackLeaseProtocol: 1[\s\S]*languageValidationActivityProtocol: 1[\s\S]*languageValidationDurationClaimProtocol: 1[\s\S]*languageValidationWindowCheckpointProtocol: LANGUAGE_VALIDATION_WINDOW_CHECKPOINT_PROTOCOL[\s\S]*languageValidationTaskBudgetMs: LANGUAGE_VALIDATION_TASK_BUDGET_MS[\s\S]*languageValidationFetchTimeoutMs: LANGUAGE_VALIDATION_FETCH_TIMEOUT_MS[\s\S]*languageValidationPostFetchReserveMs: LANGUAGE_VALIDATION_POST_FETCH_RESERVE_MS[\s\S]*languageValidationJobLeaseSeconds: LANGUAGE_VALIDATION_JOB_LEASE_SECONDS[\s\S]*languageValidationSampleDurationSeconds: LANGUAGE_VALIDATION_SAMPLE_DURATION_SECONDS[\s\S]*languageValidationRetryWorkerProtocol: LANGUAGE_VALIDATION_RETRY_WORKER_PROTOCOL[\s\S]*languageValidationRetryWorkerBatch: LANGUAGE_VALIDATION_RETRY_WORKER_BATCH[\s\S]*languageValidationProviderAttemptProtocol: 1[\s\S]*languageValidationViewerPreemptionProtocol: 1[\s\S]*languageValidationMaxConsecutiveProviderNoProgress:[\s\S]*LANGUAGE_VALIDATION_MAX_CONSECUTIVE_PROVIDER_NO_PROGRESS[\s\S]*languageValidationGatewayFailureRetrySeconds:[\s\S]*LANGUAGE_VALIDATION_GATEWAY_FAILURE_RETRY_MS \/ 1000/);
   assert.match(playback, /const LANGUAGE_VALIDATION_FETCH_TIMEOUT_MS = 240_000/);
-  assert.match(edgeDeploy, /EXPECTED_PLAYBACK_VERSION=66/);
+  assert.match(edgeDeploy, /EXPECTED_PLAYBACK_VERSION=67/);
   assert.match(edgeDeploy, /EXPECTED_LANGUAGE_VALIDATION_TASK_BUDGET_MS=270000/);
   assert.match(edgeDeploy, /EXPECTED_LANGUAGE_VALIDATION_FETCH_TIMEOUT_MS=240000/);
   assert.match(edgeDeploy, /EXPECTED_LANGUAGE_VALIDATION_POST_FETCH_RESERVE_MS=30000/);
@@ -489,10 +490,13 @@ test('foreground playback atomically parks validation work and records an opaque
   );
   assert.match(preemptionMigration, /create or replace function public\.claim_cloud_playback_session[\s\S]*pg_advisory_xact_lock[\s\S]*delete from public\.provider_account_language_validation_leases[\s\S]*LANGUAGE_VALIDATION_VIEWER_PREEMPTED[\s\S]*insert into public\.provider_account_language_validation_preemptions/i);
   assert.match(preemptionMigration, /validation_lease_owner_sha256[\s\S]*extensions\.digest\(v_validation_owner, 'sha256'\)/i);
-  assert.match(
-    preemptionMigration,
-    /norva_quarantine_audio_validation_provider_no_progress[\s\S]*delete from public\.provider_account_language_validation_leases[\s\S]*'language-validation-track:' \|\| v_job\.id::text \|\| ':%'[\s\S]*delete from public\.provider_file_probe_leases/i,
+  const strictQuarantine = between(
+    strictUndMigration,
+    'create or replace function public.norva_quarantine_audio_validation_provider_no_progress(',
+    '\nrevoke all on function public.norva_quarantine_audio_validation_provider_no_progress(',
   );
+  assert.doesNotMatch(strictQuarantine, /delete from public\.(?:provider_account_language_validation_leases|provider_file_probe_leases)/i);
+  assert.match(strictQuarantine, /Keep both transport leases until the[\s\S]*attested release path deletes them, or until their TTL expires/i);
   assert.match(preemptionMigration, /revoke all on table public\.provider_account_language_validation_preemptions[\s\S]*from public, anon, authenticated/i);
   assert.match(preemptionMigration, /grant select, insert, update, delete[\s\S]*provider_account_language_validation_preemptions to service_role/i);
   assert.equal(
@@ -664,7 +668,7 @@ test('stale unverified track maps are repaired only from the exact profile witho
   assert.ok(mismatchAt >= 0);
   assert.ok(repairAt > mismatchAt);
   assert.ok(providerAt > repairAt);
-  assert.match(start, /hasActiveLanguageValidationJob\(db, identityKey, itemId\)/);
+  assert.match(start, /hasActiveLanguageValidationJob\(db, identityKey, "movie", itemId\)/);
   assert.match(start, /cacheStatus === "validating"/);
   assert.doesNotMatch(start.slice(mismatchAt, providerAt), /resolvePlaybackTarget|createBytePipeCapability|createBytePipeAccess|await fetch/);
 });

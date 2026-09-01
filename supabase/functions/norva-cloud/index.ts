@@ -403,7 +403,10 @@ async function route(
       body: {
         ok: true,
         service: "norva-cloud",
-        version: 25,
+        version: 27,
+        sourceDesiredStateProtocol: 1,
+        legacySourceToggleBridge: 1,
+        m3uSyncLeaseProtocol: 2,
         playbackCreationProtocol: 1,
         relayTakeoverProtocol: 1,
         relayCoordinatorLockTtlMs: EDGE_SESSION_COORDINATOR_LOCK_TTL_MS,
@@ -743,8 +746,10 @@ async function route(
       return { body: await hardSyncSource(id, user.id, db) };
     }
     if (req.method === "POST" && id && action === "toggle") {
-      const body = await toggleSourceEnabled(id, user.id, db);
-      await acknowledgeCatalogVisibilityEpochMutation(req, db);
+      const body = await setSourceEnabled(req, id, user.id, db);
+      if (body.visibilityChanged) {
+        await acknowledgeCatalogVisibilityEpochMutation(req, db);
+      }
       return { body };
     }
     if (req.method === "POST" && id && action === "test") {
@@ -1547,33 +1552,173 @@ function assertLegacySourcePatchAllowlisted(body: JsonRecord) {
   }
 }
 
+type LegacyM3uClaimRestore = {
+  expectedUpdatedAt: string;
+  patch: Record<"sync_status" | "sync_error", string | null> & {
+    config_hint?: JsonRecord;
+  };
+};
+
+async function restoreLegacyM3uClaimState(
+  db: SupabaseClient,
+  sourceId: string,
+  userId: string,
+  restore: LegacyM3uClaimRestore,
+) {
+  const { error } = await db
+    .from("cloud_sources")
+    .update(restore.patch)
+    .eq("id", sourceId)
+    .eq("user_id", userId)
+    .eq("source_type", "m3u")
+    .eq("sync_status", "syncing")
+    .eq("updated_at", restore.expectedUpdatedAt);
+  if (error) {
+    console.error("[norva-cloud] legacy M3U claim-state restore failed", sourceId, error.message);
+  }
+}
+
 async function syncExistingSource(id: string, userId: string, db: SupabaseClient) {
   await assertOwnedSource(id, userId, db);
   await assertVisibleSource(id, userId, db);
+  const { data: prior, error: priorError } = await db
+    .from("cloud_sources")
+    .select("source_type,sync_status,sync_error,updated_at")
+    .eq("id", id)
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (priorError) throwDb(priorError, "Unable to read source sync state");
+  if (!prior) throw new HttpError(404, "Source not found");
   const { data, error } = await db
     .from("cloud_sources")
     .update({ sync_status: "syncing", sync_error: null })
     .eq("id", id)
     .eq("user_id", userId)
-    .select("id")
-    .single();
+    .eq("updated_at", String(prior.updated_at))
+    .select("id,updated_at")
+    .maybeSingle();
   if (error) throwDb(error, "Unable to start source sync");
-  waitUntil(syncCloudSource(id, userId, db));
+  if (!data) throw new HttpError(409, "Source state changed; retry synchronization");
+  const legacyRestore: LegacyM3uClaimRestore | null = prior.source_type === "m3u"
+    ? {
+      expectedUpdatedAt: String(data.updated_at),
+      patch: {
+        sync_status: stringOr(prior.sync_status, "idle"),
+        // This stored value crosses a persistence boundary again during the
+        // bounded rollback, so apply the canonical redaction and length cap.
+        sync_error: typeof prior.sync_error === "string" && prior.sync_error.trim()
+          ? formatSourceSyncError(new Error(prior.sync_error), "Source sync failed")
+          : null,
+      },
+    }
+    : null;
+  waitUntil(syncCloudSource(id, userId, db, legacyRestore));
   return { source: await managedSourceSnapshot(data.id, userId, db), syncStarted: true };
 }
 
-// Disable/Enable a source. Disabled = paused: excluded from auto-refresh/resume and hidden from the
-// catalog UI (the client filters `sources.filter(s => s.enabled)`), but its data is kept.
-async function toggleSourceEnabled(id: string, userId: string, db: SupabaseClient) {
+// Set the desired source state. Disabled = paused: excluded from auto-refresh/resume and hidden from
+// the catalog UI (the client filters `sources.filter(s => s.enabled)`), but its data is kept.
+//
+// This endpoint intentionally accepts a desired state rather than an instruction to invert the
+// current value. Retries are therefore idempotent. The conditional update is the only transition
+// winner, so two simultaneous enable requests can never start two sync drivers.
+async function setSourceEnabled(req: Request, id: string, userId: string, db: SupabaseClient) {
   await assertOwnedSource(id, userId, db);
+  const body = await readJson(req);
+  const hasDesiredState = Object.prototype.hasOwnProperty.call(body, "enabled");
+  if (hasDesiredState && typeof body.enabled !== "boolean") {
+    throw new HttpError(400, "The desired source state is required", {
+      code: "SOURCE_ENABLED_STATE_REQUIRED",
+    });
+  }
   const { data: cur, error: readErr } = await db
-    .from("cloud_sources").select("enabled").eq("id", id).eq("user_id", userId).maybeSingle();
+    .from("cloud_sources")
+    .select("enabled,source_type,sync_status,deleted_at")
+    .eq("id", id)
+    .eq("user_id", userId)
+    .is("deleted_at", null)
+    .maybeSingle();
   if (readErr) throwDb(readErr, "Unable to read source");
-  const next = !((cur as JsonRecord | null)?.enabled ?? true);
+  if (!cur) throw new HttpError(404, "Source not found");
+  const current = (cur as JsonRecord).enabled === true;
+  // Rolling-deploy bridge: tabs loaded before the desired-state client shipped
+  // still send an empty body. Preserve their legacy one-shot inversion so an
+  // urgent Disable remains available. Newly loaded clients always send the
+  // explicit desired state and therefore retain retry idempotence.
+  const desired = hasDesiredState ? body.enabled === true : !current;
+  const legacyToggle = !hasDesiredState;
+  const sourceType = stringOr((cur as JsonRecord | null)?.source_type, "");
+  const syncStatus = stringOr((cur as JsonRecord | null)?.sync_status, "idle");
+  if (current === desired) {
+    return {
+      success: true,
+      enabled: desired,
+      syncStarted: false,
+      visibilityChanged: false,
+      legacyToggle,
+      source: await managedSourceSnapshot(id, userId, db),
+    };
+  }
+
   const { data, error } = await db
-    .from("cloud_sources").update({ enabled: next }).eq("id", id).eq("user_id", userId).select("id").single();
-  if (error) throwDb(error, "Unable to toggle source");
-  return { success: true, enabled: next, source: await managedSourceSnapshot(data.id, userId, db) };
+    .from("cloud_sources")
+    .update({ enabled: desired })
+    .eq("id", id)
+    .eq("user_id", userId)
+    .is("deleted_at", null)
+    .eq("enabled", current)
+    .select("id")
+    .maybeSingle();
+  if (error) throwDb(error, "Unable to change source state");
+
+  // A concurrent winner may already have committed the same desired state.
+  // Treat that as a successful no-op; only the actual transition winner may
+  // resume a paused import.
+  if (!data) {
+    const { data: latest, error: latestError } = await db
+      .from("cloud_sources")
+      .select("enabled")
+      .eq("id", id)
+      .eq("user_id", userId)
+      .is("deleted_at", null)
+      .maybeSingle();
+    if (latestError) throwDb(latestError, "Unable to verify source state");
+    if (!latest) throw new HttpError(404, "Source not found");
+    if ((latest as JsonRecord).enabled !== desired) {
+      throw new HttpError(409, "The source state changed concurrently", {
+        code: "SOURCE_STATE_CONFLICT",
+      });
+    }
+    return {
+      success: true,
+      enabled: desired,
+      syncStarted: false,
+      visibilityChanged: false,
+      legacyToggle,
+      source: await managedSourceSnapshot(id, userId, db),
+    };
+  }
+
+  // Disabling during a large resumable import deliberately pauses that source.
+  // Re-enabling persists a due cursor/progress marker in the BEFORE trigger;
+  // the minutely resume-stuck watchdog owns the retry.  Correctness therefore
+  // survives an Edge isolate dying immediately after this CAS commits.
+  // Re-enabling a ready M3U is also a durable recovery action: it clears the
+  // raw-only fair-refresh suspension and makes that lane immediately due while
+  // preserving the ready catalogue and its cursor-free state.
+  const syncScheduled = desired && (syncStatus !== "ready" || sourceType === "m3u");
+
+  return {
+    success: true,
+    enabled: desired,
+    // Preserve the public response field while making the durable scheduling
+    // semantics explicit for newer clients and operational evidence.
+    syncStarted: syncScheduled,
+    syncScheduled,
+    visibilityChanged: true,
+    legacyToggle,
+    source: await managedSourceSnapshot(data.id, userId, db),
+  };
 }
 
 // Check a source's connection on demand (the "Check service" button). Reuses the same validation
@@ -1601,7 +1746,17 @@ async function testSourceConnection(id: string, userId: string, db: SupabaseClie
         assertSourceCurrent,
       }
       : null;
-    await validateCloudSource(type, loaded.config, await getRuntimeConfig(db), directFallback);
+    const validate = async () => validateCloudSource(
+      type,
+      loaded.config,
+      await getRuntimeConfig(db),
+      directFallback,
+    );
+    if (type === "m3u") {
+      await withM3uSourceLease(db, id, userId, validate);
+    } else {
+      await validate();
+    }
     await assertSourceCurrent();
     return sanitizeSourceConnectionResult({
       success: true,
@@ -1655,7 +1810,9 @@ async function estimateSource(id: string, userId: string, db: SupabaseClient) {
   const url = stringOr(config.playlistUrl, "");
   if (!url) return { count: 0, needsWarning: false };
   assertHttpUrl(url);
-  return estimatePlaylist(await fetchText(url, 15000, 20_000_000));
+  return await withM3uSourceLease(db, id, userId, async () => (
+    estimatePlaylist(await fetchText(url, 15000, 20_000_000))
+  ));
 }
 
 async function estimateSourceByUrl(req: Request) {
@@ -1674,16 +1831,40 @@ async function estimateSourceByUrl(req: Request) {
 async function hardSyncSource(id: string, userId: string, db: SupabaseClient) {
   await assertOwnedSource(id, userId, db);
   await assertVisibleSource(id, userId, db);
-  const { data: cur } = await db
-    .from("cloud_sources").select("config_hint").eq("id", id).eq("user_id", userId).maybeSingle();
-  const hint = recordOrEmpty((cur as JsonRecord | null)?.config_hint);
+  const { data: cur, error: currentError } = await db
+    .from("cloud_sources")
+    .select("source_type,sync_status,sync_error,config_hint,updated_at")
+    .eq("id", id)
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (currentError) throwDb(currentError, "Unable to read source rebuild state");
+  if (!cur) throw new HttpError(404, "Source not found");
+  const priorHint = recordOrEmpty((cur as JsonRecord).config_hint);
+  const hint = { ...priorHint };
   for (const k of ["contentSignature", "syncCursor", "finalizeCursor", "finalizeLease", "syncProgress"]) delete hint[k];
   const { data, error } = await db
     .from("cloud_sources")
     .update({ sync_status: "syncing", sync_error: null, config_hint: compactRecord(hint) })
-    .eq("id", id).eq("user_id", userId).select("id").single();
+    .eq("id", id)
+    .eq("user_id", userId)
+    .eq("updated_at", String(cur.updated_at))
+    .select("id,updated_at")
+    .maybeSingle();
   if (error) throwDb(error, "Unable to start rebuild");
-  waitUntil(syncCloudSource(id, userId, db));
+  if (!data) throw new HttpError(409, "Source state changed; retry rebuild");
+  const legacyRestore: LegacyM3uClaimRestore | null = cur.source_type === "m3u"
+    ? {
+      expectedUpdatedAt: String(data.updated_at),
+      patch: {
+        sync_status: stringOr(cur.sync_status, "idle"),
+        sync_error: typeof cur.sync_error === "string" && cur.sync_error.trim()
+          ? formatSourceSyncError(new Error(cur.sync_error), "Source sync failed")
+          : null,
+        config_hint: priorHint,
+      },
+    }
+    : null;
+  waitUntil(syncCloudSource(id, userId, db, legacyRestore));
   return { source: await managedSourceSnapshot(data.id, userId, db), syncStarted: true, hard: true };
 }
 
@@ -1951,20 +2132,202 @@ async function writeSourceSyncProgress(
   if (error) console.warn("[norva-cloud] Unable to update source sync progress", error.message);
 }
 
-async function syncCloudSource(sourceId: string, userId: string, db: SupabaseClient) {
+async function sourceSyncIoAllowed(sourceId: string, userId: string, db: SupabaseClient) {
+  const { data, error } = await db
+    .from("cloud_catalog_visible_sources")
+    .select("id")
+    .eq("id", sourceId)
+    .eq("user_id", userId)
+    .eq("enabled", true)
+    .is("deleted_at", null)
+    .maybeSingle();
+  if (error) throwDb(error, "Unable to verify source sync visibility");
+  return Boolean(data);
+}
+
+type M3uSyncLeaseClaim = {
+  claimed: boolean;
+  reason: string;
+  retryAt: string;
+  attemptCount: number;
+  leaseUntil: string;
+};
+
+const M3U_SYNC_LEASE_TTL_SECONDS = 300;
+
+async function claimM3uSyncLease(
+  db: SupabaseClient,
+  sourceId: string,
+  userId: string,
+  leaseToken: string,
+): Promise<M3uSyncLeaseClaim> {
+  const { data, error } = await db.rpc("norva_claim_source_m3u_sync_lease", {
+    p_source_id: sourceId,
+    p_user_id: userId,
+    p_lease_token: leaseToken,
+    p_ttl_seconds: M3U_SYNC_LEASE_TTL_SECONDS,
+  });
+  if (error) throwDb(error, "Unable to claim M3U sync lease");
+  const result = recordOrEmpty(Array.isArray(data) ? data[0] : data);
+  return {
+    claimed: result.claimed === true,
+    reason: stringOr(result.reason, ""),
+    retryAt: stringOr(result.retryAt ?? result.retry_at, ""),
+    attemptCount: Math.max(0, Number(result.attemptCount ?? result.attempt_count) || 0),
+    leaseUntil: stringOr(result.leaseUntil ?? result.lease_until, ""),
+  };
+}
+
+async function claimM3uDiagnosticLease(
+  db: SupabaseClient,
+  sourceId: string,
+  userId: string,
+  leaseToken: string,
+): Promise<M3uSyncLeaseClaim> {
+  const { data, error } = await db.rpc("norva_claim_source_m3u_diagnostic_lease", {
+    p_source_id: sourceId,
+    p_user_id: userId,
+    p_lease_token: leaseToken,
+    p_ttl_seconds: M3U_SYNC_LEASE_TTL_SECONDS,
+  });
+  if (error) throwDb(error, "Unable to claim M3U diagnostic lease");
+  const result = recordOrEmpty(Array.isArray(data) ? data[0] : data);
+  return {
+    claimed: result.claimed === true,
+    reason: stringOr(result.reason, ""),
+    retryAt: stringOr(result.retryAt ?? result.retry_at, ""),
+    attemptCount: Math.max(0, Number(result.attemptCount ?? result.attempt_count) || 0),
+    leaseUntil: stringOr(result.leaseUntil ?? result.lease_until, ""),
+  };
+}
+
+async function assertM3uSyncLeaseCurrent(
+  db: SupabaseClient,
+  sourceId: string,
+  userId: string,
+  leaseToken: string,
+) {
+  const { data, error } = await db.rpc("norva_renew_source_m3u_sync_lease", {
+    p_source_id: sourceId,
+    p_user_id: userId,
+    p_lease_token: leaseToken,
+    p_ttl_seconds: M3U_SYNC_LEASE_TTL_SECONDS,
+  });
+  if (error) throwDb(error, "Unable to renew M3U sync lease");
+  if (data !== true) {
+    throw new HttpError(409, "M3U sync ownership changed", {
+      code: "M3U_SYNC_LEASE_LOST",
+    });
+  }
+}
+
+async function settleM3uSyncLease(
+  db: SupabaseClient,
+  sourceId: string,
+  userId: string,
+  leaseToken: string,
+  outcome: "success" | "transient_error" | "permanent_error" | "cancelled",
+  errorKind: string | null,
+) {
+  const { data, error } = await db.rpc("norva_settle_source_m3u_sync_lease", {
+    p_source_id: sourceId,
+    p_user_id: userId,
+    p_lease_token: leaseToken,
+    p_outcome: outcome,
+    p_error_kind: errorKind,
+  });
+  if (error) {
+    console.error("[norva-cloud] Unable to settle M3U sync lease", error.message);
+    return { settled: false, state: "unknown" };
+  }
+  const result = recordOrEmpty(Array.isArray(data) ? data[0] : data);
+  return { settled: result.settled === true, state: stringOr(result.state, "") };
+}
+
+function classifyM3uSyncFailure(error: unknown): {
+  outcome: "transient_error" | "permanent_error";
+  errorKind: string;
+} {
+  const status = error instanceof HttpError ? Number(error.status) : 0;
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  if ([400, 401, 403, 404, 410, 422].includes(status)) {
+    return { outcome: "permanent_error", errorKind: `HTTP_${status}` };
+  }
+  if (/managed cloud configuration|decrypt|invalid playlist|no playable catalog/i.test(message)) {
+    return { outcome: "permanent_error", errorKind: "M3U_CONFIGURATION_OR_CONTENT" };
+  }
+  if (status === 408 || status === 425 || status === 429 || status >= 500) {
+    return { outcome: "transient_error", errorKind: status ? `HTTP_${status}` : "PROVIDER_TRANSIENT" };
+  }
+  if (/timeout|timed out|network|fetch|connection|socket|econn|temporar|upstream/i.test(message)) {
+    return { outcome: "transient_error", errorKind: "PROVIDER_TRANSIENT" };
+  }
+  return { outcome: "transient_error", errorKind: "M3U_SYNC_UNKNOWN" };
+}
+
+async function withM3uSourceLease<T>(
+  db: SupabaseClient,
+  sourceId: string,
+  userId: string,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const leaseToken = crypto.randomUUID();
+  const claim = await claimM3uDiagnosticLease(db, sourceId, userId, leaseToken);
+  if (!claim.claimed) {
+    const quarantined = claim.reason === "quarantined";
+    throw new HttpError(409, quarantined
+      ? "This source must be disabled and enabled before another provider check"
+      : "A source operation is already in progress", {
+      code: quarantined ? "M3U_SYNC_QUARANTINED" : "M3U_SYNC_BUSY",
+      retryAt: claim.retryAt || undefined,
+    });
+  }
+
+  try {
+    const result = await operation();
+    await assertM3uSyncLeaseCurrent(db, sourceId, userId, leaseToken);
+    await settleM3uSyncLease(db, sourceId, userId, leaseToken, "success", null);
+    return result;
+  } catch (error) {
+    // Check/estimate are foreground diagnostics, not durable import attempts.
+    // They share the exclusion lease but must not consume the import retry
+    // budget or quarantine a source after a user closes/cancels the request.
+    await settleM3uSyncLease(db, sourceId, userId, leaseToken, "cancelled", null);
+    throw error;
+  }
+}
+
+async function syncCloudSource(
+  sourceId: string,
+  userId: string,
+  db: SupabaseClient,
+  legacyRestore: LegacyM3uClaimRestore | null = null,
+) {
   let baseHint: JsonRecord = {};
   let progress: JsonRecord = {};
   let generation: ActiveCatalogGeneration | null = null;
+  let m3uLeaseToken: string | null = null;
+  let m3uLeaseNextHeartbeatAt = 0;
+  const heartbeatM3uSyncLease = async () => {
+    if (!m3uLeaseToken || Date.now() < m3uLeaseNextHeartbeatAt) return;
+    await assertM3uSyncLeaseCurrent(db, sourceId, userId, m3uLeaseToken);
+    m3uLeaseNextHeartbeatAt = Date.now() + 60_000;
+  };
 
   try {
+    if (!await sourceSyncIoAllowed(sourceId, userId, db)) return;
     const { data: source, error } = await db
       .from("cloud_sources")
       .select("*")
       .eq("id", sourceId)
       .eq("user_id", userId)
+      .eq("enabled", true)
+      .is("deleted_at", null)
       .maybeSingle();
     if (error) throwDb(error, "Unable to load source");
-    if (!source) throw new HttpError(404, "Source not found");
+    // A disable/delete racing the durable watchdog is a normal pause, not a
+    // source error.  Stop before decrypting credentials or opening provider I/O.
+    if (!source) return;
     if (!source.config_ciphertext) throw new HttpError(400, "Source has no managed cloud configuration");
     generation = await readActiveCatalogGenerationSnapshot(db, sourceId, userId);
 
@@ -1993,6 +2356,7 @@ async function syncCloudSource(sourceId: string, userId: string, db: SupabaseCli
       const inDiscovery = cur.active === true && stringOr(cur.phase, "") === "discover";
       if (inDiscovery && String(source.sync_status) === "syncing") {
         if (Date.now() - heartbeat < 75_000) return; // a chain is alive — join it
+        if (!await sourceSyncIoAllowed(sourceId, userId, db)) return;
         await driveXtreamSyncToReady(sourceId, userId, db); // stalled → resume without wiping
         return;
       }
@@ -2015,13 +2379,41 @@ async function syncCloudSource(sourceId: string, userId: string, db: SupabaseCli
         })
         .eq("id", sourceId)
         .eq("user_id", userId);
+      if (!await sourceSyncIoAllowed(sourceId, userId, db)) return;
       await driveXtreamSyncToReady(sourceId, userId, db);
       return;
     }
 
     // m3u / other source types stay on the single-isolate path (bounded size).
+    if (source.source_type === "m3u") {
+      const candidateToken = crypto.randomUUID();
+      const claim = await claimM3uSyncLease(db, sourceId, userId, candidateToken);
+      if (!claim.claimed) {
+        // Old app builds pre-marked a source as syncing before this durable
+        // claim existed. Restore only backoff/quarantine refusals, and only if
+        // the exact post-write updated_at fence still owns the row. A leased
+        // refusal deliberately remains syncing because another worker owns it.
+        if (legacyRestore && ["backoff", "quarantined"].includes(claim.reason)) {
+          await restoreLegacyM3uClaimState(db, sourceId, userId, legacyRestore);
+        }
+        return;
+      }
+      m3uLeaseToken = candidateToken;
+      m3uLeaseNextHeartbeatAt = Date.now() + 60_000;
+      baseHint = {
+        ...baseHint,
+        m3uSyncControl: compactRecord({
+          v: 1,
+          state: "running",
+          attemptCount: claim.attemptCount,
+          leaseUntil: claim.leaseUntil,
+          updatedAt: startedAt,
+        }),
+      };
+    }
+
     await assertActiveCatalogGenerationCurrent(db, sourceId, userId, generation);
-    await db
+    const { error: startError } = await db
       .from("cloud_sources")
       .update({
         sync_status: "syncing",
@@ -2031,26 +2423,56 @@ async function syncCloudSource(sourceId: string, userId: string, db: SupabaseCli
       })
       .eq("id", sourceId)
       .eq("user_id", userId);
+    if (startError) throwDb(startError, "Unable to start source sync");
 
+    if (!await sourceSyncIoAllowed(sourceId, userId, db)) {
+      if (m3uLeaseToken) {
+        await settleM3uSyncLease(db, sourceId, userId, m3uLeaseToken, "cancelled", null);
+        m3uLeaseToken = null;
+      }
+      return;
+    }
+    if (m3uLeaseToken) {
+      await assertM3uSyncLeaseCurrent(db, sourceId, userId, m3uLeaseToken);
+    }
     const config = await decryptSourceConfig(source.config_ciphertext, await getRuntimeConfig(db));
     await assertActiveCatalogGenerationCurrent(db, sourceId, userId, generation);
     const reportProgress: SyncProgressReporter = async (patch: JsonRecord) => {
+      await heartbeatM3uSyncLease();
       progress = mergeSyncProgress(progress, compactRecord({ ...patch, status: "syncing", updatedAt: new Date().toISOString() }));
       await assertActiveCatalogGenerationCurrent(db, sourceId, userId, generation!);
       await writeSourceSyncProgress(db, sourceId, userId, baseHint, progress);
     };
 
+    if (!await sourceSyncIoAllowed(sourceId, userId, db)) {
+      if (m3uLeaseToken) {
+        await settleM3uSyncLease(db, sourceId, userId, m3uLeaseToken, "cancelled", null);
+        m3uLeaseToken = null;
+      }
+      return;
+    }
     const result = source.source_type === "m3u"
-      ? await syncM3uSource(sourceId, userId, config, db, generation, reportProgress)
+      ? await syncM3uSource(
+        sourceId,
+        userId,
+        config,
+        db,
+        generation,
+        reportProgress,
+        heartbeatM3uSyncLease,
+      )
       : { total: 0 };
 
     if (source.source_type === "m3u" && Number(result.total ?? 0) <= 0) {
       throw new HttpError(422, "No playable catalog items were imported from this source");
     }
+    if (m3uLeaseToken) {
+      await assertM3uSyncLeaseCurrent(db, sourceId, userId, m3uLeaseToken);
+    }
 
     await assertActiveCatalogGenerationCurrent(db, sourceId, userId, generation);
     const syncedAt = new Date().toISOString();
-    await db
+    const { error: readyError } = await db
       .from("cloud_sources")
       .update({
         sync_status: "ready",
@@ -2064,12 +2486,32 @@ async function syncCloudSource(sourceId: string, userId: string, db: SupabaseCli
       })
       .eq("id", sourceId)
       .eq("user_id", userId);
+    if (readyError) throwDb(readyError, "Unable to complete source sync");
+    if (m3uLeaseToken) {
+      await settleM3uSyncLease(db, sourceId, userId, m3uLeaseToken, "success", null);
+      m3uLeaseToken = null;
+    }
   } catch (error) {
-    if (isCatalogGenerationSuperseded(error)) return;
+    if (error instanceof HttpError
+        && stringOr(recordOrEmpty(error.details).code, "") === "M3U_SYNC_LEASE_LOST") {
+      if (m3uLeaseToken) {
+        await settleM3uSyncLease(db, sourceId, userId, m3uLeaseToken, "cancelled", null);
+      }
+      return;
+    }
+    if (isCatalogGenerationSuperseded(error)) {
+      if (m3uLeaseToken) {
+        await settleM3uSyncLease(db, sourceId, userId, m3uLeaseToken, "cancelled", null);
+      }
+      return;
+    }
     if (generation) {
       try {
         await assertActiveCatalogGenerationCurrent(db, sourceId, userId, generation);
       } catch (_) {
+        if (m3uLeaseToken) {
+          await settleM3uSyncLease(db, sourceId, userId, m3uLeaseToken, "cancelled", null);
+        }
         return;
       }
     }
@@ -2095,6 +2537,10 @@ async function syncCloudSource(sourceId: string, userId: string, db: SupabaseCli
       })
       .eq("id", sourceId)
       .eq("user_id", userId);
+    if (m3uLeaseToken) {
+      const failure = classifyM3uSyncFailure(error);
+      await settleM3uSyncLease(db, sourceId, userId, m3uLeaseToken, failure.outcome, failure.errorKind);
+    }
   }
 }
 
@@ -2799,6 +3245,7 @@ async function syncM3uSource(
   db: SupabaseClient,
   generation: ActiveCatalogGeneration,
   reportProgress: SyncProgressReporter = async () => {},
+  heartbeat: () => Promise<void> = async () => {},
 ) {
   const playlistUrl = stringOr(config.playlistUrl, "");
   await reportProgress({
@@ -2848,14 +3295,21 @@ async function syncM3uSource(
       import: { status: "running", count: rows.length },
     },
   });
-  const savedRows = await replaceSourceItems(sourceId, userId, rows, db, generation);
+  const savedRows = await replaceSourceItems(
+    sourceId,
+    userId,
+    rows,
+    db,
+    generation,
+    heartbeat,
+  );
   await reportProgress({
     stage: "finalizing",
     percent: 86,
     steps: { import: { status: "done", count: savedRows.length }, finalize: { status: "running" } },
   });
   const liveCatalog = await refreshMaterializedLiveCatalog(db, {
-    sourceId, userId, rows: savedRows, generation,
+    sourceId, userId, rows: savedRows, generation, heartbeat,
   });
   return { live: rows.length, total: rows.length, liveCatalog };
 }
@@ -2866,10 +3320,13 @@ async function replaceSourceItems(
   rows: JsonRecord[],
   db: SupabaseClient,
   generation: ActiveCatalogGeneration,
+  heartbeat: () => Promise<void> = async () => {},
 ): Promise<LiveCatalogItem[]> {
   const savedRows: LiveCatalogItem[] = [];
-  await clearCatalogGenerationMediaItems(db, sourceId, userId, generation);
+  await heartbeat();
+  await clearCatalogGenerationMediaItems(db, sourceId, userId, generation, heartbeat);
   for (let index = 0; index < rows.length; index += 500) {
+    await heartbeat();
     const chunk = withCatalogGenerationRows(rows.slice(index, index + 500), generation);
     if (!chunk.length) continue;
     const { data, error } = await db
@@ -2887,8 +3344,10 @@ async function clearCatalogGenerationMediaItems(
   sourceId: string,
   userId: string,
   generation: ActiveCatalogGeneration,
+  heartbeat: () => Promise<void> = async () => {},
 ) {
   for (let guard = 0; guard < 100; guard += 1) {
+    await heartbeat();
     const { data, error } = await db.rpc("norva_delete_catalog_generation_items_batch", {
       p_source_id: sourceId,
       p_user_id: userId,

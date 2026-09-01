@@ -114,7 +114,7 @@ Deno.serve(async (req) => {
       return json(req, {
         ok: true,
         service: "norva-source-sync",
-        version: 15,
+        version: 17,
         liveMaterialization: true,
         syncProgress: true,
         catalogFinalize: true,
@@ -129,6 +129,9 @@ Deno.serve(async (req) => {
         episodeProbeBatchCanary: "4/5",
         exactTailDrainSafe: true,
         cloudAutoRefreshClaimProtocol: 1,
+        sourceReenableResumeProtocol: 1,
+        m3uSyncLeaseProtocol: 2,
+        fileAudioRepairCohortProtocol: 2,
         tmdbSearchPolicy: TMDB_SEARCH_POLICY_VERSION,
       });
     }
@@ -313,13 +316,18 @@ Deno.serve(async (req) => {
   } catch (error) {
     const status = error instanceof HttpError ? error.status : 500;
     const code = publicErrorCode(error);
+    const retryAt = publicErrorRetryAt(error, code);
     const message = status >= 500
       ? "Catalog synchronization is temporarily unavailable"
       : error instanceof Error ? error.message : "Unexpected error";
     // Never return or log arbitrary provider/gateway/SQL payloads carried by
     // HttpError.details. Only the stable machine code may cross this boundary.
     console.error("[norva-source-sync]", status, code ?? "UNCLASSIFIED");
-    return json(req, { error: message, ...(code ? { code } : {}) }, status);
+    return json(req, {
+      error: message,
+      ...(code ? { code } : {}),
+      ...(retryAt ? { retryAt } : {}),
+    }, status);
   }
 });
 
@@ -328,6 +336,10 @@ const SOURCE_SYNC_PUBLIC_ERROR_CODES = new Set([
   "SOURCE_CATALOG_CHANGED",
   "CATALOG_VISIBILITY_UNAVAILABLE",
   "PROVIDER_DIRECT_FALLBACK_RETRYABLE",
+  "M3U_SYNC_BUSY",
+  "M3U_SYNC_BACKOFF",
+  "M3U_SYNC_QUARANTINED",
+  "M3U_SYNC_UNAVAILABLE",
 ]);
 
 function publicErrorCode(error: unknown): string | null {
@@ -406,10 +418,61 @@ function isCatalogAccessGuardError(error: unknown): boolean {
     "SOURCE_CATALOG_NOT_VISIBLE",
     "SOURCE_CATALOG_CHANGED",
     "CATALOG_VISIBILITY_UNAVAILABLE",
+    "M3U_SYNC_LEASE_LOST",
   ].includes(stringOr(error.details.code, ""));
 }
 
+function publicErrorRetryAt(error: unknown, code: string | null): string | null {
+  if (!(error instanceof HttpError) || !isRecord(error.details)
+      || !["M3U_SYNC_BUSY", "M3U_SYNC_BACKOFF"].includes(code ?? "")) return null;
+  const raw = stringOr(error.details.retryAt ?? error.details.retry_at, "");
+  const timestamp = Date.parse(raw);
+  return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : null;
+}
+
 type SyncProgressReporter = (progress: JsonRecord) => Promise<void>;
+type M3uSyncLeaseClaim = {
+  claimed: boolean;
+  reason: string;
+  retryAt: string;
+  attemptCount: number;
+  leaseUntil: string;
+};
+
+function m3uSyncClaimRefusal(claim: M3uSyncLeaseClaim): HttpError {
+  const common = {
+    retryAt: claim.retryAt || undefined,
+    attemptCount: claim.attemptCount,
+  };
+  if (claim.reason === "quarantined") {
+    return new HttpError(
+      409,
+      "This source must be disabled and enabled before another synchronization",
+      { ...common, code: "M3U_SYNC_QUARANTINED" },
+    );
+  }
+  if (claim.reason === "backoff") {
+    return new HttpError(
+      429,
+      "This source is cooling down after a failed synchronization attempt",
+      { ...common, code: "M3U_SYNC_BACKOFF" },
+    );
+  }
+  if (claim.reason === "leased") {
+    return new HttpError(
+      409,
+      "A source operation is already in progress",
+      { ...common, code: "M3U_SYNC_BUSY" },
+    );
+  }
+  return new HttpError(
+    503,
+    "Source synchronization is temporarily unavailable",
+    { ...common, code: "M3U_SYNC_UNAVAILABLE" },
+  );
+}
+
+const M3U_SYNC_LEASE_TTL_SECONDS = 300;
 
 function syncProgressSteps(status: "pending" | "running" | "done" | "error" | "skipped" = "pending") {
   return {
@@ -526,65 +589,157 @@ async function writeSourceSyncProgress(
   if (error) console.warn("[norva-source-sync] Unable to update source sync progress", error.message);
 }
 
-async function syncCloudSource(sourceId: string, userId: string, db: SupabaseClient, country: string | null = null, opts: { force?: boolean; rawOnly?: boolean } = {}) {
+async function syncCloudSource(
+  sourceId: string,
+  userId: string,
+  db: SupabaseClient,
+  country: string | null = null,
+  opts: {
+    force?: boolean;
+    rawOnly?: boolean;
+    m3uLease?: { token: string; attemptCount: number; leaseUntil: string };
+  } = {},
+) {
   const { data: source, error } = await db
     .from("cloud_sources")
     .select("*")
     .eq("id", sourceId)
     .eq("user_id", userId)
+    .eq("enabled", true)
+    .is("deleted_at", null)
     .maybeSingle();
   if (error) throwDb(error, "Unable to load source");
-  if (!source) throw new HttpError(404, "Source not found");
-  await assertCatalogVisible(sourceId, userId, db);
+  // A scheduled worker may race a user pause. Treat the missing eligible row
+  // as a clean stop before credential decryption/provider I/O.
+  if (!source) {
+    if (opts.m3uLease) {
+      await settleM3uSyncLease(db, sourceId, userId, opts.m3uLease.token, "cancelled", null);
+    }
+    return { sourceId, status: "paused", skipped: "source_not_catalog_visible" };
+  }
+  try {
+    await assertCatalogVisible(sourceId, userId, db);
+  } catch (error) {
+    if (opts.m3uLease) {
+      await settleM3uSyncLease(db, sourceId, userId, opts.m3uLease.token, "cancelled", null);
+    }
+    throw error;
+  }
   const accessSnapshot = await readCatalogAccessSnapshot(sourceId, userId, db, false);
-  if (!source.config_ciphertext) throw new HttpError(400, "Source has no managed cloud configuration");
+  if (!source.config_ciphertext && (source.source_type !== "m3u" || opts.rawOnly)) {
+    throw new HttpError(400, "Source has no managed cloud configuration");
+  }
 
   // Previously-imported catalogue fingerprint, for change-detection.
   const previousSignature = recordOrEmpty(source.config_hint).contentSignature;
   const startedAt = new Date().toISOString();
-  const baseHint = recordOrEmpty(source.config_hint);
+  let baseHint = recordOrEmpty(source.config_hint);
+  let m3uLeaseToken: string | null = null;
+  let m3uLeaseNextHeartbeatAt = 0;
+  const heartbeatM3uSyncLease = async () => {
+    if (!m3uLeaseToken || Date.now() < m3uLeaseNextHeartbeatAt) return;
+    await assertM3uSyncLeaseCurrent(db, sourceId, userId, m3uLeaseToken);
+    m3uLeaseNextHeartbeatAt = Date.now() + 60_000;
+  };
+
+  // Every M3U provider read, whether it is a full import or a detection-only
+  // cron tick, claims the same PostgreSQL lease before credential decryption or
+  // network I/O. The table is the authority; config_hint only mirrors it for
+  // operations UI. This also serializes raw detection with a user-triggered
+  // rebuild and with the legacy norva-cloud adapter during rolling deploys.
+  if (source.source_type === "m3u") {
+    let claim: M3uSyncLeaseClaim;
+    if (opts.m3uLease) {
+      m3uLeaseToken = opts.m3uLease.token;
+      claim = {
+        claimed: true,
+        reason: "",
+        retryAt: "",
+        attemptCount: opts.m3uLease.attemptCount,
+        leaseUntil: opts.m3uLease.leaseUntil,
+      };
+      await assertM3uSyncLeaseCurrent(db, sourceId, userId, m3uLeaseToken);
+    } else {
+      const candidateToken = crypto.randomUUID();
+      claim = await claimM3uSyncLease(db, sourceId, userId, candidateToken);
+      if (!claim.claimed) {
+        // A resolved "deferred" object is unsafe here: the interactive route
+        // would report HTTP 200 and auto-refresh would settle its outer lease as
+        // success even though no provider I/O occurred. Preserve the durable
+        // retry/quarantine state with a stable, public error instead.
+        throw m3uSyncClaimRefusal(claim);
+      }
+      m3uLeaseToken = candidateToken;
+    }
+    m3uLeaseNextHeartbeatAt = Date.now() + 60_000;
+    baseHint = {
+      ...baseHint,
+      m3uSyncControl: compactRecord({
+        v: 1,
+        state: "running",
+        attemptCount: claim.attemptCount,
+        leaseUntil: claim.leaseUntil,
+        updatedAt: startedAt,
+      }),
+    };
+  }
 
   // Detection-only (cron): never mutate the catalogue, materialization, signature
   // or sync_status — stream the provider and compare its signature against our
   // last full import, surfacing the app-closed "what's new" signal on growth.
   // Memory-safe (only the running fingerprint is held, never the rows).
   if (opts.rawOnly) {
-    const config = await decryptSourceConfig(source.config_ciphertext, await getRuntimeConfig(db));
-    await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
-    let result: JsonRecord | null = null;
-    if (source.source_type === "xtream") {
-      result = await detectXtreamChange(sourceId, userId, config, db, previousSignature, {
-        configCiphertext: String(source.config_ciphertext),
-        configRevision: accessSnapshot.configRevision,
-      });
-    } else if (source.source_type === "m3u") {
-      result = await syncM3uSource(
-        sourceId,
-        userId,
-        config,
-        db,
-        country,
-        accessSnapshot,
-        async () => {},
-        { previousSignature, force: false, rawOnly: true },
-      ) as unknown as JsonRecord;
-    }
-    await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
-    if (!result) return { sourceId, status: "detected", changed: false };
-    if (result.changed) {
+    try {
+      const config = await decryptSourceConfig(source.config_ciphertext, await getRuntimeConfig(db));
       await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
-      await maybeRecordContentEvent(db, userId, sourceId, previousSignature, result);
-    }
-    // Persist the provider identity (additive). Existing sources acquire providerKey on
-    // the next detect tick — no full re-sync needed — so the cross-user dedup activates
-    // on its own. Read-merge-write to avoid clobbering a concurrent syncProgress writer.
-    const detectedKey = stringOr(result.providerKey, "");
-    if (detectedKey && detectedKey !== stringOr(recordOrEmpty(source.config_hint).providerKey, "")) {
+      let result: JsonRecord | null = null;
+      if (source.source_type === "xtream") {
+        result = await detectXtreamChange(sourceId, userId, config, db, previousSignature, {
+          configCiphertext: String(source.config_ciphertext),
+          configRevision: accessSnapshot.configRevision,
+        });
+      } else if (source.source_type === "m3u") {
+        result = await syncM3uSource(
+          sourceId,
+          userId,
+          config,
+          db,
+          country,
+          accessSnapshot,
+          async () => {
+            await heartbeatM3uSyncLease();
+          },
+          { previousSignature, force: false, rawOnly: true },
+        ) as unknown as JsonRecord;
+      }
       await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
-      await patchSourceConfigHint(db, sourceId, (hint) => ({ ...hint, providerKey: detectedKey }));
+      if (result?.changed) {
+        await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
+        await maybeRecordContentEvent(db, userId, sourceId, previousSignature, result);
+      }
+      // Persist the provider identity (additive). Existing sources acquire providerKey on
+      // the next detect tick — no full re-sync needed — so the cross-user dedup activates
+      // on its own. Read-merge-write to avoid clobbering a concurrent syncProgress writer.
+      const detectedKey = stringOr(result?.providerKey, "");
+      if (detectedKey && detectedKey !== stringOr(recordOrEmpty(source.config_hint).providerKey, "")) {
+        await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
+        await patchSourceConfigHint(db, sourceId, (hint) => ({ ...hint, providerKey: detectedKey }));
+      }
+      await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
+      if (m3uLeaseToken) {
+        await assertM3uSyncLeaseCurrent(db, sourceId, userId, m3uLeaseToken);
+        await settleM3uSyncLease(db, sourceId, userId, m3uLeaseToken, "success", null);
+      }
+      return result
+        ? { sourceId, status: "detected", changed: Boolean(result.changed), ...result }
+        : { sourceId, status: "detected", changed: false };
+    } catch (error) {
+      if (m3uLeaseToken) {
+        const failure = classifyM3uSyncFailure(error);
+        await settleM3uSyncLease(db, sourceId, userId, m3uLeaseToken, failure.outcome, failure.errorKind);
+      }
+      throw error;
     }
-    await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
-    return { sourceId, status: "detected", changed: Boolean(result.changed), ...result };
   }
 
   let progress: JsonRecord = compactRecord({
@@ -640,7 +795,7 @@ async function syncCloudSource(sourceId: string, userId: string, db: SupabaseCli
     return { sourceId, status: "syncing", started: true };
   }
 
-  await db
+  const { error: startError } = await db
     .from("cloud_sources")
     .update({
       sync_status: "syncing",
@@ -650,23 +805,54 @@ async function syncCloudSource(sourceId: string, userId: string, db: SupabaseCli
     })
     .eq("id", sourceId)
     .eq("user_id", userId);
-  await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
+  if (startError) {
+    if (m3uLeaseToken) {
+      await settleM3uSyncLease(db, sourceId, userId, m3uLeaseToken, "transient_error", "SYNC_STATE_WRITE");
+    }
+    throwDb(startError, "Unable to start source sync");
+  }
+  try {
+    await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
+  } catch (error) {
+    if (m3uLeaseToken) {
+      await settleM3uSyncLease(db, sourceId, userId, m3uLeaseToken, "cancelled", null);
+      m3uLeaseToken = null;
+    }
+    throw error;
+  }
 
   const reportProgress: SyncProgressReporter = async (patch: JsonRecord) => {
+    await heartbeatM3uSyncLease();
     progress = mergeSyncProgress(progress, compactRecord({ ...patch, status: "syncing", updatedAt: new Date().toISOString() }));
     await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
     await writeSourceSyncProgress(db, sourceId, userId, baseHint, progress);
   };
 
   try {
+    if (!source.config_ciphertext) {
+      throw new HttpError(400, "Source has no managed cloud configuration");
+    }
     const config = await decryptSourceConfig(source.config_ciphertext, await getRuntimeConfig(db));
     await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
     const syncOpts = { previousSignature, force: opts.force, rawOnly: false };
     const result = source.source_type === "m3u"
-      ? await syncM3uSource(sourceId, userId, config, db, country, accessSnapshot, reportProgress, syncOpts)
+      ? await syncM3uSource(
+        sourceId,
+        userId,
+        config,
+        db,
+        country,
+        accessSnapshot,
+        reportProgress,
+        syncOpts,
+        heartbeatM3uSyncLease,
+      )
       : { total: 0 };
     const resultRecord = result as JsonRecord;
     await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
+    if (m3uLeaseToken) {
+      await assertM3uSyncLeaseCurrent(db, sourceId, userId, m3uLeaseToken);
+    }
 
     if (source.source_type === "m3u" && Number(result.total ?? 0) <= 0) {
       throw new HttpError(422, "No playable catalog items were imported from this source");
@@ -694,9 +880,17 @@ async function syncCloudSource(sourceId: string, userId: string, db: SupabaseCli
     await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
     await maybeRecordContentEvent(db, userId, sourceId, previousSignature, resultRecord);
     await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
+    if (m3uLeaseToken) {
+      await settleM3uSyncLease(db, sourceId, userId, m3uLeaseToken, "success", null);
+    }
     return { sourceId, status: "ready", ...result };
   } catch (error) {
-    if (isCatalogAccessGuardError(error)) throw error;
+    if (isCatalogAccessGuardError(error)) {
+      if (m3uLeaseToken) {
+        await settleM3uSyncLease(db, sourceId, userId, m3uLeaseToken, "cancelled", null);
+      }
+      throw error;
+    }
     // Provider/DB errors can themselves be the observable side of a cutover.
     // Re-check before writing an error status against the superseded source.
     await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
@@ -720,6 +914,10 @@ async function syncCloudSource(sourceId: string, userId: string, db: SupabaseCli
       })
       .eq("id", sourceId)
       .eq("user_id", userId);
+    if (m3uLeaseToken) {
+      const failure = classifyM3uSyncFailure(error);
+      await settleM3uSyncLease(db, sourceId, userId, m3uLeaseToken, failure.outcome, failure.errorKind);
+    }
     throw error;
   }
 }
@@ -1737,6 +1935,18 @@ function enrichmentFleetNextDelay(summary: JsonRecord, lane: number): number {
   return 5 * 60;
 }
 
+async function sourceHasPendingMovieAudioRepair(
+  db: SupabaseClient,
+  claim: EnrichmentFleetClaim,
+): Promise<boolean> {
+  const { data, error } = await db.rpc("catalog_file_audio_repair_pending", {
+    p_user: claim.user_id,
+    p_source: claim.source_id,
+  });
+  if (error) throwDb(error, "Unable to inspect exact movie audio repair backlog");
+  return data === true;
+}
+
 async function finishEnrichmentFleetClaim(
   db: SupabaseClient,
   claim: EnrichmentFleetClaim,
@@ -2308,7 +2518,9 @@ async function runEnrichmentFleetClaim(
   const seriesInventory = lane === 5 || lane === 9;
   const episodeProbe = lane === 2 || lane === 7;
   const episodeSpeech = lane === 6 || lane === 10;
-  const speechVerification = lane === 1 || lane === 4 || lane === 8;
+  const speechLane = lane === 1 || lane === 4 || lane === 8;
+  let speechVerification = speechLane;
+  let repairCohort = false;
   const providerOverview = lane === 11;
   // Progressive episode-probe canary: one of the two lanes moves from four to
   // five files (+12.5% per full cycle). The worker accepts up to six, allowing
@@ -2318,18 +2530,11 @@ async function runEnrichmentFleetClaim(
   // sequential within one source. Two files per claim materially improve
   // throughput while the 540s request budget and 1200s distributed lease keep
   // a slow/silent multi-track file from overlapping the next provider job.
-  const timeout = setTimeout(
-    () => controller.abort(),
-    (speechVerification || episodeSpeech)
-      ? 540_000
-      : (episodeProbe ? 390_000 : 105_000),
-  );
+  let timeout: ReturnType<typeof setTimeout> | null = null;
   // Raw probes currently find a usable container tag for nearly every file,
   // hence two tagged lanes. Keep one dedicated untagged lane so generic
   // "Audio 2" tracks cannot starve behind that much larger backlog.
-  const speechTarget = speechVerification
-    ? (lane === 4 ? "untagged" : "tagged")
-    : undefined;
+  let speechTarget: "untagged" | "tagged" | undefined;
   let responseReceived = false;
   let localLane = false;
   let accessSnapshot: CatalogAccessSnapshot | null = null;
@@ -2349,6 +2554,29 @@ async function runEnrichmentFleetClaim(
       return;
     }
     accessSnapshot = await readCatalogAccessSnapshot(claim.source_id, claim.user_id, db, false);
+
+    // A repaired false-negative cohort has no exact track map yet, so speech
+    // verification cannot make progress on it. Temporarily lend two of the
+    // three movie-speech lanes to the exact probe queue while it is non-empty.
+    // Lane 8 always remains available for untagged LID while the cohort is
+    // pending, so exact probing and strict certification advance in parallel.
+    // Each borrowed lane preserves the same four-file cap, concurrency=1,
+    // distributed leases, provider drain and viewer pre-emption as lane 0.
+    const repairCohortPending = (lane === 1 || lane === 4 || lane === 8)
+      && await sourceHasPendingMovieAudioRepair(db, claim);
+    if ((lane === 1 || lane === 4) && repairCohortPending) {
+      speechVerification = false;
+      repairCohort = true;
+    }
+    timeout = setTimeout(
+      () => controller.abort(),
+      (speechVerification || episodeSpeech)
+        ? 540_000
+        : (episodeProbe ? 390_000 : 105_000),
+    );
+    speechTarget = speechVerification
+      ? (lane === 4 || (lane === 8 && repairCohortPending) ? "untagged" : "tagged")
+      : undefined;
     if (seriesInventory) {
       localLane = true;
       const result = await runSeriesInventoryFleetLane(db, claim);
@@ -2395,6 +2623,7 @@ async function runEnrichmentFleetClaim(
           speechTarget,
           target: subtitleProbe ? "subtitle" : undefined,
           fileScope: true,
+          repairCohort,
           // Every path stays sequential inside a provider account. The real
           // episode canary completed 14 probes / 72 tracks without one unknown
           // or provider failure, so cheap exact probes use the existing
@@ -2470,7 +2699,7 @@ async function runEnrichmentFleetClaim(
       localLane || responseReceived,
     );
   } finally {
-    clearTimeout(timeout);
+    if (timeout) clearTimeout(timeout);
   }
 }
 
@@ -2568,6 +2797,16 @@ function cloudAutoRefreshFailure(error: unknown) {
   const status = Number.isInteger(rawStatus) && rawStatus >= 100 && rawStatus <= 599
     ? rawStatus
     : null;
+  const details = error instanceof HttpError && isRecord(error.details)
+    ? error.details
+    : {};
+  const code = stringOr(details.code, "");
+  if (code === "M3U_SYNC_QUARANTINED") {
+    return { outcome: "action_required", httpStatus: 409, errorKind: "m3u_quarantined" } as const;
+  }
+  if (code === "M3U_SYNC_BUSY" || code === "M3U_SYNC_BACKOFF") {
+    return { outcome: "transient_failure", httpStatus: status, errorKind: "busy" } as const;
+  }
   const classified = classifyOpsSourceError(formatSourceSyncError(error, "Source refresh failed"));
   if (status !== null && [401, 403, 404].includes(status)) {
     const errorKind = status === 404
@@ -2690,27 +2929,81 @@ async function cronResumeStuck(db: SupabaseClient) {
   // if it has a finalize cursor (it was mid-build), the watchdog resumes it from there
   // (finalizeCloudSource resets sync_status back to "syncing" on its first batch). A 60s
   // staleness gate keeps this to ~one retry/min for a genuinely broken source.
-  const { data, error } = await db
-    .from("cloud_catalog_visible_sources")
-    .select("id,user_id,sync_status,config_hint")
-    .in("sync_status", ["syncing", "error"])
-    .eq("source_type", "xtream")
-    .is("deleted_at", null) // never resurrect a source the user removed (soft-deleted, being reaped)
-    .eq("enabled", true)    // a disabled source is paused — don't resume it
-    // Oldest-first so the highest-priority queued import (the one admitHeavyImport will
-    // admit next) is among the ≤5 we re-kick — slots free up to the front of the queue.
-    .order("created_at", { ascending: true })
-    .limit(100);
-  if (error) return { ok: false, error: error.message };
   const resumed: string[] = [];
+  let scanned = 0;
+  const pageSize = 100;
   const finalizingStages = new Set(["materializing", "building_titles", "building_live_channels", "building_live_variants", "finalizing"]);
   const finalizePhases = new Set(["live", "live_channels", "live_variants", "titles", "complete"]);
-  for (const src of (data ?? [])) {
+  // Page through the entire due population until five real owners are found.
+  // A fixed first page lets old quarantined/backoff M3U rows permanently starve
+  // every newer M3U and Xtream source. Offset pagination is safe here because
+  // the oldest-first candidate set is stable within this short read-only scan;
+  // any concurrent transition is revalidated by the claim/snapshot fences.
+  for (let page = 0; resumed.length < 5; page += 1) {
+    const { data, error } = await db
+      .from("cloud_catalog_visible_sources")
+      .select("id,user_id,source_type,sync_status,config_hint")
+      .in("sync_status", ["syncing", "error"])
+      .in("source_type", ["xtream", "m3u"])
+      .is("deleted_at", null) // never resurrect a source the user removed (soft-deleted, being reaped)
+      .eq("enabled", true)    // a disabled source is paused — don't resume it
+      .order("created_at", { ascending: true })
+      .range(page * pageSize, ((page + 1) * pageSize) - 1);
+    if (error) return { ok: false, error: error.message, scanned };
+    const rows = data ?? [];
+    scanned += rows.length;
+    for (const src of rows) {
     const hint = recordOrEmpty(src.config_hint);
     const cursor = recordOrEmpty(hint.syncCursor);
     const progress = recordOrEmpty(hint.syncProgress);
     const finalizeCursor = recordOrEmpty(hint.finalizeCursor);
     const isError = String(src.sync_status) === "error";
+    const sourceType = String(src.source_type);
+    if (sourceType === "m3u") {
+      // M3U has no category cursor because its import is deliberately bounded to
+      // one isolate. The timestamp is only a cheap candidate filter. Every task
+      // below must win norva_claim_source_m3u_sync_lease before credential
+      // decryption/provider I/O, so overlapping cron ticks stay harmless.
+      const lastSeen = stringOr(progress.updatedAt, "");
+      if (lastSeen && lastSeen > staleFinalizeIso) continue;
+      const leaseToken = crypto.randomUUID();
+      const claim = await claimM3uSyncLease(
+        db,
+        String(src.id),
+        String(src.user_id),
+        leaseToken,
+      );
+      // Only a real lease winner consumes one of the five watchdog dispatch
+      // slots. Leased/backoff/quarantined rows remain visible for operations,
+      // but can never starve later due sources in this oldest-first page.
+      if (!claim.claimed) continue;
+      runInBackground(syncCloudSource(String(src.id), String(src.user_id), db, null, {
+        force: false,
+        rawOnly: false,
+        m3uLease: {
+          token: leaseToken,
+          attemptCount: claim.attemptCount,
+          leaseUntil: claim.leaseUntil,
+        },
+      }).finally(async () => {
+        // Idempotent final safety net for DB/snapshot failures that happen
+        // before syncCloudSource reaches its provider-I/O try/catch. If the
+        // normal path already settled, this returns lease_lost and changes
+        // nothing; otherwise it releases the pre-claimed token without charging
+        // a provider attempt that never happened.
+        await settleM3uSyncLease(
+          db,
+          String(src.id),
+          String(src.user_id),
+          leaseToken,
+          "cancelled",
+          null,
+        );
+      }));
+      resumed.push(String(src.id));
+      if (resumed.length >= 5) break;
+      continue;
+    }
     // Resume discovery even when the source errored: a large/slow discovery that
     // exhausted its continuation budget — or hit any non-503 error — still carries
     // an active discover cursor and must be picked back up, not stranded behind a
@@ -2755,9 +3048,11 @@ async function cronResumeStuck(db: SupabaseClient) {
     }
     else runInBackground(driveFinalizeToReady(db, String(src.id), String(src.user_id), null));
     resumed.push(String(src.id));
-    if (resumed.length >= 5) break;
+      if (resumed.length >= 5) break;
+    }
+    if (rows.length < pageSize) break;
   }
-  return { ok: true, scanned: (data ?? []).length, resumed };
+  return { ok: true, scanned, resumed };
 }
 
 // Service-authed entry point to finish a source's materialization without a user
@@ -3047,6 +3342,94 @@ async function releaseFinalizeLease(
     p_user_id: userId,
     p_lease_token: leaseToken,
   });
+}
+
+async function claimM3uSyncLease(
+  db: SupabaseClient,
+  sourceId: string,
+  userId: string,
+  leaseToken: string,
+): Promise<M3uSyncLeaseClaim> {
+  const { data, error } = await db.rpc("norva_claim_source_m3u_sync_lease", {
+    p_source_id: sourceId,
+    p_user_id: userId,
+    p_lease_token: leaseToken,
+    p_ttl_seconds: M3U_SYNC_LEASE_TTL_SECONDS,
+  });
+  if (error) throwDb(error, "Unable to claim M3U sync lease");
+  const result = recordOrEmpty(Array.isArray(data) ? data[0] : data);
+  return {
+    claimed: result.claimed === true,
+    reason: stringOr(result.reason, ""),
+    retryAt: stringOr(result.retryAt ?? result.retry_at, ""),
+    attemptCount: Math.max(0, Number(result.attemptCount ?? result.attempt_count) || 0),
+    leaseUntil: stringOr(result.leaseUntil ?? result.lease_until, ""),
+  };
+}
+
+async function assertM3uSyncLeaseCurrent(
+  db: SupabaseClient,
+  sourceId: string,
+  userId: string,
+  leaseToken: string,
+) {
+  const { data, error } = await db.rpc("norva_renew_source_m3u_sync_lease", {
+    p_source_id: sourceId,
+    p_user_id: userId,
+    p_lease_token: leaseToken,
+    p_ttl_seconds: M3U_SYNC_LEASE_TTL_SECONDS,
+  });
+  if (error) throwDb(error, "Unable to renew M3U sync lease");
+  if (data !== true) {
+    throw new HttpError(409, "M3U sync ownership changed", {
+      code: "M3U_SYNC_LEASE_LOST",
+    });
+  }
+}
+
+async function settleM3uSyncLease(
+  db: SupabaseClient,
+  sourceId: string,
+  userId: string,
+  leaseToken: string,
+  outcome: "success" | "transient_error" | "permanent_error" | "cancelled",
+  errorKind: string | null,
+) {
+  const { data, error } = await db.rpc("norva_settle_source_m3u_sync_lease", {
+    p_source_id: sourceId,
+    p_user_id: userId,
+    p_lease_token: leaseToken,
+    p_outcome: outcome,
+    p_error_kind: errorKind,
+  });
+  if (error) {
+    console.error("[norva-source-sync] Unable to settle M3U sync lease", error.message);
+    return { settled: false, state: "unknown" };
+  }
+  const result = recordOrEmpty(Array.isArray(data) ? data[0] : data);
+  return { settled: result.settled === true, state: stringOr(result.state, "") };
+}
+
+function classifyM3uSyncFailure(error: unknown): {
+  outcome: "transient_error" | "permanent_error";
+  errorKind: string;
+} {
+  const status = error instanceof HttpError ? Number(error.status) : 0;
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  if ([400, 401, 403, 404, 410, 422].includes(status)) {
+    return { outcome: "permanent_error", errorKind: `HTTP_${status}` };
+  }
+  if (/managed cloud configuration|decrypt|invalid playlist|no playable catalog/i.test(message)) {
+    return { outcome: "permanent_error", errorKind: "M3U_CONFIGURATION_OR_CONTENT" };
+  }
+  if (status === 408 || status === 425 || status === 429 || status >= 500) {
+    return { outcome: "transient_error", errorKind: status ? `HTTP_${status}` : "PROVIDER_TRANSIENT" };
+  }
+  if (/timeout|timed out|network|fetch|connection|socket|econn|temporar|upstream/i.test(message)) {
+    return { outcome: "transient_error", errorKind: "PROVIDER_TRANSIENT" };
+  }
+  // Unknown failures get a bounded recovery chance, never an unbounded minute loop.
+  return { outcome: "transient_error", errorKind: "M3U_SYNC_UNKNOWN" };
 }
 
 // Kick a fresh finalize isolate (resumes from the persisted finalize cursor).
@@ -3826,6 +4209,7 @@ async function syncM3uSource(
   expectedSnapshot: CatalogAccessSnapshot,
   reportProgress: SyncProgressReporter = async () => {},
   opts: { previousSignature?: unknown; force?: boolean; rawOnly?: boolean } = {},
+  heartbeat: () => Promise<void> = async () => {},
 ) {
   const playlistUrl = stringOr(config.playlistUrl, "");
   await reportProgress({
@@ -3899,7 +4283,14 @@ async function syncM3uSource(
     },
   });
   await assertCatalogSnapshotCurrent(sourceId, userId, expectedSnapshot, db);
-  const savedRows = await replaceSourceItems(sourceId, userId, rows, db, expectedSnapshot);
+  const savedRows = await replaceSourceItems(
+    sourceId,
+    userId,
+    rows,
+    db,
+    expectedSnapshot,
+    heartbeat,
+  );
   await reportProgress({
     stage: "finalizing",
     percent: 86,
@@ -3912,6 +4303,7 @@ async function syncM3uSource(
     rows: savedRows,
     country: country || stringOr(config.country, "FR"),
     generation: expectedSnapshot,
+    heartbeat,
   });
   await assertCatalogSnapshotCurrent(sourceId, userId, expectedSnapshot, db);
   return { live: rows.length, total: rows.length, liveCatalog, contentSignature };
@@ -3923,10 +4315,12 @@ async function replaceSourceItems(
   rows: JsonRecord[],
   db: SupabaseClient,
   expectedSnapshot: CatalogAccessSnapshot,
+  heartbeat: () => Promise<void> = async () => {},
 ): Promise<LiveCatalogItem[]> {
   const savedRows: LiveCatalogItem[] = [];
   await assertCatalogSnapshotCurrent(sourceId, userId, expectedSnapshot, db);
   for (let guard = 0; guard < 100; guard += 1) {
+    await heartbeat();
     const { data, error } = await db.rpc("norva_delete_catalog_generation_items_batch", {
       p_source_id: sourceId,
       p_user_id: userId,
@@ -3939,6 +4333,7 @@ async function replaceSourceItems(
     if (guard === 99) throw new Error("Catalog generation clear exceeded its bounded batch budget");
   }
   for (let index = 0; index < rows.length; index += 500) {
+    await heartbeat();
     await assertCatalogSnapshotCurrent(sourceId, userId, expectedSnapshot, db);
     const chunk = withCatalogGenerationRows(rows.slice(index, index + 500), expectedSnapshot);
     if (!chunk.length) continue;

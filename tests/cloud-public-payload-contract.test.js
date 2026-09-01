@@ -248,7 +248,7 @@ test('source connection checks expose only fixed success and failure contracts',
   assert.match(validation, /const directFetch = async \(\) => \{[\s\S]*fetchJson[\s\S]*await directFallback\?\.assertSourceCurrent\?\.\(\)/);
 });
 
-test('base source mutations return only id before reading the management projection', () => {
+test('base source mutations return only internal ids or a CAS timestamp before the management projection', () => {
   assert.doesNotMatch(CLOUD, /SOURCE_ROW_PUBLIC_SELECT/);
   assert.doesNotMatch(
     CLOUD,
@@ -265,9 +265,9 @@ test('base source mutations return only id before reading the management project
   const cases = [
     ['async function createSource(', 'async function updateSource(', /\.insert\(row\)\.select\("id"\)\.single\(\)/],
     ['async function updateSource(', 'async function syncExistingSource(', /\.update\(\{ display_name: displayName \}\)[\s\S]*\.select\("id"\)/],
-    ['async function syncExistingSource(', 'async function toggleSourceEnabled(', /\.update\(\{ sync_status: "syncing", sync_error: null \}\)[\s\S]*\.select\("id"\)/],
-    ['async function toggleSourceEnabled(', 'async function testSourceConnection(', /\.update\(\{ enabled: next \}\)[\s\S]*\.select\("id"\)/],
-    ['async function hardSyncSource(', 'function buildSourceConfig(', /\.update\(\{ sync_status: "syncing", sync_error: null, config_hint: compactRecord\(hint\) \}\)[\s\S]*\.select\("id"\)/],
+    ['async function syncExistingSource(', 'async function setSourceEnabled(', /\.update\(\{ sync_status: "syncing", sync_error: null \}\)[\s\S]*\.select\("id,updated_at"\)/],
+    ['async function setSourceEnabled(', 'async function testSourceConnection(', /\.update\(\{ enabled: desired \}\)[\s\S]*\.eq\("enabled", current\)[\s\S]*\.select\("id"\)/],
+    ['async function hardSyncSource(', 'function buildSourceConfig(', /\.update\(\{ sync_status: "syncing", sync_error: null, config_hint: compactRecord\(hint\) \}\)[\s\S]*\.select\("id,updated_at"\)/],
   ];
 
   for (const [start, end, mutation] of cases) {

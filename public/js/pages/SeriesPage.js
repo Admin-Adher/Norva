@@ -640,7 +640,7 @@ class SeriesPage {
         const loaderEl = this.container.querySelector('.genre-bucket-loader');
         this.bucketObserver = new IntersectionObserver((entries) => {
             if (entries.some((e) => e.isIntersecting)) this.loadBucketPage();
-        }, { rootMargin: '700px' });
+        }, { root: this.container, rootMargin: '700px' });
         this.loadBucketPage().then(() => {
             if (loaderEl) this.bucketObserver.observe(loaderEl);
         });

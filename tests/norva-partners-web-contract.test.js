@@ -2509,7 +2509,7 @@ test('Partners route participates in bounded native continuity without storing p
     /\.partners-shell[\s\S]{0,500}scroll-padding-block:[^;]*var\(--bottom-nav-h\)/,
   );
   assert.match(htmlSource, /main\.css\?v=4a3c14b9a1/);
-  assert.match(htmlSource, /cloudApi\.js\?v=70/);
+  assert.match(htmlSource, /cloudApi\.js\?v=71/);
   assert.match(htmlSource, /standalone\.js\?v=12/);
   assert.match(htmlSource, /Settings\.js\?v=d1ee96cc32/);
   assert.match(htmlSource, /PartnersPage\.js\?v=10/);
