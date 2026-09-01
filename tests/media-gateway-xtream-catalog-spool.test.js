@@ -258,9 +258,11 @@ test('pinned direct and proxy requests never follow a public-to-private redirect
     }
     const openXtreamProviderResponse = vm.runInNewContext(`(${source})`, {
       Agent: FakeDispatcher,
-      ProxyAgent: FakeDispatcher,
       providerProxyUrls: proxyUrls,
-      poolIndexForKey: () => 0,
+      providerHttpProxyUrls: proxyUrls,
+      providerSocksProxyUrls: [],
+      providerRouteForKey: () => ({ slot: 1, nodeTransport: 'http' }),
+      createProviderProxyAgent: (url, options) => new FakeDispatcher({ uri: url, ...options }),
       proxyKeyFromUrl: () => 'account-key',
       resolveXtreamEgressTarget: async () => ({
         pinnedUrl: 'https://93.184.216.34/player_api.php',

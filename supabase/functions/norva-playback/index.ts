@@ -279,7 +279,7 @@ async function handleRequest(req: Request): Promise<Response> {
       return json(req, {
         ok: true,
         service: "norva-playback",
-        version: 68,
+        version: 69,
         nativeHeartbeatProtocol: 1,
         providerCircuitProtocol: 1,
         exactTrackCrawlerProtocol: 2,
@@ -345,6 +345,7 @@ async function handleRequest(req: Request): Promise<Response> {
         exactTailDrainSafe: true,
         providerCatalogRefreshDrainMs: PROVIDER_CATALOG_REFRESH_DRAIN_MS,
         completeHlsCacheCallbackProtocol: 1,
+        providerAdaptiveRouteControlProtocol: 1,
       });
     }
     if (req.method === "GET" && segments[0] === "telemetry" && segments[1] === "summary") {
@@ -449,6 +450,9 @@ async function handleRequest(req: Request): Promise<Response> {
     }
     if (req.method === "POST" && segments[0] === "account-activity") {
       return json(req, await runAccountActivity(req, supabase));
+    }
+    if (req.method === "POST" && segments[0] === "provider-route" && segments[1] === "resolve") {
+      return json(req, await runProviderRouteResolve(req, supabase));
     }
     if (req.method === "POST" && segments[0] === "complete-cache-callback") {
       return json(req, await runCompleteHlsCacheCallback(req, supabase));
@@ -10821,6 +10825,181 @@ async function runAccountActivity(req: Request, db: SupabaseClient) {
     if (error) return { ok: true, touched: 0, warn: "rpc-error" };
   } catch (_) { return { ok: true, touched: 0, warn: "rpc-exception" }; }
   return { ok: true, touched: keys.length };
+}
+
+type ProviderRouteCoordinate = {
+  slot: number;
+  nodeTransport: "http" | "socks5";
+};
+
+function providerRouteCoordinate(value: unknown): ProviderRouteCoordinate | null {
+  const record = recordOrEmpty(value);
+  const slot = Number(record.slot);
+  const nodeTransport = stringOr(record.nodeTransport, "");
+  if (!Number.isInteger(slot) || slot < 1 || slot > 32) return null;
+  if (nodeTransport !== "http" && nodeTransport !== "socks5") return null;
+  return { slot, nodeTransport };
+}
+
+function providerRouteCoordinateKey(value: ProviderRouteCoordinate): string {
+  return `${value.slot}:${value.nodeTransport}`;
+}
+
+function providerRouteNumberOrNull(value: unknown): number | null {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function publicProviderRouteDecision(
+  state: JsonRecord,
+  candidates: Map<string, ProviderRouteCoordinate>,
+): JsonRecord | null {
+  const coordinate = providerRouteCoordinate({
+    slot: state.route_slot,
+    nodeTransport: state.node_transport,
+  });
+  if (!coordinate || !candidates.has(providerRouteCoordinateKey(coordinate))) return null;
+  const expiresAt = stringOrNull(state.expires_at);
+  if (!expiresAt || !Number.isFinite(Date.parse(expiresAt)) || Date.parse(expiresAt) <= Date.now()) return null;
+  return {
+    ...coordinate,
+    score: providerRouteNumberOrNull(state.score),
+    confidence: providerRouteNumberOrNull(state.confidence),
+    expiresAt,
+    selectionReason: stringOr(state.selected_reason, "account-sticky"),
+  };
+}
+
+async function runProviderRouteResolve(req: Request, db: SupabaseClient): Promise<JsonRecord> {
+  const runtimeConfig = await getRuntimeConfig(db);
+  requireConfiguredMediaGatewayCallback(req, runtimeConfig);
+  const body = await req.json()
+    .then(recordOrEmpty)
+    .catch(() => { throw new HttpError(400, "Invalid provider route JSON"); });
+  const expectedKeys = [
+    "accountFingerprint",
+    "candidates",
+    "hostFingerprint",
+    "priority",
+    "protocol",
+  ];
+  const actualKeys = Object.keys(body).sort();
+  if (
+    actualKeys.length !== expectedKeys.length ||
+    !actualKeys.every((key, index) => key === expectedKeys[index]) ||
+    body.protocol !== 1 || body.priority !== "viewer"
+  ) {
+    throw new HttpError(400, "Invalid provider route request shape");
+  }
+  const accountFingerprint = stringOr(body.accountFingerprint, "");
+  const hostFingerprint = stringOr(body.hostFingerprint, "");
+  if (!/^[0-9a-f]{64}$/.test(accountFingerprint) || !/^[0-9a-f]{64}$/.test(hostFingerprint)) {
+    throw new HttpError(400, "Invalid provider route identity");
+  }
+  const rawCandidates = Array.isArray(body.candidates) ? body.candidates : [];
+  if (!rawCandidates.length || rawCandidates.length > 64) {
+    throw new HttpError(400, "Invalid provider route candidates");
+  }
+  const candidates = new Map<string, ProviderRouteCoordinate>();
+  for (const rawCandidate of rawCandidates) {
+    const coordinate = providerRouteCoordinate(rawCandidate);
+    if (!coordinate) throw new HttpError(400, "Invalid provider route candidates");
+    const candidateRecord = recordOrEmpty(rawCandidate);
+    if (Object.keys(candidateRecord).sort().join(",") !== "nodeTransport,slot") {
+      throw new HttpError(400, "Invalid provider route candidates");
+    }
+    const key = providerRouteCoordinateKey(coordinate);
+    if (candidates.has(key)) throw new HttpError(400, "Invalid provider route candidates");
+    candidates.set(key, coordinate);
+  }
+
+  // A viewer always wins. This call only raises the distributed benchmark's
+  // preemption bit; the existing provider-session/permit machinery remains the
+  // sole admission authority for the actual provider connection.
+  let benchmarkPreempted = false;
+  try {
+    const { data, error } = await db.rpc("norva_preempt_provider_route_lease", {
+      p_account_fingerprint: accountFingerprint,
+    });
+    benchmarkPreempted = !error && data === true;
+  } catch (_) { /* migration lag or transient DB outage: preserve playback */ }
+
+  const disabled = {
+    protocol: 1,
+    enabled: false,
+    apply: false,
+    decision: null,
+    benchmarkPreempted,
+  };
+  let policy: JsonRecord | null = null;
+  try {
+    const { data, error } = await db
+      .from("provider_route_policies")
+      .select("enabled,shadow_mode,route_ttl_seconds,minimum_confidence,minimum_relative_gain,sustained_candidate_wins,consecutive_failure_threshold,tiny_probe_bytes,sustained_probe_bytes,top_candidate_count,benchmark_lease_seconds")
+      .eq("policy_key", "default")
+      .maybeSingle();
+    if (error || !data) return disabled;
+    policy = recordOrEmpty(data);
+  } catch (_) {
+    return disabled;
+  }
+  if (!policy) return disabled;
+
+  let decision: JsonRecord | null = null;
+  try {
+    const { data: accountState, error: accountError } = await db
+      .from("provider_route_state")
+      .select("route_slot,node_transport,score,confidence,expires_at,selected_reason")
+      .eq("scope", "account")
+      .eq("route_identity", accountFingerprint)
+      .gt("expires_at", new Date().toISOString())
+      .maybeSingle();
+    if (!accountError && accountState) {
+      decision = publicProviderRouteDecision(recordOrEmpty(accountState), candidates);
+    }
+    if (!decision) {
+      const { data: hostStates, error: hostError } = await db
+        .from("provider_route_state")
+        .select("route_slot,node_transport,score,confidence,expires_at,selected_reason")
+        .eq("scope", "host")
+        .eq("host_fingerprint", hostFingerprint)
+        .gt("expires_at", new Date().toISOString())
+        .order("score", { ascending: false })
+        .order("confidence", { ascending: false })
+        .limit(16);
+      if (!hostError) {
+        for (const state of hostStates || []) {
+          decision = publicProviderRouteDecision(recordOrEmpty(state), candidates);
+          if (decision) {
+            decision.selectionReason = "host-learned";
+            break;
+          }
+        }
+      }
+    }
+  } catch (_) { /* fallback remains local and sticky */ }
+
+  const enabled = policy.enabled === true;
+  const shadowMode = policy.shadow_mode !== false;
+  return {
+    protocol: 1,
+    enabled,
+    apply: enabled && !shadowMode && Boolean(decision),
+    decision,
+    benchmarkPreempted,
+    policy: {
+      shadowMode,
+      routeTtlSeconds: providerRouteNumberOrNull(policy.route_ttl_seconds),
+      minimumConfidence: providerRouteNumberOrNull(policy.minimum_confidence),
+      minimumRelativeGain: providerRouteNumberOrNull(policy.minimum_relative_gain),
+      sustainedCandidateWins: providerRouteNumberOrNull(policy.sustained_candidate_wins),
+      consecutiveFailureThreshold: providerRouteNumberOrNull(policy.consecutive_failure_threshold),
+      tinyProbeBytes: providerRouteNumberOrNull(policy.tiny_probe_bytes),
+      sustainedProbeBytes: providerRouteNumberOrNull(policy.sustained_probe_bytes),
+      topCandidateCount: providerRouteNumberOrNull(policy.top_candidate_count),
+      benchmarkLeaseSeconds: providerRouteNumberOrNull(policy.benchmark_lease_seconds),
+    },
+  };
 }
 
 function requireConfiguredMediaGatewayCallback(

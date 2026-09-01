@@ -301,17 +301,17 @@ test('gateway uses the canonical provider key on every provider network lane', (
   );
   assert.match(
     gateway,
-    /const proxyIndex = providerProxyUrls\.length \? poolIndexForKey\(proxyKeyFromUrl\(url\)\) : -1;/,
+    /const providerKey = proxyKeyFromUrl\(url\);[\s\S]{0,160}providerRouteForKey\(providerKey\)/,
     'pinned metadata must select its proxy with the canonical provider-account key',
   );
   assert.match(
     gateway,
-    /createProviderProxyAgent\(providerProxyUrls\[proxyIndex\], \{[\s\S]{0,120}requestTls:/,
+    /createProviderProxyAgent\(routeUrl, \{[\s\S]{0,120}requestTls:/,
     'pinned metadata must retain the selected sticky proxy while enforcing request-time DNS pinning',
   );
   assert.match(
     gateway,
-    /function pickProxyAgent\(key\) \{[\s\S]{0,120}poolIndexForKey\(key\)/,
+    /function pickProxyAgent\(key\) \{[\s\S]{0,160}providerRouteForKey\(key\)/,
     'HTTP lanes must resolve their operator override through the shared sticky slot selector',
   );
   assert.match(
@@ -471,7 +471,7 @@ test('gateway fails proxy 407 safely before provider 458 handling', () => {
 });
 
 test('gateway advertises targeted operator override support without identities or secrets', () => {
-  assert.match(gateway, /const GATEWAY_VERSION = 142;/);
+  assert.match(gateway, /const GATEWAY_VERSION = 143;/);
   assert.match(gateway, /providerProxyAffinityProtocol:\s*1/);
   assert.match(gateway, /providerProxyAffinityKey:\s*'provider-account'/);
   assert.match(gateway, /providerProxySlotOverrideProtocol:\s*1/);
@@ -514,10 +514,13 @@ test('service-only session diagnostics expose only the proxy slot and one-way af
     gateway,
     /app\.get\('\/debug\/sessions', requireGatewayAuth,[\s\S]{0,220}sessions: Array\.from\(sessions\.values\(\)\)\.map\(debugSession\)/,
   );
-  assert.match(
-    gateway,
-    /providerProxy:\s*providerProxyAgents\.length[\s\S]{0,320}slot:\s*poolIndexForKey\(providerProxyAffinity\) \+ 1,[\s\S]{0,160}affinitySha256:\s*providerProxyAffinitySha256,[\s\S]{0,160}overridden:\s*providerProxySlotOverrides\.has\(providerProxyAffinitySha256\)/,
-  );
+  const debugStart = gateway.indexOf('function debugSession(session)');
+  const debugEnd = gateway.indexOf('function redactDebugValue(', debugStart);
+  const debugSource = gateway.slice(debugStart, debugEnd);
+  assert.match(debugSource, /providerProxy:\s*providerProxyAgents\.length/);
+  assert.match(debugSource, /slot:\s*providerRoute\.slot/);
+  assert.match(debugSource, /affinitySha256:\s*providerProxyAffinitySha256/);
+  assert.match(debugSource, /overridden:\s*providerProxySlotOverrides\.has\(providerProxyAffinitySha256\)/);
   assert.doesNotMatch(
     gateway,
     /providerProxy:\s*providerProxyAgents\.length[\s\S]{0,500}(sourceUrl|username|password):/,
@@ -527,11 +530,11 @@ test('service-only session diagnostics expose only the proxy slot and one-way af
 test('service-only diagnostics retain the last proxy selection before a session exists', () => {
   assert.match(
     gateway,
-    /function observeProviderProxySelection\(key\)[\s\S]{0,420}slot:\s*poolIndexForKey\(affinity\) \+ 1,[\s\S]{0,180}affinitySha256,[\s\S]{0,180}overridden:\s*providerProxySlotOverrides\.has\(affinitySha256\)/,
+    /function observeProviderProxySelection\(key\)[\s\S]{0,500}slot:\s*route\.slot,[\s\S]{0,300}affinitySha256,[\s\S]{0,180}overridden:\s*providerProxySlotOverrides\.has\(affinitySha256\)/,
   );
   assert.match(
     gateway,
-    /const playbackProxyKey = proxyKeyFromUrl\(sourceUrl\);\s*observeProviderProxySelection\(playbackProxyKey\);/,
+    /resolveForPlayback\([\s\S]{0,180}sourceUrl,[\s\S]{0,180}playbackProxyKey,[\s\S]{0,300}observeProviderProxySelection\(playbackProxyKey\);/,
   );
   assert.match(
     gateway,

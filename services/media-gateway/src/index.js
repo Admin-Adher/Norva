@@ -47,6 +47,7 @@ const {
     providerAccountAffinityKeyFromCredentials,
     proxySlotIndexForAccount,
 } = require('./providerProxyPool');
+const { ProviderAdaptiveRouteControl } = require('./providerAdaptiveRouteControl');
 const {
     CompleteMkvHlsCache,
     MkvHlsCacheError,
@@ -80,6 +81,11 @@ const app = express();
 //   PROVIDER_PROXY_SLOT_OVERRIDES  optional service-only JSON map whose keys are
 //                        sha256(provider-account) and whose values are slots 1..5.
 //                        Used only for bounded operator A/B and emergency egress repair.
+//   PROVIDER_ADAPTIVE_ROUTE_ENABLED  enables the server-side slot + Node protocol
+//                        decision only when a dedicated fingerprint key and the
+//                        pinned Edge callback are also configured.
+//   PROVIDER_ROUTE_FINGERPRINT_HMAC_KEY  dedicated 32-byte key as 64 lowercase
+//                        hexadecimal characters. It is never replaced by GATEWAY_TOKEN.
 //
 // Each provider ACCOUNT is pinned to ONE pool IP (sticky by the canonical provider
 // host+username identity). The Norva user id is deliberately never part of proxy affinity:
@@ -114,10 +120,16 @@ const providerProxySlotOverrides = parseProviderProxySlotOverrides(
     process.env.PROVIDER_PROXY_SLOT_OVERRIDES || '',
     providerProxyUrls.length,
 );
+let providerHttpProxyAgents = [];
+let providerSocksProxyAgents = [];
 let providerProxyAgents = [];
 if (providerProxyUrls.length) {
     try {
-        providerProxyAgents = providerProxyUrls.map((u) => createProviderProxyAgent(u));
+        providerHttpProxyAgents = providerHttpProxyUrls.map((u) => createProviderProxyAgent(u));
+        providerSocksProxyAgents = providerSocksProxyUrls.map((u) => createProviderProxyAgent(u));
+        providerProxyAgents = providerSocksProxyAgents.length
+            ? providerSocksProxyAgents
+            : providerHttpProxyAgents;
         // Fetch receives an explicit dispatcher and every provider-connected child receives
         // an explicit env. There is intentionally no process-wide "slot 1" fallback: it would
         // silently break account affinity whenever a provider spawn forgot its routing key.
@@ -129,20 +141,52 @@ if (providerProxyUrls.length) {
         throw new Error(`Provider proxy pool could not be initialised (${failureKind})`);
     }
 }
+let providerAdaptiveRouteControl = null;
 // FNV-1a hash → stable index into the pool for a given key (same key → same IP).
-function poolIndexForKey(key) {
+function staticPoolIndexForKey(key) {
     if (providerProxyAgents.length <= 1) return 0;
     return proxySlotIndexForAccount(key, providerProxyAgents.length, providerProxySlotOverrides);
+}
+function providerRouteForKey(key) {
+    const staticIndex = staticPoolIndexForKey(key);
+    const fallbackTransport = providerSocksProxyAgents.length ? 'socks5' : 'http';
+    const adaptive = providerAdaptiveRouteControl?.decisionForAffinity(key) || null;
+    const selected = adaptive || {
+        slot: staticIndex + 1,
+        ffmpegSlot: staticIndex + 1,
+        nodeTransport: fallbackTransport,
+        selectionReason: 'static-affinity',
+        controlStatus: 'static',
+    };
+    const affinitySha256 = sha256Hex(String(key || ''));
+    if (providerProxySlotOverrides.has(affinitySha256)) {
+        return {
+            ...selected,
+            slot: staticIndex + 1,
+            ffmpegSlot: staticIndex + 1,
+            selectionReason: 'operator-override',
+        };
+    }
+    return selected;
+}
+function poolIndexForKey(key) {
+    if (!providerProxyAgents.length) return 0;
+    return providerRouteForKey(key).slot - 1;
 }
 let lastProviderProxySelection = null;
 function observeProviderProxySelection(key) {
     const affinity = String(key || '');
     if (!providerProxyAgents.length || !affinity) return;
     const affinitySha256 = sha256Hex(affinity);
+    const route = providerRouteForKey(affinity);
     lastProviderProxySelection = {
-        protocol: 1,
-        transport: providerProxyTransport,
-        slot: poolIndexForKey(affinity) + 1,
+        protocol: 2,
+        transport: route.nodeTransport,
+        slot: route.slot,
+        score: Number.isFinite(route.score) ? route.score : null,
+        confidence: Number.isFinite(route.confidence) ? route.confidence : null,
+        selectionReason: route.selectionReason,
+        controlStatus: route.controlStatus,
         affinitySha256,
         overridden: providerProxySlotOverrides.has(affinitySha256),
         selectedAt: new Date().toISOString(),
@@ -789,11 +833,21 @@ function viewerPlaybackActiveLocally() {
 }
 
 function pickProxyAgent(key) {
-    return providerProxyAgents.length ? providerProxyAgents[poolIndexForKey(key)] : null;
+    if (!providerProxyAgents.length) return null;
+    const route = providerRouteForKey(key);
+    const agents = route.nodeTransport === 'socks5'
+        ? providerSocksProxyAgents
+        : providerHttpProxyAgents;
+    return agents[route.slot - 1] || null;
 }
 function pinnedProxyAgentFactory(key) {
     if (!providerProxyUrls.length) return null;
-    const proxyUrl = providerProxyUrls[poolIndexForKey(key)];
+    const route = providerRouteForKey(key);
+    const urls = route.nodeTransport === 'socks5'
+        ? providerSocksProxyUrls
+        : providerHttpProxyUrls;
+    const proxyUrl = urls[route.slot - 1];
+    if (!proxyUrl) return null;
     // The closure pins one provider account to one configured residential slot.
     // Recreating the dispatcher therefore renews only the local CONNECT tunnel;
     // it never rotates the account to another exit IP.
@@ -842,6 +896,35 @@ function redactCreds(s) {
 const PORT = Number.parseInt(process.env.PORT || '8080', 10);
 const GATEWAY_TOKEN = process.env.GATEWAY_TOKEN || process.env.NORVA_MEDIA_GATEWAY_TOKEN || '';
 const PUBLIC_BASE_URL = (process.env.PUBLIC_BASE_URL || '').replace(/\/+$/, '');
+const edgeCallbackBase = (process.env.NORVA_EDGE_CALLBACK_BASE || '').replace(/\/+$/, '');
+function decodeProviderRouteFingerprintKey(value) {
+    const encoded = String(value || '').trim().toLowerCase();
+    return /^[a-f0-9]{64}$/.test(encoded) ? Buffer.from(encoded, 'hex') : null;
+}
+const PROVIDER_ADAPTIVE_ROUTE_REQUESTED = process.env.PROVIDER_ADAPTIVE_ROUTE_ENABLED === 'true';
+const PROVIDER_ADAPTIVE_ROUTE_LOOKUP_TIMEOUT_MS = clampInt(
+    process.env.PROVIDER_ADAPTIVE_ROUTE_LOOKUP_TIMEOUT_MS,
+    500,
+    100,
+    2_000,
+);
+const PROVIDER_ROUTE_FINGERPRINT_KEY = decodeProviderRouteFingerprintKey(
+    process.env.PROVIDER_ROUTE_FINGERPRINT_HMAC_KEY,
+);
+providerAdaptiveRouteControl = new ProviderAdaptiveRouteControl({
+    enabled: PROVIDER_ADAPTIVE_ROUTE_REQUESTED,
+    httpProxyUrls: providerHttpProxyUrls,
+    socksProxyUrls: providerSocksProxyUrls,
+    fingerprintKey: PROVIDER_ROUTE_FINGERPRINT_KEY,
+    edgeBase: edgeCallbackBase,
+    gatewayToken: GATEWAY_TOKEN,
+    lookupTimeoutMs: PROVIDER_ADAPTIVE_ROUTE_LOOKUP_TIMEOUT_MS,
+    slotIndexForKey: staticPoolIndexForKey,
+});
+if (PROVIDER_ADAPTIVE_ROUTE_REQUESTED) {
+    const adaptiveStatus = providerAdaptiveRouteControl.publicStatus();
+    console.log(`[media-gateway] adaptive provider route ${adaptiveStatus.active ? 'SHADOW-CAPABLE' : 'INERT'} — ${adaptiveStatus.candidates} non-secret route candidate(s)`);
+}
 // Backend origins the async jobs may call back / upload to. Historically only the
 // managed *.supabase.co project was accepted; the self-host cutover moved the API
 // to its own origin, so the allowlist is env-extensible (comma-separated) with
@@ -1970,7 +2053,7 @@ const MULTI_AUDIO_HLS_PROTOCOL = 1;
 // production Ryzen/Radeon host. Keep the operational default evidence-based and configurable,
 // while bounding accidental fan-out. Every exact source track stays visible to the user.
 const MAX_MULTI_AUDIO_RENDITIONS = clampInt(process.env.MAX_MULTI_AUDIO_RENDITIONS, 12, 2, 32);
-const GATEWAY_VERSION = 142;
+const GATEWAY_VERSION = 143;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -2389,6 +2472,7 @@ app.get('/health', (req, res) => {
         providerProxyAffinityKey: 'provider-account',
         providerProxySlotOverrideProtocol: 1,
         providerProxySlotOverrideConfigured: providerProxySlotOverrides.size > 0,
+        providerAdaptiveRoute: providerAdaptiveRouteControl.publicStatus(),
         transcribeQueueDepth: transcribeQueue.length,
         transcribeBusy,
         ocrQueueDepth: ocrQueue.length,
@@ -3166,6 +3250,11 @@ app.get('/raw/:token', async (req, res) => {
         if (activeAttemptGuard) activeAttemptGuard.dispose();
         releaseRawPump(pump);
     });
+    await providerAdaptiveRouteControl.resolveForPlayback(claims.url, pumpProxyKey, {
+        signal: ac.signal,
+    });
+    if (ac.signal.aborted || res.destroyed || res.writableEnded) return;
+    observeProviderProxySelection(pumpProxyKey);
     const headers = { 'user-agent': claims.ua || FFMPEG_USER_AGENT };
     if (req.headers.range) headers.range = req.headers.range;
     if (req.headers.accept) headers.accept = req.headers.accept;
@@ -8838,7 +8927,6 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
 
         const normalizedOwnerKey = normalizeSessionKey(ownerKey);
         const playbackProxyKey = proxyKeyFromUrl(sourceUrl);
-        observeProviderProxySelection(playbackProxyKey);
         const playbackProviderSlotKey = providerSlotKeyFromUrl(sourceUrl, normalizedOwnerKey);
         // Observe abandonment before admission or lock allocation. A queued
         // browser navigation must release immediately rather than wait behind a
@@ -8936,6 +9024,19 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
         }
         if (sessionRequestAbortController.signal.aborted) throw new Error('Session request aborted');
 
+        let adaptiveRouteLookupMs = 0;
+        let adaptiveRouteDecision = null;
+        if (!completeHlsCacheLookup.hit) {
+            const adaptiveRouteLookupStartedAt = Date.now();
+            adaptiveRouteDecision = await providerAdaptiveRouteControl.resolveForPlayback(
+                sourceUrl,
+                playbackProxyKey,
+                { signal: sessionRequestAbortController.signal },
+            );
+            adaptiveRouteLookupMs = Math.max(0, Date.now() - adaptiveRouteLookupStartedAt);
+            if (sessionRequestAbortController.signal.aborted) return;
+            observeProviderProxySelection(playbackProxyKey);
+        }
         const cleanupStartedAt = Date.now();
         let stoppedConflictingSessions = 0;
         let globalBackgroundPreemptions = { extractions: 0, whispers: 0, cpu: 0 };
@@ -9156,6 +9257,9 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             lastError: null,
             logTail: '',
             startupTimings: {
+                adaptiveRouteLookupMs,
+                adaptiveRouteControlStatus: adaptiveRouteDecision?.controlStatus || null,
+                adaptiveRouteSelectionReason: adaptiveRouteDecision?.selectionReason || null,
                 cleanupMs,
                 slotReleaseWaitMs,
                 stoppedConflictingSessions,
@@ -16598,6 +16702,7 @@ function debugSession(session) {
     const providerProxyAffinitySha256 = providerProxyAffinity
         ? sha256Hex(providerProxyAffinity)
         : null;
+    const providerRoute = providerProxyAffinity ? providerRouteForKey(providerProxyAffinity) : null;
     const selectedTrack = Number.isInteger(mappedIndex)
         ? exactTracks.find((track) => normalizeAudioStreamIndex(track?.index) === mappedIndex) || null
         : selectedAudioTrackForSession(session);
@@ -16608,9 +16713,13 @@ function debugSession(session) {
         mode: session.mode,
         providerProxy: providerProxyAgents.length && providerProxyAffinitySha256
             ? {
-                protocol: 1,
-                transport: providerProxyTransport,
-                slot: poolIndexForKey(providerProxyAffinity) + 1,
+                protocol: 2,
+                transport: providerRoute.nodeTransport,
+                slot: providerRoute.slot,
+                score: Number.isFinite(providerRoute.score) ? providerRoute.score : null,
+                confidence: Number.isFinite(providerRoute.confidence) ? providerRoute.confidence : null,
+                selectionReason: providerRoute.selectionReason,
+                controlStatus: providerRoute.controlStatus,
                 affinitySha256: providerProxyAffinitySha256,
                 overridden: providerProxySlotOverrides.has(providerProxyAffinitySha256),
             }
@@ -16867,9 +16976,14 @@ async function assertXtreamEgressTarget(value) {
 
 async function openXtreamProviderResponse(url, options = {}) {
     const target = await resolveXtreamEgressTarget(url);
-    const proxyIndex = providerProxyUrls.length ? poolIndexForKey(proxyKeyFromUrl(url)) : -1;
-    const dispatcher = proxyIndex >= 0
-        ? createProviderProxyAgent(providerProxyUrls[proxyIndex], {
+    const providerKey = proxyKeyFromUrl(url);
+    const route = providerProxyUrls.length ? providerRouteForKey(providerKey) : null;
+    const routeUrls = route?.nodeTransport === 'socks5'
+        ? providerSocksProxyUrls
+        : providerHttpProxyUrls;
+    const routeUrl = route ? routeUrls[route.slot - 1] : null;
+    const dispatcher = routeUrl
+        ? createProviderProxyAgent(routeUrl, {
             requestTls: target.protocol === 'https:' ? { servername: target.hostname } : undefined,
         })
         : new Agent({
@@ -18128,7 +18242,6 @@ function isLocalOrigin(origin) {
 // both. If unset, the reporter stays idle (logged at startup) and the lock degrades gracefully to
 // the edge-side session/event/history writers.
 const ACCOUNT_ACTIVITY_REPORT_MS = clampInt(process.env.ACCOUNT_ACTIVITY_REPORT_MS, 60_000, 0, 300_000);
-const edgeCallbackBase = (process.env.NORVA_EDGE_CALLBACK_BASE || '').replace(/\/+$/, '');
 // The account activity key is already the canonical host + '/' + logical username used by
 // proxy affinity, provider locks and the Edge. Never decode it again here: a literal `%2B`,
 // `%20` or `%2F` in a provider username must stay literal across every producer.
