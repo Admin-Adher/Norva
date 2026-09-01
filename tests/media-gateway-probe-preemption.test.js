@@ -292,9 +292,33 @@ test('background ffprobe is registered and released after a successful exit', as
   assert.equal(harness.accountExtractions.get(providerKey)?.size, 1);
   harness.children[0].stdout.emit('data', Buffer.from('{"streams":[]}'));
   harness.children[0].emit('exit', 0, null);
+  harness.children[0].emit('close', 0, null);
 
   assert.deepEqual(await pending, { streams: [] });
   assert.equal(harness.accountExtractions.has(providerKey), false);
+});
+
+test('background ffprobe waits for pipe close before parsing late stdout', async () => {
+  const harness = makeHarness();
+  const pending = harness.runFfprobe(['-show_streams'], 1_000, providerUrl, {
+    background: true,
+  });
+  let settled = false;
+  pending.then(() => { settled = true; }, () => { settled = true; });
+
+  const child = harness.children[0];
+  child.stdout.emit('data', Buffer.from('{"streams":['));
+  child.emit('exit', 0, null);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(settled, false, 'process exit must not parse before stdout is closed');
+  child.stdout.emit('data', Buffer.from('{"index":1,"tags":{"language":"fra"}}]}'));
+  child.emit('close', 0, null);
+
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(await pending)),
+    { streams: [{ index: 1, tags: { language: 'fra' } }] },
+  );
 });
 
 test('background ffprobe distinguishes spawn failure from a live-child error', async (t) => {
@@ -329,6 +353,7 @@ test('background ffprobe distinguishes spawn failure from a live-child error', a
     assert.deepEqual(harness.children[0].killSignals, ['SIGKILL']);
 
     harness.children[0].emit('exit', null, 'SIGKILL');
+    harness.children[0].emit('close', null, 'SIGKILL');
     await assert.rejects(pending, /kill failed/);
     assert.equal(harness.accountExtractions.has(providerKey), false);
   });
@@ -342,6 +367,7 @@ test('background ffprobe distinguishes spawn failure from a live-child error', a
     assert.equal(harness.accountExtractions.get(providerKey)?.size, 1,
       'the provider ledger remains held until the timed-out child actually exits');
     harness.children[0].emit('exit', null, 'SIGTERM');
+    harness.children[0].emit('close', null, 'SIGTERM');
     await assert.rejects(pending, /Codec probe timeout/);
     assert.equal(harness.accountExtractions.has(providerKey), false);
   });
@@ -355,6 +381,7 @@ test('viewer preemption kills the background child and returns a stable 409 code
   assert.equal(harness.preemptAccountExtractions(providerKey, 'viewer play'), 1);
   assert.deepEqual(child.killSignals, ['SIGKILL']);
   child.emit('exit', null, 'SIGKILL');
+  child.emit('close', null, 'SIGKILL');
 
   await assert.rejects(pending, (error) => {
     assert.equal(error.status, 409);
@@ -377,6 +404,7 @@ test('viewer preemption remains typed when child error wins the event race', asy
   assert.equal(harness.accountExtractions.get(providerKey)?.size, 1,
     'child error alone must not release the provider reservation');
   child.emit('exit', null, 'SIGKILL');
+  child.emit('close', null, 'SIGKILL');
 
   await assert.rejects(pending, (error) => {
     assert.equal(error.status, 409);
@@ -393,6 +421,7 @@ test('viewer preemption remains typed when timeout wins the event race', async (
   harness.preemptAccountExtractions(providerKey, 'viewer play');
   await new Promise((resolve) => setTimeout(resolve, 20));
   harness.children[0].emit('exit', null, 'SIGKILL');
+  harness.children[0].emit('close', null, 'SIGKILL');
 
   await assert.rejects(pending, (error) => {
     assert.equal(error.status, 409);
@@ -434,6 +463,7 @@ test('the spawn boundary prevents concurrent background probes for one account',
 
   harness.children[0].stdout.emit('data', Buffer.from('{}'));
   harness.children[0].emit('exit', 0, null);
+  harness.children[0].emit('close', 0, null);
   await first;
 });
 
@@ -445,6 +475,7 @@ test('a global viewer winning the spawn race preempts and types a background pro
   assert.deepEqual(harness.children[0].killSignals, ['SIGKILL']);
   assert.equal(harness.viewerQosStats.globalExtractionPreemptions, 1);
   harness.children[0].emit('exit', null, 'SIGKILL');
+  harness.children[0].emit('close', null, 'SIGKILL');
 
   await assert.rejects(pending, (error) => {
     assert.equal(error.status, 409);
@@ -466,6 +497,7 @@ test('ordinary ffprobes keep their original unregistered behavior', async () => 
   );
   harness.children[0].stdout.emit('data', Buffer.from('{"format":{"duration":"12"}}'));
   harness.children[0].emit('exit', 0, null);
+  harness.children[0].emit('close', 0, null);
 
   assert.deepEqual(
     JSON.parse(JSON.stringify(await pending)),
@@ -475,6 +507,8 @@ test('ordinary ffprobes keep their original unregistered behavior', async () => 
 });
 
 test('/probe-audio exposes the typed background backpressure contract', () => {
+  assert.match(gateway, /providerProbeDrainProtocol:\s*1/);
+  assert.match(gateway, /basicLidConsensusProtocol:\s*1/);
   assert.match(
     probeRoute,
     /probeCodecProfile\(url, ua, \{\s*background: true,\s*backgroundActivityKind: ACCOUNT_ACTIVITY_KIND_CATALOG_REFRESH,\s*providerDrainState,/,
@@ -511,6 +545,7 @@ test('/probe-audio keeps the shared provider reservation through the release del
   harness.events.push('ffprobe-exit');
   harness.children[0].stdout.emit('data', Buffer.from('{"streams":[]}'));
   harness.children[0].emit('exit', 0, null);
+  harness.children[0].emit('close', 0, null);
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.equal(harness.accountExtractions.get(providerKey)?.size, 1,
@@ -550,6 +585,7 @@ test('a viewer starting during probe cooldown observes the holder and waits', as
 
   harness.children[0].stdout.emit('data', Buffer.from('{"streams":[]}'));
   harness.children[0].emit('exit', 0, null);
+  harness.children[0].emit('close', 0, null);
   await new Promise((resolve) => setImmediate(resolve));
 
   const stoppedForHandoff = harness.preemptAccountExtractions(providerKey, 'viewer play');
@@ -579,6 +615,7 @@ test('/probe-audio keeps a failed ffprobe response safe and drain-attested', asy
   harness.children[0].stderr.emit('data', Buffer.from('provider refused request'));
   harness.events.push('ffprobe-exit');
   harness.children[0].emit('exit', 1, null);
+  harness.children[0].emit('close', 1, null);
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.equal(harness.accountExtractions.get(providerKey)?.size, 1);

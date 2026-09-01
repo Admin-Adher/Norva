@@ -26,8 +26,10 @@ FUNCS_DIR="$REPO/supabase/functions"
 CONFIG="$REPO/supabase/config.toml"
 COMPOSE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/docker-compose.supabase.yml"
 ENV_FILE="$(dirname "$COMPOSE")/.env"
-EXPECTED_PLAYBACK_VERSION=63
+EXPECTED_PLAYBACK_VERSION=64
 EXPECTED_PLAYBACK_PROTOCOL=1
+EXPECTED_EXACT_TRACK_CRAWLER_PROTOCOL=2
+EXPECTED_BASIC_LID_CONSENSUS_PROTOCOL=2
 EXPECTED_VOD_CONTAINER_SELF_HEAL_PROTOCOL=1
 EXPECTED_MEDIA_GATEWAY_CANARY_ROUTING_PROTOCOL=1
 EXPECTED_RELAY_TAKEOVER_PROTOCOL=1
@@ -53,8 +55,9 @@ EXPECTED_LANGUAGE_VALIDATION_VIEWER_PREEMPTION_PROTOCOL=1
 EXPECTED_LANGUAGE_VALIDATION_MAX_CONSECUTIVE_PROVIDER_NO_PROGRESS=4
 EXPECTED_CLOUD_VERSION=25
 EXPECTED_CLOUD_PROTOCOL=1
-EXPECTED_CATALOG_VERSION=6
+EXPECTED_CATALOG_VERSION=7
 EXPECTED_FLAT_CODEC_PROFILE_PROTOCOL=1
+EXPECTED_EXACT_TRACK_PERSISTENCE_PROTOCOL=2
 EXPECTED_SOURCE_SYNC_VERSION=15
 EXPECTED_CLOUD_AUTO_REFRESH_CLAIM_PROTOCOL=1
 EXPECTED_TMDB_SEARCH_POLICY=promax-multilang-v2
@@ -252,6 +255,8 @@ if command -v docker >/dev/null 2>&1 && [[ -f "$COMPOSE" ]]; then
     auth_challenge_health="$(function_health_in_service "$service" norva-auth-challenge)"
     [[ "$playback_health" == *"\"version\":$EXPECTED_PLAYBACK_VERSION"* \
         && "$playback_health" == *"\"providerCircuitProtocol\":$EXPECTED_PLAYBACK_PROTOCOL"* \
+        && "$playback_health" == *"\"exactTrackCrawlerProtocol\":$EXPECTED_EXACT_TRACK_CRAWLER_PROTOCOL"* \
+        && "$playback_health" == *"\"basicLidConsensusProtocol\":$EXPECTED_BASIC_LID_CONSENSUS_PROTOCOL"* \
         && "$playback_health" == *"\"vodContainerSelfHealProtocol\":$EXPECTED_VOD_CONTAINER_SELF_HEAL_PROTOCOL"* \
         && "$playback_health" == *"\"relayTakeoverProtocol\":$EXPECTED_RELAY_TAKEOVER_PROTOCOL"* \
         && "$playback_health" == *"\"relayCoordinatorLockTtlMs\":$EXPECTED_RELAY_COORDINATOR_LOCK_TTL_MS"* \
@@ -290,7 +295,8 @@ if command -v docker >/dev/null 2>&1 && [[ -f "$COMPOSE" ]]; then
       exit 1
     }
     [[ "$catalog_health" == *"\"version\":$EXPECTED_CATALOG_VERSION"* \
-        && "$catalog_health" == *"\"flatCodecProfileProtocol\":$EXPECTED_FLAT_CODEC_PROFILE_PROTOCOL"* ]] || {
+        && "$catalog_health" == *"\"flatCodecProfileProtocol\":$EXPECTED_FLAT_CODEC_PROFILE_PROTOCOL"* \
+        && "$catalog_health" == *"\"exactTrackPersistenceProtocol\":$EXPECTED_EXACT_TRACK_PERSISTENCE_PROTOCOL"* ]] || {
       echo "ERROR: $service norva-catalog protocol marker mismatch" >&2
       exit 1
     }

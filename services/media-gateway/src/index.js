@@ -1957,7 +1957,7 @@ const MULTI_AUDIO_HLS_PROTOCOL = 1;
 // production Ryzen/Radeon host. Keep the operational default evidence-based and configurable,
 // while bounding accidental fan-out. Every exact source track stays visible to the user.
 const MAX_MULTI_AUDIO_RENDITIONS = clampInt(process.env.MAX_MULTI_AUDIO_RENDITIONS, 12, 2, 32);
-const GATEWAY_VERSION = 139;
+const GATEWAY_VERSION = 140;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -2084,6 +2084,8 @@ app.get('/health', (req, res) => {
         service: 'norva-media-gateway',
         version: GATEWAY_VERSION,
         providerCircuitProtocol: 1,
+        providerProbeDrainProtocol: 1,
+        basicLidConsensusProtocol: 1,
         vodContainerSelfHealProtocol: 1,
         codecProbe: true,
         codecProbeTimeoutMs: CODEC_PROBE_TIMEOUT_MS,
@@ -15655,6 +15657,9 @@ function runFfprobe(args, timeoutMs, sourceUrl, options = {}) {
         let stdout = '';
         let stderr = '';
         let finished = false;
+        let exitSeen = false;
+        let exitCode = null;
+        let exitSignal = null;
         let terminatingError = null;
         let spawnFailureWithoutProcess = false;
         let forceKillTimer = null;
@@ -15716,9 +15721,23 @@ function runFfprobe(args, timeoutMs, sourceUrl, options = {}) {
             // real `exit` event before resolving, rejecting, or attesting drain.
             if (!terminatingError) beginTermination(terminalError(err), 'SIGKILL');
         });
+        const markChildExited = (code, signal) => {
+            if (exitSeen || spawnFailureWithoutProcess) return;
+            exitSeen = true;
+            exitCode = code;
+            exitSignal = signal;
+            clearTimers();
+            if (backgroundKey && providerDrainState?.providerProbeStarted) {
+                providerDrainState.ffprobeExited = true;
+                releaseRegistrationAfterProviderDrain();
+            } else {
+                releaseRegistrationAfterProviderDrain();
+            }
+        };
         const finishChildLifecycle = (code, signal) => {
             if (finished) return;
             finished = true;
+            if (!spawnFailureWithoutProcess) markChildExited(code, signal);
             clearTimers();
             if (spawnFailureWithoutProcess) {
                 if (backgroundKey && providerDrainState) {
@@ -15729,19 +15748,16 @@ function runFfprobe(args, timeoutMs, sourceUrl, options = {}) {
                     providerDrainState.releaseRegistration = null;
                 }
                 releaseRegistration();
-            } else if (backgroundKey && providerDrainState?.providerProbeStarted) {
-                providerDrainState.ffprobeExited = true;
-                releaseRegistrationAfterProviderDrain();
-            } else {
-                releaseRegistrationAfterProviderDrain();
             }
             if (terminatingError) {
                 reject(terminatingError);
                 return;
             }
-            if (code !== 0) {
+            const finalCode = exitSeen ? exitCode : code;
+            const finalSignal = exitSeen ? exitSignal : signal;
+            if (finalCode !== 0) {
                 const failure = new Error(
-                    `Codec probe exited with code ${code ?? 'null'} signal ${signal ?? 'none'}${stderr ? `: ${lastNonEmptyLine(stderr)}` : ''}`,
+                    `Codec probe exited with code ${finalCode ?? 'null'} signal ${finalSignal ?? 'none'}${stderr ? `: ${lastNonEmptyLine(stderr)}` : ''}`,
                 );
                 failure.ffprobeLog = stderr;
                 failure.logTail = stderr;
@@ -15754,10 +15770,12 @@ function runFfprobe(args, timeoutMs, sourceUrl, options = {}) {
                 reject(new Error(`Codec probe returned invalid JSON: ${err.message}`));
             }
         };
-        child.on('exit', finishChildLifecycle);
-        // Spawn failures have no `exit`; `close` is the definitive fallback.
-        // Normal processes may emit both, and the idempotent finished flag keeps
-        // settlement/release single-shot.
+        // `exit` proves the provider process is gone but not that stdout/stderr
+        // pipes are drained. Record provider exit immediately, then wait for
+        // `close` before parsing JSON or settling the caller.
+        child.on('exit', markChildExited);
+        // Spawn failures have no `exit`; `close` is also their definitive proof
+        // that no child/provider socket exists.
         child.on('close', finishChildLifecycle);
     });
 }

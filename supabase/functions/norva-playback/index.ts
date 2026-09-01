@@ -279,9 +279,11 @@ async function handleRequest(req: Request): Promise<Response> {
       return json(req, {
         ok: true,
         service: "norva-playback",
-        version: 63,
+        version: 64,
         nativeHeartbeatProtocol: 1,
         providerCircuitProtocol: 1,
+        exactTrackCrawlerProtocol: 2,
+        basicLidConsensusProtocol: 2,
         vodContainerSelfHealProtocol: 1,
         exactFileCodecProfileProtocol: 1,
         relayCoordinatorLockTtlMs: EDGE_SESSION_COORDINATOR_LOCK_TTL_MS,

@@ -5,7 +5,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const ROOT = path.join(__dirname, '..');
-const read = (file) => fs.readFileSync(path.join(ROOT, file), 'utf8');
+const read = (file) => fs.readFileSync(path.join(ROOT, file), 'utf8').replace(/\r\n?/g, '\n');
 const between = (source, start, end) => {
   const from = source.indexOf(start);
   assert.notStrictEqual(from, -1, `missing start anchor: ${start}`);

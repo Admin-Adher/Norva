@@ -96,10 +96,11 @@ async function handleRequest(req: Request): Promise<Response> {
       return json(req, {
         ok: true,
         service: "norva-catalog",
-        version: 6,
+        version: 7,
         liveContract: "norva.live.logical.v1",
         materializedLive: true,
         flatCodecProfileProtocol: 1,
+        exactTrackPersistenceProtocol: 2,
       });
     }
 

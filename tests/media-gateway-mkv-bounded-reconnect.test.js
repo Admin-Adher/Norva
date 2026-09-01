@@ -3169,7 +3169,7 @@ function ffprobeTimeoutHarness() {
     return { child, runFfprobe };
 }
 
-test('ffprobe timeout preserves terminal 458/407 stderr, waits for exit, and force-kills', async () => {
+test('ffprobe timeout preserves terminal 458/407 stderr, waits for pipe close, and force-kills', async () => {
     for (const scenario of [
         { stderr: 'HTTP 458 max connections', code: 'PROVIDER_BUSY', status: 458 },
         { stderr: 'HTTP error 407 Proxy Authentication Required', code: 'PROXY_AUTH_FAILED', status: 502 },
@@ -3183,6 +3183,9 @@ test('ffprobe timeout preserves terminal 458/407 stderr, waits for exit, and for
         assert.deepEqual(child.kills, ['SIGTERM', 'SIGKILL']);
         assert.equal(settled, false, 'no next provider request may start before ffprobe exits');
         child.emit('exit', null, 'SIGKILL');
+        await new Promise((resolve) => setImmediate(resolve));
+        assert.equal(settled, false, 'late pipe output must remain observable after process exit');
+        child.emit('close', null, 'SIGKILL');
         await assert.rejects(
             pending,
             (error) => error?.code === scenario.code && error?.status === scenario.status,
