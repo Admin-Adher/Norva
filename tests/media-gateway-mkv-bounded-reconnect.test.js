@@ -448,6 +448,15 @@ function mp4Fixture(length = 64, majorBrand = 'isom') {
     return fixture;
 }
 
+function mpegTsFixture(packetCount = 3) {
+    assert.ok(packetCount >= 3);
+    const fixture = Buffer.alloc(packetCount * 188, 0xff);
+    for (let packet = 0; packet < packetCount; packet += 1) {
+        fixture[packet * 188] = 0x47;
+    }
+    return fixture;
+}
+
 function mkvSession(fileSizeBytes) {
     return {
         sourceUrl: 'https://provider.example/movie/account/title.mkv',
@@ -1087,6 +1096,44 @@ test('a declared MKV with an ISO-BMFF prefix returns one bound correction and cl
             assert.equal(tracker.active, 0);
         });
     }
+});
+
+test('a declared MKV with three MPEG-TS sync packets returns one bound correction', async () => {
+    const fixture = mpegTsFixture();
+    const tracker = makeTracker();
+    let fetches = 0;
+    const h = pumpHarness({
+        fetch: async () => {
+            fetches += 1;
+            return trackedResponse(tracker, {
+                status: 206,
+                chunks: [fixture.subarray(0, 96), fixture.subarray(96, 240), fixture.subarray(240)],
+                headers: {
+                    'Content-Range': `bytes 0-${fixture.length - 1}/${fixture.length}`,
+                    'Content-Length': String(fixture.length),
+                    ETag: '"ts-as-mkv"',
+                },
+            });
+        },
+    });
+    const session = mkvSession(fixture.length);
+    await assert.rejects(
+        h.ensureBoundedMkvInputPump(session),
+        (error) => {
+            assert.equal(error?.code, 'SOURCE_CONTAINER_MISMATCH');
+            assert.equal(error?.status, 409);
+            assert.equal(error?.details?.observedContainer, 'ts');
+            assert.equal(error?.details?.evidence?.kind, 'mpeg-ts-sync-v1');
+            assert.equal(
+                error?.details?.evidence?.prefixSha256,
+                crypto.createHash('sha256').update(fixture.subarray(0, 512)).digest('hex'),
+            );
+            return true;
+        },
+    );
+    assert.equal(fetches, 1);
+    assert.equal(tracker.maxActive, 1);
+    assert.equal(tracker.active, 0);
 });
 
 test('a server-observed MP4 authority overrides stale MKV hints without provider I/O', async () => {

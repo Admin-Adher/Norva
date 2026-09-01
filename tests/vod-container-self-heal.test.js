@@ -119,6 +119,13 @@ test('Gateway container mismatch evidence is exact, typed, and bound to the requ
   assert.equal(accepted.observedContainer, 'mp4');
   assert.equal(accepted.evidence.fileSizeBytes, 123456);
 
+  const ts = {
+    ...valid,
+    observedContainer: 'ts',
+    evidence: { ...valid.evidence, kind: 'mpeg-ts-sync-v1' },
+  };
+  assert.equal(normalize(409, ts, ts.evidence.sourceUrlSha256)?.observedContainer, 'ts');
+
   for (const invalid of [
     { status: 502, body: valid, expected: valid.evidence.sourceUrlSha256 },
     { status: 409, body: { ...valid, protocol: '1' }, expected: valid.evidence.sourceUrlSha256 },
@@ -199,6 +206,10 @@ test('only a Norva-built Xtream URL has its terminal container rewritten', () =>
   assert.equal(
     rewrite(xtream, 'mkv', 'mp4', 'xtream'),
     'https://provider.example/panel/movie/user/pass/42.mp4?token=kept',
+  );
+  assert.equal(
+    rewrite(xtream, 'mkv', 'ts', 'xtream'),
+    'https://provider.example/panel/movie/user/pass/42.ts?token=kept',
   );
   assert.equal(rewrite(xtream, 'mkv', 'mp4', 'm3u'), xtream);
   assert.equal(
@@ -293,7 +304,7 @@ test('the database observation is service-only, playback-bound, atomic, and sync
   assert.doesNotMatch(syncSql, /delete from\s+(public\.)?catalog_file_container_observations/i);
 });
 
-test('Gateway emits only redacted hashes and recognizes MP4 before FFmpeg startup', () => {
+test('Gateway emits only redacted hashes and recognizes MP4 or MPEG-TS before FFmpeg startup', () => {
   const gateway = read(GATEWAY_PATH);
   const edge = read(EDGE_PATH);
   const deploy = read(path.join(ROOT, 'ops/hetzner/scripts/04-deploy-edge-functions.sh'));
@@ -308,6 +319,8 @@ test('Gateway emits only redacted hashes and recognizes MP4 before FFmpeg startu
     '\nasync function primeFullBodyMatroskaAttempt(',
   );
   assert.match(classifier, /subarray\(4, 8\)\.toString\('ascii'\) === 'ftyp'/);
+  assert.match(classifier, /prefix\[0\] === 0x47 && prefix\[188\] === 0x47 && prefix\[376\] === 0x47/);
+  assert.match(edge, /ts: "mpeg-ts-sync-v1"/);
   assert.match(classifier, /sourceUrlSha256/);
   assert.match(classifier, /effectiveUrlSha256/);
   assert.match(classifier, /validatorSha256/);

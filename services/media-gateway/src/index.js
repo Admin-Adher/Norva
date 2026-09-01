@@ -9636,7 +9636,7 @@ function normalizeSourceContainerAuthority(value, sourceUrl) {
         'prefixSha256',
     ])) return null;
     const container = normalizeCodecToken(record.container);
-    if (!['mkv', 'mp4', 'mov', 'avi', 'ogg', 'flv', 'mpg', 'mpeg'].includes(container)) return null;
+    if (!['mkv', 'mp4', 'mov', 'avi', 'ogg', 'flv', 'mpg', 'mpeg', 'ts'].includes(container)) return null;
     const sourceUrlSha256 = String(record.sourceUrlSha256 || '').trim().toLowerCase();
     const prefixSha256 = String(record.prefixSha256 || '').trim().toLowerCase();
     const evidenceKind = String(record.evidenceKind || '').trim();
@@ -9649,6 +9649,7 @@ function normalizeSourceContainerAuthority(value, sourceUrl) {
         flv: 'flv-v1',
         mpg: 'mpeg-ps-v1',
         mpeg: 'mpeg-ps-v1',
+        ts: 'mpeg-ts-sync-v1',
     }[container];
     if (
         record.protocol !== 1 ||
@@ -9978,6 +9979,12 @@ function classifyMediaContainerPrefix(value) {
     ) {
         return { container: 'mpg', evidenceKind: 'mpeg-ps-v1' };
     }
+    if (
+        prefix.length >= 377 &&
+        prefix[0] === 0x47 && prefix[188] === 0x47 && prefix[376] === 0x47
+    ) {
+        return { container: 'ts', evidenceKind: 'mpeg-ts-sync-v1' };
+    }
     return null;
 }
 
@@ -10053,7 +10060,7 @@ async function primeFullBodyMatroskaAttempt(attempt, parentSignal, session = nul
         }
         return true;
     };
-    while (inspectionPrefix.length < 12) {
+    while (inspectionPrefix.length < 377) {
         if (!await readAndRetain()) break;
         const observed = classifyMediaContainerPrefix(inspectionPrefix);
         if (observed?.container === 'mkv') return;

@@ -5254,7 +5254,7 @@ function exactJsonKeys(value: JsonRecord, expected: string[]) {
 function canonicalVodContainer(value: unknown): string | null {
   const token = normalizeCodecToken(value);
   const canonical = token === "matroska" ? "mkv" : token === "mpeg" ? "mpg" : token;
-  return ["mkv", "mp4", "mov", "avi", "ogg", "flv", "mpg"].includes(canonical)
+  return ["mkv", "mp4", "mov", "avi", "ogg", "flv", "mpg", "ts"].includes(canonical)
     ? canonical
     : null;
 }
@@ -5268,6 +5268,7 @@ function containerEvidenceKind(container: string): string | null {
     ogg: "ogg-v1",
     flv: "flv-v1",
     mpg: "mpeg-ps-v1",
+    ts: "mpeg-ts-sync-v1",
   }[container] ?? null;
 }
 
