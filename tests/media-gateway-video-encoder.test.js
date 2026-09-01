@@ -222,6 +222,7 @@ test('shared-host VAAPI compose is private, single-instance and resource bounded
     assert.deepEqual(gateway.command.slice(0, 6), ['ionice', '-c2', '-n7', 'nice', '-n', '10']);
     assert.match(gateway.healthcheck.test.at(-1), /videoEncoder\?\.backend !== 'vaapi'/);
     assert.match(gateway.healthcheck.test.at(-1), /mkvCompleteHlsCache\?\.enabled !== true/);
+    assert.doesNotMatch(gateway.healthcheck.test.at(-1), /backgroundContinuation/);
 });
 
 test('shared-host runtime preparation is revision-pinned and never prints secrets', () => {

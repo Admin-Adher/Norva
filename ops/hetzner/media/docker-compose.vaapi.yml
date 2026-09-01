@@ -81,8 +81,7 @@ services:
           fetch('http://127.0.0.1:8080/health').then(async (response) => {
             const body = await response.json();
             if (!response.ok || body.ok !== true || body.videoEncoder?.backend !== 'vaapi'
-              || body.videoEncoder?.ready !== true || body.mkvCompleteHlsCache?.enabled !== true
-              || body.mkvCompleteHlsCache?.backgroundContinuation?.enabled !== true) process.exit(1);
+              || body.videoEncoder?.ready !== true || body.mkvCompleteHlsCache?.enabled !== true) process.exit(1);
           }).catch(() => process.exit(1))
       interval: 15s
       timeout: 5s
