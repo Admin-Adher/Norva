@@ -133,7 +133,7 @@ test('Gateway fast-start policy accepts only a measured file-exact or complete-c
     }
 });
 
-test('Gateway startup buffer shortens to six seconds only for an admitted fast path', () => {
+test('Gateway startup buffer keeps mono fast while multi-audio gets a durable first-refresh reserve', () => {
     const gatewayStartupBufferOptions = loadMethod(
         'gatewayStartupBufferOptions',
         'gatewayRecoveryBufferOptions',
@@ -148,6 +148,8 @@ test('Gateway startup buffer shortens to six seconds only for an admitted fast p
         observedEncodeRateX: 3.25,
     };
     const page = {
+        _gatewayAudioRenditionStatus: 'absent',
+        _gatewayAudioRenditions: [],
         normalizeGatewayStartupPolicy(value) {
             return value === valid ? valid : null;
         },
@@ -155,6 +157,15 @@ test('Gateway startup buffer shortens to six seconds only for an admitted fast p
 
     assert.deepEqual(gatewayStartupBufferOptions.call(page, valid), {
         minimumSeconds: 6,
+        timeoutMs: 45000,
+        policy: valid,
+    });
+    assert.deepEqual(gatewayStartupBufferOptions.call({
+        ...page,
+        _gatewayAudioRenditionStatus: 'ready',
+        _gatewayAudioRenditions: [{ streamIndex: 1 }, { streamIndex: 3 }],
+    }, valid), {
+        minimumSeconds: 12,
         timeoutMs: 45000,
         policy: valid,
     });

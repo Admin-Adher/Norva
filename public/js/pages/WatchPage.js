@@ -5436,8 +5436,19 @@ class WatchPage {
                 policy: null,
             };
         }
+        // A growing multi-audio EVENT manifest publishes one video playlist
+        // plus several audio renditions. Six seconds is enough for the mono
+        // fast path, but a real Opplex cold-start showed that it can cross the
+        // first playlist refresh boundary before every selected rendition has
+        // a durable reserve. Match the already-proven recovery floor for this
+        // topology while preserving the faster six-second mono start.
+        const multiAudioTopology = this._gatewayAudioRenditionStatus === 'ready'
+            && Array.isArray(this._gatewayAudioRenditions)
+            && this._gatewayAudioRenditions.length > 1;
         return {
-            minimumSeconds: policy.targetBufferSeconds,
+            minimumSeconds: multiAudioTopology
+                ? Math.max(12, policy.targetBufferSeconds)
+                : policy.targetBufferSeconds,
             timeoutMs: 45000,
             policy,
         };
