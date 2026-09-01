@@ -3,7 +3,7 @@ set local lock_timeout = '3s';
 set local statement_timeout = '30s';
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(53);
+select extensions.plan(54);
 
 insert into auth.users (
   id, instance_id, aud, role, email, encrypted_password, email_confirmed_at,
@@ -623,6 +623,14 @@ select extensions.ok(
    from cron.job
    where jobname = 'norva-resume-stuck-sync'),
   'the cron command covers M3U and resolves the shared secret at execution time'
+);
+
+select extensions.ok(
+  (select command like '%https://api.norva.tv/functions/v1/norva-source-sync/cron/resume-stuck%'
+      and command not like '%oupsceccxsonaalhueff.supabase.co%'
+   from cron.job
+   where jobname = 'norva-resume-stuck-sync'),
+  'the source-resume watchdog targets only the canonical self-hosted Edge ingress'
 );
 
 select extensions.is(
