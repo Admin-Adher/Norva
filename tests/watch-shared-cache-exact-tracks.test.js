@@ -172,7 +172,7 @@ test('exact HLS subtitle rows replace stale probe rows in the captions menu', ()
   assert.doesNotMatch(captionsList.innerHTML, /Stale probe row|data-source="probe"/);
 });
 
-test('partial exact HLS merges prepared rows with disabled source metadata without exposing a restart', () => {
+test('partial exact HLS keeps every exact source row selectable while marking on-demand lanes', () => {
   const WatchPage = loadWatchPage();
   const page = Object.create(WatchPage.prototype);
   const captionsList = {
@@ -215,8 +215,74 @@ test('partial exact HLS merges prepared rows with disabled source metadata witho
   page.updateCaptionsTracks();
   assert.match(captionsList.innerHTML, /data-source="hls" data-index="0" data-stream-index="4">English/);
   assert.match(captionsList.innerHTML, /data-source="hls" data-index="1" data-stream-index="7">Français/);
-  assert.match(captionsList.innerHTML, /class="captions-option pending"[^>]+data-source="unprepared-hls"[^>]+data-stream-index="9"[^>]+disabled[^>]*>Spanish - Español · Unavailable this playback/);
+  assert.match(captionsList.innerHTML, /class="captions-option loadable"[^>]+data-source="unprepared-hls"[^>]+data-stream-index="9"[^>]+title="Loads at the current position"[^>]*>Spanish - Español · Load/);
+  assert.doesNotMatch(captionsList.innerHTML, /disabled|Unavailable this playback/);
   assert.doesNotMatch(captionsList.innerHTML, /data-source="probe"/);
+});
+
+test('a truthful unprepared exact row restarts one bounded lane at the same stream identity', async () => {
+  const WatchPage = loadWatchPage();
+  const page = Object.create(WatchPage.prototype);
+  let restartCalls = 0;
+  let restartPreference = null;
+  Object.assign(page, {
+    video: { textTracks: [], currentTime: 87, readyState: 4 },
+    hls: {
+      subtitleDisplay: true,
+      subtitleTrack: 0,
+      subtitleTracks: [
+        { name: 'English', attrs: { 'X-NORVA-STREAM-INDEX': '4' } },
+      ],
+      audioTrack: -1,
+      audioTracks: [],
+    },
+    _hlsOwnsExactSubtitles: true,
+    _exactSubtitleHlsTopology: {
+      protocol: 1,
+      enabled: true,
+      cacheEligible: false,
+      reason: 'enabled-partial',
+      sourceTrackCount: 2,
+      preparedTrackCount: 1,
+    },
+    currentPlaybackMode: 'gateway-session',
+    content: {
+      id: 'movie-unprepared-subtitle',
+      sourceId: 'source-one',
+      playbackPreferences: { subtitle: { source: 'hls', streamIndex: 4 } },
+    },
+    pendingPlaybackPreferences: null,
+    selectedSubtitleStreamIndex: null,
+    selectedSubtitleTrackUserChoice: true,
+    selectedAudioTrackUserChoice: false,
+    _pendingSubtitlePreferenceApplied: true,
+    _pendingAudioPreferenceApplied: true,
+    getExtractableSubtitleTracks() {
+      return [
+        { index: 4, language: 'eng', title: 'English', extractable: true, subtitleType: 'text', codec: 'subrip' },
+        { index: 9, language: 'spa', title: 'Español', extractable: true, subtitleType: 'text', codec: 'subrip' },
+      ];
+    },
+    queueSelectedSubtitleTrackRestart(preference) {
+      restartCalls += 1;
+      restartPreference = preference;
+      return Promise.resolve(true);
+    },
+    setSubtitleSwitchFeedback() {},
+    updateCaptionsTracks() {},
+    closeCaptionsMenu() {},
+    saveResumeSnapshotThrottled() {},
+    saveProgress() {},
+  });
+
+  await page.selectCaptionTrack('unprepared-hls', 1, 9);
+
+  assert.equal(restartCalls, 1);
+  assert.equal(page.hls.subtitleDisplay, false);
+  assert.equal(page.hls.subtitleTrack, -1);
+  assert.equal(restartPreference.source, 'probe');
+  assert.equal(restartPreference.streamIndex, 9);
+  assert.equal(page.video.currentTime, 87);
 });
 
 test('an unprepared or stale Gateway subtitle choice cannot mutate or restart active playback', async () => {

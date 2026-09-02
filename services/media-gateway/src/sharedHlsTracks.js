@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const fsp = fs.promises;
-const DEFAULT_MAX_SUBTITLE_RENDITIONS = 32;
+const DEFAULT_MAX_SUBTITLE_RENDITIONS = 8;
 const DEFAULT_MAX_CACHEABLE_SUBTITLE_RENDITIONS = 8;
 const EXACT_SUBTITLE_BOOTSTRAP_PROTOCOL = 1;
 const EXACT_SUBTITLE_FIRST_MEDIA_SEQUENCE = 1;

@@ -87,6 +87,8 @@ test('VAAPI hardware decode is explicit, exact-profile scoped and keeps a softwa
     assert.equal(config.hardwareDecode, true);
     assert.deepEqual(videoEncoderInputArgs(config, false, { hardwareDecode: true }), []);
     const input = videoEncoderInputArgs(config, true, { hardwareDecode: true });
+    assert.equal(input.includes('-vaapi_device'), false,
+        'hardware decode must not create a second implicit VAAPI device');
     assert.equal(input[input.indexOf('-hwaccel') + 1], 'vaapi');
     assert.equal(input[input.indexOf('-hwaccel_device') + 1], '/dev/dri/renderD128');
     assert.equal(input[input.indexOf('-hwaccel_output_format') + 1], 'vaapi');

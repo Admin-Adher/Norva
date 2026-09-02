@@ -2276,21 +2276,22 @@ const MULTI_AUDIO_HLS_PROTOCOL = 1;
 // production Ryzen/Radeon host. Keep the operational default evidence-based and configurable,
 // while bounding accidental fan-out. Every exact source track stays visible to the user.
 const MAX_MULTI_AUDIO_RENDITIONS = clampInt(process.env.MAX_MULTI_AUDIO_RENDITIONS, 12, 2, 32);
-// Exact WebVTT renditions are cheap enough to expose the complete provider graph
-// in one FFmpeg pass. Keep playback and shared-cache limits independent: a movie
-// with many subtitle tracks remains fully selectable, but cannot multiply the
-// bounded complete-HLS cache into thousands of persistent WebVTT objects.
+// The complete exact subtitle list remains metadata-visible, but only a bounded
+// cohort is segmented in the startup FFmpeg process. Mapping dozens of sparse
+// WebVTT outputs can hold the first video segment past the 60 s readiness gate.
+// The requested/default/common-language tracks are prioritized; another exact
+// track is loaded through the measured-seek lane when the viewer selects it.
 const MAX_EXACT_SUBTITLE_HLS_RENDITIONS = clampInt(
     process.env.MAX_EXACT_SUBTITLE_HLS_RENDITIONS,
-    32,
+    8,
     1,
-    32,
+    16,
 );
 const MAX_CACHEABLE_EXACT_SUBTITLE_HLS_RENDITIONS = Math.min(
     MAX_EXACT_SUBTITLE_HLS_RENDITIONS,
     clampInt(process.env.MAX_CACHEABLE_EXACT_SUBTITLE_HLS_RENDITIONS, 8, 1, 32),
 );
-const GATEWAY_VERSION = 160;
+const GATEWAY_VERSION = 161;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to

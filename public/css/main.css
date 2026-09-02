@@ -11751,6 +11751,10 @@ html.tv-mode .navbar-menu .nav-link.active .norva-ui-icon {
   background: none;
 }
 
+.captions-option.loadable {
+  color: var(--color-text-secondary);
+}
+
 .captions-option.active,
 .audio-option.active {
   color: var(--color-accent);

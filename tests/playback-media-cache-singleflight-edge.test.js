@@ -14,8 +14,8 @@ const gateway = fs.readFileSync(path.join(
   '../services/media-gateway/src/index.js',
 ), 'utf8');
 
-test('Edge v77 exposes dark singleflight configuration with a dedicated HMAC key', () => {
-  assert.match(edge, /version: 77,[\s\S]*sharedMediaCacheSingleflightProtocol: MEDIA_CACHE_SINGLEFLIGHT_PROTOCOL/);
+test('Edge v78 exposes dark singleflight configuration with a dedicated HMAC key', () => {
+  assert.match(edge, /version: 78,[\s\S]*sharedMediaCacheSingleflightProtocol: MEDIA_CACHE_SINGLEFLIGHT_PROTOCOL/);
   assert.match(edge, /NORVA_MEDIA_CACHE_SINGLEFLIGHT_ENABLED/);
   assert.match(edge, /NORVA_MEDIA_CACHE_COORDINATION_HMAC_KEY/);
   assert.match(edge, /NORVA_MEDIA_CACHE_FOLLOWER_WAIT_MS/);
@@ -35,6 +35,23 @@ test('cold MKV miss coordinates before provider circuit, capacity and provider c
   assert.match(create, /authoritativeVodContainer === "mkv" && mode === "transcode"/);
   assert.match(create, /if \(coordinatedPlayback\) return coordinatedPlayback/);
   assert.ok(create.indexOf('preemptBackgroundMediaCacheForViewer') < create.indexOf('assertProviderCircuitClosed'));
+});
+
+test('partial shared-cache configuration fails closed for cache and open for entitled playback', () => {
+  const coordinate = edge.slice(
+    edge.indexOf('async function coordinateColdMediaCachePlayback'),
+    edge.indexOf('async function mediaCacheAccountFingerprintForPlayback'),
+  );
+  const fingerprint = edge.slice(
+    edge.indexOf('async function mediaCacheAccountFingerprintForPlayback'),
+    edge.indexOf('async function createPlaybackSessionCore'),
+  );
+  assert.match(coordinate, /shared media cache singleflight unavailable; using provider playback/);
+  assert.match(coordinate, /mediaCachePlaybackWorkerUrl[\s\S]*return null;/);
+  assert.doesNotMatch(coordinate, /MEDIA_CACHE_SINGLEFLIGHT_CONFIG_INVALID/);
+  assert.match(fingerprint, /shared media cache coordination unavailable; skipping cache preemption/);
+  assert.match(fingerprint, /mediaCacheCoordinationKeyIsValid[\s\S]*return null;/);
+  assert.doesNotMatch(fingerprint, /MEDIA_CACHE_SINGLEFLIGHT_CONFIG_INVALID/);
 });
 
 test('ambiguous coordination and completed-work claims never fall through to provider', () => {

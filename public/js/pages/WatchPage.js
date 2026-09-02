@@ -796,18 +796,23 @@ class WatchPage {
         };
     }
 
+    subtitlePreferenceFromProbeTrack(track, subtitleTracks = this.getExtractableSubtitleTracks()) {
+        if (!track) return null;
+        const trackIndex = subtitleTracks.indexOf(track);
+        return {
+            source: 'probe',
+            streamIndex: track.index,
+            label: this.getSubtitleMenuLabel(track, subtitleTracks, trackIndex, 'Subtitles'),
+            language: track.inferredLanguage || track.language || null,
+            offsetSeconds: this.normalizeSubtitleOffset(this.subtitleOffsetSeconds)
+        };
+    }
+
     getCurrentSubtitlePreference() {
         const selectedProbe = this._hlsOwnsExactSubtitles ? null : this.getSelectedSubtitleTrack();
         if (selectedProbe) {
             const subtitleTracks = this.getExtractableSubtitleTracks();
-            const trackIndex = subtitleTracks.indexOf(selectedProbe);
-            return {
-                source: 'probe',
-                streamIndex: selectedProbe.index,
-                label: this.getSubtitleMenuLabel(selectedProbe, subtitleTracks, trackIndex, 'Subtitles'),
-                language: selectedProbe.inferredLanguage || selectedProbe.language || null,
-                offsetSeconds: this.normalizeSubtitleOffset(this.subtitleOffsetSeconds)
-            };
+            return this.subtitlePreferenceFromProbeTrack(selectedProbe, subtitleTracks);
         }
 
         if (this.hls && Number.isInteger(this.hls.subtitleTrack) && this.hls.subtitleTrack >= 0) {
@@ -12677,9 +12682,10 @@ class WatchPage {
                             probeSubtitleTracks,
                             index,
                             `Subtitles ${index + 1}`,
-                        )} · Unavailable this playback`,
+                        )} · Load`,
                         active: false,
-                        disabled: true,
+                        disabled: false,
+                        requiresRestart: true,
                     };
                 });
                 hlsOptions.forEach((track) => {
@@ -12776,10 +12782,10 @@ class WatchPage {
         const offActive = !anyActive && !burned;
         const optionHtml = options.map(track => {
             const streamAttr = track.streamIndex !== undefined ? ` data-stream-index="${track.streamIndex}"` : '';
-            const pendingClass = track.disabled ? 'pending' : '';
+            const pendingClass = track.disabled ? 'pending' : (track.requiresRestart ? 'loadable' : '');
             const disabledAttr = track.disabled
                 ? ' disabled aria-disabled="true" title="Not prepared in the current playback session"'
-                : '';
+                : (track.requiresRestart ? ' title="Loads at the current position"' : '');
             return `<button class="captions-option ${track.active ? 'active' : pendingClass}" data-source="${track.source}" data-index="${track.index}"${streamAttr}${disabledAttr}>${this.escapeHtml(track.label)}</button>`;
         }).join('');
         // Burned-in: the off-row becomes a locked entry (can't be turned off); otherwise
@@ -12936,11 +12942,25 @@ class WatchPage {
         if (!this.video) return;
 
         const gatewayBackedAtSelection = ['gateway-session', 'transcode-session'].includes(this.currentPlaybackMode);
+        let loadUnpreparedExactTrack = false;
         if (source === 'unprepared-hls') {
             const track = this.getExtractableSubtitleTracks()
                 .find(candidate => Number(candidate?.index) === Number(streamIndex));
-            this.setSubtitleSwitchFeedback('deferred', this.getSubtitleTrackLabel(track, 'Selected'));
-            return false;
+            if (
+                !track
+                || !gatewayBackedAtSelection
+                || !this.isPartialExactHlsSubtitleTopology()
+                || !Number.isInteger(Number(streamIndex))
+            ) {
+                this.setSubtitleSwitchFeedback('deferred', this.getSubtitleTrackLabel(track, 'Selected'));
+                return false;
+            }
+            // The exact track exists but is outside the bounded startup cohort.
+            // Reuse the existing provider-lane handoff at the current playhead;
+            // the requested stream is placed first in the replacement cohort.
+            source = 'probe';
+            index = this.getExtractableSubtitleTracks().indexOf(track);
+            loadUnpreparedExactTrack = true;
         }
         if (source === 'probe' && gatewayBackedAtSelection) {
             if (this._hlsOwnsExactSubtitles) {
@@ -12952,7 +12972,7 @@ class WatchPage {
                 if (preparedIndex >= 0) {
                     source = 'hls';
                     index = preparedIndex;
-                } else {
+                } else if (!loadUnpreparedExactTrack) {
                     const track = this.getExtractableSubtitleTracks()
                         .find(candidate => Number(candidate?.index) === Number(streamIndex));
                     this.setSubtitleSwitchFeedback('deferred', this.getSubtitleTrackLabel(track, 'Selected'));
@@ -13029,7 +13049,9 @@ class WatchPage {
             this.selectedSubtitleStreamIndex = streamIndex;
             this.subtitleOffsetSeconds = this.loadSubtitleOffset(streamIndex);
             this.selectedSubtitleTrackUserChoice = true;
-            subtitlePreference = this.getCurrentSubtitlePreference();
+            subtitlePreference = loadUnpreparedExactTrack
+                ? this.subtitlePreferenceFromProbeTrack(this.getSelectedSubtitleTrack())
+                : this.getCurrentSubtitlePreference();
             this.setSubtitleSwitchFeedback('applying', this.subtitleTrackLabel());
         } else if (source === 'native' && index >= 0 && index < tracks.length) {
             this.selectedSubtitleStreamIndex = null;

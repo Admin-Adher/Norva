@@ -335,7 +335,7 @@ async function handleRequest(req: Request): Promise<Response> {
       return json(req, {
         ok: true,
         service: "norva-playback",
-        version: 77,
+        version: 78,
         nativeHeartbeatProtocol: 1,
         providerCircuitProtocol: 1,
         exactTrackCrawlerProtocol: 2,
@@ -1785,9 +1785,11 @@ async function coordinateColdMediaCachePlayback(options: {
   if (!runtimeConfig.mediaCacheSingleflightEnabled) return null;
   if (!mediaCachePlaybackWorkerUrl(runtimeConfig)
     || !mediaCacheCoordinationKeyIsValid(runtimeConfig.mediaCacheCoordinationHmacKey)) {
-    throw new HttpError(503, "Shared media cache singleflight is misconfigured", {
-      code: "MEDIA_CACHE_SINGLEFLIGHT_CONFIG_INVALID",
-    });
+    // Shared-cache production is optional acceleration. A rolling or partial
+    // secret deployment must fail closed for cache access while preserving the
+    // viewer's ordinary, entitlement-checked Gateway playback.
+    console.warn("[norva-playback] shared media cache singleflight unavailable; using provider playback");
+    return null;
   }
   const fingerprints = await deriveMediaCacheCoordinationFingerprints({
     key: runtimeConfig.mediaCacheCoordinationHmacKey,
@@ -1970,9 +1972,8 @@ async function mediaCacheAccountFingerprintForPlayback(options: {
   } = options;
   if (!runtimeConfig.mediaCacheSingleflightEnabled) return null;
   if (!mediaCacheCoordinationKeyIsValid(runtimeConfig.mediaCacheCoordinationHmacKey)) {
-    throw new HttpError(503, "Shared media cache coordination is misconfigured", {
-      code: "MEDIA_CACHE_SINGLEFLIGHT_CONFIG_INVALID",
-    });
+    console.warn("[norva-playback] shared media cache coordination unavailable; skipping cache preemption");
+    return null;
   }
   const fingerprints = await deriveMediaCacheCoordinationFingerprints({
     key: runtimeConfig.mediaCacheCoordinationHmacKey,

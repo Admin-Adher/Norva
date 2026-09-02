@@ -10,8 +10,8 @@ const edge = fs.readFileSync(path.join(
   '../supabase/functions/norva-playback/index.ts',
 ), 'utf8');
 
-test('Edge v77 exposes only an authenticated Gateway publication route', () => {
-  assert.match(edge, /version: 77,[\s\S]*sharedMediaCachePublicationProtocol: 1/);
+test('Edge v78 exposes only an authenticated Gateway publication route', () => {
+  assert.match(edge, /version: 78,[\s\S]*sharedMediaCachePublicationProtocol: 1/);
   assert.match(edge, /segments\[0\] === "media-cache" && segments\[1\] === "publication"/);
   const callback = edge.slice(
     edge.indexOf('async function runMediaCachePublicationCallback('),

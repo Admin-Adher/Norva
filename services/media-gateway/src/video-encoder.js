@@ -107,14 +107,20 @@ function preflightVideoEncoder(config, options = {}) {
 function videoEncoderInputArgs(config, encodeVideo, options = {}) {
     if (!encodeVideo || config?.backend !== VAAPI_BACKEND) return [];
     const hardwareDecode = config.hardwareDecode === true && options.hardwareDecode === true;
-    return [
-        '-vaapi_device', config.device,
-        ...(hardwareDecode ? [
+    // `-vaapi_device` and `-hwaccel_device` each create their own VAAPI device
+    // context. Passing both for hardware decode leaves FFmpeg with two devices
+    // and an implicit filter-device choice; on a resumed stream that can select
+    // the context which does not own the decoded frames and stall before the
+    // first HLS segment. Hardware-decoded frames already carry their VAAPI
+    // context, so use the decoder device alone. Software decode still needs the
+    // explicit upload device used by `format=nv12,hwupload`.
+    return hardwareDecode
+        ? [
             '-hwaccel', 'vaapi',
             '-hwaccel_device', config.device,
             '-hwaccel_output_format', 'vaapi',
-        ] : []),
-    ];
+        ]
+        : ['-vaapi_device', config.device];
 }
 
 function videoEncoderOutputArgs(config, options = {}) {
