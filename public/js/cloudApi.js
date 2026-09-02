@@ -655,6 +655,21 @@
     // invalidated the moment its data is mutated.
     const _getCache = new Map();      // key -> { at, data }
     const _getInFlight = new Map();   // key -> promise
+    // Mutations can finish while an older GET for the same namespace is still
+    // in flight. Deleting only the settled cache entry is not enough: a later
+    // reader would join that stale promise, and the stale response could also
+    // repopulate the cache after the mutation. Namespace generations make such
+    // responses observable to their original caller but permanently ineligible
+    // for joining or caching after invalidation.
+    const _getInvalidationGeneration = new Map();
+
+    function cacheNamespace(cacheKey) {
+        return String(cacheKey || '').split(':', 1)[0];
+    }
+
+    function cacheGeneration(cacheKey) {
+        return _getInvalidationGeneration.get(cacheNamespace(cacheKey)) || 0;
+    }
     const _responseVisibilityEpoch = new WeakMap();
     let _visibilityEpoch = '';
 
@@ -750,6 +765,7 @@
     function cachedGet(cacheKey, ttlMs, fetchFn) {
         const startEpoch = _visibilityEpoch;
         const scopedKey = visibilityScopedCacheKey(cacheKey, startEpoch);
+        const startGeneration = cacheGeneration(cacheKey);
         const hit = _getCache.get(scopedKey);
         if (hit && (Date.now() - hit.at) < ttlMs) { NorvaTrace.log('cache HIT (in-memory)', scopedKey + ' · age ' + Math.round((Date.now() - hit.at) / 1000) + 's'); return Promise.resolve(cloneJson(hit.data)); }
         if (_getInFlight.has(scopedKey)) { NorvaTrace.log('cache JOIN in-flight', scopedKey); return _getInFlight.get(scopedKey).then(cloneJson); }
@@ -758,7 +774,8 @@
             .then((data) => {
                 const responseEpoch = visibilityEpochFromPayload(data);
                 const epochChangedWithoutProof = !responseEpoch && _visibilityEpoch !== startEpoch;
-                if (!epochChangedWithoutProof) {
+                const invalidatedWhileInFlight = cacheGeneration(cacheKey) !== startGeneration;
+                if (!epochChangedWithoutProof && !invalidatedWhileInFlight) {
                     _getCache.set(visibilityScopedCacheKey(cacheKey, responseEpoch || startEpoch), {
                         at: Date.now(),
                         data
@@ -773,8 +790,16 @@
         return p.then(cloneJson);
     }
     function invalidateCache(prefix) {
+        const namespace = cacheNamespace(prefix);
+        _getInvalidationGeneration.set(namespace, (_getInvalidationGeneration.get(namespace) || 0) + 1);
         for (const k of Array.from(_getCache.keys())) {
             if (k === prefix || k.indexOf(prefix + ':') === 0) _getCache.delete(k);
+        }
+        // Promises cannot be cancelled here, but removing their join handles lets
+        // the post-mutation refresh start a new authoritative GET immediately.
+        // Their guarded finally blocks cannot delete a newer promise at this key.
+        for (const k of Array.from(_getInFlight.keys())) {
+            if (k === prefix || k.indexOf(prefix + ':') === 0) _getInFlight.delete(k);
         }
     }
     const SOURCES_TTL_MS = 30 * 1000;
