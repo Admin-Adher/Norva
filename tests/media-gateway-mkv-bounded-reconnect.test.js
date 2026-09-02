@@ -3425,8 +3425,10 @@ test('finite MKV seek preparation drains the retained provider before opening on
     assert.equal(brokerOptions.effectiveUrlIdentitySha256, session.vodInputEffectiveUrlIdentitySha256);
     assert.equal(brokerOptions.pathPrefix, 'finite-mkv-seek');
     assert.equal(brokerOptions.finiteWindowBytes, 1 * 1024 * 1024);
+    assert.equal(brokerOptions.finiteSequentialWindowBytes, 2 * 1024 * 1024);
     assert.equal(brokerOptions.finiteCacheBytes, 32 * 1024 * 1024);
     assert.equal(session.startupTimings.finiteMkvSeekMultiAudioWindow, true);
+    assert.equal(session.startupTimings.finiteMkvSeekSequentialWindowBytes, 2 * 1024 * 1024);
     assert.equal(typeof brokerOptions.dispatcherFactory, 'function');
     assert.equal(brokerOptions.dispatcherMaxAgeMs, 4 * 60_000);
     assert.equal(brokerOptions.completedReleaseDelayMs, 0);
@@ -3643,6 +3645,8 @@ test('production finite MKV resume uses continuous indexed windows and keeps lin
     assert.match(source, /FINITE_MKV_SEEK_WINDOW_BYTES[\s\S]+?8 \* 1024 \* 1024/);
     assert.match(source, /FINITE_MKV_MULTI_AUDIO_SEEK_WINDOW_BYTES[\s\S]+?1 \* 1024 \* 1024/);
     assert.match(source, /FINITE_MKV_SEEK_CACHE_BYTES[\s\S]+?64 \* 1024 \* 1024/);
+    assert.match(source, /finiteSequentialWindowBytes:\s*FINITE_MKV_SEEK_WINDOW_BYTES/);
+    assert.match(source, /finiteMkvSeekBroker:\s*\{[\s\S]+?sequentialWindowBytes:\s*FINITE_MKV_SEEK_WINDOW_BYTES/);
     assert.match(source, /finiteMkvSeekBroker:\s*\{[\s\S]+?bufferedWindowBeforeLocalResponse:\s*false/);
     assert.match(source, /finiteMkvSeekBroker:\s*\{[\s\S]+?continuousLocalRangeResponse:\s*true/);
     assert.match(source, /finiteMkvSeekBroker:\s*\{[\s\S]+?concurrentLocalRanges:\s*true/);

@@ -826,6 +826,69 @@ test('finite seek broker preserves every continuous local range across serial pr
   assert.equal(broker.cacheMisses, 5);
 });
 
+test('finite seek broker aligns the first slice so an overlapping cue fetches only its missing tail', async (t) => {
+  const { createStrictLidBroker } = brokerHarness();
+  const data = Buffer.from(Array.from({ length: 64 }, (_, index) => index));
+  const calls = [];
+  const provider = http.createServer((req, res) => {
+    calls.push(req.headers.range);
+    sendExactRange(req, res, data, { etag: '"finite-aligned-v1"' });
+  });
+  const sourceUrl = await listen(provider);
+  t.after(() => closeServer(provider));
+  const broker = await createStrictLidBroker({
+    sourceUrl,
+    fileSizeBytes: data.length,
+    dispatcher: null,
+    pathPrefix: 'finite-mkv-seek',
+    finiteWindowBytes: 8,
+    finiteSequentialWindowBytes: 24,
+    finiteCacheBytes: 64,
+    releaseDelayMs: 0,
+    completedReleaseDelayMs: 0,
+    openTimeoutMs: 2000,
+  });
+  t.after(() => broker.close());
+
+  const prefix = await fetch(broker.inputUrl, { headers: { Range: 'bytes=0-7' } });
+  assert.deepEqual(Buffer.from(await prefix.arrayBuffer()), data.subarray(0, 8));
+  const overlap = await fetch(broker.inputUrl, { headers: { Range: 'bytes=2-15' } });
+  assert.deepEqual(Buffer.from(await overlap.arrayBuffer()), data.subarray(2, 16));
+  assert.deepEqual(calls, ['bytes=0-7', 'bytes=8-15']);
+  assert.equal(broker.cacheHits, 1);
+});
+
+test('finite seek broker expands only a proven sequential local read after its first provider window', async (t) => {
+  const { createStrictLidBroker } = brokerHarness();
+  const data = Buffer.from(Array.from({ length: 64 }, (_, index) => index));
+  const calls = [];
+  const provider = http.createServer((req, res) => {
+    calls.push(req.headers.range);
+    sendExactRange(req, res, data, { etag: '"finite-sequential-v1"' });
+  });
+  const sourceUrl = await listen(provider);
+  t.after(() => closeServer(provider));
+  const broker = await createStrictLidBroker({
+    sourceUrl,
+    fileSizeBytes: data.length,
+    dispatcher: null,
+    pathPrefix: 'finite-mkv-seek',
+    finiteWindowBytes: 8,
+    finiteSequentialWindowBytes: 24,
+    finiteCacheBytes: 64,
+    releaseDelayMs: 0,
+    completedReleaseDelayMs: 0,
+    openTimeoutMs: 2000,
+  });
+  t.after(() => broker.close());
+
+  const response = await fetch(broker.inputUrl, { headers: { Range: 'bytes=0-39' } });
+  assert.deepEqual(Buffer.from(await response.arrayBuffer()), data.subarray(0, 40));
+  assert.deepEqual(calls, ['bytes=0-7', 'bytes=8-31', 'bytes=32-39']);
+  assert.equal(broker.sequentialWindowBytes, 24);
+  assert.equal(broker.completedProviderFetches, 3);
+});
+
 test('finite seek broker streams provider progress before a window is fully materialized', async (t) => {
   const { createStrictLidBroker } = brokerHarness();
   const data = Buffer.from(Array.from({ length: 16 }, (_, index) => 0x40 + index));
