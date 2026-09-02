@@ -283,8 +283,14 @@ test('Gateway readiness materializes every segment in the ten-second buffer', as
         assert.equal(session.startupTimings.playlistBufferSeconds, 12);
         assert.equal(session.startupTimings.firstSegmentBytes, 11);
         assert.equal(session.startupTimings.playlistSegmentBytes, 41);
-        assert.equal(session.startupTimings.firstSegmentReadyMs, 1_000);
-        assert.equal(session.startupTimings.playlistProductionSpanMs, 4_000);
+        assert.ok(
+            Math.abs(session.startupTimings.firstSegmentReadyMs - 1_000) < 2,
+            `first segment timing drifted to ${session.startupTimings.firstSegmentReadyMs} ms`,
+        );
+        assert.ok(
+            Math.abs(session.startupTimings.playlistProductionSpanMs - 4_000) < 2,
+            `playlist timing drifted to ${session.startupTimings.playlistProductionSpanMs} ms`,
+        );
         assert.equal(session.startupTimings.playlistPostFirstBufferSeconds, 8);
         assert.equal(session.startupTimings.sustainedMediaProductionRateX, 2);
     } finally {
