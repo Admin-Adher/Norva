@@ -3631,7 +3631,9 @@ test('production finite MKV resume uses continuous indexed windows and keeps lin
     assert.match(source, /effectiveUrlSha256:\s*session\.vodInputEffectiveUrlSha256/);
     assert.match(source, /effectiveUrlIdentitySha256:\s*session\.vodInputEffectiveUrlIdentitySha256/);
     assert.match(source, /boundedMkvInputPumpProtocol:\s*1/);
-    assert.match(source, /finiteMkvSeekBroker:\s*\{[\s\S]+?protocol:\s*6/);
+    assert.match(source, /finiteMkvSeekBroker:\s*\{[\s\S]+?protocol:\s*7/);
+    assert.match(source, /FINITE_MKV_SEEK_WINDOW_BYTES[\s\S]+?8 \* 1024 \* 1024/);
+    assert.match(source, /FINITE_MKV_SEEK_CACHE_BYTES[\s\S]+?64 \* 1024 \* 1024/);
     assert.match(source, /finiteMkvSeekBroker:\s*\{[\s\S]+?bufferedWindowBeforeLocalResponse:\s*false/);
     assert.match(source, /finiteMkvSeekBroker:\s*\{[\s\S]+?continuousLocalRangeResponse:\s*true/);
     assert.match(source, /finiteMkvSeekBroker:\s*\{[\s\S]+?concurrentLocalRanges:\s*true/);

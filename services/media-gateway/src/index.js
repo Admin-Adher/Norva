@@ -1780,13 +1780,13 @@ const STRICT_LID_BROKER_IDLE_TIMEOUT_MS = clampInt(
 // indexed seeking without ever exposing overlapping provider bodies.
 const FINITE_MKV_SEEK_WINDOW_BYTES = clampInt(
     process.env.FINITE_MKV_SEEK_WINDOW_BYTES,
-    2 * 1024 * 1024,
+    8 * 1024 * 1024,
     256 * 1024,
     16 * 1024 * 1024,
 );
 const FINITE_MKV_SEEK_CACHE_BYTES = clampInt(
     process.env.FINITE_MKV_SEEK_CACHE_BYTES,
-    32 * 1024 * 1024,
+    64 * 1024 * 1024,
     FINITE_MKV_SEEK_WINDOW_BYTES,
     256 * 1024 * 1024,
 );
@@ -2730,7 +2730,7 @@ app.get('/health', (req, res) => {
         },
         boundedMkvInputPumpProtocol: 1,
         finiteMkvSeekBroker: {
-            protocol: 6,
+            protocol: 7,
             active: Array.from(sessions.values()).filter((session) => (
                 Boolean(session?.finiteMkvSeekBroker)
             )).length,

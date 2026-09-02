@@ -71,6 +71,8 @@ test('edge coordinates a strict leased benchmark and persists only bounded telem
   assert.match(benchmark, /norva_renew_provider_route_lease/);
   assert.match(benchmark, /norva_release_provider_route_lease/);
   assert.match(benchmark, /provider_route_measurements/);
+  assert.match(benchmark, /freshRankings: ProviderRouteAggregate\[\] = rankings/);
+  assert.match(benchmark, /accountRankings,[\s\S]*batchRankings,/);
   assert.match(benchmark, /minimum_relative_gain/);
   assert.match(benchmark, /sustained_candidate_wins/);
   assert.doesNotMatch(benchmark, /body\.(sourceUrl|serverUrl|username|password|userId|sourceId)/);

@@ -13019,7 +13019,12 @@ function providerRouteConfidence(measurements: ProviderRouteMeasurement[]): numb
   ).length;
   const sampleConfidence = providerRouteClamp(measurements.length / 5, 0, 1);
   const completeness = complete / measurements.length;
-  return Number(providerRouteClamp(0.2 + sampleConfidence * 0.5 + completeness * 0.3, 0, 1).toFixed(4));
+  const sustainedEvidence = complete > 0 ? 0.3 : 0;
+  return Number(providerRouteClamp(
+    0.2 + sampleConfidence * 0.3 + completeness * 0.2 + sustainedEvidence,
+    0,
+    1,
+  ).toFixed(4));
 }
 
 function aggregateProviderRouteEdge(
@@ -13255,8 +13260,13 @@ async function persistProviderRouteState(
   hostFingerprint: string,
   policy: JsonRecord,
   rankings: ProviderRouteAggregate[],
+  freshRankings: ProviderRouteAggregate[] = rankings,
 ): Promise<JsonRecord | null> {
-  const recommendation = rankings[0];
+  // Historical measurements stabilize the score of the route already in use,
+  // but the candidate must come from this complete benchmark. Otherwise one
+  // formerly fast sample can dominate the retention window and prevent the
+  // candidate-win counter from ever observing a degraded route's replacement.
+  const recommendation = freshRankings[0];
   if (!recommendation) return null;
   const now = new Date();
   const ttlSeconds = providerRoutePolicyNumber(policy, "route_ttl_seconds", 604_800);
@@ -13453,6 +13463,7 @@ async function reportProviderRouteBenchmark(
     hostFingerprint,
     policy,
     accountRankings,
+    batchRankings,
   );
   const hostMeasurements = await recentProviderRouteMeasurements(
     db,

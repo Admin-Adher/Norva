@@ -175,7 +175,16 @@ function confidenceForMeasurements(measurements) {
         measurement.rangeSeekOk === true).length;
     const sampleConfidence = clamp(samples.length / 5, 0, 1);
     const completeness = complete / samples.length;
-    return Number(clamp(0.2 + sampleConfidence * 0.5 + completeness * 0.3, 0, 1).toFixed(4));
+    // One complete 16 MiB probe is materially stronger evidence than several
+    // tiny TTFB samples. Give that end-to-end range proof enough weight to pass
+    // the minimum-confidence gate, while hysteresis still requires repeated
+    // benchmark wins before an existing sticky route can change.
+    const sustainedEvidence = complete > 0 ? 0.3 : 0;
+    return Number(clamp(
+        0.2 + sampleConfidence * 0.3 + completeness * 0.2 + sustainedEvidence,
+        0,
+        1,
+    ).toFixed(4));
 }
 
 function median(values) {

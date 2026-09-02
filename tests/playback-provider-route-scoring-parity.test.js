@@ -47,6 +47,7 @@ function edgeScoringHarness() {
   const executable = stripTypeScriptTypes(`${prelude}\n${edgeSource.slice(start, end)}\n({
     evaluateProviderRouteTransitionEdge,
     parseProviderRouteMeasurement,
+    providerRouteConfidence,
     providerRoutePolicyNumber,
     rankProviderRouteEdge,
     scoreProviderRouteEdge,
@@ -106,6 +107,24 @@ test('Edge measurement parser rejects leaked fields and rankings keep the fastes
   const rankings = edge.rankProviderRouteEdge([slow, fast]);
   assert.equal(`${rankings[0].slot}:${rankings[0].nodeTransport}`, '1:http');
   assert.ok(rankings[0].score > rankings[1].score);
+});
+
+test('one sustained probe plus its tiny sweep clears the route confidence gate on both runtimes', () => {
+  const edge = edgeScoringHarness();
+  const tiny = edge.parseProviderRouteMeasurement(measurement({
+    phase: 'tiny',
+    sampleBytes: 1024 * 1024,
+    first4MiBMs: null,
+    first16MiBMs: null,
+  }));
+  const sustained = edge.parseProviderRouteMeasurement(measurement());
+  const samples = [tiny, sustained];
+  assert.ok(samples.every(Boolean));
+  assert.equal(
+    edge.providerRouteConfidence(samples),
+    routeEngine.confidenceForMeasurements(samples),
+  );
+  assert.ok(edge.providerRouteConfidence(samples) >= 0.65);
 });
 
 test('Edge and Gateway apply identical route hysteresis including explicit zero policy values', () => {
