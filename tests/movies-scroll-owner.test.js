@@ -40,6 +40,6 @@ test('Movies bucket pagination observes the Movies grid instead of the viewport'
 
 test('Movies scroll assets are cache-busted together', () => {
   const app = read('public/app.html');
-  assert.match(app, /\/css\/main\.css\?v=1c2a19ef50/);
+  assert.match(app, /\/css\/main\.css\?v=c8f9019925/);
   assert.match(app, /\/js\/pages\/MoviesPage\.js\?v=61/);
 });

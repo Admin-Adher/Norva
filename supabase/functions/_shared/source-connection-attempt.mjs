@@ -165,6 +165,7 @@ export function classifySourceAttemptFailure({ status, code, message } = {}) {
   if (normalizedCode === "MISSING_CREDENTIALS") return "missing_credentials";
   if (numericStatus === 401 || numericStatus === 403 || /CREDENTIAL|AUTH/.test(normalizedCode)) return "credentials";
   if (numericStatus === 404) return "endpoint_not_found";
+  if (numericStatus === 413 || /PAYLOAD_TOO_LARGE|RESPONSE_TOO_LARGE/.test(normalizedCode)) return "payload_too_large";
   if (numericStatus === 408 || numericStatus === 504 || /TIMEOUT|DEADLINE/.test(normalizedCode)) return "timeout";
   if (numericStatus === 458 || /BUSY|MULTI_IP/.test(normalizedCode)) return "provider_busy";
   if (numericStatus === 429) return "rate_limited";

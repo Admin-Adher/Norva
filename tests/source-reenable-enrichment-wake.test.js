@@ -216,7 +216,7 @@ test('every existing-source M3U provider read shares the durable lease', () => {
 
   const estimateStart = cloud.indexOf('async function estimateSource(');
   const estimateEnd = cloud.indexOf('async function estimateSourceByUrl(', estimateStart);
-  assert.match(cloud.slice(estimateStart, estimateEnd), /withM3uSourceLease\([\s\S]*fetchText/);
+  assert.match(cloud.slice(estimateStart, estimateEnd), /withM3uSourceLease\([\s\S]*estimateM3uPlaylist/);
 
   assert.match(liveMaterialization, /heartbeat\?: \(\) => Promise<void>/);
   assert.match(liveMaterialization, /clearLiveMaterialization\([\s\S]*input\.heartbeat/);

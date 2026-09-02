@@ -43,6 +43,9 @@ test('first-source form exposes field errors and focuses recovery', () => {
   assert.match(home, /aria-describedby="home-source-server-hint home-source-server-error"/);
   assert.match(home, /Usually found in your provider email or account area/);
   assert.match(home, /Paste a complete Xtream link to fill the login automatically/);
+  assert.match(home, /id="home-source-url-hint" role="status" aria-live="polite"/);
+  assert.match(home, /applyEarlyInputFeedback/);
+  assert.match(sourceManager, /This looks like a name, not a link/);
   assert.match(home, /id="home-source-username-error"/);
   assert.match(home, /id="home-source-password-error"/);
   assert.match(home, /input\.setAttribute\('aria-invalid', 'true'\)/);
@@ -95,6 +98,7 @@ test('first-source failures use distinct safe copy without exposing raw provider
   assert.equal(copy({ status: 404 }, 'xtream').title, 'This provider address was not found');
   assert.equal(copy({ code: 'PROVIDER_DNS_FAILURE' }, 'xtream').title, 'Your provider server is not responding');
   assert.equal(copy({ status: 422 }, 'm3u').title, 'This isn’t a complete playlist link');
+  assert.equal(copy({ status: 413 }, 'm3u').title, 'This playlist contains an oversized entry');
   assert.equal(copy({ status: 500 }, 'm3u').title, 'Norva could not connect this playlist');
   assert.match(home, /showSummaryError\(this\.setupConnectionErrorCopy\(creationError, type\)/);
   assert.doesNotMatch(home, /showSummaryError\([^\n]*creationError\?\.message/);
@@ -162,9 +166,9 @@ test('setup visuals reuse Norva assets and ship cache-busted', () => {
   assert.match(shell, /class="tc-intro-icon" src="\/img\/icons\/norva-movies\.svg/);
   assert.match(shell, /class="tc-intro-icon" src="\/img\/icons\/norva-settings\.svg/);
   assert.doesNotMatch(shell, /<div class="tc-intro-icon">/);
-  assert.match(shell, /main\.css\?v=1c2a19ef50/);
+  assert.match(shell, /main\.css\?v=c8f9019925/);
   assert.match(shell, /sourceHealth\.js\?v=6c0eefcb4f/);
-  assert.match(shell, /SourceManager\.js\?v=7fcc0560f4/);
-  assert.match(shell, /HomePage\.js\?v=4b8155eafa/);
+  assert.match(shell, /SourceManager\.js\?v=575d34510a/);
+  assert.match(shell, /HomePage\.js\?v=b98a873483/);
   assert.match(shell, /app\.js\?v=4ea3d10343/);
 });

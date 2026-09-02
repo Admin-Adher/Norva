@@ -1493,14 +1493,14 @@ class SourceManager {
             if (parsed.password && (force || !passwordInput.value.trim())) {
                 passwordInput.value = parsed.password;
             }
-            if ((!parsed.username || !parsed.password) && advancedLogin) {
+            if ((!usernameInput.value.trim() || !passwordInput.value.trim()) && advancedLogin) {
                 advancedLogin.open = true;
             }
             if (nameInput && !nameInput.value.trim() && parsed.host) {
                 nameInput.value = parsed.host.replace(/^www\./i, '');
             }
             if (hint) {
-                hint.textContent = parsed.username && parsed.password
+                hint.textContent = usernameInput.value.trim() && passwordInput.value.trim()
                     ? 'Login detected from the link. You can review it before saving.'
                     : 'Server detected. Add the username and password if they were provided separately.';
             }
@@ -1679,6 +1679,51 @@ class SourceManager {
         return 'other';
     }
 
+    sourceInputFeedback(raw, type = 'm3u') {
+        const value = String(raw || '').trim();
+        const sourceType = String(type || 'm3u').toLowerCase() === 'xtream' ? 'xtream' : 'm3u';
+        if (!value) return { state: 'empty', pathShape: 'invalid', message: '' };
+
+        const pathShape = this.sourceInputPathShape(value);
+        if (pathShape === 'invalid') {
+            return {
+                state: 'invalid',
+                pathShape,
+                message: 'Enter a complete http or https address supplied by your provider.'
+            };
+        }
+        if (pathShape === 'web_page') {
+            return {
+                state: 'invalid',
+                pathShape,
+                message: sourceType === 'm3u'
+                    ? 'This looks like a web page. Paste the complete M3U or M3U8 playlist link.'
+                    : 'This looks like a web page. Enter the Xtream server address supplied by your provider.'
+            };
+        }
+        const rootLooksLikeAddress = /^https?:\/\//i.test(value) || /[.:]/.test(value.split(/[/?#]/, 1)[0]);
+        if (sourceType === 'm3u' && pathShape === 'root' && !value.includes('?') && !rootLooksLikeAddress) {
+            return {
+                state: 'invalid',
+                pathShape,
+                message: 'This looks like a name, not a link. Paste the complete M3U URL from your provider.'
+            };
+        }
+
+        const recognizedPlaylist = sourceType === 'm3u' && ['get.php', '.m3u', '.m3u8'].includes(pathShape);
+        return {
+            state: recognizedPlaylist || sourceType === 'xtream' ? 'ready' : 'neutral',
+            pathShape,
+            message: recognizedPlaylist
+                ? 'Complete playlist link detected. Ready to check.'
+                : sourceType === 'xtream'
+                    ? 'Server address detected. Add or review the provider login.'
+                    : pathShape === 'root'
+                        ? 'Web address detected. Norva will verify that it returns an M3U playlist.'
+                        : 'Link detected. Norva will verify its playlist format before importing.'
+        };
+    }
+
     sourceAttemptRootDomain(rawHostname) {
         const hostname = String(rawHostname || '').trim().toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
         if (!hostname) return null;
@@ -1832,9 +1877,11 @@ class SourceManager {
         try {
             const estimate = await API.sources.estimateByUrl(connection.url, connection.type);
             if (!estimate?.needsWarning) return true;
+            const count = Number(estimate.count || 0).toLocaleString();
+            const countLabel = estimate.countIsLowerBound ? `at least ${count}` : count;
             return this.showWarningModal({
                 title: 'Large playlist',
-                message: `This playlist contains <strong>${Number(estimate.count || 0).toLocaleString()}</strong> channels.`,
+                message: `This playlist contains <strong>${countLabel}</strong> channels.`,
                 details: 'Syncing may take several minutes and app performance may be impacted with large playlists.<br><br>Consider using a filtered M3U from your provider to include only channels you actually watch.',
                 proceedText: 'Proceed anyway',
                 cancelText: 'Cancel'

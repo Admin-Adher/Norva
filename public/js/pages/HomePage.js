@@ -1209,7 +1209,7 @@ class HomePage {
                                                placeholder="https://provider.example/get.php?…"
                                                name="provider-playlist-url" inputmode="url" autocomplete="off" autocapitalize="none" spellcheck="false"
                                                aria-describedby="home-source-url-hint home-source-url-error">
-                                        <p class="setup-form-hint" id="home-source-url-hint">Usually found in your provider email or account area.</p>
+                                        <p class="setup-form-hint" id="home-source-url-hint" role="status" aria-live="polite" aria-atomic="true">Usually found in your provider email or account area.</p>
                                         <p class="setup-field-error hidden" id="home-source-url-error"></p>
                                     </div>
                                 </div>
@@ -1220,7 +1220,7 @@ class HomePage {
                                                placeholder="https://provider.example:8080"
                                                name="provider-server-url" inputmode="url" autocomplete="off" autocapitalize="none" spellcheck="false"
                                                aria-describedby="home-source-server-hint home-source-server-error">
-                                        <p class="setup-form-hint" id="home-source-server-hint">Paste a complete Xtream link to fill the login automatically.</p>
+                                        <p class="setup-form-hint" id="home-source-server-hint" role="status" aria-live="polite" aria-atomic="true">Paste a complete Xtream link to fill the login automatically.</p>
                                         <p class="setup-field-error hidden" id="home-source-server-error"></p>
                                     </div>
                                     <div class="setup-credentials-grid">
@@ -1318,6 +1318,7 @@ class HomePage {
         const message = String(error?.message || payload.message || '').toLowerCase();
         if (status === 401 || status === 403 || code.includes('CREDENTIAL') || code.includes('AUTH')) return 'credentials';
         if (status === 458 || code.includes('BUSY')) return 'provider_busy';
+        if (status === 413 || code.includes('PAYLOAD_TOO_LARGE') || code.includes('RESPONSE_TOO_LARGE')) return 'payload_too_large';
         if (status === 408 || status === 504 || code.includes('TIMEOUT') || message.includes('timed out')) return 'timeout';
         if (status === 404 || code.includes('ENDPOINT_NOT_FOUND') || code.includes('NOT_FOUND')) return 'provider_unreachable';
         if ([502, 503].includes(status) || /DNS|TLS|CONNECTION|NETWORK|UNREACHABLE/.test(code)) return 'provider_unreachable';
@@ -1347,6 +1348,12 @@ class HomePage {
             return {
                 title: 'This TV service is busy',
                 body: 'Your details were kept. Wait a few seconds, then try again.'
+            };
+        }
+        if (family === 'payload_too_large') {
+            return {
+                title: 'This playlist contains an oversized entry',
+                body: 'Your link was kept, but one playlist line exceeded the safe parsing limit. Ask your provider for a standard M3U or filtered playlist, then try again.'
             };
         }
         if (family === 'provider_unreachable' || family === 'timeout' || family === 'network') {
@@ -1380,6 +1387,7 @@ class HomePage {
         const usernameInput = container.querySelector('#home-source-username');
         const passwordInput = container.querySelector('#home-source-password');
         const passwordToggle = container.querySelector('#home-source-password-toggle');
+        const m3uHint = container.querySelector('#home-source-url-hint');
         const serverHint = container.querySelector('#home-source-server-hint');
         const error = container.querySelector('#home-tv-service-error');
         const submit = container.querySelector('#home-tv-service-submit');
@@ -1400,6 +1408,8 @@ class HomePage {
         if (!form || !m3uInput || !serverInput || !usernameInput || !passwordInput || !submit) return;
         const accessWizard = manager?.bindProviderAccessTerms?.(form);
         let accessWizardApproved = false;
+        const defaultM3uHint = 'Usually found in your provider email or account area.';
+        const defaultServerHint = 'Paste a complete Xtream link to fill the login automatically.';
 
         const fieldErrors = new Map([
             [m3uInput, container.querySelector('#home-source-url-error')],
@@ -1452,6 +1462,34 @@ class HomePage {
             if (focus) {
                 try { error.focus({ preventScroll: true }); } catch (_) { /* noop */ }
             }
+        };
+        const resetInputHint = (input) => {
+            const hint = input === serverInput ? serverHint : m3uHint;
+            if (!hint) return;
+            hint.textContent = input === serverInput ? defaultServerHint : defaultM3uHint;
+            delete hint.dataset.validationState;
+        };
+        const applyEarlyInputFeedback = (input, type) => {
+            const feedback = manager?.sourceInputFeedback?.(input?.value, type);
+            if (!input || !feedback) return null;
+            if (feedback.pathShape && (!input.dataset.sourceInputPathShape || feedback.pathShape !== 'root')) {
+                input.dataset.sourceInputPathShape = feedback.pathShape;
+            }
+            const hint = input === serverInput ? serverHint : m3uHint;
+            if (feedback.state === 'invalid') {
+                setFieldError(input, feedback.message);
+                if (hint) {
+                    hint.textContent = input === serverInput ? defaultServerHint : defaultM3uHint;
+                    delete hint.dataset.validationState;
+                }
+                return feedback;
+            }
+            clearFieldError(input);
+            if (hint && feedback.message) {
+                hint.textContent = feedback.message;
+                hint.dataset.validationState = feedback.state;
+            }
+            return feedback;
         };
         const selectedType = () => form.dataset.setupConnectionType === 'xtream' ? 'xtream' : 'm3u';
         const activeUrlInput = () => selectedType() === 'xtream' ? serverInput : m3uInput;
@@ -1539,7 +1577,7 @@ class HomePage {
             const parsed = manager?.parseXtreamLink?.(serverInput.value);
             if (!parsed) {
                 if (serverHint) serverHint.textContent = 'Paste a complete Xtream link to fill the login automatically.';
-                return;
+                return null;
             }
             if (!serverInput.dataset.sourceInputPathShape || currentPathShape !== 'root') {
                 serverInput.dataset.sourceInputPathShape = currentPathShape;
@@ -1551,13 +1589,14 @@ class HomePage {
             if (parsed.username && (force || !usernameInput.value.trim())) usernameInput.value = parsed.username;
             if (parsed.password && (force || !passwordInput.value.trim())) passwordInput.value = parsed.password;
             if (serverHint) {
-                serverHint.textContent = parsed.username && parsed.password
+                serverHint.textContent = usernameInput.value.trim() && passwordInput.value.trim()
                     ? 'Login detected from the link. You can review it before connecting.'
                     : 'Server detected. Add the username and password if they were provided separately.';
             }
             clearFieldError(serverInput);
             if (usernameInput.value.trim()) clearFieldError(usernameInput);
             if (passwordInput.value.trim()) clearFieldError(passwordInput);
+            return parsed;
         };
 
         modeTabs.forEach((tab, index) => {
@@ -1577,11 +1616,23 @@ class HomePage {
         });
 
         [m3uInput, serverInput].forEach((input) => {
-            input.addEventListener('input', () => delete input.dataset.sourceInputPathShape);
+            input.addEventListener('input', () => {
+                delete input.dataset.sourceInputPathShape;
+                resetInputHint(input);
+            });
         });
-        serverInput.addEventListener('paste', () => setTimeout(() => applyParsedLink(true), 0));
-        serverInput.addEventListener('blur', () => applyParsedLink(false));
-        serverInput.addEventListener('change', () => applyParsedLink(false));
+        m3uInput.addEventListener('paste', () => setTimeout(() => applyEarlyInputFeedback(m3uInput, 'm3u'), 0));
+        m3uInput.addEventListener('blur', () => applyEarlyInputFeedback(m3uInput, 'm3u'));
+        m3uInput.addEventListener('change', () => applyEarlyInputFeedback(m3uInput, 'm3u'));
+        serverInput.addEventListener('paste', () => setTimeout(() => {
+            if (!applyParsedLink(true)) applyEarlyInputFeedback(serverInput, 'xtream');
+        }, 0));
+        serverInput.addEventListener('blur', () => {
+            if (!applyParsedLink(false)) applyEarlyInputFeedback(serverInput, 'xtream');
+        });
+        serverInput.addEventListener('change', () => {
+            if (!applyParsedLink(false)) applyEarlyInputFeedback(serverInput, 'xtream');
+        });
 
         passwordToggle?.addEventListener('click', () => {
             const visible = passwordInput.type === 'text';
@@ -1650,7 +1701,8 @@ class HomePage {
             const type = selectedType();
             const urlInput = activeUrlInput();
             const rawUrl = urlInput.value.trim();
-            const pathShape = manager?.sourceInputPathShape?.(rawUrl) || 'invalid';
+            const feedback = manager?.sourceInputFeedback?.(rawUrl, type);
+            const pathShape = feedback?.pathShape || manager?.sourceInputPathShape?.(rawUrl) || 'invalid';
             if (rawUrl && !urlInput.dataset.sourceInputPathShape) urlInput.dataset.sourceInputPathShape = pathShape;
             let firstInvalid = null;
             if (!rawUrl) {
@@ -1661,15 +1713,15 @@ class HomePage {
                     body: message
                 });
                 firstInvalid = urlInput;
-            } else if (pathShape === 'invalid' || pathShape === 'web_page' || (type === 'm3u' && pathShape === 'root' && !rawUrl.includes('?'))) {
+            } else if (feedback?.state === 'invalid' || pathShape === 'invalid' || pathShape === 'web_page') {
                 const copy = type === 'm3u'
                     ? {
                         title: 'This isn’t a complete playlist link',
-                        body: 'Paste the full M3U/M3U8 link from your provider. It may end in .m3u or include get.php.'
+                        body: feedback?.message || 'Paste the full M3U/M3U8 link from your provider. It may end in .m3u or include get.php.'
                     }
                     : {
                         title: 'This isn’t a valid Xtream server address',
-                        body: 'Enter the complete http or https server address supplied by your provider.'
+                        body: feedback?.message || 'Enter the complete http or https server address supplied by your provider.'
                     };
                 setFieldError(urlInput, copy.body);
                 showSummaryError(copy);

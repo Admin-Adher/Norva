@@ -2794,6 +2794,11 @@ video::cue {
   line-height: 1.45;
 }
 
+.setup-form-hint[data-validation-state="ready"] {
+  color: var(--color-success);
+  font-weight: 600;
+}
+
 .setup-field-error {
   margin: 7px 0 0;
   color: var(--color-error-text);
@@ -3106,7 +3111,7 @@ video::cue {
 }
 
 .setup-assistance-panel h2:focus {
-  outline: none;
+  outline: none !important;
 }
 
 .setup-assistance-panel > p {

@@ -26,6 +26,7 @@ import {
   fetchBoundedProviderJson,
   fetchBoundedProviderText,
 } from "../_shared/bounded-provider-response.mjs";
+import { fetchM3uPlaylistStream } from "../_shared/m3u-playlist-stream.mjs";
 import type { LiveCatalogItem } from "../_shared/live-catalog.ts";
 import { getEntitlementDecision, planFeatureEntitled, realPlanCode } from "../_shared/entitlements.ts";
 import { driveXtreamSyncToReady, freshSyncCursor, detectXtreamChange, enqueueImportNotification } from "../_shared/xtream-sync.ts";
@@ -41,6 +42,7 @@ import {
 import { isStaleDatabaseConflict } from "../_shared/database-conflict.ts";
 
 type JsonRecord = Record<string, unknown>;
+type M3uPlaylistItem = { title: string; url: string; tvgId: string; logo: string; group: string };
 type RuntimeConfig = {
   sourceConfigKey: string;
   mediaGatewayUrl: string;
@@ -131,6 +133,7 @@ Deno.serve(async (req) => {
         cloudAutoRefreshClaimProtocol: 1,
         sourceReenableResumeProtocol: 1,
         m3uSyncLeaseProtocol: 2,
+        m3uStreamingImportProtocol: 1,
         fileAudioRepairCohortProtocol: 2,
         tmdbSearchPolicy: TMDB_SEARCH_POLICY_VERSION,
       });
@@ -4224,7 +4227,10 @@ async function syncM3uSource(
     steps: { connect: { status: "running" } },
   });
   await assertCatalogSnapshotCurrent(sourceId, userId, expectedSnapshot, db);
-  const playlist = await fetchText(playlistUrl, 30000, 20_000_000);
+  const playlist = await fetchM3uItems(playlistUrl, 60_000, {
+    maxBytes: 128 * 1024 * 1024,
+    maxItems: 100_000,
+  });
   await assertCatalogSnapshotCurrent(sourceId, userId, expectedSnapshot, db);
   await reportProgress({
     stage: "discovered",
@@ -4237,21 +4243,26 @@ async function syncM3uSource(
       categories: { status: "running" },
     },
   });
-  const items = parseM3u(playlist).slice(0, 20000);
-  const rows = await Promise.all(items.map(async (item) => ({
-    user_id: userId,
-    source_id: sourceId,
-    item_type: "live",
-    external_id: item.tvgId || await sha256Hex(item.url),
-    parent_external_id: item.group || null,
-    title: item.title,
-    subtitle: item.group || null,
-    poster_url: item.logo || null,
-    backdrop_url: null,
-    metadata: compactRecord({ tvgId: item.tvgId, group: item.group }),
-    playback_hint: compactRecord({ sourceType: "m3u", targetUrl: item.url }),
-    available: true,
-  })));
+  const items = playlist.items as M3uPlaylistItem[];
+  const rows: JsonRecord[] = [];
+  for (let index = 0; index < items.length; index += 500) {
+    await heartbeat();
+    const chunk = await Promise.all(items.slice(index, index + 500).map(async (item) => ({
+      user_id: userId,
+      source_id: sourceId,
+      item_type: "live",
+      external_id: item.tvgId || await sha256Hex(item.url),
+      parent_external_id: item.group || null,
+      title: item.title,
+      subtitle: item.group || null,
+      poster_url: item.logo || null,
+      backdrop_url: null,
+      metadata: compactRecord({ tvgId: item.tvgId, group: item.group }),
+      playback_hint: compactRecord({ sourceType: "m3u", targetUrl: item.url }),
+      available: true,
+    })));
+    rows.push(...chunk);
+  }
 
   const categoryCount = new Set(rows.map((row) => stringOr(row.parent_external_id, "")).filter(Boolean)).size;
 
@@ -4263,7 +4274,15 @@ async function syncM3uSource(
     // Detection-only (cron) path — see the matching note in syncXtreamSource.
     const changed = Boolean(opts.previousSignature) && !contentSignatureEquals(contentSignature, opts.previousSignature);
     await assertCatalogSnapshotCurrent(sourceId, userId, expectedSnapshot, db);
-    return { live: rows.length, total: rows.length, contentSignature, changed, detectOnly: true };
+    return {
+      live: rows.length,
+      total: rows.length,
+      contentSignature,
+      changed,
+      detectOnly: true,
+      importTruncated: playlist.truncated || undefined,
+      importLimitReason: playlist.truncated ? playlist.truncationReason : undefined,
+    };
   }
 
   if (!opts.force && opts.previousSignature && contentSignatureEquals(contentSignature, opts.previousSignature)) {
@@ -4274,7 +4293,14 @@ async function syncM3uSource(
       steps: { import: { status: "done", count: rows.length }, finalize: { status: "done" } },
     });
     await assertCatalogSnapshotCurrent(sourceId, userId, expectedSnapshot, db);
-    return { live: rows.length, total: rows.length, contentSignature, skipped: true };
+    return {
+      live: rows.length,
+      total: rows.length,
+      contentSignature,
+      skipped: true,
+      importTruncated: playlist.truncated || undefined,
+      importLimitReason: playlist.truncated ? playlist.truncationReason : undefined,
+    };
   }
 
   await reportProgress({
@@ -4312,7 +4338,14 @@ async function syncM3uSource(
     heartbeat,
   });
   await assertCatalogSnapshotCurrent(sourceId, userId, expectedSnapshot, db);
-  return { live: rows.length, total: rows.length, liveCatalog, contentSignature };
+  return {
+    live: rows.length,
+    total: rows.length,
+    liveCatalog,
+    contentSignature,
+    importTruncated: playlist.truncated || undefined,
+    importLimitReason: playlist.truncated ? playlist.truncationReason : undefined,
+  };
 }
 
 async function replaceSourceItems(
@@ -4751,6 +4784,27 @@ async function fetchText(url: string, timeoutMs: number, maxBytes: number) {
   }
 }
 
+async function fetchM3uItems(
+  url: string,
+  timeoutMs: number,
+  limits: { maxBytes: number; maxItems: number },
+) {
+  try {
+    const result = await fetchM3uPlaylistStream(url, {
+      timeoutMs,
+      maxBytes: limits.maxBytes,
+      maxItems: limits.maxItems,
+      headers: { "User-Agent": "NorvaCloud/1.0" },
+    });
+    if (!result.response.ok) throw new HttpError(result.response.status, "IPTV provider request failed");
+    if (!result.headerDetected) throw new HttpError(400, "This URL does not look like a valid M3U playlist");
+    return result;
+  } catch (error) {
+    if (error instanceof HttpError) throw error;
+    throw boundedProviderHttpError(error, "playlist");
+  }
+}
+
 function boundedProviderHttpError(error: unknown, payloadType: string) {
   if (error instanceof BoundedProviderResponseError && error.kind === "too_large") {
     return new HttpError(413, `Provider ${payloadType} payload is too large`);
@@ -4759,38 +4813,6 @@ function boundedProviderHttpError(error: unknown, payloadType: string) {
     return new HttpError(504, "IPTV provider response deadline exceeded");
   }
   return new HttpError(502, "Unable to reach IPTV provider");
-}
-
-function parseM3u(playlist: string) {
-  const lines = playlist.split(/\r?\n/);
-  const items: Array<{ title: string; url: string; tvgId: string; logo: string; group: string }> = [];
-  let pending: { title: string; tvgId: string; logo: string; group: string } | null = null;
-
-  for (const rawLine of lines) {
-    const line = rawLine.trim();
-    if (!line) continue;
-    if (line.startsWith("#EXTINF")) {
-      pending = {
-        title: line.includes(",") ? line.slice(line.indexOf(",") + 1).trim() : "Norva channel",
-        tvgId: attr(line, "tvg-id") || attr(line, "tvg-name"),
-        logo: attr(line, "tvg-logo"),
-        group: attr(line, "group-title"),
-      };
-      continue;
-    }
-    if (line.startsWith("#")) continue;
-    if (pending && /^https?:\/\//i.test(line)) {
-      items.push({ ...pending, url: line });
-      pending = null;
-    }
-  }
-
-  return items;
-}
-
-function attr(value: string, name: string) {
-  const match = value.match(new RegExp(`${name}="([^"]*)"`, "i"));
-  return match?.[1]?.trim() ?? "";
 }
 
 function xtreamApiUrl(config: {

@@ -34,6 +34,49 @@ export async function fetchBoundedProviderText(url, options) {
   );
 }
 
+// Read only the beginning of a response. Unlike the complete-body helper, an
+// advertised body larger than maxBytes is not an error: callers use the prefix
+// for format validation and leave the full body to a background importer.
+export async function fetchBoundedProviderTextPrefix(url, options) {
+  const timeoutMs = Number(options?.timeoutMs);
+  const maxBytes = Number(options?.maxBytes);
+  if (
+    !Number.isFinite(timeoutMs) || timeoutMs <= 0 ||
+    !Number.isSafeInteger(maxBytes) || maxBytes <= 0
+  ) {
+    throw new BoundedProviderResponseError("invalid_limit");
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, {
+      method: options?.method ?? "GET",
+      headers: options?.headers,
+      body: options?.body,
+      signal: controller.signal,
+      redirect: options?.redirect ?? "follow",
+    });
+    const result = await readResponsePrefixBytes(response, maxBytes);
+    return {
+      response,
+      value: new TextDecoder().decode(result.bytes),
+      truncated: result.truncated,
+    };
+  } catch (error) {
+    if (error instanceof BoundedProviderResponseError) throw error;
+    if (
+      controller.signal.aborted ||
+      (error instanceof Error && error.name === "AbortError")
+    ) {
+      throw new BoundedProviderResponseError("timeout");
+    }
+    throw new BoundedProviderResponseError("network");
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function fetchAndConsumeProviderResponse(url, options, consume) {
   const timeoutMs = Number(options?.timeoutMs);
   const maxBytes = Number(options?.maxBytes);
@@ -103,4 +146,48 @@ async function readBoundedResponseBytes(response, maxBytes) {
     offset += chunk.byteLength;
   }
   return bytes;
+}
+
+async function readResponsePrefixBytes(response, maxBytes) {
+  const rawContentLength = response.headers?.get?.("content-length") ?? "";
+  const contentLength = /^\d+$/.test(rawContentLength)
+    ? Number(rawContentLength)
+    : null;
+  if (!response.body) return { bytes: new Uint8Array(0), truncated: false };
+
+  const reader = response.body.getReader();
+  const chunks = [];
+  let totalBytes = 0;
+  let truncated = contentLength !== null && contentLength > maxBytes;
+  try {
+    while (totalBytes < maxBytes) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!(value instanceof Uint8Array)) {
+        throw new BoundedProviderResponseError("network");
+      }
+      const remaining = maxBytes - totalBytes;
+      const accepted = value.byteLength > remaining
+        ? value.subarray(0, remaining)
+        : value;
+      chunks.push(accepted);
+      totalBytes += accepted.byteLength;
+      if (value.byteLength > remaining) {
+        truncated = true;
+        break;
+      }
+    }
+    if (totalBytes >= maxBytes) truncated = true;
+    if (truncated) await reader.cancel().catch(() => undefined);
+  } finally {
+    reader.releaseLock();
+  }
+
+  const bytes = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return { bytes, truncated };
 }

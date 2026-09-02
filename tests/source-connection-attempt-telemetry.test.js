@@ -73,6 +73,7 @@ test('source attempt failures collapse into bounded operational families', async
   assert.equal(classifySourceAttemptFailure({ status: 422, code: 'MISSING_CREDENTIALS' }), 'missing_credentials');
   assert.equal(classifySourceAttemptFailure({ status: 401 }), 'credentials');
   assert.equal(classifySourceAttemptFailure({ status: 404 }), 'endpoint_not_found');
+  assert.equal(classifySourceAttemptFailure({ status: 413 }), 'payload_too_large');
   assert.equal(classifySourceAttemptFailure({ status: 504 }), 'timeout');
   assert.equal(classifySourceAttemptFailure({ status: 458 }), 'provider_busy');
   assert.equal(classifySourceAttemptFailure({ status: 400, message: 'This URL does not look like a valid M3U playlist' }), 'playlist_format');
@@ -83,6 +84,7 @@ test('source attempt failures collapse into bounded operational families', async
 test('database and client contracts never persist or forward a raw URL field', () => {
   const root = path.resolve(__dirname, '..');
   const migration = fs.readFileSync(path.join(root, 'supabase/migrations/20260902090000_source_connection_attempt_telemetry_v1.sql'), 'utf8');
+  const payloadFamilyMigration = fs.readFileSync(path.join(root, 'supabase/migrations/20260902170000_source_connection_attempt_payload_family.sql'), 'utf8');
   const tableContract = migration.slice(
     migration.indexOf('create table analytics_private.source_connection_attempts'),
     migration.indexOf('comment on table analytics_private.source_connection_attempts'),
@@ -90,6 +92,8 @@ test('database and client contracts never persist or forward a raw URL field', (
   assert.doesNotMatch(tableContract, /\buser_id\b|\burl\b|\bpath\b|\bquery\b|\busername\b|\bpassword\b|\bip_address\b/i);
   assert.match(migration, /expires_at timestamptz not null default \(now\(\) \+ interval '90 days'\)/);
   assert.match(migration, /admin_internal_accounts/);
+  assert.match(payloadFamilyMigration, /'payload_too_large'/);
+  assert.doesNotMatch(payloadFamilyMigration, /\buser_id\b|\burl\b|\bquery\b|\busername\b|\bpassword\b|\bip_address\b/i);
 
   const sourceManager = fs.readFileSync(path.join(root, 'public/js/components/SourceManager.js'), 'utf8');
   const homePage = fs.readFileSync(path.join(root, 'public/js/pages/HomePage.js'), 'utf8');
@@ -119,6 +123,13 @@ test('browser-side classifier emits only a root domain, host hash and bounded sh
   assert.equal(classify.call(context, 'https://panel.test/list.m3u8?token=private'), '.m3u8');
   assert.equal(classify.call(context, 'https://jiotv.com/login.html'), 'web_page');
   assert.equal(classify.call(context, 'ftp://provider.test/list.m3u'), 'invalid');
+
+  const feedback = context.sourceInputFeedback;
+  assert.equal(feedback.call(context, 'nooor', 'm3u').state, 'invalid');
+  assert.equal(feedback.call(context, 'restream.re', 'm3u').state, 'neutral');
+  assert.equal(feedback.call(context, 'https://panel.test/get.php?token=private', 'm3u').state, 'ready');
+  assert.equal(feedback.call(context, 'https://jiotv.com/login.html', 'm3u').state, 'invalid');
+  assert.equal(feedback.call(context, 'https://panel.test', 'xtream').state, 'ready');
 
   const diagnostic = await context.sourceAttemptDiagnostic.call(context, {
     type: 'xtream',

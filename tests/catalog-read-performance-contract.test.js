@@ -124,5 +124,5 @@ test('Live bounds first paint and defers off-screen logo decoding without hiding
   assert.match(appHtml, /cloudApi\.js\?v=71/);
   assert.match(appHtml, /api\.js\?v=93/);
   assert.match(appHtml, /LiveGuideFusion\.js\?v=30/);
-  assert.match(appHtml, /HomePage\.js\?v=4b8155eafa/);
+  assert.match(appHtml, /HomePage\.js\?v=b98a873483/);
 });
