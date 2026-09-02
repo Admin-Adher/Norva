@@ -15,7 +15,7 @@ const gateway = fs.readFileSync(path.join(
 ), 'utf8');
 
 test('Edge v78 exposes dark singleflight configuration with a dedicated HMAC key', () => {
-  assert.match(edge, /version: 79,[\s\S]*sharedMediaCacheSingleflightProtocol: MEDIA_CACHE_SINGLEFLIGHT_PROTOCOL/);
+  assert.match(edge, /version: 80,[\s\S]*sharedMediaCacheSingleflightProtocol: MEDIA_CACHE_SINGLEFLIGHT_PROTOCOL/);
   assert.match(edge, /NORVA_MEDIA_CACHE_SINGLEFLIGHT_ENABLED/);
   assert.match(edge, /NORVA_MEDIA_CACHE_COORDINATION_HMAC_KEY/);
   assert.match(edge, /NORVA_MEDIA_CACHE_FOLLOWER_WAIT_MS/);

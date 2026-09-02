@@ -11,7 +11,7 @@ const edge = fs.readFileSync(path.join(
 ), 'utf8');
 
 test('Edge v78 exposes only an authenticated Gateway publication route', () => {
-  assert.match(edge, /version: 79,[\s\S]*sharedMediaCachePublicationProtocol: 1/);
+  assert.match(edge, /version: 80,[\s\S]*sharedMediaCachePublicationProtocol: 1/);
   assert.match(edge, /segments\[0\] === "media-cache" && segments\[1\] === "publication"/);
   const callback = edge.slice(
     edge.indexOf('async function runMediaCachePublicationCallback('),

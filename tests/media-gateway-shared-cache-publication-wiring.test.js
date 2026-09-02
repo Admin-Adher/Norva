@@ -14,12 +14,12 @@ const producerControl = fs.readFileSync(path.join(
   '../services/media-gateway/src/mediaCacheProducerControl.js',
 ), 'utf8');
 
-test('Gateway v162 keeps global R2 publication dark and behind private dedicated credentials', () => {
+test('Gateway v163 keeps global R2 publication dark and behind private dedicated credentials', () => {
   assert.match(gateway, /NORVA_SHARED_MEDIA_CACHE_ENABLED === 'true'/);
   assert.match(gateway, /NORVA_MEDIA_CACHE_WORKER_URL/);
   assert.match(gateway, /NORVA_MEDIA_CACHE_WORKER_TOKEN/);
   assert.match(gateway, /NORVA_MEDIA_CACHE_MANIFEST_HMAC_KEY/);
-  assert.match(gateway, /const GATEWAY_VERSION = 162/);
+  assert.match(gateway, /const GATEWAY_VERSION = 163/);
   assert.doesNotMatch(gateway, /R2_ACCESS_KEY|R2_SECRET|AWS_ACCESS_KEY/);
 });
 

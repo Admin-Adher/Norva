@@ -15,6 +15,11 @@ const resumeSeekMigrationPath = path.join(
   '../supabase/migrations/20260902213500_provider_route_resume_seek_benchmark_v2.sql',
 );
 const resumeSeekMigration = fs.readFileSync(resumeSeekMigrationPath, 'utf8');
+const realtimeViabilityMigrationPath = path.join(
+  __dirname,
+  '../supabase/migrations/20260903114500_provider_route_realtime_viability_v3.sql',
+);
+const realtimeViabilityMigration = fs.readFileSync(realtimeViabilityMigrationPath, 'utf8');
 
 test('adaptive provider routing control plane defines policies, state, measurements, and leases', () => {
   for (const table of [
@@ -60,6 +65,15 @@ test('v2 route evidence requires bounded non-zero resume probes and expires pref
   assert.match(resumeSeekMigration, /phase = 'resume-seek' and range_start_bytes > 0/);
   assert.match(resumeSeekMigration, /update public\.provider_route_state[\s\S]*expires_at = greatest/);
   assert.doesNotMatch(resumeSeekMigration, /delete from public\.provider_route_(state|measurements)/);
+});
+
+test('v3 route evidence uses long deep probes and an exact realtime throughput floor', () => {
+  assert.match(realtimeViabilityMigration, /realtime_throughput_margin numeric\(4,2\) not null default 1\.35/);
+  assert.match(realtimeViabilityMigration, /alter column resume_probe_bytes set default 8388608/);
+  assert.match(realtimeViabilityMigration, /resume_probe_bytes between 4194304 and 16777216/);
+  assert.match(realtimeViabilityMigration, /minimum_required_bytes_per_second bigint not null default 0/);
+  assert.match(realtimeViabilityMigration, /update public\.provider_route_state[\s\S]*expires_at = greatest/);
+  assert.doesNotMatch(realtimeViabilityMigration, /delete from public\.provider_route_(state|measurements)/);
 });
 
 test('route benchmark lease is distributed, bounded, service-only, and preemptable by playback', () => {

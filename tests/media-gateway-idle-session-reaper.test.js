@@ -82,5 +82,5 @@ test('gateway routes renew liveness and the minute reaper closes idle transports
   assert.match(cleanup, /viewerSessionIdleExpired\(session, now\)/);
   assert.match(cleanup, /stopSession\(session, \{ reason: 'viewer-idle' \}\)/);
   assert.match(source, /viewerSessionIdleTimeoutMs: VIEWER_SESSION_IDLE_TIMEOUT_MS/);
-  assert.match(source, /const GATEWAY_VERSION = 162;/);
+  assert.match(source, /const GATEWAY_VERSION = 163;/);
 });

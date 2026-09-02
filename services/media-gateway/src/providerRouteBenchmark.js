@@ -13,6 +13,7 @@ const MEASUREMENT_KEYS = Object.freeze([
     'first16MiBMs',
     'first4MiBMs',
     'http5xx',
+    'minimumRequiredBytesPerSecond',
     'nodeTransport',
     'phase',
     'provider458',
@@ -113,6 +114,7 @@ function emptyMeasurement(candidate, sampleBytes, rangeStartBytes = 0) {
         proxy407: 0,
         provider458: 0,
         http5xx: 0,
+        minimumRequiredBytesPerSecond: 0,
     };
 }
 
@@ -181,7 +183,14 @@ async function measureProviderRoute({
             return measurement;
         }
         const contentRange = parsedContentRange(safeHeader(response.headers, 'content-range'));
-        measurement.rangeSeekOk = status === 206 && contentRange?.start === boundedRangeStartBytes;
+        const expectedRangeBytes = contentRange?.total
+            ? Math.min(boundedSampleBytes, contentRange.total - boundedRangeStartBytes)
+            : boundedSampleBytes;
+        const expectedRangeEnd = boundedRangeStartBytes + expectedRangeBytes - 1;
+        measurement.rangeSeekOk = status === 206 &&
+            contentRange?.start === boundedRangeStartBytes &&
+            expectedRangeBytes > 0 &&
+            contentRange?.end === expectedRangeEnd;
         measurement.resourceSizeBytes = contentRange?.total || null;
         if (!response.body || typeof response.body.getReader !== 'function') {
             measurement.resets = 1;
@@ -214,7 +223,7 @@ async function measureProviderRoute({
         const elapsedSeconds = Math.max(0.001, (performance.now() - startedAt) / 1000);
         measurement.throughputBytesPerSecond = Math.max(0, Math.round(received / elapsedSeconds));
         measurement.varianceRatio = coefficientOfVariation(throughputWindows);
-        measurement.success = received >= Math.min(boundedSampleBytes, MIB);
+        measurement.success = received >= expectedRangeBytes;
         if (!measurement.success) measurement.resets = 1;
         return measurement;
     } catch (error) {
@@ -241,7 +250,8 @@ function normalizePolicy(value = {}) {
         consecutiveFailureThreshold: boundedInteger(value.consecutiveFailureThreshold, 3, 2, 12),
         tinyProbeBytes: boundedInteger(value.tinyProbeBytes, MIB, 256 * 1024, 4 * MIB),
         sustainedProbeBytes: boundedInteger(value.sustainedProbeBytes, 16 * MIB, 4 * MIB, 16 * MIB),
-        resumeProbeBytes: boundedInteger(value.resumeProbeBytes, MIB, 256 * 1024, 4 * MIB),
+        resumeProbeBytes: boundedInteger(value.resumeProbeBytes, 8 * MIB, 4 * MIB, 16 * MIB),
+        realtimeThroughputMargin: boundedNumber(value.realtimeThroughputMargin, 1.35, 1.1, 3),
         topCandidateCount: boundedInteger(value.topCandidateCount, 2, 1, 4),
         benchmarkLeaseSeconds: boundedInteger(value.benchmarkLeaseSeconds, 120, 15, 600),
     };
@@ -261,6 +271,7 @@ async function runLeasedProviderRouteBenchmark({
     control,
     hostFingerprint,
     isAccountIdle,
+    mediaDurationSeconds = null,
     onLeaseAcquired = null,
     onLeaseReleased = null,
     ownerInstanceFingerprint,
@@ -322,6 +333,7 @@ async function runLeasedProviderRouteBenchmark({
                 candidates,
                 probe,
                 isAccountIdle: leasedIdleCheck,
+                mediaDurationSeconds,
                 signal: benchmarkController.signal,
                 policy,
             });

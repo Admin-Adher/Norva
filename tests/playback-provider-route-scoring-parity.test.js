@@ -60,6 +60,7 @@ function measurement(overrides = {}) {
     first16MiBMs: 4200,
     first4MiBMs: 1100,
     http5xx: 0,
+    minimumRequiredBytesPerSecond: 6 * 1024 * 1024,
     nodeTransport: 'http',
     phase: 'sustained',
     provider458: 0,
@@ -165,6 +166,29 @@ test('Edge and Gateway both exclude a fast prefix route with failed resume evide
   assert.equal(edge.rankProviderRouteEdge(parsed, { requireResumeEvidence: true }).length, 0);
   const gatewayCandidate = { id: '1:http', slot: 1, nodeTransport: 'http' };
   assert.equal(routeEngine.routeHasCompleteResumeEvidence(gatewayCandidate, samples), false);
+});
+
+test('Edge and Gateway both reject successful deep probes below the realtime floor', () => {
+  const edge = edgeScoringHarness();
+  const samples = [
+    measurement({ phase: 'tiny', sampleBytes: 1024 * 1024, first4MiBMs: null, first16MiBMs: null }),
+    measurement(),
+    measurement({
+      phase: 'resume-seek',
+      sampleBytes: 8 * 1024 * 1024,
+      rangeStartBytes: 256 * 1024 * 1024,
+      first4MiBMs: 8_000,
+      first16MiBMs: null,
+      throughputBytesPerSecond: 4 * 1024 * 1024,
+    }),
+  ];
+  const parsed = samples.map(edge.parseProviderRouteMeasurement);
+  assert.ok(parsed.every(Boolean));
+  assert.equal(edge.rankProviderRouteEdge(parsed, { requireResumeEvidence: true }).length, 0);
+  assert.equal(routeEngine.routeHasCompleteResumeEvidence(
+    { id: '1:http', slot: 1, nodeTransport: 'http' },
+    samples,
+  ), false);
 });
 
 test('Edge and Gateway apply identical route hysteresis including explicit zero policy values', () => {

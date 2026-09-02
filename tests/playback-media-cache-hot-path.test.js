@@ -11,7 +11,7 @@ const edge = fs.readFileSync(path.join(
 ), 'utf8');
 
 test('Edge v78 advertises the shared-cache hot playback protocol', () => {
-  assert.match(edge, /version: 79,[\s\S]*sharedMediaCacheHotPlaybackProtocol: 1/);
+  assert.match(edge, /version: 80,[\s\S]*sharedMediaCacheHotPlaybackProtocol: 1/);
 });
 
 test('exact MKV cache lookup runs before provider circuit, capacity query, and provider claim', () => {

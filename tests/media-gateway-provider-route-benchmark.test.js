@@ -93,6 +93,23 @@ test('route probe rejects a provider that answers a deep request with the wrong 
   assert.equal(measurement.rangeSeekOk, false);
 });
 
+test('route probe rejects a short body that only pretends to satisfy an 8 MiB sample', async () => {
+  const sampleBytes = 8 * 1024 * 1024;
+  const measurement = await measureProviderRoute({
+    candidate: { slot: 3, nodeTransport: 'http' },
+    sourceUrl: 'https://provider.invalid/movie/account/secret/42.mkv',
+    sampleBytes,
+    rangeStartBytes: 64 * 1024 * 1024,
+    createDispatcher: () => ({ close: async () => {} }),
+    fetchImpl: async () => new Response(byteStream([new Uint8Array(1024 * 1024)]), {
+      status: 206,
+      headers: { 'content-range': `bytes ${64 * 1024 * 1024}-${65 * 1024 * 1024 - 1}/5368709120` },
+    }),
+  });
+  assert.equal(measurement.rangeSeekOk, false);
+  assert.equal(measurement.success, false);
+});
+
 test('route probe classifies proxy auth and never exposes the response body', async () => {
   let cancelled = 0;
   const measurement = await measureProviderRoute({
@@ -125,6 +142,7 @@ test('leased benchmark sweeps sequentially, reports bounded telemetry, then rele
     hostFingerprint: 'b'.repeat(64),
     ownerInstanceFingerprint: 'c'.repeat(64),
     candidates,
+    mediaDurationSeconds: 3_600,
     isAccountIdle: async () => true,
     control: async (action, payload) => {
       actions.push({ action, payload });
@@ -263,4 +281,6 @@ test('serialized measurements have one strict non-secret schema', () => {
 test('benchmark policy preserves an explicit zero confidence threshold', () => {
   assert.equal(normalizePolicy({ minimumConfidence: 0 }).minimumConfidence, 0);
   assert.equal(normalizePolicy({ minimumConfidence: null }).minimumConfidence, 0.65);
+  assert.equal(normalizePolicy({}).resumeProbeBytes, 8 * 1024 * 1024);
+  assert.equal(normalizePolicy({}).realtimeThroughputMargin, 1.35);
 });

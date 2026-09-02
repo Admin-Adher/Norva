@@ -4,6 +4,7 @@ const crypto = require('node:crypto');
 
 const MIB = 1024 * 1024;
 const MAX_RESUME_RANGE_START_BYTES = (128 * 1024 * MIB) - 1;
+const MAX_MEASURED_THROUGHPUT_BYTES_PER_SECOND = 10 * 1024 * MIB;
 const NODE_TRANSPORTS = new Set(['http', 'socks5']);
 const DEFAULT_ROUTE_POLICY = Object.freeze({
     routeTtlMs: 7 * 24 * 60 * 60 * 1000,
@@ -13,7 +14,8 @@ const DEFAULT_ROUTE_POLICY = Object.freeze({
     consecutiveFailureThreshold: 3,
     tinyProbeBytes: 1 * MIB,
     sustainedProbeBytes: 16 * MIB,
-    resumeProbeBytes: 1 * MIB,
+    resumeProbeBytes: 8 * MIB,
+    realtimeThroughputMargin: 1.35,
     topCandidateCount: 2,
 });
 
@@ -29,6 +31,31 @@ function finiteNumber(value, fallback = 0) {
 
 function nonNegativeInteger(value) {
     return Math.max(0, Math.trunc(finiteNumber(value, 0)));
+}
+
+function minimumRequiredThroughputBytesPerSecond(
+    resourceSizeBytes,
+    mediaDurationSeconds,
+    margin = DEFAULT_ROUTE_POLICY.realtimeThroughputMargin,
+) {
+    const size = finiteNumber(resourceSizeBytes, 0);
+    const duration = finiteNumber(mediaDurationSeconds, 0);
+    const safetyMargin = finiteNumber(margin, 0);
+    if (
+        !Number.isSafeInteger(size) || size <= 0 ||
+        duration <= 0 || duration > 24 * 60 * 60 ||
+        safetyMargin < 1 || safetyMargin > 3
+    ) return 0;
+    return Math.min(
+        MAX_MEASURED_THROUGHPUT_BYTES_PER_SECOND,
+        Math.ceil((size / duration) * safetyMargin),
+    );
+}
+
+function measurementMeetsRealtimeRequirement(measurement = {}) {
+    const minimum = finiteNumber(measurement.minimumRequiredBytesPerSecond, 0);
+    const throughput = finiteNumber(measurement.throughputBytesPerSecond, 0);
+    return minimum > 0 && throughput >= minimum;
 }
 
 function routeId(route) {
@@ -138,6 +165,13 @@ function scoreProviderRouteMeasurement(measurement = {}) {
     const first4MiBMs = Math.max(ttfbMs, finiteNumber(measurement.first4MiBMs, 60_000));
     const first16MiBMs = Math.max(first4MiBMs, finiteNumber(measurement.first16MiBMs, 120_000));
     const throughputBytesPerSecond = Math.max(0, finiteNumber(measurement.throughputBytesPerSecond, 0));
+    const minimumRequiredBytesPerSecond = Math.max(
+        0,
+        finiteNumber(measurement.minimumRequiredBytesPerSecond, 0),
+    );
+    if (minimumRequiredBytesPerSecond > 0 && throughputBytesPerSecond < minimumRequiredBytesPerSecond) {
+        return 0;
+    }
     const varianceRatio = clamp(finiteNumber(measurement.varianceRatio, 1), 0, 4);
     const resets = nonNegativeInteger(measurement.resets);
     const timeouts = nonNegativeInteger(measurement.timeouts);
@@ -176,12 +210,14 @@ function confidenceForMeasurements(measurements) {
         measurement.phase === 'sustained' && measurement.success !== false &&
         finiteNumber(measurement.first16MiBMs, 0) > 0 &&
         finiteNumber(measurement.throughputBytesPerSecond, 0) > 0 &&
+        measurementMeetsRealtimeRequirement(measurement) &&
         measurement.rangeSeekOk === true).length;
     const resumeSamples = samples.filter((measurement) => measurement.phase === 'resume-seek');
     const successfulResumeSamples = resumeSamples.filter((measurement) =>
         measurement.success !== false && measurement.rangeSeekOk === true &&
         finiteNumber(measurement.rangeStartBytes, 0) > 0 &&
-        finiteNumber(measurement.throughputBytesPerSecond, 0) > 0).length;
+        finiteNumber(measurement.throughputBytesPerSecond, 0) > 0 &&
+        measurementMeetsRealtimeRequirement(measurement)).length;
     const sampleConfidence = clamp(samples.length / 5, 0, 1);
     const completeness = completeSustained / samples.length;
     const sustainedEvidence = completeSustained > 0 ? 0.2 : 0;
@@ -212,7 +248,9 @@ function aggregateProviderRouteMeasurements(route, measurements) {
     const throughputEvidence = sustained.length ? sustained : matching.filter((item) => item.phase !== 'resume-seek');
     const ttfbEvidence = [...throughputEvidence, ...resume];
     const resumePassed = resume.length === 0 || resume.every((item) =>
-        item.success !== false && item.rangeSeekOk === true && finiteNumber(item.rangeStartBytes, 0) > 0);
+        item.success !== false && item.rangeSeekOk === true &&
+        finiteNumber(item.rangeStartBytes, 0) > 0 &&
+        measurementMeetsRealtimeRequirement(item));
     const aggregate = {
         slot: route.slot,
         nodeTransport: route.nodeTransport,
@@ -221,6 +259,10 @@ function aggregateProviderRouteMeasurements(route, measurements) {
         first4MiBMs: median(throughputEvidence.map((item) => finiteNumber(item.first4MiBMs, 60_000))),
         first16MiBMs: median(throughputEvidence.map((item) => finiteNumber(item.first16MiBMs, 120_000))),
         throughputBytesPerSecond: median(throughputEvidence.map((item) => finiteNumber(item.throughputBytesPerSecond, 0))),
+        minimumRequiredBytesPerSecond: Math.max(
+            0,
+            ...matching.map((item) => finiteNumber(item.minimumRequiredBytesPerSecond, 0)),
+        ),
         varianceRatio: median(throughputEvidence.map((item) => finiteNumber(item.varianceRatio, 1))),
         rangeSeekOk: resume.length > 0
             ? resumePassed
@@ -260,10 +302,12 @@ function routeHasCompleteResumeEvidence(route, measurements) {
     const resume = matching.filter((measurement) => measurement.phase === 'resume-seek');
     return sustained.some((measurement) =>
         measurement.success !== false && measurement.rangeSeekOk === true &&
-        finiteNumber(measurement.first16MiBMs, 0) > 0) &&
-        resume.length > 0 && resume.every((measurement) =>
+        finiteNumber(measurement.first16MiBMs, 0) > 0 &&
+        measurementMeetsRealtimeRequirement(measurement)) &&
+        resume.length >= 2 && resume.every((measurement) =>
             measurement.success !== false && measurement.rangeSeekOk === true &&
-            finiteNumber(measurement.rangeStartBytes, 0) > 0);
+            finiteNumber(measurement.rangeStartBytes, 0) > 0 &&
+            measurementMeetsRealtimeRequirement(measurement));
 }
 
 function rankProviderRoutes(candidates, measurements) {
@@ -338,6 +382,7 @@ async function benchmarkProviderRoutesSequentially({
     candidates,
     probe,
     isAccountIdle,
+    mediaDurationSeconds = null,
     signal = null,
     policy = {},
 } = {}) {
@@ -359,6 +404,19 @@ async function benchmarkProviderRoutesSequentially({
         measurements.push({ ...measurement, slot: candidate.slot, nodeTransport: candidate.nodeTransport, phase: 'tiny' });
     }
 
+    const resourceSizeBytes = Math.max(
+        0,
+        ...measurements.map((measurement) => finiteNumber(measurement.resourceSizeBytes, 0)),
+    );
+    const minimumRequiredBytesPerSecond = minimumRequiredThroughputBytesPerSecond(
+        resourceSizeBytes,
+        mediaDurationSeconds,
+        effective.realtimeThroughputMargin,
+    );
+    for (const measurement of measurements) {
+        measurement.minimumRequiredBytesPerSecond = minimumRequiredBytesPerSecond;
+    }
+
     const tinyRankings = rankProviderRoutes(candidates, measurements);
     const finalists = tinyRankings.slice(0, effective.topCandidateCount);
     for (const finalist of finalists) {
@@ -370,7 +428,13 @@ async function benchmarkProviderRoutesSequentially({
             checkpoints: [4 * MIB, 16 * MIB],
             signal,
         });
-        measurements.push({ ...measurement, slot: candidate.slot, nodeTransport: candidate.nodeTransport, phase: 'sustained' });
+        measurements.push({
+            ...measurement,
+            slot: candidate.slot,
+            nodeTransport: candidate.nodeTransport,
+            phase: 'sustained',
+            minimumRequiredBytesPerSecond,
+        });
     }
 
     const finalistCandidates = candidates.filter((candidate) =>
@@ -399,6 +463,7 @@ async function benchmarkProviderRoutesSequentially({
                 nodeTransport: candidate.nodeTransport,
                 phase: 'resume-seek',
                 rangeStartBytes,
+                minimumRequiredBytesPerSecond,
             });
         }
     }
@@ -417,12 +482,15 @@ async function benchmarkProviderRoutesSequentially({
 module.exports = {
     DEFAULT_ROUTE_POLICY,
     MAX_RESUME_RANGE_START_BYTES,
+    MAX_MEASURED_THROUGHPUT_BYTES_PER_SECOND,
     MIB,
     aggregateProviderRouteMeasurements,
     benchmarkProviderRoutesSequentially,
     buildProviderRouteCandidates,
     confidenceForMeasurements,
     evaluateProviderRouteTransition,
+    measurementMeetsRealtimeRequirement,
+    minimumRequiredThroughputBytesPerSecond,
     providerRouteFingerprints,
     rankProviderRoutes,
     resumeSeekOffsets,

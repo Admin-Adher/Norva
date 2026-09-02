@@ -11,7 +11,7 @@ const edge = fs.readFileSync(path.join(
 ), 'utf8');
 
 test('Edge v78 keeps live join dark behind an independent runtime flag', () => {
-  assert.match(edge, /version: 79/);
+  assert.match(edge, /version: 80/);
   assert.match(edge, /NORVA_MEDIA_CACHE_LIVE_JOIN_ENABLED/);
   assert.match(edge, /mediaCacheLiveJoinEnabled/);
   assert.match(edge, /liveJoinRequested: config\.mediaCacheLiveJoinEnabled/);

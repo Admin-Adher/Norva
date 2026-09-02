@@ -155,6 +155,7 @@ test('benchmarks are strictly sequential and qualify finalists with two resume-r
   let maximumActive = 0;
   const result = await routeEngine.benchmarkProviderRoutesSequentially({
     candidates,
+    mediaDurationSeconds: 7_200,
     isAccountIdle: async () => true,
     probe: async (candidate, options) => {
       active += 1;
@@ -185,6 +186,9 @@ test('benchmarks are strictly sequential and qualify finalists with two resume-r
   assert.equal(observed.length, candidates.length + 2 + 4);
   assert.equal(observed.slice(4, 6).every((entry) => entry.startsWith('sustained:')), true);
   assert.equal(observed.slice(-4).every((entry) => entry.startsWith('resume-seek:')), true);
+  assert.equal(observed.slice(-4).every((entry) => (
+    Number(entry.split(':').at(-2)) === 8 * routeEngine.MIB
+  )), true);
   assert.equal(observed.slice(-4).every((entry) => Number(entry.split(':').at(-1)) > 0), true);
   assert.ok(result.recommendation);
 });
@@ -195,6 +199,7 @@ test('a route that is fast at byte zero is disqualified when a resumed range fai
   });
   const result = await routeEngine.benchmarkProviderRoutesSequentially({
     candidates,
+    mediaDurationSeconds: 7_200,
     isAccountIdle: async () => true,
     probe: async (candidate, options) => {
       const brokenResume = candidate.id === '1:http' && options.phase === 'resume-seek';
@@ -215,6 +220,51 @@ test('a route that is fast at byte zero is disqualified when a resumed range fai
   assert.equal(result.status, 'completed');
   assert.equal(result.recommendation.id, '2:http');
   assert.equal(result.rankings.some((route) => route.id === '1:http'), false);
+});
+
+test('a deep route slower than the exact media rate is rejected despite a fast prefix', async () => {
+  const candidates = routeEngine.buildProviderRouteCandidates({
+    httpProxyUrls: ['http://fast-prefix-slow-resume', 'http://realtime-safe'],
+  });
+  const result = await routeEngine.benchmarkProviderRoutesSequentially({
+    candidates,
+    mediaDurationSeconds: 7_200,
+    isAccountIdle: async () => true,
+    probe: async (candidate, options) => successfulMeasurement({
+      phase: options.phase,
+      sampleBytes: options.sampleBytes,
+      rangeStartBytes: options.rangeStartBytes || 0,
+      resourceSizeBytes: 5 * 1024 * routeEngine.MIB,
+      ttfbMs: candidate.id === '1:http' ? 50 : 250,
+      first4MiBMs: options.phase === 'sustained' ? 900 : null,
+      first16MiBMs: options.phase === 'sustained' ? 3_600 : null,
+      throughputBytesPerSecond: options.phase === 'resume-seek'
+        ? (candidate.id === '1:http' ? 512 * 1024 : 3 * routeEngine.MIB)
+        : (candidate.id === '1:http' ? 24 * routeEngine.MIB : 12 * routeEngine.MIB),
+    }),
+  });
+
+  assert.equal(result.recommendation.id, '2:http');
+  assert.equal(result.rankings.some((route) => route.id === '1:http'), false);
+  assert.ok(result.measurements.every((measurement) => (
+    measurement.minimumRequiredBytesPerSecond > 0
+  )));
+});
+
+test('a benchmark without exact media duration cannot create an applicable route', async () => {
+  const candidates = routeEngine.buildProviderRouteCandidates({ httpProxyUrls: ['http://one'] });
+  const result = await routeEngine.benchmarkProviderRoutesSequentially({
+    candidates,
+    isAccountIdle: async () => true,
+    probe: async (_candidate, options) => successfulMeasurement({
+      phase: options.phase,
+      sampleBytes: options.sampleBytes,
+      rangeStartBytes: options.rangeStartBytes || 0,
+      resourceSizeBytes: 5 * 1024 * routeEngine.MIB,
+    }),
+  });
+  assert.equal(result.recommendation, null);
+  assert.equal(result.rankings.length, 0);
 });
 
 test('resume probes stay inside the strict persisted byte-offset contract', () => {

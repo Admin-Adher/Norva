@@ -2291,7 +2291,7 @@ const MAX_CACHEABLE_EXACT_SUBTITLE_HLS_RENDITIONS = Math.min(
     MAX_EXACT_SUBTITLE_HLS_RENDITIONS,
     clampInt(process.env.MAX_CACHEABLE_EXACT_SUBTITLE_HLS_RENDITIONS, 8, 1, 32),
 );
-const GATEWAY_VERSION = 162;
+const GATEWAY_VERSION = 163;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -2416,6 +2416,7 @@ async function runProviderRouteBenchmarkJob(job, controller) {
             !accountKeyBusyLocally(job.affinityKey) &&
             !otherProviderWorkActive()
         ),
+        mediaDurationSeconds: job.mediaDurationSeconds,
         onLeaseAcquired: async () => {
             extractionRegistration = registerAccountExtraction(
                 job.affinityKey,
@@ -2530,7 +2531,20 @@ async function drainProviderRouteBenchmarkQueue() {
     }
 }
 
-function scheduleProviderRouteBenchmark(sourceUrl, affinityKey, userAgent) {
+function providerRouteBenchmarkDurationSeconds(...sources) {
+    for (const source of sources) {
+        const record = asRecord(source);
+        for (const value of [record.durationSeconds, record.duration_seconds, record.duration]) {
+            const duration = Number(value);
+            if (Number.isFinite(duration) && duration > 0 && duration <= 24 * 60 * 60) {
+                return duration;
+            }
+        }
+    }
+    return null;
+}
+
+function scheduleProviderRouteBenchmark(sourceUrl, affinityKey, userAgent, mediaDurationSeconds = null) {
     if (!providerRouteBenchmarkEnabled || !isHttpUrl(sourceUrl) || !affinityKey) {
         return { queued: false, reason: 'benchmark-disabled' };
     }
@@ -2541,7 +2555,13 @@ function scheduleProviderRouteBenchmark(sourceUrl, affinityKey, userAgent) {
         return { queued: false, reason: 'cooldown' };
     }
     const existing = providerRouteBenchmarkPending.get(fingerprints.accountFingerprint);
-    if (existing || providerRouteBenchmarkActive?.job?.accountFingerprint === fingerprints.accountFingerprint) {
+    if (existing) {
+        const normalizedDuration = providerRouteBenchmarkDurationSeconds({ durationSeconds: mediaDurationSeconds });
+        if (normalizedDuration) existing.mediaDurationSeconds = normalizedDuration;
+        providerRouteBenchmarkStats.deduplicated += 1;
+        return { queued: true, reason: 'deduplicated' };
+    }
+    if (providerRouteBenchmarkActive?.job?.accountFingerprint === fingerprints.accountFingerprint) {
         providerRouteBenchmarkStats.deduplicated += 1;
         return { queued: true, reason: 'deduplicated' };
     }
@@ -2554,6 +2574,7 @@ function scheduleProviderRouteBenchmark(sourceUrl, affinityKey, userAgent) {
         affinityKey,
         sourceUrl,
         userAgent: sanitizeUserAgent(userAgent) || FFMPEG_USER_AGENT,
+        mediaDurationSeconds: providerRouteBenchmarkDurationSeconds({ durationSeconds: mediaDurationSeconds }),
         attempts: 0,
         nextAt: Date.now() + PROVIDER_ROUTE_BENCHMARK_SETTLE_MS,
     });
@@ -3083,9 +3104,12 @@ app.post('/provider-route/benchmark', requireGatewayAuth, async (req, res) => {
     const body = req.body && typeof req.body === 'object' ? req.body : {};
     const keys = Object.keys(body).sort();
     if (
-        !keys.length || keys.some((key) => !['sourceUrl', 'userAgent'].includes(key)) ||
+        !keys.length || keys.some((key) => !['durationSeconds', 'sourceUrl', 'userAgent'].includes(key)) ||
         !body.sourceUrl || !isHttpUrl(body.sourceUrl)
     ) return res.status(400).json({ error: 'sourceUrl is required' });
+    if (body.durationSeconds !== undefined && !providerRouteBenchmarkDurationSeconds(body)) {
+        return res.status(400).json({ error: 'durationSeconds is invalid' });
+    }
     if (!providerRouteBenchmarkEnabled) {
         return res.status(503).json({ error: 'Provider route benchmark is disabled' });
     }
@@ -3098,6 +3122,7 @@ app.post('/provider-route/benchmark', requireGatewayAuth, async (req, res) => {
         String(body.sourceUrl),
         proxyKeyFromUrl(String(body.sourceUrl)),
         body.userAgent,
+        body.durationSeconds,
     );
     const status = scheduled.queued ? 202 : (scheduled.reason === 'queue-full' ? 429 : 409);
     return res.status(status).json({
@@ -10052,7 +10077,12 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             adaptiveRouteLookupMs = Math.max(0, Date.now() - adaptiveRouteLookupStartedAt);
             if (sessionRequestAbortController.signal.aborted) return;
             observeProviderProxySelection(playbackProxyKey);
-            scheduleProviderRouteBenchmark(sourceUrl, playbackProxyKey, userAgent);
+            scheduleProviderRouteBenchmark(
+                sourceUrl,
+                playbackProxyKey,
+                userAgent,
+                providerRouteBenchmarkDurationSeconds(normalizedCodecProfile, normalizedPlaybackHint),
+            );
         }
         const cleanupStartedAt = Date.now();
         let stoppedConflictingSessions = 0;
@@ -10447,6 +10477,12 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
                 sessionRequestAbortController.signal,
             );
             if (sessionRequestAbortController.signal.aborted) throw new Error('Session request aborted');
+            scheduleProviderRouteBenchmark(
+                sourceUrl,
+                playbackProxyKey,
+                userAgent,
+                providerRouteBenchmarkDurationSeconds(session.codecProfile, session.playbackHint),
+            );
         }
 
         if (finiteMkvPlayback && normalizedSeekOffset > 0) {
@@ -10555,6 +10591,12 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
         session.startupTimings.totalMs = Math.max(0, Date.now() - sessionCreateStartedAt);
         session.startupTimings.inputProbeMode = session.fastInputProbe === true ? 'known-fast' : 'full';
         session.startupTimings.fastInputProbeFallbacks = Number(session.fastInputProbeFallbacks || 0);
+        scheduleProviderRouteBenchmark(
+            sourceUrl,
+            playbackProxyKey,
+            userAgent,
+            providerRouteBenchmarkDurationSeconds(session.codecProfile, session.playbackHint),
+        );
         session.startupPolicy = startupPolicyForSession(session);
         // Cache publication is a two-barrier operation. A short source can
         // finish on VAAPI before the local header probe above has replaced the

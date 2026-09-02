@@ -10,8 +10,8 @@ const gateway = fs.readFileSync(path.join(
   '../services/media-gateway/src/index.js',
 ), 'utf8');
 
-test('Gateway v162 keeps adaptive routing behind dedicated route and benchmark gates', () => {
-  assert.match(gateway, /const GATEWAY_VERSION = 162;/);
+test('Gateway v163 keeps adaptive routing behind dedicated route and benchmark gates', () => {
+  assert.match(gateway, /const GATEWAY_VERSION = 163;/);
   assert.match(gateway, /process\.env\.PROVIDER_ADAPTIVE_ROUTE_ENABLED === 'true'/);
   assert.match(gateway, /process\.env\.PROVIDER_ROUTE_BENCHMARK_ENABLED === 'true'/);
   assert.match(gateway, /process\.env\.PROVIDER_ROUTE_FINGERPRINT_HMAC_KEY/);
@@ -80,6 +80,8 @@ test('benchmark learning is bounded, sequential, service-only, and locally preem
   assert.match(benchmark, /registerAccountExtraction/);
   assert.match(benchmark, /PROVIDER_SLOT_RELEASE_DELAY_MS/);
   assert.match(benchmark, /setViewerPreemptHandler/);
+  assert.match(benchmark, /mediaDurationSeconds: job\.mediaDurationSeconds/);
+  assert.match(benchmark, /existing\.mediaDurationSeconds = normalizedDuration/);
   assert.match(
     benchmark,
     /\['viewer-active-or-leased', 'lease-unavailable'\][\s\S]{0,220}deferProviderRouteBenchmarkWithoutConsumingAttempt\(job\)/,
@@ -90,6 +92,7 @@ test('benchmark learning is bounded, sequential, service-only, and locally preem
   );
   assert.match(benchmark, /function retryProviderRouteBenchmark[\s\S]{0,180}job\.attempts >= 5/);
   assert.match(gateway, /app\.post\('\/provider-route\/benchmark', requireGatewayAuth/);
+  assert.match(gateway, /enrichSessionCodecProfileFromBoundedHeader[\s\S]{0,500}providerRouteBenchmarkDurationSeconds\(session\.codecProfile, session\.playbackHint\)/);
 });
 
 test('distributed activity reports only HMAC route identities for active viewers', () => {
