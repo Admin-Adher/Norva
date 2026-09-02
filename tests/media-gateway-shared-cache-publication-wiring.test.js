@@ -24,7 +24,7 @@ test('Gateway v157 keeps global R2 publication dark and behind private dedicated
 });
 
 test('subtitle-heavy playback and shared-cache limits remain independently bounded', () => {
-  assert.match(gateway, /MAX_EXACT_SUBTITLE_HLS_RENDITIONS[\s\S]{0,120}\n\s*32,\n\s*1,\n\s*32,/);
+  assert.match(gateway, /MAX_EXACT_SUBTITLE_HLS_RENDITIONS[\s\S]{0,120}\r?\n\s*32,\r?\n\s*1,\r?\n\s*32,/);
   assert.match(gateway, /MAX_CACHEABLE_EXACT_SUBTITLE_HLS_RENDITIONS[\s\S]{0,180}clampInt\(process\.env\.MAX_CACHEABLE_EXACT_SUBTITLE_HLS_RENDITIONS, 8, 1, 32\)/);
   const cacheTopology = gateway.slice(
     gateway.indexOf('function mkvCompleteHlsCacheSubtitleTopology('),
