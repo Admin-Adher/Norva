@@ -28,8 +28,14 @@ test('mobile Home always paints an explicit loading, error or empty state', () =
 
 test('mobile Home scroll clearance keeps the ecosystem module above Android navigation', () => {
   assert.match(css, /#page-home\s*\{[\s\S]*?scroll-padding-block-end:/);
-  assert.match(css, /#page-home \.dashboard-content\s*\{[\s\S]*?padding-bottom:\s*calc\(32px \+ env\(safe-area-inset-bottom/);
+  assert.match(css, /#page-home:not\(\.home-setup-active\) \.dashboard-content\s*\{[\s\S]*?padding-bottom:\s*calc\(32px \+ env\(safe-area-inset-bottom/);
   assert.match(css, /#home-ecosystem\s*\{[\s\S]*?scroll-margin-block-end:\s*calc\(var\(--bottom-nav-h\)/);
+});
+
+test('first-source setup owns one painted bottom clearance without an empty scroll tail', () => {
+  assert.match(css, /#page-home\.home-setup-connect-active \.norva-setup-connect\s*\{[\s\S]{0,260}padding-bottom:\s*max\(calc\(var\(--space-lg\) \+ var\(--space-sm\)\), calc\(var\(--space-md\) \+ var\(--safe-area-inset-bottom\)\)\)/);
+  assert.doesNotMatch(css, /#page-home \.dashboard-content\s*\{[\s\S]{0,160}padding-bottom:\s*calc\(32px \+ env\(safe-area-inset-bottom/);
+  assert.match(css, /\.norva-setup-submit\s*\{[\s\S]{0,180}justify-content:\s*center;[\s\S]{0,120}text-align:\s*center;/);
 });
 
 test('phone Live source selection is a branded accessible sheet, not a native select', () => {
