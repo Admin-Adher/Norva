@@ -889,6 +889,39 @@ test('finite seek broker expands only a proven sequential local read after its f
   assert.equal(broker.completedProviderFetches, 3);
 });
 
+test('finite seek broker primes one pinned route before its base and sequential windows', async (t) => {
+  const { createStrictLidBroker } = brokerHarness();
+  const data = Buffer.from(Array.from({ length: 64 }, (_, index) => index));
+  const calls = [];
+  const provider = http.createServer((req, res) => {
+    calls.push(req.headers.range);
+    sendExactRange(req, res, data, { etag: '"finite-warmup-v1"' });
+  });
+  const sourceUrl = await listen(provider);
+  t.after(() => closeServer(provider));
+  const broker = await createStrictLidBroker({
+    sourceUrl,
+    fileSizeBytes: data.length,
+    dispatcher: null,
+    pathPrefix: 'finite-mkv-seek',
+    finiteWarmupWindowBytes: 2,
+    finiteWindowBytes: 8,
+    finiteSequentialWindowBytes: 24,
+    finiteCacheBytes: 64,
+    releaseDelayMs: 0,
+    completedReleaseDelayMs: 0,
+    openTimeoutMs: 2000,
+  });
+  t.after(() => broker.close());
+
+  const response = await fetch(broker.inputUrl, { headers: { Range: 'bytes=0-39' } });
+  assert.deepEqual(Buffer.from(await response.arrayBuffer()), data.subarray(0, 40));
+  assert.deepEqual(calls, ['bytes=0-1', 'bytes=2-7', 'bytes=8-31', 'bytes=32-39']);
+  assert.equal(broker.warmupWindowBytes, 2);
+  assert.equal(broker.warmupProviderWindows, 1);
+  assert.equal(broker.completedProviderFetches, 4);
+});
+
 test('finite seek broker streams provider progress before a window is fully materialized', async (t) => {
   const { createStrictLidBroker } = brokerHarness();
   const data = Buffer.from(Array.from({ length: 16 }, (_, index) => 0x40 + index));
@@ -1828,7 +1861,7 @@ test('strict LID rejects invalid exact signed coordinates before creating a serv
   assert.match(route, /detectLanguageRequestPolicy\(req, options\)[\s\S]*validateDetectLanguageCapability\(capabilityToken, policy\.requiredScope\)/);
   assert.match(gatewaySource, /strictLidLoopbackBrokerProtocol: 1/);
   assert.match(gatewaySource, /strictLidFileSizeClaim: 'fileSizeBytes'/);
-  assert.match(gatewaySource, /const GATEWAY_VERSION = 157/);
+  assert.match(gatewaySource, /const GATEWAY_VERSION = 159/);
   assert.match(gatewaySource, /supersededReleaseDelayMs:\s*PROVIDER_SLOT_RELEASE_DELAY_MS/);
   assert.match(gatewaySource, /strictLidProviderDrainProtocol: 1/);
   assert.match(gatewaySource, /strictLidWeakFallbackProtocol: 1/);

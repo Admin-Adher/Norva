@@ -3370,6 +3370,7 @@ test('finite MKV seek preparation drains the retained provider before opening on
             PROVIDER_SLOT_RELEASE_DELAY_MS: 2500,
             FINITE_MKV_SEEK_WINDOW_BYTES: 2 * 1024 * 1024,
             FINITE_MKV_MULTI_AUDIO_SEEK_WINDOW_BYTES: 1 * 1024 * 1024,
+            FINITE_MKV_RESUME_WARMUP_WINDOW_BYTES: 256 * 1024,
             FINITE_MKV_SEEK_CACHE_BYTES: 32 * 1024 * 1024,
             FINITE_MKV_SEEK_PROXY_AGENT_MAX_AGE_MS: 4 * 60_000,
             pinnedProxyAgentFactory: () => () => ({ slot: 3 }),
@@ -3425,9 +3426,11 @@ test('finite MKV seek preparation drains the retained provider before opening on
     assert.equal(brokerOptions.effectiveUrlIdentitySha256, session.vodInputEffectiveUrlIdentitySha256);
     assert.equal(brokerOptions.pathPrefix, 'finite-mkv-seek');
     assert.equal(brokerOptions.finiteWindowBytes, 1 * 1024 * 1024);
+    assert.equal(brokerOptions.finiteWarmupWindowBytes, 256 * 1024);
     assert.equal(brokerOptions.finiteSequentialWindowBytes, 2 * 1024 * 1024);
     assert.equal(brokerOptions.finiteCacheBytes, 32 * 1024 * 1024);
     assert.equal(session.startupTimings.finiteMkvSeekMultiAudioWindow, true);
+    assert.equal(session.startupTimings.finiteMkvSeekWarmupWindowBytes, 256 * 1024);
     assert.equal(session.startupTimings.finiteMkvSeekSequentialWindowBytes, 2 * 1024 * 1024);
     assert.equal(typeof brokerOptions.dispatcherFactory, 'function');
     assert.equal(brokerOptions.dispatcherMaxAgeMs, 4 * 60_000);
@@ -3641,7 +3644,7 @@ test('production finite MKV resume uses continuous indexed windows and keeps lin
     assert.match(source, /effectiveUrlSha256:\s*session\.vodInputEffectiveUrlSha256/);
     assert.match(source, /effectiveUrlIdentitySha256:\s*session\.vodInputEffectiveUrlIdentitySha256/);
     assert.match(source, /boundedMkvInputPumpProtocol:\s*1/);
-    assert.match(source, /finiteMkvSeekBroker:\s*\{[\s\S]+?protocol:\s*8/);
+    assert.match(source, /finiteMkvSeekBroker:\s*\{[\s\S]+?protocol:\s*9/);
     assert.match(source, /FINITE_MKV_SEEK_WINDOW_BYTES[\s\S]+?8 \* 1024 \* 1024/);
     assert.match(source, /FINITE_MKV_MULTI_AUDIO_SEEK_WINDOW_BYTES[\s\S]+?4 \* 1024 \* 1024/);
     assert.match(source, /FINITE_MKV_SEEK_CACHE_BYTES[\s\S]+?64 \* 1024 \* 1024/);

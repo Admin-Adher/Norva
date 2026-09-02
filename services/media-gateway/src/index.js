@@ -1811,6 +1811,15 @@ const FINITE_MKV_MULTI_AUDIO_SEEK_WINDOW_BYTES = clampInt(
     256 * 1024,
     8 * 1024 * 1024,
 );
+// Some residential/provider paths ramp up only after one small exact range has
+// crossed the already-pinned tunnel. Split only the broker's very first range,
+// then return to the normal 4/8 MiB windows on that same dispatcher and IP.
+const FINITE_MKV_RESUME_WARMUP_WINDOW_BYTES = clampInt(
+    process.env.FINITE_MKV_RESUME_WARMUP_WINDOW_BYTES,
+    256 * 1024,
+    0,
+    1024 * 1024,
+);
 const FINITE_MKV_SEEK_CACHE_BYTES = clampInt(
     process.env.FINITE_MKV_SEEK_CACHE_BYTES,
     64 * 1024 * 1024,
@@ -2253,7 +2262,7 @@ const MAX_CACHEABLE_EXACT_SUBTITLE_HLS_RENDITIONS = Math.min(
     MAX_EXACT_SUBTITLE_HLS_RENDITIONS,
     clampInt(process.env.MAX_CACHEABLE_EXACT_SUBTITLE_HLS_RENDITIONS, 8, 1, 32),
 );
-const GATEWAY_VERSION = 158;
+const GATEWAY_VERSION = 159;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -2773,7 +2782,7 @@ app.get('/health', (req, res) => {
         },
         boundedMkvInputPumpProtocol: 1,
         finiteMkvSeekBroker: {
-            protocol: 8,
+            protocol: 9,
             active: Array.from(sessions.values()).filter((session) => (
                 Boolean(session?.finiteMkvSeekBroker)
             )).length,
@@ -2789,6 +2798,7 @@ app.get('/health', (req, res) => {
             abandonedRangePreemption: true,
             windowBytes: FINITE_MKV_SEEK_WINDOW_BYTES,
             multiAudioResumeWindowBytes: FINITE_MKV_MULTI_AUDIO_SEEK_WINDOW_BYTES,
+            resumeWarmupWindowBytes: FINITE_MKV_RESUME_WARMUP_WINDOW_BYTES,
             sequentialWindowBytes: FINITE_MKV_SEEK_WINDOW_BYTES,
             cacheMaxBytes: FINITE_MKV_SEEK_CACHE_BYTES,
             identityPreflightRange: BOUNDED_MKV_HEADER_PARSE && INBAND_HEADER_CACHE_MAX > 0
@@ -5128,18 +5138,30 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
         const bufferedChunks = finiteSeek ? [] : null;
         let finiteWindowStartOffset = 0;
         let finiteWindowRange = null;
+        let finiteWindowIsWarmup = false;
         let forwarded = 0;
         let reconnects = 0;
         let consecutiveNoProgressFailures = 0;
         let responseStarted = false;
         let finiteLocalBackpressured = false;
         let finiteProviderWindowsCompleted = 0;
+        let finiteWarmupWindowsCompleted = 0;
         while (forwarded < requestedLength) {
             if (attempt.localClosed) break;
             if (finiteSeek && forwarded === finiteWindowStartOffset) {
-                const effectiveWindowBytes = finiteProviderWindowsCompleted > 0
-                    ? context.finiteSequentialWindowBytes
-                    : context.finiteWindowBytes;
+                finiteWindowIsWarmup = (
+                    context.finiteWarmupWindowBytes > 0
+                    && !context.finiteWarmupWindowConsumed
+                );
+                const regularProviderWindowsCompleted = Math.max(
+                    0,
+                    finiteProviderWindowsCompleted - finiteWarmupWindowsCompleted,
+                );
+                const effectiveWindowBytes = finiteWindowIsWarmup
+                    ? context.finiteWarmupWindowBytes
+                    : (regularProviderWindowsCompleted > 0
+                        ? context.finiteSequentialWindowBytes
+                        : context.finiteWindowBytes);
                 finiteWindowRange = finiteMkvSeekWindowRange({
                     start: range.start + forwarded,
                     end: range.end,
@@ -5148,7 +5170,10 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                     // The first slice ends on a stable base-window boundary. A
                     // later overlapping cue can reuse the cached suffix and fetch
                     // only its missing tail instead of redownloading the prefix.
-                    alignToWindowEnd: forwarded === 0,
+                    alignToWindowEnd: forwarded === 0 || (
+                        finiteWarmupWindowsCompleted > 0
+                        && regularProviderWindowsCompleted === 0
+                    ),
                 });
                 const cached = finiteMkvSeekCacheLookup(context, finiteWindowRange);
                 if (cached) {
@@ -5453,7 +5478,14 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                     );
                 }
                 attempt.upstreamCompletedExactRange = true;
-                if (finiteSeek) finiteProviderWindowsCompleted++;
+                if (finiteSeek) {
+                    finiteProviderWindowsCompleted++;
+                    if (finiteWindowIsWarmup) {
+                        context.finiteWarmupWindowConsumed = true;
+                        context.finiteWarmupProviderWindows += 1;
+                        finiteWarmupWindowsCompleted += 1;
+                    }
+                }
                 finishFiniteMkvSeekWindowTrace(context, finiteWindowTrace, 'completed');
                 await closeStrictLidBrokerProviderFetch(context, attempt, 'completed');
                 if (finiteSeek && range.start + forwarded === finiteWindowRange.end + 1) {
@@ -5788,6 +5820,9 @@ async function createStrictLidBroker(options = {}) {
         finiteWindowBytes: Number.isFinite(Number(options.finiteWindowBytes))
             ? Math.max(1, Math.min(16 * 1024 * 1024, Number(options.finiteWindowBytes)))
             : FINITE_MKV_SEEK_WINDOW_BYTES,
+        finiteWarmupWindowBytes: 0,
+        finiteWarmupWindowConsumed: false,
+        finiteWarmupProviderWindows: 0,
         finiteSequentialWindowBytes: 0,
         finiteCacheMaxBytes: 0,
         setTimer: typeof options.setTimer === 'function' ? options.setTimer : setTimeout,
@@ -5829,6 +5864,9 @@ async function createStrictLidBroker(options = {}) {
             Math.min(16 * 1024 * 1024, Number(options.finiteSequentialWindowBytes)),
         )
         : context.finiteWindowBytes;
+    context.finiteWarmupWindowBytes = Number.isFinite(Number(options.finiteWarmupWindowBytes))
+        ? Math.max(0, Math.min(context.finiteWindowBytes, Number(options.finiteWarmupWindowBytes)))
+        : 0;
     context.finiteCacheMaxBytes = Number.isFinite(Number(options.finiteCacheBytes))
         ? Math.max(context.finiteWindowBytes, Math.min(256 * 1024 * 1024, Number(options.finiteCacheBytes)))
         : Math.max(context.finiteWindowBytes, FINITE_MKV_SEEK_CACHE_BYTES);
@@ -5867,6 +5905,8 @@ async function createStrictLidBroker(options = {}) {
         get maxQueuedRequests() { return context.finiteMaxQueuedRequests; },
         get maxQueuedProviderWindows() { return context.finiteMaxQueuedProviderWindows; },
         get plannedSupersessions() { return context.finitePlannedSupersessions; },
+        get warmupWindowBytes() { return context.finiteWarmupWindowBytes; },
+        get warmupProviderWindows() { return context.finiteWarmupProviderWindows; },
         get sequentialWindowBytes() { return context.finiteSequentialWindowBytes; },
         get windowTrace() {
             return context.finiteWindowTrace.map((trace) => ({
@@ -12345,6 +12385,7 @@ async function prepareFiniteMkvSeekBroker(session, parentSignal = null) {
         onProviderIdentity: (identity) => applyFiniteMkvSeekProviderIdentity(session, identity),
         pathPrefix: 'finite-mkv-seek',
         finiteWindowBytes: effectiveWindowBytes,
+        finiteWarmupWindowBytes: FINITE_MKV_RESUME_WARMUP_WINDOW_BYTES,
         finiteSequentialWindowBytes: FINITE_MKV_SEEK_WINDOW_BYTES,
         finiteCacheBytes: FINITE_MKV_SEEK_CACHE_BYTES,
         // Provider chunks advance FFmpeg immediately while each exact window is
@@ -12360,6 +12401,7 @@ async function prepareFiniteMkvSeekBroker(session, parentSignal = null) {
     session.startupTimings.finiteMkvSeekBroker = true;
     session.startupTimings.finiteMkvSeekProviderFetches = 0;
     session.startupTimings.finiteMkvSeekWindowBytes = effectiveWindowBytes;
+    session.startupTimings.finiteMkvSeekWarmupWindowBytes = FINITE_MKV_RESUME_WARMUP_WINDOW_BYTES;
     session.startupTimings.finiteMkvSeekSequentialWindowBytes = FINITE_MKV_SEEK_WINDOW_BYTES;
     session.startupTimings.finiteMkvSeekMultiAudioWindow = exactAudioTrackCount > 1;
     session.startupTimings.finiteMkvSeekCacheLimitBytes = FINITE_MKV_SEEK_CACHE_BYTES;
@@ -18531,6 +18573,8 @@ function debugSession(session) {
                 cacheHits: Number(session.finiteMkvSeekBroker.cacheHits || 0),
                 cacheMisses: Number(session.finiteMkvSeekBroker.cacheMisses || 0),
                 plannedSupersessions: Number(session.finiteMkvSeekBroker.plannedSupersessions || 0),
+                warmupWindowBytes: Number(session.finiteMkvSeekBroker.warmupWindowBytes || 0),
+                warmupProviderWindows: Number(session.finiteMkvSeekBroker.warmupProviderWindows || 0),
                 sequentialWindowBytes: Number(session.finiteMkvSeekBroker.sequentialWindowBytes || 0),
                 windowTrace: session.finiteMkvSeekBroker.windowTrace,
             }
