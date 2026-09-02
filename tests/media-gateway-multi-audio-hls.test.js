@@ -64,6 +64,8 @@ function loadPlanHarness() {
             MAX_MULTI_AUDIO_RENDITIONS: 12,
             MULTI_AUDIO_HLS_PROTOCOL: 1,
             MULTI_AUDIO_HLS_STARTUP_PROOF_SECONDS: 20,
+            MULTI_AUDIO_HLS_RESUME_STARTUP_PROOF_SECONDS: 4,
+            MULTI_AUDIO_HLS_RESUME_STARTUP_SEGMENTS: 2,
             EXACT_MATROSKA_H264_MAX_WIDTH: 1_920,
             EXACT_MATROSKA_H264_MAX_HEIGHT: 1_080,
             EXACT_MATROSKA_H264_MAX_PIXELS: 1_920 * 1_080,
@@ -182,6 +184,19 @@ test('normal exact-size preflight freezes a reachable gateway-inband multi graph
     assert.equal(session.hlsTargetSeconds, 2);
     assert.equal(session.minHlsStartupBufferSeconds, 20);
     assert.match(session.videoPlaylistPath, /video\.m3u8$/);
+
+    const resumed = exactMkvSession(session.codecProfile.audioTracks, {
+        seekOffset: 87,
+        outputDir: session.outputDir,
+        playlistPath: session.playlistPath,
+        startupTimings: {},
+        hlsTargetSeconds: 4,
+        minHlsStartupBufferSeconds: 10,
+        minHlsStartupSegments: 3,
+    });
+    h.freezeMultiAudioHlsTopology(resumed);
+    assert.equal(resumed.minHlsStartupBufferSeconds, 4);
+    assert.equal(resumed.minHlsStartupSegments, 2);
 
     const route = sourceBetween("app.post('/sessions'", "\n// Cross-device kill-switch");
     const boundedPumpIndex = route.indexOf('await ensureBoundedMkvInputPump(');
@@ -578,7 +593,15 @@ test('serialization, health and cleanup retain the bounded single-provider contr
     );
     assert.match(
         gatewaySource,
-        /session\.minHlsStartupBufferSeconds\s*=\s*MULTI_AUDIO_HLS_STARTUP_PROOF_SECONDS/,
+        /session\.minHlsStartupBufferSeconds\s*=\s*resumed[\s\S]*?MULTI_AUDIO_HLS_RESUME_STARTUP_PROOF_SECONDS[\s\S]*?: MULTI_AUDIO_HLS_STARTUP_PROOF_SECONDS/,
+    );
+    assert.match(
+        gatewaySource,
+        /MULTI_AUDIO_HLS_RESUME_STARTUP_PROOF_SECONDS\s*=\s*clampInt\([\s\S]*?4,\s*2,\s*60/,
+    );
+    assert.match(
+        gatewaySource,
+        /session\.minHlsStartupSegments\s*=\s*MULTI_AUDIO_HLS_RESUME_STARTUP_SEGMENTS/,
     );
     assert.match(gatewaySource, /multiAudioHls:\s*\{\s*protocol:\s*MULTI_AUDIO_HLS_PROTOCOL[\s\S]*maxAudioRenditions:\s*MAX_MULTI_AUDIO_RENDITIONS/);
     assert.ok((gatewaySource.match(/audioRenditions:\s*audioRenditionsForSession\(session\)/g) || []).length >= 3);

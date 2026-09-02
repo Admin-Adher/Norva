@@ -1725,14 +1725,28 @@ const MIN_HLS_STARTUP_SEGMENTS = clampInt(process.env.MIN_HLS_STARTUP_SEGMENTS, 
 // every prepared audio rendition. Readiness already validates finalized,
 // non-empty segments in the video playlist and in every audio child playlist.
 // Keeping a fixed 20-second proof on top of that made a slow indexed resume wait
-// for ten segments even after the first playable graph was complete. Three
-// aligned two-second segments retain a useful reserve while allowing Hetzner to
-// advertise the graph as soon as it is genuinely playable.
+// for ten segments even after the first playable graph was complete. Cold starts
+// retain three aligned two-second segments. Indexed resumes can safely expose the
+// already-validated graph after two aligned segments: every video/audio playlist
+// and finalized file is still checked below, while the player grows its reserve
+// behind the first rendered frame.
 const MULTI_AUDIO_HLS_STARTUP_PROOF_SECONDS = clampInt(
     process.env.MULTI_AUDIO_HLS_STARTUP_PROOF_SECONDS,
     6,
     4,
     60,
+);
+const MULTI_AUDIO_HLS_RESUME_STARTUP_PROOF_SECONDS = clampInt(
+    process.env.MULTI_AUDIO_HLS_RESUME_STARTUP_PROOF_SECONDS,
+    4,
+    2,
+    60,
+);
+const MULTI_AUDIO_HLS_RESUME_STARTUP_SEGMENTS = clampInt(
+    process.env.MULTI_AUDIO_HLS_RESUME_STARTUP_SEGMENTS,
+    2,
+    1,
+    10,
 );
 const MAX_SUBTITLE_TRACKS = clampInt(process.env.MAX_SUBTITLE_TRACKS, 32, 1, 64);
 const MAX_ACTIVE_VIEWER_SUBTITLE_OPERATIONS = clampInt(process.env.MAX_ACTIVE_VIEWER_SUBTITLE_OPERATIONS, 1, 1, 4);
@@ -16696,7 +16710,13 @@ function freezeMultiAudioHlsTopology(session) {
     session.forceAlignedMultiAudioVideoEncode = plan.enabled === true;
     if (plan.enabled) {
         session.hlsTargetSeconds = EXACT_MATROSKA_H264_HLS_TARGET_SECONDS;
-        session.minHlsStartupBufferSeconds = MULTI_AUDIO_HLS_STARTUP_PROOF_SECONDS;
+        const resumed = Number(session?.seekOffset || 0) > 0;
+        session.minHlsStartupBufferSeconds = resumed
+            ? MULTI_AUDIO_HLS_RESUME_STARTUP_PROOF_SECONDS
+            : MULTI_AUDIO_HLS_STARTUP_PROOF_SECONDS;
+        if (resumed) {
+            session.minHlsStartupSegments = MULTI_AUDIO_HLS_RESUME_STARTUP_SEGMENTS;
+        }
     }
     session.startupTimings = asRecord(session.startupTimings);
     session.startupTimings.multiAudioHls = multiAudioHlsDiagnosticsForSession(session);
