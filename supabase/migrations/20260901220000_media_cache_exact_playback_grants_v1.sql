@@ -54,7 +54,7 @@ update public.media_cache_bindings binding
    set variant_id = candidate.variant_id
   from (
     select variant.user_id, variant.source_id, variant.media_item_id,
-           min(variant.id) as variant_id
+           min(variant.id::text)::uuid as variant_id
       from public.cloud_title_variants variant
      group by variant.user_id, variant.source_id, variant.media_item_id
     having count(*) = 1

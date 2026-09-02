@@ -65,6 +65,11 @@ async function requestBody(body) {
 class FakeR2Bucket {
   constructor() {
     this.objects = new Map();
+    this.failReads = false;
+  }
+
+  assertReadable() {
+    if (this.failReads) throw new Error('simulated R2 outage');
   }
 
   record(key, stored, range = null) {
@@ -116,11 +121,13 @@ class FakeR2Bucket {
   }
 
   async get(key, options = {}) {
+    this.assertReadable();
     const stored = this.objects.get(key);
     return stored ? this.record(key, stored, options.range || null) : null;
   }
 
   async head(key) {
+    this.assertReadable();
     const stored = this.objects.get(key);
     if (!stored) return null;
     const record = this.record(key, stored);
@@ -130,6 +137,7 @@ class FakeR2Bucket {
   }
 
   async list(options = {}) {
+    this.assertReadable();
     const prefix = String(options.prefix || '');
     const limit = Math.max(1, Math.min(1000, Number(options.limit) || 1000));
     const keys = [...this.objects.keys()].filter((key) => key.startsWith(prefix)).sort();
@@ -160,21 +168,27 @@ class FakeEdgeCache {
     this.matches = 0;
     this.puts = 0;
     this.deletes = 0;
+    this.failMatch = false;
+    this.failPut = false;
+    this.failDelete = false;
   }
 
   async match(request) {
     this.matches += 1;
+    if (this.failMatch) throw new Error('simulated CDN lookup outage');
     const response = this.responses.get(request.url);
     return response ? response.clone() : undefined;
   }
 
   async put(request, response) {
     this.puts += 1;
+    if (this.failPut) throw new Error('simulated CDN write outage');
     this.responses.set(request.url, response.clone());
   }
 
   async delete(request) {
     this.deletes += 1;
+    if (this.failDelete) throw new Error('simulated CDN purge outage');
     return this.responses.delete(request.url);
   }
 }
@@ -482,6 +496,61 @@ test('authorization precedes one canonical shared edge-cache lookup and exposes 
   assert.ok(payload.layers.r2.hits >= 1);
   assert.equal(JSON.stringify(payload).includes(SERVICE_TOKEN), false);
   assert.equal(JSON.stringify(payload).includes(ticket), false);
+});
+
+test('CDN read and write outages fail open to verified R2 bytes and remain observable', async (t) => {
+  const bucket = new FakeR2Bucket();
+  const cache = new FakeEdgeCache();
+  cache.failMatch = true;
+  cache.failPut = true;
+  const env = { ...environment(bucket), MEDIA_CACHE_EDGE_CACHE: cache };
+  const { publication, ticket } = await publishedFixture(t, env, { contentSha256: 'c4'.repeat(32) });
+  const assetUrl = `https://cache.test/v1/hls/${publication.objectKey}/segment-000.ts`;
+
+  const response = await worker.fetch(new Request(assetUrl, {
+    headers: { authorization: `Bearer ${ticket}` },
+  }), env);
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('x-norva-cache-layer'), 'r2');
+  assert.deepEqual(Buffer.from(await response.arrayBuffer()), Buffer.from('video-segment'));
+
+  const metrics = await worker.fetch(new Request('https://cache.test/internal/v1/metrics', {
+    headers: { authorization: `Bearer ${SERVICE_TOKEN}` },
+  }), env);
+  const payload = await metrics.json();
+  assert.ok(payload.layers.cdn.failures >= 2);
+  assert.equal(JSON.stringify(payload).includes(SERVICE_TOKEN), false);
+  assert.equal(JSON.stringify(payload).includes(ticket), false);
+});
+
+test('an R2 outage after the playlist returns an explicit retryable status without quarantining good media', async (t) => {
+  const bucket = new FakeR2Bucket();
+  const env = environment(bucket);
+  const { publication, ticket } = await publishedFixture(t, env, { contentSha256: 'c5'.repeat(32) });
+  const authorization = { authorization: `Bearer ${ticket}` };
+  const playlist = await worker.fetch(new Request(
+    `https://cache.test/v1/hls/${publication.objectKey}/index.m3u8`,
+    { headers: authorization },
+  ), env);
+  assert.equal(playlist.status, 200);
+  assert.match(await playlist.text(), /segment-000\.ts/);
+
+  bucket.failReads = true;
+  const segment = await worker.fetch(new Request(
+    `https://cache.test/v1/hls/${publication.objectKey}/segment-000.ts`,
+    { headers: authorization },
+  ), env);
+  assert.equal(segment.status, 503);
+  assert.equal((await segment.json()).code, 'R2_UNAVAILABLE');
+  bucket.failReads = false;
+  assert.equal(bucket.objects.has(`media-cache-quarantine/v1/${publication.objectKey}`), false);
+
+  const recovered = await worker.fetch(new Request(
+    `https://cache.test/v1/hls/${publication.objectKey}/segment-000.ts`,
+    { headers: authorization },
+  ), env);
+  assert.equal(recovered.status, 200);
+  assert.deepEqual(Buffer.from(await recovered.arrayBuffer()), Buffer.from('video-segment'));
 });
 
 test('corruption is quarantined, purge clears R2 and CDN, and only verified regeneration recovers service', async (t) => {

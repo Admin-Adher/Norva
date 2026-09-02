@@ -85,3 +85,23 @@ test('shared completion after viewer exit is dark, demand-driven and immediately
   assert.doesNotMatch(controlSetup, /onPreempt: async/);
   assert.match(controlSetup, /stopSession\(session, \{ reason: 'viewer-preempted' \}\)\.catch/);
 });
+
+test('session cleanup returns the cache locator only after any eligible local promotion settles', () => {
+  const helper = gateway.slice(
+    gateway.indexOf('async function privateFinalCodecProfileAfterPendingCacheWork('),
+    gateway.indexOf('function mediaCacheLiveViewerCount('),
+  );
+  assert.match(helper, /scheduleMkvCompleteHlsCachePromotion\(session\)/);
+  assert.match(helper, /await promotion\?\.catch/);
+  assert.match(helper, /return privateFinalCodecProfileForSession\(session\)/);
+
+  const deleteRoute = gateway.slice(
+    gateway.indexOf("app.delete('/sessions/:id',"),
+    gateway.indexOf("app.get('/sessions/:id/playlist.m3u8'"),
+  );
+  const finalProfile = deleteRoute.lastIndexOf(
+    'await privateFinalCodecProfileAfterPendingCacheWork(session)',
+  );
+  const stop = deleteRoute.lastIndexOf('await stopSession(session)');
+  assert.ok(finalProfile >= 0 && stop > finalProfile);
+});

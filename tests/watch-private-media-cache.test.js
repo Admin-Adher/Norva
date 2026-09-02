@@ -10,6 +10,35 @@ const watch = fs.readFileSync(path.join(__dirname, '../public/js/pages/WatchPage
 const cloudApi = fs.readFileSync(path.join(__dirname, '../public/js/cloudApi.js'), 'utf8');
 const api = fs.readFileSync(path.join(__dirname, '../public/js/api.js'), 'utf8');
 
+class FakeHls {
+  static Events = {
+    MEDIA_ATTACHED: 'media-attached',
+    AUDIO_TRACKS_UPDATED: 'audio-tracks-updated',
+    AUDIO_TRACK_SWITCHED: 'audio-track-switched',
+    SUBTITLE_TRACKS_UPDATED: 'subtitle-tracks-updated',
+    SUBTITLE_TRACK_SWITCH: 'subtitle-track-switch',
+    MANIFEST_PARSED: 'manifest-parsed',
+    ERROR: 'error',
+  };
+
+  static ErrorTypes = { MEDIA_ERROR: 'media-error', NETWORK_ERROR: 'network-error' };
+
+  constructor(config) {
+    this.config = config;
+    this.handlers = new Map();
+    this.audioTracks = [];
+  }
+
+  on(event, handler) { this.handlers.set(event, handler); }
+  emit(event, data) { return this.handlers.get(event)?.(event, data); }
+  loadSource(url) { this.url = url; }
+  attachMedia(media) { this.media = media; }
+  destroy() {}
+  startLoad() {}
+  recoverMediaError() {}
+  swapAudioCodec() {}
+}
+
 function loadWatchPage(cloud = {}) {
   const context = {
     window: {
@@ -24,6 +53,7 @@ function loadWatchPage(cloud = {}) {
     clearTimeout,
     Date,
     Promise,
+    Hls: FakeHls,
   };
   vm.runInNewContext(watch, context, { filename: 'WatchPage.js' });
   return context.window.WatchPage;
@@ -165,6 +195,73 @@ test('private cache delivery failure bypasses exactly once per authorized cache 
   page._privateMediaCacheAccess = page.normalizePrivateMediaCacheAccess(cacheContract(), nextSessionId);
   assert.equal(await page.fallbackPrivateMediaCacheToProvider(7, 'delivery-503'), true);
   assert.equal(restarts.length, 2);
+});
+
+test('cache-to-provider range retry preserves the one-shot cache bypass', () => {
+  const restartStart = watch.indexOf('async restartCloudGatewayStreamAt');
+  const restart = watch.slice(
+    restartStart,
+    watch.indexOf('\n    async ', restartStart + 1),
+  );
+  assert.match(restart, /isRangeSeekFailure[\s\S]*restartCloudGatewayStreamAt\(target,[\s\S]*mediaCacheReadPolicy === 'bypass-once'[\s\S]*mediaCacheReadPolicy: 'bypass-once'/);
+});
+
+test('fatal private-cache HTTP and transport outages enter the provider fallback path', async () => {
+  const WatchPage = loadWatchPage();
+  const page = Object.create(WatchPage.prototype);
+  const sessionId = '33333333-3333-4333-8333-333333333333';
+  Object.assign(page, {
+    _playbackAttemptId: 21,
+    _gatewayAudioRenditionRequired: false,
+    _gatewayAudioRenditionStatus: 'absent',
+    currentPlaybackMode: 'direct-hls',
+    hls: null,
+    video: { currentTime: 73.4, canPlayType: () => '', play: async () => {} },
+    isGatewayPlaybackUrl: () => false,
+    isStalePlaybackAttempt: () => false,
+    cancelPendingHlsAudioSwitch() {},
+    updateAudioTracks() {},
+    updateCaptionsTracks() {},
+    restorePendingAudioPreference() {},
+    restorePendingSubtitlePreference() {},
+    retryGatewaySeekAfterFatalPlayback: () => false,
+    canUseLocalProxy: () => false,
+    sendPlaybackEvent() {},
+    handlePlaybackFailure: async () => {},
+    showLoading() {},
+    _reattachAiTrackIfActive() {},
+  });
+  page._privateMediaCacheAccess = page.normalizePrivateMediaCacheAccess(cacheContract(), sessionId);
+  const fallbacks = [];
+  page.fallbackPrivateMediaCacheToProvider = async (...args) => {
+    fallbacks.push(args);
+    return true;
+  };
+  page.playHls(page._privateMediaCacheAccess.playlistUrl, {
+    playbackAttemptId: 21,
+    privateMediaCache: true,
+    autoplay: false,
+  });
+
+  page.hls.emit(FakeHls.Events.ERROR, {
+    fatal: true,
+    type: FakeHls.ErrorTypes.NETWORK_ERROR,
+    response: { status: 503 },
+    details: 'fragLoadError',
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(fallbacks, [[21, 'delivery-503']]);
+
+  fallbacks.length = 0;
+  page._networkRecoveries = 1;
+  page.hls.emit(FakeHls.Events.ERROR, {
+    fatal: true,
+    type: FakeHls.ErrorTypes.NETWORK_ERROR,
+    response: { status: 0 },
+    details: 'fragLoadError',
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(fallbacks, [[21, 'delivery-network']]);
 });
 
 test('private cache skips provider probing and is cleared on teardown', () => {

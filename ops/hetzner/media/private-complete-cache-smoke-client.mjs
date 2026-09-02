@@ -202,7 +202,15 @@ async function waitForDrain() {
         const state = await health();
         if (state.activeSessions === 0 && state.totalSessions === 0 &&
             state.videoEncoderCapacity?.active === 0 && state.vodInputPump?.active === 0 &&
-            state.rawPumpCount === 0 && state.mkvCompleteHlsCache?.stats?.activeLeases === 0) return state;
+            state.rawPumpCount === 0 && state.finiteMkvSeekBroker?.active === 0 &&
+            state.finiteMkvLinearSeekBridge?.active === 0 && state.activeStrictLidBrokers === 0 &&
+            state.viewerStartupReservations === 0 && state.viewerSessionStartupAdmissions === 0 &&
+            state.viewerSessionStartupLockCount === 0 && state.viewerSessionStartupWaiters === 0 &&
+            state.activeViewerSubtitleOperations === 0 && state.pendingViewerSubtitleOperations === 0 &&
+            state.backgroundCpuProcessCount === 0 && state.mkvH264FastStart?.activeAnalyzers === 0 &&
+            state.sharedMediaCache?.liveJoin?.activeViewers === 0 &&
+            state.sharedMediaCache?.backgroundContinuation?.active === 0 &&
+            state.mkvCompleteHlsCache?.stats?.activeLeases === 0) return state;
         await new Promise((resolve) => setTimeout(resolve, 100));
     }
     throw new Error('GATEWAY_DRAIN_TIMEOUT');
@@ -390,6 +398,10 @@ try {
         cacheHits: Number(cacheStats.hits),
         activeLeasesAfterCleanup: Number(cacheStats.activeLeases),
         activeSessionsAfterCleanup: drained.activeSessions,
+        encodersAfterCleanup: Number(drained.videoEncoderCapacity?.active),
+        pumpsAfterCleanup: Number(drained.vodInputPump?.active),
+        brokersAfterCleanup: Number(drained.finiteMkvSeekBroker?.active),
+        startupPermitsAfterCleanup: Number(drained.viewerSessionStartupAdmissions),
     };
 } finally {
     if (activeSessionId) {

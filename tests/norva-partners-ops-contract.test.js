@@ -1310,7 +1310,7 @@ test('Partners callback changes trigger CI and every norva-web deploy is pinned'
   ]
     .map((match) => match[1]);
   assert.ok(
-    relayActionRefs.length === 3
+    relayActionRefs.length >= 3
       && relayActionRefs.every((reference) => /@[a-f0-9]{40}$/.test(reference)),
     'deploy-relay actions must be pinned to immutable commit SHAs',
   );

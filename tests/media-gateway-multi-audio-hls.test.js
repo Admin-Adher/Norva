@@ -308,7 +308,7 @@ function masterPlaylist(plan) {
     const media = plan.audioRenditions.map((rendition) => [
         '#EXT-X-MEDIA:TYPE=AUDIO',
         'GROUP-ID="group_audio"',
-        `NAME="audio_${rendition.hlsIndex}"`,
+        `NAME="FFmpeg Audio ${rendition.hlsIndex + 1}"`,
         `DEFAULT=${rendition.hlsIndex === plan.defaultHlsIndex ? 'YES' : 'NO'}`,
         'AUTOSELECT=YES',
         `LANGUAGE="${rendition.language}"`,

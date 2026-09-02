@@ -96,8 +96,10 @@ const workerMetrics = {
   failures: 0,
   cdnHits: 0,
   cdnMisses: 0,
+  cdnFailures: 0,
   l2Hits: 0,
   l2Misses: 0,
+  l2Failures: 0,
   bytesFromCdn: 0,
   bytesFromR2: 0,
   manifestsLoaded: 0,
@@ -170,8 +172,18 @@ function publicWorkerMetrics(env: MediaCacheWorkerEnv): Record<string, unknown> 
     requests: workerMetrics.requests,
     failures: workerMetrics.failures,
     layers: {
-      cdn: { hits: workerMetrics.cdnHits, misses: workerMetrics.cdnMisses, bytes: workerMetrics.bytesFromCdn },
-      r2: { hits: workerMetrics.l2Hits, misses: workerMetrics.l2Misses, bytes: workerMetrics.bytesFromR2 },
+      cdn: {
+        hits: workerMetrics.cdnHits,
+        misses: workerMetrics.cdnMisses,
+        failures: workerMetrics.cdnFailures,
+        bytes: workerMetrics.bytesFromCdn,
+      },
+      r2: {
+        hits: workerMetrics.l2Hits,
+        misses: workerMetrics.l2Misses,
+        failures: workerMetrics.l2Failures,
+        bytes: workerMetrics.bytesFromR2,
+      },
     },
     manifests: {
       loaded: workerMetrics.manifestsLoaded,
@@ -213,6 +225,15 @@ function edgeCache(env: MediaCacheWorkerEnv): EdgeCacheLike | null {
   if (env.MEDIA_CACHE_EDGE_CACHE) return env.MEDIA_CACHE_EDGE_CACHE;
   const storage = (globalThis as unknown as { caches?: { default?: EdgeCacheLike } }).caches;
   return storage?.default ?? null;
+}
+
+async function publicR2Read<T>(operation: () => Promise<T>): Promise<T> {
+  try {
+    return await operation();
+  } catch (_) {
+    workerMetrics.l2Failures += 1;
+    throw new WorkerHttpError(503, "R2_UNAVAILABLE", "Media cache object storage is temporarily unavailable");
+  }
 }
 
 function canonicalEdgeCacheRequest(request: Request, objectKey: string, assetSha256: string): Request {
@@ -694,7 +715,7 @@ async function loadManifest(
   nowMs: number,
   allowQuarantined = false,
 ): Promise<SharedManifest> {
-  if (!allowQuarantined && await isObjectQuarantined(env, objectKey)) {
+  if (!allowQuarantined && await publicR2Read(() => isObjectQuarantined(env, objectKey))) {
     throw new WorkerHttpError(503, "OBJECT_QUARANTINED", "Media cache object is quarantined");
   }
   const cached = manifestCache.get(objectKey);
@@ -703,7 +724,7 @@ async function loadManifest(
     return cached.manifest;
   }
   const key = `media-cache/v1/${objectKey.slice(0, 2)}/${objectKey}/manifest.auth.json`;
-  const object = await env.MEDIA_CACHE_BUCKET.get(key);
+  const object = await publicR2Read(() => env.MEDIA_CACHE_BUCKET.get(key));
   if (!object) {
     workerMetrics.l2Misses += 1;
     throw new WorkerHttpError(404, "OBJECT_NOT_READY", "Media cache object is not ready");
@@ -712,7 +733,7 @@ async function loadManifest(
   if (object.size <= 0 || object.size > MAX_MANIFEST_BYTES) {
     throw new WorkerHttpError(502, "MANIFEST_INVALID", "Media cache manifest is invalid");
   }
-  const body = new Uint8Array(await object.arrayBuffer());
+  const body = new Uint8Array(await publicR2Read(() => object.arrayBuffer()));
   const bodySha256 = await sha256Hex(body);
   if (body.length !== object.size
     || object.customMetadata?.["norva-sha256"] !== bodySha256
@@ -783,7 +804,8 @@ async function publicHlsAsset(
     if (error instanceof MediaCacheTicketError) throw new WorkerHttpError(401, error.code, "Media cache ticket is invalid");
     throw error;
   }
-  if (ticket.objectKey !== objectKey || await playbackRevoked(env, ticket, nowMs)) {
+  if (ticket.objectKey !== objectKey
+    || await publicR2Read(() => playbackRevoked(env, ticket, nowMs))) {
     throw new WorkerHttpError(403, "ACCESS_REVOKED", "Media cache access is revoked");
   }
   const assetPath = safeAssetPath(logicalPath);
@@ -803,7 +825,14 @@ async function publicHlsAsset(
   const cache = edgeCache(env);
   const canonicalRequest = canonicalEdgeCacheRequest(request, objectKey, record.sha256);
   if (!range && request.method === "GET" && cache) {
-    const cached = await cache.match(canonicalRequest);
+    let cached: Response | undefined;
+    let cacheLookupFailed = false;
+    try {
+      cached = await cache.match(canonicalRequest);
+    } catch (_) {
+      cacheLookupFailed = true;
+      workerMetrics.cdnFailures += 1;
+    }
     if (cached) {
       const cachedSize = Number(cached.headers.get("content-length"));
       const cachedDigest = cached.headers.get("x-norva-content-sha256");
@@ -826,14 +855,20 @@ async function publicHlsAsset(
         }
         return new Response(cached.body, { status: 200, headers });
       }
-      await cache.delete(canonicalRequest).catch(() => false);
+      await cache.delete(canonicalRequest).catch(() => {
+        workerMetrics.cdnFailures += 1;
+        return false;
+      });
     }
-    workerMetrics.cdnMisses += 1;
+    if (!cacheLookupFailed) workerMetrics.cdnMisses += 1;
   }
   const objectStorageKey = `media-cache/v1/${objectKey.slice(0, 2)}/${objectKey}/${record.objectName}`;
   const object = request.method === "HEAD" && !range
-    ? await env.MEDIA_CACHE_BUCKET.head(objectStorageKey)
-    : await env.MEDIA_CACHE_BUCKET.get(objectStorageKey, range ? { range: request.headers } : undefined);
+    ? await publicR2Read(() => env.MEDIA_CACHE_BUCKET.head(objectStorageKey))
+    : await publicR2Read(() => env.MEDIA_CACHE_BUCKET.get(
+      objectStorageKey,
+      range ? { range: request.headers } : undefined,
+    ));
   if (!object || object.size !== record.size
     || object.customMetadata?.["norva-sha256"] !== record.sha256
     || !object.checksums?.sha256
@@ -880,7 +915,9 @@ async function publicHlsAsset(
       "cache-tag": objectCacheTag(objectKey),
     });
     const cachedResponse = new Response(objectBody, { status: 200, headers: cacheHeaders });
-    const write = cache.put(canonicalRequest, cachedResponse.clone()).catch(() => {});
+    const write = cache.put(canonicalRequest, cachedResponse.clone()).catch(() => {
+      workerMetrics.cdnFailures += 1;
+    });
     if (executionContext) executionContext.waitUntil(write);
     else await write;
     return new Response(cachedResponse.body, { status, headers });

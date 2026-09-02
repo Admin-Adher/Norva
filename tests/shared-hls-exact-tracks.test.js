@@ -8,12 +8,29 @@ const path = require('node:path');
 
 const {
   buildExactSubtitleHlsPlan,
+  exactAudioName,
   exactSubtitleOutputArgs,
   finalizeExactHlsTrackGraph,
   rewriteExactHlsMaster,
 } = require('../services/media-gateway/src/sharedHlsTracks');
 
 const plain = (value) => JSON.parse(JSON.stringify(value));
+
+test('unknown audio renditions receive stable non-duplicated labels', () => {
+  const plan = {
+    enabled: true,
+    audioRenditions: [
+      { hlsIndex: 0, language: 'und' },
+      { hlsIndex: 1, language: 'und' },
+      { hlsIndex: 2, language: 'eng' },
+    ],
+  };
+  assert.deepEqual(plan.audioRenditions.map((rendition) => exactAudioName(plan, rendition)), [
+    'Audio 1',
+    'Audio 2',
+    'ENG',
+  ]);
+});
 
 function profile(subtitles) {
   return { metadataComplete: true, subtitles };

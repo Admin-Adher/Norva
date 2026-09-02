@@ -28,6 +28,8 @@ test('ready global objects publish one exact safe root playlist without tenant c
 test('cache bindings authorize exact active movies and exact generation-aware episodes', () => {
   assert.match(migration, /alter column media_item_id drop not null/);
   assert.match(migration, /alter column variant_id set not null/);
+  assert.match(migration, /min\(variant\.id::text\)::uuid as variant_id/);
+  assert.doesNotMatch(migration, /min\(variant\.id\)/);
   assert.match(migration, /having count\(\*\) = 1[\s\S]*media cache binding backfill is incomplete/);
   assert.match(migration, /\(item_type = 'movie' and media_item_id is not null\)[\s\S]*\(item_type = 'episode' and media_item_id is null\)/);
   assert.match(migration, /media_cache_bindings_authority_unique unique \([\s\S]*external_id,[\s\S]*variant_id,[\s\S]*target_url_sha256/);

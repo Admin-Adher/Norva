@@ -8,6 +8,15 @@ name: Deploy Norva Relay Worker
 
 on:
   workflow_dispatch:
+    inputs:
+      target:
+        description: Deployment target
+        required: true
+        default: relay
+        type: choice
+        options:
+          - relay
+          - media-cache-canary
   push:
     branches: [main]
 
@@ -16,6 +25,7 @@ permissions:
 
 jobs:
   deploy:
+    if: github.event_name == 'push' || inputs.target == 'relay'
     name: Deploy norva-relay to Cloudflare Workers
     runs-on: ubuntu-latest
     environment: Cloudflare
@@ -36,3 +46,132 @@ jobs:
           wranglerVersion: '4.102.0'
           workingDirectory: services/norva-relay
           command: deploy
+
+  media-cache-canary:
+    if: github.event_name == 'workflow_dispatch' && inputs.target == 'media-cache-canary'
+    name: Isolated private media-cache canary
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    concurrency:
+      group: norva-media-cache-canary
+      cancel-in-progress: false
+    environment: Cloudflare
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      MEDIA_CACHE_CANARY_BASE_URL: https://media-cache-canary.norva.tv
+      MEDIA_CACHE_CANARY_EXPECT_HOST: media-cache-canary.norva.tv
+      MEDIA_CACHE_CANARY_REQUIRE_GLOBAL_PURGE: 'true'
+      MEDIA_CACHE_CANARY_RUN_ID: gha-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: '22.22.3'
+
+      - name: Install pinned dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Verify canary contracts before provisioning
+        run: |
+          set -euo pipefail
+          test "$(npx --no-install wrangler --version)" = "4.102.0"
+          node --check ops/cloudflare/media-cache-canary-client.mjs
+          node --test tests/media-cache-worker-e2e.test.js tests/watch-private-media-cache.test.js tests/media-cache-cloudflare-canary-contract.test.js
+          npx --no-install wrangler deploy --config workers/media-cache/wrangler.canary.toml --dry-run
+
+      - name: Create ephemeral canary credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          service_token="$(openssl rand -hex 32)"
+          manifest_key="$(openssl rand -hex 32)"
+          ticket_key="$(openssl rand -hex 32)"
+          printf '::add-mask::%s\n' "$service_token" "$manifest_key" "$ticket_key"
+          {
+            printf 'MEDIA_CACHE_CANARY_SERVICE_TOKEN=%s\n' "$service_token"
+            printf 'MEDIA_CACHE_CANARY_MANIFEST_HMAC_KEY=%s\n' "$manifest_key"
+            printf 'MEDIA_CACHE_CANARY_TICKET_HMAC_KEY=%s\n' "$ticket_key"
+          } >> "$GITHUB_ENV"
+
+      - name: Resolve the exact Norva zone
+        shell: bash
+        run: |
+          set -euo pipefail
+          zone_response="$(curl --fail --silent --show-error \
+            --header "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            --header 'Content-Type: application/json' \
+            "https://api.cloudflare.com/client/v4/zones?name=norva.tv&status=active&account.id=$CLOUDFLARE_ACCOUNT_ID")"
+          zone_id="$(printf '%s' "$zone_response" | node -e '
+            let raw = "";
+            process.stdin.on("data", (chunk) => { raw += chunk; });
+            process.stdin.on("end", () => {
+              const payload = JSON.parse(raw);
+              if (payload.success !== true || !Array.isArray(payload.result) || payload.result.length !== 1) process.exit(2);
+              const zone = payload.result[0];
+              if (zone.name !== "norva.tv" || zone.account?.id !== process.env.CLOUDFLARE_ACCOUNT_ID || !/^[0-9a-f]{32}$/.test(zone.id)) process.exit(3);
+              process.stdout.write(zone.id);
+            });
+          ')"
+          printf '::add-mask::%s\n' "$zone_id"
+          printf 'MEDIA_CACHE_CANARY_ZONE_ID=%s\n' "$zone_id" >> "$GITHUB_ENV"
+
+      - name: Provision isolated Worker and R2 bucket
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! npx --no-install wrangler r2 bucket info norva-media-cache-canary --json >/dev/null 2>&1; then
+            npx --no-install wrangler r2 bucket create norva-media-cache-canary
+          fi
+          npx --no-install wrangler deploy --config workers/media-cache/wrangler.canary.toml
+          node -e '
+            process.stdout.write(JSON.stringify({
+              MEDIA_CACHE_GATEWAY_TOKEN: process.env.MEDIA_CACHE_CANARY_SERVICE_TOKEN,
+              MEDIA_CACHE_MANIFEST_HMAC_KEY: process.env.MEDIA_CACHE_CANARY_MANIFEST_HMAC_KEY,
+              MEDIA_CACHE_TICKET_HMAC_KEY: process.env.MEDIA_CACHE_CANARY_TICKET_HMAC_KEY,
+              MEDIA_CACHE_CLOUDFLARE_ZONE_ID: process.env.MEDIA_CACHE_CANARY_ZONE_ID,
+              MEDIA_CACHE_CLOUDFLARE_PURGE_TOKEN: process.env.CLOUDFLARE_API_TOKEN,
+            }));
+          ' | npx --no-install wrangler secret bulk --config workers/media-cache/wrangler.canary.toml
+          npx --no-install wrangler deploy --config workers/media-cache/wrangler.canary.toml
+
+      - name: Prove private R2, CDN hit, global purge and recovery
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          node ops/cloudflare/media-cache-canary-client.mjs | tee artifacts/media-cache-canary-receipt.json
+
+      - name: Remove all canary data and Cloudflare resources
+        if: always()
+        shell: bash
+        env:
+          MEDIA_CACHE_CANARY_CLEANUP_ONLY: 'true'
+        run: |
+          set -uo pipefail
+          cleanup_status=0
+          node ops/cloudflare/media-cache-canary-client.mjs || cleanup_status=$?
+          delete_worker_status=0
+          npx --no-install wrangler delete norva-media-cache-canary --force || delete_worker_status=$?
+          delete_bucket_status=0
+          npx --no-install wrangler r2 bucket delete norva-media-cache-canary || delete_bucket_status=$?
+          if npx --no-install wrangler r2 bucket info norva-media-cache-canary --json >/dev/null 2>&1; then
+            echo 'Canary R2 bucket still exists after cleanup.' >&2
+            delete_bucket_status=1
+          fi
+          if [ "$cleanup_status" -ne 0 ] || [ "$delete_worker_status" -ne 0 ] || [ "$delete_bucket_status" -ne 0 ]; then
+            echo "Canary cleanup failed: object=$cleanup_status worker=$delete_worker_status bucket=$delete_bucket_status" >&2
+            exit 1
+          fi
+
+      - name: Upload secret-free canary receipt
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: media-cache-canary-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/media-cache-canary-receipt.json
+          if-no-files-found: ignore
+          retention-days: 14

@@ -10254,6 +10254,19 @@ function privateFinalCodecProfileForSession(session) {
         : publicMkvCodecProfile(session.codecProfile);
 }
 
+async function privateFinalCodecProfileAfterPendingCacheWork(session) {
+    // A completed HLS playlist can become visible a few milliseconds before
+    // the manifest-last local promotion has authenticated its locator. Waiting
+    // for only that already-eligible promotion keeps an ordinary early exit
+    // immediate while ensuring DELETE returns the private cache proof after
+    // EOF. Without this barrier, the next request opens the provider again even
+    // though the complete cache object was promoted during stopSession().
+    const promotion = scheduleMkvCompleteHlsCachePromotion(session)
+        || session?.completeHlsCachePromotionPromise;
+    await promotion?.catch(() => null);
+    return privateFinalCodecProfileForSession(session);
+}
+
 function mediaCacheLiveViewerCount(session) {
     return Number(session?.viewerAttachments?.snapshot?.().count || 0);
 }
@@ -10405,7 +10418,7 @@ app.delete('/sessions/:id/viewers/:attachmentId', requireGatewayAuth, async (req
             });
         }
     }
-    const finalCodecProfile = privateFinalCodecProfileForSession(session);
+    const finalCodecProfile = await privateFinalCodecProfileAfterPendingCacheWork(session);
     await stopSession(session);
     return res.json(compactRecord({
         success: true,
@@ -10422,7 +10435,6 @@ app.delete('/sessions/:id/viewers/:attachmentId', requireGatewayAuth, async (req
 app.delete('/sessions/:id', requireGatewayAuth, async (req, res) => {
     const session = sessions.get(req.params.id);
     if (!session) return res.status(404).json({ error: 'Session not found' });
-    const finalCodecProfile = privateFinalCodecProfileForSession(session);
     const continuationRequested = String(
         req.query?.completeCache ?? req.query?.complete_cache ?? '',
     ).trim().toLowerCase() === 'continue';
@@ -10458,6 +10470,7 @@ app.delete('/sessions/:id', requireGatewayAuth, async (req, res) => {
             });
         }
     }
+    const finalCodecProfile = await privateFinalCodecProfileAfterPendingCacheWork(session);
     await stopSession(session);
     res.json(compactRecord({
         success: true,
@@ -17427,12 +17440,10 @@ function inspectMultiAudioMasterPlaylist(playlist, plan) {
     for (let hlsIndex = 0; hlsIndex < audioMedia.length; hlsIndex += 1) {
         const attributes = audioMedia[hlsIndex];
         const rendition = plan.audioRenditions[hlsIndex];
-        const expectedName = `audio_${hlsIndex}`;
-        const expectedUri = `${expectedName}.m3u8`;
+        const expectedUri = `audio_${hlsIndex}.m3u8`;
         const uri = controlledLocalPlaylistName(attributes.URI);
         const isDefault = String(attributes.DEFAULT || '').toUpperCase() === 'YES';
         if (
-            attributes.NAME !== expectedName ||
             uri !== expectedUri ||
             normalizeHlsAudioLanguage(attributes.LANGUAGE) !== rendition.language ||
             !attributes['GROUP-ID']
@@ -19461,11 +19472,11 @@ function rememberFailure(session, detail) {
 
 function controlledAudioRenditionName(plan, rendition) {
     const language = normalizeHlsAudioLanguage(rendition?.language).toUpperCase();
-    if (language === 'UND') return `Audio ${Number(rendition?.hlsIndex) + 1}`;
     const priorWithLanguage = plan.audioRenditions
         .slice(0, rendition.hlsIndex)
         .filter((candidate) => normalizeHlsAudioLanguage(candidate.language).toUpperCase() === language)
         .length;
+    if (language === 'UND') return `Audio ${priorWithLanguage + 1}`;
     return priorWithLanguage > 0 ? `${language} ${priorWithLanguage + 1}` : language;
 }
 

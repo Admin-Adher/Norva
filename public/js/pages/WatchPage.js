@@ -6985,6 +6985,9 @@ class WatchPage {
                     requestId,
                     subtitleSwitchRequestId,
                     playbackPreferences,
+                    ...(options.mediaCacheReadPolicy === 'bypass-once'
+                        ? { mediaCacheReadPolicy: 'bypass-once' }
+                        : {}),
                     playbackIdentity,
                 });
                 return;

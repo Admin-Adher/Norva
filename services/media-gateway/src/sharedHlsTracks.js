@@ -182,6 +182,7 @@ function exactAudioName(planValue, renditionValue) {
         .slice(0, hlsIndex)
         .filter((candidate) => normalizeLanguage(candidate?.language) === language)
         .length;
+    if (language === 'und') return `Audio ${priorWithLanguage + 1}`;
     return priorWithLanguage > 0 ? `${base} ${priorWithLanguage + 1}` : base;
 }
 

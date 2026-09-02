@@ -1,0 +1,17 @@
+name = "norva-media-cache-canary"
+main = "src/index.ts"
+compatibility_date = "2026-09-01"
+workers_dev = true
+routes = [
+  { pattern = "media-cache-canary.norva.tv", custom_domain = true }
+]
+
+[[r2_buckets]]
+binding = "MEDIA_CACHE_BUCKET"
+bucket_name = "norva-media-cache-canary"
+
+[vars]
+MEDIA_CACHE_ALLOWED_ORIGINS = "https://norva.tv"
+MEDIA_CACHE_R2_MAX_BYTES = "1073741824"
+MEDIA_CACHE_R2_MAX_OBJECTS = "1000"
+MEDIA_CACHE_MAX_FILES_PER_OBJECT = "64"

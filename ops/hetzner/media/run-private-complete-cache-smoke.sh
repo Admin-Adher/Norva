@@ -2,19 +2,28 @@
 set -Eeuo pipefail
 umask 077
 
-readonly DEPLOY_ROOT='/home/adrien/norva-media-deployments/53705bd7e404'
-readonly SCRIPT_DIR="${DEPLOY_ROOT}/ops/hetzner/media"
-readonly ENV_PATH="${SCRIPT_DIR}/.env.media-vaapi"
-readonly IMAGE='norva-media-gateway:vaapi-53705bd7e404'
-readonly IMAGE_BUNDLE_SHA256='53705bd7e404f5a1805c4ff3ab75cd2ef81f3f38ac843d7135c4e2f3856d2c11'
+readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+readonly IMAGE="${1:-${NORVA_COMPLETE_CACHE_CANARY_IMAGE:-}}"
+readonly IMAGE_BUNDLE_SHA256="${2:-${NORVA_COMPLETE_CACHE_CANARY_BUNDLE_SHA256:-}}"
+readonly PRIMARY_CONTAINER="${NORVA_COMPLETE_CACHE_PRIMARY_CONTAINER:-norva-media-gateway}"
 readonly PROVIDER_CONTAINER='norva-media-cache-canary-provider'
 readonly GATEWAY_CONTAINER='norva-media-cache-canary'
 readonly NETWORK='norva_default'
 
-[[ -f "${ENV_PATH}" && "$(stat -c '%a' "${ENV_PATH}")" == '600' ]] || {
-  echo 'COMPLETE_CACHE_CANARY_FAIL env' >&2
+[[ "${IMAGE}" =~ ^norva-media-gateway:vaapi-[a-z0-9][a-z0-9._-]{5,95}$ ]] || {
+  echo 'COMPLETE_CACHE_CANARY_FAIL image' >&2
   exit 1
 }
+[[ "${IMAGE_BUNDLE_SHA256}" =~ ^[0-9a-f]{64}$ ]] || {
+  echo 'COMPLETE_CACHE_CANARY_FAIL bundle' >&2
+  exit 1
+}
+for command_name in docker openssl; do
+  command -v "${command_name}" >/dev/null 2>&1 || {
+    echo "COMPLETE_CACHE_CANARY_FAIL missing-${command_name}" >&2
+    exit 1
+  }
+done
 IMAGE_ID="$(docker image inspect "${IMAGE}" --format '{{.Id}}')"
 readonly IMAGE_ID
 [[ "${IMAGE_ID}" =~ ^sha256:[0-9a-f]{64}$ ]] || {
@@ -25,21 +34,34 @@ readonly IMAGE_ID
   echo 'COMPLETE_CACHE_CANARY_FAIL bundle-drift' >&2
   exit 1
 }
-docker inspect norva-media-gateway --format '{{.State.Health.Status}}' | grep -qx 'healthy'
+[[ "$(docker inspect "${PRIMARY_CONTAINER}" --format '{{.State.Health.Status}}')" == 'healthy' ]]
+PRIMARY_IMAGE="$(docker inspect "${PRIMARY_CONTAINER}" --format '{{.Config.Image}}')"
+PRIMARY_IMAGE_ID="$(docker inspect "${PRIMARY_CONTAINER}" --format '{{.Image}}')"
+PRIMARY_RESTARTS="$(docker inspect "${PRIMARY_CONTAINER}" --format '{{.RestartCount}}')"
+PRIMARY_OOM="$(docker inspect "${PRIMARY_CONTAINER}" --format '{{.State.OOMKilled}}')"
+readonly PRIMARY_IMAGE PRIMARY_IMAGE_ID PRIMARY_RESTARTS PRIMARY_OOM
 
 CANARY_DIR="$(mktemp -d /home/adrien/norva-complete-cache-canary.XXXXXX)"
 install -d -m 0700 "${CANARY_DIR}/fixture" "${CANARY_DIR}/output" "${CANARY_DIR}/cache"
+CANARY_ENV="${CANARY_DIR}/canary.env"
+readonly CANARY_ENV
+{
+  printf 'GATEWAY_TOKEN=%s\n' "$(openssl rand -hex 32)"
+  printf 'MKV_H264_FAST_START_PROOF_HMAC_KEY=%s\n' "$(openssl rand -hex 32)"
+  printf 'MKV_COMPLETE_HLS_CACHE_MANIFEST_HMAC_KEY=%s\n' "$(openssl rand -hex 32)"
+} > "${CANARY_ENV}"
+chmod 0600 "${CANARY_ENV}"
 PROVIDER_STARTED=0
 GATEWAY_STARTED=0
 
 cleanup() {
-  if [[ "${PROVIDER_STARTED}" == '1' ]]; then
-    docker stop --time 5 "${PROVIDER_CONTAINER}" >/dev/null 2>&1 || true
-    docker rm -f "${PROVIDER_CONTAINER}" >/dev/null 2>&1 || true
-  fi
   if [[ "${GATEWAY_STARTED}" == '1' ]]; then
     docker stop --time 10 "${GATEWAY_CONTAINER}" >/dev/null 2>&1 || true
     docker rm -f "${GATEWAY_CONTAINER}" >/dev/null 2>&1 || true
+  fi
+  if [[ "${PROVIDER_STARTED}" == '1' ]]; then
+    docker stop --time 5 "${PROVIDER_CONTAINER}" >/dev/null 2>&1 || true
+    docker rm -f "${PROVIDER_CONTAINER}" >/dev/null 2>&1 || true
   fi
   case "${CANARY_DIR}" in
     /home/adrien/norva-complete-cache-canary.*) rm -rf -- "${CANARY_DIR}" ;;
@@ -127,7 +149,7 @@ docker run -d \
   --tmpfs /tmp:rw,nosuid,nodev,noexec,size=268435456 \
   -v "${CANARY_DIR}/output:/canary-output" \
   -v "${CANARY_DIR}/cache:/canary-cache" \
-  --env-file "${ENV_PATH}" \
+  --env-file "${CANARY_ENV}" \
   -e PORT=8080 \
   -e OUTPUT_DIR=/canary-output \
   -e PUBLIC_BASE_URL=http://norva-media-cache-canary:8080 \
@@ -160,10 +182,15 @@ docker exec -i "${GATEWAY_CONTAINER}" node --input-type=module - \
   < "${SCRIPT_DIR}/private-complete-cache-smoke-client.mjs"
 
 echo '===COMPLETE_CACHE_POST_STATE==='
-docker inspect norva-media-gateway --format \
+docker inspect "${PRIMARY_CONTAINER}" --format \
   'primary_status={{.State.Status}} primary_health={{.State.Health.Status}} primary_restarts={{.RestartCount}} primary_oom={{.State.OOMKilled}}'
+[[ "$(docker inspect "${PRIMARY_CONTAINER}" --format '{{.Config.Image}}')" == "${PRIMARY_IMAGE}" ]]
+[[ "$(docker inspect "${PRIMARY_CONTAINER}" --format '{{.Image}}')" == "${PRIMARY_IMAGE_ID}" ]]
+[[ "$(docker inspect "${PRIMARY_CONTAINER}" --format '{{.State.Health.Status}}')" == 'healthy' ]]
+[[ "$(docker inspect "${PRIMARY_CONTAINER}" --format '{{.RestartCount}}')" == "${PRIMARY_RESTARTS}" ]]
+[[ "$(docker inspect "${PRIMARY_CONTAINER}" --format '{{.State.OOMKilled}}')" == "${PRIMARY_OOM}" ]]
 docker stats --no-stream --format \
   'table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.PIDs}}' \
-  norva-media-gateway norva-db "${GATEWAY_CONTAINER}"
+  "${PRIMARY_CONTAINER}" norva-db "${GATEWAY_CONTAINER}"
 echo '===PRIVATE_COMPLETE_CACHE_SMOKE_OK==='
 echo "candidate_image=${IMAGE} candidate_id=${IMAGE_ID} bundle=${IMAGE_BUNDLE_SHA256}"
