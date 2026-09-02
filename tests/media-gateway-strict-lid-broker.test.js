@@ -922,6 +922,99 @@ test('finite seek broker primes one pinned route before its base and sequential 
   assert.equal(broker.completedProviderFetches, 4);
 });
 
+test('a validated resume reuses the previously materialized MKV prefix after one current warmup', async (t) => {
+  const { createStrictLidBroker } = brokerHarness();
+  const data = Buffer.from(Array.from({ length: 64 }, (_, index) => index));
+  const calls = [];
+  const provider = http.createServer((req, res) => {
+    calls.push(req.headers.range);
+    sendExactRange(req, res, data, { etag: '"finite-resume-prefix-v1"' });
+  });
+  const sourceUrl = await listen(provider);
+  t.after(() => closeServer(provider));
+  let candidate = null;
+  const common = {
+    sourceUrl,
+    fileSizeBytes: data.length,
+    dispatcher: null,
+    pathPrefix: 'finite-mkv-seek',
+    finiteWarmupWindowBytes: 2,
+    finiteWindowBytes: 8,
+    finiteSequentialWindowBytes: 24,
+    finiteResumePrefixTargetBytes: 8,
+    finiteCacheBytes: 64,
+    releaseDelayMs: 0,
+    completedReleaseDelayMs: 0,
+    openTimeoutMs: 2000,
+  };
+
+  const first = await createStrictLidBroker({
+    ...common,
+    onFiniteResumePrefix: (prefix) => {
+      candidate = { ...prefix, payload: Buffer.from(prefix.payload) };
+      return true;
+    },
+  });
+  const firstResponse = await fetch(first.inputUrl, { headers: { Range: 'bytes=0-7' } });
+  assert.deepEqual(Buffer.from(await firstResponse.arrayBuffer()), data.subarray(0, 8));
+  assert.deepEqual(calls, ['bytes=0-1', 'bytes=2-7']);
+  assert.ok(candidate);
+  assert.equal(first.resumePrefixPublished, true);
+  await first.close();
+
+  const second = await createStrictLidBroker({
+    ...common,
+    finiteResumePrefixCandidate: candidate,
+  });
+  t.after(() => second.close());
+  const secondResponse = await fetch(second.inputUrl, { headers: { Range: 'bytes=0-7' } });
+  assert.deepEqual(Buffer.from(await secondResponse.arrayBuffer()), data.subarray(0, 8));
+  assert.deepEqual(calls, ['bytes=0-1', 'bytes=2-7', 'bytes=0-1']);
+  assert.equal(second.providerFetches, 1);
+  assert.equal(second.completedProviderFetches, 1);
+  assert.equal(second.interruptedProviderFetches, 0);
+  assert.equal(second.resumePrefixCacheHit, true);
+  assert.equal(second.resumePrefixCacheBytes, 8);
+  await second.close();
+
+  const stale = await createStrictLidBroker({
+    ...common,
+    finiteResumePrefixCandidate: {
+      ...candidate,
+      validator: { ...candidate.validator, value: '"finite-resume-prefix-stale"' },
+    },
+  });
+  t.after(() => stale.close());
+  const staleResponse = await fetch(stale.inputUrl, { headers: { Range: 'bytes=0-7' } });
+  assert.deepEqual(Buffer.from(await staleResponse.arrayBuffer()), data.subarray(0, 8));
+  assert.deepEqual(calls, [
+    'bytes=0-1',
+    'bytes=2-7',
+    'bytes=0-1',
+    'bytes=0-1',
+    'bytes=2-7',
+  ]);
+  assert.equal(stale.resumePrefixCacheHit, false);
+  await stale.close();
+
+  const weak = await createStrictLidBroker({
+    ...common,
+    finiteResumePrefixWeakValidationBytes: 4,
+    finiteResumePrefixCandidate: {
+      ...candidate,
+      validator: null,
+      effectiveUrlIdentitySha256: 'b'.repeat(64),
+    },
+  });
+  t.after(() => weak.close());
+  const weakResponse = await fetch(weak.inputUrl, { headers: { Range: 'bytes=0-7' } });
+  assert.deepEqual(Buffer.from(await weakResponse.arrayBuffer()), data.subarray(0, 8));
+  assert.deepEqual(calls.slice(-1), ['bytes=0-3']);
+  assert.equal(weak.warmupWindowBytes, 4);
+  assert.equal(weak.resumePrefixCacheHit, true);
+  assert.equal(weak.resumePrefixCacheBytes, 8);
+});
+
 test('a newer cue prevents the primed header request from cooling its pinned tunnel', async (t) => {
   const { createStrictLidBroker } = brokerHarness();
   const data = Buffer.from(Array.from({ length: 64 }, (_, index) => index));
@@ -1934,7 +2027,7 @@ test('strict LID rejects invalid exact signed coordinates before creating a serv
   assert.match(route, /detectLanguageRequestPolicy\(req, options\)[\s\S]*validateDetectLanguageCapability\(capabilityToken, policy\.requiredScope\)/);
   assert.match(gatewaySource, /strictLidLoopbackBrokerProtocol: 1/);
   assert.match(gatewaySource, /strictLidFileSizeClaim: 'fileSizeBytes'/);
-  assert.match(gatewaySource, /const GATEWAY_VERSION = 159/);
+  assert.match(gatewaySource, /const GATEWAY_VERSION = 160/);
   assert.match(gatewaySource, /supersededReleaseDelayMs:\s*PROVIDER_SLOT_RELEASE_DELAY_MS/);
   assert.match(gatewaySource, /strictLidProviderDrainProtocol: 1/);
   assert.match(gatewaySource, /strictLidWeakFallbackProtocol: 1/);

@@ -49,6 +49,7 @@ const {
     selectProviderProxyDefaultTransport,
 } = require('./providerProxyPool');
 const { ProviderAdaptiveRouteControl } = require('./providerAdaptiveRouteControl');
+const { FiniteMkvResumePrefixCache } = require('./finiteMkvResumePrefixCache');
 const { PrivateMediaCacheStoreClient } = require('./privateMediaCacheStoreClient');
 const { SharedHlsObjectPublisher } = require('./sharedHlsObjectPublisher');
 const { publishSharedMediaCacheSession } = require('./sharedMediaCachePublication');
@@ -1835,6 +1836,24 @@ const FINITE_MKV_SEEK_CACHE_BYTES = clampInt(
     FINITE_MKV_SEEK_WINDOW_BYTES,
     256 * 1024 * 1024,
 );
+const FINITE_MKV_RESUME_PREFIX_CACHE_MAX_BYTES = clampInt(
+    process.env.FINITE_MKV_RESUME_PREFIX_CACHE_MAX_BYTES,
+    128 * 1024 * 1024,
+    8 * 1024 * 1024,
+    1024 * 1024 * 1024,
+);
+const FINITE_MKV_RESUME_PREFIX_CACHE_TTL_MS = clampInt(
+    process.env.FINITE_MKV_RESUME_PREFIX_CACHE_TTL_MS,
+    30 * 60 * 1000,
+    60 * 1000,
+    24 * 60 * 60 * 1000,
+);
+const FINITE_MKV_RESUME_PREFIX_WEAK_VALIDATION_BYTES = clampInt(
+    process.env.FINITE_MKV_RESUME_PREFIX_WEAK_VALIDATION_BYTES,
+    1024 * 1024,
+    FINITE_MKV_RESUME_WARMUP_WINDOW_BYTES,
+    INBAND_HEADER_BYTES,
+);
 // Static residential CONNECT tunnels can have a shorter lifetime than a movie.
 // Renew the Undici dispatcher at an exact provider-window boundary before the
 // observed six-minute tunnel expiry. The factory remains pinned to the same
@@ -2271,7 +2290,7 @@ const MAX_CACHEABLE_EXACT_SUBTITLE_HLS_RENDITIONS = Math.min(
     MAX_EXACT_SUBTITLE_HLS_RENDITIONS,
     clampInt(process.env.MAX_CACHEABLE_EXACT_SUBTITLE_HLS_RENDITIONS, 8, 1, 32),
 );
-const GATEWAY_VERSION = 159;
+const GATEWAY_VERSION = 160;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -2571,6 +2590,11 @@ const codecProfileCache = new Map();
 // sourceUrl -> { chunks: Buffer[], len, done, capturing, updatedAt }. Leading bytes tee'd
 // from /raw so a codec probe can read the header locally (no 2nd provider connection).
 const headerByteCache = new Map();
+const finiteMkvResumePrefixCache = new FiniteMkvResumePrefixCache({
+    maxBytes: FINITE_MKV_RESUME_PREFIX_CACHE_MAX_BYTES,
+    maxEntryBytes: Math.max(INBAND_HEADER_BYTES, FINITE_MKV_MULTI_AUDIO_SEEK_WINDOW_BYTES),
+    ttlMs: FINITE_MKV_RESUME_PREFIX_CACHE_TTL_MS,
+});
 const lastFailures = [];
 const probeStats = {
     attempts: 0,
@@ -2809,6 +2833,7 @@ app.get('/health', (req, res) => {
             multiAudioResumeWindowBytes: FINITE_MKV_MULTI_AUDIO_SEEK_WINDOW_BYTES,
             resumeWarmupWindowBytes: FINITE_MKV_RESUME_WARMUP_WINDOW_BYTES,
             resumeCueGraceMs: FINITE_MKV_RESUME_CUE_GRACE_MS,
+            resumePrefixWeakValidationBytes: FINITE_MKV_RESUME_PREFIX_WEAK_VALIDATION_BYTES,
             sequentialWindowBytes: FINITE_MKV_SEEK_WINDOW_BYTES,
             cacheMaxBytes: FINITE_MKV_SEEK_CACHE_BYTES,
             identityPreflightRange: BOUNDED_MKV_HEADER_PARSE && INBAND_HEADER_CACHE_MAX > 0
@@ -2823,6 +2848,7 @@ app.get('/health', (req, res) => {
             validatorPinnedWhenAvailable: true,
             proxyAgentMaxAgeMs: FINITE_MKV_SEEK_PROXY_AGENT_MAX_AGE_MS,
         },
+        finiteMkvResumePrefixCache: finiteMkvResumePrefixCache.publicStatus(),
         finiteMkvLinearSeekBridge: {
             protocol: 1,
             enabled: FINITE_MKV_LINEAR_SEEK_BRIDGE_ENABLED,
@@ -4959,14 +4985,19 @@ function finiteMkvSeekWindowRange(range, windowBytes, options = {}) {
     };
 }
 
-function finiteMkvSeekCacheLookup(context, range, { countMiss = true } = {}) {
+function finiteMkvSeekCacheLookup(context, range, { countMiss = true, allowPrefix = false } = {}) {
     for (const [key, entry] of context.finiteCache.entries()) {
-        if (entry.start > range.start || entry.end < range.end) continue;
+        if (
+            entry.start > range.start
+            || entry.end < range.start
+            || (!allowPrefix && entry.end < range.end)
+        ) continue;
         context.finiteCache.delete(key);
         context.finiteCache.set(key, entry);
         context.finiteCacheHits++;
         const offset = range.start - entry.start;
-        return entry.payload.subarray(offset, offset + (range.end - range.start + 1));
+        const availableEnd = Math.min(range.end, entry.end);
+        return entry.payload.subarray(offset, offset + (availableEnd - range.start + 1));
     }
     if (countMiss) context.finiteCacheMisses++;
     return null;
@@ -4989,6 +5020,103 @@ function finiteMkvSeekCacheStore(context, range, payload) {
         context.finiteCache.delete(oldestKey);
         context.finiteCacheBytes -= Number(oldest?.payload?.length || 0);
         context.finiteCacheEvictions++;
+    }
+}
+
+function normalizeFiniteMkvResumePrefixCandidate(value, context) {
+    const candidate = value && typeof value === 'object' ? value : null;
+    const validator = candidate?.validator
+        ? normalizeStrictLidExpectedValidator(candidate.validator)
+        : null;
+    const identity = String(candidate?.effectiveUrlIdentitySha256 || '').toLowerCase();
+    const payload = candidate?.payload;
+    if (
+        !candidate
+        || Number(candidate.fileSizeBytes) !== context.fileSizeBytes
+        || (candidate.validator && validator?.kind !== 'etag')
+        || !/^[a-f0-9]{64}$/.test(identity)
+        || !Buffer.isBuffer(payload)
+        || payload.length !== context.finiteResumePrefixTargetBytes
+        || payload.length > context.fileSizeBytes
+    ) return null;
+    return {
+        fileSizeBytes: context.fileSizeBytes,
+        validator,
+        effectiveUrlIdentitySha256: identity,
+        payload,
+    };
+}
+
+function activateFiniteMkvResumePrefixCandidate(context, providerRange, payload) {
+    if (context.finiteResumePrefixCandidateChecked || providerRange.start !== 0) return false;
+    context.finiteResumePrefixCandidateChecked = true;
+    const candidate = context.finiteResumePrefixCandidate;
+    context.finiteResumePrefixCandidate = null;
+    if (!candidate || !Buffer.isBuffer(payload) || !payload.length) return false;
+    const strongValidatorMatches = candidate.validator
+        ? context.validator?.kind === 'etag'
+            && context.validator.value === candidate.validator.value
+        : true;
+    const effectiveIdentityMatches = candidate.validator
+        ? context.effectiveUrlIdentitySha256 === candidate.effectiveUrlIdentitySha256
+        : true;
+    if (
+        !strongValidatorMatches
+        || !effectiveIdentityMatches
+        || payload.length > candidate.payload.length
+        || !candidate.payload.subarray(0, payload.length).equals(payload)
+    ) return false;
+    finiteMkvSeekCacheStore(context, {
+        start: 0,
+        end: candidate.payload.length - 1,
+        total: context.fileSizeBytes,
+    }, candidate.payload);
+    context.finiteResumePrefixCacheHit = true;
+    context.finiteResumePrefixCacheBytes = candidate.payload.length;
+    return true;
+}
+
+function contiguousFiniteMkvSeekPrefix(context, targetBytes) {
+    const entries = [...context.finiteCache.values()]
+        .filter((entry) => entry.start < targetBytes && entry.end >= 0)
+        .sort((left, right) => left.start - right.start || right.end - left.end);
+    const chunks = [];
+    let cursor = 0;
+    for (const entry of entries) {
+        if (entry.end < cursor) continue;
+        if (entry.start > cursor) break;
+        const offset = cursor - entry.start;
+        const length = Math.min(targetBytes - cursor, entry.end - cursor + 1);
+        if (length <= 0) continue;
+        chunks.push(entry.payload.subarray(offset, offset + length));
+        cursor += length;
+        if (cursor >= targetBytes) return Buffer.concat(chunks, targetBytes);
+    }
+    return null;
+}
+
+function maybePublishFiniteMkvResumePrefix(context) {
+    if (
+        context.finiteResumePrefixPublished
+        || typeof context.onFiniteResumePrefix !== 'function'
+        || !/^[a-f0-9]{64}$/.test(String(context.effectiveUrlIdentitySha256 || ''))
+    ) return false;
+    const payload = contiguousFiniteMkvSeekPrefix(
+        context,
+        context.finiteResumePrefixTargetBytes,
+    );
+    if (!payload) return false;
+    try {
+        const stored = context.onFiniteResumePrefix({
+            fileSizeBytes: context.fileSizeBytes,
+            validator: context.validator ? { ...context.validator } : null,
+            effectiveUrlIdentitySha256: context.effectiveUrlIdentitySha256,
+            payload,
+        });
+        context.finiteResumePrefixPublished = stored !== false;
+        return context.finiteResumePrefixPublished;
+    } catch (_) {
+        return false;
     }
 }
 
@@ -5180,12 +5308,11 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                     // The first slice ends on a stable base-window boundary. A
                     // later overlapping cue can reuse the cached suffix and fetch
                     // only its missing tail instead of redownloading the prefix.
-                    alignToWindowEnd: forwarded === 0 || (
-                        finiteWarmupWindowsCompleted > 0
-                        && regularProviderWindowsCompleted === 0
-                    ),
+                    alignToWindowEnd: regularProviderWindowsCompleted === 0,
                 });
-                const cached = finiteMkvSeekCacheLookup(context, finiteWindowRange);
+                const cached = finiteMkvSeekCacheLookup(context, finiteWindowRange, {
+                    allowPrefix: true,
+                });
                 if (cached) {
                     if (attempt.localClosed) break;
                     if (!responseStarted) {
@@ -5223,7 +5350,7 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                 const queuedCacheHit = finiteMkvSeekCacheLookup(
                     context,
                     finiteWindowRange,
-                    { countMiss: false },
+                    { countMiss: false, allowPrefix: true },
                 );
                 if (queuedCacheHit) {
                     releaseFiniteProviderSlot();
@@ -5521,6 +5648,14 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                         );
                     }
                     finiteMkvSeekCacheStore(context, finiteWindowRange, payload);
+                    if (finiteWindowIsWarmup) {
+                        activateFiniteMkvResumePrefixCandidate(
+                            context,
+                            finiteWindowRange,
+                            payload,
+                        );
+                    }
+                    maybePublishFiniteMkvResumePrefix(context);
                     bufferedChunks.length = 0;
                     // The exact provider window is fully materialized. Release
                     // the mono-account slot before writing to the local socket:
@@ -5791,6 +5926,9 @@ async function createStrictLidBroker(options = {}) {
     const onProviderIdentity = typeof options.onProviderIdentity === 'function'
         ? options.onProviderIdentity
         : null;
+    const onFiniteResumePrefix = typeof options.onFiniteResumePrefix === 'function'
+        ? options.onFiniteResumePrefix
+        : null;
     const ownsDispatcher = Boolean(dispatcherFactory);
     const now = typeof options.now === 'function' ? options.now : Date.now;
     const initialDispatcher = dispatcherFactory
@@ -5888,6 +6026,16 @@ async function createStrictLidBroker(options = {}) {
         finiteCacheHits: 0,
         finiteCacheMisses: 0,
         finiteCacheEvictions: 0,
+        finiteResumePrefixCandidate: null,
+        finiteResumePrefixCandidateChecked: false,
+        finiteResumePrefixTargetBytes: 0,
+        finiteResumePrefixWeakValidationBytes: Number.isFinite(Number(options.finiteResumePrefixWeakValidationBytes))
+            ? Math.max(1, Number(options.finiteResumePrefixWeakValidationBytes))
+            : 1024 * 1024,
+        finiteResumePrefixCacheHit: false,
+        finiteResumePrefixCacheBytes: 0,
+        finiteResumePrefixPublished: false,
+        onFiniteResumePrefix,
         finiteWindowTrace: [],
         finiteQueuedRequests: 0,
         finiteMaxQueuedRequests: 0,
@@ -5905,9 +6053,29 @@ async function createStrictLidBroker(options = {}) {
     context.finiteWarmupWindowBytes = Number.isFinite(Number(options.finiteWarmupWindowBytes))
         ? Math.max(0, Math.min(context.finiteWindowBytes, Number(options.finiteWarmupWindowBytes)))
         : 0;
+    context.finiteResumePrefixTargetBytes = Math.min(
+        context.fileSizeBytes,
+        context.finiteWindowBytes,
+        Number.isFinite(Number(options.finiteResumePrefixTargetBytes))
+            ? Math.max(context.finiteWarmupWindowBytes, Number(options.finiteResumePrefixTargetBytes))
+            : context.finiteWindowBytes,
+    );
     context.finiteCacheMaxBytes = Number.isFinite(Number(options.finiteCacheBytes))
         ? Math.max(context.finiteWindowBytes, Math.min(256 * 1024 * 1024, Number(options.finiteCacheBytes)))
         : Math.max(context.finiteWindowBytes, FINITE_MKV_SEEK_CACHE_BYTES);
+    context.finiteResumePrefixCandidate = normalizeFiniteMkvResumePrefixCandidate(
+        options.finiteResumePrefixCandidate,
+        context,
+    );
+    if (context.finiteResumePrefixCandidate && !context.finiteResumePrefixCandidate.validator) {
+        context.finiteWarmupWindowBytes = Math.max(
+            context.finiteWarmupWindowBytes,
+            Math.min(
+                context.finiteResumePrefixTargetBytes,
+                context.finiteResumePrefixWeakValidationBytes,
+            ),
+        );
+    }
     const server = http.createServer((req, res) => {
         handleStrictLidBrokerRequest(context, expectedPath, req, res);
     });
@@ -5940,6 +6108,9 @@ async function createStrictLidBroker(options = {}) {
         get cacheHits() { return context.finiteCacheHits; },
         get cacheMisses() { return context.finiteCacheMisses; },
         get cacheEvictions() { return context.finiteCacheEvictions; },
+        get resumePrefixCacheHit() { return context.finiteResumePrefixCacheHit; },
+        get resumePrefixCacheBytes() { return context.finiteResumePrefixCacheBytes; },
+        get resumePrefixPublished() { return context.finiteResumePrefixPublished; },
         get maxQueuedRequests() { return context.finiteMaxQueuedRequests; },
         get maxQueuedProviderWindows() { return context.finiteMaxQueuedProviderWindows; },
         get plannedSupersessions() { return context.finitePlannedSupersessions; },
@@ -11814,7 +11985,13 @@ async function closeVodInputAttempt(attempt) {
 function captureBoundedMkvHeaderBytes(session, byteOffset, chunk) {
     if (!BOUNDED_MKV_HEADER_PARSE || INBAND_HEADER_BYTES <= 0 || INBAND_HEADER_CACHE_MAX <= 0) return;
     const currentHeaderAuthorityRequired = needsMkvH264CurrentHeaderAuthority(session);
-    if (hasCompleteMkvPlaybackProfile(session?.codecProfile) && !currentHeaderAuthorityRequired) return;
+    const completePlaybackProfile = hasCompleteMkvPlaybackProfile(session?.codecProfile);
+    const captureColdResumePrefix = Boolean(
+        completePlaybackProfile &&
+        !currentHeaderAuthorityRequired &&
+        Number(session?.seekOffset || 0) <= 0
+    );
+    if (completePlaybackProfile && !currentHeaderAuthorityRequired && !captureColdResumePrefix) return;
     const sourceUrl = String(session?.sourceUrl || '');
     const offset = Number(byteOffset);
     if (!sourceUrl || !Number.isSafeInteger(offset) || offset < 0 || !chunk?.length) return;
@@ -11868,7 +12045,33 @@ function captureBoundedMkvHeaderBytes(session, byteOffset, chunk) {
     if (entry.len >= captureLimitBytes) {
         entry.done = true;
         entry.capturing = false;
+        if (captureColdResumePrefix && publishCapturedFiniteMkvResumePrefix(session, entry)) {
+            session.startupTimings = asRecord(session.startupTimings);
+            session.startupTimings.finiteMkvResumePrefixPublishedFromColdPump = true;
+            if (headerByteCache.get(sourceUrl) === entry) headerByteCache.delete(sourceUrl);
+        }
     }
+}
+
+function publishCapturedFiniteMkvResumePrefix(session, entry) {
+    if (!session || !entry || entry.captureOwner !== String(session?.id || session?.sourceUrl || '')) {
+        return false;
+    }
+    const fileSizeBytes = fileSizeBytesForSession(session);
+    const exactAudioTrackCount = audioTracksForSession(session).length;
+    const effectiveWindowBytes = exactAudioTrackCount > 1
+        ? Math.min(FINITE_MKV_SEEK_WINDOW_BYTES, FINITE_MKV_MULTI_AUDIO_SEEK_WINDOW_BYTES)
+        : FINITE_MKV_SEEK_WINDOW_BYTES;
+    const targetBytes = Math.min(fileSizeBytes || 0, effectiveWindowBytes, INBAND_HEADER_BYTES);
+    if (!targetBytes || entry.len < targetBytes) return false;
+    const payload = Buffer.concat(entry.chunks, entry.len).subarray(0, targetBytes);
+    return finiteMkvResumePrefixCache.put({
+        sourceUrl: session.sourceUrl,
+        fileSizeBytes,
+        validator: session.vodInputValidator,
+        effectiveUrlIdentitySha256: session.vodInputEffectiveUrlIdentitySha256,
+        payload,
+    });
 }
 
 async function openBoundedVodInputAttempt(session, offset, parentSignal, dispatcher, options = {}) {
@@ -12412,6 +12615,10 @@ async function prepareFiniteMkvSeekBroker(session, parentSignal = null) {
     const effectiveWindowBytes = exactAudioTrackCount > 1
         ? Math.min(FINITE_MKV_SEEK_WINDOW_BYTES, FINITE_MKV_MULTI_AUDIO_SEEK_WINDOW_BYTES)
         : FINITE_MKV_SEEK_WINDOW_BYTES;
+    const finiteResumePrefixCandidate = finiteMkvResumePrefixCache.get({
+        sourceUrl: session.sourceUrl,
+        fileSizeBytes,
+    });
     const broker = await createStrictLidBroker({
         sourceUrl: session.sourceUrl,
         fileSizeBytes,
@@ -12428,6 +12635,13 @@ async function prepareFiniteMkvSeekBroker(session, parentSignal = null) {
         finiteWarmupWindowBytes: FINITE_MKV_RESUME_WARMUP_WINDOW_BYTES,
         finiteSequentialWindowBytes: FINITE_MKV_SEEK_WINDOW_BYTES,
         finiteCacheBytes: FINITE_MKV_SEEK_CACHE_BYTES,
+        finiteResumePrefixTargetBytes: Math.min(effectiveWindowBytes, INBAND_HEADER_BYTES),
+        finiteResumePrefixWeakValidationBytes: FINITE_MKV_RESUME_PREFIX_WEAK_VALIDATION_BYTES,
+        finiteResumePrefixCandidate,
+        onFiniteResumePrefix: (prefix) => finiteMkvResumePrefixCache.put({
+            sourceUrl: session.sourceUrl,
+            ...prefix,
+        }),
         // Provider chunks advance FFmpeg immediately while each exact window is
         // also materialized for cache/integrity. Provider windows remain
         // serialized, so release grace is reserved for real failures.
@@ -12443,6 +12657,7 @@ async function prepareFiniteMkvSeekBroker(session, parentSignal = null) {
     session.startupTimings.finiteMkvSeekWindowBytes = effectiveWindowBytes;
     session.startupTimings.finiteMkvSeekWarmupCueGraceMs = FINITE_MKV_RESUME_CUE_GRACE_MS;
     session.startupTimings.finiteMkvSeekWarmupWindowBytes = FINITE_MKV_RESUME_WARMUP_WINDOW_BYTES;
+    session.startupTimings.finiteMkvResumePrefixWeakValidationBytes = FINITE_MKV_RESUME_PREFIX_WEAK_VALIDATION_BYTES;
     session.startupTimings.finiteMkvSeekSequentialWindowBytes = FINITE_MKV_SEEK_WINDOW_BYTES;
     session.startupTimings.finiteMkvSeekMultiAudioWindow = exactAudioTrackCount > 1;
     session.startupTimings.finiteMkvSeekCacheLimitBytes = FINITE_MKV_SEEK_CACHE_BYTES;
@@ -13323,6 +13538,7 @@ async function enrichSessionCodecProfileFromBoundedHeader(session, signal = null
     if (hasCompleteMkvPlaybackProfile(session?.codecProfile) && !currentHeaderAuthorityRequired) {
         const captured = headerByteCache.get(session.sourceUrl);
         if (captured?.captureOwner === String(session?.id || session.sourceUrl)) {
+            publishCapturedFiniteMkvResumePrefix(session, captured);
             headerByteCache.delete(session.sourceUrl);
         }
         return true;
@@ -13342,6 +13558,7 @@ async function enrichSessionCodecProfileFromBoundedHeader(session, signal = null
         // The prefix is per-startup evidence. Release its bounded memory even
         // when a malformed/truncated header cannot be parsed.
         if (headerByteCache.get(session.sourceUrl) === capturedEntry) {
+            publishCapturedFiniteMkvResumePrefix(session, capturedEntry);
             headerByteCache.delete(session.sourceUrl);
         }
     }
@@ -18614,6 +18831,9 @@ function debugSession(session) {
                 cacheHits: Number(session.finiteMkvSeekBroker.cacheHits || 0),
                 cacheMisses: Number(session.finiteMkvSeekBroker.cacheMisses || 0),
                 plannedSupersessions: Number(session.finiteMkvSeekBroker.plannedSupersessions || 0),
+                resumePrefixCacheHit: session.finiteMkvSeekBroker.resumePrefixCacheHit === true,
+                resumePrefixCacheBytes: Number(session.finiteMkvSeekBroker.resumePrefixCacheBytes || 0),
+                resumePrefixPublished: session.finiteMkvSeekBroker.resumePrefixPublished === true,
                 warmupCueGraceMs: Number(session.finiteMkvSeekBroker.warmupCueGraceMs || 0),
                 warmupWindowBytes: Number(session.finiteMkvSeekBroker.warmupWindowBytes || 0),
                 warmupProviderWindows: Number(session.finiteMkvSeekBroker.warmupProviderWindows || 0),
@@ -20266,6 +20486,7 @@ setInterval(() => {
     for (const [key, entry] of codecProfileCache) {
         if (entry.expiresAt <= now) codecProfileCache.delete(key);
     }
+    finiteMkvResumePrefixCache.prune(now);
     // Purge stale in-band header buffers (only needed transiently around playback start).
     if (INBAND_HEADER_TTL_MS > 0) {
         for (const [key, entry] of headerByteCache) {

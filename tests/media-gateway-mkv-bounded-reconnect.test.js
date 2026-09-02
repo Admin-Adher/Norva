@@ -716,6 +716,65 @@ test('cold MKV preloads one bounded metadata prefix and replays every byte on th
     assert.equal(tracker.active, 0);
 });
 
+test('cold MKV with a complete profile publishes a resume prefix from the existing playback body', async () => {
+    const prefixBytes = 8;
+    const fixture = mkvFixture(32);
+    const tracker = makeTracker();
+    const headerByteCache = new Map();
+    const published = [];
+    let fetches = 0;
+    const h = pumpHarness({
+        BOUNDED_MKV_HEADER_PARSE: true,
+        INBAND_HEADER_BYTES: prefixBytes,
+        INBAND_HEADER_CACHE_MAX: 2,
+        FINITE_MKV_SEEK_WINDOW_BYTES: prefixBytes,
+        FINITE_MKV_MULTI_AUDIO_SEEK_WINDOW_BYTES: prefixBytes,
+        headerByteCache,
+        hasCompleteMkvPlaybackProfile: () => true,
+        audioTracksForSession: () => [{ index: 1 }, { index: 2 }],
+        finiteMkvResumePrefixCache: {
+            put(value) {
+                published.push({ ...value, payload: Buffer.from(value.payload) });
+                return true;
+            },
+        },
+        fetch: async (_url, options) => {
+            fetches += 1;
+            tracker.calls.push(options.headers);
+            return trackedResponse(tracker, {
+                status: 206,
+                chunks: [fixture.subarray(0, 4), fixture.subarray(4)],
+                headers: {
+                    'Content-Range': `bytes 0-${fixture.length - 1}/${fixture.length}`,
+                    'Content-Length': String(fixture.length),
+                    ETag: '"cold-complete-v1"',
+                },
+            });
+        },
+    });
+    const session = mkvSession(fixture.length);
+    session.seekOffset = 0;
+
+    await h.ensureBoundedMkvInputPump(session);
+    const writable = new CapturingWritable();
+    const result = await h.runBoundedMkvInputPump(
+        session,
+        writable,
+        new AbortController().signal,
+        null,
+    );
+
+    assert.equal(fetches, 1, 'resume warming reuses the sole cold-playback provider body');
+    assert.equal(result.bytesForwarded, fixture.length);
+    assert.deepEqual(writable.bytes(), fixture);
+    assert.equal(published.length, 1);
+    assert.deepEqual(published[0].payload, fixture.subarray(0, prefixBytes));
+    assert.equal(session.startupTimings.finiteMkvResumePrefixPublishedFromColdPump, true);
+    assert.equal(headerByteCache.has(session.sourceUrl), false, 'the duplicated transient prefix is released');
+    assert.equal(tracker.maxActive, 1);
+    assert.equal(tracker.active, 0);
+});
+
 test('cold MKV retains the bounded prefix after Info and Tracks so local ffprobe sees packet data', async () => {
     const targetBytes = 300_000;
     const metadataBytes = 100_000;
@@ -2653,6 +2712,7 @@ function metadataHarness(overrides = {}) {
             return runFfprobeImpl(...args);
         },
         isFiniteMkvVodSession: () => true,
+        publishCapturedFiniteMkvResumePrefix: () => false,
         needsMkvH264CurrentHeaderAuthority: () => false,
         maybeFinalizeMkvH264FastStartProof: () => null,
         mkvH264FastStartProfileFingerprint: () => 'a'.repeat(64),
@@ -3372,8 +3432,14 @@ test('finite MKV seek preparation drains the retained provider before opening on
             FINITE_MKV_MULTI_AUDIO_SEEK_WINDOW_BYTES: 1 * 1024 * 1024,
             FINITE_MKV_RESUME_WARMUP_WINDOW_BYTES: 256 * 1024,
             FINITE_MKV_RESUME_CUE_GRACE_MS: 50,
+            FINITE_MKV_RESUME_PREFIX_WEAK_VALIDATION_BYTES: 1024 * 1024,
             FINITE_MKV_SEEK_CACHE_BYTES: 32 * 1024 * 1024,
+            INBAND_HEADER_BYTES: 4 * 1024 * 1024,
             FINITE_MKV_SEEK_PROXY_AGENT_MAX_AGE_MS: 4 * 60_000,
+            finiteMkvResumePrefixCache: {
+                get: () => null,
+                put: () => true,
+            },
             pinnedProxyAgentFactory: () => () => ({ slot: 3 }),
             proxyKeyFromUrl: () => 'provider.example/user',
             isFiniteMkvVodSession: () => true,
