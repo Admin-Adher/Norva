@@ -80,6 +80,7 @@ const {
     finiteMkvLinearSeekBridgeArgs,
     finiteMkvLinearSeekBridgePlan,
 } = require('./finite-mkv-linear-seek-bridge');
+const { createViewerAttachmentRegistry } = require('./viewerAttachments');
 
 const app = express();
 
@@ -1008,6 +1009,13 @@ const VIEWER_SESSION_IDLE_TIMEOUT_MS = clampInt(
     30,
     30 * 60,
 ) * 1000;
+const MEDIA_CACHE_LIVE_JOIN_REQUESTED = process.env.MEDIA_CACHE_LIVE_JOIN_ENABLED === 'true';
+const MEDIA_CACHE_LIVE_JOIN_MAX_VIEWERS = clampInt(
+    process.env.MEDIA_CACHE_LIVE_JOIN_MAX_VIEWERS,
+    64,
+    1,
+    256,
+);
 // Startup remains bounded even though finite MKV resumes now use the private
 // serialized range broker; the same deadline also covers ordinary provider
 // startup and the fail-safe legacy non-seekable paths.
@@ -2133,6 +2141,10 @@ const sharedMediaCacheStats = {
     callbackFailures: 0,
     bytesPublished: 0,
     filesPublished: 0,
+    liveJoinAccepted: 0,
+    liveJoinRejected: 0,
+    liveJoinRevoked: 0,
+    liveJoinReattachedContinuations: 0,
 };
 let sharedMediaCachePublisher = null;
 let sharedMediaCacheStatus = SHARED_MEDIA_CACHE_REQUESTED ? 'disabled' : 'not-requested';
@@ -2197,7 +2209,7 @@ const MAX_EXACT_SUBTITLE_HLS_RENDITIONS = clampInt(
     1,
     16,
 );
-const GATEWAY_VERSION = 148;
+const GATEWAY_VERSION = 149;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -2657,6 +2669,17 @@ app.get('/health', (req, res) => {
             pipelineBuild: MKV_COMPLETE_HLS_CACHE_PIPELINE_BUILD,
             segmenterBuild: SHARED_MEDIA_CACHE_SEGMENTER_BUILD,
             ttlMs: SHARED_MEDIA_CACHE_TTL_MS,
+            liveJoin: {
+                protocol: 1,
+                requested: MEDIA_CACHE_LIVE_JOIN_REQUESTED,
+                enabled: mediaCacheLiveJoinEnabled(),
+                maximumViewersPerProducer: MEDIA_CACHE_LIVE_JOIN_MAX_VIEWERS,
+                activeViewers: Array.from(sessions.values()).reduce((total, session) => (
+                    total + Number(session?.viewerAttachments?.snapshot?.().count || 0)
+                ), 0),
+                topologyGate: 'exact-audio-subtitle-graph',
+                continuityGate: 'non-empty-contiguous-hls-window',
+            },
             backgroundContinuation: {
                 protocol: 1,
                 requested: SHARED_MEDIA_CACHE_BACKGROUND_CONTINUATION_REQUESTED,
@@ -9782,6 +9805,13 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             outputDir,
             playlistPath: path.join(outputDir, 'playlist.m3u8'),
             accessToken,
+            primaryViewerAttached: true,
+            completeCacheContinuationDemanded: false,
+            backgroundCacheContinuationOriginalExpiresAt: null,
+            viewerAttachments: createViewerAttachmentRegistry({
+                maximum: MEDIA_CACHE_LIVE_JOIN_MAX_VIEWERS,
+                tokenFactory: randomToken,
+            }),
             createdAt: new Date(),
             lastClientAccessAtMs: Date.now(),
             expiresAt: expiresAtDate,
@@ -10174,6 +10204,13 @@ function gatewayCreatedSessionPayload(req, session) {
         startupTimings: session.startupTimings,
         hlsUrl: publicUrl(req, `/sessions/${session.id}/playlist.m3u8?token=${encodeURIComponent(session.accessToken)}`),
         expiresAt: session.expiresAt.toISOString(),
+        liveJoin: {
+            protocol: 1,
+            candidate: mediaCacheLiveJoinEnabled()
+                && Boolean(session.mediaCacheProducer)
+                && session.status === 'ready'
+                && session.assetSource === 'session-output',
+        },
     };
 }
 
@@ -10215,6 +10252,171 @@ function privateFinalCodecProfileForSession(session) {
         : publicMkvCodecProfile(session.codecProfile);
 }
 
+function mediaCacheLiveViewerCount(session) {
+    return Number(session?.viewerAttachments?.snapshot?.().count || 0);
+}
+
+function mediaCacheLiveJoinEnabled() {
+    return Boolean(
+        MEDIA_CACHE_LIVE_JOIN_REQUESTED
+        && sharedMediaCachePublisher
+        && mediaCacheProducerControl.active
+    );
+}
+
+function detachMediaCachePrimaryViewer(session) {
+    if (!session || session.primaryViewerAttached === false) return false;
+    session.primaryViewerAttached = false;
+    session.accessToken = randomToken();
+    return true;
+}
+
+function restoreMediaCacheContinuationForViewer(session) {
+    if (!session) return false;
+    if (!session.backgroundCacheContinuation) {
+        session.completeCacheContinuationDemanded = false;
+        return true;
+    }
+    if (session.backgroundCacheContinuationPromise || session.status === 'background-callback') return false;
+    if (session.backgroundCacheContinuationTimer) {
+        clearTimeout(session.backgroundCacheContinuationTimer);
+        session.backgroundCacheContinuationTimer = null;
+    }
+    session.backgroundCacheContinuation = false;
+    session.backgroundCacheContinuationStartedAtMs = null;
+    session.backgroundCacheContinuationDeadlineMs = null;
+    session.backgroundCacheContinuationOutcome = null;
+    session.backgroundCacheContinuationProviderDrained = false;
+    const originalExpiresAt = session.backgroundCacheContinuationOriginalExpiresAt;
+    if (originalExpiresAt instanceof Date && originalExpiresAt.getTime() > Date.now()) {
+        session.expiresAt = new Date(originalExpiresAt.getTime());
+    }
+    session.backgroundCacheContinuationOriginalExpiresAt = null;
+    session.completeCacheContinuationDemanded = false;
+    session.status = 'ready';
+    sharedMediaCacheStats.liveJoinReattachedContinuations += 1;
+    return true;
+}
+
+app.post('/sessions/:id/viewers', requireGatewayAuth, async (req, res) => {
+    const session = sessions.get(req.params.id);
+    if (!session) return res.status(404).json({ error: 'Session not found' });
+    if (!mediaCacheLiveJoinEnabled()) {
+        return res.status(404).json({ error: 'Live join is unavailable' });
+    }
+    const attachmentId = String(req.body?.attachmentId || req.body?.attachment_id || '').trim();
+    const playbackSessionId = String(
+        req.body?.playbackSessionId || req.body?.playback_session_id || '',
+    ).trim();
+    const expiresAt = String(req.body?.expiresAt || req.body?.expires_at || '').trim();
+    const expiryMs = Date.parse(expiresAt);
+    const originalExpiryMs = session.backgroundCacheContinuationOriginalExpiresAt instanceof Date
+        ? session.backgroundCacheContinuationOriginalExpiresAt.getTime()
+        : Number.NaN;
+    const maximumExpiryMs = Number.isFinite(originalExpiryMs)
+        ? originalExpiryMs
+        : session.expiresAt.getTime();
+    if (!Number.isFinite(expiryMs) || expiryMs > maximumExpiryMs) {
+        return res.status(400).json({
+            error: 'Attachment expiry is invalid',
+            code: 'MEDIA_CACHE_LIVE_ATTACHMENT_EXPIRY_INVALID',
+        });
+    }
+    const assessment = await inspectMediaCacheLiveJoinGraph(session);
+    if (!assessment.joinable) {
+        sharedMediaCacheStats.liveJoinRejected += 1;
+        res.setHeader('Retry-After', '1');
+        return res.status(425).json({
+            error: 'The shared media stream is not ready to join yet',
+            code: 'MEDIA_CACHE_LIVE_JOIN_NOT_READY',
+            reason: assessment.reason,
+        });
+    }
+    let attachment;
+    try {
+        attachment = session.viewerAttachments.attach({
+            attachmentId,
+            playbackSessionId,
+            expiresAt,
+        });
+    } catch (error) {
+        const code = String(error?.code || 'MEDIA_CACHE_LIVE_ATTACHMENT_INVALID');
+        const status = code === 'MEDIA_CACHE_LIVE_ATTACHMENT_CAPACITY' ? 429 : 409;
+        return res.status(status).json({ error: 'Live attachment is invalid', code });
+    }
+    if (!restoreMediaCacheContinuationForViewer(session)) {
+        session.viewerAttachments.revoke(attachment.attachmentId, attachment.playbackSessionId);
+        sharedMediaCacheStats.liveJoinRejected += 1;
+        res.setHeader('Retry-After', '1');
+        return res.status(425).json({
+            error: 'The shared media stream is finalizing',
+            code: 'MEDIA_CACHE_LIVE_JOIN_NOT_READY',
+            reason: 'producer-finalizing',
+        });
+    }
+    sharedMediaCacheStats.liveJoinAccepted += attachment.idempotent ? 0 : 1;
+    const payload = gatewayCreatedSessionPayload(req, session);
+    payload.hlsUrl = publicUrl(
+        req,
+        `/sessions/${session.id}/playlist.m3u8?token=${encodeURIComponent(attachment.token)}`,
+    );
+    payload.liveJoin = {
+        ...assessment,
+        attachmentId: attachment.attachmentId,
+        expiresAt: new Date(attachment.expiresAtMs).toISOString(),
+        activeViewerCount: mediaCacheLiveViewerCount(session),
+    };
+    return res.status(201).json(payload);
+});
+
+app.delete('/sessions/:id/viewers/:attachmentId', requireGatewayAuth, async (req, res) => {
+    const session = sessions.get(req.params.id);
+    if (!session) return res.status(404).json({ error: 'Session not found' });
+    const playbackSessionId = String(
+        req.query?.playbackSessionId || req.query?.playback_session_id || '',
+    ).trim() || null;
+    const revoked = session.viewerAttachments?.revoke?.(
+        req.params.attachmentId,
+        playbackSessionId,
+    );
+    if (!revoked) return res.status(404).json({ error: 'Attachment not found' });
+    sharedMediaCacheStats.liveJoinRevoked += 1;
+    const remaining = mediaCacheLiveViewerCount(session);
+    const continuationRequested = String(
+        req.query?.completeCache ?? req.query?.complete_cache ?? '',
+    ).trim().toLowerCase() === 'continue';
+    if (continuationRequested) session.completeCacheContinuationDemanded = true;
+    if (session.primaryViewerAttached !== false || remaining > 0) {
+        return res.json({ success: true, state: 'detached', activeViewerCount: remaining });
+    }
+    let continuation = null;
+    if (continuationRequested || session.completeCacheContinuationDemanded === true) {
+        continuation = startMkvCompleteHlsBackgroundContinuation(session);
+        if (continuation.started === true) {
+            return res.status(202).json({
+                success: true,
+                completeCacheContinuation: {
+                    protocol: 1,
+                    state: continuation.state || 'running',
+                    deadlineAt: continuation.deadlineAt,
+                },
+            });
+        }
+    }
+    const finalCodecProfile = privateFinalCodecProfileForSession(session);
+    await stopSession(session);
+    return res.json(compactRecord({
+        success: true,
+        state: 'stopped',
+        finalCodecProfile,
+        completeCacheContinuation: continuation ? {
+            protocol: 1,
+            state: 'not-started',
+            reason: String(continuation.reason || 'ineligible').slice(0, 96),
+        } : null,
+    }));
+});
+
 app.delete('/sessions/:id', requireGatewayAuth, async (req, res) => {
     const session = sessions.get(req.params.id);
     if (!session) return res.status(404).json({ error: 'Session not found' });
@@ -10222,22 +10424,48 @@ app.delete('/sessions/:id', requireGatewayAuth, async (req, res) => {
     const continuationRequested = String(
         req.query?.completeCache ?? req.query?.complete_cache ?? '',
     ).trim().toLowerCase() === 'continue';
-    if (continuationRequested) {
-        const continuation = startMkvCompleteHlsBackgroundContinuation(session);
+    if (session.mediaCacheProducer) {
+        if (continuationRequested) session.completeCacheContinuationDemanded = true;
+        detachMediaCachePrimaryViewer(session);
+        const activeViewerCount = mediaCacheLiveViewerCount(session);
+        if (activeViewerCount > 0) {
+            return res.status(202).json({
+                success: true,
+                finalCodecProfile: null,
+                completeCacheContinuation: {
+                    protocol: 1,
+                    state: 'joined',
+                    deadlineAt: session.expiresAt.toISOString(),
+                },
+                activeViewerCount,
+            });
+        }
+    }
+    let continuation = null;
+    if (continuationRequested || session.completeCacheContinuationDemanded === true) {
+        continuation = startMkvCompleteHlsBackgroundContinuation(session);
         if (continuation.started === true) {
             return res.status(202).json({
                 success: true,
                 finalCodecProfile: null,
                 completeCacheContinuation: {
                     protocol: 1,
-                    state: 'running',
+                    state: continuation.state || 'running',
                     deadlineAt: continuation.deadlineAt,
                 },
             });
         }
     }
     await stopSession(session);
-    res.json(compactRecord({ success: true, finalCodecProfile }));
+    res.json(compactRecord({
+        success: true,
+        finalCodecProfile,
+        completeCacheContinuation: continuation ? {
+            protocol: 1,
+            state: 'not-started',
+            reason: String(continuation.reason || 'ineligible').slice(0, 96),
+        } : null,
+    }));
 });
 
 app.get('/sessions/:id/playlist.m3u8', requirePlaybackToken, async (req, res) => {
@@ -10265,7 +10493,7 @@ app.get('/sessions/:id/playlist.m3u8', requirePlaybackToken, async (req, res) =>
         } else {
             playlist = await fsp.readFile(session.playlistPath, 'utf8');
         }
-        res.send(rewritePlaylistSegments(playlist, session.accessToken, session));
+        res.send(rewritePlaylistSegments(playlist, req.playbackToken, session));
     } catch (err) {
         if (session.completeHlsCacheLease) {
             failMkvCompleteHlsCacheSession(session, err);
@@ -10296,7 +10524,7 @@ app.get('/sessions/:id/:file', requirePlaybackToken, async (req, res) => {
                 try {
                     const playlist = await handle.readFile('utf8');
                     res.setHeader('Cache-Control', 'no-store');
-                    return res.send(rewritePlaylistSegments(playlist, session.accessToken, session));
+                    return res.send(rewritePlaylistSegments(playlist, req.playbackToken, session));
                 } finally {
                     await handle.close().catch(() => {});
                 }
@@ -10323,7 +10551,7 @@ app.get('/sessions/:id/:file', requirePlaybackToken, async (req, res) => {
             // would drop the playback token on the very next hls.js request.
             const playlist = await fsp.readFile(filePath, 'utf8');
             res.setHeader('Cache-Control', 'no-store');
-            return res.send(rewritePlaylistSegments(playlist, session.accessToken, session));
+            return res.send(rewritePlaylistSegments(playlist, req.playbackToken, session));
         }
         // Selected WebVTT files grow while FFmpeg demuxes the active lane. A
         // 30-second browser cache makes a valid selection look empty until the
@@ -15016,6 +15244,11 @@ function startMkvCompleteHlsBackgroundContinuation(session, nowMs = Date.now()) 
         return { started: false, reason: 'continuation-expired' };
     }
     session.backgroundCacheContinuation = true;
+    session.primaryViewerAttached = false;
+    session.completeCacheContinuationDemanded = false;
+    session.backgroundCacheContinuationOriginalExpiresAt = Number.isFinite(originalExpiryMs)
+        ? new Date(originalExpiryMs)
+        : null;
     session.backgroundCacheContinuationStartedAtMs = Number(nowMs);
     session.backgroundCacheContinuationDeadlineMs = deadlineMs;
     session.backgroundCacheContinuationProviderDrained = false;
@@ -15043,7 +15276,12 @@ function startMkvCompleteHlsBackgroundContinuation(session, nowMs = Date.now()) 
     ) {
         setImmediate(() => finishMkvCompleteHlsBackgroundContinuation(session));
     }
-    return { started: true, reason: 'started', deadlineAt: new Date(deadlineMs).toISOString() };
+    return {
+        started: true,
+        state: 'running',
+        reason: 'started',
+        deadlineAt: new Date(deadlineMs).toISOString(),
+    };
 }
 
 function needsMkvH264CurrentHeaderAuthority(session) {
@@ -17269,6 +17507,7 @@ async function inspectHlsMediaPlaylistArtifact(session, target) {
     const inspection = inspectHlsStartupPlaylist(playlist, {
         minBufferSeconds: session?.minHlsStartupBufferSeconds,
         minSegments: session?.minHlsStartupSegments,
+        requireContinuous: target?.requireContinuous === true,
     });
     if (!inspection.ready) return null;
     const segmentPaths = inspection.segmentFiles.map((segment) => path.resolve(session.outputDir, segment));
@@ -17302,12 +17541,23 @@ function inspectHlsStartupPlaylist(playlist, requirements = {}) {
     const segmentFiles = [];
     let pendingDuration = null;
     let completePlaylist = false;
+    let discontinuityCount = 0;
+    let mediaSequence = 0;
 
     for (const rawLine of lines) {
         const line = rawLine.trim();
         if (!line) continue;
         if (line === '#EXT-X-ENDLIST') {
             completePlaylist = true;
+            continue;
+        }
+        if (line === '#EXT-X-DISCONTINUITY') {
+            discontinuityCount += 1;
+            continue;
+        }
+        if (line.startsWith('#EXT-X-MEDIA-SEQUENCE:')) {
+            const parsed = Number.parseInt(line.slice('#EXT-X-MEDIA-SEQUENCE:'.length), 10);
+            if (Number.isInteger(parsed) && parsed >= 0) mediaSequence = parsed;
             continue;
         }
         if (line.startsWith('#EXTINF:')) {
@@ -17338,15 +17588,98 @@ function inspectHlsStartupPlaylist(playlist, requirements = {}) {
     const measuredDurationSeconds = durationSeconds;
     durationSeconds = Number(measuredDurationSeconds.toFixed(3));
     if (!segmentCount || !firstSegment) {
-        return { ready: false, reason: 'no_segments', segmentCount: 0, durationSeconds: 0, firstSegment: null, segmentFiles: [] };
+        return { ready: false, reason: 'no_segments', segmentCount: 0, durationSeconds: 0, firstSegment: null, segmentFiles: [], discontinuityCount, mediaSequence };
+    }
+    if (requirements?.requireContinuous === true && discontinuityCount > 0) {
+        return { ready: false, reason: 'discontinuous_playlist', segmentCount, durationSeconds, firstSegment, segmentFiles, discontinuityCount, mediaSequence };
     }
     if (!completePlaylist && segmentCount < minSegments) {
-        return { ready: false, reason: 'insufficient_segments', segmentCount, durationSeconds, firstSegment, segmentFiles };
+        return { ready: false, reason: 'insufficient_segments', segmentCount, durationSeconds, firstSegment, segmentFiles, discontinuityCount, mediaSequence };
     }
     if (!completePlaylist && measuredDurationSeconds < minBufferSeconds) {
-        return { ready: false, reason: 'insufficient_duration', segmentCount, durationSeconds, firstSegment, segmentFiles };
+        return { ready: false, reason: 'insufficient_duration', segmentCount, durationSeconds, firstSegment, segmentFiles, discontinuityCount, mediaSequence };
     }
-    return { ready: true, reason: 'ready', segmentCount, durationSeconds, firstSegment, segmentFiles };
+    return { ready: true, reason: 'ready', segmentCount, durationSeconds, firstSegment, segmentFiles, discontinuityCount, mediaSequence };
+}
+
+async function inspectMediaCacheLiveJoinGraph(session) {
+    const reject = (reason) => ({ joinable: false, reason });
+    if (!mediaCacheLiveJoinEnabled()) return reject('live-join-disabled');
+    if (!session?.mediaCacheProducer || session.assetSource !== 'session-output') {
+        return reject('not-a-shared-producer');
+    }
+    if (session.stoppingPromise || !['ready', 'background-cache'].includes(session.status)) {
+        return reject('producer-not-ready');
+    }
+    if (session.backgroundCacheContinuationPromise) return reject('producer-finalizing');
+    if (!session.multiAudioHls || !session.exactSubtitleHls) {
+        return reject('topology-not-frozen');
+    }
+    try {
+        const master = await fsp.readFile(session.playlistPath, 'utf8');
+        if (multiAudioHlsEnabled(session)) {
+            const masterInspection = inspectMultiAudioMasterPlaylist(master, session.multiAudioHls);
+            if (!masterInspection.ready) return reject(masterInspection.reason);
+        }
+        const publicMaster = rewriteExactHlsMaster(master, {
+            audioPlan: session.multiAudioHls,
+            subtitlePlan: session.exactSubtitleHls,
+        });
+        if (!String(publicMaster).startsWith('#EXTM3U')) return reject('master-rewrite-invalid');
+
+        const targets = hlsMediaPlaylistTargetsForSession(session).map((target) => ({
+            ...target,
+            requireContinuous: true,
+        }));
+        const inspected = await Promise.all(
+            targets.map((target) => inspectHlsMediaPlaylistArtifact(session, target)),
+        );
+        if (inspected.some((result) => !result)) return reject('media-continuity-not-ready');
+
+        const subtitleRenditions = exactSubtitleRenditionsForSession(session);
+        for (const rendition of subtitleRenditions) {
+            const playlistName = controlledLocalPlaylistName(rendition.playlistName);
+            if (!playlistName) return reject('subtitle-playlist-name-invalid');
+            const playlistPath = path.resolve(session.outputDir, playlistName);
+            if (!isWithin(session.outputDir, playlistPath)) return reject('subtitle-playlist-escaped');
+            const playlist = await fsp.readFile(playlistPath, 'utf8');
+            const lines = String(playlist).split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+            if (lines[0] !== '#EXTM3U' || lines.includes('#EXT-X-DISCONTINUITY')) {
+                return reject('subtitle-continuity-invalid');
+            }
+            const segments = lines.filter((line) => !line.startsWith('#'));
+            for (const rawName of segments) {
+                const name = String(rawName || '').split(/[?#]/, 1)[0];
+                if (
+                    !name || name !== path.basename(name) || name.includes('/') || name.includes('\\')
+                    || !/^[a-z0-9][a-z0-9._-]*\.vtt$/i.test(name)
+                ) return reject('subtitle-segment-name-invalid');
+                const segmentPath = path.resolve(session.outputDir, name);
+                if (!isWithin(session.outputDir, segmentPath)) return reject('subtitle-segment-escaped');
+                const stat = await fsp.stat(segmentPath);
+                if (!stat.isFile() || stat.size <= 6) return reject('subtitle-segment-invalid');
+            }
+        }
+
+        const video = multiAudioHlsEnabled(session)
+            ? inspected.find((result) => result.kind === 'video')
+            : inspected[0];
+        if (!video) return reject('video-continuity-not-ready');
+        return {
+            joinable: true,
+            reason: 'ready',
+            protocol: 1,
+            topologyValidated: true,
+            continuityValidated: true,
+            playlistSegmentCount: video.inspection.segmentCount,
+            playlistBufferSeconds: video.inspection.durationSeconds,
+            mediaSequence: video.inspection.mediaSequence,
+            audioRenditionCount: audioRenditionsForSession(session).length,
+            subtitleRenditionCount: subtitleRenditions.length,
+        };
+    } catch (_) {
+        return reject('hls-graph-not-ready');
+    }
 }
 
 async function waitForPlaylist(session, timeoutMs, abortSignal = null) {
@@ -17439,6 +17772,10 @@ async function stopSession(session, options = {}) {
     session.status = 'stopping';
     mediaCacheProducerControl.detach(session);
     session.stoppingPromise = (async () => {
+        session.primaryViewerAttached = false;
+        session.completeCacheContinuationDemanded = false;
+        session.backgroundCacheContinuationOriginalExpiresAt = null;
+        session.viewerAttachments?.clear?.();
         const completeHlsCacheLease = session.completeHlsCacheLease;
         session.completeHlsCacheLease = null;
         completeHlsCacheLease?.release?.();
@@ -17654,18 +17991,26 @@ function requireGatewayAuth(req, res, next) {
 function requirePlaybackToken(req, res, next) {
     const session = sessions.get(req.params.id);
     if (!session) return res.status(404).send('Session not found');
-    if (session.backgroundCacheContinuation === true) {
-        return res.status(410).send('Session detached');
-    }
     if (session.expiresAt.getTime() < Date.now()) {
         stopSession(session, { reason: 'session-expired' })
             .catch((err) => console.error('[media-gateway] cleanup failed:', err));
         return res.status(410).send('Session expired');
     }
-    const token = req.query.token || '';
-    if (!token || !timingSafeEqual(String(token), session.accessToken)) {
+    const token = String(req.query.token || '');
+    const primaryAuthorized = session.primaryViewerAttached !== false
+        && token
+        && timingSafeEqual(token, session.accessToken);
+    const attachment = primaryAuthorized
+        ? null
+        : session.viewerAttachments?.authorize?.(token, Date.now());
+    if (!primaryAuthorized && !attachment) {
         return res.status(401).send('Unauthorized');
     }
+    if (session.backgroundCacheContinuation === true && !attachment) {
+        return res.status(410).send('Session detached');
+    }
+    req.playbackToken = token;
+    req.playbackAttachmentId = attachment?.attachmentId || null;
     next();
 }
 
@@ -17717,6 +18062,12 @@ function serializeSession(req, session) {
         codecProfileSource: session.codecProfileSource || null,
         startupPolicy: session.startupPolicy || startupPolicyForSession(session),
         startupTimings: session.startupTimings || null,
+        liveJoin: {
+            protocol: 1,
+            enabled: MEDIA_CACHE_LIVE_JOIN_REQUESTED,
+            primaryViewerAttached: session.primaryViewerAttached !== false,
+            activeViewerCount: mediaCacheLiveViewerCount(session),
+        },
         hlsUrl: publicUrl(req, `/sessions/${session.id}/playlist.m3u8?token=${encodeURIComponent(session.accessToken)}`),
         createdAt: session.createdAt.toISOString(),
         expiresAt: session.expiresAt.toISOString(),

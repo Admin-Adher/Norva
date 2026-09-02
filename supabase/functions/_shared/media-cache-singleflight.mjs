@@ -229,6 +229,7 @@ export async function awaitMediaCacheSingleflight(options = {}) {
   const pollMs = Math.max(25, Math.min(2_000, Number(options.pollMs) || 250));
   const deadline = now() + timeoutMs;
   let followerRegistrations = 0;
+  let transferredFollowerRegistrations = 0;
   let claim = normalizeMediaCacheProducerClaim(await options.claim());
   if (!claim) throw new Error("media_cache_singleflight_claim_invalid");
 
@@ -250,6 +251,29 @@ export async function awaitMediaCacheSingleflight(options = {}) {
             preemptRequested: false,
           });
         }
+        if (
+          state?.state === "producing" &&
+          state.preemptRequested !== true &&
+          typeof options.tryJoin === "function"
+        ) {
+          const join = await options.tryJoin(state);
+          if (isRecord(join)) {
+            const registrationTransferred = join.joined === true ||
+              join.registrationTransferred === true;
+            if (registrationTransferred) transferredFollowerRegistrations += 1;
+            if (join.error !== undefined && join.error !== null) throw join.error;
+          }
+          if (isRecord(join) && join.joined === true) {
+            return Object.freeze({
+              role: "joined",
+              leaseToken: null,
+              objectKey: null,
+              leaseExpiresAt: state.leaseExpiresAt,
+              preemptRequested: false,
+              joinValue: join.value,
+            });
+          }
+        }
         if (!state || Date.parse(String(state.leaseExpiresAt || "")) <= now()) {
           claim = normalizeMediaCacheProducerClaim(await options.claim());
           if (!claim) throw new Error("media_cache_singleflight_reclaim_invalid");
@@ -270,7 +294,11 @@ export async function awaitMediaCacheSingleflight(options = {}) {
     }
   } finally {
     if (typeof options.leave === "function") {
-      for (let count = 0; count < followerRegistrations; count += 1) {
+      const registrationsToLeave = Math.max(
+        0,
+        followerRegistrations - transferredFollowerRegistrations,
+      );
+      for (let count = 0; count < registrationsToLeave; count += 1) {
         await options.leave().catch(() => false);
       }
     }

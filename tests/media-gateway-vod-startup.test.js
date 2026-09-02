@@ -108,13 +108,22 @@ test('a partial request profile is completed once before FFmpeg chooses copy or 
 test('Gateway readiness requires ten seconds and three finalized HLS segments', () => {
     const inspectHlsStartupPlaylist = loadGatewayFunction(
         'inspectHlsStartupPlaylist',
-        'waitForPlaylist',
+        'inspectMediaCacheLiveJoinGraph',
         { path, MIN_HLS_STARTUP_BUFFER_SECONDS: 10, MIN_HLS_STARTUP_SEGMENTS: 3 },
     );
 
     assert.deepStrictEqual(
         plain(inspectHlsStartupPlaylist('#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:0\n')),
-        { ready: false, reason: 'no_segments', segmentCount: 0, durationSeconds: 0, firstSegment: null, segmentFiles: [] },
+        {
+            ready: false,
+            reason: 'no_segments',
+            segmentCount: 0,
+            durationSeconds: 0,
+            firstSegment: null,
+            segmentFiles: [],
+            discontinuityCount: 0,
+            mediaSequence: 0,
+        },
     );
     assert.deepStrictEqual(
         plain(inspectHlsStartupPlaylist('#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXTINF:0.100000,\nsegment-00000.ts\n')),
@@ -125,6 +134,8 @@ test('Gateway readiness requires ten seconds and three finalized HLS segments', 
             durationSeconds: 0.1,
             firstSegment: 'segment-00000.ts',
             segmentFiles: ['segment-00000.ts'],
+            discontinuityCount: 0,
+            mediaSequence: 0,
         },
     );
 
@@ -224,7 +235,7 @@ test('Gateway readiness materializes every segment in the ten-second buffer', as
 test('Gateway readiness honors a proof-sized configured VOD window', () => {
     const inspectHlsStartupPlaylist = loadGatewayFunction(
         'inspectHlsStartupPlaylist',
-        'waitForPlaylist',
+        'inspectMediaCacheLiveJoinGraph',
         { path, MIN_HLS_STARTUP_BUFFER_SECONDS: 125, MIN_HLS_STARTUP_SEGMENTS: 3 },
     );
     const playlist = (count) => [
@@ -442,7 +453,7 @@ test('an exact finite Matroska H264 profile selects the 2s keyframe encode plan 
 test('exact Matroska H264 uses independent 2s HLS segments with forced keyframes and no split-by-time', () => {
     const source = readGateway();
 
-    assert.match(source, /const GATEWAY_VERSION = 148;/);
+    assert.match(source, /const GATEWAY_VERSION = 149;/);
     assert.match(source, /exactMatroskaH264ReencodeProtocol:\s*1/);
     assert.match(source, /exactMatroskaH264HlsTargetSeconds:\s*EXACT_MATROSKA_H264_HLS_TARGET_SECONDS/);
     assert.match(source, /exactMatroskaH264MaxPixels:\s*EXACT_MATROSKA_H264_MAX_PIXELS/);

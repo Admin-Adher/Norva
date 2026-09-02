@@ -102,6 +102,7 @@ type RuntimeConfig = {
   mediaCacheEnabled: boolean;
   mediaCacheTicketTtlSeconds: number;
   mediaCacheSingleflightEnabled: boolean;
+  mediaCacheLiveJoinEnabled: boolean;
   mediaCacheCoordinationHmacKey: string;
   mediaCacheFollowerWaitMs: number;
 };
@@ -174,6 +175,7 @@ const RUNTIME_CONFIG_KEYS = [
   "NORVA_MEDIA_CACHE_ENABLED",
   "NORVA_MEDIA_CACHE_TICKET_TTL_SECONDS",
   "NORVA_MEDIA_CACHE_SINGLEFLIGHT_ENABLED",
+  "NORVA_MEDIA_CACHE_LIVE_JOIN_ENABLED",
   "NORVA_MEDIA_CACHE_COORDINATION_HMAC_KEY",
   "NORVA_MEDIA_CACHE_FOLLOWER_WAIT_MS",
 ];
@@ -274,6 +276,7 @@ const ENV_MEDIA_CACHE_TICKET_HMAC_KEY = Deno.env.get("NORVA_MEDIA_CACHE_TICKET_H
 const ENV_MEDIA_CACHE_ENABLED = Deno.env.get("NORVA_MEDIA_CACHE_ENABLED") ?? "";
 const ENV_MEDIA_CACHE_TICKET_TTL_SECONDS = Deno.env.get("NORVA_MEDIA_CACHE_TICKET_TTL_SECONDS") ?? "";
 const ENV_MEDIA_CACHE_SINGLEFLIGHT_ENABLED = Deno.env.get("NORVA_MEDIA_CACHE_SINGLEFLIGHT_ENABLED") ?? "";
+const ENV_MEDIA_CACHE_LIVE_JOIN_ENABLED = Deno.env.get("NORVA_MEDIA_CACHE_LIVE_JOIN_ENABLED") ?? "";
 const ENV_MEDIA_CACHE_COORDINATION_HMAC_KEY = Deno.env.get("NORVA_MEDIA_CACHE_COORDINATION_HMAC_KEY") ?? "";
 const ENV_MEDIA_CACHE_FOLLOWER_WAIT_MS = Deno.env.get("NORVA_MEDIA_CACHE_FOLLOWER_WAIT_MS") ?? "";
 const MEDIA_CACHE_SINGLEFLIGHT_OWNER_INSTANCE_ID = crypto.randomUUID();
@@ -324,7 +327,7 @@ async function handleRequest(req: Request): Promise<Response> {
       return json(req, {
         ok: true,
         service: "norva-playback",
-        version: 75,
+        version: 76,
         nativeHeartbeatProtocol: 1,
         providerCircuitProtocol: 1,
         exactTrackCrawlerProtocol: 2,
@@ -396,6 +399,7 @@ async function handleRequest(req: Request): Promise<Response> {
         sharedMediaCachePublicationProtocol: 1,
         sharedMediaCacheSingleflightProtocol: MEDIA_CACHE_SINGLEFLIGHT_PROTOCOL,
         sharedMediaCacheDemandContinuationProtocol: 1,
+        sharedMediaCacheLiveJoinProtocol: 1,
         privateMediaCacheDelivery: {
           enabled: config.mediaCacheEnabled,
           workerConfigured: Boolean(config.mediaCacheWorkerUrl && config.mediaCacheWorkerToken),
@@ -410,6 +414,11 @@ async function handleRequest(req: Request): Promise<Response> {
               config.mediaCacheCoordinationHmacKey,
             ),
             followerWaitMs: config.mediaCacheFollowerWaitMs,
+            liveJoinRequested: config.mediaCacheLiveJoinEnabled,
+            liveJoinActive: config.mediaCacheLiveJoinEnabled
+              && config.mediaCacheSingleflightEnabled
+              && Boolean(mediaCachePlaybackWorkerUrl(config))
+              && mediaCacheCoordinationKeyIsValid(config.mediaCacheCoordinationHmacKey),
           },
         },
       });
@@ -1207,6 +1216,362 @@ async function claimReadyMediaCacheWorkPlayback(options: {
   });
 }
 
+async function rollbackMediaCacheLivePlayback(
+  db: SupabaseClient,
+  sessionId: string,
+  userId: string,
+  attachmentId: string,
+) {
+  const { error } = await db.rpc("norva_rollback_media_cache_live_playback", {
+    p_session_id: sessionId,
+    p_user_id: userId,
+    p_attachment_id: attachmentId,
+  });
+  if (error) throw error;
+}
+
+async function revokeMediaCacheLiveGatewayAttachment(options: {
+  route: MediaGatewayRoute;
+  gatewaySessionId: string;
+  attachmentId: string;
+  playbackSessionId: string;
+}) {
+  const { route, gatewaySessionId, attachmentId, playbackSessionId } = options;
+  const url = new URL(
+    `${route.url}/sessions/${encodeURIComponent(gatewaySessionId)}` +
+      `/viewers/${encodeURIComponent(attachmentId)}`,
+  );
+  url.searchParams.set("playbackSessionId", playbackSessionId);
+  const response = await fetch(url.toString(), {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${route.token}` },
+    signal: AbortSignal.timeout(8_000),
+  });
+  if (!response.ok && response.status !== 404) {
+    throw new HttpError(response.status, "Media gateway refused live attachment cleanup");
+  }
+  await response.body?.cancel().catch(() => {});
+  return true;
+}
+
+async function tryCreateLiveMediaCachePlayback(options: {
+  req: Request;
+  db: SupabaseClient;
+  runtimeConfig: RuntimeConfig;
+  entitlement: Awaited<ReturnType<typeof requirePlaybackEntitlement>>;
+  workFingerprint: string;
+  userId: string;
+  sourceId: string;
+  deviceId: string | null;
+  itemType: string;
+  itemId: string;
+  targetUrlHash: string;
+  streamMime: string | null;
+  playbackHint: JsonRecord;
+  expiresAt: string;
+}) {
+  const {
+    req, db, runtimeConfig, entitlement, workFingerprint, userId, sourceId,
+    deviceId, itemType, itemId, targetUrlHash, streamMime, playbackHint, expiresAt,
+  } = options;
+  if (!runtimeConfig.mediaCacheLiveJoinEnabled) return null;
+  const liveSessionId = crypto.randomUUID();
+  const { data, error } = await db.rpc("norva_claim_media_cache_live_playback", {
+    p_work_fingerprint: workFingerprint,
+    p_session_id: liveSessionId,
+    p_user_id: userId,
+    p_source_id: sourceId,
+    p_device_id: deviceId,
+    p_item_type: itemType,
+    p_item_id: itemId,
+    p_target_url_hash: targetUrlHash,
+    p_stream_mime: streamMime,
+    p_playback_hint: playbackHint,
+    p_expires_at: expiresAt,
+    p_concurrent_limit: entitlement.limit,
+  });
+  if (error) throwDb(error, "Unable to claim shared live media playback");
+  const rows = Array.isArray(data) ? data : (data ? [data] : []);
+  if (rows.length === 0) return null;
+  if (rows.length !== 1) {
+    throw new HttpError(503, "Shared live media claim is ambiguous", {
+      code: "MEDIA_CACHE_LIVE_JOIN_INVALID",
+    });
+  }
+  const claim = recordOrEmpty(rows[0]);
+  if (claim.capacity_exceeded === true) {
+    throwEntitlementRequired("concurrent_streams", entitlement.decision, {
+      limit: entitlement.limit,
+      current: boundedInt(claim.current_streams, entitlement.limit, 0, 64),
+    });
+  }
+  const claimedSessionId = stringOr(claim.new_session_id, "");
+  const attachmentId = stringOr(claim.attachment_id, "");
+  const producerGatewaySessionId = stringOr(claim.producer_external_session_id, "");
+  if (
+    claimedSessionId !== liveSessionId ||
+    !PLAYBACK_SESSION_UUID_PATTERN.test(attachmentId) ||
+    !PLAYBACK_SESSION_UUID_PATTERN.test(producerGatewaySessionId)
+  ) {
+    throw new HttpError(503, "Shared live media claim is invalid", {
+      code: "MEDIA_CACHE_LIVE_JOIN_INVALID",
+    });
+  }
+  const route = mediaGatewayRouteForStoredSession(runtimeConfig, {
+    gateway_id: stringOrNull(claim.producer_gateway_id),
+  });
+  if (!route) {
+    await rollbackMediaCacheLivePlayback(db, liveSessionId, userId, attachmentId)
+      .catch(() => null);
+    throw new HttpError(503, "Shared live media gateway route is unavailable", {
+      code: "MEDIA_GATEWAY_STORED_ROUTE_UNAVAILABLE",
+    });
+  }
+
+  const { data: claimedSession, error: sessionError } = await db
+    .from("cloud_playback_sessions")
+    .select("*,cloud_gateway_sessions(*)")
+    .eq("id", liveSessionId)
+    .eq("user_id", userId)
+    .single();
+  if (sessionError || !claimedSession) {
+    await rollbackMediaCacheLivePlayback(db, liveSessionId, userId, attachmentId)
+      .catch(() => null);
+    if (sessionError) throwDb(sessionError, "Unable to load shared live media session");
+    throw new HttpError(503, "Shared live media session is unavailable");
+  }
+
+  let gatewayBody: JsonRecord = {};
+  let attachmentCreationAttempted = false;
+  let followerRegistrationTransferred = false;
+  let activationOutcomeUncertain = false;
+  try {
+    if (req.signal.aborted) throw playbackRequestAbortError();
+    attachmentCreationAttempted = true;
+    const response = await fetch(
+      `${route.url}/sessions/${encodeURIComponent(producerGatewaySessionId)}/viewers`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${route.token}`,
+        },
+        body: JSON.stringify({
+          attachmentId,
+          playbackSessionId: liveSessionId,
+          expiresAt: stringOr(claim.producer_expires_at, expiresAt),
+        }),
+        signal: req.signal,
+      },
+    );
+    gatewayBody = await response.json().catch(() => ({} as JsonRecord));
+    if ([404, 410, 425, 429].includes(response.status)) {
+      await revokeMediaCacheLiveGatewayAttachment({
+        route,
+        gatewaySessionId: producerGatewaySessionId,
+        attachmentId,
+        playbackSessionId: liveSessionId,
+      }).catch(() => null);
+      await rollbackMediaCacheLivePlayback(db, liveSessionId, userId, attachmentId);
+      return null;
+    }
+    if (!response.ok) {
+      throw new HttpError(response.status, "Media gateway refused shared live attachment", gatewayBody);
+    }
+    const liveJoin = recordOrEmpty(gatewayBody.liveJoin ?? gatewayBody.live_join);
+    const hlsUrl = stringOr(gatewayBody.hlsUrl ?? gatewayBody.hls_url, "");
+    const audioStreamIndex = boundedNullableInt(
+      gatewayBody.audioStreamIndex ?? gatewayBody.audio_stream_index,
+      0,
+      1024,
+    );
+    const subtitleStreamIndex = boundedNullableInt(
+      gatewayBody.subtitleStreamIndex ?? gatewayBody.subtitle_stream_index,
+      0,
+      1024,
+    );
+    const codecProfile = firstUsefulCodecProfile(gatewayBody.codecProfile, gatewayBody.codec_profile);
+    const audioRenditions = normalizeGatewayAudioRenditions(
+      gatewayBody.audioRenditions ?? gatewayBody.audio_renditions,
+      audioStreamIndex,
+    );
+    const multiAudioHls = normalizeGatewayMultiAudioHls(
+      gatewayBody.multiAudioHls ?? gatewayBody.multi_audio_hls,
+      audioRenditions,
+      audioStreamIndex,
+      codecProfile,
+    );
+    const subtitleRenditions = normalizeGatewaySubtitleRenditions(
+      gatewayBody.subtitleRenditions ?? gatewayBody.subtitle_renditions,
+      codecProfile,
+    );
+    const exactSubtitleHls = normalizeGatewayExactSubtitleHls(
+      gatewayBody.exactSubtitleHls ?? gatewayBody.exact_subtitle_hls,
+      subtitleRenditions,
+      codecProfile,
+    );
+    if (
+      !hlsUrl ||
+      stringOr(gatewayBody.id, "") !== producerGatewaySessionId ||
+      liveJoin.joinable !== true ||
+      liveJoin.topologyValidated !== true ||
+      liveJoin.continuityValidated !== true ||
+      stringOr(liveJoin.attachmentId ?? liveJoin.attachment_id, "") !== attachmentId ||
+      Number(liveJoin.audioRenditionCount) !== (multiAudioHls ? audioRenditions.length : 0) ||
+      Number(liveJoin.subtitleRenditionCount) !== (exactSubtitleHls ? subtitleRenditions.length : 0)
+    ) {
+      throw new HttpError(502, "Shared live media topology is invalid", {
+        code: "MEDIA_CACHE_LIVE_JOIN_TOPOLOGY_INVALID",
+      });
+    }
+
+    let activated: unknown = false;
+    let activationError: unknown = null;
+    // The SQL activation is idempotent. Retry once so a committed transaction
+    // whose PostgREST response was lost is acknowledged without consuming a
+    // second singleflight follower registration.
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const activation = await db.rpc(
+        "norva_activate_media_cache_live_playback",
+        {
+          p_session_id: liveSessionId,
+          p_user_id: userId,
+          p_attachment_id: attachmentId,
+          p_hls_url: hlsUrl,
+        },
+      );
+      activated = activation.data;
+      activationError = activation.error;
+      if (!activationError || req.signal.aborted) break;
+    }
+    if (activationError) {
+      const { data: activationRows, error: activationInspectionError } = await db
+        .from("cloud_gateway_sessions")
+        .select("status,hls_url,media_cache_live_attachment_state")
+        .eq("playback_session_id", liveSessionId)
+        .eq("user_id", userId)
+        .eq("media_cache_live_attachment_id", attachmentId)
+        .limit(1);
+      if (activationInspectionError) {
+        activationOutcomeUncertain = true;
+      } else {
+        const activationRow = recordOrEmpty(
+          Array.isArray(activationRows) ? activationRows[0] : activationRows,
+        );
+        if (stringOr(activationRow.media_cache_live_attachment_state, "") === "active") {
+          followerRegistrationTransferred = true;
+          activated = stringOr(activationRow.status, "") === "ready" &&
+            stringOr(activationRow.hls_url, "") === hlsUrl;
+        }
+      }
+      if (activated !== true) {
+        throwDb(activationError, "Unable to activate shared live media playback");
+      }
+    }
+    if (activated !== true) {
+      await revokeMediaCacheLiveGatewayAttachment({
+        route,
+        gatewaySessionId: producerGatewaySessionId,
+        attachmentId,
+        playbackSessionId: liveSessionId,
+      }).catch(() => null);
+      await rollbackMediaCacheLivePlayback(db, liveSessionId, userId, attachmentId)
+        .catch(() => null);
+      return null;
+    }
+    followerRegistrationTransferred = true;
+
+    const supersededSessionIds = Array.isArray(claim.superseded_session_ids)
+      ? claim.superseded_session_ids
+        .map((value) => stringOrNull(value))
+        .filter((value): value is string => Boolean(value))
+      : [];
+    await releaseSupersededPlaybackSessions(supersededSessionIds, db).catch(() => {
+      console.warn("[norva-playback] superseded shared live attachment cleanup failed");
+    });
+    const gatewayRows = Array.isArray(claimedSession.cloud_gateway_sessions)
+      ? claimedSession.cloud_gateway_sessions
+      : [];
+    const gatewayRow = recordOrEmpty(gatewayRows[0]);
+    const gatewaySessionResponse = {
+      ...sanitizeGatewaySession({ ...gatewayRow, status: "ready", hls_url: hlsUrl }),
+      audioStreamIndex,
+      audio_stream_index: audioStreamIndex,
+      subtitleStreamIndex,
+      subtitle_stream_index: subtitleStreamIndex,
+      audioRenditions: multiAudioHls ? audioRenditions : null,
+      audio_renditions: multiAudioHls ? audioRenditions : null,
+      multiAudioHls,
+      multi_audio_hls: multiAudioHls,
+      subtitleRenditions: exactSubtitleHls ? subtitleRenditions : null,
+      subtitle_renditions: exactSubtitleHls ? subtitleRenditions : null,
+      exactSubtitleHls,
+      exact_subtitle_hls: exactSubtitleHls,
+      liveJoin,
+      live_join: liveJoin,
+    };
+    return {
+      session: publicPlaybackSession({ ...claimedSession, status: "ready" }),
+      playback: {
+        mode: "transcode",
+        status: "ready",
+        url: hlsUrl,
+        transport: "shared-live-hls",
+        gatewaySession: gatewaySessionResponse,
+        gatewayRequired: false,
+        startupMs: 0,
+        audioMode: stringOrNull(gatewayBody.audioMode ?? gatewayBody.audio_mode),
+        audioStreamIndex,
+        audio_stream_index: audioStreamIndex,
+        subtitleStreamIndex,
+        subtitle_stream_index: subtitleStreamIndex,
+        audioRenditions: multiAudioHls ? audioRenditions : null,
+        audio_renditions: multiAudioHls ? audioRenditions : null,
+        multiAudioHls,
+        multi_audio_hls: multiAudioHls,
+        subtitleRenditions: exactSubtitleHls ? subtitleRenditions : null,
+        subtitle_renditions: exactSubtitleHls ? subtitleRenditions : null,
+        exactSubtitleHls,
+        exact_subtitle_hls: exactSubtitleHls,
+        startupPolicy: normalizeGatewayStartupPolicy(
+          gatewayBody.startupPolicy ?? gatewayBody.startup_policy,
+        ),
+        codecProfile: hasUsefulCodecProfile(codecProfile) ? codecProfile : null,
+        liveJoin,
+        live_join: liveJoin,
+        transportExpiresAt: stringOr(claim.producer_expires_at, expiresAt),
+        sessionExpiresAt: expiresAt,
+      },
+    };
+  } catch (joinError) {
+    if (attachmentCreationAttempted) {
+      await revokeMediaCacheLiveGatewayAttachment({
+        route,
+        gatewaySessionId: producerGatewaySessionId,
+        attachmentId,
+        playbackSessionId: liveSessionId,
+      }).catch(() => null);
+    }
+    if (followerRegistrationTransferred || activationOutcomeUncertain) {
+      await db.rpc("norva_finalize_media_cache_live_attachment_release", {
+        p_playback_session_id: liveSessionId,
+        p_user_id: userId,
+        p_attachment_id: attachmentId,
+      }).catch(() => null);
+    } else {
+      await rollbackMediaCacheLivePlayback(db, liveSessionId, userId, attachmentId)
+        .catch(() => null);
+    }
+    const failure = joinError instanceof Error
+      ? joinError
+      : new Error("Shared live media playback failed");
+    (failure as Error & { mediaCacheFollowerRegistrationTransferred?: boolean })
+      .mediaCacheFollowerRegistrationTransferred =
+        followerRegistrationTransferred || activationOutcomeUncertain;
+    throw failure;
+  }
+}
+
 async function abandonMediaCacheProducerClaim(
   db: SupabaseClient,
   producer: MediaCacheProducerContext,
@@ -1301,6 +1666,38 @@ async function coordinateColdMediaCachePlayback(options: {
     claim,
     resolve,
     leave,
+    tryJoin: runtimeConfig.mediaCacheLiveJoinEnabled
+      ? async () => {
+        try {
+          const joined = await tryCreateLiveMediaCachePlayback({
+            req,
+            db,
+            runtimeConfig,
+            entitlement,
+            workFingerprint: fingerprints.workFingerprint,
+            userId,
+            sourceId,
+            deviceId,
+            itemType,
+            itemId,
+            targetUrlHash,
+            streamMime,
+            playbackHint,
+            expiresAt,
+          });
+          return joined ? { joined: true, value: joined } : null;
+        } catch (error) {
+          return {
+            joined: false,
+            registrationTransferred: Boolean(
+              (error as { mediaCacheFollowerRegistrationTransferred?: boolean })
+                ?.mediaCacheFollowerRegistrationTransferred,
+            ),
+            error,
+          };
+        }
+      }
+      : undefined,
     timeoutMs: runtimeConfig.mediaCacheFollowerWaitMs,
     pollMs: 250,
     signal: req.signal,
@@ -1323,6 +1720,9 @@ async function coordinateColdMediaCachePlayback(options: {
       sessionId, userId, sourceId, deviceId, itemType, itemId, targetUrlHash,
       streamMime, playbackHint, expiresAt,
     });
+  }
+  if (outcome.role === "joined" && outcome.joinValue) {
+    return outcome.joinValue;
   }
   throw new HttpError(425, "Another viewer is preparing this film", {
     code: "MEDIA_CACHE_PRODUCER_ACTIVE",
@@ -4826,6 +5226,27 @@ async function requestDemandDrivenMediaCacheContinuation(
   return data === true;
 }
 
+async function requestDemandDrivenMediaCacheContinuationForLiveAttachment(
+  db: SupabaseClient,
+  runtimeConfig: RuntimeConfig,
+  playbackSessionId: string,
+  attachmentId: string,
+) {
+  if (!runtimeConfig.mediaCacheSingleflightEnabled) return false;
+  if (!PLAYBACK_SESSION_UUID_PATTERN.test(playbackSessionId)
+    || !PLAYBACK_SESSION_UUID_PATTERN.test(attachmentId)) return false;
+  const { data, error } = await db.rpc(
+    "norva_request_media_cache_continuation_for_live_attachment",
+    {
+      p_playback_session_id: playbackSessionId,
+      p_attachment_id: attachmentId,
+      p_ttl_seconds: MEDIA_CACHE_SINGLEFLIGHT_LEASE_TTL_SECONDS,
+    },
+  );
+  if (error) return false;
+  return data === true;
+}
+
 async function expirePlaybackSession(id: string, userId: string, db: SupabaseClient) {
   const { data: session, error } = await db
     .from("cloud_playback_sessions")
@@ -4848,6 +5269,7 @@ async function expirePlaybackSession(id: string, userId: string, db: SupabaseCli
     : [];
   const runtimeConfig = await getRuntimeConfig(db);
   const closedGatewayIds: string[] = [];
+  const preservedGatewayDatabaseIds = new Set<string>();
   const gatewayErrors: unknown[] = [];
   const mediaCacheErrors: unknown[] = [];
   let rawPumpsAborted = 0;
@@ -4908,18 +5330,28 @@ async function expirePlaybackSession(id: string, userId: string, db: SupabaseCli
         });
       }
 
-      const cleanupUrl = new URL(
-        `${storedGatewayRoute.url}/sessions/${encodeURIComponent(externalSessionId)}`,
-      );
+      const liveAttachmentId = stringOrNull(gateway.media_cache_live_attachment_id);
+      const cleanupUrl = new URL(liveAttachmentId
+        ? `${storedGatewayRoute.url}/sessions/${encodeURIComponent(externalSessionId)}` +
+          `/viewers/${encodeURIComponent(liveAttachmentId)}`
+        : `${storedGatewayRoute.url}/sessions/${encodeURIComponent(externalSessionId)}`);
       // Detach only when the distributed lease still has a waiting viewer.
       // This server-side transition marks the lease as background-preemptable;
       // a browser cannot request continuation and an idle asset is never filled.
-      const continueMediaCache = await requestDemandDrivenMediaCacheContinuation(
-        db,
-        runtimeConfig,
-        id,
-        externalSessionId,
-      );
+      const continueMediaCache = liveAttachmentId
+        ? await requestDemandDrivenMediaCacheContinuationForLiveAttachment(
+          db,
+          runtimeConfig,
+          id,
+          liveAttachmentId,
+        )
+        : await requestDemandDrivenMediaCacheContinuation(
+          db,
+          runtimeConfig,
+          id,
+          externalSessionId,
+        );
+      if (liveAttachmentId) cleanupUrl.searchParams.set("playbackSessionId", id);
       if (continueMediaCache) cleanupUrl.searchParams.set("completeCache", "continue");
       const response = await fetch(cleanupUrl.toString(), {
         method: "DELETE",
@@ -4933,6 +5365,31 @@ async function expirePlaybackSession(id: string, userId: string, db: SupabaseCli
       const cleanupBody = response.ok
         ? await response.json().catch(() => ({} as JsonRecord))
         : ({} as JsonRecord);
+      const continuationState = stringOrNull(
+        recordOrEmpty(
+          cleanupBody.completeCacheContinuation ?? cleanupBody.complete_cache_continuation,
+        ).state,
+      );
+      const gatewayDatabaseId = stringOrNull(gateway.id);
+      if (
+        !liveAttachmentId &&
+        response.status === 202 &&
+        ["joined", "running"].includes(stringOr(continuationState, "")) &&
+        gatewayDatabaseId
+      ) {
+        preservedGatewayDatabaseIds.add(gatewayDatabaseId);
+      }
+      if (liveAttachmentId) {
+        const { error: finalizeError } = await db.rpc(
+          "norva_finalize_media_cache_live_attachment_release",
+          {
+            p_playback_session_id: id,
+            p_user_id: userId,
+            p_attachment_id: liveAttachmentId,
+          },
+        );
+        if (finalizeError) throw finalizeError;
+      }
       const finalCodecProfile = normalizeCodecProfile(recordOrEmpty(
         cleanupBody.finalCodecProfile ?? cleanupBody.final_codec_profile,
       ));
@@ -4979,7 +5436,9 @@ async function expirePlaybackSession(id: string, userId: string, db: SupabaseCli
   if (gatewaySessions.length) {
     const gatewayIds = gatewaySessions
       .map((gateway: JsonRecord) => stringOrNull(gateway.id))
-      .filter((gatewayId: string | null): gatewayId is string => Boolean(gatewayId));
+      .filter((gatewayId: string | null): gatewayId is string => (
+        Boolean(gatewayId) && !preservedGatewayDatabaseIds.has(String(gatewayId))
+      ));
     if (gatewayIds.length) {
       const { error: gatewayUpdateError } = await db
         .from("cloud_gateway_sessions")
@@ -5308,7 +5767,7 @@ async function getPlaybackTelemetrySummary(url: URL, userId: string, db: Supabas
 async function closeOpenGatewaySessionsForUser(userId: string, db: SupabaseClient): Promise<number> {
   const { data: gatewaySessions, error } = await db
     .from("cloud_gateway_sessions")
-    .select("id, playback_session_id, gateway_id, external_session_id, status")
+    .select("id,playback_session_id,gateway_id,external_session_id,status,media_cache_live_attachment_id,media_cache_lease_token")
     .eq("user_id", userId)
     .in("status", ["pending", "starting", "ready"]);
   if (error) {
@@ -5318,9 +5777,7 @@ async function closeOpenGatewaySessionsForUser(userId: string, db: SupabaseClien
   if (!gatewaySessions?.length) return 0;
 
   const runtimeConfig = await getRuntimeConfig(db);
-  const gatewayIds = gatewaySessions
-    .map((gateway: JsonRecord) => stringOrNull(gateway.id))
-    .filter((gatewayId: string | null): gatewayId is string => Boolean(gatewayId));
+  const preservedGatewayDatabaseIds = new Set<string>();
   const playbackSessionIds = gatewaySessions
     .map((gateway: JsonRecord) => stringOrNull(gateway.playback_session_id))
     .filter((sessionId: string | null): sessionId is string => Boolean(sessionId));
@@ -5346,7 +5803,7 @@ async function closeOpenGatewaySessionsForUser(userId: string, db: SupabaseClien
     runtimeConfig.mediaGatewayRouting.defaultRoute ||
     runtimeConfig.mediaGatewayRouting.canaryRoute
   ) {
-    await Promise.allSettled(gatewaySessions.map(async (gateway: JsonRecord) => {
+    const cleanupGatewaySession = async (gateway: JsonRecord) => {
       const externalSessionId = stringOrNull(gateway.external_session_id);
       if (!externalSessionId) return;
       const storedGatewayRoute = mediaGatewayRouteForStoredSession(runtimeConfig, gateway);
@@ -5354,9 +5811,29 @@ async function closeOpenGatewaySessionsForUser(userId: string, db: SupabaseClien
         console.warn("[norva-playback] stored gateway cleanup route unavailable");
         return;
       }
-      const response = await fetch(`${storedGatewayRoute.url}/sessions/${encodeURIComponent(externalSessionId)}`, {
+      const playbackSessionId = stringOrNull(gateway.playback_session_id);
+      const liveAttachmentId = stringOrNull(gateway.media_cache_live_attachment_id);
+      const cleanupUrl = new URL(liveAttachmentId
+        ? `${storedGatewayRoute.url}/sessions/${encodeURIComponent(externalSessionId)}` +
+          `/viewers/${encodeURIComponent(liveAttachmentId)}`
+        : `${storedGatewayRoute.url}/sessions/${encodeURIComponent(externalSessionId)}`);
+      const continueMediaCache = playbackSessionId
+        ? (liveAttachmentId
+          ? await requestDemandDrivenMediaCacheContinuationForLiveAttachment(
+            db, runtimeConfig, playbackSessionId, liveAttachmentId,
+          )
+          : await requestDemandDrivenMediaCacheContinuation(
+            db, runtimeConfig, playbackSessionId, externalSessionId,
+          ))
+        : false;
+      if (liveAttachmentId && playbackSessionId) {
+        cleanupUrl.searchParams.set("playbackSessionId", playbackSessionId);
+      }
+      if (continueMediaCache) cleanupUrl.searchParams.set("completeCache", "continue");
+      const response = await fetch(cleanupUrl.toString(), {
         method: "DELETE",
         headers: { Authorization: `Bearer ${storedGatewayRoute.token}` },
+        signal: AbortSignal.timeout(8_000),
       });
       if (!response.ok && response.status !== 404) {
         console.warn("[norva-playback] gateway cleanup refused", response.status, await response.text().catch(() => ""));
@@ -5364,6 +5841,28 @@ async function closeOpenGatewaySessionsForUser(userId: string, db: SupabaseClien
       }
       if (response.ok) {
         const cleanupBody = await response.json().catch(() => ({} as JsonRecord));
+        const continuationState = stringOrNull(recordOrEmpty(
+          cleanupBody.completeCacheContinuation ?? cleanupBody.complete_cache_continuation,
+        ).state);
+        const gatewayDatabaseId = stringOrNull(gateway.id);
+        if (
+          !liveAttachmentId && response.status === 202 &&
+          ["joined", "running"].includes(stringOr(continuationState, "")) &&
+          gatewayDatabaseId
+        ) preservedGatewayDatabaseIds.add(gatewayDatabaseId);
+        if (liveAttachmentId && playbackSessionId) {
+          const { error: finalizeError } = await db.rpc(
+            "norva_finalize_media_cache_live_attachment_release",
+            {
+              p_playback_session_id: playbackSessionId,
+              p_user_id: userId,
+              p_attachment_id: liveAttachmentId,
+            },
+          );
+          if (finalizeError) {
+            console.warn("[norva-playback] live attachment finalization failed");
+          }
+        }
         const finalCodecProfile = normalizeCodecProfile(recordOrEmpty(
           cleanupBody.finalCodecProfile ?? cleanupBody.final_codec_profile,
         ));
@@ -5391,10 +5890,28 @@ async function closeOpenGatewaySessionsForUser(userId: string, db: SupabaseClien
           });
         }
       }
-    }));
+    };
+
+    // A same-account retry can temporarily own both a viewer attachment and
+    // the producer row. Detach viewers first: otherwise a concurrent producer
+    // DELETE may answer `joined`, get preserved in Postgres, then lose its last
+    // viewer milliseconds later and stop, leaving a stale ready row behind.
+    const liveAttachmentGatewaySessions = gatewaySessions.filter(
+      (gateway: JsonRecord) => Boolean(stringOrNull(gateway.media_cache_live_attachment_id)),
+    );
+    const producerGatewaySessions = gatewaySessions.filter(
+      (gateway: JsonRecord) => !stringOrNull(gateway.media_cache_live_attachment_id),
+    );
+    await Promise.allSettled(liveAttachmentGatewaySessions.map(cleanupGatewaySession));
+    await Promise.allSettled(producerGatewaySessions.map(cleanupGatewaySession));
   }
 
   const now = new Date().toISOString();
+  const gatewayIds = gatewaySessions
+    .map((gateway: JsonRecord) => stringOrNull(gateway.id))
+    .filter((gatewayId: string | null): gatewayId is string => (
+      Boolean(gatewayId) && !preservedGatewayDatabaseIds.has(String(gatewayId))
+    ));
   if (gatewayIds.length) {
     const { error: gatewayUpdateError } = await db
       .from("cloud_gateway_sessions")
@@ -6864,6 +7381,9 @@ async function createGatewaySession(
   const startupPolicy = normalizeGatewayStartupPolicy(
     gatewayBody.startupPolicy ?? gatewayBody.startup_policy,
   );
+  const liveJoinCandidate = recordOrEmpty(
+    gatewayBody.liveJoin ?? gatewayBody.live_join,
+  ).candidate === true;
 
   try {
     const { data, error } = await db
@@ -6883,6 +7403,8 @@ async function createGatewaySession(
             media_cache_account_fingerprint: mediaCacheProducer.accountFingerprint,
             media_cache_lease_token: mediaCacheProducer.leaseToken,
             media_cache_owner_instance_fingerprint: mediaCacheProducer.ownerInstanceFingerprint,
+            media_cache_live_joinable_at: liveJoinCandidate ? new Date().toISOString() : null,
+            media_cache_primary_attached: true,
           }
           : {}),
       })
@@ -8098,6 +8620,7 @@ async function getRuntimeConfig(db: SupabaseClient): Promise<RuntimeConfig> {
     !ENV_MEDIA_CACHE_ENABLED ||
     !ENV_MEDIA_CACHE_TICKET_TTL_SECONDS ||
     !ENV_MEDIA_CACHE_SINGLEFLIGHT_ENABLED ||
+    !ENV_MEDIA_CACHE_LIVE_JOIN_ENABLED ||
     !ENV_MEDIA_CACHE_COORDINATION_HMAC_KEY ||
     !ENV_MEDIA_CACHE_FOLLOWER_WAIT_MS;
 
@@ -8152,6 +8675,11 @@ async function getRuntimeConfig(db: SupabaseClient): Promise<RuntimeConfig> {
     mediaCacheSingleflightEnabled: (
       ENV_MEDIA_CACHE_SINGLEFLIGHT_ENABLED ||
       fromDb.get("NORVA_MEDIA_CACHE_SINGLEFLIGHT_ENABLED") ||
+      ""
+    ) === "true",
+    mediaCacheLiveJoinEnabled: (
+      ENV_MEDIA_CACHE_LIVE_JOIN_ENABLED ||
+      fromDb.get("NORVA_MEDIA_CACHE_LIVE_JOIN_ENABLED") ||
       ""
     ) === "true",
     mediaCacheCoordinationHmacKey: ENV_MEDIA_CACHE_COORDINATION_HMAC_KEY ||

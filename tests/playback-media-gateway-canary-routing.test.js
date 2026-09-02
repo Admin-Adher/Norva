@@ -205,12 +205,15 @@ test('malformed allowlists never select a canary or expose a partial route', asy
 test('norva-playback persists the chosen gateway identity and routes cleanup by stored identity', () => {
   const edge = fs.readFileSync(EDGE_PATH, 'utf8');
   assert.match(edge, /gateway_id:\s*gatewayRoute\.gatewayId/);
-  assert.match(edge, /select\("id, playback_session_id, gateway_id, external_session_id, status"\)/);
+  assert.match(
+    edge,
+    /select\("id,playback_session_id,gateway_id,external_session_id,status,media_cache_live_attachment_id,media_cache_lease_token"\)/,
+  );
   assert.match(edge, /mediaGatewayRouteForStoredSession\(runtimeConfig, gateway\)/);
   assert.match(edge, /MEDIA_GATEWAY_STORED_ROUTE_UNAVAILABLE/);
   assert.match(edge, /MEDIA_GATEWAY_CANARY_ROUTE_UNAVAILABLE/);
   assert.match(edge, /createBytePipeAccess\([\s\S]*?rawTokenExpiresAt,[\s\S]*?true,[\s\S]*?\);/);
-  assert.match(edge, /version: 75[\s\S]*mediaGatewayCanaryRouting:/);
+  assert.match(edge, /version: 76[\s\S]*mediaGatewayCanaryRouting:/);
 });
 
 test('Edge v61 forwards only admitted copy, complete-cache, or measured VAAPI startup policies', () => {

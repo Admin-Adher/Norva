@@ -141,3 +141,42 @@ test('a vanished producer can be replaced once and a timed-out follower always l
   assert.equal(pending.role, 'pending');
   assert.equal(leaves, 1);
 });
+
+test('an atomically transferred live join never decrements a second follower on success or response loss', async () => {
+  const { awaitMediaCacheSingleflight } = await loadRuntime();
+  const leaseExpiresAt = new Date(Date.now() + 60_000).toISOString();
+  let leaves = 0;
+  const common = {
+    claim: async () => ({ claim_role: 'follower', lease_expires_at: leaseExpiresAt }),
+    resolve: async () => ({
+      work_state: 'producing',
+      producer_stage: 'producing',
+      lease_expires_at: leaseExpiresAt,
+    }),
+    leave: async () => { leaves += 1; return true; },
+    timeoutMs: 100,
+    pollMs: 25,
+  };
+
+  const joined = await awaitMediaCacheSingleflight({
+    ...common,
+    tryJoin: async () => ({ joined: true, value: { playback: 'shared-live-hls' } }),
+  });
+  assert.equal(joined.role, 'joined');
+  assert.deepEqual(joined.joinValue, { playback: 'shared-live-hls' });
+  assert.equal(leaves, 0);
+
+  const responseLost = new Error('activation response lost');
+  await assert.rejects(
+    awaitMediaCacheSingleflight({
+      ...common,
+      tryJoin: async () => ({
+        joined: false,
+        registrationTransferred: true,
+        error: responseLost,
+      }),
+    }),
+    responseLost,
+  );
+  assert.equal(leaves, 0);
+});
