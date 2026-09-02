@@ -57,7 +57,6 @@ function combinedAbortController(parentSignal, timeoutMs) {
         timedOut = true;
         controller.abort(new Error('Provider route benchmark timeout'));
     }, timeoutMs);
-    timer.unref?.();
     return {
         signal: controller.signal,
         timedOut: () => timedOut,
@@ -290,7 +289,6 @@ async function runLeasedProviderRouteBenchmark({
         () => { pulseLease().catch(() => {}); },
         Math.max(10, Math.min(5_000, Number(pulseIntervalMs) || 1_000)),
     );
-    pulseTimer.unref?.();
     const leasedIdleCheck = async () => {
         if (benchmarkController.signal.aborted || !await isAccountIdle()) return false;
         return pulseLease();
