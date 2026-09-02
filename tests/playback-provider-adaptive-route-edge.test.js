@@ -11,7 +11,7 @@ const edge = fs.readFileSync(path.join(
 ), 'utf8');
 
 test('playback edge exposes the service-authenticated provider route resolver', () => {
-  assert.match(edge, /version: 76,[\s\S]*providerAdaptiveRouteControlProtocol: 1/);
+  assert.match(edge, /version: 77,[\s\S]*providerAdaptiveRouteControlProtocol: 1/);
   assert.match(
     edge,
     /segments\[0\] === "provider-route" && segments\[1\] === "resolve"[\s\S]*runProviderRouteResolve/,

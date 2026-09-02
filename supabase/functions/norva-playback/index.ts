@@ -335,7 +335,7 @@ async function handleRequest(req: Request): Promise<Response> {
       return json(req, {
         ok: true,
         service: "norva-playback",
-        version: 76,
+        version: 77,
         nativeHeartbeatProtocol: 1,
         providerCircuitProtocol: 1,
         exactTrackCrawlerProtocol: 2,
@@ -1826,6 +1826,12 @@ async function coordinateColdMediaCachePlayback(options: {
     // provider-backed playback available during a rolling schema deployment.
     console.warn("[norva-playback] media cache admission unavailable; publication disabled");
   }
+  // Shadow/off governance records demand and recommendations only. It must be
+  // observational: claiming a producer here would transfer cache-only
+  // constraints to the Gateway even though this playback can never publish an
+  // object. In particular, imperfect provider suffixes must still fall through
+  // to the ordinary self-healing MKV path without a cache context.
+  if (admission.admitted !== true) return null;
   const rpcSingleRow = (data: unknown, label: string) => {
     const rows = Array.isArray(data) ? data : (data ? [data] : []);
     if (rows.length !== 1) throw new HttpError(503, label, { code: "MEDIA_CACHE_SINGLEFLIGHT_INVALID" });

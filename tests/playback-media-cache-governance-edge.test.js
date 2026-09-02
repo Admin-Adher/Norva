@@ -23,12 +23,25 @@ test('cold demand is scored and recorded before a producer is claimed', () => {
     'async function mediaCacheAccountFingerprintForPlayback',
   );
   const demand = coordinate.indexOf('norva_record_media_cache_demand');
+  const admissionGate = coordinate.indexOf('if (admission.admitted !== true) return null;');
   const claim = coordinate.indexOf('norva_claim_media_cache_producer');
-  assert.ok(demand >= 0 && claim > demand);
+  assert.ok(demand >= 0 && admissionGate > demand && claim > admissionGate);
   assert.match(coordinate, /p_work_fingerprint: fingerprints\.workFingerprint/);
   assert.match(coordinate, /p_account_fingerprint: fingerprints\.accountFingerprint/);
   assert.match(coordinate, /publication disabled/);
   assert.doesNotMatch(coordinate, /providerName|username|password|ticket/i);
+});
+
+test('off and shadow governance remain observational and never constrain playback', () => {
+  const coordinate = section(
+    'async function coordinateColdMediaCachePlayback',
+    'async function mediaCacheAccountFingerprintForPlayback',
+  );
+  assert.match(coordinate, /if \(admission\.admitted !== true\) return null;/);
+  assert.ok(
+    coordinate.indexOf('if (admission.admitted !== true) return null;') <
+      coordinate.indexOf('norva_claim_media_cache_producer'),
+  );
 });
 
 test('cost admission is passed only to cold coordination, never to the hot lookup', () => {

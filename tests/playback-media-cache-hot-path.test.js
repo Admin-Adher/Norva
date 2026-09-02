@@ -10,8 +10,8 @@ const edge = fs.readFileSync(path.join(
   '../supabase/functions/norva-playback/index.ts',
 ), 'utf8');
 
-test('Edge v76 advertises the shared-cache hot playback protocol', () => {
-  assert.match(edge, /version: 76,[\s\S]*sharedMediaCacheHotPlaybackProtocol: 1/);
+test('Edge v77 advertises the shared-cache hot playback protocol', () => {
+  assert.match(edge, /version: 77,[\s\S]*sharedMediaCacheHotPlaybackProtocol: 1/);
 });
 
 test('exact MKV cache lookup runs before provider circuit, capacity query, and provider claim', () => {

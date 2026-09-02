@@ -105,6 +105,46 @@ test('a partial request profile is completed once before FFmpeg chooses copy or 
     );
 });
 
+test('an authenticated VOD kind wins over an inaccurate provider URL suffix', () => {
+    const source = readGateway();
+    const liveStart = source.indexOf('function isLiveSession(');
+    const liveEnd = source.indexOf('\n// An H.264 stream', liveStart);
+    assert.ok(liveStart >= 0 && liveEnd > liveStart, 'isLiveSession source not found');
+    const isLiveSession = vm.runInNewContext(
+        `(${source.slice(liveStart, liveEnd).trim()})`,
+        { asRecord: gatewayGlobals.asRecord, path, URL },
+    );
+    assert.strictEqual(isLiveSession({
+        sourceUrl: 'https://provider.example/movie/account/file.ts',
+        playbackHint: { streamType: 'movie', container: 'mkv' },
+    }), false);
+    assert.strictEqual(isLiveSession({
+        sourceUrl: 'https://provider.example/live/account/channel.ts',
+        playbackHint: { streamType: 'live' },
+    }), true);
+    assert.strictEqual(isLiveSession({
+        sourceUrl: 'https://provider.example/channel.m3u8',
+        playbackHint: {},
+    }), true);
+
+    const isFiniteMkvVodSession = loadGatewayFunction(
+        'isFiniteMkvVodSession',
+        'parseProviderFileSize',
+        {
+            asRecord: gatewayGlobals.asRecord,
+            isLiveSession,
+            normalizeCodecToken: gatewayGlobals.normalizeCodecToken,
+            path,
+            URL,
+        },
+    );
+    assert.strictEqual(isFiniteMkvVodSession({
+        sourceUrl: 'https://provider.example/movie/account/file.ts',
+        playbackHint: { streamType: 'movie', container: 'mkv' },
+        codecProfile: {},
+    }), true);
+});
+
 test('Gateway readiness requires ten seconds and three finalized HLS segments', () => {
     const inspectHlsStartupPlaylist = loadGatewayFunction(
         'inspectHlsStartupPlaylist',
@@ -453,7 +493,7 @@ test('an exact finite Matroska H264 profile selects the 2s keyframe encode plan 
 test('exact Matroska H264 uses independent 2s HLS segments with forced keyframes and no split-by-time', () => {
     const source = readGateway();
 
-    assert.match(source, /const GATEWAY_VERSION = 149;/);
+    assert.match(source, /const GATEWAY_VERSION = 150;/);
     assert.match(source, /exactMatroskaH264ReencodeProtocol:\s*1/);
     assert.match(source, /exactMatroskaH264HlsTargetSeconds:\s*EXACT_MATROSKA_H264_HLS_TARGET_SECONDS/);
     assert.match(source, /exactMatroskaH264MaxPixels:\s*EXACT_MATROSKA_H264_MAX_PIXELS/);

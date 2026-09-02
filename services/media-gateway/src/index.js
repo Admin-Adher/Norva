@@ -2210,7 +2210,7 @@ const MAX_EXACT_SUBTITLE_HLS_RENDITIONS = clampInt(
     1,
     16,
 );
-const GATEWAY_VERSION = 149;
+const GATEWAY_VERSION = 150;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -13675,6 +13675,11 @@ function isLiveSession(session) {
     const hint = asRecord(session.playbackHint);
     const type = String(hint.streamType || hint.stream_type || hint.itemType || hint.item_type || '').toLowerCase();
     if (type === 'live' || type === 'channel') return true;
+    // Provider URL suffixes are frequently inaccurate (for example a finite
+    // movie delivered from a `.ts` endpoint). An authenticated, server-owned
+    // VOD kind is stronger authority than that suffix and must keep the file on
+    // the finite playback/self-healing path.
+    if (type === 'movie' || type === 'vod' || type === 'series' || type === 'episode') return false;
     try {
         const extension = path.extname(new URL(session.sourceUrl).pathname).replace(/^\./, '').toLowerCase();
         return extension === 'ts' || extension === 'm3u8';
