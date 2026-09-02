@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#05080f">
+  <title>TV Guide Grid Empty? Context Checks | Norva Blog</title>
+  <meta name="description" content="Troubleshoot an empty guide grid by checking source schedule coverage, channel identity, guide window, time zone, filters, profile, device, and timing.">
+  <link rel="canonical" href="https://norva.tv/blog/tv-guide-grid-empty/">
+  <meta name="robots" content="index,follow">
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/css/blog.css?v=1">
+  <meta property="og:type" content="article">
+  <meta property="og:site_name" content="Norva">
+  <meta property="og:title" content="TV Guide Grid Empty? Context Checks | Norva Blog">
+  <meta property="og:description" content="Troubleshoot an empty guide grid by checking source schedule coverage, channel identity, guide window, time zone, filters, profile, device, and timing.">
+  <meta property="og:url" content="https://norva.tv/blog/tv-guide-grid-empty/">
+  <meta property="og:image" content="https://norva.tv/img/devices/norva-device-tv.webp">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="TV Guide Grid Empty? Context Checks | Norva Blog">
+  <meta name="twitter:description" content="Troubleshoot an empty guide grid by checking source schedule coverage, channel identity, guide window, time zone, filters, profile, device, and timing.">
+  <meta name="twitter:image" content="https://norva.tv/img/devices/norva-device-tv.webp">
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "headline": "TV Guide Grid Empty? Start With These Context Checks",
+  "description": "Troubleshoot an empty guide grid by checking source schedule coverage, channel identity, guide window, time zone, filters, profile, device, and timing.",
+  "inLanguage": "en",
+  "datePublished": "2026-09-02T20:00:00+02:00",
+  "dateModified": "2026-09-02T20:00:00+02:00",
+  "author": {
+    "@type": "Organization",
+    "name": "Norva"
+  },
+  "publisher": {
+    "@type": "Organization",
+    "name": "Norva",
+    "logo": {
+      "@type": "ImageObject",
+      "url": "https://norva.tv/img/norva-app-icon-96.png"
+    }
+  },
+  "image": [
+    "https://norva.tv/img/devices/norva-device-tv.webp"
+  ],
+  "mainEntityOfPage": {
+    "@type": "WebPage",
+    "@id": "https://norva.tv/blog/tv-guide-grid-empty/"
+  }
+}
+  </script>
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    {
+      "@type": "ListItem",
+      "position": 1,
+      "name": "Home",
+      "item": "https://norva.tv/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 2,
+      "name": "Blog",
+      "item": "https://norva.tv/blog/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 3,
+      "name": "TV Guide Grid Empty? Start With These Context Checks",
+      "item": "https://norva.tv/blog/tv-guide-grid-empty/"
+    }
+  ]
+}
+  </script>
+  <script src="/js/marketing-config.js?v=1"></script>
+  <script defer src="/js/marketing.js?v=1"></script>
+  <script defer src="/js/consent-banner.js?v=1"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="blog-nav">
+    <a class="brand" href="/" aria-label="Norva home">
+      <img src="/img/norva-app-icon-96.png" width="34" height="34" alt="" decoding="async">
+      <span>Norva</span>
+    </a>
+    <nav class="nav-right" aria-label="Primary">
+      <a href="/blog/">Blog</a>
+      <a class="hide-sm" href="/#how-it-works">How it works</a>
+      <a class="cta" href="/account.html?returnTo=%2Fapp%23home" data-cta="blog-nav" data-auth-action>Start free trial</a>
+    </nav>
+  </header>
+  <main id="main-content">
+    <nav class="breadcrumb" aria-label="Breadcrumb"><a href="/">Home</a><span class="sep">›</span><a href="/blog/">Blog</a><span class="sep">›</span><span aria-current="page">TV Guide Grid Empty? Start With These Context Checks</span></nav>
+    <article>
+      <div class="article-meta">
+        <span class="tag">TV Guide Troubleshooting</span>
+        <span>By Norva Editorial Team</span>
+        <span class="dot">·</span>
+        <time datetime="2026-09-02T20:00:00+02:00">2 September 2026</time>
+        <span class="dot">·</span>
+        <span>8 min read</span>
+      </div>
+      <h1>TV Guide Grid Empty? Start With These Context Checks</h1>
+      <p class="lede">An empty-grid check separates missing channel rows from rows without listings, then verifies source coverage, time window, filters, profile, device, and timeline.</p>
+      <nav class="toc" aria-label="On this page">
+      <strong>On this page</strong>
+      <ul><li><a href="#classify-the-blank-screen">Classify the blank screen</a></li><li><a href="#verify-the-guide-window">Verify the guide window</a></li><li><a href="#confirm-account-profile-and-filters">Confirm account, profile, and filters</a></li><li><a href="#check-source-channel-coverage">Check source channel coverage</a></li><li><a href="#separate-no-channels-from-no-listings">Separate no channels from no listings</a></li><li><a href="#check-channel-identity-cues">Check channel identity cues</a></li><li><a href="#compare-another-supported-device">Compare another supported device</a></li><li><a href="#preserve-the-request-timeline">Preserve the request timeline</a></li><li><a href="#avoid-destructive-first-steps">Avoid destructive first steps</a></li><li><a href="#classify-the-evidence">Classify the evidence</a></li><li><a href="#prepare-a-redacted-support-record">Prepare a redacted support record</a></li><li><a href="#original-evidence-empty-guide-checklist">Original evidence: empty guide checklist</a></li><li><a href="#common-mistakes-and-limitations">Common mistakes and limitations</a></li><li><a href="#frequently-asked-questions">Frequently asked questions</a></li><li><a href="#your-next-step">Your next step</a></li><li><a href="#sources">Sources</a></li></ul>
+    </nav>
+      <blockquote><strong>In short:</strong> First decide whether the grid has no channel rows or has rows with no program cells. Record the authorized source, channel group, selected date and time window, device clock and time zone, account, profile, filters, device, application version, and timestamp. Verify two source channels and one schedule sample, remove one visible restriction, compare another supported device, and avoid repeated refreshes or source edits before saving evidence.</blockquote>
+<p>An empty-looking guide can describe several states: no channels, channels without listings, listings outside the selected window, hidden rows, or a layout that fails to reveal existing cells. Naming the state determines the next check.</p>
+<h2 id="classify-the-blank-screen">Classify the blank screen</h2>
+<p>Record whether channel labels appear, row outlines exist, a loading or empty message is visible, the time header appears, and focus can enter the grid. Do not call a layout or focus problem missing data until channel and program presence are checked.</p>
+<p>The <a href="/blog/tv-guide-troubleshooting-handbook/">TV guide troubleshooting handbook</a> provides the layer matrix.</p>
+<h2 id="verify-the-guide-window">Verify the guide window</h2>
+<p>Record selected date, visible start and end times, device-local clock, time zone name, and offset where visible. Return to the current time using only documented controls. A correct schedule outside the visible window can look empty.</p>
+<h2 id="confirm-account-profile-and-filters">Confirm account, profile, and filters</h2>
+<p>Record the active Norva account and profile, channel group, source selection, favorites-only or availability controls, category, search query, and any other visible filter. Remove one restriction, observe, then restore the baseline.</p>
+<p>Use the guide-filter checklist when channel rows return after a filter change.</p>
+<h2 id="check-source-channel-coverage">Check source channel coverage</h2>
+<p>Through the provider's official authorized route, confirm that at least two sampled channels currently exist and expose schedule information for the same time window. Record masked channel labels, source identity cues, and timestamps. Do not export the complete channel list.</p>
+<h2 id="separate-no-channels-from-no-listings">Separate no channels from no listings</h2>
+<p>If channel rows are absent, focus on source selection, group, filters, profile, and channel availability. If rows exist but program cells are blank, focus on schedule coverage, time context, and channel-to-schedule identity. The partial coverage guide handles mixed rows.</p>
+<h2 id="check-channel-identity-cues">Check channel identity cues</h2>
+<p>Record visible channel name, number or source identifier where shown, logo state, and source label. Same-name channels may not share schedule data. Do not infer mapping from name or logo alone.</p>
+<h2 id="compare-another-supported-device">Compare another supported device</h2>
+<p>Use the same account, profile, source, channel group, filters, date, guide window, and close timestamp. Record both device clocks, zones, and application versions. A populated grid on one screen establishes a cross-device difference, not its cause.</p>
+<h2 id="preserve-the-request-timeline">Preserve the request timeline</h2>
+<p>Record when the guide was opened, any visible loading state, first blank observation, navigation changes, source update, refresh request, application update, and current state. Use only current official timing guidance; otherwise report elapsed observation without a deadline.</p>
+<h2 id="avoid-destructive-first-steps">Avoid destructive first steps</h2>
+<p>Do not clear application data, reinstall, remove and reconnect the source, edit channel identifiers, change device time manually, or repeat refreshes before preserving the baseline. Those actions create new variables.</p>
+<h2 id="classify-the-evidence">Classify the evidence</h2>
+<p>Use no channel rows, channel rows without listings, guide window mismatch, time-zone mismatch, filter or group difference, source schedule absent, channel identity uncertain, device-specific display, focus or layout issue, or unknown. Keep the observation separate from implementation theories.</p>
+<h2 id="prepare-a-redacted-support-record">Prepare a redacted support record</h2>
+<p>Use the guide evidence template with screen classification, stable context, sampled channels, source observations, clock and zone, device versions, timeline, and actions. Exclude credentials and full source addresses.</p>
+<h2 id="original-evidence-empty-guide-checklist">Original evidence: empty guide checklist</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>Check</th><th>Observation</th></tr></thead>
+<tbody><tr><td>Channel rows present?</td><td></td></tr><tr><td>Program cells present?</td><td></td></tr><tr><td>Date and guide window</td><td></td></tr><tr><td>Device clock and zone</td><td></td></tr><tr><td>Account, profile, filters</td><td></td></tr><tr><td>Source channel samples</td><td></td></tr><tr><td>Other-device result</td><td></td></tr><tr><td>Timeline and actions</td><td></td></tr></tbody>
+</table></div>
+<h2 id="common-mistakes-and-limitations">Common mistakes and limitations</h2>
+<ul><li>Treating no rows and empty rows as the same symptom.</li><li>Ignoring selected date, time window, or time zone.</li><li>Comparing different channel groups or profiles.</li><li>Matching channels by logo alone.</li><li>Repeating refreshes before recording the first state.</li><li>Sharing a complete private channel list.</li></ul>
+<h2 id="frequently-asked-questions">Frequently asked questions</h2>
+<h3 id="should-i-change-the-device-clock-manually">Should I change the device clock manually?</h3>
+<p>Not as a first diagnostic step. Record the current automatic or manual state and follow official device and Norva guidance.</p>
+<h3 id="does-a-blank-grid-prove-the-source-has-no-schedule">Does a blank grid prove the source has no schedule?</h3>
+<p>No. Verify source coverage, channel identity, guide window, filters, and another supported device separately.</p>
+<h3 id="how-many-channels-should-i-sample">How many channels should I sample?</h3>
+<p>Use a small representative set, commonly two affected channels and one normal control when available.</p>
+<h2 id="your-next-step">Your next step</h2>
+<p><a href="https://norva.tv/support" target="_blank" rel="noopener">Check Current Norva Support</a></p>
+<h2 id="sources">Sources</h2>
+<ul><li><a href="https://norva.tv/support" target="_blank" rel="noopener">Norva support</a></li><li><a href="https://norva.tv/privacy" target="_blank" rel="noopener">Norva privacy policy</a></li><li><a href="https://norva.tv/terms" target="_blank" rel="noopener">Norva terms of service</a></li><li><a href="https://www.iana.org/time-zones" target="_blank" rel="noopener">IANA Time Zone Database</a></li></ul>
+      <section class="article-cta">
+      <a class="btn" href="https://norva.tv/support" data-cta="blog-article">Check Current Norva Support</a>
+    </section>
+      <section class="sources">
+      <h2>Sources</h2>
+      <ul><li><a href="https://norva.tv/support" target="_blank" rel="noopener">https://norva.tv/support</a></li><li><a href="https://norva.tv/privacy" target="_blank" rel="noopener">https://norva.tv/privacy</a></li><li><a href="https://norva.tv/terms" target="_blank" rel="noopener">https://norva.tv/terms</a></li><li><a href="https://www.iana.org/time-zones" target="_blank" rel="noopener">https://www.iana.org/time-zones</a></li></ul>
+    </section>
+      <section class="related">
+      <h2>Related reading</h2>
+      <div class="related-grid">
+        <a class="card" href="/blog/tv-guide-troubleshooting-handbook/">
+          <span class="tag">TV Guide Troubleshooting</span>
+          <div class="card-title">The Complete TV Guide Troubleshooting Handbook</div>
+          <p>A disciplined guide investigation separates schedule data, channel identity, time context, filters, device presentation, remote focus, layout, and performance before any reset.</p>
+        </a>
+      </div>
+    </section>
+    </article>
+  </main>
+  <footer class="blog-footer">
+    <div class="foot-inner">
+      <nav class="foot-links" aria-label="Footer">
+        <a href="/">Home</a>
+        <a href="/blog/">Blog</a>
+        <a href="/#features">Benefits</a>
+        <a href="/#pricing">Pricing</a>
+        <a href="/support.html?returnTo=%2Fblog%2F">Support</a>
+        <a href="/terms.html">Terms</a>
+        <a href="/privacy.html">Privacy</a>
+        <a href="/mentions-legales.html">Legal notice</a>
+      </nav>
+      <p class="disclaimer">&copy; 2026 Norva. Norva is a media player and organiser. It does not provide media. Use requires a compatible source you own or are authorised to access.</p>
+    </div>
+  </footer>
+</body>
+</html>
