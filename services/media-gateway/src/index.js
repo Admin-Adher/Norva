@@ -1799,14 +1799,15 @@ const FINITE_MKV_SEEK_WINDOW_BYTES = clampInt(
     256 * 1024,
     16 * 1024 * 1024,
 );
-// A resumed multi-audio graph causes FFmpeg to hop through more Matroska cue
-// ranges before all mapped streams are aligned. Large 8 MiB provider windows
-// are efficient once reads become sequential, but make an abandoned cue hold a
-// mono-account slot for tens of seconds on a slow origin. Keep that startup
-// phase bounded; single-audio resumes retain the larger throughput window.
+// A resumed multi-audio graph causes FFmpeg to revisit the Matroska header and
+// cue index before all mapped streams align. A 1 MiB first window split the
+// observed 0-3 MiB header walk into three provider round trips; 8 MiB made short
+// abandoned cues too expensive on a slow origin. Four MiB covers the indexed
+// header in one bounded fetch, while sequential media reads can still expand to
+// the normal 8 MiB throughput window.
 const FINITE_MKV_MULTI_AUDIO_SEEK_WINDOW_BYTES = clampInt(
     process.env.FINITE_MKV_MULTI_AUDIO_SEEK_WINDOW_BYTES,
-    1 * 1024 * 1024,
+    4 * 1024 * 1024,
     256 * 1024,
     8 * 1024 * 1024,
 );

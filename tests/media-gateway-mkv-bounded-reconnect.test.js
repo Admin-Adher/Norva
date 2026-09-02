@@ -3643,7 +3643,7 @@ test('production finite MKV resume uses continuous indexed windows and keeps lin
     assert.match(source, /boundedMkvInputPumpProtocol:\s*1/);
     assert.match(source, /finiteMkvSeekBroker:\s*\{[\s\S]+?protocol:\s*8/);
     assert.match(source, /FINITE_MKV_SEEK_WINDOW_BYTES[\s\S]+?8 \* 1024 \* 1024/);
-    assert.match(source, /FINITE_MKV_MULTI_AUDIO_SEEK_WINDOW_BYTES[\s\S]+?1 \* 1024 \* 1024/);
+    assert.match(source, /FINITE_MKV_MULTI_AUDIO_SEEK_WINDOW_BYTES[\s\S]+?4 \* 1024 \* 1024/);
     assert.match(source, /FINITE_MKV_SEEK_CACHE_BYTES[\s\S]+?64 \* 1024 \* 1024/);
     assert.match(source, /finiteSequentialWindowBytes:\s*FINITE_MKV_SEEK_WINDOW_BYTES/);
     assert.match(source, /finiteMkvSeekBroker:\s*\{[\s\S]+?sequentialWindowBytes:\s*FINITE_MKV_SEEK_WINDOW_BYTES/);
