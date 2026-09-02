@@ -32,6 +32,9 @@ test('canary is manual-only while the existing relay main deployment remains unc
   assert.match(workflow, /if \[ "\$MEDIA_CACHE_CANARY_READY" = 'true' \]/);
   assert.match(workflow, /secrets\.CLOUDFLARE_MEDIA_CACHE_DEPLOY_TOKEN/);
   assert.match(workflow, /secrets\.CLOUDFLARE_MEDIA_CACHE_PURGE_TOKEN/);
+  assert.match(workflow, /CLOUDFLARE_ZONE_ID: \$\{\{ vars\.CLOUDFLARE_ZONE_ID \}\}/);
+  assert.match(workflow, /client\/v4\/zones\/\$CLOUDFLARE_ZONE_ID/);
+  assert.doesNotMatch(workflow, /zones\?[^\n]*account\.id/);
   assert.match(workflow, /MEDIA_CACHE_CLOUDFLARE_PURGE_TOKEN: process\.env\.MEDIA_CACHE_CANARY_PURGE_TOKEN/);
   assert.doesNotMatch(workflow, /MEDIA_CACHE_CLOUDFLARE_PURGE_TOKEN: process\.env\.CLOUDFLARE_API_TOKEN/);
   assert.match(workflow, /wrangler delete norva-media-cache-canary --force/);

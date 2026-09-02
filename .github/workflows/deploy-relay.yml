@@ -59,6 +59,7 @@ jobs:
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_MEDIA_CACHE_DEPLOY_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_ZONE_ID: ${{ vars.CLOUDFLARE_ZONE_ID }}
       MEDIA_CACHE_CANARY_PURGE_TOKEN: ${{ secrets.CLOUDFLARE_MEDIA_CACHE_PURGE_TOKEN }}
       MEDIA_CACHE_CANARY_BASE_URL: https://media-cache-canary.norva.tv
       MEDIA_CACHE_CANARY_EXPECT_HOST: media-cache-canary.norva.tv
@@ -93,6 +94,7 @@ jobs:
           set -euo pipefail
           test -n "$CLOUDFLARE_API_TOKEN"
           test -n "$CLOUDFLARE_ACCOUNT_ID"
+          test -n "$CLOUDFLARE_ZONE_ID"
           test -n "$MEDIA_CACHE_CANARY_PURGE_TOKEN"
           service_token="$(openssl rand -hex 32)"
           manifest_key="$(openssl rand -hex 32)"
@@ -108,18 +110,24 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          zone_response="$(curl --fail-with-body --silent --show-error \
+          zone_response="$(curl --silent --show-error \
             --header "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
             --header 'Content-Type: application/json' \
-            "https://api.cloudflare.com/client/v4/zones?name=norva.tv&status=active")"
+            "https://api.cloudflare.com/client/v4/zones/$CLOUDFLARE_ZONE_ID")"
           zone_id="$(printf '%s' "$zone_response" | node -e '
             let raw = "";
             process.stdin.on("data", (chunk) => { raw += chunk; });
             process.stdin.on("end", () => {
               const payload = JSON.parse(raw);
-              if (payload.success !== true || !Array.isArray(payload.result) || payload.result.length !== 1) process.exit(2);
-              const zone = payload.result[0];
-              if (zone.name !== "norva.tv" || zone.account?.id !== process.env.CLOUDFLARE_ACCOUNT_ID || !/^[0-9a-f]{32}$/.test(zone.id)) process.exit(3);
+              if (payload.success !== true || !payload.result || Array.isArray(payload.result)) {
+                const errors = Array.isArray(payload.errors)
+                  ? payload.errors.map(({ code, message }) => `${code}: ${message}`).join("; ")
+                  : "unknown Cloudflare error";
+                console.error(`Cloudflare zone verification failed: ${errors}`);
+                process.exit(2);
+              }
+              const zone = payload.result;
+              if (zone.id !== process.env.CLOUDFLARE_ZONE_ID || zone.name !== "norva.tv" || zone.status !== "active" || zone.account?.id !== process.env.CLOUDFLARE_ACCOUNT_ID || !/^[0-9a-f]{32}$/.test(zone.id)) process.exit(3);
               process.stdout.write(zone.id);
             });
           ')"
