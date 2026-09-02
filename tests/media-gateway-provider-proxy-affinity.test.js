@@ -115,6 +115,39 @@ test('the static pool accepts backward-compatible one-slot or the complete five-
   );
 });
 
+test('the static fallback transport is explicit while both protocols remain available', () => {
+  const httpProxyUrls = ['http://one', 'http://two'];
+  const socksProxyUrls = ['socks5://one', 'socks5://two'];
+  assert.equal(proxyPool.selectProviderProxyDefaultTransport({
+    httpProxyUrls,
+    socksProxyUrls,
+  }), 'socks5', 'an unset value preserves the existing hybrid-pool behavior');
+  assert.equal(proxyPool.selectProviderProxyDefaultTransport({
+    httpProxyUrls,
+    socksProxyUrls,
+    requestedTransport: ' HTTP ',
+  }), 'http');
+  assert.equal(proxyPool.selectProviderProxyDefaultTransport({
+    httpProxyUrls,
+    requestedTransport: 'http',
+  }), 'http');
+  assert.equal(proxyPool.selectProviderProxyDefaultTransport({}), 'direct');
+  assert.throws(
+    () => proxyPool.selectProviderProxyDefaultTransport({
+      httpProxyUrls,
+      requestedTransport: 'socks5',
+    }),
+    /requires PROVIDER_PROXY_SOCKS_URLS/,
+  );
+  assert.throws(
+    () => proxyPool.selectProviderProxyDefaultTransport({
+      httpProxyUrls,
+      requestedTransport: 'rotating',
+    }),
+    /must be http or socks5/,
+  );
+});
+
 test('legacy singular host:port:user:pass is normalized without exposing raw credential delimiters', () => {
   const [url] = proxyPool.parseProviderProxyUrls(
     'gateway.evomi.example:1000:static-user:p@ss:with/slash',
@@ -330,9 +363,15 @@ test('Gateway separates the SOCKS5 Node pool from the HTTP child-process pool', 
   assert.equal(gatewayPackage.dependencies.undici, '7.29.0');
   assert.equal(gatewayPackage.engines.node, '>=20.18.1');
   assert.match(gateway, /process\.env\.PROVIDER_PROXY_SOCKS_URLS/);
+  assert.match(gateway, /process\.env\.PROVIDER_PROXY_DEFAULT_NODE_TRANSPORT/);
   assert.match(
     gateway,
-    /const providerProxyUrls = providerSocksProxyUrls\.length[\s\S]{0,120}providerHttpProxyUrls/,
+    /const providerProxyUrls = providerProxyTransport === 'socks5'[\s\S]{0,100}providerSocksProxyUrls[\s\S]{0,100}providerHttpProxyUrls/,
+  );
+  assert.match(
+    gateway,
+    /fallbackNodeTransport:\s*providerProxyTransport/,
+    'the safe static fallback is independent from the adaptive HTTP and SOCKS5 candidate set',
   );
   assert.match(
     gateway,
@@ -471,7 +510,7 @@ test('gateway fails proxy 407 safely before provider 458 handling', () => {
 });
 
 test('gateway advertises targeted operator override support without identities or secrets', () => {
-  assert.match(gateway, /const GATEWAY_VERSION = 150;/);
+  assert.match(gateway, /const GATEWAY_VERSION = 151;/);
   assert.match(gateway, /providerProxyAffinityProtocol:\s*1/);
   assert.match(gateway, /providerProxyAffinityKey:\s*'provider-account'/);
   assert.match(gateway, /providerProxySlotOverrideProtocol:\s*1/);

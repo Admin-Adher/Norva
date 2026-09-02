@@ -46,6 +46,7 @@ const {
     providerAccountAffinityKey,
     providerAccountAffinityKeyFromCredentials,
     proxySlotIndexForAccount,
+    selectProviderProxyDefaultTransport,
 } = require('./providerProxyPool');
 const { ProviderAdaptiveRouteControl } = require('./providerAdaptiveRouteControl');
 const { PrivateMediaCacheStoreClient } = require('./privateMediaCacheStoreClient');
@@ -96,6 +97,9 @@ const app = express();
 //   PROVIDER_PROXY_SOCKS_URLS  optional same-shape SOCKS5 pool used only by Node
 //                        fetch/undici lanes. Child processes keep the matching
 //                        HTTP slot because FFmpeg's proxy support is HTTP-only here.
+//   PROVIDER_PROXY_DEFAULT_NODE_TRANSPORT  optional http|socks5 static fallback.
+//                        The legacy default remains SOCKS5 whenever that pool exists;
+//                        adaptive decisions may still select either configured protocol.
 //   PROVIDER_PROXY_SLOT_OVERRIDES  optional service-only JSON map whose keys are
 //                        sha256(provider-account) and whose values are slots 1..5.
 //                        Used only for bounded operator A/B and emergency egress repair.
@@ -130,12 +134,14 @@ if (providerSocksProxyUrls.length
     && providerSocksProxyUrls.length !== providerHttpProxyUrls.length) {
     throw new Error('PROVIDER_PROXY_SOCKS_URLS must have the same slot count as PROVIDER_PROXY_URLS');
 }
-const providerProxyUrls = providerSocksProxyUrls.length
+const providerProxyTransport = selectProviderProxyDefaultTransport({
+    httpProxyUrls: providerHttpProxyUrls,
+    socksProxyUrls: providerSocksProxyUrls,
+    requestedTransport: process.env.PROVIDER_PROXY_DEFAULT_NODE_TRANSPORT,
+});
+const providerProxyUrls = providerProxyTransport === 'socks5'
     ? providerSocksProxyUrls
     : providerHttpProxyUrls;
-const providerProxyTransport = providerProxyUrls.length
-    ? (providerSocksProxyUrls.length ? 'socks5' : 'http')
-    : 'direct';
 const providerProxySlotOverrides = parseProviderProxySlotOverrides(
     process.env.PROVIDER_PROXY_SLOT_OVERRIDES || '',
     providerProxyUrls.length,
@@ -147,7 +153,7 @@ if (providerProxyUrls.length) {
     try {
         providerHttpProxyAgents = providerHttpProxyUrls.map((u) => createProviderProxyAgent(u));
         providerSocksProxyAgents = providerSocksProxyUrls.map((u) => createProviderProxyAgent(u));
-        providerProxyAgents = providerSocksProxyAgents.length
+        providerProxyAgents = providerProxyTransport === 'socks5'
             ? providerSocksProxyAgents
             : providerHttpProxyAgents;
         // Fetch receives an explicit dispatcher and every provider-connected child receives
@@ -169,7 +175,7 @@ function staticPoolIndexForKey(key) {
 }
 function providerRouteForKey(key) {
     const staticIndex = staticPoolIndexForKey(key);
-    const fallbackTransport = providerSocksProxyAgents.length ? 'socks5' : 'http';
+    const fallbackTransport = providerProxyTransport;
     const adaptive = providerAdaptiveRouteControl?.decisionForAffinity(key) || null;
     const selected = adaptive || {
         slot: staticIndex + 1,
@@ -971,6 +977,7 @@ providerAdaptiveRouteControl = new ProviderAdaptiveRouteControl({
     gatewayToken: GATEWAY_TOKEN,
     lookupTimeoutMs: PROVIDER_ADAPTIVE_ROUTE_LOOKUP_TIMEOUT_MS,
     slotIndexForKey: staticPoolIndexForKey,
+    fallbackNodeTransport: providerProxyTransport,
 });
 if (PROVIDER_ADAPTIVE_ROUTE_REQUESTED) {
     const adaptiveStatus = providerAdaptiveRouteControl.publicStatus();
@@ -2210,7 +2217,7 @@ const MAX_EXACT_SUBTITLE_HLS_RENDITIONS = clampInt(
     1,
     16,
 );
-const GATEWAY_VERSION = 150;
+const GATEWAY_VERSION = 151;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to

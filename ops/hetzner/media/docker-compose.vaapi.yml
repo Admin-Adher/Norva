@@ -43,6 +43,7 @@ services:
       NORVA_EDGE_CALLBACK_BASE: ${NORVA_EDGE_CALLBACK_BASE:?NORVA_EDGE_CALLBACK_BASE is required}
       PROVIDER_PROXY_URLS: ${PROVIDER_PROXY_URLS:-}
       PROVIDER_PROXY_SOCKS_URLS: ${PROVIDER_PROXY_SOCKS_URLS:-}
+      PROVIDER_PROXY_DEFAULT_NODE_TRANSPORT: ${PROVIDER_PROXY_DEFAULT_NODE_TRANSPORT:-}
       PROVIDER_PROXY_SLOT_OVERRIDES: ${PROVIDER_PROXY_SLOT_OVERRIDES:-}
       # Adaptive routing is independently dark by default. The fingerprint key
       # is dedicated and never falls back to the shared Gateway bearer.

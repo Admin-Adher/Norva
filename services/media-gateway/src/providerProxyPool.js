@@ -175,6 +175,22 @@ function parseProviderProxyUrls(value, variableName = 'PROVIDER_PROXY_URLS') {
     return urls;
 }
 
+function selectProviderProxyDefaultTransport({
+    httpProxyUrls = [],
+    socksProxyUrls = [],
+    requestedTransport = '',
+} = {}) {
+    const requested = String(requestedTransport || '').trim().toLowerCase();
+    if (requested && !['http', 'socks5'].includes(requested)) {
+        throw new Error('PROVIDER_PROXY_DEFAULT_NODE_TRANSPORT must be http or socks5');
+    }
+    if (requested === 'socks5' && !socksProxyUrls.length) {
+        throw new Error('PROVIDER_PROXY_DEFAULT_NODE_TRANSPORT=socks5 requires PROVIDER_PROXY_SOCKS_URLS');
+    }
+    if (!httpProxyUrls.length) return 'direct';
+    return requested || (socksProxyUrls.length ? 'socks5' : 'http');
+}
+
 module.exports = {
     MAX_PROXY_SLOT_OVERRIDES,
     STATIC_PROXY_SLOT_COUNT,
@@ -184,5 +200,6 @@ module.exports = {
     providerAccountAffinityKeyFromCredentials,
     providerAccountOverrideHash,
     proxySlotIndexForAccount,
+    selectProviderProxyDefaultTransport,
     stableProxySlotIndex,
 };

@@ -52,6 +52,9 @@ class ProviderAdaptiveRouteControl {
         this.fetchImpl = options.fetchImpl || globalThis.fetch;
         this.lookupTimeoutMs = Math.max(100, Math.min(2_000, Number(options.lookupTimeoutMs) || 500));
         this.slotIndexForKey = options.slotIndexForKey;
+        this.fallbackNodeTransport = options.fallbackNodeTransport === 'http'
+            ? 'http'
+            : (this.socksProxyUrls.length ? 'socks5' : 'http');
         this.now = options.now || Date.now;
         this.appliedByAffinity = new Map();
         this.shadowByAffinity = new Map();
@@ -158,7 +161,7 @@ class ProviderAdaptiveRouteControl {
         const count = this.httpProxyUrls.length;
         if (!count) return null;
         const index = Math.max(0, Math.min(count - 1, Number(this.slotIndexForKey(affinityKey)) || 0));
-        const nodeTransport = this.socksProxyUrls.length ? 'socks5' : 'http';
+        const nodeTransport = this.fallbackNodeTransport;
         const candidate = this.candidates.find((item) =>
             item.slot === index + 1 && item.nodeTransport === nodeTransport);
         this.stats.fallbacks += 1;
@@ -243,6 +246,7 @@ class ProviderAdaptiveRouteControl {
             appliedAccounts: this.appliedByAffinity.size,
             shadowAccounts: this.shadowByAffinity.size,
             trackedAccounts: this.fingerprintsByAffinity.size,
+            fallbackNodeTransport: this.fallbackNodeTransport,
             ...this.stats,
         };
     }

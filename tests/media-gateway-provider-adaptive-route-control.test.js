@@ -46,6 +46,31 @@ test('disabled control preserves the existing sticky slot and preferred transpor
   assert.equal(control.publicStatus().active, false);
 });
 
+test('an explicit HTTP fallback keeps SOCKS5 available for adaptive decisions', async () => {
+  const control = controller({
+    fallbackNodeTransport: 'http',
+    fetchImpl: async () => response({
+      protocol: 1,
+      enabled: true,
+      apply: false,
+      decision: {
+        slot: 1,
+        nodeTransport: 'socks5',
+        score: 95,
+        confidence: 0.95,
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        selectionReason: 'host-learned',
+      },
+    }),
+  });
+  const decision = await control.resolveForPlayback(sourceUrl, 'provider/account');
+
+  assert.equal(decision.id, '2:http');
+  assert.equal(decision.selectionReason, 'shadow-mode');
+  assert.equal(control.candidates.some((candidate) => candidate.id === '1:socks5'), true);
+  assert.equal(control.publicStatus().fallbackNodeTransport, 'http');
+});
+
 test('viewer resolution sends only HMAC identities and non-secret route coordinates', async () => {
   let request = null;
   const expiresAt = new Date(Date.now() + 60_000).toISOString();
