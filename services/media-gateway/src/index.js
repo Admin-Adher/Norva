@@ -2223,7 +2223,7 @@ const MAX_CACHEABLE_EXACT_SUBTITLE_HLS_RENDITIONS = Math.min(
     MAX_EXACT_SUBTITLE_HLS_RENDITIONS,
     clampInt(process.env.MAX_CACHEABLE_EXACT_SUBTITLE_HLS_RENDITIONS, 8, 1, 32),
 );
-const GATEWAY_VERSION = 155;
+const GATEWAY_VERSION = 156;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -10071,6 +10071,7 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
                 : (finiteMkvPlayback && normalizedSeekOffset > 0
                     ? 'seekable_matroska_resume'
                     : (session.videoMode === 'encode' ? 'unsafe_or_unknown_video' : 'copy')))));
+        applyVaapiVodStartupReadiness(session);
         session.hlsCacheDescriptor = session.videoMode === 'copy'
             ? mkvH264HlsCacheDescriptorForSession(session)
             : null;
@@ -11747,16 +11748,27 @@ async function preopenBoundedMkvInputPump(session, parentSignal = null, options 
     if (!isFiniteMkvVodSession(session) || session.preopenedVodInputAttempt) return;
     const dispatcher = pickProxyAgent(proxyKeyFromUrl(session.sourceUrl)) || null;
     const drainExactRange = options.drainExactRange === true;
+    // A resumed session whose signed/request profile already describes every
+    // stream does not gain any authority from downloading the same 4 MiB
+    // metadata prefix again. Keep only the small identity prefix needed to
+    // detect a provider-side file swap before the indexed seek starts.
+    const resumeHeaderProfileRequired = Boolean(
+        !hasCompleteMkvPlaybackProfile(session?.codecProfile) ||
+        needsMkvH264CurrentHeaderAuthority(session)
+    );
     const captureResumeHeader = Boolean(
         drainExactRange &&
         BOUNDED_MKV_HEADER_PARSE &&
         INBAND_HEADER_BYTES > 0 &&
-        INBAND_HEADER_CACHE_MAX > 0
+        INBAND_HEADER_CACHE_MAX > 0 &&
+        resumeHeaderProfileRequired
     );
     const knownFileSizeBytes = fileSizeBytesForSession(session);
     const identityRangeBytes = captureResumeHeader
         ? Math.max(1, Math.min(INBAND_HEADER_BYTES, knownFileSizeBytes || INBAND_HEADER_BYTES))
-        : 1;
+        : (drainExactRange && BOUNDED_MKV_HEADER_PARSE
+            ? Math.max(1, Math.min(RAW_PREFIX_SNIFF_BYTES, knownFileSizeBytes || RAW_PREFIX_SNIFF_BYTES))
+            : 1);
     let retryCount = 0;
     while (true) {
         let opened = null;
@@ -15401,8 +15413,39 @@ function freezeMkvH264FastStart(session) {
     return assessment;
 }
 
+function applyVaapiVodStartupReadiness(session) {
+    if (
+        !isFiniteMkvVodSession(session) ||
+        isLiveSession(session) ||
+        videoModeForSession(session) !== 'encode' ||
+        VIDEO_ENCODER_CONFIG.backend !== 'vaapi' ||
+        VIDEO_ENCODER_PREFLIGHT.ready !== true
+    ) return false;
+
+    // Shorter finalized segments let the browser receive the same safe six
+    // seconds with less fixed muxing latency. Multi-audio sessions retain their
+    // deeper topology proof window; only the ordinary single-video graph is
+    // allowed to use the small admission gate here.
+    session.hlsTargetSeconds = EXACT_MATROSKA_H264_HLS_TARGET_SECONDS;
+    if (!multiAudioHlsEnabled(session)) {
+        session.minHlsStartupBufferSeconds = VAAPI_VOD_FAST_START_BUFFER_SECONDS;
+        session.minHlsStartupSegments = Math.max(
+            3,
+            Math.ceil(VAAPI_VOD_FAST_START_BUFFER_SECONDS / EXACT_MATROSKA_H264_HLS_TARGET_SECONDS),
+        );
+    }
+    session.startupTimings = asRecord(session.startupTimings);
+    session.startupTimings.vaapiFastReadiness = true;
+    session.startupTimings.vaapiFastReadinessBufferSeconds = session.minHlsStartupBufferSeconds;
+    return true;
+}
+
 function observedMediaProductionRateX(session) {
     const timings = asRecord(session?.startupTimings);
+    const sustainedRate = Number(timings.sustainedMediaProductionRateX);
+    if (Number.isFinite(sustainedRate) && sustainedRate > 0) {
+        return Number(Math.min(sustainedRate, 20).toFixed(3));
+    }
     const bufferSeconds = Number(timings.playlistBufferSeconds);
     const elapsedMs = Number(timings.ffmpegReadyMs);
     if (!Number.isFinite(bufferSeconds) || bufferSeconds <= 0 || !Number.isFinite(elapsedMs) || elapsedMs <= 0) {
@@ -17590,11 +17633,37 @@ async function inspectHlsMediaPlaylistArtifact(session, target) {
     ) return null;
     const stats = await Promise.all(segmentPaths.map((segmentPath) => fsp.stat(segmentPath)));
     if (!stats.every((stat) => stat.isFile() && stat.size > 0)) return null;
+    const productionStartedAtMs = Number(session?.hlsCacheProductionStartedAtMs);
+    const firstSegmentCompletedAtMs = Number(stats[0]?.mtimeMs);
+    const lastSegmentCompletedAtMs = Number(stats[stats.length - 1]?.mtimeMs);
+    const firstSegmentReadyMs = (
+        Number.isFinite(productionStartedAtMs) && productionStartedAtMs > 0 &&
+        Number.isFinite(firstSegmentCompletedAtMs) && firstSegmentCompletedAtMs >= productionStartedAtMs
+    ) ? firstSegmentCompletedAtMs - productionStartedAtMs : null;
+    const playlistProductionSpanMs = (
+        stats.length >= 3 &&
+        Number.isFinite(firstSegmentCompletedAtMs) &&
+        Number.isFinite(lastSegmentCompletedAtMs) &&
+        lastSegmentCompletedAtMs > firstSegmentCompletedAtMs
+    ) ? lastSegmentCompletedAtMs - firstSegmentCompletedAtMs : null;
+    const playlistPostFirstBufferSeconds = Number(
+        inspection.segmentDurations.slice(1).reduce((sum, duration) => sum + duration, 0).toFixed(3),
+    );
+    const sustainedMediaProductionRateX = (
+        playlistProductionSpanMs !== null && playlistPostFirstBufferSeconds > 0
+    ) ? Number(Math.min(
+        playlistPostFirstBufferSeconds / (playlistProductionSpanMs / 1_000),
+        20,
+    ).toFixed(3)) : null;
     return {
         ...target,
         inspection,
         firstSegmentBytes: stats[0].size,
         playlistSegmentBytes: stats.reduce((sum, stat) => sum + stat.size, 0),
+        firstSegmentReadyMs,
+        playlistProductionSpanMs,
+        playlistPostFirstBufferSeconds,
+        sustainedMediaProductionRateX,
     };
 }
 
@@ -17612,6 +17681,7 @@ function inspectHlsStartupPlaylist(playlist, requirements = {}) {
     let segmentCount = 0;
     let firstSegment = null;
     const segmentFiles = [];
+    const segmentDurations = [];
     let pendingDuration = null;
     let completePlaylist = false;
     let discontinuityCount = 0;
@@ -17653,6 +17723,7 @@ function inspectHlsStartupPlaylist(playlist, requirements = {}) {
         }
         if (!firstSegment) firstSegment = segment;
         segmentFiles.push(segment);
+        segmentDurations.push(pendingDuration);
         segmentCount += 1;
         durationSeconds += pendingDuration;
         pendingDuration = null;
@@ -17661,18 +17732,18 @@ function inspectHlsStartupPlaylist(playlist, requirements = {}) {
     const measuredDurationSeconds = durationSeconds;
     durationSeconds = Number(measuredDurationSeconds.toFixed(3));
     if (!segmentCount || !firstSegment) {
-        return { ready: false, reason: 'no_segments', segmentCount: 0, durationSeconds: 0, firstSegment: null, segmentFiles: [], discontinuityCount, mediaSequence };
+        return { ready: false, reason: 'no_segments', segmentCount: 0, durationSeconds: 0, firstSegment: null, segmentFiles: [], segmentDurations: [], discontinuityCount, mediaSequence };
     }
     if (requirements?.requireContinuous === true && discontinuityCount > 0) {
-        return { ready: false, reason: 'discontinuous_playlist', segmentCount, durationSeconds, firstSegment, segmentFiles, discontinuityCount, mediaSequence };
+        return { ready: false, reason: 'discontinuous_playlist', segmentCount, durationSeconds, firstSegment, segmentFiles, segmentDurations, discontinuityCount, mediaSequence };
     }
     if (!completePlaylist && segmentCount < minSegments) {
-        return { ready: false, reason: 'insufficient_segments', segmentCount, durationSeconds, firstSegment, segmentFiles, discontinuityCount, mediaSequence };
+        return { ready: false, reason: 'insufficient_segments', segmentCount, durationSeconds, firstSegment, segmentFiles, segmentDurations, discontinuityCount, mediaSequence };
     }
     if (!completePlaylist && measuredDurationSeconds < minBufferSeconds) {
-        return { ready: false, reason: 'insufficient_duration', segmentCount, durationSeconds, firstSegment, segmentFiles, discontinuityCount, mediaSequence };
+        return { ready: false, reason: 'insufficient_duration', segmentCount, durationSeconds, firstSegment, segmentFiles, segmentDurations, discontinuityCount, mediaSequence };
     }
-    return { ready: true, reason: 'ready', segmentCount, durationSeconds, firstSegment, segmentFiles, discontinuityCount, mediaSequence };
+    return { ready: true, reason: 'ready', segmentCount, durationSeconds, firstSegment, segmentFiles, segmentDurations, discontinuityCount, mediaSequence };
 }
 
 async function inspectMediaCacheLiveJoinGraph(session) {
@@ -17788,6 +17859,10 @@ async function waitForPlaylist(session, timeoutMs, abortSignal = null) {
                 session.startupTimings.playlistBufferSeconds = video.inspection.durationSeconds;
                 session.startupTimings.firstSegmentBytes = video.firstSegmentBytes;
                 session.startupTimings.playlistSegmentBytes = video.playlistSegmentBytes;
+                session.startupTimings.firstSegmentReadyMs = video.firstSegmentReadyMs;
+                session.startupTimings.playlistProductionSpanMs = video.playlistProductionSpanMs;
+                session.startupTimings.playlistPostFirstBufferSeconds = video.playlistPostFirstBufferSeconds;
+                session.startupTimings.sustainedMediaProductionRateX = video.sustainedMediaProductionRateX;
                 if (multiAudioHlsEnabled(session)) {
                     session.startupTimings.multiAudioHls = {
                         ...multiAudioHlsDiagnosticsForSession(session),

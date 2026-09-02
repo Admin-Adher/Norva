@@ -1089,6 +1089,61 @@ test('HTTP 200 full-body fallback stays fail-closed outside an exact offset-zero
         assert.equal(Buffer.concat(captured?.chunks || []).equals(largeFixture.subarray(0, prefixBytes)), true);
     });
 
+    await t.test('resumed MKV with a complete profile drains only the 512-byte file identity', async () => {
+        const largeFixture = mkvFixture(500_000);
+        const tracker = makeTracker();
+        const headerByteCache = new Map();
+        let fetches = 0;
+        const h = pumpHarness({
+            BOUNDED_MKV_HEADER_PARSE: true,
+            INBAND_HEADER_BYTES: 300_000,
+            INBAND_HEADER_CACHE_MAX: 2,
+            headerByteCache,
+            hasCompleteMkvPlaybackProfile: (profile) => profile?.metadataComplete === true,
+            fetch: async (_url, options) => {
+                fetches += 1;
+                tracker.calls.push(options.headers);
+                return trackedResponse(tracker, {
+                    status: 206,
+                    chunks: [largeFixture.subarray(0, 512)],
+                    headers: {
+                        'Content-Range': `bytes 0-511/${largeFixture.length}`,
+                        'Content-Length': '512',
+                        ETag: '"seek-complete-profile"',
+                    },
+                });
+            },
+        });
+        const session = mkvSession(largeFixture.length);
+        session.seekOffset = 12;
+        session.codecProfile = {
+            container: 'matroska,webm',
+            fileSizeBytes: largeFixture.length,
+            metadataComplete: true,
+            durationSeconds: 7_200,
+            videoCodec: 'h264',
+            audioTracks: [{ index: 1, codec: 'aac', language: 'eng' }],
+            subtitles: [],
+            probeSource: 'gateway_inband',
+            probedAt: '2026-08-31T12:00:00.000Z',
+        };
+
+        await h.ensureBoundedMkvInputPump(session);
+
+        assert.equal(fetches, 1);
+        assert.equal(tracker.calls[0].Range, 'bytes=0-511');
+        assert.equal(tracker.maxActive, 1);
+        assert.equal(tracker.active, 0);
+        assert.equal(session.startupTimings.providerSeekIdentityPreflightBytes, 512);
+        assert.equal(session.startupTimings.providerSeekHeaderPrefetch, false);
+        assert.equal(session.vodInputPrefixIdentityBytes, 512);
+        assert.equal(
+            session.vodInputPrefixIdentitySha256,
+            crypto.createHash('sha256').update(largeFixture.subarray(0, 512)).digest('hex'),
+        );
+        assert.equal(headerByteCache.has(session.sourceUrl), false);
+    });
+
     await t.test('reconnect at a non-zero offset', async () => {
         const tracker = makeTracker();
         const cut = 19;

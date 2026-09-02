@@ -161,6 +161,7 @@ test('Gateway readiness requires ten seconds and three finalized HLS segments', 
             durationSeconds: 0,
             firstSegment: null,
             segmentFiles: [],
+            segmentDurations: [],
             discontinuityCount: 0,
             mediaSequence: 0,
         },
@@ -174,6 +175,7 @@ test('Gateway readiness requires ten seconds and three finalized HLS segments', 
             durationSeconds: 0.1,
             firstSegment: 'segment-00000.ts',
             segmentFiles: ['segment-00000.ts'],
+            segmentDurations: [0.1],
             discontinuityCount: 0,
             mediaSequence: 0,
         },
@@ -253,7 +255,13 @@ test('Gateway readiness materializes every segment in the ten-second buffer', as
     ].join('\n'));
     fs.writeFileSync(path.join(dir, 'segment-00000.ts'), Buffer.alloc(11));
     fs.writeFileSync(path.join(dir, 'segment-00001.ts'), Buffer.alloc(13));
-    const session = { outputDir: dir, playlistPath, startupTimings: {} };
+    const productionStartedAtMs = Date.now() - 10_000;
+    const session = {
+        outputDir: dir,
+        playlistPath,
+        startupTimings: {},
+        hlsCacheProductionStartedAtMs: productionStartedAtMs,
+    };
 
     try {
         await assert.rejects(harness.waitForPlaylist(session, 15), /Playlist timeout/,
@@ -262,11 +270,23 @@ test('Gateway readiness materializes every segment in the ten-second buffer', as
         await assert.rejects(harness.waitForPlaylist(session, 15), /Playlist timeout/,
             'an empty final segment cannot be advertised');
         fs.writeFileSync(path.join(dir, 'segment-00002.ts'), Buffer.alloc(17));
+        for (const [index, offsetMs] of [1_000, 3_000, 5_000].entries()) {
+            const completedAt = new Date(productionStartedAtMs + offsetMs);
+            fs.utimesSync(
+                path.join(dir, `segment-${String(index).padStart(5, '0')}.ts`),
+                completedAt,
+                completedAt,
+            );
+        }
         await harness.waitForPlaylist(session, 100);
         assert.equal(session.startupTimings.playlistSegmentCount, 3);
         assert.equal(session.startupTimings.playlistBufferSeconds, 12);
         assert.equal(session.startupTimings.firstSegmentBytes, 11);
         assert.equal(session.startupTimings.playlistSegmentBytes, 41);
+        assert.equal(session.startupTimings.firstSegmentReadyMs, 1_000);
+        assert.equal(session.startupTimings.playlistProductionSpanMs, 4_000);
+        assert.equal(session.startupTimings.playlistPostFirstBufferSeconds, 8);
+        assert.equal(session.startupTimings.sustainedMediaProductionRateX, 2);
     } finally {
         fs.rmSync(dir, { recursive: true, force: true });
     }
@@ -493,7 +513,7 @@ test('an exact finite Matroska H264 profile selects the 2s keyframe encode plan 
 test('exact Matroska H264 uses independent 2s HLS segments with forced keyframes and no split-by-time', () => {
     const source = readGateway();
 
-    assert.match(source, /const GATEWAY_VERSION = 155;/);
+    assert.match(source, /const GATEWAY_VERSION = 156;/);
     assert.match(source, /exactMatroskaH264ReencodeProtocol:\s*1/);
     assert.match(source, /exactMatroskaH264HlsTargetSeconds:\s*EXACT_MATROSKA_H264_HLS_TARGET_SECONDS/);
     assert.match(source, /exactMatroskaH264MaxPixels:\s*EXACT_MATROSKA_H264_MAX_PIXELS/);

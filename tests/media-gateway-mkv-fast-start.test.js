@@ -167,6 +167,7 @@ function loadFastStartHarness(overrides = {}) {
     isFiniteMkvVodSession: (session) => session?.testFinite !== false,
     isLiveSession: () => false,
     cacheCodecProfile: () => {},
+    multiAudioHlsEnabled: (session) => session?.multiAudioHls?.enabled === true,
     videoModeForSession: (session) => session.videoMode || 'encode',
     audioModeForSession: (session) => session.testAudioMode || 'encode',
     ...overrides,
@@ -181,6 +182,7 @@ function loadFastStartHarness(overrides = {}) {
       freeze: freezeMkvH264FastStart,
       needsCurrentHeader: needsMkvH264CurrentHeaderAuthority,
       policy: startupPolicyForSession,
+      applyVaapiReadiness: applyVaapiVodStartupReadiness,
       analyzerGate: shouldCreateMkvH264FullFilePacketAnalyzer,
       buildCompleteCacheLocator: buildMkvCompleteHlsCacheLocator,
       verifyGenericCompleteCache: verifiedGenericMkvCompleteCacheBinding,
@@ -1659,8 +1661,9 @@ test('startup policy protocol 2 admits only a measured VAAPI video transcode abo
   session.testAudioMode = 'encode';
   session.startupTimings = {
     videoEncoder: 'vaapi',
-    playlistBufferSeconds: 10,
-    ffmpegReadyMs: 2_000,
+    playlistBufferSeconds: 12,
+    ffmpegReadyMs: 13_799,
+    sustainedMediaProductionRateX: 2.18,
   };
   assert.deepEqual(JSON.parse(JSON.stringify(h.policy(session))), {
     protocol: 2,
@@ -1668,10 +1671,12 @@ test('startup policy protocol 2 admits only a measured VAAPI video transcode abo
     pipeline: 'video-transcode',
     targetBufferSeconds: 6,
     minimumEncodeRateX: 2,
-    observedEncodeRateX: 5,
+    observedEncodeRateX: 2.18,
     reason: 'vaapi-transcode-ready',
   });
 
+  delete session.startupTimings.sustainedMediaProductionRateX;
+  session.startupTimings.playlistBufferSeconds = 10;
   session.startupTimings.ffmpegReadyMs = 6_000;
   assert.deepEqual(JSON.parse(JSON.stringify(h.policy(session))), {
     protocol: 2,
@@ -1689,6 +1694,38 @@ test('startup policy protocol 2 admits only a measured VAAPI video transcode abo
     ffmpegReadyMs: 500,
   };
   assert.equal(h.policy(session).eligible, false);
+});
+
+test('VAAPI finite MKV readiness uses three two-second segments without weakening multi-audio proof', () => {
+  const h = loadFastStartHarness({
+    VIDEO_ENCODER_CONFIG: { backend: 'vaapi' },
+    VIDEO_ENCODER_PREFLIGHT: { ready: true },
+  });
+  const singleAudio = {
+    videoMode: 'encode',
+    hlsTargetSeconds: 4,
+    minHlsStartupBufferSeconds: 10,
+    minHlsStartupSegments: 3,
+    startupTimings: {},
+  };
+  assert.equal(h.applyVaapiReadiness(singleAudio), true);
+  assert.equal(singleAudio.hlsTargetSeconds, 2);
+  assert.equal(singleAudio.minHlsStartupBufferSeconds, 6);
+  assert.equal(singleAudio.minHlsStartupSegments, 3);
+  assert.equal(singleAudio.startupTimings.vaapiFastReadiness, true);
+
+  const multiAudio = {
+    videoMode: 'encode',
+    hlsTargetSeconds: 2,
+    minHlsStartupBufferSeconds: 20,
+    minHlsStartupSegments: 3,
+    multiAudioHls: { enabled: true },
+    startupTimings: {},
+  };
+  assert.equal(h.applyVaapiReadiness(multiAudio), true);
+  assert.equal(multiAudio.hlsTargetSeconds, 2);
+  assert.equal(multiAudio.minHlsStartupBufferSeconds, 20);
+  assert.equal(multiAudio.minHlsStartupSegments, 3);
 });
 
 test('an admitted replay starts one FFmpeg graph with copied video and proof-selected audio mode', () => {
