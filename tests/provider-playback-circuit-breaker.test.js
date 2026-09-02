@@ -594,7 +594,7 @@ test('production rollout proves the provider circuit protocol on every runtime',
   assert.match(cloud, /relayCoordinatorLockTtlMs:\s*EDGE_SESSION_COORDINATOR_LOCK_TTL_MS/);
 
   assert.match(deploy, /verify_function_protocol "\$service"/);
-  assert.match(deploy, /EXPECTED_PLAYBACK_VERSION=68/);
+  assert.match(deploy, /EXPECTED_PLAYBACK_VERSION=76/);
   assert.match(deploy, /EXPECTED_RELAY_COORDINATOR_LOCK_TTL_MS=120000/);
   assert.match(deploy, /EXPECTED_ENGINE_TRACK_PROBE_BLOCKING=false/);
   assert.match(deploy, /EXPECTED_EXACT_FILE_CODEC_PROFILE_PROTOCOL=1/);

@@ -308,7 +308,7 @@ test('Edge v55 deploy drains one-user routing, upgrades both replicas, and resto
   assert.match(deploy, /h\.vaapiVodFastStart\?\.minimumEncodeRateX === 2/);
   assert.match(deploy, /a7a31dca6004980ca7088eba65f64ba1b691c416faee978d1e560427b7c12546  supabase\/functions\/norva-playback\/index\.ts/);
   assert.match(deploy, /767d3315c950070c93c827adc9c2bc583b17b3adba2a425fa0ca7dbbb1039dda  ops\/hetzner\/scripts\/04-deploy-edge-functions\.sh/);
-  assert.match(reload, /^EXPECTED_PLAYBACK_VERSION=68$/m);
+  assert.match(reload, /^EXPECTED_PLAYBACK_VERSION=76$/m);
 
   const drain = deploy.indexOf("set_canary_selection ''");
   const standby = deploy.indexOf('wait_edge_state 53 standby 0', drain);
@@ -327,6 +327,17 @@ test('Edge v55 deploy drains one-user routing, upgrades both replicas, and resto
   assert.match(deploy, /EDGE_V54_ROLLBACK_INCOMPLETE_INSPECT_REQUIRED/);
   assert.match(deploy, /EDGE_V54_DEPLOYED_ONE_USER_OK/);
   assert.doesNotMatch(deploy, /echo[^\n]*(SELECTED_USER_HASH|gateway_token|db_canary_token)/i);
+});
+
+test('Edge reload pins the exact norva-playback health version from the deployed bundle', () => {
+  const edge = fs.readFileSync(EDGE_PATH, 'utf8');
+  const reload = fs.readFileSync(EDGE_RELOAD_SCRIPT_PATH, 'utf8');
+  const edgeVersion = edge.match(/service:\s*"norva-playback",\s*version:\s*(\d+)/)?.[1];
+  const expectedVersion = reload.match(/^EXPECTED_PLAYBACK_VERSION=(\d+)$/m)?.[1];
+
+  assert.ok(edgeVersion, 'norva-playback health version must be declared');
+  assert.ok(expectedVersion, 'Edge reload expected playback version must be declared');
+  assert.equal(expectedVersion, edgeVersion);
 });
 
 test('one-user activation proves the callback before selection and rolls selection back first', () => {
