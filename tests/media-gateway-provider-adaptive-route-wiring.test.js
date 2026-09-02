@@ -10,8 +10,8 @@ const gateway = fs.readFileSync(path.join(
   '../services/media-gateway/src/index.js',
 ), 'utf8');
 
-test('Gateway v157 keeps adaptive routing behind dedicated route and benchmark gates', () => {
-  assert.match(gateway, /const GATEWAY_VERSION = 157;/);
+test('Gateway v158 keeps adaptive routing behind dedicated route and benchmark gates', () => {
+  assert.match(gateway, /const GATEWAY_VERSION = 158;/);
   assert.match(gateway, /process\.env\.PROVIDER_ADAPTIVE_ROUTE_ENABLED === 'true'/);
   assert.match(gateway, /process\.env\.PROVIDER_ROUTE_BENCHMARK_ENABLED === 'true'/);
   assert.match(gateway, /process\.env\.PROVIDER_ROUTE_FINGERPRINT_HMAC_KEY/);
@@ -80,6 +80,15 @@ test('benchmark learning is bounded, sequential, service-only, and locally preem
   assert.match(benchmark, /registerAccountExtraction/);
   assert.match(benchmark, /PROVIDER_SLOT_RELEASE_DELAY_MS/);
   assert.match(benchmark, /setViewerPreemptHandler/);
+  assert.match(
+    benchmark,
+    /\['viewer-active-or-leased', 'lease-unavailable'\][\s\S]{0,220}deferProviderRouteBenchmarkWithoutConsumingAttempt\(job\)/,
+  );
+  assert.match(
+    benchmark,
+    /controller\.signal\.aborted[\s\S]{0,180}deferProviderRouteBenchmarkWithoutConsumingAttempt\(job\)/,
+  );
+  assert.match(benchmark, /function retryProviderRouteBenchmark[\s\S]{0,180}job\.attempts >= 5/);
   assert.match(gateway, /app\.post\('\/provider-route\/benchmark', requireGatewayAuth/);
 });
 

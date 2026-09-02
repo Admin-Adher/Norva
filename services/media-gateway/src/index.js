@@ -2253,7 +2253,7 @@ const MAX_CACHEABLE_EXACT_SUBTITLE_HLS_RENDITIONS = Math.min(
     MAX_EXACT_SUBTITLE_HLS_RENDITIONS,
     clampInt(process.env.MAX_CACHEABLE_EXACT_SUBTITLE_HLS_RENDITIONS, 8, 1, 32),
 );
-const GATEWAY_VERSION = 157;
+const GATEWAY_VERSION = 158;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -2423,13 +2423,25 @@ function armProviderRouteBenchmarkDrain() {
     providerRouteBenchmarkTimer.unref?.();
 }
 
-function requeueProviderRouteBenchmark(job, delayMs = PROVIDER_ROUTE_BENCHMARK_RETRY_MS) {
+function deferProviderRouteBenchmark(job, delayMs = PROVIDER_ROUTE_BENCHMARK_RETRY_MS) {
+    job.nextAt = Date.now() + delayMs;
+    providerRouteBenchmarkPending.set(job.accountFingerprint, job);
+}
+
+function retryProviderRouteBenchmark(job, delayMs = PROVIDER_ROUTE_BENCHMARK_RETRY_MS) {
     if (job.attempts >= 5) {
         providerRouteBenchmarkStats.failed += 1;
         return;
     }
-    job.nextAt = Date.now() + delayMs;
-    providerRouteBenchmarkPending.set(job.accountFingerprint, job);
+    deferProviderRouteBenchmark(job, delayMs);
+}
+
+function deferProviderRouteBenchmarkWithoutConsumingAttempt(
+    job,
+    delayMs = PROVIDER_ROUTE_BENCHMARK_RETRY_MS,
+) {
+    job.attempts = Math.max(0, job.attempts - 1);
+    deferProviderRouteBenchmark(job, delayMs);
 }
 
 async function drainProviderRouteBenchmarkQueue() {
@@ -2444,7 +2456,7 @@ async function drainProviderRouteBenchmarkQueue() {
     }
     providerRouteBenchmarkPending.delete(job.accountFingerprint);
     if (viewerPlaybackActiveLocally() || accountKeyBusyLocally(job.affinityKey)) {
-        requeueProviderRouteBenchmark(job);
+        deferProviderRouteBenchmark(job);
         armProviderRouteBenchmarkDrain();
         return;
     }
@@ -2459,16 +2471,20 @@ async function drainProviderRouteBenchmarkQueue() {
             providerRouteBenchmarkCooldowns.set(job.accountFingerprint, Date.now());
         } else if (outcome?.status === 'preempted') {
             providerRouteBenchmarkStats.preempted += 1;
-            requeueProviderRouteBenchmark(job);
+            deferProviderRouteBenchmarkWithoutConsumingAttempt(job);
         } else if (['viewer-active-or-leased', 'lease-unavailable'].includes(outcome?.status)) {
             providerRouteBenchmarkStats.leaseDeferrals += 1;
-            requeueProviderRouteBenchmark(job);
+            deferProviderRouteBenchmarkWithoutConsumingAttempt(job);
         } else if (outcome?.status !== 'control-disabled') {
-            requeueProviderRouteBenchmark(job);
+            retryProviderRouteBenchmark(job);
         }
     } catch (_) {
-        if (controller.signal.aborted) providerRouteBenchmarkStats.preempted += 1;
-        requeueProviderRouteBenchmark(job);
+        if (controller.signal.aborted) {
+            providerRouteBenchmarkStats.preempted += 1;
+            deferProviderRouteBenchmarkWithoutConsumingAttempt(job);
+        } else {
+            retryProviderRouteBenchmark(job);
+        }
     } finally {
         providerRouteBenchmarkActive = null;
         armProviderRouteBenchmarkDrain();
