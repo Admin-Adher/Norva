@@ -413,11 +413,15 @@ async function benchmarkProviderRoutesSequentially({
         mediaDurationSeconds,
         effective.realtimeThroughputMargin,
     );
+    // The tiny sweep measures connection setup as much as route capacity. Rank
+    // that raw evidence before attaching the full-file realtime floor; otherwise
+    // a 1 MiB ramp-up sample below the movie's average rate scores every route as
+    // zero and deterministically shortlists the first configured slots.
+    const tinyRankings = rankProviderRoutes(candidates, measurements);
     for (const measurement of measurements) {
         measurement.minimumRequiredBytesPerSecond = minimumRequiredBytesPerSecond;
     }
 
-    const tinyRankings = rankProviderRoutes(candidates, measurements);
     const finalists = tinyRankings.slice(0, effective.topCandidateCount);
     for (const finalist of finalists) {
         if (!await mayContinue()) return { status: 'preempted', measurements, rankings: rankProviderRoutes(candidates, measurements) };

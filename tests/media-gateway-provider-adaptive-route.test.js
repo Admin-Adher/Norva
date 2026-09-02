@@ -251,6 +251,45 @@ test('a deep route slower than the exact media rate is rejected despite a fast p
   )));
 });
 
+test('tiny probes shortlist the fastest routes even when every ramp-up sample is below realtime', async () => {
+  const candidates = routeEngine.buildProviderRouteCandidates({
+    httpProxyUrls: ['http://slow', 'http://fastest', 'http://second-fastest'],
+  });
+  const sustainedCandidates = [];
+  const tinyThroughput = {
+    '1:http': 0.2 * routeEngine.MIB,
+    '2:http': 0.8 * routeEngine.MIB,
+    '3:http': 0.6 * routeEngine.MIB,
+  };
+  const result = await routeEngine.benchmarkProviderRoutesSequentially({
+    candidates,
+    mediaDurationSeconds: 7_200,
+    isAccountIdle: async () => true,
+    probe: async (candidate, options) => {
+      if (options.phase === 'sustained') sustainedCandidates.push(candidate.id);
+      const tiny = options.phase === 'tiny';
+      return successfulMeasurement({
+        phase: options.phase,
+        sampleBytes: options.sampleBytes,
+        rangeStartBytes: options.rangeStartBytes || 0,
+        resourceSizeBytes: 5 * 1024 * routeEngine.MIB,
+        ttfbMs: candidate.id === '2:http' ? 100 : (candidate.id === '3:http' ? 200 : 300),
+        first4MiBMs: tiny ? null : 1_200,
+        first16MiBMs: tiny ? null : 4_500,
+        throughputBytesPerSecond: tiny ? tinyThroughput[candidate.id] : 3 * routeEngine.MIB,
+      });
+    },
+  });
+
+  assert.deepEqual(sustainedCandidates, ['2:http', '3:http']);
+  assert.equal(result.recommendation.id, '2:http');
+  assert.ok(result.measurements
+    .filter((measurement) => measurement.phase === 'tiny')
+    .every((measurement) => (
+      measurement.throughputBytesPerSecond < measurement.minimumRequiredBytesPerSecond
+    )));
+});
+
 test('a benchmark without exact media duration cannot create an applicable route', async () => {
   const candidates = routeEngine.buildProviderRouteCandidates({ httpProxyUrls: ['http://one'] });
   const result = await routeEngine.benchmarkProviderRoutesSequentially({
