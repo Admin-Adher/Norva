@@ -1820,6 +1820,15 @@ const FINITE_MKV_RESUME_WARMUP_WINDOW_BYTES = clampInt(
     0,
     1024 * 1024,
 );
+// FFmpeg commonly consumes the primer, then opens a tail/Cues range a few
+// milliseconds later. A tiny local grace prevents us from opening and aborting
+// the base range during that deterministic jump, which would cool the tunnel.
+const FINITE_MKV_RESUME_CUE_GRACE_MS = clampInt(
+    process.env.FINITE_MKV_RESUME_CUE_GRACE_MS,
+    50,
+    0,
+    250,
+);
 const FINITE_MKV_SEEK_CACHE_BYTES = clampInt(
     process.env.FINITE_MKV_SEEK_CACHE_BYTES,
     64 * 1024 * 1024,
@@ -2799,6 +2808,7 @@ app.get('/health', (req, res) => {
             windowBytes: FINITE_MKV_SEEK_WINDOW_BYTES,
             multiAudioResumeWindowBytes: FINITE_MKV_MULTI_AUDIO_SEEK_WINDOW_BYTES,
             resumeWarmupWindowBytes: FINITE_MKV_RESUME_WARMUP_WINDOW_BYTES,
+            resumeCueGraceMs: FINITE_MKV_RESUME_CUE_GRACE_MS,
             sequentialWindowBytes: FINITE_MKV_SEEK_WINDOW_BYTES,
             cacheMaxBytes: FINITE_MKV_SEEK_CACHE_BYTES,
             identityPreflightRange: BOUNDED_MKV_HEADER_PARSE && INBAND_HEADER_CACHE_MAX > 0
@@ -5521,6 +5531,9 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                     finiteLocalBackpressured = false;
                     finiteWindowStartOffset = forwarded;
                     finiteWindowRange = null;
+                    if (finiteWindowIsWarmup && context.finiteWarmupCueGraceMs > 0) {
+                        await sleep(context.finiteWarmupCueGraceMs);
+                    }
                 }
             } catch (error) {
                 const progressBytes = forwarded - offsetBeforeFetch;
@@ -5821,6 +5834,9 @@ async function createStrictLidBroker(options = {}) {
             ? Math.max(1, Math.min(16 * 1024 * 1024, Number(options.finiteWindowBytes)))
             : FINITE_MKV_SEEK_WINDOW_BYTES,
         finiteWarmupWindowBytes: 0,
+        finiteWarmupCueGraceMs: Number.isFinite(Number(options.finiteWarmupCueGraceMs))
+            ? Math.max(0, Math.min(250, Number(options.finiteWarmupCueGraceMs)))
+            : 0,
         finiteWarmupWindowConsumed: false,
         finiteWarmupProviderWindows: 0,
         finiteSequentialWindowBytes: 0,
@@ -5905,6 +5921,7 @@ async function createStrictLidBroker(options = {}) {
         get maxQueuedRequests() { return context.finiteMaxQueuedRequests; },
         get maxQueuedProviderWindows() { return context.finiteMaxQueuedProviderWindows; },
         get plannedSupersessions() { return context.finitePlannedSupersessions; },
+        get warmupCueGraceMs() { return context.finiteWarmupCueGraceMs; },
         get warmupWindowBytes() { return context.finiteWarmupWindowBytes; },
         get warmupProviderWindows() { return context.finiteWarmupProviderWindows; },
         get sequentialWindowBytes() { return context.finiteSequentialWindowBytes; },
@@ -12385,6 +12402,7 @@ async function prepareFiniteMkvSeekBroker(session, parentSignal = null) {
         onProviderIdentity: (identity) => applyFiniteMkvSeekProviderIdentity(session, identity),
         pathPrefix: 'finite-mkv-seek',
         finiteWindowBytes: effectiveWindowBytes,
+        finiteWarmupCueGraceMs: FINITE_MKV_RESUME_CUE_GRACE_MS,
         finiteWarmupWindowBytes: FINITE_MKV_RESUME_WARMUP_WINDOW_BYTES,
         finiteSequentialWindowBytes: FINITE_MKV_SEEK_WINDOW_BYTES,
         finiteCacheBytes: FINITE_MKV_SEEK_CACHE_BYTES,
@@ -12401,6 +12419,7 @@ async function prepareFiniteMkvSeekBroker(session, parentSignal = null) {
     session.startupTimings.finiteMkvSeekBroker = true;
     session.startupTimings.finiteMkvSeekProviderFetches = 0;
     session.startupTimings.finiteMkvSeekWindowBytes = effectiveWindowBytes;
+    session.startupTimings.finiteMkvSeekWarmupCueGraceMs = FINITE_MKV_RESUME_CUE_GRACE_MS;
     session.startupTimings.finiteMkvSeekWarmupWindowBytes = FINITE_MKV_RESUME_WARMUP_WINDOW_BYTES;
     session.startupTimings.finiteMkvSeekSequentialWindowBytes = FINITE_MKV_SEEK_WINDOW_BYTES;
     session.startupTimings.finiteMkvSeekMultiAudioWindow = exactAudioTrackCount > 1;
@@ -18573,6 +18592,7 @@ function debugSession(session) {
                 cacheHits: Number(session.finiteMkvSeekBroker.cacheHits || 0),
                 cacheMisses: Number(session.finiteMkvSeekBroker.cacheMisses || 0),
                 plannedSupersessions: Number(session.finiteMkvSeekBroker.plannedSupersessions || 0),
+                warmupCueGraceMs: Number(session.finiteMkvSeekBroker.warmupCueGraceMs || 0),
                 warmupWindowBytes: Number(session.finiteMkvSeekBroker.warmupWindowBytes || 0),
                 warmupProviderWindows: Number(session.finiteMkvSeekBroker.warmupProviderWindows || 0),
                 sequentialWindowBytes: Number(session.finiteMkvSeekBroker.sequentialWindowBytes || 0),
