@@ -2209,15 +2209,15 @@ const MULTI_AUDIO_HLS_PROTOCOL = 1;
 const MAX_MULTI_AUDIO_RENDITIONS = clampInt(process.env.MAX_MULTI_AUDIO_RENDITIONS, 12, 2, 32);
 // Exact WebVTT renditions are cheap, but subtitle-heavy releases can expose
 // dozens of streams. Bound the one-pass fan-out so first-frame latency remains
-// predictable; over-limit or image-based subtitle graphs stay provider-backed
-// and are never mislabeled as a complete shared-cache object.
+// predictable; over-limit text graphs use a prioritized partial HLS cohort,
+// while partial or image-based graphs are never mislabeled as complete cache.
 const MAX_EXACT_SUBTITLE_HLS_RENDITIONS = clampInt(
     process.env.MAX_EXACT_SUBTITLE_HLS_RENDITIONS,
     8,
     1,
     16,
 );
-const GATEWAY_VERSION = 152;
+const GATEWAY_VERSION = 153;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -16459,6 +16459,7 @@ function exactSubtitleRenditionsForSession(session) {
 function freezeExactSubtitleHlsTopology(session) {
     const plan = buildExactSubtitleHlsPlan(session?.codecProfile, {
         maxRenditions: MAX_EXACT_SUBTITLE_HLS_RENDITIONS,
+        requestedStreamIndex: session?.subtitleStreamIndex,
     });
     session.exactSubtitleHls = plan;
     session.hlsMasterRequired = multiAudioHlsEnabled(session) || plan.enabled === true;

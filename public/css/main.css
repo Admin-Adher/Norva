@@ -11728,6 +11728,8 @@ html.tv-mode .navbar-menu .nav-link.active .norva-ui-icon {
   background: rgba(255, 255, 255, 0.1);
 }
 
+.captions-option.pending,
+.captions-option:disabled,
 .audio-option.pending,
 .audio-option:disabled {
   color: var(--color-text-secondary);
@@ -11735,6 +11737,8 @@ html.tv-mode .navbar-menu .nav-link.active .norva-ui-icon {
   opacity: 0.78;
 }
 
+.captions-option.pending:hover,
+.captions-option:disabled:hover,
 .audio-option.pending:hover,
 .audio-option:disabled:hover {
   background: none;

@@ -1497,7 +1497,7 @@ const MediaUtils = (() => {
         const subtitle = preferences?.subtitle || preferences?.subtitles || null;
         const subtitleOff = subtitle?.source === 'off' || subtitle?.mode === 'off';
         const subtitleIndex = Number(subtitle?.streamIndex ?? subtitle?.stream_index);
-        if (!subtitleOff && subtitle?.source === 'probe'
+        if (!subtitleOff && (subtitle?.source === 'probe' || subtitle?.source === 'hls')
             && Number.isInteger(subtitleIndex) && subtitleIndex >= 0 && subtitleIndex <= 1024) {
             result.subtitleStreamIndex = subtitleIndex;
         } else {

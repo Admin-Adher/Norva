@@ -770,6 +770,43 @@ test('the explicit Gateway disabled-mono contract exposes its exact track before
     ]);
 });
 
+test('a muxed-mono manifest without an audioTracks event payload still proves zero alternates', () => {
+    const WatchPage = loadWatchPage();
+    const harness = makePage(WatchPage);
+    const { page } = harness;
+    page.content = { id: 'movie-mono-payload', type: 'movie' };
+    page.audioLanguageValidationStatus = 'probed';
+    page.playingAudioVersionLabel = () => 'English · Provider label';
+    page.audioTracks = [{ index: 7, language: 'eng', codec: 'eac3', channels: 6 }];
+    page.selectedAudioStreamIndex = 7;
+    page.directAudioStreamIndex = 7;
+    const disabledMono = {
+        protocol: 1,
+        enabled: false,
+        reason: 'audio_track_count_below_minimum',
+        sourceTrackCount: 1,
+        preparedTrackCount: 0,
+        defaultHlsIndex: null,
+        defaultStreamIndex: null,
+    };
+    page.configureGatewayAudioRenditions([], disabledMono, page.audioTracks, {
+        required: true,
+        playbackAttemptId: 17,
+        audioStreamIndex: 7,
+    });
+    page.playHls('https://gateway.example/sessions/session-mono-payload/playlist.m3u8', {
+        playbackAttemptId: 17,
+        autoplay: false,
+    });
+    page.hls.audioTracks = [];
+    page.hls.emit(FakeHls.Events.MANIFEST_PARSED, {});
+
+    assert.equal(page._gatewayHlsAudioTracksReady, true);
+    assert.deepEqual(Array.from(page.getVisibleAudioTracks(), (track) => [track.source, track.label]), [
+        ['none', 'English · EAC3 · 6ch'],
+    ]);
+});
+
 test('malformed disabled-mono declarations remain visibly fail closed', () => {
     const WatchPage = loadWatchPage();
     const cases = [

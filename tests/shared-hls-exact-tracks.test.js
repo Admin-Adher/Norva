@@ -72,7 +72,7 @@ function ffmpegMaster() {
   ].join('\n');
 }
 
-test('exact subtitle plan preserves every bounded text track and rejects partial cache graphs', () => {
+test('exact subtitle plan preserves every bounded text track and builds a prioritized partial playback cohort', () => {
   const tracks = [
     exactTextTrack(3, 'eng', 'English', { default: true }),
     exactTextTrack(7, 'fra', 'Français', { forced: true }),
@@ -103,11 +103,27 @@ test('exact subtitle plan preserves every bounded text track and rejects partial
   assert.equal(image.cacheEligible, false);
   assert.equal(image.reason, 'unsupported-or-inexact-subtitle');
 
-  const tooMany = buildExactSubtitleHlsPlan(profile(
-    Array.from({ length: 9 }, (_, index) => exactTextTrack(index + 3, 'eng', `Track ${index + 1}`)),
-  ), { maxRenditions: 8 });
-  assert.equal(tooMany.enabled, false);
-  assert.equal(tooMany.reason, 'subtitle-rendition-limit');
+  const tooManyTracks = [
+    exactTextTrack(3, 'ara', 'Arabic', { default: true }),
+    exactTextTrack(4, 'hrv', 'Croatian', { forced: true }),
+    exactTextTrack(5, 'ces', 'Czech'),
+    exactTextTrack(6, 'dan', 'Danish'),
+    exactTextTrack(7, 'nld', 'Dutch'),
+    exactTextTrack(8, 'eng', 'English'),
+    exactTextTrack(9, 'fra', 'French'),
+    exactTextTrack(10, 'deu', 'German'),
+    exactTextTrack(11, 'spa', 'Spanish'),
+  ];
+  const tooMany = buildExactSubtitleHlsPlan(profile(tooManyTracks), {
+    maxRenditions: 8,
+    requestedStreamIndex: 9,
+  });
+  assert.equal(tooMany.enabled, true);
+  assert.equal(tooMany.cacheEligible, false, 'a partial graph must never become a complete shared-cache object');
+  assert.equal(tooMany.reason, 'enabled-partial');
+  assert.equal(tooMany.sourceTrackCount, 9);
+  assert.deepEqual(plain(tooMany.renditions.map((track) => track.streamIndex)), [9, 3, 4, 5, 6, 7, 8, 10]);
+  assert.equal(tooMany.renditions.some((track) => track.streamIndex === 11), false);
 });
 
 test('one FFmpeg process maps every exact subtitle to a segmented WebVTT output', () => {

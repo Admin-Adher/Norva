@@ -102,9 +102,6 @@ function buildExactSubtitleHlsPlan(profileValue, options = {}) {
     if (sourceTracks.length === 0) {
         return { ...base, cacheEligible: true, reason: 'no-subtitles' };
     }
-    if (sourceTracks.length > maxRenditions) {
-        return { ...base, reason: 'subtitle-rendition-limit' };
-    }
     if (!sourceTracks.every(isExactTextSubtitle)) {
         return { ...base, reason: 'unsupported-or-inexact-subtitle' };
     }
@@ -113,14 +110,53 @@ function buildExactSubtitleHlsPlan(profileValue, options = {}) {
         return { ...base, reason: 'invalid-subtitle-stream-index' };
     }
     const labels = uniqueLabels(sourceTracks, 'Subtitle');
-    const renditions = sourceTracks.map((raw, hlsIndex) => {
+    const requestedStreamIndex = normalizeStreamIndex(options.requestedStreamIndex);
+    const prioritizedSourceIndexes = [];
+    const selectedSourceIndexes = new Set();
+    const addSourceIndex = (sourceIndex) => {
+        if (!Number.isInteger(sourceIndex) || sourceIndex < 0 || sourceIndex >= sourceTracks.length) return;
+        if (selectedSourceIndexes.has(sourceIndex)) return;
+        selectedSourceIndexes.add(sourceIndex);
+        prioritizedSourceIndexes.push(sourceIndex);
+    };
+
+    // Subtitle-heavy files cannot fan every track out without making startup
+    // unpredictable. Build one deterministic playback cohort instead: the
+    // viewer's requested absolute stream, then default/forced tracks, then one
+    // track per language before duplicate variants. The full exact list remains
+    // metadata-visible while this bounded cohort switches in the current HLS.
+    if (Number.isInteger(requestedStreamIndex)) {
+        addSourceIndex(streamIndexes.indexOf(requestedStreamIndex));
+    }
+    sourceTracks.forEach((track, sourceIndex) => {
+        if (track?.default === true) addSourceIndex(sourceIndex);
+    });
+    sourceTracks.forEach((track, sourceIndex) => {
+        if (track?.forced === true) addSourceIndex(sourceIndex);
+    });
+    const representedLanguages = new Set(
+        prioritizedSourceIndexes.map((sourceIndex) => normalizeLanguage(
+            sourceTracks[sourceIndex]?.language ?? sourceTracks[sourceIndex]?.lang,
+        )),
+    );
+    sourceTracks.forEach((track, sourceIndex) => {
+        const language = normalizeLanguage(track?.language ?? track?.lang);
+        if (representedLanguages.has(language)) return;
+        representedLanguages.add(language);
+        addSourceIndex(sourceIndex);
+    });
+    sourceTracks.forEach((track, sourceIndex) => addSourceIndex(sourceIndex));
+
+    const cohortSourceIndexes = prioritizedSourceIndexes.slice(0, maxRenditions);
+    const renditions = cohortSourceIndexes.map((sourceIndex, hlsIndex) => {
+        const raw = sourceTracks[sourceIndex];
         const track = record(raw);
         const sourceCodec = normalizeToken(track.codec ?? track.codecName ?? track.codec_name);
         return Object.freeze({
             hlsIndex,
-            streamIndex: streamIndexes[hlsIndex],
+            streamIndex: streamIndexes[sourceIndex],
             language: normalizeLanguage(track.language ?? track.lang),
-            title: labels[hlsIndex],
+            title: labels[sourceIndex],
             sourceCodec,
             outputCodec: 'webvtt',
             default: track.default === true,
@@ -133,8 +169,8 @@ function buildExactSubtitleHlsPlan(profileValue, options = {}) {
     return Object.freeze({
         ...base,
         enabled: true,
-        cacheEligible: true,
-        reason: 'enabled',
+        cacheEligible: sourceTracks.length <= maxRenditions,
+        reason: sourceTracks.length <= maxRenditions ? 'enabled' : 'enabled-partial',
         renditions: Object.freeze(renditions),
     });
 }

@@ -133,10 +133,48 @@ test('Edge preserves only the complete exact Gateway WebVTT topology', () => {
   assert.ok((response.match(/exactSubtitleHls: gateway\.exactSubtitleHls \?\? null/g) || []).length >= 2);
 });
 
-test('Edge drops every partial, stale or non-text subtitle graph as one unit', () => {
+test('Edge preserves a bounded exact playback cohort without marking it cache complete', () => {
+  const { normalize, normalizeMetadata } = loadNormalizers();
+  const partialProfile = {
+    subtitles: [
+      profile.subtitles[0],
+      {
+        index: 6,
+        language: 'deu',
+        codec: 'subrip',
+        subtitleType: 'text',
+        extractable: true,
+        default: false,
+        forced: false,
+        hearingImpaired: false,
+      },
+      profile.subtitles[1],
+    ],
+  };
+  const partial = normalize(renditions, partialProfile);
+  assert.deepEqual(JSON.parse(JSON.stringify(partial)), renditions,
+    'renditions bind by absolute stream identity, not codec-profile array position');
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(normalizeMetadata({
+      ...metadata,
+      cacheEligible: false,
+      reason: 'enabled-partial',
+      sourceTrackCount: 3,
+      preparedTrackCount: 2,
+    }, partial, partialProfile))),
+    {
+      ...metadata,
+      cacheEligible: false,
+      reason: 'enabled-partial',
+      sourceTrackCount: 3,
+      preparedTrackCount: 2,
+    },
+  );
+});
+
+test('Edge drops every stale, contradictory or non-text subtitle graph as one unit', () => {
   const { normalize, normalizeMetadata } = loadNormalizers();
   const renditionVariants = [
-    renditions.slice(0, 1),
     [renditions[0], { ...renditions[1], hlsIndex: 2 }],
     [renditions[0], { ...renditions[1], streamIndex: 4 }],
     [renditions[0], { ...renditions[1], language: 'eng' }],
@@ -146,6 +184,7 @@ test('Edge drops every partial, stale or non-text subtitle graph as one unit', (
     [renditions[0], { ...renditions[1], playlistName: '../subtitle_1.m3u8' }],
   ];
   for (const value of renditionVariants) assert.equal(normalize(value, profile), null);
+  assert.equal(normalize(renditions, { subtitles: [profile.subtitles[0]] }), null);
 
   const normalized = normalize(renditions, profile);
   assert.ok(normalized);

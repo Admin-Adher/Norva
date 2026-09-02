@@ -8456,26 +8456,35 @@ function normalizeGatewaySubtitleRenditions(value: unknown, codecProfileValue: u
     : (Array.isArray(codecProfile.subtitleTracks)
       ? codecProfile.subtitleTracks
       : (Array.isArray(codecProfile.subtitle_tracks) ? codecProfile.subtitle_tracks : []));
-  if (exactTracks.length !== value.length) return null;
+  if (exactTracks.length < value.length || exactTracks.length > 32) return null;
+
+  const exactByStreamIndex = new Map();
+  for (const exactValue of exactTracks) {
+    const exact = recordOrEmpty(exactValue);
+    const exactStreamIndex = Number(exact.index ?? exact.streamIndex ?? exact.stream_index);
+    if (!Number.isInteger(exactStreamIndex) || exactStreamIndex < 0 || exactStreamIndex > 1024 ||
+      exactByStreamIndex.has(exactStreamIndex)) return null;
+    exactByStreamIndex.set(exactStreamIndex, exact);
+  }
 
   const normalized: JsonRecord[] = [];
   const streamIndices = new Set<number>();
   for (let position = 0; position < value.length; position += 1) {
     const raw = recordOrEmpty(value[position]);
-    const exact = recordOrEmpty(exactTracks[position]);
     const hlsIndex = Number(raw.hlsIndex);
     const streamIndex = Number(raw.streamIndex);
+    const exact = exactByStreamIndex.get(streamIndex);
+    if (!exact) return null;
     const language = normalizeGatewaySubtitleLanguage(raw.language);
     const title = typeof raw.title === "string" ? raw.title : "";
     const sourceCodec = normalizeCodecToken(raw.sourceCodec ?? raw.source_codec);
     const outputCodec = normalizeCodecToken(raw.outputCodec ?? raw.output_codec);
-    const exactStreamIndex = Number(exact.index ?? exact.streamIndex ?? exact.stream_index);
     const exactCodec = normalizeCodecToken(exact.codec ?? exact.codecName ?? exact.codec_name);
     const exactSubtitleType = normalizeCodecToken(exact.subtitleType ?? exact.subtitle_type ?? exact.kind);
     if (
       !Number.isInteger(hlsIndex) || hlsIndex !== position ||
       !Number.isInteger(streamIndex) || streamIndex < 0 || streamIndex > 1024 ||
-      streamIndices.has(streamIndex) || exactStreamIndex !== streamIndex ||
+      streamIndices.has(streamIndex) ||
       language.length < 2 || language.length > 32 ||
       language !== normalizeGatewaySubtitleLanguage(exact.language ?? exact.lang) ||
       title.length < 1 || title.length > 96 || title.trim() !== title ||
@@ -8524,18 +8533,22 @@ function normalizeGatewayExactSubtitleHls(
   const maxRenditions = Number(raw.maxRenditions);
   const sourceTrackCount = Number(raw.sourceTrackCount);
   const preparedTrackCount = Number(raw.preparedTrackCount);
+  const completeGraph = raw.cacheEligible === true && raw.reason === "enabled" &&
+    sourceTrackCount === preparedTrackCount;
+  const partialGraph = raw.cacheEligible === false && raw.reason === "enabled-partial" &&
+    sourceTrackCount > preparedTrackCount;
   if (
-    raw.protocol !== 1 || raw.enabled !== true || raw.cacheEligible !== true || raw.reason !== "enabled" ||
+    raw.protocol !== 1 || raw.enabled !== true || (!completeGraph && !partialGraph) ||
     !Number.isSafeInteger(maxRenditions) || maxRenditions < 1 || maxRenditions > 32 ||
-    renditions.length > maxRenditions || exactTracks.length !== renditions.length ||
-    !Number.isSafeInteger(sourceTrackCount) || sourceTrackCount !== renditions.length ||
+    renditions.length > maxRenditions || exactTracks.length !== sourceTrackCount ||
+    !Number.isSafeInteger(sourceTrackCount) || sourceTrackCount < renditions.length ||
     !Number.isSafeInteger(preparedTrackCount) || preparedTrackCount !== renditions.length
   ) return null;
   return {
     protocol: 1,
     enabled: true,
-    cacheEligible: true,
-    reason: "enabled",
+    cacheEligible: raw.cacheEligible,
+    reason: raw.reason,
     maxRenditions,
     sourceTrackCount,
     preparedTrackCount,

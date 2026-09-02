@@ -66,6 +66,13 @@ test('playback hints make Gateway subtitle extraction explicit and single-lane',
   assert.equal(selected.audioStreamIndex, 2);
   assert.equal(selected.subtitleStreamIndex, 17);
 
+  const exactHls = mediaUtils.applyPlaybackPreferencesToHint(
+    { container: 'mkv' },
+    { subtitle: { source: 'hls', streamIndex: 23 } },
+  );
+  assert.equal(exactHls.subtitleStreamIndex, 23,
+    'a signed exact HLS stream identity is prioritized in the next bounded cohort');
+
   const off = mediaUtils.applyPlaybackPreferencesToHint(
     { container: 'mkv', subtitleStreamIndex: 17, subtitle_stream_index: 17 },
     { subtitle: { source: 'off' } },
@@ -88,7 +95,7 @@ test('Gateway extracts no subtitle by default and at most the exact selected tex
     'function mappedSubtitleStreamIndexForSession(session) {',
   );
 
-  assert.match(gateway, /const GATEWAY_VERSION = 152;/);
+  assert.match(gateway, /const GATEWAY_VERSION = 153;/);
   assert.match(subtitleSelection, /if \(!Number\.isInteger\(requestedIndex\)\) return \[\];/);
   assert.match(subtitleSelection, /\.find\(\(track\) => normalizeAudioStreamIndex\(track\.index\) === requestedIndex\)/);
   assert.match(subtitleSelection, /return selected \? \[selected\] : \[\];/);
