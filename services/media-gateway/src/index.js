@@ -5246,6 +5246,14 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                 if (!context.effectiveUrlIdentitySha256) {
                     context.effectiveUrlIdentitySha256 = observedEffectiveUrlIdentitySha256;
                 }
+                if (!context.providerIdentityReported && context.onProviderIdentity) {
+                    context.providerIdentityReported = true;
+                    context.onProviderIdentity({
+                        validator: context.validator ? { ...context.validator } : null,
+                        effectiveUrlSha256: context.effectiveUrlSha256,
+                        effectiveUrlIdentitySha256: context.effectiveUrlIdentitySha256,
+                    });
+                }
                 if (!attempt.response.body || typeof attempt.response.body.getReader !== 'function') {
                     throw markStrictLidTerminal(context, strictLidBrokerError(
                         'PROVIDER_EMPTY_RESPONSE',
@@ -5573,6 +5581,9 @@ async function createStrictLidBroker(options = {}) {
     const dispatcherFactory = typeof options.dispatcherFactory === 'function'
         ? options.dispatcherFactory
         : null;
+    const onProviderIdentity = typeof options.onProviderIdentity === 'function'
+        ? options.onProviderIdentity
+        : null;
     const ownsDispatcher = Boolean(dispatcherFactory);
     const now = typeof options.now === 'function' ? options.now : Date.now;
     const initialDispatcher = dispatcherFactory
@@ -5652,6 +5663,8 @@ async function createStrictLidBroker(options = {}) {
         pathPrefix,
         effectiveUrlSha256: expectedEffectiveUrlSha256,
         effectiveUrlIdentitySha256: expectedEffectiveUrlIdentitySha256,
+        onProviderIdentity,
+        providerIdentityReported: false,
         terminalError: null,
         providerFetches: 0,
         completedProviderFetches: 0,
@@ -11062,9 +11075,26 @@ async function ensureBoundedMkvInputPump(session, parentSignal = null) {
     const preopenStartedAt = Date.now();
     const hadExactFileSize = Boolean(fileSizeBytesForSession(session));
     const resumedSeek = Number(session?.seekOffset || 0) > 0;
-    await preopenBoundedMkvInputPump(session, parentSignal, {
-        drainExactRange: resumedSeek,
-    });
+    const deferKnownResumeIdentityToSeekBroker = Boolean(
+        resumedSeek &&
+        hadExactFileSize &&
+        hasCompleteMkvPlaybackProfile(session?.codecProfile) &&
+        !needsMkvH264CurrentHeaderAuthority(session)
+    );
+    if (deferKnownResumeIdentityToSeekBroker) {
+        // The seek broker's first exact provider window already validates the
+        // total, captures the validator and pins the resolved target. Opening a
+        // separate 512-byte request here adds a second proxy/TLS round trip but
+        // no additional authority for a complete, exact-size profile.
+        session.startupTimings.providerGetPreopened = false;
+        session.startupTimings.providerSeekIdentityPreflight = false;
+        session.startupTimings.providerSeekIdentityDeferredToBroker = true;
+        session.startupTimings.providerSeekHeaderPrefetch = false;
+    } else {
+        await preopenBoundedMkvInputPump(session, parentSignal, {
+            drainExactRange: resumedSeek,
+        });
+    }
     const fileSizeBytes = fileSizeBytesForSession(session);
     const unknownLengthFullBody = session.preopenedVodInputAttempt?.range?.fullBodyUnknownSize === true;
     if (!fileSizeBytes && !unknownLengthFullBody) {
@@ -12080,6 +12110,36 @@ function usesFiniteMkvSeekBroker(session) {
     );
 }
 
+function applyFiniteMkvSeekProviderIdentity(session, identity) {
+    if (!session || !identity || typeof identity !== 'object') return;
+    const validator = normalizeStrictLidExpectedValidator(identity.validator);
+    if (validator) session.vodInputValidator = validator;
+    session.vodInputStrongValidator = validator?.kind === 'etag'
+        ? {
+            type: 'etag-sha256',
+            digest: crypto.createHash('sha256').update(validator.value).digest('hex'),
+        }
+        : null;
+    const effectiveUrlSha256 = String(identity.effectiveUrlSha256 || '').toLowerCase();
+    const effectiveUrlIdentitySha256 = String(identity.effectiveUrlIdentitySha256 || '').toLowerCase();
+    if (/^[a-f0-9]{64}$/.test(effectiveUrlSha256)) {
+        session.vodInputEffectiveUrlSha256 = effectiveUrlSha256;
+    }
+    if (/^[a-f0-9]{64}$/.test(effectiveUrlIdentitySha256)) {
+        session.vodInputEffectiveUrlIdentitySha256 = effectiveUrlIdentitySha256;
+    }
+    session.startupTimings = asRecord(session.startupTimings);
+    if (session.startupTimings.finiteMkvSeekProviderIdentityBound === true) return;
+    const validatorEvidence = validator?.kind === 'etag'
+        ? 'strong-etag'
+        : (validator?.kind === 'last-modified' ? 'last-modified' : 'weak-or-absent');
+    if (validatorEvidence === 'strong-etag') vodInputPumpStats.validatorEvidence.strongEtag += 1;
+    else if (validatorEvidence === 'last-modified') vodInputPumpStats.validatorEvidence.lastModified += 1;
+    else vodInputPumpStats.validatorEvidence.weakOrAbsent += 1;
+    session.startupTimings.providerValidatorEvidence = validatorEvidence;
+    session.startupTimings.finiteMkvSeekProviderIdentityBound = true;
+}
+
 async function prepareFiniteMkvSeekBroker(session, parentSignal = null) {
     if (!isFiniteMkvVodSession(session) || Number(session?.seekOffset || 0) <= 0) return null;
     if (session.finiteMkvSeekBroker) return session.finiteMkvSeekBroker;
@@ -12113,6 +12173,7 @@ async function prepareFiniteMkvSeekBroker(session, parentSignal = null) {
         expectedValidator: session.vodInputValidator,
         effectiveUrlSha256: session.vodInputEffectiveUrlSha256,
         effectiveUrlIdentitySha256: session.vodInputEffectiveUrlIdentitySha256,
+        onProviderIdentity: (identity) => applyFiniteMkvSeekProviderIdentity(session, identity),
         pathPrefix: 'finite-mkv-seek',
         // Provider chunks advance FFmpeg immediately while each exact window is
         // also materialized for cache/integrity. Provider windows remain

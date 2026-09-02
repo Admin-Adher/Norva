@@ -475,10 +475,11 @@ test('finite MKV seek reuses one provider connection across serialized windows',
   const data = Buffer.from(Array.from({ length: 16 }, (_, index) => index));
   const providerPorts = [];
   const connectionHeaders = [];
+  const providerIdentities = [];
   const provider = http.createServer((req, res) => {
     providerPorts.push(req.socket.remotePort);
     connectionHeaders.push(req.headers.connection || null);
-    sendExactRange(req, res, data);
+    sendExactRange(req, res, data, { etag: '"reuse-v1"' });
   });
   const sourceUrl = await listen(provider);
   const dispatcher = new Agent({ connections: 1, pipelining: 1 });
@@ -492,6 +493,7 @@ test('finite MKV seek reuses one provider connection across serialized windows',
     releaseDelayMs: 0,
     completedReleaseDelayMs: 0,
     openTimeoutMs: 2000,
+    onProviderIdentity: (identity) => providerIdentities.push(identity),
   });
   t.after(async () => {
     await broker.close();
@@ -507,6 +509,14 @@ test('finite MKV seek reuses one provider connection across serialized windows',
   assert.deepEqual(connectionHeaders, ['keep-alive', 'keep-alive']);
   assert.equal(broker.providerFetches, 2);
   assert.equal(broker.completedProviderFetches, 2);
+  assert.equal(providerIdentities.length, 1, 'provider identity is bound once on the first exact window');
+  assert.deepEqual({ ...providerIdentities[0].validator }, {
+    header: 'If-Range',
+    value: '"reuse-v1"',
+    kind: 'etag',
+  });
+  assert.match(providerIdentities[0].effectiveUrlSha256, /^[a-f0-9]{64}$/);
+  assert.match(providerIdentities[0].effectiveUrlIdentitySha256, /^[a-f0-9]{64}$/);
 });
 
 test('finite seek broker renews an ageing dispatcher on the same pinned proxy slot', async () => {

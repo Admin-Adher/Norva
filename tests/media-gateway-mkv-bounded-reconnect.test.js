@@ -1089,7 +1089,7 @@ test('HTTP 200 full-body fallback stays fail-closed outside an exact offset-zero
         assert.equal(Buffer.concat(captured?.chunks || []).equals(largeFixture.subarray(0, prefixBytes)), true);
     });
 
-    await t.test('resumed MKV with a complete profile drains only the 512-byte file identity', async () => {
+    await t.test('resumed MKV with a complete exact-size profile defers identity to the first seek window', async () => {
         const largeFixture = mkvFixture(500_000);
         const tracker = makeTracker();
         const headerByteCache = new Map();
@@ -1130,17 +1130,20 @@ test('HTTP 200 full-body fallback stays fail-closed outside an exact offset-zero
 
         await h.ensureBoundedMkvInputPump(session);
 
-        assert.equal(fetches, 1);
-        assert.equal(tracker.calls[0].Range, 'bytes=0-511');
-        assert.equal(tracker.maxActive, 1);
+        assert.equal(fetches, 0, 'the seek broker must own the only provider round trip');
+        assert.equal(tracker.calls.length, 0);
+        assert.equal(tracker.maxActive, 0);
         assert.equal(tracker.active, 0);
-        assert.equal(session.startupTimings.providerSeekIdentityPreflightBytes, 512);
-        assert.equal(session.startupTimings.providerSeekHeaderPrefetch, false);
-        assert.equal(session.vodInputPrefixIdentityBytes, 512);
-        assert.equal(
-            session.vodInputPrefixIdentitySha256,
-            crypto.createHash('sha256').update(largeFixture.subarray(0, 512)).digest('hex'),
+        assert.ok(
+            session.startupTimings.providerGetPreopenMs >= 0 &&
+            session.startupTimings.providerGetPreopenMs < 50,
+            'deferral performs no network wait even under a parallel test load',
         );
+        assert.equal(session.startupTimings.providerSeekIdentityPreflight, false);
+        assert.equal(session.startupTimings.providerSeekIdentityDeferredToBroker, true);
+        assert.equal(session.startupTimings.providerSeekHeaderPrefetch, false);
+        assert.equal(session.vodInputPrefixIdentityBytes, undefined);
+        assert.equal(session.vodInputPrefixIdentitySha256, undefined);
         assert.equal(headerByteCache.has(session.sourceUrl), false);
     });
 
@@ -3371,6 +3374,11 @@ test('finite MKV seek preparation drains the retained provider before opening on
             proxyKeyFromUrl: () => 'provider.example/user',
             isFiniteMkvVodSession: () => true,
             fileSizeBytesForSession: (session) => session.fileSizeBytes,
+            normalizeStrictLidExpectedValidator: (value) => value,
+            crypto,
+            vodInputPumpStats: {
+                validatorEvidence: { strongEtag: 0, lastModified: 0, weakOrAbsent: 0 },
+            },
             vodInputPumpError: (code, message, options = {}) => Object.assign(new Error(message), { code, ...options }),
             closePreopenedBoundedMkvInput: async (session) => {
                 events.push('preopen-close');
@@ -3416,6 +3424,22 @@ test('finite MKV seek preparation drains the retained provider before opening on
     assert.equal(brokerOptions.dispatcherMaxAgeMs, 4 * 60_000);
     assert.equal(brokerOptions.completedReleaseDelayMs, 0);
     assert.equal(brokerOptions.supersededReleaseDelayMs, 2500);
+    assert.equal(typeof brokerOptions.onProviderIdentity, 'function');
+    brokerOptions.onProviderIdentity({
+        validator: { header: 'If-Range', value: '"v1"', kind: 'etag' },
+        effectiveUrlSha256: 'c'.repeat(64),
+        effectiveUrlIdentitySha256: 'd'.repeat(64),
+    });
+    assert.deepEqual({ ...session.vodInputValidator }, {
+        header: 'If-Range', value: '"v1"', kind: 'etag',
+    });
+    assert.deepEqual({ ...session.vodInputStrongValidator }, {
+        type: 'etag-sha256',
+        digest: crypto.createHash('sha256').update('"v1"').digest('hex'),
+    });
+    assert.equal(session.vodInputEffectiveUrlSha256, 'c'.repeat(64));
+    assert.equal(session.vodInputEffectiveUrlIdentitySha256, 'd'.repeat(64));
+    assert.equal(session.startupTimings.finiteMkvSeekProviderIdentityBound, true);
     assert.equal(harness.usesFiniteMkvSeekBroker(session), true);
 
     await harness.closeFiniteMkvSeekBroker(session);
