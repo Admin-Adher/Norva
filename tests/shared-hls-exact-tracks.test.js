@@ -12,6 +12,8 @@ const {
   exactSubtitleOutputArgs,
   finalizeExactHlsTrackGraph,
   rewriteExactHlsMaster,
+  rewriteExactSubtitleMediaSequence,
+  seedExactSubtitlePlaylists,
 } = require('../services/media-gateway/src/sharedHlsTracks');
 
 const plain = (value) => JSON.parse(JSON.stringify(value));
@@ -160,8 +162,43 @@ test('one FFmpeg process maps every exact subtitle to a segmented WebVTT output'
   assert.equal(args.filter((value) => value === 'segment').length, 2);
   assert.equal(args.filter((value) => value === 'webvtt').length, 4);
   assert.equal(args.filter((value) => value === '-ss').length, 2);
+  assert.equal(args.filter((value) => value === '-segment_start_number').length, 2);
+  assert.equal(args.filter((value) => value === '1').length, 2);
   assert.match(args.join(' '), /subtitle_0-%05d\.vtt/);
   assert.match(args.join(' '), /subtitle_1-%05d\.vtt/);
+});
+
+test('late-cue exact subtitles are selectable through a live gap bootstrap before FFmpeg emits data', async (t) => {
+  const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'norva-exact-hls-bootstrap-'));
+  t.after(() => fs.promises.rm(root, { recursive: true, force: true }));
+  const plan = buildExactSubtitleHlsPlan(profile([
+    exactTextTrack(3, 'eng', 'English'),
+    exactTextTrack(4, 'ita', 'Italian [ForcedNarrative]', { forced: true }),
+  ]));
+
+  assert.equal(seedExactSubtitlePlaylists(plan, root), 2);
+  const bootstrap = await fs.promises.readFile(path.join(root, 'subtitle_1.m3u8'), 'utf8');
+  assert.match(bootstrap, /#EXT-X-NORVA-BOOTSTRAP:1/);
+  assert.match(bootstrap, /#EXT-X-MEDIA-SEQUENCE:0/);
+  assert.match(bootstrap, /#EXTINF:0\.001,/);
+  assert.match(bootstrap, /#EXT-X-GAP/);
+  assert.match(bootstrap, /subtitle_1-00000\.vtt/);
+  assert.equal(await fs.promises.readFile(path.join(root, 'subtitle_1-00000.vtt'), 'utf8'), 'WEBVTT\n\n');
+  assert.equal(rewriteExactSubtitleMediaSequence(bootstrap), bootstrap);
+
+  const exact = [
+    '#EXTM3U',
+    '#EXT-X-VERSION:3',
+    '#EXT-X-MEDIA-SEQUENCE:0',
+    '#EXT-X-TARGETDURATION:120',
+    '#EXTINF:119.500,',
+    'subtitle_1-00001.vtt',
+    '',
+  ].join('\n');
+  const transitioned = rewriteExactSubtitleMediaSequence(exact);
+  assert.match(transitioned, /#EXT-X-MEDIA-SEQUENCE:1/);
+  assert.match(transitioned, /subtitle_1-00001\.vtt/);
+  assert.equal(rewriteExactSubtitleMediaSequence(transitioned), transitioned, 'sequence rewrite is idempotent');
 });
 
 test('master finalization keeps useful audio labels and exposes exact subtitle attributes', () => {

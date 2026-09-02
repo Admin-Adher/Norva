@@ -61,6 +61,8 @@ const {
     exactSubtitleOutputArgs,
     finalizeExactHlsTrackGraph,
     rewriteExactHlsMaster,
+    rewriteExactSubtitleMediaSequence,
+    seedExactSubtitlePlaylists,
 } = require('./sharedHlsTracks');
 const {
     measureProviderRoute,
@@ -2221,7 +2223,7 @@ const MAX_CACHEABLE_EXACT_SUBTITLE_HLS_RENDITIONS = Math.min(
     MAX_EXACT_SUBTITLE_HLS_RENDITIONS,
     clampInt(process.env.MAX_CACHEABLE_EXACT_SUBTITLE_HLS_RENDITIONS, 8, 1, 32),
 );
-const GATEWAY_VERSION = 154;
+const GATEWAY_VERSION = 155;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -10548,7 +10550,10 @@ app.get('/sessions/:id/:file', requirePlaybackToken, async (req, res) => {
             const handle = await session.completeHlsCacheLease.openAsset(requested);
             if (requested.toLowerCase().endsWith('.m3u8')) {
                 try {
-                    const playlist = await handle.readFile('utf8');
+                    let playlist = await handle.readFile('utf8');
+                    if (isExactSubtitleSessionPlaylistName(session, requested)) {
+                        playlist = rewriteExactSubtitleMediaSequence(playlist);
+                    }
                     res.setHeader('Cache-Control', 'no-store');
                     return res.send(rewritePlaylistSegments(playlist, req.playbackToken, session));
                 } finally {
@@ -10575,7 +10580,10 @@ app.get('/sessions/:id/:file', requirePlaybackToken, async (req, res) => {
             // Every child playlist is an authenticated resource graph. Rewrite
             // its media/segment URIs exactly like the master; serving it raw
             // would drop the playback token on the very next hls.js request.
-            const playlist = await fsp.readFile(filePath, 'utf8');
+            let playlist = await fsp.readFile(filePath, 'utf8');
+            if (isExactSubtitleSessionPlaylistName(session, requested)) {
+                playlist = rewriteExactSubtitleMediaSequence(playlist);
+            }
             res.setHeader('Cache-Control', 'no-store');
             return res.send(rewritePlaylistSegments(playlist, req.playbackToken, session));
         }
@@ -13327,6 +13335,15 @@ function startFfmpeg(session) {
     let child;
     let linearSeekBridge = null;
     try {
+        if (exactSubtitlePlan) {
+            const bootstrapCount = seedExactSubtitlePlaylists(exactSubtitlePlan, session.outputDir);
+            session.startupTimings = asRecord(session.startupTimings);
+            session.startupTimings.exactSubtitleBootstrap = {
+                protocol: 1,
+                preparedTrackCount: bootstrapCount,
+                firstMediaSequence: 1,
+            };
+        }
         if (linearSeekBridgePlan) {
             linearSeekBridge = spawnFiniteMkvLinearSeekBridge(session, linearSeekBridgePlan, inputProbeArgs);
         }
@@ -19479,6 +19496,12 @@ function isAllowedSessionPlaylistName(session, value) {
         }
     }
     return allowed.has(requested);
+}
+
+function isExactSubtitleSessionPlaylistName(session, value) {
+    const requested = safeSessionArtifactName(value);
+    if (!requested || !exactSubtitleHlsEnabled(session)) return false;
+    return session.exactSubtitleHls.renditions.some((rendition) => rendition.playlistName === requested);
 }
 
 function segmentContentType(file) {

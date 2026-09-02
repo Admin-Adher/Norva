@@ -6,6 +6,8 @@ const path = require('node:path');
 const fsp = fs.promises;
 const DEFAULT_MAX_SUBTITLE_RENDITIONS = 32;
 const DEFAULT_MAX_CACHEABLE_SUBTITLE_RENDITIONS = 8;
+const EXACT_SUBTITLE_BOOTSTRAP_PROTOCOL = 1;
+const EXACT_SUBTITLE_FIRST_MEDIA_SEQUENCE = 1;
 const TEXT_SUBTITLE_CODECS = new Set([
     'ass',
     'movtext',
@@ -199,6 +201,11 @@ function exactSubtitleOutputArgs(planValue, outputDirectory, postInputSeek = [])
         '-c:s', 'webvtt',
         '-f', 'segment',
         '-segment_time', '2',
+        // Sequence zero belongs to the harmless bootstrap playlist written
+        // before FFmpeg starts. The first exact segment begins at one so a
+        // selected late-cue track can transition from bootstrap to source data
+        // without hls.js mistaking both resources for the same fragment.
+        '-segment_start_number', String(EXACT_SUBTITLE_FIRST_MEDIA_SEQUENCE),
         '-segment_list_flags', '+live',
         '-segment_list_size', '0',
         '-segment_list_type', 'm3u8',
@@ -206,6 +213,81 @@ function exactSubtitleOutputArgs(planValue, outputDirectory, postInputSeek = [])
         '-segment_list', path.join(outputDirectory, rendition.playlistName),
         path.join(outputDirectory, rendition.segmentPattern),
     ]);
+}
+
+function exactSubtitleBootstrapNames(renditionValue) {
+    const rendition = record(renditionValue);
+    const hlsIndex = normalizeStreamIndex(rendition.hlsIndex);
+    if (!Number.isInteger(hlsIndex)) {
+        throw new SharedHlsTrackError('SUBTITLE_BOOTSTRAP_INDEX_INVALID', 'subtitle bootstrap index is invalid');
+    }
+    const playlistName = safeFlatName(rendition.playlistName);
+    const expectedPlaylistName = `subtitle_${hlsIndex}.m3u8`;
+    const expectedPattern = `subtitle_${hlsIndex}-%05d.vtt`;
+    if (playlistName !== expectedPlaylistName || rendition.segmentPattern !== expectedPattern) {
+        throw new SharedHlsTrackError('SUBTITLE_BOOTSTRAP_NAME_INVALID', 'subtitle bootstrap name is invalid');
+    }
+    return {
+        playlistName,
+        segmentName: `subtitle_${hlsIndex}-00000.vtt`,
+    };
+}
+
+function seedExactSubtitlePlaylists(planValue, outputDirectoryValue) {
+    const plan = record(planValue);
+    if (plan.enabled !== true || !Array.isArray(plan.renditions)) return 0;
+    const outputDirectoryRaw = String(outputDirectoryValue || '').trim();
+    if (!outputDirectoryRaw) {
+        throw new SharedHlsTrackError('SUBTITLE_BOOTSTRAP_ROOT_INVALID', 'subtitle bootstrap root is invalid');
+    }
+    const outputDirectory = path.resolve(outputDirectoryRaw);
+    const stat = fs.statSync(outputDirectory, { throwIfNoEntry: false });
+    if (!stat?.isDirectory()) {
+        throw new SharedHlsTrackError('SUBTITLE_BOOTSTRAP_ROOT_MISSING', 'subtitle bootstrap root is missing');
+    }
+    for (const rendition of plan.renditions) {
+        const names = exactSubtitleBootstrapNames(rendition);
+        const playlistPath = path.resolve(outputDirectory, names.playlistName);
+        const segmentPath = path.resolve(outputDirectory, names.segmentName);
+        if (!isWithin(outputDirectory, playlistPath) || !isWithin(outputDirectory, segmentPath)) {
+            throw new SharedHlsTrackError('SUBTITLE_BOOTSTRAP_ESCAPED', 'subtitle bootstrap escaped output root');
+        }
+        const playlist = [
+            '#EXTM3U',
+            '#EXT-X-VERSION:3',
+            `#EXT-X-NORVA-BOOTSTRAP:${EXACT_SUBTITLE_BOOTSTRAP_PROTOCOL}`,
+            '#EXT-X-MEDIA-SEQUENCE:0',
+            '#EXT-X-ALLOW-CACHE:NO',
+            '#EXT-X-TARGETDURATION:1',
+            '#EXTINF:0.001,',
+            '#EXT-X-GAP',
+            names.segmentName,
+            '',
+        ].join('\n');
+        const tempPath = `${playlistPath}.norva-bootstrap-${process.pid}.tmp`;
+        fs.writeFileSync(segmentPath, 'WEBVTT\n\n', { encoding: 'utf8', flag: 'w' });
+        try {
+            fs.writeFileSync(tempPath, playlist, { encoding: 'utf8', flag: 'wx' });
+            fs.renameSync(tempPath, playlistPath);
+        } finally {
+            try { fs.unlinkSync(tempPath); } catch (_) {}
+        }
+    }
+    return plan.renditions.length;
+}
+
+function rewriteExactSubtitleMediaSequence(playlistValue) {
+    const source = String(playlistValue || '');
+    const lines = source.split(/\r?\n/);
+    if (lines[0]?.trim() !== '#EXTM3U') return source;
+    const firstSegment = lines.find((line) => line.trim() && !line.trim().startsWith('#'))?.trim() || '';
+    const segmentMatch = /-(\d{5})\.vtt$/i.exec(firstSegment);
+    const firstSegmentNumber = segmentMatch ? Number(segmentMatch[1]) : 0;
+    if (!Number.isInteger(firstSegmentNumber) || firstSegmentNumber < 1) return source;
+    const sequenceIndex = lines.findIndex((line) => /^#EXT-X-MEDIA-SEQUENCE:/i.test(line.trim()));
+    if (sequenceIndex < 0) return source;
+    lines[sequenceIndex] = `#EXT-X-MEDIA-SEQUENCE:${firstSegmentNumber}`;
+    return lines.join('\n');
 }
 
 function escapeHlsQuoted(value) {
@@ -392,4 +474,6 @@ module.exports = {
     exactSubtitleOutputArgs,
     finalizeExactHlsTrackGraph,
     rewriteExactHlsMaster,
+    rewriteExactSubtitleMediaSequence,
+    seedExactSubtitlePlaylists,
 };
