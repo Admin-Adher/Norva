@@ -319,7 +319,7 @@ test('gateway uses the canonical provider key on every provider network lane', (
   );
   assert.match(
     gateway,
-    /const dispatcher = pickProxyAgent\(proxyKeyFromUrl\(session\.sourceUrl\)\) \|\| null;/,
+    /const dispatcher = providerProxyAgentForRoute\(providerNodeRouteForSession\(session\)\);/,
     'the finite-MKV input pump must freeze one sticky provider-account dispatcher',
   );
   assert.match(
@@ -510,7 +510,7 @@ test('gateway fails proxy 407 safely before provider 458 handling', () => {
 });
 
 test('gateway advertises targeted operator override support without identities or secrets', () => {
-  assert.match(gateway, /const GATEWAY_VERSION = 164;/);
+  assert.match(gateway, /const GATEWAY_VERSION = 165;/);
   assert.match(gateway, /providerProxyAffinityProtocol:\s*1/);
   assert.match(gateway, /providerProxyAffinityKey:\s*'provider-account'/);
   assert.match(gateway, /providerProxySlotOverrideProtocol:\s*1/);

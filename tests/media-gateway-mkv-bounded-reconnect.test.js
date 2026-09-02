@@ -135,6 +135,10 @@ function pumpHarness(overrides = {}) {
         maybeFinalizeMkvH264FastStartProof: () => null,
         RAW_PREFIX_SNIFF_BYTES: 512,
         FFMPEG_USER_AGENT: 'Norva/Test',
+        providerHttpProxyUrls: [],
+        providerSocksProxyUrls: [],
+        providerHttpProxyAgents: [],
+        providerSocksProxyAgents: [],
         providerProxyAgents: [],
         vodInputPumpStats: {
             starts: 0,
@@ -161,6 +165,8 @@ function pumpHarness(overrides = {}) {
             session?.playbackHint?.streamType || session?.playbackHint?.stream_type || '',
         ).toLowerCase()),
         proxyKeyFromUrl: () => 'provider.example/account',
+        providerRouteForKey: () => null,
+        createProviderProxyAgent: () => null,
         pickProxyAgent: () => null,
         classifyProviderResponseFailure: providerFailure.classifyProviderResponseFailure,
         classifyProviderFetchFailure: providerFailure.classifyProviderFetchFailure,
@@ -180,6 +186,12 @@ function pumpHarness(overrides = {}) {
             normalizeSourceContainerAuthority,
             isFiniteMkvVodSession,
             classifyMediaContainerPrefix,
+            providerNodeRouteIsAvailable,
+            providerNodeRouteForSession,
+            providerProxyAgentForRoute,
+            pinProviderNodeRouteForSession,
+            alternateProviderNodeTransportRoute,
+            shouldFallbackProviderNodeTransport,
             parseProviderFileSize,
             probeProviderFileSize,
             ensureBoundedMkvInputPump,
@@ -584,6 +596,64 @@ test('bounded MKV pump forwards exact bytes, resumes at the exact offset, and ne
     assert.deepEqual(tracker.dispatchers, [dispatcher, dispatcher], 'every reconnect stays on one sticky proxy');
 });
 
+test('bounded MKV pump can rescue an interrupted body by changing protocol without changing proxy slot', async () => {
+    const fixture = mkvFixture(80);
+    const tracker = makeTracker();
+    const httpDispatcher = { id: 'slot-3-http' };
+    const socksDispatcher = { id: 'slot-3-socks5' };
+    const cut = 24;
+    const h = pumpHarness({
+        providerHttpProxyUrls: ['http://1', 'http://2', 'http://3'],
+        providerSocksProxyUrls: ['socks5://1', 'socks5://2', 'socks5://3'],
+        providerHttpProxyAgents: [{}, {}, httpDispatcher],
+        providerSocksProxyAgents: [{}, {}, socksDispatcher],
+        providerProxyAgents: [{}, {}, httpDispatcher],
+        providerRouteForKey: () => ({ slot: 3, ffmpegSlot: 3, nodeTransport: 'http' }),
+        fetch: async (_url, options) => {
+            tracker.dispatchers.push(options.dispatcher);
+            if (options.dispatcher === httpDispatcher) {
+                return trackedResponse(tracker, {
+                    chunks: [fixture.subarray(0, cut)],
+                    headers: {
+                        'Content-Range': `bytes 0-${fixture.length - 1}/${fixture.length}`,
+                        'Content-Length': String(fixture.length),
+                        ETag: '"pump-transport-v1"',
+                    },
+                });
+            }
+            assert.equal(options.dispatcher, socksDispatcher);
+            return trackedResponse(tracker, {
+                chunks: [fixture.subarray(cut)],
+                headers: {
+                    'Content-Range': `bytes ${cut}-${fixture.length - 1}/${fixture.length}`,
+                    'Content-Length': String(fixture.length - cut),
+                    ETag: '"pump-transport-v1"',
+                },
+            });
+        },
+    });
+    const session = mkvSession(fixture.length);
+    const writable = new CapturingWritable();
+
+    const result = await h.runBoundedMkvInputPump(
+        session,
+        writable,
+        new AbortController().signal,
+        httpDispatcher,
+    );
+
+    assert.deepEqual(writable.bytes(), fixture);
+    assert.equal(result.reconnects, 1);
+    assert.deepEqual(tracker.dispatchers, [httpDispatcher, socksDispatcher]);
+    assert.equal(session.providerNodeRoute.slot, 3);
+    assert.equal(session.providerNodeRoute.nodeTransport, 'socks5');
+    assert.equal(session.startupTimings.providerTransportFallbackAttempted, true);
+    assert.equal(session.startupTimings.providerTransportFallbackFrom, 'http');
+    assert.equal(session.startupTimings.providerTransportFallbackTo, 'socks5');
+    assert.equal(tracker.maxActive, 1);
+    assert.equal(tracker.active, 0);
+});
+
 test('cold unknown-size MKV discovers total from the retained playback GET and opens one provider socket', async () => {
     const fixture = mkvFixture(64);
     const tracker = makeTracker();
@@ -615,6 +685,99 @@ test('cold unknown-size MKV discovers total from the retained playback GET and o
     assert.equal(session.vodInputContentSha256, result.contentSha256);
     assert.deepEqual(writable.bytes(), fixture);
     assert.equal(session.startupTimings.fileSizeDiscoveredFromPlaybackGet, true);
+});
+
+test('cold MKV preopen changes only the Node transport on the same proxy slot after a network failure', async () => {
+    const fixture = mkvFixture(96);
+    const tracker = makeTracker();
+    const httpDispatcher = { id: 'slot-2-http' };
+    const socksDispatcher = { id: 'slot-2-socks5' };
+    const dispatchers = [];
+    const h = pumpHarness({
+        providerHttpProxyUrls: ['http://slot-1', 'http://slot-2'],
+        providerSocksProxyUrls: ['socks5://slot-1', 'socks5://slot-2'],
+        providerHttpProxyAgents: [{ id: 'slot-1-http' }, httpDispatcher],
+        providerSocksProxyAgents: [{ id: 'slot-1-socks5' }, socksDispatcher],
+        providerProxyAgents: [{ id: 'slot-1-http' }, httpDispatcher],
+        providerRouteForKey: () => ({
+            slot: 2,
+            ffmpegSlot: 2,
+            nodeTransport: 'http',
+            ffmpegTransport: 'http',
+            selectionReason: 'deterministic-fallback',
+            controlStatus: 'fallback',
+        }),
+        fetch: async (_url, options) => {
+            dispatchers.push(options.dispatcher);
+            if (options.dispatcher === httpDispatcher) {
+                throw Object.assign(new Error('provider connection reset'), { code: 'ECONNRESET' });
+            }
+            assert.equal(options.dispatcher, socksDispatcher);
+            return trackedResponse(tracker, {
+                chunks: [fixture],
+                headers: {
+                    'Content-Range': `bytes 0-${fixture.length - 1}/${fixture.length}`,
+                    'Content-Length': String(fixture.length),
+                    ETag: '"transport-fallback-v1"',
+                },
+            });
+        },
+    });
+    const session = mkvSession(null);
+
+    await h.ensureBoundedMkvInputPump(session);
+
+    assert.deepEqual(dispatchers, [httpDispatcher, socksDispatcher]);
+    assert.equal(session.providerNodeRoute.slot, 2, 'the provider exit slot must never rotate');
+    assert.equal(session.providerNodeRoute.ffmpegSlot, 2);
+    assert.equal(session.providerNodeRoute.nodeTransport, 'socks5');
+    assert.equal(session.providerNodeRoute.controlStatus, 'session-fallback');
+    assert.equal(session.startupTimings.providerTransportFallbackAttempted, true);
+    assert.equal(session.startupTimings.providerTransportFallbackTriggerCode, 'PROVIDER_CONNECTION_RESET');
+    assert.equal(session.startupTimings.providerTransportFallbackTo, 'socks5');
+    assert.equal(session.startupTimings.providerPreopenRetries, 0);
+
+    const writable = new CapturingWritable();
+    const pump = h.startBoundedMkvInputPump(session, writable);
+    assert.equal(pump.dispatcher, socksDispatcher, 'later byte-pump reconnects stay on the rescued transport');
+    await pump.promise;
+    assert.deepEqual(writable.bytes(), fixture);
+    assert.equal(tracker.maxActive, 1, 'the HTTP attempt is closed before SOCKS5 opens');
+    assert.equal(tracker.active, 0);
+});
+
+test('same-slot transport fallback never masks provider or proxy HTTP refusals', async (t) => {
+    for (const scenario of [
+        { status: 458, code: 'PROVIDER_BUSY' },
+        { status: 407, code: 'PROXY_AUTH_FAILED' },
+    ]) {
+        await t.test(String(scenario.status), async () => {
+            const tracker = makeTracker();
+            const httpDispatcher = { id: `slot-http-${scenario.status}` };
+            const socksDispatcher = { id: `slot-socks-${scenario.status}` };
+            const dispatchers = [];
+            const h = pumpHarness({
+                providerHttpProxyUrls: ['http://slot-1'],
+                providerSocksProxyUrls: ['socks5://slot-1'],
+                providerHttpProxyAgents: [httpDispatcher],
+                providerSocksProxyAgents: [socksDispatcher],
+                providerProxyAgents: [httpDispatcher],
+                providerRouteForKey: () => ({ slot: 1, ffmpegSlot: 1, nodeTransport: 'http' }),
+                fetch: async (_url, options) => {
+                    dispatchers.push(options.dispatcher);
+                    return trackedResponse(tracker, { status: scenario.status, chunks: [] });
+                },
+            });
+
+            await assert.rejects(
+                h.ensureBoundedMkvInputPump(mkvSession(null)),
+                (error) => error?.code === scenario.code,
+            );
+            assert.deepEqual(dispatchers, [httpDispatcher]);
+            assert.equal(tracker.maxActive, 1);
+            assert.equal(tracker.active, 0);
+        });
+    }
 });
 
 test('cold offset-zero MKV accepts one exact HTTP 200 body without losing pre-read bytes', async () => {
@@ -3440,7 +3603,13 @@ test('finite MKV seek preparation drains the retained provider before opening on
                 get: () => null,
                 put: () => true,
             },
-            pinnedProxyAgentFactory: () => () => ({ slot: 3 }),
+            providerNodeRouteForSession: () => ({ slot: 3, nodeTransport: 'http' }),
+            alternateProviderNodeTransportRoute: () => ({ slot: 3, nodeTransport: 'socks5' }),
+            pinnedProxyAgentFactoryForRoute: (route) => () => ({
+                slot: route.slot,
+                nodeTransport: route.nodeTransport,
+            }),
+            pinProviderNodeRouteForSession: (session, route) => { session.providerNodeRoute = route; },
             proxyKeyFromUrl: () => 'provider.example/user',
             isFiniteMkvVodSession: () => true,
             fileSizeBytesForSession: (session) => session.fileSizeBytes,
@@ -3502,6 +3671,9 @@ test('finite MKV seek preparation drains the retained provider before opening on
     assert.equal(session.startupTimings.finiteMkvSeekWarmupWindowBytes, 256 * 1024);
     assert.equal(session.startupTimings.finiteMkvSeekSequentialWindowBytes, 2 * 1024 * 1024);
     assert.equal(typeof brokerOptions.dispatcherFactory, 'function');
+    assert.equal(typeof brokerOptions.dispatcherFallbackFactory, 'function');
+    assert.deepEqual({ ...brokerOptions.dispatcherFactory() }, { slot: 3, nodeTransport: 'http' });
+    assert.deepEqual({ ...brokerOptions.dispatcherFallbackFactory() }, { slot: 3, nodeTransport: 'socks5' });
     assert.equal(brokerOptions.dispatcherMaxAgeMs, 4 * 60_000);
     assert.equal(brokerOptions.completedReleaseDelayMs, 0);
     assert.equal(brokerOptions.supersededReleaseDelayMs, 2500);

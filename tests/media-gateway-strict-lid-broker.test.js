@@ -629,6 +629,127 @@ test('finite seek broker replaces a failed tunnel before retrying remaining byte
   assert.deepEqual(closedGenerations, [1, 2]);
 });
 
+test('finite seek broker falls back HTTP to SOCKS5 on the same proxy slot before retrying', async () => {
+  const { createStrictLidBroker } = brokerHarness();
+  const data = Buffer.alloc(8, 0x5b);
+  const events = [];
+  const observedDispatchers = [];
+  const primaryFactory = () => ({
+    slot: 2,
+    nodeTransport: 'http',
+    async close() { events.push('close-http'); },
+  });
+  const fallbackFactory = () => ({
+    slot: 2,
+    nodeTransport: 'socks5',
+    async close() { events.push('close-socks5'); },
+  });
+  const broker = await createStrictLidBroker({
+    sourceUrl: 'https://provider.invalid/movie/account/secret/file.mkv',
+    fileSizeBytes: data.length,
+    pathPrefix: 'finite-mkv-seek',
+    finiteWindowBytes: 8,
+    finiteCacheBytes: 8,
+    releaseDelayMs: 0,
+    completedReleaseDelayMs: 0,
+    dispatcherFactory: primaryFactory,
+    dispatcherFallbackFactory: fallbackFactory,
+    onDispatcherFallback: ({ code }) => events.push(`fallback-${code}`),
+    fetchImpl: async (_url, options) => {
+      observedDispatchers.push(options.dispatcher);
+      if (options.dispatcher.nodeTransport === 'http') {
+        throw Object.assign(new Error('HTTP CONNECT path reset'), { code: 'ECONNRESET' });
+      }
+      assert.deepEqual(events, ['close-http', 'fallback-PROVIDER_FETCH_FAILED']);
+      return new Response(data, {
+        status: 206,
+        headers: {
+          'Content-Range': `bytes 0-7/${data.length}`,
+          'Content-Length': String(data.length),
+          ETag: '"same-exit-fallback-v1"',
+        },
+      });
+    },
+  });
+
+  try {
+    const response = await fetch(broker.inputUrl, { headers: { Range: 'bytes=0-7' } });
+    assert.equal(response.status, 206);
+    assert.deepEqual(Buffer.from(await response.arrayBuffer()), data);
+    assert.deepEqual(observedDispatchers.map((dispatcher) => ({
+      slot: dispatcher.slot,
+      nodeTransport: dispatcher.nodeTransport,
+    })), [
+      { slot: 2, nodeTransport: 'http' },
+      { slot: 2, nodeTransport: 'socks5' },
+    ]);
+    assert.equal(broker.interruptedProviderFetches, 1);
+    assert.equal(broker.completedProviderFetches, 1);
+    assert.equal(broker.dispatcherRefreshes, 1);
+    assert.equal(broker.dispatcherFallbacks, 1);
+  } finally {
+    await broker.close();
+  }
+  assert.deepEqual(events, [
+    'close-http',
+    'fallback-PROVIDER_FETCH_FAILED',
+    'close-socks5',
+  ]);
+});
+
+test('finite seek broker does not change transport after an upstream HTTP response', async () => {
+  const { createStrictLidBroker } = brokerHarness();
+  const data = Buffer.alloc(8, 0x4a);
+  const transports = [];
+  let primaryGeneration = 0;
+  let fallbackFactoryCalls = 0;
+  let fetchCalls = 0;
+  const broker = await createStrictLidBroker({
+    sourceUrl: 'https://provider.invalid/movie/account/secret/file.mkv',
+    fileSizeBytes: data.length,
+    pathPrefix: 'finite-mkv-seek',
+    finiteWindowBytes: 8,
+    finiteCacheBytes: 8,
+    releaseDelayMs: 0,
+    completedReleaseDelayMs: 0,
+    dispatcherFactory: () => ({
+      slot: 2,
+      nodeTransport: 'http',
+      generation: ++primaryGeneration,
+      async close() {},
+    }),
+    dispatcherFallbackFactory: () => {
+      fallbackFactoryCalls += 1;
+      return { slot: 2, nodeTransport: 'socks5', async close() {} };
+    },
+    fetchImpl: async (_url, options) => {
+      fetchCalls += 1;
+      transports.push(options.dispatcher.nodeTransport);
+      if (fetchCalls === 1) return new Response('temporary', { status: 503 });
+      return new Response(data, {
+        status: 206,
+        headers: {
+          'Content-Range': `bytes 0-7/${data.length}`,
+          'Content-Length': String(data.length),
+          ETag: '"http-response-v1"',
+        },
+      });
+    },
+  });
+
+  try {
+    const response = await fetch(broker.inputUrl, { headers: { Range: 'bytes=0-7' } });
+    assert.equal(response.status, 206);
+    assert.deepEqual(Buffer.from(await response.arrayBuffer()), data);
+    assert.deepEqual(transports, ['http', 'http']);
+    assert.equal(fallbackFactoryCalls, 0);
+    assert.equal(broker.dispatcherFallbacks, 0);
+    assert.equal(broker.dispatcherRefreshes, 1);
+  } finally {
+    await broker.close();
+  }
+});
+
 test('strict broker can reopen immediately only after an exact provider range is fully drained', async (t) => {
   const { createStrictLidBroker } = brokerHarness();
   const data = Buffer.alloc(64, 0x5c);
@@ -2027,7 +2148,7 @@ test('strict LID rejects invalid exact signed coordinates before creating a serv
   assert.match(route, /detectLanguageRequestPolicy\(req, options\)[\s\S]*validateDetectLanguageCapability\(capabilityToken, policy\.requiredScope\)/);
   assert.match(gatewaySource, /strictLidLoopbackBrokerProtocol: 1/);
   assert.match(gatewaySource, /strictLidFileSizeClaim: 'fileSizeBytes'/);
-  assert.match(gatewaySource, /const GATEWAY_VERSION = 164/);
+  assert.match(gatewaySource, /const GATEWAY_VERSION = 165/);
   assert.match(gatewaySource, /supersededReleaseDelayMs:\s*PROVIDER_SLOT_RELEASE_DELAY_MS/);
   assert.match(gatewaySource, /strictLidProviderDrainProtocol: 1/);
   assert.match(gatewaySource, /strictLidWeakFallbackProtocol: 1/);

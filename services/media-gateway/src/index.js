@@ -2291,7 +2291,7 @@ const MAX_CACHEABLE_EXACT_SUBTITLE_HLS_RENDITIONS = Math.min(
     MAX_EXACT_SUBTITLE_HLS_RENDITIONS,
     clampInt(process.env.MAX_CACHEABLE_EXACT_SUBTITLE_HLS_RENDITIONS, 8, 1, 32),
 );
-const GATEWAY_VERSION = 164;
+const GATEWAY_VERSION = 165;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -4977,6 +4977,37 @@ async function refreshStrictLidBrokerDispatcher(context, force = false) {
     return true;
 }
 
+async function fallbackStrictLidBrokerDispatcher(context, publicError = null) {
+    if (
+        !context?.ownsDispatcher
+        || context.dispatcherFallbackAttempted === true
+        || typeof context.dispatcherFallbackFactory !== 'function'
+    ) return false;
+    context.dispatcherFallbackAttempted = true;
+    let replacement = null;
+    try { replacement = context.dispatcherFallbackFactory(); } catch (_) { return false; }
+    if (!replacement) return false;
+    const retired = context.dispatcher;
+    context.dispatcher = replacement;
+    context.dispatcherFactory = context.dispatcherFallbackFactory;
+    context.dispatcherFallbackFactory = null;
+    context.dispatcherCreatedAtMs = Number(context.now?.() ?? Date.now());
+    context.dispatcherRefreshes += 1;
+    context.dispatcherFallbacks += 1;
+    if (retired && retired !== replacement) {
+        await disposeStrictLidBrokerDispatcher(retired);
+    }
+    try {
+        context.onDispatcherFallback?.({
+            code: String(publicError?.code || 'PROVIDER_FETCH_FAILED'),
+        });
+    } catch (_) {
+        // Observability must never turn a successfully rescued provider route
+        // into a playback failure.
+    }
+    return true;
+}
+
 async function closeStrictLidBrokerAttempt(context, attempt, reason = 'completed') {
     if (!attempt) return;
     if (!attempt.closePromise) {
@@ -5779,9 +5810,18 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
 
                 // A residential tunnel that reaches its provider-side maximum
                 // age can make several immediate retries reuse the same dead
-                // Undici dispatcher. Rebuild it on the same pinned proxy slot
-                // before retrying the exact remaining bytes.
-                if (publicError.code !== 'PROXY_AUTH_FAILED') {
+                // Undici dispatcher. First change only HTTP<->SOCKS on the same
+                // Oxylabs slot/IP when the initial request failed before any
+                // provider HTTP response. Otherwise rebuild the same transport.
+                const changedTransport = progressBytes === 0
+                    && !Number.isInteger(upstreamStatus)
+                    && [
+                        'PROVIDER_FETCH_FAILED',
+                        'PROVIDER_FIRST_BYTE_TIMEOUT',
+                        'PROVIDER_IDLE_TIMEOUT',
+                    ].includes(publicError.code)
+                    && await fallbackStrictLidBrokerDispatcher(context, publicError);
+                if (!changedTransport && publicError.code !== 'PROXY_AUTH_FAILED') {
                     await refreshStrictLidBrokerDispatcher(context, true);
                 }
 
@@ -5950,6 +5990,12 @@ async function createStrictLidBroker(options = {}) {
     const dispatcherFactory = typeof options.dispatcherFactory === 'function'
         ? options.dispatcherFactory
         : null;
+    const dispatcherFallbackFactory = typeof options.dispatcherFallbackFactory === 'function'
+        ? options.dispatcherFallbackFactory
+        : null;
+    const onDispatcherFallback = typeof options.onDispatcherFallback === 'function'
+        ? options.onDispatcherFallback
+        : null;
     const onProviderIdentity = typeof options.onProviderIdentity === 'function'
         ? options.onProviderIdentity
         : null;
@@ -5977,6 +6023,10 @@ async function createStrictLidBroker(options = {}) {
         userAgent: String(options.userAgent || FFMPEG_USER_AGENT),
         dispatcher: initialDispatcher,
         dispatcherFactory,
+        dispatcherFallbackFactory,
+        dispatcherFallbackAttempted: false,
+        dispatcherFallbacks: 0,
+        onDispatcherFallback,
         ownsDispatcher,
         dispatcherCreatedAtMs: dispatcherFactory ? Number(now()) : null,
         dispatcherMaxAgeMs: Number.isFinite(Number(options.dispatcherMaxAgeMs))
@@ -6160,6 +6210,7 @@ async function createStrictLidBroker(options = {}) {
             }));
         },
         get dispatcherRefreshes() { return context.dispatcherRefreshes; },
+        get dispatcherFallbacks() { return context.dispatcherFallbacks; },
         async close(reason = 'broker_closed') {
             if (closePromise) return closePromise;
             closePromise = (async () => {
@@ -11912,6 +11963,92 @@ function classifyVodInputFetchError(error, timedOut = false) {
     });
 }
 
+function providerNodeRouteIsAvailable(route) {
+    const slot = Number(route?.slot);
+    const transport = String(route?.nodeTransport || '');
+    if (!Number.isInteger(slot) || slot < 1) return false;
+    const agents = transport === 'socks5'
+        ? providerSocksProxyAgents
+        : (transport === 'http' ? providerHttpProxyAgents : []);
+    return Boolean(agents[slot - 1]);
+}
+
+function providerNodeRouteForSession(session) {
+    if (providerNodeRouteIsAvailable(session?.providerNodeRoute)) {
+        return session.providerNodeRoute;
+    }
+    const affinityKey = proxyKeyFromUrl(session?.sourceUrl || '');
+    const route = affinityKey ? providerRouteForKey(affinityKey) : null;
+    return providerNodeRouteIsAvailable(route) ? route : null;
+}
+
+function providerProxyAgentForRoute(route) {
+    if (!providerNodeRouteIsAvailable(route)) return null;
+    const agents = route.nodeTransport === 'socks5'
+        ? providerSocksProxyAgents
+        : providerHttpProxyAgents;
+    return agents[route.slot - 1] || null;
+}
+
+function pinProviderNodeRouteForSession(session, route) {
+    if (!session || !providerNodeRouteIsAvailable(route)) return null;
+    const pinned = Object.freeze({
+        slot: Number(route.slot),
+        ffmpegSlot: Number(route.ffmpegSlot || route.slot),
+        nodeTransport: route.nodeTransport,
+        ffmpegTransport: 'http',
+        selectionReason: String(route.selectionReason || 'session-pinned').slice(0, 64),
+        controlStatus: String(route.controlStatus || 'session-pinned').slice(0, 64),
+        score: Number.isFinite(Number(route.score)) ? Number(route.score) : null,
+        confidence: Number.isFinite(Number(route.confidence)) ? Number(route.confidence) : null,
+    });
+    session.providerNodeRoute = pinned;
+    session.startupTimings = asRecord(session.startupTimings);
+    session.startupTimings.providerNodeTransport = pinned.nodeTransport;
+    session.startupTimings.providerProxySlot = pinned.slot;
+    return pinned;
+}
+
+function alternateProviderNodeTransportRoute(route) {
+    if (!providerNodeRouteIsAvailable(route)) return null;
+    const nodeTransport = route.nodeTransport === 'http' ? 'socks5' : 'http';
+    const alternate = {
+        ...route,
+        nodeTransport,
+        ffmpegTransport: 'http',
+        ffmpegSlot: Number(route.ffmpegSlot || route.slot),
+        selectionReason: 'same-slot-transport-fallback',
+        controlStatus: 'session-fallback',
+    };
+    return providerNodeRouteIsAvailable(alternate) ? alternate : null;
+}
+
+function shouldFallbackProviderNodeTransport(error) {
+    if (!error || error.retryable !== true || Number.isInteger(error.upstreamStatus)) return false;
+    if (['PROXY_AUTH_FAILED', 'PROVIDER_BUSY', 'VOD_INPUT_ABORTED'].includes(String(error.code || ''))) {
+        return false;
+    }
+    return new Set([
+        'timeout',
+        'connection_reset',
+        'dns',
+        'network_unreachable',
+        'tls',
+        'network',
+        'premature_eof',
+    ]).has(String(error.networkCause || ''));
+}
+
+function pinnedProxyAgentFactoryForRoute(route) {
+    if (!providerNodeRouteIsAvailable(route)) return null;
+    const urls = route.nodeTransport === 'socks5'
+        ? providerSocksProxyUrls
+        : providerHttpProxyUrls;
+    const proxyUrl = urls[route.slot - 1];
+    if (!proxyUrl) return null;
+    return () => createProviderProxyAgent(proxyUrl);
+}
+
 function waitForVodInputRetry(delayMs, signal) {
     if (signal?.aborted) return Promise.resolve(false);
     return new Promise((resolve) => {
@@ -12267,7 +12404,9 @@ async function openBoundedVodInputAttempt(session, offset, parentSignal, dispatc
 
 async function preopenBoundedMkvInputPump(session, parentSignal = null, options = {}) {
     if (!isFiniteMkvVodSession(session) || session.preopenedVodInputAttempt) return;
-    const dispatcher = pickProxyAgent(proxyKeyFromUrl(session.sourceUrl)) || null;
+    let providerRoute = providerNodeRouteForSession(session);
+    let dispatcher = providerProxyAgentForRoute(providerRoute);
+    let transportFallbackAttempted = false;
     const drainExactRange = options.drainExactRange === true;
     // A resumed session whose signed/request profile already describes every
     // stream does not gain any authority from downloading the same 4 MiB
@@ -12400,6 +12539,7 @@ async function preopenBoundedMkvInputPump(session, parentSignal = null, options 
                         .digest('hex');
                     session.startupTimings.providerSeekPrefixIdentityBytes = identityPrefix.length;
                 }
+                pinProviderNodeRouteForSession(session, providerRoute);
                 return;
             }
 
@@ -12410,6 +12550,7 @@ async function preopenBoundedMkvInputPump(session, parentSignal = null, options 
             };
             session.startupTimings.providerGetPreopened = true;
             session.startupTimings.providerPreopenRetries = retryCount;
+            pinProviderNodeRouteForSession(session, providerRoute);
             retained = true;
             return;
         } catch (error) {
@@ -12419,6 +12560,25 @@ async function preopenBoundedMkvInputPump(session, parentSignal = null, options 
             }
             if (parentSignal?.aborted || error?.code === 'VOD_INPUT_ABORTED') {
                 throw abortedVodInputPumpError();
+            }
+            const alternateRoute = !transportFallbackAttempted && shouldFallbackProviderNodeTransport(error)
+                ? alternateProviderNodeTransportRoute(providerRoute)
+                : null;
+            if (alternateRoute) {
+                transportFallbackAttempted = true;
+                const previousTransport = providerRoute.nodeTransport;
+                providerRoute = alternateRoute;
+                dispatcher = providerProxyAgentForRoute(providerRoute);
+                session.startupTimings = asRecord(session.startupTimings);
+                session.startupTimings.providerTransportFallbackAttempted = true;
+                session.startupTimings.providerTransportFallbackTriggerCode = error?.code || 'VOD_INPUT_FAILED';
+                session.startupTimings.providerTransportFallbackFrom = previousTransport;
+                session.startupTimings.providerTransportFallbackTo = providerRoute.nodeTransport;
+                const captured = headerByteCache.get(session.sourceUrl);
+                if (captured?.captureOwner === String(session?.id || session.sourceUrl)) {
+                    headerByteCache.delete(session.sourceUrl);
+                }
+                continue;
             }
             if (error?.retryable !== true || retryCount >= VOD_INPUT_RETRY_LIMIT) throw error;
             retryCount += 1;
@@ -12663,11 +12823,22 @@ async function prepareFiniteMkvSeekBroker(session, parentSignal = null) {
         sourceUrl: session.sourceUrl,
         fileSizeBytes,
     });
+    const primaryProviderRoute = providerNodeRouteForSession(session);
+    const fallbackProviderRoute = alternateProviderNodeTransportRoute(primaryProviderRoute);
     const broker = await createStrictLidBroker({
         sourceUrl: session.sourceUrl,
         fileSizeBytes,
         userAgent: session.userAgent || FFMPEG_USER_AGENT,
-        dispatcherFactory: pinnedProxyAgentFactory(proxyKeyFromUrl(session.sourceUrl)),
+        dispatcherFactory: pinnedProxyAgentFactoryForRoute(primaryProviderRoute),
+        dispatcherFallbackFactory: pinnedProxyAgentFactoryForRoute(fallbackProviderRoute),
+        onDispatcherFallback: ({ code } = {}) => {
+            pinProviderNodeRouteForSession(session, fallbackProviderRoute);
+            session.startupTimings = asRecord(session.startupTimings);
+            session.startupTimings.providerTransportFallbackAttempted = true;
+            session.startupTimings.providerTransportFallbackTriggerCode = code || 'PROVIDER_FETCH_FAILED';
+            session.startupTimings.providerTransportFallbackFrom = primaryProviderRoute?.nodeTransport || null;
+            session.startupTimings.providerTransportFallbackTo = fallbackProviderRoute?.nodeTransport || null;
+        },
         dispatcherMaxAgeMs: FINITE_MKV_SEEK_PROXY_AGENT_MAX_AGE_MS,
         expectedValidator: session.vodInputValidator,
         effectiveUrlSha256: session.vodInputEffectiveUrlSha256,
@@ -12745,6 +12916,9 @@ async function closeFiniteMkvSeekBroker(session) {
     );
     session.startupTimings.finiteMkvSeekProxyAgentRefreshes = Number(
         broker.dispatcherRefreshes || 0,
+    );
+    session.startupTimings.finiteMkvSeekTransportFallbacks = Number(
+        broker.dispatcherFallbacks || 0,
     );
     await broker.close().catch(() => {});
 }
@@ -13338,6 +13512,9 @@ async function runBoundedMkvInputPump(session, writable, signal, dispatcher) {
     let consecutiveNoProgressFailures = 0;
     let reconnects = 0;
     let unknownLengthFullBodyEof = false;
+    let activeProviderRoute = providerNodeRouteForSession(session);
+    let activeDispatcher = dispatcher || providerProxyAgentForRoute(activeProviderRoute);
+    let transportFallbackAttempted = session?.startupTimings?.providerTransportFallbackAttempted === true;
     // Hash the authoritative byte stream while it is already crossing the
     // single bounded provider connection. Reconnects resume at the exact
     // logical offset, so every source byte enters this digest exactly once and
@@ -13363,7 +13540,7 @@ async function runBoundedMkvInputPump(session, writable, signal, dispatcher) {
                     session,
                     offset,
                     signal,
-                    dispatcher,
+                    activeDispatcher,
                     offset === 0 && forwardedBytes === 0 ? { allowFullBodyAtZero: true } : {},
                 );
             attempt = opened.attempt;
@@ -13479,6 +13656,22 @@ async function runBoundedMkvInputPump(session, writable, signal, dispatcher) {
         if (fileSizeBytes && offset >= fileSizeBytes) break;
         if (failure && failure.retryable !== true) throw failure;
 
+        const alternateRoute = failure && !transportFallbackAttempted
+            && shouldFallbackProviderNodeTransport(failure)
+            ? alternateProviderNodeTransportRoute(activeProviderRoute)
+            : null;
+        if (alternateRoute) {
+            transportFallbackAttempted = true;
+            const previousTransport = activeProviderRoute.nodeTransport;
+            activeProviderRoute = alternateRoute;
+            activeDispatcher = providerProxyAgentForRoute(activeProviderRoute);
+            pinProviderNodeRouteForSession(session, activeProviderRoute);
+            session.startupTimings.providerTransportFallbackAttempted = true;
+            session.startupTimings.providerTransportFallbackTriggerCode = failure.code || 'VOD_INPUT_FAILED';
+            session.startupTimings.providerTransportFallbackFrom = previousTransport;
+            session.startupTimings.providerTransportFallbackTo = activeProviderRoute.nodeTransport;
+        }
+
         const progressBytes = offset - attemptOffset;
         // A provider may legally satisfy one large bounded request through many
         // smaller Content-Range responses. Any durable byte progress resets the
@@ -13538,7 +13731,7 @@ async function runBoundedMkvInputPump(session, writable, signal, dispatcher) {
 
 function startBoundedMkvInputPump(session, writable) {
     const controller = new AbortController();
-    const dispatcher = pickProxyAgent(proxyKeyFromUrl(session.sourceUrl)) || null;
+    const dispatcher = providerProxyAgentForRoute(providerNodeRouteForSession(session));
     const pump = {
         controller,
         dispatcher,
@@ -18816,7 +19009,7 @@ function debugSession(session) {
     const providerProxyAffinitySha256 = providerProxyAffinity
         ? sha256Hex(providerProxyAffinity)
         : null;
-    const providerRoute = providerProxyAffinity ? providerRouteForKey(providerProxyAffinity) : null;
+    const providerRoute = providerProxyAffinity ? providerNodeRouteForSession(session) : null;
     const selectedTrack = Number.isInteger(mappedIndex)
         ? exactTracks.find((track) => normalizeAudioStreamIndex(track?.index) === mappedIndex) || null
         : selectedAudioTrackForSession(session);
@@ -18871,6 +19064,7 @@ function debugSession(session) {
                 completedProviderFetches: Number(session.finiteMkvSeekBroker.completedProviderFetches || 0),
                 interruptedProviderFetches: Number(session.finiteMkvSeekBroker.interruptedProviderFetches || 0),
                 dispatcherRefreshes: Number(session.finiteMkvSeekBroker.dispatcherRefreshes || 0),
+                dispatcherFallbacks: Number(session.finiteMkvSeekBroker.dispatcherFallbacks || 0),
                 cacheBytes: Number(session.finiteMkvSeekBroker.cacheBytes || 0),
                 cacheHits: Number(session.finiteMkvSeekBroker.cacheHits || 0),
                 cacheMisses: Number(session.finiteMkvSeekBroker.cacheMisses || 0),
