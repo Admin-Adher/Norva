@@ -52,6 +52,11 @@ class ProviderAdaptiveRouteControl {
         this.fetchImpl = options.fetchImpl || globalThis.fetch;
         this.lookupTimeoutMs = Math.max(100, Math.min(2_000, Number(options.lookupTimeoutMs) || 500));
         this.slotIndexForKey = options.slotIndexForKey;
+        // Canary-only escape hatch: exercise the route selected by the control
+        // plane while the global policy remains observational. The default is
+        // deliberately false, so a normal production process can never turn a
+        // shadow recommendation into live egress by accident.
+        this.applyShadowForCanary = options.applyShadowForCanary === true;
         this.fallbackNodeTransport = options.fallbackNodeTransport === 'http'
             ? 'http'
             : (this.socksProxyUrls.length ? 'socks5' : 'http');
@@ -225,6 +230,16 @@ class ProviderAdaptiveRouteControl {
             if (decision) {
                 this.shadowByAffinity.set(String(affinityKey || ''), decision);
                 this.stats.shadows += 1;
+                if (this.applyShadowForCanary && payload.enabled === true) {
+                    const canaryDecision = Object.freeze({
+                        ...decision,
+                        controlStatus: 'canary-shadow-applied',
+                        selectionReason: `canary-${decision.selectionReason}`.slice(0, 64),
+                    });
+                    this.appliedByAffinity.set(String(affinityKey || ''), canaryDecision);
+                    this.stats.applied += 1;
+                    return canaryDecision;
+                }
             }
             return this.fallback(affinityKey, payload.enabled === false ? 'control-disabled' : 'shadow-mode');
         } catch (error) {
@@ -247,6 +262,7 @@ class ProviderAdaptiveRouteControl {
             shadowAccounts: this.shadowByAffinity.size,
             trackedAccounts: this.fingerprintsByAffinity.size,
             fallbackNodeTransport: this.fallbackNodeTransport,
+            canaryShadowApply: this.applyShadowForCanary,
             ...this.stats,
         };
     }

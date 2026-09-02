@@ -930,6 +930,8 @@ function decodeProviderRouteFingerprintKey(value) {
     return /^[a-f0-9]{64}$/.test(encoded) ? Buffer.from(encoded, 'hex') : null;
 }
 const PROVIDER_ADAPTIVE_ROUTE_REQUESTED = process.env.PROVIDER_ADAPTIVE_ROUTE_ENABLED === 'true';
+const PROVIDER_ADAPTIVE_ROUTE_CANARY_APPLY_SHADOW =
+    process.env.PROVIDER_ADAPTIVE_ROUTE_CANARY_APPLY_SHADOW === 'true';
 const PROVIDER_ADAPTIVE_ROUTE_LOOKUP_TIMEOUT_MS = clampInt(
     process.env.PROVIDER_ADAPTIVE_ROUTE_LOOKUP_TIMEOUT_MS,
     500,
@@ -980,6 +982,7 @@ providerAdaptiveRouteControl = new ProviderAdaptiveRouteControl({
     lookupTimeoutMs: PROVIDER_ADAPTIVE_ROUTE_LOOKUP_TIMEOUT_MS,
     slotIndexForKey: staticPoolIndexForKey,
     fallbackNodeTransport: providerProxyTransport,
+    applyShadowForCanary: PROVIDER_ADAPTIVE_ROUTE_CANARY_APPLY_SHADOW,
 });
 if (PROVIDER_ADAPTIVE_ROUTE_REQUESTED) {
     const adaptiveStatus = providerAdaptiveRouteControl.publicStatus();

@@ -137,6 +137,33 @@ test('shadow decisions are observed but cannot alter the live route', async () =
   assert.equal(control.publicStatus().appliedAccounts, 0);
 });
 
+test('an explicit canary switch applies the observed shadow route without changing the default', async () => {
+  const control = controller({
+    applyShadowForCanary: true,
+    fetchImpl: async () => response({
+      protocol: 1,
+      enabled: true,
+      apply: false,
+      decision: {
+        slot: 1,
+        nodeTransport: 'http',
+        score: 95,
+        confidence: 0.95,
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        selectionReason: 'host-learned',
+      },
+    }),
+  });
+  const decision = await control.resolveForPlayback(sourceUrl, 'provider/account');
+
+  assert.equal(decision.id, '1:http');
+  assert.equal(decision.controlStatus, 'canary-shadow-applied');
+  assert.equal(decision.selectionReason, 'canary-host-learned');
+  assert.equal(control.publicStatus().canaryShadowApply, true);
+  assert.equal(control.publicStatus().shadowAccounts, 1);
+  assert.equal(control.publicStatus().appliedAccounts, 1);
+});
+
 test('invalid, expired, unavailable, and timed-out control responses fail to the sticky route', async () => {
   const cases = [
     async () => response({ protocol: 2 }),
