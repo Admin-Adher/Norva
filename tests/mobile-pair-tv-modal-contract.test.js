@@ -10,6 +10,7 @@ const root = path.join(__dirname, '..');
 const read = relativePath => fs.readFileSync(path.join(root, relativePath), 'utf8').replace(/\r\n/g, '\n');
 
 const component = read('public/js/components/PairTvSheet.js');
+const devices = read('public/js/components/DevicesScreensModule.js');
 const home = read('public/js/pages/HomePage.js');
 const app = read('public/js/app.js');
 const appHtml = read('public/app.html');
@@ -21,7 +22,7 @@ function loadSheet(appStub = {}) {
   return { window, sheet: new window.PairTvSheet(appStub) };
 }
 
-test('Prototype A is shipped as an app-owned bottom sheet with the approved icon', () => {
+test('the Pair TV companion flow remains an app-owned bottom sheet with the approved icon', () => {
   assert.ok(fs.existsSync(path.join(root, 'public/img/icons/norva-devices-simple.svg')));
   const icon = read('public/img/icons/norva-devices-simple.svg');
   assert.match(icon, /M18 8V6a2 2 0 0 0-2-2H4/);
@@ -32,8 +33,12 @@ test('Prototype A is shipped as an app-owned bottom sheet with the approved icon
   assert.match(component, /Open Norva on your TV/);
   assert.match(component, /Scan the QR or enter the 6-character code/);
   assert.match(component, /Manage all devices/);
+  assert.match(component, /Need the TV app\?/);
+  assert.match(component, /play\.google\.com\/store\/apps\/details\?id=tv\.norva\.tv/);
+  assert.match(component, /same Google account/);
   assert.match(component, /TV Connected/);
   assert.match(component, /screen is now linked and synced with your account/);
+  assert.match(component, /norva:devices-changed/);
 });
 
 test('the phone Home action opens the sheet without changing route', () => {
@@ -54,11 +59,13 @@ test('the phone Home action opens the sheet without changing route', () => {
   assert.match(component, /options\.force === true \|\| options\.code/);
 
   const modalIndex = appHtml.indexOf('/js/components/NorvaModal.js?v=2');
-  const pairIndex = appHtml.indexOf('/js/components/PairTvSheet.js?v=3');
+  const pairIndex = appHtml.indexOf('/js/components/PairTvSheet.js?v=a8db32010d');
+  const devicesIndex = appHtml.indexOf('/js/components/DevicesScreensModule.js?v=cb8a9f10e4');
   const homeIndex = appHtml.indexOf('/js/pages/HomePage.js?v=b98a873483');
   const appIndex = appHtml.indexOf('/js/app.js?v=4ea3d10343');
-  assert.ok(modalIndex > 0 && modalIndex < pairIndex && pairIndex < homeIndex && homeIndex < appIndex);
-  assert.match(appHtml, /\/css\/main\.css\?v=c8f9019925/);
+  assert.ok(modalIndex > 0 && modalIndex < pairIndex && pairIndex < devicesIndex && devicesIndex < homeIndex && homeIndex < appIndex);
+  assert.match(appHtml, /\/css\/main\.css\?v=4fb2cde48b/);
+  assert.match(appHtml, /\/js\/pages\/Settings\.js\?v=5241073432/);
 });
 
 test('pairing code normalization matches the six-character TV alphabet exactly', () => {
@@ -166,7 +173,8 @@ test('QR and Settings open the in-app sheet instead of a standalone pairing page
   const pairApprove = read('public/pair-approve.html');
   const account = read('public/account.html');
 
-  assert.match(settings, /openPairTvSheet\?\.\(event\.currentTarget, \{ force: true \}\)/);
+  assert.match(settings, /new Module\(this\.app, root\)/);
+  assert.match(devices, /openPairTvSheet\?\.\(target, \{ force: true \}\)/);
   assert.doesNotMatch(settings, /approvePairCode/);
   assert.match(cloudPair, /\/app\.html\?pair=/);
   assert.match(cloud, /location\.replace\('\/app\.html\?pair='/);

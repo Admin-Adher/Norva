@@ -81,6 +81,7 @@ test('phone Home opens the in-place Pair TV sheet instead of navigating to Setti
 test('devices and pairing are permanent cloud-account destinations, not an Advanced tab', () => {
   const appHtml = read('public/app.html');
   const appJs = read('public/js/app.js');
+  const devicesModule = read('public/js/components/DevicesScreensModule.js');
   const devicesIcon = read('public/img/icons/norva-devices.svg');
   assert.match(appHtml, /class="tab" data-tab="screens" id="screens-tab"[^>]*>[\s\S]*?<span>Devices<\/span>[\s\S]*?<\/button>/);
   assert.match(appHtml, /data-tab="screens"[\s\S]*?src="\/img\/icons\/norva-devices\.svg\?v=sharp-core-1"/);
@@ -88,8 +89,12 @@ test('devices and pairing are permanent cloud-account destinations, not an Advan
   assert.match(devicesIcon, /stop-color="#6ff3ff"/);
   assert.match(devicesIcon, /stop-color="#d65bff"/);
   assert.doesNotMatch(appHtml, /class="tab tab-advanced" data-tab="screens"/);
-  assert.match(appHtml, /Add another screen/);
-  assert.match(appHtml, /Your devices &amp; screens/);
+  assert.match(appHtml, /id="devices-screens-root" class="devices-screens-root"/);
+  assert.match(appHtml, /\/js\/components\/DevicesScreensModule\.js\?v=/);
+  assert.match(devicesModule, /Norva everywhere/);
+  assert.match(devicesModule, /Start here\. Watch everywhere\./);
+  assert.match(devicesModule, /Start on your TV/);
+  assert.match(devicesModule, /Watch at norva\.tv/);
   assert.match(appJs, /data-act="screens"/);
   assert.match(appJs, /Web, phone, tablet and TV/);
   assert.match(appJs, /openScreensSettings\(\)/);

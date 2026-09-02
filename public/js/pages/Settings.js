@@ -103,6 +103,7 @@ function nativeBillingReady(app) {
 class SettingsPage {
     constructor(app) {
         this.app = app;
+        this.devicesScreensModule = null;
         const settingsRoot = document.getElementById('page-settings');
         this.tabs = settingsRoot?.querySelectorAll('.tabs .tab') || [];
         this.tabContents = settingsRoot?.querySelectorAll('.tab-content') || [];
@@ -1767,187 +1768,15 @@ class SettingsPage {
         }
     }
 
-    // --- Screens & pairing tab (display name / pairing / devices / command) ---
+    // Devices & Screens is a deep page module; Settings only hosts its lifecycle.
     initScreensTab() {
-        if (!this.screensBound) {
-            this.screensBound = true;
-            document.getElementById('screens-save-profile')?.addEventListener('click', () => this.saveScreensProfile());
-            document.getElementById('screens-open-pair')?.addEventListener('click', (event) => {
-                this.app?.openPairTvSheet?.(event.currentTarget, { force: true });
-            });
-            document.getElementById('screens-send-play')?.addEventListener('click', () => this.sendScreenCommand('play'));
-            document.getElementById('screens-send-open')?.addEventListener('click', () => this.sendScreenCommand('open'));
+        if (!this.devicesScreensModule) {
+            const root = document.getElementById('devices-screens-root');
+            const Module = window.DevicesScreensModule;
+            if (!root || typeof Module !== 'function') return false;
+            this.devicesScreensModule = new Module(this.app, root);
         }
-        this.loadScreensProfile();
-        this.loadTrustedDevices();
-    }
-
-    setScreensStatus(el, type, message) {
-        if (!el) return;
-        el.textContent = message || '';
-        el.setAttribute('role', type === 'error' ? 'alert' : 'status');
-        el.setAttribute('aria-live', type === 'error' ? 'assertive' : 'polite');
-        el.setAttribute('aria-atomic', 'true');
-        el.style.color = type === 'success' ? '#34d399' : type === 'error' ? '#fb7185' : '#a8b3c7';
-    }
-
-    escapeHtml(value) {
-        return String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-    }
-    escapeAttr(value) { return this.escapeHtml(value); }
-
-    async loadScreensProfile() {
-        try {
-            const profile = await window.NorvaCloud.profile.get();
-            const el = document.getElementById('screens-display-name');
-            if (el) el.value = profile?.display_name || profile?.displayName || '';
-        } catch (_) { /* ignore */ }
-    }
-
-    async saveScreensProfile() {
-        const status = document.getElementById('screens-profile-status');
-        const name = (document.getElementById('screens-display-name')?.value || '').trim();
-        try {
-            this.setScreensStatus(status, 'info', 'Saving…');
-            await window.NorvaCloud.profile.save({ displayName: name, locale: navigator.language || 'en-US' });
-            this.setScreensStatus(status, 'success', 'Saved.');
-        } catch (e) {
-            console.warn('[Settings] Screen profile save failed.', e);
-            this.setScreensStatus(status, 'error', 'Could not save the screen profile. Try again.');
-        }
-    }
-
-    async loadTrustedDevices() {
-        const listEl = document.getElementById('screens-devices-list');
-        const status = document.getElementById('screens-devices-status');
-        const select = document.getElementById('screens-command-device');
-        if (!listEl) return;
-        try {
-            const payload = await window.NorvaCloud.devices.list();
-            const devices = (payload.devices || []).filter((d) => !d.revoked);
-            if (select) {
-                select.innerHTML = devices.length
-                    ? devices.map((d) => `<option value="${this.escapeAttr(d.id)}">${this.escapeHtml(d.device_name || this.deviceTypeLabel(d))}</option>`).join('')
-                    : '<option value="">No screen linked yet</option>';
-            }
-            listEl.innerHTML = devices.length
-                ? devices.map((d) => this.renderTrustedDevice(d)).join('')
-                : '<div class="screens-empty">No screens linked yet.<br>Pair a TV, phone or browser above to see it here.</div>';
-            listEl.querySelectorAll('[data-revoke-device]').forEach((btn) => {
-                btn.addEventListener('click', async () => {
-                    const ok = await NorvaModal.confirm(
-                        'This screen will need to be paired again to reconnect to your account.',
-                        { title: 'Remove screen?', confirmLabel: 'Remove screen', danger: true }
-                    );
-                    if (!ok) return;
-                    const id = btn.dataset.revokeDevice;
-                    btn.disabled = true;
-                    try {
-                        await window.NorvaCloud.devices.revoke(id);
-                        // If we just revoked THIS browser/screen, drop the now-dead device
-                        // token so subsequent device-scoped calls don't keep using it until
-                        // a late 401 (matches cloud.html's revoke cleanup).
-                        try {
-                            if (localStorage.getItem('norva-cloud-device-id') === id) {
-                                window.NorvaCloud?.setDeviceToken?.('');
-                                localStorage.removeItem('norva-cloud-device-id');
-                            }
-                        } catch (_) { /* noop */ }
-                        this.loadTrustedDevices();
-                        this.setScreensStatus(status, 'success', 'Screen revoked.');
-                    } catch (e) {
-                        btn.disabled = false;
-                        console.warn('[Settings] Screen revocation failed.', e);
-                        this.setScreensStatus(status, 'error', 'Could not remove this screen. Try again.');
-                    }
-                });
-            });
-        } catch (e) {
-            console.warn('[Settings] Trusted screens load failed.', e);
-            this.setScreensStatus(status, 'error', 'Could not load your screens. Check your connection and try again.');
-        }
-    }
-
-    renderTrustedDevice(device) {
-        const seen = device.last_seen_at ? this.relativeTime(device.last_seen_at) : 'Never connected';
-        return `<div class="device-card">
-            <div class="dc-icon">${this.deviceIcon(device)}</div>
-            <div class="dc-info">
-                <div class="dc-name">${this.escapeHtml(device.device_name || this.deviceTypeLabel(device))}</div>
-                <div class="dc-meta">${this.escapeHtml(this.deviceTypeLabel(device))} · ${this.escapeHtml(seen)}</div>
-            </div>
-            <button class="dc-remove" type="button" data-revoke-device="${this.escapeAttr(device.id)}">Remove</button>
-        </div>`;
-    }
-
-    // Normalise a device into one of: tv | phone | tablet | web | screen
-    deviceKind(device) {
-        const hint = `${device.device_type || ''} ${device.platform || ''} ${device.device_name || ''}`.toLowerCase();
-        if (/\btv\b|androidtv|android tv|firetv|fire tv|tvos|appletv|apple tv|chromecast|cast|roku|webos|tizen|bravia/.test(hint)) return 'tv';
-        if (/tablet|ipad/.test(hint)) return 'tablet';
-        if (/phone|android|iphone|ios|mobile/.test(hint)) return 'phone';
-        if (/web|browser|chrome|firefox|safari|edge|desktop|windows|mac|linux/.test(hint)) return 'web';
-        return 'screen';
-    }
-
-    deviceTypeLabel(device) {
-        switch (this.deviceKind(device)) {
-            case 'tv': return 'TV';
-            case 'phone': return 'Phone';
-            case 'tablet': return 'Tablet';
-            case 'web': return 'Web browser';
-            default: return 'Screen';
-        }
-    }
-
-    deviceIcon(device) {
-        const icons = {
-            tv: '<rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8M12 17v4"/>',
-            phone: '<rect x="6" y="2" width="12" height="20" rx="2.5"/><path d="M11 18h2"/>',
-            tablet: '<rect x="4" y="2" width="16" height="20" rx="2.5"/><path d="M11 18h2"/>',
-            web: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.5 2.5 15.5 0 18M12 3c-2.5 2.5-2.5 15.5 0 18"/>',
-            screen: '<rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8"/>'
-        };
-        const kind = this.deviceKind(device);
-        return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${icons[kind] || icons.screen}</svg>`;
-    }
-
-    relativeTime(iso) {
-        const then = new Date(iso).getTime();
-        if (!Number.isFinite(then)) return 'Recently';
-        const diff = Date.now() - then;
-        if (diff < 0) return 'Just now';
-        const mins = Math.floor(diff / 60000);
-        if (mins < 1) return 'Just now';
-        if (mins < 60) return `${mins} min ago`;
-        const hrs = Math.floor(mins / 60);
-        if (hrs < 24) return `${hrs} h ago`;
-        const days = Math.floor(hrs / 24);
-        if (days < 7) return `${days} d ago`;
-        if (days < 30) return `${Math.floor(days / 7)} wk ago`;
-        return new Date(iso).toLocaleDateString('en-US');
-    }
-
-    async sendScreenCommand(command) {
-        const status = document.getElementById('screens-command-status');
-        const targetDeviceId = document.getElementById('screens-command-device')?.value;
-        const url = (document.getElementById('screens-command-url')?.value || '').trim();
-        const title = (document.getElementById('screens-command-title')?.value || '').trim() || 'Norva';
-        if (!targetDeviceId) { this.setScreensStatus(status, 'error', 'Choose a trusted screen.'); return; }
-        if (command === 'play' && !url) { this.setScreensStatus(status, 'error', 'Enter a playback URL.'); return; }
-        try {
-            this.setScreensStatus(status, 'info', 'Sending…');
-            await window.NorvaCloud.commands.queue({
-                targetDeviceId,
-                command,
-                payload: command === 'play' ? { url, playbackUrl: url, title } : { url: url || '/' },
-                ttlSeconds: 120
-            });
-            this.setScreensStatus(status, 'success', 'Command sent.');
-        } catch (e) {
-            console.warn('[Settings] Screen command failed.', e);
-            this.setScreensStatus(status, 'error', 'Could not send the command. Check that the screen is online and try again.');
-        }
+        return this.devicesScreensModule.activate();
     }
 
     isTabAvailable(tabName) {
@@ -2001,6 +1830,7 @@ class SettingsPage {
         // never inherit the previous panel's scroll (on either mobile or TV),
         // otherwise its heading and primary controls can open off-screen.
         const settingsPage = document.getElementById('page-settings');
+        settingsPage?.classList.toggle('settings-screens-active', tabName === 'screens');
         const settingsContainer = settingsPage?.querySelector('.settings-container');
         const activePanel = settingsContainer?.querySelector('.tab-content.active');
         const resetTabScroll = () => {
@@ -2042,6 +1872,8 @@ class SettingsPage {
 
         if (tabName === 'screens') {
             this.initScreensTab();
+        } else {
+            this.devicesScreensModule?.deactivate?.();
         }
 
         return tabName;
@@ -2196,6 +2028,8 @@ class SettingsPage {
     }
 
     hide() {
+        this.devicesScreensModule?.deactivate?.();
+        document.getElementById('page-settings')?.classList.remove('settings-screens-active');
         document.documentElement.classList.remove('tv-settings-active');
     }
 }

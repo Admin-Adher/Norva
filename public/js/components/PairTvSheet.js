@@ -99,6 +99,14 @@
                             <button type="submit" class="btn btn-primary pair-tv-submit" disabled>Pair TV</button>
                         </form>
 
+                        <a class="pair-tv-store-link" href="https://play.google.com/store/apps/details?id=tv.norva.tv"
+                            target="_blank" rel="noopener noreferrer" aria-label="Open Norva for Android TV on Google Play">
+                            <img src="/img/icons/google-play-mark.svg?v=1" alt="">
+                            <span><strong>Need the TV app?</strong><small>Open Google Play</small></span>
+                            <span aria-hidden="true">↗</span>
+                        </a>
+                        <p class="pair-tv-store-note">Google Play can install Norva on a compatible TV signed in to the same Google account.</p>
+
                         <button type="button" class="pair-tv-manage" data-pair-tv-manage>Manage all devices</button>
                     </div>
 
@@ -402,6 +410,11 @@
                 this.panel.setAttribute('aria-labelledby', 'pair-tv-success-title');
                 this.panel.removeAttribute('aria-describedby');
                 this.liveRegion.textContent = 'TV connected. Your screen is now linked and synced with your account.';
+                if (typeof window.CustomEvent === 'function') {
+                    window.dispatchEvent?.(new window.CustomEvent('norva:devices-changed', {
+                        detail: { reason: 'paired' }
+                    }));
+                }
                 this.successState.querySelector('h2')?.focus?.({ preventScroll: true });
                 return true;
             } catch (error) {

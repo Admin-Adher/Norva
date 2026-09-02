@@ -11,6 +11,7 @@ const read = (relativePath) => fs.readFileSync(path.join(root, relativePath), 'u
 const app = read('public/js/app.js');
 const profiles = read('public/js/profiles.js');
 const settings = read('public/js/pages/Settings.js');
+const devicesScreens = read('public/js/components/DevicesScreensModule.js');
 const standalone = read('public/js/utils/standalone.js');
 const phoneMain = read('clients/android-phone/app/src/main/java/tv/norva/phone/MainActivity.java');
 const account = read('public/account.html');
@@ -106,10 +107,11 @@ test('Settings tabs implement the complete keyboard tab and tabpanel contract', 
 });
 
 test('Settings presents sanitized live errors instead of provider payloads', () => {
-  assert.match(settings, /role="status" aria-live="polite" aria-atomic="true"/);
-  assert.match(settings, /el\.setAttribute\('role', type === 'error' \? 'alert' : 'status'\)/);
-  assert.doesNotMatch(settings, /textContent\s*=\s*[^;\n]*(?:e|err|error)\?*\.message/);
-  assert.doesNotMatch(settings, /NorvaModal\.toast\([^;\n]*(?:e|err|error)\?*\.message/);
+  const settingsSurfaces = `${settings}\n${devicesScreens}`;
+  assert.match(settingsSurfaces, /role="status" aria-live="polite" aria-atomic="true"/);
+  assert.match(devicesScreens, /element\.setAttribute\('role', error \? 'alert' : 'status'\)/);
+  assert.doesNotMatch(settingsSurfaces, /textContent\s*=\s*[^;\n]*(?:e|err|error)\?*\.message/);
+  assert.doesNotMatch(settingsSurfaces, /NorvaModal\.toast\([^;\n]*(?:e|err|error)\?*\.message/);
   assert.doesNotMatch(settings, /textContent\s*=\s*'Error: '\s*\+\s*data\.error/);
 });
 

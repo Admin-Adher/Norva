@@ -18,7 +18,7 @@
   <link rel="preconnect" href="https://api.norva.tv" crossorigin>
   <link rel="dns-prefetch" href="https://image.tmdb.org">
   <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
-  <link rel="stylesheet" href="/css/main.css?v=c8f9019925">
+  <link rel="stylesheet" href="/css/main.css?v=4fb2cde48b">
   <link id="premium-profile-style" rel="stylesheet" href="/css/profiles-premium.css?v=2" media="not all">
   <script>
     if (!/NorvaTV-AndroidTV/i.test(navigator.userAgent || '') && !/[?&]tv=1\b/.test(window.location.search || '')) {
@@ -956,82 +956,8 @@
 
           <!-- Screens & Pairing Tab -->
           <div id="tab-screens" class="tab-content">
-            <header class="settings-panel-header">
-              <h2>Devices</h2>
-              <p>Pair and manage the screens that use your Norva account.</p>
-            </header>
-            <style>
-              .screens-wrap{max-width:880px}
-              .screens-pair{display:flex;gap:18px;align-items:center;flex-wrap:wrap;background:linear-gradient(135deg,rgba(91,124,250,.12),rgba(181,121,255,.06));border:1px solid #2b3550;border-radius:16px;padding:22px}
-               .screens-pair .sp-icon{width:44px;height:44px;display:grid;place-items:center;background:transparent;flex:0 0 auto}
-                .screens-pair .sp-icon img{width:28px;height:28px;object-fit:contain}
-              .screens-pair .sp-text{flex:1;min-width:200px}
-              .screens-pair .sp-text h4{font-size:17px;margin:0 0 4px;color:#f1f5fb}
-              .screens-pair .sp-text p{color:#9aa6bd;font-size:13px;margin:0;line-height:1.5}
-              .screens-pair-form{display:flex;gap:10px;align-items:center;flex:0 0 auto}
-              .screens-code{width:160px;text-transform:uppercase;letter-spacing:.16em;font-weight:800;text-align:center;font-size:18px;padding:0 12px;min-height:48px;border-radius:10px;border:1px solid #344158;background:#0b0f16;color:#fff}
-              .screens-code:focus{outline:none;border-color:#5b7cfa}
-              .screens-h{font-size:15px;font-weight:800;color:#cdd6e6;letter-spacing:.02em;margin:24px 2px 12px}
-              .screens-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(258px,1fr));gap:12px}
-              .device-card{display:flex;align-items:center;gap:14px;background:#0f131b;border:1px solid #222a39;border-radius:14px;padding:13px 15px}
-              .device-card .dc-icon{width:44px;height:44px;border-radius:12px;display:grid;place-items:center;background:#1a2130;color:#9db4ff;flex:0 0 auto}
-              .device-card .dc-icon svg{width:24px;height:24px}
-              .device-card .dc-info{flex:1;min-width:0}
-              .device-card .dc-name{font-weight:700;color:#f1f5fb;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-              .device-card .dc-meta{color:#8b97ad;font-size:12px;margin-top:2px}
-              .device-card .dc-remove{background:transparent;border:1px solid #4a2a33;color:#fb7185;border-radius:9px;padding:7px 13px;font-weight:700;cursor:pointer;font-size:13px;flex:0 0 auto}
-              .device-card .dc-remove:hover{background:rgba(251,113,133,.12)}
-              .screens-empty{color:#8b97ad;font-size:14px;background:#0f131b;border:1px dashed #2a3346;border-radius:14px;padding:26px 18px;text-align:center;line-height:1.6}
-              .screens-card{background:#11151d;border:1px solid #222a39;border-radius:14px;padding:18px}
-              .screens-input{min-height:46px;padding:0 13px;border-radius:10px;border:1px solid #344158;background:#0b0f16;color:#f8fafc;font:inherit}
-              .screens-input:focus{outline:none;border-color:#5b7cfa}
-              .screens-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-              .screens-status{min-height:18px;font-size:13px;margin-top:10px}
-              .screens-cast .sc-fields{display:grid;gap:10px;margin-top:4px}
-              .screens-muted{color:#9aa6bd;font-size:13px;margin:0 0 10px;line-height:1.5}
-              @media(max-width:560px){.screens-pair-form{width:100%}.screens-code{flex:1;width:auto}}
-            </style>
-            <div class="screens-wrap">
-
-              <div class="screens-pair">
-                 <div class="sp-icon"><img src="/img/icons/norva-devices-simple.svg?v=1" alt=""></div>
-                <div class="sp-text">
-                  <h4>Add another screen</h4>
-                  <p>Pair a TV or another screen from here. You stay in Norva — no separate pairing page.</p>
-                </div>
-                <div class="screens-pair-form">
-                  <button class="btn btn-primary" id="screens-open-pair" type="button">Pair a screen</button>
-                </div>
-              </div>
-
-              <div class="screens-h">Your devices &amp; screens</div>
-              <div class="screens-grid" id="screens-devices-list"></div>
-              <div class="screens-status" id="screens-devices-status"></div>
-
-              <div class="screens-h">Account name</div>
-              <div class="screens-card">
-                <div class="screens-row">
-                  <input id="screens-display-name" class="screens-input" type="text" maxlength="80" autocomplete="name" placeholder="Your name" style="flex:1;min-width:180px">
-                  <button class="btn btn-primary" id="screens-save-profile" type="button">Save</button>
-                </div>
-                <div class="screens-status" id="screens-profile-status"></div>
-              </div>
-
-              <div class="screens-h">Cast a link to a screen</div>
-              <div class="screens-card screens-cast">
-                <p class="screens-muted">Send a video link to one of your trusted screens to start playing it there.</p>
-                <div class="sc-fields">
-                  <select id="screens-command-device" class="screens-input"></select>
-                  <input id="screens-command-title" class="screens-input" type="text" maxlength="120" placeholder="Title (optional)">
-                  <input id="screens-command-url" class="screens-input" type="url" placeholder="https://…  (video link)">
-                </div>
-                <div class="screens-row" style="margin-top:12px">
-                  <button class="btn btn-primary" id="screens-send-play" type="button">Play on screen</button>
-                  <button class="btn btn-secondary" id="screens-send-open" type="button">Open</button>
-                </div>
-                <div class="screens-status" id="screens-command-status"></div>
-              </div>
-
+            <div id="devices-screens-root" class="devices-screens-root">
+              <div class="devices-loading-fallback" role="status">Loading your screens…</div>
             </div>
           </div>
 
@@ -2142,7 +2068,8 @@
   <script defer src="/js/utils/GenreTaxonomy.js?v=4"></script>
   <script defer src="/js/utils/GenreRails.js?v=8"></script>
   <script defer src="/js/components/NorvaModal.js?v=2"></script>
-  <script defer src="/js/components/PairTvSheet.js?v=3"></script>
+  <script defer src="/js/components/PairTvSheet.js?v=a8db32010d"></script>
+  <script defer src="/js/components/DevicesScreensModule.js?v=cb8a9f10e4"></script>
   <script defer src="/js/components/MultiSelect.js?v=4"></script>
   <script defer src="/js/components/RegionPicker.js?v=1"></script>
   <script defer src="/js/vendor/qrcode.js?v=1"></script>
@@ -2157,7 +2084,7 @@
   <script defer src="/js/pages/Guide.js?v=2"></script>
   <script defer src="/js/pages/MoviesPage.js?v=61"></script>
   <script defer src="/js/pages/SeriesPage.js?v=60"></script>
-  <script defer src="/js/pages/Settings.js?v=d1ee96cc32"></script>
+  <script defer src="/js/pages/Settings.js?v=5241073432"></script>
   <script defer src="/js/pages/PartnersPage.js?v=10"></script>
   <script defer src="/js/pages/WatchPage.js?v=155"></script>
   <script defer src="/js/profiles.js?v=d2b1662711"></script>
