@@ -5204,6 +5204,18 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
             if (finiteSeek) {
                 releaseFiniteProviderSlot = await acquireFiniteMkvSeekProviderSlot(context, controller.signal);
                 if (attempt.localClosed) break;
+                if (
+                    finiteWarmupWindowsCompleted > 0
+                    && requestId !== context.latestRequestId
+                ) {
+                    // A newer Cues/tail request won the provider queue while
+                    // this primed header continuation was waiting. Starting it
+                    // now would only cool the pinned tunnel on cancellation.
+                    attempt.localClosed = true;
+                    preemptAbandonedFiniteMkvSeekAttempt(context, attempt);
+                    try { res.destroy(); } catch (_) {}
+                    break;
+                }
                 // Another overlapping local range may have filled this exact
                 // window while this attempt waited for the mono-provider slot.
                 // Recheck under the provider mutex so one byte window is never
@@ -5533,6 +5545,16 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                     finiteWindowRange = null;
                     if (finiteWindowIsWarmup && context.finiteWarmupCueGraceMs > 0) {
                         await sleep(context.finiteWarmupCueGraceMs);
+                        if (requestId !== context.latestRequestId && !attempt.localClosed) {
+                            // The primer gave FFmpeg enough EBML metadata to ask
+                            // for Cues/tail data. Do not open the now-obsolete
+                            // header continuation only to abort its pinned tunnel
+                            // a few milliseconds later.
+                            attempt.localClosed = true;
+                            preemptAbandonedFiniteMkvSeekAttempt(context, attempt);
+                            try { res.destroy(); } catch (_) {}
+                            break;
+                        }
                     }
                 }
             } catch (error) {

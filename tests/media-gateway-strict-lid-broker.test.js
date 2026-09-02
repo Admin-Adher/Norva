@@ -922,6 +922,79 @@ test('finite seek broker primes one pinned route before its base and sequential 
   assert.equal(broker.completedProviderFetches, 4);
 });
 
+test('a newer cue prevents the primed header request from cooling its pinned tunnel', async (t) => {
+  const { createStrictLidBroker } = brokerHarness();
+  const data = Buffer.from(Array.from({ length: 64 }, (_, index) => index));
+  const calls = [];
+  let releaseWarmupTail;
+  const warmupTailGate = new Promise((resolve) => { releaseWarmupTail = resolve; });
+  t.after(() => releaseWarmupTail());
+  const provider = http.createServer(async (req, res) => {
+    calls.push(req.headers.range);
+    if (req.headers.range === 'bytes=0-1') {
+      res.writeHead(206, {
+        'Content-Type': 'application/octet-stream',
+        'Content-Range': `bytes 0-1/${data.length}`,
+        'Content-Length': '2',
+        ETag: '"finite-warmup-cue-v1"',
+      });
+      res.write(data.subarray(0, 1));
+      await warmupTailGate;
+      res.end(data.subarray(1, 2));
+      return;
+    }
+    sendExactRange(req, res, data, { etag: '"finite-warmup-cue-v1"' });
+  });
+  const sourceUrl = await listen(provider);
+  t.after(() => closeServer(provider));
+  const broker = await createStrictLidBroker({
+    sourceUrl,
+    fileSizeBytes: data.length,
+    dispatcher: null,
+    pathPrefix: 'finite-mkv-seek',
+    finiteWarmupWindowBytes: 2,
+    finiteWarmupCueGraceMs: 50,
+    finiteWindowBytes: 8,
+    finiteSequentialWindowBytes: 24,
+    finiteCacheBytes: 64,
+    releaseDelayMs: 0,
+    completedReleaseDelayMs: 0,
+    supersededReleaseDelayMs: 20,
+    openTimeoutMs: 2000,
+  });
+  t.after(() => broker.close());
+
+  const header = await fetch(broker.inputUrl, { headers: { Range: 'bytes=0-39' } });
+  const headerReader = header.body.getReader();
+  const primer = await headerReader.read();
+  assert.deepEqual(Buffer.from(primer.value), data.subarray(0, 1));
+
+  const cueBodyPromise = new Promise((resolve, reject) => {
+    const request = http.get(broker.inputUrl, {
+      agent: false,
+      headers: { Range: 'bytes=62-63' },
+    }, (response) => {
+      const chunks = [];
+      response.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
+      response.on('end', () => resolve(Buffer.concat(chunks)));
+      response.on('error', reject);
+    });
+    request.on('error', reject);
+  });
+  for (let attempt = 0; attempt < 100 && broker.maxQueuedRequests < 2; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  assert.equal(broker.maxQueuedRequests, 2);
+  releaseWarmupTail();
+  const cueBody = await cueBodyPromise;
+  assert.deepEqual(cueBody, data.subarray(62, 64));
+  await headerReader.cancel().catch(() => {});
+
+  assert.deepEqual(calls, ['bytes=0-1', 'bytes=62-63']);
+  assert.equal(broker.completedProviderFetches, 2);
+  assert.equal(broker.interruptedProviderFetches, 0);
+});
+
 test('finite seek broker streams provider progress before a window is fully materialized', async (t) => {
   const { createStrictLidBroker } = brokerHarness();
   const data = Buffer.from(Array.from({ length: 16 }, (_, index) => 0x40 + index));
