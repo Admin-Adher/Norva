@@ -2287,7 +2287,7 @@ test('complete-cache Gateway sessions stay authenticated, bound and fail closed 
 });
 
 test('Edge authority, response redaction, original-item CAS and protocol-2 Web contract are wired fail closed', () => {
-  const create = between(EDGE, 'async function createPlaybackSession(', '\nasync function getPlaybackSession(');
+  const create = between(EDGE, 'async function createPlaybackSessionCore(', '\nasync function createPlaybackSession(');
   const cleanup = between(EDGE, 'async function expirePlaybackSession(', '\nasync function recordPlaybackSessionFailure(');
   const closeAll = between(EDGE, 'async function closeOpenGatewaySessionsForUser(', '\nasync function prepareEdgeSessionCoordinator(');
   const publicSession = between(EDGE, 'function publicPlaybackSession(', '\nasync function providerAccountHashFromUrl(');

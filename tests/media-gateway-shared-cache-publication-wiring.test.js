@@ -10,12 +10,12 @@ const gateway = fs.readFileSync(path.join(
   '../services/media-gateway/src/index.js',
 ), 'utf8');
 
-test('Gateway v146 keeps global R2 publication dark and behind private dedicated credentials', () => {
+test('Gateway v147 keeps global R2 publication dark and behind private dedicated credentials', () => {
   assert.match(gateway, /NORVA_SHARED_MEDIA_CACHE_ENABLED === 'true'/);
   assert.match(gateway, /NORVA_MEDIA_CACHE_WORKER_URL/);
   assert.match(gateway, /NORVA_MEDIA_CACHE_WORKER_TOKEN/);
   assert.match(gateway, /NORVA_MEDIA_CACHE_MANIFEST_HMAC_KEY/);
-  assert.match(gateway, /const GATEWAY_VERSION = 146/);
+  assert.match(gateway, /const GATEWAY_VERSION = 147/);
   assert.doesNotMatch(gateway, /R2_ACCESS_KEY|R2_SECRET|AWS_ACCESS_KEY/);
 });
 
@@ -44,10 +44,12 @@ test('Gateway publishes manifest-last graph before one bounded Edge authority ca
     gateway.indexOf('async function maybePublishMkvCompleteHlsCache('),
   );
   assert.match(publication, /publishSharedMediaCacheSession\(/);
-  assert.match(publication, /registerPublication: registerSharedMediaCachePublication/);
+  assert.match(publication, /registerPublication: async \(payload\) =>/);
+  assert.match(publication, /return registerSharedMediaCachePublication\(payload\)/);
+  assert.match(publication, /mediaCacheProducerControl\.pulse\(session, 'finalizing'\)/);
   assert.match(publication, /\/media-cache\/publication/);
   assert.match(publication, /AbortSignal\.timeout\(SHARED_MEDIA_CACHE_CALLBACK_TIMEOUT_MS\)/);
-  assert.match(publication, /const delays = \[0, 1_000, 5_000\]/);
+  assert.match(publication, /const delays = \[0, 1_000, 5_000, 15_000\]/);
   assert.match(publication, /64 \* 1024/);
   assert.doesNotMatch(publication, /sourceUrl|providerPassword|password/);
 });

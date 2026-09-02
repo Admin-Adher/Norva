@@ -88,7 +88,7 @@ test('Gateway extracts no subtitle by default and at most the exact selected tex
     'function mappedSubtitleStreamIndexForSession(session) {',
   );
 
-  assert.match(gateway, /const GATEWAY_VERSION = 146;/);
+  assert.match(gateway, /const GATEWAY_VERSION = 147;/);
   assert.match(subtitleSelection, /if \(!Number\.isInteger\(requestedIndex\)\) return \[\];/);
   assert.match(subtitleSelection, /\.find\(\(track\) => normalizeAudioStreamIndex\(track\.index\) === requestedIndex\)/);
   assert.match(subtitleSelection, /return selected \? \[selected\] : \[\];/);
@@ -113,8 +113,8 @@ test('Edge returns a ready Gateway session before best-effort catalog telemetry'
   const edge = read('supabase/functions/norva-playback/index.ts');
   const createSession = section(
     edge,
+    'async function createPlaybackSessionCore(',
     'async function createPlaybackSession(',
-    'type StrictLanguageValidationEvidence',
   );
 
   assert.match(createSession, /runBackground\(recordPlaybackStartupObservation\(db,/);

@@ -227,7 +227,7 @@ test('the exact owner variant profile outranks lagging item and global catalogue
 
 test('a real MP4 stays on Relay while a mismatched unsafe container still promotes to Gateway', () => {
   const edge = read(EDGE_PATH);
-  const create = sourceBetween(edge, 'async function createPlaybackSession(', '\nasync function getPlaybackSession(');
+  const create = sourceBetween(edge, 'async function createPlaybackSessionCore(', '\nasync function createPlaybackSession(');
   const helper = sourceBetween(
     edge,
     'function authoritativeVodGatewayTier(',
@@ -355,7 +355,7 @@ test('container persistence keeps the playback-resolution generation and require
   assert.equal(mutatedGenerationB, false);
 
   const edge = read(EDGE_PATH);
-  const create = sourceBetween(edge, 'async function createPlaybackSession(', '\nasync function getPlaybackSession(');
+  const create = sourceBetween(edge, 'async function createPlaybackSessionCore(', '\nasync function createPlaybackSession(');
   assert.match(create, /playbackGeneration = await readActiveCatalogGenerationSnapshot[\s\S]*const resolved = [\s\S]*assertActiveCatalogGenerationCurrent\([^)]*playbackGeneration\)[\s\S]*createGatewaySession\([\s\S]*playbackGeneration/);
   const writer = sourceBetween(edge, 'async function persistGatewaySourceContainerMismatch(', '\nasync function createGatewaySession(');
   assert.doesNotMatch(writer, /readActiveCatalogGenerationSnapshot/);
@@ -387,7 +387,7 @@ test('Gateway emits only redacted hashes and recognizes MP4 or MPEG-TS before FF
   const edge = read(EDGE_PATH);
   const deploy = read(path.join(ROOT, 'ops/hetzner/scripts/04-deploy-edge-functions.sh'));
   assert.match(gateway, /version: GATEWAY_VERSION,[\s\S]*vodContainerSelfHealProtocol: 1/);
-  assert.match(edge, /version: 73,[\s\S]*vodContainerSelfHealProtocol: 1/);
+  assert.match(edge, /version: 74,[\s\S]*vodContainerSelfHealProtocol: 1/);
   assert.match(deploy, /EXPECTED_PLAYBACK_VERSION=68/);
   assert.match(deploy, /EXPECTED_VOD_CONTAINER_SELF_HEAL_PROTOCOL=1/);
   assert.match(deploy, /vodContainerSelfHealProtocol\\\":\$EXPECTED_VOD_CONTAINER_SELF_HEAL_PROTOCOL/);

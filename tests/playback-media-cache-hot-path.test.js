@@ -10,8 +10,8 @@ const edge = fs.readFileSync(path.join(
   '../supabase/functions/norva-playback/index.ts',
 ), 'utf8');
 
-test('Edge v73 advertises the shared-cache hot playback protocol', () => {
-  assert.match(edge, /version: 73,[\s\S]*sharedMediaCacheHotPlaybackProtocol: 1/);
+test('Edge v74 advertises the shared-cache hot playback protocol', () => {
+  assert.match(edge, /version: 74,[\s\S]*sharedMediaCacheHotPlaybackProtocol: 1/);
 });
 
 test('exact MKV cache lookup runs before provider circuit, capacity query, and provider claim', () => {
@@ -28,8 +28,8 @@ test('exact MKV cache lookup runs before provider circuit, capacity query, and p
 
 test('hot claim is atomic and ambiguous errors cannot fall through to the provider', () => {
   const hot = edge.slice(
-    edge.indexOf('async function tryCreateHotMediaCachePlayback'),
-    edge.indexOf('async function createPlaybackSession'),
+    edge.indexOf('async function completeClaimedMediaCachePlayback'),
+    edge.indexOf('async function claimReadyMediaCacheWorkPlayback'),
   );
   assert.match(hot, /norva_claim_media_cache_playback/);
   assert.match(hot, /if \(error\) throwDb\(error, "Unable to claim shared media cache playback"\)/);
@@ -41,8 +41,8 @@ test('hot claim is atomic and ambiguous errors cannot fall through to the provid
 
 test('hot response returns only a private HLS contract and no provider URL', () => {
   const hot = edge.slice(
-    edge.indexOf('async function tryCreateHotMediaCachePlayback'),
-    edge.indexOf('async function createPlaybackSession'),
+    edge.indexOf('async function completeClaimedMediaCachePlayback'),
+    edge.indexOf('async function claimReadyMediaCacheWorkPlayback'),
   );
   assert.match(hot, /mode: "shared-cache"/);
   assert.match(hot, /url: mediaCache\.playlistUrl/);

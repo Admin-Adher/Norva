@@ -43,8 +43,8 @@ test('playback reserves the opaque holder before a bounded catalogue drain and n
   const edge = read('supabase', 'functions', 'norva-playback', 'index.ts');
   const create = section(
     edge,
-    'async function createPlaybackSession(',
-    '\nasync function getPlaybackSession(',
+    'async function createPlaybackSessionCore(',
+    '\nasync function createPlaybackSession(',
   );
 
   const readDrain = create.indexOf('await providerCatalogRefreshDrainRemainingMs(');
@@ -175,7 +175,7 @@ test('Gateway reports short catalogue holders immediately and drains an active h
   );
   assert.ok(countBeforePreempt >= 0 && countBeforePreempt < preempt);
   assert.ok(preempt < delay, 'the active catalogue class selects the longer release drain');
-  assert.match(gateway, /const GATEWAY_VERSION = 146/);
+  assert.match(gateway, /const GATEWAY_VERSION = 147/);
   assert.match(edgeVersion(gateway), /providerCatalogRefreshSlotReleaseDelayMs/);
 });
 

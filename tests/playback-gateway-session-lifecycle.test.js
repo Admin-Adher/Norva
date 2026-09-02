@@ -120,8 +120,8 @@ test('gateway DB persistence failure awaits deletion of the newly-created extern
 test('a rejected or ambiguous coordinator commit deletes Gateway state before failing playback', () => {
   const create = section(
     edgeSource,
-    'async function createPlaybackSession(',
-    '\nasync function startPlaybackLanguageValidation(',
+    'async function createPlaybackSessionCore(',
+    '\nasync function createPlaybackSession(',
   );
   const commit = create.indexOf('const gatewayCommit = await commitEdgeSessionCoordinator');
   const reject = create.indexOf('if (edgeCoordination && !gatewayCommit?.ok)', commit);

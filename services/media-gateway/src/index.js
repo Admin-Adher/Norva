@@ -52,6 +52,10 @@ const { PrivateMediaCacheStoreClient } = require('./privateMediaCacheStoreClient
 const { SharedHlsObjectPublisher } = require('./sharedHlsObjectPublisher');
 const { publishSharedMediaCacheSession } = require('./sharedMediaCachePublication');
 const {
+    MediaCacheProducerControl,
+    normalizeMediaCacheProducerContext,
+} = require('./mediaCacheProducerControl');
+const {
     buildExactSubtitleHlsPlan,
     exactSubtitleOutputArgs,
     finalizeExactHlsTrackGraph,
@@ -2114,6 +2118,12 @@ const SHARED_MEDIA_CACHE_CALLBACK_TIMEOUT_MS = clampInt(
     1_000,
     30_000,
 );
+const MEDIA_CACHE_PRODUCER_HEARTBEAT_MS = clampInt(
+    process.env.NORVA_MEDIA_CACHE_PRODUCER_HEARTBEAT_MS,
+    20_000,
+    5_000,
+    60_000,
+);
 const sharedMediaCacheStats = {
     publications: 0,
     alreadyReady: 0,
@@ -2156,6 +2166,16 @@ if (SHARED_MEDIA_CACHE_REQUESTED) {
             .toLowerCase().replace(/[^a-z0-9_-]+/g, '-').slice(0, 80) || 'invalid-config';
     }
 }
+const mediaCacheProducerControl = new MediaCacheProducerControl({
+    edgeBase: edgeCallbackBase,
+    gatewayToken: GATEWAY_TOKEN,
+    heartbeatMs: MEDIA_CACHE_PRODUCER_HEARTBEAT_MS,
+    onPreempt: async (session) => {
+        if (session?.backgroundCacheContinuation === true) {
+            await stopSession(session, { reason: 'viewer-preempted' });
+        }
+    },
+});
 const MULTI_AUDIO_HLS_PROTOCOL = 1;
 // Twelve exact-file renditions add roughly 0.2 s to first-HLS readiness versus eight on the
 // production Ryzen/Radeon host. Keep the operational default evidence-based and configurable,
@@ -2171,7 +2191,7 @@ const MAX_EXACT_SUBTITLE_HLS_RENDITIONS = clampInt(
     1,
     16,
 );
-const GATEWAY_VERSION = 146;
+const GATEWAY_VERSION = 147;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -2631,6 +2651,10 @@ app.get('/health', (req, res) => {
             pipelineBuild: MKV_COMPLETE_HLS_CACHE_PIPELINE_BUILD,
             segmenterBuild: SHARED_MEDIA_CACHE_SEGMENTER_BUILD,
             ttlMs: SHARED_MEDIA_CACHE_TTL_MS,
+            producerControl: {
+                ...mediaCacheProducerControl.publicStatus(),
+                heartbeatMs: MEDIA_CACHE_PRODUCER_HEARTBEAT_MS,
+            },
             stats: { ...sharedMediaCacheStats },
         },
         multiAudioHls: {
@@ -9392,6 +9416,7 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             videoCodec,
             clientAudioPassthrough,
             completeHlsCachePolicy,
+            mediaCacheProducer,
             seekOffset,
             startOffset,
             resumeTime
@@ -9407,6 +9432,21 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             return res.status(400).json({
                 error: 'sourceContainerAuthority is invalid',
                 code: 'SOURCE_CONTAINER_AUTHORITY_INVALID',
+            });
+        }
+        const normalizedMediaCacheProducer = mediaCacheProducer === undefined
+            ? null
+            : normalizeMediaCacheProducerContext(mediaCacheProducer);
+        if (mediaCacheProducer !== undefined && !normalizedMediaCacheProducer) {
+            return res.status(400).json({
+                error: 'mediaCacheProducer is invalid',
+                code: 'MEDIA_CACHE_PRODUCER_CONTEXT_INVALID',
+            });
+        }
+        if (normalizedMediaCacheProducer && (!sharedMediaCachePublisher || !mediaCacheProducerControl.active)) {
+            return res.status(503).json({
+                error: 'Shared media cache producer control is unavailable',
+                code: 'MEDIA_CACHE_PRODUCER_CONTROL_UNAVAILABLE',
             });
         }
 
@@ -9608,6 +9648,13 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             codecProfile: normalizedCodecProfile,
             sourceContainerAuthority: normalizedSourceContainerAuthority,
         });
+        if (normalizedMediaCacheProducer && !finiteMkvPlaybackAtRequest) {
+            await removeSessionDir(outputDir).catch(() => {});
+            return res.status(400).json({
+                error: 'Shared media cache producer requires an exact finite MKV',
+                code: 'MEDIA_CACHE_PRODUCER_MEDIA_INVALID',
+            });
+        }
         let finiteMkvPlayback = finiteMkvPlaybackAtRequest;
         const shouldProbe = shouldProbeCodecProfile(normalizedPlaybackHint, sourceUrl);
         const shouldCompleteProfile = shouldProbe && shouldProbeMissingSubtitleTracks(normalizedCodecProfile, normalizedPlaybackHint, sourceUrl);
@@ -9731,6 +9778,11 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             completeHlsGraphPromise: null,
             sharedMediaCachePublicationPromise: null,
             sharedMediaCachePublication: null,
+            mediaCacheProducer: normalizedMediaCacheProducer,
+            mediaCacheProducerStage: normalizedMediaCacheProducer ? 'probing' : null,
+            mediaCacheProducerCompleted: false,
+            mediaCacheProducerPreemptRequested: false,
+            mediaCacheProducerHeartbeatTimer: null,
             exactSubtitleHls: null,
             exactHlsTrackGraphFinalizationPromise: null,
             exactHlsTrackGraphFinalization: null,
@@ -9956,6 +10008,9 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             : null;
 
         sessions.set(id, session);
+        if (normalizedMediaCacheProducer) {
+            mediaCacheProducerControl.attach(session, normalizedMediaCacheProducer);
+        }
 
         const ffmpegStartedAt = Date.now();
         session.hlsCacheProductionStartedAtMs = ffmpegStartedAt;
@@ -9993,6 +10048,7 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
                 details: detail
             });
         }
+        if (session.mediaCacheProducer) session.mediaCacheProducerStage = 'producing';
         const startOffsetProbeStartedAt = Date.now();
         await observeSessionStartOffset(session);
         if (sessionRequestAbortController.signal.aborted) throw new Error('Session request aborted');
@@ -14570,7 +14626,10 @@ async function registerSharedMediaCachePublication(payload) {
         error.code = 'SHARED_MEDIA_CACHE_CALLBACK_TOO_LARGE';
         throw error;
     }
-    const delays = [0, 1_000, 5_000];
+    // A very short asset can finish and publish before Edge has committed the
+    // corresponding cloud_gateway_sessions row. Keep one final bounded retry
+    // beyond that transaction window; publication runs off the foreground path.
+    const delays = [0, 1_000, 5_000, 15_000];
     let lastError = null;
     for (const delayMs of delays) {
         if (delayMs > 0) await sleep(delayMs);
@@ -14589,7 +14648,8 @@ async function registerSharedMediaCachePublication(payload) {
             const error = new Error(`shared media cache publication callback rejected with HTTP ${response.status}`);
             error.code = 'SHARED_MEDIA_CACHE_CALLBACK_REJECTED';
             error.status = response.status;
-            if (response.status >= 400 && response.status < 500 && response.status !== 408 && response.status !== 429) {
+            if (response.status >= 400 && response.status < 500
+                && response.status !== 404 && response.status !== 408 && response.status !== 429) {
                 sharedMediaCacheStats.callbackFailures += 1;
                 throw error;
             }
@@ -14599,6 +14659,7 @@ async function registerSharedMediaCachePublication(payload) {
                 error?.code === 'SHARED_MEDIA_CACHE_CALLBACK_REJECTED'
                 && Number(error?.status) >= 400
                 && Number(error?.status) < 500
+                && Number(error?.status) !== 404
                 && Number(error?.status) !== 408
                 && Number(error?.status) !== 429
             ) throw error;
@@ -14625,6 +14686,14 @@ async function maybePublishSharedMediaCache(session) {
     if (!pipelineBuild) return null;
     const graph = await completeHlsGraphForSession(session);
     try {
+        if (session.mediaCacheProducer) {
+            const producerState = await mediaCacheProducerControl.pulse(session, 'uploading').catch(() => null);
+            if (producerState === 'expired' || producerState === 'preempted') {
+                const error = new Error('shared media cache producer lease is no longer writable');
+                error.code = 'SHARED_MEDIA_CACHE_PRODUCER_LEASE_LOST';
+                throw error;
+            }
+        }
         const result = await publishSharedMediaCacheSession({
             session,
             publisher: sharedMediaCachePublisher,
@@ -14633,9 +14702,20 @@ async function maybePublishSharedMediaCache(session) {
             sourceDirectory: session.outputDir,
             rootPlaylist: graph.rootPlaylist,
             files: graph.files,
-            registerPublication: registerSharedMediaCachePublication,
+            registerPublication: async (payload) => {
+                if (session.mediaCacheProducer) {
+                    const producerState = await mediaCacheProducerControl.pulse(session, 'finalizing').catch(() => null);
+                    if (producerState === 'expired' || producerState === 'preempted') {
+                        const error = new Error('shared media cache producer lease cannot finalize');
+                        error.code = 'SHARED_MEDIA_CACHE_PRODUCER_LEASE_LOST';
+                        throw error;
+                    }
+                }
+                return registerSharedMediaCachePublication(payload);
+            },
         });
         session.sharedMediaCachePublication = result;
+        if (session.mediaCacheProducer) mediaCacheProducerControl.markCompleted(session);
         if (result.status === 'published') {
             sharedMediaCacheStats.publications += 1;
             sharedMediaCacheStats.bytesPublished += Number(result.totalBytes || 0);
@@ -17285,6 +17365,7 @@ async function stopSession(session, options = {}) {
         session.backgroundCacheContinuationTimer = null;
     }
     session.status = 'stopping';
+    mediaCacheProducerControl.detach(session);
     session.stoppingPromise = (async () => {
         const completeHlsCacheLease = session.completeHlsCacheLease;
         session.completeHlsCacheLease = null;
@@ -17302,6 +17383,11 @@ async function stopSession(session, options = {}) {
         releaseVideoEncoderAdmission(session);
         await session.completeHlsCachePromotionPromise?.catch(() => null);
         await session.sharedMediaCachePublicationPromise?.catch(() => null);
+        if (session.mediaCacheProducer && session.mediaCacheProducerCompleted !== true) {
+            await mediaCacheProducerControl.abandon(session).catch(() => {
+                console.warn('[media-gateway] unable to abandon shared media cache producer lease');
+            });
+        }
         session.status = 'ended';
         sessions.delete(session.id);
         wakePlaybackBlockedQueues();

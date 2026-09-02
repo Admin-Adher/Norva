@@ -670,8 +670,8 @@ test('legacy physical writers use exact ABA overloads and fallback only when the
   const playback = source(path.join(ROOT, 'supabase', 'functions', 'norva-playback', 'index.ts'));
   assert.match(playback, /callActiveCatalogGenerationRpc\(db, "record_catalog_file_container_observation"/);
   const createPlayback = playback.slice(
-    playback.indexOf('async function createPlaybackSession('),
-    playback.indexOf('\nasync function getPlaybackSession('),
+    playback.indexOf('async function createPlaybackSessionCore('),
+    playback.indexOf('\nasync function createPlaybackSession('),
   );
   const snapshotAt = createPlayback.indexOf('const playbackGeneration = await readActiveCatalogGenerationSnapshot(db, sourceId, userId)');
   const resolvedAt = createPlayback.indexOf('const resolved = ', snapshotAt);

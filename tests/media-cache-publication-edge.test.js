@@ -10,8 +10,8 @@ const edge = fs.readFileSync(path.join(
   '../supabase/functions/norva-playback/index.ts',
 ), 'utf8');
 
-test('Edge v73 exposes only an authenticated Gateway publication route', () => {
-  assert.match(edge, /version: 73,[\s\S]*sharedMediaCachePublicationProtocol: 1/);
+test('Edge v74 exposes only an authenticated Gateway publication route', () => {
+  assert.match(edge, /version: 74,[\s\S]*sharedMediaCachePublicationProtocol: 1/);
   assert.match(edge, /segments\[0\] === "media-cache" && segments\[1\] === "publication"/);
   const callback = edge.slice(
     edge.indexOf('async function runMediaCachePublicationCallback('),
@@ -43,6 +43,6 @@ test('callback response contains no storage credential or raw provider coordinat
     edge.indexOf('async function runMediaCachePublicationCallback('),
     edge.indexOf('async function runCompleteHlsCacheCallback('),
   );
-  assert.match(callback, /return \{ ok: true, protocol: 1, objectKey, bindingId \}/);
+  assert.match(callback, /return \{ ok: true, protocol: 1, objectKey, bindingId, producerState \}/);
   assert.doesNotMatch(callback, /accessKey|secretKey|bucket|providerUrl|targetUrl/);
 });

@@ -307,7 +307,7 @@ test('one playback intention permits only the 458 handoff or one proven containe
 
 test('playback edge checks the circuit, claims one account session and reports supersession', () => {
   const edge = read('supabase/functions/norva-playback/index.ts');
-  const create = section(edge, 'async function createPlaybackSession(', 'async function getPlaybackSession(');
+  const create = section(edge, 'async function createPlaybackSessionCore(', 'async function createPlaybackSession(');
   const heartbeat = section(edge, 'async function heartbeatPlaybackSession(', 'async function expirePlaybackSession(');
 
   assert.match(edge, /provider-playback-circuit-policy\.mjs/);
@@ -324,14 +324,14 @@ test('playback edge checks the circuit, claims one account session and reports s
   assert.match(heartbeat, /PLAYBACK_SUPERSEDED/);
   assert.match(edge, /open_provider_playback_circuit/);
   assert.match(edge, /PROVIDER_ACCOUNT_BUSY/);
-  assert.match(edge, /version:\s*73/);
+  assert.match(edge, /version:\s*74/);
   assert.match(edge, /providerCircuitProtocol:\s*1/);
   assert.match(edge, /exactFileCodecProfileProtocol:\s*1/);
 });
 
 test('session creation derives the global account hash only from an owned server-resolved target', () => {
   const edge = read('supabase/functions/norva-playback/index.ts');
-  const create = section(edge, 'async function createPlaybackSession(', 'async function getPlaybackSession(');
+  const create = section(edge, 'async function createPlaybackSessionCore(', 'async function createPlaybackSession(');
   const resolve = section(edge, 'async function resolvePlaybackTarget(', '// Series have no directly-playable stream id');
 
   assert.match(create, /if \(!sourceId \|\| !itemType \|\| !itemId\)/);
@@ -579,11 +579,11 @@ test('production rollout proves the provider circuit protocol on every runtime',
   const cloud = read('supabase/functions/norva-cloud/index.ts');
   const deploy = read('ops/hetzner/scripts/04-deploy-edge-functions.sh');
 
-  assert.match(gateway, /const GATEWAY_VERSION = 146/);
+  assert.match(gateway, /const GATEWAY_VERSION = 147/);
   assert.match(gateway, /providerCircuitProtocol:\s*1/);
   assert.match(gateway, /providerProxyAffinityProtocol:\s*1/);
   assert.match(gateway, /exactFileCodecProfileProtocol:\s*1/);
-  assert.match(playback, /version:\s*73/);
+  assert.match(playback, /version:\s*74/);
   assert.match(playback, /providerCircuitProtocol:\s*1/);
   assert.match(playback, /exactFileCodecProfileProtocol:\s*1/);
   assert.match(playback, /relayTakeoverProtocol:\s*1/);

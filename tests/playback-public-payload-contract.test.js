@@ -69,7 +69,7 @@ test('playback event and gateway responses cannot return raw database rows', () 
   assert.match(event, /return \{ event: sanitizePlaybackEvent\(data\) \}/);
   assert.doesNotMatch(event, /\.select\("\*"\)/);
 
-  const creation = section('async function createPlaybackSession(', 'async function startPlaybackLanguageValidation(');
+  const creation = section('async function createPlaybackSessionCore(', 'async function createPlaybackSession(');
   assert.match(creation, /\.\.\.sanitizeGatewaySession\(gateway\.session\)/);
   const gatewayResponse = creation.slice(
     creation.indexOf('const gatewaySessionResponse ='),
