@@ -48,7 +48,7 @@ test('onboarding collects an optional duration or explicit dates plus reminder o
   assert.match(home, /payload\.type === 'xtream'/);
   assert.match(home, /data-setup-flow-step="connection"/);
   assert.match(home, /setFlowStep\('access'\)/);
-  assert.match(home, /submit\.hidden = accessActive;[\s\S]{0,80}submit\.classList\.toggle\('hidden', accessActive\)/);
+  assert.match(home, /const updateSubmitVisibility = \(\) => \{[\s\S]{0,220}form\.dataset\.setupFlowStep === 'access'[\s\S]{0,160}submit\.hidden = hidden;[\s\S]{0,80}submit\.classList\.toggle\('hidden', hidden\)/);
   assert.match(home, /norva:provider-access-complete/);
   assert.match(home, /accessWizardApproved = true[\s\S]{0,80}form\.requestSubmit\(\)/);
   assert.match(home, /if \(needsAccessStep && !accessWizardApproved\)/);
@@ -182,10 +182,10 @@ test('Provider Access keeps the exact-date calendar optional and explains paused
 });
 
 test('all changed Provider Access UI assets are cache-busted', () => {
-  assert.match(shell, /main\.css\?v=4a3c14b9a1/);
+  assert.match(shell, /main\.css\?v=1c2a19ef50/);
   assert.match(shell, /cloudApi\.js\?v=71/);
   assert.match(shell, /api\.js\?v=93/);
   assert.match(shell, /sourceHealth\.js\?v=6c0eefcb4f/);
   assert.match(shell, /SourceManager\.js\?v=7fcc0560f4/);
-  assert.match(shell, /HomePage\.js\?v=6016cf63fb/);
+  assert.match(shell, /HomePage\.js\?v=4b8155eafa/);
 });

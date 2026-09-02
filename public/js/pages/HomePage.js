@@ -1194,45 +1194,92 @@ class HomePage {
                     </div>
                     <h1 data-setup-flow-title>Paste your TV service link</h1>
                     <p data-setup-flow-description>We’ll organize your catalog. Nothing else.</p>
-                    <form class="norva-setup-inline-form" id="home-tv-service-form" data-setup-flow-step="connection" autocomplete="off" novalidate>
+                    <form class="norva-setup-inline-form" id="home-tv-service-form" data-setup-flow-step="connection" data-setup-connection-type="m3u" data-setup-assistance-view="connection" autocomplete="off" novalidate>
                         <div data-setup-connection-step>
-                            <div class="form-group">
-                                <label for="home-source-url">Xtream or M3U link</label>
-                                <input type="url" id="home-source-url" class="form-input setup-form-input"
-                                       placeholder="https://provider.com/get.php?username=…&password=…"
-                                       name="provider-server-url" inputmode="url" autocomplete="off" autocapitalize="none" spellcheck="false" required
-                                       aria-describedby="home-source-url-hint home-source-find-link home-source-url-error">
-                                <p class="setup-form-hint" id="home-source-url-hint">Xtream or M3U — login fills in automatically.</p>
-                                <p class="setup-form-help" id="home-source-find-link">Don’t have the link handy? Check the email or account of your TV service for “M3U” or “Xtream”. You can also search your provider’s name plus “Xtream” or “M3U”.</p>
-                                <p class="setup-field-error hidden" id="home-source-url-error"></p>
-                            </div>
-                            <details class="source-advanced-login setup-manual-login" id="home-source-advanced">
-                                <summary>Name or login manually</summary>
-                                <p class="setup-form-hint">Optional. Auto-filled when a complete link is pasted above.</p>
-                                <div class="form-group setup-service-name-group">
-                                    <label for="home-source-name">Service name <span class="label-optional">(optional)</span></label>
-                                    <input type="text" id="home-source-name" name="provider-display-name" class="form-input setup-form-input" placeholder="Family TV" autocomplete="off" autocapitalize="words" spellcheck="false" data-1p-ignore="true" data-lpignore="true" data-form-type="other">
+                            <div data-setup-connection-main>
+                                <div class="setup-mode-tabs" role="tablist" aria-label="Connection format">
+                                    <button class="setup-mode-tab" id="home-source-mode-m3u" type="button" role="tab" aria-selected="true" aria-controls="home-source-panel-m3u" data-setup-mode="m3u">M3U link</button>
+                                    <button class="setup-mode-tab" id="home-source-mode-xtream" type="button" role="tab" aria-selected="false" aria-controls="home-source-panel-xtream" data-setup-mode="xtream" tabindex="-1">Xtream login</button>
                                 </div>
-                                <div class="setup-manual-grid">
+                                <input type="hidden" id="home-source-name" name="provider-display-name" value="">
+                                <div class="setup-mode-panel" id="home-source-panel-m3u" role="tabpanel" aria-labelledby="home-source-mode-m3u" data-setup-panel="m3u">
                                     <div class="form-group">
-                                        <label for="home-source-username">Username</label>
-                                        <input type="text" id="home-source-username" name="provider-login" class="form-input setup-form-input" placeholder="username" autocomplete="off" autocapitalize="none" spellcheck="false" data-1p-ignore="true" data-lpignore="true" data-form-type="other" aria-describedby="home-source-username-error">
-                                        <p class="setup-field-error hidden" id="home-source-username-error"></p>
+                                        <label for="home-source-url">Full M3U or M3U8 link</label>
+                                        <input type="url" id="home-source-url" class="form-input setup-form-input"
+                                               placeholder="https://provider.example/get.php?…"
+                                               name="provider-playlist-url" inputmode="url" autocomplete="off" autocapitalize="none" spellcheck="false"
+                                               aria-describedby="home-source-url-hint home-source-url-error">
+                                        <p class="setup-form-hint" id="home-source-url-hint">Usually found in your provider email or account area.</p>
+                                        <p class="setup-field-error hidden" id="home-source-url-error"></p>
                                     </div>
+                                </div>
+                                <div class="setup-mode-panel" id="home-source-panel-xtream" role="tabpanel" aria-labelledby="home-source-mode-xtream" data-setup-panel="xtream" hidden>
                                     <div class="form-group">
-                                        <label for="home-source-password">Password</label>
-                                        <div class="setup-password-field">
-                                            <input type="password" id="home-source-password" name="provider-secret" class="form-input setup-form-input" placeholder="password" autocomplete="new-password" data-1p-ignore="true" data-lpignore="true" data-form-type="other" aria-describedby="home-source-password-error">
-                                            <button type="button" class="setup-password-toggle" id="home-source-password-toggle" aria-label="Show password" aria-pressed="false">${Icons.hide}</button>
+                                        <label for="home-source-server">Server address</label>
+                                        <input type="url" id="home-source-server" class="form-input setup-form-input"
+                                               placeholder="https://provider.example:8080"
+                                               name="provider-server-url" inputmode="url" autocomplete="off" autocapitalize="none" spellcheck="false"
+                                               aria-describedby="home-source-server-hint home-source-server-error">
+                                        <p class="setup-form-hint" id="home-source-server-hint">Paste a complete Xtream link to fill the login automatically.</p>
+                                        <p class="setup-field-error hidden" id="home-source-server-error"></p>
+                                    </div>
+                                    <div class="setup-credentials-grid">
+                                        <div class="form-group">
+                                            <label for="home-source-username">Username</label>
+                                            <input type="text" id="home-source-username" name="provider-login" class="form-input setup-form-input" placeholder="Username" autocomplete="off" autocapitalize="none" spellcheck="false" data-1p-ignore="true" data-lpignore="true" data-form-type="other" aria-describedby="home-source-username-error">
+                                            <p class="setup-field-error hidden" id="home-source-username-error"></p>
                                         </div>
-                                        <p class="setup-field-error hidden" id="home-source-password-error"></p>
+                                        <div class="form-group">
+                                            <label for="home-source-password">Password</label>
+                                            <div class="setup-password-field">
+                                                <input type="password" id="home-source-password" name="provider-secret" class="form-input setup-form-input" placeholder="Password" autocomplete="new-password" data-1p-ignore="true" data-lpignore="true" data-form-type="other" aria-describedby="home-source-password-error">
+                                                <button type="button" class="setup-password-toggle" id="home-source-password-toggle" aria-label="Show password" aria-pressed="false">${Icons.hide}</button>
+                                            </div>
+                                            <p class="setup-field-error hidden" id="home-source-password-error"></p>
+                                        </div>
                                     </div>
                                 </div>
-                            </details>
+                                <button class="setup-compatibility-help" type="button" data-setup-app-login-trigger>
+                                    <span class="setup-compatibility-icon" aria-hidden="true">${Icons.info}</span>
+                                    <span><strong>My provider only gave me an app login</strong><small>No M3U link or Xtream server details</small></span>
+                                    <span class="setup-compatibility-arrow" aria-hidden="true">${Icons.chevronRight}</span>
+                                </button>
+                                <div class="setup-player-note"><span aria-hidden="true">${Icons.fingerprint}</span><span>Your service details are encrypted. Norva is a player and never supplies content.</span></div>
+                            </div>
+                            <section class="setup-assistance-panel" data-setup-app-login-panel aria-labelledby="home-app-login-title" hidden>
+                                <button class="setup-back-button" type="button" data-setup-assist-back><span aria-hidden="true">${Icons.chevronRight}</span>Back to connection formats</button>
+                                <span class="setup-assistance-icon" aria-hidden="true">${Icons.info}</span>
+                                <h2 id="home-app-login-title" tabindex="-1">An app login cannot be imported directly</h2>
+                                <p>Norva needs an <strong>M3U/M3U8 link</strong> or <strong>Xtream server credentials</strong> from your provider.</p>
+                                <div class="setup-privacy-callout"><span aria-hidden="true">${Icons.fingerprint}</span><span>Do not enter your provider app password here.</span></div>
+                                <button class="btn btn-primary setup-guide-open" type="button" data-setup-guide-open>How to get M3U or Xtream access</button>
+                            </section>
+                            <section class="setup-assistance-panel setup-access-guide" data-setup-access-guide aria-labelledby="home-access-guide-title" hidden>
+                                <button class="setup-back-button" type="button" data-setup-guide-back><span aria-hidden="true">${Icons.chevronRight}</span>Back</button>
+                                <h2 id="home-access-guide-title" tabindex="-1">Ask your provider for compatible access</h2>
+                                <p>Look in your welcome email, account area or provider support.</p>
+                                <div class="setup-access-formats" aria-label="Compatible formats">
+                                    <div><span aria-hidden="true">${Icons.link}</span><span><strong>M3U / M3U8 playlist</strong><small>A complete URL, often ending in .m3u or containing get.php</small></span></div>
+                                    <div><span aria-hidden="true">${Icons.fingerprint}</span><span><strong>Xtream access</strong><small>Server URL, username and password</small></span></div>
+                                </div>
+                                <div class="setup-provider-request">
+                                    <strong>Message for your provider</strong>
+                                    <div class="setup-provider-message" data-setup-provider-message>
+                                        <p>Hello, could you please send me one of these access formats?</p>
+                                        <ol>
+                                            <li>My complete M3U/M3U8 playlist URL</li>
+                                            <li>My Xtream Codes details: server URL (including the port), username and password</li>
+                                        </ol>
+                                        <p>Thank you.</p>
+                                    </div>
+                                </div>
+                                <button class="btn btn-primary setup-copy-message" type="button" data-setup-copy-message>Copy message</button>
+                                <p class="setup-copy-feedback" data-setup-copy-feedback role="status" aria-live="polite" aria-atomic="true"></p>
+                            </section>
                         </div>
                         <div class="norva-setup-error hidden" id="home-tv-service-error" role="alert" aria-atomic="true" tabindex="-1"></div>
                         ${manager?.getProviderAccessTermsFields?.({ prefix: 'home-provider-access', onboarding: true, deferred: true }) || ''}
-                        <button class="btn btn-primary norva-setup-submit" id="home-tv-service-submit" type="submit">Continue</button>
+                        <button class="btn btn-primary norva-setup-submit" id="home-tv-service-submit" type="submit">Check playlist</button>
                     </form>
                 </div>
             </section>
@@ -1264,65 +1311,106 @@ class HomePage {
         })[state] || 'Pending';
     }
 
+    setupConnectionFailureFamily(error = {}, type = 'xtream') {
+        const payload = error?.payload || {};
+        const code = String(payload.error_code || payload.errorCode || payload.code || error?.code || '').trim().toUpperCase();
+        const status = Number(payload.status ?? payload.upstreamStatus ?? error?.status ?? error?.upstreamStatus);
+        const message = String(error?.message || payload.message || '').toLowerCase();
+        if (status === 401 || status === 403 || code.includes('CREDENTIAL') || code.includes('AUTH')) return 'credentials';
+        if (status === 458 || code.includes('BUSY')) return 'provider_busy';
+        if (status === 408 || status === 504 || code.includes('TIMEOUT') || message.includes('timed out')) return 'timeout';
+        if (status === 404 || code.includes('ENDPOINT_NOT_FOUND') || code.includes('NOT_FOUND')) return 'provider_unreachable';
+        if ([502, 503].includes(status) || /DNS|TLS|CONNECTION|NETWORK|UNREACHABLE/.test(code)) return 'provider_unreachable';
+        if (type === 'm3u' && ([400, 415, 422].includes(status) || /PLAYLIST|FORMAT|M3U/.test(code))) return 'format';
+        if (message.includes('network') || message.includes('fetch')) return 'network';
+        return 'unknown';
+    }
+
+    setupConnectionErrorCopy(error = {}, type = 'xtream') {
+        const payload = error?.payload || {};
+        const code = String(payload.error_code || payload.errorCode || payload.code || error?.code || '').trim().toUpperCase();
+        const status = Number(payload.status ?? payload.upstreamStatus ?? error?.status ?? error?.upstreamStatus);
+        const family = this.setupConnectionFailureFamily(error, type);
+        if (status === 404 || code.includes('ENDPOINT_NOT_FOUND') || code.includes('NOT_FOUND')) {
+            return {
+                title: 'This provider address was not found',
+                body: 'We reached the server, but this path does not exist. Check the complete link or server address.'
+            };
+        }
+        if (family === 'credentials') {
+            return {
+                title: 'The provider rejected this login',
+                body: 'Check the server address, username and password supplied by your provider.'
+            };
+        }
+        if (family === 'provider_busy') {
+            return {
+                title: 'This TV service is busy',
+                body: 'Your details were kept. Wait a few seconds, then try again.'
+            };
+        }
+        if (family === 'provider_unreachable' || family === 'timeout' || family === 'network') {
+            return {
+                title: 'Your provider server is not responding',
+                body: 'Your details were kept. Try again in a few minutes, or ask your provider whether the server is online.'
+            };
+        }
+        if (family === 'format') {
+            return {
+                title: 'This isn’t a complete playlist link',
+                body: 'Paste the full M3U/M3U8 link from your provider. It may end in .m3u or include get.php.'
+            };
+        }
+        return type === 'm3u'
+            ? {
+                title: 'Norva could not connect this playlist',
+                body: 'Your link was kept. Check it with your provider, then try again.'
+            }
+            : {
+                title: 'Norva could not connect this TV service',
+                body: 'Check the server address and login, then try again.'
+            };
+    }
+
     bindSetupConnectionForm(container) {
         const form = container.querySelector('#home-tv-service-form');
-        const urlInput = container.querySelector('#home-source-url');
+        const m3uInput = container.querySelector('#home-source-url');
+        const serverInput = container.querySelector('#home-source-server');
         const nameInput = container.querySelector('#home-source-name');
         const usernameInput = container.querySelector('#home-source-username');
         const passwordInput = container.querySelector('#home-source-password');
         const passwordToggle = container.querySelector('#home-source-password-toggle');
-        const advancedLogin = container.querySelector('#home-source-advanced');
-        const hint = container.querySelector('#home-source-url-hint');
+        const serverHint = container.querySelector('#home-source-server-hint');
         const error = container.querySelector('#home-tv-service-error');
         const submit = container.querySelector('#home-tv-service-submit');
         const connectionStep = container.querySelector('[data-setup-connection-step]');
+        const connectionMain = container.querySelector('[data-setup-connection-main]');
+        const appLoginTrigger = container.querySelector('[data-setup-app-login-trigger]');
+        const appLoginPanel = container.querySelector('[data-setup-app-login-panel]');
+        const accessGuide = container.querySelector('[data-setup-access-guide]');
+        const guideOpen = container.querySelector('[data-setup-guide-open]');
+        const copyMessage = container.querySelector('[data-setup-copy-message]');
+        const copyFeedback = container.querySelector('[data-setup-copy-feedback]');
+        const modeTabs = Array.from(container.querySelectorAll('[data-setup-mode]'));
+        const modePanels = Array.from(container.querySelectorAll('[data-setup-panel]'));
         const accessTerms = form?.querySelector('[data-provider-access-terms]');
         const flowTitle = container.querySelector('[data-setup-flow-title]');
         const flowDescription = container.querySelector('[data-setup-flow-description]');
         const manager = this.app?.sourceManager || window.app?.sourceManager;
-        if (!form || !urlInput || !usernameInput || !passwordInput || !submit) return;
+        if (!form || !m3uInput || !serverInput || !usernameInput || !passwordInput || !submit) return;
         const accessWizard = manager?.bindProviderAccessTerms?.(form);
         let accessWizardApproved = false;
 
-        const setFlowStep = (step) => {
-            const accessActive = step === 'access';
-            form.dataset.setupFlowStep = step;
-            container.querySelector('.norva-setup-connect-card')?.classList.toggle('is-access-step', accessActive);
-            if (connectionStep) connectionStep.hidden = accessActive;
-            if (accessTerms) accessTerms.hidden = !accessActive;
-            submit.hidden = accessActive;
-            submit.classList.toggle('hidden', accessActive);
-            if (flowTitle) flowTitle.textContent = accessActive ? 'When can you use this service?' : 'Paste your TV service link';
-            if (flowDescription) flowDescription.textContent = accessActive
-                ? 'Add the access period now, or safely choose to do it later.'
-                : 'We’ll organize your catalog. Nothing else.';
-            container.querySelectorAll('[data-setup-flow-marker]').forEach((marker) => {
-                const markerStep = marker.dataset.setupFlowMarker;
-                marker.classList.toggle('is-current', markerStep === step);
-                marker.classList.toggle('is-complete', accessActive && markerStep === 'connection');
-            });
-            if (accessActive) accessWizard?.showStep?.(0);
-            else {
-                accessWizardApproved = false;
-                requestAnimationFrame(() => urlInput.focus({ preventScroll: true }));
-            }
-        };
-
-        accessTerms?.addEventListener('norva:provider-access-cancel', () => setFlowStep('connection'));
-        accessTerms?.addEventListener('norva:provider-access-complete', () => {
-            accessWizardApproved = true;
-            form.requestSubmit();
-        });
-
         const fieldErrors = new Map([
-            [urlInput, container.querySelector('#home-source-url-error')],
+            [m3uInput, container.querySelector('#home-source-url-error')],
+            [serverInput, container.querySelector('#home-source-server-error')],
             [usernameInput, container.querySelector('#home-source-username-error')],
             [passwordInput, container.querySelector('#home-source-password-error')]
         ]);
         const clearSummaryError = () => {
             if (!error) return;
             error.classList.add('hidden');
-            error.textContent = '';
+            error.replaceChildren();
         };
         const clearFieldError = (input) => {
             input?.removeAttribute('aria-invalid');
@@ -1345,17 +1433,37 @@ class HomePage {
                 target.classList.remove('hidden');
             }
         };
-        const showSummaryError = (message, { focus = false } = {}) => {
+        const showSummaryError = (value, { focus = false } = {}) => {
             if (!error) return;
-            error.textContent = message;
+            const copy = typeof value === 'string' ? { title: '', body: value } : (value || {});
+            const fragment = document.createDocumentFragment();
+            if (copy.title) {
+                const title = document.createElement('strong');
+                title.textContent = copy.title;
+                fragment.append(title);
+            }
+            if (copy.body) {
+                const body = document.createElement('span');
+                body.textContent = copy.body;
+                fragment.append(body);
+            }
+            error.replaceChildren(fragment);
             error.classList.remove('hidden');
             if (focus) {
                 try { error.focus({ preventScroll: true }); } catch (_) { /* noop */ }
             }
         };
-        const setSubmitting = (busy, label = 'Continue') => {
+        const selectedType = () => form.dataset.setupConnectionType === 'xtream' ? 'xtream' : 'm3u';
+        const activeUrlInput = () => selectedType() === 'xtream' ? serverInput : m3uInput;
+        const connectionSubmitLabel = () => selectedType() === 'xtream' ? 'Connect source' : 'Check playlist';
+        const updateSubmitVisibility = () => {
+            const hidden = form.dataset.setupFlowStep === 'access' || form.dataset.setupAssistanceView !== 'connection';
+            submit.hidden = hidden;
+            submit.classList.toggle('hidden', hidden);
+        };
+        const setSubmitting = (busy, label = '') => {
             submit.disabled = busy;
-            submit.textContent = label;
+            submit.textContent = label || connectionSubmitLabel();
             if (busy) submit.setAttribute('aria-busy', 'true');
             else submit.removeAttribute('aria-busy');
             if (accessTerms && form.dataset.setupFlowStep === 'access') {
@@ -1364,53 +1472,116 @@ class HomePage {
             }
         };
 
-        const applyParsedLink = (force = false) => {
-            const currentPathShape = manager?.sourceInputPathShape?.(urlInput.value) || 'invalid';
-            const parsed = manager?.parseXtreamLink?.(urlInput.value);
-            const termsFieldset = form.querySelector('[data-provider-access-terms]');
-            const playlistLink = manager?.looksLikePlaylistLink?.(urlInput.value) === true;
-            if (termsFieldset) {
-                if (form.dataset.setupFlowStep === 'access' && playlistLink) setFlowStep('connection');
-                if (playlistLink) {
-                    const mode = termsFieldset.querySelector('[data-access-mode]');
-                    if (mode) {
-                        mode.value = 'skip';
-                        mode.dispatchEvent(new Event('change'));
-                    }
-                }
+        const setConnectionMode = (nextMode) => {
+            const mode = nextMode === 'xtream' ? 'xtream' : 'm3u';
+            form.dataset.setupConnectionType = mode;
+            accessWizardApproved = false;
+            modeTabs.forEach((tab) => {
+                const selected = tab.dataset.setupMode === mode;
+                tab.setAttribute('aria-selected', String(selected));
+                tab.tabIndex = selected ? 0 : -1;
+            });
+            modePanels.forEach((panel) => { panel.hidden = panel.dataset.setupPanel !== mode; });
+            clearErrors();
+            if (!submit.disabled) submit.textContent = connectionSubmitLabel();
+        };
+
+        const showAssistanceView = (view, { focus = true, focusTarget = null } = {}) => {
+            const next = ['connection', 'app-login', 'guide'].includes(view) ? view : 'connection';
+            form.dataset.setupAssistanceView = next;
+            if (connectionMain) connectionMain.hidden = next !== 'connection';
+            if (appLoginPanel) appLoginPanel.hidden = next !== 'app-login';
+            if (accessGuide) accessGuide.hidden = next !== 'guide';
+            clearErrors();
+            updateSubmitVisibility();
+            if (!focus) return;
+            const target = focusTarget || (next === 'app-login'
+                ? appLoginPanel?.querySelector('h2')
+                : next === 'guide'
+                    ? accessGuide?.querySelector('h2')
+                    : appLoginTrigger);
+            requestAnimationFrame(() => {
+                try { target?.focus({ preventScroll: true }); } catch (_) { /* noop */ }
+            });
+        };
+
+        const setFlowStep = (step, { focus = true } = {}) => {
+            const accessActive = step === 'access';
+            form.dataset.setupFlowStep = step;
+            container.querySelector('.norva-setup-connect-card')?.classList.toggle('is-access-step', accessActive);
+            if (connectionStep) connectionStep.hidden = accessActive;
+            if (accessTerms) accessTerms.hidden = !accessActive;
+            updateSubmitVisibility();
+            if (flowTitle) flowTitle.textContent = accessActive ? 'When can you use this service?' : 'Paste your TV service link';
+            if (flowDescription) flowDescription.textContent = accessActive
+                ? 'Add the access period now, or safely choose to do it later.'
+                : 'We’ll organize your catalog. Nothing else.';
+            container.querySelectorAll('[data-setup-flow-marker]').forEach((marker) => {
+                const markerStep = marker.dataset.setupFlowMarker;
+                marker.classList.toggle('is-current', markerStep === step);
+                marker.classList.toggle('is-complete', accessActive && markerStep === 'connection');
+            });
+            if (accessActive) accessWizard?.showStep?.(0);
+            else {
+                accessWizardApproved = false;
+                if (focus) requestAnimationFrame(() => activeUrlInput()?.focus({ preventScroll: true }));
             }
+        };
+
+        accessTerms?.addEventListener('norva:provider-access-cancel', () => setFlowStep('connection'));
+        accessTerms?.addEventListener('norva:provider-access-complete', () => {
+            accessWizardApproved = true;
+            form.requestSubmit();
+        });
+
+        const applyParsedLink = (force = false) => {
+            const currentPathShape = manager?.sourceInputPathShape?.(serverInput.value) || 'invalid';
+            const parsed = manager?.parseXtreamLink?.(serverInput.value);
             if (!parsed) {
-                if (hint) {
-                    hint.textContent = manager?.looksLikePlaylistLink?.(urlInput.value)
-                        ? 'Playlist link detected. Norva will connect it without asking for a separate login.'
-                        : 'If you paste a full Xtream link, Norva will fill the login fields automatically.';
-                }
+                if (serverHint) serverHint.textContent = 'Paste a complete Xtream link to fill the login automatically.';
                 return;
             }
-            if (!urlInput.dataset.sourceInputPathShape || currentPathShape !== 'root') {
-                urlInput.dataset.sourceInputPathShape = currentPathShape;
+            if (!serverInput.dataset.sourceInputPathShape || currentPathShape !== 'root') {
+                serverInput.dataset.sourceInputPathShape = currentPathShape;
             }
-            if (parsed.serverUrl) urlInput.value = parsed.serverUrl;
+            if (parsed.serverUrl) serverInput.value = parsed.serverUrl;
             if (nameInput && !nameInput.value.trim() && parsed.host) {
                 nameInput.value = parsed.host.replace(/^www\./i, '');
             }
             if (parsed.username && (force || !usernameInput.value.trim())) usernameInput.value = parsed.username;
             if (parsed.password && (force || !passwordInput.value.trim())) passwordInput.value = parsed.password;
-            if ((!parsed.username || !parsed.password) && advancedLogin) advancedLogin.open = true;
-            if (hint) {
-                hint.textContent = parsed.username && parsed.password
+            if (serverHint) {
+                serverHint.textContent = parsed.username && parsed.password
                     ? 'Login detected from the link. You can review it before connecting.'
                     : 'Server detected. Add the username and password if they were provided separately.';
             }
-            clearFieldError(urlInput);
+            clearFieldError(serverInput);
             if (usernameInput.value.trim()) clearFieldError(usernameInput);
             if (passwordInput.value.trim()) clearFieldError(passwordInput);
         };
 
-        urlInput.addEventListener('input', () => delete urlInput.dataset.sourceInputPathShape);
-        urlInput.addEventListener('paste', () => setTimeout(() => applyParsedLink(true), 0));
-        urlInput.addEventListener('blur', () => applyParsedLink(false));
-        urlInput.addEventListener('change', () => applyParsedLink(false));
+        modeTabs.forEach((tab, index) => {
+            tab.addEventListener('click', () => setConnectionMode(tab.dataset.setupMode));
+            tab.addEventListener('keydown', (event) => {
+                let nextIndex = null;
+                if (event.key === 'ArrowRight') nextIndex = (index + 1) % modeTabs.length;
+                if (event.key === 'ArrowLeft') nextIndex = (index - 1 + modeTabs.length) % modeTabs.length;
+                if (event.key === 'Home') nextIndex = 0;
+                if (event.key === 'End') nextIndex = modeTabs.length - 1;
+                if (nextIndex === null) return;
+                event.preventDefault();
+                const next = modeTabs[nextIndex];
+                setConnectionMode(next.dataset.setupMode);
+                next.focus();
+            });
+        });
+
+        [m3uInput, serverInput].forEach((input) => {
+            input.addEventListener('input', () => delete input.dataset.sourceInputPathShape);
+        });
+        serverInput.addEventListener('paste', () => setTimeout(() => applyParsedLink(true), 0));
+        serverInput.addEventListener('blur', () => applyParsedLink(false));
+        serverInput.addEventListener('change', () => applyParsedLink(false));
 
         passwordToggle?.addEventListener('click', () => {
             const visible = passwordInput.type === 'text';
@@ -1426,9 +1597,123 @@ class HomePage {
             });
         });
 
+        appLoginTrigger?.addEventListener('click', () => showAssistanceView('app-login'));
+        appLoginPanel?.querySelector('[data-setup-assist-back]')?.addEventListener('click', () => showAssistanceView('connection'));
+        guideOpen?.addEventListener('click', () => showAssistanceView('guide'));
+        accessGuide?.querySelector('[data-setup-guide-back]')?.addEventListener('click', () => showAssistanceView('app-login', { focusTarget: guideOpen }));
+
+        const providerRequest = [
+            'Hello, could you please send me one of these access formats?',
+            '',
+            '1. My complete M3U/M3U8 playlist URL',
+            '2. My Xtream Codes details: server URL (including the port), username and password',
+            '',
+            'Thank you.'
+        ].join('\n');
+        const writeClipboard = async (value) => {
+            if (navigator.clipboard?.writeText) {
+                await navigator.clipboard.writeText(value);
+                return;
+            }
+            const textarea = document.createElement('textarea');
+            textarea.value = value;
+            textarea.setAttribute('readonly', '');
+            textarea.style.position = 'fixed';
+            textarea.style.opacity = '0';
+            document.body.append(textarea);
+            textarea.select();
+            const copied = document.execCommand?.('copy');
+            textarea.remove();
+            if (!copied) throw new Error('Clipboard unavailable');
+        };
+        let copyResetTimer = null;
+        copyMessage?.addEventListener('click', async () => {
+            copyMessage.disabled = true;
+            if (copyResetTimer) clearTimeout(copyResetTimer);
+            try {
+                await writeClipboard(providerRequest);
+                copyMessage.textContent = 'Copied';
+                if (copyFeedback) copyFeedback.textContent = 'Message copied to clipboard.';
+            } catch (_) {
+                copyMessage.textContent = 'Copy message';
+                if (copyFeedback) copyFeedback.textContent = 'Could not copy automatically. Select the message above to copy it.';
+            } finally {
+                copyMessage.disabled = false;
+                copyResetTimer = setTimeout(() => {
+                    copyMessage.textContent = 'Copy message';
+                    if (copyFeedback) copyFeedback.textContent = '';
+                }, 2200);
+            }
+        });
+
+        const validateSelectedConnection = () => {
+            const type = selectedType();
+            const urlInput = activeUrlInput();
+            const rawUrl = urlInput.value.trim();
+            const pathShape = manager?.sourceInputPathShape?.(rawUrl) || 'invalid';
+            if (rawUrl && !urlInput.dataset.sourceInputPathShape) urlInput.dataset.sourceInputPathShape = pathShape;
+            let firstInvalid = null;
+            if (!rawUrl) {
+                const message = type === 'm3u' ? 'Paste your complete M3U or M3U8 link.' : 'Enter the server address supplied by your provider.';
+                setFieldError(urlInput, message);
+                showSummaryError({
+                    title: type === 'm3u' ? 'Add your playlist link' : 'Add your Xtream server',
+                    body: message
+                });
+                firstInvalid = urlInput;
+            } else if (pathShape === 'invalid' || pathShape === 'web_page' || (type === 'm3u' && pathShape === 'root' && !rawUrl.includes('?'))) {
+                const copy = type === 'm3u'
+                    ? {
+                        title: 'This isn’t a complete playlist link',
+                        body: 'Paste the full M3U/M3U8 link from your provider. It may end in .m3u or include get.php.'
+                    }
+                    : {
+                        title: 'This isn’t a valid Xtream server address',
+                        body: 'Enter the complete http or https server address supplied by your provider.'
+                    };
+                setFieldError(urlInput, copy.body);
+                showSummaryError(copy);
+                firstInvalid = urlInput;
+            }
+            if (type === 'xtream') {
+                if (!usernameInput.value.trim()) {
+                    setFieldError(usernameInput, 'Enter the username supplied by your provider.');
+                    firstInvalid = firstInvalid || usernameInput;
+                }
+                if (!passwordInput.value.trim()) {
+                    setFieldError(passwordInput, 'Enter the password supplied by your provider.');
+                    firstInvalid = firstInvalid || passwordInput;
+                }
+                if (!firstInvalid && pathShape !== 'invalid' && pathShape !== 'web_page') return true;
+                if (rawUrl && (!usernameInput.value.trim() || !passwordInput.value.trim())) {
+                    showSummaryError({
+                        title: 'Complete your Xtream login',
+                        body: 'Enter the server address, username and password supplied by your provider.'
+                    });
+                }
+            }
+            if (!firstInvalid) return true;
+            if (rawUrl) {
+                manager?.reportSourceConnectionValidationAttempt?.({
+                    type,
+                    url: rawUrl,
+                    username: usernameInput.value,
+                    password: passwordInput.value,
+                    inputPathShape: urlInput.dataset.sourceInputPathShape || '',
+                    failureFamily: type === 'xtream' && (!usernameInput.value.trim() || !passwordInput.value.trim())
+                        ? 'missing_credentials'
+                        : 'invalid_input'
+                });
+            }
+            try { firstInvalid.focus({ preventScroll: true }); } catch (_) { /* noop */ }
+            return false;
+        };
+
         form.addEventListener('submit', async (event) => {
             event.preventDefault();
             clearErrors();
+
+            if (!validateSelectedConnection()) return;
 
             let payload;
             let accessTerms = null;
@@ -1457,47 +1742,15 @@ class HomePage {
                     try { target?.focus({ preventScroll: true }); } catch (_) { /* noop */ }
                     return;
                 }
-                const hasAddress = Boolean(urlInput.value.trim());
-                const playlist = manager?.looksLikePlaylistLink?.(urlInput.value) === true;
-                if (hasAddress) {
-                    manager?.reportSourceConnectionValidationAttempt?.({
-                        type: 'auto',
-                        url: urlInput.value,
-                        username: usernameInput.value,
-                        password: passwordInput.value,
-                        inputPathShape: urlInput.dataset.sourceInputPathShape || '',
-                        failureFamily: !playlist && (!usernameInput.value.trim() || !passwordInput.value.trim())
-                            ? 'missing_credentials'
-                            : 'invalid_input'
-                    });
-                }
-                let firstInvalid = null;
-                if (!hasAddress) {
-                    setFieldError(urlInput, 'Enter the provider URL or complete link.');
-                    firstInvalid = urlInput;
-                    showSummaryError('Enter the provider URL or complete link to continue.');
-                } else if (!playlist) {
-                    if (advancedLogin) advancedLogin.open = true;
-                    if (!usernameInput.value.trim()) {
-                        setFieldError(usernameInput, 'Enter the username supplied by your provider.');
-                        firstInvalid = usernameInput;
-                    }
-                    if (!passwordInput.value.trim()) {
-                        setFieldError(passwordInput, 'Enter the password supplied by your provider.');
-                        firstInvalid = firstInvalid || passwordInput;
-                    }
-                    showSummaryError('Complete the missing provider login fields, then try again.');
-                } else {
-                    setFieldError(urlInput, 'Check that this playlist link is complete.');
-                    firstInvalid = urlInput;
-                    showSummaryError('Check the playlist link, then try again.');
-                }
-                try { firstInvalid?.focus({ preventScroll: true }); } catch (_) { /* noop */ }
+                showSummaryError('Review the provider access details, then try again.');
                 return;
             }
 
             setSubmitting(true, 'Connecting…');
             try {
+                manager?.trackProduct?.('provider_connect_started', {
+                    source: 'onboarding', journey: 'provider_onboarding', step: 'provider_connect', state: 'started'
+                });
                 if (manager?.confirmLargePlaylistIfNeeded && !await manager.confirmLargePlaylistIfNeeded(payload)) {
                     setSubmitting(false);
                     const focusTarget = form.dataset.setupFlowStep === 'access'
@@ -1507,6 +1760,9 @@ class HomePage {
                     return;
                 }
                 const created = await window.API.sources.create(payload);
+                manager?.trackProduct?.('provider_connected', {
+                    source: 'onboarding', journey: 'provider_onboarding', step: 'provider_connect', state: 'completed', outcome: 'success'
+                });
                 let accessSaveFailed = false;
                 if (accessTerms) {
                     const sourceId = created.cloudId || created.cloud_id || created.id;
@@ -1516,12 +1772,22 @@ class HomePage {
                             idempotencyKey: manager.providerAccessIdempotency(sourceId, action)
                         });
                         manager.clearProviderAccessIdempotency(sourceId, action);
-                    } catch (error) {
+                        manager?.trackProduct?.('provider_access_saved', {
+                            source: 'onboarding', journey: 'provider_onboarding', step: 'provider_access', state: 'completed', outcome: 'success'
+                        });
+                    } catch (accessError) {
                         accessSaveFailed = true;
-                        console.warn('[Dashboard] TV service connected but Provider Access terms remain retryable:', error?.code || 'request_failed');
+                        manager?.trackProduct?.('journey_error', {
+                            source: 'onboarding', journey: 'provider_onboarding', step: 'provider_access', outcome: 'error',
+                            failureFamily: manager?.productFailureFamily?.(accessError) || 'unknown'
+                        });
+                        console.warn('[Dashboard] TV service connected but Provider Access terms remain retryable:', accessError?.code || 'request_failed');
                     }
                 }
                 await this.app?.sourceManager?.loadSources?.();
+                manager?.trackProduct?.('catalog_sync_started', {
+                    source: 'onboarding', journey: 'catalog', step: 'catalog_sync', state: 'started', catalogState: 'syncing'
+                });
                 document.dispatchEvent(new CustomEvent('norva:source-health-changed'));
                 if (accessSaveFailed) {
                     NorvaModal.toast('Your service is connected. Add its access period later from Settings → TV Service.', 'error');
@@ -1530,20 +1796,31 @@ class HomePage {
                 this.lastLoadedAt = 0;
                 await this.app?.refreshSourceHealth?.();
                 await this.loadDashboardData();
-            } catch (_) {
+            } catch (creationError) {
                 console.error('[Dashboard] TV service connection failed.');
-                showSummaryError('Norva could not connect this TV service. Check the address and login, then try again.', { focus: true });
+                const type = selectedType();
+                const family = this.setupConnectionFailureFamily(creationError, type);
+                manager?.trackProduct?.('journey_error', {
+                    source: 'onboarding', journey: 'provider_onboarding', step: 'provider_connect', outcome: 'error', failureFamily: family
+                });
+                if (form.dataset.setupFlowStep === 'access') setFlowStep('connection', { focus: false });
+                showSummaryError(this.setupConnectionErrorCopy(creationError, type), { focus: true });
                 setSubmitting(false);
             }
         });
+
+        setConnectionMode('m3u');
+        showAssistanceView('connection', { focus: false });
     }
 
     readSetupConnectionForm(container) {
         const manager = this.app?.sourceManager || window.app?.sourceManager;
         if (!manager?.buildSourceConnection) throw new Error('TV service connection is unavailable.');
-        const urlInput = container.querySelector('#home-source-url');
+        const form = container.querySelector('#home-tv-service-form');
+        const type = form?.dataset?.setupConnectionType === 'xtream' ? 'xtream' : 'm3u';
+        const urlInput = container.querySelector(type === 'xtream' ? '#home-source-server' : '#home-source-url');
         return manager.buildSourceConnection({
-            type: 'auto',
+            type,
             name: container.querySelector('#home-source-name')?.value || '',
             url: urlInput?.value || '',
             username: container.querySelector('#home-source-username')?.value || '',

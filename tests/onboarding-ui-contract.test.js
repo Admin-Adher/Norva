@@ -4,6 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const vm = require('node:vm');
 
 const root = path.join(__dirname, '..');
 const read = (relativePath) => fs.readFileSync(path.join(root, relativePath), 'utf8');
@@ -38,12 +39,14 @@ test('one catalog policy drives Home, navigation and preparation state', () => {
 });
 
 test('first-source form exposes field errors and focuses recovery', () => {
-  assert.match(home, /aria-describedby="home-source-url-hint home-source-find-link home-source-url-error"/);
-  assert.match(home, /Don’t have the link handy\?/);
+  assert.match(home, /aria-describedby="home-source-url-hint home-source-url-error"/);
+  assert.match(home, /aria-describedby="home-source-server-hint home-source-server-error"/);
+  assert.match(home, /Usually found in your provider email or account area/);
+  assert.match(home, /Paste a complete Xtream link to fill the login automatically/);
   assert.match(home, /id="home-source-username-error"/);
   assert.match(home, /id="home-source-password-error"/);
   assert.match(home, /input\.setAttribute\('aria-invalid', 'true'\)/);
-  assert.match(home, /firstInvalid\?\.focus\(\{ preventScroll: true \}\)/);
+  assert.match(home, /firstInvalid\.focus\(\{ preventScroll: true \}\)/);
   assert.match(home, /manager\.buildSourceConnection\(/);
   assert.match(home, /manager\.confirmLargePlaylistIfNeeded\(payload\)/);
   assert.match(home, /submit\.setAttribute\('aria-busy', 'true'\)/);
@@ -52,11 +55,61 @@ test('first-source form exposes field errors and focuses recovery', () => {
 });
 
 test('first-source provider fields cannot inherit Norva account autofill', () => {
-  assert.match(home, /id="home-source-name"[^>]*name="provider-display-name"[^>]*autocomplete="off"/);
+  assert.match(home, /type="hidden" id="home-source-name"[^>]*name="provider-display-name"/);
   assert.match(home, /id="home-source-username"[^>]*name="provider-login"[^>]*autocomplete="off"[^>]*autocapitalize="none"[^>]*spellcheck="false"/);
   assert.match(home, /id="home-source-password"[^>]*name="provider-secret"[^>]*autocomplete="new-password"/);
   assert.doesNotMatch(home, /id="home-source-username"[^>]*autocomplete="username"/);
   assert.doesNotMatch(home, /id="home-source-password"[^>]*autocomplete="current-password"/);
+});
+
+test('Concept B keeps both compatible formats visible and app-only access secondary', () => {
+  assert.match(home, /class="setup-mode-tabs" role="tablist" aria-label="Connection format"/);
+  assert.match(home, /role="tab" aria-selected="true"[^>]*data-setup-mode="m3u">M3U link/);
+  assert.match(home, /role="tab" aria-selected="false"[^>]*data-setup-mode="xtream"[^>]*>Xtream login/);
+  assert.match(home, /data-setup-panel="m3u"/);
+  assert.match(home, /data-setup-panel="xtream" hidden/);
+  assert.match(home, /My provider only gave me an app login/);
+  assert.match(home, /No M3U link or Xtream server details/);
+  assert.match(home, /An app login cannot be imported directly/);
+  assert.match(home, /Do not enter your provider app password here/);
+  assert.doesNotMatch(home, /Continue without a catalog/);
+});
+
+test('compatibility guide has a real copy action and restores focus through each level', () => {
+  assert.match(home, /How to get M3U or Xtream access/);
+  assert.match(home, /My complete M3U\/M3U8 playlist URL/);
+  assert.match(home, /My Xtream Codes details: server URL \(including the port\), username and password/);
+  assert.match(home, /navigator\.clipboard\?\.writeText/);
+  assert.match(home, /document\.execCommand\?\.\('copy'\)/);
+  assert.match(home, /Message copied to clipboard\./);
+  assert.match(home, /data-setup-copy-feedback[^>]*role="status" aria-live="polite" aria-atomic="true"/);
+  assert.match(home, /focusTarget: guideOpen/);
+  assert.match(home, /target\?\.focus\(\{ preventScroll: true \}\)/);
+});
+
+test('first-source failures use distinct safe copy without exposing raw provider responses', () => {
+  const sandbox = { window: {}, console, URL, setTimeout, clearTimeout };
+  vm.runInNewContext(home, sandbox, { filename: 'HomePage.js' });
+  const prototype = sandbox.window.HomePage.prototype;
+  const copy = (error, type) => prototype.setupConnectionErrorCopy.call(prototype, error, type);
+  assert.equal(copy({ status: 404 }, 'xtream').title, 'This provider address was not found');
+  assert.equal(copy({ code: 'PROVIDER_DNS_FAILURE' }, 'xtream').title, 'Your provider server is not responding');
+  assert.equal(copy({ status: 422 }, 'm3u').title, 'This isn’t a complete playlist link');
+  assert.equal(copy({ status: 500 }, 'm3u').title, 'Norva could not connect this playlist');
+  assert.match(home, /showSummaryError\(this\.setupConnectionErrorCopy\(creationError, type\)/);
+  assert.doesNotMatch(home, /showSummaryError\([^\n]*creationError\?\.message/);
+});
+
+test('first-source path emits the existing privacy-safe analytics spine', () => {
+  const setupStart = home.indexOf('    bindSetupConnectionForm(container) {');
+  const setupEnd = home.indexOf('    readSetupConnectionForm(container) {', setupStart);
+  const setup = home.slice(setupStart, setupEnd);
+  assert.match(setup, /provider_connect_started/);
+  assert.match(setup, /provider_connected/);
+  assert.match(setup, /provider_access_saved/);
+  assert.match(setup, /catalog_sync_started/);
+  assert.match(setup, /journey_error/);
+  assert.doesNotMatch(setup, /trackProduct[^\n]*(?:username|password|sourceId)/i);
 });
 
 test('onboarding import uses a cinema-building surface instead of an ops dashboard', () => {
@@ -96,6 +149,9 @@ test('onboarding controls remain operable in short and touch viewports', () => {
   assert.match(css, /\.setup-manual-grid\s*\{[\s\S]{0,80}grid-template-columns:\s*minmax\(0, 1fr\)/);
   assert.match(css, /\.norva-setup-actions \.btn\s*\{[\s\S]{0,100}min-height:\s*44px/);
   assert.match(css, /\.setup-password-toggle\s*\{[\s\S]{0,260}width:\s*44px;[\s\S]{0,60}height:\s*44px/);
+  assert.match(css, /\.setup-mode-tab\s*\{[\s\S]{0,100}min-height:\s*48px/);
+  assert.match(css, /\.setup-compatibility-help\s*\{[\s\S]{0,220}min-height:\s*56px/);
+  assert.match(css, /\.setup-back-button\s*\{[\s\S]{0,180}min-height:\s*44px/);
   assert.match(css, /\.modal-close\s*\{[\s\S]{0,120}min-width:\s*44px;[\s\S]{0,80}min-height:\s*44px/);
   assert.match(css, /\.modal-footer \.btn\s*\{[\s\S]{0,80}min-height:\s*44px/);
   assert.match(css, /@media \(max-width: 900px\), \(max-height: 620px\)[\s\S]{0,700}home-setup-connect-active[\s\S]{0,220}height:\s*auto/);
@@ -106,9 +162,9 @@ test('setup visuals reuse Norva assets and ship cache-busted', () => {
   assert.match(shell, /class="tc-intro-icon" src="\/img\/icons\/norva-movies\.svg/);
   assert.match(shell, /class="tc-intro-icon" src="\/img\/icons\/norva-settings\.svg/);
   assert.doesNotMatch(shell, /<div class="tc-intro-icon">/);
-  assert.match(shell, /main\.css\?v=4a3c14b9a1/);
+  assert.match(shell, /main\.css\?v=1c2a19ef50/);
   assert.match(shell, /sourceHealth\.js\?v=6c0eefcb4f/);
   assert.match(shell, /SourceManager\.js\?v=7fcc0560f4/);
-  assert.match(shell, /HomePage\.js\?v=6016cf63fb/);
+  assert.match(shell, /HomePage\.js\?v=4b8155eafa/);
   assert.match(shell, /app\.js\?v=4ea3d10343/);
 });
