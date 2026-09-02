@@ -14,8 +14,8 @@ const gateway = fs.readFileSync(path.join(
   '../services/media-gateway/src/index.js',
 ), 'utf8');
 
-test('Edge v74 exposes dark singleflight configuration with a dedicated HMAC key', () => {
-  assert.match(edge, /version: 74,[\s\S]*sharedMediaCacheSingleflightProtocol: MEDIA_CACHE_SINGLEFLIGHT_PROTOCOL/);
+test('Edge v75 exposes dark singleflight configuration with a dedicated HMAC key', () => {
+  assert.match(edge, /version: 75,[\s\S]*sharedMediaCacheSingleflightProtocol: MEDIA_CACHE_SINGLEFLIGHT_PROTOCOL/);
   assert.match(edge, /NORVA_MEDIA_CACHE_SINGLEFLIGHT_ENABLED/);
   assert.match(edge, /NORVA_MEDIA_CACHE_COORDINATION_HMAC_KEY/);
   assert.match(edge, /NORVA_MEDIA_CACHE_FOLLOWER_WAIT_MS/);
@@ -34,6 +34,7 @@ test('cold MKV miss coordinates before provider circuit, capacity and provider c
   assert.ok(coordinate < create.indexOf('claim_cloud_playback_session'));
   assert.match(create, /authoritativeVodContainer === "mkv" && mode === "transcode"/);
   assert.match(create, /if \(coordinatedPlayback\) return coordinatedPlayback/);
+  assert.ok(create.indexOf('preemptBackgroundMediaCacheForViewer') < create.indexOf('assertProviderCircuitClosed'));
 });
 
 test('ambiguous coordination and completed-work claims never fall through to provider', () => {
@@ -75,10 +76,33 @@ test('producer callback is Gateway-authenticated and completes the work only aft
   assert.match(edge, /segments\[0\] === "media-cache" && segments\[1\] === "producer-control"/);
   assert.match(control, /requireConfiguredMediaGatewayCallback/);
   assert.match(control, /norva_pulse_media_cache_producer_for_gateway/);
+  assert.match(control, /norva_pulse_media_cache_continuation_for_gateway/);
   assert.match(control, /norva_abandon_media_cache_producer_for_gateway/);
   const commitIndex = control.indexOf('norva_commit_media_cache_publication');
   const completeIndex = control.indexOf('norva_complete_media_cache_producer_for_gateway');
   assert.ok(commitIndex >= 0 && completeIndex > commitIndex);
+});
+
+test('normal close reserves continuation only for live server-side demand', () => {
+  const expire = edge.slice(
+    edge.indexOf('async function requestDemandDrivenMediaCacheContinuation'),
+    edge.indexOf('async function recordPlaybackEvent'),
+  );
+  assert.match(expire, /norva_request_media_cache_continuation_for_gateway/);
+  assert.match(expire, /if \(continueMediaCache\) cleanupUrl\.searchParams\.set\("completeCache", "continue"\)/);
+  assert.doesNotMatch(expire, /cleanupUrl\.searchParams\.set\("completeCache", "continue"\);[\s\S]*requestDemandDrivenMediaCacheContinuation/);
+});
+
+test('real viewer preemption is distributed, bounded and excludes its own producer work', () => {
+  const preempt = edge.slice(
+    edge.indexOf('async function preemptBackgroundMediaCacheForViewer'),
+    edge.indexOf('async function createPlaybackSessionCore'),
+  );
+  assert.match(preempt, /norva_preempt_background_media_cache_producers/);
+  assert.match(preempt, /norva_count_background_media_cache_producers/);
+  assert.match(preempt, /MEDIA_CACHE_BACKGROUND_PREEMPT_WAIT_MS/);
+  assert.match(preempt, /MEDIA_CACHE_BACKGROUND_DRAINING/);
+  assert.match(preempt, /p_except_work_fingerprint: exceptWorkFingerprint/);
 });
 
 test('Gateway validates, renews, finalizes and abandons one attached producer context', () => {

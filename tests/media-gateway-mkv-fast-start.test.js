@@ -321,7 +321,7 @@ function loadCompleteCachePromotionBarrierHarness(publish) {
 function loadCompleteCacheContinuationHarness(overrides = {}) {
   const block = between(
     GATEWAY,
-    'function mkvCompleteHlsBackgroundContinuationEnabled()',
+    'function mkvCompleteHlsBackgroundContinuationTargets(',
     '\nfunction needsMkvH264CurrentHeaderAuthority(',
   );
   const timers = [];
@@ -339,15 +339,22 @@ function loadCompleteCacheContinuationHarness(overrides = {}) {
     AbortSignal,
     setImmediate,
     MKV_COMPLETE_HLS_BACKGROUND_CONTINUATION_REQUESTED: true,
+    SHARED_MEDIA_CACHE_BACKGROUND_CONTINUATION_REQUESTED: false,
     MKV_COMPLETE_HLS_BACKGROUND_CONTINUATION_MAX_MS: 30 * 60 * 1000,
     MKV_COMPLETE_HLS_BACKGROUND_CALLBACK_TIMEOUT_MS: 1_000,
     MKV_COMPLETE_HLS_CACHE_LOCATOR_KEY: Buffer.alloc(32, 7),
     GATEWAY_TOKEN: 'gateway-token',
     edgeCallbackBase: 'http://edge.internal/norva-playback',
     mkvCompleteHlsCache: {},
+    sharedMediaCachePublisher: null,
+    mediaCacheProducerControl: { active: false, schedule() {} },
+    sessions: new Map(),
+    providerSlotKeyForSession: () => 'provider-slot',
+    isSessionBlockingProviderSlot: () => false,
     mkvCompleteHlsCacheStats: stats,
     asRecord: (value) => value && typeof value === 'object' && !Array.isArray(value) ? value : {},
     mkvCompleteHlsCacheStaticContext: () => ({ eligible: true, reason: 'accepted' }),
+    sharedMediaCacheStaticContext: () => ({ eligible: false, reason: 'disabled' }),
     randomToken: () => 'rotated-private-token',
     scheduleMkvCompleteHlsCachePromotion: async (session) => {
       session.codecProfile = {
@@ -358,6 +365,7 @@ function loadCompleteCacheContinuationHarness(overrides = {}) {
       session.mkvCompleteHlsCacheProofFinalized = true;
       return { status: 'published' };
     },
+    scheduleSharedMediaCachePublication: async () => null,
     privateFinalCodecProfileForSession: (session) => session.codecProfile,
     mkvCompleteHlsCacheProofForProfile: (profile) => profile?.mkvCompleteHlsCacheProof || null,
     wakePlaybackBlockedQueues: () => {},

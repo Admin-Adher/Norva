@@ -73,6 +73,7 @@ class MediaCacheProducerControl {
             pulses: 0,
             renewals: 0,
             preemptions: 0,
+            demandStops: 0,
             expirations: 0,
             completions: 0,
             abandons: 0,
@@ -109,7 +110,10 @@ class MediaCacheProducerControl {
                 .catch(() => null)
                 .finally(() => {
                     if (!session.mediaCacheProducerCompleted && session.status !== 'ended') {
-                        this.schedule(session, this.heartbeatMs);
+                        const nextDelay = session.backgroundCacheContinuation === true
+                            ? Math.min(this.heartbeatMs, 5_000)
+                            : this.heartbeatMs;
+                        this.schedule(session, nextDelay);
                     }
                 });
         }, Math.max(1, Number(delayMs) || this.heartbeatMs));
@@ -154,12 +158,17 @@ class MediaCacheProducerControl {
         session.mediaCacheProducerStage = stage;
         this.stats.pulses += 1;
         try {
-            const state = await this.request(session, { action: 'pulse', stage });
+            const continuation = session.backgroundCacheContinuation === true;
+            const state = await this.request(session, {
+                action: continuation ? 'continuation-pulse' : 'pulse',
+                stage,
+            });
             if (state === 'renewed') this.stats.renewals += 1;
-            if (state === 'preempted') {
+            if (['preempted', 'idle', 'expired', 'missing'].includes(state)) {
                 session.mediaCacheProducerPreemptRequested = true;
-                this.stats.preemptions += 1;
-                if (session.backgroundCacheContinuation === true) {
+                if (state === 'preempted') this.stats.preemptions += 1;
+                else if (state === 'idle') this.stats.demandStops += 1;
+                if (continuation) {
                     await this.onPreempt?.(session);
                 }
             }

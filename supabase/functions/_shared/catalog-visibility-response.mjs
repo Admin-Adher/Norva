@@ -43,6 +43,8 @@ const PUBLIC_EDGE_ERROR_CODES = new Set([
   "PROVIDER_TLS_FAILURE",
   "MEDIA_GATEWAY_CANARY_ROUTE_UNAVAILABLE",
   "MEDIA_GATEWAY_STORED_ROUTE_UNAVAILABLE",
+  "MEDIA_CACHE_BACKGROUND_DRAINING",
+  "MEDIA_CACHE_PRODUCER_ACTIVE",
   "GATEWAY_SESSION_ID_MISSING",
   "AUDIO_INDEX_MAP_MISMATCH",
   "AUDIO_STREAM_MAP_MISMATCH",
@@ -222,6 +224,8 @@ export function publicEdgeErrorPayload(
   const correlationId = stableToken(rawDetails.correlationId ?? rawDetails.correlation_id, 128);
   if (code) details.code = code;
   if (correlationId) details.correlationId = correlationId;
+  const retryAfterSeconds = code ? publicRetryAfterSeconds(rawDetails.retryAfterSeconds) : null;
+  if (retryAfterSeconds !== null) details.retryAfterSeconds = retryAfterSeconds;
 
   const clientMessage = error instanceof Error
     ? error.message.trim().replace(/[\r\n\t]+/g, " ").slice(0, 240)
@@ -315,6 +319,10 @@ async function sanitizeAuthenticatedErrorResponse(response) {
   );
   if (code) details.code = code;
   if (correlationId) details.correlationId = correlationId;
+  const retryAfterSeconds = code
+    ? publicRetryAfterSeconds(rawDetails.retryAfterSeconds ?? record.retryAfterSeconds)
+    : null;
+  if (retryAfterSeconds !== null) details.retryAfterSeconds = retryAfterSeconds;
 
   const clientMessage = typeof record.error === "string"
     ? record.error.trim().replace(/[\r\n\t]+/g, " ").slice(0, 240)
@@ -340,6 +348,12 @@ function stableToken(value, maxLength) {
 function publicErrorCode(value) {
   const code = stableToken(value, 64);
   return code && PUBLIC_EDGE_ERROR_CODES.has(code) ? code : null;
+}
+
+function publicRetryAfterSeconds(value) {
+  const seconds = Number(value);
+  if (!Number.isFinite(seconds) || seconds < 1 || seconds > 300) return null;
+  return Math.ceil(seconds);
 }
 
 function catalogVisibilityErrorResponse(

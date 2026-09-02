@@ -2105,6 +2105,8 @@ if (
 // default and does not alter the local v2 cache rollout.
 const SHARED_MEDIA_CACHE_PROTOCOL = 1;
 const SHARED_MEDIA_CACHE_REQUESTED = process.env.NORVA_SHARED_MEDIA_CACHE_ENABLED === 'true';
+const SHARED_MEDIA_CACHE_BACKGROUND_CONTINUATION_REQUESTED =
+    process.env.NORVA_SHARED_MEDIA_CACHE_BACKGROUND_CONTINUATION_ENABLED === 'true';
 const SHARED_MEDIA_CACHE_SEGMENTER_BUILD = 'ffmpeg-hls-mpegts-webvtt-v2';
 const SHARED_MEDIA_CACHE_TTL_MS = clampInt(
     process.env.NORVA_SHARED_MEDIA_CACHE_TTL_MS,
@@ -2170,9 +2172,13 @@ const mediaCacheProducerControl = new MediaCacheProducerControl({
     edgeBase: edgeCallbackBase,
     gatewayToken: GATEWAY_TOKEN,
     heartbeatMs: MEDIA_CACHE_PRODUCER_HEARTBEAT_MS,
-    onPreempt: async (session) => {
+    onPreempt: (session) => {
         if (session?.backgroundCacheContinuation === true) {
-            await stopSession(session, { reason: 'viewer-preempted' });
+            // Do not return stopSession's promise here. A demand pulse can run
+            // inside the publication promise, while stopSession deliberately
+            // waits for that publication to settle. Returning it would create
+            // a pulse -> stop -> publication -> pulse cycle.
+            stopSession(session, { reason: 'viewer-preempted' }).catch(() => {});
         }
     },
 });
@@ -2191,7 +2197,7 @@ const MAX_EXACT_SUBTITLE_HLS_RENDITIONS = clampInt(
     1,
     16,
 );
-const GATEWAY_VERSION = 147;
+const GATEWAY_VERSION = 148;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -2651,6 +2657,23 @@ app.get('/health', (req, res) => {
             pipelineBuild: MKV_COMPLETE_HLS_CACHE_PIPELINE_BUILD,
             segmenterBuild: SHARED_MEDIA_CACHE_SEGMENTER_BUILD,
             ttlMs: SHARED_MEDIA_CACHE_TTL_MS,
+            backgroundContinuation: {
+                protocol: 1,
+                requested: SHARED_MEDIA_CACHE_BACKGROUND_CONTINUATION_REQUESTED,
+                enabled: Boolean(
+                    SHARED_MEDIA_CACHE_BACKGROUND_CONTINUATION_REQUESTED
+                    && sharedMediaCachePublisher
+                    && mediaCacheProducerControl.active
+                ),
+                demand: 'distributed-followers-only',
+                preemptable: true,
+                maxMs: MKV_COMPLETE_HLS_BACKGROUND_CONTINUATION_MAX_MS,
+                active: Array.from(sessions.values()).filter((session) => (
+                    session?.backgroundCacheContinuation === true
+                    && session?.mediaCacheProducer
+                    && !session?.stoppingPromise
+                )).length,
+            },
             producerControl: {
                 ...mediaCacheProducerControl.publicStatus(),
                 heartbeatMs: MEDIA_CACHE_PRODUCER_HEARTBEAT_MS,
@@ -10195,13 +10218,11 @@ function privateFinalCodecProfileForSession(session) {
 app.delete('/sessions/:id', requireGatewayAuth, async (req, res) => {
     const session = sessions.get(req.params.id);
     if (!session) return res.status(404).json({ error: 'Session not found' });
-    await session.completeHlsCachePromotionPromise?.catch(() => null);
-    await session.sharedMediaCachePublicationPromise?.catch(() => null);
     const finalCodecProfile = privateFinalCodecProfileForSession(session);
     const continuationRequested = String(
         req.query?.completeCache ?? req.query?.complete_cache ?? '',
     ).trim().toLowerCase() === 'continue';
-    if (!finalCodecProfile?.mkvCompleteHlsCacheProof && continuationRequested) {
+    if (continuationRequested) {
         const continuation = startMkvCompleteHlsBackgroundContinuation(session);
         if (continuation.started === true) {
             return res.status(202).json({
@@ -14688,7 +14709,7 @@ async function maybePublishSharedMediaCache(session) {
     try {
         if (session.mediaCacheProducer) {
             const producerState = await mediaCacheProducerControl.pulse(session, 'uploading').catch(() => null);
-            if (producerState === 'expired' || producerState === 'preempted') {
+            if (producerState !== 'renewed') {
                 const error = new Error('shared media cache producer lease is no longer writable');
                 error.code = 'SHARED_MEDIA_CACHE_PRODUCER_LEASE_LOST';
                 throw error;
@@ -14705,7 +14726,7 @@ async function maybePublishSharedMediaCache(session) {
             registerPublication: async (payload) => {
                 if (session.mediaCacheProducer) {
                     const producerState = await mediaCacheProducerControl.pulse(session, 'finalizing').catch(() => null);
-                    if (producerState === 'expired' || producerState === 'preempted') {
+                    if (producerState !== 'renewed') {
                         const error = new Error('shared media cache producer lease cannot finalize');
                         error.code = 'SHARED_MEDIA_CACHE_PRODUCER_LEASE_LOST';
                         throw error;
@@ -14820,19 +14841,40 @@ function scheduleMkvCompleteHlsCachePromotion(session) {
     return promotion;
 }
 
-function mkvCompleteHlsBackgroundContinuationEnabled() {
-    return Boolean(
-        MKV_COMPLETE_HLS_BACKGROUND_CONTINUATION_REQUESTED &&
-        mkvCompleteHlsCache &&
-        MKV_COMPLETE_HLS_CACHE_LOCATOR_KEY &&
-        GATEWAY_TOKEN &&
-        edgeCallbackBase
+function mkvCompleteHlsBackgroundContinuationTargets(session) {
+    const local = Boolean(
+        MKV_COMPLETE_HLS_BACKGROUND_CONTINUATION_REQUESTED
+        && mkvCompleteHlsCache
+        && MKV_COMPLETE_HLS_CACHE_LOCATOR_KEY
     );
+    const shared = Boolean(
+        SHARED_MEDIA_CACHE_BACKGROUND_CONTINUATION_REQUESTED
+        && sharedMediaCachePublisher
+        && mediaCacheProducerControl.active
+        && session?.mediaCacheProducer
+        && session?.mediaCacheProducerCompleted !== true
+    );
+    return { local, shared };
+}
+
+function mkvCompleteHlsBackgroundContinuationEnabled(session) {
+    const targets = mkvCompleteHlsBackgroundContinuationTargets(session);
+    return Boolean((targets.local || targets.shared) && GATEWAY_TOKEN && edgeCallbackBase);
+}
+
+function providerAccountFreeForBackgroundContinuation(session) {
+    const providerSlotKey = providerSlotKeyForSession(session);
+    if (!providerSlotKey) return false;
+    return !Array.from(sessions.values()).some((candidate) => (
+        candidate !== session
+        && providerSlotKeyForSession(candidate) === providerSlotKey
+        && isSessionBlockingProviderSlot(candidate)
+    ));
 }
 
 function assessMkvCompleteHlsBackgroundContinuation(session) {
     const reject = (reason) => ({ eligible: false, reason });
-    if (!mkvCompleteHlsBackgroundContinuationEnabled()) return reject('continuation-disabled');
+    if (!mkvCompleteHlsBackgroundContinuationEnabled(session)) return reject('continuation-disabled');
     if (!session || session.stoppingPromise) return reject('session-stopping');
     if (session.backgroundCacheContinuation === true) return reject('already-running');
     if (session.assetSource === 'complete-hls-cache') return reject('already-cached');
@@ -14846,8 +14888,14 @@ function assessMkvCompleteHlsBackgroundContinuation(session) {
         !/^[a-f0-9]{64}$/.test(String(validator.digest || '')) ||
         !/^[a-f0-9]{64}$/.test(String(session.vodInputEffectiveUrlSha256 || ''))
     ) return reject('strong-validator-required');
-    const context = mkvCompleteHlsCacheStaticContext(session);
-    if (!context.eligible) return reject(context.reason);
+    if (!providerAccountFreeForBackgroundContinuation(session)) return reject('provider-account-busy');
+    const targets = mkvCompleteHlsBackgroundContinuationTargets(session);
+    const localContext = targets.local ? mkvCompleteHlsCacheStaticContext(session) : null;
+    const sharedContext = targets.shared ? sharedMediaCacheStaticContext(session) : null;
+    if (targets.shared && !sharedContext?.eligible) return reject(sharedContext?.reason || 'shared-cache-ineligible');
+    if (!targets.shared && targets.local && !localContext?.eligible) {
+        return reject(localContext?.reason || 'local-cache-ineligible');
+    }
     const child = session.ffmpeg;
     if (!child) return reject('ffmpeg-missing');
     const childRunning = child.exitCode === null && !child.signalCode;
@@ -14856,7 +14904,7 @@ function assessMkvCompleteHlsBackgroundContinuation(session) {
     }
     const pump = session.inputPump;
     if (!pump && session.completeHlsCacheMediaReady !== true) return reject('input-pump-missing');
-    return { eligible: true, reason: 'eligible', context };
+    return { eligible: true, reason: 'eligible', targets, localContext, sharedContext };
 }
 
 function settleMkvCompleteHlsBackgroundContinuation(session, outcome) {
@@ -14905,10 +14953,26 @@ function finishMkvCompleteHlsBackgroundContinuation(session) {
     if (!session?.backgroundCacheContinuation) return null;
     if (session.backgroundCacheContinuationPromise) return session.backgroundCacheContinuationPromise;
     const completion = (async () => {
-        await scheduleMkvCompleteHlsCachePromotion(session);
+        const targets = mkvCompleteHlsBackgroundContinuationTargets(session);
+        const localPublication = targets.local
+            ? await scheduleMkvCompleteHlsCachePromotion(session)
+            : null;
+        const sharedPublication = targets.shared
+            ? await scheduleSharedMediaCachePublication(session)
+            : null;
         const finalCodecProfile = privateFinalCodecProfileForSession(session);
         const cacheProof = mkvCompleteHlsCacheProofForProfile(finalCodecProfile);
-        if (!cacheProof || session.mkvCompleteHlsCacheProofFinalized !== true) {
+        const localCompleted = Boolean(
+            localPublication
+            && cacheProof
+            && session.mkvCompleteHlsCacheProofFinalized === true
+        );
+        const sharedCompleted = Boolean(
+            sharedPublication
+            && session.sharedMediaCachePublication
+            && session.mediaCacheProducerCompleted === true
+        );
+        if ((targets.shared && !sharedCompleted) || (!targets.shared && !localCompleted)) {
             settleMkvCompleteHlsBackgroundContinuation(session, 'failed');
             await stopSession(session, { reason: 'background-failed' });
             return false;
@@ -14919,11 +14983,13 @@ function finishMkvCompleteHlsBackgroundContinuation(session) {
         session.backgroundCacheContinuationProviderDrained = true;
         session.status = 'background-callback';
         wakePlaybackBlockedQueues();
-        const callbackDelivered = await reportMkvCompleteHlsBackgroundContinuation(
-            session,
-            finalCodecProfile,
-        );
-        if (!callbackDelivered) mkvCompleteHlsCacheStats.continuationCallbackFailures += 1;
+        if (localCompleted) {
+            const callbackDelivered = await reportMkvCompleteHlsBackgroundContinuation(
+                session,
+                finalCodecProfile,
+            );
+            if (!callbackDelivered) mkvCompleteHlsCacheStats.continuationCallbackFailures += 1;
+        }
         settleMkvCompleteHlsBackgroundContinuation(session, 'completed');
         await stopSession(session, { reason: 'background-completed' });
         return true;
@@ -14965,6 +15031,12 @@ function startMkvCompleteHlsBackgroundContinuation(session, nowMs = Date.now()) 
     }, Math.max(1, deadlineMs - Number(nowMs)));
     timer.unref?.();
     session.backgroundCacheContinuationTimer = timer;
+    if (assessment.targets.shared) {
+        // Recheck distributed demand immediately after detaching. Subsequent
+        // continuation heartbeats run at most every five seconds and stop on
+        // zero followers or any foreground preemption request.
+        mediaCacheProducerControl.schedule(session, 1);
+    }
     if (
         session.completeHlsCacheMediaReady === true &&
         session.completeHlsCacheProfileReady === true

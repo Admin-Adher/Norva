@@ -278,6 +278,7 @@ const ENV_MEDIA_CACHE_COORDINATION_HMAC_KEY = Deno.env.get("NORVA_MEDIA_CACHE_CO
 const ENV_MEDIA_CACHE_FOLLOWER_WAIT_MS = Deno.env.get("NORVA_MEDIA_CACHE_FOLLOWER_WAIT_MS") ?? "";
 const MEDIA_CACHE_SINGLEFLIGHT_OWNER_INSTANCE_ID = crypto.randomUUID();
 const MEDIA_CACHE_SINGLEFLIGHT_LEASE_TTL_SECONDS = 120;
+const MEDIA_CACHE_BACKGROUND_PREEMPT_WAIT_MS = 8_000;
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY") ?? "";
 const SUBTITLE_EMAIL_FROM = Deno.env.get("NORVA_SUBTITLE_EMAIL_FROM") ?? "Norva Updates <updates@norva.tv>";
 const EMAIL_REPLY_TO = Deno.env.get("NORVA_EMAIL_REPLY_TO") ?? "support@norva.tv";
@@ -323,7 +324,7 @@ async function handleRequest(req: Request): Promise<Response> {
       return json(req, {
         ok: true,
         service: "norva-playback",
-        version: 74,
+        version: 75,
         nativeHeartbeatProtocol: 1,
         providerCircuitProtocol: 1,
         exactTrackCrawlerProtocol: 2,
@@ -394,6 +395,7 @@ async function handleRequest(req: Request): Promise<Response> {
         sharedMediaCacheHotPlaybackProtocol: 1,
         sharedMediaCachePublicationProtocol: 1,
         sharedMediaCacheSingleflightProtocol: MEDIA_CACHE_SINGLEFLIGHT_PROTOCOL,
+        sharedMediaCacheDemandContinuationProtocol: 1,
         privateMediaCacheDelivery: {
           enabled: config.mediaCacheEnabled,
           workerConfigured: Boolean(config.mediaCacheWorkerUrl && config.mediaCacheWorkerToken),
@@ -1328,6 +1330,75 @@ async function coordinateColdMediaCachePlayback(options: {
   });
 }
 
+async function mediaCacheAccountFingerprintForPlayback(options: {
+  runtimeConfig: RuntimeConfig;
+  targetUrl: string;
+  providerAccountScope: string;
+  itemType: string;
+  itemId: string;
+  container: string;
+}) {
+  const {
+    runtimeConfig, targetUrl, providerAccountScope, itemType, itemId, container,
+  } = options;
+  if (!runtimeConfig.mediaCacheSingleflightEnabled) return null;
+  if (!mediaCacheCoordinationKeyIsValid(runtimeConfig.mediaCacheCoordinationHmacKey)) {
+    throw new HttpError(503, "Shared media cache coordination is misconfigured", {
+      code: "MEDIA_CACHE_SINGLEFLIGHT_CONFIG_INVALID",
+    });
+  }
+  const fingerprints = await deriveMediaCacheCoordinationFingerprints({
+    key: runtimeConfig.mediaCacheCoordinationHmacKey,
+    targetUrl,
+    providerAccountScope: providerAccountScope || null,
+    itemType,
+    itemId,
+    container,
+    ownerInstanceId: MEDIA_CACHE_SINGLEFLIGHT_OWNER_INSTANCE_ID,
+  });
+  return fingerprints.accountFingerprint;
+}
+
+async function preemptBackgroundMediaCacheForViewer(options: {
+  db: SupabaseClient;
+  accountFingerprint: string | null;
+  exceptWorkFingerprint?: string | null;
+  signal?: AbortSignal | null;
+}) {
+  const {
+    db, accountFingerprint, exceptWorkFingerprint = null, signal = null,
+  } = options;
+  if (!accountFingerprint) return 0;
+  const rpcArgs = {
+    p_account_fingerprint: accountFingerprint,
+    p_except_work_fingerprint: exceptWorkFingerprint,
+  };
+  const { error: preemptError } = await db.rpc(
+    "norva_preempt_background_media_cache_producers",
+    rpcArgs,
+  );
+  if (preemptError) throwDb(preemptError, "Unable to preempt background media cache work");
+
+  const deadline = Date.now() + MEDIA_CACHE_BACKGROUND_PREEMPT_WAIT_MS;
+  while (true) {
+    if (signal?.aborted) throw playbackRequestAbortError();
+    const { data, error } = await db.rpc(
+      "norva_count_background_media_cache_producers",
+      rpcArgs,
+    );
+    if (error) throwDb(error, "Unable to verify background media cache drain");
+    const active = boundedInt(data, 0, 0, 1_000_000);
+    if (active === 0) return 0;
+    if (Date.now() >= deadline) {
+      throw new HttpError(425, "A previous cache fill is yielding to playback", {
+        code: "MEDIA_CACHE_BACKGROUND_DRAINING",
+        retryAfterSeconds: 1,
+      });
+    }
+    await sleep(Math.min(250, Math.max(1, deadline - Date.now())));
+  }
+}
+
 async function createPlaybackSessionCore(
   req: Request,
   userId: string,
@@ -1539,6 +1610,26 @@ async function createPlaybackSessionCore(
     });
     if (coordinatedPlayback) return coordinatedPlayback;
   }
+  // A real viewer always wins over detached cache completion, including when
+  // the previous producer lives on another Gateway instance. Foreground
+  // producers are excluded in SQL and therefore can never be interrupted by
+  // this optimization.
+  mediaCacheRuntimeConfig = mediaCacheRuntimeConfig ?? await getRuntimeConfig(db);
+  const mediaCacheAccountFingerprint = mediaCacheLifecycle.producer?.accountFingerprint ??
+    await mediaCacheAccountFingerprintForPlayback({
+      runtimeConfig: mediaCacheRuntimeConfig,
+      targetUrl,
+      providerAccountScope,
+      itemType,
+      itemId,
+      container: stringOr(authoritativeVodContainer ?? requestedPlaybackHint.container, "unknown"),
+    });
+  await preemptBackgroundMediaCacheForViewer({
+    db,
+    accountFingerprint: mediaCacheAccountFingerprint,
+    exceptWorkFingerprint: mediaCacheLifecycle.producer?.workFingerprint ?? null,
+    signal: req.signal,
+  });
   await assertProviderCircuitClosed(providerAccountHash, db);
 
   await requirePlaybackCapacity(userId, db, providerAccountHash, entitlement);
@@ -4709,6 +4800,32 @@ async function heartbeatPlaybackSession(id: string, userId: string, db: Supabase
   return { ok: true };
 }
 
+async function requestDemandDrivenMediaCacheContinuation(
+  db: SupabaseClient,
+  runtimeConfig: RuntimeConfig,
+  playbackSessionId: string,
+  gatewaySessionId: string,
+) {
+  if (!runtimeConfig.mediaCacheSingleflightEnabled) return false;
+  if (!PLAYBACK_SESSION_UUID_PATTERN.test(playbackSessionId)
+    || !PLAYBACK_SESSION_UUID_PATTERN.test(gatewaySessionId)) return false;
+  const { data, error } = await db.rpc(
+    "norva_request_media_cache_continuation_for_gateway",
+    {
+      p_playback_session_id: playbackSessionId,
+      p_gateway_session_id: gatewaySessionId,
+      p_ttl_seconds: MEDIA_CACHE_SINGLEFLIGHT_LEASE_TTL_SECONDS,
+    },
+  );
+  if (error) {
+    // Continuation is optional. A migration lag or database ambiguity must
+    // close the provider session instead of leaving an ungoverned background
+    // producer behind.
+    return false;
+  }
+  return data === true;
+}
+
 async function expirePlaybackSession(id: string, userId: string, db: SupabaseClient) {
   const { data: session, error } = await db
     .from("cloud_playback_sessions")
@@ -4794,10 +4911,16 @@ async function expirePlaybackSession(id: string, userId: string, db: SupabaseCli
       const cleanupUrl = new URL(
         `${storedGatewayRoute.url}/sessions/${encodeURIComponent(externalSessionId)}`,
       );
-      // A normal user close may detach an eligible finite MKV into the same
-      // provider GET/FFmpeg until EOF. The Gateway revokes browser access first;
-      // any new viewer preempts that background owner before opening a socket.
-      cleanupUrl.searchParams.set("completeCache", "continue");
+      // Detach only when the distributed lease still has a waiting viewer.
+      // This server-side transition marks the lease as background-preemptable;
+      // a browser cannot request continuation and an idle asset is never filled.
+      const continueMediaCache = await requestDemandDrivenMediaCacheContinuation(
+        db,
+        runtimeConfig,
+        id,
+        externalSessionId,
+      );
+      if (continueMediaCache) cleanupUrl.searchParams.set("completeCache", "continue");
       const response = await fetch(cleanupUrl.toString(), {
         method: "DELETE",
         headers: { Authorization: `Bearer ${storedGatewayRoute.token}` },
@@ -12615,7 +12738,7 @@ async function runMediaCacheProducerControl(
     throw new HttpError(400, "Invalid media cache producer control JSON");
   });
   const action = stringOr(body.action, "");
-  const expectedKeys = action === "pulse"
+  const expectedKeys = action === "pulse" || action === "continuation-pulse"
     ? ["action", "gatewaySessionId", "playbackSessionId", "protocol", "stage"]
     : action === "abandon"
     ? ["action", "gatewaySessionId", "playbackSessionId", "protocol"]
@@ -12640,12 +12763,15 @@ async function runMediaCacheProducerControl(
     throw new HttpError(404, "Media cache producer session not found");
   }
 
-  if (action === "pulse") {
+  if (action === "pulse" || action === "continuation-pulse") {
     const stage = stringOr(body.stage, "");
     if (!["probing", "producing", "uploading", "finalizing"].includes(stage)) {
       throw new HttpError(400, "Invalid media cache producer stage");
     }
-    const { data, error } = await db.rpc("norva_pulse_media_cache_producer_for_gateway", {
+    const rpcName = action === "continuation-pulse"
+      ? "norva_pulse_media_cache_continuation_for_gateway"
+      : "norva_pulse_media_cache_producer_for_gateway";
+    const { data, error } = await db.rpc(rpcName, {
       p_playback_session_id: playbackSessionId,
       p_gateway_session_id: gatewaySessionId,
       p_stage: stage,
@@ -12653,7 +12779,7 @@ async function runMediaCacheProducerControl(
     });
     if (error) throwDb(error, "Unable to renew shared media cache producer");
     const state = stringOr(data, "invalid");
-    if (!["renewed", "preempted", "expired", "missing"].includes(state)) {
+    if (!["renewed", "preempted", "idle", "expired", "missing"].includes(state)) {
       throw new HttpError(503, "Shared media cache producer pulse is invalid");
     }
     return { protocol: 1, state };

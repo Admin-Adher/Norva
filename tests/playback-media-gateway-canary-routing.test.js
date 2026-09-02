@@ -210,7 +210,7 @@ test('norva-playback persists the chosen gateway identity and routes cleanup by 
   assert.match(edge, /MEDIA_GATEWAY_STORED_ROUTE_UNAVAILABLE/);
   assert.match(edge, /MEDIA_GATEWAY_CANARY_ROUTE_UNAVAILABLE/);
   assert.match(edge, /createBytePipeAccess\([\s\S]*?rawTokenExpiresAt,[\s\S]*?true,[\s\S]*?\);/);
-  assert.match(edge, /version: 74[\s\S]*mediaGatewayCanaryRouting:/);
+  assert.match(edge, /version: 75[\s\S]*mediaGatewayCanaryRouting:/);
 });
 
 test('Edge v61 forwards only admitted copy, complete-cache, or measured VAAPI startup policies', () => {

@@ -9,13 +9,17 @@ const gateway = fs.readFileSync(path.join(
   __dirname,
   '../services/media-gateway/src/index.js',
 ), 'utf8');
+const producerControl = fs.readFileSync(path.join(
+  __dirname,
+  '../services/media-gateway/src/mediaCacheProducerControl.js',
+), 'utf8');
 
-test('Gateway v147 keeps global R2 publication dark and behind private dedicated credentials', () => {
+test('Gateway v148 keeps global R2 publication dark and behind private dedicated credentials', () => {
   assert.match(gateway, /NORVA_SHARED_MEDIA_CACHE_ENABLED === 'true'/);
   assert.match(gateway, /NORVA_MEDIA_CACHE_WORKER_URL/);
   assert.match(gateway, /NORVA_MEDIA_CACHE_WORKER_TOKEN/);
   assert.match(gateway, /NORVA_MEDIA_CACHE_MANIFEST_HMAC_KEY/);
-  assert.match(gateway, /const GATEWAY_VERSION = 147/);
+  assert.match(gateway, /const GATEWAY_VERSION = 148/);
   assert.doesNotMatch(gateway, /R2_ACCESS_KEY|R2_SECRET|AWS_ACCESS_KEY/);
 });
 
@@ -47,9 +51,37 @@ test('Gateway publishes manifest-last graph before one bounded Edge authority ca
   assert.match(publication, /registerPublication: async \(payload\) =>/);
   assert.match(publication, /return registerSharedMediaCachePublication\(payload\)/);
   assert.match(publication, /mediaCacheProducerControl\.pulse\(session, 'finalizing'\)/);
+  assert.equal((publication.match(/producerState !== 'renewed'/g) || []).length, 2);
   assert.match(publication, /\/media-cache\/publication/);
   assert.match(publication, /AbortSignal\.timeout\(SHARED_MEDIA_CACHE_CALLBACK_TIMEOUT_MS\)/);
   assert.match(publication, /const delays = \[0, 1_000, 5_000, 15_000\]/);
   assert.match(publication, /64 \* 1024/);
   assert.doesNotMatch(publication, /sourceUrl|providerPassword|password/);
+});
+
+test('shared completion after viewer exit is dark, demand-driven and immediately preemptable', () => {
+  assert.match(gateway, /NORVA_SHARED_MEDIA_CACHE_BACKGROUND_CONTINUATION_ENABLED === 'true'/);
+  const assessment = gateway.slice(
+    gateway.indexOf('function mkvCompleteHlsBackgroundContinuationTargets('),
+    gateway.indexOf('function settleMkvCompleteHlsBackgroundContinuation('),
+  );
+  assert.match(assessment, /session\?\.mediaCacheProducer/);
+  assert.match(assessment, /providerAccountFreeForBackgroundContinuation/);
+  assert.match(assessment, /sharedMediaCacheStaticContext/);
+
+  const finish = gateway.slice(
+    gateway.indexOf('function finishMkvCompleteHlsBackgroundContinuation('),
+    gateway.indexOf('function needsMkvH264CurrentHeaderAuthority('),
+  );
+  assert.match(finish, /scheduleSharedMediaCachePublication/);
+  assert.match(finish, /session\.mediaCacheProducerCompleted === true/);
+  assert.match(finish, /mediaCacheProducerControl\.schedule\(session, 1\)/);
+  assert.match(producerControl, /action: continuation \? 'continuation-pulse' : 'pulse'/);
+  const controlSetup = gateway.slice(
+    gateway.indexOf('const mediaCacheProducerControl = new MediaCacheProducerControl({'),
+    gateway.indexOf('const MULTI_AUDIO_HLS_PROTOCOL'),
+  );
+  assert.match(controlSetup, /onPreempt: \(session\) =>/);
+  assert.doesNotMatch(controlSetup, /onPreempt: async/);
+  assert.match(controlSetup, /stopSession\(session, \{ reason: 'viewer-preempted' \}\)\.catch/);
 });

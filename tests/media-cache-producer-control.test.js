@@ -79,6 +79,49 @@ test('preemption stops only detached continuation, never an active foreground vi
   assert.deepEqual(preempted, [foreground.id]);
 });
 
+test('detached continuation uses demand-aware pulses and stops when no follower remains', async () => {
+  const requests = [];
+  const stopped = [];
+  const control = new MediaCacheProducerControl({
+    edgeBase: 'https://edge.example',
+    gatewayToken: 'g'.repeat(32),
+    initialDelayMs: 60_000,
+    fetchImpl: async (_url, init) => {
+      requests.push(JSON.parse(init.body));
+      return new Response(JSON.stringify({ protocol: 1, state: 'idle' }));
+    },
+    onPreempt: async (current) => stopped.push(current.id),
+  });
+  const detached = session();
+  control.attach(detached, context);
+  detached.backgroundCacheContinuation = true;
+  assert.equal(await control.pulse(detached, 'producing'), 'idle');
+  control.detach(detached);
+  assert.equal(requests[0].action, 'continuation-pulse');
+  assert.deepEqual(stopped, [detached.id]);
+  assert.equal(control.publicStatus().demandStops, 1);
+});
+
+test('an expired or missing detached lease stops instead of holding the provider until timeout', async () => {
+  const stopped = [];
+  const states = ['expired', 'missing'];
+  const control = new MediaCacheProducerControl({
+    edgeBase: 'https://edge.example',
+    gatewayToken: 'g'.repeat(32),
+    initialDelayMs: 60_000,
+    fetchImpl: async () => new Response(JSON.stringify({ protocol: 1, state: states.shift() })),
+    onPreempt: async (current) => stopped.push(current.id),
+  });
+  const detached = session();
+  control.attach(detached, context);
+  detached.backgroundCacheContinuation = true;
+  assert.equal(await control.pulse(detached, 'producing'), 'expired');
+  assert.equal(await control.pulse(detached, 'producing'), 'missing');
+  control.detach(detached);
+  assert.deepEqual(stopped, [detached.id, detached.id]);
+  assert.equal(control.publicStatus().expirations, 2);
+});
+
 test('successful publication suppresses abandon; failed work abandons with bounded retry', async () => {
   let calls = 0;
   const control = new MediaCacheProducerControl({

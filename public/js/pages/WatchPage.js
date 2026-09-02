@@ -2209,24 +2209,43 @@ class WatchPage {
 
         if (streamUrlResolver) {
             let resolved;
-            try {
-                resolved = await streamUrlResolver({
-                    signal: playbackResolveSignal,
-                    playbackAttemptId,
-                });
-            } catch (err) {
-                if (this.isStalePlaybackAttempt(playbackAttemptId)
-                    || playbackResolveSignal?.aborted
-                    || err?.name === 'AbortError') return;
-                const errorText = this.getErrorText(err) || 'This title could not be started. Please try again.';
-                // The initial resolver has not handed this attempt a playable
-                // Gateway lane. A timer-driven retry would silently mint a new
-                // session; leave that decision to the visible Retry button.
-                this.showPlaybackError(errorText, {
-                    immediate: true,
-                    allowAutomaticRetry: false
-                });
-                return;
+            let coordinationRetryCount = 0;
+            const coordinationStartedAt = Date.now();
+            while (!resolved) {
+                try {
+                    resolved = await streamUrlResolver({
+                        signal: playbackResolveSignal,
+                        playbackAttemptId,
+                    });
+                } catch (err) {
+                    if (this.isStalePlaybackAttempt(playbackAttemptId)
+                        || playbackResolveSignal?.aborted
+                        || err?.name === 'AbortError') return;
+                    const retryDelayMs = this.playbackCoordinationRetryDelayMs(
+                        err,
+                        coordinationRetryCount,
+                        Date.now() - coordinationStartedAt
+                    );
+                    if (retryDelayMs !== null) {
+                        coordinationRetryCount += 1;
+                        this.recordPlaybackStartupPhase('cacheCoordinationWait', playbackAttemptId);
+                        const stillCurrent = await this.waitForPlaybackCoordinationRetry(
+                            retryDelayMs,
+                            playbackResolveSignal
+                        );
+                        if (!stillCurrent || this.isStalePlaybackAttempt(playbackAttemptId)) return;
+                        continue;
+                    }
+                    const errorText = this.getErrorText(err) || 'This title could not be started. Please try again.';
+                    // Only the two exact cache-coordination 425 codes may loop
+                    // above. A terminal resolver failure never arms the generic
+                    // timer retry, which could mint an unrelated provider lane.
+                    this.showPlaybackError(errorText, {
+                        immediate: true,
+                        allowAutomaticRetry: false
+                    });
+                    return;
+                }
             }
             // A cloud resolver can finish after Back/navigation invalidated this
             // attempt. The response already owns a provider session, so capture
@@ -2963,6 +2982,54 @@ class WatchPage {
 
     isStalePlaybackAttempt(attemptId) {
         return Number.isFinite(attemptId) && attemptId !== this._playbackAttemptId;
+    }
+
+    playbackCoordinationRetryDelayMs(error, retryCount = 0, elapsedMs = 0) {
+        const status = Number(error?.status ?? error?.httpStatus ?? 0);
+        if (status !== 425 || !Number.isInteger(retryCount) || retryCount < 0 || retryCount >= 6) {
+            return null;
+        }
+        const code = String(
+            error?.code
+            || error?.payload?.details?.code
+            || error?.payload?.code
+            || ''
+        ).trim().toUpperCase();
+        if (!['MEDIA_CACHE_PRODUCER_ACTIVE', 'MEDIA_CACHE_BACKGROUND_DRAINING'].includes(code)) {
+            return null;
+        }
+        const elapsed = Number.isFinite(Number(elapsedMs)) ? Math.max(0, Number(elapsedMs)) : 0;
+        const remainingMs = 90_000 - elapsed;
+        if (remainingMs <= 0) return null;
+        const retryAfterSeconds = Number(
+            error?.payload?.details?.retryAfterSeconds
+            ?? error?.payload?.retryAfterSeconds
+        );
+        const requestedMs = Number.isFinite(retryAfterSeconds)
+            && retryAfterSeconds >= 1
+            && retryAfterSeconds <= 10
+            ? Math.ceil(retryAfterSeconds * 1000)
+            : (code === 'MEDIA_CACHE_BACKGROUND_DRAINING' ? 1_000 : 2_000);
+        return Math.min(requestedMs, remainingMs);
+    }
+
+    waitForPlaybackCoordinationRetry(delayMs, signal = null) {
+        if (signal?.aborted) return Promise.resolve(false);
+        const waitMs = Math.max(1, Math.min(10_000, Math.ceil(Number(delayMs) || 0)));
+        return new Promise((resolve) => {
+            let settled = false;
+            let timer = null;
+            const finish = (value) => {
+                if (settled) return;
+                settled = true;
+                if (timer !== null) clearTimeout(timer);
+                signal?.removeEventListener?.('abort', onAbort);
+                resolve(value);
+            };
+            const onAbort = () => finish(false);
+            signal?.addEventListener?.('abort', onAbort, { once: true });
+            timer = setTimeout(() => finish(true), waitMs);
+        });
     }
 
     async cleanupStaleCloudPlaybackSession(sessionId) {
@@ -4167,6 +4234,9 @@ class WatchPage {
         }
         if (this.isProviderBusyError(text)) {
             return this.providerAccountConflictCopy().message;
+        }
+        if (/MEDIA_CACHE_(PRODUCER_ACTIVE|BACKGROUND_DRAINING)/i.test(text)) {
+            return 'This film is still being prepared. Please retry in a moment.';
         }
         if (/PROVIDER_(CONNECT|RESPONSE)_TIMEOUT|UND_ERR_(CONNECT|HEADERS)_TIMEOUT|ETIMEDOUT/i.test(text)) {
             return 'The TV service did not respond before the connection timed out. Retry once the service is reachable.';
