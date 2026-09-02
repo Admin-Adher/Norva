@@ -4983,6 +4983,40 @@ function startFiniteMkvSeekResponse(context, res, range) {
     if (context.validator?.kind === 'last-modified') res.setHeader('Last-Modified', context.validator.value);
 }
 
+function beginFiniteMkvSeekWindowTrace(context, requestId, localRange, providerRange) {
+    const startedAtMs = Number(context.now?.() ?? Date.now());
+    const trace = {
+        requestId,
+        localStart: localRange.start,
+        localEnd: localRange.end,
+        providerStart: providerRange.start,
+        providerEnd: providerRange.end,
+        startedAtMs,
+        responseHeadersMs: null,
+        firstByteMs: null,
+        durationMs: null,
+        bytes: 0,
+        outcome: 'active',
+    };
+    context.finiteWindowTrace.push(trace);
+    while (context.finiteWindowTrace.length > 64) context.finiteWindowTrace.shift();
+    return trace;
+}
+
+function markFiniteMkvSeekWindowTrace(context, trace, stage, bytes = 0) {
+    if (!trace) return;
+    const elapsedMs = Math.max(0, Number(context.now?.() ?? Date.now()) - trace.startedAtMs);
+    if (stage === 'headers' && trace.responseHeadersMs === null) trace.responseHeadersMs = elapsedMs;
+    if (stage === 'first-byte' && trace.firstByteMs === null) trace.firstByteMs = elapsedMs;
+    if (bytes > 0) trace.bytes += bytes;
+}
+
+function finishFiniteMkvSeekWindowTrace(context, trace, outcome) {
+    if (!trace || trace.outcome !== 'active') return;
+    trace.durationMs = Math.max(0, Number(context.now?.() ?? Date.now()) - trace.startedAtMs);
+    trace.outcome = String(outcome || 'stopped').slice(0, 80);
+}
+
 function preemptAbandonedFiniteMkvSeekAttempt(context, attempt) {
     if (
         !attempt?.localClosed ||
@@ -5139,6 +5173,9 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                 end: finiteSeek ? finiteWindowRange.end : range.end,
                 total: range.total,
             };
+            const finiteWindowTrace = finiteSeek
+                ? beginFiniteMkvSeekWindowTrace(context, requestId, range, remainingRange)
+                : null;
             let upstreamStatus = null;
             try {
                 if (finiteSeek) {
@@ -5167,6 +5204,7 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                     signal: upstreamController.signal,
                     dispatcher: context.dispatcher || undefined,
                 });
+                markFiniteMkvSeekWindowTrace(context, finiteWindowTrace, 'headers');
                 upstreamStatus = Number(attempt.response.status);
                 if (upstreamStatus === 458) {
                     throw markStrictLidTerminal(context, strictLidBrokerError(
@@ -5317,6 +5355,12 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                     const chunk = Buffer.from(value || []);
                     if (!chunk.length) continue;
                     attempt.deadline.progress();
+                    markFiniteMkvSeekWindowTrace(
+                        context,
+                        finiteWindowTrace,
+                        'first-byte',
+                        chunk.length,
+                    );
                     if (forwarded + chunk.length > requestedLength) {
                         throw markStrictLidTerminal(context, strictLidBrokerError(
                             'RANGE_LENGTH_MISMATCH',
@@ -5364,6 +5408,7 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                     );
                 }
                 attempt.upstreamCompletedExactRange = true;
+                finishFiniteMkvSeekWindowTrace(context, finiteWindowTrace, 'completed');
                 await closeStrictLidBrokerProviderFetch(context, attempt, 'completed');
                 if (finiteSeek && range.start + forwarded === finiteWindowRange.end + 1) {
                     const windowLength = finiteWindowRange.end - finiteWindowRange.start + 1;
@@ -5402,6 +5447,13 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
             } catch (error) {
                 const progressBytes = forwarded - offsetBeforeFetch;
                 const timeoutKind = attempt.deadline?.timeoutKind || null;
+                finishFiniteMkvSeekWindowTrace(
+                    context,
+                    finiteWindowTrace,
+                    attempt.stopReason === 'superseded'
+                        ? 'superseded'
+                        : (timeoutKind ? `timeout-${timeoutKind}` : (error?.code || 'failed')),
+                );
                 const intentionallyStopped = controller.signal.aborted
                     || context.closed
                     || attempt.localClosed
@@ -5716,6 +5768,7 @@ async function createStrictLidBroker(options = {}) {
         finiteCacheHits: 0,
         finiteCacheMisses: 0,
         finiteCacheEvictions: 0,
+        finiteWindowTrace: [],
         finiteQueuedRequests: 0,
         finiteMaxQueuedRequests: 0,
         finiteQueuedProviderWindows: 0,
@@ -5761,6 +5814,20 @@ async function createStrictLidBroker(options = {}) {
         get maxQueuedRequests() { return context.finiteMaxQueuedRequests; },
         get maxQueuedProviderWindows() { return context.finiteMaxQueuedProviderWindows; },
         get plannedSupersessions() { return context.finitePlannedSupersessions; },
+        get windowTrace() {
+            return context.finiteWindowTrace.map((trace) => ({
+                requestId: trace.requestId,
+                localStart: trace.localStart,
+                localEnd: trace.localEnd,
+                providerStart: trace.providerStart,
+                providerEnd: trace.providerEnd,
+                responseHeadersMs: trace.responseHeadersMs,
+                firstByteMs: trace.firstByteMs,
+                durationMs: trace.durationMs,
+                bytes: trace.bytes,
+                outcome: trace.outcome,
+            }));
+        },
         get dispatcherRefreshes() { return context.dispatcherRefreshes; },
         async close(reason = 'broker_closed') {
             if (closePromise) return closePromise;
@@ -18402,6 +18469,7 @@ function debugSession(session) {
                 cacheHits: Number(session.finiteMkvSeekBroker.cacheHits || 0),
                 cacheMisses: Number(session.finiteMkvSeekBroker.cacheMisses || 0),
                 plannedSupersessions: Number(session.finiteMkvSeekBroker.plannedSupersessions || 0),
+                windowTrace: session.finiteMkvSeekBroker.windowTrace,
             }
             : null,
         finiteMkvLinearSeekBridge: session.linearSeekBridge

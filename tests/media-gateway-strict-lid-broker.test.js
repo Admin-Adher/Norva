@@ -971,6 +971,18 @@ test('finite seek broker preempts only a locally abandoned cue before serving it
   assert.equal(broker.interruptedProviderFetches, 1);
   assert.equal(broker.completedProviderFetches, 1);
   assert.equal(broker.plannedSupersessions, 1);
+  assert.deepEqual(
+    Array.from(broker.windowTrace, (entry) => ({
+      providerStart: entry.providerStart,
+      providerEnd: entry.providerEnd,
+      bytes: entry.bytes,
+      outcome: entry.outcome,
+    })),
+    [
+      { providerStart: 0, providerEnd: 7, bytes: 1, outcome: 'superseded' },
+      { providerStart: 32, providerEnd: 39, bytes: 8, outcome: 'completed' },
+    ],
+  );
 });
 
 test('finite seek broker serves a newer cue while an older local response is backpressured', async (t) => {
