@@ -172,6 +172,24 @@ test('Edge preserves a bounded exact playback cohort without marking it cache co
   );
 });
 
+test('Edge preserves a complete subtitle-heavy playback graph that is deliberately not cacheable', () => {
+  const { normalize, normalizeMetadata } = loadNormalizers();
+  const normalized = normalize(renditions, profile);
+  assert.ok(normalized);
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(normalizeMetadata({
+      ...metadata,
+      cacheEligible: false,
+      reason: 'enabled-full-noncacheable',
+    }, normalized, profile))),
+    {
+      ...metadata,
+      cacheEligible: false,
+      reason: 'enabled-full-noncacheable',
+    },
+  );
+});
+
 test('Edge drops every stale, contradictory or non-text subtitle graph as one unit', () => {
   const { normalize, normalizeMetadata } = loadNormalizers();
   const renditionVariants = [

@@ -952,12 +952,15 @@ class WatchPage {
         const completeGraph = value.cacheEligible === true
             && value.reason === 'enabled'
             && preparedTrackCount === sourceTrackCount;
+        const completeNonCacheableGraph = value.cacheEligible === false
+            && value.reason === 'enabled-full-noncacheable'
+            && preparedTrackCount === sourceTrackCount;
         const partialGraph = value.cacheEligible === false
             && value.reason === 'enabled-partial'
             && preparedTrackCount < sourceTrackCount;
         return value.protocol === 1
             && value.enabled === true
-            && (completeGraph || partialGraph)
+            && (completeGraph || completeNonCacheableGraph || partialGraph)
             && Number.isSafeInteger(sourceTrackCount)
             && sourceTrackCount > 0
             && Number.isSafeInteger(preparedTrackCount)

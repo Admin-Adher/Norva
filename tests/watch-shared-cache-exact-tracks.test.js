@@ -83,6 +83,13 @@ test('private cache metadata preserves the exact subtitle contract end-to-end', 
     sourceTrackCount: 12,
     preparedTrackCount: 8,
   }), true, 'a bounded live cohort is exact even though it is not a complete cache graph');
+  assert.equal(page.isExactHlsSubtitleTopology({
+    ...exactSubtitleHls,
+    cacheEligible: false,
+    reason: 'enabled-full-noncacheable',
+    sourceTrackCount: 32,
+    preparedTrackCount: 32,
+  }), true, 'a complete subtitle-heavy playback graph is exact without being cacheable');
   assert.equal(page.isExactHlsSubtitleTopology({ ...exactSubtitleHls, preparedTrackCount: 0 }), false);
   assert.match(watchSource, /subtitleRenditions:\s*playbackMetadata\.subtitleRenditions/);
   assert.match(watchSource, /exactSubtitleHls:\s*playbackMetadata\.exactSubtitleHls/);

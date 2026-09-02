@@ -126,6 +126,28 @@ test('exact subtitle plan preserves every bounded text track and builds a priori
   assert.equal(tooMany.renditions.some((track) => track.streamIndex === 11), false);
 });
 
+test('subtitle-heavy playback exposes all 32 exact tracks without making the graph cacheable', () => {
+  const tracks = Array.from({ length: 32 }, (_, index) => exactTextTrack(
+    index + 3,
+    index === 0 ? 'eng' : 'und',
+    `Subtitle ${index + 1}`,
+    { default: index === 0 },
+  ));
+  const plan = buildExactSubtitleHlsPlan(profile(tracks), {
+    maxRenditions: 32,
+    maxCacheableRenditions: 8,
+  });
+
+  assert.equal(plan.enabled, true);
+  assert.equal(plan.cacheEligible, false);
+  assert.equal(plan.reason, 'enabled-full-noncacheable');
+  assert.equal(plan.sourceTrackCount, 32);
+  assert.equal(plan.maxCacheableRenditions, 8);
+  assert.equal(plan.renditions.length, 32);
+  assert.deepEqual(plain(plan.renditions.map((track) => track.streamIndex)),
+    Array.from({ length: 32 }, (_, index) => index + 3));
+});
+
 test('one FFmpeg process maps every exact subtitle to a segmented WebVTT output', () => {
   const plan = buildExactSubtitleHlsPlan(profile([
     exactTextTrack(3, 'eng', 'English'),

@@ -147,7 +147,8 @@ function loadFastStartHarness(overrides = {}) {
     EXACT_MATROSKA_H264_MAX_PIXELS: 1920 * 1080,
     MULTI_AUDIO_HLS_PROTOCOL: 1,
     MAX_MULTI_AUDIO_RENDITIONS: 12,
-    MAX_EXACT_SUBTITLE_HLS_RENDITIONS: 8,
+    MAX_EXACT_SUBTITLE_HLS_RENDITIONS: 32,
+    MAX_CACHEABLE_EXACT_SUBTITLE_HLS_RENDITIONS: 8,
     stableJson,
     asRecord: (value) => value && typeof value === 'object' && !Array.isArray(value) ? value : {},
     compactRecord: (record) => Object.fromEntries(Object.entries(record || {}).filter(([, value]) => (

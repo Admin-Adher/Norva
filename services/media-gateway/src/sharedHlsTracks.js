@@ -4,7 +4,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const fsp = fs.promises;
-const DEFAULT_MAX_SUBTITLE_RENDITIONS = 8;
+const DEFAULT_MAX_SUBTITLE_RENDITIONS = 32;
+const DEFAULT_MAX_CACHEABLE_SUBTITLE_RENDITIONS = 8;
 const TEXT_SUBTITLE_CODECS = new Set([
     'ass',
     'movtext',
@@ -88,6 +89,15 @@ function buildExactSubtitleHlsPlan(profileValue, options = {}) {
     if (maxRenditions < 1 || maxRenditions > 32) {
         throw new SharedHlsTrackError('SUBTITLE_HLS_LIMIT_INVALID', 'subtitle HLS limit is invalid');
     }
+    const maxCacheableRenditions = Number.isInteger(options.maxCacheableRenditions)
+        ? options.maxCacheableRenditions
+        : Math.min(DEFAULT_MAX_CACHEABLE_SUBTITLE_RENDITIONS, maxRenditions);
+    if (maxCacheableRenditions < 1 || maxCacheableRenditions > maxRenditions) {
+        throw new SharedHlsTrackError(
+            'SUBTITLE_HLS_CACHE_LIMIT_INVALID',
+            'cacheable subtitle HLS limit is invalid',
+        );
+    }
     const sourceTracks = subtitleSourceTracks(profileValue);
     const base = {
         protocol: 1,
@@ -95,6 +105,7 @@ function buildExactSubtitleHlsPlan(profileValue, options = {}) {
         cacheEligible: false,
         reason: 'profile-incomplete',
         maxRenditions,
+        maxCacheableRenditions,
         sourceTrackCount: Array.isArray(sourceTracks) ? sourceTracks.length : 0,
         renditions: [],
     };
@@ -166,11 +177,15 @@ function buildExactSubtitleHlsPlan(profileValue, options = {}) {
             segmentPattern: `subtitle_${hlsIndex}-%05d.vtt`,
         });
     });
+    const completeGraph = sourceTracks.length <= maxRenditions;
+    const cacheEligible = completeGraph && sourceTracks.length <= maxCacheableRenditions;
     return Object.freeze({
         ...base,
         enabled: true,
-        cacheEligible: sourceTracks.length <= maxRenditions,
-        reason: sourceTracks.length <= maxRenditions ? 'enabled' : 'enabled-partial',
+        cacheEligible,
+        reason: !completeGraph
+            ? 'enabled-partial'
+            : (cacheEligible ? 'enabled' : 'enabled-full-noncacheable'),
         renditions: Object.freeze(renditions),
     });
 }
@@ -369,6 +384,7 @@ async function finalizeExactHlsTrackGraph(options = {}) {
 }
 
 module.exports = {
+    DEFAULT_MAX_CACHEABLE_SUBTITLE_RENDITIONS,
     DEFAULT_MAX_SUBTITLE_RENDITIONS,
     SharedHlsTrackError,
     buildExactSubtitleHlsPlan,

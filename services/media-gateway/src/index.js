@@ -2207,17 +2207,21 @@ const MULTI_AUDIO_HLS_PROTOCOL = 1;
 // production Ryzen/Radeon host. Keep the operational default evidence-based and configurable,
 // while bounding accidental fan-out. Every exact source track stays visible to the user.
 const MAX_MULTI_AUDIO_RENDITIONS = clampInt(process.env.MAX_MULTI_AUDIO_RENDITIONS, 12, 2, 32);
-// Exact WebVTT renditions are cheap, but subtitle-heavy releases can expose
-// dozens of streams. Bound the one-pass fan-out so first-frame latency remains
-// predictable; over-limit text graphs use a prioritized partial HLS cohort,
-// while partial or image-based graphs are never mislabeled as complete cache.
+// Exact WebVTT renditions are cheap enough to expose the complete provider graph
+// in one FFmpeg pass. Keep playback and shared-cache limits independent: a movie
+// with many subtitle tracks remains fully selectable, but cannot multiply the
+// bounded complete-HLS cache into thousands of persistent WebVTT objects.
 const MAX_EXACT_SUBTITLE_HLS_RENDITIONS = clampInt(
     process.env.MAX_EXACT_SUBTITLE_HLS_RENDITIONS,
-    8,
+    32,
     1,
-    16,
+    32,
 );
-const GATEWAY_VERSION = 153;
+const MAX_CACHEABLE_EXACT_SUBTITLE_HLS_RENDITIONS = Math.min(
+    MAX_EXACT_SUBTITLE_HLS_RENDITIONS,
+    clampInt(process.env.MAX_CACHEABLE_EXACT_SUBTITLE_HLS_RENDITIONS, 8, 1, 32),
+);
+const GATEWAY_VERSION = 154;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -14040,6 +14044,7 @@ function mkvCompleteHlsCacheSubtitleTopology(session, subtitles) {
     if (!Array.isArray(subtitles)) return reject('missing-subtitle-topology');
     const plan = buildExactSubtitleHlsPlan({ subtitles }, {
         maxRenditions: MAX_EXACT_SUBTITLE_HLS_RENDITIONS,
+        maxCacheableRenditions: MAX_CACHEABLE_EXACT_SUBTITLE_HLS_RENDITIONS,
     });
     if (plan.cacheEligible !== true) return reject(plan.reason || 'subtitle-topology-ineligible');
     if (subtitles.length === 0) {
@@ -16446,6 +16451,7 @@ function exactSubtitleHlsDiagnosticsForSession(session) {
         cacheEligible: plan.cacheEligible === true,
         reason: stringOrNull(plan.reason) || 'not-evaluated',
         maxRenditions: MAX_EXACT_SUBTITLE_HLS_RENDITIONS,
+        maxCacheableRenditions: MAX_CACHEABLE_EXACT_SUBTITLE_HLS_RENDITIONS,
         sourceTrackCount: Number.isInteger(plan.sourceTrackCount) ? plan.sourceTrackCount : 0,
         preparedTrackCount: Array.isArray(plan.renditions) ? plan.renditions.length : 0,
     };
@@ -16459,6 +16465,7 @@ function exactSubtitleRenditionsForSession(session) {
 function freezeExactSubtitleHlsTopology(session) {
     const plan = buildExactSubtitleHlsPlan(session?.codecProfile, {
         maxRenditions: MAX_EXACT_SUBTITLE_HLS_RENDITIONS,
+        maxCacheableRenditions: MAX_CACHEABLE_EXACT_SUBTITLE_HLS_RENDITIONS,
         requestedStreamIndex: session?.subtitleStreamIndex,
     });
     session.exactSubtitleHls = plan;

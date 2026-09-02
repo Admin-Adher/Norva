@@ -8535,10 +8535,13 @@ function normalizeGatewayExactSubtitleHls(
   const preparedTrackCount = Number(raw.preparedTrackCount);
   const completeGraph = raw.cacheEligible === true && raw.reason === "enabled" &&
     sourceTrackCount === preparedTrackCount;
+  const completeNonCacheableGraph = raw.cacheEligible === false &&
+    raw.reason === "enabled-full-noncacheable" && sourceTrackCount === preparedTrackCount;
   const partialGraph = raw.cacheEligible === false && raw.reason === "enabled-partial" &&
     sourceTrackCount > preparedTrackCount;
   if (
-    raw.protocol !== 1 || raw.enabled !== true || (!completeGraph && !partialGraph) ||
+    raw.protocol !== 1 || raw.enabled !== true ||
+    (!completeGraph && !completeNonCacheableGraph && !partialGraph) ||
     !Number.isSafeInteger(maxRenditions) || maxRenditions < 1 || maxRenditions > 32 ||
     renditions.length > maxRenditions || exactTracks.length !== sourceTrackCount ||
     !Number.isSafeInteger(sourceTrackCount) || sourceTrackCount < renditions.length ||

@@ -14,13 +14,25 @@ const producerControl = fs.readFileSync(path.join(
   '../services/media-gateway/src/mediaCacheProducerControl.js',
 ), 'utf8');
 
-test('Gateway v153 keeps global R2 publication dark and behind private dedicated credentials', () => {
+test('Gateway v154 keeps global R2 publication dark and behind private dedicated credentials', () => {
   assert.match(gateway, /NORVA_SHARED_MEDIA_CACHE_ENABLED === 'true'/);
   assert.match(gateway, /NORVA_MEDIA_CACHE_WORKER_URL/);
   assert.match(gateway, /NORVA_MEDIA_CACHE_WORKER_TOKEN/);
   assert.match(gateway, /NORVA_MEDIA_CACHE_MANIFEST_HMAC_KEY/);
-  assert.match(gateway, /const GATEWAY_VERSION = 153/);
+  assert.match(gateway, /const GATEWAY_VERSION = 154/);
   assert.doesNotMatch(gateway, /R2_ACCESS_KEY|R2_SECRET|AWS_ACCESS_KEY/);
+});
+
+test('subtitle-heavy playback and shared-cache limits remain independently bounded', () => {
+  assert.match(gateway, /MAX_EXACT_SUBTITLE_HLS_RENDITIONS[\s\S]{0,120}\n\s*32,\n\s*1,\n\s*32,/);
+  assert.match(gateway, /MAX_CACHEABLE_EXACT_SUBTITLE_HLS_RENDITIONS[\s\S]{0,180}clampInt\(process\.env\.MAX_CACHEABLE_EXACT_SUBTITLE_HLS_RENDITIONS, 8, 1, 32\)/);
+  const cacheTopology = gateway.slice(
+    gateway.indexOf('function mkvCompleteHlsCacheSubtitleTopology('),
+    gateway.indexOf('function mkvCompleteHlsCacheStaticContext('),
+  );
+  assert.match(cacheTopology, /maxRenditions: MAX_EXACT_SUBTITLE_HLS_RENDITIONS/);
+  assert.match(cacheTopology, /maxCacheableRenditions: MAX_CACHEABLE_EXACT_SUBTITLE_HLS_RENDITIONS/);
+  assert.match(cacheTopology, /if \(plan\.cacheEligible !== true\) return reject/);
 });
 
 test('shared publication waits for profile and immutable media barriers then reuses one graph walk', () => {
