@@ -325,8 +325,21 @@ try {
     if (serializedMetrics.includes(serviceToken) || serializedMetrics.includes(ticket.token)) {
       throw new Error('metrics exposed an authentication secret');
     }
-    if (Number(metrics.layers?.cdn?.hits || 0) < 1 || Number(metrics.layers?.r2?.hits || 0) < 1) {
-      throw new Error('cache layer metrics are incomplete');
+    // Cloudflare does not guarantee isolate affinity between requests. The
+    // response headers above are the live layer proof; isolate-local counters
+    // may legitimately be zero when this request reaches another isolate.
+    const layerMetricValues = [
+      metrics.layers?.cdn?.hits,
+      metrics.layers?.cdn?.misses,
+      metrics.layers?.cdn?.failures,
+      metrics.layers?.cdn?.bytes,
+      metrics.layers?.r2?.hits,
+      metrics.layers?.r2?.misses,
+      metrics.layers?.r2?.failures,
+      metrics.layers?.r2?.bytes,
+    ];
+    if (metrics.protocol !== 1 || layerMetricValues.some((value) => !Number.isFinite(value) || value < 0)) {
+      throw new Error('cache layer metrics schema is incomplete');
     }
 
     process.stdout.write(`${JSON.stringify({

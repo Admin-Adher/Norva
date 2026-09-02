@@ -182,11 +182,22 @@ jobs:
           delete_worker_status=0
           if [ "$MEDIA_CACHE_CANARY_WORKER_ATTEMPTED" = 'true' ]; then
             worker_delete_log="$(mktemp)"
-            if ! npx --no-install wrangler delete norva-media-cache-canary --force >"$worker_delete_log" 2>&1; then
-              if ! grep -Fq '[code: 10090]' "$worker_delete_log"; then
-                cat "$worker_delete_log" >&2
-                delete_worker_status=1
-              fi
+            worker_delete_http_status="$(curl --silent --show-error \
+              --output "$worker_delete_log" \
+              --write-out '%{http_code}' \
+              --request DELETE \
+              --header "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+              "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/norva-media-cache-canary?force=true")" || delete_worker_status=$?
+            if [ "$delete_worker_status" -eq 0 ] && [ "$worker_delete_http_status" -ne 200 ] && [ "$worker_delete_http_status" -ne 204 ] && [ "$worker_delete_http_status" -ne 404 ]; then
+              node -e '
+                const fs = require("node:fs");
+                const payload = JSON.parse(fs.readFileSync(process.argv[1], "utf8") || "{}");
+                const errors = Array.isArray(payload.errors)
+                  ? payload.errors.map(({ code, message }) => `${code}: ${message}`).join("; ")
+                  : "unknown Cloudflare error";
+                console.error(`Cloudflare Worker deletion failed: ${errors}`);
+              ' "$worker_delete_log"
+              delete_worker_status=1
             fi
             rm -f -- "$worker_delete_log"
           fi

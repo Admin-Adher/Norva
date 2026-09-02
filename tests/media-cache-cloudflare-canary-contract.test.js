@@ -37,7 +37,9 @@ test('canary is manual-only while the existing relay main deployment remains unc
   assert.doesNotMatch(workflow, /zones\?[^\n]*account\.id/);
   assert.match(workflow, /MEDIA_CACHE_CLOUDFLARE_PURGE_TOKEN: process\.env\.MEDIA_CACHE_CANARY_PURGE_TOKEN/);
   assert.doesNotMatch(workflow, /MEDIA_CACHE_CLOUDFLARE_PURGE_TOKEN: process\.env\.CLOUDFLARE_API_TOKEN/);
-  assert.match(workflow, /wrangler delete norva-media-cache-canary --force/);
+  assert.match(workflow, /workers\/scripts\/norva-media-cache-canary\?force=true/);
+  assert.match(workflow, /--request DELETE/);
+  assert.doesNotMatch(workflow, /wrangler delete norva-media-cache-canary/);
   assert.match(workflow, /wrangler r2 bucket delete norva-media-cache-canary/);
   assert.doesNotMatch(workflow, /wrangler delete norva-media-cache --force/);
   assert.doesNotMatch(workflow, /wrangler r2 bucket delete norva-media-cache(?:\s|$)/);
@@ -51,5 +53,7 @@ test('canary receipt requires private delivery, exact tracks, CDN hit, purge and
   assert.match(client, /hotLayer: 'cdn'/);
   assert.match(client, /globalEdgePurgeCompleted/);
   assert.match(client, /verified-quarantined/);
+  assert.match(client, /Cloudflare does not guarantee isolate affinity/);
+  assert.match(client, /const layerMetricValues = \[/);
   assert.match(client, /secretFreeMetrics: true/);
 });
