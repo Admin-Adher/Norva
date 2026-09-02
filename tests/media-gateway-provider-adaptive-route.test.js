@@ -11,6 +11,7 @@ const fingerprintKey = Buffer.alloc(32, 0x5a);
 
 function successfulMeasurement(overrides = {}) {
   return {
+    success: true,
     ttfbMs: 250,
     first4MiBMs: 1_200,
     first16MiBMs: 4_500,
@@ -144,7 +145,7 @@ test('hysteresis changes route only for expiry, repeated route failures, or sust
   }).reason, 'current-expired');
 });
 
-test('benchmarks are strictly sequential, use a tiny sweep then retest only the top two', async () => {
+test('benchmarks are strictly sequential and qualify finalists with two resume-range probes', async () => {
   const candidates = routeEngine.buildProviderRouteCandidates({
     httpProxyUrls: ['http://one', 'http://two'],
     socksProxyUrls: ['socks5://one', 'socks5://two'],
@@ -158,7 +159,7 @@ test('benchmarks are strictly sequential, use a tiny sweep then retest only the 
     probe: async (candidate, options) => {
       active += 1;
       maximumActive = Math.max(maximumActive, active);
-      observed.push(`${options.phase}:${candidate.id}:${options.sampleBytes}`);
+      observed.push(`${options.phase}:${candidate.id}:${options.sampleBytes}:${options.rangeStartBytes || 0}`);
       await new Promise((resolve) => setImmediate(resolve));
       active -= 1;
       const rank = { '1:http': 4, '1:socks5': 1, '2:http': 3, '2:socks5': 2 }[candidate.id];
@@ -167,6 +168,8 @@ test('benchmarks are strictly sequential, use a tiny sweep then retest only the 
         first4MiBMs: rank * 600,
         first16MiBMs: rank * 2_000,
         throughputBytesPerSecond: (6 - rank) * routeEngine.MIB,
+        rangeStartBytes: options.rangeStartBytes || 0,
+        resourceSizeBytes: 5 * 1024 * routeEngine.MIB,
       });
     },
   });
@@ -179,9 +182,53 @@ test('benchmarks are strictly sequential, use a tiny sweep then retest only the 
     'tiny:2:http',
     'tiny:2:socks5',
   ]);
-  assert.equal(observed.length, candidates.length + 2);
-  assert.equal(observed.slice(-2).every((entry) => entry.startsWith('sustained:')), true);
+  assert.equal(observed.length, candidates.length + 2 + 4);
+  assert.equal(observed.slice(4, 6).every((entry) => entry.startsWith('sustained:')), true);
+  assert.equal(observed.slice(-4).every((entry) => entry.startsWith('resume-seek:')), true);
+  assert.equal(observed.slice(-4).every((entry) => Number(entry.split(':').at(-1)) > 0), true);
   assert.ok(result.recommendation);
+});
+
+test('a route that is fast at byte zero is disqualified when a resumed range fails', async () => {
+  const candidates = routeEngine.buildProviderRouteCandidates({
+    httpProxyUrls: ['http://fast-prefix-bad-seek', 'http://slower-safe'],
+  });
+  const result = await routeEngine.benchmarkProviderRoutesSequentially({
+    candidates,
+    isAccountIdle: async () => true,
+    probe: async (candidate, options) => {
+      const brokenResume = candidate.id === '1:http' && options.phase === 'resume-seek';
+      return successfulMeasurement({
+        phase: options.phase,
+        sampleBytes: options.sampleBytes,
+        rangeStartBytes: options.rangeStartBytes || 0,
+        resourceSizeBytes: 5 * 1024 * routeEngine.MIB,
+        success: !brokenResume,
+        rangeSeekOk: !brokenResume,
+        timeouts: brokenResume ? 1 : 0,
+        ttfbMs: candidate.id === '1:http' ? 50 : 250,
+        first4MiBMs: options.phase === 'sustained' ? (candidate.id === '1:http' ? 500 : 1200) : null,
+        first16MiBMs: options.phase === 'sustained' ? (candidate.id === '1:http' ? 2000 : 4500) : null,
+      });
+    },
+  });
+  assert.equal(result.status, 'completed');
+  assert.equal(result.recommendation.id, '2:http');
+  assert.equal(result.rankings.some((route) => route.id === '1:http'), false);
+});
+
+test('resume probes stay inside the strict persisted byte-offset contract', () => {
+  const offsets = routeEngine.resumeSeekOffsets(
+    1024 * 1024 * 1024 * 1024,
+    routeEngine.MIB,
+  );
+  const maximumAlignedOffset = Math.floor(
+    routeEngine.MAX_RESUME_RANGE_START_BYTES / routeEngine.MIB,
+  ) * routeEngine.MIB;
+  assert.equal(offsets.length, 2);
+  assert.ok(offsets[0] > 0);
+  assert.equal(offsets[1], maximumAlignedOffset);
+  assert.ok(offsets.every((offset) => offset <= routeEngine.MAX_RESUME_RANGE_START_BYTES));
 });
 
 test('a real playback claim preempts the benchmark before another provider request starts', async () => {

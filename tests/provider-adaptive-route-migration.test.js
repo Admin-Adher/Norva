@@ -10,6 +10,11 @@ const migrationPath = path.join(
   '../supabase/migrations/20260901193000_provider_adaptive_route_control_v1.sql',
 );
 const migration = fs.readFileSync(migrationPath, 'utf8');
+const resumeSeekMigrationPath = path.join(
+  __dirname,
+  '../supabase/migrations/20260902213500_provider_route_resume_seek_benchmark_v2.sql',
+);
+const resumeSeekMigration = fs.readFileSync(resumeSeekMigrationPath, 'utf8');
 
 test('adaptive provider routing control plane defines policies, state, measurements, and leases', () => {
   for (const table of [
@@ -46,6 +51,15 @@ test('route measurement contract covers startup, sustained throughput, seek, and
   ]) {
     assert.match(migration, new RegExp(`\\b${signal}\\b`));
   }
+});
+
+test('v2 route evidence requires bounded non-zero resume probes and expires prefix-only state', () => {
+  assert.match(resumeSeekMigration, /add column if not exists resume_probe_bytes integer not null default 1048576/);
+  assert.match(resumeSeekMigration, /add column if not exists range_start_bytes bigint not null default 0/);
+  assert.match(resumeSeekMigration, /phase in \('tiny', 'sustained', 'resume-seek', 'real-playback'\)/);
+  assert.match(resumeSeekMigration, /phase = 'resume-seek' and range_start_bytes > 0/);
+  assert.match(resumeSeekMigration, /update public\.provider_route_state[\s\S]*expires_at = greatest/);
+  assert.doesNotMatch(resumeSeekMigration, /delete from public\.provider_route_(state|measurements)/);
 });
 
 test('route benchmark lease is distributed, bounded, service-only, and preemptable by playback', () => {

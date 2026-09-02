@@ -45,9 +45,52 @@ test('route probe reads one bounded byte range and closes its isolated dispatche
   assert.equal(requests[0].options.redirect, 'follow');
   assert.equal(measurement.success, true);
   assert.equal(measurement.rangeSeekOk, true);
+  assert.equal(measurement.rangeStartBytes, 0);
   assert.equal(measurement.sampleBytes, 1024 * 1024);
   assert.ok(measurement.throughputBytesPerSecond > 0);
   assert.equal(closed, 1);
+});
+
+test('route probe validates the exact non-zero byte range used by resumed playback', async () => {
+  const requests = [];
+  const rangeStartBytes = 64 * 1024 * 1024;
+  const measurement = await measureProviderRoute({
+    candidate: { slot: 3, nodeTransport: 'http' },
+    sourceUrl: 'https://provider.invalid/movie/account/secret/42.mkv',
+    sampleBytes: 1024 * 1024,
+    rangeStartBytes,
+    createDispatcher: () => ({ close: async () => {} }),
+    fetchImpl: async (url, options) => {
+      requests.push({ url, options });
+      return new Response(byteStream([new Uint8Array(1024 * 1024)]), {
+        status: 206,
+        headers: {
+          'content-range': `bytes ${rangeStartBytes}-${rangeStartBytes + 1024 * 1024 - 1}/5368709120`,
+        },
+      });
+    },
+  });
+  assert.equal(requests[0].options.headers.range, `bytes=${rangeStartBytes}-${rangeStartBytes + 1024 * 1024 - 1}`);
+  assert.equal(measurement.rangeStartBytes, rangeStartBytes);
+  assert.equal(measurement.rangeSeekOk, true);
+  assert.equal(measurement.resourceSizeBytes, 5368709120);
+  assert.equal(measurement.success, true);
+});
+
+test('route probe rejects a provider that answers a deep request with the wrong byte range', async () => {
+  const measurement = await measureProviderRoute({
+    candidate: { slot: 3, nodeTransport: 'http' },
+    sourceUrl: 'https://provider.invalid/movie/account/secret/42.mkv',
+    sampleBytes: 1024 * 1024,
+    rangeStartBytes: 64 * 1024 * 1024,
+    createDispatcher: () => ({ close: async () => {} }),
+    fetchImpl: async () => new Response(byteStream([new Uint8Array(1024 * 1024)]), {
+      status: 206,
+      headers: { 'content-range': 'bytes 0-1048575/5368709120' },
+    }),
+  });
+  assert.equal(measurement.success, true);
+  assert.equal(measurement.rangeSeekOk, false);
 });
 
 test('route probe classifies proxy auth and never exposes the response body', async () => {
@@ -108,6 +151,8 @@ test('leased benchmark sweeps sequentially, reports bounded telemetry, then rele
         throughputBytesPerSecond: candidate.nodeTransport === 'http' ? 20_000_000 : 10_000_000,
         varianceRatio: 0.1,
         rangeSeekOk: true,
+        rangeStartBytes: context.rangeStartBytes || 0,
+        resourceSizeBytes: 512 * 1024 * 1024,
         resets: 0,
         timeouts: 0,
         proxy407: 0,
@@ -119,10 +164,13 @@ test('leased benchmark sweeps sequentially, reports bounded telemetry, then rele
   assert.equal(outcome.status, 'completed');
   assert.equal(maximumActiveProbe, 1);
   assert.deepEqual(actions.map((entry) => entry.action), [
-    'claim', 'pulse', 'pulse', 'pulse', 'report', 'release',
+    'claim', 'pulse', 'pulse', 'pulse', 'pulse', 'pulse', 'report', 'release',
   ]);
   const report = actions.find((entry) => entry.action === 'report').payload;
-  assert.equal(report.measurements.length, 3);
+  assert.equal(report.measurements.length, 5);
+  assert.equal(report.measurements.filter((entry) => entry.phase === 'resume-seek').length, 2);
+  assert.equal(report.measurements.filter((entry) => entry.phase === 'resume-seek')
+    .every((entry) => entry.rangeStartBytes > 0), true);
   assert.equal(JSON.stringify(report).includes('provider.invalid'), false);
   assert.equal(JSON.stringify(report).includes('secret'), false);
 });
@@ -204,6 +252,7 @@ test('serialized measurements have one strict non-secret schema', () => {
     nodeTransport: 'http',
     phase: 'tiny',
     sampleBytes: 1024,
+    rangeStartBytes: 0,
     success: true,
     sourceUrl: 'https://must-not-leak.invalid/secret',
   }]);

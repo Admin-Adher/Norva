@@ -2291,7 +2291,7 @@ const MAX_CACHEABLE_EXACT_SUBTITLE_HLS_RENDITIONS = Math.min(
     MAX_EXACT_SUBTITLE_HLS_RENDITIONS,
     clampInt(process.env.MAX_CACHEABLE_EXACT_SUBTITLE_HLS_RENDITIONS, 8, 1, 32),
 );
-const GATEWAY_VERSION = 161;
+const GATEWAY_VERSION = 162;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -2437,6 +2437,7 @@ async function runProviderRouteBenchmarkJob(job, controller) {
                 candidate,
                 createDispatcher: providerRouteBenchmarkDispatcher,
                 sampleBytes: options.sampleBytes,
+                rangeStartBytes: options.rangeStartBytes || 0,
                 signal: options.signal,
                 sourceUrl: job.sourceUrl,
                 timeoutMs: options.phase === 'sustained' ? 120_000 : 30_000,

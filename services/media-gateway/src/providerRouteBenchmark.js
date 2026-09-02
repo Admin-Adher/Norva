@@ -2,11 +2,13 @@
 
 const { performance } = require('node:perf_hooks');
 const {
+    MAX_RESUME_RANGE_START_BYTES,
     MIB,
     benchmarkProviderRoutesSequentially,
 } = require('./providerAdaptiveRoute');
 
 const BENCHMARK_PROTOCOL = 1;
+const MAX_BENCHMARK_RANGE_START_BYTES = MAX_RESUME_RANGE_START_BYTES;
 const MEASUREMENT_KEYS = Object.freeze([
     'first16MiBMs',
     'first4MiBMs',
@@ -15,6 +17,7 @@ const MEASUREMENT_KEYS = Object.freeze([
     'phase',
     'provider458',
     'proxy407',
+    'rangeStartBytes',
     'rangeSeekOk',
     'resets',
     'sampleBytes',
@@ -71,8 +74,15 @@ function safeHeader(headers, name) {
     try { return String(headers?.get?.(name) || ''); } catch (_) { return ''; }
 }
 
-function contentRangeStartsAtZero(value) {
-    return /^bytes\s+0-/i.test(String(value || '').trim());
+function parsedContentRange(value) {
+    const match = String(value || '').trim().match(/^bytes\s+(\d+)-(\d+)\/(\d+|\*)$/i);
+    if (!match) return null;
+    const start = Number(match[1]);
+    const end = Number(match[2]);
+    const total = match[3] === '*' ? null : Number(match[3]);
+    if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || end < start) return null;
+    if (total !== null && (!Number.isSafeInteger(total) || total <= end)) return null;
+    return { start, end, total };
 }
 
 function coefficientOfVariation(samples) {
@@ -84,12 +94,13 @@ function coefficientOfVariation(samples) {
     return Number(Math.min(100, Math.sqrt(variance) / mean).toFixed(5));
 }
 
-function emptyMeasurement(candidate, sampleBytes) {
+function emptyMeasurement(candidate, sampleBytes, rangeStartBytes = 0) {
     return {
         slot: candidate.slot,
         nodeTransport: candidate.nodeTransport,
         phase: null,
         sampleBytes,
+        rangeStartBytes,
         success: false,
         ttfbMs: null,
         first4MiBMs: null,
@@ -123,6 +134,7 @@ async function measureProviderRoute({
     createDispatcher,
     fetchImpl = globalThis.fetch,
     sampleBytes,
+    rangeStartBytes = 0,
     signal = null,
     sourceUrl,
     timeoutMs = 60_000,
@@ -132,8 +144,14 @@ async function measureProviderRoute({
         throw new TypeError('Provider route benchmark dependencies are required');
     }
     const boundedSampleBytes = boundedInteger(sampleBytes, MIB, 256 * 1024, 16 * MIB);
+    const boundedRangeStartBytes = boundedInteger(
+        rangeStartBytes,
+        0,
+        0,
+        MAX_BENCHMARK_RANGE_START_BYTES,
+    );
     const boundedTimeoutMs = boundedInteger(timeoutMs, 60_000, 1_000, 180_000);
-    const measurement = emptyMeasurement(candidate, boundedSampleBytes);
+    const measurement = emptyMeasurement(candidate, boundedSampleBytes, boundedRangeStartBytes);
     const guard = combinedAbortController(signal, boundedTimeoutMs);
     const dispatcher = createDispatcher(candidate);
     const startedAt = performance.now();
@@ -147,7 +165,7 @@ async function measureProviderRoute({
                 accept: '*/*',
                 'accept-encoding': 'identity',
                 connection: 'keep-alive',
-                range: `bytes=0-${boundedSampleBytes - 1}`,
+                range: `bytes=${boundedRangeStartBytes}-${boundedRangeStartBytes + boundedSampleBytes - 1}`,
                 'user-agent': userAgent,
             },
             redirect: 'follow',
@@ -162,9 +180,9 @@ async function measureProviderRoute({
             response = null;
             return measurement;
         }
-        measurement.rangeSeekOk = status === 206 && contentRangeStartsAtZero(
-            safeHeader(response.headers, 'content-range'),
-        );
+        const contentRange = parsedContentRange(safeHeader(response.headers, 'content-range'));
+        measurement.rangeSeekOk = status === 206 && contentRange?.start === boundedRangeStartBytes;
+        measurement.resourceSizeBytes = contentRange?.total || null;
         if (!response.body || typeof response.body.getReader !== 'function') {
             measurement.resets = 1;
             return measurement;
@@ -223,6 +241,7 @@ function normalizePolicy(value = {}) {
         consecutiveFailureThreshold: boundedInteger(value.consecutiveFailureThreshold, 3, 2, 12),
         tinyProbeBytes: boundedInteger(value.tinyProbeBytes, MIB, 256 * 1024, 4 * MIB),
         sustainedProbeBytes: boundedInteger(value.sustainedProbeBytes, 16 * MIB, 4 * MIB, 16 * MIB),
+        resumeProbeBytes: boundedInteger(value.resumeProbeBytes, MIB, 256 * 1024, 4 * MIB),
         topCandidateCount: boundedInteger(value.topCandidateCount, 2, 1, 4),
         benchmarkLeaseSeconds: boundedInteger(value.benchmarkLeaseSeconds, 120, 15, 600),
     };
@@ -340,6 +359,7 @@ async function runLeasedProviderRouteBenchmark({
 
 module.exports = {
     BENCHMARK_PROTOCOL,
+    MAX_BENCHMARK_RANGE_START_BYTES,
     MEASUREMENT_KEYS,
     coefficientOfVariation,
     measureProviderRoute,

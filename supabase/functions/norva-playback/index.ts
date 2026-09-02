@@ -335,7 +335,7 @@ async function handleRequest(req: Request): Promise<Response> {
       return json(req, {
         ok: true,
         service: "norva-playback",
-        version: 78,
+        version: 79,
         nativeHeartbeatProtocol: 1,
         providerCircuitProtocol: 1,
         exactTrackCrawlerProtocol: 2,
@@ -12855,6 +12855,7 @@ async function runProviderRouteResolve(req: Request, db: SupabaseClient): Promis
       consecutiveFailureThreshold: providerRouteNumberOrNull(policy.consecutive_failure_threshold),
       tinyProbeBytes: providerRouteNumberOrNull(policy.tiny_probe_bytes),
       sustainedProbeBytes: providerRouteNumberOrNull(policy.sustained_probe_bytes),
+      resumeProbeBytes: providerRouteNumberOrNull(policy.resume_probe_bytes),
       topCandidateCount: providerRouteNumberOrNull(policy.top_candidate_count),
       benchmarkLeaseSeconds: providerRouteNumberOrNull(policy.benchmark_lease_seconds),
     },
@@ -12870,6 +12871,7 @@ const PROVIDER_ROUTE_BENCHMARK_MEASUREMENT_KEYS = [
   "phase",
   "provider458",
   "proxy407",
+  "rangeStartBytes",
   "rangeSeekOk",
   "resets",
   "sampleBytes",
@@ -12882,8 +12884,9 @@ const PROVIDER_ROUTE_BENCHMARK_MEASUREMENT_KEYS = [
 ];
 
 type ProviderRouteMeasurement = ProviderRouteCoordinate & {
-  phase: "tiny" | "sustained";
+  phase: "tiny" | "sustained" | "resume-seek";
   sampleBytes: number;
+  rangeStartBytes: number;
   success: boolean;
   ttfbMs: number | null;
   first4MiBMs: number | null;
@@ -12933,6 +12936,11 @@ function parseProviderRouteMeasurement(value: unknown): ProviderRouteMeasurement
   const coordinate = providerRouteCoordinate(record);
   const phase = stringOr(record.phase, "");
   const sampleBytes = providerRouteBoundedInteger(record.sampleBytes, 0, 16 * 1024 * 1024);
+  const rangeStartBytes = providerRouteBoundedInteger(
+    record.rangeStartBytes,
+    0,
+    (128 * 1024 * 1024 * 1024) - 1,
+  );
   const ttfbMs = providerRouteBoundedInteger(record.ttfbMs, 0, 300_000, true);
   const first4MiBMs = providerRouteBoundedInteger(record.first4MiBMs, 0, 600_000, true);
   const first16MiBMs = providerRouteBoundedInteger(record.first16MiBMs, 0, 1_200_000, true);
@@ -12949,7 +12957,10 @@ function parseProviderRouteMeasurement(value: unknown): ProviderRouteMeasurement
   const provider458 = providerRouteBoundedInteger(record.provider458, 0, 32_767);
   const http5xx = providerRouteBoundedInteger(record.http5xx, 0, 32_767);
   if (
-    !coordinate || !["tiny", "sustained"].includes(phase) || sampleBytes === null ||
+    !coordinate || !["tiny", "sustained", "resume-seek"].includes(phase) ||
+    sampleBytes === null || rangeStartBytes === null ||
+    (["tiny", "sustained"].includes(phase) && rangeStartBytes !== 0) ||
+    (phase === "resume-seek" && rangeStartBytes <= 0) ||
     typeof record.success !== "boolean" || typeof record.rangeSeekOk !== "boolean" ||
     resets === null || timeouts === null || proxy407 === null || provider458 === null || http5xx === null ||
     (record.ttfbMs !== null && ttfbMs === null) ||
@@ -12960,8 +12971,9 @@ function parseProviderRouteMeasurement(value: unknown): ProviderRouteMeasurement
   ) return null;
   return {
     ...coordinate,
-    phase: phase as "tiny" | "sustained",
+    phase: phase as "tiny" | "sustained" | "resume-seek",
     sampleBytes,
+    rangeStartBytes,
     success: record.success,
     ttfbMs,
     first4MiBMs,
@@ -12982,7 +12994,7 @@ function providerRouteClamp(value: number, minimum: number, maximum: number): nu
 }
 
 function scoreProviderRouteEdge(measurement: ProviderRouteMeasurement): number {
-  if (measurement.proxy407 > 0) return 0;
+  if (measurement.proxy407 > 0 || measurement.success === false) return 0;
   const ttfbMs = measurement.ttfbMs ?? 30_000;
   const first4MiBMs = Math.max(ttfbMs, measurement.first4MiBMs ?? 60_000);
   const first16MiBMs = Math.max(first4MiBMs, measurement.first16MiBMs ?? 120_000);
@@ -13013,16 +13025,25 @@ function providerRouteMedian(values: Array<number | null>): number {
 
 function providerRouteConfidence(measurements: ProviderRouteMeasurement[]): number {
   if (!measurements.length) return 0;
-  const complete = measurements.filter((measurement) =>
+  const completeSustained = measurements.filter((measurement) =>
+    measurement.phase === "sustained" && measurement.success !== false &&
     Number(measurement.first16MiBMs || 0) > 0 &&
     Number(measurement.throughputBytesPerSecond || 0) > 0 &&
     measurement.rangeSeekOk
   ).length;
+  const resumeSamples = measurements.filter((measurement) => measurement.phase === "resume-seek");
+  const successfulResumeSamples = resumeSamples.filter((measurement) =>
+    measurement.success !== false && measurement.rangeSeekOk &&
+    measurement.rangeStartBytes > 0 && Number(measurement.throughputBytesPerSecond || 0) > 0
+  ).length;
   const sampleConfidence = providerRouteClamp(measurements.length / 5, 0, 1);
-  const completeness = complete / measurements.length;
-  const sustainedEvidence = complete > 0 ? 0.3 : 0;
+  const completeness = completeSustained / measurements.length;
+  const sustainedEvidence = completeSustained > 0 ? 0.2 : 0;
+  const resumeEvidence = resumeSamples.length > 0 && successfulResumeSamples === resumeSamples.length
+    ? 0.25
+    : 0;
   return Number(providerRouteClamp(
-    0.2 + sampleConfidence * 0.3 + completeness * 0.2 + sustainedEvidence,
+    0.2 + sampleConfidence * 0.2 + completeness * 0.15 + sustainedEvidence + resumeEvidence,
     0,
     1,
   ).toFixed(4));
@@ -13036,19 +13057,31 @@ function aggregateProviderRouteEdge(
     measurement.slot === coordinate.slot && measurement.nodeTransport === coordinate.nodeTransport
   );
   if (!matching.length) return null;
+  const sustained = matching.filter((measurement) => measurement.phase === "sustained");
+  const resume = matching.filter((measurement) => measurement.phase === "resume-seek");
+  const throughputEvidence = sustained.length
+    ? sustained
+    : matching.filter((measurement) => measurement.phase !== "resume-seek");
+  const ttfbEvidence = [...throughputEvidence, ...resume];
+  const resumePassed = resume.length === 0 || resume.every((measurement) =>
+    measurement.success !== false && measurement.rangeSeekOk && measurement.rangeStartBytes > 0
+  );
   const aggregate: ProviderRouteMeasurement = {
     ...coordinate,
     phase: "sustained",
     sampleBytes: Math.max(...matching.map((measurement) => measurement.sampleBytes)),
-    success: matching.filter((measurement) => measurement.success).length >= Math.ceil(matching.length / 2),
-    ttfbMs: providerRouteMedian(matching.map((measurement) => measurement.ttfbMs)),
-    first4MiBMs: providerRouteMedian(matching.map((measurement) => measurement.first4MiBMs)),
-    first16MiBMs: providerRouteMedian(matching.map((measurement) => measurement.first16MiBMs)),
+    rangeStartBytes: 0,
+    success: throughputEvidence.some((measurement) => measurement.success) && resumePassed,
+    ttfbMs: providerRouteMedian(ttfbEvidence.map((measurement) => measurement.ttfbMs)),
+    first4MiBMs: providerRouteMedian(throughputEvidence.map((measurement) => measurement.first4MiBMs)),
+    first16MiBMs: providerRouteMedian(throughputEvidence.map((measurement) => measurement.first16MiBMs)),
     throughputBytesPerSecond: providerRouteMedian(
-      matching.map((measurement) => measurement.throughputBytesPerSecond),
+      throughputEvidence.map((measurement) => measurement.throughputBytesPerSecond),
     ),
-    varianceRatio: providerRouteMedian(matching.map((measurement) => measurement.varianceRatio)),
-    rangeSeekOk: matching.filter((measurement) => measurement.rangeSeekOk).length >= Math.ceil(matching.length / 2),
+    varianceRatio: providerRouteMedian(throughputEvidence.map((measurement) => measurement.varianceRatio)),
+    rangeSeekOk: resume.length > 0
+      ? resumePassed
+      : matching.filter((measurement) => measurement.rangeSeekOk).length >= Math.ceil(matching.length / 2),
     resets: matching.reduce((sum, measurement) => sum + measurement.resets, 0),
     timeouts: matching.reduce((sum, measurement) => sum + measurement.timeouts, 0),
     proxy407: matching.reduce((sum, measurement) => sum + measurement.proxy407, 0),
@@ -13064,7 +13097,26 @@ function aggregateProviderRouteEdge(
   };
 }
 
-function rankProviderRouteEdge(measurements: ProviderRouteMeasurement[]): ProviderRouteAggregate[] {
+function providerRouteHasCompleteResumeEvidence(
+  coordinate: ProviderRouteCoordinate,
+  measurements: ProviderRouteMeasurement[],
+): boolean {
+  const matching = measurements.filter((measurement) =>
+    measurement.slot === coordinate.slot && measurement.nodeTransport === coordinate.nodeTransport
+  );
+  const sustained = matching.filter((measurement) => measurement.phase === "sustained");
+  const resume = matching.filter((measurement) => measurement.phase === "resume-seek");
+  return sustained.some((measurement) =>
+    measurement.success && measurement.rangeSeekOk && Number(measurement.first16MiBMs || 0) > 0
+  ) && resume.length > 0 && resume.every((measurement) =>
+    measurement.success && measurement.rangeSeekOk && measurement.rangeStartBytes > 0
+  );
+}
+
+function rankProviderRouteEdge(
+  measurements: ProviderRouteMeasurement[],
+  options: { requireResumeEvidence?: boolean } = {},
+): ProviderRouteAggregate[] {
   const coordinates = new Map<string, ProviderRouteCoordinate>();
   for (const measurement of measurements) {
     coordinates.set(providerRouteCoordinateKey(measurement), {
@@ -13073,6 +13125,10 @@ function rankProviderRouteEdge(measurements: ProviderRouteMeasurement[]): Provid
     });
   }
   return [...coordinates.values()]
+    .filter((coordinate) =>
+      options.requireResumeEvidence !== true ||
+      providerRouteHasCompleteResumeEvidence(coordinate, measurements)
+    )
     .map((coordinate) => aggregateProviderRouteEdge(coordinate, measurements))
     .filter((aggregate): aggregate is ProviderRouteAggregate => Boolean(aggregate))
     .sort((left, right) =>
@@ -13142,6 +13198,7 @@ function providerRouteMeasurementFromRow(value: unknown): ProviderRouteMeasureme
     provider458: row.provider_458 ?? 0,
     proxy407: row.proxy_407 ?? 0,
     rangeSeekOk: row.range_seek_ok === true,
+    rangeStartBytes: row.range_start_bytes ?? 0,
     resets: row.resets ?? 0,
     sampleBytes: row.sample_bytes ?? 0,
     slot: row.route_slot,
@@ -13157,7 +13214,7 @@ async function getProviderRoutePolicy(db: SupabaseClient): Promise<JsonRecord | 
   try {
     const { data, error } = await db
       .from("provider_route_policies")
-      .select("enabled,shadow_mode,route_ttl_seconds,minimum_confidence,minimum_relative_gain,sustained_candidate_wins,consecutive_failure_threshold,tiny_probe_bytes,sustained_probe_bytes,top_candidate_count,benchmark_lease_seconds,measurement_retention_seconds")
+      .select("enabled,shadow_mode,route_ttl_seconds,minimum_confidence,minimum_relative_gain,sustained_candidate_wins,consecutive_failure_threshold,tiny_probe_bytes,sustained_probe_bytes,resume_probe_bytes,top_candidate_count,benchmark_lease_seconds,measurement_retention_seconds")
       .eq("policy_key", "default")
       .maybeSingle();
     return error || !data ? null : recordOrEmpty(data);
@@ -13176,6 +13233,7 @@ function publicProviderRoutePolicy(policy: JsonRecord): JsonRecord {
     consecutiveFailureThreshold: providerRouteNumberOrNull(policy.consecutive_failure_threshold),
     tinyProbeBytes: providerRouteNumberOrNull(policy.tiny_probe_bytes),
     sustainedProbeBytes: providerRouteNumberOrNull(policy.sustained_probe_bytes),
+    resumeProbeBytes: providerRouteNumberOrNull(policy.resume_probe_bytes),
     topCandidateCount: providerRouteNumberOrNull(policy.top_candidate_count),
     benchmarkLeaseSeconds: providerRouteNumberOrNull(policy.benchmark_lease_seconds),
   };
@@ -13242,7 +13300,7 @@ async function recentProviderRouteMeasurements(
     const since = new Date(Date.now() - retentionSeconds * 1000).toISOString();
     const { data, error } = await db
       .from("provider_route_measurements")
-      .select("route_slot,node_transport,phase,sample_bytes,success,ttfb_ms,first_4mib_ms,first_16mib_ms,throughput_bytes_per_second,variance_ratio,range_seek_ok,resets,timeouts,proxy_407,provider_458,http_5xx")
+      .select("route_slot,node_transport,phase,sample_bytes,range_start_bytes,success,ttfb_ms,first_4mib_ms,first_16mib_ms,throughput_bytes_per_second,variance_ratio,range_seek_ok,resets,timeouts,proxy_407,provider_458,http_5xx")
       .eq(column, fingerprint)
       .gte("observed_at", since)
       .order("observed_at", { ascending: false })
@@ -13418,7 +13476,8 @@ async function reportProviderRouteBenchmark(
     throw new HttpError(400, "Invalid provider route measurements");
   }
   const acceptedMeasurements = measurements as ProviderRouteMeasurement[];
-  const batchRankings = rankProviderRouteEdge(acceptedMeasurements);
+  const batchRankings = rankProviderRouteEdge(acceptedMeasurements, { requireResumeEvidence: true });
+  const qualifiedBatchRoutes = new Set(batchRankings.map(providerRouteCoordinateKey));
   const confidenceByRoute = new Map(batchRankings.map((ranking) => [
     providerRouteCoordinateKey(ranking),
     ranking.confidence,
@@ -13430,6 +13489,7 @@ async function reportProviderRouteBenchmark(
     node_transport: measurement.nodeTransport,
     phase: measurement.phase,
     sample_bytes: measurement.sampleBytes,
+    range_start_bytes: measurement.rangeStartBytes,
     success: measurement.success,
     ttfb_ms: measurement.ttfbMs,
     first_4mib_ms: measurement.first4MiBMs,
@@ -13448,6 +13508,16 @@ async function reportProviderRouteBenchmark(
   const { error: insertError } = await db.from("provider_route_measurements").insert(rows);
   if (insertError) throw new HttpError(503, "Provider route measurement store unavailable");
 
+  if (!batchRankings.length) {
+    return {
+      protocol: 1,
+      accepted: true,
+      decision: null,
+      measurementCount: acceptedMeasurements.length,
+      qualification: "no-resume-safe-route",
+    };
+  }
+
   const retentionSeconds = providerRoutePolicyNumber(policy, "measurement_retention_seconds", 2_592_000);
   const accountMeasurements = await recentProviderRouteMeasurements(
     db,
@@ -13455,9 +13525,9 @@ async function reportProviderRouteBenchmark(
     accountFingerprint,
     retentionSeconds,
   );
-  const accountRankings = rankProviderRouteEdge(accountMeasurements.length
-    ? accountMeasurements
-    : acceptedMeasurements);
+  const accountRankings = rankProviderRouteEdge(
+    accountMeasurements.length ? accountMeasurements : acceptedMeasurements,
+  ).filter((ranking) => qualifiedBatchRoutes.has(providerRouteCoordinateKey(ranking)));
   const accountState = await persistProviderRouteState(
     db,
     accountFingerprint,
@@ -13472,7 +13542,9 @@ async function reportProviderRouteBenchmark(
     hostFingerprint,
     retentionSeconds,
   );
-  await persistProviderHostRouteState(db, hostFingerprint, policy, rankProviderRouteEdge(hostMeasurements));
+  const hostRankings = rankProviderRouteEdge(hostMeasurements)
+    .filter((ranking) => qualifiedBatchRoutes.has(providerRouteCoordinateKey(ranking)));
+  await persistProviderHostRouteState(db, hostFingerprint, policy, hostRankings);
   if (!accountState) throw new HttpError(503, "Provider route state store unavailable");
   const candidates = new Map<string, ProviderRouteCoordinate>();
   for (const measurement of acceptedMeasurements) {

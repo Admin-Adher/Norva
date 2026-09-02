@@ -10,8 +10,8 @@ const gateway = fs.readFileSync(path.join(
   '../services/media-gateway/src/index.js',
 ), 'utf8');
 
-test('Gateway v161 keeps adaptive routing behind dedicated route and benchmark gates', () => {
-  assert.match(gateway, /const GATEWAY_VERSION = 161;/);
+test('Gateway v162 keeps adaptive routing behind dedicated route and benchmark gates', () => {
+  assert.match(gateway, /const GATEWAY_VERSION = 162;/);
   assert.match(gateway, /process\.env\.PROVIDER_ADAPTIVE_ROUTE_ENABLED === 'true'/);
   assert.match(gateway, /process\.env\.PROVIDER_ROUTE_BENCHMARK_ENABLED === 'true'/);
   assert.match(gateway, /process\.env\.PROVIDER_ROUTE_FINGERPRINT_HMAC_KEY/);

@@ -3,6 +3,7 @@
 const crypto = require('node:crypto');
 
 const MIB = 1024 * 1024;
+const MAX_RESUME_RANGE_START_BYTES = (128 * 1024 * MIB) - 1;
 const NODE_TRANSPORTS = new Set(['http', 'socks5']);
 const DEFAULT_ROUTE_POLICY = Object.freeze({
     routeTtlMs: 7 * 24 * 60 * 60 * 1000,
@@ -12,6 +13,7 @@ const DEFAULT_ROUTE_POLICY = Object.freeze({
     consecutiveFailureThreshold: 3,
     tinyProbeBytes: 1 * MIB,
     sustainedProbeBytes: 16 * MIB,
+    resumeProbeBytes: 1 * MIB,
     topCandidateCount: 2,
 });
 
@@ -20,6 +22,7 @@ function clamp(value, minimum, maximum) {
 }
 
 function finiteNumber(value, fallback = 0) {
+    if (value === null || value === undefined || value === '') return fallback;
     const number = Number(value);
     return Number.isFinite(number) ? number : fallback;
 }
@@ -129,7 +132,7 @@ function providerRouteFingerprints(sourceUrl, fingerprintKey) {
 
 function scoreProviderRouteMeasurement(measurement = {}) {
     const proxy407 = nonNegativeInteger(measurement.proxy407);
-    if (proxy407 > 0) return 0;
+    if (proxy407 > 0 || measurement.success === false) return 0;
 
     const ttfbMs = Math.max(0, finiteNumber(measurement.ttfbMs, 30_000));
     const first4MiBMs = Math.max(ttfbMs, finiteNumber(measurement.first4MiBMs, 60_000));
@@ -169,19 +172,24 @@ function scoreProviderRouteMeasurement(measurement = {}) {
 function confidenceForMeasurements(measurements) {
     const samples = Array.isArray(measurements) ? measurements : [];
     if (!samples.length) return 0;
-    const complete = samples.filter((measurement) =>
+    const completeSustained = samples.filter((measurement) =>
+        measurement.phase === 'sustained' && measurement.success !== false &&
         finiteNumber(measurement.first16MiBMs, 0) > 0 &&
         finiteNumber(measurement.throughputBytesPerSecond, 0) > 0 &&
         measurement.rangeSeekOk === true).length;
+    const resumeSamples = samples.filter((measurement) => measurement.phase === 'resume-seek');
+    const successfulResumeSamples = resumeSamples.filter((measurement) =>
+        measurement.success !== false && measurement.rangeSeekOk === true &&
+        finiteNumber(measurement.rangeStartBytes, 0) > 0 &&
+        finiteNumber(measurement.throughputBytesPerSecond, 0) > 0).length;
     const sampleConfidence = clamp(samples.length / 5, 0, 1);
-    const completeness = complete / samples.length;
-    // One complete 16 MiB probe is materially stronger evidence than several
-    // tiny TTFB samples. Give that end-to-end range proof enough weight to pass
-    // the minimum-confidence gate, while hysteresis still requires repeated
-    // benchmark wins before an existing sticky route can change.
-    const sustainedEvidence = complete > 0 ? 0.3 : 0;
+    const completeness = completeSustained / samples.length;
+    const sustainedEvidence = completeSustained > 0 ? 0.2 : 0;
+    const resumeEvidence = resumeSamples.length > 0 && successfulResumeSamples === resumeSamples.length
+        ? 0.25
+        : 0;
     return Number(clamp(
-        0.2 + sampleConfidence * 0.3 + completeness * 0.2 + sustainedEvidence,
+        0.2 + sampleConfidence * 0.2 + completeness * 0.15 + sustainedEvidence + resumeEvidence,
         0,
         1,
     ).toFixed(4));
@@ -199,15 +207,24 @@ function aggregateProviderRouteMeasurements(route, measurements) {
     const matching = (Array.isArray(measurements) ? measurements : [])
         .filter((measurement) => routeId(measurement) === id);
     if (!matching.length) return null;
+    const sustained = matching.filter((item) => item.phase === 'sustained');
+    const resume = matching.filter((item) => item.phase === 'resume-seek');
+    const throughputEvidence = sustained.length ? sustained : matching.filter((item) => item.phase !== 'resume-seek');
+    const ttfbEvidence = [...throughputEvidence, ...resume];
+    const resumePassed = resume.length === 0 || resume.every((item) =>
+        item.success !== false && item.rangeSeekOk === true && finiteNumber(item.rangeStartBytes, 0) > 0);
     const aggregate = {
         slot: route.slot,
         nodeTransport: route.nodeTransport,
-        ttfbMs: median(matching.map((item) => finiteNumber(item.ttfbMs, 30_000))),
-        first4MiBMs: median(matching.map((item) => finiteNumber(item.first4MiBMs, 60_000))),
-        first16MiBMs: median(matching.map((item) => finiteNumber(item.first16MiBMs, 120_000))),
-        throughputBytesPerSecond: median(matching.map((item) => finiteNumber(item.throughputBytesPerSecond, 0))),
-        varianceRatio: median(matching.map((item) => finiteNumber(item.varianceRatio, 1))),
-        rangeSeekOk: matching.filter((item) => item.rangeSeekOk === true).length >= Math.ceil(matching.length / 2),
+        success: throughputEvidence.some((item) => item.success !== false) && resumePassed,
+        ttfbMs: median(ttfbEvidence.map((item) => finiteNumber(item.ttfbMs, 30_000))),
+        first4MiBMs: median(throughputEvidence.map((item) => finiteNumber(item.first4MiBMs, 60_000))),
+        first16MiBMs: median(throughputEvidence.map((item) => finiteNumber(item.first16MiBMs, 120_000))),
+        throughputBytesPerSecond: median(throughputEvidence.map((item) => finiteNumber(item.throughputBytesPerSecond, 0))),
+        varianceRatio: median(throughputEvidence.map((item) => finiteNumber(item.varianceRatio, 1))),
+        rangeSeekOk: resume.length > 0
+            ? resumePassed
+            : matching.filter((item) => item.rangeSeekOk === true).length >= Math.ceil(matching.length / 2),
         resets: matching.reduce((sum, item) => sum + nonNegativeInteger(item.resets), 0),
         timeouts: matching.reduce((sum, item) => sum + nonNegativeInteger(item.timeouts), 0),
         proxy407: matching.reduce((sum, item) => sum + nonNegativeInteger(item.proxy407), 0),
@@ -222,6 +239,31 @@ function aggregateProviderRouteMeasurements(route, measurements) {
         sampleCount: matching.length,
         metrics: Object.freeze(aggregate),
     });
+}
+
+function resumeSeekOffsets(resourceSizeBytes, sampleBytes) {
+    const size = Math.max(0, Math.trunc(finiteNumber(resourceSizeBytes, 0)));
+    const sample = Math.max(256 * 1024, Math.trunc(finiteNumber(sampleBytes, MIB)));
+    if (size <= sample) return [];
+    const maximumStart = Math.min(size - sample, MAX_RESUME_RANGE_START_BYTES);
+    const align = (value) => Math.floor(Math.min(maximumStart, Math.max(MIB, value)) / MIB) * MIB;
+    return [...new Set([
+        align(size * 0.05),
+        align(size * 0.5),
+    ].filter((value) => value > 0 && value <= maximumStart))];
+}
+
+function routeHasCompleteResumeEvidence(route, measurements) {
+    const id = routeId(route);
+    const matching = measurements.filter((measurement) => routeId(measurement) === id);
+    const sustained = matching.filter((measurement) => measurement.phase === 'sustained');
+    const resume = matching.filter((measurement) => measurement.phase === 'resume-seek');
+    return sustained.some((measurement) =>
+        measurement.success !== false && measurement.rangeSeekOk === true &&
+        finiteNumber(measurement.first16MiBMs, 0) > 0) &&
+        resume.length > 0 && resume.every((measurement) =>
+            measurement.success !== false && measurement.rangeSeekOk === true &&
+            finiteNumber(measurement.rangeStartBytes, 0) > 0);
 }
 
 function rankProviderRoutes(candidates, measurements) {
@@ -331,7 +373,39 @@ async function benchmarkProviderRoutesSequentially({
         measurements.push({ ...measurement, slot: candidate.slot, nodeTransport: candidate.nodeTransport, phase: 'sustained' });
     }
 
-    const rankings = rankProviderRoutes(candidates, measurements);
+    const finalistCandidates = candidates.filter((candidate) =>
+        finalists.some((finalist) => finalist.id === candidate.id));
+    const finalistRankings = rankProviderRoutes(finalistCandidates, measurements);
+    for (const finalist of finalistRankings) {
+        const candidate = candidates.find((item) => item.id === finalist.id);
+        const resourceSizeBytes = measurements
+            .filter((measurement) => routeId(measurement) === finalist.id)
+            .map((measurement) => finiteNumber(measurement.resourceSizeBytes, 0))
+            .find((value) => value > effective.resumeProbeBytes) || 0;
+        const offsets = resumeSeekOffsets(resourceSizeBytes, effective.resumeProbeBytes);
+        for (const rangeStartBytes of offsets) {
+            if (!await mayContinue()) {
+                return { status: 'preempted', measurements, rankings: rankProviderRoutes(candidates, measurements) };
+            }
+            const measurement = await probe(candidate, {
+                phase: 'resume-seek',
+                sampleBytes: effective.resumeProbeBytes,
+                rangeStartBytes,
+                signal,
+            });
+            measurements.push({
+                ...measurement,
+                slot: candidate.slot,
+                nodeTransport: candidate.nodeTransport,
+                phase: 'resume-seek',
+                rangeStartBytes,
+            });
+        }
+    }
+
+    const qualifiedCandidates = finalistCandidates.filter((candidate) =>
+        routeHasCompleteResumeEvidence(candidate, measurements));
+    const rankings = rankProviderRoutes(qualifiedCandidates, measurements);
     return {
         status: aborted(signal) ? 'preempted' : 'completed',
         measurements,
@@ -342,6 +416,7 @@ async function benchmarkProviderRoutesSequentially({
 
 module.exports = {
     DEFAULT_ROUTE_POLICY,
+    MAX_RESUME_RANGE_START_BYTES,
     MIB,
     aggregateProviderRouteMeasurements,
     benchmarkProviderRoutesSequentially,
@@ -350,7 +425,9 @@ module.exports = {
     evaluateProviderRouteTransition,
     providerRouteFingerprints,
     rankProviderRoutes,
+    resumeSeekOffsets,
     routeId,
+    routeHasCompleteResumeEvidence,
     scoreProviderRouteMeasurement,
     selectInitialProviderRoute,
 };

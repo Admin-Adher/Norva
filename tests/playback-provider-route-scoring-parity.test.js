@@ -64,6 +64,7 @@ function measurement(overrides = {}) {
     phase: 'sustained',
     provider458: 0,
     proxy407: 0,
+    rangeStartBytes: 0,
     rangeSeekOk: true,
     resets: 0,
     sampleBytes: 16 * 1024 * 1024,
@@ -109,7 +110,7 @@ test('Edge measurement parser rejects leaked fields and rankings keep the fastes
   assert.ok(rankings[0].score > rankings[1].score);
 });
 
-test('one sustained probe plus its tiny sweep clears the route confidence gate on both runtimes', () => {
+test('prefix plus resume-range evidence clears the route confidence gate on both runtimes', () => {
   const edge = edgeScoringHarness();
   const tiny = edge.parseProviderRouteMeasurement(measurement({
     phase: 'tiny',
@@ -118,13 +119,52 @@ test('one sustained probe plus its tiny sweep clears the route confidence gate o
     first16MiBMs: null,
   }));
   const sustained = edge.parseProviderRouteMeasurement(measurement());
-  const samples = [tiny, sustained];
+  const earlyResume = edge.parseProviderRouteMeasurement(measurement({
+    phase: 'resume-seek',
+    sampleBytes: 1024 * 1024,
+    rangeStartBytes: 256 * 1024 * 1024,
+    first4MiBMs: null,
+    first16MiBMs: null,
+  }));
+  const middleResume = edge.parseProviderRouteMeasurement(measurement({
+    phase: 'resume-seek',
+    sampleBytes: 1024 * 1024,
+    rangeStartBytes: 2560 * 1024 * 1024,
+    first4MiBMs: null,
+    first16MiBMs: null,
+  }));
+  const samples = [tiny, sustained, earlyResume, middleResume];
   assert.ok(samples.every(Boolean));
   assert.equal(
     edge.providerRouteConfidence(samples),
     routeEngine.confidenceForMeasurements(samples),
   );
   assert.ok(edge.providerRouteConfidence(samples) >= 0.65);
+});
+
+test('Edge and Gateway both exclude a fast prefix route with failed resume evidence', () => {
+  const edge = edgeScoringHarness();
+  const samples = [
+    measurement({ phase: 'tiny', sampleBytes: 1024 * 1024, first4MiBMs: null, first16MiBMs: null }),
+    measurement(),
+    measurement({
+      phase: 'resume-seek',
+      sampleBytes: 1024 * 1024,
+      rangeStartBytes: 256 * 1024 * 1024,
+      success: false,
+      rangeSeekOk: false,
+      timeouts: 1,
+      ttfbMs: null,
+      first4MiBMs: null,
+      first16MiBMs: null,
+      throughputBytesPerSecond: 0,
+    }),
+  ];
+  const parsed = samples.map(edge.parseProviderRouteMeasurement);
+  assert.ok(parsed.every(Boolean));
+  assert.equal(edge.rankProviderRouteEdge(parsed, { requireResumeEvidence: true }).length, 0);
+  const gatewayCandidate = { id: '1:http', slot: 1, nodeTransport: 'http' };
+  assert.equal(routeEngine.routeHasCompleteResumeEvidence(gatewayCandidate, samples), false);
 });
 
 test('Edge and Gateway apply identical route hysteresis including explicit zero policy values', () => {

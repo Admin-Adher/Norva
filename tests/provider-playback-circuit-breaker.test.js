@@ -324,7 +324,7 @@ test('playback edge checks the circuit, claims one account session and reports s
   assert.match(heartbeat, /PLAYBACK_SUPERSEDED/);
   assert.match(edge, /open_provider_playback_circuit/);
   assert.match(edge, /PROVIDER_ACCOUNT_BUSY/);
-  assert.match(edge, /version:\s*78/);
+  assert.match(edge, /version:\s*79/);
   assert.match(edge, /providerCircuitProtocol:\s*1/);
   assert.match(edge, /exactFileCodecProfileProtocol:\s*1/);
 });
@@ -579,11 +579,11 @@ test('production rollout proves the provider circuit protocol on every runtime',
   const cloud = read('supabase/functions/norva-cloud/index.ts');
   const deploy = read('ops/hetzner/scripts/04-deploy-edge-functions.sh');
 
-  assert.match(gateway, /const GATEWAY_VERSION = 161/);
+  assert.match(gateway, /const GATEWAY_VERSION = 162/);
   assert.match(gateway, /providerCircuitProtocol:\s*1/);
   assert.match(gateway, /providerProxyAffinityProtocol:\s*1/);
   assert.match(gateway, /exactFileCodecProfileProtocol:\s*1/);
-  assert.match(playback, /version:\s*78/);
+  assert.match(playback, /version:\s*79/);
   assert.match(playback, /providerCircuitProtocol:\s*1/);
   assert.match(playback, /exactFileCodecProfileProtocol:\s*1/);
   assert.match(playback, /relayTakeoverProtocol:\s*1/);
@@ -594,7 +594,7 @@ test('production rollout proves the provider circuit protocol on every runtime',
   assert.match(cloud, /relayCoordinatorLockTtlMs:\s*EDGE_SESSION_COORDINATOR_LOCK_TTL_MS/);
 
   assert.match(deploy, /verify_function_protocol "\$service"/);
-  assert.match(deploy, /EXPECTED_PLAYBACK_VERSION=78/);
+  assert.match(deploy, /EXPECTED_PLAYBACK_VERSION=79/);
   assert.match(deploy, /EXPECTED_RELAY_COORDINATOR_LOCK_TTL_MS=120000/);
   assert.match(deploy, /EXPECTED_ENGINE_TRACK_PROBE_BLOCKING=false/);
   assert.match(deploy, /EXPECTED_EXACT_FILE_CODEC_PROFILE_PROTOCOL=1/);
