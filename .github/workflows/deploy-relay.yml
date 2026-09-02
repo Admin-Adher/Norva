@@ -57,12 +57,16 @@ jobs:
       cancel-in-progress: false
     environment: Cloudflare
     env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_MEDIA_CACHE_DEPLOY_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      MEDIA_CACHE_CANARY_PURGE_TOKEN: ${{ secrets.CLOUDFLARE_MEDIA_CACHE_PURGE_TOKEN }}
       MEDIA_CACHE_CANARY_BASE_URL: https://media-cache-canary.norva.tv
       MEDIA_CACHE_CANARY_EXPECT_HOST: media-cache-canary.norva.tv
       MEDIA_CACHE_CANARY_REQUIRE_GLOBAL_PURGE: 'true'
       MEDIA_CACHE_CANARY_RUN_ID: gha-${{ github.run_id }}-${{ github.run_attempt }}
+      MEDIA_CACHE_CANARY_BUCKET_CREATED: 'false'
+      MEDIA_CACHE_CANARY_WORKER_ATTEMPTED: 'false'
+      MEDIA_CACHE_CANARY_READY: 'false'
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
@@ -87,6 +91,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          test -n "$MEDIA_CACHE_CANARY_PURGE_TOKEN"
           service_token="$(openssl rand -hex 32)"
           manifest_key="$(openssl rand -hex 32)"
           ticket_key="$(openssl rand -hex 32)"
@@ -123,9 +130,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if ! npx --no-install wrangler r2 bucket info norva-media-cache-canary --json >/dev/null 2>&1; then
-            npx --no-install wrangler r2 bucket create norva-media-cache-canary
+          if npx --no-install wrangler r2 bucket info norva-media-cache-canary --json >/dev/null 2>&1; then
+            echo 'Refusing to reuse a pre-existing canary R2 bucket.' >&2
+            exit 1
           fi
+          npx --no-install wrangler r2 bucket create norva-media-cache-canary
+          printf 'MEDIA_CACHE_CANARY_BUCKET_CREATED=true\n' >> "$GITHUB_ENV"
+          printf 'MEDIA_CACHE_CANARY_WORKER_ATTEMPTED=true\n' >> "$GITHUB_ENV"
           npx --no-install wrangler deploy --config workers/media-cache/wrangler.canary.toml
           node -e '
             process.stdout.write(JSON.stringify({
@@ -133,10 +144,11 @@ jobs:
               MEDIA_CACHE_MANIFEST_HMAC_KEY: process.env.MEDIA_CACHE_CANARY_MANIFEST_HMAC_KEY,
               MEDIA_CACHE_TICKET_HMAC_KEY: process.env.MEDIA_CACHE_CANARY_TICKET_HMAC_KEY,
               MEDIA_CACHE_CLOUDFLARE_ZONE_ID: process.env.MEDIA_CACHE_CANARY_ZONE_ID,
-              MEDIA_CACHE_CLOUDFLARE_PURGE_TOKEN: process.env.CLOUDFLARE_API_TOKEN,
+              MEDIA_CACHE_CLOUDFLARE_PURGE_TOKEN: process.env.MEDIA_CACHE_CANARY_PURGE_TOKEN,
             }));
           ' | npx --no-install wrangler secret bulk --config workers/media-cache/wrangler.canary.toml
           npx --no-install wrangler deploy --config workers/media-cache/wrangler.canary.toml
+          printf 'MEDIA_CACHE_CANARY_READY=true\n' >> "$GITHUB_ENV"
 
       - name: Prove private R2, CDN hit, global purge and recovery
         shell: bash
@@ -150,17 +162,33 @@ jobs:
         shell: bash
         env:
           MEDIA_CACHE_CANARY_CLEANUP_ONLY: 'true'
+          MEDIA_CACHE_CANARY_HEALTH_ATTEMPTS: '6'
         run: |
           set -uo pipefail
           cleanup_status=0
-          node ops/cloudflare/media-cache-canary-client.mjs || cleanup_status=$?
+          if [ "$MEDIA_CACHE_CANARY_READY" = 'true' ]; then
+            node ops/cloudflare/media-cache-canary-client.mjs || cleanup_status=$?
+          else
+            echo 'Skipping object cleanup because the configured Worker never became ready.'
+          fi
           delete_worker_status=0
-          npx --no-install wrangler delete norva-media-cache-canary --force || delete_worker_status=$?
+          if [ "$MEDIA_CACHE_CANARY_WORKER_ATTEMPTED" = 'true' ]; then
+            worker_delete_log="$(mktemp)"
+            if ! npx --no-install wrangler delete norva-media-cache-canary --force >"$worker_delete_log" 2>&1; then
+              if ! grep -Fq '[code: 10090]' "$worker_delete_log"; then
+                cat "$worker_delete_log" >&2
+                delete_worker_status=1
+              fi
+            fi
+            rm -f -- "$worker_delete_log"
+          fi
           delete_bucket_status=0
-          npx --no-install wrangler r2 bucket delete norva-media-cache-canary || delete_bucket_status=$?
-          if npx --no-install wrangler r2 bucket info norva-media-cache-canary --json >/dev/null 2>&1; then
-            echo 'Canary R2 bucket still exists after cleanup.' >&2
-            delete_bucket_status=1
+          if [ "$MEDIA_CACHE_CANARY_BUCKET_CREATED" = 'true' ]; then
+            npx --no-install wrangler r2 bucket delete norva-media-cache-canary || delete_bucket_status=$?
+            if npx --no-install wrangler r2 bucket info norva-media-cache-canary --json >/dev/null 2>&1; then
+              echo 'Canary R2 bucket still exists after cleanup.' >&2
+              delete_bucket_status=1
+            fi
           fi
           if [ "$cleanup_status" -ne 0 ] || [ "$delete_worker_status" -ne 0 ] || [ "$delete_bucket_status" -ne 0 ]; then
             echo "Canary cleanup failed: object=$cleanup_status worker=$delete_worker_status bucket=$delete_bucket_status" >&2

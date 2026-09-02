@@ -23,6 +23,16 @@ function enabled(name, fallback = false) {
   throw new Error(`${name} is invalid`);
 }
 
+function boundedInteger(name, fallback, minimum, maximum) {
+  const raw = String(process.env[name] || '').trim();
+  if (!raw) return fallback;
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value < minimum || value > maximum) {
+    throw new Error(`${name} is invalid`);
+  }
+  return value;
+}
+
 function canonicalJson(value) {
   if (value === null || typeof value === 'string' || typeof value === 'boolean') return JSON.stringify(value);
   if (typeof value === 'number' && Number.isFinite(value)) return JSON.stringify(value);
@@ -157,6 +167,7 @@ const ticketKey = required('MEDIA_CACHE_CANARY_TICKET_HMAC_KEY', /^[0-9a-f]{64}$
 const runId = required('MEDIA_CACHE_CANARY_RUN_ID', /^[A-Za-z0-9._-]{1,128}$/);
 const requireGlobalPurge = enabled('MEDIA_CACHE_CANARY_REQUIRE_GLOBAL_PURGE', false);
 const cleanupOnly = enabled('MEDIA_CACHE_CANARY_CLEANUP_ONLY', false);
+const healthAttempts = boundedInteger('MEDIA_CACHE_CANARY_HEALTH_ATTEMPTS', 30, 1, 60);
 const expectedHost = String(process.env.MEDIA_CACHE_CANARY_EXPECT_HOST || '').trim().toLowerCase();
 if (baseUrl.protocol !== 'https:' && baseUrl.hostname !== '127.0.0.1' && baseUrl.hostname !== 'localhost') {
   throw new Error('canary base URL must use HTTPS');
@@ -213,7 +224,7 @@ async function cleanup() {
 }
 
 try {
-  await waitForHealth(baseUrl, serviceToken);
+  await waitForHealth(baseUrl, serviceToken, healthAttempts);
   if (cleanupOnly) {
     await cleanup();
     process.stdout.write(`${JSON.stringify({ ok: true, protocol: 1, cleanupOnly: true, objectKey })}\n`);
