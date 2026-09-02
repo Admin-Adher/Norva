@@ -8,6 +8,7 @@ const vm = require('node:vm');
 
 const watch = fs.readFileSync(path.join(__dirname, '../public/js/pages/WatchPage.js'), 'utf8');
 const cloudApi = fs.readFileSync(path.join(__dirname, '../public/js/cloudApi.js'), 'utf8');
+const api = fs.readFileSync(path.join(__dirname, '../public/js/api.js'), 'utf8');
 
 function loadWatchPage(cloud = {}) {
   const context = {
@@ -90,6 +91,80 @@ test('ticket renews proactively and retries an authenticated HLS request', () =>
   assert.match(refresh, /this\.hls\?\.startLoad\(\)/);
   assert.match(watch, /\[401, 403\]\.includes\(responseStatus\)/);
   assert.match(watch, /refreshPrivateMediaCacheTicket\('http-auth'\)/);
+  assert.match(watch, /responseStatus >= 400/);
+  assert.match(watch, /!\[401, 403\]\.includes\(responseStatus\)/);
+});
+
+test('expired ticket renewal falls back to the provider before showing a terminal error', async () => {
+  const cloud = {
+    token: 'user-token',
+    playback: {
+      refreshMediaCacheTicket: async () => { throw new Error('worker unavailable'); },
+    },
+  };
+  const WatchPage = loadWatchPage(cloud);
+  const page = Object.create(WatchPage.prototype);
+  const sessionId = '11111111-1111-4111-8111-111111111111';
+  page._privateMediaCacheTicketPromise = null;
+  page._privateMediaCacheTicketGeneration = 4;
+  page._privateMediaCacheTicketTimer = null;
+  page._privateMediaCacheAccess = page.normalizePrivateMediaCacheAccess(cacheContract(), sessionId);
+  page._privateMediaCacheAccess.ticketExpiresAtMs = Date.now() - 1;
+  page._playbackAttemptId = 12;
+  page.isPlaybackSupersededError = () => false;
+  page.isStalePlaybackAttempt = () => false;
+  const fallbacks = [];
+  const errors = [];
+  page.fallbackPrivateMediaCacheToProvider = async (...args) => {
+    fallbacks.push(args);
+    return true;
+  };
+  page.showPlaybackError = (...args) => { errors.push(args); };
+
+  assert.equal(await page.refreshPrivateMediaCacheTicket('scheduled'), false);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(fallbacks, [[12, 'authorization-expired']]);
+  assert.deepEqual(errors, []);
+});
+
+test('private cache delivery failure bypasses exactly once per authorized cache session', async () => {
+  assert.match(api, /mediaCacheReadPolicy:\s*'bypass-once'/);
+  assert.match(watch, /privateCacheDeliveryFailure/);
+  assert.match(watch, /fallbackPrivateMediaCacheToProvider/);
+  assert.match(watch, /mediaCacheReadPolicy:\s*'bypass-once'/);
+
+  const WatchPage = loadWatchPage();
+  const page = Object.create(WatchPage.prototype);
+  const sessionId = '11111111-1111-4111-8111-111111111111';
+  page._privateMediaCacheTicketPromise = null;
+  page._privateMediaCacheTicketGeneration = 1;
+  page._privateMediaCacheTicketTimer = null;
+  page._privateMediaCacheFallbackSessionIds = new Set();
+  page._privateMediaCacheAccess = page.normalizePrivateMediaCacheAccess(cacheContract(), sessionId);
+  page.isStalePlaybackAttempt = () => false;
+  page.getPlaybackPosition = () => 42.9;
+  page.trackPlaybackPosition = () => {};
+  page.saveResumeSnapshotThrottled = () => {};
+  page.showLoading = () => {};
+  page.captureVodPlaybackIdentity = () => ({ sourceId: 'source', itemId: 'item' });
+  const restarts = [];
+  page.restartCloudGatewayStreamAt = async (...args) => { restarts.push(args); };
+
+  assert.equal(await page.fallbackPrivateMediaCacheToProvider(7, 'delivery-502'), true);
+  assert.equal(page.resumeTime, 42);
+  assert.equal(page._privateMediaCacheAccess, null);
+  assert.equal(restarts.length, 1);
+  assert.equal(restarts[0][0], 42);
+  assert.equal(restarts[0][1].mediaCacheReadPolicy, 'bypass-once');
+
+  page._privateMediaCacheAccess = page.normalizePrivateMediaCacheAccess(cacheContract(), sessionId);
+  assert.equal(await page.fallbackPrivateMediaCacheToProvider(7, 'delivery-502'), false);
+  assert.ok(page._privateMediaCacheAccess);
+
+  const nextSessionId = '22222222-2222-4222-8222-222222222222';
+  page._privateMediaCacheAccess = page.normalizePrivateMediaCacheAccess(cacheContract(), nextSessionId);
+  assert.equal(await page.fallbackPrivateMediaCacheToProvider(7, 'delivery-503'), true);
+  assert.equal(restarts.length, 2);
 });
 
 test('private cache skips provider probing and is cleared on teardown', () => {

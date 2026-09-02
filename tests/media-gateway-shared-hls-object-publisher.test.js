@@ -197,3 +197,20 @@ test('prefix-only, live and failed FFmpeg outputs never start an object publicat
   }
   assert.equal(simulator.snapshot().puts, 0);
 });
+
+test('admission TTL can shorten shared retention but never exceed the configured maximum', async (t) => {
+  const simulator = new PrivateR2Simulator({ root: await temporary(t, 'norva-shared-hls-r2-ttl-') });
+  const fixture = await hlsFixture(t);
+  const now = 5_000_000;
+  const cache = publisher(simulator, { now: () => now, ttlMs: 60_000 });
+  const published = await cache.publish(completeOptions(fixture, { ttlMs: 5_000 }));
+  assert.equal(published.expiresAtMs, now + 5_000);
+  const other = new PrivateR2Simulator({ root: await temporary(t, 'norva-shared-hls-r2-ttl-over-') });
+  await assert.rejects(
+    () => publisher(other, { ttlMs: 60_000 }).publish(completeOptions(fixture, {
+      identity: identity({ contentSha256: 'e1'.repeat(32) }),
+      ttlMs: 60_001,
+    })),
+    (error) => error.code === 'INVALID_SHARED_HLS_CONFIG',
+  );
+});

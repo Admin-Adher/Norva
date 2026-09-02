@@ -13,6 +13,10 @@ const context = Object.freeze({
   accountFingerprint: 'cd'.repeat(32),
   leaseToken: '11111111-1111-4111-8111-111111111111',
   ownerInstanceFingerprint: 'ef'.repeat(32),
+  admission: Object.freeze({
+    mode: 'enforced', admitted: true, score: 88, confidence: 71,
+    reason: 'repeated', ttlSeconds: 1_209_600,
+  }),
 });
 
 function session() {
@@ -29,6 +33,12 @@ test('producer context is exact, opaque and rejects partial or extra authority',
   assert.equal(normalizeMediaCacheProducerContext({ ...context, leaseToken: null }), null);
   assert.equal(normalizeMediaCacheProducerContext({ ...context, sourceUrl: 'https://secret' }), null);
   assert.equal(normalizeMediaCacheProducerContext({ ...context, workFingerprint: 'nope' }), null);
+  assert.equal(normalizeMediaCacheProducerContext({
+    ...context,
+    admission: { ...context.admission, admitted: true, mode: 'shadow' },
+  }), null);
+  const { admission: _admission, ...legacy } = context;
+  assert.equal(normalizeMediaCacheProducerContext(legacy).admission.admitted, false);
 });
 
 test('Gateway pulse carries only session ids, action and stage', async () => {

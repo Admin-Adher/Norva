@@ -45,7 +45,7 @@ test('viewer resolution preempts a benchmark before reading a sticky account or 
   assert.ok(preempt >= 0 && accountLookup > preempt);
   assert.match(resolver, /scope", "account"/);
   assert.match(resolver, /scope", "host"/);
-  assert.match(resolver, /apply: enabled && !shadowMode && Boolean\(decision\)/);
+  assert.match(resolver, /const apply = enabled && !shadowMode && Boolean\(decision\)/);
 });
 
 test('route-control migration lag fails open to the Gateway sticky route without leaking state', () => {

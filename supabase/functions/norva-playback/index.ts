@@ -112,6 +112,14 @@ type MediaCacheProducerContext = {
   accountFingerprint: string;
   leaseToken: string;
   ownerInstanceFingerprint: string;
+  admission: {
+    mode: "off" | "shadow" | "enforced";
+    admitted: boolean;
+    score: number;
+    confidence: number;
+    reason: "repeated" | "popular" | "costly" | "not-admitted";
+    ttlSeconds: number;
+  };
 };
 type MediaCacheSingleflightLifecycle = {
   producer: MediaCacheProducerContext | null;
@@ -554,6 +562,15 @@ async function handleRequest(req: Request): Promise<Response> {
     }
     if (req.method === "POST" && segments[0] === "media-cache" && segments[1] === "producer-control") {
       return json(req, await runMediaCacheProducerControl(req, supabase));
+    }
+    if (req.method === "POST" && segments[0] === "media-cache" && segments[1] === "maintenance") {
+      return json(req, await runMediaCacheMaintenance(req, supabase));
+    }
+    if (req.method === "POST" && segments[0] === "media-cache" && segments[1] === "purge") {
+      return json(req, await runMediaCachePurge(req, supabase), 202);
+    }
+    if (req.method === "POST" && segments[0] === "media-cache" && segments[1] === "recovery") {
+      return json(req, await runMediaCacheRecovery(req, supabase));
     }
     if (req.method === "POST" && segments[0] === "complete-cache-callback") {
       return json(req, await runCompleteHlsCacheCallback(req, supabase));
@@ -1031,6 +1048,61 @@ function playbackRequestAbortError(): Error {
   return error;
 }
 
+async function preflightAuthorizedMediaCachePlayback(
+  mediaCacheValue: unknown,
+  requestSignal: AbortSignal,
+): Promise<void> {
+  const mediaCache = recordOrEmpty(mediaCacheValue);
+  const authorization = recordOrEmpty(mediaCache.authorization);
+  const playlistUrl = stringOr(mediaCache.playlistUrl, "");
+  const ticket = stringOr(authorization.token, "");
+  if (!playlistUrl || authorization.scheme !== "Bearer" || !ticket) {
+    throw new HttpError(503, "Private media cache delivery is unavailable", {
+      code: "MEDIA_CACHE_DELIVERY_UNAVAILABLE",
+      cacheCode: "authorization-invalid",
+    });
+  }
+  if (requestSignal.aborted) throw playbackRequestAbortError();
+  let response: Response;
+  try {
+    response = await fetch(playlistUrl, {
+      method: "GET",
+      headers: { Authorization: `Bearer ${ticket}` },
+      signal: AbortSignal.timeout(3_000),
+    });
+  } catch (_) {
+    throw new HttpError(503, "Private media cache delivery is unavailable", {
+      code: "MEDIA_CACHE_DELIVERY_UNAVAILABLE",
+      cacheCode: "network",
+    });
+  }
+  if (!response.ok) {
+    let cacheCode = `http-${response.status}`;
+    try {
+      const errorPayload = recordOrEmpty(await response.json());
+      const candidate = stringOr(errorPayload.code, "").toLowerCase();
+      if (/^[a-z0-9_-]{1,64}$/.test(candidate)) cacheCode = candidate;
+    } catch (_) {
+      await response.body?.cancel().catch(() => {});
+    }
+    throw new HttpError(503, "Private media cache delivery is unavailable", {
+      code: "MEDIA_CACHE_DELIVERY_UNAVAILABLE",
+      cacheCode,
+      cacheStatus: response.status,
+    });
+  }
+  const contentType = stringOr(response.headers.get("content-type"), "").toLowerCase();
+  if (!contentType.includes("mpegurl")) {
+    await response.body?.cancel().catch(() => {});
+    throw new HttpError(503, "Private media cache delivery is unavailable", {
+      code: "MEDIA_CACHE_DELIVERY_UNAVAILABLE",
+      cacheCode: "playlist-content-type",
+    });
+  }
+  await response.body?.cancel().catch(() => {});
+  if (requestSignal.aborted) throw playbackRequestAbortError();
+}
+
 async function completeClaimedMediaCachePlayback(options: {
   req: Request;
   db: SupabaseClient;
@@ -1085,6 +1157,7 @@ async function completeClaimedMediaCachePlayback(options: {
   try {
     if (req.signal.aborted) throw playbackRequestAbortError();
     const mediaCache = await createAuthorizedMediaCachePlayback(runtimeConfig, sessionId, claim);
+    await preflightAuthorizedMediaCachePlayback(mediaCache, req.signal);
     const { data: session, error: sessionError } = await db
       .from("cloud_playback_sessions")
       .select("*")
@@ -1097,6 +1170,11 @@ async function completeClaimedMediaCachePlayback(options: {
     }
     await releaseSupersededPlaybackSessions(supersededSessionIds, db);
     if (req.signal.aborted) throw playbackRequestAbortError();
+    runBackground(db.rpc("norva_record_media_cache_metric", {
+      p_metric: "viewer_joined", p_value: 1, p_samples: 1,
+      p_layer: "l2", p_market_region: "global", p_route_slot: "none",
+      p_route_protocol: "none", p_outcome: "hit", p_score: null, p_confidence: null,
+    }).then(() => undefined));
     return {
       session: publicPlaybackSession(session),
       playback: {
@@ -1115,6 +1193,34 @@ async function completeClaimedMediaCachePlayback(options: {
       await expirePlaybackSession(sessionId, userId, db);
     } catch (_) {
       console.warn("[norva-playback] unable to roll back shared media cache playback claim");
+    }
+    const details = claimError instanceof HttpError ? recordOrEmpty(claimError.details) : {};
+    if (details.code === "MEDIA_CACHE_DELIVERY_UNAVAILABLE") {
+      await releaseSupersededPlaybackSessions(supersededSessionIds, db).catch(() => null);
+      const objectKey = stringOr(claim.object_key, "").toLowerCase();
+      const cacheCode = stringOr(details.cacheCode, "").toLowerCase();
+      runBackground((async () => {
+        await db.rpc("norva_record_media_cache_metric", {
+          p_metric: "cache_fallback",
+          p_value: 1,
+          p_samples: 1,
+          p_layer: "l2",
+          p_market_region: "global",
+          p_route_slot: "none",
+          p_route_protocol: "none",
+          p_outcome: "fallback",
+          p_score: null,
+          p_confidence: null,
+        });
+        if (MEDIA_CACHE_OBJECT_KEY_PATTERN.test(objectKey)
+          && ["asset_corrupt", "manifest_invalid", "object_quarantined"].includes(cacheCode)) {
+          await db.rpc("norva_enqueue_media_cache_purge", {
+            p_object_key: objectKey,
+            p_reason: "corruption",
+          });
+        }
+      })());
+      return null;
     }
     throw claimError;
   }
@@ -1417,8 +1523,8 @@ async function tryCreateLiveMediaCachePlayback(options: {
       liveJoin.topologyValidated !== true ||
       liveJoin.continuityValidated !== true ||
       stringOr(liveJoin.attachmentId ?? liveJoin.attachment_id, "") !== attachmentId ||
-      Number(liveJoin.audioRenditionCount) !== (multiAudioHls ? audioRenditions.length : 0) ||
-      Number(liveJoin.subtitleRenditionCount) !== (exactSubtitleHls ? subtitleRenditions.length : 0)
+      Number(liveJoin.audioRenditionCount) !== (multiAudioHls ? (audioRenditions?.length ?? 0) : 0) ||
+      Number(liveJoin.subtitleRenditionCount) !== (exactSubtitleHls ? (subtitleRenditions?.length ?? 0) : 0)
     ) {
       throw new HttpError(502, "Shared live media topology is invalid", {
         code: "MEDIA_CACHE_LIVE_JOIN_TOPOLOGY_INVALID",
@@ -1510,6 +1616,11 @@ async function tryCreateLiveMediaCachePlayback(options: {
       liveJoin,
       live_join: liveJoin,
     };
+    runBackground(db.rpc("norva_record_media_cache_metric", {
+      p_metric: "viewer_joined", p_value: 1, p_samples: 1,
+      p_layer: "gateway", p_market_region: "global", p_route_slot: "none",
+      p_route_protocol: "none", p_outcome: "hit", p_score: null, p_confidence: null,
+    }).then(() => undefined));
     return {
       session: publicPlaybackSession({ ...claimedSession, status: "ready" }),
       playback: {
@@ -1553,11 +1664,11 @@ async function tryCreateLiveMediaCachePlayback(options: {
       }).catch(() => null);
     }
     if (followerRegistrationTransferred || activationOutcomeUncertain) {
-      await db.rpc("norva_finalize_media_cache_live_attachment_release", {
+      await Promise.resolve(db.rpc("norva_finalize_media_cache_live_attachment_release", {
         p_playback_session_id: liveSessionId,
         p_user_id: userId,
         p_attachment_id: attachmentId,
-      }).catch(() => null);
+      })).catch(() => null);
     } else {
       await rollbackMediaCacheLivePlayback(db, liveSessionId, userId, attachmentId)
         .catch(() => null);
@@ -1585,6 +1696,66 @@ async function abandonMediaCacheProducerClaim(
   return data === true;
 }
 
+function mediaCacheDemandCostScore(options: {
+  playbackHint: JsonRecord;
+  authoritativeVodTier: string | null;
+  forceVideoTranscode: boolean;
+}): number {
+  const { playbackHint, authoritativeVodTier, forceVideoTranscode } = options;
+  let score = 45;
+  const gatewayMode = stringOr(
+    playbackHint.gatewayMode ?? playbackHint.gateway_mode,
+    "",
+  ).toLowerCase();
+  if (authoritativeVodTier === "video_transcode" || forceVideoTranscode || gatewayMode === "transcode") {
+    score = 95;
+  } else if (authoritativeVodTier === "audio_transcode" || gatewayMode === "audio-transcode") {
+    score = 80;
+  } else if (gatewayMode === "remux") {
+    score = 60;
+  }
+  const durationSeconds = boundedNullableInt(
+    playbackHint.durationSeconds ?? playbackHint.duration_seconds ?? playbackHint.duration,
+    1,
+    24 * 60 * 60,
+  );
+  if (durationSeconds && durationSeconds >= 2 * 60 * 60) score += 10;
+  const audioTrackCount = boundedNullableInt(
+    playbackHint.audioTrackCount ?? playbackHint.audio_track_count,
+    0,
+    256,
+  );
+  const subtitleTrackCount = boundedNullableInt(
+    playbackHint.subtitleTrackCount ?? playbackHint.subtitle_track_count,
+    0,
+    256,
+  );
+  if ((audioTrackCount ?? 0) > 1) score += 5;
+  if ((subtitleTrackCount ?? 0) > 0) score += 5;
+  return Math.max(0, Math.min(100, score));
+}
+
+function normalizeMediaCacheAdmission(value: unknown): MediaCacheProducerContext["admission"] | null {
+  const row = recordOrEmpty(value);
+  const mode = stringOr(row.policy_mode ?? row.policyMode, "");
+  const reason = stringOr(row.reason, "");
+  const score = boundedNullableInt(row.admission_score ?? row.admissionScore, 0, 100);
+  const confidence = boundedNullableInt(row.confidence, 0, 100);
+  const ttlSeconds = boundedNullableInt(row.ttl_seconds ?? row.ttlSeconds, 300, 7_776_000);
+  if (!["off", "shadow", "enforced"].includes(mode)
+    || !["repeated", "popular", "costly", "not-admitted"].includes(reason)
+    || score === null || confidence === null || ttlSeconds === null
+    || (row.admitted === true && mode !== "enforced")) return null;
+  return {
+    mode: mode as "off" | "shadow" | "enforced",
+    admitted: row.admitted === true,
+    score,
+    confidence,
+    reason: reason as "repeated" | "popular" | "costly" | "not-admitted",
+    ttlSeconds,
+  };
+}
+
 async function coordinateColdMediaCachePlayback(options: {
   req: Request;
   db: SupabaseClient;
@@ -1604,11 +1775,12 @@ async function coordinateColdMediaCachePlayback(options: {
   streamMime: string | null;
   playbackHint: JsonRecord;
   expiresAt: string;
+  costScore: number;
 }) {
   const {
     req, db, runtimeConfig, lifecycle, entitlement, targetUrl,
     providerAccountScope, container, sessionId, userId, sourceId, deviceId,
-    itemType, itemId, targetUrlHash, streamMime, playbackHint, expiresAt,
+    itemType, itemId, targetUrlHash, streamMime, playbackHint, expiresAt, costScore,
   } = options;
   if (!runtimeConfig.mediaCacheSingleflightEnabled) return null;
   if (!mediaCachePlaybackWorkerUrl(runtimeConfig)
@@ -1626,6 +1798,34 @@ async function coordinateColdMediaCachePlayback(options: {
     container,
     ownerInstanceId: MEDIA_CACHE_SINGLEFLIGHT_OWNER_INSTANCE_ID,
   });
+  let admission: MediaCacheProducerContext["admission"] = {
+    mode: "off",
+    admitted: false,
+    score: 0,
+    confidence: 0,
+    reason: "not-admitted",
+    ttlSeconds: 604_800,
+  };
+  const { data: admissionData, error: admissionError } = await db.rpc(
+    "norva_record_media_cache_demand",
+    {
+      p_work_fingerprint: fingerprints.workFingerprint,
+      p_account_fingerprint: fingerprints.accountFingerprint,
+      p_cost_score: Math.max(0, Math.min(100, Math.round(costScore))),
+    },
+  );
+  if (!admissionError) {
+    const admissionRows = Array.isArray(admissionData)
+      ? admissionData
+      : (admissionData ? [admissionData] : []);
+    admission = admissionRows.length === 1
+      ? (normalizeMediaCacheAdmission(admissionRows[0]) ?? admission)
+      : admission;
+  } else {
+    // Fail closed for shared-cache writes, while leaving the real viewer's
+    // provider-backed playback available during a rolling schema deployment.
+    console.warn("[norva-playback] media cache admission unavailable; publication disabled");
+  }
   const rpcSingleRow = (data: unknown, label: string) => {
     const rows = Array.isArray(data) ? data : (data ? [data] : []);
     if (rows.length !== 1) throw new HttpError(503, label, { code: "MEDIA_CACHE_SINGLEFLIGHT_INVALID" });
@@ -1703,26 +1903,47 @@ async function coordinateColdMediaCachePlayback(options: {
     signal: req.signal,
   });
   if (outcome.role === "leader") {
+    const leaseToken = stringOrNull(outcome.leaseToken);
+    if (!leaseToken) {
+      throw new HttpError(503, "Shared media cache producer claim is invalid", {
+        code: "MEDIA_CACHE_SINGLEFLIGHT_INVALID",
+      });
+    }
     lifecycle.producer = {
       protocol: MEDIA_CACHE_SINGLEFLIGHT_PROTOCOL,
       workFingerprint: fingerprints.workFingerprint,
       accountFingerprint: fingerprints.accountFingerprint,
-      leaseToken: outcome.leaseToken,
+      leaseToken,
       ownerInstanceFingerprint: fingerprints.ownerInstanceFingerprint,
+      admission,
     };
+    runBackground(db.rpc("norva_record_media_cache_metric", {
+      p_metric: "producer_started", p_value: 1, p_samples: 1,
+      p_layer: "gateway", p_market_region: "global", p_route_slot: "none",
+      p_route_protocol: "none", p_outcome: "none",
+      p_score: admission.score, p_confidence: admission.confidence,
+    }).then(() => undefined));
     return null;
   }
   if (outcome.role === "ready") {
+    const readyObjectKey = stringOrNull(outcome.objectKey);
+    if (!readyObjectKey || !MEDIA_CACHE_OBJECT_KEY_PATTERN.test(readyObjectKey)) {
+      throw new HttpError(503, "Shared media cache work result is invalid", {
+        code: "MEDIA_CACHE_SINGLEFLIGHT_INVALID",
+      });
+    }
     return await claimReadyMediaCacheWorkPlayback({
       req, db, runtimeConfig, entitlement,
       workFingerprint: fingerprints.workFingerprint,
-      expectedObjectKey: outcome.objectKey,
+      expectedObjectKey: readyObjectKey,
       sessionId, userId, sourceId, deviceId, itemType, itemId, targetUrlHash,
       streamMime, playbackHint, expiresAt,
     });
   }
-  if (outcome.role === "joined" && outcome.joinValue) {
-    return outcome.joinValue;
+  const joinValue = (outcome as { joinValue?: Awaited<ReturnType<typeof tryCreateLiveMediaCachePlayback>> })
+    .joinValue;
+  if (outcome.role === "joined" && joinValue) {
+    return joinValue;
   }
   throw new HttpError(425, "Another viewer is preparing this film", {
     code: "MEDIA_CACHE_PRODUCER_ACTIVE",
@@ -1822,6 +2043,14 @@ async function createPlaybackSessionCore(
   if (deviceId) await assertOwnedDevice(deviceId, userId, db);
 
   const requestedMode = stringOr(body.mode, "auto");
+  const mediaCacheReadPolicy = stringOr(
+    body.mediaCacheReadPolicy ?? body.media_cache_read_policy,
+    "default",
+  );
+  if (mediaCacheReadPolicy !== "default" && mediaCacheReadPolicy !== "bypass-once") {
+    throw new HttpError(400, "Invalid media cache read policy");
+  }
+  const mediaCacheReadBypassOnce = mediaCacheReadPolicy === "bypass-once";
   let requestedPlaybackHint = recordOrEmpty(body.playbackHint ?? body.playback_hint);
   const parentSeriesId = itemType === "series"
     ? stringOr(
@@ -1956,30 +2185,41 @@ async function createPlaybackSessionCore(
       : {}),
   });
   const entitlement = await requirePlaybackEntitlement(userId, db);
-  const sessionId = crypto.randomUUID();
+  let sessionId = crypto.randomUUID();
   let mediaCacheRuntimeConfig: RuntimeConfig | null = null;
   // Only exact Matroska VOD enters the shared HLS lane. Browser-native MP4
   // remains byte-preserving Relay/direct even if a stale historical binding
   // exists, preserving the zero-Gateway MP4 contract.
   if (authoritativeVodContainer === "mkv") {
     mediaCacheRuntimeConfig = await getRuntimeConfig(db);
-    const hotPlayback = await tryCreateHotMediaCachePlayback({
-      req,
-      db,
-      runtimeConfig: mediaCacheRuntimeConfig,
-      entitlement,
-      sessionId,
-      userId,
-      sourceId,
-      deviceId,
-      itemType,
-      itemId,
-      targetUrlHash,
-      streamMime: stringOrNull(body.streamMime ?? body.stream_mime),
-      playbackHint: requestedPlaybackHint,
-      expiresAt: transportExpiresAt,
-    });
-    if (hotPlayback) return hotPlayback;
+    if (mediaCacheReadBypassOnce) {
+      runBackground(db.rpc("norva_record_media_cache_metric", {
+        p_metric: "cache_fallback", p_value: 1, p_samples: 1,
+        p_layer: "gateway", p_market_region: "global", p_route_slot: "none",
+        p_route_protocol: "none", p_outcome: "fallback", p_score: null, p_confidence: null,
+      }).then(() => undefined));
+    } else {
+      const hotPlayback = await tryCreateHotMediaCachePlayback({
+        req,
+        db,
+        runtimeConfig: mediaCacheRuntimeConfig,
+        entitlement,
+        sessionId,
+        userId,
+        sourceId,
+        deviceId,
+        itemType,
+        itemId,
+        targetUrlHash,
+        streamMime: stringOrNull(body.streamMime ?? body.stream_mime),
+        playbackHint: requestedPlaybackHint,
+        expiresAt: transportExpiresAt,
+      });
+      if (hotPlayback) return hotPlayback;
+      // A failed private-cache preflight is rolled back before provider fallback.
+      // Never reuse the expired cache-claim UUID for the fresh provider session.
+      sessionId = crypto.randomUUID();
+    }
   }
   const providerAccountScope = "providerAccountScope" in resolved
     ? stringOr(resolved.providerAccountScope, "")
@@ -1987,7 +2227,8 @@ async function createPlaybackSessionCore(
   const providerAccountHash = providerAccountScope
     ? await sha256Hex(providerAccountScope)
     : await providerAccountHashFromUrl(targetUrl);
-  if (authoritativeVodContainer === "mkv" && mode === "transcode" && mediaCacheRuntimeConfig) {
+  if (authoritativeVodContainer === "mkv" && mode === "transcode"
+    && mediaCacheRuntimeConfig && !mediaCacheReadBypassOnce) {
     const coordinatedPlayback = await coordinateColdMediaCachePlayback({
       req,
       db,
@@ -2007,8 +2248,14 @@ async function createPlaybackSessionCore(
       streamMime: stringOrNull(body.streamMime ?? body.stream_mime),
       playbackHint: requestedPlaybackHint,
       expiresAt: transportExpiresAt,
+      costScore: mediaCacheDemandCostScore({
+        playbackHint: requestedPlaybackHint,
+        authoritativeVodTier,
+        forceVideoTranscode: gatewayVideoTranscodeExplicit,
+      }),
     });
     if (coordinatedPlayback) return coordinatedPlayback;
+    sessionId = crypto.randomUUID();
   }
   // A real viewer always wins over detached cache completion, including when
   // the previous producer lives on another Gateway instance. Foreground
@@ -2534,6 +2781,7 @@ async function createPlaybackSessionCore(
       resolvedContainerObservation,
       req.signal,
       mediaCacheLifecycle.producer,
+      mediaCacheReadBypassOnce,
     );
     if (mediaCacheLifecycle.producer) mediaCacheLifecycle.transferredToGateway = true;
     if (req.signal.aborted) throw playbackRequestAbortError();
@@ -4917,6 +5165,9 @@ function languageValidationResponse(options: {
 
 const MEDIA_CACHE_OBJECT_KEY_PATTERN = /^[0-9a-f]{64}$/;
 const MEDIA_CACHE_ROOT_PLAYLIST_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,1023}$/;
+const MEDIA_CACHE_IDENTITY_COMPONENT_KEYS = [
+  "audio", "content", "duration", "pipeline", "segmenter", "size", "subtitles", "video",
+];
 
 function validatedMediaCacheWorkerUrl(value: string): string | null {
   try {
@@ -5557,6 +5808,45 @@ async function recordPlaybackEvent(
   if (sourceId && ttff && (eventType === "first_frame" || eventType === "play_started")) {
     await recordPlaybackStartupObservation(db, { userId, sourceId, itemType, itemId, startupMs: ttff });
   }
+  if (playbackSessionId && ttff && eventType === "first_frame") {
+    runBackground((async () => {
+      const { data: grant } = await db
+        .from("media_cache_playback_grants")
+        .select("object_key")
+        .eq("playback_session_id", playbackSessionId)
+        .eq("user_id", userId)
+        .is("revoked_at", null)
+        .maybeSingle();
+      const objectKey = stringOr(grant?.object_key, "").toLowerCase();
+      if (!MEDIA_CACHE_OBJECT_KEY_PATTERN.test(objectKey)) return;
+      const { data: object } = await db
+        .from("media_cache_objects")
+        .select("file_size_bytes,duration_milliseconds")
+        .eq("object_key", objectKey)
+        .maybeSingle();
+      await db.rpc("norva_record_media_cache_metric", {
+        p_metric: "first_image_ms", p_value: ttff, p_samples: 1,
+        p_layer: "l2", p_market_region: "global", p_route_slot: "none",
+        p_route_protocol: "none", p_outcome: "hit", p_score: null, p_confidence: null,
+      });
+      const fileSizeBytes = Number(object?.file_size_bytes || 0);
+      const durationMilliseconds = Number(object?.duration_milliseconds || 0);
+      if (Number.isSafeInteger(fileSizeBytes) && fileSizeBytes > 0) {
+        await db.rpc("norva_record_media_cache_metric", {
+          p_metric: "ffmpeg_bytes_avoided", p_value: fileSizeBytes, p_samples: 1,
+          p_layer: "gateway", p_market_region: "global", p_route_slot: "none",
+          p_route_protocol: "none", p_outcome: "hit", p_score: null, p_confidence: null,
+        });
+      }
+      if (Number.isSafeInteger(durationMilliseconds) && durationMilliseconds > 0) {
+        await db.rpc("norva_record_media_cache_metric", {
+          p_metric: "ffmpeg_seconds_avoided", p_value: Math.round(durationMilliseconds / 1000),
+          p_samples: 1, p_layer: "gateway", p_market_region: "global", p_route_slot: "none",
+          p_route_protocol: "none", p_outcome: "hit", p_score: null, p_confidence: null,
+        });
+      }
+    })());
+  }
   return { event: sanitizePlaybackEvent(data) };
 }
 
@@ -5870,7 +6160,6 @@ async function closeOpenGatewaySessionsForUser(userId: string, db: SupabaseClien
         const finalCompleteCacheProof = normalizeMkvH264FastStartProof(
           finalCodecProfile.mkvCompleteHlsCacheProof,
         );
-        const playbackSessionId = stringOrNull(gateway.playback_session_id);
         const playbackSession = playbackSessionId ? playbackSessionsById.get(playbackSessionId) : null;
         if (
           hasUsefulCodecProfile(finalCodecProfile) && playbackSession && stringOr(playbackSession.item_type, "") === "movie" &&
@@ -7076,6 +7365,7 @@ async function createGatewaySession(
   sourceContainerObservation: JsonRecord = {},
   requestSignal: AbortSignal | null = null,
   mediaCacheProducer: MediaCacheProducerContext | null = null,
+  bypassCompleteHlsCache = false,
 ) {
   const gatewayMode = gatewayModeForPlayback(mode, playbackHint, forceVideoTranscode);
   const gatewayHints = gatewayPlaybackHints(playbackHint);
@@ -7152,7 +7442,7 @@ async function createGatewaySession(
         // waiting on a lease that can never publish a global object.
         completeHlsCachePolicy: "bypass",
       }
-      : {}),
+      : (bypassCompleteHlsCache ? { completeHlsCachePolicy: "bypass" } : {})),
     ...(userAgent ? { userAgent } : {}),
   };
   let { response, body: gatewayBody } = await requestGatewaySession(
@@ -7403,6 +7693,12 @@ async function createGatewaySession(
             media_cache_account_fingerprint: mediaCacheProducer.accountFingerprint,
             media_cache_lease_token: mediaCacheProducer.leaseToken,
             media_cache_owner_instance_fingerprint: mediaCacheProducer.ownerInstanceFingerprint,
+            media_cache_admission_mode: mediaCacheProducer.admission.mode,
+            media_cache_admitted: mediaCacheProducer.admission.admitted,
+            media_cache_admission_score: mediaCacheProducer.admission.score,
+            media_cache_admission_confidence: mediaCacheProducer.admission.confidence,
+            media_cache_admission_reason: mediaCacheProducer.admission.reason,
+            media_cache_ttl_seconds: mediaCacheProducer.admission.ttlSeconds,
             media_cache_live_joinable_at: liveJoinCandidate ? new Date().toISOString() : null,
             media_cache_primary_attached: true,
           }
@@ -10075,8 +10371,8 @@ async function releaseProviderFileProbe(
 
 // Keep a best-effort task alive past the response on Supabase Edge (background work) without
 // blocking it. Falls back to fire-and-forget where EdgeRuntime.waitUntil isn't present.
-function runBackground(p: Promise<unknown>): void {
-  const task = p.catch(() => {});
+function runBackground(p: PromiseLike<unknown>): void {
+  const task = Promise.resolve(p).catch(() => {});
   try {
     const er = (globalThis as { EdgeRuntime?: { waitUntil?: (p: Promise<unknown>) => void } }).EdgeRuntime;
     if (er && typeof er.waitUntil === "function") er.waitUntil(task);
@@ -12494,10 +12790,37 @@ async function runProviderRouteResolve(req: Request, db: SupabaseClient): Promis
 
   const enabled = policy.enabled === true;
   const shadowMode = policy.shadow_mode !== false;
+  const apply = enabled && !shadowMode && Boolean(decision);
+  if (apply && decision) {
+    const routeSlot = Number(decision.slot);
+    const routeProtocol = stringOr(decision.nodeTransport, "");
+    const rawScore = Number(decision.score);
+    const rawConfidence = Number(decision.confidence);
+    const score = Number.isFinite(rawScore) ? Math.max(0, Math.min(100, Math.round(rawScore))) : null;
+    const confidence = Number.isFinite(rawConfidence)
+      ? Math.max(0, Math.min(100, Math.round(rawConfidence <= 1 ? rawConfidence * 100 : rawConfidence)))
+      : null;
+    if (Number.isInteger(routeSlot) && routeSlot >= 1 && routeSlot <= 32
+      && ["http", "socks5"].includes(routeProtocol)) {
+      const dimensions = {
+        p_samples: 1, p_layer: "provider", p_market_region: "global",
+        p_route_slot: `slot-${routeSlot}`, p_route_protocol: routeProtocol,
+        p_outcome: "none", p_score: score, p_confidence: confidence,
+      };
+      runBackground(Promise.all([
+        ...(score === null ? [] : [db.rpc("norva_record_media_cache_metric", {
+          p_metric: "route_score", p_value: score, ...dimensions,
+        })]),
+        ...(confidence === null ? [] : [db.rpc("norva_record_media_cache_metric", {
+          p_metric: "route_confidence", p_value: confidence, ...dimensions,
+        })]),
+      ]).then(() => undefined));
+    }
+  }
   return {
     protocol: 1,
     enabled,
-    apply: enabled && !shadowMode && Boolean(decision),
+    apply,
     decision,
     benchmarkPreempted,
     policy: {
@@ -13310,6 +13633,15 @@ async function runMediaCacheProducerControl(
     if (!["renewed", "preempted", "idle", "expired", "missing"].includes(state)) {
       throw new HttpError(503, "Shared media cache producer pulse is invalid");
     }
+    if (["preempted", "idle", "expired", "missing"].includes(state)) {
+      const metric = ["preempted", "idle"].includes(state) ? "fill_preempted" : "fill_expired";
+      const outcome = ["preempted", "idle"].includes(state) ? "preempted" : "expired";
+      runBackground(db.rpc("norva_record_media_cache_metric", {
+        p_metric: metric, p_value: 1, p_samples: 1,
+        p_layer: "gateway", p_market_region: "global", p_route_slot: "none",
+        p_route_protocol: "none", p_outcome: outcome, p_score: null, p_confidence: null,
+      }).then(() => undefined));
+    }
     return { protocol: 1, state };
   }
 
@@ -13322,7 +13654,383 @@ async function runMediaCacheProducerControl(
   if (!["abandoned", "completed", "missing"].includes(state)) {
     throw new HttpError(503, "Shared media cache producer abandon is invalid");
   }
+  if (state === "abandoned") {
+    runBackground(db.rpc("norva_record_media_cache_metric", {
+      p_metric: "fill_failed", p_value: 1, p_samples: 1,
+      p_layer: "gateway", p_market_region: "global", p_route_slot: "none",
+      p_route_protocol: "none", p_outcome: "failed", p_score: null, p_confidence: null,
+    }).then(() => undefined));
+  }
   return { protocol: 1, state };
+}
+
+async function runMediaCacheMaintenanceCore(
+  db: SupabaseClient,
+  runtimeConfig: RuntimeConfig,
+  batch: number,
+  scanOrphans = false,
+): Promise<JsonRecord> {
+  const workerUrl = mediaCachePlaybackWorkerUrl(runtimeConfig);
+  if (!workerUrl) {
+    return { protocol: 1, claimed: 0, completed: 0, retried: 0, state: "worker-unavailable" };
+  }
+  const ownerFingerprint = await sha256Hex(
+    `media-cache-maintenance-v1\0${MEDIA_CACHE_SINGLEFLIGHT_OWNER_INSTANCE_ID}`,
+  );
+  let orphanCandidates = 0;
+  if (scanOrphans) {
+    try {
+      let inventoryCursor: string | null = null;
+      const { data: inventoryPolicy } = await db
+        .from("media_cache_governance_policy")
+        .select("r2_inventory_cursor")
+        .eq("singleton", true)
+        .maybeSingle();
+      const persistedCursor = stringOrNull(recordOrEmpty(inventoryPolicy).r2_inventory_cursor);
+      if (persistedCursor && persistedCursor.length <= 1024 && !/[\u0000-\u001f\u007f]/.test(persistedCursor)) {
+        inventoryCursor = persistedCursor;
+      }
+      const inventoryUrl = new URL(`${workerUrl}/internal/v1/inventory`);
+      // R2 assets are intentionally uploaded before the authoritative manifest.
+      // A large multi-rendition film can require thousands of bounded writes, so
+      // automatic cleanup must never race a slow but still valid publication.
+      inventoryUrl.searchParams.set("minimumAgeMs", String(24 * 60 * 60 * 1_000));
+      inventoryUrl.searchParams.set("limit", String(Math.max(10, batch * 5)));
+      if (inventoryCursor) inventoryUrl.searchParams.set("cursor", inventoryCursor);
+      const inventoryResponse = await fetch(inventoryUrl.toString(), {
+        headers: { Authorization: `Bearer ${runtimeConfig.mediaCacheWorkerToken}` },
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (inventoryResponse.ok) {
+        const inventory = recordOrEmpty(await inventoryResponse.json());
+        const partialCandidates = Array.isArray(inventory.orphanCandidates)
+          ? inventory.orphanCandidates
+          : [];
+        const manifestCandidates = Array.isArray(inventory.manifestCandidates)
+          ? inventory.manifestCandidates
+          : [];
+        const seenInventoryKeys = new Set<string>();
+        const candidates = [...partialCandidates, ...manifestCandidates]
+          .filter((candidateValue) => {
+            const objectKey = stringOr(recordOrEmpty(candidateValue).objectKey, "").toLowerCase();
+            if (!MEDIA_CACHE_OBJECT_KEY_PATTERN.test(objectKey) || seenInventoryKeys.has(objectKey)) return false;
+            seenInventoryKeys.add(objectKey);
+            return true;
+          })
+          .slice(0, batch);
+        for (const candidateValue of candidates) {
+          const objectKey = stringOr(recordOrEmpty(candidateValue).objectKey, "").toLowerCase();
+          if (!MEDIA_CACHE_OBJECT_KEY_PATTERN.test(objectKey)) continue;
+          const { data: jobId } = await db.rpc("norva_enqueue_media_cache_purge", {
+            p_object_key: objectKey,
+            p_reason: "orphan",
+          });
+          if (PLAYBACK_SESSION_UUID_PATTERN.test(stringOr(jobId, ""))) orphanCandidates += 1;
+        }
+        const truncated = inventory.truncated === true;
+        const nextCursor = truncated ? stringOrNull(inventory.cursor) : null;
+        if (!truncated || (nextCursor && nextCursor.length <= 1024
+          && !/[\u0000-\u001f\u007f]/.test(nextCursor))) {
+          await db.from("media_cache_governance_policy").update({
+            r2_inventory_cursor: nextCursor,
+            r2_inventory_scanned_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          }).eq("singleton", true);
+        }
+      } else {
+        await inventoryResponse.body?.cancel().catch(() => {});
+      }
+    } catch (_) {
+      // Inventory is advisory. Existing DB purge jobs still run below.
+    }
+  }
+  if (orphanCandidates > 0) {
+    runBackground(db.rpc("norva_record_media_cache_metric", {
+      p_metric: "orphan_candidate", p_value: orphanCandidates, p_samples: orphanCandidates,
+      p_layer: "l2", p_market_region: "global", p_route_slot: "none",
+      p_route_protocol: "none", p_outcome: "none", p_score: null, p_confidence: null,
+    }).then(() => undefined));
+  }
+  let claimed = 0;
+  let completed = 0;
+  let retried = 0;
+  for (let index = 0; index < batch; index += 1) {
+    const { data, error } = await db.rpc("norva_claim_media_cache_purge", {
+      p_lease_owner_fingerprint: ownerFingerprint,
+      p_ttl_seconds: 120,
+    });
+    if (error) throwDb(error, "Unable to claim media cache purge");
+    const rows = Array.isArray(data) ? data : (data ? [data] : []);
+    if (rows.length === 0) break;
+    if (rows.length !== 1) {
+      throw new HttpError(503, "Media cache purge claim is ambiguous", {
+        code: "MEDIA_CACHE_PURGE_CLAIM_INVALID",
+      });
+    }
+    const job = recordOrEmpty(rows[0]);
+    const jobId = stringOr(job.job_id, "").toLowerCase();
+    const objectKey = stringOr(job.object_key, "").toLowerCase();
+    const reason = stringOr(job.reason, "").toLowerCase();
+    const leaseToken = stringOr(job.lease_token, "").toLowerCase();
+    if (!PLAYBACK_SESSION_UUID_PATTERN.test(jobId)
+      || !MEDIA_CACHE_OBJECT_KEY_PATTERN.test(objectKey)
+      || !["eviction", "orphan", "corruption", "legal", "security"].includes(reason)
+      || !PLAYBACK_SESSION_UUID_PATTERN.test(leaseToken)) {
+      throw new HttpError(503, "Media cache purge claim is invalid", {
+        code: "MEDIA_CACHE_PURGE_CLAIM_INVALID",
+      });
+    }
+    claimed += 1;
+    let success = false;
+    let errorCode: string | null = null;
+    try {
+      const response = await fetch(`${workerUrl}/internal/v1/cache-objects/${objectKey}`, {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${runtimeConfig.mediaCacheWorkerToken}`,
+          "x-norva-purge-reason": reason,
+        },
+        signal: AbortSignal.timeout(30_000),
+      });
+      success = response.ok;
+      if (!success) errorCode = `worker-http-${response.status}`;
+      await response.body?.cancel().catch(() => {});
+    } catch (_) {
+      errorCode = "worker-network";
+    }
+    const { data: completion, error: completionError } = await db.rpc(
+      "norva_complete_media_cache_purge",
+      {
+        p_job_id: jobId,
+        p_lease_owner_fingerprint: ownerFingerprint,
+        p_lease_token: leaseToken,
+        p_reason: reason,
+        p_success: success,
+        p_error_code: success ? null : errorCode,
+      },
+    );
+    if (completionError) throwDb(completionError, "Unable to complete media cache purge");
+    if (stringOr(completion, "") === "completed") completed += 1;
+    else retried += 1;
+  }
+  return { protocol: 1, claimed, completed, retried, orphanCandidates, state: "ok" };
+}
+
+async function runMediaCacheMaintenance(
+  req: Request,
+  db: SupabaseClient,
+): Promise<JsonRecord> {
+  const runtimeConfig = await getRuntimeConfig(db);
+  requireConfiguredMediaGatewayCallback(req, runtimeConfig);
+  const body = await req.json().then(recordOrEmpty).catch(() => {
+    throw new HttpError(400, "Invalid media cache maintenance JSON");
+  });
+  if (!exactJsonKeys(body, ["batch", "protocol"]) || body.protocol !== 1) {
+    throw new HttpError(400, "Invalid media cache maintenance shape");
+  }
+  const batch = boundedInt(body.batch, 1, 1, 10);
+  const { error: scheduleError } = await db.rpc("norva_schedule_media_cache_evictions", {
+    p_batch: Math.max(25, batch),
+  });
+  if (scheduleError) throwDb(scheduleError, "Unable to schedule media cache eviction");
+  const result = await runMediaCacheMaintenanceCore(db, runtimeConfig, batch, true);
+  await Promise.resolve(db.rpc("norva_prune_media_cache_demand", { p_batch: 10_000 }))
+    .catch(() => null);
+  return result;
+}
+
+async function runMediaCachePurge(
+  req: Request,
+  db: SupabaseClient,
+): Promise<JsonRecord> {
+  const runtimeConfig = await getRuntimeConfig(db);
+  requireConfiguredMediaGatewayCallback(req, runtimeConfig);
+  const body = await req.json().then(recordOrEmpty).catch(() => {
+    throw new HttpError(400, "Invalid media cache purge JSON");
+  });
+  if (!exactJsonKeys(body, ["objectKey", "protocol", "reason"]) || body.protocol !== 1) {
+    throw new HttpError(400, "Invalid media cache purge shape");
+  }
+  const objectKey = stringOr(body.objectKey, "").toLowerCase();
+  const reason = stringOr(body.reason, "").toLowerCase();
+  if (!MEDIA_CACHE_OBJECT_KEY_PATTERN.test(objectKey)
+    || !["corruption", "legal", "security"].includes(reason)) {
+    throw new HttpError(400, "Invalid media cache purge request");
+  }
+  const { data, error } = await db.rpc("norva_enqueue_media_cache_purge", {
+    p_object_key: objectKey,
+    p_reason: reason,
+  });
+  if (error) throwDb(error, "Unable to enqueue media cache purge");
+  const jobId = stringOr(data, "").toLowerCase();
+  if (!PLAYBACK_SESSION_UUID_PATTERN.test(jobId)) {
+    throw new HttpError(404, "Media cache purge object not found", {
+      code: "MEDIA_CACHE_PURGE_OBJECT_NOT_FOUND",
+    });
+  }
+
+  // The enqueue RPC fences the object and revokes the relevant grants before
+  // this best-effort physical deletion begins. A failed attempt stays queued
+  // for the normal leased maintenance worker instead of reopening delivery.
+  let maintenance: JsonRecord;
+  try {
+    maintenance = await runMediaCacheMaintenanceCore(db, runtimeConfig, 1, false);
+  } catch (_) {
+    maintenance = {
+      protocol: 1,
+      claimed: 0,
+      completed: 0,
+      retried: 0,
+      state: "deferred",
+    };
+  }
+  return {
+    ok: true,
+    protocol: 1,
+    objectKey,
+    reason,
+    jobId,
+    state: maintenance.completed === 1 ? "completed" : "queued",
+    maintenance,
+  };
+}
+
+async function runMediaCacheRecovery(
+  req: Request,
+  db: SupabaseClient,
+): Promise<JsonRecord> {
+  const runtimeConfig = await getRuntimeConfig(db);
+  requireConfiguredMediaGatewayCallback(req, runtimeConfig);
+  const workerUrl = mediaCachePlaybackWorkerUrl(runtimeConfig);
+  if (!workerUrl) throw new HttpError(503, "Private media cache is unavailable");
+  const body = await req.json().then(recordOrEmpty).catch(() => {
+    throw new HttpError(400, "Invalid media cache recovery JSON");
+  });
+  if (!exactJsonKeys(body, ["objectKey", "protocol"]) || body.protocol !== 1) {
+    throw new HttpError(400, "Invalid media cache recovery shape");
+  }
+  const objectKey = stringOr(body.objectKey, "").toLowerCase();
+  if (!MEDIA_CACHE_OBJECT_KEY_PATTERN.test(objectKey)) {
+    throw new HttpError(400, "Invalid media cache recovery object");
+  }
+  const response = await fetch(`${workerUrl}/internal/v1/recoveries/${objectKey}`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${runtimeConfig.mediaCacheWorkerToken}`,
+      "x-norva-recovery-phase": "verify",
+    },
+    signal: AbortSignal.timeout(60_000),
+  });
+  if (!response.ok) {
+    await response.body?.cancel().catch(() => {});
+    throw new HttpError(409, "Media cache recovery is not verified", {
+      code: "MEDIA_CACHE_RECOVERY_UNVERIFIED",
+    });
+  }
+  const recovered = recordOrEmpty(await response.json());
+  const components = recordOrEmpty(recovered.components);
+  const rootPlaylist = stringOr(recovered.rootPlaylist, "");
+  const manifestSha256 = stringOr(recovered.manifestSha256, "").toLowerCase();
+  const expiresAtMs = Number(recovered.expiresAtMs);
+  const totalBytes = Number(recovered.totalBytes);
+  const fileCount = Number(recovered.verifiedFiles);
+  const componentDigests = MEDIA_CACHE_IDENTITY_COMPONENT_KEYS.map((key) =>
+    stringOr(components[key], "").toLowerCase()
+  );
+  const [audioSha256, contentSha256, durationSha256, pipelineSha256,
+    segmenterSha256, sizeSha256, subtitleSha256, videoSha256] = componentDigests;
+  const identityEnvelope = JSON.stringify({
+    components: {
+      audio: audioSha256,
+      content: contentSha256,
+      duration: durationSha256,
+      pipeline: pipelineSha256,
+      segmenter: segmenterSha256,
+      size: sizeSha256,
+      subtitles: subtitleSha256,
+      video: videoSha256,
+    },
+    namespace: "norva-global-media-object",
+    schema: 1,
+  });
+  const derivedObjectKey = componentDigests.every((digest) => MEDIA_CACHE_OBJECT_KEY_PATTERN.test(digest))
+    ? await sha256Hex(identityEnvelope)
+    : "";
+  const nowMs = Date.now();
+  let committed = false;
+  if (exactJsonKeys(recovered, [
+    "components", "expiresAtMs", "manifestSha256", "objectKey", "ok", "phase", "protocol",
+    "rootPlaylist", "status", "totalBytes", "verifiedFiles",
+  ])
+    && recovered.ok === true && recovered.protocol === 1
+    && recovered.objectKey === objectKey && recovered.phase === "verify"
+    && recovered.status === "verified-quarantined"
+    && exactJsonKeys(components, MEDIA_CACHE_IDENTITY_COMPONENT_KEYS)
+    && derivedObjectKey === objectKey
+    && MEDIA_CACHE_OBJECT_KEY_PATTERN.test(manifestSha256)
+    && MEDIA_CACHE_ROOT_PLAYLIST_PATTERN.test(rootPlaylist)
+    && !/(^|\/)\.{1,2}(\/|$)|\/\//.test(rootPlaylist)
+    && Number.isSafeInteger(expiresAtMs) && expiresAtMs > nowMs + 5 * 60_000
+    && expiresAtMs <= nowMs + 90 * 24 * 60 * 60_000
+    && Number.isSafeInteger(totalBytes) && totalBytes > 0
+    && Number.isSafeInteger(fileCount) && fileCount >= 1 && fileCount <= 20_000) {
+    const { data, error } = await db.rpc("norva_recover_media_cache_object", {
+      p_object_key: objectKey,
+      p_content_sha256: contentSha256,
+      p_video_profile_sha256: videoSha256,
+      p_audio_topology_sha256: audioSha256,
+      p_subtitle_topology_sha256: subtitleSha256,
+      p_root_playlist: rootPlaylist,
+      p_manifest_sha256: manifestSha256,
+      p_total_bytes: totalBytes,
+      p_file_count: fileCount,
+      p_expires_at: new Date(expiresAtMs).toISOString(),
+    });
+    if (!error) committed = data === true;
+  }
+  if (!committed) {
+    // The verify phase deliberately leaves the Worker quarantine marker in
+    // place, so a rejected DB fence has no authorization race to close.
+    throw new HttpError(409, "Media cache recovery authority changed", {
+      code: "MEDIA_CACHE_RECOVERY_REJECTED",
+    });
+  }
+  let finalized = false;
+  for (let attempt = 0; attempt < 2 && !finalized; attempt += 1) {
+    try {
+      const finalizeResponse = await fetch(`${workerUrl}/internal/v1/recoveries/${objectKey}`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${runtimeConfig.mediaCacheWorkerToken}`,
+          "x-norva-recovery-phase": "commit",
+        },
+        signal: AbortSignal.timeout(30_000),
+      });
+      if (finalizeResponse.ok) {
+        const finalizedBody = recordOrEmpty(await finalizeResponse.json());
+        finalized = ["ready", "already-ready"].includes(stringOr(finalizedBody.status, ""));
+      } else {
+        await finalizeResponse.body?.cancel().catch(() => {});
+      }
+    } catch (_) { /* bounded idempotent retry below */ }
+  }
+  if (!finalized) {
+    // The Worker marker still blocks delivery unless a commit response was
+    // positively verified. Re-fence the DB and let the purge queue regenerate.
+    await Promise.resolve(db.rpc("norva_enqueue_media_cache_purge", {
+      p_object_key: objectKey,
+      p_reason: "corruption",
+    })).catch(() => null);
+    throw new HttpError(503, "Media cache recovery finalization failed", {
+      code: "MEDIA_CACHE_RECOVERY_FINALIZE_FAILED",
+    });
+  }
+  await Promise.resolve(db.rpc("norva_record_media_cache_metric", {
+    p_metric: "cache_recovery", p_value: 1, p_samples: 1,
+    p_layer: "l2", p_market_region: "global", p_route_slot: "none",
+    p_route_protocol: "none", p_outcome: "recovered", p_score: null, p_confidence: null,
+  })).catch(() => null);
+  return { ok: true, protocol: 1, objectKey, status: "ready" };
 }
 
 async function runMediaCachePublicationCallback(
@@ -13406,7 +14114,7 @@ async function runMediaCachePublicationCallback(
     throw new HttpError(404, "Media cache publication session not found");
   }
 
-  const { data, error } = await db.rpc("norva_commit_media_cache_publication", {
+  const { data, error } = await db.rpc("norva_commit_admitted_media_cache_publication", {
     p_playback_session_id: playbackSessionId,
     p_gateway_session_id: gatewaySessionId,
     p_user_id: userId,
@@ -13432,6 +14140,13 @@ async function runMediaCachePublicationCallback(
   const bindingId = stringOr(committed.binding_id, "").toLowerCase();
   if (!PLAYBACK_SESSION_UUID_PATTERN.test(bindingId)
     || stringOr(committed.object_key, "") !== objectKey) {
+    // The signed manifest is already visible in R2. Fence a lost-authority
+    // publication as a delayed orphan; a concurrent valid publisher can cancel
+    // the untouched job transactionally before any Worker deletion is leased.
+    await Promise.resolve(db.rpc("norva_enqueue_media_cache_purge", {
+      p_object_key: objectKey,
+      p_reason: "orphan",
+    })).catch(() => null);
     throw new HttpError(409, "Shared media cache publication authority changed", {
       code: "MEDIA_CACHE_PUBLICATION_REJECTED",
     });
@@ -13452,6 +14167,22 @@ async function runMediaCachePublicationCallback(
       code: "MEDIA_CACHE_PRODUCER_COMPLETION_REJECTED",
     });
   }
+  runBackground((async () => {
+    await db.rpc("norva_record_media_cache_metric", {
+      p_metric: "fill_completed",
+      p_value: 1,
+      p_samples: 1,
+      p_layer: "l2",
+      p_market_region: "global",
+      p_route_slot: "none",
+      p_route_protocol: "none",
+      p_outcome: "completed",
+      p_score: null,
+      p_confidence: null,
+    });
+    await db.rpc("norva_schedule_media_cache_evictions", { p_batch: 25 });
+    await runMediaCacheMaintenanceCore(db, runtimeConfig, 1);
+  })());
   return { ok: true, protocol: 1, objectKey, bindingId, producerState };
 }
 

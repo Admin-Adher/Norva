@@ -30,13 +30,16 @@ function normalizeEndpoint(value) {
 
 function normalizeMediaCacheProducerContext(value) {
     const context = record(value);
-    if (!exactKeys(context, [
+    const legacyKeys = [
         'accountFingerprint',
         'leaseToken',
         'ownerInstanceFingerprint',
         'protocol',
         'workFingerprint',
-    ]) || context.protocol !== 1) return null;
+    ];
+    const governedKeys = [...legacyKeys, 'admission'];
+    const legacy = exactKeys(context, legacyKeys);
+    if ((!legacy && !exactKeys(context, governedKeys)) || context.protocol !== 1) return null;
     const workFingerprint = String(context.workFingerprint || '').toLowerCase();
     const accountFingerprint = String(context.accountFingerprint || '').toLowerCase();
     const leaseToken = String(context.leaseToken || '').toLowerCase();
@@ -45,12 +48,41 @@ function normalizeMediaCacheProducerContext(value) {
         || !SHA256_PATTERN.test(accountFingerprint)
         || !UUID_PATTERN.test(leaseToken)
         || !SHA256_PATTERN.test(ownerInstanceFingerprint)) return null;
+    let admission = Object.freeze({
+        mode: 'off',
+        admitted: false,
+        score: 0,
+        confidence: 0,
+        reason: 'not-admitted',
+        ttlSeconds: 604_800,
+    });
+    if (!legacy) {
+        const candidate = record(context.admission);
+        if (!exactKeys(candidate, ['admitted', 'confidence', 'mode', 'reason', 'score', 'ttlSeconds'])
+            || !['off', 'shadow', 'enforced'].includes(candidate.mode)
+            || !['repeated', 'popular', 'costly', 'not-admitted'].includes(candidate.reason)
+            || typeof candidate.admitted !== 'boolean'
+            || !Number.isSafeInteger(candidate.score) || candidate.score < 0 || candidate.score > 100
+            || !Number.isSafeInteger(candidate.confidence) || candidate.confidence < 0 || candidate.confidence > 100
+            || !Number.isSafeInteger(candidate.ttlSeconds)
+            || candidate.ttlSeconds < 300 || candidate.ttlSeconds > 7_776_000
+            || (candidate.admitted && candidate.mode !== 'enforced')) return null;
+        admission = Object.freeze({
+            mode: candidate.mode,
+            admitted: candidate.admitted,
+            score: candidate.score,
+            confidence: candidate.confidence,
+            reason: candidate.reason,
+            ttlSeconds: candidate.ttlSeconds,
+        });
+    }
     return Object.freeze({
         protocol: 1,
         workFingerprint,
         accountFingerprint,
         leaseToken,
         ownerInstanceFingerprint,
+        admission,
     });
 }
 

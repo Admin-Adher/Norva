@@ -31,7 +31,8 @@ test('callback accepts only global object evidence and delegates binding authori
   assert.match(callback, /exactJsonKeys\(body,[\s\S]*"gatewaySessionId", "object", "playbackSessionId", "protocol", "status"/);
   assert.match(callback, /exactJsonKeys\(object,[\s\S]*"contentSha256"[\s\S]*"subtitleTopologySha256"/);
   assert.match(callback, /object\.storageBackend !== "r2"/);
-  assert.match(callback, /norva_commit_media_cache_publication/);
+  assert.match(callback, /norva_commit_admitted_media_cache_publication/);
+  assert.doesNotMatch(callback, /db\.rpc\("norva_commit_media_cache_publication"/);
   assert.match(callback, /p_playback_session_id: playbackSessionId/);
   assert.match(callback, /p_gateway_session_id: gatewaySessionId/);
   assert.match(callback, /p_user_id: userId/);

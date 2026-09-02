@@ -69,6 +69,7 @@ async function publishSharedMediaCacheSession(options = {}) {
         sourceDirectory: options.sourceDirectory,
         rootPlaylist: options.rootPlaylist,
         files: options.files,
+        ...(options.ttlMs === undefined ? {} : { ttlMs: options.ttlMs }),
         completion: { kind: 'complete-hls', sourceEof: true, ffmpegExitCode: 0 },
     });
     const { result, components } = exactPublicationResult(published);

@@ -2277,6 +2277,9 @@ const CloudAdapter = (() => {
                     itemType: type === 'series' ? 'series' : type === 'movie' ? 'movie' : 'live',
                     itemId: streamId,
                     playbackHint,
+                    ...(query.get('mediaCacheReadPolicy') === 'bypass-once'
+                        ? { mediaCacheReadPolicy: 'bypass-once' }
+                        : {}),
                     gatewayAutoMode: mode === 'transcode' && !forcedMode,
                     seekOffset: playbackHint.seekOffset,
                     clientMetadata: _cloudClientTelemetryMetadata(),

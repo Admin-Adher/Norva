@@ -229,6 +229,7 @@ class WatchPage {
         this._privateMediaCacheTicketTimer = null;
         this._privateMediaCacheTicketPromise = null;
         this._privateMediaCacheTicketGeneration = 0;
+        this._privateMediaCacheFallbackSessionIds = new Set();
         this._reportedProviderFailureKeys = new Set();
         this.playbackTelemetry = null;
         this._playRequestedAt = 0;
@@ -2948,6 +2949,11 @@ class WatchPage {
         this.abortPlaybackResolution();
         this._playbackAttemptId += 1;
         this._cloudPlaybackLaneAttemptId = null;
+        if (this._privateMediaCacheFallbackSessionIds instanceof Set) {
+            this._privateMediaCacheFallbackSessionIds.clear();
+        } else {
+            this._privateMediaCacheFallbackSessionIds = new Set();
+        }
         const AbortControllerCtor = typeof window !== 'undefined' && typeof window.AbortController === 'function'
             ? window.AbortController
             : (typeof AbortController === 'function' ? AbortController : null);
@@ -3843,10 +3849,28 @@ class WatchPage {
                 if (this.isPlaybackSupersededError(error)) {
                     void this.handlePlaybackSuperseded(access.sessionId);
                 } else {
-                    this.showPlaybackError(
-                        'Secure cached playback authorization expired. Please retry.',
-                        { immediate: true }
-                    );
+                    const fallbackAttemptId = this._playbackAttemptId;
+                    void this.fallbackPrivateMediaCacheToProvider(
+                        fallbackAttemptId,
+                        'authorization-expired'
+                    ).then((fellBack) => {
+                        if (!fellBack
+                            && !this.isStalePlaybackAttempt(fallbackAttemptId)
+                            && this._privateMediaCacheAccess === access) {
+                            this.showPlaybackError(
+                                'Secure cached playback authorization expired. Please retry.',
+                                { immediate: true }
+                            );
+                        }
+                    }).catch((fallbackError) => {
+                        console.warn('[WatchPage] Private media cache authorization fallback failed:', fallbackError?.message || fallbackError);
+                        if (!this.isStalePlaybackAttempt(fallbackAttemptId)) {
+                            this.showPlaybackError(
+                                'Secure cached playback authorization expired. Please retry.',
+                                { immediate: true }
+                            );
+                        }
+                    });
                 }
             }
             return false;
@@ -3878,6 +3902,29 @@ class WatchPage {
         this.destroyEngine();
         await this.releasePlaybackPipelineForRetry();
         this.showPlaybackError('PLAYBACK_SUPERSEDED', { immediate: true });
+    }
+
+    async fallbackPrivateMediaCacheToProvider(playbackAttemptId, reason = 'cache-unavailable') {
+        const cacheSessionId = String(this._privateMediaCacheAccess?.sessionId || '');
+        if (!(this._privateMediaCacheFallbackSessionIds instanceof Set)) {
+            this._privateMediaCacheFallbackSessionIds = new Set();
+        }
+        if (this.isStalePlaybackAttempt(playbackAttemptId)
+            || !cacheSessionId
+            || this._privateMediaCacheFallbackSessionIds.has(cacheSessionId)) return false;
+        this._privateMediaCacheFallbackSessionIds.add(cacheSessionId);
+        const position = Math.max(0, Math.floor(Number(this.getPlaybackPosition?.()) || 0));
+        this.trackPlaybackPosition?.({ position, force: true });
+        this.resumeTime = position;
+        try { this.saveResumeSnapshotThrottled?.(true); } catch (_) { /* best-effort */ }
+        this.clearPrivateMediaCacheAccess();
+        this.showLoading?.();
+        console.warn(`[WatchPage] Private media cache ${String(reason || 'unavailable')}; falling back once at ${position}s.`);
+        await this.restartCloudGatewayStreamAt(position, {
+            mediaCacheReadPolicy: 'bypass-once',
+            playbackIdentity: this.captureVodPlaybackIdentity?.() || null,
+        });
+        return true;
     }
 
     providerFailureSignal(error) {
@@ -6300,6 +6347,26 @@ class WatchPage {
                     return;
                 }
             } else if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+                const privateCacheNetworkFailures = (this._networkRecoveries || 0) + 1;
+                const privateCacheDeliveryFailure = options.privateMediaCache === true
+                    && ![401, 403].includes(responseStatus)
+                    && (
+                        responseStatus >= 400
+                        || (responseStatus === 0 && privateCacheNetworkFailures >= 2)
+                    );
+                if (privateCacheDeliveryFailure) {
+                    void this.fallbackPrivateMediaCacheToProvider(
+                        playbackAttemptId,
+                        `delivery-${responseStatus || 'network'}`
+                    ).catch(error => {
+                        console.warn('[WatchPage] Private media cache fallback failed:', error?.message || error);
+                        if (!this.isStalePlaybackAttempt(playbackAttemptId)) {
+                            this.handlePlaybackFailure('Cached playback became unavailable.')
+                                .catch(() => {});
+                        }
+                    });
+                    return;
+                }
                 if (isGatewaySession && this.isGatewaySessionGoneError(data)) {
                     const message = this.gatewaySessionGoneMessage(data);
                     console.warn('[WatchPage] Gateway session disappeared; refreshing playback session.');
@@ -6889,7 +6956,10 @@ class WatchPage {
             ...activeAudioOptions,
             seekOffset: sessionStart,
             startOffset: sessionStart,
-            resumeTime: sessionStart
+            resumeTime: sessionStart,
+            ...(options.mediaCacheReadPolicy === 'bypass-once'
+                ? { mediaCacheReadPolicy: 'bypass-once' }
+                : {})
         };
         playbackHint = typeof this.applyPlaybackPreferencesToHint === 'function'
             ? this.applyPlaybackPreferencesToHint(playbackHint, playbackPreferences)

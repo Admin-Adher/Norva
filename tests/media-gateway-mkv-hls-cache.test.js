@@ -415,6 +415,28 @@ test('TTL expiry is a miss and prune removes the expired complete entry', async 
   assert.equal((await cache.acquire(identity)).reason, 'miss');
 });
 
+test('adaptive TTL can shorten cold retention but can never exceed the configured maximum', async (t) => {
+  const root = await tempDirectory(t, 'norva-hls-cache-adaptive-ttl-');
+  const stages = [await makeSimpleHls(t), await makeSimpleHls(t)];
+  let now = 50_000;
+  const cache = new CompleteMkvHlsCache(cacheOptions(root, { now: () => now, ttlMs: 60_000 }));
+  const cold = cacheIdentity({ itemId: 'adaptive-cold' });
+  await cache.publishComplete({ ...publishOptions(stages[0], cold), ttlMs: 5_000 });
+  now += 5_001;
+  assert.equal((await cache.acquire(cold)).reason, 'expired');
+  await assert.rejects(
+    cache.publishComplete({
+      ...publishOptions(stages[1], cacheIdentity({ itemId: 'adaptive-invalid' })),
+      ttlMs: 60_001,
+    }),
+    (error) => error.code === 'INVALID_CACHE_CONFIG',
+  );
+  const status = cache.publicStatus();
+  assert.equal(status.policy, 'lfu-lru-active-lease-safe');
+  assert.ok(status.metrics.misses >= 1);
+  assert.equal(status.maximumTtlMs, 60_000);
+});
+
 test('single-instance startup removes only bounded crash residue from the private publish temp root', async (t) => {
   const root = await tempDirectory(t, 'norva-hls-cache-crash-residue-');
   const orphan = path.join(root, 'tmp', 'publish-orphan123');

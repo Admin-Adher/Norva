@@ -309,6 +309,10 @@ test('ten authorized viewers live-join one exact MKV producer and detach indepen
         accountFingerprint: 'b2'.repeat(32),
         leaseToken: crypto.randomUUID(),
         ownerInstanceFingerprint: 'c3'.repeat(32),
+        admission: {
+          mode: 'enforced', admitted: true, score: 90, confidence: 80,
+          reason: 'popular', ttlSeconds: 2_592_000,
+        },
       },
     }),
   }));

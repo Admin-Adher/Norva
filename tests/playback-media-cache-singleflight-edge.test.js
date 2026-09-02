@@ -78,7 +78,7 @@ test('producer callback is Gateway-authenticated and completes the work only aft
   assert.match(control, /norva_pulse_media_cache_producer_for_gateway/);
   assert.match(control, /norva_pulse_media_cache_continuation_for_gateway/);
   assert.match(control, /norva_abandon_media_cache_producer_for_gateway/);
-  const commitIndex = control.indexOf('norva_commit_media_cache_publication');
+  const commitIndex = control.indexOf('norva_commit_admitted_media_cache_publication');
   const completeIndex = control.indexOf('norva_complete_media_cache_producer_for_gateway');
   assert.ok(commitIndex >= 0 && completeIndex > commitIndex);
 });

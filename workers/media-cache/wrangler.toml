@@ -14,3 +14,5 @@ MEDIA_CACHE_ALLOWED_ORIGINS = "https://norva.tv,https://app.norva.tv,https://nor
 # MEDIA_CACHE_GATEWAY_TOKEN
 # MEDIA_CACHE_MANIFEST_HMAC_KEY (exactly 32 bytes encoded as 64 hex)
 # MEDIA_CACHE_TICKET_HMAC_KEY (a different exact 32-byte key encoded as 64 hex)
+# MEDIA_CACHE_CLOUDFLARE_ZONE_ID (the Norva custom-domain zone; required before cache reads)
+# MEDIA_CACHE_CLOUDFLARE_PURGE_TOKEN (dedicated Cache Purge-only API token)

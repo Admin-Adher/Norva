@@ -66,12 +66,14 @@ test('EOF-complete Gateway output is uploaded before one authority-only callback
     sourceDirectory: 'C:/tmp/session',
     rootPlaylist: 'playlist.m3u8',
     files: ['playlist.m3u8', 'segment-000.ts'],
+    ttlMs: 1_209_600_000,
     async registerPublication(payload) {
       calls.push(['register', payload]);
       return { ok: true, objectKey: payload.object.objectKey, bindingId };
     },
   });
   assert.deepEqual(calls.map(([kind]) => kind), ['publish', 'register']);
+  assert.equal(calls[0][1].ttlMs, 1_209_600_000);
   const payload = calls[1][1];
   assert.deepEqual(Object.keys(payload).sort(), [
     'gatewaySessionId', 'object', 'playbackSessionId', 'protocol', 'status',

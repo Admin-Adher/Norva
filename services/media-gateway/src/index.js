@@ -2141,6 +2141,7 @@ const sharedMediaCacheStats = {
     callbackFailures: 0,
     bytesPublished: 0,
     filesPublished: 0,
+    admissionSkipped: 0,
     liveJoinAccepted: 0,
     liveJoinRejected: 0,
     liveJoinRevoked: 0,
@@ -2638,7 +2639,7 @@ app.get('/health', (req, res) => {
             locatorSigningReady: Boolean(MKV_COMPLETE_HLS_CACHE_LOCATOR_KEY),
             genericSingleAudio: true,
             genericMultiAudio: true,
-            subtitleAssets: false,
+            subtitleAssets: true,
             backgroundContinuation: {
                 protocol: 1,
                 requested: MKV_COMPLETE_HLS_BACKGROUND_CONTINUATION_REQUESTED,
@@ -2652,6 +2653,7 @@ app.get('/health', (req, res) => {
             maxBytes: MKV_COMPLETE_HLS_CACHE_MAX_BYTES,
             minFreeBytes: MKV_COMPLETE_HLS_CACHE_MIN_FREE_BYTES,
             maxEntryBytes: MKV_COMPLETE_HLS_CACHE_MAX_ENTRY_BYTES,
+            governance: mkvCompleteHlsCache?.publicStatus?.() || null,
             stats: { ...mkvCompleteHlsCacheStats },
         },
         sharedMediaCache: {
@@ -2665,7 +2667,7 @@ app.get('/health', (req, res) => {
             exactContentSha256: true,
             exactAudioTopology: true,
             exactSubtitleTopologyInIdentity: true,
-            embeddedSubtitleAssets: false,
+            embeddedSubtitleAssets: true,
             pipelineBuild: MKV_COMPLETE_HLS_CACHE_PIPELINE_BUILD,
             segmenterBuild: SHARED_MEDIA_CACHE_SEGMENTER_BUILD,
             ttlMs: SHARED_MEDIA_CACHE_TTL_MS,
@@ -14924,6 +14926,10 @@ async function registerSharedMediaCachePublication(payload) {
 
 async function maybePublishSharedMediaCache(session) {
     if (!sharedMediaCachePublisher || session?.assetSource === 'complete-hls-cache') return null;
+    if (session?.mediaCacheProducer?.admission?.admitted !== true) {
+        sharedMediaCacheStats.admissionSkipped += 1;
+        return null;
+    }
     if (
         session?.inputFailure || session?.lastError
         || session?.inputPump?.completed !== true
@@ -14951,6 +14957,7 @@ async function maybePublishSharedMediaCache(session) {
             sourceDirectory: session.outputDir,
             rootPlaylist: graph.rootPlaylist,
             files: graph.files,
+            ttlMs: session.mediaCacheProducer.admission.ttlSeconds * 1_000,
             registerPublication: async (payload) => {
                 if (session.mediaCacheProducer) {
                     const producerState = await mediaCacheProducerControl.pulse(session, 'finalizing').catch(() => null);
@@ -15080,6 +15087,7 @@ function mkvCompleteHlsBackgroundContinuationTargets(session) {
         && sharedMediaCachePublisher
         && mediaCacheProducerControl.active
         && session?.mediaCacheProducer
+        && session?.mediaCacheProducer?.admission?.admitted === true
         && session?.mediaCacheProducerCompleted !== true
     );
     return { local, shared };

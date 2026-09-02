@@ -622,6 +622,20 @@ class CompleteMkvHlsCache {
         this.statfs = typeof options.statfs === 'function' ? options.statfs : (root) => fsp.statfs(root);
         this.refcounts = new Map();
         this.quarantined = new Set();
+        this.accessCounts = new Map();
+        this.metrics = {
+            hits: 0,
+            misses: 0,
+            invalid: 0,
+            quarantines: 0,
+            publications: 0,
+            alreadyPresent: 0,
+            evictions: 0,
+            expiredEvictions: 0,
+            quotaEvictions: 0,
+            bytesEvicted: 0,
+        };
+        this.lastStorage = { entries: 0, bytes: 0, tempBytes: 0, measuredAtMs: null };
         this.tail = Promise.resolve();
         this.initialized = false;
         this.rootReal = '';
@@ -766,6 +780,7 @@ class CompleteMkvHlsCache {
 
     quarantine(key) {
         if (!/^[0-9a-f]{64}$/.test(key)) throw new MkvHlsCacheError('INVALID_CACHE_KEY', 'cache key is invalid');
+        if (!this.quarantined.has(key)) this.metrics.quarantines += 1;
         this.quarantined.add(key);
         return this._serial(async () => {
             await this._init();
@@ -778,12 +793,16 @@ class CompleteMkvHlsCache {
             if (this.quarantined.has(derived.key)) {
                 await this._removeQuarantinedEntry(derived.key);
                 if (this.quarantined.has(derived.key)) {
+                    this.metrics.misses += 1;
                     return { hit: false, reason: 'quarantined', key: derived.key };
                 }
             }
             const entryDirectory = this._entryDirectory(derived.key);
             const stat = await optionalLstat(entryDirectory);
-            if (!stat) return { hit: false, reason: 'miss', key: derived.key };
+            if (!stat) {
+                this.metrics.misses += 1;
+                return { hit: false, reason: 'miss', key: derived.key };
+            }
             try {
                 const { payload, entryReal } = await this._readManifest(entryDirectory, derived.key);
                 if (canonicalJson(payload.components) !== canonicalJson(derived.components)) {
@@ -793,10 +812,13 @@ class CompleteMkvHlsCache {
                     throw new MkvHlsCacheError('CACHE_KEY_COLLISION', 'cache entry identity kind does not match the derived key');
                 }
                 if (payload.expiresAtMs <= Number(this.now())) {
+                    this.metrics.misses += 1;
                     return { hit: false, reason: 'expired', key: derived.key };
                 }
                 await this._validateEntryFiles(entryReal, payload);
                 this.refcounts.set(derived.key, (this.refcounts.get(derived.key) || 0) + 1);
+                this.accessCounts.set(derived.key, (this.accessCounts.get(derived.key) || 0) + 1);
+                this.metrics.hits += 1;
                 const accessedAt = new Date(Number(this.now()));
                 await fsp.utimes(entryReal, accessedAt, accessedAt).catch(() => {});
                 let released = false;
@@ -831,6 +853,9 @@ class CompleteMkvHlsCache {
                 };
             } catch (error) {
                 if (error instanceof MkvHlsCacheError) {
+                    this.metrics.invalid += 1;
+                    this.metrics.misses += 1;
+                    if (!this.quarantined.has(derived.key)) this.metrics.quarantines += 1;
                     this.quarantined.add(derived.key);
                     await this._removeQuarantinedEntry(derived.key).catch(() => {});
                     return { hit: false, reason: 'invalid', key: derived.key };
@@ -887,37 +912,58 @@ class CompleteMkvHlsCache {
                     bytes: await directorySizeNoSymlink(entryReal),
                     expiresAtMs: payload.expiresAtMs,
                     lastAccessMs: stat.mtimeMs,
+                    accessCount: this.accessCounts.get(entry.name) || 0,
                 });
             }
         }
         return records;
     }
 
-    async _removeEntry(record) {
+    async _removeEntry(record, reason = 'manual') {
         if ((this.refcounts.get(record.key) || 0) > 0) return false;
         assertInsideRoot(this.rootReal, record.directory);
         const stat = await fsp.lstat(record.directory);
         if (!stat.isDirectory() || stat.isSymbolicLink()) throw new MkvHlsCacheError('UNSAFE_CACHE_PATH', 'refusing to evict an unsafe cache path');
         await fsp.rm(record.directory, { recursive: true, force: false });
+        this.accessCounts.delete(record.key);
+        if (reason === 'expired' || reason === 'quota') {
+            this.metrics.evictions += 1;
+            this.metrics.bytesEvicted += Math.max(0, Number(record.bytes) || 0);
+            if (reason === 'expired') this.metrics.expiredEvictions += 1;
+            if (reason === 'quota') this.metrics.quotaEvictions += 1;
+        }
         return true;
     }
 
     async _ensureCapacity(incomingBytes) {
         let records = await this._scanEntries();
         const now = Number(this.now());
-        for (const record of records.filter((item) => item.expiresAtMs <= now)) await this._removeEntry(record);
+        for (const record of records.filter((item) => item.expiresAtMs <= now)) {
+            await this._removeEntry(record, 'expired');
+        }
         records = await this._scanEntries();
         const tempBytes = await directorySizeNoSymlink(this.tempRoot);
         let total = records.reduce((sum, item) => sum + item.bytes, 0) + tempBytes;
         let available = await this._availableBytes();
-        const oldest = records.sort((a, b) => a.lastAccessMs - b.lastAccessMs);
+        // Hybrid LFU/LRU: evict the least-used object first, then the oldest
+        // among equal-frequency objects. After a process restart every count is
+        // zero and the persisted directory mtime remains a safe LRU fallback.
+        const oldest = records.sort((a, b) => (
+            a.accessCount - b.accessCount || a.lastAccessMs - b.lastAccessMs
+        ));
         while (total + incomingBytes > this.maxBytes || available < this.minFreeBytes + incomingBytes) {
             const candidate = oldest.find((item) => (this.refcounts.get(item.key) || 0) === 0);
             if (!candidate) throw new MkvHlsCacheError('CACHE_QUOTA_EXCEEDED', 'cache quota cannot be satisfied without evicting an active entry');
             oldest.splice(oldest.indexOf(candidate), 1);
-            if (await this._removeEntry(candidate)) total -= candidate.bytes;
+            if (await this._removeEntry(candidate, 'quota')) total -= candidate.bytes;
             available = await this._availableBytes();
         }
+        this.lastStorage = {
+            entries: records.filter((record) => oldest.includes(record)).length,
+            bytes: Math.max(0, total - tempBytes),
+            tempBytes,
+            measuredAtMs: Number(this.now()),
+        };
     }
 
     async _publishCompleteDerived(options, derived) {
@@ -932,6 +978,12 @@ class CompleteMkvHlsCache {
             const names = options.files.map((item) => safeRelativeAsset(item));
             if (new Set(names).size !== names.length) throw new MkvHlsCacheError('INVALID_CACHE_ASSETS', 'complete HLS asset list contains duplicates');
             names.sort();
+            const effectiveTtlMs = options.ttlMs === undefined
+                ? this.ttlMs
+                : strictPositiveInteger(options.ttlMs, 'ttlMs');
+            if (effectiveTtlMs > this.ttlMs || effectiveTtlMs > MAX_CACHE_TTL_MS) {
+                throw new MkvHlsCacheError('INVALID_CACHE_CONFIG', 'adaptive ttl exceeds the configured cache bound');
+            }
 
             const existingDirectory = this._entryDirectory(derived.key);
             if (this.quarantined.has(derived.key)) {
@@ -951,12 +1003,13 @@ class CompleteMkvHlsCache {
                     }
                     if (payload.expiresAtMs > Number(this.now())) {
                         await this._validateEntryFiles(entryReal, payload);
+                        this.metrics.alreadyPresent += 1;
                         return { status: 'already-exists', key: derived.key, totalBytes: payload.totalBytes };
                     }
                     if ((this.refcounts.get(derived.key) || 0) > 0) {
                         throw new MkvHlsCacheError('CACHE_ENTRY_ACTIVE_EXPIRED', 'expired cache entry is still leased');
                     }
-                    await this._removeEntry({ key: derived.key, directory: entryReal });
+                    await this._removeEntry({ key: derived.key, directory: entryReal }, 'expired');
                 } catch (error) {
                     if (
                         !(error instanceof MkvHlsCacheError)
@@ -1002,7 +1055,7 @@ class CompleteMkvHlsCache {
                 }
                 await validateCompleteHlsDirectory(tempDirectory, rootPlaylist, fileRecords, this.maxPlaylistBytes);
                 const createdAtMs = Number(this.now());
-                if (!Number.isSafeInteger(createdAtMs) || createdAtMs <= 0 || createdAtMs + this.ttlMs > Number.MAX_SAFE_INTEGER) {
+                if (!Number.isSafeInteger(createdAtMs) || createdAtMs <= 0 || createdAtMs + effectiveTtlMs > Number.MAX_SAFE_INTEGER) {
                     throw new MkvHlsCacheError('INVALID_CACHE_CLOCK', 'cache clock is invalid');
                 }
                 const isGlobalObject = derived.identityKind === 'global-media-object';
@@ -1015,7 +1068,7 @@ class CompleteMkvHlsCache {
                     files: fileRecords,
                     totalBytes: fileRecords.reduce((sum, item) => sum + item.size, 0),
                     createdAtMs,
-                    expiresAtMs: createdAtMs + this.ttlMs,
+                    expiresAtMs: createdAtMs + effectiveTtlMs,
                     completion: { kind: 'complete-hls', sourceEof: true, ffmpegExitCode: 0 },
                 };
                 const envelope = signManifest(payload, this.manifestKey);
@@ -1038,6 +1091,7 @@ class CompleteMkvHlsCache {
                 await fsp.utimes(existingDirectory, publishedAt, publishedAt);
                 await fsyncDirectory(shardDirectory);
                 await this._ensureCapacity(0);
+                this.metrics.publications += 1;
                 return { status: 'published', key: derived.key, totalBytes: payload.totalBytes };
             } finally {
                 if (!promoted) await fsp.rm(tempDirectory, { recursive: true, force: true }).catch(() => {});
@@ -1115,6 +1169,7 @@ class CompleteMkvHlsCache {
             await this._init();
             const bindingPath = this._bindingPath(bindingDerived.key);
             if (!await optionalLstat(bindingPath)) {
+                this.metrics.misses += 1;
                 return { hit: false, reason: 'binding-miss', key: objectDerived.key, bindingKey: bindingDerived.key };
             }
             let payload;
@@ -1122,6 +1177,7 @@ class CompleteMkvHlsCache {
                 payload = await this._readBinding(bindingPath, bindingDerived, Number(this.now()));
             } catch (error) {
                 if (error instanceof MkvHlsCacheError) {
+                    this.metrics.misses += 1;
                     return {
                         hit: false,
                         reason: error.code === 'CACHE_BINDING_EXPIRED' ? 'binding-expired' : 'binding-invalid',
@@ -1132,6 +1188,7 @@ class CompleteMkvHlsCache {
                 throw error;
             }
             if (payload.state !== 'active') {
+                this.metrics.misses += 1;
                 return { hit: false, reason: 'binding-revoked', key: objectDerived.key, bindingKey: bindingDerived.key };
             }
             const acquired = await this._acquireDerivedUnlocked(objectDerived);
@@ -1168,6 +1225,22 @@ class CompleteMkvHlsCache {
             const afterBytes = after.reduce((sum, item) => sum + item.bytes, 0);
             return { removedEntries: before.length - after.length, removedBytes: beforeBytes - afterBytes };
         });
+    }
+
+    publicStatus() {
+        return {
+            protocol: 1,
+            policy: 'lfu-lru-active-lease-safe',
+            maximumBytes: this.maxBytes,
+            minimumFreeBytes: this.minFreeBytes,
+            maximumTtlMs: this.ttlMs,
+            activeLeases: Array.from(this.refcounts.values()).reduce((sum, count) => sum + count, 0),
+            activeObjects: this.refcounts.size,
+            quarantinedObjects: this.quarantined.size,
+            trackedHotObjects: this.accessCounts.size,
+            storage: { ...this.lastStorage },
+            metrics: { ...this.metrics },
+        };
     }
 }
 

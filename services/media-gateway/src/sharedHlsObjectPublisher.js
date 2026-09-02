@@ -213,6 +213,15 @@ class SharedHlsObjectPublisher {
 
     async publish(options = {}) {
         validateCompletion(options.completion);
+        const effectiveTtlMs = options.ttlMs === undefined
+            ? this.ttlMs
+            : strictPositiveInteger(options.ttlMs, 'ttlMs');
+        if (effectiveTtlMs > this.ttlMs || effectiveTtlMs > MAX_SHARED_CACHE_TTL_MS) {
+            throw new SharedHlsPublicationError(
+                'INVALID_SHARED_HLS_CONFIG',
+                'adaptive ttl exceeds the configured shared-cache bound',
+            );
+        }
         const derived = deriveGlobalMediaCacheObjectKey(options.identity);
         if (typeof options.sourceDirectory !== 'string' || !options.sourceDirectory.trim()
             || /[\u0000\r\n]/.test(options.sourceDirectory)) {
@@ -303,7 +312,7 @@ class SharedHlsObjectPublisher {
         }
 
         const createdAtMs = Number(this.now());
-        if (!Number.isSafeInteger(createdAtMs) || createdAtMs <= 0 || createdAtMs + this.ttlMs > Number.MAX_SAFE_INTEGER) {
+        if (!Number.isSafeInteger(createdAtMs) || createdAtMs <= 0 || createdAtMs + effectiveTtlMs > Number.MAX_SAFE_INTEGER) {
             throw new SharedHlsPublicationError('INVALID_SHARED_HLS_CLOCK', 'shared HLS clock is invalid');
         }
         const payload = {
@@ -315,7 +324,7 @@ class SharedHlsObjectPublisher {
             files: records,
             totalBytes,
             createdAtMs,
-            expiresAtMs: createdAtMs + this.ttlMs,
+            expiresAtMs: createdAtMs + effectiveTtlMs,
             completion: { kind: 'complete-hls', sourceEof: true, ffmpegExitCode: 0 },
         };
         const envelope = signSharedManifest(payload, this.manifestKey);
