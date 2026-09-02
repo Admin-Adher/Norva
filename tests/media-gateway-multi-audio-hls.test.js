@@ -571,6 +571,15 @@ test('child playlist serving is allowlisted, rewritten no-store, and rejects tra
 });
 
 test('serialization, health and cleanup retain the bounded single-provider contract', () => {
+    assert.match(
+        gatewaySource,
+        /MULTI_AUDIO_HLS_STARTUP_PROOF_SECONDS\s*=\s*clampInt\([\s\S]*?6,\s*4,\s*60/,
+        'the production multi-audio gate uses three aligned two-second segments instead of a fixed 20-second wait',
+    );
+    assert.match(
+        gatewaySource,
+        /session\.minHlsStartupBufferSeconds\s*=\s*MULTI_AUDIO_HLS_STARTUP_PROOF_SECONDS/,
+    );
     assert.match(gatewaySource, /multiAudioHls:\s*\{\s*protocol:\s*MULTI_AUDIO_HLS_PROTOCOL[\s\S]*maxAudioRenditions:\s*MAX_MULTI_AUDIO_RENDITIONS/);
     assert.ok((gatewaySource.match(/audioRenditions:\s*audioRenditionsForSession\(session\)/g) || []).length >= 3);
     const stop = sourceBetween('async function stopSession(', '\nasync function stopConflictingSourceSessions(');

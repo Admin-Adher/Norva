@@ -893,6 +893,86 @@ test('finite seek broker streams provider progress before a window is fully mate
   assert.equal(broker.completedProviderFetches, 1);
 });
 
+test('finite seek broker preempts only a locally abandoned cue before serving its successor', async (t) => {
+  const { createStrictLidBroker } = brokerHarness();
+  const data = Buffer.from(Array.from({ length: 64 }, (_, index) => index));
+  const state = { active: 0, maxActive: 0, calls: [] };
+  const provider = http.createServer((req, res) => {
+    const { start, end } = exactRange(req, data.length);
+    state.calls.push(req.headers.range);
+    state.active++;
+    state.maxActive = Math.max(state.maxActive, state.active);
+    let released = false;
+    const release = () => {
+      if (released) return;
+      released = true;
+      state.active--;
+    };
+    res.once('close', release);
+    res.once('finish', release);
+    res.writeHead(206, {
+      'Content-Type': 'application/octet-stream',
+      'Content-Range': `bytes ${start}-${end}/${data.length}`,
+      'Content-Length': String(end - start + 1),
+      ETag: '"finite-abandon-v1"',
+    });
+    if (state.calls.length === 1) {
+      res.write(data.subarray(start, start + 1));
+      return;
+    }
+    res.end(data.subarray(start, end + 1));
+  });
+  const sourceUrl = await listen(provider);
+  t.after(() => closeServer(provider));
+  const broker = await createStrictLidBroker({
+    sourceUrl,
+    fileSizeBytes: data.length,
+    dispatcher: null,
+    pathPrefix: 'finite-mkv-seek',
+    finiteWindowBytes: 8,
+    finiteCacheBytes: 32,
+    releaseDelayMs: 0,
+    completedReleaseDelayMs: 0,
+    supersededReleaseDelayMs: 0,
+    openTimeoutMs: 2000,
+  });
+  t.after(() => broker.close());
+
+  let abandonFirst;
+  const firstAbandoned = new Promise((resolve, reject) => {
+    const request = http.get(broker.inputUrl, { headers: { Range: 'bytes=0-31' } }, (response) => {
+      response.once('data', () => {
+        response.destroy();
+        request.destroy();
+        resolve();
+      });
+      response.once('error', () => {});
+    });
+    request.once('error', (error) => {
+      if (state.calls.length === 0) reject(error);
+    });
+    abandonFirst = request;
+  });
+  t.after(() => abandonFirst?.destroy());
+  await firstAbandoned;
+
+  const second = await Promise.race([
+    fetch(broker.inputUrl, { headers: { Range: 'bytes=32-39' } }),
+    new Promise((_, reject) => setTimeout(
+      () => reject(new Error('abandoned finite cue kept the provider slot')),
+      2000,
+    )),
+  ]);
+  assert.equal(second.status, 206);
+  assert.deepEqual(Buffer.from(await second.arrayBuffer()), data.subarray(32, 40));
+  assert.deepEqual(state.calls, ['bytes=0-7', 'bytes=32-39']);
+  assert.equal(state.maxActive, 1, 'the successor must wait for the abandoned provider body to close');
+  assert.equal(state.active, 0);
+  assert.equal(broker.interruptedProviderFetches, 1);
+  assert.equal(broker.completedProviderFetches, 1);
+  assert.equal(broker.plannedSupersessions, 1);
+});
+
 test('finite seek broker serves a newer cue while an older local response is backpressured', async (t) => {
   const { createStrictLidBroker } = brokerHarness();
   const MiB = 1024 * 1024;
@@ -1673,7 +1753,7 @@ test('strict LID rejects invalid exact signed coordinates before creating a serv
   assert.match(route, /detectLanguageRequestPolicy\(req, options\)[\s\S]*validateDetectLanguageCapability\(capabilityToken, policy\.requiredScope\)/);
   assert.match(gatewaySource, /strictLidLoopbackBrokerProtocol: 1/);
   assert.match(gatewaySource, /strictLidFileSizeClaim: 'fileSizeBytes'/);
-  assert.match(gatewaySource, /const GATEWAY_VERSION = 156/);
+  assert.match(gatewaySource, /const GATEWAY_VERSION = 157/);
   assert.match(gatewaySource, /supersededReleaseDelayMs:\s*PROVIDER_SLOT_RELEASE_DELAY_MS/);
   assert.match(gatewaySource, /strictLidProviderDrainProtocol: 1/);
   assert.match(gatewaySource, /strictLidWeakFallbackProtocol: 1/);

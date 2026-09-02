@@ -1722,15 +1722,16 @@ const KNOWN_VOD_INPUT_PROBE_SIZE_BYTES = clampInt(process.env.KNOWN_VOD_INPUT_PR
 const MIN_HLS_STARTUP_BUFFER_SECONDS = clampInt(process.env.MIN_HLS_STARTUP_BUFFER_SECONDS, 10, 1, 180);
 const MIN_HLS_STARTUP_SEGMENTS = clampInt(process.env.MIN_HLS_STARTUP_SEGMENTS, 3, 1, 10);
 // Multi-audio MKV playback always transcodes an aligned video rendition plus
-// every prepared audio rendition. A short leading prefix can encode much
-// faster than the sustained provider stream and make the startup policy sign a
-// false-positive production rate. Require a longer proof window before the
-// graph is advertised; healthy VAAPI sessions can still produce it quickly,
-// while a collapsing upstream falls back to the conservative client buffer.
+// every prepared audio rendition. Readiness already validates finalized,
+// non-empty segments in the video playlist and in every audio child playlist.
+// Keeping a fixed 20-second proof on top of that made a slow indexed resume wait
+// for ten segments even after the first playable graph was complete. Three
+// aligned two-second segments retain a useful reserve while allowing Hetzner to
+// advertise the graph as soon as it is genuinely playable.
 const MULTI_AUDIO_HLS_STARTUP_PROOF_SECONDS = clampInt(
     process.env.MULTI_AUDIO_HLS_STARTUP_PROOF_SECONDS,
-    20,
-    10,
+    6,
+    4,
     60,
 );
 const MAX_SUBTITLE_TRACKS = clampInt(process.env.MAX_SUBTITLE_TRACKS, 32, 1, 64);
@@ -1783,6 +1784,17 @@ const FINITE_MKV_SEEK_WINDOW_BYTES = clampInt(
     8 * 1024 * 1024,
     256 * 1024,
     16 * 1024 * 1024,
+);
+// A resumed multi-audio graph causes FFmpeg to hop through more Matroska cue
+// ranges before all mapped streams are aligned. Large 8 MiB provider windows
+// are efficient once reads become sequential, but make an abandoned cue hold a
+// mono-account slot for tens of seconds on a slow origin. Keep that startup
+// phase bounded; single-audio resumes retain the larger throughput window.
+const FINITE_MKV_MULTI_AUDIO_SEEK_WINDOW_BYTES = clampInt(
+    process.env.FINITE_MKV_MULTI_AUDIO_SEEK_WINDOW_BYTES,
+    1 * 1024 * 1024,
+    256 * 1024,
+    8 * 1024 * 1024,
 );
 const FINITE_MKV_SEEK_CACHE_BYTES = clampInt(
     process.env.FINITE_MKV_SEEK_CACHE_BYTES,
@@ -2226,7 +2238,7 @@ const MAX_CACHEABLE_EXACT_SUBTITLE_HLS_RENDITIONS = Math.min(
     MAX_EXACT_SUBTITLE_HLS_RENDITIONS,
     clampInt(process.env.MAX_CACHEABLE_EXACT_SUBTITLE_HLS_RENDITIONS, 8, 1, 32),
 );
-const GATEWAY_VERSION = 156;
+const GATEWAY_VERSION = 157;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -2730,7 +2742,7 @@ app.get('/health', (req, res) => {
         },
         boundedMkvInputPumpProtocol: 1,
         finiteMkvSeekBroker: {
-            protocol: 7,
+            protocol: 8,
             active: Array.from(sessions.values()).filter((session) => (
                 Boolean(session?.finiteMkvSeekBroker)
             )).length,
@@ -2743,7 +2755,9 @@ app.get('/health', (req, res) => {
             prematureLocalRangeTermination: false,
             exactRangeDrainReopensImmediately: true,
             plannedSupersessionReopensImmediately: false,
+            abandonedRangePreemption: true,
             windowBytes: FINITE_MKV_SEEK_WINDOW_BYTES,
+            multiAudioResumeWindowBytes: FINITE_MKV_MULTI_AUDIO_SEEK_WINDOW_BYTES,
             cacheMaxBytes: FINITE_MKV_SEEK_CACHE_BYTES,
             identityPreflightRange: BOUNDED_MKV_HEADER_PARSE && INBAND_HEADER_CACHE_MAX > 0
                 ? 'bounded-header-prefix'
@@ -4969,6 +4983,19 @@ function startFiniteMkvSeekResponse(context, res, range) {
     if (context.validator?.kind === 'last-modified') res.setHeader('Last-Modified', context.validator.value);
 }
 
+function preemptAbandonedFiniteMkvSeekAttempt(context, attempt) {
+    if (
+        !attempt?.localClosed ||
+        attempt.stopReason === 'superseded' ||
+        attempt.controller?.signal?.aborted
+    ) return false;
+    attempt.stopReason = 'superseded';
+    attempt.superseded = true;
+    context.finitePlannedSupersessions++;
+    try { attempt.controller.abort(new Error('abandoned MKV cue superseded')); } catch (_) {}
+    return true;
+}
+
 async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
     const finiteSeek = context.pathPrefix === 'finite-mkv-seek';
     if (context.closed || (!finiteSeek && requestId !== context.latestRequestId)) {
@@ -5013,6 +5040,12 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
             // without downloading the rest of a potentially multi-gigabyte range.
             if (!finiteSeek) {
                 try { controller.abort(new Error('local reader closed')); } catch (_) {}
+            } else if (requestId !== context.latestRequestId) {
+                // FFmpeg has already abandoned this local Content-Length and a
+                // newer cue is waiting. Stop draining the obsolete upstream
+                // window, then observe the normal provider release grace before
+                // opening its successor. Live local ranges are never truncated.
+                preemptAbandonedFiniteMkvSeekAttempt(context, attempt);
             }
         }
     };
@@ -5539,6 +5572,12 @@ function handleStrictLidBrokerRequest(context, expectedPath, req, res) {
         void closeStrictLidBrokerAttempt(context, active, 'superseded').catch(() => {});
     }
     if (finiteSeek) {
+        // A close can arrive just before or just after FFmpeg issues its next
+        // range. Cover both orderings: the close handler handles the latter,
+        // while the new request preempts already-abandoned attempts here.
+        for (const attempt of context.activeFiniteAttempts) {
+            preemptAbandonedFiniteMkvSeekAttempt(context, attempt);
+        }
         context.finiteQueuedRequests++;
         context.finiteMaxQueuedRequests = Math.max(
             context.finiteMaxQueuedRequests,
@@ -5681,6 +5720,7 @@ async function createStrictLidBroker(options = {}) {
         finiteMaxQueuedRequests: 0,
         finiteQueuedProviderWindows: 0,
         finiteMaxQueuedProviderWindows: 0,
+        finitePlannedSupersessions: 0,
         closed: false,
     };
     context.finiteCacheMaxBytes = Number.isFinite(Number(options.finiteCacheBytes))
@@ -5720,6 +5760,7 @@ async function createStrictLidBroker(options = {}) {
         get cacheEvictions() { return context.finiteCacheEvictions; },
         get maxQueuedRequests() { return context.finiteMaxQueuedRequests; },
         get maxQueuedProviderWindows() { return context.finiteMaxQueuedProviderWindows; },
+        get plannedSupersessions() { return context.finitePlannedSupersessions; },
         get dispatcherRefreshes() { return context.dispatcherRefreshes; },
         async close(reason = 'broker_closed') {
             if (closePromise) return closePromise;
@@ -12167,6 +12208,10 @@ async function prepareFiniteMkvSeekBroker(session, parentSignal = null) {
     }
     if (parentSignal?.aborted) throw abortedVodInputPumpError();
 
+    const exactAudioTrackCount = audioTracksForSession(session).length;
+    const effectiveWindowBytes = exactAudioTrackCount > 1
+        ? Math.min(FINITE_MKV_SEEK_WINDOW_BYTES, FINITE_MKV_MULTI_AUDIO_SEEK_WINDOW_BYTES)
+        : FINITE_MKV_SEEK_WINDOW_BYTES;
     const broker = await createStrictLidBroker({
         sourceUrl: session.sourceUrl,
         fileSizeBytes,
@@ -12178,6 +12223,8 @@ async function prepareFiniteMkvSeekBroker(session, parentSignal = null) {
         effectiveUrlIdentitySha256: session.vodInputEffectiveUrlIdentitySha256,
         onProviderIdentity: (identity) => applyFiniteMkvSeekProviderIdentity(session, identity),
         pathPrefix: 'finite-mkv-seek',
+        finiteWindowBytes: effectiveWindowBytes,
+        finiteCacheBytes: FINITE_MKV_SEEK_CACHE_BYTES,
         // Provider chunks advance FFmpeg immediately while each exact window is
         // also materialized for cache/integrity. Provider windows remain
         // serialized, so release grace is reserved for real failures.
@@ -12190,7 +12237,8 @@ async function prepareFiniteMkvSeekBroker(session, parentSignal = null) {
     session.startupTimings.boundedMkvInputPump = false;
     session.startupTimings.finiteMkvSeekBroker = true;
     session.startupTimings.finiteMkvSeekProviderFetches = 0;
-    session.startupTimings.finiteMkvSeekWindowBytes = FINITE_MKV_SEEK_WINDOW_BYTES;
+    session.startupTimings.finiteMkvSeekWindowBytes = effectiveWindowBytes;
+    session.startupTimings.finiteMkvSeekMultiAudioWindow = exactAudioTrackCount > 1;
     session.startupTimings.finiteMkvSeekCacheLimitBytes = FINITE_MKV_SEEK_CACHE_BYTES;
     return broker;
 }
@@ -12227,6 +12275,9 @@ async function closeFiniteMkvSeekBroker(session) {
     session.startupTimings.finiteMkvSeekCacheMisses = Number(broker.cacheMisses || 0);
     session.startupTimings.finiteMkvSeekCacheEvictions = Number(broker.cacheEvictions || 0);
     session.startupTimings.finiteMkvSeekMaxQueuedRequests = Number(broker.maxQueuedRequests || 0);
+    session.startupTimings.finiteMkvSeekPlannedSupersessions = Number(
+        broker.plannedSupersessions || 0,
+    );
     session.startupTimings.finiteMkvSeekProxyAgentRefreshes = Number(
         broker.dispatcherRefreshes || 0,
     );
@@ -16553,10 +16604,7 @@ function freezeMultiAudioHlsTopology(session) {
     session.forceAlignedMultiAudioVideoEncode = plan.enabled === true;
     if (plan.enabled) {
         session.hlsTargetSeconds = EXACT_MATROSKA_H264_HLS_TARGET_SECONDS;
-        session.minHlsStartupBufferSeconds = Math.max(
-            Number(session.minHlsStartupBufferSeconds) || 0,
-            MULTI_AUDIO_HLS_STARTUP_PROOF_SECONDS,
-        );
+        session.minHlsStartupBufferSeconds = MULTI_AUDIO_HLS_STARTUP_PROOF_SECONDS;
     }
     session.startupTimings = asRecord(session.startupTimings);
     session.startupTimings.multiAudioHls = multiAudioHlsDiagnosticsForSession(session);
@@ -18353,6 +18401,7 @@ function debugSession(session) {
                 cacheBytes: Number(session.finiteMkvSeekBroker.cacheBytes || 0),
                 cacheHits: Number(session.finiteMkvSeekBroker.cacheHits || 0),
                 cacheMisses: Number(session.finiteMkvSeekBroker.cacheMisses || 0),
+                plannedSupersessions: Number(session.finiteMkvSeekBroker.plannedSupersessions || 0),
             }
             : null,
         finiteMkvLinearSeekBridge: session.linearSeekBridge
