@@ -36,6 +36,7 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.text.NumberFormat;
 import java.util.Map;
 import java.util.Set;
@@ -49,22 +50,28 @@ import java.util.regex.Pattern;
 import tv.norva.analytics.NativeClarity;
 
 /**
- * Native "Downloads" screen — the offline library, styled to match the Norva
- * web app. Movies show as cards; episodes are grouped under their show. Each
- * item exposes the controls valid for its state (play / pause / resume / move /
- * retry / cancel-delete). A header shows storage use, the active download, and a
- * Wi-Fi-only toggle. Rebuilt on a light poll only when something changes.
+ * Native "Downloads" screen — Norva's cinematic offline library. The screen is
+ * deliberately organised around intent: what is ready, what is moving, and what
+ * needs attention. Movies remain directly playable; series open into grouped
+ * seasons. Destructive controls stay out of the primary reading flow and are
+ * exposed through the platform long-press action or the accessible Manage mode.
+ * The proven download/store pipeline underneath this view is unchanged.
  */
 public final class DownloadsActivity extends Activity {
 
-    private static final int BG = Color.parseColor("#0a0a0f");
-    private static final int CARD = Color.parseColor("#15151d");
-    private static final int CARD_BORDER = Color.parseColor("#23232e");
+    private static final int BG = Color.parseColor("#080B12");
+    private static final int CARD = Color.parseColor("#12121A");
+    private static final int CARD_BORDER = Color.parseColor("#27272A");
     private static final int ACCENT = Color.parseColor("#3B82F6");
-    private static final int SUBTLE = Color.parseColor("#22222c");
-    private static final int TEXT = Color.WHITE;
-    private static final int MUTED = Color.parseColor("#a1a1aa");
-    private static final int DANGER = Color.parseColor("#ef4444");
+    private static final int ACCENT_PRESSED = Color.parseColor("#60A5FA");
+    private static final int SUBTLE = Color.parseColor("#1A1A25");
+    private static final int TEXT = Color.parseColor("#F8FAFC");
+    private static final int MUTED = Color.parseColor("#94A3B8");
+    private static final int SUCCESS = Color.parseColor("#10B981");
+    private static final int WARNING = Color.parseColor("#F59E0B");
+    private static final int DANGER = Color.parseColor("#EF4444");
+    private static final int DANGER_PRESSED = Color.parseColor("#F87171");
+    private static final int ERROR_TEXT = Color.parseColor("#FECACA");
 
     private static final Pattern SXEY = Pattern.compile("(?i)S(\\d{1,3})\\s*E(\\d{1,4})");
 
@@ -73,10 +80,25 @@ public final class DownloadsActivity extends Activity {
     private TextView summary;
     private TextView active;
     private TextView clearAll;
+    private TextView overviewTitle;
+    private TextView readyCount;
+    private TextView movingCount;
+    private TextView attentionCount;
+    private TextView storageUsed;
+    private TextView storageFree;
+    private TextView rulesSummary;
+    private TextView rulesChevron;
+    private LinearLayout rulesHeader;
+    private LinearLayout rulesBody;
+    private ProgressRail storageRail;
+    private boolean rulesExpanded;
+    private boolean manageReady;
+    private String selectedSeriesTitle;
     private String lastStructureSignature;
     private String lastContentSignature;
     private Snapshot currentSnapshot;
     private final Map<String, TextView> statusViews = new LinkedHashMap<>();
+    private final Map<String, ProgressRail> progressViews = new LinkedHashMap<>();
     private final Map<String, Integer> announcedProgressBuckets = new LinkedHashMap<>();
     private final Set<String> announcedFailures = new HashSet<>();
     /** Seasons the user has collapsed, keyed "showTitle|season"; survives re-render. */
@@ -126,27 +148,42 @@ public final class DownloadsActivity extends Activity {
         ScrollView scroll = new ScrollView(this);
         scroll.setBackgroundColor(BG);
         scroll.setFillViewport(true);
+        scroll.setClipToPadding(true);
+        scroll.setVerticalScrollBarEnabled(false);
         scroll.setFitsSystemWindows(Build.VERSION.SDK_INT < 30);
 
         LinearLayout container = new LinearLayout(this);
         container.setOrientation(LinearLayout.VERTICAL);
-        container.setPadding(dp(18), dp(30), dp(18), dp(24));
+        final int pageGutterDp = pageGutterDp();
+        container.setPadding(
+                dp(pageGutterDp),
+                dp(18),
+                dp(pageGutterDp),
+                dp(24));
         if (Build.VERSION.SDK_INT >= 30) {
             scroll.setOnApplyWindowInsetsListener((view, insets) -> {
                 android.graphics.Insets safe = insets.getInsets(
                         android.view.WindowInsets.Type.systemBars()
                                 | android.view.WindowInsets.Type.displayCutout());
-                container.setPadding(
-                        dp(18) + safe.left,
-                        dp(30) + safe.top,
-                        dp(18) + safe.right,
-                        dp(24) + safe.bottom);
+                // Insets belong to the scrolling viewport, not its child. This
+                // keeps scrolled content from sliding under status/navigation
+                // controls while the background can still draw edge to edge.
+                scroll.setPadding(safe.left, safe.top, safe.right, safe.bottom);
                 return insets;
             });
             scroll.requestApplyInsets();
         }
 
-        // Header row: title + Close.
+        TextView kicker = new TextView(this);
+        kicker.setText(R.string.downloads_kicker);
+        kicker.setTextColor(ACCENT_PRESSED);
+        kicker.setTypeface(Typeface.DEFAULT_BOLD);
+        kicker.setTextSize(TypedValue.COMPLEX_UNIT_SP, 10.5f);
+        kicker.setLetterSpacing(0.16f);
+        container.addView(kicker);
+
+        // Product header: the destructive global action stays secondary while
+        // Close remains a familiar 48 dp platform-sized target.
         LinearLayout header = new LinearLayout(this);
         header.setOrientation(LinearLayout.HORIZONTAL);
         header.setGravity(Gravity.CENTER_VERTICAL);
@@ -154,35 +191,145 @@ public final class DownloadsActivity extends Activity {
         title.setText(R.string.downloads_title);
         title.setTextColor(TEXT);
         title.setTypeface(Typeface.DEFAULT_BOLD);
-        title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 26);
+        title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 30);
+        if (Build.VERSION.SDK_INT >= 28) title.setAccessibilityHeading(true);
         header.addView(title, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-        TextView close = pill(getString(R.string.downloads_close), SUBTLE, TEXT);
+
+        clearAll = pill(getString(R.string.downloads_clear_all), BG, MUTED);
+        clearAll.setContentDescription(getString(R.string.downloads_clear_all_description));
+        clearAll.setOnClickListener(v -> confirmClearAll());
+        setClearAllEnabled(false);
+        header.addView(clearAll);
+
+        TextView close = pill(getString(R.string.downloads_close_glyph), SUBTLE, TEXT);
+        close.setContentDescription(getString(R.string.downloads_close));
         close.setOnClickListener(v -> finish());
+        LinearLayout.LayoutParams closeLp = (LinearLayout.LayoutParams) close.getLayoutParams();
+        closeLp.leftMargin = dp(6);
+        close.setLayoutParams(closeLp);
         header.addView(close);
-        container.addView(header);
+        LinearLayout.LayoutParams headerLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        headerLp.topMargin = dp(4);
+        container.addView(header, headerLp);
+
+        // D / Cinematic Queue overview. It gives one-glance readiness without
+        // duplicating the detailed cards further down the page.
+        LinearLayout overview = new LinearLayout(this);
+        overview.setOrientation(LinearLayout.VERTICAL);
+        overview.setBackground(roundedStroke(CARD, CARD_BORDER, 16));
+        overview.setPadding(dp(16), dp(16), dp(16), dp(15));
+        LinearLayout.LayoutParams overviewLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        overviewLp.topMargin = dp(18);
+        container.addView(overview, overviewLp);
+
+        TextView overviewLabel = eyebrow(getString(R.string.downloads_overview));
+        overview.addView(overviewLabel);
+
+        overviewTitle = new TextView(this);
+        overviewTitle.setText(R.string.downloads_overview_checking);
+        overviewTitle.setTextColor(TEXT);
+        overviewTitle.setTypeface(Typeface.DEFAULT_BOLD);
+        overviewTitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20);
+        overviewTitle.setPadding(0, dp(5), 0, 0);
+        overview.addView(overviewTitle);
 
         summary = new TextView(this);
         summary.setTextColor(MUTED);
         summary.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
-        summary.setPadding(0, dp(3), 0, 0);
-        container.addView(summary);
+        summary.setText(R.string.downloads_overview_loading_caption);
+        summary.setPadding(0, dp(4), 0, 0);
+        summary.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
+        overview.addView(summary);
 
         active = new TextView(this);
-        active.setTextColor(Color.parseColor("#cdd9ff"));
+        active.setTextColor(ACCENT_PRESSED);
         active.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
-        active.setPadding(0, dp(2), 0, 0);
+        active.setPadding(0, dp(4), 0, 0);
         active.setVisibility(View.GONE);
         // Progress is announced explicitly at useful 10% boundaries below.
         // Avoid a live-region announcement for every 1.5 s byte update.
         active.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_NONE);
-        container.addView(active);
+        overview.addView(active);
 
-        // Wi-Fi-only: dedicated setting row (label + subtitle + accent-styled switch),
-        // separate from the destructive "Clear all" action.
+        LinearLayout metrics = new LinearLayout(this);
+        metrics.setOrientation(LinearLayout.HORIZONTAL);
+        metrics.setPadding(0, dp(16), 0, 0);
+        readyCount = metricValue();
+        movingCount = metricValue();
+        attentionCount = metricValue();
+        metrics.addView(metricColumn(R.string.downloads_ready, readyCount, SUCCESS),
+                new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        metrics.addView(metricColumn(R.string.downloads_moving, movingCount, ACCENT_PRESSED),
+                new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        metrics.addView(metricColumn(R.string.downloads_attention, attentionCount, WARNING),
+                new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        overview.addView(metrics);
+
+        LinearLayout storageLabels = new LinearLayout(this);
+        storageLabels.setOrientation(LinearLayout.HORIZONTAL);
+        storageLabels.setPadding(0, dp(15), 0, 0);
+        storageUsed = microText();
+        storageFree = microText();
+        storageFree.setGravity(Gravity.END);
+        storageLabels.addView(storageUsed,
+                new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        storageLabels.addView(storageFree,
+                new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        overview.addView(storageLabels);
+        storageRail = new ProgressRail(this, SUCCESS, SUBTLE);
+        LinearLayout.LayoutParams storageRailLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(6));
+        storageRailLp.topMargin = dp(8);
+        overview.addView(storageRail, storageRailLp);
+
+        // Download rules are useful but not the page's main job. They start
+        // collapsed and retain full-row switch semantics when opened.
+        LinearLayout rulesCard = new LinearLayout(this);
+        rulesCard.setOrientation(LinearLayout.VERTICAL);
+        rulesCard.setBackground(roundedStroke(CARD, CARD_BORDER, 14));
+        LinearLayout.LayoutParams rulesLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        rulesLp.topMargin = dp(12);
+        container.addView(rulesCard, rulesLp);
+
+        rulesHeader = new LinearLayout(this);
+        rulesHeader.setOrientation(LinearLayout.HORIZONTAL);
+        rulesHeader.setGravity(Gravity.CENTER_VERTICAL);
+        rulesHeader.setPadding(dp(14), dp(10), dp(10), dp(10));
+        rulesHeader.setMinimumHeight(dp(64));
+        rulesHeader.setBackground(pressableRounded(Color.TRANSPARENT, SUBTLE, 14));
+        rulesHeader.setClickable(true);
+        rulesHeader.setFocusable(true);
+        rulesHeader.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
+        LinearLayout rulesText = new LinearLayout(this);
+        rulesText.setOrientation(LinearLayout.VERTICAL);
+        TextView rulesTitle = titleText(getString(R.string.downloads_rules));
+        rulesTitle.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        rulesSummary = microText();
+        rulesSummary.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        rulesText.addView(rulesTitle);
+        rulesText.addView(rulesSummary);
+        rulesHeader.addView(rulesText,
+                new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        rulesChevron = pill(getString(R.string.downloads_expand_glyph), SUBTLE, MUTED);
+        rulesChevron.setClickable(false);
+        rulesChevron.setFocusable(false);
+        rulesChevron.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        rulesHeader.addView(rulesChevron);
+        rulesHeader.setOnClickListener(v -> setRulesExpanded(!rulesExpanded, true));
+        rulesCard.addView(rulesHeader);
+
+        rulesBody = new LinearLayout(this);
+        rulesBody.setOrientation(LinearLayout.VERTICAL);
+        rulesBody.setPadding(dp(10), 0, dp(10), dp(10));
+        rulesCard.addView(rulesBody);
+
         LinearLayout wifiRow = new LinearLayout(this);
         wifiRow.setOrientation(LinearLayout.HORIZONTAL);
         wifiRow.setGravity(Gravity.CENTER_VERTICAL);
-        wifiRow.setBackground(roundedStroke(CARD, CARD_BORDER, 12));
+        wifiRow.setBackground(pressableRounded(SUBTLE, CARD_BORDER, 10));
         wifiRow.setPadding(dp(14), dp(12), dp(14), dp(12));
         LinearLayout wifiText = new LinearLayout(this);
         wifiText.setOrientation(LinearLayout.VERTICAL);
@@ -220,6 +367,7 @@ public final class DownloadsActivity extends Activity {
                     wifiDescription);
             wifiRow.announceForAccessibility(getString(
                     nv ? R.string.downloads_wifi_only_on : R.string.downloads_wifi_only_off));
+            updateRulesSummary(wifi.isChecked(), DownloadService.getSmartDownloads(this));
             renderNow();
         };
         wifiRow.setOnClickListener(flip);
@@ -231,17 +379,14 @@ public final class DownloadsActivity extends Activity {
         LinearLayout.LayoutParams wifiTogLp = new LinearLayout.LayoutParams(dp(48), dp(28));
         wifiTogLp.leftMargin = dp(12);
         wifiRow.addView(wifi, wifiTogLp);
-        LinearLayout.LayoutParams wifiRowLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        wifiRowLp.topMargin = dp(14);
-        container.addView(wifiRow, wifiRowLp);
+        rulesBody.addView(wifiRow);
 
         // Smart downloads: finished episode -> its follower joins the queue
         // automatically (payload attached by the web at enqueue time).
         LinearLayout smartRow = new LinearLayout(this);
         smartRow.setOrientation(LinearLayout.HORIZONTAL);
         smartRow.setGravity(Gravity.CENTER_VERTICAL);
-        smartRow.setBackground(roundedStroke(CARD, CARD_BORDER, 12));
+        smartRow.setBackground(pressableRounded(SUBTLE, CARD_BORDER, 10));
         smartRow.setPadding(dp(14), dp(12), dp(14), dp(12));
         LinearLayout smartText = new LinearLayout(this);
         smartText.setOrientation(LinearLayout.VERTICAL);
@@ -272,6 +417,7 @@ public final class DownloadsActivity extends Activity {
                     smartDescription);
             smartRow.announceForAccessibility(getString(
                     nv ? R.string.downloads_smart_on : R.string.downloads_smart_off));
+            updateRulesSummary(DownloadService.getWifiOnly(this), smart.isChecked());
         };
         smartRow.setOnClickListener(smartFlip);
         configureToggleRow(
@@ -285,35 +431,45 @@ public final class DownloadsActivity extends Activity {
         LinearLayout.LayoutParams smartRowLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         smartRowLp.topMargin = dp(10);
-        container.addView(smartRow, smartRowLp);
-
-        LinearLayout clearRow = new LinearLayout(this);
-        clearRow.setOrientation(LinearLayout.HORIZONTAL);
-        clearRow.setGravity(Gravity.END);
-        clearRow.setPadding(0, dp(10), 0, dp(2));
-        clearAll = pill(getString(R.string.downloads_clear_all), SUBTLE, MUTED);
-        clearAll.setContentDescription(getString(R.string.downloads_clear_all_description));
-        clearAll.setOnClickListener(v -> confirmClearAll());
-        setClearAllEnabled(false);
-        clearRow.addView(clearAll);
-        container.addView(clearRow);
+        rulesBody.addView(smartRow, smartRowLp);
+        updateRulesSummary(wifi.isChecked(), smart.isChecked());
+        setRulesExpanded(false, false);
 
         empty = new TextView(this);
-        empty.setText(R.string.downloads_empty);
+        empty.setText(R.string.downloads_loading);
         empty.setTextColor(MUTED);
         empty.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
         empty.setGravity(Gravity.CENTER);
-        empty.setPadding(0, dp(56), 0, 0);
-        container.addView(empty);
+        empty.setBackground(roundedStroke(CARD, CARD_BORDER, 14));
+        empty.setPadding(dp(24), dp(38), dp(24), dp(38));
+        LinearLayout.LayoutParams emptyLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        emptyLp.topMargin = dp(18);
+        container.addView(empty, emptyLp);
 
         list = new LinearLayout(this);
         list.setOrientation(LinearLayout.VERTICAL);
-        list.setPadding(0, dp(14), 0, 0);
+        list.setPadding(0, dp(18), 0, 0);
         container.addView(list);
 
         scroll.addView(container);
         setContentView(scroll);
         NativeClarity.registerSensitiveView(scroll);
+    }
+
+    @Override
+    public void onBackPressed() {
+        if (selectedSeriesTitle != null) {
+            selectedSeriesTitle = null;
+            if (currentSnapshot != null) renderStructure(currentSnapshot);
+            return;
+        }
+        if (manageReady) {
+            manageReady = false;
+            if (currentSnapshot != null) renderStructure(currentSnapshot);
+            return;
+        }
+        super.onBackPressed();
     }
 
     /**
@@ -372,6 +528,138 @@ public final class DownloadsActivity extends Activity {
             info.setClassName("android.widget.Switch");
             info.setCheckable(true);
             info.setChecked(checked);
+        }
+    }
+
+    /** Small deterministic progress rail used for storage and transfers. */
+    static final class ProgressRail extends View {
+        private final int fillColor;
+        private final int trackColor;
+        private final android.graphics.Paint paint =
+                new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+        private int progress;
+
+        ProgressRail(android.content.Context context, int fillColor, int trackColor) {
+            super(context);
+            this.fillColor = fillColor;
+            this.trackColor = trackColor;
+            setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);
+        }
+
+        void setProgress(int value) {
+            int bounded = Math.max(0, Math.min(100, value));
+            if (bounded == progress) return;
+            progress = bounded;
+            invalidate();
+            sendAccessibilityEvent(
+                    android.view.accessibility.AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED);
+        }
+
+        @Override
+        protected void onDraw(android.graphics.Canvas canvas) {
+            super.onDraw(canvas);
+            float radius = getHeight() / 2f;
+            paint.setColor(trackColor);
+            canvas.drawRoundRect(0f, 0f, getWidth(), getHeight(), radius, radius, paint);
+            if (progress > 0) {
+                paint.setColor(fillColor);
+                float width = getWidth() * (progress / 100f);
+                canvas.drawRoundRect(0f, 0f, width, getHeight(), radius, radius, paint);
+            }
+        }
+
+        @Override
+        public void onInitializeAccessibilityNodeInfo(
+                android.view.accessibility.AccessibilityNodeInfo info) {
+            super.onInitializeAccessibilityNodeInfo(info);
+            info.setClassName("android.widget.ProgressBar");
+            info.setRangeInfo(android.view.accessibility.AccessibilityNodeInfo.RangeInfo.obtain(
+                    android.view.accessibility.AccessibilityNodeInfo.RangeInfo.RANGE_TYPE_INT,
+                    0,
+                    100,
+                    progress));
+        }
+    }
+
+    private TextView eyebrow(String text) {
+        TextView view = new TextView(this);
+        view.setText(text);
+        view.setTextColor(MUTED);
+        view.setTypeface(Typeface.DEFAULT_BOLD);
+        view.setTextSize(TypedValue.COMPLEX_UNIT_SP, 10.5f);
+        view.setLetterSpacing(0.12f);
+        return view;
+    }
+
+    private TextView metricValue() {
+        TextView view = new TextView(this);
+        view.setText(R.string.downloads_metric_pending);
+        view.setTypeface(Typeface.DEFAULT_BOLD);
+        view.setTextSize(TypedValue.COMPLEX_UNIT_SP, 22);
+        return view;
+    }
+
+    private LinearLayout metricColumn(int labelRes, TextView value, int color) {
+        LinearLayout column = new LinearLayout(this);
+        column.setOrientation(LinearLayout.VERTICAL);
+        value.setTextColor(color);
+        TextView label = microText();
+        label.setText(labelRes);
+        label.setPadding(0, dp(2), 0, 0);
+        column.addView(value);
+        column.addView(label);
+        return column;
+    }
+
+    private TextView microText() {
+        TextView view = new TextView(this);
+        view.setTextColor(MUTED);
+        view.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11.5f);
+        return view;
+    }
+
+    private void updateRulesSummary(boolean wifiOnly, boolean smartDownloads) {
+        if (rulesSummary == null) return;
+        rulesSummary.setText(getString(
+                R.string.downloads_rules_summary,
+                getString(wifiOnly
+                        ? R.string.downloads_rules_wifi_only_on
+                        : R.string.downloads_rules_wifi_only_off),
+                getString(smartDownloads
+                        ? R.string.downloads_rules_smart_on
+                        : R.string.downloads_rules_smart_off)));
+        if (rulesHeader != null) {
+            rulesHeader.setContentDescription(getString(
+                    R.string.downloads_rules_description,
+                    rulesSummary.getText(),
+                    getString(rulesExpanded
+                            ? R.string.downloads_state_expanded
+                            : R.string.downloads_state_collapsed),
+                    getString(rulesExpanded
+                            ? R.string.downloads_collapse
+                            : R.string.downloads_expand)));
+        }
+    }
+
+    private void setRulesExpanded(boolean expanded, boolean announce) {
+        rulesExpanded = expanded;
+        if (rulesBody == null || rulesChevron == null || rulesHeader == null) return;
+        rulesBody.setVisibility(expanded ? View.VISIBLE : View.GONE);
+        rulesChevron.setText(expanded
+                ? R.string.downloads_collapse_glyph
+                : R.string.downloads_expand_glyph);
+        updateRulesSummary(
+                DownloadService.getWifiOnly(this),
+                DownloadService.getSmartDownloads(this));
+        if (Build.VERSION.SDK_INT >= 30) {
+            rulesHeader.setStateDescription(getString(expanded
+                    ? R.string.downloads_state_expanded
+                    : R.string.downloads_state_collapsed));
+        }
+        if (announce) {
+            rulesHeader.announceForAccessibility(getString(expanded
+                    ? R.string.downloads_rules_expanded
+                    : R.string.downloads_rules_collapsed));
         }
     }
 
@@ -752,22 +1040,125 @@ public final class DownloadsActivity extends Activity {
     private void renderStructure(Snapshot snapshot) {
         List<DownloadStore.Item> items = snapshot.items;
         statusViews.clear();
+        progressViews.clear();
         list.removeAllViews();
 
-        // Movies as cards; episodes grouped under their show (preserve order).
-        Map<String, List<DownloadStore.Item>> shows = new LinkedHashMap<>();
-        for (DownloadStore.Item it : items) {
-            if ("episode".equals(it.itemType)) {
-                String key = it.title == null ? "" : it.title;
-                List<DownloadStore.Item> g = shows.get(key);
-                if (g == null) { g = new ArrayList<>(); shows.put(key, g); }
-                g.add(it);
+        DownloadStore.Item featured = null;
+        List<DownloadStore.Item> moving = new ArrayList<>();
+        List<DownloadStore.Item> readyMovies = new ArrayList<>();
+        Map<String, List<DownloadStore.Item>> readyShows = new LinkedHashMap<>();
+        List<DownloadStore.Item> attention = new ArrayList<>();
+
+        for (DownloadStore.Item item : items) {
+            if ("done".equals(item.state)) {
+                if ("episode".equals(item.itemType)) {
+                    String key = displayTitle(item);
+                    List<DownloadStore.Item> episodes = readyShows.get(key);
+                    if (episodes == null) {
+                        episodes = new ArrayList<>();
+                        readyShows.put(key, episodes);
+                    }
+                    episodes.add(item);
+                } else {
+                    readyMovies.add(item);
+                }
+            } else if ("downloading".equals(item.state)
+                    || "paused".equals(item.state)
+                    || "queued".equals(item.state)) {
+                moving.add(item);
             } else {
-                list.addView(movieCard(it));
+                attention.add(item);
             }
         }
-        for (Map.Entry<String, List<DownloadStore.Item>> e : shows.entrySet()) {
-            list.addView(showCard(e.getKey(), e.getValue()));
+
+        // Prefer the transfer that is genuinely moving, then the paused one, then
+        // the first queued title. This preserves the user's mental model of "now".
+        for (DownloadStore.Item item : moving) {
+            if ("downloading".equals(item.state)) { featured = item; break; }
+        }
+        if (featured == null) {
+            for (DownloadStore.Item item : moving) {
+                if ("paused".equals(item.state)) { featured = item; break; }
+            }
+        }
+        if (featured == null && !moving.isEmpty()) featured = moving.get(0);
+
+        if (featured != null) {
+            list.addView(sectionHeader(
+                    getString(R.string.downloads_active_transfer),
+                    getString(featuredSupporting(featured)),
+                    null));
+            list.addView(featuredTransferCard(featured));
+        }
+
+        List<DownloadStore.Item> queue = new ArrayList<>(moving);
+        if (featured != null) queue.remove(featured);
+        if (!queue.isEmpty()) {
+            list.addView(sectionHeader(
+                    getString(R.string.downloads_ordered_queue),
+                    getResources().getQuantityString(
+                            R.plurals.downloads_queue_count, queue.size(), queue.size()),
+                    null));
+            for (int index = 0; index < queue.size(); index++) {
+                list.addView(queueCard(queue.get(index), index + 2));
+            }
+        }
+
+        if (!readyMovies.isEmpty() || !readyShows.isEmpty()) {
+            TextView manage = pill(
+                    getString(manageReady
+                            ? R.string.downloads_action_done
+                            : R.string.downloads_action_manage),
+                    manageReady ? ACCENT : SUBTLE,
+                    manageReady ? TEXT : MUTED);
+            manage.setContentDescription(getString(manageReady
+                    ? R.string.downloads_manage_hide_description
+                    : R.string.downloads_manage_show_description));
+            manage.setOnClickListener(v -> {
+                manageReady = !manageReady;
+                if (currentSnapshot != null) renderStructure(currentSnapshot);
+                announceStatus(getString(manageReady
+                        ? R.string.downloads_manage_shown
+                        : R.string.downloads_manage_hidden));
+            });
+            list.addView(sectionHeader(
+                    getString(R.string.downloads_ready_offline),
+                    getResources().getQuantityString(
+                            R.plurals.downloads_ready_count,
+                            readyMovies.size() + readyShows.size(),
+                            readyMovies.size() + readyShows.size()),
+                    manage));
+            list.addView(readyShelf(readyMovies, readyShows));
+
+            TextView hint = microText();
+            hint.setText(R.string.downloads_ready_gesture_hint);
+            hint.setPadding(dp(2), dp(9), 0, dp(2));
+            list.addView(hint);
+
+            if (selectedSeriesTitle != null) {
+                List<DownloadStore.Item> selected = readyShows.get(selectedSeriesTitle);
+                if (selected == null || selected.isEmpty()) {
+                    selectedSeriesTitle = null;
+                } else {
+                    list.addView(seriesDetailCard(selectedSeriesTitle, selected));
+                }
+            }
+        } else {
+            selectedSeriesTitle = null;
+            manageReady = false;
+        }
+
+        if (!attention.isEmpty()) {
+            list.addView(sectionHeader(
+                    getString(R.string.downloads_needs_attention),
+                    getResources().getQuantityString(
+                            R.plurals.downloads_attention_count,
+                            attention.size(),
+                            attention.size()),
+                    null));
+            for (DownloadStore.Item item : attention) {
+                list.addView(attentionCard(item));
+            }
         }
     }
 
@@ -775,44 +1166,95 @@ public final class DownloadsActivity extends Activity {
     private void renderHeader(Snapshot snapshot) {
         List<DownloadStore.Item> items = snapshot.items;
         empty.setVisibility(items.isEmpty() ? View.VISIBLE : View.GONE);
+        empty.setText(R.string.downloads_empty);
         setClearAllEnabled(!items.isEmpty());
 
         int done = 0;
-        int remaining = 0;
+        int moving = 0;
+        int needsAttention = 0;
+        int queuedCount = 0;
         String activeTitle = null;
         int activePct = 0;
+        String pausedTitle = null;
+        int pausedPct = 0;
         for (DownloadStore.Item item : items) {
             if ("done".equals(item.state)) done++;
-            else remaining++;
+            else if ("downloading".equals(item.state)
+                    || "paused".equals(item.state)
+                    || "queued".equals(item.state)) moving++;
+            else needsAttention++;
+            if ("queued".equals(item.state)) queuedCount++;
             if ("downloading".equals(item.state)) {
                 activeTitle = displayTitle(item);
-                activePct = item.totalBytes > 0
-                        ? (int) Math.min(100, item.downloadedBytes * 100 / item.totalBytes)
-                        : 0;
+                activePct = progressOf(item);
+            } else if ("paused".equals(item.state) && pausedTitle == null) {
+                pausedTitle = displayTitle(item);
+                pausedPct = progressOf(item);
             }
         }
 
-        summary.setText(items.isEmpty() ? ""
-                : getResources().getQuantityString(
-                        R.plurals.downloads_summary_titles,
-                        done,
-                        done,
-                        sizeStr(snapshot.usedBytes),
-                        sizeStr(snapshot.freeBytes)));
+        readyCount.setText(localizedInteger(done));
+        movingCount.setText(localizedInteger(moving));
+        attentionCount.setText(localizedInteger(needsAttention));
+
+        if (needsAttention > 0) {
+            overviewTitle.setText(R.string.downloads_overview_attention);
+            summary.setText(R.string.downloads_overview_attention_caption);
+        } else if (moving > 0) {
+            overviewTitle.setText(R.string.downloads_overview_moving);
+            summary.setText(R.string.downloads_overview_moving_caption);
+        } else if (done > 0) {
+            overviewTitle.setText(R.string.downloads_overview_ready);
+            summary.setText(getResources().getQuantityString(
+                    R.plurals.downloads_overview_saved_titles, done, done));
+        } else {
+            overviewTitle.setText(R.string.downloads_overview_empty);
+            summary.setText(R.string.downloads_overview_empty_caption);
+        }
+
+        storageUsed.setText(getString(
+                R.string.downloads_storage_used, sizeStr(snapshot.usedBytes)));
+        storageFree.setText(getString(
+                R.string.downloads_storage_free, sizeStr(snapshot.freeBytes)));
+        long totalStorage = snapshot.usedBytes + snapshot.freeBytes;
+        storageRail.setProgress(totalStorage > 0
+                ? (int) Math.min(100, snapshot.usedBytes * 100 / totalStorage)
+                : 0);
+        storageRail.setContentDescription(getString(
+                R.string.downloads_storage_description,
+                sizeStr(snapshot.usedBytes),
+                sizeStr(snapshot.freeBytes)));
+
         if (activeTitle != null) {
             active.setVisibility(View.VISIBLE);
-            active.setText(remaining > 1
+            active.setText(moving > 1
                     ? getResources().getQuantityString(
                             R.plurals.downloads_active_with_queue,
-                            remaining - 1,
+                            moving - 1,
                             activeTitle,
                             activePct,
-                            remaining - 1)
+                            moving - 1)
                     : getString(R.string.downloads_active, activeTitle, activePct));
-        } else if (remaining > 0) {
+        } else if (pausedTitle != null) {
+            active.setVisibility(View.VISIBLE);
+            String paused = getString(
+                    R.string.downloads_paused_overview,
+                    pausedTitle,
+                    pausedPct);
+            if (moving > 1) {
+                paused = getResources().getQuantityString(
+                        R.plurals.downloads_paused_with_pending,
+                        moving - 1,
+                        paused,
+                        moving - 1);
+            }
+            active.setText(snapshot.wifiWait && queuedCount > 0
+                    ? getString(R.string.downloads_queue_waiting_wifi, paused)
+                    : paused);
+        } else if (queuedCount > 0) {
             active.setVisibility(View.VISIBLE);
             String queue = getResources().getQuantityString(
-                    R.plurals.downloads_in_queue, remaining, remaining);
+                    R.plurals.downloads_in_queue, queuedCount, queuedCount);
             active.setText(snapshot.wifiWait
                     ? getString(R.string.downloads_queue_waiting_wifi, queue)
                     : queue);
@@ -825,13 +1267,25 @@ public final class DownloadsActivity extends Activity {
         for (DownloadStore.Item item : items) {
             TextView status = statusViews.get(item.id);
             if (status != null) bindStatus(status, item);
+            ProgressRail rail = progressViews.get(item.id);
+            if (rail != null) {
+                int progress = progressOf(item);
+                rail.setProgress(progress);
+                rail.setContentDescription(getResources().getQuantityString(
+                        R.plurals.downloads_progress_description,
+                        progress,
+                        displayTitle(item),
+                        progress));
+            }
         }
     }
 
     private void showRefreshFailure() {
+        overviewTitle.setText(R.string.downloads_overview_attention);
         active.setVisibility(View.VISIBLE);
         String message = getString(R.string.downloads_refresh_failed);
         active.setText(message);
+        if (currentSnapshot == null && empty != null) empty.setText(message);
         announceStatus(message);
     }
 
@@ -894,6 +1348,451 @@ public final class DownloadsActivity extends Activity {
         return item.title == null || item.title.trim().isEmpty()
                 ? getString(R.string.downloads_fallback_title)
                 : item.title.trim();
+    }
+
+    private String cardTitle(DownloadStore.Item item) {
+        if (!"episode".equals(item.itemType)) return displayTitle(item);
+        return getString(
+                R.string.downloads_title_with_subtitle,
+                displayTitle(item),
+                episodeLabel(item));
+    }
+
+    private int progressOf(DownloadStore.Item item) {
+        if (item == null || item.totalBytes <= 0) return 0;
+        return (int) Math.max(0, Math.min(
+                100,
+                item.downloadedBytes * 100 / item.totalBytes));
+    }
+
+    private static String localizedInteger(int value) {
+        NumberFormat format = NumberFormat.getIntegerInstance(Locale.US);
+        return format.format(value);
+    }
+
+    private View sectionHeader(String title, String supporting, View action) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(2), dp(20), 0, dp(9));
+
+        LinearLayout copy = new LinearLayout(this);
+        copy.setOrientation(LinearLayout.VERTICAL);
+        TextView heading = new TextView(this);
+        heading.setText(title);
+        heading.setTextColor(TEXT);
+        heading.setTypeface(Typeface.DEFAULT_BOLD);
+        heading.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
+        if (Build.VERSION.SDK_INT >= 28) heading.setAccessibilityHeading(true);
+        copy.addView(heading);
+        if (supporting != null && !supporting.isEmpty()) {
+            TextView detail = microText();
+            detail.setText(supporting);
+            detail.setPadding(0, dp(2), 0, 0);
+            copy.addView(detail);
+        }
+        row.addView(copy,
+                new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        if (action != null) row.addView(action);
+        return row;
+    }
+
+    private View featuredTransferCard(final DownloadStore.Item item) {
+        LinearLayout card = card();
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setBackground(roundedStroke(CARD, ACCENT, 16));
+
+        LinearLayout top = new LinearLayout(this);
+        top.setOrientation(LinearLayout.HORIZONTAL);
+        top.setGravity(Gravity.CENTER_VERTICAL);
+        top.addView(posterView(item, 72, 104));
+
+        LinearLayout copy = new LinearLayout(this);
+        copy.setOrientation(LinearLayout.VERTICAL);
+        TextView state = eyebrow(getString(transferLabel(item)));
+        state.setTextColor("paused".equals(item.state) ? WARNING : ACCENT_PRESSED);
+        copy.addView(state);
+        copy.addView(titleText(cardTitle(item)));
+        copy.addView(statusText(item));
+        top.addView(copy,
+                new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        card.addView(top);
+
+        ProgressRail rail = progressBarFor(item, ACCENT);
+        LinearLayout.LayoutParams railLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(6));
+        railLp.topMargin = dp(13);
+        card.addView(rail, railLp);
+        card.addView(actionsRow(item));
+        return card;
+    }
+
+    private int transferLabel(DownloadStore.Item item) {
+        if ("downloading".equals(item.state)) return R.string.downloads_state_downloading;
+        if ("paused".equals(item.state)) return R.string.downloads_state_paused;
+        return currentSnapshot != null && currentSnapshot.wifiWait && !item.allowCellular
+                ? R.string.downloads_state_waiting_wifi
+                : R.string.downloads_state_queued;
+    }
+
+    private int featuredSupporting(DownloadStore.Item item) {
+        if ("paused".equals(item.state)) return R.string.downloads_paused_focus;
+        if (currentSnapshot != null && currentSnapshot.wifiWait && !item.allowCellular) {
+            return R.string.downloads_waiting_wifi_focus;
+        }
+        return R.string.downloads_first_in_queue;
+    }
+
+    private View queueCard(final DownloadStore.Item item, int position) {
+        LinearLayout card = card();
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(10), dp(10), dp(10), dp(10));
+
+        LinearLayout top = new LinearLayout(this);
+        top.setOrientation(LinearLayout.HORIZONTAL);
+        top.setGravity(Gravity.CENTER_VERTICAL);
+
+        TextView number = new TextView(this);
+        number.setText(localizedInteger(position));
+        number.setTextColor(MUTED);
+        number.setTypeface(Typeface.DEFAULT_BOLD);
+        number.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        number.setGravity(Gravity.CENTER);
+        number.setBackground(rounded(SUBTLE, 18));
+        number.setMinWidth(dp(36));
+        number.setMinHeight(dp(36));
+        LinearLayout.LayoutParams numberLp = new LinearLayout.LayoutParams(dp(36), dp(36));
+        numberLp.rightMargin = dp(10);
+        top.addView(number, numberLp);
+        top.addView(posterView(item, 46, 66));
+
+        LinearLayout copy = new LinearLayout(this);
+        copy.setOrientation(LinearLayout.VERTICAL);
+        copy.addView(titleText(cardTitle(item)));
+        copy.addView(statusText(item));
+        top.addView(copy,
+                new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        card.addView(top);
+        if ("downloading".equals(item.state) || "paused".equals(item.state)) {
+            ProgressRail rail = progressBarFor(item, ACCENT);
+            LinearLayout.LayoutParams railLp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, dp(5));
+            railLp.topMargin = dp(10);
+            card.addView(rail, railLp);
+        }
+        card.addView(actionsRow(item));
+        return card;
+    }
+
+    private ProgressRail progressBarFor(DownloadStore.Item item, int color) {
+        ProgressRail rail = new ProgressRail(this, color, SUBTLE);
+        rail.setProgress(progressOf(item));
+        rail.setContentDescription(getResources().getQuantityString(
+                R.plurals.downloads_progress_description,
+                progressOf(item),
+                displayTitle(item),
+                progressOf(item)));
+        if (item.id != null) progressViews.put(item.id, rail);
+        return rail;
+    }
+
+    private View readyShelf(
+            List<DownloadStore.Item> movies,
+            Map<String, List<DownloadStore.Item>> shows) {
+        HorizontalScrollView scroll = new HorizontalScrollView(this);
+        scroll.setHorizontalScrollBarEnabled(false);
+        scroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
+        LinearLayout shelf = new LinearLayout(this);
+        shelf.setOrientation(LinearLayout.HORIZONTAL);
+        shelf.setPadding(dp(2), 0, dp(18), 0);
+        for (DownloadStore.Item movie : movies) shelf.addView(readyMovieTile(movie));
+        for (Map.Entry<String, List<DownloadStore.Item>> show : shows.entrySet()) {
+            shelf.addView(readyShowTile(show.getKey(), show.getValue()));
+        }
+        scroll.addView(shelf, new ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT));
+        return scroll;
+    }
+
+    private View readyMovieTile(final DownloadStore.Item item) {
+        LinearLayout tile = readyTileBase();
+        ImageView poster = posterView(item, 112, 164);
+        ((LinearLayout.LayoutParams) poster.getLayoutParams()).rightMargin = 0;
+        tile.addView(poster);
+        TextView title = titleText(displayTitle(item));
+        title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13.5f);
+        title.setMaxLines(2);
+        title.setPadding(0, dp(8), 0, 0);
+        tile.addView(title);
+        TextView state = microText();
+        state.setText(R.string.downloads_ready_offline);
+        state.setTextColor(SUCCESS);
+        state.setPadding(0, dp(3), 0, 0);
+        tile.addView(state);
+        if (manageReady) tile.addView(manageDeleteButton(item));
+        tile.setOnClickListener(v -> playLocal(item));
+        tile.setContentDescription(getString(
+                R.string.downloads_ready_movie_description, displayTitle(item)));
+        configureDeleteGesture(tile, item);
+        return tile;
+    }
+
+    private View readyShowTile(
+            final String showTitle,
+            final List<DownloadStore.Item> episodes) {
+        LinearLayout tile = readyTileBase();
+        ImageView poster = posterView(episodes.get(0), 112, 164);
+        ((LinearLayout.LayoutParams) poster.getLayoutParams()).rightMargin = 0;
+        tile.addView(poster);
+        TextView title = titleText(showTitle);
+        title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13.5f);
+        title.setMaxLines(2);
+        title.setPadding(0, dp(8), 0, 0);
+        tile.addView(title);
+        TextView count = microText();
+        count.setText(getResources().getQuantityString(
+                R.plurals.downloads_episode_count, episodes.size(), episodes.size()));
+        count.setTextColor(SUCCESS);
+        count.setPadding(0, dp(3), 0, 0);
+        tile.addView(count);
+        if (manageReady) tile.addView(manageDeleteButton(showTitle, episodes));
+        tile.setOnClickListener(v -> {
+            selectedSeriesTitle = showTitle;
+            if (currentSnapshot != null) renderStructure(currentSnapshot);
+            announceStatus(getString(R.string.downloads_series_opened, showTitle));
+        });
+        tile.setContentDescription(getString(
+                R.string.downloads_ready_series_description,
+                showTitle,
+                episodes.size()));
+        configureDeleteGesture(tile, showTitle, episodes);
+        return tile;
+    }
+
+    private LinearLayout readyTileBase() {
+        LinearLayout tile = new LinearLayout(this);
+        tile.setOrientation(LinearLayout.VERTICAL);
+        tile.setPadding(dp(8), dp(8), dp(8), dp(10));
+        tile.setBackground(pressableRoundedStroke(CARD, SUBTLE, CARD_BORDER, 14));
+        tile.setClickable(true);
+        tile.setFocusable(true);
+        tile.setMinimumHeight(dp(48));
+        LinearLayout.LayoutParams tileLp = new LinearLayout.LayoutParams(
+                dp(128), ViewGroup.LayoutParams.WRAP_CONTENT);
+        tileLp.rightMargin = dp(10);
+        tile.setLayoutParams(tileLp);
+        return tile;
+    }
+
+    private TextView manageDeleteButton(final DownloadStore.Item item) {
+        TextView button = pill(
+                getString(R.string.downloads_action_delete),
+                SUBTLE,
+                ERROR_TEXT);
+        button.setContentDescription(getString(
+                R.string.downloads_action_for_title,
+                getString(R.string.downloads_action_delete),
+                displayTitle(item)));
+        LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams) button.getLayoutParams();
+        lp.topMargin = dp(6);
+        button.setLayoutParams(lp);
+        button.setOnClickListener(v -> confirmDelete(item));
+        return button;
+    }
+
+    private TextView manageDeleteButton(
+            final String showTitle,
+            final List<DownloadStore.Item> episodes) {
+        TextView button = pill(
+                getString(R.string.downloads_action_delete),
+                SUBTLE,
+                ERROR_TEXT);
+        button.setContentDescription(getString(
+                R.string.downloads_delete_series_description, showTitle));
+        LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams) button.getLayoutParams();
+        lp.topMargin = dp(6);
+        button.setLayoutParams(lp);
+        button.setOnClickListener(v -> confirmDeleteSeries(showTitle, episodes));
+        return button;
+    }
+
+    private View seriesDetailCard(
+            final String showTitle,
+            final List<DownloadStore.Item> episodes) {
+        LinearLayout card = card();
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setBackground(roundedStroke(CARD, ACCENT, 16));
+
+        LinearLayout head = new LinearLayout(this);
+        head.setOrientation(LinearLayout.HORIZONTAL);
+        head.setGravity(Gravity.CENTER_VERTICAL);
+        head.setBackground(pressableRounded(Color.TRANSPARENT, SUBTLE, 10));
+        head.addView(posterView(episodes.get(0), 56, 82));
+        LinearLayout copy = new LinearLayout(this);
+        copy.setOrientation(LinearLayout.VERTICAL);
+        copy.addView(eyebrow(getString(R.string.downloads_series_details)));
+        copy.addView(titleText(showTitle));
+        TextView count = microText();
+        count.setText(getResources().getQuantityString(
+                R.plurals.downloads_episode_count, episodes.size(), episodes.size()));
+        copy.addView(count);
+        head.addView(copy,
+                new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        TextView close = pill(getString(R.string.downloads_close_glyph), SUBTLE, TEXT);
+        close.setContentDescription(getString(R.string.downloads_close_series));
+        close.setOnClickListener(v -> {
+            selectedSeriesTitle = null;
+            if (currentSnapshot != null) renderStructure(currentSnapshot);
+        });
+        head.addView(close);
+        configureDeleteGesture(head, showTitle, episodes);
+        card.addView(head);
+
+        Map<Integer, List<DownloadStore.Item>> bySeason = groupBySeason(episodes);
+        for (Map.Entry<Integer, List<DownloadStore.Item>> season : bySeason.entrySet()) {
+            List<DownloadStore.Item> sorted = season.getValue();
+            Collections.sort(sorted, (a, b) -> {
+                int comparison = Integer.compare(episodeOf(a), episodeOf(b));
+                return comparison != 0 ? comparison : Long.compare(a.createdAt, b.createdAt);
+            });
+            String key = showTitle + "|" + season.getKey();
+            LinearLayout body = new LinearLayout(this);
+            body.setOrientation(LinearLayout.VERTICAL);
+            body.setVisibility(collapsed.contains(key) ? View.GONE : View.VISIBLE);
+            for (DownloadStore.Item episode : sorted) {
+                body.addView(readyEpisodeRow(episode));
+            }
+            card.addView(seasonHeader(season.getKey(), sorted.size(), key, body));
+            card.addView(body);
+        }
+        if (manageReady) card.addView(manageDeleteButton(showTitle, episodes));
+        return card;
+    }
+
+    private Map<Integer, List<DownloadStore.Item>> groupBySeason(
+            List<DownloadStore.Item> episodes) {
+        Map<Integer, List<DownloadStore.Item>> bySeason = new TreeMap<>((a, b) -> {
+            if (a.intValue() == b.intValue()) return 0;
+            if (a <= 0) return 1;
+            if (b <= 0) return -1;
+            return Integer.compare(a, b);
+        });
+        for (DownloadStore.Item episode : episodes) {
+            int season = seasonOf(episode);
+            List<DownloadStore.Item> group = bySeason.get(season);
+            if (group == null) {
+                group = new ArrayList<>();
+                bySeason.put(season, group);
+            }
+            group.add(episode);
+        }
+        return bySeason;
+    }
+
+    private View readyEpisodeRow(final DownloadStore.Item episode) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(6), dp(6), 0, dp(6));
+        row.setBackground(pressableRounded(Color.TRANSPARENT, SUBTLE, 10));
+        row.setMinimumHeight(dp(56));
+        row.setClickable(true);
+        row.setFocusable(true);
+
+        LinearLayout copy = new LinearLayout(this);
+        copy.setOrientation(LinearLayout.VERTICAL);
+        TextView title = titleText(episodeLabel(episode));
+        title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        copy.addView(title);
+        TextView status = microText();
+        status.setText(getString(
+                R.string.downloads_status_saved,
+                sizeStr(episode.totalBytes)));
+        status.setTextColor(SUCCESS);
+        copy.addView(status);
+        row.addView(copy,
+                new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        TextView play = pill(getString(R.string.downloads_play_glyph), SUBTLE, TEXT);
+        play.setContentDescription(getString(
+                R.string.downloads_action_for_title,
+                getString(R.string.downloads_action_play),
+                episodeLabel(episode)));
+        play.setOnClickListener(v -> playLocal(episode));
+        row.addView(play);
+        if (manageReady) row.addView(manageDeleteButton(episode));
+        row.setOnClickListener(v -> playLocal(episode));
+        row.setContentDescription(getString(
+                R.string.downloads_ready_episode_description,
+                episodeLabel(episode)));
+        configureDeleteGesture(row, episode);
+        return row;
+    }
+
+    private View attentionCard(final DownloadStore.Item item) {
+        LinearLayout card = card();
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setBackground(roundedStroke(CARD, DANGER, 14));
+        LinearLayout top = new LinearLayout(this);
+        top.setOrientation(LinearLayout.HORIZONTAL);
+        top.setGravity(Gravity.CENTER_VERTICAL);
+        top.addView(posterView(item, 56, 82));
+        LinearLayout copy = new LinearLayout(this);
+        copy.setOrientation(LinearLayout.VERTICAL);
+        TextView eyebrow = eyebrow(getString(R.string.downloads_attention_label));
+        eyebrow.setTextColor(ERROR_TEXT);
+        copy.addView(eyebrow);
+        copy.addView(titleText(cardTitle(item)));
+        copy.addView(statusText(item));
+        top.addView(copy,
+                new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        card.addView(top);
+        card.addView(actionsRow(item));
+        return card;
+    }
+
+    private void configureDeleteGesture(
+            final View target,
+            final DownloadStore.Item item) {
+        target.setLongClickable(true);
+        target.setOnLongClickListener(v -> {
+            v.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS);
+            confirmDelete(item);
+            return true;
+        });
+        addLongPressAccessibilityAction(
+                target,
+                getString(R.string.downloads_long_press_delete, displayTitle(item)));
+    }
+
+    private void configureDeleteGesture(
+            final View target,
+            final String showTitle,
+            final List<DownloadStore.Item> episodes) {
+        target.setLongClickable(true);
+        target.setOnLongClickListener(v -> {
+            v.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS);
+            confirmDeleteSeries(showTitle, episodes);
+            return true;
+        });
+        addLongPressAccessibilityAction(
+                target,
+                getString(R.string.downloads_long_press_delete_series, showTitle));
+    }
+
+    private void addLongPressAccessibilityAction(final View target, final String label) {
+        target.setAccessibilityDelegate(new View.AccessibilityDelegate() {
+            @Override
+            public void onInitializeAccessibilityNodeInfo(
+                    View host,
+                    android.view.accessibility.AccessibilityNodeInfo info) {
+                super.onInitializeAccessibilityNodeInfo(host, info);
+                info.addAction(new android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction(
+                        android.view.accessibility.AccessibilityNodeInfo.ACTION_LONG_CLICK,
+                        label));
+            }
+        });
     }
 
     // ---- Movie card ----
@@ -985,6 +1884,7 @@ public final class DownloadsActivity extends Activity {
         h.setOrientation(LinearLayout.HORIZONTAL);
         h.setGravity(Gravity.CENTER_VERTICAL);
         h.setPadding(0, dp(13), 0, dp(2));
+        h.setBackground(pressableRounded(Color.TRANSPARENT, SUBTLE, 10));
         h.setClickable(true);
         h.setFocusable(true);
         h.setMinimumHeight(dp(48));
@@ -1250,7 +2150,7 @@ public final class DownloadsActivity extends Activity {
     }
 
     private void bindStatus(TextView s, DownloadStore.Item it) {
-        s.setTextColor("failed".equals(it.state) ? DANGER : MUTED);
+        s.setTextColor("failed".equals(it.state) ? ERROR_TEXT : MUTED);
         switch (it.state) {
             case "done":
                 s.setText(getString(
@@ -1383,6 +2283,29 @@ public final class DownloadsActivity extends Activity {
                         R.string.downloads_mutation_removal_requested,
                         () -> DownloadService.requestCancel(
                                 getApplicationContext(), it.id)));
+    }
+
+    private void confirmDeleteSeries(
+            final String showTitle,
+            final List<DownloadStore.Item> episodes) {
+        if (episodes == null || episodes.isEmpty()) return;
+        final List<String> ids = new ArrayList<>();
+        for (DownloadStore.Item episode : episodes) ids.add(episode.id);
+        styledConfirm(
+                getString(R.string.downloads_confirm_delete_series_title),
+                getResources().getQuantityString(
+                        R.plurals.downloads_confirm_delete_series_message,
+                        ids.size(),
+                        showTitle,
+                        ids.size()),
+                getString(R.string.downloads_action_delete),
+                () -> executeMutation(
+                        R.string.downloads_mutation_removal_requested,
+                        () -> {
+                            for (String id : ids) {
+                                DownloadService.requestCancel(getApplicationContext(), id);
+                            }
+                        }));
     }
 
     private void confirmClearAll() {
@@ -1581,7 +2504,7 @@ public final class DownloadsActivity extends Activity {
         b.setPadding(dp(15), dp(9), dp(15), dp(9));
         b.setMinimumWidth(dp(48));
         b.setMinimumHeight(dp(48));
-        b.setBackground(rounded(bg, 10));
+        b.setBackground(pressableRounded(bg, pressedColor(bg), 10));
         b.setClickable(true);
         b.setFocusable(true);
         b.setLayoutParams(new LinearLayout.LayoutParams(
@@ -1602,6 +2525,39 @@ public final class DownloadsActivity extends Activity {
         d.setCornerRadius(dp(radiusDp));
         d.setStroke(Math.max(1, dp(1)), stroke);
         return d;
+    }
+
+    private int pressedColor(int background) {
+        if (background == ACCENT) return ACCENT_PRESSED;
+        if (background == DANGER) return DANGER_PRESSED;
+        return CARD_BORDER;
+    }
+
+    private android.graphics.drawable.StateListDrawable pressableRounded(
+            int normal,
+            int pressed,
+            int radiusDp) {
+        android.graphics.drawable.StateListDrawable states =
+                new android.graphics.drawable.StateListDrawable();
+        states.addState(
+                new int[]{android.R.attr.state_pressed},
+                rounded(pressed, radiusDp));
+        states.addState(new int[]{}, rounded(normal, radiusDp));
+        return states;
+    }
+
+    private android.graphics.drawable.StateListDrawable pressableRoundedStroke(
+            int normal,
+            int pressed,
+            int stroke,
+            int radiusDp) {
+        android.graphics.drawable.StateListDrawable states =
+                new android.graphics.drawable.StateListDrawable();
+        states.addState(
+                new int[]{android.R.attr.state_pressed},
+                roundedStroke(pressed, stroke, radiusDp));
+        states.addState(new int[]{}, roundedStroke(normal, stroke, radiusDp));
+        return states;
     }
 
     private void roundCorners(View v, final int radiusPx) {
@@ -1642,7 +2598,8 @@ public final class DownloadsActivity extends Activity {
     }
 
     private static String localizedNumber(double value, int fractionDigits) {
-        NumberFormat format = NumberFormat.getNumberInstance();
+        // Downloads intentionally stays English on every device locale.
+        NumberFormat format = NumberFormat.getNumberInstance(Locale.US);
         format.setGroupingUsed(false);
         format.setMinimumFractionDigits(fractionDigits);
         format.setMaximumFractionDigits(fractionDigits);
@@ -1651,5 +2608,12 @@ public final class DownloadsActivity extends Activity {
 
     private int dp(int v) {
         return Math.round(v * getResources().getDisplayMetrics().density);
+    }
+
+    private int pageGutterDp() {
+        int widthDp = getResources().getConfiguration().screenWidthDp;
+        if (widthDp >= 840) return 96;
+        if (widthDp >= 600) return 64;
+        return 18;
     }
 }

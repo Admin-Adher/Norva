@@ -12,7 +12,7 @@ const source = fs.readFileSync(
     'clients/android-phone/app/src/main/java/tv/norva/phone/DownloadsActivity.java',
   ),
   'utf8',
-);
+).replace(/\r\n/g, '\n');
 const englishStrings = fs.readFileSync(
   path.join(root, 'clients/android-phone/app/src/main/res/values/strings.xml'),
   'utf8',
@@ -157,6 +157,68 @@ test('downloads exposes one semantic switch owner and explicit accessible action
   assert.match(source, /b\.setMinimumHeight\(dp\(48\)\)/);
 });
 
+test('prototype D separates active, queue, ready and attention journeys', () => {
+  const render = method('private void renderStructure(Snapshot snapshot)');
+  const header = method('private void renderHeader(Snapshot snapshot)');
+
+  assert.match(render, /R\.string\.downloads_active_transfer/);
+  assert.match(render, /featuredTransferCard\(featured\)/);
+  assert.match(render, /R\.string\.downloads_ordered_queue/);
+  assert.match(render, /queueCard\(queue\.get\(index\), index \+ 2\)/);
+  assert.match(render, /R\.string\.downloads_ready_offline/);
+  assert.match(render, /readyShelf\(readyMovies, readyShows\)/);
+  assert.match(render, /seriesDetailCard\(selectedSeriesTitle, selected\)/);
+  assert.match(render, /R\.string\.downloads_needs_attention/);
+  assert.match(render, /attentionCard\(item\)/);
+  assert.match(header, /readyCount\.setText/);
+  assert.match(header, /movingCount\.setText/);
+  assert.match(header, /attentionCount\.setText/);
+  assert.match(header, /storageRail\.setProgress/);
+  assert.match(header, /R\.string\.downloads_paused_overview/);
+  assert.match(header, /R\.plurals\.downloads_paused_with_pending/);
+  assert.match(header, /queuedCount > 0/);
+});
+
+test('ready VOD deletion is long-press first with a subtle accessible fallback', () => {
+  const movie = method('private View readyMovieTile(final DownloadStore.Item item)');
+  const series = method('private View readyShowTile(');
+  const itemGesture = method('private void configureDeleteGesture(\n            final View target,\n            final DownloadStore.Item item)');
+  const seriesDelete = method('private void confirmDeleteSeries(');
+
+  assert.match(movie, /setOnClickListener\(v -> playLocal\(item\)\)/);
+  assert.match(movie, /configureDeleteGesture\(tile, item\)/);
+  assert.match(movie, /if \(manageReady\) tile\.addView\(manageDeleteButton\(item\)\)/);
+  assert.match(series, /selectedSeriesTitle = showTitle/);
+  assert.match(series, /configureDeleteGesture\(tile, showTitle, episodes\)/);
+  assert.match(itemGesture, /setOnLongClickListener/);
+  assert.match(itemGesture, /HapticFeedbackConstants\.LONG_PRESS/);
+  assert.match(itemGesture, /confirmDelete\(item\)/);
+  assert.match(seriesDelete, /styledConfirm/);
+  assert.match(seriesDelete, /DownloadService\.requestCancel/);
+  assert.match(source, /ACTION_LONG_CLICK/);
+  assert.match(source, /R\.string\.downloads_manage_show_description/);
+  assert.match(source, /R\.string\.downloads_manage_hide_description/);
+});
+
+test('prototype D keeps rules collapsed until requested and models progress semantically', () => {
+  const create = method('protected void onCreate(Bundle b)');
+  const rules = method('private void setRulesExpanded(boolean expanded, boolean announce)');
+  const railAt = source.indexOf('static final class ProgressRail extends View');
+  const rail = source.slice(railAt, source.indexOf('\n    }', railAt) + 6);
+
+  assert.match(create, /setRulesExpanded\(false, false\)/);
+  assert.match(create, /rulesHeader\.setDescendantFocusability\(ViewGroup\.FOCUS_BLOCK_DESCENDANTS\)/);
+  assert.match(create, /rulesChevron\.setClickable\(false\)/);
+  assert.match(rules, /rulesBody\.setVisibility\(expanded \? View\.VISIBLE : View\.GONE\)/);
+  assert.match(rules, /R\.string\.downloads_rules_expanded/);
+  assert.match(rules, /R\.string\.downloads_rules_collapsed/);
+  assert.match(rail, /info\.setClassName\("android\.widget\.ProgressBar"\)/);
+  assert.match(rail, /RangeInfo\.obtain/);
+  assert.match(source, /android\.R\.attr\.state_pressed/);
+  assert.match(source, /pressableRoundedStroke\(CARD, SUBTLE, CARD_BORDER, 14\)/);
+  assert.match(source, /pressableRounded\(bg, pressedColor\(bg\), 10\)/);
+});
+
 test('downloads disables destructive empty action, sanitizes errors and announces states', () => {
   const clearState = method('private void setClearAllEnabled(boolean enabled)');
   const bindStatus = method('private void bindStatus(TextView s, DownloadStore.Item it)');
@@ -174,7 +236,7 @@ test('downloads disables destructive empty action, sanitizes errors and announce
   assert.match(announcements, /R\.string\.downloads_a11y_failed/);
 });
 
-test('downloads user-facing and accessibility copy is resource-backed in English and French', () => {
+test('downloads user-facing and accessibility copy stays English on every device locale', () => {
   const resourceNames = new Set(
     [...source.matchAll(/R\.(?:string|plurals)\.(downloads_[a-z0-9_]+)/g)]
       .map((match) => match[1]),
@@ -186,16 +248,24 @@ test('downloads user-facing and accessibility copy is resource-backed in English
       `<(?:string|plurals)\\s+name="${resourceName}"(?:\\s|>)`,
     );
     assert.match(englishStrings, declaration, `missing English ${resourceName}`);
-    assert.match(frenchStrings, declaration, `missing French ${resourceName}`);
   }
 
+  assert.doesNotMatch(
+    frenchStrings,
+    /<(?:string|plurals)\s+name="downloads_/,
+    'Downloads must fall back to the default English resources',
+  );
   assert.doesNotMatch(source, /setText\(\s*"[^"]*[A-Za-z][^"]*"\s*\)/);
   assert.doesNotMatch(
     source,
     /(?:setContentDescription|announceForAccessibility|setStateDescription)\(\s*"[^"]*[A-Za-z][^"]*"/,
   );
-  assert.match(englishStrings, /<plurals name="downloads_episode_count">/);
-  assert.match(frenchStrings, /<item quantity="many">/);
+  assert.match(source, /NumberFormat\.getNumberInstance\(Locale\.US\)/);
+  assert.match(source, /NumberFormat\.getIntegerInstance\(Locale\.US\)/);
+  assert.match(
+    englishStrings,
+    /<plurals name="downloads_episode_count"(?:\s[^>]*)?>/,
+  );
 });
 
 test('downloads reserves Android navigation bars and display cutouts', () => {
@@ -204,5 +274,12 @@ test('downloads reserves Android navigation bars and display cutouts', () => {
     source,
     /WindowInsets\.Type\.systemBars\(\)[\s\S]*WindowInsets\.Type\.displayCutout\(\)/,
   );
-  assert.match(source, /dp\(24\) \+ safe\.bottom/);
+  assert.match(source, /scroll\.setClipToPadding\(true\)/);
+  assert.match(
+    source,
+    /scroll\.setPadding\(safe\.left, safe\.top, safe\.right, safe\.bottom\)/,
+  );
+  assert.match(source, /final int pageGutterDp = pageGutterDp\(\)/);
+  assert.match(source, /if \(widthDp >= 840\) return 96/);
+  assert.match(source, /if \(widthDp >= 600\) return 64/);
 });

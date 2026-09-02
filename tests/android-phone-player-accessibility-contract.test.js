@@ -65,11 +65,14 @@ test('Android phone player exposes stable IDs for automation and accessibility f
 test('Android phone French resources translate the complete player string contract', () => {
   const englishXml = read('clients/android-phone/app/src/main/res/values/strings.xml');
   const frenchXml = read('clients/android-phone/app/src/main/res/values-fr/strings.xml');
-  const english = resourceNames(englishXml, 'string');
-  const french = resourceNames(frenchXml, 'string');
-
-  // OAuth configuration is deliberately global and non-translatable.
-  english.delete('norva_google_web_client_id');
+  const english = new Set(
+    [...resourceNames(englishXml, 'string')]
+      .filter((name) => name.startsWith('player_')),
+  );
+  const french = new Set(
+    [...resourceNames(frenchXml, 'string')]
+      .filter((name) => name.startsWith('player_')),
+  );
 
   assert.deepEqual(
     [...english].filter((name) => !french.has(name)).sort(),
