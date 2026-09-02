@@ -116,6 +116,7 @@ class WatchPage {
         this.gatewaySourceTimestamps = false;
         this.audioTracks = [];
         this.subtitleTracks = [];
+        this._hlsOwnsExactSubtitles = false;
         // Exact subtitle evidence is kept separately from the render list. The
         // latter can also contain native/browser/preference-derived tracks and
         // must never be promoted to an exact provider-file observation.
@@ -751,11 +752,14 @@ class WatchPage {
         if (this.hls && Number.isInteger(this.hls.audioTrack) && this.hls.audioTrack >= 0) {
             const track = this.hls.audioTracks?.[this.hls.audioTrack];
             if (track) {
+                const streamIndex = this.hlsTrackSourceStreamIndex(track);
                 return {
                     source: 'hls',
                     index: this.hls.audioTrack,
+                    ...(Number.isInteger(streamIndex) ? { streamIndex } : {}),
                     label: track.name || track.lang || `Audio ${this.hls.audioTrack + 1}`,
-                    language: track.lang || null
+                    language: track.lang || null,
+                    codec: track.codec || track.audioCodec || null
                 };
             }
         }
@@ -791,7 +795,7 @@ class WatchPage {
     }
 
     getCurrentSubtitlePreference() {
-        const selectedProbe = this.getSelectedSubtitleTrack();
+        const selectedProbe = this._hlsOwnsExactSubtitles ? null : this.getSelectedSubtitleTrack();
         if (selectedProbe) {
             const subtitleTracks = this.getExtractableSubtitleTracks();
             const trackIndex = subtitleTracks.indexOf(selectedProbe);
@@ -807,9 +811,11 @@ class WatchPage {
         if (this.hls && Number.isInteger(this.hls.subtitleTrack) && this.hls.subtitleTrack >= 0) {
             const track = this.hls.subtitleTracks?.[this.hls.subtitleTrack];
             if (track) {
+                const streamIndex = this.hlsTrackSourceStreamIndex(track);
                 return {
                     source: 'hls',
                     index: this.hls.subtitleTrack,
+                    ...(Number.isInteger(streamIndex) ? { streamIndex } : {}),
                     label: track.name || track.lang || `Subtitle ${this.hls.subtitleTrack + 1}`,
                     language: track.lang || null
                 };
@@ -928,11 +934,52 @@ class WatchPage {
         if (kind === 'subtitle') this._pendingSubtitlePreferenceApplied = true;
     }
 
+    isExactHlsSubtitleTopology(value) {
+        if (!value || typeof value !== 'object') return false;
+        const sourceTrackCount = Number(value.sourceTrackCount ?? value.source_track_count);
+        const preparedTrackCount = Number(value.preparedTrackCount ?? value.prepared_track_count);
+        return value.protocol === 1
+            && value.enabled === true
+            && value.cacheEligible === true
+            && value.reason === 'enabled'
+            && Number.isSafeInteger(sourceTrackCount)
+            && sourceTrackCount > 0
+            && preparedTrackCount === sourceTrackCount;
+    }
+
+    hlsTrackSourceStreamIndex(track) {
+        if (!track || typeof track !== 'object') return null;
+        const attrs = track.attrs || track.attributes || {};
+        let viaGetter = null;
+        try {
+            viaGetter = typeof attrs.get === 'function'
+                ? attrs.get('X-NORVA-STREAM-INDEX')
+                : null;
+        } catch (_) { /* malformed third-party track metadata */ }
+        const candidates = [
+            track.streamIndex,
+            track.stream_index,
+            track.sourceStreamIndex,
+            track.source_stream_index,
+            attrs['X-NORVA-STREAM-INDEX'],
+            attrs['x-norva-stream-index'],
+            viaGetter,
+        ];
+        for (const value of candidates) {
+            const parsed = Number(value);
+            if (Number.isSafeInteger(parsed) && parsed >= 0 && parsed <= 4095) return parsed;
+        }
+        return null;
+    }
+
     findTrackByPreference(tracks, preference, fallbackIndex = null, type = 'track') {
         if (!Array.isArray(tracks) || !preference) return null;
         const streamIndex = Number(preference.streamIndex ?? preference.stream_index);
         if (Number.isInteger(streamIndex)) {
-            const byStream = tracks.find(track => Number(track?.index) === streamIndex);
+            const byStream = tracks.find(track => (
+                Number(track?.index) === streamIndex
+                || this.hlsTrackSourceStreamIndex(track) === streamIndex
+            ));
             if (byStream) return byStream;
         }
 
@@ -968,6 +1015,21 @@ class WatchPage {
         if (this._pendingAudioPreferenceApplied) return false;
         const preference = this.pendingPlaybackPreferences?.audio;
         if (!preference) return false;
+
+        if (this._privateMediaCacheAccess && this.hls?.audioTracks?.length) {
+            const track = this.findTrackByPreference(
+                this.hls.audioTracks,
+                preference,
+                Number(preference.index),
+                'audio'
+            );
+            const index = this.hls.audioTracks.indexOf(track);
+            if (index >= 0) {
+                this.hls.audioTrack = index;
+                this._pendingAudioPreferenceApplied = true;
+                return true;
+            }
+        }
 
         const probeTracks = Array.isArray(info?.audioTracks) && info.audioTracks.length
             ? info.audioTracks
@@ -1025,6 +1087,24 @@ class WatchPage {
             }
             this.clearExternalSubtitleTracks();
             return true;
+        }
+
+        if (this._hlsOwnsExactSubtitles && this.hls?.subtitleTracks?.length) {
+            const track = this.findTrackByPreference(
+                this.hls.subtitleTracks,
+                preference,
+                Number(preference.index),
+                'subtitle'
+            );
+            const index = this.hls.subtitleTracks.indexOf(track);
+            if (index >= 0) {
+                this.hls.subtitleDisplay = true;
+                this.hls.subtitleTrack = index;
+                this.selectedSubtitleStreamIndex = null;
+                this.selectedSubtitleTrackUserChoice = true;
+                this._pendingSubtitlePreferenceApplied = true;
+                return true;
+            }
         }
 
         const probeTracks = this.getExtractableSubtitleTracks();
@@ -1766,6 +1846,24 @@ class WatchPage {
             ?? gatewaySession?.multiAudioHls
             ?? gatewaySession?.multi_audio_hls
             ?? null;
+        const subtitleRenditions = extra.subtitleRenditions
+            ?? extra.subtitle_renditions
+            ?? root.subtitleRenditions
+            ?? root.subtitle_renditions
+            ?? nestedPlayback.subtitleRenditions
+            ?? nestedPlayback.subtitle_renditions
+            ?? gatewaySession?.subtitleRenditions
+            ?? gatewaySession?.subtitle_renditions
+            ?? null;
+        const exactSubtitleHls = extra.exactSubtitleHls
+            ?? extra.exact_subtitle_hls
+            ?? root.exactSubtitleHls
+            ?? root.exact_subtitle_hls
+            ?? nestedPlayback.exactSubtitleHls
+            ?? nestedPlayback.exact_subtitle_hls
+            ?? gatewaySession?.exactSubtitleHls
+            ?? gatewaySession?.exact_subtitle_hls
+            ?? null;
         const startupPolicy = extra.startupPolicy
             ?? extra.startup_policy
             ?? root.startupPolicy
@@ -1788,6 +1886,8 @@ class WatchPage {
             gatewaySession,
             audioRenditions,
             multiAudioHls,
+            subtitleRenditions,
+            exactSubtitleHls,
             startupPolicy,
             codecProfile: extra.codecProfile
                 || extra.codec_profile
@@ -2205,6 +2305,8 @@ class WatchPage {
             subtitleStreamIndex: playbackMetadata.subtitleStreamIndex ?? playbackMetadata.subtitle_stream_index ?? null,
             audioRenditions: playbackMetadata.audioRenditions ?? playbackMetadata.audio_renditions ?? null,
             multiAudioHls: playbackMetadata.multiAudioHls ?? playbackMetadata.multi_audio_hls ?? null,
+            subtitleRenditions: playbackMetadata.subtitleRenditions ?? playbackMetadata.subtitle_renditions ?? null,
+            exactSubtitleHls: playbackMetadata.exactSubtitleHls ?? playbackMetadata.exact_subtitle_hls ?? null,
             startupPolicy: playbackMetadata.startupPolicy ?? playbackMetadata.startup_policy
                 ?? playbackMetadata.gatewaySession?.startupPolicy
                 ?? playbackMetadata.gatewaySession?.startup_policy
@@ -3235,6 +3337,7 @@ class WatchPage {
         this._audioTopologyPending = false;
         this.audioTracks = [];
         this.subtitleTracks = [];
+        this._hlsOwnsExactSubtitles = false;
         this.subtitleSourceUrl = null;
         this.subtitleStartOffset = 0;
         this.selectedSubtitleStreamIndex = null;
@@ -5126,6 +5229,14 @@ class WatchPage {
             await this.handlePlaybackFailure('Private media cache authorization is invalid.');
             return;
         }
+        const exactSubtitleHls = options.exactSubtitleHls
+            ?? options.exact_subtitle_hls
+            ?? options.gatewaySession?.exactSubtitleHls
+            ?? options.gatewaySession?.exact_subtitle_hls
+            ?? null;
+        this._hlsOwnsExactSubtitles = Boolean(
+            privateMediaCacheAccess || this.isExactHlsSubtitleTopology(exactSubtitleHls)
+        );
         if (this.video) {
             this.video.dataset.playbackAttemptId = String(playbackAttemptId);
         }
@@ -5520,13 +5631,16 @@ class WatchPage {
                 : 0;
             this.streamStartOffset = startOffset;
             this.trackPlaybackPosition({ position: startOffset, force: true });
-            this.attachProbeSubtitles(url, this.subtitleTracks, startOffset);
+            if (!this._hlsOwnsExactSubtitles) {
+                this.attachProbeSubtitles(url, this.subtitleTracks, startOffset);
+            }
             this.playHls(finalUrl, {
                 playbackAttemptId,
                 autoplay: options.autoplay !== false,
                 audioSwitchRequestId: options.audioSwitchRequestId,
                 startupPolicy: options.startupPolicy ?? options.startup_policy ?? null,
-                privateMediaCache: Boolean(privateMediaCacheAccess)
+                privateMediaCache: Boolean(privateMediaCacheAccess),
+                nativeHlsSubtitles: this._hlsOwnsExactSubtitles
             });
             const requestedOffset = Number(
                 options.requestedSeekOffset ??
@@ -5782,10 +5896,10 @@ class WatchPage {
             maxMaxBufferLength: (isTranscodeSession || isGatewaySession) ? 600 : 60,
             startLevel: -1,
             enableWorker: true,
-            // External probe subtitles are attached lazily as native <track>
-            // elements. Keep hls.js from owning textTracks so it cannot reset
-            // the selected external track back to "hidden" during HLS events.
-            renderTextTracksNatively: false,
+            // Exact Gateway/cache renditions are part of the HLS graph and must
+            // be rendered by hls.js. Legacy probe subtitles remain external
+            // <track> elements, where hls.js ownership would reset their state.
+            renderTextTracksNatively: options.nativeHlsSubtitles === true,
             // Cloud gateway sessions are real-time VOD transcodes too: start at
             // the beginning, never the live edge (otherwise hls.js chases the
             // edge on the growing EVENT playlist and never loads a fragment).
@@ -9044,7 +9158,12 @@ class WatchPage {
         return tracks.map((track, index) => ({
             source: 'hls',
             index,
+            ...(Number.isInteger(this.hlsTrackSourceStreamIndex(track))
+                ? { streamIndex: this.hlsTrackSourceStreamIndex(track) }
+                : {}),
             label: track.name || track.lang || `Audio ${index + 1}`,
+            language: track.lang || track.language || null,
+            codec: track.codec || track.audioCodec || null,
             active: this.hls.audioTrack === index
         }));
     }
@@ -12348,7 +12467,20 @@ class WatchPage {
         let options = [];
         let anyActive = false;
 
-        if (probeSubtitleTracks.length) {
+        if (this._hlsOwnsExactSubtitles && hlsSubtitleTracks.length) {
+            options = hlsSubtitleTracks.map((track, index) => {
+                const active = this.hls.subtitleTrack === index;
+                const streamIndex = this.hlsTrackSourceStreamIndex(track);
+                anyActive = anyActive || active;
+                return {
+                    source: 'hls',
+                    index,
+                    ...(Number.isInteger(streamIndex) ? { streamIndex } : {}),
+                    label: track.name || track.lang || `Subtitle ${index + 1}`,
+                    active
+                };
+            });
+        } else if (probeSubtitleTracks.length) {
             options = probeSubtitleTracks.map((track, index) => {
                 const active = Number(track.index) === Number(this.selectedSubtitleStreamIndex);
                 anyActive = anyActive || active;
@@ -12383,10 +12515,12 @@ class WatchPage {
         if (!options.length && hlsSubtitleTracks.length) {
             options = hlsSubtitleTracks.map((track, index) => {
                 const active = this.hls.subtitleTrack === index;
+                const streamIndex = this.hlsTrackSourceStreamIndex(track);
                 anyActive = anyActive || active;
                 return {
                     source: 'hls',
                     index,
+                    ...(Number.isInteger(streamIndex) ? { streamIndex } : {}),
                     label: track.name || track.lang || `Subtitle ${index + 1}`,
                     active
                 };
@@ -12645,6 +12779,7 @@ class WatchPage {
             this.selectedSubtitleTrackUserChoice = true;
             this.hls.subtitleDisplay = true;
             this.hls.subtitleTrack = index;
+            subtitlePreference = this.getCurrentSubtitlePreference();
         }
 
         this.clearPendingPreference('subtitle');

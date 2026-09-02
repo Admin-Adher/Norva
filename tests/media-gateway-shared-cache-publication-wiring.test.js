@@ -10,12 +10,12 @@ const gateway = fs.readFileSync(path.join(
   '../services/media-gateway/src/index.js',
 ), 'utf8');
 
-test('Gateway v145 keeps global R2 publication dark and behind private dedicated credentials', () => {
+test('Gateway v146 keeps global R2 publication dark and behind private dedicated credentials', () => {
   assert.match(gateway, /NORVA_SHARED_MEDIA_CACHE_ENABLED === 'true'/);
   assert.match(gateway, /NORVA_MEDIA_CACHE_WORKER_URL/);
   assert.match(gateway, /NORVA_MEDIA_CACHE_WORKER_TOKEN/);
   assert.match(gateway, /NORVA_MEDIA_CACHE_MANIFEST_HMAC_KEY/);
-  assert.match(gateway, /const GATEWAY_VERSION = 145/);
+  assert.match(gateway, /const GATEWAY_VERSION = 146/);
   assert.doesNotMatch(gateway, /R2_ACCESS_KEY|R2_SECRET|AWS_ACCESS_KEY/);
 });
 

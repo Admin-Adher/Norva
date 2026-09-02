@@ -23,7 +23,7 @@ function between(startMarker, endMarker) {
 function loadNormalizer() {
   let block = between(
     'function normalizeGatewayAudioRenditions(',
-    '\nfunction normalizeCodecProfileTracks(',
+    '\nfunction normalizeGatewaySubtitleLanguage(',
   );
   block = block
     .replace(

@@ -52,6 +52,12 @@ const { PrivateMediaCacheStoreClient } = require('./privateMediaCacheStoreClient
 const { SharedHlsObjectPublisher } = require('./sharedHlsObjectPublisher');
 const { publishSharedMediaCacheSession } = require('./sharedMediaCachePublication');
 const {
+    buildExactSubtitleHlsPlan,
+    exactSubtitleOutputArgs,
+    finalizeExactHlsTrackGraph,
+    rewriteExactHlsMaster,
+} = require('./sharedHlsTracks');
+const {
     measureProviderRoute,
     runLeasedProviderRouteBenchmark,
 } = require('./providerRouteBenchmark');
@@ -1961,7 +1967,7 @@ const MKV_H264_HLS_CACHE_SECRET = decodeMkvH264FastStartProofKey(
 // above remains permanently dark while this implementation is integrated.
 const MKV_COMPLETE_HLS_CACHE_PROTOCOL = 2;
 const MKV_COMPLETE_HLS_CACHE_ACTIVATION_READY = true;
-const MKV_COMPLETE_HLS_CACHE_PIPELINE_BUILD = 'mkv-complete-hls-mpegts-v4';
+const MKV_COMPLETE_HLS_CACHE_PIPELINE_BUILD = 'mkv-complete-hls-mpegts-v5';
 const MKV_COMPLETE_HLS_CACHE_LOCATOR_BUILD = 2;
 // The cache locator is an opaque, signed capability to address one immutable
 // complete HLS rendition before any provider GET. It deliberately shares only
@@ -2095,7 +2101,7 @@ if (
 // default and does not alter the local v2 cache rollout.
 const SHARED_MEDIA_CACHE_PROTOCOL = 1;
 const SHARED_MEDIA_CACHE_REQUESTED = process.env.NORVA_SHARED_MEDIA_CACHE_ENABLED === 'true';
-const SHARED_MEDIA_CACHE_SEGMENTER_BUILD = 'ffmpeg-hls-mpegts-v1';
+const SHARED_MEDIA_CACHE_SEGMENTER_BUILD = 'ffmpeg-hls-mpegts-webvtt-v2';
 const SHARED_MEDIA_CACHE_TTL_MS = clampInt(
     process.env.NORVA_SHARED_MEDIA_CACHE_TTL_MS,
     30 * 24 * 60 * 60 * 1_000,
@@ -2155,7 +2161,17 @@ const MULTI_AUDIO_HLS_PROTOCOL = 1;
 // production Ryzen/Radeon host. Keep the operational default evidence-based and configurable,
 // while bounding accidental fan-out. Every exact source track stays visible to the user.
 const MAX_MULTI_AUDIO_RENDITIONS = clampInt(process.env.MAX_MULTI_AUDIO_RENDITIONS, 12, 2, 32);
-const GATEWAY_VERSION = 145;
+// Exact WebVTT renditions are cheap, but subtitle-heavy releases can expose
+// dozens of streams. Bound the one-pass fan-out so first-frame latency remains
+// predictable; over-limit or image-based subtitle graphs stay provider-backed
+// and are never mislabeled as a complete shared-cache object.
+const MAX_EXACT_SUBTITLE_HLS_RENDITIONS = clampInt(
+    process.env.MAX_EXACT_SUBTITLE_HLS_RENDITIONS,
+    8,
+    1,
+    16,
+);
+const GATEWAY_VERSION = 146;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -4335,6 +4351,12 @@ function strictLidNodeBodyAdapter(nodeBody) {
     let locked = false;
     const awaitDestroyed = () => {
         if (!nodeBody || nodeBody.destroyed || nodeBody.readableEnded) return Promise.resolve();
+        // Undici requires every request body to be consumed or explicitly
+        // dumped. Destroying an untouched, paused error body can race the HTTP/1
+        // parser's EOF path and trip its internal `assert(!this.paused)`.
+        if (typeof nodeBody.dump === 'function') {
+            return nodeBody.dump({ limit: 128 * 1024 }).catch(() => {});
+        }
         return new Promise((resolve) => {
             let settled = false;
             const finish = () => {
@@ -4385,19 +4407,86 @@ function strictLidNodeBodyAdapter(nodeBody) {
 }
 
 async function strictLidProviderRequest(sourceUrl, options = {}) {
-    const response = await undiciRequest(sourceUrl, {
-        method: options.method || 'GET',
-        headers: options.headers || {},
-        maxRedirections: 5,
-        signal: options.signal,
-        dispatcher: options.dispatcher || undefined,
-        throwOnError: false,
-    });
+    const redirectStatuses = new Set([301, 302, 303, 307, 308]);
+    let effectiveUrl = String(sourceUrl || '');
+    let response = null;
+    let status = null;
+    for (let redirectCount = 0; ; redirectCount += 1) {
+        // Undici 7.29 removed the request-level `throwOnError` and
+        // `maxRedirections` options. Passing either now fails after allocating a
+        // client and can leave its HTTP/1 parser paused. Follow bounded GET
+        // redirects explicitly so 407 remains observable and the exact final
+        // provider target can still be bound into playback integrity evidence.
+        response = await undiciRequest(effectiveUrl, {
+            method: options.method || 'GET',
+            headers: options.headers || {},
+            signal: options.signal,
+            dispatcher: options.dispatcher || undefined,
+        });
+        status = Number(response.statusCode);
+        const rawLocation = response.headers?.location;
+        const location = Array.isArray(rawLocation) ? rawLocation[0] : rawLocation;
+        if (!redirectStatuses.has(status) || !location) break;
+
+        if (response.body) {
+            if (typeof response.body.dump === 'function') {
+                try { await response.body.dump({ limit: 128 * 1024 }); } catch (_) {}
+            } else {
+                const redirectBody = strictLidNodeBodyAdapter(response.body);
+                try { await redirectBody.cancel(); } catch (_) {}
+            }
+        }
+        if (redirectCount >= 5) {
+            const error = new Error('Provider redirect limit exceeded');
+            error.code = 'UND_ERR_TOO_MANY_REDIRECTS';
+            throw error;
+        }
+        let nextUrl;
+        try {
+            nextUrl = new URL(String(location), effectiveUrl);
+        } catch (_) {
+            const error = new Error('Provider returned an invalid redirect target');
+            error.code = 'UND_ERR_INVALID_URL';
+            throw error;
+        }
+        if (!['http:', 'https:'].includes(nextUrl.protocol)) {
+            const error = new Error('Provider returned an unsupported redirect target');
+            error.code = 'UND_ERR_INVALID_URL';
+            throw error;
+        }
+        effectiveUrl = nextUrl.href;
+    }
+    // Error statuses are classified from their status alone. Start consuming
+    // those bodies in the same microtask that receives the headers, before a
+    // tiny provider response can reach socket EOF while Undici is still paused.
+    // This also bounds hostile error pages and keeps the mono-account socket
+    // reusable when the body is small and well formed.
+    let body = null;
+    let bodySettled = !response.body;
+    if (response.body) {
+        if (status === 200 || status === 206) {
+            body = strictLidNodeBodyAdapter(response.body);
+        } else if (typeof response.body.dump === 'function') {
+            try {
+                await response.body.dump({ limit: 128 * 1024 });
+                bodySettled = true;
+            } catch (_) {}
+        } else {
+            body = strictLidNodeBodyAdapter(response.body);
+            try {
+                await body.cancel();
+                bodySettled = true;
+            } catch (_) {}
+            body = null;
+        }
+    }
+    if (bodySettled && status !== 200 && status !== 206) {
+        // Undici resumes a completed HTTP/1 connection on the next immediate.
+        // Yield once before a bounded retry so it reuses the same authenticated
+        // provider tunnel instead of opening a second mono-account socket.
+        await new Promise((resolve) => setImmediate(resolve));
+    }
     const rawHeaders = response.headers || {};
-    const redirectHistory = Array.isArray(response.context?.history)
-        ? response.context.history
-        : [];
-    const effectiveUrl = String(redirectHistory.at(-1)?.href || sourceUrl);
     const headers = {
         get(name) {
             const value = rawHeaders[String(name || '').toLowerCase()];
@@ -4406,10 +4495,11 @@ async function strictLidProviderRequest(sourceUrl, options = {}) {
         },
     };
     return {
-        status: Number(response.statusCode),
+        status,
         url: effectiveUrl,
         headers,
-        body: response.body ? strictLidNodeBodyAdapter(response.body) : null,
+        body,
+        bodySettled,
     };
 }
 
@@ -4583,6 +4673,7 @@ async function closeStrictLidBrokerProviderFetch(context, attempt, reason = 'com
     const onAttemptAbort = attempt.onAttemptAbort;
     const fetchStarted = attempt.fetchStarted === true;
     const completedExactRange = attempt.upstreamCompletedExactRange === true;
+    const upstreamBodySettled = response?.bodySettled === true;
     attempt.upstreamController = null;
     attempt.reader = null;
     attempt.response = null;
@@ -4594,18 +4685,30 @@ async function closeStrictLidBrokerProviderFetch(context, attempt, reason = 'com
     attempt.controller.signal.removeEventListener?.('abort', onAttemptAbort);
     const preserveFiniteProviderConnection = completedExactRange
         && context.pathPrefix === 'finite-mkv-seek';
-    if (preserveFiniteProviderConnection) {
+    if (preserveFiniteProviderConnection || upstreamBodySettled) {
         // The declared Content-Length has been consumed exactly, so Undici can
-        // return this authenticated tunnel to its pool. Aborting/cancelling here
-        // forced a fresh residential CONNECT/TCP handshake every 2 MiB.
+        // return this authenticated tunnel to its pool. The same rule applies to
+        // a non-success response whose bounded error body was already dumped:
+        // aborting its settled controller races Undici's HTTP/1 EOF path and can
+        // surface Parser.finish()'s internal `assert(!this.paused)`. Aborting or
+        // cancelling a completed range also forced a fresh residential
+        // CONNECT/TCP handshake every 2 MiB.
         try { reader?.releaseLock(); } catch (_) {}
     } else {
-        try { controller.abort(new Error(reason)); } catch (_) {}
-        if (reader) {
-            try { await reader.cancel(); } catch (_) {}
-            try { reader.releaseLock(); } catch (_) {}
-        } else if (response?.body && !response.body.locked) {
-            try { await response.body.cancel(); } catch (_) {}
+        // Dispose the Web stream before aborting the request controller. With
+        // Undici, aborting a paused error body first can race socket EOF against
+        // Parser.finish() and surface its internal `assert(!this.paused)` as an
+        // uncaught exception. Cancellation is already the transport teardown;
+        // the controller abort that follows only settles any remaining waiters.
+        try {
+            if (reader) {
+                try { await reader.cancel(); } catch (_) {}
+                try { reader.releaseLock(); } catch (_) {}
+            } else if (response?.body && !response.body.locked) {
+                try { await response.body.cancel(); } catch (_) {}
+            }
+        } finally {
+            try { controller.abort(new Error(reason)); } catch (_) {}
         }
     }
     if (!fetchStarted) return;
@@ -9628,6 +9731,10 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             completeHlsGraphPromise: null,
             sharedMediaCachePublicationPromise: null,
             sharedMediaCachePublication: null,
+            exactSubtitleHls: null,
+            exactHlsTrackGraphFinalizationPromise: null,
+            exactHlsTrackGraphFinalization: null,
+            exactHlsTrackGraphError: null,
             completeHlsCacheMediaReady: false,
             completeHlsCacheProfileReady: false,
             completeHlsCacheFfmpegCompletedCleanly: false,
@@ -9702,6 +9809,7 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             session.mkvH264FastStartAudioAuthority = true;
             session.forceMkvH264FastStartAudioTranscode = false;
             freezeMultiAudioHlsTopology(session);
+            freezeExactSubtitleHlsTopology(session);
             session.videoMode = 'copy';
             session.videoModeReason = 'complete_hls_cache_hit';
             // The cached playlist covers the complete movie from t=0. Expose
@@ -9819,6 +9927,7 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
         // otherwise complete request/cached profile, making the normal Norva
         // exact-profile path reachable without ever mutating a running graph.
         freezeMultiAudioHlsTopology(session);
+        freezeExactSubtitleHlsTopology(session);
         const fastStartAssessment = freezeMkvH264FastStart(session);
 
         const finiteMkvH264RequiresProof = Boolean(
@@ -9974,6 +10083,8 @@ function gatewayCreatedSessionPayload(req, session) {
         subtitleStreamIndex: mappedSubtitleStreamIndexForSession(session),
         audioRenditions: audioRenditionsForSession(session),
         multiAudioHls: multiAudioHlsDiagnosticsForSession(session),
+        subtitleRenditions: exactSubtitleRenditionsForSession(session),
+        exactSubtitleHls: exactSubtitleHlsDiagnosticsForSession(session),
         requestedSeekOffset: session.seekOffset || 0,
         actualStartOffset: session.actualStartOffset || 0,
         localSeekTarget: session.localSeekTarget || 0,
@@ -11178,7 +11289,6 @@ async function openBoundedVodInputAttempt(session, offset, parentSignal, dispatc
             Accept: '*/*',
             'Accept-Encoding': 'identity',
             'User-Agent': session.userAgent || FFMPEG_USER_AGENT,
-            Connection: 'close',
         };
         if (offset > 0 && session.vodInputValidator?.value) {
             headers[session.vodInputValidator.header] = session.vodInputValidator.value;
@@ -12690,11 +12800,36 @@ async function stopFiniteMkvLinearSeekBridge(session) {
     if (session.linearSeekBridge === bridge) session.linearSeekBridge = null;
 }
 
+function finalizeSessionExactHlsTrackGraph(session) {
+    if (session?.exactHlsTrackGraphFinalizationPromise) {
+        return session.exactHlsTrackGraphFinalizationPromise;
+    }
+    const finalization = finalizeExactHlsTrackGraph({
+        outputDirectory: session.outputDir,
+        masterPath: session.playlistPath,
+        masterRequired: session.hlsMasterRequired === true,
+        audioPlan: session.multiAudioHls,
+        subtitlePlan: session.exactSubtitleHls,
+    }).then((result) => {
+        session.exactHlsTrackGraphFinalization = result;
+        session.exactHlsTrackGraphError = null;
+        return result;
+    }).catch((error) => {
+        session.exactHlsTrackGraphError = String(error?.code || 'HLS_TRACK_GRAPH_FINALIZATION_FAILED')
+            .replace(/[^A-Z0-9_-]+/gi, '_').slice(0, 120);
+        throw error;
+    });
+    session.exactHlsTrackGraphFinalizationPromise = finalization;
+    return finalization;
+}
+
 function startFfmpeg(session) {
     const multiAudioPlan = multiAudioHlsEnabled(session) ? session.multiAudioHls : null;
+    const exactSubtitlePlan = exactSubtitleHlsEnabled(session) ? session.exactSubtitleHls : null;
+    const masterRequired = Boolean(multiAudioPlan || exactSubtitlePlan);
     const segmentPattern = path.join(
         session.outputDir,
-        multiAudioPlan ? '%v-%05d.ts' : 'segment-%05d.ts',
+        masterRequired ? '%v-%05d.ts' : 'segment-%05d.ts',
     );
     const inputProbeArgs = inputProbeArgsForSession(session);
     // During the bounded fast path, require the already-known video/audio maps.
@@ -12829,7 +12964,13 @@ function startFfmpeg(session) {
                 '-var_stream_map', multiAudioPlan.varStreamMap,
                 path.join(session.outputDir, '%v.m3u8'),
             ]
-            : [session.playlistPath])
+            : (exactSubtitlePlan
+                ? [
+                    '-master_pl_name', 'playlist.m3u8',
+                    '-var_stream_map', 'v:0,a:0,name:video',
+                    path.join(session.outputDir, '%v.m3u8'),
+                ]
+                : [session.playlistPath]))
     ];
     args.push(...hlsOutputArgs);
 
@@ -12962,12 +13103,25 @@ function startFfmpeg(session) {
         // `close` follows process exit and stdio drainage. Only then are every
         // playlist and segment immutable enough for complete-cache collection.
         if (session.completeHlsCacheFfmpegCompletedCleanly === true) {
-            session.completeHlsCacheMediaReady = true;
-            scheduleMkvCompleteHlsCachePromotion(session);
-            scheduleSharedMediaCachePublication(session);
-            if (session.backgroundCacheContinuation === true) {
-                setImmediate(() => finishMkvCompleteHlsBackgroundContinuation(session));
-            }
+            finalizeSessionExactHlsTrackGraph(session).then(() => {
+                // The exact audio/subtitle graph is now immutable. Cache graph
+                // discovery starts only after the atomically rewritten master is
+                // visible, so manifest-last publication can never omit a track.
+                session.completeHlsCacheMediaReady = true;
+                scheduleMkvCompleteHlsCachePromotion(session);
+                scheduleSharedMediaCachePublication(session);
+                if (session.backgroundCacheContinuation === true) {
+                    setImmediate(() => finishMkvCompleteHlsBackgroundContinuation(session));
+                }
+            }).catch((error) => {
+                console.warn(
+                    `[media-gateway] exact HLS track graph not cacheable for ${session.id}: ` +
+                    String(error?.code || 'validation-failed').slice(0, 120),
+                );
+                if (session.backgroundCacheContinuation === true) {
+                    setImmediate(() => stopSession(session, { reason: 'background-failed' }).catch(() => {}));
+                }
+            });
         } else if (session.backgroundCacheContinuation === true) {
             setImmediate(() => stopSession(session, { reason: 'background-failed' }).catch(() => {}));
         }
@@ -13505,7 +13659,8 @@ function mkvCompleteHlsCacheAudioTopology(session, audioTracks) {
         plan.sourceTrackCount !== audioTracks.length ||
         !Array.isArray(plan.audioRenditions) ||
         plan.audioRenditions.length < 2 ||
-        plan.audioRenditions.length > Math.min(MAX_MULTI_AUDIO_RENDITIONS, audioTracks.length)
+        plan.audioRenditions.length !== audioTracks.length ||
+        plan.audioRenditions.length > MAX_MULTI_AUDIO_RENDITIONS
     ) {
         return reject('multi-audio-topology-drift');
     }
@@ -13531,6 +13686,39 @@ function mkvCompleteHlsCacheAudioTopology(session, audioTracks) {
     };
 }
 
+function mkvCompleteHlsCacheSubtitleTopology(session, subtitles) {
+    const reject = (reason) => ({ eligible: false, reason });
+    if (!Array.isArray(subtitles)) return reject('missing-subtitle-topology');
+    const plan = buildExactSubtitleHlsPlan({ subtitles }, {
+        maxRenditions: MAX_EXACT_SUBTITLE_HLS_RENDITIONS,
+    });
+    if (plan.cacheEligible !== true) return reject(plan.reason || 'subtitle-topology-ineligible');
+    if (subtitles.length === 0) {
+        return {
+            eligible: true,
+            reason: 'no-subtitles',
+            topology: { kind: 'none', protocol: 1, renditions: [] },
+        };
+    }
+    if (plan.enabled !== true || plan.renditions.length !== subtitles.length) {
+        return reject('subtitle-topology-partial');
+    }
+    const frozenPlan = asRecord(session?.exactSubtitleHls);
+    if (
+        frozenPlan.enabled === true &&
+        stableJson(frozenPlan.renditions) !== stableJson(plan.renditions)
+    ) return reject('subtitle-topology-drift');
+    return {
+        eligible: true,
+        reason: 'exact-webvtt',
+        topology: {
+            kind: 'exact-webvtt',
+            protocol: 1,
+            renditions: plan.renditions.map((rendition) => ({ ...rendition })),
+        },
+    };
+}
+
 function mkvCompleteHlsCacheStaticContext(session) {
     const reject = (reason) => ({ eligible: false, reason });
     if (session?.completeHlsCachePolicy === 'bypass') return reject('cache-bypass');
@@ -13552,13 +13740,10 @@ function mkvCompleteHlsCacheStaticContext(session) {
         : (Array.isArray(profile.subtitleTracks)
             ? profile.subtitleTracks
             : (Array.isArray(profile.subtitle_tracks) ? profile.subtitle_tracks : []));
-    // Detached subtitle assets are not part of the authenticated HLS graph yet.
-    // Audio, however, is safe for both one rendition and the exact bounded
-    // multi-audio master graph because every output playlist/segment is walked
-    // and hashed by collectCompleteHlsSessionAssets before publication.
-    if (subtitles.length > 0) return reject('subtitle-assets-not-cacheable');
     const audioTopology = mkvCompleteHlsCacheAudioTopology(session, audioTracks);
     if (!audioTopology.eligible) return reject(audioTopology.reason);
+    const subtitleTopology = mkvCompleteHlsCacheSubtitleTopology(session, subtitles);
+    if (!subtitleTopology.eligible) return reject(subtitleTopology.reason);
     const structuralProfile = mkvH264FastStartProfileFingerprint(profile, fileSizeBytes);
     if (!structuralProfile) return reject('profile-fingerprint-unavailable');
     const profileFingerprint = sha256Hex(stableJson({
@@ -13566,6 +13751,7 @@ function mkvCompleteHlsCacheStaticContext(session) {
         structuralProfile,
         requestedMode: session?.mode === 'transcode' ? 'transcode' : 'remux',
         audioTopology: audioTopology.topology,
+        subtitleTopology: subtitleTopology.topology,
     }));
     return {
         eligible: true,
@@ -13575,6 +13761,7 @@ function mkvCompleteHlsCacheStaticContext(session) {
         fileSizeBytes,
         profileFingerprint,
         audioTopology: audioTopology.topology,
+        subtitleTopology: subtitleTopology.topology,
     };
 }
 
@@ -13603,18 +13790,17 @@ function sharedMediaCacheStaticContext(session) {
         : (Array.isArray(profile.subtitleTracks)
             ? profile.subtitleTracks
             : (Array.isArray(profile.subtitle_tracks) ? profile.subtitle_tracks : []));
-    // Embedded subtitle extraction is the next cache milestone. Until those
-    // assets are part of the authenticated HLS graph, never publish an object
-    // that would advertise tracks it cannot actually serve.
-    if (subtitles.length > 0) return reject('subtitle-assets-not-cacheable');
     const audioTopology = mkvCompleteHlsCacheAudioTopology(session, audioTracks);
     if (!audioTopology.eligible) return reject(audioTopology.reason);
+    const subtitleTopology = mkvCompleteHlsCacheSubtitleTopology(session, subtitles);
+    if (!subtitleTopology.eligible) return reject(subtitleTopology.reason);
     return {
         eligible: true,
         reason: 'shared-cache-profile-accepted',
         profile,
         fileSizeBytes,
         audioTopology: audioTopology.topology,
+        subtitleTopology: subtitleTopology.topology,
     };
 }
 
@@ -13631,10 +13817,13 @@ function sharedMediaCachePipelineBuildForSession(session, staticContext = null) 
     const targetSeconds = multiAudio
         ? EXACT_MATROSKA_H264_HLS_TARGET_SECONDS
         : Number(session?.hlsTargetSeconds || 4);
+    const subtitleCount = Array.isArray(context.subtitleTopology?.renditions)
+        ? context.subtitleTopology.renditions.length
+        : 0;
     if (!['copy', 'encode'].includes(videoMode)) return null;
     if (!multiAudio && !['copy', 'transcode'].includes(audioMode)) return null;
     if (!Number.isInteger(targetSeconds) || targetSeconds < 1 || targetSeconds > 30) return null;
-    return `${MKV_COMPLETE_HLS_CACHE_PIPELINE_BUILD}:video-${videoMode}:audio-${audioMode}:target-${targetSeconds}`;
+    return `${MKV_COMPLETE_HLS_CACHE_PIPELINE_BUILD}:video-${videoMode}:audio-${audioMode}:subtitles-webvtt-${subtitleCount}:target-${targetSeconds}`;
 }
 
 function cloneMkvCompleteHlsCacheProfile(profile) {
@@ -13669,10 +13858,13 @@ function mkvCompleteHlsCachePipelineBuildForSession(session, staticContext = nul
     const targetSeconds = multiAudio
         ? EXACT_MATROSKA_H264_HLS_TARGET_SECONDS
         : Number(session?.hlsTargetSeconds || 4);
+    const subtitleCount = Array.isArray(context.subtitleTopology?.renditions)
+        ? context.subtitleTopology.renditions.length
+        : 0;
     if (!['copy', 'encode'].includes(videoMode)) return null;
     if (!multiAudio && !['copy', 'transcode'].includes(audioMode)) return null;
     if (!Number.isInteger(targetSeconds) || targetSeconds < 1 || targetSeconds > 30) return null;
-    return `${MKV_COMPLETE_HLS_CACHE_PIPELINE_BUILD}:video-${videoMode}:audio-${audioMode}:target-${targetSeconds}`;
+    return `${MKV_COMPLETE_HLS_CACHE_PIPELINE_BUILD}:video-${videoMode}:audio-${audioMode}:subtitles-webvtt-${subtitleCount}:target-${targetSeconds}`;
 }
 
 function buildMkvCompleteHlsCacheLocator(session, nowMs = Date.now()) {
@@ -14165,7 +14357,17 @@ function verifiedMkvH264CompleteCacheBinding(session, nowMs = Date.now()) {
         mkvH264FastStart: { eligible: true },
         mkvH264FastStartAudioAuthority: true,
     };
-    if (subtitleTracksForSession(proofBoundSession).length > 0) {
+    const proofSubtitles = Array.isArray(proofBoundSession.codecProfile?.subtitles)
+        ? proofBoundSession.codecProfile.subtitles
+        : (Array.isArray(proofBoundSession.codecProfile?.subtitleTracks)
+            ? proofBoundSession.codecProfile.subtitleTracks
+            : (Array.isArray(proofBoundSession.codecProfile?.subtitle_tracks)
+                ? proofBoundSession.codecProfile.subtitle_tracks
+                : []));
+    // Legacy H.264 proofs address the pre-WebVTT graph. They must never serve a
+    // file that has any subtitle topology, selected or not. Exact subtitles use
+    // the generic v5 complete-cache locator produced by this Gateway instead.
+    if (proofSubtitles.length > 0 || subtitleTracksForSession(proofBoundSession).length > 0) {
         return reject('subtitle-assets-not-cacheable');
     }
     const audioMode = shouldCopyAudio(proofBoundSession) ? 'copy' : 'transcode';
@@ -15792,6 +15994,42 @@ function freezeMultiAudioHlsTopology(session) {
     return plan;
 }
 
+function exactSubtitleHlsEnabled(session) {
+    return session?.exactSubtitleHls?.enabled === true;
+}
+
+function exactSubtitleHlsDiagnosticsForSession(session) {
+    const plan = asRecord(session?.exactSubtitleHls);
+    return {
+        protocol: 1,
+        enabled: plan.enabled === true,
+        cacheEligible: plan.cacheEligible === true,
+        reason: stringOrNull(plan.reason) || 'not-evaluated',
+        maxRenditions: MAX_EXACT_SUBTITLE_HLS_RENDITIONS,
+        sourceTrackCount: Number.isInteger(plan.sourceTrackCount) ? plan.sourceTrackCount : 0,
+        preparedTrackCount: Array.isArray(plan.renditions) ? plan.renditions.length : 0,
+    };
+}
+
+function exactSubtitleRenditionsForSession(session) {
+    if (!exactSubtitleHlsEnabled(session)) return [];
+    return session.exactSubtitleHls.renditions.map((rendition) => ({ ...rendition }));
+}
+
+function freezeExactSubtitleHlsTopology(session) {
+    const plan = buildExactSubtitleHlsPlan(session?.codecProfile, {
+        maxRenditions: MAX_EXACT_SUBTITLE_HLS_RENDITIONS,
+    });
+    session.exactSubtitleHls = plan;
+    session.hlsMasterRequired = multiAudioHlsEnabled(session) || plan.enabled === true;
+    if (plan.enabled === true && !multiAudioHlsEnabled(session)) {
+        session.videoPlaylistPath = path.join(session.outputDir, 'video.m3u8');
+    }
+    session.startupTimings = asRecord(session.startupTimings);
+    session.startupTimings.exactSubtitleHls = exactSubtitleHlsDiagnosticsForSession(session);
+    return plan;
+}
+
 function audioArgsForSession(session, copyAudio = shouldCopyAudio(session)) {
     return copyAudio ? ['-c:a', 'copy'] : TRANSCODE_AUDIO_ARGS;
 }
@@ -15812,6 +16050,12 @@ function videoModeForSession(session) {
 }
 
 function appendSubtitleOutputs(args, session, postInputSeek = []) {
+    if (exactSubtitleHlsEnabled(session)) {
+        const renditions = exactSubtitleRenditionsForSession(session);
+        args.push(...exactSubtitleOutputArgs(session.exactSubtitleHls, session.outputDir, postInputSeek));
+        console.log(`[media-gateway] segmenting exact subtitle stream(s): ${renditions.map((track) => track.streamIndex).join(', ')}`);
+        return;
+    }
     const tracks = subtitleTracksForSession(session);
     if (!tracks.length) return;
 
@@ -16842,8 +17086,10 @@ function hlsMediaPlaylistTargetsForSession(session) {
             kind: 'single',
             hlsIndex: null,
             streamIndex: mappedAudioStreamIndexForSession(session),
-            playlistName: path.basename(session.playlistPath),
-            playlistPath: session.playlistPath,
+            playlistName: exactSubtitleHlsEnabled(session) ? 'video.m3u8' : path.basename(session.playlistPath),
+            playlistPath: exactSubtitleHlsEnabled(session)
+                ? (session.videoPlaylistPath || path.resolve(session.outputDir, 'video.m3u8'))
+                : session.playlistPath,
         }];
     }
     const plan = session.multiAudioHls;
@@ -17303,6 +17549,8 @@ function serializeSession(req, session) {
         subtitleStreamIndex: mappedSubtitleStreamIndexForSession(session),
         audioRenditions: audioRenditionsForSession(session),
         multiAudioHls: multiAudioHlsDiagnosticsForSession(session),
+        subtitleRenditions: exactSubtitleRenditionsForSession(session),
+        exactSubtitleHls: exactSubtitleHlsDiagnosticsForSession(session),
         requestedSeekOffset: session.seekOffset || 0,
         actualStartOffset: session.actualStartOffset || 0,
         localSeekTarget: session.localSeekTarget || 0,
@@ -17353,6 +17601,8 @@ function debugSession(session) {
         subtitleStreamIndex: mappedSubtitleStreamIndexForSession(session),
         audioRenditions: audioRenditionsForSession(session),
         multiAudioHls: multiAudioHlsDiagnosticsForSession(session),
+        subtitleRenditions: exactSubtitleRenditionsForSession(session),
+        exactSubtitleHls: exactSubtitleHlsDiagnosticsForSession(session),
         requestedSeekOffset: session.seekOffset || 0,
         actualStartOffset: session.actualStartOffset || 0,
         localSeekTarget: session.localSeekTarget || 0,
@@ -18655,6 +18905,13 @@ function isAllowedSessionPlaylistName(session, value) {
         for (const rendition of session.multiAudioHls.audioRenditions) {
             allowed.add(`audio_${rendition.hlsIndex}.m3u8`);
         }
+    } else if (exactSubtitleHlsEnabled(session)) {
+        allowed.add('video.m3u8');
+    }
+    if (exactSubtitleHlsEnabled(session)) {
+        for (const rendition of session.exactSubtitleHls.renditions) {
+            allowed.add(rendition.playlistName);
+        }
     }
     return allowed.has(requested);
 }
@@ -18696,6 +18953,15 @@ function controlledAudioRenditionName(plan, rendition) {
 }
 
 function rewriteMultiAudioMasterNames(playlist, session) {
+    try {
+        return rewriteExactHlsMaster(playlist, {
+            audioPlan: session?.multiAudioHls,
+            subtitlePlan: session?.exactSubtitleHls,
+        });
+    } catch (_) {
+        // Media playlists have no EXT-X-STREAM-INF and therefore are not masters.
+        // Fall through to the legacy audio-only no-op/rewrite for those children.
+    }
     if (!multiAudioHlsEnabled(session)) return String(playlist || '');
     const plan = session.multiAudioHls;
     return String(playlist || '')

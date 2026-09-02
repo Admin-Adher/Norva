@@ -1903,6 +1903,10 @@ async function createPlaybackSession(
       audio_renditions: gateway.audioRenditions ?? null,
       multiAudioHls: gateway.multiAudioHls ?? null,
       multi_audio_hls: gateway.multiAudioHls ?? null,
+      subtitleRenditions: gateway.subtitleRenditions ?? null,
+      subtitle_renditions: gateway.subtitleRenditions ?? null,
+      exactSubtitleHls: gateway.exactSubtitleHls ?? null,
+      exact_subtitle_hls: gateway.exactSubtitleHls ?? null,
       startupPolicy: gateway.startupPolicy ?? null,
       startup_policy: gateway.startupPolicy ?? null,
     }
@@ -1945,6 +1949,10 @@ async function createPlaybackSession(
       audio_renditions: gateway.audioRenditions ?? null,
       multiAudioHls: gateway.multiAudioHls ?? null,
       multi_audio_hls: gateway.multiAudioHls ?? null,
+      subtitleRenditions: gateway.subtitleRenditions ?? null,
+      subtitle_renditions: gateway.subtitleRenditions ?? null,
+      exactSubtitleHls: gateway.exactSubtitleHls ?? null,
+      exact_subtitle_hls: gateway.exactSubtitleHls ?? null,
       startupPolicy: gateway.startupPolicy ?? null,
       startup_policy: gateway.startupPolicy ?? null,
       codecProfile: hasUsefulCodecProfile(responseCodecProfile) ? responseCodecProfile : null,
@@ -6172,6 +6180,8 @@ async function createGatewaySession(
       sourceTimestamps: false,
       audioRenditions: null,
       multiAudioHls: null,
+      subtitleRenditions: null,
+      exactSubtitleHls: null,
       startupPolicy: null,
     };
   }
@@ -6406,6 +6416,19 @@ async function createGatewaySession(
   // hls.js indexes are safe only when the diagnostics bind the default absolute
   // stream to the exact rendition array returned by this same Gateway response.
   const audioRenditions = multiAudioHls ? normalizedAudioRenditions : null;
+  const normalizedSubtitleRenditions = normalizeGatewaySubtitleRenditions(
+    gatewayBody.subtitleRenditions ?? gatewayBody.subtitle_renditions,
+    codecProfile,
+  );
+  const exactSubtitleHls = normalizeGatewayExactSubtitleHls(
+    gatewayBody.exactSubtitleHls ?? gatewayBody.exact_subtitle_hls,
+    normalizedSubtitleRenditions,
+    codecProfile,
+  );
+  // As with audio, the rendition array and its diagnostics are one indivisible
+  // topology. A partial or stale Gateway response must never create selectable
+  // subtitle rows in the player.
+  const subtitleRenditions = exactSubtitleHls ? normalizedSubtitleRenditions : null;
   const startupPolicy = normalizeGatewayStartupPolicy(
     gatewayBody.startupPolicy ?? gatewayBody.startup_policy,
   );
@@ -6442,6 +6465,8 @@ async function createGatewaySession(
       sourceTimestamps,
       audioRenditions,
       multiAudioHls,
+      subtitleRenditions,
+      exactSubtitleHls,
       startupPolicy,
       codecProfile,
       cleanupCreatedSession,
@@ -7149,6 +7174,110 @@ function normalizeGatewayMultiAudioHls(
   };
 }
 
+function normalizeGatewaySubtitleLanguage(value: unknown) {
+  const normalized = String(value || "und").trim().replace(/_/g, "-").toLowerCase();
+  return /^[a-z]{2,3}(?:-[a-z0-9]{2,8})*$/.test(normalized) ? normalized : "und";
+}
+
+function isExactGatewayTextSubtitleCodec(value: unknown) {
+  return ["ass", "movtext", "srt", "ssa", "subrip", "text", "webvtt"]
+    .includes(normalizeCodecToken(value));
+}
+
+function normalizeGatewaySubtitleRenditions(value: unknown, codecProfileValue: unknown = null) {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 32) return null;
+  const codecProfile = recordOrEmpty(codecProfileValue);
+  const exactTracks = Array.isArray(codecProfile.subtitles)
+    ? codecProfile.subtitles
+    : (Array.isArray(codecProfile.subtitleTracks)
+      ? codecProfile.subtitleTracks
+      : (Array.isArray(codecProfile.subtitle_tracks) ? codecProfile.subtitle_tracks : []));
+  if (exactTracks.length !== value.length) return null;
+
+  const normalized: JsonRecord[] = [];
+  const streamIndices = new Set<number>();
+  for (let position = 0; position < value.length; position += 1) {
+    const raw = recordOrEmpty(value[position]);
+    const exact = recordOrEmpty(exactTracks[position]);
+    const hlsIndex = Number(raw.hlsIndex);
+    const streamIndex = Number(raw.streamIndex);
+    const language = normalizeGatewaySubtitleLanguage(raw.language);
+    const title = typeof raw.title === "string" ? raw.title : "";
+    const sourceCodec = normalizeCodecToken(raw.sourceCodec ?? raw.source_codec);
+    const outputCodec = normalizeCodecToken(raw.outputCodec ?? raw.output_codec);
+    const exactStreamIndex = Number(exact.index ?? exact.streamIndex ?? exact.stream_index);
+    const exactCodec = normalizeCodecToken(exact.codec ?? exact.codecName ?? exact.codec_name);
+    const exactSubtitleType = normalizeCodecToken(exact.subtitleType ?? exact.subtitle_type ?? exact.kind);
+    if (
+      !Number.isInteger(hlsIndex) || hlsIndex !== position ||
+      !Number.isInteger(streamIndex) || streamIndex < 0 || streamIndex > 1024 ||
+      streamIndices.has(streamIndex) || exactStreamIndex !== streamIndex ||
+      language.length < 2 || language.length > 32 ||
+      language !== normalizeGatewaySubtitleLanguage(exact.language ?? exact.lang) ||
+      title.length < 1 || title.length > 96 || title.trim() !== title ||
+      /[\u0000-\u001f\u007f]/.test(title) ||
+      !isExactGatewayTextSubtitleCodec(sourceCodec) || sourceCodec !== exactCodec ||
+      outputCodec !== "webvtt" || exact.extractable !== true ||
+      (exactSubtitleType && exactSubtitleType !== "text" && !isExactGatewayTextSubtitleCodec(exactSubtitleType)) ||
+      typeof raw.default !== "boolean" || typeof raw.forced !== "boolean" ||
+      typeof raw.hearingImpaired !== "boolean" ||
+      raw.default !== (exact.default === true) || raw.forced !== (exact.forced === true) ||
+      raw.hearingImpaired !== (exact.hearingImpaired === true || exact.hearing_impaired === true) ||
+      raw.playlistName !== `subtitle_${hlsIndex}.m3u8` ||
+      raw.segmentPattern !== `subtitle_${hlsIndex}-%05d.vtt`
+    ) return null;
+    streamIndices.add(streamIndex);
+    normalized.push({
+      hlsIndex,
+      streamIndex,
+      language,
+      title,
+      sourceCodec,
+      outputCodec: "webvtt",
+      default: raw.default,
+      forced: raw.forced,
+      hearingImpaired: raw.hearingImpaired,
+      playlistName: raw.playlistName,
+      segmentPattern: raw.segmentPattern,
+    });
+  }
+  return normalized;
+}
+
+function normalizeGatewayExactSubtitleHls(
+  value: unknown,
+  renditions: JsonRecord[] | null,
+  codecProfileValue: unknown = null,
+) {
+  if (!renditions || renditions.length < 1 || renditions.length > 32) return null;
+  const raw = recordOrEmpty(value);
+  const codecProfile = recordOrEmpty(codecProfileValue);
+  const exactTracks = Array.isArray(codecProfile.subtitles)
+    ? codecProfile.subtitles
+    : (Array.isArray(codecProfile.subtitleTracks)
+      ? codecProfile.subtitleTracks
+      : (Array.isArray(codecProfile.subtitle_tracks) ? codecProfile.subtitle_tracks : []));
+  const maxRenditions = Number(raw.maxRenditions);
+  const sourceTrackCount = Number(raw.sourceTrackCount);
+  const preparedTrackCount = Number(raw.preparedTrackCount);
+  if (
+    raw.protocol !== 1 || raw.enabled !== true || raw.cacheEligible !== true || raw.reason !== "enabled" ||
+    !Number.isSafeInteger(maxRenditions) || maxRenditions < 1 || maxRenditions > 32 ||
+    renditions.length > maxRenditions || exactTracks.length !== renditions.length ||
+    !Number.isSafeInteger(sourceTrackCount) || sourceTrackCount !== renditions.length ||
+    !Number.isSafeInteger(preparedTrackCount) || preparedTrackCount !== renditions.length
+  ) return null;
+  return {
+    protocol: 1,
+    enabled: true,
+    cacheEligible: true,
+    reason: "enabled",
+    maxRenditions,
+    sourceTrackCount,
+    preparedTrackCount,
+  };
+}
+
 function normalizeCodecProfileTracks(value: unknown, kind: "audio" | "subtitle") {
   if (!Array.isArray(value)) return [];
   return value
@@ -7181,6 +7310,8 @@ function normalizeCodecProfileTracks(value: unknown, kind: "audio" | "subtitle")
         subtitleType,
         extractable,
         default: booleanOrNull(track.default),
+        forced: booleanOrNull(track.forced),
+        hearingImpaired: booleanOrNull(track.hearingImpaired ?? track.hearing_impaired),
         burnInRequired: booleanOrNull(track.burnInRequired ?? track.burn_in_required),
         unsupportedReason: stringOrNull(track.unsupportedReason ?? track.unsupported_reason),
       });

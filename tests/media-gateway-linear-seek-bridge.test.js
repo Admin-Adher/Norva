@@ -259,7 +259,12 @@ test('local fault-injection gateway reaches HLS through one provider pump and le
     const providerRequestLog = [];
     const providerServer = http.createServer((request, response) => {
         providerRequests += 1;
-        providerRequestLog.push({ method: request.method, range: String(request.headers.range || '') });
+        providerRequestLog.push({
+            method: request.method,
+            range: String(request.headers.range || ''),
+            connection: String(request.headers.connection || ''),
+            remotePort: Number(request.socket.remotePort || 0),
+        });
         activeProviderResponses += 1;
         maxActiveProviderResponses = Math.max(maxActiveProviderResponses, activeProviderResponses);
         let settled = false;
@@ -289,8 +294,12 @@ test('local fault-injection gateway reaches HLS through one provider pump and le
         const fullByteZeroFallback = start === 0 && requestedEnd >= sourceBytes.length - 1;
         if (!firstIdentityRequest && !fullByteZeroFallback) {
             brokerFailures += 1;
-            response.writeHead(502, { 'Content-Type': 'text/plain', 'Content-Length': '23' });
-            response.end('temporary indexed failure');
+            const failureBody = 'temporary indexed failure';
+            response.writeHead(502, {
+                'Content-Type': 'text/plain',
+                'Content-Length': String(Buffer.byteLength(failureBody)),
+            });
+            response.end(failureBody);
             return;
         }
         if (fullByteZeroFallback && !firstIdentityRequest) fullFallbacks += 1;
@@ -305,7 +314,14 @@ test('local fault-injection gateway reaches HLS through one provider pump and le
         response.end(payload);
     });
     await new Promise((resolve) => providerServer.listen(0, '127.0.0.1', resolve));
-    t.after(() => new Promise((resolve) => providerServer.close(resolve)));
+    t.after(() => {
+        // A failed assertion can leave the child Gateway holding the fixture's
+        // keep-alive socket until its own later cleanup hook runs. Close that
+        // test-only transport explicitly so diagnostics are emitted instead of
+        // the test runner hanging behind an unrelated open handle.
+        providerServer.closeAllConnections?.();
+        providerServer.close();
+    });
     const providerPort = providerServer.address().port;
 
     const portReservation = http.createServer();
@@ -444,4 +460,18 @@ test('local fault-injection gateway reaches HLS through one provider pump and le
     assert.equal(activeProviderResponses, 0);
     assert.equal(finalHealth.finiteMkvLinearSeekBridge.stats.failures, 0);
     assert.ok(providerRequests >= 2, JSON.stringify(providerRequestLog));
+    const indexedRetryPorts = new Set(providerRequestLog
+        .filter((request) => request.range === 'bytes=0-262143')
+        .map((request) => request.remotePort));
+    assert.equal(indexedRetryPorts.size, 1, 'indexed retries must reuse one provider connection');
+    assert.equal(
+        providerRequestLog.some((request) => request.connection === 'close'),
+        false,
+        'finite MKV provider requests must keep the authenticated tunnel reusable',
+    );
+    assert.doesNotMatch(
+        gatewayOutput.join(''),
+        /uncaughtException|assert\(!this\.paused\)/,
+        'provider error-body cleanup must not escape Undici internals into the Gateway process',
+    );
 });

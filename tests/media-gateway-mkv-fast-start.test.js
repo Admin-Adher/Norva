@@ -18,6 +18,9 @@ const {
   videoEncoderInputArgs,
   videoEncoderOutputArgs,
 } = require('../services/media-gateway/src/video-encoder');
+const {
+  buildExactSubtitleHlsPlan,
+} = require('../services/media-gateway/src/sharedHlsTracks');
 
 const ROOT = path.join(__dirname, '..');
 const GATEWAY = fs.readFileSync(path.join(ROOT, 'services/media-gateway/src/index.js'), 'utf8').replace(/\r\n?/g, '\n');
@@ -135,7 +138,7 @@ function loadFastStartHarness(overrides = {}) {
     MKV_COMPLETE_HLS_CACHE_LOCATOR_BUILD: 2,
     MKV_COMPLETE_HLS_CACHE_LOCATOR_KEY: COMPLETE_CACHE_KEY,
     MKV_COMPLETE_HLS_CACHE_TTL_MS: 7 * 24 * 60 * 60 * 1000,
-    MKV_COMPLETE_HLS_CACHE_PIPELINE_BUILD: 'mkv-complete-hls-mpegts-v4',
+    MKV_COMPLETE_HLS_CACHE_PIPELINE_BUILD: 'mkv-complete-hls-mpegts-v5',
     MKV_COMPLETE_HLS_CACHE_PROFILE_SNAPSHOT_MAX_BYTES: 256 * 1024,
     mkvCompleteHlsCache: {},
     EXACT_MATROSKA_H264_HLS_TARGET_SECONDS: 2,
@@ -143,7 +146,8 @@ function loadFastStartHarness(overrides = {}) {
     EXACT_MATROSKA_H264_MAX_HEIGHT: 1080,
     EXACT_MATROSKA_H264_MAX_PIXELS: 1920 * 1080,
     MULTI_AUDIO_HLS_PROTOCOL: 1,
-            MAX_MULTI_AUDIO_RENDITIONS: 12,
+    MAX_MULTI_AUDIO_RENDITIONS: 12,
+    MAX_EXACT_SUBTITLE_HLS_RENDITIONS: 8,
     stableJson,
     asRecord: (value) => value && typeof value === 'object' && !Array.isArray(value) ? value : {},
     compactRecord: (record) => Object.fromEntries(Object.entries(record || {}).filter(([, value]) => (
@@ -156,6 +160,7 @@ function loadFastStartHarness(overrides = {}) {
       const parsed = Number(value);
       return Number.isInteger(parsed) && parsed >= 0 && parsed <= 1024 ? parsed : null;
     },
+    buildExactSubtitleHlsPlan,
     sha256Hex: (value) => crypto.createHash('sha256').update(String(value)).digest('hex'),
     mkvH264FastStartProofKeyId: keyId,
     isFiniteMkvVodSession: (session) => session?.testFinite !== false,
@@ -1002,7 +1007,10 @@ test('generic complete-cache locator admits a prepared HEVC graph without provid
   const locator = h.buildCompleteCacheLocator(trained, issuedAtMs);
   assert.ok(locator?.envelope);
   assert.equal(locator.payload.scope, 'complete-hls');
-  assert.equal(locator.payload.pipelineBuild, 'mkv-complete-hls-mpegts-v4:video-encode:audio-transcode:target-4');
+  assert.equal(
+    locator.payload.pipelineBuild,
+    'mkv-complete-hls-mpegts-v5:video-encode:audio-transcode:subtitles-webvtt-0:target-4',
+  );
   assert.equal(h.openCompleteCacheProof(locator.envelope)?.profileFingerprint, locator.payload.profileFingerprint);
 
   trained.codecProfile.videoCodec = 'h264';
@@ -1074,7 +1082,7 @@ test('generic complete-cache locator binds the exact multi-audio HLS topology', 
   assert.ok(locator?.envelope);
   assert.equal(
     locator.payload.pipelineBuild,
-    'mkv-complete-hls-mpegts-v4:video-encode:audio-multi-aac-2:target-2',
+    'mkv-complete-hls-mpegts-v5:video-encode:audio-multi-aac-2:subtitles-webvtt-0:target-2',
   );
 
   const replay = {
@@ -1137,7 +1145,15 @@ test('complete-cache promotion waits for both drained media and the final enrich
 
   assert.deepEqual(calls, ['hevc-enriched', 'h264-enriched']);
   assert.match(GATEWAY, /completeHlsCacheProfileReady = true;[\s\S]{0,160}scheduleMkvCompleteHlsCachePromotion\(session\)/);
-  assert.match(GATEWAY, /child\.on\('close',[\s\S]{0,400}completeHlsCacheMediaReady = true;[\s\S]{0,160}scheduleMkvCompleteHlsCachePromotion\(session\)/);
+  const ffmpegBlock = between(GATEWAY, 'function startFfmpeg(', '\nfunction seekArgsForSession(');
+  const closeAt = ffmpegBlock.indexOf("child.on('close', () => {");
+  const graphFinalizationAt = ffmpegBlock.indexOf('finalizeSessionExactHlsTrackGraph(session)', closeAt);
+  const mediaReadyAt = ffmpegBlock.indexOf('session.completeHlsCacheMediaReady = true;', graphFinalizationAt);
+  const promotionAt = ffmpegBlock.indexOf('scheduleMkvCompleteHlsCachePromotion(session)', mediaReadyAt);
+  assert.ok(closeAt >= 0, 'cache publication must be gated by FFmpeg close');
+  assert.ok(graphFinalizationAt > closeAt, 'the exact track graph must finalize after FFmpeg close');
+  assert.ok(mediaReadyAt > graphFinalizationAt, 'media becomes cache-ready only after exact graph finalization');
+  assert.ok(promotionAt > mediaReadyAt, 'promotion starts only after the immutable graph is ready');
 });
 
 test('complete-cache continuation revokes playback, keeps the same owners, and reports one finalized proof', async () => {
@@ -1698,6 +1714,7 @@ test('an admitted replay starts one FFmpeg graph with copied video and proof-sel
   const startFfmpeg = vm.runInNewContext(`(${startFfmpegSource})`, {
     path,
     multiAudioHlsEnabled: () => false,
+    exactSubtitleHlsEnabled: () => false,
     inputProbeArgsForSession: () => [],
     shouldCopyAudio: (value) => value.forceMkvH264FastStartAudioTranscode !== true,
     audioArgsForSession: (_value, copyAudio) => copyAudio ? ['-c:a', 'copy'] : ['-c:a', 'aac', '-profile:a', 'aac_low', '-ar', '48000', '-ac', '2'],
@@ -1819,7 +1836,7 @@ test('complete-cache Gateway sessions stay authenticated, bound and fail closed 
         strongEtagSha256: proof.validator.digest,
         profileFingerprint: proof.profileFingerprint,
         fileSizeBytes: proof.fileSizeBytes,
-        pipelineBuild: 'mkv-complete-hls-mpegts-v4:video-copy:audio-copy',
+        pipelineBuild: 'mkv-complete-hls-mpegts-v5:video-copy:audio-copy',
         proofBuild: proof.build,
       },
     };

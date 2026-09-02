@@ -185,6 +185,7 @@ test('Gateway readiness materializes every segment in the ten-second buffer', as
             ),
             isWithin,
             multiAudioHlsEnabled: () => false,
+            exactSubtitleHlsEnabled: () => false,
             mappedAudioStreamIndexForSession: () => null,
             MIN_HLS_STARTUP_BUFFER_SECONDS: 10,
             MIN_HLS_STARTUP_SEGMENTS: 3,
@@ -441,7 +442,7 @@ test('an exact finite Matroska H264 profile selects the 2s keyframe encode plan 
 test('exact Matroska H264 uses independent 2s HLS segments with forced keyframes and no split-by-time', () => {
     const source = readGateway();
 
-    assert.match(source, /const GATEWAY_VERSION = 145;/);
+    assert.match(source, /const GATEWAY_VERSION = 146;/);
     assert.match(source, /exactMatroskaH264ReencodeProtocol:\s*1/);
     assert.match(source, /exactMatroskaH264HlsTargetSeconds:\s*EXACT_MATROSKA_H264_HLS_TARGET_SECONDS/);
     assert.match(source, /exactMatroskaH264MaxPixels:\s*EXACT_MATROSKA_H264_MAX_PIXELS/);

@@ -236,6 +236,7 @@ test('one FFmpeg maps absolute input indexes to audio-only ordinals and keeps th
         {
             path,
             multiAudioHlsEnabled: (value) => value?.multiAudioHls?.enabled === true,
+            exactSubtitleHlsEnabled: () => false,
             inputProbeArgsForSession: () => [],
             shouldCopyAudio: () => { throw new Error('single-audio copy predicate must not run'); },
             audioArgsForSession: (_value, copyAudio) => {
@@ -532,6 +533,7 @@ test('child playlist serving is allowlisted, rewritten no-store, and rejects tra
         {
             path,
             multiAudioHlsEnabled: (session) => session?.multiAudioHls?.enabled === true,
+            exactSubtitleHlsEnabled: (session) => session?.exactSubtitleHls?.enabled === true,
         },
     );
     const session = {
@@ -540,12 +542,22 @@ test('child playlist serving is allowlisted, rewritten no-store, and rejects tra
             videoPlaylistName: 'video.m3u8',
             audioRenditions: [{ hlsIndex: 0 }, { hlsIndex: 1 }],
         },
+        exactSubtitleHls: {
+            enabled: true,
+            renditions: [
+                { playlistName: 'subtitle_0.m3u8' },
+                { playlistName: 'subtitle_1.m3u8' },
+            ],
+        },
     };
     assert.equal(helpers.safeSessionArtifactName('../video.m3u8'), null);
     assert.equal(helpers.safeSessionArtifactName('..\\video.m3u8'), null);
     assert.equal(helpers.safeSessionArtifactName('video/child.m3u8'), null);
     assert.equal(helpers.isAllowedSessionPlaylistName(session, 'video.m3u8'), true);
     assert.equal(helpers.isAllowedSessionPlaylistName(session, 'audio_1.m3u8'), true);
+    assert.equal(helpers.isAllowedSessionPlaylistName(session, 'subtitle_0.m3u8'), true);
+    assert.equal(helpers.isAllowedSessionPlaylistName(session, 'subtitle_1.m3u8'), true);
+    assert.equal(helpers.isAllowedSessionPlaylistName(session, 'subtitle_2.m3u8'), false);
     assert.equal(helpers.isAllowedSessionPlaylistName(session, 'unknown.m3u8'), false);
 
     const route = sourceBetween(

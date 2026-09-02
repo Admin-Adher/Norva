@@ -3400,6 +3400,7 @@ test('finite MKV resume spawns FFmpeg against only the loopback URL with pre-inp
         path,
         Number,
         multiAudioHlsEnabled: () => false,
+        exactSubtitleHlsEnabled: () => false,
         inputProbeArgsForSession: () => [],
         shouldCopyAudio: () => false,
         audioArgsForSession: () => ['-c:a', 'aac'],
