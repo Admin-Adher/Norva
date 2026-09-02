@@ -1779,6 +1779,10 @@ const CloudAdapter = (() => {
             displayName: data.name || data.displayName || data.display_name || (type === 'm3u' ? 'Playlist link' : 'TV provider'),
             syncNow: data.syncNow !== false
         };
+        const pathShape = String(data.inputPathShape || data.input_path_shape || '').trim().toLowerCase();
+        if (new Set(['root', 'get.php', 'player_api.php', '.m3u8', '.m3u', 'web_page', 'other', 'invalid']).has(pathShape)) {
+            payload.inputPathShape = pathShape;
+        }
 
         if (type === 'xtream') {
             payload.url = data.url || data.serverUrl || data.server_url;
@@ -1846,6 +1850,10 @@ const CloudAdapter = (() => {
         if (method === 'GET' && /^\/sources\/[^/]+$/.test(path)) {
             const id = path.split('/').pop();
             return (await listSources()).find(source => String(source.id) === String(id) || source.cloudId === id) || null;
+        }
+        if (method === 'POST' && path === '/sources/attempt') {
+            if (!hasUserSession()) return { accepted: false };
+            return await NorvaCloud.sources.recordAttempt(data || {});
         }
         if (method === 'POST' && path === '/sources') {
             if (!hasUserSession()) throw new Error('Sign in to add a TV provider.');
@@ -2873,6 +2881,7 @@ const API = {
         getAll: () => API.request('GET', '/sources'),
         getByType: (type) => API.request('GET', `/sources/type/${type}`),
         getById: (id) => API.request('GET', `/sources/${id}`),
+        recordAttempt: (data) => API.request('POST', '/sources/attempt', data),
         create: (data) => API.request('POST', '/sources', data),
         update: (id, data) => API.request('PUT', `/sources/${id}`, data),
         delete: (id) => API.request('DELETE', `/sources/${id}`),

@@ -126,7 +126,7 @@ public class MainActivity extends Activity {
     private static final int MAX_PARTNER_CHOOSER_TITLE_CHARS =
             PartnersContract.MAX_CHOOSER_TITLE_CHARS;
     private static final int MAX_HANDLED_SHARE_REQUEST_IDS = 64;
-    private static final String UA_SUFFIX       = " NorvaTV-AndroidPhone/1.0";
+    private static final String UA_SUFFIX       = " NorvaTV-AndroidPhone/" + BuildConfig.VERSION_NAME;
     private static final int    REQ_PLAYER      = 1001;
     private static final int    REQ_NOTIF_PERM  = 1002;
     private static final int    REQ_CAMERA_PERM = 1003;

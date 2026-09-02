@@ -1365,6 +1365,7 @@ class HomePage {
         };
 
         const applyParsedLink = (force = false) => {
+            const currentPathShape = manager?.sourceInputPathShape?.(urlInput.value) || 'invalid';
             const parsed = manager?.parseXtreamLink?.(urlInput.value);
             const termsFieldset = form.querySelector('[data-provider-access-terms]');
             const playlistLink = manager?.looksLikePlaylistLink?.(urlInput.value) === true;
@@ -1386,6 +1387,9 @@ class HomePage {
                 }
                 return;
             }
+            if (!urlInput.dataset.sourceInputPathShape || currentPathShape !== 'root') {
+                urlInput.dataset.sourceInputPathShape = currentPathShape;
+            }
             if (parsed.serverUrl) urlInput.value = parsed.serverUrl;
             if (nameInput && !nameInput.value.trim() && parsed.host) {
                 nameInput.value = parsed.host.replace(/^www\./i, '');
@@ -1403,6 +1407,7 @@ class HomePage {
             if (passwordInput.value.trim()) clearFieldError(passwordInput);
         };
 
+        urlInput.addEventListener('input', () => delete urlInput.dataset.sourceInputPathShape);
         urlInput.addEventListener('paste', () => setTimeout(() => applyParsedLink(true), 0));
         urlInput.addEventListener('blur', () => applyParsedLink(false));
         urlInput.addEventListener('change', () => applyParsedLink(false));
@@ -1454,6 +1459,18 @@ class HomePage {
                 }
                 const hasAddress = Boolean(urlInput.value.trim());
                 const playlist = manager?.looksLikePlaylistLink?.(urlInput.value) === true;
+                if (hasAddress) {
+                    manager?.reportSourceConnectionValidationAttempt?.({
+                        type: 'auto',
+                        url: urlInput.value,
+                        username: usernameInput.value,
+                        password: passwordInput.value,
+                        inputPathShape: urlInput.dataset.sourceInputPathShape || '',
+                        failureFamily: !playlist && (!usernameInput.value.trim() || !passwordInput.value.trim())
+                            ? 'missing_credentials'
+                            : 'invalid_input'
+                    });
+                }
                 let firstInvalid = null;
                 if (!hasAddress) {
                     setFieldError(urlInput, 'Enter the provider URL or complete link.');
@@ -1524,12 +1541,14 @@ class HomePage {
     readSetupConnectionForm(container) {
         const manager = this.app?.sourceManager || window.app?.sourceManager;
         if (!manager?.buildSourceConnection) throw new Error('TV service connection is unavailable.');
+        const urlInput = container.querySelector('#home-source-url');
         return manager.buildSourceConnection({
             type: 'auto',
             name: container.querySelector('#home-source-name')?.value || '',
-            url: container.querySelector('#home-source-url')?.value || '',
+            url: urlInput?.value || '',
             username: container.querySelector('#home-source-username')?.value || '',
-            password: container.querySelector('#home-source-password')?.value || ''
+            password: container.querySelector('#home-source-password')?.value || '',
+            inputPathShape: urlInput?.dataset?.sourceInputPathShape || ''
         });
     }
 

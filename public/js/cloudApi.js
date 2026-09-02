@@ -4545,6 +4545,7 @@
 
         sources: {
             list: () => listSourcesCached(),
+            recordAttempt: (attempt) => request('POST', '/sources/attempt', attempt),
             create: (source) => request('POST', '/sources', source).then((r) => { invalidateSourcesCache(); return r; }),
             update: (id, patch) => request('PATCH', `/sources/${encodeURIComponent(id)}`, patch).then((r) => { invalidateSourcesCache(); return r; }),
             toggle: (id, enabled) => request('POST', `/sources/${encodeURIComponent(id)}/toggle`, { enabled }).then((r) => { invalidateSourcesCache(); return r; }),

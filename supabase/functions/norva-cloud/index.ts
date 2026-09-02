@@ -3,6 +3,14 @@ import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { playbackTransportExpiresAt } from "../_shared/playback-expiry.mjs";
 import { formatSourceSyncError } from "../_shared/source-sync-error.mjs";
 import {
+  classifySourceAttemptFailure,
+  normalizedSourceAttemptDomain,
+  normalizeSourceAttemptPathShape,
+  normalizeSourceAttemptType,
+  sourceAttemptClientContext,
+  summarizeSourceConnectionAttempt,
+} from "../_shared/source-connection-attempt.mjs";
+import {
   buildProviderDirectFallbackSnapshot,
   directFallbackLeaseTtlSeconds,
   ProviderDirectFallbackLeaseError,
@@ -720,6 +728,9 @@ async function route(
     if (req.method === "GET" && !id) return { body: await listSources(user.id, db) };
     if (req.method === "GET" && id === "status" && !action) return { body: await listSourceStatuses(user.id, db) };
     if (req.method === "POST" && id === "estimate" && !action) return { body: await estimateSourceByUrl(req) };
+    if (req.method === "POST" && id === "attempt" && !action) {
+      return { status: 202, body: await recordClientSourceConnectionAttempt(req, user.id, db) };
+    }
     if (req.method === "POST" && !id) {
       // A hidden Phase-4 staging source is part of the same logical provider
       // replacement and must never consume a second commercial source slot.
@@ -1461,44 +1472,177 @@ async function createSource(req: Request, userId: string, db: SupabaseClient) {
   const body = await readJson(req);
   const sourceType = stringOr(body.sourceType ?? body.source_type ?? body.type, "");
   const displayName = stringOr(body.displayName ?? body.display_name ?? body.name, "");
-  if (!sourceType || !displayName) throw new HttpError(400, "sourceType and displayName are required");
-  if (!["xtream", "m3u", "epg"].includes(sourceType)) throw new HttpError(400, "Unsupported source type");
-
   const rawConfig = buildSourceConfig(sourceType, body);
-  const hasManagedConfig = Object.keys(rawConfig).length > 0;
-  const runtimeConfig = await getRuntimeConfig(db);
-  const validation = hasManagedConfig ? await validateCloudSource(sourceType, rawConfig, runtimeConfig) : {};
-  const configCiphertext = hasManagedConfig
-    ? await encryptSourceConfig(rawConfig, runtimeConfig)
-    : stringOrNull(body.configCiphertext ?? body.config_ciphertext);
-  const configHint = {
-    ...recordOrEmpty(body.configHint ?? body.config_hint),
-    ...buildSourceHint(sourceType, rawConfig, validation),
-    managedBy: hasManagedConfig ? "norva-cloud" : undefined,
-  };
-  const syncNow = hasManagedConfig && body.syncNow !== false && body.sync_now !== false;
+  const attempt = await summarizeSourceConnectionAttempt({
+    sourceType,
+    url: sourceType === "xtream"
+      ? stringOr(rawConfig.serverUrl, "")
+      : sourceType === "m3u"
+        ? stringOr(rawConfig.playlistUrl, "")
+        : "",
+    inputPathShape: body.inputPathShape ?? body.input_path_shape,
+  });
+  const clientContext = sourceAttemptClientContext(req.headers.get("user-agent"));
 
-  const row = {
-    user_id: userId,
-    source_type: sourceType,
-    display_name: displayName,
-    config_ciphertext: configCiphertext,
-    config_hint: compactRecord(configHint),
-    sync_status: syncNow ? "syncing" : stringOr(body.syncStatus ?? body.sync_status, "idle"),
-  };
+  try {
+    if (!sourceType || !displayName) throw new HttpError(400, "sourceType and displayName are required");
+    if (!["xtream", "m3u", "epg"].includes(sourceType)) throw new HttpError(400, "Unsupported source type");
 
-  const { data, error } = await db.from("cloud_sources").insert(row).select("id").single();
-  if (error) throwDb(error, "Unable to create source");
+    const hasManagedConfig = Object.keys(rawConfig).length > 0;
+    const runtimeConfig = await getRuntimeConfig(db);
+    const validation = hasManagedConfig ? await validateCloudSource(sourceType, rawConfig, runtimeConfig) : {};
+    const configCiphertext = hasManagedConfig
+      ? await encryptSourceConfig(rawConfig, runtimeConfig)
+      : stringOrNull(body.configCiphertext ?? body.config_ciphertext);
+    const configHint = {
+      ...recordOrEmpty(body.configHint ?? body.config_hint),
+      ...buildSourceHint(sourceType, rawConfig, validation),
+      managedBy: hasManagedConfig ? "norva-cloud" : undefined,
+    };
+    const syncNow = hasManagedConfig && body.syncNow !== false && body.sync_now !== false;
 
-  if (syncNow) {
-    waitUntil(syncCloudSource(data.id, userId, db));
+    const row = {
+      user_id: userId,
+      source_type: sourceType,
+      display_name: displayName,
+      config_ciphertext: configCiphertext,
+      config_hint: compactRecord(configHint),
+      sync_status: syncNow ? "syncing" : stringOr(body.syncStatus ?? body.sync_status, "idle"),
+    };
+
+    const { data, error } = await db.from("cloud_sources").insert(row).select("id").single();
+    if (error) throwDb(error, "Unable to create source");
+
+    if (syncNow) {
+      waitUntil(syncCloudSource(data.id, userId, db));
+    }
+
+    const result = {
+      source: await managedSourceSnapshot(data.id, userId, db),
+      validation: sanitizeSourceValidation(validation),
+      syncStarted: syncNow,
+    };
+    scheduleSourceConnectionAttempt(db, userId, attempt, clientContext, null);
+    return result;
+  } catch (error) {
+    scheduleSourceConnectionAttempt(db, userId, attempt, clientContext, error);
+    throw error;
+  }
+}
+
+const SOURCE_ATTEMPT_CLIENT_WINDOW_MS = 60_000;
+const SOURCE_ATTEMPT_CLIENT_MAX_PER_WINDOW = 12;
+const sourceAttemptClientWindows = new Map<string, { startedAt: number; count: number }>();
+
+function admitClientSourceAttempt(userId: string) {
+  const now = Date.now();
+  const current = sourceAttemptClientWindows.get(userId);
+  if (!current || now - current.startedAt >= SOURCE_ATTEMPT_CLIENT_WINDOW_MS) {
+    if (!current && sourceAttemptClientWindows.size >= 2000) {
+      for (const [key, window] of sourceAttemptClientWindows) {
+        if (now - window.startedAt >= SOURCE_ATTEMPT_CLIENT_WINDOW_MS) sourceAttemptClientWindows.delete(key);
+      }
+      if (sourceAttemptClientWindows.size >= 2000) return false;
+    }
+    sourceAttemptClientWindows.set(userId, { startedAt: now, count: 1 });
+    return true;
+  }
+  if (current.count >= SOURCE_ATTEMPT_CLIENT_MAX_PER_WINDOW) return false;
+  current.count += 1;
+  return true;
+}
+
+async function recordClientSourceConnectionAttempt(req: Request, userId: string, db: SupabaseClient) {
+  const body = await readJson(req);
+  const allowedKeys = new Set([
+    "sourceType", "domainNormalized", "hostHash", "pathShape", "failureFamily",
+  ]);
+  if (Object.keys(body).some((key) => !allowedKeys.has(key))) {
+    throw new HttpError(400, "Unsupported source attempt diagnostic field");
   }
 
-  return {
-    source: await managedSourceSnapshot(data.id, userId, db),
-    validation: sanitizeSourceValidation(validation),
-    syncStarted: syncNow,
+  const sourceType = normalizeSourceAttemptType(body.sourceType);
+  const pathShape = normalizeSourceAttemptPathShape(body.pathShape);
+  const rawDomain = stringOr(body.domainNormalized, "").trim().toLowerCase();
+  const hostHash = stringOr(body.hostHash, "").trim().toLowerCase();
+  const failureFamily = stringOr(body.failureFamily, "").trim().toLowerCase();
+  if (!sourceType || !pathShape) throw new HttpError(400, "Invalid source attempt diagnostic");
+  if (rawDomain && !/^[a-z0-9._-]{1,253}$/.test(rawDomain)) {
+    throw new HttpError(400, "Invalid source attempt domain");
+  }
+  if (hostHash && !/^[0-9a-f]{64}$/.test(hostHash)) {
+    throw new HttpError(400, "Invalid source attempt host hash");
+  }
+  if (!["missing_credentials", "invalid_input"].includes(failureFamily)) {
+    throw new HttpError(400, "Invalid source attempt failure family");
+  }
+  if (!admitClientSourceAttempt(userId)) return { accepted: true };
+
+  const attempt = {
+    sourceType,
+    domainNormalized: rawDomain ? normalizedSourceAttemptDomain(rawDomain) : null,
+    hostHash: hostHash || null,
+    pathShape,
   };
+  const clientContext = sourceAttemptClientContext(req.headers.get("user-agent"));
+  scheduleSourceConnectionAttempt(
+    db,
+    userId,
+    attempt,
+    clientContext,
+    new HttpError(422, "Client-side source validation failed", {
+      code: failureFamily === "missing_credentials" ? "MISSING_CREDENTIALS" : "INVALID_REQUEST",
+    }),
+  );
+  return { accepted: true };
+}
+
+function scheduleSourceConnectionAttempt(
+  db: SupabaseClient,
+  userId: string,
+  attempt: {
+    sourceType: string;
+    domainNormalized: string | null;
+    hostHash: string | null;
+    pathShape: string;
+  } | null,
+  clientContext: { platform: string; appVersion: string | null },
+  failure: unknown,
+) {
+  if (!attempt) return;
+  const status = failure instanceof HttpError
+    ? Math.max(100, Math.min(599, Math.trunc(failure.status)))
+    : failure
+      ? 500
+      : 201;
+  const details = failure instanceof HttpError ? recordOrEmpty(failure.details) : {};
+  const failureFamily = failure
+    ? classifySourceAttemptFailure({
+      status,
+      code: details.code,
+      message: failure instanceof Error ? failure.message : "",
+    })
+    : null;
+
+  waitUntil(Promise.resolve(db.rpc("norva_record_source_connection_attempt", {
+    p_user_id: userId,
+    p_source_type: attempt.sourceType,
+    p_domain_normalized: attempt.domainNormalized,
+    p_host_hash: attempt.hostHash,
+    p_path_shape: attempt.pathShape,
+    p_outcome: failure ? "failed" : "accepted",
+    p_http_status: status,
+    p_failure_family: failureFamily,
+    p_platform: clientContext.platform,
+    p_app_version: clientContext.appVersion,
+  })).then(({ error }) => {
+    if (error) {
+      const safeCode = /^[A-Z0-9_]{1,16}$/.test(String(error.code ?? "").toUpperCase())
+        ? String(error.code).toUpperCase()
+        : "DATABASE_ERROR";
+      console.warn("[norva-cloud] source attempt telemetry failed", safeCode);
+    }
+  }));
 }
 
 async function updateSource(req: Request, id: string, userId: string, db: SupabaseClient) {

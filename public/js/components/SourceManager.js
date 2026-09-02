@@ -1469,10 +1469,19 @@ class SourceManager {
         if (!urlInput || !usernameInput || !passwordInput) return;
 
         const applyParsedLink = (force = false) => {
+            const currentPathShape = this.sourceInputPathShape(urlInput.value);
             const parsed = this.parseXtreamLink(urlInput.value);
             if (!parsed) {
                 if (hint) hint.textContent = 'If you paste a full Xtream link, Norva will fill the login fields automatically.';
                 return;
+            }
+
+            // The full link is reduced to its server root before the request is
+            // sent. Preserve only this bounded shape label so diagnostics can
+            // distinguish get.php/player_api.php without retaining a path or
+            // any username/password query value.
+            if (!urlInput.dataset.sourceInputPathShape || currentPathShape !== 'root') {
+                urlInput.dataset.sourceInputPathShape = currentPathShape;
             }
 
             if (parsed.serverUrl) {
@@ -1497,6 +1506,7 @@ class SourceManager {
             }
         };
 
+        urlInput.addEventListener('input', () => delete urlInput.dataset.sourceInputPathShape);
         urlInput.addEventListener('paste', () => setTimeout(() => applyParsedLink(true), 0));
         urlInput.addEventListener('blur', () => applyParsedLink(false));
         urlInput.addEventListener('change', () => applyParsedLink(false));
@@ -1642,6 +1652,113 @@ class SourceManager {
             /[?&](?:type|output|format)=m3u(?:_plus)?(?:&|$)/i.test(value);
     }
 
+    sourceInputPathShape(raw) {
+        const value = String(raw || '').trim();
+        if (!value) return 'invalid';
+        let url;
+        try {
+            if (/^[a-z][a-z0-9+.-]*:\/\//i.test(value) && !/^https?:\/\//i.test(value)) return 'invalid';
+            url = new URL(/^https?:\/\//i.test(value) ? value : `http://${value}`);
+        } catch (_) {
+            return 'invalid';
+        }
+
+        let pathname;
+        try {
+            pathname = decodeURIComponent(url.pathname || '/').toLowerCase().replace(/\/{2,}/g, '/');
+        } catch (_) {
+            pathname = (url.pathname || '/').toLowerCase().replace(/\/{2,}/g, '/');
+        }
+        const parts = pathname.split('/').filter(Boolean);
+        if (!parts.length) return 'root';
+        if (parts.includes('get.php')) return 'get.php';
+        if (parts.includes('player_api.php')) return 'player_api.php';
+        if (pathname.endsWith('.m3u8')) return '.m3u8';
+        if (pathname.endsWith('.m3u')) return '.m3u';
+        if (/\.(?:html?|xhtml)$/.test(pathname)) return 'web_page';
+        return 'other';
+    }
+
+    sourceAttemptRootDomain(rawHostname) {
+        const hostname = String(rawHostname || '').trim().toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
+        if (!hostname) return null;
+        if (hostname.includes(':') || /^\d{1,3}(?:\.\d{1,3}){3}$/.test(hostname)) return 'ip-address';
+        if (hostname === 'localhost' || hostname.endsWith('.local')) return 'local-address';
+        const labels = hostname.split('.').filter(Boolean);
+        if (labels.length <= 2) return hostname;
+        const multiLabelSuffixes = new Set([
+            'co.in', 'firm.in', 'gen.in', 'ind.in', 'net.in', 'org.in',
+            'com.bd', 'net.bd', 'org.bd', 'com.pk', 'net.pk', 'org.pk',
+            'co.th', 'in.th', 'or.th', 'com.vn', 'net.vn', 'org.vn',
+            'co.id', 'web.id', 'or.id', 'com.my', 'net.my', 'org.my',
+            'co.ma', 'net.ma', 'com.dz', 'org.dz', 'com.tn', 'org.tn',
+            'co.uk', 'org.uk', 'me.uk', 'com.au', 'net.au', 'org.au',
+            'co.ae', 'com.sa'
+        ]);
+        return multiLabelSuffixes.has(labels.slice(-2).join('.'))
+            ? labels.slice(-3).join('.')
+            : labels.slice(-2).join('.');
+    }
+
+    async sourceAttemptDiagnostic(input = {}) {
+        const rawUrl = String(input.url || '').trim();
+        if (!rawUrl) return null;
+        let parsedUrl = null;
+        try {
+            if (/^[a-z][a-z0-9+.-]*:\/\//i.test(rawUrl) && !/^https?:\/\//i.test(rawUrl)) {
+                throw new Error('Unsupported URL scheme');
+            }
+            parsedUrl = new URL(/^https?:\/\//i.test(rawUrl) ? rawUrl : `http://${rawUrl}`);
+        } catch (_) { /* invalid is an allowed diagnostic shape */ }
+
+        const requestedType = String(input.type || 'auto').trim().toLowerCase();
+        const parsedXtream = ['auto', 'xtream'].includes(requestedType) ? this.parseXtreamLink(rawUrl) : null;
+        const hasCredentials = Boolean(
+            String(input.username || '').trim() || String(input.password || '').trim() ||
+            parsedXtream?.username || parsedXtream?.password
+        );
+        const sourceType = requestedType === 'auto'
+            ? (this.looksLikePlaylistLink(rawUrl) && !hasCredentials ? 'm3u' : 'xtream')
+            : requestedType;
+        if (!['m3u', 'xtream'].includes(sourceType)) return null;
+
+        const hostname = String(parsedUrl?.hostname || '').trim().toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
+        let hostHash = null;
+        if (hostname && globalThis.crypto?.subtle) {
+            try {
+                const digest = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(hostname));
+                hostHash = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
+            } catch (_) { /* grouping is optional */ }
+        }
+        const allowedShapes = new Set([
+            'root', 'get.php', 'player_api.php', '.m3u8', '.m3u', 'web_page', 'other', 'invalid'
+        ]);
+        const suppliedShape = String(input.inputPathShape || '').trim().toLowerCase();
+        const derivedShape = this.sourceInputPathShape(rawUrl);
+
+        return {
+            sourceType,
+            domainNormalized: this.sourceAttemptRootDomain(hostname),
+            hostHash,
+            pathShape: allowedShapes.has(suppliedShape) && derivedShape === 'root' ? suppliedShape : derivedShape
+        };
+    }
+
+    async reportSourceConnectionValidationAttempt(input = {}) {
+        if (window.API?.isCloudMode?.() !== true || !window.API?.sources?.recordAttempt) return false;
+        try {
+            const diagnostic = await this.sourceAttemptDiagnostic(input);
+            if (!diagnostic) return false;
+            await window.API.sources.recordAttempt({
+                ...diagnostic,
+                failureFamily: input.failureFamily === 'missing_credentials' ? 'missing_credentials' : 'invalid_input'
+            });
+            return true;
+        } catch (_) {
+            return false;
+        }
+    }
+
     buildSourceConnection(input = {}) {
         const existing = input.existing === true;
         const requestedType = String(input.type || 'xtream').toLowerCase();
@@ -1691,13 +1808,22 @@ class SourceManager {
             credentialsProvided = /^https?:\/\//i.test(rawUrl);
         }
 
+        const allowedPathShapes = new Set([
+            'root', 'get.php', 'player_api.php', '.m3u8', '.m3u', 'web_page', 'other', 'invalid'
+        ]);
+        const suppliedPathShape = String(input.inputPathShape || '').trim().toLowerCase();
+        const inputPathShape = allowedPathShapes.has(suppliedPathShape)
+            ? suppliedPathShape
+            : this.sourceInputPathShape(rawUrl);
+
         return {
             type,
             name,
             url: type === 'm3u' ? rawUrl : url,
             username,
             password,
-            credentialsProvided
+            credentialsProvided,
+            inputPathShape
         };
     }
 
@@ -1720,13 +1846,15 @@ class SourceManager {
     }
 
     readSourceForm(type, { existing = false } = {}) {
+        const urlInput = document.getElementById('source-url');
         return this.buildSourceConnection({
             type,
             existing,
             name: document.getElementById('source-name')?.value || '',
-            url: document.getElementById('source-url')?.value || '',
+            url: urlInput?.value || '',
             username: document.getElementById('source-username')?.value || '',
-            password: document.getElementById('source-password')?.value || ''
+            password: document.getElementById('source-password')?.value || '',
+            inputPathShape: urlInput?.dataset?.sourceInputPathShape || ''
         });
     }
 
@@ -2601,6 +2729,17 @@ class SourceManager {
                 accessTerms = this.readProviderAccessTerms(document.getElementById('modal'));
             }
         } catch (err) {
+            const urlInput = document.getElementById('source-url');
+            this.reportSourceConnectionValidationAttempt({
+                type,
+                url: urlInput?.value || '',
+                username: document.getElementById('source-username')?.value || '',
+                password: document.getElementById('source-password')?.value || '',
+                inputPathShape: urlInput?.dataset?.sourceInputPathShape || '',
+                failureFamily: /username and password|required/i.test(String(err?.message || ''))
+                    ? 'missing_credentials'
+                    : 'invalid_input'
+            });
             if (type === 'xtream') this.openAdvancedSourceLogin();
             const safeMessage = /^Enter a valid provider access/.test(String(err?.message || ''))
                 ? err.message
@@ -2608,12 +2747,12 @@ class SourceManager {
             NorvaModal.toast(safeMessage, 'error');
             return;
         }
-        const { name, url, username, password } = form;
+        const { name, url, username, password, inputPathShape } = form;
 
         try {
             if (!await this.confirmLargePlaylistIfNeeded(form)) return;
 
-            const createdSource = await API.sources.create({ type, name, url, username, password });
+            const createdSource = await API.sources.create({ type, name, url, username, password, inputPathShape });
             if (type === 'xtream') {
                 this.trackProduct('provider_connected', {
                     journey: 'provider_onboarding', step: 'provider_connect', state: 'completed', outcome: 'success'

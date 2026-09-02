@@ -74,7 +74,7 @@ public class MainActivity extends Activity {
     private static final String CLOUD_PAIR_URL = "https://norva.tv/cloud-pair.html?device=tv&returnTo=%2Fapp.html%3Fpaired%3D1%23home";
     // Marker appended to the WebView user agent: the web app detects it and
     // enables TV mode (D-pad spatial navigation, focus outlines).
-    private static final String UA_SUFFIX = " NorvaTV-AndroidTV/3.1";
+    private static final String UA_SUFFIX = " NorvaTV-AndroidTV/" + BuildConfig.VERSION_NAME;
 
     private FrameLayout root;
     private WebView webView;
