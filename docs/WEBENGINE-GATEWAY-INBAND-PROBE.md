@@ -47,6 +47,12 @@ on the leading 200 KB of an MKV reports the same streams as the full file). For 
 whose `moov` is at the **end**, the leading bytes don't parse, so step 2 returns null
 and it falls back to the provider probe (step 3) — correct, just not connection-free.
 
+For the exact finite-MKV playback lane, finding complete EBML `Info` and `Tracks`
+does not end the cold prefetch early. The Gateway retains the full configured bounded
+prefix (4 MB by default) on the same provider connection before running local
+`ffprobe`: real provider files can require packet data after `Tracks` before their
+streams are emitted. Those retained bytes are then replayed to FFmpeg exactly once.
+
 **Safety:** with `INBAND_HEADER_PARSE=false` the `/raw` capture and the in-band branch
 are both skipped — behaviour is identical to stage 1. The tee never throws into the
 byte pipe, is attached before `pipe()` (no missed leading chunk), and respects pipe

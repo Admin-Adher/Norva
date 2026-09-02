@@ -2217,7 +2217,7 @@ const MAX_EXACT_SUBTITLE_HLS_RENDITIONS = clampInt(
     1,
     16,
 );
-const GATEWAY_VERSION = 151;
+const GATEWAY_VERSION = 152;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -11934,6 +11934,7 @@ async function prefetchRetainedBoundedMkvHeader(session, opened, parentSignal = 
     const startedAt = Date.now();
     let reachedEof = false;
     let metadataComplete = false;
+    let metadataCompleteAtBytes = null;
     let lastMetadataCheckBytes = 0;
     const metadataCheckIntervalBytes = Math.min(targetBytes, 64 * 1024);
     const detectCompleteMetadata = (force = false) => {
@@ -11943,7 +11944,10 @@ async function prefetchRetainedBoundedMkvHeader(session, opened, parentSignal = 
             captured.captureOwner !== String(session?.id || session?.sourceUrl || '') ||
             captured.len <= 0
         ) return false;
-        if (captured.metadataComplete === true) return true;
+        if (captured.metadataComplete === true) {
+            metadataCompleteAtBytes ??= captured.metadataCompleteAtBytes || captured.len;
+            return true;
+        }
         if (
             !force &&
             captured.len < targetBytes &&
@@ -11956,20 +11960,21 @@ async function prefetchRetainedBoundedMkvHeader(session, opened, parentSignal = 
         );
         if (!complete) return false;
 
-        // Info + Tracks are the complete topology authority needed by the
-        // local ffprobe. Mark the bounded capture complete immediately instead
-        // of waiting for an arbitrary 4 MiB prefix; the unread bytes remain on
-        // this same provider socket and are replayed to FFmpeg exactly once.
+        // Info + Tracks prove that the topology exists, but they do not prove
+        // that every ffprobe/Matroska combination can demux a file truncated at
+        // that exact byte. Some provider files need packet data after Tracks
+        // before ffprobe emits streams. Remember where metadata completed, but
+        // retain the full bounded prefix on this same provider socket so the
+        // first response can expose its exact audio/subtitle graph reliably.
         captured.metadataComplete = true;
-        captured.done = true;
-        captured.capturing = false;
-        captured.completionReason = 'matroska-info-tracks-complete';
+        captured.metadataCompleteAtBytes = captured.len;
+        metadataCompleteAtBytes = captured.len;
         captured.updatedAt = Date.now();
         return true;
     };
 
     metadataComplete = detectCompleteMetadata(prefetchedBytes >= targetBytes);
-    while (prefetchedBytes < targetBytes && !metadataComplete) {
+    while (prefetchedBytes < targetBytes) {
         const next = await readRawPrefixChunk(
             attempt.reader,
             parentSignal,
@@ -12000,7 +12005,18 @@ async function prefetchRetainedBoundedMkvHeader(session, opened, parentSignal = 
         retained.push(chunk);
         captureBoundedMkvHeaderBytes(session, prefetchedBytes, chunk);
         prefetchedBytes += chunk.length;
-        metadataComplete = detectCompleteMetadata(prefetchedBytes >= targetBytes);
+        metadataComplete = detectCompleteMetadata(prefetchedBytes >= targetBytes) || metadataComplete;
+    }
+
+    const captured = headerByteCache.get(String(session?.sourceUrl || ''));
+    if (
+        captured?.captureOwner === String(session?.id || session?.sourceUrl || '') &&
+        captured.len >= targetBytes
+    ) {
+        captured.done = true;
+        captured.capturing = false;
+        captured.completionReason = 'bounded-prefix-target';
+        captured.updatedAt = Date.now();
     }
 
     if (reachedEof && range?.fullBodyUnknownSize !== true && prefetchedBytes < maximumRangeBytes) {
@@ -12017,6 +12033,7 @@ async function prefetchRetainedBoundedMkvHeader(session, opened, parentSignal = 
     session.startupTimings.providerColdHeaderPrefetchMs = Math.max(0, Date.now() - startedAt);
     session.startupTimings.providerColdHeaderPrefetchReachedEof = reachedEof;
     session.startupTimings.providerColdHeaderMetadataComplete = metadataComplete;
+    session.startupTimings.providerColdHeaderMetadataCompleteAtBytes = metadataCompleteAtBytes;
     session.startupTimings.providerColdHeaderPrefetchAvoidedBytes = Math.max(
         0,
         targetBytes - prefetchedBytes,

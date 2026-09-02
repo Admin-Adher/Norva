@@ -101,7 +101,7 @@ test('window and finalize capabilities cannot downgrade into non-strict POST or 
 });
 
 test('v104 exposes additive window checkpoint budgets and pending-finalize observability', () => {
-  assert.match(gateway, /const GATEWAY_VERSION = 151;/);
+  assert.match(gateway, /const GATEWAY_VERSION = 152;/);
   assert.match(gateway, /strictLidExtractionTimeoutProtocol: 4/);
   assert.match(gateway, /strictLidWindowCheckpointProtocol: STRICT_LID_WINDOW_CHECKPOINT_PROTOCOL/);
   assert.match(gateway, /strictLidWindowEvidenceEnvelopeProtocol: STRICT_LID_WINDOW_ENVELOPE_PROTOCOL/);

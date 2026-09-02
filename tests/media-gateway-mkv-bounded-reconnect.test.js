@@ -716,7 +716,7 @@ test('cold MKV preloads one bounded metadata prefix and replays every byte on th
     assert.equal(tracker.active, 0);
 });
 
-test('cold MKV stops prefix prefetch as soon as complete Info and Tracks are available', async () => {
+test('cold MKV retains the bounded prefix after Info and Tracks so local ffprobe sees packet data', async () => {
     const targetBytes = 300_000;
     const metadataBytes = 100_000;
     const fixture = Buffer.concat([
@@ -754,16 +754,18 @@ test('cold MKV stops prefix prefetch as soon as complete Info and Tracks are ava
 
     await h.ensureBoundedMkvInputPump(session);
 
-    assert.equal(fetches, 1, 'adaptive metadata detection reuses the retained provider GET');
-    assert.equal(session.startupTimings.providerColdHeaderPrefetchBytes, metadataBytes);
+    assert.equal(fetches, 1, 'metadata detection and the demuxer prefix reuse the retained provider GET');
+    assert.equal(session.startupTimings.providerColdHeaderPrefetchBytes, targetBytes);
     assert.equal(session.startupTimings.providerColdHeaderPrefetchTargetBytes, targetBytes);
     assert.equal(session.startupTimings.providerColdHeaderMetadataComplete, true);
-    assert.equal(session.startupTimings.providerColdHeaderPrefetchAvoidedBytes, targetBytes - metadataBytes);
+    assert.equal(session.startupTimings.providerColdHeaderMetadataCompleteAtBytes, metadataBytes);
+    assert.equal(session.startupTimings.providerColdHeaderPrefetchAvoidedBytes, 0);
     const captured = headerByteCache.get(session.sourceUrl);
-    assert.equal(captured?.len, metadataBytes);
+    assert.equal(captured?.len, targetBytes);
     assert.equal(captured?.done, true);
     assert.equal(captured?.metadataComplete, true);
-    assert.equal(captured?.completionReason, 'matroska-info-tracks-complete');
+    assert.equal(captured?.metadataCompleteAtBytes, metadataBytes);
+    assert.equal(captured?.completionReason, 'bounded-prefix-target');
 
     const writable = new CapturingWritable();
     const result = await h.runBoundedMkvInputPump(
@@ -775,7 +777,7 @@ test('cold MKV stops prefix prefetch as soon as complete Info and Tracks are ava
 
     assert.equal(fetches, 1, 'FFmpeg replay keeps the original provider socket');
     assert.equal(result.bytesForwarded, fixture.length);
-    assert.deepEqual(writable.bytes(), fixture, 'early-stopped metadata bytes are replayed exactly once');
+    assert.deepEqual(writable.bytes(), fixture, 'the full bounded prefix is replayed exactly once');
     assert.equal(tracker.maxActive, 1);
     assert.equal(tracker.active, 0);
 });
