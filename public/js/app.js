@@ -80,6 +80,9 @@ class App {
         this.pages.admin = null;
         this.entitlement = null;
         this.sourceHealthSummary = null;
+        this._searchNavVisible = false;
+        this._downloadsNavVisible = false;
+        this._hasLocalDownloads = false;
         for (const page of ['movies', 'series']) {
             const top = Number(this._nativeContinuity?.gridScroll?.[page]) || 0;
             if (top > 0 && this.pages[page]) this.pages[page]._savedScrollTop = top;
@@ -713,7 +716,7 @@ class App {
         // "Use Norva elsewhere" devices popover (web only, never in the shells).
         this.setupDevicesButton();
 
-        // Surface the Downloads menu entry once the native app has ≥1 download.
+        // Reconcile VOD actions with catalogue health and the native offline store.
         this.refreshDownloadsNav();
         document.addEventListener('visibilitychange', () => {
             if (document.visibilityState === 'visible') this.refreshDownloadsNav();
@@ -909,14 +912,14 @@ class App {
         }
         if (intent.kind !== 'action') return false;
         if (intent.target === 'search') {
-            this.openSearch();
-            return true;
+            return this.openSearch();
         }
         if (intent.target === 'account') {
             this.openAccountSheet();
             return true;
         }
         if (intent.target === 'downloads') {
+            if (this._downloadsNavVisible !== true) return false;
             try { window.NorvaTVCloud?.openDownloads?.(); } catch (_) { /* no bridge */ }
             return true;
         }
@@ -1439,11 +1442,82 @@ class App {
         return false;
     }
 
+    readLocalDownloadPresence() {
+        if (!this.isNativePhoneShell()) return false;
+        const bridge = window.NorvaTVCloud;
+        if (!bridge || typeof bridge.getDownloads !== 'function') return this._hasLocalDownloads === true;
+        try {
+            const downloads = JSON.parse(bridge.getDownloads() || '[]');
+            if (!Array.isArray(downloads)) return this._hasLocalDownloads === true;
+            this._hasLocalDownloads = downloads.length > 0;
+        } catch (_) {
+            // A transient bridge read must not strand an already-known offline library.
+        }
+        return this._hasLocalDownloads === true;
+    }
+
+    applyMediaActionAvailability(summary = this.sourceHealthSummary) {
+        const catalogKnown = Boolean(summary && summary.state !== 'unknown' && !summary.error);
+        const policy = catalogKnown
+            ? window.NorvaSourceHealth?.catalogAvailability?.(summary)
+            : null;
+        const categoryAvailable = (category) => {
+            if (!catalogKnown) return false;
+            const shared = policy?.categories?.[category];
+            return typeof shared === 'boolean'
+                ? shared
+                : this.catalogCategoryAvailable(category, summary);
+        };
+        const state = {
+            catalogKnown,
+            moviesAvailable: categoryAvailable('movies'),
+            seriesAvailable: categoryAvailable('series'),
+            hasLocalDownloads: this.readLocalDownloadPresence(),
+            previousSearchVisible: this._searchNavVisible,
+        };
+        const visibility = this.navigation?.model?.mediaActionVisibility?.(state) || {
+            search: catalogKnown
+                ? Boolean(state.moviesAvailable || state.seriesAvailable)
+                : Boolean(state.previousSearchVisible),
+            downloads: Boolean(
+                state.hasLocalDownloads
+                || (catalogKnown && (state.moviesAvailable || state.seriesAvailable))
+            ),
+        };
+        const searchVisible = visibility.search === true;
+        const downloadsVisible = this.isNativePhoneShell() && visibility.downloads === true;
+        const activeElement = document.activeElement;
+        const activeNavKey = activeElement?.closest?.('[data-nav-key]')?.dataset?.navKey || '';
+        const topSearch = document.getElementById('nav-search');
+        const focusWillHide = (!searchVisible && (activeElement === topSearch || activeNavKey === 'search'))
+            || (!downloadsVisible && activeNavKey === 'downloads');
+
+        this._searchNavVisible = searchVisible;
+        this._downloadsNavVisible = downloadsVisible;
+        if (!searchVisible && document.getElementById('gsearch-overlay')?.classList.contains('active')) {
+            this.closeSearch(false);
+        }
+        this.navigation?.setVisible('search', searchVisible);
+        this.navigation?.setVisible('downloads', downloadsVisible);
+        if (topSearch) {
+            topSearch.hidden = !searchVisible;
+            topSearch.setAttribute('aria-hidden', searchVisible ? 'false' : 'true');
+            topSearch.tabIndex = searchVisible ? 0 : -1;
+        }
+        if (focusWillHide) {
+            const home = this.navigation?.findAll?.('home')
+                ?.find((link) => !link.hidden && link.offsetParent !== null);
+            home?.focus?.({ preventScroll: true });
+        }
+        return Object.freeze({ search: searchVisible, downloads: downloadsVisible });
+    }
+
     applyCatalogAvailability(summary = this.sourceHealthSummary) {
         // A transient/unknown summary (a temporary /sources hiccup that loadSummary maps to
         // state='unknown') must NEVER hide already-visible catalog tabs — otherwise a network blip
         // makes Live/Movies/Series vanish under an onboarded user. Keep the last-known-good tab
         // visibility until a real summary (ready / syncing / not_configured) arrives.
+        this.applyMediaActionAvailability(summary);
         if (summary && (summary.state === 'unknown' || summary.error)) return;
         const ready = this.isCatalogReady(summary);
         // Every navigation adapter receives the same shared gate decision.
@@ -2449,11 +2523,9 @@ class App {
         return { section, body };
     }
 
-    /** Show the model-owned Downloads action only inside the phone/tablet APK. */
+    /** Reconcile native local downloads with the latest reliable VOD capability. */
     refreshDownloadsNav() {
-        // The native screen owns both the empty state and downloaded content.
-        const isApk = /NorvaTV-AndroidPhone/i.test(navigator.userAgent || '');
-        this.navigation?.setVisible('downloads', isApk);
+        return this.applyMediaActionAvailability(this.sourceHealthSummary);
     }
 
     // ---- Account sheet (mobile Profile tab) -------------------------------
@@ -2991,6 +3063,7 @@ class App {
     // pages use), so it spans the whole library instead of one content type.
 
     openSearch() {
+        if (this._searchNavVisible !== true) return false;
         const ov = document.getElementById('gsearch-overlay') || this.buildSearchOverlay();
         // Stash the opener before the background becomes inert so every input mode
         // (touch, keyboard, screen reader and D-pad) returns to the invoking control.
@@ -3016,6 +3089,7 @@ class App {
         setTimeout(() => {
             try { if (document.activeElement !== input) { input.focus(); input.select(); } } catch (_) { /* noop */ }
         }, 50);
+        return true;
     }
 
     closeSearch(restoreFocus = true) {

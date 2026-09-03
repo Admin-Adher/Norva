@@ -62,9 +62,9 @@ test('the phone Home action opens the sheet without changing route', () => {
   const pairIndex = appHtml.indexOf('/js/components/PairTvSheet.js?v=a8db32010d');
   const devicesIndex = appHtml.indexOf('/js/components/DevicesScreensModule.js?v=cb8a9f10e4');
   const homeIndex = appHtml.indexOf('/js/pages/HomePage.js?v=b98a873483');
-  const appIndex = appHtml.indexOf('/js/app.js?v=4ea3d10343');
+  const appIndex = appHtml.indexOf('/js/app.js?v=fa59ee02c6');
   assert.ok(modalIndex > 0 && modalIndex < pairIndex && pairIndex < devicesIndex && devicesIndex < homeIndex && homeIndex < appIndex);
-  assert.match(appHtml, /\/css\/main\.css\?v=4fb2cde48b/);
+  assert.match(appHtml, /\/css\/main\.css\?v=71854078d1/);
   assert.match(appHtml, /\/js\/pages\/Settings\.js\?v=5241073432/);
 });
 

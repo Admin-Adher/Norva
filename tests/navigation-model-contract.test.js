@@ -46,6 +46,8 @@ test('one navigation model owns routes, actions and platform projection order', 
   assert.equal(model.allowsPlatform('downloads', 'tv'), false);
   assert.equal(model.allowsPlatform('admin', 'web'), true);
   assert.equal(model.allowsPlatform('admin', 'phone'), false);
+  assert.equal(model.entry('search').gate, 'vod-catalog');
+  assert.equal(model.entry('downloads').gate, 'vod-catalog-or-local');
 
   assert.throws(
     () => new NavigationModel({
@@ -65,6 +67,46 @@ test('one navigation model owns routes, actions and platform projection order', 
   );
 });
 
+test('Search and Downloads follow the VOD and local-library capability matrix', () => {
+  const { resolveMediaActionVisibility } = require('../public/js/navigation/NavigationModel.js');
+  const resolve = (state) => ({ ...resolveMediaActionVisibility(state) });
+
+  assert.deepEqual(resolve({ catalogKnown: true }), {
+    search: false,
+    downloads: false,
+    vodAvailable: false,
+  });
+  assert.deepEqual(resolve({ catalogKnown: true, hasLocalDownloads: true }), {
+    search: false,
+    downloads: true,
+    vodAvailable: false,
+  });
+  assert.deepEqual(resolve({ catalogKnown: true, moviesAvailable: true }), {
+    search: true,
+    downloads: true,
+    vodAvailable: true,
+  });
+  assert.deepEqual(resolve({ catalogKnown: true, seriesAvailable: true }), {
+    search: true,
+    downloads: true,
+    vodAvailable: true,
+  });
+  assert.deepEqual(resolve({ catalogKnown: false, previousSearchVisible: true }), {
+    search: true,
+    downloads: false,
+    vodAvailable: false,
+  });
+  assert.deepEqual(resolve({
+    catalogKnown: false,
+    previousSearchVisible: false,
+    hasLocalDownloads: true,
+  }), {
+    search: false,
+    downloads: true,
+    vodAvailable: false,
+  });
+});
+
 test('the model renders accessible web, phone and TV projections without markup duplication', () => {
   const { createDefaultNavigationModel } = require('../public/js/navigation/NavigationModel.js');
   const model = createDefaultNavigationModel();
@@ -82,8 +124,8 @@ test('the model renders accessible web, phone and TV projections without markup 
   assert.equal((web.match(/class="nav-link/g) || []).length, 5);
   assert.equal((phone.match(/class="nav-link/g) || []).length, 7);
   assert.equal((tv.match(/class="nav-link/g) || []).length, 6);
-  assert.match(phone, /id="nav-search-bottom"[^>]*data-action="search"/);
-  assert.match(phone, /id="nav-downloads-bottom"[^>]*data-action="downloads"/);
+  assert.match(phone, /id="nav-search-bottom"[^>]*data-action="search"[^>]*data-nav-gate="vod-catalog"[^>]*hidden/);
+  assert.match(phone, /id="nav-downloads-bottom"[^>]*data-action="downloads"[^>]*data-nav-gate="vod-catalog-or-local"[^>]*hidden/);
   assert.match(phone, /id="nav-account"[^>]*aria-label="Account and settings"/);
   assert.doesNotMatch(web, /data-nav-key="admin"|data-nav-key="settings"|data-nav-key="logout"/);
   assert.match(tv, /id="logout-btn"/);
@@ -148,6 +190,28 @@ test('Downloads stays exclusive to the native phone and tablet shell', () => {
   }
 });
 
+test('the app projects the matrix to both search controls and the native Downloads action', () => {
+  const html = read('public/app.html');
+  const app = read('public/js/app.js');
+  const css = read('public/css/main.css');
+  const phoneMain = read('clients/android-phone/app/src/main/java/tv/norva/phone/MainActivity.java');
+
+  assert.match(html, /id="nav-search"[^>]*hidden aria-hidden="true" tabindex="-1"/);
+  assert.match(css, /\.nav-search-btn\[hidden\]\s*\{\s*display:\s*none;\s*\}/);
+  assert.match(app, /readLocalDownloadPresence\(\)[\s\S]*?bridge\.getDownloads\(\)/);
+  assert.match(app, /moviesAvailable:\s*categoryAvailable\('movies'\)/);
+  assert.match(app, /seriesAvailable:\s*categoryAvailable\('series'\)/);
+  assert.match(app, /previousSearchVisible:\s*this\._searchNavVisible/);
+  assert.match(app, /this\.navigation\?\.setVisible\('search', searchVisible\)/);
+  assert.match(app, /this\.navigation\?\.setVisible\('downloads', downloadsVisible\)/);
+  assert.match(app, /topSearch\.hidden = !searchVisible/);
+  assert.match(app, /applyMediaActionAvailability\(summary\);[\s\S]{0,120}summary\.state === 'unknown'/);
+  assert.match(app, /if \(this\._downloadsNavVisible !== true\) return false/);
+  assert.match(app, /openSearch\(\) \{\s*if \(this\._searchNavVisible !== true\) return false/);
+  assert.match(app, /refreshDownloadsNav\(\) \{\s*return this\.applyMediaActionAvailability/);
+  assert.match(phoneMain, /!hasNetwork\(\) && !DownloadStore\.all\(this\)\.isEmpty\(\)/);
+});
+
 test('app shell delegates navigation policy and removes the retired hamburger path', () => {
   const html = read('public/app.html');
   const app = read('public/js/app.js');
@@ -156,11 +220,11 @@ test('app shell delegates navigation policy and removes the retired hamburger pa
   const css = read('public/css/main.css');
   const tvMain = read('clients/android-tv/app/src/main/java/tv/norva/tv/MainActivity.java');
 
-  const modelScript = html.indexOf('/js/navigation/NavigationModel.js?v=b09ff7a7da');
+  const modelScript = html.indexOf('/js/navigation/NavigationModel.js?v=5279356025');
   const adaptersScript = html.indexOf('/js/navigation/NavigationAdapters.js?v=1');
   const bootstrapScript = html.indexOf('/js/navigation/navigationBootstrap.js?v=1');
   const tvScript = html.indexOf('/js/utils/tvNavigation.js?v=32');
-  const appScript = html.indexOf('/js/app.js?v=4ea3d10343');
+  const appScript = html.indexOf('/js/app.js?v=fa59ee02c6');
   assert.ok(modelScript > 0 && modelScript < adaptersScript);
   assert.ok(adaptersScript < bootstrapScript && bootstrapScript < tvScript && tvScript < appScript);
 

@@ -110,7 +110,7 @@
             key: 'search',
             label: 'Search',
             ariaLabel: 'Search',
-            gate: 'always',
+            gate: 'vod-catalog',
             icon: Object.freeze({
                 kind: 'svg',
                 body: '<circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/>',
@@ -120,7 +120,7 @@
             key: 'downloads',
             label: 'Downloads',
             ariaLabel: 'Downloads',
-            gate: 'native-phone',
+            gate: 'vod-catalog-or-local',
             platforms: Object.freeze(['phone']),
             icon: Object.freeze({
                 kind: 'svg',
@@ -203,6 +203,29 @@
             .replace(/&/g, '&amp;')
             .replace(/</g, '&lt;')
             .replace(/>/g, '&gt;');
+    }
+
+    /**
+     * Resolve the two VOD actions without confusing server reachability with
+     * actual catalogue or device capability.
+     *
+     * Unknown health preserves Search's last reliable state. Downloads never
+     * depends on that stale server state: a local transfer or saved title keeps
+     * the native library reachable even when every provider is paused/offline.
+     */
+    function resolveMediaActionVisibility({
+        catalogKnown = false,
+        moviesAvailable = false,
+        seriesAvailable = false,
+        hasLocalDownloads = false,
+        previousSearchVisible = false,
+    } = {}) {
+        const vodAvailable = Boolean(catalogKnown && (moviesAvailable || seriesAvailable));
+        return Object.freeze({
+            search: catalogKnown ? vodAvailable : Boolean(previousSearchVisible),
+            downloads: vodAvailable || Boolean(hasLocalDownloads),
+            vodAvailable,
+        });
     }
 
     class NavigationModel {
@@ -300,6 +323,10 @@
             return this.entry(pageName)?.transition || null;
         }
 
+        mediaActionVisibility(state) {
+            return resolveMediaActionVisibility(state);
+        }
+
         renderProjection(projection, { currentPage = 'home' } = {}) {
             return this.projectionItems(projection)
                 .map((item) => this.renderLink(item, currentPage))
@@ -360,6 +387,7 @@
     return Object.freeze({
         NavigationModel,
         createDefaultNavigationModel,
+        resolveMediaActionVisibility,
         DEFAULT_ROUTES,
         DEFAULT_ACTIONS,
         DEFAULT_PROJECTIONS,

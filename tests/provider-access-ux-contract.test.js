@@ -182,7 +182,7 @@ test('Provider Access keeps the exact-date calendar optional and explains paused
 });
 
 test('all changed Provider Access UI assets are cache-busted', () => {
-  assert.match(shell, /main\.css\?v=4fb2cde48b/);
+  assert.match(shell, /main\.css\?v=71854078d1/);
   assert.match(shell, /cloudApi\.js\?v=72/);
   assert.match(shell, /api\.js\?v=93/);
   assert.match(shell, /sourceHealth\.js\?v=6c0eefcb4f/);

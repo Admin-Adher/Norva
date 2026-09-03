@@ -130,9 +130,9 @@ test('revised SVG URLs bypass existing image and service-worker caches', () => {
   }
   assert.match(renderedNavigation, /norva-logout\.svg\?v=sharp-core-1/);
   assert.match(iconsJs, /norva-\$\{name\}\.svg\?v=sharp-core-1/);
-  assert.match(html, /\/css\/main\.css\?v=4fb2cde48b/);
+  assert.match(html, /\/css\/main\.css\?v=71854078d1/);
   assert.match(html, /\/js\/icons\.js\?v=3/);
-  assert.match(html, /\/js\/navigation\/NavigationModel\.js\?v=b09ff7a7da/);
+  assert.match(html, /\/js\/navigation\/NavigationModel\.js\?v=5279356025/);
   assert.match(html, /\/js\/navigation\/NavigationAdapters\.js\?v=1/);
-  assert.match(html, /\/js\/app\.js\?v=4ea3d10343/);
+  assert.match(html, /\/js\/app\.js\?v=fa59ee02c6/);
 });

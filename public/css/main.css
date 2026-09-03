@@ -17008,6 +17008,7 @@ html.tv-mode #page-live .search-clear {
   cursor: pointer;
   transition: color 0.15s ease, background 0.15s ease;
 }
+.nav-search-btn[hidden] { display: none; }
 .nav-search-btn:hover { color: #fff; background: rgba(255, 255, 255, 0.06); }
 .nav-search-btn:focus-visible { outline: 2px solid var(--primary-blue, #5b7cfa); outline-offset: 2px; }
 /* TV uses its own D-pad UI; a keyboard-driven search overlay there would be janky. */
