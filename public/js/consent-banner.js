@@ -45,18 +45,21 @@
     var nativeSurface = Boolean(window.NorvaNativeAnalytics
       && typeof window.NorvaNativeAnalytics.available === 'function'
       && window.NorvaNativeAnalytics.available());
-    // Android has its own consent-gated Clarity/Firebase streams. Do not also
-    // load the browser GA/Ads tags inside the WebView or double-count sessions.
-    if (!nativeSurface) {
-      if (window.NorvaMarketing && typeof window.NorvaMarketing.setConsent === 'function') {
-        window.NorvaMarketing.setConsent(status);
-      }
+    if (nativeSurface) {
+      // Enable/disable the native SDKs before ProductAnalytics publishes any
+      // same-page lifecycle or business event. Browser GA/Ads stays disabled
+      // in Android WebViews to avoid a second, platform=web event stream.
+      window.NorvaNativeAnalytics.setConsent(status);
       if (window.NorvaProductAnalytics && typeof window.NorvaProductAnalytics.setConsent === 'function') {
         window.NorvaProductAnalytics.setConsent(status);
       }
+      return;
     }
-    if (window.NorvaNativeAnalytics && typeof window.NorvaNativeAnalytics.setConsent === 'function') {
-      window.NorvaNativeAnalytics.setConsent(status);
+    if (window.NorvaMarketing && typeof window.NorvaMarketing.setConsent === 'function') {
+      window.NorvaMarketing.setConsent(status);
+    }
+    if (window.NorvaProductAnalytics && typeof window.NorvaProductAnalytics.setConsent === 'function') {
+      window.NorvaProductAnalytics.setConsent(status);
     }
   }
 

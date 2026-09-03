@@ -1511,7 +1511,8 @@ public class MainActivity extends Activity {
                         NativeClarity.handleMessage(
                                 MainActivity.this,
                                 message == null ? null : message.getData(),
-                                MainActivity.this::setFirebaseAnalyticsCollection);
+                                MainActivity.this::setFirebaseAnalyticsCollection,
+                                MainActivity.this::logFirebaseProductEvent);
                     }
                 });
     }
@@ -1530,6 +1531,18 @@ public class MainActivity extends Activity {
             settings.put(FirebaseAnalytics.ConsentType.AD_PERSONALIZATION, status);
             analytics.setConsent(settings);
             analytics.setAnalyticsCollectionEnabled(granted);
+        } catch (Throwable ignored) { }
+    }
+
+    private void logFirebaseProductEvent(String eventName) {
+        if (eventName == null || eventName.isEmpty()) return;
+        try {
+            // Keep Norva's neutral funnel vocabulary everywhere else, and use
+            // GA4's recommended registration name only at the Firebase edge.
+            String firebaseEventName = "signup_completed".equals(eventName)
+                    ? FirebaseAnalytics.Event.SIGN_UP
+                    : eventName;
+            FirebaseAnalytics.getInstance(this).logEvent(firebaseEventName, null);
         } catch (Throwable ignored) { }
     }
 

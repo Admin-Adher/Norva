@@ -56,7 +56,7 @@ test('native WebView capture preserves geometry but masks all rendered content',
 
 test('first-run account consent is bridged immediately and labelled as account', () => {
   const account = read('public/account.html');
-  assert.match(account, /native-analytics\.js\?v=2[\s\S]*product-analytics\.js\?v=2[\s\S]*consent-banner\.js\?v=1/);
+  assert.match(account, /native-analytics\.js\?v=2[\s\S]*product-analytics\.js\?v=3[\s\S]*consent-banner\.js\?v=4/);
   const runtime = runNativeAdapter('', '/account');
   assert.deepEqual(runtime.messages[0], {
     v: 2, type: 'screen', name: 'account'
@@ -85,10 +85,10 @@ test('Android shells are analytics-eligible only through the native consent brid
   const phoneGradle = read('clients/android-phone/app/build.gradle');
   const tvGradle = read('clients/android-tv/app/build.gradle');
   const phoneMain = read('clients/android-phone/app/src/main/java/tv/norva/phone/MainActivity.java');
-  assert.match(html, /native-analytics\.js\?v=2[\s\S]*product-analytics\.js\?v=2[\s\S]*consent-banner\.js\?v=3/);
+  assert.match(html, /native-analytics\.js\?v=2[\s\S]*product-analytics\.js\?v=3[\s\S]*consent-banner\.js\?v=4/);
   assert.doesNotMatch(consent, /isTvSurface\(\)\)\s*\{\s*apply\('granted'/);
   assert.match(consent, /NorvaNativeAnalytics\.setConsent\(status\)/);
-  assert.match(consent, /if \(!nativeSurface\)[\s\S]*NorvaMarketing\.setConsent/);
+  assert.match(consent, /if \(nativeSurface\)[\s\S]*NorvaNativeAnalytics\.setConsent\(status\)[\s\S]*NorvaProductAnalytics\.setConsent\(status\)[\s\S]*return/);
   assert.match(adapter, /boolean possible = Clarity\.initialize\(activity,/);
   assert.match(adapter, /Clarity\.setOnSessionStartedCallback/);
   assert.match(adapter, /PENDING_EVENTS\.size\(\) < EVENTS\.size\(\)/);

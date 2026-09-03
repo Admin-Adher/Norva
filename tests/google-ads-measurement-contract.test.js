@@ -67,7 +67,7 @@ test('completed account signup emits the GA4 sign_up event and the configured Go
     && entry[2] && entry[2].send_to === 'AW-TEST/SIGNUP-LABEL').length, 1);
 
   const account = fs.readFileSync(path.join(root, 'public/account.html'), 'utf8');
-  assert.match(account, /\/js\/marketing\.js\?v=4/,
+  assert.match(account, /\/js\/marketing\.js\?v=5/,
     'the account page must invalidate cached marketing adapters');
 });
 
