@@ -418,7 +418,8 @@ async function route(
       body: {
         ok: true,
         service: "norva-cloud",
-        version: 27,
+        version: 28,
+        behavioralLifecycleProtocol: 1,
         sourceDesiredStateProtocol: 1,
         legacySourceToggleBridge: 1,
         m3uSyncLeaseProtocol: 2,
@@ -848,6 +849,10 @@ async function route(
 
   if (scope === "push-token" && req.method === "POST" && !id) {
     return { status: 201, body: await registerPushToken(req, user.id, db) };
+  }
+
+  if (scope === "lifecycle-events" && req.method === "POST" && !id) {
+    return { status: 202, body: await recordBehavioralLifecycleEvent(req, user.id, db) };
   }
 
   if (scope === "pairing" && req.method === "POST" && id === "approve") {
@@ -1632,24 +1637,46 @@ function scheduleSourceConnectionAttempt(
     })
     : null;
 
-  waitUntil(Promise.resolve(db.rpc("norva_record_source_connection_attempt", {
-    p_user_id: userId,
-    p_source_type: attempt.sourceType,
-    p_domain_normalized: attempt.domainNormalized,
-    p_host_hash: attempt.hostHash,
-    p_path_shape: attempt.pathShape,
-    p_outcome: failure ? "failed" : "accepted",
-    p_http_status: status,
-    p_failure_family: failureFamily,
-    p_platform: clientContext.platform,
-    p_app_version: clientContext.appVersion,
-  })).then(({ error }) => {
-    if (error) {
-      const safeCode = /^[A-Z0-9_]{1,16}$/.test(String(error.code ?? "").toUpperCase())
-        ? String(error.code).toUpperCase()
+  const outcome = failure ? "failed" : "accepted";
+  const behavioralEventId = crypto.randomUUID();
+  waitUntil(Promise.allSettled([
+    Promise.resolve(db.rpc("norva_record_source_connection_attempt", {
+      p_user_id: userId,
+      p_source_type: attempt.sourceType,
+      p_domain_normalized: attempt.domainNormalized,
+      p_host_hash: attempt.hostHash,
+      p_path_shape: attempt.pathShape,
+      p_outcome: outcome,
+      p_http_status: status,
+      p_failure_family: failureFamily,
+      p_platform: clientContext.platform,
+      p_app_version: clientContext.appVersion,
+    })).then(({ error }) => {
+      if (error) throw error;
+    }),
+    Promise.resolve(db.rpc("norva_capture_behavioral_source_attempt", {
+      p_user_id: userId,
+      p_source_type: attempt.sourceType,
+      p_outcome: outcome,
+      p_failure_family: failureFamily,
+      p_platform: clientContext.platform,
+      p_app_version: clientContext.appVersion,
+      p_event_id: behavioralEventId,
+    })).then(({ error }) => {
+      if (error) throw error;
+    }),
+  ]).then((results) => {
+    results.forEach((result, index) => {
+      if (result.status !== "rejected") return;
+      const rawCode = (result.reason as { code?: unknown } | undefined)?.code;
+      const safeCode = /^[A-Z0-9_]{1,16}$/.test(String(rawCode ?? "").toUpperCase())
+        ? String(rawCode).toUpperCase()
         : "DATABASE_ERROR";
-      console.warn("[norva-cloud] source attempt telemetry failed", safeCode);
-    }
+      console.warn(
+        `[norva-cloud] ${index === 0 ? "source attempt telemetry" : "behavioral source projection"} failed`,
+        safeCode,
+      );
+    });
   }));
 }
 
@@ -6485,16 +6512,63 @@ function routeSegments(pathname: string) {
 async function registerPushToken(req: Request, userId: string, db: SupabaseClient): Promise<JsonRecord> {
   const body = await readJson(req);
   const token = stringOr(body.token, "");
-  if (!token) throw new HttpError(400, "Missing push token");
+  if (!token || token.length > 4096) throw new HttpError(400, "Missing or invalid push token");
   const platformRaw = String(body.platform ?? "android");
   const platform = ["android", "ios", "web"].includes(platformRaw) ? platformRaw : "android";
-  const now = new Date().toISOString();
-  const { error } = await db.from("cloud_push_tokens").upsert(
-    [{ token, user_id: userId, platform, updated_at: now, last_seen_at: now }],
-    { onConflict: "token" },
-  );
+  const permissionRaw = String(body.permissionState ?? body.permission_state ?? "unknown").toLowerCase();
+  const permissionState = ["unknown", "prompt", "granted", "denied"].includes(permissionRaw)
+    ? permissionRaw
+    : "unknown";
+  const timezone = stringOr(body.timezone, "UTC").slice(0, 64);
+  const locale = stringOrNull(body.locale)?.slice(0, 35) ?? null;
+  const appVersion = stringOrNull(body.appVersion ?? body.app_version)?.slice(0, 40) ?? null;
+  const { data, error } = await db.rpc("norva_register_push_token", {
+    p_user_id: userId,
+    p_token: token,
+    p_platform: platform,
+    p_permission_state: permissionState,
+    p_timezone: timezone,
+    p_locale: locale,
+    p_app_version: appVersion,
+  });
   if (error) throwDb(error, "Unable to register push token");
-  return { ok: true };
+  return isRecord(data) ? data : { ok: true, permission_state: permissionState };
+}
+
+async function recordBehavioralLifecycleEvent(
+  req: Request,
+  userId: string,
+  db: SupabaseClient,
+): Promise<JsonRecord> {
+  const body = await readJson(req);
+  const allowedKeys = new Set(["deliveryId", "delivery_id", "event"]);
+  if (Object.keys(body).some((key) => !allowedKeys.has(key))) {
+    throw new HttpError(400, "Unsupported lifecycle event field");
+  }
+  const deliveryId = stringOr(body.deliveryId ?? body.delivery_id, "").trim();
+  const event = stringOr(body.event, "").trim().toLowerCase();
+  if (event === "source_form_opened" && !deliveryId) {
+    const clientContext = sourceAttemptClientContext(req.headers.get("user-agent"));
+    const { data, error } = await db.rpc("norva_record_behavioral_product_event", {
+      p_user_id: userId,
+      p_event_name: event,
+      p_platform: clientContext.platform,
+      p_app_version: clientContext.appVersion,
+      p_event_id: crypto.randomUUID(),
+    });
+    if (error) throwDb(error, "Unable to record lifecycle product event");
+    return { accepted: data === true };
+  }
+  if (!UUID_PATTERN.test(deliveryId) || !["delivered", "opened", "deep_link_opened"].includes(event)) {
+    throw new HttpError(400, "Invalid lifecycle event");
+  }
+  const { data, error } = await db.rpc("norva_record_behavioral_delivery_event", {
+    p_user_id: userId,
+    p_delivery_id: deliveryId,
+    p_event_kind: event,
+  });
+  if (error) throwDb(error, "Unable to record lifecycle event");
+  return { accepted: data === true };
 }
 
 async function readJson(req: Request): Promise<JsonRecord> {

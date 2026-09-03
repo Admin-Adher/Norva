@@ -90,6 +90,7 @@ class AdminPage {
         this._notificationRules = [];
         this._notificationSystemRules = [];
         this._notificationAudienceCounts = null;
+        this._behavioralLifecycle = null;
         this._notificationSelectedRule = '';
         this._notificationRuleEditor = null;
         this._notificationDraft = null;
@@ -1155,7 +1156,7 @@ class AdminPage {
 #page-admin .notif-intro p{max-width:720px;margin:7px 0 0;color:var(--color-text-secondary);font-size:12.5px;line-height:1.55;}
 #page-admin .notif-live-state{display:inline-flex;align-items:center;gap:7px;min-height:32px;padding:5px 10px;border:1px solid color-mix(in srgb,var(--color-success) 40%,transparent);border-radius:var(--radius-full);background:color-mix(in srgb,var(--color-success) 8%,transparent);color:var(--color-success);font-size:10.5px;font-weight:800;white-space:nowrap;}
 #page-admin .notif-live-state::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor;}
-#page-admin .notif-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;}
+#page-admin .notif-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;}
 #page-admin .notif-kpi{min-width:0;padding:13px 14px;border:1px solid var(--color-border);border-radius:var(--radius-md);background:var(--color-bg-secondary);}
 #page-admin .notif-kpi strong,#page-admin .notif-kpi span{display:block;}
 #page-admin .notif-kpi strong{color:var(--color-text-primary);font-size:18px;font-variant-numeric:tabular-nums;}
@@ -1202,6 +1203,7 @@ class AdminPage {
 #page-admin .notif-status{min-height:20px;color:var(--color-text-secondary);font-size:11px;line-height:1.45;}
 #page-admin .notif-status.is-error{color:var(--color-error-text);}
 #page-admin .notif-status.is-success{color:var(--color-success);}
+#page-admin .notif-status.is-warning{color:var(--color-warning);}
 #page-admin .notif-review{border:1px solid color-mix(in srgb,var(--color-warning) 32%,var(--color-border));border-radius:var(--radius-md);background:color-mix(in srgb,var(--color-warning) 6%,var(--color-bg-secondary));padding:14px;}
 #page-admin .notif-review[hidden]{display:none;}
 #page-admin .notif-review h4{margin:0;color:var(--color-text-primary);font-size:12px;}
@@ -1265,7 +1267,111 @@ class AdminPage {
 #page-admin .notif-switch-track::after{content:"";display:block;width:20px;height:20px;margin:3px;border-radius:50%;background:var(--color-text-secondary);transition:transform .18s ease,background .18s ease;}
 #page-admin .notif-switch input:checked+.notif-switch-track{border-color:var(--color-accent);background:color-mix(in srgb,var(--color-accent) 65%,var(--color-bg-tertiary));}
 #page-admin .notif-switch input:checked+.notif-switch-track::after{background:var(--color-text-primary);transform:translateX(20px);}
-#page-admin .notif-field input:focus-visible,#page-admin .notif-field textarea:focus-visible,#page-admin .notif-field select:focus-visible,#page-admin .notif-button:focus-visible,#page-admin .notif-tab:focus-visible,#page-admin .notif-icon-button:focus-visible,#page-admin .notif-rule-item:focus-visible,#page-admin .notif-switch input:focus-visible+.notif-switch-track,#page-admin .notif-choice:focus-within{outline:2px solid var(--color-accent);outline-offset:2px;}
+#page-admin .notif-lifecycle-stack{display:grid;gap:16px;}
+#page-admin .notif-lifecycle-runtime{border:1px solid color-mix(in srgb,var(--color-warning) 42%,var(--color-border));border-radius:var(--radius-lg);background:color-mix(in srgb,var(--color-warning) 5%,var(--color-bg-secondary));overflow:hidden;}
+#page-admin .notif-lifecycle-runtime.is-running{border-color:color-mix(in srgb,var(--color-success) 45%,var(--color-border));background:color-mix(in srgb,var(--color-success) 5%,var(--color-bg-secondary));}
+#page-admin .notif-runtime-head{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;padding:16px;border-bottom:1px solid var(--color-border);}
+#page-admin .notif-runtime-head h3{margin:0;color:var(--color-text-primary);font-size:15px;}
+#page-admin .notif-runtime-head p{margin:5px 0 0;color:var(--color-text-muted);font-size:10px;line-height:1.5;}
+#page-admin [data-lifecycle-import-readiness]{margin:16px;padding:0;overflow:hidden;}
+#page-admin [data-lifecycle-import-readiness]>.notif-runtime-head{padding:14px;}
+#page-admin [data-lifecycle-import-readiness]>.notif-lifecycle-guardrails,#page-admin [data-lifecycle-import-readiness]>.notif-protected,#page-admin [data-lifecycle-import-readiness]>.notif-actions{margin-left:14px;margin-right:14px;}
+#page-admin [data-lifecycle-import-readiness]>.notif-actions{padding-bottom:14px;}
+#page-admin .notif-runtime-actions{display:flex;flex-wrap:wrap;gap:8px;padding:14px 16px;}
+#page-admin .notif-runtime-confirm{margin:0 16px 16px;padding:14px;border:1px solid var(--color-border-light);border-radius:var(--radius-md);background:var(--color-bg-primary);}
+#page-admin .notif-runtime-confirm[hidden]{display:none;}
+#page-admin .notif-runtime-grid{display:grid;grid-template-columns:minmax(160px,.7fr) minmax(240px,1.3fr);gap:10px;}
+#page-admin .notif-button[aria-disabled="true"]{opacity:.55;cursor:not-allowed;}
+#page-admin .notif-primary-metric{display:grid;grid-template-columns:minmax(180px,.65fr) minmax(0,1.35fr);gap:14px;align-items:stretch;}
+#page-admin .notif-primary-number{display:flex;flex-direction:column;justify-content:center;min-height:120px;padding:18px;border:1px solid color-mix(in srgb,var(--color-accent) 35%,var(--color-border));border-radius:var(--radius-lg);background:linear-gradient(145deg,color-mix(in srgb,var(--color-accent) 12%,var(--color-bg-secondary)),var(--color-bg-primary));}
+#page-admin .notif-primary-number strong{color:var(--color-text-primary);font-size:32px;line-height:1;font-variant-numeric:tabular-nums;}
+#page-admin .notif-primary-number span{margin-top:8px;color:var(--color-text-secondary);font-size:10px;line-height:1.45;}
+#page-admin .notif-dimension-table{width:100%;border-collapse:collapse;font-size:10px;}
+#page-admin .notif-dimension-table th,#page-admin .notif-dimension-table td{padding:8px 9px;border-bottom:1px solid var(--color-border);text-align:left;white-space:nowrap;}
+#page-admin .notif-dimension-table th{color:var(--color-text-muted);font-size:8.5px;text-transform:uppercase;letter-spacing:.05em;}
+#page-admin .notif-dimension-table td{color:var(--color-text-secondary);font-variant-numeric:tabular-nums;}
+#page-admin .notif-table-scroll{overflow:auto;max-height:280px;}
+#page-admin .notif-table-scroll[data-horizontal-scroll]{overscroll-behavior-inline:contain;scrollbar-gutter:stable;touch-action:pan-x pan-y;}
+#page-admin .notif-scroll-hint{display:none;margin:0;color:var(--color-text-muted);font-size:9px;line-height:1.4;text-align:right;}
+#page-admin .notif-lifecycle-reach{display:grid;grid-template-columns:repeat(auto-fit,minmax(128px,1fr));gap:8px;}
+#page-admin .notif-lifecycle-reach>div{min-width:0;padding:11px;border:1px solid var(--color-border);border-radius:var(--radius-md);background:var(--color-bg-primary);}
+#page-admin .notif-lifecycle-reach strong,#page-admin .notif-lifecycle-reach span{display:block;}
+#page-admin .notif-lifecycle-reach strong{color:var(--color-text-primary);font-size:18px;font-variant-numeric:tabular-nums;}
+#page-admin .notif-lifecycle-reach span{margin-top:4px;color:var(--color-text-muted);font-size:9.5px;line-height:1.4;}
+#page-admin .notif-lifecycle-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;align-items:start;}
+#page-admin .notif-lifecycle-card{min-width:0;border:1px solid var(--color-border);border-radius:var(--radius-lg);background:var(--color-bg-secondary);padding:16px;}
+#page-admin .notif-lifecycle-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding-bottom:13px;border-bottom:1px solid var(--color-border);}
+#page-admin .notif-lifecycle-head h3{margin:0;color:var(--color-text-primary);font-size:15px;line-height:1.35;}
+#page-admin .notif-lifecycle-head p{margin:5px 0 0;color:var(--color-text-muted);font-size:10.5px;line-height:1.5;}
+#page-admin .notif-lifecycle-metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;margin-top:12px;}
+#page-admin .notif-lifecycle-metrics>div{min-width:0;padding:8px;border-radius:var(--radius-sm);background:var(--color-bg-primary);}
+#page-admin .notif-lifecycle-metrics strong,#page-admin .notif-lifecycle-metrics span{display:block;}
+#page-admin .notif-lifecycle-metrics strong{font-size:13px;font-variant-numeric:tabular-nums;}
+#page-admin .notif-lifecycle-metrics span{margin-top:2px;color:var(--color-text-muted);font-size:8.5px;}
+#page-admin .notif-experiment{margin:12px 0 13px;border:1px solid var(--color-border);border-radius:var(--radius-md);background:var(--color-bg-primary);overflow:hidden;}
+#page-admin .notif-experiment>summary{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:44px;padding:10px 11px;cursor:pointer;list-style:none;}
+#page-admin .notif-experiment>summary::-webkit-details-marker{display:none;}
+#page-admin .notif-experiment>summary strong,#page-admin .notif-experiment>summary small{display:block;}
+#page-admin .notif-experiment>summary strong{color:var(--color-text-primary);font-size:10.5px;}
+#page-admin .notif-experiment>summary small{margin-top:3px;color:var(--color-text-muted);font-size:8.5px;line-height:1.4;}
+#page-admin .notif-experiment[open]>summary{border-bottom:1px solid var(--color-border);}
+#page-admin .notif-experiment-body{display:grid;gap:10px;padding:11px;}
+#page-admin .notif-experiment-plan{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;}
+#page-admin .notif-experiment-plan>div{min-width:0;padding:8px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-bg-secondary);}
+#page-admin .notif-experiment-plan strong,#page-admin .notif-experiment-plan span{display:block;}
+#page-admin .notif-experiment-plan strong{color:var(--color-text-primary);font-size:10px;line-height:1.35;overflow-wrap:anywhere;}
+#page-admin .notif-experiment-plan span{margin-top:3px;color:var(--color-text-muted);font-size:8px;line-height:1.35;}
+#page-admin .notif-experiment-safety{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px;}
+#page-admin .notif-experiment-safety>div{min-width:0;padding:8px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-bg-secondary);}
+#page-admin .notif-experiment-safety strong,#page-admin .notif-experiment-safety span{display:block;}
+#page-admin .notif-experiment-safety strong{color:var(--color-text-primary);font-size:12px;font-variant-numeric:tabular-nums;}
+#page-admin .notif-experiment-safety span{margin-top:3px;color:var(--color-text-muted);font-size:8px;line-height:1.35;}
+#page-admin .notif-experiment-safety .is-blocking{border-color:color-mix(in srgb,var(--color-error-text) 42%,var(--color-border));}
+#page-admin .notif-experiment-safety .is-blocking strong{color:var(--color-error-text);}
+#page-admin .notif-experiment-report{margin:0;padding:9px 10px;border-left:2px solid var(--color-accent);background:color-mix(in srgb,var(--color-accent) 6%,transparent);color:var(--color-text-secondary);font-size:9px;line-height:1.5;}
+#page-admin .notif-experiment-report strong{color:var(--color-text-primary);}
+#page-admin .notif-lifecycle-steps{display:grid;gap:7px;margin:13px 0;padding:0;list-style:none;}
+#page-admin .notif-lifecycle-step{border:1px solid var(--color-border);border-radius:var(--radius-md);background:var(--color-bg-primary);overflow:hidden;}
+#page-admin .notif-lifecycle-step>summary{display:grid;grid-template-columns:26px minmax(0,1fr) auto;gap:9px;align-items:start;min-height:44px;padding:9px;cursor:pointer;list-style:none;}
+#page-admin .notif-lifecycle-step>summary::-webkit-details-marker{display:none;}
+#page-admin .notif-lifecycle-step-index{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border:1px solid var(--color-border-light);border-radius:50%;background:var(--color-bg-tertiary);color:var(--color-text-secondary);font-size:9px;font-weight:800;}
+#page-admin .notif-lifecycle-step strong,#page-admin .notif-lifecycle-step span,#page-admin .notif-lifecycle-step small{display:block;}
+#page-admin .notif-lifecycle-step strong{color:var(--color-text-primary);font-size:10.5px;}
+#page-admin .notif-lifecycle-step span{margin-top:2px;color:var(--color-text-secondary);font-size:10px;line-height:1.4;}
+#page-admin .notif-lifecycle-step small{margin-top:2px;color:var(--color-text-muted);font-size:8.5px;line-height:1.35;word-break:break-word;}
+#page-admin .notif-step-editor{display:grid;gap:12px;padding:12px;border-top:1px solid var(--color-border);}
+#page-admin .notif-step-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;}
+#page-admin .notif-step-flags{display:flex;gap:8px;flex-wrap:wrap;}
+#page-admin fieldset.notif-step-flags{min-width:0;margin:12px 0 0;padding:0;border:0;}
+#page-admin fieldset.notif-step-flags legend{flex:0 0 100%;margin:0 0 2px;padding:0;color:var(--color-text-secondary);font-size:10px;font-weight:750;}
+#page-admin .notif-step-flag{display:flex;align-items:center;gap:7px;min-height:44px;padding:8px 10px;border:1px solid var(--color-border);border-radius:var(--radius-sm);color:var(--color-text-secondary);font-size:9.5px;}
+#page-admin .notif-step-flag input{width:18px;height:18px;min-height:0;margin:0;accent-color:var(--color-accent);}
+#page-admin .notif-step-copy-policy{margin:0;padding:9px 10px;border-left:2px solid var(--color-accent);background:color-mix(in srgb,var(--color-accent) 6%,transparent);color:var(--color-text-secondary);font-size:9.5px;line-height:1.5;overflow-wrap:anywhere;}
+#page-admin .notif-step-copy-policy strong{display:inline;color:var(--color-text-primary);font-size:inherit;}
+#page-admin .notif-step-editor input[aria-invalid="true"],#page-admin .notif-step-editor textarea[aria-invalid="true"],#page-admin .notif-step-editor select[aria-invalid="true"]{border-color:var(--color-error);box-shadow:0 0 0 1px color-mix(in srgb,var(--color-error) 30%,transparent);}
+#page-admin [data-lifecycle-readiness-form] input[aria-invalid="true"]{border-color:var(--color-error);box-shadow:0 0 0 1px color-mix(in srgb,var(--color-error) 30%,transparent);}
+#page-admin .notif-step-flag.is-invalid{border-color:var(--color-error);background:color-mix(in srgb,var(--color-error) 6%,transparent);}
+#page-admin .notif-step-previews{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;}
+#page-admin .notif-step-preview{min-width:0;min-height:112px;padding:11px;border:1px solid var(--color-border);border-radius:var(--radius-md);background:var(--color-bg-secondary);}
+#page-admin .notif-step-preview>span{color:var(--color-text-muted);font-size:8px;text-transform:uppercase;letter-spacing:.08em;}
+#page-admin .notif-step-preview strong{margin-top:10px;font-size:10.5px;line-height:1.35;}
+#page-admin .notif-step-preview p{margin:5px 0 9px;color:var(--color-text-secondary);font-size:9px;line-height:1.45;}
+#page-admin .notif-step-preview b{display:inline-flex;padding:5px 8px;border-radius:var(--radius-sm);background:var(--color-accent);color:var(--color-text-on-accent,var(--color-text-primary));font-size:8px;}
+#page-admin .notif-step-preview.is-android{border-radius:16px;background:color-mix(in srgb,var(--color-bg-tertiary) 85%,var(--color-bg-primary));}
+#page-admin .notif-step-preview.is-email{background:color-mix(in srgb,var(--color-bg-primary) 80%,var(--color-text-primary));}
+#page-admin .notif-lifecycle-controls{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;padding-top:13px;border-top:1px solid var(--color-border);}
+#page-admin .notif-lifecycle-guardrails{display:flex;flex-wrap:wrap;gap:6px 12px;margin:11px 0;color:var(--color-text-muted);font-size:9px;line-height:1.4;}
+#page-admin .notif-lifecycle-confirm{margin-top:12px;}
+#page-admin .notif-lifecycle-confirm[hidden]{display:none;}
+#page-admin .notif-audit-list{display:grid;gap:7px;max-height:320px;overflow:auto;}
+#page-admin .notif-audit-row{display:grid;grid-template-columns:130px minmax(0,1fr) auto;gap:10px;align-items:start;padding:10px;border:1px solid var(--color-border);border-radius:var(--radius-md);background:var(--color-bg-primary);}
+#page-admin .notif-audit-row strong{color:var(--color-text-primary);font-size:9.5px;}
+#page-admin .notif-audit-row span{color:var(--color-text-secondary);font-size:9.5px;line-height:1.4;}
+#page-admin .notif-audit-row time{color:var(--color-text-muted);font-size:8.5px;white-space:nowrap;}
+#page-admin .notif-dlq-list{display:grid;gap:8px;}
+#page-admin .notif-dlq-row{padding:11px;border:1px solid color-mix(in srgb,var(--color-danger) 30%,var(--color-border));border-radius:var(--radius-md);background:var(--color-bg-primary);}
+#page-admin .notif-dlq-row code{color:var(--color-text-secondary);font-size:8.5px;word-break:break-all;}
+#page-admin .notif-field input:focus-visible,#page-admin .notif-field textarea:focus-visible,#page-admin .notif-field select:focus-visible,#page-admin .notif-button:focus-visible,#page-admin .notif-tab:focus-visible,#page-admin .notif-icon-button:focus-visible,#page-admin .notif-rule-item:focus-visible,#page-admin .notif-switch input:focus-visible+.notif-switch-track,#page-admin .notif-choice:focus-within,#page-admin .notif-experiment>summary:focus-visible{outline:2px solid var(--color-accent);outline-offset:2px;}
 #page-admin .mkt-log-clip{max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--adm-tx2);font-size:12px;}
 #page-admin .mkt-td-wrap{white-space:normal;overflow:visible;text-overflow:clip;vertical-align:top;}
 #page-admin .mkt-log-title{max-width:220px;min-width:120px;white-space:normal;word-break:break-word;line-height:1.4;font-size:12.5px;}
@@ -1277,6 +1383,7 @@ class AdminPage {
   #page-admin .notif-preview-pane{position:static;}
   #page-admin .notif-schedule-row{grid-template-columns:minmax(0,1fr) minmax(130px,.7fr) 100px auto;}
   #page-admin .notif-schedule-row .notif-row-audience{display:none;}
+  #page-admin .notif-lifecycle-reach{grid-template-columns:repeat(3,minmax(0,1fr));}
 }
 @media(max-width:820px){
   #page-admin .notif-kpis{grid-template-columns:repeat(2,minmax(0,1fr));}
@@ -1284,6 +1391,9 @@ class AdminPage {
   #page-admin .notif-rule-list-pane{border-right:0;border-bottom:1px solid var(--color-border);}
   #page-admin .notif-rule-list{display:flex;max-height:none;overflow-x:auto;}
   #page-admin .notif-rule-item{min-width:220px;}
+  #page-admin .notif-lifecycle-grid{grid-template-columns:1fr;}
+  #page-admin .notif-primary-metric{grid-template-columns:1fr;}
+  #page-admin .notif-step-previews{grid-template-columns:1fr;}
 }
 @media(max-width:640px){
   #page-admin .notif-intro{display:block;padding:16px;}
@@ -1297,6 +1407,13 @@ class AdminPage {
   #page-admin .notif-row-actions{grid-column:1/-1;justify-content:flex-start;}
   #page-admin .notif-detail-head{display:block;}
   #page-admin .notif-detail-actions{justify-content:flex-start;margin-top:12px;}
+  #page-admin .notif-lifecycle-reach{grid-template-columns:repeat(2,minmax(0,1fr));}
+  #page-admin .notif-runtime-head{display:block;}
+  #page-admin .notif-runtime-grid,#page-admin .notif-step-grid{grid-template-columns:1fr;}
+  #page-admin .notif-experiment-plan{grid-template-columns:1fr;}
+  #page-admin .notif-experiment-safety{grid-template-columns:repeat(2,minmax(0,1fr));}
+  #page-admin .notif-scroll-hint{display:block;}
+  #page-admin .notif-audit-row{grid-template-columns:1fr;}
   #page-admin .mkt-log-bar{align-items:stretch;}
   #page-admin #mkt-log-q{width:100%;min-width:0;min-height:44px;}
 }
@@ -1306,6 +1423,9 @@ class AdminPage {
   #page-admin .notif-actions .notif-button{width:100%;}
   #page-admin .notif-preview-facts{grid-template-columns:1fr;}
   #page-admin .notif-preview-fact+.notif-preview-fact{border-left:0;border-top:1px solid var(--color-border);}
+  #page-admin .notif-lifecycle-controls,#page-admin .notif-lifecycle-reach{grid-template-columns:1fr;}
+  #page-admin .notif-lifecycle-metrics{grid-template-columns:repeat(2,minmax(0,1fr));}
+  #page-admin .notif-experiment-safety{grid-template-columns:1fr;}
 }
 @media(prefers-reduced-motion:reduce){
   #page-admin .notif-button,#page-admin .notif-switch-track,#page-admin .notif-switch-track::after{transition:none;}
@@ -2802,8 +2922,14 @@ class AdminPage {
         const failureCount = Number(notificationOverview.automation_failures_7d || 0);
         const activeCustomRules = customRules.filter(rule => rule.enabled).length;
         const automationCount = systemRules.length + customRules.length;
-        const pushDevices = typeof audienceCounts.all === 'number' ? audienceCounts.all : Number(ov?.push_devices || 0);
-        const pushUsers = Number(ov?.push_users || 0);
+        const hasReachabilitySemantics = typeof audienceCounts.registered_tokens === 'number'
+            || typeof ov?.push_registered_devices === 'number';
+        const pushDevices = hasReachabilitySemantics
+            ? (typeof audienceCounts.all === 'number' ? audienceCounts.all : Number(ov?.push_devices || 0))
+            : null;
+        const pushUsers = hasReachabilitySemantics ? Number(ov?.push_users || 0) : null;
+        const registeredTokens = Number(audienceCounts.registered_tokens ?? ov?.push_registered_devices ?? ov?.push_devices ?? 0);
+        const registeredAccounts = Number(audienceCounts.registered_accounts ?? ov?.push_registered_users ?? ov?.push_users ?? 0);
         const nextSchedule = schedules.find(row => row.status === 'scheduled') || null;
         const nextAt = nextSchedule?.scheduled_for || notificationOverview.next_scheduled_at || null;
         const hasCampaignVisual = Boolean(camp?.bg_path);
@@ -2830,7 +2956,10 @@ class AdminPage {
         });
         if (!scheduledCount) tasks.push({
             icon: 'clock', tone: '', title: ov?.last_notif_at ? 'Aucune prochaine diffusion' : 'Aucune notification manuelle récente',
-            copy: `${n(pushDevices)} appareil${pushDevices > 1 ? 's' : ''} peuvent recevoir un message après vérification.`, action: 'Programmer', view: 'composer', scheduled: true
+            copy: pushDevices === null
+                ? `${n(registeredTokens)} jeton${registeredTokens > 1 ? 's' : ''} push enregistré${registeredTokens > 1 ? 's' : ''} ; la permission et la fraîcheur restent à confirmer.`
+                : `${n(pushDevices)} appareil${pushDevices > 1 ? 's' : ''} répondent aux critères de ciblage push.`,
+            action: 'Programmer', view: 'composer', scheduled: true
         });
         if (!tasks.length) tasks.push({
             icon: 'check', tone: 'success', title: 'Aucune action urgente',
@@ -2850,7 +2979,7 @@ class AdminPage {
         el.innerHTML = `
             <section class="mkt-command-summary" aria-label="Résumé marketing">
                 <div class="mkt-command-summary-item"><strong>${n(actives.length)}</strong><span>promotion${actives.length > 1 ? 's' : ''} active${actives.length > 1 ? 's' : ''}<small>${actives.length ? 'offres actuellement publiées' : 'aucune campagne en cours'}</small></span></div>
-                <div class="mkt-command-summary-item"><strong>${n(pushDevices)}</strong><span>appareil${pushDevices > 1 ? 's' : ''} joignable${pushDevices > 1 ? 's' : ''}<small>${pushUsers ? `répartis sur ${n(pushUsers)} compte${pushUsers > 1 ? 's' : ''}` : 'audience push disponible'}</small></span></div>
+                <div class="mkt-command-summary-item"><strong>${pushDevices === null ? '—' : n(pushDevices)}</strong><span>cible${pushDevices === 1 ? '' : 's'} push éligible${pushDevices === 1 ? '' : 's'}<small>${n(registeredTokens)} jeton${registeredTokens > 1 ? 's' : ''} enregistré${registeredTokens > 1 ? 's' : ''} · ${n(registeredAccounts)} compte${registeredAccounts > 1 ? 's' : ''} avec jeton</small></span></div>
                 <div class="mkt-command-summary-item"><strong>${n(scheduledCount)}</strong><span>diffusion${scheduledCount > 1 ? 's' : ''} programmée${scheduledCount > 1 ? 's' : ''}<small>${nextAt ? `prochaine ${esc(this._notificationDateLabel(nextAt))}` : 'aucune prochaine date'}</small></span></div>
                 <div class="mkt-command-summary-item"><strong>${n(automationCount)}</strong><span>règle${automationCount > 1 ? 's' : ''} automatique${automationCount > 1 ? 's' : ''}<small>${n(systemRules.length)} système · ${n(activeCustomRules)} personnalisée${activeCustomRules > 1 ? 's' : ''} active${activeCustomRules > 1 ? 's' : ''}</small></span></div>
             </section>
@@ -2869,7 +2998,7 @@ class AdminPage {
                 <aside class="mkt-command-stack">
                     <section class="mkt-command-panel"><header class="mkt-command-panel-head"><div><h3>Prochaine diffusion</h3><p>File de campagne</p></div></header>${nextAt ? `<div class="mkt-command-empty"><span class="mkt-command-row-icon">${icon('calendar')}</span><h3>${esc(nextSchedule?.title || 'Push programmé')}</h3><p>${esc(nextLabel)} · ${esc(AdminPage.audShort(nextSchedule?.audience || 'all'))}</p><button class="mkt-command-button" type="button" data-overview-notif="scheduled">Voir la programmation</button></div>` : `<div class="mkt-command-empty"><span class="mkt-command-row-icon">${icon('calendar')}</span><h3>Rien de programmé</h3><p>Préparez un message puis choisissez sa date après la relecture.</p><button class="mkt-command-button" type="button" data-overview-notif="composer" data-scheduled="true">Programmer un push</button></div>`}</section>
                     <section class="mkt-command-panel"><header class="mkt-command-panel-head"><div><h3>État des canaux</h3><p>Disponibilité, pas performance</p></div></header><div class="mkt-channel-list">
-                        <div class="mkt-channel">${icon('phone')}<div><strong>Push Android</strong><small>${n(pushDevices)} appareil${pushDevices > 1 ? 's' : ''}</small></div><span class="mkt-command-status ${pushDevices ? 'success' : 'warning'}">${pushDevices ? 'Prêt' : 'À connecter'}</span></div>
+                        <div class="mkt-channel">${icon('phone')}<div><strong>Push Android</strong><small>${pushDevices === null ? 'Mesure de permission indisponible' : `${n(pushDevices)} cible${pushDevices > 1 ? 's' : ''} éligible${pushDevices > 1 ? 's' : ''}`}</small></div><span class="mkt-command-status ${pushDevices ? 'success' : 'warning'}">${pushDevices ? 'Prêt' : 'À vérifier'}</span></div>
                         <div class="mkt-channel">${icon('image')}<div><strong>Visuel storefront</strong><small>${hasCampaignVisual ? 'Visuel configuré' : 'Thème automatique'}</small></div><span class="mkt-command-status ${hasCampaignVisual ? 'success' : 'warning'}">${hasCampaignVisual ? 'Prêt' : 'À choisir'}</span></div>
                     </div></section>
                 </aside>
@@ -3066,6 +3195,64 @@ class AdminPage {
         ];
     }
 
+    // UX preflight for the immutable PostgreSQL copy boundary. This method is
+    // intentionally non-authoritative: it explains definite failures before a
+    // save, while norva_behavioral_step_copy_safe remains the enforcement layer.
+    static behavioralStepCopyValidation(config = {}) {
+        const journeyKey = String(config.journeyKey || '');
+        const values = {
+            title: String(config.title || '').trim(),
+            body: String(config.body || '').trim(),
+            cta: String(config.ctaLabel || '').trim()
+        };
+        const deepLink = String(config.deepLink || '').trim();
+        const requiresNewContent = config.requiresNewContent === true;
+        const issues = [];
+        const add = (code, field, message) => issues.push({ code, field, message });
+        const labels = { title: 'titre', body: 'message', cta: 'libellé du CTA' };
+        const limits = { title: [2, 80], body: [2, 500], cta: [2, 50] };
+
+        Object.entries(values).forEach(([field, value]) => {
+            const [minimum, maximum] = limits[field];
+            if (value.length < minimum || value.length > maximum) {
+                add('invalid_length', field, `Le ${labels[field]} doit contenir entre ${minimum} et ${maximum} caractères.`);
+            }
+        });
+
+        const patterns = [
+            ['control_character', /[\u0000-\u001f\u007f-\u009f]/u, 'Retirez les retours à la ligne et caractères de contrôle.'],
+            ['external_url', /(^|[^a-z0-9_])(https?:\/\/|www\.)/iu, 'Retirez toute URL externe. Le bouton utilise déjà une destination Norva contrôlée.'],
+            ['email_address', /[a-z0-9][a-z0-9._%+-]*@[a-z0-9.-]+\.[a-z]{2,}/iu, 'Retirez l’adresse e-mail du modèle.'],
+            ['external_domain', /\b[a-z0-9][a-z0-9.-]*\.[a-z]{2,}\b/iu, 'Retirez tout domaine externe. Le bouton utilise déjà une destination Norva contrôlée.'],
+            ['credential_value', /\b(username|password|passwd|token|secret|api[ _-]?key|authorization|cookie)\b\s*(is|=|:)/iu, 'Ne saisissez jamais une valeur d’identifiant, de mot de passe, de jeton ou de clé. Une aide générique reste autorisée.'],
+            ['payment_data', /\b(card\s+number|cvv|cvc|iban|bank\s+account|payment\s+details|billing\s+details)\b/iu, 'Retirez toute information de paiement ou bancaire.'],
+            ['long_number', /[0-9][0-9\s-]{10,}[0-9]/u, 'Retirez les longues suites de chiffres, qui peuvent contenir une donnée personnelle ou de paiement.'],
+            ['interpolation', /\{\{|\$\{|<%/u, 'Les variables dynamiques ne sont pas autorisées dans ces modèles.']
+        ];
+        Object.entries(values).forEach(([field, value]) => {
+            patterns.forEach(([code, pattern, message]) => {
+                if (pattern.test(value)) add(code, field, message);
+            });
+            if (!requiresNewContent && /\b(new|latest|updated|changed)\b|recently\s+added/iu.test(value)) {
+                add('unverified_freshness', field, 'Retirez la promesse de contenu nouveau ou activez la preuve de fraîcheur sur le parcours de reprise.');
+            }
+        });
+
+        if (requiresNewContent && journeyKey !== 'continue_watching') {
+            add('freshness_not_supported', 'new-content', 'La preuve de contenu nouveau est réservée au parcours de reprise.');
+        }
+        const expectedDeepLinks = {
+            no_source: ['/app.html#settings/sources'],
+            import_unresolved: ['/app.html#settings/sources'],
+            catalog_ready_no_first_play: ['/app.html#home'],
+            continue_watching: [requiresNewContent ? '/app.html#home' : '/app.html#home/resume']
+        };
+        if (!expectedDeepLinks[journeyKey]?.includes(deepLink)) {
+            add('wrong_destination', 'deep-link', 'Choisissez la destination Norva correspondant exactement à l’action attendue pour ce parcours.');
+        }
+        return { valid: issues.length === 0, issues };
+    }
+
     _notificationLocalValue(value) {
         const d = new Date(value || Date.now() + 60 * 60 * 1000);
         const p = n => String(n).padStart(2, '0');
@@ -3093,12 +3280,13 @@ class AdminPage {
         const host = document.getElementById('mkt-notification-center');
         if (!host) return;
         host.setAttribute('aria-busy', 'true');
-        const [overview, schedules, rules, systemRules, audiences] = await Promise.allSettled([
+        const [overview, schedules, rules, systemRules, audiences, lifecycle] = await Promise.allSettled([
             this._rpc('admin_marketing_notification_center_overview'),
             this._rpc('admin_marketing_notification_schedules', { p_status: null, p_limit: 150 }),
             this._rpc('admin_marketing_notification_rules'),
             this._rpc('admin_marketing_system_automations'),
-            this._rpc('admin_marketing_audience_counts')
+            this._rpc('admin_marketing_audience_counts'),
+            this._rpc('admin_behavioral_lifecycle_overview', { p_window_days: 30 })
         ]);
         if (this._route !== 'marketing' || !document.getElementById('mkt-notification-center')) return;
 
@@ -3108,6 +3296,7 @@ class AdminPage {
         this._notificationRules = rules.status === 'fulfilled' && Array.isArray(rules.value) ? rules.value : [];
         this._notificationSystemRules = systemRules.status === 'fulfilled' && Array.isArray(systemRules.value) ? systemRules.value : [];
         this._notificationAudienceCounts = audiences.status === 'fulfilled' && audiences.value ? audiences.value : null;
+        this._behavioralLifecycle = lifecycle.status === 'fulfilled' && lifecycle.value ? lifecycle.value : null;
         this._renderNotificationCenter();
     }
 
@@ -3202,14 +3391,26 @@ class AdminPage {
         const n = AdminPage.n;
         const overview = this._notificationOverview || {};
         const counts = this._notificationAudienceCounts || {};
+        const lifecycle = this._behavioralLifecycle || {};
+        const reachability = lifecycle.reachability || {};
+        const lifecycleJourneys = Array.isArray(lifecycle.journeys) ? lifecycle.journeys : [];
+        const hasReachabilitySemantics = typeof counts.registered_tokens === 'number'
+            || typeof reachability.registered_tokens === 'number';
+        const targetableTokens = hasReachabilitySemantics
+            ? Number(reachability.targetable_tokens ?? counts.all ?? 0)
+            : null;
+        const registeredTokens = Number(reachability.registered_tokens ?? counts.registered_tokens ?? counts.all ?? 0);
+        const registeredAccounts = Number(reachability.registered_accounts ?? counts.registered_accounts ?? 0);
+        const activeLifecycleCount = lifecycleJourneys.filter(journey => journey.status === 'active').length;
+        const lifecycleFailureCount = lifecycleJourneys.reduce((sum, journey) => sum + Number(journey?.metrics?.dead_letter || 0), 0);
         const scheduledCount = Number(overview.scheduled || 0);
-        const ruleCount = Number(overview.active_automations || 0);
         const failureCount = Number(overview.automation_failures_7d || 0);
         const next = overview.next_scheduled_at ? this._notificationDateLabel(overview.next_scheduled_at) : 'Aucune';
         const views = [
             ['composer', 'Composer', ''],
             ['scheduled', 'Programmées', scheduledCount ? String(scheduledCount) : ''],
             ['automations', 'Automatiques', String(this._notificationSystemRules.length + this._notificationRules.length)],
+            ['journeys', 'Parcours', lifecycleJourneys.length ? String(lifecycleJourneys.length) : ''],
             ['history', 'Historique', '']
         ];
         if (!views.some(([key]) => key === this._notificationView)) this._notificationView = 'composer';
@@ -3217,15 +3418,17 @@ class AdminPage {
         host.innerHTML = `<div class="notif-center">
             <section class="notif-intro" aria-labelledby="notif-center-title"><div><span class="notif-kicker">Centre de diffusion</span><h2 id="notif-center-title">Notifications</h2><p>Composez un push, programmez une campagne et supervisez les règles automatiques sans mélanger les messages marketing avec les alertes transactionnelles protégées.</p></div><span class="notif-live-state">Moteur ${this._notificationCenterAvailable ? 'opérationnel' : 'partiel'}</span></section>
             <div class="notif-kpis" aria-label="Résumé des notifications">
-                <div class="notif-kpi"><strong>${typeof counts.all === 'number' ? n(counts.all) : '—'}</strong><span>appareils push disponibles</span></div>
+                <div class="notif-kpi"><strong>${targetableTokens === null ? '—' : n(targetableTokens)}</strong><span>cibles push éligibles · permission accordée et jeton vu depuis moins de 45 jours</span></div>
+                <div class="notif-kpi"><strong>${n(registeredTokens)}</strong><span>jetons enregistrés · ${n(registeredAccounts)} compte${registeredAccounts > 1 ? 's' : ''} avec au moins un jeton</span></div>
                 <div class="notif-kpi"><strong>${n(scheduledCount)}</strong><span>campagnes programmées · prochaine : ${AdminPage.esc(next)}</span></div>
-                <div class="notif-kpi"><strong>${n(ruleCount)}</strong><span>automations personnalisées actives</span></div>
-                <div class="notif-kpi"><strong>${n(failureCount)}</strong><span>automations à vérifier sur 7 jours</span></div>
+                <div class="notif-kpi"><strong>${n(activeLifecycleCount)}</strong><span>parcours comportementaux actifs · ${n(lifecycleJourneys.length)} configurés</span></div>
+                <div class="notif-kpi"><strong>${n(failureCount + lifecycleFailureCount)}</strong><span>livraisons à vérifier · ${n(lifecycleFailureCount)} en lettre morte</span></div>
             </div>
             <div class="notif-tabs" role="tablist" aria-label="Sections du centre de notifications">${tabs}</div>
             <section class="notif-panel" id="notif-panel-composer" role="tabpanel" aria-labelledby="notif-tab-composer"${this._notificationView === 'composer' ? '' : ' hidden'}>${this._notificationComposerMarkup()}</section>
             <section class="notif-panel" id="notif-panel-scheduled" role="tabpanel" aria-labelledby="notif-tab-scheduled"${this._notificationView === 'scheduled' ? '' : ' hidden'}><div id="notif-schedule-list"></div></section>
             <section class="notif-panel" id="notif-panel-automations" role="tabpanel" aria-labelledby="notif-tab-automations"${this._notificationView === 'automations' ? '' : ' hidden'}><div id="notif-automation-workspace"></div></section>
+            <section class="notif-panel" id="notif-panel-journeys" role="tabpanel" aria-labelledby="notif-tab-journeys"${this._notificationView === 'journeys' ? '' : ' hidden'}>${this._behavioralLifecycleMarkup()}</section>
             <section class="notif-panel" id="notif-panel-history" role="tabpanel" aria-labelledby="notif-tab-history"${this._notificationView === 'history' ? '' : ' hidden'}>
                 <div class="notif-card"><div class="notif-card-head"><div><h3>Historique des envois</h3><p>Envois immédiats et campagnes programmées, avec leurs compteurs réels.</p></div></div><div class="notif-card-body"><div class="mkt-log-bar"><input type="search" id="mkt-log-q" placeholder="Rechercher par titre, message ou auteur" autocomplete="off"><div class="qv-row" id="mkt-log-auds" role="group" aria-label="Filtrer par audience"></div></div><div id="mkt-log"><div class="ssub">Chargement…</div></div></div></div>
             </section>
@@ -3263,8 +3466,762 @@ class AdminPage {
         this._wireNotificationComposer();
         this._renderNotificationSchedules();
         this._renderNotificationAutomations();
+        this._wireBehavioralLifecycleControls();
         this._wirePushLogControls();
         this._loadPushLog();
+    }
+
+    _behavioralLifecycleMarkup() {
+        const data = this._behavioralLifecycle;
+        if (!data) return `<div class="notif-card"><div class="notif-card-head"><div><h3>Parcours comportementaux</h3><p>La configuration sera disponible après installation de la migration dédiée.</p></div><span class="notif-state is-draft">Indisponible</span></div><div class="notif-card-body"><div class="notif-protected">Aucun parcours n’est activé depuis cet écran. Les campagnes manuelles existantes restent indépendantes.</div></div></div>`;
+
+        const n = AdminPage.n;
+        const esc = AdminPage.esc;
+        const reach = data.reachability || {};
+        const runtime = data.runtime || { emergency_stop: true, audience_mode: 'internal_test' };
+        const importReadiness = data.import_readiness || { status: 'missing', expired: true, pilot_gate_open: false, checks: {} };
+        const importChecks = importReadiness.checks || {};
+        const importReady = importReadiness.pilot_gate_open === true;
+        const primary = data.primary_72h || {};
+        const dimensions = Array.isArray(data.dimensions) ? data.dimensions : [];
+        const audit = Array.isArray(data.audit_history) ? data.audit_history : [];
+        const deadLetters = Array.isArray(data.dead_letters) ? data.dead_letters : [];
+        const journeys = Array.isArray(data.journeys) ? data.journeys : [];
+        const channelLabel = channel => ({ in_app: 'Dans l’app', push: 'Push', email: 'Email' })[channel] || channel;
+        const delayLabel = minutes => {
+            const value = Number(minutes || 0);
+            if (value === 0) return 'Immédiat';
+            if (value % 1440 === 0) return `J+${value / 1440}`;
+            if (value % 60 === 0) return `T+${value / 60} h`;
+            return `T+${value} min`;
+        };
+        const rate = (value, total) => total > 0 ? `${(100 * Number(value || 0) / total).toFixed(1)} %` : '—';
+        const formatDate = value => {
+            if (!value) return '—';
+            const date = new Date(value);
+            return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' });
+        };
+        const statusLabel = status => ({ draft: 'Brouillon', active: 'Actif', paused: 'En pause', archived: 'Archivé' })[status] || 'Inconnu';
+        const experimentVariableLabel = value => ({
+            baseline: 'Baseline / aucun changement expérimental',
+            delay: 'Délai',
+            channel: 'Canal',
+            copy: 'Texte',
+            cta: 'CTA et destination'
+        })[value] || 'Plan non défini';
+        const cards = journeys.map(journey => {
+            const key = String(journey.key || '');
+            const safeKey = esc(key);
+            const status = String(journey.status || 'draft');
+            const isActive = status === 'active';
+            const isArchived = status === 'archived';
+            const stateClass = isActive ? 'is-live' : status === 'draft' ? 'is-draft' : '';
+            const metrics = journey.metrics || {};
+            const conversion = journey.conversion || {};
+            const eligibility = journey.eligibility || {};
+            const experimentWindows = journey.experiment_windows || {};
+            const safety = journey.experiment_safety || {};
+            const reporting = journey.reporting || {};
+            const experimentPlan = journey.experiment_plan || {};
+            const experimentDecision = journey.experiment_decision || {};
+            const providerComparison = experimentDecision.provider_comparison || {};
+            const treatmentUsers = Number(metrics.treatment_users || 0);
+            const holdoutUsers = Number(metrics.holdout_users || 0);
+            const treatmentConversions = Number(conversion.treatment_users || 0);
+            const holdoutConversions = Number(conversion.holdout_users || 0);
+            const numberOrZero = value => Number.isFinite(Number(value)) ? Number(value) : 0;
+            const percent = value => value == null ? '—' : `${n(value)} %`;
+            const windowRows = [
+                ['24h', '24 h'],
+                ['72h', '72 h'],
+                ['7d', '7 jours'],
+            ].map(([windowKey, label]) => {
+                const sample = experimentWindows[windowKey] || {};
+                const insufficient = sample.status !== 'measurable';
+                const treatment = insufficient ? 'Échantillon insuffisant' : `${percent(sample.treatment_rate_pct)} (${n(sample.treatment_conversions || 0)}/${n(sample.treatment_users || 0)})`;
+                const holdout = insufficient ? 'Échantillon insuffisant' : `${percent(sample.holdout_rate_pct)} (${n(sample.holdout_conversions || 0)}/${n(sample.holdout_users || 0)})`;
+                const lift = insufficient || sample.absolute_lift_pp == null
+                    ? '—'
+                    : `${numberOrZero(sample.absolute_lift_pp) > 0 ? '+' : ''}${n(sample.absolute_lift_pp)} pt${Math.abs(numberOrZero(sample.absolute_lift_pp)) === 1 ? '' : 's'}`;
+                const relative = insufficient || sample.relative_uplift_pct == null
+                    ? ''
+                    : ` · relatif ${numberOrZero(sample.relative_uplift_pct) > 0 ? '+' : ''}${percent(sample.relative_uplift_pct)}`;
+                const unsubscribeLift = sample.unsubscribe_lift_pp == null
+                    ? '—'
+                    : `${numberOrZero(sample.unsubscribe_lift_pp) > 0 ? '+' : ''}${n(sample.unsubscribe_lift_pp)} pt`;
+                return `<tr data-experiment-window="${esc(windowKey)}"><td><strong>${esc(label)}</strong></td><td>${esc(treatment)}</td><td>${esc(holdout)}</td><td>${esc(lift)}${esc(relative)}</td><td>${esc(unsubscribeLift)}</td></tr>`;
+            }).join('');
+            const duplicateKeys = numberOrZero(safety.duplicate_dedupe_keys);
+            const sentAfterConversion = numberOrZero(safety.sent_after_conversion);
+            const rejected = numberOrZero(safety.provider_rejected);
+            const transportStarted = numberOrZero(safety.transport_started);
+            const cancelledAfterConversion = numberOrZero(safety.cancelled_after_conversion);
+            const safetyBlocked = duplicateKeys > 0 || sentAfterConversion > 0;
+            const decisionStatus = String(experimentDecision.status || 'configuration_pending');
+            const decisionLabel = ({
+                configuration_pending: 'Plan en brouillon',
+                not_started: 'Non démarré',
+                pending: 'En maturation',
+                observation_ready: 'Lecture J+7',
+                insufficient_sample: 'Échantillon insuffisant',
+                blocked_safety: 'Bloqué par sécurité',
+                baseline_required: 'Baseline fournisseur requise',
+                baseline_ready: 'Baseline prête',
+                holdout_conversion_zero: 'Témoin sans conversion',
+                target_met: 'Cible atteinte',
+                target_not_met: 'Cible non atteinte'
+            })[decisionStatus] || 'Décision indisponible';
+            const decisionBlocked = safetyBlocked || decisionStatus === 'blocked_safety';
+            const experimentState = decisionBlocked ? 'Bloquant' : decisionLabel;
+            const experimentStateClass = decisionBlocked
+                ? 'is-failed'
+                : decisionStatus === 'target_met' || decisionStatus === 'baseline_ready'
+                    ? 'is-live'
+                    : 'is-draft';
+            const milestoneLabel = value => ({ ready: 'prêt', pending: 'en attente', not_started: 'non démarré' })[value] || 'inconnu';
+            const reportingCopy = reporting.cohort_started_at
+                ? `Cohorte pilote ouverte le ${formatDate(reporting.cohort_started_at)}. Rapport J+7 ${milestoneLabel(reporting.day_7_status)} (${formatDate(reporting.day_7_due_at)}) · rapport J+14 ${milestoneLabel(reporting.day_14_status)} (${formatDate(reporting.day_14_due_at)}).`
+                : 'Le pilote réel n’a pas démarré. Les rapports J+7 et J+14 resteront indisponibles jusqu’à la première affectation hors comptes internes.';
+            const targetLabel = experimentPlan.target_relative_lift_pct == null
+                ? 'À confirmer après baseline'
+                : `+${n(experimentPlan.target_relative_lift_pct)} % relatif`;
+            const providerDeltaLabel = providerComparison.delta_pp == null
+                ? 'Baseline en construction'
+                : `${numberOrZero(providerComparison.delta_pp) > 0 ? '+' : ''}${n(providerComparison.delta_pp)} pt`;
+            const steps = (Array.isArray(journey.steps) ? journey.steps : []).map(step => {
+                const stepKey = String(step.key || '');
+                const safeStep = esc(stepKey);
+                const stepDisabled = isActive || isArchived ? ' disabled' : '';
+                const ttlHours = Math.round(Number(step.ttl_seconds || 0) / 3600 * 10) / 10;
+                const policyId = `step-copy-policy-${safeKey}-${safeStep}`;
+                const statusId = `step-status-${safeKey}-${safeStep}`;
+                const describedBy = `${policyId} ${statusId}`;
+                const deepLinkOptions = key === 'no_source' || key === 'import_unresolved'
+                    ? [['/app.html#settings/sources', 'Ajout M3U / Xtream']]
+                    : key === 'catalog_ready_no_first_play'
+                        ? [['/app.html#home', 'Catalogue / accueil']]
+                        : [['/app.html#home/resume', 'Reprendre la dernière lecture'], ['/app.html#home', 'Catalogue avec contenu nouveau vérifié']];
+                return `<details class="notif-lifecycle-step" data-lifecycle-step="${safeStep}">
+                    <summary><span class="notif-lifecycle-step-index">${n(step.ordinal)}</span><div><strong>${esc(delayLabel(step.delay_minutes))} · ${esc(channelLabel(step.channel))}</strong><span data-step-summary-title>${esc(step.title || '')}</span><small data-step-summary-destination>${esc(step.cta_label || '')} → ${esc(step.deep_link || '')}</small></div><span class="notif-state ${step.enabled ? 'is-live' : 'is-draft'}">${step.enabled ? 'Activée' : 'Désactivée'}</span></summary>
+                    <div class="notif-step-editor">
+                        <div class="notif-step-grid">
+                            <label class="notif-field" for="step-channel-${safeKey}-${safeStep}">Canal<select id="step-channel-${safeKey}-${safeStep}" data-step-field="channel"${stepDisabled}>${['in_app', 'push', 'email'].map(channel => `<option value="${channel}"${step.channel === channel ? ' selected' : ''}>${esc(channelLabel(channel))}</option>`).join('')}</select></label>
+                            <label class="notif-field" for="step-delay-${safeKey}-${safeStep}">Délai (minutes)<input id="step-delay-${safeKey}-${safeStep}" data-step-field="delay" type="number" min="0" max="43200" step="1" value="${esc(Number(step.delay_minutes || 0))}"${stepDisabled}></label>
+                            <label class="notif-field span-2" for="step-title-${safeKey}-${safeStep}">Titre<input id="step-title-${safeKey}-${safeStep}" data-step-field="title" maxlength="80" aria-describedby="${describedBy}" value="${esc(step.title || '')}"${stepDisabled}></label>
+                            <label class="notif-field span-2" for="step-body-${safeKey}-${safeStep}">Message<textarea id="step-body-${safeKey}-${safeStep}" data-step-field="body" maxlength="500" rows="3" aria-describedby="${describedBy}"${stepDisabled}>${esc(step.body || '')}</textarea></label>
+                            <label class="notif-field" for="step-cta-${safeKey}-${safeStep}">Libellé CTA<input id="step-cta-${safeKey}-${safeStep}" data-step-field="cta" maxlength="50" aria-describedby="${describedBy}" value="${esc(step.cta_label || '')}"${stepDisabled}></label>
+                            <label class="notif-field" for="step-link-${safeKey}-${safeStep}">Lien profond<select id="step-link-${safeKey}-${safeStep}" data-step-field="deep-link" aria-describedby="${describedBy}"${stepDisabled}>${deepLinkOptions.map(([value, label]) => `<option value="${value}"${step.deep_link === value ? ' selected' : ''}>${esc(label)}</option>`).join('')}</select></label>
+                            <label class="notif-field" for="step-ttl-${safeKey}-${safeStep}">Expiration (heures)<input id="step-ttl-${safeKey}-${safeStep}" data-step-field="ttl-hours" type="number" min="0.1" max="336" step="0.1" value="${esc(ttlHours)}"${stepDisabled}></label>
+                        </div>
+                        <div class="notif-step-flags">
+                            <label class="notif-step-flag"><input data-step-field="enabled" type="checkbox"${step.enabled ? ' checked' : ''}${stepDisabled}> Étape activée</label>
+                            <label class="notif-step-flag"><input data-step-field="marketing" type="checkbox"${step.is_marketing ? ' checked' : ''}${stepDisabled}> Contenu marketing (consentement email requis)</label>
+                            ${key === 'continue_watching' ? `<label class="notif-step-flag"><input data-step-field="new-content" type="checkbox" aria-describedby="${describedBy}"${step.requires_new_content ? ' checked' : ''}${stepDisabled}> Exiger un contenu réellement nouveau</label>` : ''}
+                        </div>
+                        <p class="notif-step-copy-policy" id="${policyId}"><strong>Confidentialité du message.</strong> Aucun domaine, URL, adresse e-mail, secret, paiement ou variable dynamique. Une promesse de nouveauté exige une preuve serveur.</p>
+                        <div class="notif-step-previews" aria-label="Aperçus du message">
+                            <div class="notif-step-preview is-android"><span>Android</span><strong data-step-preview="title">${esc(step.title || '')}</strong><p data-step-preview="body">${esc(step.body || '')}</p><b data-step-preview="cta">${esc(step.cta_label || '')}</b></div>
+                            <div class="notif-step-preview"><span>Web / in-app</span><strong data-step-preview="title">${esc(step.title || '')}</strong><p data-step-preview="body">${esc(step.body || '')}</p><b data-step-preview="cta">${esc(step.cta_label || '')}</b></div>
+                            <div class="notif-step-preview is-email"><span>Email</span><strong data-step-preview="title">${esc(step.title || '')}</strong><p data-step-preview="body">${esc(step.body || '')}</p><b data-step-preview="cta">${esc(step.cta_label || '')}</b></div>
+                        </div>
+                        ${stepDisabled ? `<p class="notif-status">Mettez le parcours en pause avant de modifier ce modèle.</p>` : `<div class="notif-actions"><button class="notif-button" type="button" data-lifecycle-step-save>Enregistrer ce modèle</button><span class="notif-status" id="${statusId}" data-lifecycle-step-status role="status" aria-live="polite" aria-atomic="true"></span></div>`}
+                    </div>
+                </details>`;
+            }).join('');
+            const countries = (Array.isArray(journey.countries) ? journey.countries : []).join(', ');
+            const disabled = isActive || isArchived ? ' disabled' : '';
+            return `<article class="notif-lifecycle-card" data-lifecycle-journey="${safeKey}" data-lifecycle-status="${esc(status)}">
+                <header class="notif-lifecycle-head"><div><span class="notif-kicker">${esc(key.replaceAll('_', ' '))}</span><h3>${esc(journey.name || key)}</h3><p>${esc(journey.description || '')}</p></div><span class="notif-state ${stateClass}">${esc(statusLabel(status))}</span></header>
+                <div class="notif-lifecycle-guardrails"><span>Entrée : <strong>${esc(journey.entry_event || '—')}</strong></span><span>Sortie : <strong>${esc(journey.exit_event || '—')}</strong></span><span>Éligibles maintenant : <strong>${n(eligibility.currently_eligible || 0)}</strong></span><span>Test interne : ${n(eligibility.potential_internal_test || 0)}</span><span>Pilote : ${n(eligibility.potential_pilot || 0)}</span></div>
+                <div class="notif-lifecycle-metrics" aria-label="Résultats sur ${n(data.window_days || 30)} jours">
+                    <div><strong>${n(metrics.provider_accepted || 0)}</strong><span>acceptés</span></div><div><strong>${n(metrics.delivered || 0)}</strong><span>livrés</span></div><div><strong>${n(metrics.opened || 0)}</strong><span>ouverts</span></div><div><strong>${n(metrics.dead_letter || 0)}</strong><span>lettre morte</span></div><div><strong>${rate(treatmentConversions, treatmentUsers)}</strong><span>conversion relancée</span></div><div><strong>${rate(holdoutConversions, holdoutUsers)}</strong><span>conversion témoin</span></div><div><strong>${n(treatmentUsers)}</strong><span>utilisateurs relancés</span></div><div><strong>${n(holdoutUsers)}</strong><span>utilisateurs témoins</span></div>
+                </div>
+                <details class="notif-experiment" data-lifecycle-experiment>
+                    <summary><span><strong>Expérience 24 h · 72 h · 7 jours</strong><small>Cohortes matures uniquement · version ${n(journey.version || 1)} · ${esc(experimentVariableLabel(experimentPlan.variable))} · cible ${esc(targetLabel)} · aucune significativité statistique implicite</small></span><span class="notif-state ${experimentStateClass}">${esc(experimentState)}</span></summary>
+                    <div class="notif-experiment-body">
+                        <div class="notif-experiment-plan" aria-label="Plan expérimental de la version">
+                            <div><strong>${esc(experimentVariableLabel(experimentPlan.variable))}</strong><span>Une seule variable autorisée par nouvelle version.</span></div>
+                            <div><strong>${esc(experimentPlan.primary_metric || journey.exit_event || '—')} · ${n(experimentPlan.window_hours || 72)} h</strong><span>${esc(targetLabel)} · snapshot ${experimentPlan.snapshot_status === 'immutable' ? 'immuable' : 'en brouillon'}.</span></div>
+                            <div><strong>${esc(experimentPlan.hypothesis || 'Hypothèse non renseignée')}</strong><span>Hypothèse auditable, pas une promesse de résultat.</span></div>
+                        </div>
+                        <p class="notif-scroll-hint" aria-hidden="true">Tableau détaillé · balayez horizontalement</p>
+                        <div class="notif-table-scroll" data-horizontal-scroll tabindex="0" role="region" aria-label="Comparaison expérimentale par fenêtre, défilement horizontal"><table class="notif-dimension-table"><thead><tr><th>Fenêtre</th><th>Relancés</th><th>Témoins</th><th>Écart absolu</th><th>Écart désabonnement</th></tr></thead><tbody>${windowRows}</tbody></table></div>
+                        <div class="notif-experiment-safety" aria-label="Garde-fous de l’expérience">
+                            <div class="${duplicateKeys > 0 ? 'is-blocking' : ''}"><strong>${n(duplicateKeys)}</strong><span>clés de déduplication en double</span></div>
+                            <div class="${sentAfterConversion > 0 ? 'is-blocking' : ''}"><strong>${n(sentAfterConversion)}</strong><span>envois après conversion</span></div>
+                            <div><strong>${n(rejected)} / ${n(transportStarted)}</strong><span>rejets fournisseur · ${percent(safety.provider_rejection_rate_pct)}</span></div>
+                            <div><strong>${n(cancelledAfterConversion)}</strong><span>livraisons annulées après conversion</span></div>
+                        </div>
+                        <p class="notif-experiment-report"><strong>Décision directionnelle : ${esc(decisionLabel)}.</strong> ${esc(reportingCopy)} Désabonnement : seuil +${n(experimentPlan.unsubscribe_lift_guardrail_pp ?? 0.5)} point. Rejets fournisseur : ${esc(providerDeltaLabel)} face à la version précédente, seuil +${n(experimentPlan.provider_rejection_guardrail_pp ?? 0.5)} point. Cette vue ne calcule pas de significativité statistique.</p>
+                    </div>
+                </details>
+                <div class="notif-lifecycle-steps">${steps}</div>
+                <div class="notif-lifecycle-controls">
+                    <label class="notif-field" for="lifecycle-variable-${safeKey}">Variable testée<select id="lifecycle-variable-${safeKey}" data-lifecycle-field="experiment-variable"${disabled}>${['baseline', 'delay', 'channel', 'copy', 'cta'].map(value => `<option value="${value}"${experimentPlan.variable === value ? ' selected' : ''}>${esc(experimentVariableLabel(value))}</option>`).join('')}</select><span class="notif-field-help">Baseline = aucun changement délai/canal/texte/CTA. Sinon PostgreSQL exige exactement la variable déclarée.</span></label>
+                    <label class="notif-field" for="lifecycle-window-${safeKey}">Fenêtre principale<select id="lifecycle-window-${safeKey}" data-lifecycle-field="experiment-window"${disabled}>${[24, 72, 168].map(value => `<option value="${value}"${Number(experimentPlan.window_hours || 72) === value ? ' selected' : ''}>${value === 168 ? '7 jours' : `${value} heures`}</option>`).join('')}</select></label>
+                    <label class="notif-field span-2" for="lifecycle-hypothesis-${safeKey}">Hypothèse<textarea id="lifecycle-hypothesis-${safeKey}" data-lifecycle-field="experiment-hypothesis" minlength="20" maxlength="500" rows="2"${disabled}>${esc(experimentPlan.hypothesis || '')}</textarea><span class="notif-field-help">Une phrase vérifiable, conservée dans le snapshot immuable de la version.</span></label>
+                    <label class="notif-field" for="lifecycle-target-${safeKey}">Cible d’uplift relatif (%)<input id="lifecycle-target-${safeKey}" data-lifecycle-field="experiment-target" type="number" min="0.01" max="1000" step="0.01" value="${experimentPlan.target_relative_lift_pct == null ? '' : esc(experimentPlan.target_relative_lift_pct)}" placeholder="Après baseline"${disabled}><span class="notif-field-help">Facultative pour une baseline, obligatoire pour une variante.</span></label>
+                    <label class="notif-field" for="lifecycle-rollout-${safeKey}">Pilote (%)<input id="lifecycle-rollout-${safeKey}" data-lifecycle-field="rollout" type="number" min="0" max="100" step="1" value="${n(journey.rollout_percent || 0)}"${disabled}></label>
+                    <label class="notif-field" for="lifecycle-holdout-${safeKey}">Témoin permanent<input id="lifecycle-holdout-${safeKey}" data-lifecycle-field="holdout" type="number" value="10" disabled><span class="notif-field-help">Affectation stable, indépendante des versions.</span></label>
+                    <label class="notif-field span-2" for="lifecycle-countries-${safeKey}">Pays pilotes<input id="lifecycle-countries-${safeKey}" data-lifecycle-field="countries" type="text" value="${esc(countries)}" placeholder="IN, BD" spellcheck="false"${disabled}><span class="notif-field-help">Codes ISO à deux lettres. Aucun parcours hors de cette liste.</span></label>
+                    <label class="notif-field" for="lifecycle-cooldown-${safeKey}">Pause après relance (jours)<input id="lifecycle-cooldown-${safeKey}" data-lifecycle-field="cooldown" type="number" min="7" max="14" step="1" value="${n(journey?.limits?.cooldown_days ?? 7)}"${disabled}></label>
+                    <label class="notif-field" for="lifecycle-push-day-${safeKey}">Push / 24 h<input id="lifecycle-push-day-${safeKey}" data-lifecycle-field="push-day" type="number" min="0" max="1" step="1" value="${n(journey?.limits?.push_day ?? 1)}"${disabled}></label>
+                    <label class="notif-field" for="lifecycle-push-week-${safeKey}">Push / 7 jours<input id="lifecycle-push-week-${safeKey}" data-lifecycle-field="push-week" type="number" min="0" max="3" step="1" value="${n(journey?.limits?.push_week ?? 3)}"${disabled}></label>
+                    <label class="notif-field" for="lifecycle-email-week-${safeKey}">Emails / 7 jours<input id="lifecycle-email-week-${safeKey}" data-lifecycle-field="email-week" type="number" min="0" max="2" step="1" value="${n(journey?.limits?.email_week ?? 2)}"${disabled}></label>
+                    <label class="notif-field" for="lifecycle-quiet-start-${safeKey}">Silence à partir de<input id="lifecycle-quiet-start-${safeKey}" data-lifecycle-field="quiet-start" type="number" min="0" max="23" step="1" value="${n(journey?.limits?.quiet_start ?? 21)}"${disabled}></label>
+                    <label class="notif-field" for="lifecycle-quiet-end-${safeKey}">Reprise à<input id="lifecycle-quiet-end-${safeKey}" data-lifecycle-field="quiet-end" type="number" min="0" max="23" step="1" value="${n(journey?.limits?.quiet_end ?? 9)}"${disabled}></label>
+                    <label class="notif-field span-2" for="lifecycle-reason-${safeKey}">Motif auditable<input id="lifecycle-reason-${safeKey}" data-lifecycle-field="reason" minlength="8" maxlength="500" placeholder="Pourquoi cette configuration change"></label>
+                </div>
+                <div class="notif-lifecycle-guardrails"><span>Push global plafonné avant transport.</span><span>Email marketing bloqué sans consentement explicite.</span><span>Comptes internes exclus du pilote réel.</span><span>${n(eligibility.unknown_country || 0)} état(s) éligible(s) sans pays, donc exclus du pilote.</span></div>
+                <div class="notif-actions">
+                    ${isActive ? `<button class="notif-button danger" type="button" data-lifecycle-pause>Mettre en pause</button>` : isArchived ? '' : `<button class="notif-button" type="button" data-lifecycle-save>Enregistrer ${status === 'paused' ? 'en pause' : 'le brouillon'}</button><button class="notif-button primary" type="button" data-lifecycle-prepare>Préparer l’activation</button>`}
+                    <span class="notif-status" data-lifecycle-status-message role="status"></span>
+                </div>
+                <section class="notif-review notif-lifecycle-confirm" data-lifecycle-confirm hidden tabindex="-1"><h4>Activation du parcours</h4><p class="notif-status">Saisissez <strong>ACTIVATE ${safeKey}</strong>. L’arrêt d’urgence global reste prioritaire et empêche tout envoi tant qu’il est actif.</p><label class="notif-field" for="lifecycle-confirm-${safeKey}">Confirmation<input id="lifecycle-confirm-${safeKey}" data-lifecycle-confirm-input type="text" autocomplete="off" spellcheck="false"></label><div class="notif-actions"><button class="notif-button quiet" type="button" data-lifecycle-confirm-back>Annuler</button><button class="notif-button primary" type="button" data-lifecycle-activate disabled>Activer le parcours</button></div></section>
+            </article>`;
+        }).join('');
+
+        const dimensionRows = dimensions.map(row => `<tr><td>${esc(row.country_code || '??')}</td><td>${esc(row.platform || 'unknown')}</td><td>${esc(row.app_version || 'unknown')}</td><td>${n(row.cohort || 0)}</td><td>${n(row.import_success || 0)}</td><td>${n(row.import_then_first_play || 0)}</td><td>${row.rate_pct == null ? '—' : `${esc(row.rate_pct)} %`}</td></tr>`).join('');
+        const auditRows = audit.map(row => `<div class="notif-audit-row"><strong>${esc(String(row.action || '').replaceAll('_', ' '))}${row.journey_key ? ` · ${esc(row.journey_key)}` : ''}</strong><span>${esc(row.reason || '')}<small>acteur ${esc(row.actor_ref || 'inconnu')}</small></span><time datetime="${esc(row.created_at || '')}">${esc(formatDate(row.created_at))}</time></div>`).join('');
+        const dlqRows = deadLetters.map(row => {
+            const id = String(row.id || '');
+            const expected = `RETRY ${id}`;
+            return `<details class="notif-dlq-row" data-lifecycle-dlq="${esc(id)}"><summary><strong>${esc(row.journey_key || '')} · ${esc(row.step_key || '')}</strong> — ${esc(row.last_error_family || 'unknown')} · ${n(row.attempt_count || 0)} tentative(s)</summary><p class="notif-status">Expiration : ${esc(formatDate(row.expires_at))}</p><code>${esc(id)}</code><div class="notif-step-grid"><label class="notif-field">Motif<input data-lifecycle-retry-reason minlength="8" maxlength="500" placeholder="Pourquoi rejouer cette livraison"></label><label class="notif-field">Confirmation<input data-lifecycle-retry-confirm autocomplete="off" spellcheck="false" placeholder="${esc(expected)}"></label></div><div class="notif-actions"><button class="notif-button danger" type="button" data-lifecycle-retry disabled>Rejouer une fois</button><span class="notif-status" data-lifecycle-retry-status role="status"></span></div></details>`;
+        }).join('');
+        const runtimeRunning = runtime.emergency_stop === false;
+        const runtimeLabel = runtimeRunning ? (runtime.audience_mode === 'pilot' ? 'Pilote réel autorisé' : 'Test interne autorisé') : 'Arrêt d’urgence actif';
+        const importReadinessLabel = importReady
+            ? 'Preuve import valide'
+            : importReadiness.status === 'failed'
+                ? 'Validation échouée'
+                : importReadiness.expired && importReadiness.status === 'passed'
+                    ? 'Preuve expirée'
+                    : 'Preuve manquante';
+        const importReadinessClass = importReady ? 'is-live' : importReadiness.status === 'failed' ? 'is-failed' : 'is-draft';
+        const importCheckLabel = (key, label) => `<span>${esc(label)} : <strong>${importChecks[key] === true ? 'validé' : 'manquant'}</strong></span>`;
+
+        return `<div class="notif-lifecycle-stack">
+            <section class="notif-lifecycle-runtime ${runtimeRunning ? 'is-running' : ''}" data-lifecycle-runtime-root><div class="notif-runtime-head"><div><span class="notif-kicker">Coupe-circuit global</span><h3>${esc(runtimeLabel)}</h3><p>${esc(runtime.reason || 'Aucune raison enregistrée.')} · mise à jour ${esc(formatDate(runtime.updated_at))}</p></div><span class="notif-state ${runtimeRunning ? 'is-live' : 'is-draft'}">${runtimeRunning ? 'Ouvert' : 'Bloqué'}</span></div>
+                <section class="notif-review" data-lifecycle-import-readiness data-pilot-ready="${importReady ? 'true' : 'false'}" aria-labelledby="lifecycle-import-readiness-title"><div class="notif-runtime-head"><div><span class="notif-kicker">Prérequis produit</span><h4 id="lifecycle-import-readiness-title">Validation du parcours d’import</h4><p id="lifecycle-pilot-gate-help">Le pilote exige une preuve de staging fraîche : M3U, Xtream, catalogue d’au moins 25 000 entrées, erreurs guidées et Android WebView.</p></div><span class="notif-state ${importReadinessClass}">${esc(importReadinessLabel)}</span></div><div class="notif-lifecycle-guardrails">${importCheckLabel('m3u_valid', 'M3U')}${importCheckLabel('xtream_valid', 'Xtream')}${importCheckLabel('large_catalog_valid', '25 000+ entrées')}${importCheckLabel('error_guidance_valid', 'Erreurs guidées')}${importCheckLabel('android_webview_valid', 'Android WebView')}</div><div class="notif-protected">${importReadiness.release_label ? `Release ${esc(importReadiness.release_label)} · Android ${esc(importReadiness.android_version || '—')} · commit ${esc(String(importReadiness.source_commit || '').slice(0, 12))} · preuve ${esc(String(importReadiness.evidence_sha256 || '').slice(0, 12))}… · expiration ${esc(formatDate(importReadiness.expires_at))}` : 'Aucune attestation n’est enregistrée. Le test interne reste disponible, mais PostgreSQL refuse tout pilote réel.'}</div><div class="notif-actions"><button class="notif-button" type="button" data-lifecycle-readiness-prepare>Enregistrer une preuve de staging</button><span class="notif-status" data-lifecycle-readiness-status role="status" aria-live="polite" aria-atomic="true"></span></div><section class="notif-runtime-confirm" data-lifecycle-readiness-form hidden tabindex="-1"><div class="notif-runtime-grid"><label class="notif-field">Release<input data-lifecycle-readiness-field="release" maxlength="80" autocomplete="off" spellcheck="false" placeholder="norva-1.3.16"></label><label class="notif-field">Version Android<input data-lifecycle-readiness-field="android" maxlength="40" autocomplete="off" spellcheck="false" placeholder="1.3.16"></label><label class="notif-field span-2">Commit source<input data-lifecycle-readiness-field="commit" minlength="40" maxlength="40" autocomplete="off" spellcheck="false" placeholder="40 caractères hexadécimaux"></label><label class="notif-field span-2">SHA-256 de l’artefact<input data-lifecycle-readiness-field="evidence" minlength="64" maxlength="64" autocomplete="off" spellcheck="false" placeholder="64 caractères hexadécimaux"></label></div><fieldset class="notif-step-flags"><legend>Scénarios observés dans l’artefact</legend><label class="notif-step-flag"><input type="checkbox" data-lifecycle-readiness-check="m3u"> M3U valide</label><label class="notif-step-flag"><input type="checkbox" data-lifecycle-readiness-check="xtream"> Xtream valide</label><label class="notif-step-flag"><input type="checkbox" data-lifecycle-readiness-check="large-catalogue"> Catalogue ≥ 25 000 entrées</label><label class="notif-step-flag"><input type="checkbox" data-lifecycle-readiness-check="error-guidance"> Erreurs exploitables</label><label class="notif-step-flag"><input type="checkbox" data-lifecycle-readiness-check="android-webview"> Android WebView validé</label></fieldset><p class="notif-status" data-lifecycle-readiness-expected></p><label class="notif-field">Confirmation exacte<input data-lifecycle-readiness-confirm autocomplete="off" spellcheck="false"></label><div class="notif-actions"><button class="notif-button quiet" type="button" data-lifecycle-readiness-cancel>Annuler</button><button class="notif-button primary" type="button" data-lifecycle-readiness-record disabled>Enregistrer l’attestation</button></div></section></section>
+                <div class="notif-runtime-actions"><button class="notif-button" type="button" data-lifecycle-runtime-action="internal_test">Préparer le test interne</button><button class="notif-button primary" type="button" data-lifecycle-runtime-action="pilot" aria-disabled="${importReady ? 'false' : 'true'}" aria-describedby="lifecycle-pilot-gate-help">Préparer le pilote IN / BD</button><button class="notif-button danger" type="button" data-lifecycle-runtime-action="stop">Arrêt d’urgence</button><span class="notif-status" data-lifecycle-runtime-status role="status" aria-live="polite" aria-atomic="true"></span></div><section class="notif-runtime-confirm" data-lifecycle-runtime-confirm hidden tabindex="-1"><div class="notif-runtime-grid"><label class="notif-field">Mode<select data-lifecycle-runtime-mode disabled><option value="internal_test"${runtime.audience_mode === 'internal_test' ? ' selected' : ''}>Comptes internes uniquement</option><option value="pilot"${runtime.audience_mode === 'pilot' ? ' selected' : ''}>Pilote pays configurés, hors internes</option></select></label><label class="notif-field">Motif auditable<input data-lifecycle-runtime-reason minlength="8" maxlength="500" placeholder="Pourquoi changer le coupe-circuit"></label><label class="notif-field span-2">Confirmation exacte<input data-lifecycle-runtime-typed autocomplete="off" spellcheck="false"></label></div><p class="notif-status" data-lifecycle-runtime-expected></p><div class="notif-actions"><button class="notif-button quiet" type="button" data-lifecycle-runtime-cancel>Annuler</button><button class="notif-button primary" type="button" data-lifecycle-runtime-confirm-button disabled>Confirmer</button></div></section></section>
+            <section class="notif-card"><div class="notif-card-head"><div><h3>Audience push : mesures distinctes</h3><p>Un compte peut enregistrer plusieurs jetons. Un jeton n’atteste ni la permission Android, ni une livraison.</p></div><span class="notif-state">${n(data.window_days || 30)} jours</span></div><div class="notif-card-body"><div class="notif-lifecycle-reach">
+                <div><strong>${n(reach.total_accounts || 0)}</strong><span>comptes inscrits</span></div><div><strong>${n(reach.registered_tokens || 0)}</strong><span>jetons enregistrés</span></div><div><strong>${n(reach.registered_accounts || 0)}</strong><span>comptes avec jeton</span></div><div><strong>${n(reach.permission_granted_tokens || 0)}</strong><span>permissions accordées</span></div><div><strong>${n(reach.targetable_tokens || 0)}</strong><span>jetons ciblables et frais</span></div><div><strong>${n(reach.targetable_accounts || 0)}</strong><span>comptes ciblables</span></div>
+            </div><div class="notif-protected">Les ${n(reach.total_accounts || 0)} comptes et ${n(reach.registered_tokens || 0)} jetons mesurent des objets différents : ${n(reach.registered_accounts || 0)} comptes ont au moins un jeton, ${n(reach.unknown_permission_tokens || 0)} jeton(s) n’ont pas encore déclaré leur permission et ${n(reach.denied_permission_tokens || 0)} l’ont refusée. Les états « accepté par FCM », « livré » et « ouvert » restent séparés.</div></div></section>
+            <section class="notif-card"><div class="notif-card-head"><div><h3>Activation produit sous 72 heures</h3><p>Inscription → import réussi → première lecture. Cohortes disposant de 72 heures complètes ; comptes internes exclus.</p></div><span class="notif-state">Métrique principale</span></div><div class="notif-card-body notif-primary-metric"><div class="notif-primary-number"><strong>${primary.rate_pct == null ? '—' : `${esc(primary.rate_pct)} %`}</strong><span>${n(primary.import_then_first_play || 0)} parcours complets sur ${n(primary.cohort || 0)} inscriptions matures · ${n(primary.import_success || 0)} imports réussis${primary.matured_through ? ` · maturité arrêtée au ${esc(formatDate(primary.matured_through))}` : ''}</span></div><div class="notif-table-scroll"><table class="notif-dimension-table"><thead><tr><th>Pays</th><th>Plateforme</th><th>Version</th><th>Inscrits</th><th>Imports</th><th>1re lecture</th><th>Taux</th></tr></thead><tbody>${dimensionRows || '<tr><td colspan="7">Pas encore de cohorte mesurable.</td></tr>'}</tbody></table></div></div></section>
+            <div class="notif-lifecycle-grid">${cards || '<div class="notif-card"><div class="notif-empty">Aucun parcours configuré.</div></div>'}</div>
+            <section class="notif-card"><div class="notif-card-head"><div><h3>File des échecs permanents</h3><p>Un rejeu exige une raison et la saisie de l’identifiant complet. Aucun rejeu automatique après une sortie de parcours.</p></div><span class="notif-state ${deadLetters.length ? '' : 'is-live'}">${n(deadLetters.length)}</span></div><div class="notif-card-body"><div class="notif-dlq-list">${dlqRows || '<div class="notif-empty">Aucune livraison en lettre morte.</div>'}</div></div></section>
+            <section class="notif-card"><div class="notif-card-head"><div><h3>Historique auditable</h3><p>Coupe-circuit, parcours, modèles et rejeux. Les identités opérateur sont pseudonymisées dans cette vue.</p></div><span class="notif-state">${n(audit.length)}</span></div><div class="notif-card-body"><div class="notif-audit-list">${auditRows || '<div class="notif-empty">Aucune modification enregistrée.</div>'}</div></div></section>
+        </div>`;
+    }
+
+    _wireBehavioralLifecycleControls() {
+        const root = document.getElementById('notif-panel-journeys');
+        if (!root || !this._behavioralLifecycle) return;
+        const journeys = Array.isArray(this._behavioralLifecycle.journeys) ? this._behavioralLifecycle.journeys : [];
+        const importReadiness = this._behavioralLifecycle.import_readiness || {};
+        const pilotReady = importReadiness.pilot_gate_open === true;
+        const getJourney = key => journeys.find(item => item.key === key);
+        const readConfig = (card, journey) => {
+            const rollout = Number(card.querySelector('[data-lifecycle-field="rollout"]')?.value);
+            const holdout = 10;
+            const rawCountries = card.querySelector('[data-lifecycle-field="countries"]')?.value || '';
+            const countries = [...new Set(rawCountries.split(/[\s,;]+/).map(value => value.trim().toUpperCase()).filter(Boolean))];
+            const cooldown = Number(card.querySelector('[data-lifecycle-field="cooldown"]')?.value);
+            const pushDay = Number(card.querySelector('[data-lifecycle-field="push-day"]')?.value);
+            const pushWeek = Number(card.querySelector('[data-lifecycle-field="push-week"]')?.value);
+            const emailWeek = Number(card.querySelector('[data-lifecycle-field="email-week"]')?.value);
+            const quietStart = Number(card.querySelector('[data-lifecycle-field="quiet-start"]')?.value);
+            const quietEnd = Number(card.querySelector('[data-lifecycle-field="quiet-end"]')?.value);
+            const experimentVariable = String(card.querySelector('[data-lifecycle-field="experiment-variable"]')?.value || '').trim();
+            const experimentHypothesis = String(card.querySelector('[data-lifecycle-field="experiment-hypothesis"]')?.value || '').trim();
+            const experimentWindow = Number(card.querySelector('[data-lifecycle-field="experiment-window"]')?.value);
+            const targetRaw = String(card.querySelector('[data-lifecycle-field="experiment-target"]')?.value || '').trim();
+            const experimentTarget = targetRaw === '' ? null : Number(targetRaw);
+            const reason = String(card.querySelector('[data-lifecycle-field="reason"]')?.value || '').trim();
+            if (!Number.isInteger(rollout) || rollout < 0 || rollout > 100) throw new Error('Le pilote doit être compris entre 0 et 100 %.');
+            if (!countries.length || countries.length > 30 || countries.some(value => !/^[A-Z]{2}$/.test(value))) throw new Error('Utilisez uniquement des codes pays ISO à deux lettres.');
+            if (!Number.isInteger(cooldown) || cooldown < 7 || cooldown > 14) throw new Error('La pause doit rester comprise entre 7 et 14 jours.');
+            if (!Number.isInteger(pushDay) || pushDay < 0 || pushDay > 1 || !Number.isInteger(pushWeek) || pushWeek < pushDay || pushWeek > 3) throw new Error('Les plafonds push doivent rester au maximum à 1 par 24 h et 3 sur 7 jours.');
+            if (!Number.isInteger(emailWeek) || emailWeek < 0 || emailWeek > 2) throw new Error('Le plafond email doit rester au maximum à 2 sur 7 jours.');
+            if (!Number.isInteger(quietStart) || !Number.isInteger(quietEnd) || quietStart <= quietEnd || quietStart > 23 || quietEnd < 0) throw new Error('La plage silencieuse doit traverser minuit, par exemple 21 h–9 h.');
+            if (!['baseline', 'delay', 'channel', 'copy', 'cta'].includes(experimentVariable)) throw new Error('Choisissez une variable expérimentale reconnue.');
+            if (experimentHypothesis.length < 20 || experimentHypothesis.length > 500) throw new Error('L’hypothèse expérimentale doit contenir entre 20 et 500 caractères.');
+            if (![24, 72, 168].includes(experimentWindow)) throw new Error('La fenêtre expérimentale doit être de 24 h, 72 h ou 7 jours.');
+            if (experimentTarget != null && (!Number.isFinite(experimentTarget) || experimentTarget < 0.01 || experimentTarget > 1000)) throw new Error('La cible d’uplift doit rester comprise entre 0,01 % et 1 000 %.');
+            if (experimentVariable !== 'baseline' && experimentTarget == null) throw new Error('Une variante doit définir une cible d’uplift relatif.');
+            if (reason.length < 8 || reason.length > 500) throw new Error('Ajoutez un motif auditable de 8 caractères minimum.');
+            return { rollout, holdout, countries, cooldown, pushDay, pushWeek, emailWeek, quietStart, quietEnd, experimentVariable, experimentHypothesis, experimentWindow, experimentTarget, reason, status: journey.status || 'draft' };
+        };
+        const setStatus = (card, message, kind = '') => {
+            const target = card.querySelector('[data-lifecycle-status-message]');
+            if (!target) return;
+            target.textContent = message || '';
+            target.className = `notif-status${kind ? ` is-${kind}` : ''}`;
+        };
+        const persist = async (card, journey, status, confirmation = null) => {
+            const config = readConfig(card, journey);
+            return this._rpc('admin_update_behavioral_lifecycle_journey', {
+                p_journey_key: journey.key,
+                p_status: status,
+                p_rollout_percent: config.rollout,
+                p_holdout_percent: config.holdout,
+                p_country_allowlist: config.countries,
+                p_confirmation: confirmation,
+                p_cooldown_days: config.cooldown,
+                p_max_push_per_day: config.pushDay,
+                p_max_push_per_week: config.pushWeek,
+                p_max_email_per_week: config.emailWeek,
+                p_quiet_start_hour: config.quietStart,
+                p_quiet_end_hour: config.quietEnd,
+                p_reason: config.reason,
+                p_experiment_variable: config.experimentVariable,
+                p_experiment_hypothesis: config.experimentHypothesis,
+                p_experiment_window_hours: config.experimentWindow,
+                p_target_relative_lift_pct: config.experimentTarget
+            });
+        };
+        const refreshAfterCommittedMutation = async onFailure => {
+            try {
+                await this._loadNotificationCenter();
+                return true;
+            } catch (_) {
+                onFailure?.();
+                return false;
+            }
+        };
+
+        const readinessRoot = root.querySelector('[data-lifecycle-import-readiness]');
+        if (readinessRoot) {
+            const prepare = readinessRoot.querySelector('[data-lifecycle-readiness-prepare]');
+            const form = readinessRoot.querySelector('[data-lifecycle-readiness-form]');
+            const status = readinessRoot.querySelector('[data-lifecycle-readiness-status]');
+            const expectedNode = readinessRoot.querySelector('[data-lifecycle-readiness-expected]');
+            const confirmInput = readinessRoot.querySelector('[data-lifecycle-readiness-confirm]');
+            const recordButton = readinessRoot.querySelector('[data-lifecycle-readiness-record]');
+            const valueField = name => readinessRoot.querySelector(`[data-lifecycle-readiness-field="${name}"]`);
+            const checkField = name => readinessRoot.querySelector(`[data-lifecycle-readiness-check="${name}"]`);
+            const allChecks = () => ['m3u', 'xtream', 'large-catalogue', 'error-guidance', 'android-webview']
+                .every(name => Boolean(checkField(name)?.checked));
+            let recording = false;
+
+            const validateReadiness = ({ announce = false } = {}) => {
+                const values = {
+                    release: String(valueField('release')?.value || '').trim(),
+                    android: String(valueField('android')?.value || '').trim(),
+                    commit: String(valueField('commit')?.value || '').trim().toLowerCase(),
+                    evidence: String(valueField('evidence')?.value || '').trim().toLowerCase()
+                };
+                const issues = [];
+                if (!/^[A-Za-z0-9][A-Za-z0-9._+-]{0,79}$/.test(values.release)) issues.push({ field: 'release', message: 'Release invalide.' });
+                if (!/^[A-Za-z0-9][A-Za-z0-9._+-]{0,39}$/.test(values.android)) issues.push({ field: 'android', message: 'Version Android invalide.' });
+                if (!/^[0-9a-f]{40}$/.test(values.commit)) issues.push({ field: 'commit', message: 'Le commit doit contenir 40 caractères hexadécimaux.' });
+                if (!/^[0-9a-f]{64}$/.test(values.evidence)) issues.push({ field: 'evidence', message: 'La preuve doit être un SHA-256 de 64 caractères.' });
+                ['release', 'android', 'commit', 'evidence'].forEach(name => valueField(name)?.removeAttribute('aria-invalid'));
+                issues.forEach(issue => valueField(issue.field)?.setAttribute('aria-invalid', 'true'));
+                const expected = allChecks() ? 'VERIFY IMPORT READINESS' : 'RECORD IMPORT FAILURE';
+                if (expectedNode) expectedNode.innerHTML = `Saisissez <strong>${AdminPage.esc(expected)}</strong>. Une attestation échouée garde le pilote fermé.`;
+                const confirmationMatches = confirmInput?.value === expected;
+                if (recordButton) recordButton.disabled = recording || issues.length > 0 || !confirmationMatches;
+                if (announce && status && issues.length) {
+                    status.textContent = issues[0].message;
+                    status.className = 'notif-status is-error';
+                    status.setAttribute('role', 'alert');
+                }
+                return { valid: issues.length === 0 && confirmationMatches, values, expected, issues };
+            };
+
+            prepare?.addEventListener('click', () => {
+                if (form) { form.hidden = false; form.focus(); }
+                if (status) {
+                    status.textContent = 'Aucune preuve n’est enregistrée tant que la confirmation exacte n’est pas validée.';
+                    status.className = 'notif-status';
+                    status.setAttribute('role', 'status');
+                }
+                validateReadiness();
+                valueField('release')?.focus();
+            });
+            ['release', 'android', 'commit', 'evidence'].forEach(name => valueField(name)?.addEventListener('input', () => validateReadiness()));
+            ['m3u', 'xtream', 'large-catalogue', 'error-guidance', 'android-webview'].forEach(name => checkField(name)?.addEventListener('change', () => {
+                if (confirmInput) confirmInput.value = '';
+                validateReadiness();
+            }));
+            confirmInput?.addEventListener('input', () => validateReadiness());
+            readinessRoot.querySelector('[data-lifecycle-readiness-cancel]')?.addEventListener('click', () => {
+                if (form) form.hidden = true;
+                if (status) {
+                    status.textContent = 'Enregistrement annulé ; le verrou serveur reste inchangé.';
+                    status.className = 'notif-status';
+                    status.setAttribute('role', 'status');
+                }
+                prepare?.focus();
+            });
+            recordButton?.addEventListener('click', async () => {
+                const validation = validateReadiness({ announce: true });
+                if (!validation.valid) {
+                    const firstIssue = validation.issues[0];
+                    if (firstIssue) valueField(firstIssue.field)?.focus();
+                    else confirmInput?.focus();
+                    return;
+                }
+                recording = true;
+                validateReadiness();
+                if (status) {
+                    status.textContent = 'Enregistrement de l’attestation immuable…';
+                    status.className = 'notif-status';
+                    status.setAttribute('role', 'status');
+                }
+                try {
+                    const passed = allChecks();
+                    await this._rpc('admin_record_behavioral_import_readiness', {
+                        p_release_label: validation.values.release,
+                        p_source_commit: validation.values.commit,
+                        p_android_version: validation.values.android,
+                        p_evidence_sha256: validation.values.evidence,
+                        p_m3u_valid: Boolean(checkField('m3u')?.checked),
+                        p_xtream_valid: Boolean(checkField('xtream')?.checked),
+                        p_large_catalog_valid: Boolean(checkField('large-catalogue')?.checked),
+                        p_error_guidance_valid: Boolean(checkField('error-guidance')?.checked),
+                        p_android_webview_valid: Boolean(checkField('android-webview')?.checked),
+                        p_confirmation: validation.expected
+                    });
+                    recording = false;
+                    if (form) form.hidden = true;
+                    if (status) {
+                        status.textContent = passed
+                            ? 'Preuve de staging enregistrée ; recharge serveur requise avant de préparer le pilote.'
+                            : 'Échec de staging enregistré ; le pilote reste fermé.';
+                        status.className = passed ? 'notif-status is-success' : 'notif-status is-warning';
+                    }
+                    await refreshAfterCommittedMutation(() => {
+                        if (status) {
+                            status.textContent = 'Attestation enregistrée, mais la vue n’a pas pu être actualisée. Rechargez la page avant toute préparation de pilote.';
+                            status.className = 'notif-status is-warning';
+                            status.setAttribute('role', 'status');
+                        }
+                    });
+                } catch (_) {
+                    recording = false;
+                    if (status) {
+                        status.textContent = 'Attestation refusée ; aucun verrou serveur n’a été ouvert.';
+                        status.className = 'notif-status is-error';
+                        status.setAttribute('role', 'alert');
+                    }
+                    validateReadiness();
+                }
+            });
+        }
+
+        const runtimeRoot = root.querySelector('[data-lifecycle-runtime-root]');
+        if (runtimeRoot) {
+            const panel = runtimeRoot.querySelector('[data-lifecycle-runtime-confirm]');
+            const mode = runtimeRoot.querySelector('[data-lifecycle-runtime-mode]');
+            const reason = runtimeRoot.querySelector('[data-lifecycle-runtime-reason]');
+            const typed = runtimeRoot.querySelector('[data-lifecycle-runtime-typed]');
+            const expectedLabel = runtimeRoot.querySelector('[data-lifecycle-runtime-expected]');
+            const confirmButton = runtimeRoot.querySelector('[data-lifecycle-runtime-confirm-button]');
+            const status = runtimeRoot.querySelector('[data-lifecycle-runtime-status]');
+            let pendingAction = null;
+            let pendingTrigger = null;
+            let expected = '';
+            const updateRuntimeButton = () => {
+                if (confirmButton) confirmButton.disabled = !expected || (pendingAction === 'pilot' && !pilotReady) || typed?.value !== expected || String(reason?.value || '').trim().length < 8;
+            };
+            runtimeRoot.querySelectorAll('[data-lifecycle-runtime-action]').forEach(button => button.addEventListener('click', () => {
+                pendingAction = button.dataset.lifecycleRuntimeAction;
+                pendingTrigger = button;
+                if (pendingAction === 'pilot' && !pilotReady) {
+                    pendingAction = null;
+                    expected = '';
+                    if (panel) panel.hidden = true;
+                    if (status) {
+                        status.textContent = 'Pilote refusé : enregistrez d’abord une preuve de staging complète et non expirée.';
+                        status.className = 'notif-status is-error';
+                        status.setAttribute('role', 'alert');
+                    }
+                    readinessRoot?.querySelector('[data-lifecycle-readiness-prepare]')?.focus();
+                    return;
+                }
+                expected = pendingAction === 'stop' ? 'EMERGENCY STOP' : pendingAction === 'pilot' ? 'START PILOT' : 'START INTERNAL TEST';
+                if (mode) mode.value = pendingAction === 'pilot' ? 'pilot' : 'internal_test';
+                if (typed) typed.value = '';
+                if (reason) reason.value = '';
+                if (expectedLabel) expectedLabel.innerHTML = `Saisissez <strong>${AdminPage.esc(expected)}</strong>. Le changement annule les files non transportées et crée une nouvelle limite de cohorte.`;
+                if (panel) { panel.hidden = false; panel.focus(); }
+                typed?.focus();
+                updateRuntimeButton();
+            }));
+            typed?.addEventListener('input', updateRuntimeButton);
+            reason?.addEventListener('input', updateRuntimeButton);
+            runtimeRoot.querySelector('[data-lifecycle-runtime-cancel]')?.addEventListener('click', () => {
+                pendingAction = null;
+                expected = '';
+                if (panel) panel.hidden = true;
+                if (status) status.textContent = 'Modification annulée.';
+                pendingTrigger?.focus();
+                pendingTrigger = null;
+            });
+            confirmButton?.addEventListener('click', async () => {
+                if (!pendingAction || typed?.value !== expected || String(reason?.value || '').trim().length < 8) return;
+                confirmButton.disabled = true;
+                if (status) status.textContent = 'Application du coupe-circuit…';
+                try {
+                    await this._rpc('admin_update_behavioral_lifecycle_runtime', {
+                        p_emergency_stop: pendingAction === 'stop',
+                        p_audience_mode: mode?.value === 'pilot' ? 'pilot' : 'internal_test',
+                        p_confirmation: expected,
+                        p_reason: String(reason?.value || '').trim()
+                    });
+                    if (status) status.textContent = pendingAction === 'stop' ? 'Arrêt d’urgence appliqué.' : 'Mode autorisé avec une cohorte fraîche.';
+                    pendingAction = null;
+                    expected = '';
+                    if (panel) panel.hidden = true;
+                    await refreshAfterCommittedMutation(() => {
+                        if (status) {
+                            status.textContent = 'Changement appliqué, mais la vue n’a pas pu être actualisée. Rechargez la page avant une autre action.';
+                            status.className = 'notif-status is-warning';
+                        }
+                    });
+                } catch (error) {
+                    if (status) {
+                        status.textContent = /import readiness/i.test(`${error?.message || ''} ${error?.payload?.message || ''}`)
+                            ? 'Pilote refusé : la preuve d’import est absente, échouée ou expirée.'
+                            : 'Le coupe-circuit n’a pas changé.';
+                        status.className = 'notif-status is-error';
+                        status.setAttribute('role', 'alert');
+                    }
+                    confirmButton.disabled = false;
+                }
+            });
+        }
+
+        root.querySelectorAll('[data-lifecycle-journey]').forEach(card => {
+            const journey = getJourney(card.dataset.lifecycleJourney);
+            if (!journey) return;
+
+            card.querySelectorAll('[data-lifecycle-step]').forEach(stepRoot => {
+                const step = (Array.isArray(journey.steps) ? journey.steps : []).find(item => item.key === stepRoot.dataset.lifecycleStep);
+                if (!step) return;
+                const field = name => stepRoot.querySelector(`[data-step-field="${name}"]`);
+                const saveButton = stepRoot.querySelector('[data-lifecycle-step-save]');
+                const statusNode = stepRoot.querySelector('[data-lifecycle-step-status]');
+                let saving = false;
+                const copyValidation = () => AdminPage.behavioralStepCopyValidation({
+                    journeyKey: journey.key,
+                    title: field('title')?.value,
+                    body: field('body')?.value,
+                    ctaLabel: field('cta')?.value,
+                    deepLink: field('deep-link')?.value,
+                    requiresNewContent: Boolean(field('new-content')?.checked)
+                });
+                const renderCopyValidation = ({ announce = false, showValid = false } = {}) => {
+                    const result = copyValidation();
+                    ['title', 'body', 'cta', 'deep-link', 'new-content'].forEach(name => {
+                        const input = field(name);
+                        if (!input) return;
+                        input.removeAttribute('aria-invalid');
+                        input.closest('.notif-step-flag')?.classList.remove('is-invalid');
+                    });
+                    result.issues.forEach(issue => {
+                        const input = field(issue.field);
+                        input?.setAttribute('aria-invalid', 'true');
+                        input?.closest('.notif-step-flag')?.classList.add('is-invalid');
+                    });
+                    if (saveButton) saveButton.disabled = saving || !result.valid;
+                    if (statusNode && !result.valid) {
+                        const remaining = result.issues.length - 1;
+                        statusNode.textContent = `À corriger avant enregistrement : ${result.issues[0].message}${remaining > 0 ? ` (+${remaining} autre${remaining > 1 ? 's' : ''})` : ''}`;
+                        statusNode.className = 'notif-status is-error';
+                        statusNode.setAttribute('role', announce ? 'alert' : 'status');
+                    } else if (statusNode && showValid) {
+                        statusNode.textContent = 'Contenu conforme aux règles de confidentialité ; le serveur le vérifiera encore.';
+                        statusNode.className = 'notif-status is-success';
+                        statusNode.setAttribute('role', 'status');
+                    }
+                    return result;
+                };
+                const updatePreview = () => {
+                    const title = String(field('title')?.value || '');
+                    const body = String(field('body')?.value || '');
+                    const cta = String(field('cta')?.value || '');
+                    stepRoot.querySelectorAll('[data-step-preview="title"]').forEach(node => { node.textContent = title; });
+                    stepRoot.querySelectorAll('[data-step-preview="body"]').forEach(node => { node.textContent = body; });
+                    stepRoot.querySelectorAll('[data-step-preview="cta"]').forEach(node => { node.textContent = cta; });
+                    const summaryTitle = stepRoot.querySelector('[data-step-summary-title]');
+                    if (summaryTitle) summaryTitle.textContent = title;
+                    const summaryDestination = stepRoot.querySelector('[data-step-summary-destination]');
+                    if (summaryDestination) summaryDestination.textContent = `${cta} → ${String(field('deep-link')?.value || '')}`;
+                };
+                ['title', 'body', 'cta'].forEach(name => field(name)?.addEventListener('input', () => {
+                    updatePreview();
+                    renderCopyValidation({ announce: true, showValid: true });
+                }));
+                field('deep-link')?.addEventListener('change', () => {
+                    updatePreview();
+                    renderCopyValidation({ announce: true, showValid: true });
+                });
+                field('new-content')?.addEventListener('change', () => {
+                    renderCopyValidation({ announce: true, showValid: true });
+                });
+                renderCopyValidation();
+                saveButton?.addEventListener('click', async event => {
+                    const button = event.currentTarget;
+                    const reasonValue = String(card.querySelector('[data-lifecycle-field="reason"]')?.value || '').trim();
+                    const delay = Number(field('delay')?.value);
+                    const ttlSeconds = Math.round(Number(field('ttl-hours')?.value) * 3600);
+                    const titleValue = String(field('title')?.value || '').trim();
+                    const bodyValue = String(field('body')?.value || '').trim();
+                    const ctaValue = String(field('cta')?.value || '').trim();
+                    const validation = renderCopyValidation({ announce: true });
+                    if (!validation.valid) {
+                        field(validation.issues[0].field)?.focus();
+                        return;
+                    }
+                    if (reasonValue.length < 8) { if (statusNode) statusNode.textContent = 'Ajoutez d’abord le motif auditable du parcours.'; return; }
+                    if (!Number.isInteger(delay) || delay < 0 || delay > 43200 || !Number.isInteger(ttlSeconds) || ttlSeconds < 300 || ttlSeconds > 1209600 || titleValue.length < 2 || bodyValue.length < 2 || ctaValue.length < 2) { if (statusNode) statusNode.textContent = 'Vérifiez le délai, l’expiration et les textes.'; return; }
+                    saving = true;
+                    button.disabled = true;
+                    if (statusNode) statusNode.textContent = 'Enregistrement du modèle…';
+                    try {
+                        await this._rpc('admin_update_behavioral_lifecycle_step', {
+                            p_journey_key: journey.key,
+                            p_step_key: step.key,
+                            p_channel: field('channel')?.value,
+                            p_delay_minutes: delay,
+                            p_title: titleValue,
+                            p_body: bodyValue,
+                            p_cta_label: ctaValue,
+                            p_deep_link: field('deep-link')?.value,
+                            p_ttl_seconds: ttlSeconds,
+                            p_enabled: Boolean(field('enabled')?.checked),
+                            p_is_marketing: Boolean(field('marketing')?.checked),
+                            p_requires_new_content: Boolean(field('new-content')?.checked),
+                            p_reason: reasonValue
+                        });
+                        saving = false;
+                        renderCopyValidation();
+                        if (statusNode) {
+                            statusNode.textContent = 'Modèle enregistré et historisé.';
+                            statusNode.className = 'notif-status is-success';
+                            statusNode.setAttribute('role', 'status');
+                        }
+                        await refreshAfterCommittedMutation(() => {
+                            if (statusNode) {
+                                statusNode.textContent = 'Modèle enregistré et historisé, mais la vue n’a pas pu être actualisée. Rechargez la page avant une autre modification.';
+                                statusNode.className = 'notif-status is-warning';
+                                statusNode.setAttribute('role', 'status');
+                            }
+                        });
+                    } catch (error) {
+                        if (statusNode) {
+                            const serverRejectedCopy = /unsafe lifecycle message|safe_copy_check/i.test(`${error?.message || ''} ${error?.payload?.message || ''}`);
+                            statusNode.textContent = serverRejectedCopy
+                                ? 'Le serveur a refusé ce contenu. Rechargez la configuration puis vérifiez chaque règle de confidentialité.'
+                                : 'Le modèle n’a pas été modifié.';
+                            statusNode.className = 'notif-status is-error';
+                            statusNode.setAttribute('role', 'alert');
+                        }
+                        saving = false;
+                        renderCopyValidation();
+                    }
+                });
+            });
+
+            card.querySelector('[data-lifecycle-save]')?.addEventListener('click', async event => {
+                const button = event.currentTarget;
+                button.disabled = true;
+                setStatus(card, 'Enregistrement…');
+                try {
+                    await persist(card, journey, journey.status === 'paused' ? 'paused' : 'draft');
+                    setStatus(card, journey.status === 'paused' ? 'Configuration conservée en pause.' : 'Brouillon enregistré sans diffusion.', 'success');
+                    await refreshAfterCommittedMutation(() => setStatus(card, 'Brouillon enregistré, mais la vue n’a pas pu être actualisée. Rechargez la page avant une autre modification.', 'warning'));
+                } catch (error) {
+                    setStatus(card, error?.message && !error.message.includes('admin_update_') ? error.message : 'La configuration n’a pas pu être enregistrée.', 'error');
+                    button.disabled = false;
+                }
+            });
+            card.querySelector('[data-lifecycle-pause]')?.addEventListener('click', async event => {
+                const button = event.currentTarget;
+                button.disabled = true;
+                setStatus(card, 'Mise en pause et annulation de la file…');
+                try {
+                    await persist(card, journey, 'paused');
+                    setStatus(card, 'Parcours en pause ; les livraisons en attente ont été annulées.', 'success');
+                    await refreshAfterCommittedMutation(() => setStatus(card, 'Parcours mis en pause, mais la vue n’a pas pu être actualisée. Rechargez la page avant une autre action.', 'warning'));
+                } catch (_) {
+                    setStatus(card, 'La mise en pause n’a pas abouti.', 'error');
+                    button.disabled = false;
+                }
+            });
+
+            const review = card.querySelector('[data-lifecycle-confirm]');
+            const input = card.querySelector('[data-lifecycle-confirm-input]');
+            const activate = card.querySelector('[data-lifecycle-activate]');
+            const expected = `ACTIVATE ${journey.key}`;
+            card.querySelector('[data-lifecycle-prepare]')?.addEventListener('click', () => {
+                try {
+                    const config = readConfig(card, journey);
+                    if (config.rollout < 1) throw new Error('Définissez un pilote supérieur à 0 % avant l’activation.');
+                    if (review) { review.hidden = false; review.focus(); }
+                    if (input) { input.value = ''; input.focus(); }
+                    if (activate) activate.disabled = true;
+                    setStatus(card, 'Activation non effectuée : confirmation écrite requise.');
+                } catch (error) { setStatus(card, error.message, 'error'); }
+            });
+            input?.addEventListener('input', () => { if (activate) activate.disabled = input.value !== expected; });
+            card.querySelector('[data-lifecycle-confirm-back]')?.addEventListener('click', () => {
+                if (review) review.hidden = true;
+                card.querySelector('[data-lifecycle-prepare]')?.focus();
+                setStatus(card, 'Activation annulée. Le parcours reste sans diffusion.');
+            });
+            activate?.addEventListener('click', async () => {
+                if (input?.value !== expected) return;
+                activate.disabled = true;
+                setStatus(card, 'Activation du pilote…');
+                try {
+                    await persist(card, journey, 'active', expected);
+                    setStatus(card, 'Pilote activé.', 'success');
+                    await refreshAfterCommittedMutation(() => setStatus(card, 'Pilote activé, mais la vue n’a pas pu être actualisée. Rechargez la page avant une autre action.', 'warning'));
+                } catch (_) {
+                    setStatus(card, 'L’activation n’a pas abouti. Aucun nouvel essai automatique ne sera lancé.', 'error');
+                    activate.disabled = false;
+                }
+            });
+        });
+
+        root.querySelectorAll('[data-lifecycle-dlq]').forEach(row => {
+            const id = row.dataset.lifecycleDlq;
+            const expected = `RETRY ${id}`;
+            const typed = row.querySelector('[data-lifecycle-retry-confirm]');
+            const reason = row.querySelector('[data-lifecycle-retry-reason]');
+            const button = row.querySelector('[data-lifecycle-retry]');
+            const status = row.querySelector('[data-lifecycle-retry-status]');
+            const update = () => { if (button) button.disabled = typed?.value !== expected || String(reason?.value || '').trim().length < 8; };
+            typed?.addEventListener('input', update);
+            reason?.addEventListener('input', update);
+            button?.addEventListener('click', async () => {
+                if (typed?.value !== expected) return;
+                button.disabled = true;
+                if (status) status.textContent = 'Vérification de l’éligibilité…';
+                try {
+                    const retried = await this._rpc('admin_retry_behavioral_lifecycle_delivery', {
+                        p_delivery_id: id,
+                        p_confirmation: expected,
+                        p_reason: String(reason?.value || '').trim()
+                    });
+                    if (!retried) throw new Error('not eligible');
+                    if (status) status.textContent = 'Livraison replacée une fois dans la file.';
+                    await refreshAfterCommittedMutation(() => {
+                        if (status) {
+                            status.textContent = 'Livraison replacée dans la file, mais la vue n’a pas pu être actualisée. Rechargez la page avant une autre action.';
+                            status.className = 'notif-status is-warning';
+                        }
+                    });
+                } catch (_) {
+                    if (status) status.textContent = 'Rejeu refusé : livraison expirée ou utilisateur déjà converti.';
+                    button.disabled = false;
+                }
+            });
+        });
     }
 
     _wireNotificationComposer() {
@@ -3349,7 +4306,7 @@ class AdminPage {
             const deviceCount = this._notificationAudienceCounts && typeof this._notificationAudienceCounts[audience.value] === 'number' ? this._notificationAudienceCounts[audience.value] : null;
             if (reviewList) reviewList.innerHTML = [
                 `<li><strong>${result.mode === 'scheduled' ? 'Programmation' : 'Envoi immédiat'}</strong>${result.mode === 'scheduled' ? ` · ${AdminPage.esc(this._notificationDateLabel(new Date(scheduledFor.value).toISOString(), true))}` : ' · le push ne pourra pas être rappelé'}</li>`,
-                `<li>Audience : <strong>${AdminPage.esc(aud[2])}</strong>${deviceCount === null ? '' : ` · ${AdminPage.n(deviceCount)} appareil(s) actuellement enregistrés`}</li>`,
+                `<li>Audience : <strong>${AdminPage.esc(aud[2])}</strong>${deviceCount === null ? '' : ` · ${AdminPage.n(deviceCount)} appareil(s) actuellement ciblable(s)`}</li>`,
                 `<li>Message : « ${AdminPage.esc(result.titleValue)} »</li>`
             ].join('');
             if (review) { review.hidden = false; review.focus(); }

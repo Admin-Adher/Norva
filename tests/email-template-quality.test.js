@@ -124,6 +124,7 @@ test('Resend senders include multipart text, reply-to and stable tags without we
   const imports = fs.readFileSync(path.join(root, 'supabase/functions/norva-import-notify/index.ts'), 'utf8');
   const lifecycle = fs.readFileSync(path.join(root, 'supabase/functions/norva-lifecycle/index.ts'), 'utf8');
   const lifecycleWorker = fs.readFileSync(path.join(root, 'supabase/functions/norva-branded-email-worker/index.ts'), 'utf8');
+  const resendTransport = fs.readFileSync(path.join(root, 'supabase/functions/_shared/resend-transport.mjs'), 'utf8');
 
   assert.match(imports, /"Idempotency-Key": `norva-import-\$\{deliveryKey\}`/);
   assert.match(imports, /reply_to: REPLY_TO/);
@@ -141,9 +142,10 @@ test('Resend senders include multipart text, reply-to and stable tags without we
   assert.match(lifecycle, /p_request_headers: unsubscribeHeaders/);
   assert.match(lifecycle, /norva_enqueue_lifecycle_email/);
   assert.doesNotMatch(lifecycle, /api\.resend\.com\/emails/);
-  assert.match(lifecycleWorker, /"Idempotency-Key": claim\.delivery_key/);
-  assert.match(lifecycleWorker, /reply_to: claim\.request_reply_to/);
-  assert.match(lifecycleWorker, /headers: claim\.request_headers/);
+  assert.match(lifecycleWorker, /sendResendDelivery\(claim/);
+  assert.match(resendTransport, /"Idempotency-Key": claim\.delivery_key/);
+  assert.match(resendTransport, /reply_to: claim\.request_reply_to/);
+  assert.match(resendTransport, /headers: claim\.request_headers/);
 });
 
 test('every remaining direct Resend API caller declares an explicit product User-Agent', () => {

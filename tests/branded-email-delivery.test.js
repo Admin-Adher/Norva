@@ -8,6 +8,7 @@ const read = (file) => fs.readFileSync(path.join(root, file), 'utf8').replace(/\
 const migration = read('supabase/migrations/20260721235400_branded_email_delivery_outbox.sql');
 const senderMigration = read('supabase/migrations/20260803001000_auth_sender_support_address.sql');
 const worker = read('supabase/functions/norva-branded-email-worker/index.ts');
+const transport = read('supabase/functions/_shared/resend-transport.mjs');
 const docs = read('docs/BRANDED-EMAIL-DELIVERY.md');
 
 function section(source, start, end) {
@@ -152,11 +153,12 @@ test('success and failure CAS provide idempotent ack, backoff and dead letters',
 });
 
 test('Edge worker checks Resend acceptance and preserves ambiguous accepted sends', () => {
-  assert.match(worker, /"Idempotency-Key": claim\.delivery_key/);
-  assert.match(worker, /text: claim\.request_text/);
-  assert.match(worker, /tags: claim\.request_tags/);
-  assert.match(worker, /signal: AbortSignal\.timeout\(8_000\)/);
-  assert.match(worker, /accepted: res\.ok && Boolean\(emailId\)/);
+  assert.match(worker, /sendResendDelivery\(claim/);
+  assert.match(transport, /"Idempotency-Key": claim\.delivery_key/);
+  assert.match(transport, /text: claim\.request_text/);
+  assert.match(transport, /tags: claim\.request_tags/);
+  assert.match(transport, /AbortSignal\.timeout\(timeout\)/);
+  assert.match(transport, /accepted: res\.ok && Boolean\(emailId\)/);
   assert.match(worker, /complete_branded_email_delivery/);
   assert.match(worker, /accepted_unacknowledged\+\+/);
   const accepted = section(worker, 'if (sent.accepted && sent.emailId)', 'const { data: failure');
@@ -190,7 +192,7 @@ test('worker is cron-authenticated and logs no recipient or message content', ()
   for (const log of logs) {
     assert.doesNotMatch(log, /recipient_email|request_subject|request_html|request_text/);
   }
-  assert.ok(worker.includes('.replace(/[A-Z0-9._%+-]+@'));
+  assert.ok(transport.includes('.replace(/[A-Z0-9._%+-]+@'));
 });
 
 test('runbook documents health, requeue, legacy trial policy and credential model', () => {

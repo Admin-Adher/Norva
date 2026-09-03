@@ -26,9 +26,12 @@ import {
   renderWelcome, renderPaymentFailed, renderWinback, renderAbandonedCheckout, type Rendered,
   renderCancellationConfirmed, renderSubscriptionResumed,
   renderPlanChangeScheduled, renderPlanChangeApplied, renderPaymentRecovered,
-  renderAccessExpired, renderRefundConfirmed,
+  renderAccessExpired, renderRefundConfirmed, renderBehavioralLifecycle,
 } from "../_shared/lifecycle-email.ts";
+import { fcmConfigured, sendFcmPush } from "../_shared/fcm.ts";
 
+const LIFECYCLE_VERSION = 1;
+const BEHAVIORAL_LIFECYCLE_PROTOCOL = 1;
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const PUBLIC_FUNCTIONS_URL = (Deno.env.get("SUPABASE_PUBLIC_URL") ?? SUPABASE_URL).replace(/\/+$/, "");
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? Deno.env.get("SUPABASE_SERVICE_KEY") ?? "";
@@ -581,6 +584,233 @@ async function runExpirePastDue(db: SupabaseClient): Promise<number> {
   return expired;
 }
 
+type BehavioralClaim = {
+  id: string;
+  lease_token: string;
+  user_id: string;
+  journey_key: string;
+  step_key: string;
+  channel: "push" | "email";
+  title: string;
+  body: string;
+  cta_label: string;
+  deep_link: string;
+  ttl_seconds: number;
+  collapse_key: string;
+  is_marketing: boolean;
+  attempt_count: number;
+};
+
+const BEHAVIORAL_DEEP_LINKS = new Map<string, string>([
+  ["/app.html#settings/sources", "settings/sources"],
+  ["/app.html#home", "home"],
+  ["/app.html#home/resume", "home/resume"],
+]);
+const BEHAVIORAL_FAILURE_FAMILIES = new Set([
+  "credentials", "missing_credentials", "endpoint_not_found", "timeout",
+  "provider_busy", "rate_limited", "playlist_format", "invalid_input",
+  "payload_too_large", "provider_unreachable", "infrastructure", "unknown",
+]);
+const BEHAVIORAL_SOURCE_TYPES = new Set(["m3u", "xtream"]);
+
+function behavioralDeepLink(
+  relative: string,
+  deliveryId: string,
+  options: {
+    mobile?: boolean;
+    journeyKey?: string;
+    failureFamily?: unknown;
+    sourceType?: unknown;
+  } = {},
+): string {
+  let fragment = BEHAVIORAL_DEEP_LINKS.get(relative) ?? "home";
+  const failureFamily = String(options.failureFamily ?? "").trim().toLowerCase();
+  const sourceType = String(options.sourceType ?? "").trim().toLowerCase();
+  if (options.journeyKey === "import_unresolved"
+    && fragment === "settings/sources"
+    && BEHAVIORAL_FAILURE_FAMILIES.has(failureFamily)
+    && BEHAVIORAL_SOURCE_TYPES.has(sourceType)) {
+    fragment += `/help/${failureFamily}/${sourceType}`;
+  }
+  const url = new URL("https://norva.tv/app.html");
+  if (options.mobile === true) url.searchParams.set("mobile", "1");
+  url.searchParams.set("lifecycleDelivery", deliveryId);
+  url.hash = fragment;
+  return url.toString();
+}
+
+async function runBehavioralPushes(
+  db: SupabaseClient,
+): Promise<Record<string, number | boolean>> {
+  const result = {
+    configured: fcmConfigured(), claimed: 0, provider_accepted: 0,
+    retry_scheduled: 0, dead_letter: 0, canceled_or_deferred: 0,
+    devices: 0, failed: 0, dead_tokens: 0,
+  };
+  if (!result.configured) return result;
+  const { data, error } = await db.rpc("norva_claim_behavioral_deliveries", {
+    p_channel: "push", p_batch: 25, p_lease_seconds: 120,
+  });
+  if (error) throw new Error(`behavioral push claim failed:${error.code ?? "db_error"}`);
+  const claims = (Array.isArray(data) ? data : []) as BehavioralClaim[];
+  result.claimed = claims.length;
+  for (const claim of claims) {
+    const { data: authorization, error: authorizationError } = await db.rpc(
+      "norva_authorize_behavioral_push",
+      { p_delivery_id: claim.id, p_lease_token: claim.lease_token },
+    );
+    if (authorizationError || !authorization || authorization.authorized !== true) {
+      result.canceled_or_deferred++;
+      continue;
+    }
+    const tokens = Array.isArray(authorization.tokens)
+      ? [...new Set(authorization.tokens.map((value: unknown) => String(value ?? "")).filter(Boolean))]
+      : [];
+    const deepLink = behavioralDeepLink(String(authorization.deep_link ?? claim.deep_link), claim.id, {
+      mobile: true,
+      journeyKey: claim.journey_key,
+      failureFamily: authorization.failure_family,
+      sourceType: authorization.source_type,
+    });
+    let accepted = 0;
+    let failed = 0;
+    let dead = 0;
+    let retryable = false;
+    for (const token of tokens) {
+      const sent = await sendFcmPush(token, {
+        title: String(authorization.title ?? claim.title),
+        body: String(authorization.body ?? claim.body),
+        dataOnly: true,
+        data: {
+          kind: "behavioral_lifecycle",
+          deliveryId: claim.id,
+          deepLink,
+        },
+        ttlSeconds: Number(authorization.ttl_seconds ?? claim.ttl_seconds),
+        collapseKey: String(authorization.collapse_key ?? claim.collapse_key),
+        analyticsLabel: `lifecycle_${claim.journey_key}`.replace(/[^a-zA-Z0-9_]/g, "_").slice(0, 50),
+      });
+      if (sent.ok) accepted++;
+      else if (sent.unregistered) {
+        dead++;
+        await db.from("cloud_push_tokens").delete().eq("token", token);
+      } else {
+        failed++;
+        if (sent.status === 0 || sent.status === 408 || sent.status === 429 || sent.status >= 500) {
+          retryable = true;
+        }
+      }
+    }
+    const { data: completion, error: completionError } = await db.rpc(
+      "norva_complete_behavioral_push",
+      {
+        p_delivery_id: claim.id,
+        p_lease_token: claim.lease_token,
+        p_accepted: accepted,
+        p_failed: failed,
+        p_dead: dead,
+        p_retryable: retryable,
+        p_error_family: retryable ? "transport_error" : "provider_rejected",
+      },
+    );
+    if (completionError) {
+      console.error("[norva-lifecycle] behavioral push completion failed", claim.id, completionError.code);
+      continue;
+    }
+    result.devices += tokens.length;
+    result.failed += failed;
+    result.dead_tokens += dead;
+    if (completion === "provider_accepted") result.provider_accepted++;
+    else if (completion === "pending") result.retry_scheduled++;
+    else if (completion === "dead_letter") result.dead_letter++;
+  }
+  return result;
+}
+
+async function runBehavioralEmails(
+  db: SupabaseClient,
+): Promise<Record<string, number>> {
+  const result = { claimed: 0, queued: 0, deduped: 0, retry_scheduled: 0, dead_letter: 0, canceled_or_deferred: 0 };
+  const { data, error } = await db.rpc("norva_claim_behavioral_deliveries", {
+    p_channel: "email", p_batch: 20, p_lease_seconds: 120,
+  });
+  if (error) throw new Error(`behavioral email claim failed:${error.code ?? "db_error"}`);
+  const claims = (Array.isArray(data) ? data : []) as BehavioralClaim[];
+  result.claimed = claims.length;
+  for (const claim of claims) {
+    try {
+      const { data: authorization, error: authorizationError } = await db.rpc(
+        "norva_authorize_behavioral_email_enqueue",
+        { p_delivery_id: claim.id, p_lease_token: claim.lease_token },
+      );
+      if (authorizationError || !authorization || authorization.authorized !== true) {
+        result.canceled_or_deferred++;
+        continue;
+      }
+      const { data: account } = await db.auth.admin.getUserById(claim.user_id);
+      const email = String(authorization.email ?? account.user?.email ?? "").trim().toLowerCase();
+      if (!email) throw new Error("behavioral_recipient_unavailable");
+      const deepLink = behavioralDeepLink(String(authorization.deep_link ?? claim.deep_link), claim.id, {
+        mobile: false,
+        journeyKey: claim.journey_key,
+        failureFamily: authorization.failure_family,
+        sourceType: authorization.source_type,
+      });
+      const rendered = renderBehavioralLifecycle(firstNameOf(account.user ?? null), {
+        subject: String(authorization.title ?? claim.title),
+        body: String(authorization.body ?? claim.body),
+        ctaLabel: String(authorization.cta_label ?? claim.cta_label),
+        ctaUrl: deepLink,
+        flow: `behavioral_${claim.journey_key}`.slice(0, 50),
+      });
+      const { data: queued, error: queueError } = await db.rpc("norva_enqueue_behavioral_email", {
+        p_delivery_id: claim.id,
+        p_lease_token: claim.lease_token,
+        p_recipient_email: email,
+        p_request_from: FROM,
+        p_request_reply_to: REPLY_TO,
+        p_request_subject: rendered.subject,
+        p_request_html: rendered.html,
+        p_request_text: rendered.text,
+        p_request_tags: rendered.tags,
+        p_request_headers: {},
+      });
+      if (!queueError && queued?.queued === false) {
+        result.canceled_or_deferred++;
+        continue;
+      }
+      if (queueError || queued?.queued !== true || !queued?.id) {
+        throw new Error(`behavioral_email_enqueue_failed:${queueError?.code ?? queued?.reason ?? "missing_id"}`);
+      }
+      if (queued.deduped === true) result.deduped++;
+      else result.queued++;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "behavioral_email_enqueue_failed";
+      const { data: failed } = await db.rpc("norva_fail_behavioral_email_enqueue", {
+        p_delivery_id: claim.id,
+        p_lease_token: claim.lease_token,
+        p_error_family: message.includes("recipient") ? "recipient_unavailable" : "transport_error",
+      });
+      if (failed === "dead_letter") result.dead_letter++;
+      else if (failed === "pending") result.retry_scheduled++;
+    }
+  }
+  return result;
+}
+
+async function runBehavioralLifecycle(db: SupabaseClient): Promise<Record<string, unknown>> {
+  const { data: tick, error: tickError } = await db.rpc("norva_behavioral_lifecycle_tick", {
+    p_seed_batch: 500,
+    p_in_app_batch: 100,
+  });
+  if (tickError) throw new Error(`behavioral lifecycle tick failed:${tickError.code ?? "db_error"}`);
+  const [push, email] = await Promise.all([
+    runBehavioralPushes(db),
+    runBehavioralEmails(db),
+  ]);
+  return { configured: true, tick: tick ?? {}, push, email };
+}
+
 async function authenticatedUserId(db: SupabaseClient, req: Request): Promise<string | null> {
   const token = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
   if (!token) return null;
@@ -711,10 +941,18 @@ async function handlePreferences(db: SupabaseClient, req: Request): Promise<Resp
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
+  const url = new URL(req.url);
+  if (req.method === "GET" && url.pathname.endsWith("/health")) {
+    return json({
+      ok: true,
+      service: "norva-lifecycle",
+      version: LIFECYCLE_VERSION,
+      behavioralLifecycleProtocol: BEHAVIORAL_LIFECYCLE_PROTOCOL,
+    });
+  }
   if (!SUPABASE_URL || !SERVICE_KEY) return json({ error: "Service not configured" }, 500);
 
   const db = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: false } });
-  const url = new URL(req.url);
   if (url.pathname.endsWith("/unsubscribe")) return await handleUnsubscribe(db, req, url);
   if (url.pathname.endsWith("/preferences")) return await handlePreferences(db, req);
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
@@ -739,6 +977,9 @@ Deno.serve(async (req) => {
       enabled: { trial: false, dunning: LC_DUNNING, expire: LC_EXPIRE && LC_DUNNING, winback: LC_WINBACK, abandoned: LC_ABANDONED },
       trial_reminder: "db_cron_canonical",
     };
+    // The database is the activation gate. All four behavioral journeys ship
+    // draft/0%, so deploying this worker alone cannot contact anyone.
+    out.behavioral = await runBehavioralLifecycle(db);
     out.welcome = await runWelcome(db);              // always active (transactional)
     out.billing_events = await runBillingEventIntents(db); // always active (transactional)
     if (BILLING_LIVE && LC_DUNNING) out.dunning = await runDunning(db);

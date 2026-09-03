@@ -34,6 +34,38 @@ function textValue(s: unknown, fallback = ""): string {
   return String(s ?? "").replace(/[\u0000-\u001f\u007f]+/g, " ").replace(/\s{2,}/g, " ").trim() || fallback;
 }
 
+const BEHAVIORAL_FAILURE_FAMILIES = new Set([
+  "credentials", "missing_credentials", "endpoint_not_found", "timeout",
+  "provider_busy", "rate_limited", "playlist_format", "invalid_input",
+  "payload_too_large", "provider_unreachable", "infrastructure", "unknown",
+]);
+
+export function behavioralCtaUrl(value: unknown): string | null {
+  try {
+    const url = new URL(String(value ?? ""));
+    if (url.protocol !== "https:" || url.hostname !== "norva.tv" || url.port
+      || url.username || url.password || url.pathname !== "/app.html") return null;
+
+    const deliveryIds = url.searchParams.getAll("lifecycleDelivery");
+    const mobile = url.searchParams.getAll("mobile");
+    const allowedKeys = [...new Set(url.searchParams.keys())];
+    if (deliveryIds.length !== 1
+      || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(deliveryIds[0])
+      || mobile.length > 1 || (mobile.length === 1 && mobile[0] !== "1")
+      || allowedKeys.some((key) => key !== "lifecycleDelivery" && key !== "mobile")) return null;
+
+    const fragment = url.hash.slice(1);
+    if (fragment === "home" || fragment === "home/resume" || fragment === "settings/sources") {
+      return url.toString();
+    }
+    const contextualHelp = /^settings\/sources\/help\/([a-z_]+)\/(m3u|xtream)$/.exec(fragment);
+    if (!contextualHelp || !BEHAVIORAL_FAILURE_FAMILIES.has(contextualHelp[1])) return null;
+    return url.toString();
+  } catch (_) {
+    return null;
+  }
+}
+
 function tags(category: "transactional" | "marketing", flow: string): EmailTag[] {
   return [
     { name: "app", value: "norva" },
@@ -162,6 +194,36 @@ ${transactionalFooter()}`,
         <p style="margin:0"><strong style="color:#e3e8f2">One step to start watching:</strong> open Norva and paste the link from the TV service you already use. Norva will build your catalog automatically. No card is needed to connect.</p>`,
       cta: { label: "Connect my source", url: OPEN_URL },
       note: "You can watch on Web, Android phone, tablet and Android TV with the same account.",
+    }),
+  };
+}
+
+export function renderBehavioralLifecycle(
+  firstName: string | null,
+  opts: {
+    subject: string;
+    body: string;
+    ctaLabel: string;
+    ctaUrl: string;
+    flow: string;
+  },
+): Rendered {
+  const subject = textValue(opts.subject, "Continue setting up Norva").slice(0, 120);
+  const body = textValue(opts.body, "Open Norva to continue setting up your account.").slice(0, 500);
+  const ctaLabel = textValue(opts.ctaLabel, "Open Norva").slice(0, 50);
+  const ctaUrl = behavioralCtaUrl(opts.ctaUrl) ?? OPEN_URL;
+  const flow = /^[a-z0-9_]{1,50}$/.test(opts.flow) ? opts.flow : "behavioral_lifecycle";
+  return {
+    subject,
+    tags: tags("transactional", flow),
+    text: `${greetText(firstName)}\n\n${body}\n\n${ctaLabel}: ${ctaUrl}\n\n${transactionalFooter()}`,
+    html: shell({
+      title: subject,
+      preheader: body,
+      heading: subject,
+      bodyHtml: `<p style="margin:0 0 18px">${greetHtml(firstName)}</p><p style="margin:0">${esc(body)}</p>`,
+      cta: { label: ctaLabel, url: ctaUrl },
+      note: `This service message relates only to using your Norva account. Questions? <a href="${SUPPORT_URL}" style="color:#b8c8f2;text-decoration:underline">${SUPPORT_EMAIL}</a>.`,
     }),
   };
 }

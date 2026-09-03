@@ -65,7 +65,9 @@ test('push is data-only, independently durable and deduplicated by a stable row 
   assert.match(worker, /deepLink: DEEP_LINK/);
   assert.match(worker, /NO_REGISTERED_TOKEN/);
   assert.match(worker, /result\.unregistered[\s\S]*cloud_push_tokens/);
-  assert.match(fcm, /msg\.dataOnly[\s\S]*android: \{ priority: "high" \}/);
+  assert.match(fcm, /const android = \{[\s\S]*priority: "high"/);
+  assert.match(fcm, /const message = msg\.dataOnly[\s\S]*data: \{ title: msg\.title[\s\S]*android,/);
+  assert.match(fcm, /collapse_key: collapseKey/);
   assert.match(fcm, /messageId/);
 });
 

@@ -160,12 +160,14 @@ class HomePage {
         if (this.lastLoadedAt && Date.now() - this.lastLoadedAt < this.dashboardTtlMs) {
             this.updateScrollArrows();
             this._startHeroRotation(); // hide() stops the rotation — resume it on the warm DOM
+            await this.consumeLifecycleResumeIntent();
             if (_homeDone) _homeDone('served from warm in-memory DOM (no fetch)');
             _firstPaintSummary();
             return;
         }
 
         await this.loadDashboardData();
+        await this.consumeLifecycleResumeIntent();
         if (_homeDone) _homeDone('rails fetched + rendered');
         _firstPaintSummary();
     }
@@ -1192,6 +1194,8 @@ class HomePage {
 
     renderSetupConnectionGate(container, summary = {}, steps = []) {
         const manager = this.app?.sourceManager || window.app?.sourceManager;
+        const offerNotifications = Boolean(this.app?.isNativePhoneShell?.())
+            && this.notificationPermissionState() === 'prompt';
         document.getElementById('page-home')?.classList.add('home-setup-connect-active');
         container.innerHTML = `
             <section class="norva-setup-gate norva-setup-connect" data-setup-state="not_configured" data-paired-screen="false">
@@ -1257,6 +1261,10 @@ class HomePage {
                                     <span class="setup-compatibility-arrow" aria-hidden="true">${Icons.chevronRight}</span>
                                 </button>
                                 <div class="setup-player-note"><span aria-hidden="true">${Icons.fingerprint}</span><span>Your service details are encrypted. Norva is a player and never supplies content.</span></div>
+                                ${offerNotifications ? `<div class="home-ecosystem-notifications setup-notification-nudge">
+                                    <span><strong>Let Norva finish in the background</strong><small>Enable notifications to know when a large catalogue is ready or needs attention.</small></span>
+                                    <button type="button" class="btn btn-secondary" data-ecosystem-notifications>Enable notifications</button>
+                                </div>` : ''}
                             </div>
                             <section class="setup-assistance-panel" data-setup-app-login-panel aria-labelledby="home-app-login-title" hidden>
                                 <button class="setup-back-button" type="button" data-setup-assist-back><span aria-hidden="true">${Icons.chevronRight}</span>Back to connection formats</button>
@@ -1296,6 +1304,10 @@ class HomePage {
                 </div>
             </section>
         `;
+        if (!this._sourceFormOpenedReported && this.app?.currentUser?.cloud) {
+            this._sourceFormOpenedReported = true;
+            window.NorvaCloud?.lifecycleEvents?.recordProduct?.('source_form_opened');
+        }
         this.bindSetupConnectionForm(container);
     }
 
@@ -2604,6 +2616,32 @@ class HomePage {
         if (position < 12) return 0;
         if (total > 0 && position >= total * 0.95) return 0;
         return position;
+    }
+
+    async consumeLifecycleResumeIntent() {
+        // A lifecycle reminder never carries a provider/content identifier. Resolve
+        // the latest owner-scoped resumable row from the normal history response only
+        // after the authenticated initial route has landed and its rails are ready.
+        if (this.app?._initialNavigationReady !== true
+            || this.app?.currentPage !== 'home'
+            || this.app?._lifecycleHomeIntent !== 'resume') return false;
+
+        this.app._lifecycleHomeIntent = '';
+        const item = (this.historyItems || []).find((candidate) => {
+            if (!candidate || candidate._upNext) return false;
+            const data = candidate.data || {};
+            return this.getResumeOffset(
+                candidate.progress || candidate.progress_seconds || data.progress || 0,
+                candidate.duration || candidate.duration_seconds || data.duration || 0
+            ) > 0;
+        });
+
+        if (!item) {
+            this.app?.showToast?.('Nothing to resume right now. Your catalogue is still here.');
+            return false;
+        }
+        this.openRailItem(item, true);
+        return true;
     }
 
     renderHistory(items) {

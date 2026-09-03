@@ -21,6 +21,10 @@ const emailWorker = fs.readFileSync(
   path.join(root, 'supabase/functions/norva-branded-email-worker/index.ts'),
   'utf8',
 );
+const resendTransport = fs.readFileSync(
+  path.join(root, 'supabase/functions/_shared/resend-transport.mjs'),
+  'utf8',
+);
 const templates = fs.readFileSync(
   path.join(root, 'supabase/functions/_shared/lifecycle-email.ts'),
   'utf8',
@@ -35,8 +39,9 @@ test('lifecycle transport is bounded, provider-acknowledged and idempotent for t
   assert.match(lifecycle, /dedupeKey: `lifecycle:welcome:\$\{row\.user_id\}`/);
   assert.match(lifecycle, /dedupeKey: `lifecycle:dunning:\$\{row\.user_id\}:\$\{stage\}`/);
   assert.doesNotMatch(lifecycle, /api\.resend\.com\/emails/);
-  assert.match(emailWorker, /signal: AbortSignal\.timeout\(8_000\)/);
-  assert.match(emailWorker, /accepted: res\.ok && Boolean\(emailId\)/);
+  assert.match(emailWorker, /sendResendDelivery\(claim/);
+  assert.match(resendTransport, /AbortSignal\.timeout\(timeout\)/);
+  assert.match(resendTransport, /accepted: res\.ok && Boolean\(emailId\)/);
   assert.match(deliveryMigration, /set state='sent'/);
 });
 

@@ -46,7 +46,10 @@ function settingsTabFromHash(hashValue) {
     const separator = route.indexOf('/');
     if (separator < 0 || route.slice(0, separator) !== 'settings') return '';
     try {
-        return normalizeSettingsTab(decodeURIComponent(route.slice(separator + 1)));
+        // Lifecycle help may append a bounded context suffix after the tab
+        // (`settings/sources/help/<family>/<type>`). Only the first segment is a
+        // Settings destination; the App router validates the remaining segments.
+        return normalizeSettingsTab(decodeURIComponent(route.slice(separator + 1).split('/')[0]));
     } catch (_) {
         return '';
     }
@@ -1856,6 +1859,11 @@ class SettingsPage {
             this.app.sourceManager.loadContentSources();
         }
 
+        if (tabName === 'sources' && !this._sourceFormOpenedReported && this.app?.currentUser?.cloud) {
+            this._sourceFormOpenedReported = true;
+            window.NorvaCloud?.lifecycleEvents?.recordProduct?.('source_form_opened');
+        }
+
         if (tabName === 'account') {
             this.refreshAccountSettings();
         }
@@ -1882,7 +1890,13 @@ class SettingsPage {
     async show() {
         const requestedSubRoute = normalizeSettingsTab(this.app?._settingsSubRoute);
         const requestedTab = requestedSubRoute || readPersistedSettingsTab() || 'account';
-        if (this.app) this.app._settingsSubRoute = '';
+        const lifecycleImportContext = requestedTab === 'sources'
+            ? (this.app?._lifecycleImportContext || null)
+            : null;
+        if (this.app) {
+            this.app._settingsSubRoute = '';
+            this.app._lifecycleImportContext = null;
+        }
         // TV Settings uses a fixed header/tab shell with only the active panel
         // scrolling. Reset synchronously before any network request so entry can
         // never reveal a clipped title or a stale lower section.
@@ -1915,10 +1929,15 @@ class SettingsPage {
         // Apply the requested/persisted section only after role/device visibility
         // is known. A stale or unavailable section safely falls back to Account
         // and rewrites both the hash and session value to that valid destination.
-        this.switchTab(requestedTab);
+        const activeTab = this.switchTab(requestedTab);
 
         // Load sources when page is shown
         await this.app.sourceManager.loadSources();
+        if (activeTab === 'sources' && lifecycleImportContext) {
+            this.app.sourceManager.presentLifecycleImportHelp?.(lifecycleImportContext);
+        } else {
+            this.app.sourceManager.clearLifecycleImportHelp?.();
+        }
         await this.refreshAccountSettings();
 
         // Refresh ALL player settings from server
@@ -2025,6 +2044,14 @@ class SettingsPage {
             display.textContent = 'Unknown';
             display.title = 'Could not fetch sync status';
         }
+    }
+
+    async openLifecycleImportHelp(context) {
+        if (this.app) this.app._lifecycleImportContext = null;
+        const activeTab = this.switchTab('sources');
+        if (activeTab !== 'sources') return false;
+        await this.app.sourceManager.loadSources();
+        return this.app.sourceManager.presentLifecycleImportHelp(context);
     }
 
     hide() {

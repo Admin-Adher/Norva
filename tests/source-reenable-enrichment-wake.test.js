@@ -364,7 +364,7 @@ test('file repair candidates come only from the tenant-visible active generation
 });
 
 test('production health and deploy verification expose the source resume protocols', () => {
-  assert.match(cloud, /version:\s*27/);
+  assert.match(cloud, /version:\s*28/);
   assert.match(cloud, /sourceDesiredStateProtocol:\s*1/);
   assert.match(cloud, /legacySourceToggleBridge:\s*1/);
   assert.match(cloud, /m3uSyncLeaseProtocol:\s*2/);
@@ -372,7 +372,7 @@ test('production health and deploy verification expose the source resume protoco
   assert.match(sourceSync, /sourceReenableResumeProtocol:\s*1/);
   assert.match(sourceSync, /m3uSyncLeaseProtocol:\s*2/);
   assert.match(sourceSync, /fileAudioRepairCohortProtocol:\s*2/);
-  assert.match(deployEdge, /EXPECTED_CLOUD_VERSION=27/);
+  assert.match(deployEdge, /EXPECTED_CLOUD_VERSION=28/);
   assert.match(deployEdge, /EXPECTED_SOURCE_SYNC_VERSION=19/);
   assert.match(deployEdge, /sourceDesiredStateProtocol/);
   assert.match(deployEdge, /legacySourceToggleBridge/);

@@ -134,5 +134,5 @@ test('revised SVG URLs bypass existing image and service-worker caches', () => {
   assert.match(html, /\/js\/icons\.js\?v=3/);
   assert.match(html, /\/js\/navigation\/NavigationModel\.js\?v=5279356025/);
   assert.match(html, /\/js\/navigation\/NavigationAdapters\.js\?v=1/);
-  assert.match(html, /\/js\/app\.js\?v=fa59ee02c6/);
+  assert.match(html, /\/js\/app\.js\?v=8a0b75514d/);
 });

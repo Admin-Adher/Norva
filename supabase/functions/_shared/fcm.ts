@@ -8,6 +8,9 @@
 //   await sendFcmPush(token, { title, body, data }) -> { ok, status, error?, unregistered? }
 //   `unregistered: true` means the token is dead (UNREGISTERED / invalid) and the caller should delete it.
 
+import { isInvalidFcmRegistrationResponse } from "./fcm-error.mjs";
+export { isInvalidFcmRegistrationResponse };
+
 interface ServiceAccount { client_email: string; private_key: string; project_id: string }
 
 let saCache: ServiceAccount | null = null;
@@ -73,23 +76,43 @@ export async function sendFcmPush(
     body: string;
     data?: Record<string, string>;
     dataOnly?: boolean;
+    ttlSeconds?: number;
+    collapseKey?: string;
+    analyticsLabel?: string;
   },
 ): Promise<{ ok: boolean; status: number; messageId?: string; error?: string; unregistered?: boolean }> {
   const sa = serviceAccount();
   if (!sa) return { ok: false, status: 0, error: "FCM not configured" };
   const at = await accessToken(sa);
   if (!at) return { ok: false, status: 0, error: "token exchange failed" };
+  const ttlSeconds = Number.isFinite(msg.ttlSeconds)
+    ? Math.max(300, Math.min(1_209_600, Math.trunc(msg.ttlSeconds as number)))
+    : null;
+  const collapseKey = typeof msg.collapseKey === "string" && /^[a-z0-9_-]{2,64}$/.test(msg.collapseKey)
+    ? msg.collapseKey
+    : null;
+  const analyticsLabel = typeof msg.analyticsLabel === "string" && /^[a-zA-Z0-9_]{1,50}$/.test(msg.analyticsLabel)
+    ? msg.analyticsLabel
+    : null;
+  const android = {
+    priority: "high",
+    ...(ttlSeconds ? { ttl: `${ttlSeconds}s` } : {}),
+    ...(collapseKey ? { collapse_key: collapseKey } : {}),
+  };
+  const fcmOptions = analyticsLabel ? { analytics_label: analyticsLabel } : undefined;
   const message = msg.dataOnly
     ? {
       token,
       data: { title: msg.title, body: msg.body, ...(msg.data ?? {}) },
-      android: { priority: "high" },
+      android,
+      ...(fcmOptions ? { fcm_options: fcmOptions } : {}),
     }
     : {
       token,
       notification: { title: msg.title, body: msg.body },
       data: msg.data ?? {},
-      android: { priority: "high", notification: { default_sound: true } },
+      android: { ...android, notification: { default_sound: true } },
+      ...(fcmOptions ? { fcm_options: fcmOptions } : {}),
     };
   const res = await fetch(`https://fcm.googleapis.com/v1/projects/${sa.project_id}/messages:send`, {
     method: "POST",
@@ -102,7 +125,6 @@ export async function sendFcmPush(
     return { ok: true, status: res.status, ...(messageId ? { messageId } : {}) };
   }
   const text = await res.text().catch(() => "");
-  // A dead token surfaces as 404 UNREGISTERED or 400 with INVALID_ARGUMENT on the token.
-  const unregistered = res.status === 404 || /UNREGISTERED|NOT_FOUND/i.test(text);
+  const unregistered = isInvalidFcmRegistrationResponse(res.status, text);
   return { ok: false, status: res.status, error: text.slice(0, 300), unregistered };
 }

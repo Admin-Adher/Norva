@@ -61,11 +61,11 @@ test('the phone Home action opens the sheet without changing route', () => {
   const modalIndex = appHtml.indexOf('/js/components/NorvaModal.js?v=2');
   const pairIndex = appHtml.indexOf('/js/components/PairTvSheet.js?v=a8db32010d');
   const devicesIndex = appHtml.indexOf('/js/components/DevicesScreensModule.js?v=cb8a9f10e4');
-  const homeIndex = appHtml.indexOf('/js/pages/HomePage.js?v=eb1d2d0c45');
-  const appIndex = appHtml.indexOf('/js/app.js?v=fa59ee02c6');
+  const homeIndex = appHtml.indexOf('/js/pages/HomePage.js?v=6fdf890230');
+  const appIndex = appHtml.indexOf('/js/app.js?v=8a0b75514d');
   assert.ok(modalIndex > 0 && modalIndex < pairIndex && pairIndex < devicesIndex && devicesIndex < homeIndex && homeIndex < appIndex);
   assert.match(appHtml, /\/css\/main\.css\?v=71854078d1/);
-  assert.match(appHtml, /\/js\/pages\/Settings\.js\?v=5241073432/);
+  assert.match(appHtml, /\/js\/pages\/Settings\.js\?v=2e8503448a/);
 });
 
 test('pairing code normalization matches the six-character TV alphabet exactly', () => {

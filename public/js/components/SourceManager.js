@@ -19,6 +19,7 @@ class SourceManager {
         this.warningModalFlight = null; // one shared confirmation per open modal
         this.providerAccessOperations = new Map(); // stable retry identities per source/action
         this.productSignals = new Set(); // local dedupe only; source/candidate ids never leave the device
+        this.sources = [];
 
         this.init();
     }
@@ -185,12 +186,13 @@ class SourceManager {
                 API.sources.getAll(),
                 API.sources.getStatus().catch(() => [])
             ]);
+            this.sources = Array.isArray(sources) ? sources : [];
             this.sourceStatuses = statuses || [];
 
-            this.renderSourceList(this.xtreamList, sources.filter(s => s.type === 'xtream'), 'xtream');
-            this.renderSourceList(this.m3uList, sources.filter(s => s.type === 'm3u'), 'm3u');
-            this.renderSourceList(this.epgList, sources.filter(s => s.type === 'epg'), 'epg');
-            const actionRequired = sources.find((source) => {
+            this.renderSourceList(this.xtreamList, this.sources.filter(s => s.type === 'xtream'), 'xtream');
+            this.renderSourceList(this.m3uList, this.sources.filter(s => s.type === 'm3u'), 'm3u');
+            this.renderSourceList(this.epgList, this.sources.filter(s => s.type === 'epg'), 'epg');
+            const actionRequired = this.sources.find((source) => {
                 if (source.type !== 'xtream' || !this.isSourceManagementEnabled(source)) return false;
                 const health = window.NorvaSourceHealth?.classifySource(this.sourceWithStatus(source), this.sourceStatuses || []);
                 const access = this.providerAccessSummary(source);
@@ -204,9 +206,143 @@ class SourceManager {
                 });
             }
             window.app?.pages?.settings?.refreshSourceHealthCard?.();
+            return this.sources;
         } catch (err) {
             console.error('Error loading sources:', err);
+            return this.sources;
         }
+    }
+
+    clearLifecycleImportHelp() {
+        document.getElementById('lifecycle-import-help')?.remove();
+    }
+
+    presentLifecycleImportHelp(context = {}) {
+        const failureFamilies = new Set([
+            'credentials', 'missing_credentials', 'endpoint_not_found', 'timeout',
+            'provider_busy', 'rate_limited', 'playlist_format', 'invalid_input',
+            'payload_too_large', 'provider_unreachable', 'infrastructure', 'unknown'
+        ]);
+        const failureFamily = String(context?.failureFamily || '').trim().toLowerCase();
+        const sourceType = String(context?.sourceType || '').trim().toLowerCase();
+        this.clearLifecycleImportHelp();
+        if (!failureFamilies.has(failureFamily) || !['m3u', 'xtream'].includes(sourceType)) return false;
+
+        const management = document.querySelector('#tab-sources .settings-source-management');
+        if (!management) return false;
+        const matching = (this.sources || []).filter(source => String(source?.type || '').toLowerCase() === sourceType);
+        const classify = (source) => {
+            const sourceView = this.sourceWithStatus(source);
+            const health = window.NorvaSourceHealth?.classifySource(sourceView, this.sourceStatuses || []);
+            if (health) return health;
+            const state = String(sourceView.sync_status || '').toLowerCase();
+            return {
+                state,
+                needsAttention: /fail|error|invalid|timeout|unreachable|expired|auth/.test(state),
+                refreshing: /sync|import|queue|process/.test(state)
+            };
+        };
+        const classified = matching.map(source => ({ source, health: classify(source) }));
+        const actionable = classified.find(item => item.health?.needsAttention || item.health?.state === 'disabled');
+        const syncing = classified.find(item => item.health?.state === 'syncing' || item.health?.refreshing === true);
+        const healthy = classified.find(item => item.health?.state === 'ready') || classified[0] || null;
+
+        const guidance = {
+            credentials: sourceType === 'xtream'
+                ? 'Norva could not verify that login. Check the server address, username and password supplied by your provider.'
+                : 'That playlist link may have expired. Ask your provider for a current M3U link, then replace it here.',
+            missing_credentials: sourceType === 'xtream'
+                ? 'The provider login is incomplete. You need the server address, username and password.'
+                : 'A complete M3U or M3U8 link is required before Norva can import the catalogue.',
+            endpoint_not_found: 'The saved address no longer exposes the expected catalogue endpoint. Confirm the current details with your provider.',
+            timeout: 'The provider took too long to answer. Your saved details remain private; retry when the service is responsive.',
+            provider_busy: 'The provider was temporarily busy. Retry the import without changing valid access details.',
+            rate_limited: 'The provider temporarily limited requests. Wait a little, then retry this import once.',
+            playlist_format: 'The response was not a readable M3U catalogue. Confirm that the link opens a playlist rather than a provider web page.',
+            invalid_input: sourceType === 'xtream'
+                ? 'Use the provider server address and the separate username and password fields — not an app name or web page.'
+                : 'Paste the complete M3U or M3U8 playlist link supplied by your provider.',
+            payload_too_large: 'Large catalogues are supported. Retry the import: Norva validates the beginning, then continues the bounded import in the background.',
+            provider_unreachable: 'The provider address could not be reached. Confirm that the service is online and that the address is current.',
+            infrastructure: 'Norva could not complete the import because of a temporary service problem. Your saved catalogue and access details remain protected.',
+            unknown: 'Norva could not finish this import. Review the saved details and retry from the matching service card.'
+        };
+
+        let title = 'Finish connecting your TV service';
+        let message = guidance[failureFamily];
+        let target = document.getElementById(sourceType === 'xtream' ? 'add-xtream' : 'add-m3u');
+        let actionLabel = sourceType === 'xtream' ? 'Add provider login' : 'Add playlist link';
+        const scrollBehavior = window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches
+            ? 'auto'
+            : 'smooth';
+
+        const cardFor = (source) => [...document.querySelectorAll('#tab-sources .source-item')]
+            .find(element => element.dataset.id === String(source?.id || ''));
+        if (actionable) {
+            const sourceCard = cardFor(actionable.source);
+            target = sourceCard?.querySelector('.source-primary-action') || sourceCard;
+            title = actionable.health?.state === 'disabled' ? 'This TV service is paused' : 'Let’s fix this import';
+            message = actionable.health?.state === 'disabled'
+                ? 'Enable this service before retrying its catalogue import.'
+                : guidance[failureFamily];
+            actionLabel = String(target?.textContent || 'Review service').trim();
+        } else if (syncing) {
+            const sourceCard = cardFor(syncing.source);
+            target = sourceCard?.querySelector('[data-action="progress"]') || sourceCard;
+            title = 'Your catalogue import is still running';
+            message = 'Norva is processing the catalogue in the background. You can leave this screen and return later.';
+            actionLabel = target?.matches?.('button') ? 'View import progress' : '';
+        } else if (healthy) {
+            target = cardFor(healthy.source);
+            title = 'This reminder is already resolved';
+            message = 'A working TV service is connected now, so no repair is needed. You can keep using your catalogue.';
+            actionLabel = '';
+        }
+
+        const panel = document.createElement('div');
+        panel.id = 'lifecycle-import-help';
+        panel.className = 'tc-intro';
+        panel.tabIndex = -1;
+        panel.setAttribute('role', 'status');
+        panel.setAttribute('aria-live', 'polite');
+        panel.setAttribute('aria-atomic', 'true');
+        const icon = document.createElement('img');
+        icon.className = 'tc-intro-icon';
+        icon.src = '/img/icons/norva-live-tv.svg?v=sharp-core-1';
+        icon.alt = '';
+        icon.setAttribute('aria-hidden', 'true');
+        const copy = document.createElement('div');
+        const heading = document.createElement('p');
+        heading.className = 'tc-intro-title';
+        heading.textContent = title;
+        const detail = document.createElement('p');
+        detail.className = 'tc-intro-text';
+        detail.textContent = message;
+        copy.append(heading, detail);
+        if (actionLabel && target) {
+            const actions = document.createElement('div');
+            actions.className = 'source-actions';
+            const action = document.createElement('button');
+            action.type = 'button';
+            action.className = 'btn btn-primary';
+            action.textContent = actionLabel;
+            action.addEventListener('click', () => {
+                target.scrollIntoView?.({ block: 'center', behavior: scrollBehavior });
+                if (target.matches?.('button')) target.click();
+                else target.focus?.({ preventScroll: true });
+            });
+            actions.appendChild(action);
+            copy.appendChild(actions);
+        }
+        panel.append(icon, copy);
+        const defaultIntro = management.querySelector('.tc-intro');
+        if (defaultIntro) defaultIntro.insertAdjacentElement('afterend', panel);
+        else management.prepend(panel);
+        panel.scrollIntoView?.({ block: 'start', behavior: scrollBehavior });
+        requestAnimationFrame(() => {
+            try { panel.focus({ preventScroll: true }); } catch (_) { panel.focus?.(); }
+        });
+        return true;
     }
 
     /**

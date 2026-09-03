@@ -428,7 +428,25 @@ const CONTENT_EVENT_KINDS = new Set([
   "subtitle_ready",
   "subtitle_empty",
   "subtitle_failed",
+  "behavioral_lifecycle",
 ]);
+const BEHAVIORAL_LIFECYCLE_JOURNEYS = new Set([
+  "no_source",
+  "import_unresolved",
+  "catalog_ready_no_first_play",
+  "continue_watching",
+]);
+const BEHAVIORAL_LIFECYCLE_DEEP_LINKS = new Set([
+  "/app.html#settings/sources",
+  "/app.html#home",
+  "/app.html#home/resume",
+]);
+const BEHAVIORAL_LIFECYCLE_FAILURE_FAMILIES = new Set([
+  "credentials", "missing_credentials", "endpoint_not_found", "timeout",
+  "provider_busy", "rate_limited", "playlist_format", "invalid_input",
+  "payload_too_large", "provider_unreachable", "infrastructure", "unknown",
+]);
+const BEHAVIORAL_LIFECYCLE_SOURCE_TYPES = new Set(["m3u", "xtream"]);
 const CONTENT_ITEM_TYPES = new Set(["movie", "series", "episode", "live"]);
 const SERIES_INFO_FIELDS = Object.freeze([
   "name",
@@ -748,6 +766,38 @@ export function sanitizeContentEvent(value) {
     if (Object.keys(byType).length) payload.byType = byType;
     const total = publicNonNegativeInteger(payloadSource.total, 3_000_000);
     if (total !== null) payload.total = total;
+  } else if (kind === "behavioral_lifecycle") {
+    const deliveryId = typeof payloadSource.delivery_id === "string" &&
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(payloadSource.delivery_id)
+      ? payloadSource.delivery_id
+      : null;
+    const journeyKey = typeof payloadSource.journey_key === "string" &&
+        BEHAVIORAL_LIFECYCLE_JOURNEYS.has(payloadSource.journey_key)
+      ? payloadSource.journey_key
+      : null;
+    const deepLink = typeof payloadSource.deep_link === "string" &&
+        BEHAVIORAL_LIFECYCLE_DEEP_LINKS.has(payloadSource.deep_link)
+      ? payloadSource.deep_link
+      : null;
+    if (!deliveryId || !journeyKey || !deepLink) return null;
+    payload.deliveryId = deliveryId;
+    payload.journeyKey = journeyKey;
+    payload.title = publicText(payloadSource.title, 80) ?? "Norva";
+    payload.body = publicText(payloadSource.body, 300) ?? "Open Norva to continue.";
+    payload.ctaLabel = publicText(payloadSource.cta_label, 50) ?? "Open Norva";
+    payload.deepLink = deepLink;
+    if (journeyKey === "import_unresolved") {
+      const failureFamily = typeof payloadSource.failure_family === "string"
+        && BEHAVIORAL_LIFECYCLE_FAILURE_FAMILIES.has(payloadSource.failure_family)
+        ? payloadSource.failure_family
+        : null;
+      const sourceType = typeof payloadSource.source_type === "string"
+        && BEHAVIORAL_LIFECYCLE_SOURCE_TYPES.has(payloadSource.source_type)
+        ? payloadSource.source_type
+        : null;
+      if (failureFamily) payload.failureFamily = failureFamily;
+      if (sourceType) payload.sourceType = sourceType;
+    }
   } else {
     const itemType = typeof payloadSource.itemType === "string"
       ? payloadSource.itemType.trim().toLowerCase()

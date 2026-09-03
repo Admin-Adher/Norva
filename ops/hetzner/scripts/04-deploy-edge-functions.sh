@@ -17,9 +17,10 @@
 #   docker compose --env-file .env -f docker-compose.supabase.yml stop functions functions2
 #   # apply the reviewed migrations while both runtimes are stopped
 #   NORVA_EDGE_QUIESCED_DEPLOY=1 bash ops/hetzner/scripts/04-deploy-edge-functions.sh
-# Quiesced mode refuses to start unless every runtime is stopped and the M3U
-# single-flight RPC is already present. This closes the old-code/new-schema
-# window instead of relying on health markers after the fact.
+# Quiesced mode refuses to start unless every runtime is stopped, the M3U and
+# behavioral-lifecycle contracts are present, and the lifecycle emergency stop
+# is engaged. This closes the old-code/new-schema window instead of relying on
+# health markers after the fact.
 #
 # GitHub CI validates the functions but does not deploy them to the Hetzner
 # runtime. Until an explicit SSH deploy workflow exists, production deployment
@@ -64,8 +65,10 @@ EXPECTED_LANGUAGE_VALIDATION_VIEWER_PREEMPTION_PROTOCOL=1
 EXPECTED_LANGUAGE_VALIDATION_MAX_CONSECUTIVE_PROVIDER_NO_PROGRESS=4
 EXPECTED_AUTOMATIC_STRICT_UND_AUDIO_PROTOCOL=1
 EXPECTED_AUTOMATIC_STRICT_UND_AUDIO_CONSENSUS=4/6
-EXPECTED_CLOUD_VERSION=27
+EXPECTED_CLOUD_VERSION=28
 EXPECTED_CLOUD_PROTOCOL=1
+EXPECTED_BEHAVIORAL_LIFECYCLE_PROTOCOL=1
+EXPECTED_LIFECYCLE_VERSION=1
 EXPECTED_SOURCE_DESIRED_STATE_PROTOCOL=1
 EXPECTED_LEGACY_SOURCE_TOGGLE_BRIDGE=1
 EXPECTED_CATALOG_VERSION=7
@@ -200,7 +203,74 @@ if command -v docker >/dev/null 2>&1 && [[ -f "$COMPOSE" ]]; then
       echo "ERROR: quiesced deploy requires the reviewed fail-closed M3U quarantine settlement body before edge-runtime restart" >&2
       exit 1
     }
-    echo ">> Quiesced protocol deployment verified: all Edge replicas stopped; exact M3U/repair RPC schema and quarantine settlement body present"
+
+    behavioral_lifecycle_contract_ready="$({
+      docker compose --env-file "$ENV_FILE" -f "$COMPOSE" exec -T db \
+        psql -X -A -t -v ON_ERROR_STOP=1 -U supabase_admin -d postgres \
+        -c "with required_relations(name) as (
+          values
+            ('public.behavioral_lifecycle_runtime'),
+            ('public.behavioral_lifecycle_journeys'),
+            ('public.behavioral_lifecycle_steps'),
+            ('public.behavioral_lifecycle_user_state'),
+            ('public.behavioral_lifecycle_outbox'),
+            ('public.behavioral_lifecycle_experiment_versions'),
+            ('public.behavioral_lifecycle_delivery_events'),
+            ('public.behavioral_lifecycle_funnel_events'),
+            ('public.behavioral_lifecycle_import_readiness'),
+            ('public.behavioral_lifecycle_admin_audit')
+        ), required_functions(signature) as (
+          values
+            ('public.norva_capture_behavioral_source_attempt(uuid,text,text,text,text,text,uuid)'),
+            ('public.norva_behavioral_lifecycle_tick(integer,integer)'),
+            ('public.norva_claim_behavioral_deliveries(text,integer,integer)'),
+            ('public.norva_authorize_behavioral_push(uuid,uuid)'),
+            ('public.norva_complete_behavioral_push(uuid,uuid,integer,integer,integer,boolean,text)'),
+            ('public.norva_enqueue_behavioral_email(uuid,uuid,text,text,text,text,text,text,jsonb,jsonb)'),
+            ('public.norva_fail_behavioral_email_enqueue(uuid,uuid,text)'),
+            ('public.norva_authorize_behavioral_email_enqueue(uuid,uuid)'),
+            ('public.norva_record_behavioral_delivery_event(uuid,uuid,text)'),
+            ('public.admin_behavioral_lifecycle_overview(integer)'),
+            ('public.admin_record_behavioral_import_readiness(text,text,text,text,boolean,boolean,boolean,boolean,boolean,text)'),
+            ('public.admin_update_behavioral_lifecycle_runtime(boolean,text,text,text)'),
+            ('public.admin_update_behavioral_lifecycle_journey(text,text,integer,integer,text[],text,integer,integer,integer,integer,integer,integer,text,text,text,integer,numeric)'),
+            ('public.admin_update_behavioral_lifecycle_step(text,text,text,integer,text,text,text,text,integer,boolean,boolean,boolean,text)'),
+            ('public.admin_retry_behavioral_lifecycle_delivery(uuid,text,text)')
+        )
+        select
+          (select bool_and(to_regclass(name) is not null) from required_relations)
+          and
+          (select bool_and(to_regprocedure(signature) is not null) from required_functions);"
+    } | tr -d '[:space:]')"
+    [[ "$behavioral_lifecycle_contract_ready" == "t" ]] || {
+      echo "ERROR: quiesced deploy requires behavioral lifecycle schema/RPCs and emergency stop before Edge restart" >&2
+      exit 1
+    }
+
+    behavioral_lifecycle_stopped="$({
+      docker compose --env-file "$ENV_FILE" -f "$COMPOSE" exec -T db \
+        psql -X -A -t -v ON_ERROR_STOP=1 -U supabase_admin -d postgres \
+        -c "select count(*) = 1 and bool_and(emergency_stop)
+            from public.behavioral_lifecycle_runtime
+            where singleton is true;"
+    } | tr -d '[:space:]')"
+    [[ "$behavioral_lifecycle_stopped" == "t" ]] || {
+      echo "ERROR: quiesced deploy requires behavioral lifecycle schema/RPCs and emergency stop before Edge restart" >&2
+      exit 1
+    }
+
+    behavioral_lifecycle_db_container="$(
+      docker compose --env-file "$ENV_FILE" -f "$COMPOSE" ps -q db
+    )"
+    [[ -n "$behavioral_lifecycle_db_container" ]] || {
+      echo "ERROR: quiesced deploy cannot resolve the exact database container for the lifecycle readiness gate" >&2
+      exit 1
+    }
+    DB_CONTAINER="$behavioral_lifecycle_db_container" \
+      DB_USER=supabase_admin \
+      DB_NAME=postgres \
+      bash "$REPO/ops/hetzner/scripts/verify-behavioral-lifecycle-pre-activation.sh"
+    echo ">> Quiesced protocol deployment verified: all Edge replicas stopped; exact M3U/repair and lifecycle contracts present; lifecycle emergency stop engaged"
   fi
 
   file_digest_in_service() {
@@ -240,6 +310,9 @@ if command -v docker >/dev/null 2>&1 && [[ -f "$COMPOSE" ]]; then
     local playback_path="/home/deno/functions/norva-playback/index.ts"
     local main_path="/home/deno/functions/main/index.ts"
     local cloud_path="/home/deno/functions/norva-cloud/index.ts"
+    local lifecycle_path="/home/deno/functions/norva-lifecycle/index.ts"
+    local admin_path="/home/deno/functions/norva-admin/index.ts"
+    local branded_email_worker_path="/home/deno/functions/norva-branded-email-worker/index.ts"
     local catalog_path="/home/deno/functions/norva-catalog/index.ts"
     local provider_access_path="/home/deno/functions/norva-provider-access/index.ts"
     local account_delete_path="/home/deno/functions/norva-account-delete/index.ts"
@@ -248,9 +321,17 @@ if command -v docker >/dev/null 2>&1 && [[ -f "$COMPOSE" ]]; then
     local database_conflict_path="/home/deno/functions/_shared/database-conflict.ts"
     local live_catalog_path="/home/deno/functions/_shared/live-catalog.ts"
     local live_materialization_path="/home/deno/functions/_shared/live-materialization.ts"
+    local cloud_public_view_path="/home/deno/functions/_shared/cloud-public-view.mjs"
+    local fcm_path="/home/deno/functions/_shared/fcm.ts"
+    local lifecycle_email_path="/home/deno/functions/_shared/lifecycle-email.ts"
+    local fcm_error_path="/home/deno/functions/_shared/fcm-error.mjs"
+    local resend_transport_path="/home/deno/functions/_shared/resend-transport.mjs"
     local expected_playback_digest
     local expected_main_digest
     local expected_cloud_digest
+    local expected_lifecycle_digest
+    local expected_admin_digest
+    local expected_branded_email_worker_digest
     local expected_catalog_digest
     local expected_provider_access_digest
     local expected_account_delete_digest
@@ -259,9 +340,17 @@ if command -v docker >/dev/null 2>&1 && [[ -f "$COMPOSE" ]]; then
     local expected_database_conflict_digest
     local expected_live_catalog_digest
     local expected_live_materialization_digest
+    local expected_cloud_public_view_digest
+    local expected_fcm_digest
+    local expected_lifecycle_email_digest
+    local expected_fcm_error_digest
+    local expected_resend_transport_digest
     local observed_playback_digest
     local observed_main_digest
     local observed_cloud_digest
+    local observed_lifecycle_digest
+    local observed_admin_digest
+    local observed_branded_email_worker_digest
     local observed_catalog_digest
     local observed_provider_access_digest
     local observed_account_delete_digest
@@ -270,8 +359,14 @@ if command -v docker >/dev/null 2>&1 && [[ -f "$COMPOSE" ]]; then
     local observed_database_conflict_digest
     local observed_live_catalog_digest
     local observed_live_materialization_digest
+    local observed_cloud_public_view_digest
+    local observed_fcm_digest
+    local observed_lifecycle_email_digest
+    local observed_fcm_error_digest
+    local observed_resend_transport_digest
     local playback_health
     local cloud_health
+    local lifecycle_health
     local catalog_health
     local source_sync_health
     local auth_challenge_health
@@ -279,6 +374,9 @@ if command -v docker >/dev/null 2>&1 && [[ -f "$COMPOSE" ]]; then
     expected_playback_digest="$(sha256sum "$FUNCS_DIR/norva-playback/index.ts" | awk '{print $1}')"
     expected_main_digest="$(sha256sum "$FUNCS_DIR/main/index.ts" | awk '{print $1}')"
     expected_cloud_digest="$(sha256sum "$FUNCS_DIR/norva-cloud/index.ts" | awk '{print $1}')"
+    expected_lifecycle_digest="$(sha256sum "$FUNCS_DIR/norva-lifecycle/index.ts" | awk '{print $1}')"
+    expected_admin_digest="$(sha256sum "$FUNCS_DIR/norva-admin/index.ts" | awk '{print $1}')"
+    expected_branded_email_worker_digest="$(sha256sum "$FUNCS_DIR/norva-branded-email-worker/index.ts" | awk '{print $1}')"
     expected_catalog_digest="$(sha256sum "$FUNCS_DIR/norva-catalog/index.ts" | awk '{print $1}')"
     expected_provider_access_digest="$(sha256sum "$FUNCS_DIR/norva-provider-access/index.ts" | awk '{print $1}')"
     expected_account_delete_digest="$(sha256sum "$FUNCS_DIR/norva-account-delete/index.ts" | awk '{print $1}')"
@@ -287,9 +385,17 @@ if command -v docker >/dev/null 2>&1 && [[ -f "$COMPOSE" ]]; then
     expected_database_conflict_digest="$(sha256sum "$FUNCS_DIR/_shared/database-conflict.ts" | awk '{print $1}')"
     expected_live_catalog_digest="$(sha256sum "$FUNCS_DIR/_shared/live-catalog.ts" | awk '{print $1}')"
     expected_live_materialization_digest="$(sha256sum "$FUNCS_DIR/_shared/live-materialization.ts" | awk '{print $1}')"
+    expected_cloud_public_view_digest="$(sha256sum "$FUNCS_DIR/_shared/cloud-public-view.mjs" | awk '{print $1}')"
+    expected_fcm_digest="$(sha256sum "$FUNCS_DIR/_shared/fcm.ts" | awk '{print $1}')"
+    expected_lifecycle_email_digest="$(sha256sum "$FUNCS_DIR/_shared/lifecycle-email.ts" | awk '{print $1}')"
+    expected_fcm_error_digest="$(sha256sum "$FUNCS_DIR/_shared/fcm-error.mjs" | awk '{print $1}')"
+    expected_resend_transport_digest="$(sha256sum "$FUNCS_DIR/_shared/resend-transport.mjs" | awk '{print $1}')"
     observed_playback_digest="$(file_digest_in_service "$service" "$playback_path")"
     observed_main_digest="$(file_digest_in_service "$service" "$main_path")"
     observed_cloud_digest="$(file_digest_in_service "$service" "$cloud_path")"
+    observed_lifecycle_digest="$(file_digest_in_service "$service" "$lifecycle_path")"
+    observed_admin_digest="$(file_digest_in_service "$service" "$admin_path")"
+    observed_branded_email_worker_digest="$(file_digest_in_service "$service" "$branded_email_worker_path")"
     observed_catalog_digest="$(file_digest_in_service "$service" "$catalog_path")"
     observed_provider_access_digest="$(file_digest_in_service "$service" "$provider_access_path")"
     observed_account_delete_digest="$(file_digest_in_service "$service" "$account_delete_path")"
@@ -298,6 +404,11 @@ if command -v docker >/dev/null 2>&1 && [[ -f "$COMPOSE" ]]; then
     observed_database_conflict_digest="$(file_digest_in_service "$service" "$database_conflict_path")"
     observed_live_catalog_digest="$(file_digest_in_service "$service" "$live_catalog_path")"
     observed_live_materialization_digest="$(file_digest_in_service "$service" "$live_materialization_path")"
+    observed_cloud_public_view_digest="$(file_digest_in_service "$service" "$cloud_public_view_path")"
+    observed_fcm_digest="$(file_digest_in_service "$service" "$fcm_path")"
+    observed_lifecycle_email_digest="$(file_digest_in_service "$service" "$lifecycle_email_path")"
+    observed_fcm_error_digest="$(file_digest_in_service "$service" "$fcm_error_path")"
+    observed_resend_transport_digest="$(file_digest_in_service "$service" "$resend_transport_path")"
     [[ "$observed_playback_digest" == "$expected_playback_digest" ]] || {
       echo "ERROR: $service norva-playback source digest mismatch" >&2
       exit 1
@@ -308,6 +419,18 @@ if command -v docker >/dev/null 2>&1 && [[ -f "$COMPOSE" ]]; then
     }
     [[ "$observed_cloud_digest" == "$expected_cloud_digest" ]] || {
       echo "ERROR: $service norva-cloud source digest mismatch" >&2
+      exit 1
+    }
+    [[ "$observed_lifecycle_digest" == "$expected_lifecycle_digest" ]] || {
+      echo "ERROR: $service norva-lifecycle source digest mismatch" >&2
+      exit 1
+    }
+    [[ "$observed_admin_digest" == "$expected_admin_digest" ]] || {
+      echo "ERROR: $service norva-admin source digest mismatch" >&2
+      exit 1
+    }
+    [[ "$observed_branded_email_worker_digest" == "$expected_branded_email_worker_digest" ]] || {
+      echo "ERROR: $service norva-branded-email-worker source digest mismatch" >&2
       exit 1
     }
     [[ "$observed_catalog_digest" == "$expected_catalog_digest" ]] || {
@@ -342,9 +465,30 @@ if command -v docker >/dev/null 2>&1 && [[ -f "$COMPOSE" ]]; then
       echo "ERROR: $service shared live-materialization source digest mismatch" >&2
       exit 1
     }
+    [[ "$observed_cloud_public_view_digest" == "$expected_cloud_public_view_digest" ]] || {
+      echo "ERROR: $service shared cloud-public-view source digest mismatch" >&2
+      exit 1
+    }
+    [[ "$observed_fcm_digest" == "$expected_fcm_digest" ]] || {
+      echo "ERROR: $service shared fcm source digest mismatch" >&2
+      exit 1
+    }
+    [[ "$observed_lifecycle_email_digest" == "$expected_lifecycle_email_digest" ]] || {
+      echo "ERROR: $service shared lifecycle-email source digest mismatch" >&2
+      exit 1
+    }
+    [[ "$observed_fcm_error_digest" == "$expected_fcm_error_digest" ]] || {
+      echo "ERROR: $service shared fcm-error source digest mismatch" >&2
+      exit 1
+    }
+    [[ "$observed_resend_transport_digest" == "$expected_resend_transport_digest" ]] || {
+      echo "ERROR: $service shared resend-transport source digest mismatch" >&2
+      exit 1
+    }
 
     playback_health="$(function_health_in_service "$service" norva-playback)"
     cloud_health="$(function_health_in_service "$service" norva-cloud)"
+    lifecycle_health="$(function_health_in_service "$service" norva-lifecycle)"
     catalog_health="$(function_health_in_service "$service" norva-catalog)"
     source_sync_health="$(function_health_in_service "$service" norva-source-sync)"
     auth_challenge_health="$(function_health_in_service "$service" norva-auth-challenge)"
@@ -386,6 +530,7 @@ if command -v docker >/dev/null 2>&1 && [[ -f "$COMPOSE" ]]; then
     }
     [[ "$cloud_health" == *"\"version\":$EXPECTED_CLOUD_VERSION"* \
         && "$cloud_health" == *"\"playbackCreationProtocol\":$EXPECTED_CLOUD_PROTOCOL"* \
+        && "$cloud_health" == *"\"behavioralLifecycleProtocol\":$EXPECTED_BEHAVIORAL_LIFECYCLE_PROTOCOL"* \
         && "$cloud_health" == *"\"sourceDesiredStateProtocol\":$EXPECTED_SOURCE_DESIRED_STATE_PROTOCOL"* \
         && "$cloud_health" == *"\"legacySourceToggleBridge\":$EXPECTED_LEGACY_SOURCE_TOGGLE_BRIDGE"* \
         && "$cloud_health" == *"\"m3uSyncLeaseProtocol\":$EXPECTED_M3U_SYNC_LEASE_PROTOCOL"* \
@@ -393,6 +538,12 @@ if command -v docker >/dev/null 2>&1 && [[ -f "$COMPOSE" ]]; then
         && "$cloud_health" == *"\"relayTakeoverProtocol\":$EXPECTED_RELAY_TAKEOVER_PROTOCOL"* \
         && "$cloud_health" == *"\"relayCoordinatorLockTtlMs\":$EXPECTED_RELAY_COORDINATOR_LOCK_TTL_MS"* ]] || {
       echo "ERROR: $service norva-cloud protocol marker mismatch" >&2
+      exit 1
+    }
+    [[ "$lifecycle_health" == *"\"service\":\"norva-lifecycle\""* \
+        && "$lifecycle_health" == *"\"version\":$EXPECTED_LIFECYCLE_VERSION"* \
+        && "$lifecycle_health" == *"\"behavioralLifecycleProtocol\":$EXPECTED_BEHAVIORAL_LIFECYCLE_PROTOCOL"* ]] || {
+      echo "ERROR: $service norva-lifecycle protocol marker mismatch" >&2
       exit 1
     }
     [[ "$catalog_health" == *"\"version\":$EXPECTED_CATALOG_VERSION"* \
@@ -417,7 +568,7 @@ if command -v docker >/dev/null 2>&1 && [[ -f "$COMPOSE" ]]; then
       echo "ERROR: $service norva-auth-challenge protocol marker mismatch" >&2
       exit 1
     }
-    echo "   $service source digests and playback/catalog/source-sync/auth-challenge protocols verified"
+    echo "   $service source digests and playback/cloud/lifecycle/catalog/source-sync/auth-challenge protocols verified"
   }
 
   for service in "${function_services[@]}"; do

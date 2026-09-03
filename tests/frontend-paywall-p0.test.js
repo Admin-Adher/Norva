@@ -49,7 +49,7 @@ test('connected-product navigation links both shipped Android apps to their cano
   assert.match(app, /href="\$\{esc\(a\.storeUrl\)\}" target="_blank" rel="noopener noreferrer">Install<\/a>/);
   assert.match(app, /Available now/);
   assert.doesNotMatch(app, />Coming soon</);
-  assert.match(appHtml, /\/js\/app\.js\?v=fa59ee02c6/);
+  assert.match(appHtml, /\/js\/app\.js\?v=8a0b75514d/);
 });
 
 test('transaction screens keep terms, privacy and self-service cancellation accessible', () => {
@@ -74,14 +74,14 @@ test('all changed funnel assets use fresh cache keys', () => {
   const appJs = read('public/js/app.js');
   const subscribe = read('public/subscribe.html');
   assert.match(appHtml, /marketing\.js\?v=5/);
-  assert.match(appHtml, /cloudApi\.js\?v=73/);
-  assert.match(appHtml, /Settings\.js\?v=5241073432/);
+  assert.match(appHtml, /cloudApi\.js\?v=36b703f117/);
+  assert.match(appHtml, /Settings\.js\?v=2e8503448a/);
   assert.match(appHtml, /PartnersPage\.js\?v=10/);
   assert.match(appHtml, /profiles\.js\?v=d2b1662711/);
   assert.match(appHtml, /billing-config\.js\?v=8/);
   assert.match(appHtml, /billing\.js\?v=18/);
-  assert.match(appHtml, /HomePage\.js\?v=eb1d2d0c45/);
-  assert.match(appHtml, /app\.js\?v=fa59ee02c6/);
+  assert.match(appHtml, /HomePage\.js\?v=6fdf890230/);
+  assert.match(appHtml, /app\.js\?v=8a0b75514d/);
   assert.match(appJs, /AdminPage\.js\?v=[0-9a-f]{10}/);
   assert.match(subscribe, /marketing\.js\?v=5/);
   assert.match(subscribe, /cloudApi\.js\?v=52/);

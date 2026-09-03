@@ -588,7 +588,7 @@ test('production rollout proves the provider circuit protocol on every runtime',
   assert.match(playback, /exactFileCodecProfileProtocol:\s*1/);
   assert.match(playback, /relayTakeoverProtocol:\s*1/);
   assert.match(playback, /relayCoordinatorLockTtlMs:\s*EDGE_SESSION_COORDINATOR_LOCK_TTL_MS/);
-  assert.match(cloud, /version:\s*27/);
+  assert.match(cloud, /version:\s*28/);
   assert.match(cloud, /playbackCreationProtocol:\s*1/);
   assert.match(cloud, /relayTakeoverProtocol:\s*1/);
   assert.match(cloud, /relayCoordinatorLockTtlMs:\s*EDGE_SESSION_COORDINATOR_LOCK_TTL_MS/);

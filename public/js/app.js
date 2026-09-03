@@ -41,6 +41,72 @@ const NORVA_PARTNERS_KYC_RETURN_STATUSES = new Set([
     'In Review'
 ]);
 
+// Lifecycle navigation accepts only product-owned destinations and bounded,
+// non-sensitive context. Provider URLs, credentials and content identifiers
+// never enter a reminder URL. The context suffix survives an auth round-trip
+// because it lives in the hash, while every invalid/stale route falls back to a
+// known safe surface.
+const NORVA_LIFECYCLE_BASE_ROUTES = new Set([
+    '/app.html#settings/sources',
+    '/app.html#home',
+    '/app.html#home/resume',
+]);
+const NORVA_LIFECYCLE_FAILURE_FAMILIES = new Set([
+    'credentials', 'missing_credentials', 'endpoint_not_found', 'timeout',
+    'provider_busy', 'rate_limited', 'playlist_format', 'invalid_input',
+    'payload_too_large', 'provider_unreachable', 'infrastructure', 'unknown',
+]);
+const NORVA_LIFECYCLE_SOURCE_TYPES = new Set(['m3u', 'xtream']);
+const NORVA_LIFECYCLE_DELIVERY_ID_PATTERN =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function isLifecycleDeliveryId(value) {
+    return NORVA_LIFECYCLE_DELIVERY_ID_PATTERN.test(String(value || ''));
+}
+
+function normalizeLifecycleFailureFamily(value) {
+    const family = String(value || '').trim().toLowerCase();
+    return NORVA_LIFECYCLE_FAILURE_FAMILIES.has(family) ? family : '';
+}
+
+function normalizeLifecycleSourceType(value) {
+    const sourceType = String(value || '').trim().toLowerCase();
+    return NORVA_LIFECYCLE_SOURCE_TYPES.has(sourceType) ? sourceType : '';
+}
+
+function parseLifecycleRoute(value) {
+    const raw = String(value || '');
+    const fragment = raw.includes('#') ? raw.slice(raw.indexOf('#') + 1) : raw.replace(/^#/, '');
+    if (fragment === 'home') {
+        return { baseRoute: '/app.html#home', homeIntent: '', failureFamily: '', sourceType: '' };
+    }
+    if (fragment === 'home/resume') {
+        return { baseRoute: '/app.html#home/resume', homeIntent: 'resume', failureFamily: '', sourceType: '' };
+    }
+    if (fragment === 'settings/sources') {
+        return { baseRoute: '/app.html#settings/sources', homeIntent: '', failureFamily: '', sourceType: '' };
+    }
+    const match = /^settings\/sources\/help\/([a-z_]+)\/(m3u|xtream)$/.exec(fragment);
+    const failureFamily = normalizeLifecycleFailureFamily(match?.[1]);
+    const sourceType = normalizeLifecycleSourceType(match?.[2]);
+    return failureFamily && sourceType
+        ? { baseRoute: '/app.html#settings/sources', homeIntent: '', failureFamily, sourceType }
+        : null;
+}
+
+function lifecycleRouteForPayload(payload = {}) {
+    const baseRoute = NORVA_LIFECYCLE_BASE_ROUTES.has(payload.deepLink) ? payload.deepLink : '';
+    if (!baseRoute) return '';
+    if (baseRoute !== '/app.html#settings/sources' || payload.journeyKey !== 'import_unresolved') {
+        return baseRoute;
+    }
+    const failureFamily = normalizeLifecycleFailureFamily(payload.failureFamily);
+    const sourceType = normalizeLifecycleSourceType(payload.sourceType);
+    return failureFamily && sourceType
+        ? `/app.html#settings/sources/help/${failureFamily}/${sourceType}`
+        : baseRoute;
+}
+
 class App {
     constructor() {
         // The phone APK plays everything in the native fullscreen player, so the
@@ -53,6 +119,12 @@ class App {
         this.currentPage = 'home';
         this.pages = {};
         this.currentUser = null;
+        const lifecycleRoute = parseLifecycleRoute(window.location.hash);
+        this._lifecycleHomeIntent = lifecycleRoute?.homeIntent || '';
+        this._lifecycleImportContext = lifecycleRoute?.failureFamily
+            ? { failureFamily: lifecycleRoute.failureFamily, sourceType: lifecycleRoute.sourceType }
+            : null;
+        this._initialNavigationReady = false;
         this._partnersKycReturn = this.capturePartnersKycReturn();
         this._nativeRecovery = this.isNativeContinuityRecovery();
         this._nativeContinuity = this.readNativeContinuity();
@@ -640,7 +712,13 @@ class App {
         this.startCloudWarmKeep();
         this.startSessionKeepFresh();
         this.startEnrichmentProgressPoll();
-        if (this.currentUser && !this.currentUser.device) this.registerPushToken(); // native FCM token (Android wrapper only; no-op in browser)
+        if (this.currentUser && !this.currentUser.device) {
+            this.registerPushToken(); // native FCM token (Android wrapper only; no-op in browser)
+            // Email and browser notification links must be measured too. Native
+            // registration also calls this after flushing receipts; the per-session
+            // key and the database uniqueness constraint make the overlap harmless.
+            void this.recordLifecycleDeepLinkFromLocation().catch(() => { /* best-effort telemetry */ });
+        }
 
         // Channel drawer toggle (mobile)
         const channelToggleBtn = document.getElementById('channel-toggle-btn');
@@ -871,6 +949,7 @@ class App {
         // Capture any fiche open before a refresh BEFORE navigating (applyPage may clear
         // the stash), then re-open it once we've landed on its catalogue page.
         const pendingFiche = this.readOpenFiche();
+        this._initialNavigationReady = true;
         this.navigateTo(initialPage, true); // true = replace history (don't add)
         this.restoreOpenFiche(initialPage, pendingFiche);
         this.openFicheFromRoute(initialPage);
@@ -1004,7 +1083,10 @@ class App {
             window.NorvaCloud.contentEvents.inbox(),
             this._fetchSupportReplies().catch(() => []),
         ]);
-        const catalog = ((res && res.events) || []).map(e => ({ ...e, kind: 'catalog' }));
+        const catalog = ((res && res.events) || []).map(e => ({
+            ...e,
+            kind: e?.kind === 'behavioral_lifecycle' ? 'lifecycle' : 'catalog'
+        }));
         this._notifEvents = [...support, ...catalog]
             .sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
         this._notifUnread = (Number(res && res.unread) || 0) + support.filter(e => !e.seen_at).length;
@@ -1096,11 +1178,21 @@ class App {
             const w = e.kind !== 'support' && e.payload && typeof e.payload.watch === 'string' ? e.payload.watch : '';
             return /^(movies|series)\/open:/.test(w) ? w : '';
         };
+        const lifecycleRoute = (e) => {
+            const p = e.kind === 'lifecycle' && e.payload && typeof e.payload === 'object' ? e.payload : {};
+            return lifecycleRouteForPayload(p);
+        };
         const item = (e) => e.kind === 'support'
             ? `<a class="norva-notif-item${e.seen_at ? '' : ' unread'}" href="/support.html?ticket=${encodeURIComponent(e.ticket_id)}&returnTo=${encodeURIComponent(here)}">
                     <span class="norva-notif-kind">Support</span>
                     <div class="norva-notif-summary">${esc(e.summary || 'Support replied')}</div>
                     <div class="norva-notif-time">${esc(timeAgo(e.created_at))} · Open conversation</div>
+                </a>`
+            : lifecycleRoute(e)
+                ? `<a class="norva-notif-item${e.seen_at ? '' : ' unread'}" href="${esc(lifecycleRoute(e))}" data-lifecycle-link="${esc(lifecycleRoute(e))}" data-lifecycle-delivery="${esc(e.payload?.deliveryId || '')}">
+                    <span class="norva-notif-kind">${esc(e.payload?.title || 'Norva')}</span>
+                    <div class="norva-notif-summary">${esc(e.payload?.body || e.summary || 'Open Norva to continue.')}</div>
+                    <div class="norva-notif-time">${esc(timeAgo(e.created_at))} · ${esc(e.payload?.ctaLabel || 'Open Norva')}</div>
                 </a>`
             : watchRoute(e)
                 ? `<a class="norva-notif-item${e.seen_at ? '' : ' unread'}" href="/app.html#${esc(watchRoute(e))}" data-watch="${esc(watchRoute(e))}">
@@ -1158,6 +1250,38 @@ class App {
             this.navigateTo(page);
             this.openFicheFromRoute(page);
         }));
+        surface.querySelectorAll('[data-lifecycle-link]').forEach((a) => a.addEventListener('click', (ev) => {
+            ev.preventDefault();
+            const route = a.getAttribute('data-lifecycle-link') || '';
+            const deliveryId = a.getAttribute('data-lifecycle-delivery') || '';
+            const destination = parseLifecycleRoute(route);
+            if (!destination) return;
+            if (isLifecycleDeliveryId(deliveryId)) {
+                try {
+                    void Promise.resolve(window.NorvaCloud?.lifecycleEvents?.record?.(deliveryId, 'deep_link_opened'))
+                        .catch(() => { /* best-effort telemetry */ });
+                } catch (_) { /* best-effort telemetry */ }
+            }
+            closePanel({ restoreFocus: false });
+            if (destination.baseRoute === '/app.html#settings/sources') {
+                this._lifecycleImportContext = destination.failureFamily
+                    ? { failureFamily: destination.failureFamily, sourceType: destination.sourceType }
+                    : null;
+                this._settingsSubRoute = 'sources';
+                if (this.currentPage === 'settings') {
+                    void this.pages.settings?.openLifecycleImportHelp?.(this._lifecycleImportContext);
+                } else {
+                    this.navigateTo('settings');
+                }
+                return;
+            }
+            if (destination.homeIntent === 'resume') this._lifecycleHomeIntent = 'resume';
+            if (this.currentPage === 'home') {
+                void this.pages.home?.show?.();
+            } else {
+                this.navigateTo('home');
+            }
+        }));
         // Desktop/web remains a compact anchored popover. TV uses the viewport-safe
         // overlay CSS instead, because its bell sits at the bottom of the left rail.
         if (!tv) {
@@ -1179,6 +1303,19 @@ class App {
         // catalog ids → contentEvents.markSeen (NEVER send it the synthetic support ids),
         // support → advance the shared 'norva-support-seen' watermark (server timestamps).
         const unseenIds = events.filter(e => !e.seen_at && e.kind !== 'support').map(e => e.id).filter(Boolean);
+        // A lifecycle inbox item becoming visible is also a message open. Keep this
+        // acknowledgement independent from the generic `seen_at` write: either call
+        // may be retried after an offline/error path, and PostgreSQL deduplicates the
+        // delivery event. Never promote catalog/support rows to lifecycle opens.
+        const lifecycleOpenIds = [...new Set(events
+            .filter(e => !e.seen_at && e.kind === 'lifecycle')
+            .map(e => String(e.payload?.deliveryId || ''))
+            .filter(id => isLifecycleDeliveryId(id)))];
+        if (lifecycleOpenIds.length && window.NorvaCloud?.lifecycleEvents?.record) {
+            Promise.allSettled(lifecycleOpenIds.map(deliveryId =>
+                window.NorvaCloud.lifecycleEvents.record(deliveryId, 'opened')
+            )).catch(() => { /* best-effort; an unseen row is retried next open */ });
+        }
         if (unseenIds.length) window.NorvaCloud.contentEvents.markSeen(unseenIds);
         const unseenSupport = events.filter(e => e.kind === 'support' && !e.seen_at);
         if (unseenSupport.length) {
@@ -1398,6 +1535,10 @@ class App {
                 document.addEventListener('visibilitychange', () => {
                     if (document.visibilityState === 'visible' && this.currentUser && !this.currentUser.device) this.registerPushToken();
                 });
+                window.addEventListener('norva:notification-permission-changed', () => {
+                    this._lastPushRegistrationKey = '';
+                    if (this.currentUser && !this.currentUser.device) this.registerPushToken();
+                });
             }
             let token = '';
             for (let i = 0; i < 10 && !token; i++) {                // FCM token may not be ready at first launch
@@ -1405,13 +1546,78 @@ class App {
                 if (!token) await new Promise((r) => setTimeout(r, 2000));
             }
             if (!token) { note('no-token', 'FCM token absent après ~20 s (Firebase non initialisé dans ce build ?)'); return; }
-            if (this._lastPushToken === token) return;              // déjà enregistré cette session
-            await window.NorvaCloud.push.register(token, 'android');
+            let permissionState = 'unknown';
+            try {
+                permissionState = typeof bridge.notificationPermissionState === 'function'
+                    ? String(bridge.notificationPermissionState() || 'unknown').toLowerCase()
+                    : 'unknown';
+            } catch (_) { permissionState = 'unknown'; }
+            if (!['unknown', 'prompt', 'granted', 'denied'].includes(permissionState)) permissionState = 'unknown';
+            let timezone = 'UTC';
+            try { timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; } catch (_) { /* UTC */ }
+            const locale = String(navigator.language || 'en').slice(0, 35);
+            let appVersion = null;
+            try {
+                appVersion = typeof bridge.getAppVersion === 'function'
+                    ? String(bridge.getAppVersion() || '').slice(0, 40) || null
+                    : null;
+            } catch (_) { appVersion = null; }
+            const registrationKey = [token, permissionState, timezone, locale, appVersion || ''].join('|');
+            if (this._lastPushRegistrationKey === registrationKey) {
+                await this.flushLifecycleDeliveryReceipts();
+                await this.recordLifecycleDeepLinkFromLocation();
+                return;
+            }
+            await window.NorvaCloud.push.register(token, {
+                platform: 'android', permissionState, timezone, locale, appVersion
+            });
             this._lastPushToken = token;
-            note('registered', token.slice(0, 12) + '…');
+            this._lastPushRegistrationKey = registrationKey;
+            note('registered', `permission=${permissionState}`);
+            await this.flushLifecycleDeliveryReceipts();
+            await this.recordLifecycleDeepLinkFromLocation();
         } catch (e) {
             note('error', e && e.message ? e.message : String(e));
         }
+    }
+
+    async flushLifecycleDeliveryReceipts() {
+        const bridge = window.NorvaTVCloud;
+        if (!bridge || typeof bridge.drainLifecycleDeliveryReceipts !== 'function'
+            || !window.NorvaCloud?.lifecycleEvents?.record) return;
+        let receipts = [];
+        try {
+            const parsed = JSON.parse(String(bridge.drainLifecycleDeliveryReceipts() || '[]'));
+            receipts = Array.isArray(parsed) ? parsed.slice(0, 64) : [];
+        } catch (_) { return; }
+        const failed = [];
+        for (const receipt of receipts) {
+            const deliveryId = String(receipt?.deliveryId || '');
+            const event = String(receipt?.event || '');
+            if (!isLifecycleDeliveryId(deliveryId) || !['delivered', 'opened'].includes(event)) continue;
+            try {
+                const result = await window.NorvaCloud.lifecycleEvents.record(deliveryId, event);
+                if (!result) failed.push({ deliveryId, event });
+            } catch (_) { failed.push({ deliveryId, event }); }
+        }
+        if (failed.length && typeof bridge.restoreLifecycleDeliveryReceipts === 'function') {
+            try { bridge.restoreLifecycleDeliveryReceipts(JSON.stringify(failed)); } catch (_) { /* next foreground */ }
+        }
+    }
+
+    async recordLifecycleDeepLinkFromLocation() {
+        if (!window.NorvaCloud?.lifecycleEvents?.record) return;
+        let url;
+        try { url = new URL(location.href); } catch (_) { return; }
+        const deliveryId = String(url.searchParams.get('lifecycleDelivery') || '');
+        if (!isLifecycleDeliveryId(deliveryId)) return;
+        const key = `norva-lifecycle-open:${deliveryId}`;
+        try { if (sessionStorage.getItem(key)) return; } catch (_) { /* continue */ }
+        const result = await window.NorvaCloud.lifecycleEvents.record(deliveryId, 'deep_link_opened');
+        if (!result) return;
+        try { sessionStorage.setItem(key, '1'); } catch (_) { /* private mode */ }
+        url.searchParams.delete('lifecycleDelivery');
+        try { history.replaceState(history.state, '', url.pathname + (url.search ? url.search : '') + url.hash); } catch (_) { /* noop */ }
     }
 
     isCatalogPage(pageName) {
@@ -4041,7 +4247,7 @@ class App {
                 // rewrite it. Keep this value equal to the first 10 characters of the
                 // file's canonical-LF SHA-256; the contract test fails if they drift apart.
                 // Using the content hash here also gives the immutable CDN cache a new URL.
-                s.src = '/js/pages/AdminPage.js?v=11a366446b';
+                s.src = '/js/pages/AdminPage.js?v=b6a3124667';
                 s.onload = () => resolve();
                 s.onerror = () => { this._adminPageLoading = null; reject(new Error('AdminPage.js failed to load')); };
                 document.head.appendChild(s);

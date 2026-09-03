@@ -10,6 +10,7 @@ const billingIntents = read('supabase/migrations/20260722003500_lifecycle_billin
 const paymentTerminal = read('supabase/migrations/20260722121000_payment_terminal_reconciliation.sql');
 const lifecycle = read('supabase/functions/norva-lifecycle/index.ts');
 const worker = read('supabase/functions/norva-branded-email-worker/index.ts');
+const transport = read('supabase/functions/_shared/resend-transport.mjs');
 const templates = read('supabase/functions/_shared/lifecycle-email.ts');
 const revolut = read('supabase/functions/norva-revolut/index.ts');
 const revolutBilling = read('supabase/functions/norva-revolut-billing/index.ts');
@@ -108,7 +109,7 @@ test('worker has typed 409 handling, sequential shared throttling and 429 deferr
   assert.match(worker, /setTimeout\(resolve, 300\)/);
   assert.match(worker, /sent\.status === 429/);
   assert.match(worker, /defer_branded_email_delivery/);
-  assert.match(worker, /headers: claim\.request_headers/);
+  assert.match(transport, /headers: claim\.request_headers/);
 });
 
 test('retries stop inside the 24h key window and privacy retention is bounded', () => {
@@ -123,8 +124,8 @@ test('retries stop inside the 24h key window and privacy retention is bounded', 
   assert.match(migration, /interval '14 days'/);
   assert.match(migration, /interval '90 days'/);
   assert.match(migration, /recipient_email=null, request_reply_to=null, request_subject=null/);
-  assert.match(worker, /safeProviderResponse/);
-  assert.match(worker, /redactProviderText/);
+  assert.match(transport, /safeResendProviderResponse/);
+  assert.match(transport, /redactProviderText/);
 });
 
 test('billing events use an immutable journal bridge and every supported producer is attached', () => {

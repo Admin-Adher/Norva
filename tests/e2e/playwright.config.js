@@ -4,7 +4,7 @@ const { defineConfig } = require('@playwright/test');
 
 module.exports = defineConfig({
   testDir: __dirname,
-  testMatch: 'partners.spec.js',
+  testMatch: ['partners.spec.js', 'behavioral-lifecycle.spec.js'],
   fullyParallel: true,
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 1 : 0,

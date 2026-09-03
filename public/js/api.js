@@ -1829,7 +1829,7 @@ const CloudAdapter = (() => {
         // mapping, l'appel tombait dans le « Cloud API route not mapped » final,
         // avalé par le best-effort appelant → aucun appareil enregistré.
         if (method === 'POST' && path === '/push-token') {
-            return NorvaCloud.push.register(data && data.token, data && data.platform);
+            return NorvaCloud.push.register(data && data.token, data || {});
         }
 
         if (method === 'GET' && path === '/sources') return listSources();

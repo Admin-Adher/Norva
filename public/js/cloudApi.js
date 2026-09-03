@@ -4478,7 +4478,32 @@
         // endpoints catalogue (c'était le bug historique : « Cloud API route
         // not mapped » avalé en silence → zéro appareil enregistré).
         push: {
-            register: (token, platform) => request('POST', '/push-token', { token, platform: platform || 'android' })
+            register: (token, platform = 'android', context = {}) => {
+                const details = platform && typeof platform === 'object'
+                    ? platform
+                    : { ...(context || {}), platform };
+                return request('POST', '/push-token', {
+                    token,
+                    platform: details.platform || 'android',
+                    permissionState: details.permissionState || details.permission_state || 'unknown',
+                    timezone: details.timezone || 'UTC',
+                    locale: details.locale || null,
+                    appVersion: details.appVersion || details.app_version || null
+                });
+            }
+        },
+
+        lifecycleEvents: {
+            record: (deliveryId, event) => {
+                try {
+                    return request('POST', '/lifecycle-events', { deliveryId, event }).catch(() => null);
+                } catch (_) { return Promise.resolve(null); }
+            },
+            recordProduct: (event) => {
+                try {
+                    return request('POST', '/lifecycle-events', { event }).catch(() => null);
+                } catch (_) { return Promise.resolve(null); }
+            }
         },
 
         entitlements: {

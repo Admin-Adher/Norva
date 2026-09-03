@@ -750,17 +750,18 @@ async function deliverMarketingSegment(
   audience: string,
   kind = "marketing",
 ): Promise<PushDeliveryResult> {
-  let tokenQuery = admin.from("cloud_push_tokens").select("token");
-  if (audience !== "all") {
-    const { data: userIdsData, error: segmentError } = await admin.rpc(
-      "marketing_push_targets",
-      { p_audience: audience },
-    );
-    if (segmentError) throw new Error("segment resolution unavailable");
-    const userIds = (userIdsData ?? []).map((value: unknown) => String(value)).filter(Boolean);
-    if (!userIds.length) return { devices: 0, sent: 0, fail: 0, dead: 0 };
-    tokenQuery = tokenQuery.in("user_id", userIds);
-  }
+  const freshSince = new Date(Date.now() - 45 * 86400_000).toISOString();
+  const { data: userIdsData, error: segmentError } = await admin.rpc(
+    "marketing_push_targets",
+    { p_audience: audience },
+  );
+  if (segmentError) throw new Error("segment resolution unavailable");
+  const userIds = (userIdsData ?? []).map((value: unknown) => String(value)).filter(Boolean);
+  if (!userIds.length) return { devices: 0, sent: 0, fail: 0, dead: 0 };
+  const tokenQuery = admin.from("cloud_push_tokens").select("token")
+    .eq("permission_state", "granted")
+    .gte("last_seen_at", freshSince)
+    .in("user_id", userIds);
 
   const { data: tokenRows, error: tokenError } = await tokenQuery;
   if (tokenError) throw new Error("push token read unavailable");
@@ -781,7 +782,9 @@ async function deliverMarketingUser(
   const { data: tokenRows, error: tokenError } = await admin
     .from("cloud_push_tokens")
     .select("token")
-    .eq("user_id", userId);
+    .eq("user_id", userId)
+    .eq("permission_state", "granted")
+    .gte("last_seen_at", new Date(Date.now() - 45 * 86400_000).toISOString());
   if (tokenError) throw new Error("push token read unavailable");
   return deliverPushTokens(
     (tokenRows ?? []).map((row) => (row as { token?: string }).token),

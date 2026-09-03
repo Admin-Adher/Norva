@@ -93,8 +93,12 @@ public final class DownloadsActivityInstrumentedTest {
                 Insets safe = windowInsets.getInsets(
                         WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
                 assertTrue(
+                        "Scrolling viewport does not reserve Android navigation",
+                        scroll.getPaddingBottom() >= safe.bottom);
+                assertTrue(
                         "Bottom content can collide with Android navigation",
-                        container.getPaddingBottom() >= dp(target, 24) + safe.bottom);
+                        container.getPaddingBottom() + scroll.getPaddingBottom()
+                                >= dp(target, 24) + safe.bottom);
             }
         } finally {
             instrumentation.removeMonitor(monitor);

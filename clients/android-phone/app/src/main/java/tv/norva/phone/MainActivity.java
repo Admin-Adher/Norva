@@ -280,8 +280,8 @@ public class MainActivity extends Activity {
             startActivity(new Intent(this, DownloadsActivity.class));
         }
 
-        // Push: ask for notification permission and cache the FCM token so the web
-        // bridge (getPushToken) can hand it to the backend for "catalog ready" pushes.
+        // Push: cache the FCM token without opening the system permission dialog.
+        // The contextual Web UI explains the benefit before the user chooses to ask.
         setupPush();
     }
 
@@ -378,6 +378,21 @@ public class MainActivity extends Activity {
             return false;
         }
         if ("https".equals(data.getScheme()) && "norva.tv".equals(data.getHost())) {
+            if (data.getQueryParameter("lifecycleDelivery") != null) {
+                String lifecycleDeliveryId = data.getQueryParameter("lifecycleDelivery");
+                Uri lifecycleDestination = NorvaMessagingService.canonicalLifecycleLink(
+                        data.toString(), lifecycleDeliveryId);
+                intent.setAction(null);
+                prefs().edit().putString(PREF_MODE, "cloud").apply();
+                if (lifecycleDestination == null) {
+                    connectCloud(CLOUD_WATCH_URL);
+                    return true;
+                }
+                NorvaMessagingService.rememberLifecycleReceipt(
+                        this, lifecycleDeliveryId, "opened");
+                connectCloud(lifecycleDestination.toString());
+                return true;
+            }
             if ("/partners-kyc-return".equals(data.getPath())) {
                 String kycReturnUrl = PartnersContract.canonicalKycReturnDestination(
                         data.toString());
@@ -1429,6 +1444,21 @@ public class MainActivity extends Activity {
         public String getPushToken() {
             return getSharedPreferences(NorvaMessagingService.PREFS, MODE_PRIVATE)
                     .getString(NorvaMessagingService.KEY_TOKEN, "");
+        }
+
+        @android.webkit.JavascriptInterface
+        public String getAppVersion() {
+            return BuildConfig.VERSION_NAME;
+        }
+
+        @android.webkit.JavascriptInterface
+        public String drainLifecycleDeliveryReceipts() {
+            return NorvaMessagingService.drainLifecycleReceipts(MainActivity.this);
+        }
+
+        @android.webkit.JavascriptInterface
+        public void restoreLifecycleDeliveryReceipts(String receiptsJson) {
+            NorvaMessagingService.restoreLifecycleReceipts(MainActivity.this, receiptsJson);
         }
 
         /**

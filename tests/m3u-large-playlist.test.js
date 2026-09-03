@@ -142,7 +142,7 @@ test('production health gates identify the streaming import release', () => {
   const workerSource = read('supabase/functions/norva-source-sync/index.ts');
   const deployScript = read('ops/hetzner/scripts/04-deploy-edge-functions.sh');
 
-  assert.match(cloudSource, /version:\s*27/);
+  assert.match(cloudSource, /version:\s*28/);
   assert.match(workerSource, /version:\s*19/);
   assert.match(cloudSource, /m3uStreamingImportProtocol:\s*1/);
   assert.match(workerSource, /m3uStreamingImportProtocol:\s*1/);
