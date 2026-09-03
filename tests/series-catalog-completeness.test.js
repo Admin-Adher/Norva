@@ -155,7 +155,7 @@ test('Series grid is bounded by its single visible scroll container', () => {
     'the Series scroller must not extend below its clipped parent');
   assert.match(
     source,
-    /new IntersectionObserver\([\s\S]*?\}, \{ root: this\.container, rootMargin: '700px' \}\)/,
+    /this\.observer = new IntersectionObserver\([\s\S]*?root:\s*this\.container,[\s\S]*?rootMargin:\s*'0px 0px 700px 0px'/,
     'the infinite-scroll sentinel must observe the actual Series scroll owner',
   );
 });
@@ -203,5 +203,5 @@ test('changed Series assets are cache-busted together', () => {
   const html = read('public/app.html');
   assert.match(html, /main\.css\?v=71854078d1/);
   assert.match(html, /api\.js\?v=93/);
-  assert.match(html, /SeriesPage\.js\?v=60/);
+  assert.match(html, /SeriesPage\.js\?v=01ee9949cb/);
 });

@@ -2188,11 +2188,24 @@ class SourceManager {
         const steps = progress.steps && typeof progress.steps === 'object' ? progress.steps : {};
         const step = (key, label, count, detail) => {
             const entry = steps[key] && typeof steps[key] === 'object' ? steps[key] : {};
+            const entryCount = Number(entry.count);
+            const currentCount = Number(count);
+            const isDiscovery = ['channels', 'movies', 'series', 'categories'].includes(key);
+            // Discovery step counters can be stamped from the first provider page
+            // (for example 72/80) while progress.counts continues to grow as the
+            // stream is parsed. Never let that stale checkpoint under-report the
+            // current discovered total shown in the summary cards above.
+            const resolvedCount = isDiscovery
+                ? Math.max(
+                    Number.isFinite(entryCount) ? entryCount : 0,
+                    Number.isFinite(currentCount) ? currentCount : 0
+                )
+                : Number(entry.count ?? count ?? 0) || 0;
             return {
                 key,
                 label,
                 status: String(entry.status || 'pending').toLowerCase(),
-                count: Number(entry.count ?? count ?? 0) || 0,
+                count: resolvedCount,
                 detail
             };
         };

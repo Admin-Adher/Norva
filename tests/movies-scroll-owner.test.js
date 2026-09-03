@@ -38,8 +38,20 @@ test('Movies bucket pagination observes the Movies grid instead of the viewport'
   assert.match(observer, /rootMargin:\s*'0px 0px 700px 0px'/);
 });
 
+test('Movies main pagination prefetches against the Movies grid before its last row', () => {
+  const source = read('public/js/pages/MoviesPage.js');
+  const observerStart = source.indexOf('this.observer = new IntersectionObserver');
+  const observerEnd = source.indexOf('// Continue Watching shrinks', observerStart);
+  assert.notEqual(observerStart, -1);
+  assert.notEqual(observerEnd, -1);
+  const observer = source.slice(observerStart, observerEnd);
+
+  assert.match(observer, /root:\s*this\.container/);
+  assert.match(observer, /rootMargin:\s*'0px 0px 700px 0px'/);
+});
+
 test('Movies scroll assets are cache-busted together', () => {
   const app = read('public/app.html');
   assert.match(app, /\/css\/main\.css\?v=71854078d1/);
-  assert.match(app, /\/js\/pages\/MoviesPage\.js\?v=61/);
+  assert.match(app, /\/js\/pages\/MoviesPage\.js\?v=3f5f2cacd5/);
 });

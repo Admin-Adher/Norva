@@ -112,8 +112,8 @@ test('Home and phone genre rails bound pre-paint catalogue hydration', () => {
   assert.match(catalog, /variantsByTitle: await variantsPromise/);
   assert.match(read('public/js/pages/MoviesPage.js'), /limit: this\._isTvMode\(\) \? 18 : 12/);
   assert.match(read('public/js/pages/SeriesPage.js'), /limit: this\._isTvMode\(\) \? 18 : 12/);
-  assert.match(appHtml, /MoviesPage\.js\?v=61/);
-  assert.match(appHtml, /SeriesPage\.js\?v=60/);
+  assert.match(appHtml, /MoviesPage\.js\?v=3f5f2cacd5/);
+  assert.match(appHtml, /SeriesPage\.js\?v=01ee9949cb/);
 });
 
 test('Live bounds first paint and defers off-screen logo decoding without hiding the lineup', () => {

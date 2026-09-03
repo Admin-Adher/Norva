@@ -13,6 +13,7 @@ const SOURCE_HEALTH_SOURCE = read('public/js/utils/sourceHealth.js');
 const SETTINGS_SOURCE = read('public/js/pages/Settings.js');
 const SOURCE_MANAGER_SOURCE = read('public/js/components/SourceManager.js');
 const HOME_SOURCE = read('public/js/pages/HomePage.js');
+const APP_SOURCE = read('public/app.html');
 
 function sourceHealthHarness(sourcesApi = {}) {
   const window = {
@@ -736,6 +737,35 @@ test('SourceManager exposes one preparation view instead of leaking rendering in
   assert.equal('html' in view, false, 'progress markup must stay lazy on patch-only ticks');
   assert.match(view.render(), /Living room/);
   assert.equal(typeof view.patch, 'function');
+});
+
+test('SourceManager milestones never freeze below the current discovery totals', () => {
+  const { manager } = sourceManagerHarness();
+  const milestones = manager.catalogMilestones({
+    steps: {
+      movies: { status: 'running', count: 72 },
+      series: { status: 'running', count: 80 },
+      import: { status: 'running', count: 152 },
+    },
+  }, {
+    movies: 3399,
+    series: 1401,
+    live: 0,
+    categories: 0,
+    total: 4800,
+  });
+
+  assert.equal(milestones.find((entry) => entry.key === 'movies').count, 3399);
+  assert.equal(milestones.find((entry) => entry.key === 'series').count, 1401);
+  assert.equal(
+    milestones.find((entry) => entry.key === 'import').count,
+    152,
+    'materialized import progress must stay distinct from the discovered total',
+  );
+});
+
+test('catalog progress counter fix is cache-busted in the app shell', () => {
+  assert.match(APP_SOURCE, /SourceManager\.js\?v=2b8331512d/);
 });
 
 test('SourceManager shares one connection parser for Home and Settings', () => {

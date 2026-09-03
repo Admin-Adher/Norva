@@ -209,12 +209,17 @@ class MoviesPage {
             this.loadMovies();
         });
 
-        // Lazy loading
+        // The grid is the page's real scroll owner. Prefetch while the sentinel is
+        // still comfortably below the visible area so a network-backed next page
+        // is ready before the user reaches the last rendered row.
         this.observer = new IntersectionObserver((entries) => {
             if (entries[0].isIntersecting && !this.isLoading) {
                 this.renderNextBatch();
             }
-        }, { rootMargin: '200px' });
+        }, {
+            root: this.container,
+            rootMargin: '0px 0px 700px 0px'
+        });
 
         // Continue Watching shrinks to a compact pinned strip while the grid scrolls,
         // reclaiming vertical space without disappearing. Hysteresis avoids flicker
