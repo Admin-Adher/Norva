@@ -15103,7 +15103,27 @@ function verifiedGenericMkvCompleteCacheBinding(session, nowMs = Date.now()) {
     if (!envelope) return reject('missing-cache-proof');
     const proof = openMkvCompleteHlsCacheProof(envelope);
     if (!proof) return reject('invalid-cache-proof', true);
-    const expectedPipelineBuild = mkvCompleteHlsCachePipelineBuildForSession(cacheLookupSession, context);
+    // Publication runs after the real graph has selected its segment duration
+    // (currently two seconds for VAAPI/multi-audio, four otherwise). A
+    // zero-provider lookup deliberately has no mutable live session from which
+    // to rediscover that choice. Recover only the canonical bounded target from
+    // the already authenticated proof, then independently rebuild and compare
+    // every other pipeline dimension against the current exact profile.
+    const signedPipelineBuild = typeof proof.pipelineBuild === 'string' ? proof.pipelineBuild : '';
+    const targetMarker = ':target-';
+    const targetMarkerAt = signedPipelineBuild.lastIndexOf(targetMarker);
+    const signedTargetText = targetMarkerAt >= 0
+        ? signedPipelineBuild.slice(targetMarkerAt + targetMarker.length)
+        : '';
+    const signedTargetSeconds = /^(?:2|4)$/.test(signedTargetText)
+        ? Number(signedTargetText)
+        : null;
+    const expectedPipelineBuild = Number.isInteger(signedTargetSeconds)
+        ? mkvCompleteHlsCachePipelineBuildForSession({
+            ...cacheLookupSession,
+            hlsTargetSeconds: signedTargetSeconds,
+        }, context)
+        : null;
     if (
         proof.protocol !== MKV_COMPLETE_HLS_CACHE_PROTOCOL || proof.scope !== 'complete-hls' ||
         proof.build !== MKV_COMPLETE_HLS_CACHE_LOCATOR_BUILD ||
@@ -15112,7 +15132,7 @@ function verifiedGenericMkvCompleteCacheBinding(session, nowMs = Date.now()) {
         proof.expiresAtMs - proof.issuedAtMs > MKV_COMPLETE_HLS_CACHE_TTL_MS ||
         proof.issuedAtMs > Number(nowMs) + MKV_H264_FAST_START_PROOF_FUTURE_SKEW_MS ||
         Number(nowMs) > proof.expiresAtMs ||
-        typeof proof.pipelineBuild !== 'string' ||
+        !expectedPipelineBuild ||
         proof.pipelineBuild !== expectedPipelineBuild
     ) return reject('stale-or-unsupported-cache-proof', true);
     if (proof.sourceUrlSha256 !== sha256Hex(String(session.sourceUrl || ''))) return reject('cache-proof-source-mismatch', true);

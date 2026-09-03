@@ -1073,6 +1073,52 @@ test('generic complete-cache locator admits a prepared HEVC graph without provid
   }, issuedAtMs + 1_000).eligible, false);
 });
 
+test('generic complete-cache lookup authenticates the signed segmentation target without live VAAPI state', () => {
+  const h = loadFastStartHarness({
+    VIDEO_ENCODER_CONFIG: { backend: 'vaapi' },
+    VIDEO_ENCODER_PREFLIGHT: { ready: true },
+  });
+  const issuedAtMs = Date.parse('2026-08-17T12:40:00.000Z');
+  const trained = proofSession(h, {
+    mode: 'remux',
+    videoMode: 'encode',
+    testAudioMode: 'transcode',
+    hlsTargetSeconds: 2,
+    inputPump: { completed: true },
+    codecProfile: {
+      videoCodec: 'hevc',
+      videoProfile: 'Main 10',
+      videoPixelFormat: 'yuv420p10le',
+      audioCodec: 'eac3',
+      audioProfile: '',
+      audioChannels: 6,
+      audioChannelLayout: '5.1',
+      audioTracks: [{
+        index: 1, codec: 'eac3', profile: '', channels: 6,
+        sampleRate: 48_000, channelLayout: '5.1', default: true,
+      }],
+    },
+  });
+  const locator = h.buildCompleteCacheLocator(trained, issuedAtMs);
+  assert.equal(
+    locator?.payload?.pipelineBuild,
+    'mkv-complete-hls-mpegts-v6:video-encode:audio-transcode:subtitles-webvtt-0:target-2',
+  );
+
+  const requestShapedReplay = {
+    ...trained,
+    videoMode: undefined,
+    hlsTargetSeconds: undefined,
+    inputPump: null,
+    codecProfile: { ...locator.codecProfileSnapshot, mkvCompleteHlsCacheProof: locator.envelope },
+  };
+  assert.equal(
+    h.verifyGenericCompleteCache(requestShapedReplay, issuedAtMs + 1_000).eligible,
+    true,
+    'a signed complete graph must not depend on mutable live-session target state',
+  );
+});
+
 test('generic complete-cache locator binds the exact multi-audio HLS topology', () => {
   const h = loadFastStartHarness();
   const issuedAtMs = Date.parse('2026-08-17T12:45:00.000Z');
