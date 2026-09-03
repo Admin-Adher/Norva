@@ -137,8 +137,8 @@ test('migration changes no cron activation state and RPC authority remains servi
 });
 
 test('Edge exposes and deployment verifies the fair-claim protocol on every runtime', () => {
-  assert.match(edge, /version: 17[\s\S]*cloudAutoRefreshClaimProtocol: 1/);
-  assert.match(edgeDeploy, /EXPECTED_SOURCE_SYNC_VERSION=17/);
+  assert.match(edge, /version: 18[\s\S]*cloudAutoRefreshClaimProtocol: 1/);
+  assert.match(edgeDeploy, /EXPECTED_SOURCE_SYNC_VERSION=18/);
   assert.match(edgeDeploy, /EXPECTED_CLOUD_AUTO_REFRESH_CLAIM_PROTOCOL=1/);
   assert.match(edgeDeploy, /norva-source-sync source digest mismatch/);
   assert.match(edgeDeploy, /function_health_in_service "\$service" norva-source-sync/);

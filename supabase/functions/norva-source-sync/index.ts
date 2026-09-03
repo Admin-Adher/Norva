@@ -5,7 +5,6 @@ import {
   clearLiveMaterialization,
   fetchLiveChannelIdMap,
   materializeLiveChunk,
-  refreshMaterializedLiveCatalog,
   upsertLiveChannelRows,
   upsertLiveVariantRows,
 } from "../_shared/live-materialization.ts";
@@ -116,7 +115,7 @@ Deno.serve(async (req) => {
       return json(req, {
         ok: true,
         service: "norva-source-sync",
-        version: 17,
+        version: 18,
         liveMaterialization: true,
         syncProgress: true,
         catalogFinalize: true,
@@ -134,6 +133,7 @@ Deno.serve(async (req) => {
         sourceReenableResumeProtocol: 1,
         m3uSyncLeaseProtocol: 2,
         m3uStreamingImportProtocol: 1,
+        m3uFinalizeResumeProtocol: 1,
         fileAudioRepairCohortProtocol: 2,
         tmdbSearchPolicy: TMDB_SEARCH_POLICY_VERSION,
       });
@@ -864,6 +864,29 @@ async function syncCloudSource(
 
     if (source.source_type === "m3u" && Number(result.total ?? 0) <= 0) {
       throw new HttpError(422, "No playable catalog items were imported from this source");
+    }
+
+    // Provider I/O and raw-row persistence are complete. Hand the expensive
+    // live projection to the durable finalize stepper instead of trying to
+    // materialize the whole M3U catalogue inside this provider-read isolate.
+    // The cursor is committed before the transport lease is released, so a
+    // crash at any point is recovered by resume-stuck without downloading the
+    // playlist again or consuming another provider-attempt budget.
+    if (source.source_type === "m3u" && resultRecord.finalizePending === true) {
+      const handoffAt = new Date().toISOString();
+      await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
+      await persistM3uFinalizeHandoff(db, sourceId, userId, {
+        contentSignature: resultRecord.contentSignature ?? previousSignature,
+        handoffAt,
+      });
+      await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
+      if (m3uLeaseToken) {
+        await assertM3uSyncLeaseCurrent(db, sourceId, userId, m3uLeaseToken);
+        await settleM3uSyncLease(db, sourceId, userId, m3uLeaseToken, "success", null);
+        m3uLeaseToken = null;
+      }
+      runInBackground(driveFinalizeToReady(db, sourceId, userId, country));
+      return { sourceId, status: "syncing", started: true, ...result };
     }
 
     const syncedAt = new Date().toISOString();
@@ -2974,10 +2997,38 @@ async function cronResumeStuck(db: SupabaseClient) {
     const isError = String(src.sync_status) === "error";
     const sourceType = String(src.source_type);
     if (sourceType === "m3u") {
-      // M3U has no category cursor because its import is deliberately bounded to
-      // one isolate. The timestamp is only a cheap candidate filter. Every task
-      // below must win norva_claim_source_m3u_sync_lease before credential
-      // decryption/provider I/O, so overlapping cron ticks stay harmless.
+      const progressStage = stringOr(progress.stage, "");
+      const finalizePhase = stringOr(finalizeCursor.phase, "");
+      const importStep = recordOrEmpty(recordOrEmpty(progress.steps).import);
+      const importedTotal = Number(recordOrEmpty(progress.counts).total);
+      // Once all raw rows are durable, finalization never needs provider I/O.
+      // Resume it with the catalogue finalizer even for a legacy 86%-stalled
+      // source that predates finalizeCursor. This intentionally bypasses a
+      // quarantined transport lease: replaying the provider fetch cannot repair
+      // an isolate that died while building the local projection.
+      const inM3uFinalize = (
+        finalizingStages.has(progressStage) &&
+        importStep.status === "done" &&
+        Number.isSafeInteger(importedTotal) && importedTotal > 0
+      ) || (
+        isError && finalizePhases.has(finalizePhase)
+      );
+      if (inM3uFinalize) {
+        const finalizeLease = recordOrEmpty(hint.finalizeLease);
+        const finalizeLeaseUntil = stringOr(finalizeLease.until, "");
+        if (finalizeLeaseUntil && finalizeLeaseUntil > new Date(now).toISOString()) continue;
+        const lastSeen = stringOr(progress.updatedAt, "");
+        if (lastSeen && lastSeen > staleFinalizeIso) continue;
+        runInBackground(driveFinalizeToReady(db, String(src.id), String(src.user_id), null));
+        resumed.push(String(src.id));
+        if (resumed.length >= 5) break;
+        continue;
+      }
+
+      // Discovery/provider-read recovery still owns the durable M3U transport
+      // lease. Only a real claim winner performs provider I/O, so overlapping
+      // cron ticks remain harmless and quarantined sources cannot starve later
+      // candidates in this paginated scan.
       const lastSeen = stringOr(progress.updatedAt, "");
       if (lastSeen && lastSeen > staleFinalizeIso) continue;
       const leaseToken = crypto.randomUUID();
@@ -3299,6 +3350,51 @@ async function patchSourceConfigHint(db: SupabaseClient, sourceId: string, mutat
   const { data } = await db.from("cloud_sources").select("config_hint").eq("id", sourceId).maybeSingle();
   const hint = mutate(recordOrEmpty(data?.config_hint));
   await db.from("cloud_sources").update({ config_hint: compactRecord(hint) }).eq("id", sourceId);
+}
+
+async function persistM3uFinalizeHandoff(
+  db: SupabaseClient,
+  sourceId: string,
+  userId: string,
+  input: { contentSignature: unknown; handoffAt: string },
+) {
+  const { data: source, error: readError } = await db
+    .from("cloud_sources")
+    .select("config_hint")
+    .eq("id", sourceId)
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (readError) throwDb(readError, "Unable to load M3U finalize handoff state");
+  if (!source) throw new HttpError(404, "Source not found");
+
+  const hint = recordOrEmpty(source.config_hint);
+  const progress = mergeSyncProgress(recordOrEmpty(hint.syncProgress), {
+    status: "syncing",
+    stage: "finalizing",
+    percent: 86,
+    updatedAt: input.handoffAt,
+    steps: { finalize: { status: "running" } },
+  });
+  const { data: updated, error: updateError } = await db
+    .from("cloud_sources")
+    .update({
+      sync_status: "syncing",
+      sync_error: null,
+      config_hint: compactRecord({
+        ...hint,
+        contentSignature: input.contentSignature,
+        syncProgress: progress,
+        finalizeCursor: { phase: "live", offset: 0, afterId: "" },
+      }),
+    })
+    .eq("id", sourceId)
+    .eq("user_id", userId)
+    .select("id")
+    .maybeSingle();
+  if (updateError) throwDb(updateError, "Unable to persist M3U finalize handoff");
+  if (!updated) throw new HttpError(409, "M3U finalize handoff lost source ownership", {
+    code: "SOURCE_CATALOG_CHANGED",
+  });
 }
 
 // Forward-date the finalize single-flight lease so the watchdog treats this worker as
@@ -4303,19 +4399,12 @@ async function syncM3uSource(
     steps: { import: { status: "done", count: savedRows.length }, finalize: { status: "running" } },
   });
   await assertCatalogSnapshotCurrent(sourceId, userId, expectedSnapshot, db);
-  const liveCatalog = await refreshMaterializedLiveCatalog(db, {
-    sourceId,
-    userId,
-    rows: savedRows,
-    country: country || stringOr(config.country, "FR"),
-    generation: expectedSnapshot,
-    heartbeat,
-  });
-  await assertCatalogSnapshotCurrent(sourceId, userId, expectedSnapshot, db);
   return {
     live: rows.length,
     total: rows.length,
-    liveCatalog,
+    liveCategories: categoryCount,
+    finalizePending: true,
+    liveCatalog: { rawLive: savedRows.length, pending: true },
     contentSignature,
     importTruncated: playlist.truncated || undefined,
     importLimitReason: playlist.truncated ? playlist.truncationReason : undefined,

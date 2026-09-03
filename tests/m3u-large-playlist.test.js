@@ -143,7 +143,7 @@ test('production health gates identify the streaming import release', () => {
   const deployScript = read('ops/hetzner/scripts/04-deploy-edge-functions.sh');
 
   assert.match(cloudSource, /version:\s*27/);
-  assert.match(workerSource, /version:\s*17/);
+  assert.match(workerSource, /version:\s*18/);
   assert.match(cloudSource, /m3uStreamingImportProtocol:\s*1/);
   assert.match(workerSource, /m3uStreamingImportProtocol:\s*1/);
   assert.match(deployScript, /EXPECTED_M3U_STREAMING_IMPORT_PROTOCOL=1/);

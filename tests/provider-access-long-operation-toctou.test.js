@@ -161,7 +161,8 @@ test('resumable Xtream and M3U continuations cannot keep dispatching or writing 
 
   const m3u = section(sourceSync, 'async function syncM3uSource(', '\nasync function replaceSourceItems(');
   assert.match(m3u, /assertCatalogSnapshotCurrent[\s\S]*fetchM3uItems\([\s\S]*assertCatalogSnapshotCurrent/);
-  assert.match(m3u, /assertCatalogSnapshotCurrent[\s\S]*replaceSourceItems[\s\S]*assertCatalogSnapshotCurrent[\s\S]*refreshMaterializedLiveCatalog[\s\S]*assertCatalogSnapshotCurrent/);
+  assert.match(m3u, /assertCatalogSnapshotCurrent[\s\S]*replaceSourceItems[\s\S]*assertCatalogSnapshotCurrent[\s\S]*finalizePending:\s*true/);
+  assert.doesNotMatch(m3u, /refreshMaterializedLiveCatalog/);
   assert.doesNotMatch(`${sourceSync}\n${xtream}`, /allowHidden|allowStaging|bypassVisibility/);
 });
 
