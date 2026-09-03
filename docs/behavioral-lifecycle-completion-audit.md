@@ -76,6 +76,7 @@ La baseline agrégée Hetzner/GA4 antérieure au déploiement est conservée dan
 ## Résultats de validation locale
 
 - PostgreSQL 16.15 jetable : migration complète validée et commitée dans la transaction de test.
+- Le premier gate sur le schéma Hetzner réel a détecté que les privilèges Supabase par défaut laissaient `service_role` modifier ou supprimer l’attestation d’import. Le déploiement Edge a été interrompu avant redémarrage, les runtimes précédents ont été restaurés sains, et la correction est isolée dans `20260904090000_behavioral_lifecycle_import_readiness_append_only.sql` : révocation complète puis réattribution exclusive de `SELECT, INSERT`.
 - Scénarios transactionnels : `BEHAVIORAL_LIFECYCLE_INTEGRATION_OK`.
 - Concurrence à deux workers : `BEHAVIORAL_LIFECYCLE_CONCURRENCY_OK`.
 - Le test de concurrence transporte désormais explicitement socket, port, base et rôle actifs ; il ne peut plus tomber silencieusement sur un autre cluster local.

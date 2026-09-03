@@ -26,7 +26,7 @@ function validEvidence(targetEnvironment = 'staging') {
     ]),
   );
   return {
-    schema_version: 1,
+    schema_version: 2,
     artifact_type: 'norva_behavioral_lifecycle_dormant_installation',
     evidence_scope: 'dormant_installation_only',
     captured_at: '2026-09-03T12:00:00Z',
@@ -36,7 +36,10 @@ function validEvidence(targetEnvironment = 'staging') {
     server_checkout_sha: 'c'.repeat(40),
     contains_personal_data: false,
     contains_secrets: false,
-    migration_sha256: DIGEST_B,
+    migration_sha256s: {
+      engine_v1: DIGEST_B,
+      import_readiness_append_only: DIGEST_A,
+    },
     database_read_only_gate: {
       status: 'BEHAVIORAL_LIFECYCLE_PRE_ACTIVATION_READY',
       relations: 10,

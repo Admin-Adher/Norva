@@ -156,10 +156,18 @@ begin
     raise exception 'lifecycle readiness: service role cannot read: %', v_missing;
   end if;
 
-  if has_table_privilege(
+  if not has_table_privilege(
+       'service_role', 'public.behavioral_lifecycle_import_readiness', 'INSERT'
+     ) or has_table_privilege(
        'service_role', 'public.behavioral_lifecycle_import_readiness', 'UPDATE'
      ) or has_table_privilege(
        'service_role', 'public.behavioral_lifecycle_import_readiness', 'DELETE'
+     ) or has_table_privilege(
+       'service_role', 'public.behavioral_lifecycle_import_readiness', 'TRUNCATE'
+     ) or has_table_privilege(
+       'service_role', 'public.behavioral_lifecycle_import_readiness', 'REFERENCES'
+     ) or has_table_privilege(
+       'service_role', 'public.behavioral_lifecycle_import_readiness', 'TRIGGER'
      ) then
     raise exception 'lifecycle readiness: import attestation is not append-only';
   end if;

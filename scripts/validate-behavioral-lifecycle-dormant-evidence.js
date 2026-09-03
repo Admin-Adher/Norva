@@ -21,7 +21,7 @@ const TOP_LEVEL_KEYS = [
   'server_checkout_sha',
   'contains_personal_data',
   'contains_secrets',
-  'migration_sha256',
+  'migration_sha256s',
   'database_read_only_gate',
   'edge_runtime',
   'release_assertion',
@@ -52,6 +52,7 @@ const REPLICA_KEYS = [
   'started_at',
 ];
 const RELEASE_KEYS = ['pilot_eligible', 'reason', 'missing_required_proofs'];
+const MIGRATION_KEYS = ['engine_v1', 'import_readiness_append_only'];
 const RUNTIME_PATHS = [
   'norva-cloud/index.ts',
   'norva-lifecycle/index.ts',
@@ -107,7 +108,7 @@ function canonicalize(value) {
 
 function validateEvidence(value) {
   assertExactKeys(value, TOP_LEVEL_KEYS, 'artifact');
-  assert(value.schema_version === 1, 'schema_version must be 1');
+  assert(value.schema_version === 2, 'schema_version must be 2');
   assert(value.artifact_type === 'norva_behavioral_lifecycle_dormant_installation', 'artifact_type is invalid');
   assert(value.evidence_scope === 'dormant_installation_only', 'evidence_scope is invalid');
   assertIsoTimestamp(value.captured_at, 'captured_at');
@@ -123,7 +124,10 @@ function validateEvidence(value) {
   assert(COMMIT_SHA.test(value.server_checkout_sha), 'server_checkout_sha is invalid');
   assert(value.contains_personal_data === false, 'artifact must declare no personal data');
   assert(value.contains_secrets === false, 'artifact must declare no secrets');
-  assert(SHA256.test(value.migration_sha256), 'migration_sha256 is invalid');
+  assertExactKeys(value.migration_sha256s, MIGRATION_KEYS, 'migration_sha256s');
+  for (const key of MIGRATION_KEYS) {
+    assert(SHA256.test(value.migration_sha256s[key]), `migration_sha256s.${key} is invalid`);
+  }
 
   const gate = value.database_read_only_gate;
   assertExactKeys(gate, GATE_KEYS, 'database_read_only_gate');

@@ -13,6 +13,7 @@ readonly COMPOSE="$REPO_ROOT/ops/hetzner/docker-compose.supabase.yml"
 readonly ENV_FILE="$REPO_ROOT/ops/hetzner/.env"
 readonly GATE="$SCRIPT_DIR/verify-behavioral-lifecycle-pre-activation.sh"
 readonly MIGRATION="$REPO_ROOT/supabase/migrations/20260903180000_behavioral_lifecycle_engine_v1.sql"
+readonly HARDENING_MIGRATION="$REPO_ROOT/supabase/migrations/20260904090000_behavioral_lifecycle_import_readiness_append_only.sql"
 readonly OUTPUT_DIR="${LIFECYCLE_EVIDENCE_OUTPUT_DIR:-}"
 readonly DEPLOYMENT_ID="${LIFECYCLE_DEPLOYMENT_ID:-}"
 readonly TARGET_ENVIRONMENT="${LIFECYCLE_TARGET_ENVIRONMENT:-}"
@@ -43,7 +44,8 @@ fail() {
   || fail 'LIFECYCLE_DEPLOYMENT_ID contains a forbidden traversal marker'
 [[ "$TARGET_ENVIRONMENT" == 'staging' || "$TARGET_ENVIRONMENT" == 'production' ]] \
   || fail 'LIFECYCLE_TARGET_ENVIRONMENT must be staging or production'
-[[ -f "$COMPOSE" && -f "$ENV_FILE" && -f "$GATE" && -f "$MIGRATION" ]] \
+[[ -f "$COMPOSE" && -f "$ENV_FILE" && -f "$GATE" && -f "$MIGRATION" \
+    && -f "$HARDENING_MIGRATION" ]] \
   || fail 'a required reviewed deployment file is missing'
 
 readonly OUTPUT_REAL="$(readlink -f -- "$OUTPUT_DIR")"
@@ -154,6 +156,7 @@ for service in "${EDGE_SERVICES[@]}"; do
 done
 
 readonly MIGRATION_SHA256="$(tr -d '\r' < "$MIGRATION" | sha256sum | awk '{print $1}')"
+readonly HARDENING_MIGRATION_SHA256="$(tr -d '\r' < "$HARDENING_MIGRATION" | sha256sum | awk '{print $1}')"
 readonly CAPTURE_STAMP="$(date -u +'%Y%m%dT%H%M%SZ')"
 readonly FINAL_PATH="$OUTPUT_REAL/behavioral-lifecycle-dormant-${TARGET_ENVIRONMENT}-${CAPTURE_STAMP}-${COMMIT_SHA:0:12}.json"
 [[ ! -e "$FINAL_PATH" ]] || fail 'refusing to overwrite an existing artifact'
@@ -164,6 +167,7 @@ export NORVA_LIFECYCLE_EVIDENCE_DEPLOYMENT_ID="$DEPLOYMENT_ID"
 export NORVA_LIFECYCLE_EVIDENCE_TARGET="$TARGET_ENVIRONMENT"
 export NORVA_LIFECYCLE_EVIDENCE_COMMIT="$COMMIT_SHA"
 export NORVA_LIFECYCLE_EVIDENCE_MIGRATION_SHA256="$MIGRATION_SHA256"
+export NORVA_LIFECYCLE_EVIDENCE_HARDENING_MIGRATION_SHA256="$HARDENING_MIGRATION_SHA256"
 
 python3 - <<'PY'
 import datetime
@@ -180,6 +184,7 @@ deployment_id = os.environ["NORVA_LIFECYCLE_EVIDENCE_DEPLOYMENT_ID"]
 target = os.environ["NORVA_LIFECYCLE_EVIDENCE_TARGET"]
 commit = os.environ["NORVA_LIFECYCLE_EVIDENCE_COMMIT"]
 migration_sha = os.environ["NORVA_LIFECYCLE_EVIDENCE_MIGRATION_SHA256"]
+hardening_migration_sha = os.environ["NORVA_LIFECYCLE_EVIDENCE_HARDENING_MIGRATION_SHA256"]
 
 gate = json.loads((work / "database-gate.json").read_text(encoding="utf-8"))
 digests = {}
@@ -248,7 +253,7 @@ captured_at = datetime.datetime.now(datetime.timezone.utc).replace(
     microsecond=0
 ).isoformat().replace("+00:00", "Z")
 artifact = {
-    "schema_version": 1,
+    "schema_version": 2,
     "artifact_type": "norva_behavioral_lifecycle_dormant_installation",
     "evidence_scope": "dormant_installation_only",
     "captured_at": captured_at,
@@ -258,7 +263,10 @@ artifact = {
     "server_checkout_sha": commit,
     "contains_personal_data": False,
     "contains_secrets": False,
-    "migration_sha256": migration_sha,
+    "migration_sha256s": {
+        "engine_v1": migration_sha,
+        "import_readiness_append_only": hardening_migration_sha,
+    },
     "database_read_only_gate": gate,
     "edge_runtime": {
         "replica_count": len(replicas),

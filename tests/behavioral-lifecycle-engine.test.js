@@ -11,6 +11,7 @@ const { pathToFileURL } = require('node:url');
 const root = path.join(__dirname, '..');
 const read = (...parts) => fs.readFileSync(path.join(root, ...parts), 'utf8').replace(/\r\n/g, '\n');
 const migration = read('supabase', 'migrations', '20260903180000_behavioral_lifecycle_engine_v1.sql');
+const hardeningMigration = read('supabase', 'migrations', '20260904090000_behavioral_lifecycle_import_readiness_append_only.sql');
 const lifecycle = read('supabase', 'functions', 'norva-lifecycle', 'index.ts');
 const cloud = read('supabase', 'functions', 'norva-cloud', 'index.ts');
 const norvaAdmin = read('supabase', 'functions', 'norva-admin', 'index.ts');
@@ -121,12 +122,21 @@ test('pre-activation readiness gate is read-only and proves the reviewed dormant
   const gateSql = read('ops/hetzner/tests/behavioral_lifecycle_pre_activation_readiness.sql');
 
   const expectedDigest = gateScript.match(/EXPECTED_MIGRATION_SHA256='([0-9a-f]{64})'/)?.[1];
+  const expectedHardeningDigest = gateScript.match(/EXPECTED_HARDENING_MIGRATION_SHA256='([0-9a-f]{64})'/)?.[1];
   const migrationBytes = fs.readFileSync(path.join(
     root, 'supabase', 'migrations', '20260903180000_behavioral_lifecycle_engine_v1.sql',
   ));
   const normalizedMigration = migrationBytes.toString('utf8').replace(/\r/g, '');
   const actualDigest = crypto.createHash('sha256').update(normalizedMigration).digest('hex');
   assert.equal(expectedDigest, actualDigest);
+  const hardeningMigrationBytes = fs.readFileSync(path.join(
+    root, 'supabase', 'migrations', '20260904090000_behavioral_lifecycle_import_readiness_append_only.sql',
+  ));
+  const normalizedHardeningMigration = hardeningMigrationBytes.toString('utf8').replace(/\r/g, '');
+  const actualHardeningDigest = crypto.createHash('sha256').update(normalizedHardeningMigration).digest('hex');
+  assert.equal(expectedHardeningDigest, actualHardeningDigest);
+  assert.match(hardeningMigration, /revoke all on table public\.behavioral_lifecycle_import_readiness\s+from service_role/i);
+  assert.match(hardeningMigration, /grant select, insert on table public\.behavioral_lifecycle_import_readiness\s+to service_role/i);
   assert.match(gateScript, /tr -d '\\r'/);
   assert.match(gateScript, /default_transaction_read_only=on/);
   assert.match(gateScript, /if \[\[ -n "\$\{PGDATABASE:-\}" \]\]/);
@@ -162,11 +172,13 @@ test('dormant deployment evidence is sanitized, immutable and never authorizes a
     'evidence must be written outside the Git checkout',
     'the deployed checkout has tracked modifications',
     'verify-behavioral-lifecycle-pre-activation.sh',
+    '20260904090000_behavioral_lifecycle_import_readiness_append_only.sql',
     'docker compose --env-file "$ENV_FILE" -f "$COMPOSE" ps -q db',
     'docker exec "$container" sha256sum',
     'contains_personal_data',
     'contains_secrets',
     'dormant_installation_only',
+    'migration_sha256s',
     '"pilot_eligible": False',
     'BEHAVIORAL_LIFECYCLE_PILOT_ELIGIBLE=false',
     'mature_j7_and_j14_outcomes',
