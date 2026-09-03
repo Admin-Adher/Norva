@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 set local search_path = public,extensions;
-select extensions.plan(20);
+select extensions.plan(24);
 
 -- The proof container may retain unrelated historical cleanup fixtures. Keep
 -- them pending but outside this rollback-only test window so the global fair
@@ -37,6 +37,24 @@ insert into public.cloud_sources(
   'xtream','source-delete-fixture','cipher-delete',
   '{"serverHost":"delete.example.invalid","username":"delete-user"}'::jsonb,
   'ready'
+);
+
+insert into public.cloud_playback_events(
+  user_id,source_id,item_type,item_id,event_type
+) values (
+  '93200000-0000-4000-8000-000000000001',
+  '93200000-0000-4000-8000-000000000101',
+  'movie','source-delete-guard-regression','play_requested'
+);
+
+select extensions.ok(
+  exists (
+    select 1
+    from public.cloud_playback_events
+    where source_id = '93200000-0000-4000-8000-000000000101'
+      and item_id = 'source-delete-guard-regression'
+  ),
+  'fixture includes a directly source-owned playback row guarded during terminal cleanup'
 );
 
 select extensions.ok(
@@ -82,6 +100,21 @@ select extensions.ok(
   ),
   'removed source is absent from the catalog before background cleanup'
 );
+
+insert into public.cloud_provider_account_delete_preparations(user_id)
+values ('93200000-0000-4000-8000-000000000001');
+
+select extensions.is(
+  (public.norva_run_replacement_cleanup_batch(
+    'source-delete-account-fence-proof',
+    200
+  )->>'claimed')::boolean,
+  false,
+  'source cleanup does not claim an account owned by account deletion preparation'
+);
+
+delete from public.cloud_provider_account_delete_preparations
+where user_id = '93200000-0000-4000-8000-000000000001';
 
 select extensions.is(
   (public.norva_run_replacement_cleanup_batch(
@@ -136,6 +169,16 @@ select extensions.ok(
    where source_id = '93200000-0000-4000-8000-000000000101'
      and user_id = '93200000-0000-4000-8000-000000000001'),
   'bounded database reaper ticks converge without an Edge lease'
+);
+
+select extensions.ok(
+  not exists (
+    select 1
+    from public.cloud_playback_events
+    where source_id = '93200000-0000-4000-8000-000000000101'
+      and item_id = 'source-delete-guard-regression'
+  ),
+  'terminal worker deletes directly source-owned playback rows without widening the fence'
 );
 
 select extensions.ok(
@@ -229,6 +272,31 @@ select extensions.ok(
     )
   ) > 0,
   'operator cron path is narrow and the public RPC remains service-role gated'
+);
+
+select extensions.ok(
+  position(
+    'source_delete_cleanup_guard_authority_v1'
+    in pg_catalog.pg_get_functiondef(
+      'public.norva_provider_account_delete_write_guard()'::regprocedure
+    )
+  ) > 0 and position(
+    'source.provider_deletion_pending'
+    in pg_catalog.pg_get_functiondef(
+      'public.norva_provider_account_delete_write_guard()'::regprocedure
+    )
+  ) > 0 and position(
+    'cloud_provider_account_delete_preparations preparation'
+    in pg_catalog.pg_get_functiondef(
+      'public.norva_provider_account_delete_write_guard()'::regprocedure
+    )
+  ) > 0 and position(
+    'source_delete_cleanup_worker_authority_v1'
+    in pg_catalog.pg_get_functiondef(
+      'public.norva_run_replacement_cleanup_batch(text,integer)'::regprocedure
+    )
+  ) > 0,
+  'cleanup authority is exact-source, due-job, hidden-tombstone and account-delete aware'
 );
 
 select extensions.ok(
