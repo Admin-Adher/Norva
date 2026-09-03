@@ -1,0 +1,13 @@
+ARG MEDIA_LAB_GATEWAY_BASE_IMAGE
+FROM ${MEDIA_LAB_GATEWAY_BASE_IMAGE}
+
+ARG MEDIA_LAB_GATEWAY_BASE_IMAGE
+ARG MEDIA_LAB_GATEWAY_SOURCE_SHA
+
+# Keep the large, production-equivalent codec/VAAPI image immutable while a
+# private Lab run replaces only the candidate Gateway source under test.
+COPY services/media-gateway/src/index.js /app/src/index.js
+RUN node --check /app/src/index.js
+
+LABEL norva.media-lab-gateway.candidate-source-sha256="${MEDIA_LAB_GATEWAY_SOURCE_SHA}" \
+      norva.media-lab-gateway.base-image="${MEDIA_LAB_GATEWAY_BASE_IMAGE}"
