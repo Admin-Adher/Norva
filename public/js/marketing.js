@@ -7,6 +7,17 @@
   var googleConsentDefaulted = false;
   var debug = Boolean(cfg.debug || /[?&]norva_marketing_debug=1\b/.test(location.search));
 
+  function nativeSurface() {
+    try {
+      if (/NorvaTV-Android(?:Phone|TV)/i.test(navigator.userAgent || '')) return true;
+      return Boolean(window.NorvaNativeAnalytics
+        && typeof window.NorvaNativeAnalytics.available === 'function'
+        && window.NorvaNativeAnalytics.available());
+    } catch (_) {
+      return false;
+    }
+  }
+
   function compact(obj) {
     var out = {};
     Object.keys(obj || {}).forEach(function (key) {
@@ -21,7 +32,7 @@
   }
 
   function enabled() {
-    return Boolean(cfg.enabled && consent === 'granted');
+    return Boolean(cfg.enabled && consent === 'granted' && !nativeSurface());
   }
 
   function ensureGoogleCommandQueue() {
@@ -160,6 +171,9 @@
     track: track,
     setConsent: function (next) {
       consent = next === 'denied' ? 'denied' : 'granted';
+      // Native Firebase/Clarity own Android telemetry. Never bootstrap gtag or
+      // Meta inside Norva's WebView, even after a saved-consent page reload.
+      if (nativeSurface()) return;
       updateGoogleConsent(consent);
       init();
     },
@@ -168,7 +182,7 @@
 
   // Basic consent mode: queue a denied default immediately, but keep the
   // network tag itself unloaded until the visitor explicitly opts in.
-  ensureGoogleConsentDefault();
+  if (!nativeSurface()) ensureGoogleConsentDefault();
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init, { once: true });
   else init();

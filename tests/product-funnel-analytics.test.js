@@ -58,18 +58,18 @@ test('Smart Event spine stays exactly at Clarity custom-event capacity', () => {
 
 test('every core product surface loads the common adapters before consent', () => {
   const surfaces = [
-    ['public/account.html', 1],
-    ['public/app.html', 3],
-    ['public/subscribe.html', 1],
-    ['public/paywall.html', 1],
-    ['public/checkout-revolut.html', 1],
-    ['public/subscription.html', 1]
+    ['public/account.html', 3, 4],
+    ['public/app.html', 3, 4],
+    ['public/subscribe.html', 2, 1],
+    ['public/paywall.html', 2, 1],
+    ['public/checkout-revolut.html', 2, 1],
+    ['public/subscription.html', 2, 1]
   ];
-  for (const [file, consentVersion] of surfaces) {
+  for (const [file, productVersion, consentVersion] of surfaces) {
     const html = read(file);
     const config = html.indexOf('/js/marketing-config.js?v=2');
     const native = html.indexOf('/js/native-analytics.js?v=2');
-    const product = html.indexOf('/js/product-analytics.js?v=2');
+    const product = html.indexOf(`/js/product-analytics.js?v=${productVersion}`);
     const consent = html.indexOf(`/js/consent-banner.js?v=${consentVersion}`);
     assert.ok(config >= 0 && config < native && native < product && product < consent,
       `${file}: common analytics adapters must precede consent`);

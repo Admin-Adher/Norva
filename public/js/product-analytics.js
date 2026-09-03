@@ -320,7 +320,10 @@
   });
 
   if (consent === 'granted') {
-    if (window.NorvaMarketing && typeof window.NorvaMarketing.setConsent === 'function') {
+    // A returning Android WebView may already have granted consent in storage.
+    // Keep its business events on the native Firebase/Clarity path only.
+    if (!platformContext().nativeShell
+        && window.NorvaMarketing && typeof window.NorvaMarketing.setConsent === 'function') {
       window.NorvaMarketing.setConsent('granted');
     }
     loadClarity();

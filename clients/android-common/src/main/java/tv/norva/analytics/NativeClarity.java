@@ -38,6 +38,11 @@ public final class NativeClarity {
         void onConsentChanged(boolean granted);
     }
 
+    /** Receives only names accepted by the closed product-event vocabulary. */
+    public interface EventListener {
+        void onEvent(String eventName);
+    }
+
     private static final String PREFS = "norva_native_analytics";
     private static final String PREF_CONSENT = "analytics_consent";
     private static final int PROTOCOL_VERSION = 2;
@@ -113,6 +118,15 @@ public final class NativeClarity {
             String raw,
             ConsentListener consentListener
     ) {
+        handleMessage(activity, raw, consentListener, null);
+    }
+
+    public static void handleMessage(
+            Activity activity,
+            String raw,
+            ConsentListener consentListener,
+            EventListener eventListener
+    ) {
         if (activity == null || raw == null || raw.isEmpty()
                 || raw.length() > MAX_MESSAGE_CHARS) return;
         try {
@@ -132,7 +146,14 @@ public final class NativeClarity {
                 return;
             }
             if ("event".equals(type) && hasExactKeys(message, "v", "type", "name")) {
-                event(message.optString("name", ""));
+                String eventName = normalize(message.optString("name", ""));
+                if (!EVENTS.contains(eventName)) return;
+                event(eventName);
+                // Firebase consent is independent of whether Clarity was able
+                // to start a replay session, so use the persisted user choice.
+                if (eventListener != null && hasStoredConsent(activity)) {
+                    eventListener.onEvent(eventName);
+                }
                 return;
             }
             if ("context".equals(type) && hasExactKeys(message, "v", "type", "tags")) {
@@ -271,6 +292,12 @@ public final class NativeClarity {
 
     static boolean isAllowedContext(String key, String value) {
         return !allowedValue(normalize(key), value).isEmpty();
+    }
+
+    private static boolean hasStoredConsent(Context context) {
+        return context != null && "granted".equals(context
+                .getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getString(PREF_CONSENT, "unknown"));
     }
 
     private static boolean hasExactKeys(JSONObject value, String... keys) {
