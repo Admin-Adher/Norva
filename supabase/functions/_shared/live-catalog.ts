@@ -333,7 +333,10 @@ function buildBuckets(rows: LiveCatalogItem[], country: string) {
   });
 
   return [...buckets.values()]
-    .map((bucket) => ({ ...bucket, variants: dedupeVariants(bucket.variants) }))
+    // Keep every concrete provider stream. The compact channel preview is
+    // deduplicated by quality label later, but the materialized variant table
+    // must retain same-label siblings so playback can fail over between them.
+    .map((bucket) => ({ ...bucket, variants: sortConcreteVariants(bucket.variants) }))
     .filter((bucket) => bucket.variants.length > 0)
     .sort((a, b) =>
       sectionPriority(a.section) - sectionPriority(b.section) ||
@@ -354,7 +357,8 @@ function ensureBucket(buckets: Map<string, LiveBucket>, key: string, value: Omit
 
 function makeLogicalChannel(bucket: LiveBucket, includeVariants: boolean): JsonRecord | null {
   const variants = bucket.variants;
-  const defaultVariant = pickDefault(variants);
+  const previewVariants = dedupeVariantPreviews(variants);
+  const defaultVariant = pickDefault(previewVariants);
   if (!defaultVariant) return null;
   const id = makeLogicalId(bucket.key);
   const channel: JsonRecord = {
@@ -379,9 +383,11 @@ function makeLogicalChannel(bucket: LiveBucket, includeVariants: boolean): JsonR
     group_name: bucket.groupName,
     poster_url: bucket.logo || defaultVariant.poster_url,
     stream_icon: bucket.logo || defaultVariant.stream_icon,
-    variant_count: variants.length,
-    variantCount: variants.length,
-    variant_preview: variants.map(summaryVariant),
+    // The summary remains bounded by the finite quality-label space. Full
+    // concrete siblings are carried separately when includeVariants is true.
+    variant_count: previewVariants.length,
+    variantCount: previewVariants.length,
+    variant_preview: previewVariants.map(summaryVariant),
     default_variant: summaryVariant(defaultVariant),
     defaultVariant: summaryVariant(defaultVariant),
     playback_hint: defaultVariant.playback_hint,
@@ -579,7 +585,16 @@ function variantFrom(item: LiveCatalogItem, parsed: ParsedName): LiveVariant {
   };
 }
 
-function dedupeVariants(variants: LiveVariant[]) {
+function sortConcreteVariants(variants: LiveVariant[]) {
+  return variants.slice().sort((a, b) =>
+    (a.healthRank - b.healthRank) ||
+    (a.rank - b.rank) ||
+    a.label.localeCompare(b.label) ||
+    a.streamId.localeCompare(b.streamId)
+  );
+}
+
+function dedupeVariantPreviews(variants: LiveVariant[]) {
   const byLabel = new Map<string, LiveVariant>();
   for (const variant of variants.slice().sort((a, b) => (a.healthRank - b.healthRank) || (a.rank - b.rank))) {
     if (!byLabel.has(variant.label)) byLabel.set(variant.label, variant);

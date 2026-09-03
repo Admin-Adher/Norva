@@ -470,6 +470,33 @@ test('live summary merge uses bounded RPC bodies and never a logical-id URL filt
   assert.match(source(path.join(ROOT, 'supabase', 'functions', 'norva-cloud', 'index.ts')), /const LIVE_CHUNK = 10/);
 });
 
+test('live materialization preserves same-label concrete streams while bounding previews', () => {
+  const { buildLiveMaterializationPlan } = loadLiveMaterializationModule();
+  const sourceId = '22222222-2222-4222-8222-222222222222';
+  const userId = '33333333-3333-4333-8333-333333333333';
+  const rows = ['stream-a', 'stream-b'].map((externalId, index) => ({
+    id: `44444444-4444-4444-8444-44444444444${index}`,
+    user_id: userId,
+    source_id: sourceId,
+    item_type: 'live',
+    external_id: externalId,
+    parent_external_id: 'news',
+    title: 'Example News HD',
+    subtitle: 'News',
+    metadata: {},
+    playback_hint: { url: `https://example.invalid/${externalId}` },
+    available: true,
+  }));
+
+  const plan = buildLiveMaterializationPlan({ userId, sourceId, rows, country: 'IN' });
+  assert.equal(plan.rawLive, 2);
+  assert.equal(plan.channelRows.length, 1);
+  assert.equal(plan.channelRows[0].variant_count, 1, 'preview stays one entry per quality label');
+  assert.equal(plan.channelRows[0].variant_preview.length, 1);
+  assert.equal(plan.variantRows.length, 2, 'every concrete stream remains a playback fallback');
+  assert.deepEqual(plan.variantRows.map((row) => row.stream_id).sort(), ['stream-a', 'stream-b']);
+});
+
 test('durable finalizer claims one CAS lease before writing and fences every handoff', () => {
   const worker = source(path.join(ROOT, 'supabase', 'functions', 'norva-source-sync', 'index.ts'));
   const cloud = source(path.join(ROOT, 'supabase', 'functions', 'norva-cloud', 'index.ts'));

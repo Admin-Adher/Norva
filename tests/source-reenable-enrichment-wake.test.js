@@ -368,12 +368,12 @@ test('production health and deploy verification expose the source resume protoco
   assert.match(cloud, /sourceDesiredStateProtocol:\s*1/);
   assert.match(cloud, /legacySourceToggleBridge:\s*1/);
   assert.match(cloud, /m3uSyncLeaseProtocol:\s*2/);
-  assert.match(sourceSync, /version:\s*18/);
+  assert.match(sourceSync, /version:\s*19/);
   assert.match(sourceSync, /sourceReenableResumeProtocol:\s*1/);
   assert.match(sourceSync, /m3uSyncLeaseProtocol:\s*2/);
   assert.match(sourceSync, /fileAudioRepairCohortProtocol:\s*2/);
   assert.match(deployEdge, /EXPECTED_CLOUD_VERSION=27/);
-  assert.match(deployEdge, /EXPECTED_SOURCE_SYNC_VERSION=18/);
+  assert.match(deployEdge, /EXPECTED_SOURCE_SYNC_VERSION=19/);
   assert.match(deployEdge, /sourceDesiredStateProtocol/);
   assert.match(deployEdge, /legacySourceToggleBridge/);
   assert.match(deployEdge, /sourceReenableResumeProtocol/);

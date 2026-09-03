@@ -115,7 +115,7 @@ Deno.serve(async (req) => {
       return json(req, {
         ok: true,
         service: "norva-source-sync",
-        version: 18,
+        version: 19,
         liveMaterialization: true,
         syncProgress: true,
         catalogFinalize: true,
@@ -134,6 +134,7 @@ Deno.serve(async (req) => {
         m3uSyncLeaseProtocol: 2,
         m3uStreamingImportProtocol: 1,
         m3uFinalizeResumeProtocol: 1,
+        m3uCompleteLiveVariantsProtocol: 1,
         fileAudioRepairCohortProtocol: 2,
         tmdbSearchPolicy: TMDB_SEARCH_POLICY_VERSION,
       });

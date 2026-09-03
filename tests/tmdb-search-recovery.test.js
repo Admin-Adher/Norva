@@ -64,7 +64,7 @@ test('source-sync health proves the exact TMDB policy deployed by every replica'
   const sourceSync = read('supabase/functions/norva-source-sync/index.ts');
   const deploy = read('ops/hetzner/scripts/04-deploy-edge-functions.sh');
 
-  assert.match(sourceSync, /version: 18/);
+  assert.match(sourceSync, /version: 19/);
   assert.match(sourceSync, /tmdbSearchPolicy: TMDB_SEARCH_POLICY_VERSION/);
   assert.match(deploy, /EXPECTED_TMDB_SEARCH_POLICY=promax-multilang-v2/);
   assert.match(deploy, /tmdbSearchPolicy/);
