@@ -138,7 +138,7 @@ function loadFastStartHarness(overrides = {}) {
     MKV_COMPLETE_HLS_CACHE_LOCATOR_BUILD: 2,
     MKV_COMPLETE_HLS_CACHE_LOCATOR_KEY: COMPLETE_CACHE_KEY,
     MKV_COMPLETE_HLS_CACHE_TTL_MS: 7 * 24 * 60 * 60 * 1000,
-    MKV_COMPLETE_HLS_CACHE_PIPELINE_BUILD: 'mkv-complete-hls-mpegts-v5',
+    MKV_COMPLETE_HLS_CACHE_PIPELINE_BUILD: 'mkv-complete-hls-mpegts-v6',
     MKV_COMPLETE_HLS_CACHE_PROFILE_SNAPSHOT_MAX_BYTES: 256 * 1024,
     mkvCompleteHlsCache: {},
     EXACT_MATROSKA_H264_HLS_TARGET_SECONDS: 2,
@@ -1006,6 +1006,9 @@ test('generic complete-cache locator admits a prepared HEVC graph without provid
     mode: 'transcode',
     videoMode: 'encode',
     testAudioMode: 'transcode',
+    audioStreamIndex: 1,
+    audioMode: 'transcode',
+    clientAudioPassthrough: false,
     hlsTargetSeconds: 4,
     inputPump: { completed: true },
     codecProfile: {
@@ -1020,7 +1023,7 @@ test('generic complete-cache locator admits a prepared HEVC graph without provid
   assert.equal(locator.payload.scope, 'complete-hls');
   assert.equal(
     locator.payload.pipelineBuild,
-    'mkv-complete-hls-mpegts-v5:video-encode:audio-transcode:subtitles-webvtt-0:target-4',
+    'mkv-complete-hls-mpegts-v6:video-encode:audio-transcode:subtitles-webvtt-0:target-4',
   );
   assert.equal(h.openCompleteCacheProof(locator.envelope)?.profileFingerprint, locator.payload.profileFingerprint);
 
@@ -1035,6 +1038,16 @@ test('generic complete-cache locator admits a prepared HEVC graph without provid
   const accepted = h.verifyGenericCompleteCache(replay, issuedAtMs + 1_000);
   assert.equal(accepted.eligible, true);
   assert.equal(accepted.binding.pipelineBuild, locator.payload.pipelineBuild);
+
+  const requestShapedReplay = { ...replay };
+  delete requestShapedReplay.audioStreamIndex;
+  delete requestShapedReplay.audioMode;
+  delete requestShapedReplay.clientAudioPassthrough;
+  assert.equal(
+    h.verifyGenericCompleteCache(requestShapedReplay, issuedAtMs + 1_000).eligible,
+    true,
+    'runtime-only audio hints must not invalidate an identical single-audio HLS graph',
+  );
 
   const acceptedSeek = h.verifyGenericCompleteCache({
     ...replay,
@@ -1093,7 +1106,7 @@ test('generic complete-cache locator binds the exact multi-audio HLS topology', 
   assert.ok(locator?.envelope);
   assert.equal(
     locator.payload.pipelineBuild,
-    'mkv-complete-hls-mpegts-v5:video-encode:audio-multi-aac-2:subtitles-webvtt-0:target-2',
+    'mkv-complete-hls-mpegts-v6:video-encode:audio-multi-aac-2:subtitles-webvtt-0:target-2',
   );
 
   const replay = {
@@ -1882,7 +1895,7 @@ test('complete-cache Gateway sessions stay authenticated, bound and fail closed 
         strongEtagSha256: proof.validator.digest,
         profileFingerprint: proof.profileFingerprint,
         fileSizeBytes: proof.fileSizeBytes,
-        pipelineBuild: 'mkv-complete-hls-mpegts-v5:video-copy:audio-copy',
+        pipelineBuild: 'mkv-complete-hls-mpegts-v6:video-copy:audio-copy',
         proofBuild: proof.build,
       },
     };
@@ -2174,9 +2187,6 @@ test('complete-cache Gateway sessions stay authenticated, bound and fail closed 
       codecProfile: { ...hevcProfile, mkvCompleteHlsCacheProof: hevcLocator.envelope },
       audioCodec: 'eac3',
       audioChannels: 6,
-      audioStreamIndex: 1,
-      audioMode: 'transcode',
-      clientAudioPassthrough: false,
       seekOffset: 0,
     }),
   });

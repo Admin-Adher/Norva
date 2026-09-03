@@ -2055,7 +2055,7 @@ const MKV_H264_HLS_CACHE_SECRET = decodeMkvH264FastStartProofKey(
 // above remains permanently dark while this implementation is integrated.
 const MKV_COMPLETE_HLS_CACHE_PROTOCOL = 2;
 const MKV_COMPLETE_HLS_CACHE_ACTIVATION_READY = true;
-const MKV_COMPLETE_HLS_CACHE_PIPELINE_BUILD = 'mkv-complete-hls-mpegts-v5';
+const MKV_COMPLETE_HLS_CACHE_PIPELINE_BUILD = 'mkv-complete-hls-mpegts-v6';
 const MKV_COMPLETE_HLS_CACHE_LOCATOR_BUILD = 2;
 // The cache locator is an opaque, signed capability to address one immutable
 // complete HLS rendition before any provider GET. It deliberately shares only
@@ -14797,15 +14797,17 @@ function mkvCompleteHlsCacheAudioTopology(session, audioTracks) {
         if (Number.isInteger(requestedStreamIndex) && requestedStreamIndex !== sourceStreamIndex) {
             return reject('selected-audio-stream-mismatch');
         }
+        // The immutable topology describes the source graph, not the request
+        // that happened to produce it. `audioMode`, passthrough capability and
+        // an equal requested index may be absent on a zero-provider replay.
+        // Their only output-affecting result (copy versus transcode) is already
+        // authenticated independently by `pipelineBuild` below.
         return {
             eligible: true,
             reason: 'single-audio',
             topology: {
                 kind: 'single-audio',
                 streamIndex: sourceStreamIndex,
-                requestedStreamIndex,
-                audioModeHint: normalizeCodecToken(session?.audioMode),
-                clientAudioPassthrough: session?.clientAudioPassthrough !== false,
             },
         };
     }
