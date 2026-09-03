@@ -1188,8 +1188,8 @@ class HomePage {
                     <div class="norva-setup-flow-progress" data-setup-flow-progress data-setup-flow-steps="2" aria-label="Setup progress, 2 steps">
                         <span class="is-current" data-setup-flow-marker="connection"><i>1</i><b>Connect</b></span>
                         <span class="norva-setup-flow-line"></span>
-                        <span data-setup-flow-marker="access" data-setup-flow-access-only hidden><i>2</i><b>Access</b></span>
-                        <span class="norva-setup-flow-line" data-setup-flow-access-only hidden></span>
+                        <span class="hidden" data-setup-flow-marker="access" data-setup-flow-access-only hidden><i>2</i><b>Access</b></span>
+                        <span class="norva-setup-flow-line hidden" data-setup-flow-access-only hidden></span>
                         <span data-setup-flow-marker="finish"><i data-setup-flow-finish-index>2</i><b>Finish</b></span>
                     </div>
                     <h1 data-setup-flow-title>Paste your TV service link</h1>
@@ -1500,7 +1500,10 @@ class HomePage {
         const connectionSubmitLabel = () => selectedType() === 'xtream' ? 'Connect source' : 'Check playlist';
         const updateFlowTopology = () => {
             const accessAvailable = hasAccessStep();
-            accessOnlyProgressItems.forEach((item) => { item.hidden = !accessAvailable; });
+            accessOnlyProgressItems.forEach((item) => {
+                item.hidden = !accessAvailable;
+                item.classList.toggle('hidden', !accessAvailable);
+            });
             if (finishProgressIndex) finishProgressIndex.textContent = accessAvailable ? '3' : '2';
             if (flowProgress) {
                 const totalSteps = accessAvailable ? '3' : '2';
