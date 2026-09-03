@@ -115,13 +115,85 @@ docker exec -i "${CANARY_CONTAINER}" psql \
   -X -v ON_ERROR_STOP=1 -U "${CANARY_DB_ADMIN}" -d "${CANARY_DATABASE}" \
   < "${CANARY_DIR}/schema.sql" >/dev/null
 
-printf '===APPLY_MEDIA_CACHE_MIGRATIONS===\n'
-for migration in "${MIGRATIONS[@]}"; do
-  docker exec -i "${CANARY_CONTAINER}" psql \
-    -X -v ON_ERROR_STOP=1 -U "${CANARY_DB_ADMIN}" -d "${CANARY_DATABASE}" \
-    < "${MIGRATION_DIR}/${migration}" >/dev/null
-  printf 'applied=%s\n' "${migration}"
-done
+CACHE_SCHEMA_PRESENT="$(docker exec "${CANARY_CONTAINER}" psql -X -At \
+  -U "${CANARY_DB_ADMIN}" -d "${CANARY_DATABASE}" \
+  -c "select (to_regclass('public.media_cache_objects') is not null)::text")"
+readonly CACHE_SCHEMA_PRESENT
+
+case "${CACHE_SCHEMA_PRESENT}" in
+  true)
+    # Once the cache foundation is present in production, the schema-only copy
+    # already contains its tables, functions and Gateway columns. Exercise the
+    # real upgrade path instead of trying to replay non-idempotent foundations.
+    printf '===APPLY_MEDIA_CACHE_UPGRADE===\n'
+    repair_migration="${MIGRATIONS[${#MIGRATIONS[@]} - 1]}"
+    docker exec -i "${CANARY_CONTAINER}" psql \
+      -X -v ON_ERROR_STOP=1 -U "${CANARY_DB_ADMIN}" -d "${CANARY_DATABASE}" \
+      < "${MIGRATION_DIR}/${repair_migration}" >/dev/null
+    printf 'schema_mode=upgrade\napplied=%s\n' "${repair_migration}"
+
+    # pg_dump --schema-only intentionally omits the singleton policy row. Seed
+    # its declared defaults in the disposable database and keep admission off.
+    docker exec -i "${CANARY_CONTAINER}" psql \
+      -X -v ON_ERROR_STOP=1 -U "${CANARY_DB_ADMIN}" -d "${CANARY_DATABASE}" \
+      >/dev/null <<'SQL'
+insert into public.media_cache_governance_policy (singleton)
+values (true)
+on conflict (singleton) do nothing;
+
+update public.media_cache_governance_policy
+   set admission_mode = 'off', updated_at = clock_timestamp()
+ where singleton;
+
+do $canary$
+declare
+  v_session_id constant uuid := '00000000-0000-4000-8000-000000000001';
+  v_gateway_id constant uuid := '00000000-0000-4000-8000-000000000002';
+  v_user_id constant uuid := '00000000-0000-4000-8000-000000000003';
+begin
+  if public.norva_pulse_media_cache_producer_for_gateway(
+    v_session_id, v_gateway_id, 'producing', 120
+  ) <> 'missing' then
+    raise exception 'Gateway producer pulse cast smoke did not return missing';
+  end if;
+  if public.norva_abandon_media_cache_producer_for_gateway(
+    v_session_id, v_gateway_id
+  ) <> 'missing' then
+    raise exception 'Gateway producer abandon cast smoke did not return missing';
+  end if;
+  if public.norva_complete_media_cache_producer_for_gateway(
+    v_session_id, v_gateway_id, v_user_id, repeat('a1', 32)
+  ) <> 'not-coordinated' then
+    raise exception 'Gateway producer completion cast smoke did not return not-coordinated';
+  end if;
+  if public.norva_request_media_cache_continuation_for_gateway(
+    v_session_id, v_gateway_id, 120
+  ) is distinct from false then
+    raise exception 'Gateway continuation request cast smoke did not return false';
+  end if;
+  if public.norva_pulse_media_cache_continuation_for_gateway(
+    v_session_id, v_gateway_id, 'producing', 120
+  ) <> 'missing' then
+    raise exception 'Gateway continuation pulse cast smoke did not return missing';
+  end if;
+end
+$canary$;
+SQL
+    ;;
+  false)
+    printf '===APPLY_MEDIA_CACHE_MIGRATIONS===\n'
+    for migration in "${MIGRATIONS[@]}"; do
+      docker exec -i "${CANARY_CONTAINER}" psql \
+        -X -v ON_ERROR_STOP=1 -U "${CANARY_DB_ADMIN}" -d "${CANARY_DATABASE}" \
+        < "${MIGRATION_DIR}/${migration}" >/dev/null
+      printf 'applied=%s\n' "${migration}"
+    done
+    printf 'schema_mode=fresh\n'
+    ;;
+  *)
+    die 'cache-schema-detection-invalid'
+    ;;
+esac
 
 printf '===SEED_GOVERNANCE_CONCURRENCY===\n'
 docker exec -i "${CANARY_CONTAINER}" psql \

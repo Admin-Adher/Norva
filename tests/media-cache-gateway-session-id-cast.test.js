@@ -65,4 +65,8 @@ test('the isolated PostgreSQL cache canary applies the live repair migration', (
     /20260903120000_media_cache_gateway_session_id_cast_v1\.sql/,
   );
   assert.match(postgresCanary, /'migrations', 10/);
+  assert.match(postgresCanary, /schema_mode=upgrade/);
+  assert.match(postgresCanary, /schema_mode=fresh/);
+  assert.match(postgresCanary, /norva_pulse_media_cache_producer_for_gateway/);
+  assert.match(postgresCanary, /Gateway producer pulse cast smoke did not return missing/);
 });
