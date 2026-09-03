@@ -217,7 +217,7 @@ begin
   select gateway.* into v_gateway
     from public.cloud_gateway_sessions gateway
    where gateway.playback_session_id = p_playback_session_id
-     and gateway.external_session_id = p_gateway_session_id
+     and gateway.external_session_id = p_gateway_session_id::text
      and gateway.status <> 'failed'
    limit 1;
   if not found or v_gateway.media_cache_lease_token is null then return 'missing'; end if;
@@ -257,7 +257,7 @@ begin
   select gateway.* into v_gateway
     from public.cloud_gateway_sessions gateway
    where gateway.playback_session_id = p_playback_session_id
-     and gateway.external_session_id = p_gateway_session_id
+     and gateway.external_session_id = p_gateway_session_id::text
      and gateway.user_id = p_user_id
      and gateway.status <> 'failed'
    limit 1;
@@ -294,7 +294,7 @@ begin
   select gateway.* into v_gateway
     from public.cloud_gateway_sessions gateway
    where gateway.playback_session_id = p_playback_session_id
-     and gateway.external_session_id = p_gateway_session_id
+     and gateway.external_session_id = p_gateway_session_id::text
    limit 1;
   if not found or v_gateway.media_cache_lease_token is null then return 'missing'; end if;
   if public.norva_abandon_media_cache_producer(

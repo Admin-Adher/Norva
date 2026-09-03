@@ -20,6 +20,7 @@ readonly MIGRATIONS=(
   20260902094500_media_cache_demand_continuation_v1.sql
   20260902100000_media_cache_live_join_v1.sql
   20260902103000_media_cache_governance_v1.sql
+  20260903120000_media_cache_gateway_session_id_cast_v1.sql
 )
 
 die() {
@@ -346,7 +347,7 @@ $canary$;
 select jsonb_build_object(
   'ok', true,
   'protocol', 1,
-  'migrations', 9,
+  'migrations', 10,
   'activePurgeJobs', count(*) filter (where state in ('queued', 'leased', 'retry')),
   'completedPurges', count(*) filter (where state = 'completed'),
   'failedPurges', count(*) filter (where state = 'failed'),

@@ -1284,7 +1284,7 @@ begin
   select gateway.* into v_gateway
     from public.cloud_gateway_sessions gateway
    where gateway.playback_session_id = p_playback_session_id
-     and gateway.external_session_id = p_gateway_session_id
+     and gateway.external_session_id = p_gateway_session_id::text
      and gateway.user_id = p_user_id
      and gateway.status <> 'failed'
    limit 1;

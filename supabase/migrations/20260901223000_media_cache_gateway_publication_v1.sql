@@ -59,7 +59,7 @@ begin
     join public.cloud_gateway_sessions gateway
       on gateway.playback_session_id = playback.id
      and gateway.user_id = playback.user_id
-     and gateway.external_session_id = p_gateway_session_id
+     and gateway.external_session_id = p_gateway_session_id::text
    where playback.id = p_playback_session_id
      and playback.user_id = p_user_id
      and playback.status in ('pending', 'ready', 'expired')

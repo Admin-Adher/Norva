@@ -418,7 +418,7 @@ begin
   select gateway.* into v_gateway
     from public.cloud_gateway_sessions gateway
    where gateway.playback_session_id = p_playback_session_id
-     and gateway.external_session_id = p_gateway_session_id
+     and gateway.external_session_id = p_gateway_session_id::text
      and gateway.status in ('pending', 'starting', 'ready')
      and gateway.media_cache_lease_token is not null
    limit 1
