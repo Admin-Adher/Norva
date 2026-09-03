@@ -93,7 +93,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-DB_CONTAINER="$DB_CONTAINER" DB_USER=supabase_admin DB_NAME=postgres \
+env DB_CONTAINER="$DB_CONTAINER" DB_USER=supabase_admin DB_NAME=postgres \
   bash "$GATE" >"$WORK/database-gate.log"
 
 python3 - "$WORK/database-gate.log" "$WORK/database-gate.json" <<'PY'

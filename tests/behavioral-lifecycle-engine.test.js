@@ -197,7 +197,7 @@ test('dormant deployment evidence is sanitized, immutable and never authorizes a
   ]) {
     assert.ok(capture.includes(runtimePath), `missing deployed digest proof for ${runtimePath}`);
   }
-  assert.match(capture, /DB_CONTAINER="\$DB_CONTAINER" DB_USER=supabase_admin DB_NAME=postgres[\s\S]+bash "\$GATE"/);
+  assert.match(capture, /env DB_CONTAINER="\$DB_CONTAINER" DB_USER=supabase_admin DB_NAME=postgres[\s\S]+bash "\$GATE"/);
   assert.match(capture, /os\.link\(temporary, output\)/);
   assert.match(capture, /os\.fchmod\(fd, 0o600\)/);
   for (const format of ['{{.Id}}', '{{.Image}}', '{{.State.Running}}', '{{.State.StartedAt}}']) {
