@@ -15,7 +15,7 @@ const grantMigration = fs.readFileSync(path.join(
 ), 'utf8');
 
 test('Edge v78 exposes one authenticated renewable media-cache ticket route', () => {
-  assert.match(edge, /version: 80,[\s\S]*privateMediaCacheTicketProtocol: 1/);
+  assert.match(edge, /version: 81,[\s\S]*privateMediaCacheTicketProtocol: 1/);
   assert.match(edge, /segments\[3\] === "media-cache-ticket"[\s\S]*issueMediaCachePlaybackTicket/);
   assert.match(edge, /const identity = await requireIdentity\(req, supabase\)/);
   assert.match(edge, /import \{ createMediaCacheTicket \} from "\.\.\/_shared\/media-cache-ticket\.ts"/);

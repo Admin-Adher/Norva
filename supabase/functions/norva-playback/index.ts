@@ -66,6 +66,11 @@ import {
 } from "../_shared/bounded-provider-response.mjs";
 import { createMediaCacheTicket } from "../_shared/media-cache-ticket.ts";
 import {
+  buildMediaCacheCanaryConfig,
+  mediaCacheFlagsForUser,
+  mediaCacheServiceFlags,
+} from "../_shared/media-cache-canary.mjs";
+import {
   awaitMediaCacheSingleflight,
   deriveMediaCacheCoordinationFingerprints,
   MEDIA_CACHE_SINGLEFLIGHT_PROTOCOL,
@@ -100,6 +105,12 @@ type RuntimeConfig = {
   mediaCacheWorkerToken: string;
   mediaCacheTicketHmacKey: string;
   mediaCacheEnabled: boolean;
+  mediaCacheCanary: {
+    protocol: number;
+    state: "off" | "standby" | "invalid" | "ready";
+    stage: "off" | "read" | "singleflight" | "live-join";
+    userHashes: readonly string[];
+  };
   mediaCacheTicketTtlSeconds: number;
   mediaCacheSingleflightEnabled: boolean;
   mediaCacheLiveJoinEnabled: boolean;
@@ -181,6 +192,8 @@ const RUNTIME_CONFIG_KEYS = [
   "NORVA_MEDIA_CACHE_WORKER_TOKEN",
   "NORVA_MEDIA_CACHE_TICKET_HMAC_KEY",
   "NORVA_MEDIA_CACHE_ENABLED",
+  "NORVA_MEDIA_CACHE_CANARY_USER_HASHES",
+  "NORVA_MEDIA_CACHE_CANARY_STAGE",
   "NORVA_MEDIA_CACHE_TICKET_TTL_SECONDS",
   "NORVA_MEDIA_CACHE_SINGLEFLIGHT_ENABLED",
   "NORVA_MEDIA_CACHE_LIVE_JOIN_ENABLED",
@@ -282,6 +295,8 @@ const ENV_MEDIA_CACHE_WORKER_URL = trimTrailingSlash(Deno.env.get("NORVA_MEDIA_C
 const ENV_MEDIA_CACHE_WORKER_TOKEN = Deno.env.get("NORVA_MEDIA_CACHE_WORKER_TOKEN") ?? "";
 const ENV_MEDIA_CACHE_TICKET_HMAC_KEY = Deno.env.get("NORVA_MEDIA_CACHE_TICKET_HMAC_KEY") ?? "";
 const ENV_MEDIA_CACHE_ENABLED = Deno.env.get("NORVA_MEDIA_CACHE_ENABLED") ?? "";
+const ENV_MEDIA_CACHE_CANARY_USER_HASHES = Deno.env.get("NORVA_MEDIA_CACHE_CANARY_USER_HASHES") ?? "";
+const ENV_MEDIA_CACHE_CANARY_STAGE = Deno.env.get("NORVA_MEDIA_CACHE_CANARY_STAGE") ?? "";
 const ENV_MEDIA_CACHE_TICKET_TTL_SECONDS = Deno.env.get("NORVA_MEDIA_CACHE_TICKET_TTL_SECONDS") ?? "";
 const ENV_MEDIA_CACHE_SINGLEFLIGHT_ENABLED = Deno.env.get("NORVA_MEDIA_CACHE_SINGLEFLIGHT_ENABLED") ?? "";
 const ENV_MEDIA_CACHE_LIVE_JOIN_ENABLED = Deno.env.get("NORVA_MEDIA_CACHE_LIVE_JOIN_ENABLED") ?? "";
@@ -335,7 +350,7 @@ async function handleRequest(req: Request): Promise<Response> {
       return json(req, {
         ok: true,
         service: "norva-playback",
-        version: 80,
+        version: 81,
         nativeHeartbeatProtocol: 1,
         providerCircuitProtocol: 1,
         exactTrackCrawlerProtocol: 2,
@@ -410,6 +425,12 @@ async function handleRequest(req: Request): Promise<Response> {
         sharedMediaCacheLiveJoinProtocol: 1,
         privateMediaCacheDelivery: {
           enabled: config.mediaCacheEnabled,
+          canary: {
+            protocol: config.mediaCacheCanary.protocol,
+            state: config.mediaCacheCanary.state,
+            stage: config.mediaCacheCanary.stage,
+            selectedUsers: config.mediaCacheCanary.userHashes.length,
+          },
           workerConfigured: Boolean(config.mediaCacheWorkerUrl && config.mediaCacheWorkerToken),
           ticketKeyConfigured: /^[0-9a-f]{64}$/i.test(config.mediaCacheTicketHmacKey),
           ticketTtlSeconds: config.mediaCacheTicketTtlSeconds,
@@ -2198,7 +2219,10 @@ async function createPlaybackSessionCore(
   // remains byte-preserving Relay/direct even if a stale historical binding
   // exists, preserving the zero-Gateway MP4 contract.
   if (authoritativeVodContainer === "mkv") {
-    mediaCacheRuntimeConfig = await getRuntimeConfig(db);
+    mediaCacheRuntimeConfig = await mediaCacheRuntimeConfigForUser(
+      await getRuntimeConfig(db),
+      userId,
+    );
     if (mediaCacheReadBypassOnce) {
       runBackground(db.rpc("norva_record_media_cache_metric", {
         p_metric: "cache_fallback", p_value: 1, p_samples: 1,
@@ -2268,7 +2292,10 @@ async function createPlaybackSessionCore(
   // the previous producer lives on another Gateway instance. Foreground
   // producers are excluded in SQL and therefore can never be interrupted by
   // this optimization.
-  mediaCacheRuntimeConfig = mediaCacheRuntimeConfig ?? await getRuntimeConfig(db);
+  mediaCacheRuntimeConfig = mediaCacheRuntimeConfig ?? await mediaCacheRuntimeConfigForUser(
+    await getRuntimeConfig(db),
+    userId,
+  );
   const mediaCacheAccountFingerprint = mediaCacheLifecycle.producer?.accountFingerprint ??
     await mediaCacheAccountFingerprintForPlayback({
       runtimeConfig: mediaCacheRuntimeConfig,
@@ -5275,7 +5302,7 @@ async function issueMediaCachePlaybackTicket(
     throw new HttpError(400, "Invalid media cache object key");
   }
 
-  const runtimeConfig = await getRuntimeConfig(db);
+  const runtimeConfig = await mediaCacheRuntimeConfigForUser(await getRuntimeConfig(db), userId);
   if (!mediaCachePlaybackWorkerUrl(runtimeConfig)) {
     throw new HttpError(503, "Private media cache is unavailable", {
       code: "MEDIA_CACHE_DISABLED_OR_MISCONFIGURED",
@@ -5525,7 +5552,7 @@ async function expirePlaybackSession(id: string, userId: string, db: SupabaseCli
   const gatewaySessions = Array.isArray(session.cloud_gateway_sessions)
     ? session.cloud_gateway_sessions
     : [];
-  const runtimeConfig = await getRuntimeConfig(db);
+  const runtimeConfig = await mediaCacheRuntimeConfigForUser(await getRuntimeConfig(db), userId);
   const closedGatewayIds: string[] = [];
   const preservedGatewayDatabaseIds = new Set<string>();
   const gatewayErrors: unknown[] = [];
@@ -6073,7 +6100,7 @@ async function closeOpenGatewaySessionsForUser(userId: string, db: SupabaseClien
   }
   if (!gatewaySessions?.length) return 0;
 
-  const runtimeConfig = await getRuntimeConfig(db);
+  const runtimeConfig = await mediaCacheRuntimeConfigForUser(await getRuntimeConfig(db), userId);
   const preservedGatewayDatabaseIds = new Set<string>();
   const playbackSessionIds = gatewaySessions
     .map((gateway: JsonRecord) => stringOrNull(gateway.playback_session_id))
@@ -8937,6 +8964,8 @@ async function getRuntimeConfig(db: SupabaseClient): Promise<RuntimeConfig> {
     !ENV_MEDIA_CACHE_WORKER_TOKEN ||
     !ENV_MEDIA_CACHE_TICKET_HMAC_KEY ||
     !ENV_MEDIA_CACHE_ENABLED ||
+    !ENV_MEDIA_CACHE_CANARY_USER_HASHES ||
+    !ENV_MEDIA_CACHE_CANARY_STAGE ||
     !ENV_MEDIA_CACHE_TICKET_TTL_SECONDS ||
     !ENV_MEDIA_CACHE_SINGLEFLIGHT_ENABLED ||
     !ENV_MEDIA_CACHE_LIVE_JOIN_ENABLED ||
@@ -8968,6 +8997,12 @@ async function getRuntimeConfig(db: SupabaseClient): Promise<RuntimeConfig> {
     canaryUserHashes: ENV_MEDIA_GATEWAY_CANARY_USER_HASHES ||
       fromDb.get("NORVA_MEDIA_GATEWAY_CANARY_USER_HASHES") || "",
   }) as MediaGatewayRoutingConfig;
+  const mediaCacheCanary = buildMediaCacheCanaryConfig({
+    userHashes: ENV_MEDIA_CACHE_CANARY_USER_HASHES ||
+      fromDb.get("NORVA_MEDIA_CACHE_CANARY_USER_HASHES") || "",
+    stage: ENV_MEDIA_CACHE_CANARY_STAGE ||
+      fromDb.get("NORVA_MEDIA_CACHE_CANARY_STAGE") || "",
+  }) as RuntimeConfig["mediaCacheCanary"];
   const value = {
     relayBaseUrl: trimTrailingSlash(ENV_RELAY_BASE_URL || fromDb.get("NORVA_RELAY_BASE_URL") || ""),
     relayTokenSecret: ENV_RELAY_TOKEN_SECRET || fromDb.get("RELAY_TOKEN_SECRET") || "",
@@ -8985,6 +9020,7 @@ async function getRuntimeConfig(db: SupabaseClient): Promise<RuntimeConfig> {
     mediaCacheTicketHmacKey: ENV_MEDIA_CACHE_TICKET_HMAC_KEY ||
       fromDb.get("NORVA_MEDIA_CACHE_TICKET_HMAC_KEY") || "",
     mediaCacheEnabled: (ENV_MEDIA_CACHE_ENABLED || fromDb.get("NORVA_MEDIA_CACHE_ENABLED") || "") === "true",
+    mediaCacheCanary,
     mediaCacheTicketTtlSeconds: boundedInt(
       ENV_MEDIA_CACHE_TICKET_TTL_SECONDS || fromDb.get("NORVA_MEDIA_CACHE_TICKET_TTL_SECONDS"),
       90,
@@ -9012,6 +9048,48 @@ async function getRuntimeConfig(db: SupabaseClient): Promise<RuntimeConfig> {
   };
   runtimeConfigCache = { value, expiresAt: Date.now() + 30_000 };
   return value;
+}
+
+async function mediaCacheRuntimeConfigForUser(
+  runtimeConfig: RuntimeConfig,
+  userId: string,
+): Promise<RuntimeConfig> {
+  const userHash = await sha256Hex(userId);
+  const flags = mediaCacheFlagsForUser(runtimeConfig.mediaCacheCanary, userHash, {
+    enabled: runtimeConfig.mediaCacheEnabled,
+    singleflight: runtimeConfig.mediaCacheSingleflightEnabled,
+    liveJoin: runtimeConfig.mediaCacheLiveJoinEnabled,
+  });
+  if (
+    flags.enabled === runtimeConfig.mediaCacheEnabled &&
+    flags.singleflight === runtimeConfig.mediaCacheSingleflightEnabled &&
+    flags.liveJoin === runtimeConfig.mediaCacheLiveJoinEnabled
+  ) return runtimeConfig;
+  return {
+    ...runtimeConfig,
+    mediaCacheEnabled: flags.enabled,
+    mediaCacheSingleflightEnabled: flags.singleflight,
+    mediaCacheLiveJoinEnabled: flags.liveJoin,
+  };
+}
+
+function mediaCacheRuntimeConfigForService(runtimeConfig: RuntimeConfig): RuntimeConfig {
+  const flags = mediaCacheServiceFlags(runtimeConfig.mediaCacheCanary, {
+    enabled: runtimeConfig.mediaCacheEnabled,
+    singleflight: runtimeConfig.mediaCacheSingleflightEnabled,
+    liveJoin: runtimeConfig.mediaCacheLiveJoinEnabled,
+  });
+  if (
+    flags.enabled === runtimeConfig.mediaCacheEnabled &&
+    flags.singleflight === runtimeConfig.mediaCacheSingleflightEnabled &&
+    flags.liveJoin === runtimeConfig.mediaCacheLiveJoinEnabled
+  ) return runtimeConfig;
+  return {
+    ...runtimeConfig,
+    mediaCacheEnabled: flags.enabled,
+    mediaCacheSingleflightEnabled: flags.singleflight,
+    mediaCacheLiveJoinEnabled: flags.liveJoin,
+  };
 }
 
 async function mediaGatewayRouteForPlaybackUser(
@@ -13716,13 +13794,8 @@ async function runMediaCacheProducerControl(
   req: Request,
   db: SupabaseClient,
 ): Promise<JsonRecord> {
-  const runtimeConfig = await getRuntimeConfig(db);
-  if (!runtimeConfig.mediaCacheSingleflightEnabled) {
-    throw new HttpError(503, "Shared media cache singleflight is disabled", {
-      code: "MEDIA_CACHE_SINGLEFLIGHT_DISABLED",
-    });
-  }
-  const authorizedGatewayIds = requireConfiguredMediaGatewayCallback(req, runtimeConfig);
+  const baseRuntimeConfig = await getRuntimeConfig(db);
+  const authorizedGatewayIds = requireConfiguredMediaGatewayCallback(req, baseRuntimeConfig);
   const body = await req.json().then(recordOrEmpty).catch(() => {
     throw new HttpError(400, "Invalid media cache producer control JSON");
   });
@@ -13743,13 +13816,23 @@ async function runMediaCacheProducerControl(
   }
   const { data: gatewaySession, error: gatewayError } = await db
     .from("cloud_gateway_sessions")
-    .select("gateway_id")
+    .select("gateway_id,user_id")
     .eq("playback_session_id", playbackSessionId)
     .eq("external_session_id", gatewaySessionId)
     .maybeSingle();
   if (gatewayError) throwDb(gatewayError, "Unable to verify media cache producer Gateway session");
   if (!gatewaySession || !authorizedGatewayIds.has(stringOrNull(gatewaySession.gateway_id))) {
     throw new HttpError(404, "Media cache producer session not found");
+  }
+  const userId = stringOr(gatewaySession.user_id, "");
+  if (!PLAYBACK_SESSION_UUID_PATTERN.test(userId)) {
+    throw new HttpError(404, "Media cache producer session not found");
+  }
+  const runtimeConfig = await mediaCacheRuntimeConfigForUser(baseRuntimeConfig, userId);
+  if (!runtimeConfig.mediaCacheSingleflightEnabled) {
+    throw new HttpError(503, "Shared media cache singleflight is disabled", {
+      code: "MEDIA_CACHE_SINGLEFLIGHT_DISABLED",
+    });
   }
 
   if (action === "pulse" || action === "continuation-pulse") {
@@ -13958,7 +14041,7 @@ async function runMediaCacheMaintenance(
   req: Request,
   db: SupabaseClient,
 ): Promise<JsonRecord> {
-  const runtimeConfig = await getRuntimeConfig(db);
+  const runtimeConfig = mediaCacheRuntimeConfigForService(await getRuntimeConfig(db));
   requireConfiguredMediaGatewayCallback(req, runtimeConfig);
   const body = await req.json().then(recordOrEmpty).catch(() => {
     throw new HttpError(400, "Invalid media cache maintenance JSON");
@@ -13981,7 +14064,7 @@ async function runMediaCachePurge(
   req: Request,
   db: SupabaseClient,
 ): Promise<JsonRecord> {
-  const runtimeConfig = await getRuntimeConfig(db);
+  const runtimeConfig = mediaCacheRuntimeConfigForService(await getRuntimeConfig(db));
   requireConfiguredMediaGatewayCallback(req, runtimeConfig);
   const body = await req.json().then(recordOrEmpty).catch(() => {
     throw new HttpError(400, "Invalid media cache purge JSON");
@@ -14037,7 +14120,7 @@ async function runMediaCacheRecovery(
   req: Request,
   db: SupabaseClient,
 ): Promise<JsonRecord> {
-  const runtimeConfig = await getRuntimeConfig(db);
+  const runtimeConfig = mediaCacheRuntimeConfigForService(await getRuntimeConfig(db));
   requireConfiguredMediaGatewayCallback(req, runtimeConfig);
   const workerUrl = mediaCachePlaybackWorkerUrl(runtimeConfig);
   if (!workerUrl) throw new HttpError(503, "Private media cache is unavailable");
@@ -14175,13 +14258,8 @@ async function runMediaCachePublicationCallback(
   req: Request,
   db: SupabaseClient,
 ): Promise<JsonRecord> {
-  const runtimeConfig = await getRuntimeConfig(db);
-  if (!runtimeConfig.mediaCacheEnabled) {
-    throw new HttpError(503, "Shared media cache publication is disabled", {
-      code: "MEDIA_CACHE_DISABLED",
-    });
-  }
-  const authorizedGatewayIds = requireConfiguredMediaGatewayCallback(req, runtimeConfig);
+  const baseRuntimeConfig = await getRuntimeConfig(db);
+  const authorizedGatewayIds = requireConfiguredMediaGatewayCallback(req, baseRuntimeConfig);
   const body = await req.json().then(recordOrEmpty).catch(() => {
     throw new HttpError(400, "Invalid media cache publication JSON");
   });
@@ -14250,6 +14328,12 @@ async function runMediaCachePublicationCallback(
   const userId = stringOr(gatewaySession.user_id, "");
   if (!PLAYBACK_SESSION_UUID_PATTERN.test(userId)) {
     throw new HttpError(404, "Media cache publication session not found");
+  }
+  const runtimeConfig = await mediaCacheRuntimeConfigForUser(baseRuntimeConfig, userId);
+  if (!runtimeConfig.mediaCacheEnabled) {
+    throw new HttpError(503, "Shared media cache publication is disabled", {
+      code: "MEDIA_CACHE_DISABLED",
+    });
   }
 
   const { data, error } = await db.rpc("norva_commit_admitted_media_cache_publication", {

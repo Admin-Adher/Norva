@@ -326,10 +326,10 @@ test('exact movie probes enqueue strict und certification before releasing the f
 });
 
 test('production health and deploy verification expose the strict und protocol', () => {
-  assert.match(playback, /version:\s*80/);
+  assert.match(playback, /version:\s*81/);
   assert.match(playback, /automaticStrictUndAudioProtocol:\s*1/);
   assert.match(playback, /automaticStrictUndAudioConsensus:\s*"4\/6"/);
-  assert.match(deployEdge, /EXPECTED_PLAYBACK_VERSION=80/);
+  assert.match(deployEdge, /EXPECTED_PLAYBACK_VERSION=81/);
   assert.match(deployEdge, /automaticStrictUndAudioProtocol/);
   assert.match(deployEdge, /automaticStrictUndAudioConsensus/);
 });
