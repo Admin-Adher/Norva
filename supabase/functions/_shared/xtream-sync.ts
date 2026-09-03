@@ -14,7 +14,8 @@
 // norva-source-sync (which owns finalize + the watchdog), so the module needs no
 // functionName parameter and the watchdog covers syncs kicked from either function.
 //
-// Public exports: driveXtreamSyncToReady, freshSyncCursor, detectXtreamChange.
+// Public exports include the direct-sync engine, its cinema-first walk helper,
+// change detection, and the generation-staging engine used by credential swaps.
 // Everything else is private to this module.
 // ─────────────────────────────────────────────────────────────────────────────
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
@@ -34,7 +35,10 @@ import {
 } from "./catalog-generation.ts";
 import { materializeLiveChunk } from "./live-materialization.ts";
 import type { LiveCatalogItem } from "./live-catalog.ts";
-import { projectVodTitleGenerationIsolated } from "./vod-title-projection.ts";
+import {
+  projectVodTitleGenerationIsolated,
+  refreshVodTitleProjection,
+} from "./vod-title-projection.ts";
 import {
   buildProviderDirectFallbackSnapshot,
   createSourceDirectFallbackLeaseRunner,
@@ -76,11 +80,25 @@ const ENV_MEDIA_GATEWAY_TOKEN = Deno.env.get("NORVA_MEDIA_GATEWAY_TOKEN") ?? "";
 
 let runtimeConfigCache: { value: RuntimeConfig; expiresAt: number } | null = null;
 
-const DISCOVER_TYPES: { type: "live" | "movie" | "series"; action: string }[] = [
+type DiscoveryType = "live" | "movie" | "series";
+type DiscoveryTarget = {
+  type: DiscoveryType;
+  action: string;
+  params?: Record<string, string>;
+};
+
+// v1 cursors are already persisted in production. Their numeric typeIdx must
+// keep its historical meaning until the in-flight walk completes.
+const LEGACY_DISCOVER_TYPES: { type: DiscoveryType; action: string }[] = [
   { type: "live", action: "get_live_streams" },
   { type: "movie", action: "get_vod_streams" },
   { type: "series", action: "get_series" },
 ];
+const CINEMA_DISCOVER_TYPES: Record<DiscoveryType, { type: DiscoveryType; action: string }> = {
+  movie: { type: "movie", action: "get_vod_streams" },
+  series: { type: "series", action: "get_series" },
+  live: { type: "live", action: "get_live_streams" },
+};
 // The media gateway deliberately allows only one metadata operation per provider
 // account. Keep the per-source walk serial so Norva never creates its own
 // `background_busy` storm and mistakes rejected categories for empty ones.
@@ -255,10 +273,13 @@ function runCategoryHydrationInBackground(task: Promise<void>): void {
 
 export function freshSyncCursor(startedAt: string, extra: JsonRecord = {}): JsonRecord {
   return {
-    v: 1,
+    v: 2,
     active: true,
     phase: "discover",
     deleted: false,
+    order: "cinema_first",
+    walkIdx: 0,
+    // Retained as inert compatibility fields for older operational readers.
     typeIdx: 0,
     catIdx: 0,
     counts: { live: 0, movies: 0, series: 0 },
@@ -273,6 +294,29 @@ export function freshSyncCursor(startedAt: string, extra: JsonRecord = {}): Json
     fetchErrors: 0,
     ...extra,
   };
+}
+
+function discoveryTargetsFor(cats: JsonRecord, type: DiscoveryType): DiscoveryTarget[] {
+  const ids = asStringArray(cats[type]);
+  const definition = CINEMA_DISCOVER_TYPES[type];
+  return ids.length
+    ? ids.map((categoryId) => ({ ...definition, params: { category_id: categoryId } }))
+    : [{ ...definition }];
+}
+
+// New imports alternate one bounded Movies request with one bounded Series
+// request, then append every Live TV request. This is intentionally a pure,
+// exported helper so the persisted scheduling contract is executable in tests.
+export function cinemaFirstDiscoveryWalk(cats: JsonRecord): DiscoveryTarget[] {
+  const movies = discoveryTargetsFor(cats, "movie");
+  const series = discoveryTargetsFor(cats, "series");
+  const cinema: DiscoveryTarget[] = [];
+  const cinemaLength = Math.max(movies.length, series.length);
+  for (let index = 0; index < cinemaLength; index++) {
+    if (index < movies.length) cinema.push(movies[index]);
+    if (index < series.length) cinema.push(series[index]);
+  }
+  return [...cinema, ...discoveryTargetsFor(cats, "live")];
 }
 
 function asStringArray(value: unknown): string[] {
@@ -611,9 +655,9 @@ export async function detectXtreamChange(
     await assertCatalogSnapshotCurrent(db, sourceId, userId, accessSnapshot);
     return payload;
   };
-  const liveCats = await fetchCatalog("get_live_categories");
   const vodCats = await fetchCatalog("get_vod_categories");
   const seriesCats = await fetchCatalog("get_series_categories");
+  const liveCats = await fetchCatalog("get_live_categories");
   const maps: Record<string, Map<string, string>> = {
     live: categoryMap(liveCats),
     movie: categoryMap(vodCats),
@@ -621,23 +665,22 @@ export async function detectXtreamChange(
   };
   const sig = emptySig();
   let liveCount = 0, movieCount = 0, seriesCount = 0;
-  for (const def of DISCOVER_TYPES) {
-    const ids = [...maps[def.type].keys()];
-    const targets: (Record<string, string> | undefined)[] = ids.length ? ids.map((id) => ({ category_id: id })) : [undefined];
-    for (let i = 0; i < targets.length; i += DISCOVER_CONCURRENCY) {
-      const slices = await Promise.all(targets.slice(i, i + DISCOVER_CONCURRENCY).map((p) => fetchCatalog(def.action, p)));
-      for (const slice of slices) {
-        if (!Array.isArray(slice) || !slice.length) continue;
-        for (const raw of slice) {
-          if (!isRecord(raw)) continue;
-          const ext = stringOr(raw.stream_id ?? raw.series_id ?? raw.id, "");
-          if (!ext) continue;
-          updateSig(sig, def.type, ext, Number(raw.added));
-          if (def.type === "live") liveCount++;
-          else if (def.type === "movie") movieCount++;
-          else seriesCount++;
-        }
-      }
+  const walk = cinemaFirstDiscoveryWalk({
+    live: [...maps.live.keys()],
+    movie: [...maps.movie.keys()],
+    series: [...maps.series.keys()],
+  });
+  for (const target of walk) {
+    const slice = await fetchCatalog(target.action, target.params);
+    if (!Array.isArray(slice) || !slice.length) continue;
+    for (const raw of slice) {
+      if (!isRecord(raw)) continue;
+      const ext = stringOr(raw.stream_id ?? raw.series_id ?? raw.id, "");
+      if (!ext) continue;
+      updateSig(sig, target.type, ext, Number(raw.added));
+      if (target.type === "live") liveCount++;
+      else if (target.type === "movie") movieCount++;
+      else seriesCount++;
     }
   }
   const contentSignature = finalizeSig(sig);
@@ -810,9 +853,9 @@ export async function driveXtreamSyncToReady(sourceId: string, userId: string, d
       }
     };
 
-    const liveCats = await fetchCatalog("get_live_categories");
     const vodCats = await fetchCatalog("get_vod_categories");
     const seriesCats = await fetchCatalog("get_series_categories");
+    const liveCats = await fetchCatalog("get_live_categories");
     const nameMaps: Record<string, Map<string, string>> = {
       live: categoryMap(liveCats),
       movie: categoryMap(vodCats),
@@ -870,21 +913,30 @@ export async function driveXtreamSyncToReady(sourceId: string, userId: string, d
     let liveCount = Number(counts.live) || 0;
     let movieCount = Number(counts.movies) || 0;
     let seriesCount = Number(counts.series) || 0;
+    const cinemaFirst = Number(cursor.v) >= 2 && cursor.order === "cinema_first";
+    const cinemaWalk = cinemaFirst ? cinemaFirstDiscoveryWalk(cats) : [];
+    const legacyTargetsFor = (type: DiscoveryType): DiscoveryTarget[] => {
+      const ids = asStringArray(cats[type]);
+      const definition = LEGACY_DISCOVER_TYPES.find((entry) => entry.type === type)!;
+      return ids.length
+        ? ids.map((categoryId) => ({ ...definition, params: { category_id: categoryId } }))
+        : [{ ...definition }];
+    };
+    let walkIdx = Number(cursor.walkIdx) || 0;
     let typeIdx = Number(cursor.typeIdx) || 0;
     let catIdx = Number(cursor.catIdx) || 0;
-    // Snapshot the walk position so we can tell, at the end of this isolate,
-    // whether real progress was made (and reset the continuation budget if so).
+    const startWalkIdx = walkIdx;
     const startTypeIdx = typeIdx;
     const startCatIdx = catIdx;
-
-    const targetsFor = (type: string): (Record<string, string> | undefined)[] => {
-      const ids = asStringArray(cats[type]);
-      return ids.length ? ids.map((id) => ({ category_id: id })) : [undefined];
-    };
-    const totalTargets = DISCOVER_TYPES.reduce((sum, d) => sum + targetsFor(d.type).length, 0);
+    const totalTargets = cinemaFirst
+      ? cinemaWalk.length
+      : LEGACY_DISCOVER_TYPES.reduce((sum, definition) => sum + legacyTargetsFor(definition.type).length, 0);
     const completedTargets = () => {
+      if (cinemaFirst) return walkIdx;
       let done = catIdx;
-      for (let i = 0; i < typeIdx; i++) done += targetsFor(DISCOVER_TYPES[i].type).length;
+      for (let index = 0; index < typeIdx; index++) {
+        done += legacyTargetsFor(LEGACY_DISCOVER_TYPES[index].type).length;
+      }
       return done;
     };
     // Cadence de persistance adaptative (UX barre, audit 18/07) : l'ancien « tous
@@ -894,23 +946,60 @@ export async function driveXtreamSyncToReady(sourceId: string, userId: string, d
     // petits providers qui écrivent chaque lot finissent en secondes de toute façon).
     const persistEvery = Math.max(1, Math.min(4, Math.round(totalTargets / 160)));
 
-    let sincePersist = 0;
-    while (Date.now() < deadline && typeIdx < DISCOVER_TYPES.length) {
-      const def = DISCOVER_TYPES[typeIdx];
-      const targets = targetsFor(def.type);
-      if (catIdx >= targets.length) { typeIdx++; catIdx = 0; continue; }
-      const batch = targets.slice(catIdx, catIdx + DISCOVER_CONCURRENCY);
-      const slices = await Promise.all(batch.map((p) => fetchCatalog(def.action, p)));
+    const projectFirstCinemaBatch = async (itemType: "movie" | "series", batchRows: JsonRecord[]) => {
+      const readyFlag = itemType === "movie" ? "moviesReady" : "seriesReady";
+      if (!batchRows.length || progress[readyFlag] === true) return;
+      // A provider category can contain tens of thousands of titles. Only read
+      // back one bounded database batch for the early shelf projection; the
+      // durable finalizer will project the full catalogue afterwards.
+      const externalIds = batchRows
+        .slice(0, IMPORT_BATCH_SIZE)
+        .map((row) => stringOr(row.external_id, ""))
+        .filter(Boolean);
+      const { data: savedData, error: savedError } = await db
+        .from("cloud_media_items")
+        .select("id,user_id,source_id,generation_id,item_type,external_id,parent_external_id,title,subtitle,poster_url,backdrop_url,metadata,playback_hint,available")
+        .eq("source_id", sourceId)
+        .eq("user_id", userId)
+        .eq("generation_id", accessSnapshot.generationId)
+        .eq("item_type", itemType)
+        .in("external_id", externalIds);
+      if (savedError) throw savedError;
+      const savedRows = Array.isArray(savedData) ? savedData as LiveCatalogItem[] : [];
+      if (!savedRows.length) return;
+      await refreshVodTitleProjection({
+        sourceId,
+        userId,
+        rows: savedRows,
+        db,
+        generation: accessSnapshot,
+        xtreamConfig: null,
+        mediaGatewayUrl: null,
+        mediaGatewayToken: null,
+        vodInfoLimit: 0,
+        tmdbValidateLimit: 0,
+        assertSourceCurrent: () => assertCatalogSnapshotCurrent(db, sourceId, userId, accessSnapshot),
+      });
+      await persist({
+        stage: "discovering",
+        [readyFlag]: true,
+        browseReady: true,
+        steps: { [itemType === "movie" ? "movies" : "series"]: { status: "running", count: savedRows.length } },
+      });
+    };
+
+    const importDiscoveryTarget = async (target: DiscoveryTarget) => {
+      // Deliberately one awaited provider request: DISCOVER_CONCURRENCY remains
+      // one so alternate cinema batches never create `background_busy` pressure.
+      const slice = await fetchCatalog(target.action, target.params);
       const rawRows: JsonRecord[] = [];
-      for (const slice of slices) {
-        if (!Array.isArray(slice) || !slice.length) continue;
-        const r = xtreamRows(sourceId, userId, slice as JsonRecord[], def.type, nameMaps[def.type]);
+      if (Array.isArray(slice) && slice.length) {
+        const r = xtreamRows(sourceId, userId, slice as JsonRecord[], target.type, nameMaps[target.type]);
         for (const row of r) rawRows.push(row);
       }
-      // Collapse cross-category duplicates before counting/signing/upserting.
       const batchRows = dedupeByConflictKey(rawRows);
       for (const row of batchRows) {
-        updateSig(sig, def.type, stringOr(row.external_id, ""), Number(recordOrEmpty(row.metadata).added));
+        updateSig(sig, target.type, stringOr(row.external_id, ""), Number(recordOrEmpty(row.metadata).added));
       }
       if (batchRows.length) {
         // Count only rows the upsert ACTUALLY inserted — a stream already imported
@@ -926,40 +1015,77 @@ export async function driveXtreamSyncToReady(sourceId: string, userId: string, d
           cursor.runVersion ? Number(cursor.runVersion) : null,
         );
         await assertCatalogSnapshotCurrent(db, sourceId, userId, accessSnapshot);
-        if (def.type === "live") liveCount += insertedNow;
-        else if (def.type === "movie") movieCount += insertedNow;
+        if (target.type === "live") liveCount += insertedNow;
+        else if (target.type === "movie") movieCount += insertedNow;
         else seriesCount += insertedNow;
+        if (target.type === "movie" || target.type === "series") {
+          await projectFirstCinemaBatch(target.type, batchRows);
+        }
       }
-      catIdx += batch.length;
-      if (catIdx >= targets.length) { typeIdx++; catIdx = 0; }
+    };
+
+    let sincePersist = 0;
+    const persistWalkProgress = async () => {
+      sincePersist++;
+      if (sincePersist < persistEvery && Date.now() < deadline) return;
+      sincePersist = 0;
+      const percent = Math.max(18, Math.min(66, 18 + Math.round((48 * completedTargets()) / Math.max(1, totalTargets))));
+      const importedTotal = liveCount + movieCount + seriesCount;
+      await persist({
+        stage: "discovering",
+        percent,
+        counts: { live: liveCount, movies: movieCount, series: seriesCount, total: importedTotal },
+        steps: { import: { status: "running", count: importedTotal } },
+      });
+    };
+
+    if (cinemaFirst) {
+      while (Date.now() < deadline && walkIdx < cinemaWalk.length) {
+        await importDiscoveryTarget(cinemaWalk[walkIdx]);
+        walkIdx += DISCOVER_CONCURRENCY;
+        cursor.walkIdx = walkIdx;
+        cursor.counts = { live: liveCount, movies: movieCount, series: seriesCount };
+        cursor.sig = sig;
+        await persistWalkProgress();
+        if (superseded) return;
+      }
+    } else {
+      // Backward-compatible v1 resume path. Never reinterpret a persisted
+      // typeIdx/catIdx from a deployment that began with Live TV.
+      while (Date.now() < deadline && typeIdx < LEGACY_DISCOVER_TYPES.length) {
+        const definition = LEGACY_DISCOVER_TYPES[typeIdx];
+        const targets = legacyTargetsFor(definition.type);
+        if (catIdx >= targets.length) { typeIdx++; catIdx = 0; continue; }
+        await importDiscoveryTarget(targets[catIdx]);
+        catIdx += DISCOVER_CONCURRENCY;
+        if (catIdx >= targets.length) { typeIdx++; catIdx = 0; }
+        cursor.typeIdx = typeIdx;
+        cursor.catIdx = catIdx;
+        cursor.counts = { live: liveCount, movies: movieCount, series: seriesCount };
+        cursor.sig = sig;
+        await persistWalkProgress();
+        if (superseded) return;
+      }
+    }
+
+    if (cinemaFirst) {
+      cursor.typeIdx = 0;
+      cursor.catIdx = 0;
+    } else {
       cursor.typeIdx = typeIdx;
       cursor.catIdx = catIdx;
-      cursor.counts = { live: liveCount, movies: movieCount, series: seriesCount };
-      cursor.sig = sig;
-      sincePersist++;
-      if (sincePersist >= persistEvery || Date.now() >= deadline) {
-        sincePersist = 0;
-        // Bande 18→66 (l'ancien plafond 57 laissait une falaise muette 57→74
-        // pendant recomptage + prune — comblée aussi par les jalons 68/71 plus bas).
-        const percent = Math.max(18, Math.min(66, 18 + Math.round((48 * completedTargets()) / Math.max(1, totalTargets))));
-        const importedTotal = liveCount + movieCount + seriesCount;
-        await persist({
-          stage: "discovering",
-          percent,
-          counts: { live: liveCount, movies: movieCount, series: seriesCount, total: importedTotal },
-          steps: { import: { status: "running", count: importedTotal } },
-        });
-      }
-      if (superseded) return;
     }
 
     // Real progress this isolate → reset the continuation budget so only a
     // genuinely stuck (zero-progress) loop can ever trip SYNC_MAX_CONTINUATIONS.
     // A healthy large import self-invokes hundreds of times and must never
     // self-abort just for being big.
-    if (typeIdx !== startTypeIdx || catIdx !== startCatIdx) cursor.attempts = 0;
+    if (walkIdx !== startWalkIdx || typeIdx !== startTypeIdx || catIdx !== startCatIdx) cursor.attempts = 0;
 
-    if (typeIdx < DISCOVER_TYPES.length) {
+    const discoveryIncomplete = cinemaFirst
+      ? walkIdx < cinemaWalk.length
+      : typeIdx < LEGACY_DISCOVER_TYPES.length;
+    if (discoveryIncomplete) {
       await persist(null);
       if (superseded) return;
       await assertCatalogSnapshotCurrent(db, sourceId, userId, accessSnapshot);
@@ -1387,8 +1513,9 @@ export type XtreamMetadataPage = {
 };
 
 type StagedCategory = { id: string; name: string; ordinal: number };
+type StagedGatewayState = { pageCursor: string | null; spoolToken: string | null };
 type StagedGenerationCursor = {
-  version: 1;
+  version: 1 | 2;
   actionIndex: number;
   pageCursor: string | null;
   spoolToken: string | null;
@@ -1397,19 +1524,30 @@ type StagedGenerationCursor = {
   processedCategories: number;
   processedItems: number;
   copyRevision: number;
+  cinemaMovie: StagedGatewayState;
+  cinemaSeries: StagedGatewayState;
+  cinemaDoneMask: number;
+  cinemaTurn: "movie" | "series";
 };
 
 const STAGED_CATEGORY_PAGE_SIZE = 100;
 const STAGED_ITEM_PAGE_SIZE = 250;
 const STAGED_CURSOR_TOKEN_MAX = 1024;
 const STAGED_PACKED_CURSOR_MAX = 1024;
-const STAGED_ACTIONS: Array<{
+type StagedProgressAction = "live_categories" | "vod_categories" | "series_categories" |
+  "live_streams" | "vod_streams" | "series_streams" | "cinema_streams";
+type StagedActionDefinition = {
   action: StagedCatalogAction;
-  progressAction: "live_categories" | "vod_categories" | "series_categories" |
-    "live_streams" | "vod_streams" | "series_streams";
+  progressAction: StagedProgressAction;
   kind: "categories" | "items";
   itemType: StagedCatalogItemType;
-}> = [
+};
+type StagedCinemaActionDefinition = {
+  progressAction: "cinema_streams";
+  kind: "cinema";
+};
+
+const STAGED_ACTIONS_V1: StagedActionDefinition[] = [
   { action: "get_live_categories", progressAction: "live_categories", kind: "categories", itemType: "live" },
   { action: "get_vod_categories", progressAction: "vod_categories", kind: "categories", itemType: "movie" },
   { action: "get_series_categories", progressAction: "series_categories", kind: "categories", itemType: "series" },
@@ -1417,6 +1555,50 @@ const STAGED_ACTIONS: Array<{
   { action: "get_vod_streams", progressAction: "vod_streams", kind: "items", itemType: "movie" },
   { action: "get_series", progressAction: "series_streams", kind: "items", itemType: "series" },
 ];
+const STAGED_ACTIONS_V2: Array<StagedActionDefinition | StagedCinemaActionDefinition> = [
+  { action: "get_vod_categories", progressAction: "vod_categories", kind: "categories", itemType: "movie" },
+  { action: "get_series_categories", progressAction: "series_categories", kind: "categories", itemType: "series" },
+  { action: "get_live_categories", progressAction: "live_categories", kind: "categories", itemType: "live" },
+  { progressAction: "cinema_streams", kind: "cinema" },
+  { action: "get_live_streams", progressAction: "live_streams", kind: "items", itemType: "live" },
+];
+
+function stagedActions(version: 1 | 2) {
+  return version === 2 ? STAGED_ACTIONS_V2 : STAGED_ACTIONS_V1;
+}
+
+function stagedInventoryAction(itemType: StagedCatalogItemType): StagedCatalogAction {
+  if (itemType === "movie") return "get_vod_streams";
+  if (itemType === "series") return "get_series";
+  return "get_live_streams";
+}
+
+function nextStagedGatewayState(previous: StagedGatewayState, page: XtreamMetadataPage): StagedGatewayState {
+  let spoolToken = previous.spoolToken;
+  if (page.spoolToken !== undefined) {
+    const nextSpoolToken = cleanCursorToken(page.spoolToken);
+    if (nextSpoolToken && spoolToken && nextSpoolToken !== spoolToken) {
+      const previousDigest = gatewaySpoolContentDigest(spoolToken);
+      const nextDigest = gatewaySpoolContentDigest(nextSpoolToken);
+      if (!previousDigest || !nextDigest || previousDigest !== nextDigest) {
+        throw new Error("Gateway spool identity changed while paging an action");
+      }
+    }
+    // A null/omitted token never clears a durable build identity. A safe exact-
+    // content rebuild may rotate buildId/expiry only when the digest is stable.
+    if (nextSpoolToken) spoolToken = nextSpoolToken;
+  }
+  return { pageCursor: page.nextCursor, spoolToken };
+}
+
+function nextCinemaLane(cursor: StagedGenerationCursor): "movie" | "series" | null {
+  const movieDone = (cursor.cinemaDoneMask & 1) !== 0;
+  const seriesDone = (cursor.cinemaDoneMask & 2) !== 0;
+  if (movieDone && seriesDone) return null;
+  if (cursor.cinemaTurn === "movie" && !movieDone) return "movie";
+  if (cursor.cinemaTurn === "series" && !seriesDone) return "series";
+  return movieDone ? "series" : "movie";
+}
 
 // Every one of the six Xtream list actions is consumed exactly once as a
 // gateway-owned bounded spool. Content actions are intentionally UNFILTERED:
@@ -1446,19 +1628,33 @@ export async function stageXtreamCredentialCatalogGeneration(input: {
   };
   catalogGenerationFields(generation);
   const cursor = stagedGenerationCursor(input.cursor);
+  const actions = stagedActions(cursor.version);
   const maxSlices = boundedInt(input.maxSlices, 1, 1, 8);
   const deadline = Date.now() + boundedInt(input.deadlineMs, 20_000, 1_000, 60_000);
   let slices = 0;
 
-  while (cursor.actionIndex < STAGED_ACTIONS.length && slices < maxSlices && Date.now() < deadline) {
-    const action = STAGED_ACTIONS[cursor.actionIndex];
-    const maxItems = action.kind === "categories" ? STAGED_CATEGORY_PAGE_SIZE : STAGED_ITEM_PAGE_SIZE;
+  while (cursor.actionIndex < actions.length && slices < maxSlices && Date.now() < deadline) {
+    const definition = actions[cursor.actionIndex];
+    const cinemaLane = definition.kind === "cinema" ? nextCinemaLane(cursor) : null;
+    if (definition.kind === "cinema" && !cinemaLane) {
+      advanceStagedAction(cursor);
+      continue;
+    }
+    const action = definition.kind === "cinema"
+      ? stagedInventoryAction(cinemaLane!)
+      : definition.action;
+    const itemType = definition.kind === "cinema" ? cinemaLane! : definition.itemType;
+    const kind = definition.kind === "categories" ? "categories" : "items";
+    const gatewayState = definition.kind === "cinema"
+      ? (cinemaLane === "movie" ? cursor.cinemaMovie : cursor.cinemaSeries)
+      : { pageCursor: cursor.pageCursor, spoolToken: cursor.spoolToken };
+    const maxItems = kind === "categories" ? STAGED_CATEGORY_PAGE_SIZE : STAGED_ITEM_PAGE_SIZE;
     const page = validateXtreamMetadataPage(
       await input.fetchMetadataPage({
-        action: action.action,
+        action,
         categoryId: null,
-        cursor: cursor.pageCursor,
-        spoolToken: cursor.spoolToken,
+        cursor: gatewayState.pageCursor,
+        spoolToken: gatewayState.spoolToken,
         maxItems,
       }),
       maxItems,
@@ -1477,13 +1673,13 @@ export async function stageXtreamCredentialCatalogGeneration(input: {
     }
     slices += 1;
 
-    if (action.kind === "categories") {
+    if (kind === "categories") {
       const categories = normalizeStagedCategories(page.items, cursor.registeredCategoryCount);
       const previousCategoryCount = cursor.registeredCategoryCount;
-      await registerStagedCategories(input, generation, action.itemType, categories);
+      await registerStagedCategories(input, generation, itemType, categories);
       cursor.registeredCategoryCount = await stagedCategoryCount(
         input,
-        action.itemType,
+        itemType,
         previousCategoryCount,
       );
       cursor.processedCategories += cursor.registeredCategoryCount - previousCategoryCount;
@@ -1491,16 +1687,16 @@ export async function stageXtreamCredentialCatalogGeneration(input: {
         await markStagedCategoryListComplete(
           input,
           generation,
-          action.itemType,
+          itemType,
           cursor.registeredCategoryCount,
         );
       }
     } else {
       const rawItems = page.items.filter(isRecord) as JsonRecord[];
       if (rawItems.length !== page.items.length) throw new Error("Gateway metadata page contains invalid rows");
-      const categoryNames = await stagedCategoryNames(input, action.itemType, rawItems);
+      const categoryNames = await stagedCategoryNames(input, itemType, rawItems);
       const rows = dedupeByConflictKey(
-        xtreamRows(input.sourceId, input.userId, rawItems, action.itemType, categoryNames),
+        xtreamRows(input.sourceId, input.userId, rawItems, itemType, categoryNames),
       );
       if (rows.length) {
         const { error } = await input.db
@@ -1517,11 +1713,11 @@ export async function stageXtreamCredentialCatalogGeneration(input: {
           .eq("source_id", input.sourceId)
           .eq("user_id", input.userId)
           .eq("generation_id", input.generationId)
-          .eq("item_type", action.itemType)
+          .eq("item_type", itemType)
           .in("external_id", externalIds);
         if (savedError) throw savedError;
         const savedRows = Array.isArray(savedData) ? savedData as LiveCatalogItem[] : [];
-        if (action.itemType === "live") {
+        if (itemType === "live") {
           await materializeLiveChunk(input.db, {
             userId: input.userId,
             sourceId: input.sourceId,
@@ -1545,7 +1741,7 @@ export async function stageXtreamCredentialCatalogGeneration(input: {
         input.sourceId,
         input.userId,
         input.generationId,
-        action.itemType,
+        itemType,
       );
       cursor.processedItems = (await stagedGenerationCounts(
         input.db,
@@ -1557,42 +1753,37 @@ export async function stageXtreamCredentialCatalogGeneration(input: {
         await markStagedParentActionComplete(
           input,
           generation,
-          action.itemType,
+          itemType,
           cursor.currentItemCount,
         );
       }
     }
 
-    cursor.pageCursor = page.nextCursor;
-    if (page.spoolToken !== undefined) {
-      const nextSpoolToken = cleanCursorToken(page.spoolToken);
-      if (nextSpoolToken && cursor.spoolToken && nextSpoolToken !== cursor.spoolToken) {
-        const previousDigest = gatewaySpoolContentDigest(cursor.spoolToken);
-        const nextDigest = gatewaySpoolContentDigest(nextSpoolToken);
-        if (!previousDigest || !nextDigest || previousDigest !== nextDigest) {
-          throw new Error("Gateway spool identity changed while paging an action");
-        }
-      }
-      // A null/omitted token never clears a durable build identity. The gateway
-      // emits one page-zero token for every page of a signed manifest. A safe
-      // exact-content rebuild may rotate buildId/expiry, so persist its newer
-      // token only after the signed payload's content digest matched above.
-      if (nextSpoolToken) cursor.spoolToken = nextSpoolToken;
+    const nextGatewayState = nextStagedGatewayState(gatewayState, page);
+    if (definition.kind === "cinema") {
+      if (cinemaLane === "movie") cursor.cinemaMovie = page.done ? { pageCursor: null, spoolToken: null } : nextGatewayState;
+      else cursor.cinemaSeries = page.done ? { pageCursor: null, spoolToken: null } : nextGatewayState;
+      if (page.done) cursor.cinemaDoneMask |= cinemaLane === "movie" ? 1 : 2;
+      cursor.cinemaTurn = cinemaLane === "movie" ? "series" : "movie";
+      if (cursor.cinemaDoneMask === 3) advanceStagedAction(cursor);
+    } else {
+      cursor.pageCursor = nextGatewayState.pageCursor;
+      cursor.spoolToken = nextGatewayState.spoolToken;
+      if (page.done) advanceStagedAction(cursor);
     }
-    if (page.done) advanceStagedAction(cursor);
   }
 
   // Lazy episode caches are copied mechanically from the previous active
-  // generation after the six provider lists. The SQL RPC is bounded and
+  // generation after all provider inventories. The SQL RPC is bounded and
   // lease-fenced; cloned rows are excluded from catalog identity evidence.
-  if (cursor.actionIndex === STAGED_ACTIONS.length && slices < maxSlices && Date.now() < deadline) {
+  if (cursor.actionIndex === actions.length && slices < maxSlices && Date.now() < deadline) {
     const clone = await copyStagedLazySeriesCache(input, generation, cursor.copyRevision);
     cursor.copyRevision = clone.copyRevision;
     if (clone.done) cursor.actionIndex += 1;
     slices += 1;
   }
 
-  const done = cursor.actionIndex > STAGED_ACTIONS.length;
+  const done = cursor.actionIndex > actions.length;
   const counts = await stagedGenerationCounts(input.db, input.sourceId, input.userId, input.generationId);
   const checkpoint = stagedGenerationCheckpoint(cursor, done);
   return {
@@ -1607,7 +1798,7 @@ export async function stageXtreamCredentialCatalogGeneration(input: {
 function stagedGenerationCursor(value: unknown): StagedGenerationCursor {
   if (value === undefined || value === null) {
     return {
-      version: 1,
+      version: 2,
       actionIndex: 0,
       pageCursor: null,
       spoolToken: null,
@@ -1616,18 +1807,26 @@ function stagedGenerationCursor(value: unknown): StagedGenerationCursor {
       processedCategories: 0,
       processedItems: 0,
       copyRevision: 0,
+      cinemaMovie: { pageCursor: null, spoolToken: null },
+      cinemaSeries: { pageCursor: null, spoolToken: null },
+      cinemaDoneMask: 0,
+      cinemaTurn: "movie",
     };
   }
-  if (!isRecord(value) || value.version !== 1) throw new Error("Invalid staged catalog cursor");
-  const actionIndex = strictCheckpointInteger(value.typeIndex, STAGED_ACTIONS.length + 1);
-  const expectedAction = stagedProgressAction(actionIndex);
+  if (!isRecord(value) || (value.version !== 1 && value.version !== 2)) {
+    throw new Error("Invalid staged catalog cursor");
+  }
+  const version = value.version as 1 | 2;
+  const actions = stagedActions(version);
+  const actionIndex = strictCheckpointInteger(value.typeIndex, actions.length + 1);
+  const expectedAction = stagedProgressAction(version, actionIndex);
   if (value.action !== expectedAction) throw new Error("Staged catalog progress action is inconsistent");
-  const registeredCategoryCount = strictCheckpointInteger(value.categoryOrdinal, 999_999_999);
-  const currentItemCount = strictCheckpointInteger(value.itemOffset, 999_999_999_999);
+  const categoryOrdinal = strictCheckpointInteger(value.categoryOrdinal, 999_999_999);
+  const itemOffset = strictCheckpointInteger(value.itemOffset, 999_999_999_999);
   const processedCategories = strictCheckpointInteger(value.processedCategories, 999_999_999);
   const processedItems = strictCheckpointInteger(value.processedItems, 999_999_999_999_999);
   if (
-    actionIndex < 0 || registeredCategoryCount < 0 || currentItemCount < 0 ||
+    actionIndex < 0 || categoryOrdinal < 0 || itemOffset < 0 ||
     processedCategories < 0 || processedItems < 0 || typeof value.categoriesDone !== "boolean"
   ) {
     throw new Error("Invalid staged catalog cursor position");
@@ -1636,20 +1835,35 @@ function stagedGenerationCursor(value: unknown): StagedGenerationCursor {
   if (value.categoriesDone !== expectsCategoriesDone) {
     throw new Error("Staged catalog category completion is inconsistent");
   }
-  const packedCursor = actionIndex < 3 ? value.categoryPageCursor : value.itemCursor;
-  const gatewayCursor = actionIndex < STAGED_ACTIONS.length
-    ? unpackStagedGatewayCursor(packedCursor)
-    : { pageCursor: null, spoolToken: null };
+  if (version === 2 && actionIndex === 3 && (categoryOrdinal > 3 || itemOffset > 1)) {
+    throw new Error("Staged cinema cursor is inconsistent");
+  }
+  const emptyGateway = { pageCursor: null, spoolToken: null };
+  const gatewayCursor = actionIndex < 3
+    ? unpackStagedGatewayCursor(value.categoryPageCursor)
+    : actionIndex < actions.length && !(version === 2 && actionIndex === 3)
+      ? unpackStagedGatewayCursor(value.itemCursor)
+      : emptyGateway;
+  const cinemaMovie = version === 2 && actionIndex === 3
+    ? unpackStagedGatewayCursor(value.categoryPageCursor)
+    : emptyGateway;
+  const cinemaSeries = version === 2 && actionIndex === 3
+    ? unpackStagedGatewayCursor(value.itemCursor)
+    : emptyGateway;
   return {
-    version: 1,
+    version,
     actionIndex,
     pageCursor: gatewayCursor.pageCursor,
     spoolToken: gatewayCursor.spoolToken,
-    registeredCategoryCount,
-    currentItemCount: actionIndex === STAGED_ACTIONS.length ? 0 : currentItemCount,
+    registeredCategoryCount: actionIndex < 3 ? categoryOrdinal : 0,
+    currentItemCount: actionIndex === actions.length ? 0 : itemOffset,
     processedCategories,
     processedItems,
-    copyRevision: actionIndex === STAGED_ACTIONS.length ? currentItemCount : 0,
+    copyRevision: actionIndex === actions.length ? itemOffset : 0,
+    cinemaMovie,
+    cinemaSeries,
+    cinemaDoneMask: version === 2 && actionIndex === 3 ? categoryOrdinal : 0,
+    cinemaTurn: version === 2 && actionIndex === 3 && itemOffset === 1 ? "series" : "movie",
   };
 }
 
@@ -1756,9 +1970,10 @@ function gatewaySpoolContentDigest(value: unknown) {
   }
 }
 
-function stagedProgressAction(actionIndex: number) {
-  if (actionIndex < STAGED_ACTIONS.length) return STAGED_ACTIONS[actionIndex].progressAction;
-  if (actionIndex === STAGED_ACTIONS.length) return "episode_state_copy";
+function stagedProgressAction(version: 1 | 2, actionIndex: number) {
+  const actions = stagedActions(version);
+  if (actionIndex < actions.length) return actions[actionIndex].progressAction;
+  if (actionIndex === actions.length) return "episode_state_copy";
   return "complete";
 }
 
@@ -1888,7 +2103,7 @@ async function markStagedParentActionComplete(
     p_worker: generation.leaseOwner,
     p_expected_lease_sequence: generation.attempt,
     p_category_kind: stagedCategoryKind(itemType),
-    p_action: STAGED_ACTIONS.find((entry) => entry.kind === "items" && entry.itemType === itemType)?.action,
+    p_action: stagedInventoryAction(itemType),
     p_staged_item_count: stagedItemCount,
   });
   if (error) throw error;
@@ -2038,24 +2253,54 @@ async function copyStagedLazySeriesCache(
 }
 
 function stagedGenerationCheckpoint(cursor: StagedGenerationCursor, done: boolean) {
-  const action = done ? "complete" : stagedProgressAction(cursor.actionIndex);
-  const current = cursor.actionIndex < STAGED_ACTIONS.length ? STAGED_ACTIONS[cursor.actionIndex] : null;
-  const packedCursor = current
+  const actions = stagedActions(cursor.version);
+  const action = done ? "complete" : stagedProgressAction(cursor.version, cursor.actionIndex);
+  const current = cursor.actionIndex < actions.length ? actions[cursor.actionIndex] : null;
+  const packedCursor = current && current.kind !== "cinema"
     ? packStagedGatewayCursor(cursor.pageCursor, cursor.spoolToken)
     : "";
+  if (cursor.version === 1) {
+    return {
+      version: 1,
+      action,
+      typeIndex: cursor.actionIndex,
+      categoryOrdinal: current?.kind === "categories" ? cursor.registeredCategoryCount : 0,
+      itemOffset: cursor.actionIndex === actions.length
+        ? cursor.copyRevision
+        : current?.kind === "items"
+          ? cursor.currentItemCount
+          : 0,
+      categoryPageCursor: current?.kind === "categories" ? packedCursor : "",
+      categoriesDone: cursor.actionIndex >= 3,
+      itemCursor: current?.kind === "items" ? packedCursor : "",
+      processedCategories: cursor.processedCategories,
+      processedItems: cursor.processedItems,
+    };
+  }
+  const cinemaActive = current?.kind === "cinema";
   return {
-    version: 1,
+    version: 2,
     action,
     typeIndex: cursor.actionIndex,
-    categoryOrdinal: current?.kind === "categories" ? cursor.registeredCategoryCount : 0,
-    itemOffset: cursor.actionIndex === STAGED_ACTIONS.length
+    categoryOrdinal: current?.kind === "categories"
+      ? cursor.registeredCategoryCount
+      : cinemaActive
+        ? cursor.cinemaDoneMask
+        : 0,
+    itemOffset: cursor.actionIndex === actions.length
       ? cursor.copyRevision
+      : cinemaActive
+        ? cursor.cinemaTurn === "series" ? 1 : 0
       : current?.kind === "items"
         ? cursor.currentItemCount
         : 0,
-    categoryPageCursor: current?.kind === "categories" ? packedCursor : "",
+    categoryPageCursor: cinemaActive
+      ? packStagedGatewayCursor(cursor.cinemaMovie.pageCursor, cursor.cinemaMovie.spoolToken)
+      : current?.kind === "categories" ? packedCursor : "",
     categoriesDone: cursor.actionIndex >= 3,
-    itemCursor: current?.kind === "items" ? packedCursor : "",
+    itemCursor: cinemaActive
+      ? packStagedGatewayCursor(cursor.cinemaSeries.pageCursor, cursor.cinemaSeries.spoolToken)
+      : current?.kind === "items" ? packedCursor : "",
     processedCategories: cursor.processedCategories,
     processedItems: cursor.processedItems,
   };
@@ -2317,7 +2562,7 @@ function mergeSyncProgress(current: JsonRecord, patch: JsonRecord) {
       boundedProgressPercent(patch.percent),
     );
   }
-  for (const flag of ["liveReady", "browseReady", "usable"]) {
+  for (const flag of ["moviesReady", "seriesReady", "liveReady", "browseReady", "usable"]) {
     if (current[flag] === true || patch[flag] === true) merged[flag] = true;
   }
   return merged;

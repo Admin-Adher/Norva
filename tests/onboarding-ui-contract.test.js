@@ -16,15 +16,31 @@ const app = read('public/js/app.js');
 const css = read('public/css/main.css');
 const shell = read('public/app.html');
 
-test('finalize emits early live and first-slice browse unlocks', () => {
+test('both finalizers unlock cinema slices independently and leave Live TV until last', () => {
   const sourceSync = read('supabase/functions/norva-source-sync/index.ts');
   const cloud = read('supabase/functions/norva-cloud/index.ts');
   for (const source of [sourceSync, cloud]) {
     assert.match(source, /NORVA_BROWSE_TITLE_THRESHOLD/);
-    assert.match(source, /browseReady: true/);
+    assert.match(source, /moviesReady/);
+    assert.match(source, /seriesReady/);
     assert.match(source, /liveReady: true/);
+    assert.match(source, /nextPhase: done \? \(legacyLiveFirst \? "complete" : "live"\) : "titles"/);
+    assert.match(source, /nextPhase: legacyLiveFirst && totalVod > 0 \? "titles" : "complete"/);
+    assert.match(source, /function usesLegacyLiveFirstFinalize\(/);
+    assert.match(source, /hasCinemaFirstMarker/);
+    assert.match(source, /return "titles";/);
   }
   assert.match(sourceSync, /NORVA_FINALIZE_FIRST_SLICE_THROTTLE_MS/);
+  assert.match(sourceManager, /Movies and Series first, then Live TV/);
+  assert.doesNotMatch(sourceManager, /Live first, then movies/i);
+  const milestoneStart = sourceManager.indexOf('const milestones = [');
+  const milestoneEnd = sourceManager.indexOf('];', milestoneStart);
+  const milestones = sourceManager.slice(milestoneStart, milestoneEnd);
+  assert.ok(
+    milestones.indexOf("step('movies'") < milestones.indexOf("step('series'")
+      && milestones.indexOf("step('series'") < milestones.indexOf("step('channels'"),
+    'the rendered progress milestones must keep Movies, Series, then Live TV',
+  );
 });
 
 test('one catalog policy drives Home, navigation and preparation state', () => {
@@ -167,8 +183,8 @@ test('setup visuals reuse Norva assets and ship cache-busted', () => {
   assert.match(shell, /class="tc-intro-icon" src="\/img\/icons\/norva-settings\.svg/);
   assert.doesNotMatch(shell, /<div class="tc-intro-icon">/);
   assert.match(shell, /main\.css\?v=71854078d1/);
-  assert.match(shell, /sourceHealth\.js\?v=6c0eefcb4f/);
-  assert.match(shell, /SourceManager\.js\?v=575d34510a/);
-  assert.match(shell, /HomePage\.js\?v=61b724287a/);
+  assert.match(shell, /sourceHealth\.js\?v=72a7e5bf20/);
+  assert.match(shell, /SourceManager\.js\?v=c1480273cb/);
+  assert.match(shell, /HomePage\.js\?v=eb1d2d0c45/);
   assert.match(shell, /app\.js\?v=fa59ee02c6/);
 });

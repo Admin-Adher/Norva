@@ -196,7 +196,7 @@ test('all changed Provider Access UI assets are cache-busted', () => {
   assert.match(shell, /main\.css\?v=71854078d1/);
   assert.match(shell, /cloudApi\.js\?v=73/);
   assert.match(shell, /api\.js\?v=93/);
-  assert.match(shell, /sourceHealth\.js\?v=6c0eefcb4f/);
-  assert.match(shell, /SourceManager\.js\?v=575d34510a/);
-  assert.match(shell, /HomePage\.js\?v=61b724287a/);
+  assert.match(shell, /sourceHealth\.js\?v=72a7e5bf20/);
+  assert.match(shell, /SourceManager\.js\?v=c1480273cb/);
+  assert.match(shell, /HomePage\.js\?v=eb1d2d0c45/);
 });

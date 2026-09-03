@@ -262,6 +262,10 @@ class HomePage {
                     this.app?.navigateTo?.('movies');
                     return;
                 }
+                if (e.target.closest('[data-open-series]')) {
+                    this.app?.navigateTo?.('series');
+                    return;
+                }
                 if (e.target.closest('[data-ecosystem-dismiss]')) {
                     try { localStorage.setItem('norva-ecosystem-card-dismissed-v1', '1'); } catch (_) { /* best effort */ }
                     document.getElementById('home-ecosystem')?.classList.add('hidden');
@@ -688,6 +692,9 @@ class HomePage {
             const policy = window.NorvaSourceHealth?.catalogAvailability?.(summary) || {};
             const liveReady = policy.categories?.live === true;
             const moviesReady = policy.categories?.movies === true;
+            const seriesReady = policy.categories?.series === true;
+            const cinemaReady = moviesReady || seriesReady;
+            const fullyReady = liveReady && moviesReady && seriesReady;
             if (!this.setupRefreshTimer) {
                 this.setupRefreshTimer = setTimeout(() => {
                     this.setupRefreshTimer = null;
@@ -699,14 +706,19 @@ class HomePage {
             return `
                 <section class="norva-setup-building norva-setup-building-home home-sync-hint home-state-panel" role="status" aria-live="polite">
                     <div class="norva-setup-building-copy">
-                        <p class="norva-setup-kicker">${liveReady ? 'Live is ready' : 'Building your cinema'}</p>
-                        <h2>${liveReady ? 'Your channels are ready' : 'Titles are arriving'}</h2>
-                        <p>${liveReady
-                            ? 'Open Live now. Movies and series unlock as the first titles land.'
-                            : 'Live unlocks first. Movies follow as soon as the first titles are ready.'}</p>
+                        <p class="norva-setup-kicker">${fullyReady ? 'Your full library is ready' : cinemaReady ? 'Your cinema is ready' : liveReady ? 'Live TV is ready' : 'Building your cinema'}</p>
+                        <h2>${cinemaReady || liveReady ? 'Start watching while the import continues' : 'Movies and series are arriving'}</h2>
+                        <p>${fullyReady
+                            ? 'Movies, series and Live TV are now available.'
+                            : cinemaReady
+                                ? 'Open each ready section now. Live TV is added last in the background.'
+                                : liveReady
+                                    ? 'Open Live TV now. Movies and series will appear as soon as their first batches are ready.'
+                                    : 'Movies and series unlock from their first ready batch. Live TV follows last.'}</p>
                         <div class="norva-setup-building-actions">
-                            ${liveReady ? '<button type="button" class="btn btn-primary" data-open-live>Open Live</button>' : ''}
-                            ${moviesReady ? '<button type="button" class="btn btn-secondary" data-open-movies>Open Movies</button>' : ''}
+                            ${moviesReady ? '<button type="button" class="btn btn-primary" data-open-movies>Open Movies</button>' : ''}
+                            ${seriesReady ? `<button type="button" class="btn ${moviesReady ? 'btn-secondary' : 'btn-primary'}" data-open-series>Open Series</button>` : ''}
+                            ${liveReady ? `<button type="button" class="btn ${cinemaReady ? 'btn-secondary' : 'btn-primary'}" data-open-live>Open Live</button>` : ''}
                         </div>
                     </div>
                     ${this.renderSetupPosterStrip()}
@@ -1014,7 +1026,7 @@ class HomePage {
             <div class="norva-setup-building-meter" role="progressbar" aria-valuemin="0" aria-valuemax="100"${value ? ` aria-valuenow="${value}"` : ''} aria-label="Catalog import progress">
                 <span style="width:${value}%"></span>
             </div>
-            <p class="norva-setup-building-status">${value ? `${value}% · Live first, then movies` : 'Connecting to your TV service'}</p>
+            <p class="norva-setup-building-status">${value ? `${value}% · Movies and series first · Live TV last` : 'Connecting to your TV service'}</p>
         `;
     }
 
@@ -1044,8 +1056,8 @@ class HomePage {
             <section class="norva-setup-gate norva-setup-building norva-setup-sync-embedded" data-setup-state="syncing">
                 <div class="norva-setup-building-copy">
                     <div class="norva-setup-kicker">Building your cinema</div>
-                    <h1>Your channels and titles are arriving</h1>
-                    <p>Live unlocks first. Movies follow as soon as the first titles are ready.</p>
+                    <h1>Your movies and series are arriving first</h1>
+                    <p>Each cinema section unlocks from its first ready batch. Live TV is imported last.</p>
                     ${this.renderSetupProgressBar(percent)}
                     <div class="norva-setup-actions">
                         <button class="btn btn-secondary" id="norva-setup-sync-settings" type="button">TV Service settings</button>

@@ -200,19 +200,29 @@ test('catalog policy unlocks Live as soon as channels are materialized', () => {
   assert.equal(availability.categories.series, false);
 });
 
-test('catalog policy unlocks Movies and Series on the first title slice', () => {
+test('catalog policy unlocks Movies and Series independently on their own first title slice', () => {
   const health = sourceHealthHarness();
-  const summary = health.summarize([{
+  const movieSummary = health.summarize([{
     id: 'source-1',
     sync_status: 'syncing',
-    syncProgress: { status: 'syncing', liveReady: true, browseReady: true, counts: { movies: 80 } },
+    syncProgress: { status: 'syncing', moviesReady: true, counts: { movies: 80 } },
   }]);
-  const availability = health.catalogAvailability(summary);
+  const seriesSummary = health.summarize([{
+    id: 'source-2',
+    sync_status: 'syncing',
+    syncProgress: { status: 'syncing', seriesReady: true, counts: { series: 80 } },
+  }]);
+  const movieAvailability = health.catalogAvailability(movieSummary);
+  const seriesAvailability = health.catalogAvailability(seriesSummary);
 
-  assert.equal(availability.gate, false);
-  assert.equal(availability.categories.live, true);
-  assert.equal(availability.categories.movies, true);
-  assert.equal(availability.categories.series, true);
+  assert.equal(movieAvailability.gate, false);
+  assert.equal(movieAvailability.categories.live, false);
+  assert.equal(movieAvailability.categories.movies, true);
+  assert.equal(movieAvailability.categories.series, false);
+  assert.equal(seriesAvailability.gate, false);
+  assert.equal(seriesAvailability.categories.live, false);
+  assert.equal(seriesAvailability.categories.movies, false);
+  assert.equal(seriesAvailability.categories.series, true);
 });
 
 test('catalog policy unlocks every consumer from the authoritative usable flag', () => {

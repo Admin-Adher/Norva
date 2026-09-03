@@ -303,6 +303,8 @@ function publicProgress(value) {
     counts: Object.keys(counts).length ? counts : null,
     categories: Object.keys(categories).length ? categories : null,
     steps: Object.keys(steps).length ? steps : null,
+    moviesReady: source.moviesReady === true ? true : null,
+    seriesReady: source.seriesReady === true ? true : null,
     liveReady: source.liveReady === true ? true : null,
     browseReady: source.browseReady === true ? true : null,
     usable: source.usable === true ? true : null,

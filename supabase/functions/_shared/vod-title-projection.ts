@@ -758,7 +758,10 @@ async function loadVodInfoIds(
 
   const unresolved = candidates.filter((r) => pending.has(stringOr(r.external_id, "")));
   const toFetch = limit > 0 ? unresolved.slice(0, limit) : [];
-  const concurrency = 4;
+  // Provider catalog work is single-flight end to end. Even optional VOD-info
+  // enrichment must not fan out after the discovery engine carefully serialized
+  // Movies/Series batches, otherwise mono-account providers answer background_busy.
+  const concurrency = 1;
   let cursor = 0;
   const directFallbackSnapshot = directFallbackLease
     ? await buildProviderDirectFallbackSnapshot({

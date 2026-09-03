@@ -20,6 +20,12 @@ const LIVE_SUMMARY_RPC_PATH = path.join(
   'migrations',
   '20260825024944_live_channel_summary_rpc_v1.sql',
 );
+const CINEMA_FIRST_MIGRATION_PATH = path.join(
+  ROOT,
+  'supabase',
+  'migrations',
+  '20260903130000_xtream_cinema_first_import_v2.sql',
+);
 const WRITER_PATHS = [
   path.join(SHARED, 'xtream-sync.ts'),
   path.join(SHARED, 'live-materialization.ts'),
@@ -820,9 +826,11 @@ test('empty category lists do not suppress an unfiltered non-empty stream invent
   const requests = [];
   const externalId = 'x'.repeat(256);
   const pages = new Map([
-    ['get_live_categories', []],
     ['get_vod_categories', []],
     ['get_series_categories', []],
+    ['get_live_categories', []],
+    ['get_vod_streams', []],
+    ['get_series', []],
     ['get_live_streams', [{ stream_id: externalId, name: 'Orphan News', category_id: 'missing', num: 1 }]],
   ]);
   const result = await stageXtreamCredentialCatalogGeneration({
@@ -834,7 +842,7 @@ test('empty category lists do not suppress an unfiltered non-empty stream invent
     jobId: '55555555-5555-4555-8555-555555555555',
     leaseSequence: 37,
     leaseOwner: 'generation-writer-test',
-    maxSlices: 4,
+    maxSlices: 6,
     fetchMetadataPage: async (request) => {
       requests.push(request);
       return { items: pages.get(request.action), nextCursor: null, done: true, spoolToken: null };
@@ -842,18 +850,21 @@ test('empty category lists do not suppress an unfiltered non-empty stream invent
   });
 
   assert.deepEqual(requests.map(({ action }) => action), [
-    'get_live_categories',
     'get_vod_categories',
     'get_series_categories',
+    'get_live_categories',
+    'get_vod_streams',
+    'get_series',
     'get_live_streams',
   ]);
   assert.ok(requests.every(({ categoryId }) => categoryId === null), 'inventory must not be category sliced');
   assert.equal(database.tables.cloud_media_items.length, 1);
   assert.equal(database.tables.cloud_media_items[0].external_id, externalId);
-  const completion = database.rpcCalls.find(({ name }) => name === 'norva_mark_credential_parent_action_complete');
+  const completion = database.rpcCalls.find(({ name, args }) =>
+    name === 'norva_mark_credential_parent_action_complete' && args.p_action === 'get_live_streams');
   assert.equal(completion.args.p_action, 'get_live_streams');
   assert.equal(completion.args.p_staged_item_count, 1);
-  assert.equal(result.checkpoint.action, 'vod_streams');
+  assert.equal(result.checkpoint.action, 'episode_state_copy');
   assert.equal(result.checkpoint.categoriesDone, true);
   assert.equal(result.checkpoint.processedCategories, 0);
   assert.equal(result.checkpoint.processedItems, 1);
@@ -861,6 +872,106 @@ test('empty category lists do not suppress an unfiltered non-empty stream invent
     'action', 'categoriesDone', 'categoryOrdinal', 'categoryPageCursor', 'itemCursor',
     'itemOffset', 'processedCategories', 'processedItems', 'typeIndex', 'version',
   ].sort());
+});
+
+test('cinema-first SQL checkpoint accepts v2 without reinterpreting durable v1 cursors', () => {
+  const migration = source(CINEMA_FIRST_MIGRATION_PATH);
+  assert.match(migration, /coalesce\(p_progress ->> 'version', ''\) !~ '\^\[12\]\$'/);
+  assert.match(migration, /when v_version = 1 then case v_action[\s\S]*when 'live_categories' then 0/);
+  assert.match(migration, /when v_version = 2 then case v_action[\s\S]*when 'vod_categories' then 0[\s\S]*when 'cinema_streams' then 3[\s\S]*when 'live_streams' then 4/);
+  assert.match(migration, /alter column progress set default[\s\S]*"action":"vod_categories","version":2/);
+  assert.match(migration, /set progress = '\{"action":"vod_categories","version":2/);
+  assert.match(migration, /v_key not in \([\s\S]*'processedItems'[\s\S]*\) then return false/);
+  assert.doesNotMatch(migration, /p_progress ->> '(?:serverUrl|username|password|accessToken)'/);
+});
+
+test('new direct imports alternate Movies and Series targets before every Live TV target', () => {
+  const engine = source(path.join(SHARED, 'xtream-sync.ts'));
+  const { cinemaFirstDiscoveryWalk, freshSyncCursor } = loadXtreamModule();
+  const walk = cinemaFirstDiscoveryWalk({
+    movie: ['movie-a', 'movie-b', 'movie-c'],
+    series: ['series-a', 'series-b'],
+    live: ['live-a', 'live-b'],
+  });
+
+  assert.deepEqual(walk.map(({ type }) => type), [
+    'movie', 'series', 'movie', 'series', 'movie', 'live', 'live',
+  ]);
+  assert.deepEqual(walk.map(({ params }) => params.category_id), [
+    'movie-a', 'series-a', 'movie-b', 'series-b', 'movie-c', 'live-a', 'live-b',
+  ]);
+  assert.deepEqual(
+    walk.map(({ action }) => action),
+    ['get_vod_streams', 'get_series', 'get_vod_streams', 'get_series', 'get_vod_streams', 'get_live_streams', 'get_live_streams'],
+  );
+  assert.deepEqual(
+    { v: freshSyncCursor('2026-09-03T12:00:00.000Z').v, order: freshSyncCursor('2026-09-03T12:00:00.000Z').order },
+    { v: 2, order: 'cinema_first' },
+  );
+  assert.match(
+    engine,
+    /const externalIds = batchRows\s*\.slice\(0, IMPORT_BATCH_SIZE\)/,
+    'early shelf projection must never put an unbounded provider category in one database IN filter',
+  );
+});
+
+test('optional VOD metadata enrichment preserves the provider single-flight invariant', () => {
+  const projection = source(path.join(SHARED, 'vod-title-projection.ts'));
+  const start = projection.indexOf('async function loadVodInfoIds(');
+  const end = projection.indexOf('\n// get_vod_info', start);
+  const providerReads = projection.slice(start, end);
+  assert.match(providerReads, /const concurrency = 1;/);
+  assert.match(providerReads, /await Promise\.all\(Array\.from\(\{ length: concurrency \}/);
+});
+
+test('v2 staged import alternates bounded Movies and Series pages with one provider request at a time', async () => {
+  const { stageXtreamCredentialCatalogGeneration } = loadXtreamModule();
+  const database = new FakeDatabase();
+  const requests = [];
+  let inFlight = 0;
+  let maximumInFlight = 0;
+  const cursor = {
+    action: 'cinema_streams', version: 2, typeIndex: 3,
+    categoryOrdinal: 0, itemOffset: 0, categoryPageCursor: '',
+    categoriesDone: true, itemCursor: '', processedCategories: 0, processedItems: 0,
+  };
+  const nextPages = new Map([
+    ['get_vod_streams:', { items: [], nextCursor: 'movie-page-2', done: false }],
+    ['get_series:', { items: [], nextCursor: 'series-page-2', done: false }],
+    ['get_vod_streams:movie-page-2', { items: [], nextCursor: null, done: true }],
+    ['get_series:series-page-2', { items: [], nextCursor: null, done: true }],
+  ]);
+
+  const result = await stageXtreamCredentialCatalogGeneration({
+    db: database,
+    userId: '11111111-1111-4111-8111-111111111111',
+    sourceId: '22222222-2222-4222-8222-222222222222',
+    transitionId: '33333333-3333-4333-8333-333333333333',
+    generationId: '44444444-4444-4444-8444-444444444444',
+    jobId: '55555555-5555-4555-8555-555555555555',
+    leaseSequence: 38,
+    leaseOwner: 'generation-writer-test',
+    cursor,
+    maxSlices: 4,
+    fetchMetadataPage: async (request) => {
+      requests.push(request);
+      inFlight += 1;
+      maximumInFlight = Math.max(maximumInFlight, inFlight);
+      await new Promise((resolve) => setImmediate(resolve));
+      inFlight -= 1;
+      return nextPages.get(`${request.action}:${request.cursor || ''}`);
+    },
+  });
+
+  assert.deepEqual(requests.map(({ action, cursor: pageCursor }) => [action, pageCursor]), [
+    ['get_vod_streams', null],
+    ['get_series', null],
+    ['get_vod_streams', 'movie-page-2'],
+    ['get_series', 'series-page-2'],
+  ]);
+  assert.equal(maximumInFlight, 1);
+  assert.equal(result.checkpoint.action, 'live_streams');
+  assert.equal(result.checkpoint.typeIndex, 4);
 });
 
 test('candidate pager fails closed on an oversized or ambiguous page', async () => {
@@ -917,7 +1028,7 @@ test('a pending gateway spool polls once and preserves an unchanged durable chec
   assert.equal(polls, 1);
   assert.equal(first.pending, true);
   assert.equal(first.retryAfterSeconds, 3);
-  assert.equal(first.checkpoint.action, 'live_categories');
+  assert.equal(first.checkpoint.action, 'vod_categories');
   assert.equal(database.rpcCalls.length, 0);
   assert.ok(Object.values(database.tables).every((rows) => rows.length === 0));
 
@@ -953,7 +1064,7 @@ test('bounded gateway cursor and spool token round-trip through the strict SQL c
       items: [], nextCursor: 'category-page-2', done: false, spoolToken: firstSpoolToken,
     }),
   });
-  assert.equal(first.checkpoint.action, 'live_categories');
+  assert.equal(first.checkpoint.action, 'vod_categories');
   assert.match(first.checkpoint.categoryPageCursor, /^[A-Za-z0-9_.-]+$/);
   assert.doesNotMatch(first.checkpoint.categoryPageCursor, /password|username|access_token|api_key|:\/\/|@/i);
   await assert.rejects(
@@ -1132,7 +1243,7 @@ test('candidate staging reads categories only through the service-definer RPC', 
     }),
   });
   assert.equal(first.done, false);
-  assert.equal(first.checkpoint.action, 'vod_categories');
+  assert.equal(first.checkpoint.action, 'series_categories');
   assert.equal(database.tables.cloud_source_catalog_generation_categories.length, 1);
   assert.ok(database.rpcCalls.some(({ name, args }) =>
     name === 'norva_get_credential_generation_categories'

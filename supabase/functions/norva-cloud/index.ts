@@ -783,7 +783,7 @@ async function route(
       return {
         body: await finalizeCloudSourceWithLease(id, user.id, db, {
           country: stringOrNull(body.country ?? url.searchParams.get("country")),
-          phase: stringOr(body.phase ?? url.searchParams.get("phase"), "live"),
+          phase: stringOr(body.phase ?? url.searchParams.get("phase"), "titles"),
           offset: boundedInt(body.offset ?? url.searchParams.get("offset"), 0, 0, 1_000_000),
           limit: boundedInt(body.limit ?? url.searchParams.get("limit"), 1000, 1, 2000),
           afterId: stringOr(body.afterId ?? url.searchParams.get("afterId"), ""),
@@ -2222,7 +2222,7 @@ function mergeSyncProgress(current: JsonRecord, patch: JsonRecord) {
       boundedProgressPercent(patch.percent),
     );
   }
-  for (const flag of ["liveReady", "browseReady", "usable"]) {
+  for (const flag of ["moviesReady", "seriesReady", "liveReady", "browseReady", "usable"]) {
     if (current[flag] === true || patch[flag] === true) merged[flag] = true;
   }
   return merged;
@@ -2261,6 +2261,11 @@ function completedSyncProgress(result: JsonRecord, startedAt: string, syncedAt: 
     status: "ready",
     stage: "ready",
     percent: 100,
+    moviesReady: true,
+    seriesReady: true,
+    liveReady: true,
+    browseReady: true,
+    usable: true,
     startedAt,
     updatedAt: syncedAt,
     counts: {
@@ -2859,6 +2864,10 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
   const existingProgress = recordOrEmpty(baseHint.syncProgress);
   const startedAt = stringOr(existingProgress.startedAt ?? source.last_synced_at, new Date().toISOString());
   const phase = normalizeFinalizePhase(options.phase);
+  // Preserve an in-flight pre-rollout live-first cursor. New cinema-first runs
+  // publish moviesReady/seriesReady, so the order remains explicit without
+  // widening the persisted finalize-cursor schema during a rolling deploy.
+  const legacyLiveFirst = usesLegacyLiveFirstFinalize(phase, existingProgress);
   const batchLimit = Math.max(1, Math.min(2000, options.limit || 1000));
   const batchOffset = Math.max(0, options.offset || 0);
   const batchAfterId = stringOr(options.afterId, "");
@@ -2946,13 +2955,11 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
       if (counts.live <= 0) {
         await reportProgress({
           liveReady: true,
-          ...(totalVod <= 0 ? { browseReady: true, usable: true } : {}),
         });
         return {
           sourceId, status: "syncing", phase: "live",
-          nextPhase: totalVod > 0 ? "titles" : "complete",
+          nextPhase: legacyLiveFirst && totalVod > 0 ? "titles" : "complete",
           nextOffset: 0, limit: batchLimit, totalVod, liveReady: true,
-          ...(totalVod <= 0 ? { browseReady: true, usable: true } : {}),
           ...result,
           liveCatalog: { rawLive: 0, logicalChannels: 0, liveVariants: 0, skipped: true },
         };
@@ -2966,17 +2973,15 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
       });
       if (!liveChunk.length) {
         await reportProgress({
-          stage: "building_titles",
-          percent: 86,
+          stage: "finalizing",
+          percent: 99,
           liveReady: true,
-          ...(totalVod <= 0 ? { browseReady: true, usable: true } : {}),
           steps: { finalize: { status: "running" } },
         });
         return {
           sourceId, status: "syncing", phase: "live",
-          nextPhase: totalVod > 0 ? "titles" : "complete",
+          nextPhase: legacyLiveFirst && totalVod > 0 ? "titles" : "complete",
           nextOffset: 0, limit: batchLimit, totalVod, liveReady: true,
-          ...(totalVod <= 0 ? { browseReady: true, usable: true } : {}),
           ...result,
           liveCatalog: { rawLive: counts.live, done: true },
         };
@@ -2989,7 +2994,7 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
       const nextOffset = batchOffset + liveChunk.length;
       await reportProgress({
         stage: "building_live_channels",
-        percent: Math.max(76, Math.min(85, 76 + Math.round((9 * nextOffset) / Math.max(1, counts.live)))),
+        percent: Math.max(91, Math.min(99, 91 + Math.round((8 * nextOffset) / Math.max(1, counts.live)))),
         liveReady: true,
         steps: { finalize: { status: "running" } },
       });
@@ -3002,39 +3007,6 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
 
     if (phase === "titles") {
       const totalVod = counts.movies + counts.series;
-      if (versionedCatalog && batchOffset >= totalVod) {
-        const prune = await pruneCatalogGenerationBeforeReady(
-          db,
-          sourceId,
-          userId,
-          generation,
-        );
-        await assertActiveCatalogGenerationCurrent(db, sourceId, userId, generation);
-        if (!prune.complete) {
-          await reportProgress({
-            stage: "finalizing",
-            percent: 100,
-            liveReady: true,
-            browseReady: true,
-            usable: true,
-            steps: { finalize: { status: "running" } },
-          });
-          return {
-            sourceId,
-            status: "syncing",
-            phase: "titles",
-            nextPhase: "titles",
-            nextOffset: batchOffset,
-            nextAfterId: batchAfterId,
-            totalVod,
-            liveReady: true,
-            browseReady: true,
-            usable: true,
-            readyPrune: prune,
-            ...result,
-          };
-        }
-      }
       const rows = await loadSourceItems(sourceId, userId, db, generation, {
         itemTypes: ["movie", "series"],
         afterId: batchAfterId,
@@ -3080,33 +3052,35 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
       // limit so batchLimit >= 1000 never reads a capped page as "short" and stops early.
       const pageCap = Math.min(batchLimit, 1000);
       const done = rows.length === 0 || rows.length < pageCap;
-      // Aligné sur norva-source-sync (audit 18/07) : la barre user remplit 86→99 vers
-      // le seuil USABLE (premier bloc de titres — minutes) puis épingle 100 + usable,
-      // pas vers le catalogue VOD entier (heures). Sans ça, quand CE moteur (co-pilot
-      // client, driver en stall) prenait la main, la même progression physique
-      // affichait un autre pourcentage et la barre rampait sur des heures.
+      // Movies and Series unlock independently as soon as their first projected
+      // page is available. The finalizer still walks the complete cinema catalog
+      // before beginning Live TV, so no provider lane can starve the other.
       const thresholds = titleUnlockThresholds(totalVod);
-      const browseReady = nextOffset >= thresholds.browse;
-      const usable = nextOffset >= thresholds.usable;
+      const moviesReady = existingProgress.moviesReady === true || counts.movies <= 0 || done || rows.some((row) => row.item_type === "movie");
+      const seriesReady = existingProgress.seriesReady === true || counts.series <= 0 || done || rows.some((row) => row.item_type === "series");
+      const browseReady = moviesReady || seriesReady;
+      const usable = moviesReady && seriesReady && nextOffset >= thresholds.usable;
       await reportProgress({
-        stage: done ? "finalizing" : "building_titles",
-        percent: usable ? 100 : (done ? 99 : titleFinalizePercent(nextOffset, thresholds.usable)),
-        liveReady: true,
+        stage: done ? "building_live_channels" : "building_titles",
+        percent: done ? 90 : titleFinalizePercent(nextOffset, thresholds.usable),
+        ...(moviesReady ? { moviesReady: true } : {}),
+        ...(seriesReady ? { seriesReady: true } : {}),
         ...(browseReady ? { browseReady: true } : {}),
         ...(usable ? { usable: true } : {}),
-        steps: { finalize: { status: usable ? "done" : "running" } },
+        steps: { finalize: { status: "running" } },
       });
       return {
         sourceId,
         status: "syncing",
         phase: "titles",
-        nextPhase: done ? "complete" : "titles",
-        nextOffset,
-        nextAfterId,
+        nextPhase: done ? (legacyLiveFirst ? "complete" : "live") : "titles",
+        nextOffset: done ? 0 : nextOffset,
+        nextAfterId: done ? "" : nextAfterId,
         limit: batchLimit,
         totalVod,
         done,
-        liveReady: true,
+        moviesReady,
+        seriesReady,
         browseReady,
         usable,
         ...result,
@@ -3116,6 +3090,8 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
 
     if (phase !== "complete") throw new HttpError(400, "Invalid catalog finalization phase");
 
+    // Prune only after the complete cinema-first → Live-last walk, immediately
+    // before READY, so the fallback engine matches norva-source-sync exactly.
     if (versionedCatalog) {
       const readyPrune = await pruneCatalogGenerationBeforeReady(
         db,
@@ -3127,7 +3103,9 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
       if (!readyPrune.complete) {
         await reportProgress({
           stage: "finalizing",
-          percent: 100,
+          percent: 99,
+          moviesReady: true,
+          seriesReady: true,
           liveReady: true,
           browseReady: true,
           usable: true,
@@ -3140,6 +3118,8 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
           nextPhase: "complete",
           nextOffset: batchOffset,
           nextAfterId: batchAfterId,
+          moviesReady: true,
+          seriesReady: true,
           liveReady: true,
           browseReady: true,
           usable: true,
@@ -3226,7 +3206,14 @@ function normalizeFinalizePhase(value: string) {
     phase === "titles" ||
     phase === "complete"
   ) return phase;
-  return "live";
+  return "titles";
+}
+
+function usesLegacyLiveFirstFinalize(phase: string, progress: JsonRecord) {
+  const hasCinemaFirstMarker = Object.prototype.hasOwnProperty.call(progress, "moviesReady")
+    || Object.prototype.hasOwnProperty.call(progress, "seriesReady");
+  if (hasCinemaFirstMarker) return false;
+  return phase === "live" || (phase === "titles" && progress.liveReady === true);
 }
 
 function finalizePhaseStage(phase: string) {
@@ -3242,13 +3229,14 @@ function finalizePhasePercent(phase: string, offset: number, counts: { live: num
   if (phase === "live_variants") return liveFinalizePercent("live_variants", offset, counts.live);
   if (phase === "titles") return titleFinalizePercent(offset, counts.movies + counts.series);
   if (phase === "complete") return 99;
-  return 74;
+  return liveFinalizePercent("live", offset, counts.live);
 }
 
 function liveFinalizePercent(phase: string, offset: number, total: number) {
   const ratio = total ? Math.max(0, Math.min(1, offset / total)) : 1;
-  if (phase === "live_channels") return Math.max(76, Math.min(80, Math.round(76 + ratio * 4)));
-  return Math.max(80, Math.min(86, Math.round(80 + ratio * 6)));
+  if (phase === "live_channels") return Math.max(91, Math.min(95, Math.round(91 + ratio * 4)));
+  if (phase === "live_variants") return Math.max(95, Math.min(99, Math.round(95 + ratio * 4)));
+  return Math.max(91, Math.min(99, Math.round(91 + ratio * 8)));
 }
 
 function titleUnlockThresholds(totalVod: number) {
@@ -3261,11 +3249,11 @@ function titleUnlockThresholds(totalVod: number) {
 }
 
 function titleFinalizePercent(offset: number, totalVod: number) {
-  // Band aligned with norva-source-sync (86 -> 99) so the same physical progress
+  // Band aligned with norva-source-sync (74 -> 90) so the same physical progress
   // shows the same % whichever engine drives finalize.
-  if (!totalVod) return 99;
+  if (!totalVod) return 90;
   const ratio = Math.max(0, Math.min(1, offset / totalVod));
-  return Math.max(86, Math.min(99, Math.round(86 + ratio * 13)));
+  return Math.max(74, Math.min(90, Math.round(74 + ratio * 16)));
 }
 
 async function countRowsByType(

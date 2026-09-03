@@ -2101,8 +2101,8 @@ class SourceManager {
             return { phase: 'error', counts, progress, attentionState };
         }
         if (readyStates.has(status) || readyStates.has(progressStatus)) return { phase: 'ready', counts, progress, attentionState: 'ready' };
-        // Usable threshold reached (Live + first block of movies/series): the catalogue is
-        // navigable now and the rest is a background top-up. Treat as ready for the modal /
+        // The cinema shelves become usable independently while the remaining cinema and
+        // Live TV batches continue in the background. Treat that threshold as ready for the modal /
         // onboarding gate, but flag `backgrounding` so Settings can show a quiet
         // "still adding the rest of your library" note while the long-tail finishes.
         if (progress.usable === true && !readyStates.has(status)) return { phase: 'ready', counts, progress, backgrounding: true, attentionState: 'ready' };
@@ -2198,12 +2198,12 @@ class SourceManager {
         };
         const milestones = [
             step('connect', 'Connecting to TV service', 0, 'Secure login check'),
-            step('channels', 'Channels found', counts.live, 'Live TV catalog'),
             step('movies', 'Movies found', counts.movies, 'Films catalog'),
             step('series', 'Series found', counts.series, 'Series catalog'),
+            step('channels', 'Channels found', counts.live, 'Live TV catalog — imported last'),
             step('categories', 'Categories', counts.categories, 'Navigation groups'),
             step('import', 'Import catalog', counts.total, 'Saving items to Norva Cloud'),
-            step('finalize', 'Finalize Norva', 0, 'Preparing Home, Live TV and details')
+            step('finalize', 'Finalize Norva', 0, 'Unlocking Movies and Series first, then Live TV')
         ];
         if (options.phase === 'error' && !milestones.some(item => item.status === 'error')) {
             const running = milestones.find(item => ['running', 'in_progress'].includes(item.status));
@@ -2256,7 +2256,7 @@ class SourceManager {
         if (stage === 'finalizing' || percent >= 99) {
             return 'Finishing touches — Norva is unlocking your catalog now.';
         }
-        return 'Norva is connecting, counting your catalog and preparing it for Home, Live TV, Movies and Series.';
+        return 'Norva is connecting and preparing Movies and Series first. Live TV is imported last.';
     }
 
     renderCatalogPreparation(source = {}, type = 'xtream') {
@@ -2287,11 +2287,6 @@ class SourceManager {
         </div>
         <div class="source-sync-grid">
           <div class="source-sync-card">
-            <span>Live TV</span>
-            <strong>${this.escapeHtml(this.formatCatalogCount(counts.live, countFallback))}</strong>
-            <small>channels found</small>
-          </div>
-          <div class="source-sync-card">
             <span>Movies</span>
             <strong>${this.escapeHtml(this.formatCatalogCount(counts.movies, countFallback))}</strong>
             <small>films found</small>
@@ -2300,6 +2295,11 @@ class SourceManager {
             <span>Series</span>
             <strong>${this.escapeHtml(this.formatCatalogCount(counts.series, countFallback))}</strong>
             <small>series found</small>
+          </div>
+          <div class="source-sync-card">
+            <span>Live TV</span>
+            <strong>${this.escapeHtml(this.formatCatalogCount(counts.live, countFallback))}</strong>
+            <small>channels found last</small>
           </div>
           <div class="source-sync-card">
             <span>Categories</span>
@@ -2348,9 +2348,9 @@ class SourceManager {
         const percent = Math.max(0, Math.min(100, Number(progress.percent ?? (phase === 'ready' ? 100 : 0)) || 0));
         this.animateCatalogBar(step, percent, phase === 'ready');
 
-        // Compteurs — ordre fixe du markup : Live, Movies, Series, Categories.
+        // Compteurs — ordre fixe du markup : Movies, Series, Live, Categories.
         const cards = step.querySelectorAll('.source-sync-card strong');
-        const values = [counts.live, counts.movies, counts.series, counts.categories];
+        const values = [counts.movies, counts.series, counts.live, counts.categories];
         cards.forEach((el, i) => {
             const next = this.formatCatalogCount(values[i]);
             if (el.textContent !== next) el.textContent = next;
@@ -2512,12 +2512,12 @@ class SourceManager {
 
         // Resume from the server's persisted finalize cursor so we cooperate with the
         // hands-off background driver (and its keyset titles walk) instead of restarting
-        // the whole finalize at phase=live/offset=0 — which would re-materialise the live
-        // catalogue and stamp the progress bar back down to its early-phase percent while
-        // the background chain is already deep into building titles.
+        // the whole finalize at phase=titles/offset=0 — which would re-project the cinema
+        // catalogue and stamp the progress bar back down while the background chain is
+        // already materialising Live TV.
         const initial = await refreshAndRender();
         const cursor = (initial?.configHint || initial?.config_hint || {}).finalizeCursor || {};
-        let phase = typeof cursor.phase === 'string' && cursor.phase ? cursor.phase : 'live';
+        let phase = typeof cursor.phase === 'string' && cursor.phase ? cursor.phase : 'titles';
         let offset = Number(cursor.offset ?? 0) || 0;
         let afterId = typeof cursor.afterId === 'string' ? cursor.afterId : '';
         let safety = 0;
@@ -2543,8 +2543,9 @@ class SourceManager {
 
         if (this.catalogPreparationToken !== token) return;
         if (phase === 'complete') {
-            // The titles walk reported done (nextPhase became 'complete'), so run
-            // the complete phase: it heals variants and marks the source ready.
+            // The ordered walk reported done (normally after Live TV; after
+            // titles only for a rolling-safe legacy cursor), so run the complete
+            // phase: it heals variants and marks the source ready.
             // This is the ONLY path that declares the catalog finished.
             await API.sources.finalize(sourceId, { phase: 'complete' });
             await refreshAndRender();

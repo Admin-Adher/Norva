@@ -53,12 +53,19 @@ test('ready prune is bounded, generation fenced and service-only', () => {
   assert.match(migration, /grant execute on function public\.norva_prune_catalog_generation_before_ready[\s\S]*to service_role/i);
 });
 
-test('finalize prunes at the logical title boundary and rechecks before ready', () => {
+test('finalize defers stale-version prune until cinema and Live are built, then rechecks before ready', () => {
   for (const [name, engine] of [['source-sync', sourceSync], ['cloud', cloud]]) {
     const calls = engine.match(/pruneCatalogGenerationBeforeReady\s*\(/g) || [];
-    assert.ok(calls.length >= 3, `${name}: helper plus both ready fences must be present`);
-    assert.match(engine, /if \(versionedCatalog && batchOffset >= totalVod\)[\s\S]*readyPrune: prune/);
-    assert.match(engine, /if \(versionedCatalog\)[\s\S]*const readyPrune = await pruneCatalogGenerationBeforeReady/);
+    assert.ok(calls.length >= 2, `${name}: helper plus the terminal ready fence must be present`);
+    const titlesStart = engine.indexOf('if (phase === "titles")');
+    const completeStart = engine.indexOf('if (phase !== "complete")', titlesStart);
+    assert.ok(titlesStart >= 0 && completeStart > titlesStart, `${name}: title and complete phases must be ordered`);
+    assert.doesNotMatch(
+      engine.slice(titlesStart, completeStart),
+      /pruneCatalogGenerationBeforeReady/,
+      `${name}: stale rows must not be pruned before the Live-last phase`,
+    );
+    assert.match(engine.slice(completeStart), /if \(versionedCatalog\)[\s\S]*const readyPrune = await pruneCatalogGenerationBeforeReady/);
     assert.match(engine, /if \(phase !== "complete"\)[\s\S]*const readyPrune = await pruneCatalogGenerationBeforeReady/);
     assert.match(engine, /nextPhase: "complete"[\s\S]*readyPrune/);
     assert.match(engine, /generation\.userVisibilityEpoch = nextSnapshot\.userVisibilityEpoch/);

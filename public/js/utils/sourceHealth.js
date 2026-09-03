@@ -369,10 +369,9 @@
             // *initial* import (no completed catalog yet) stays `syncing`.
             //
             // `progress.usable` is the same idea for a FIRST import: the server flips it
-            // true once Live TV + the first block of movies/series are materialised
-            // ("correctly usable"). The remaining VOD long-tail then materialises as a
-            // silent background top-up, so finish onboarding and unlock the app now
-            // rather than make the user watch a bar crawl for hours.
+            // once the initial cinema slices are usable. Category-specific readiness
+            // still controls Movies, Series and Live independently while the remaining
+            // catalogue continues in the background.
             if (hasCompletedCatalog(source, status) || progress.usable === true) {
                 state = 'ready';
                 if (progressStage === 'waiting_for_provider') {
@@ -427,16 +426,23 @@
         if (blocked) {
             return { live: false, movies: false, series: false, browsable: false };
         }
-        const fullyReady = classification.state === 'ready'
-            || progress.usable === true
-            || Boolean(classification.lastSync);
-        const browseReady = fullyReady || progress.browseReady === true;
-        const liveReady = browseReady || progress.liveReady === true;
+        const fullyReady = hasCompletedCatalog(source) || Boolean(classification.lastSync);
+        const hasSpecificCinemaReadiness = Object.prototype.hasOwnProperty.call(progress, 'moviesReady')
+            || Object.prototype.hasOwnProperty.call(progress, 'seriesReady');
+        // Legacy progress exposed one browseReady bit for both cinema sections.
+        // It also used `usable` only after Live and cinema were both available.
+        // New progress uses independent flags so one first page cannot falsely
+        // claim that the other section (or Live TV) is already queryable.
+        const legacyCinemaReady = !hasSpecificCinemaReadiness && progress.browseReady === true;
+        const legacyFullyUsable = !hasSpecificCinemaReadiness && progress.usable === true;
+        const moviesReady = fullyReady || progress.moviesReady === true || legacyCinemaReady || legacyFullyUsable;
+        const seriesReady = fullyReady || progress.seriesReady === true || legacyCinemaReady || legacyFullyUsable;
+        const liveReady = fullyReady || progress.liveReady === true || legacyFullyUsable;
         return {
             live: liveReady,
-            movies: browseReady,
-            series: browseReady,
-            browsable: liveReady || browseReady
+            movies: moviesReady,
+            series: seriesReady,
+            browsable: liveReady || moviesReady || seriesReady
         };
     }
 
@@ -444,9 +450,9 @@
      * One conservative policy for every onboarding consumer.
      * Discovery counts are deliberately ignored: the server can publish them
      * before rows are materialized, so they are not proof that a category is
-     * browsable. Live unlocks when channels are materialized (`liveReady`);
-     * Movies/Series unlock on the first title slice (`browseReady`). The later
-     * `usable` flag still means the first large block is filled.
+     * browsable. Movies and Series unlock independently on their first projected
+     * slice; Live unlocks only after its final-phase materialization. The legacy
+     * `browseReady` flag remains a compatibility fallback for old imports.
      */
     function catalogSourcePolicy(source = {}, statuses = []) {
         const status = statusFor(source, statuses);
@@ -518,7 +524,18 @@
             policies.push(policy);
         });
 
-        const catalogReady = state === 'ready' || Boolean(summary?.ready?.length);
+        const catalogReady = candidates.some(item => {
+            const source = sourceFromItem(item);
+            const classification = item?.source && item?.state ? item : classifySource(source);
+            const providerAccessStatus = lower(
+                source.provider_access_status || source.providerAccessStatus || ''
+            );
+            if (classification.state === 'disabled' ||
+                ['expired_confirmed', 'access_unavailable_confirmed'].includes(providerAccessStatus)) {
+                return false;
+            }
+            return hasCompletedCatalog(source, item?.source ? item : {});
+        });
         const categories = Object.fromEntries(CATALOG_CATEGORIES.map((category) => [
             category,
             catalogReady || policies.some((policy) => policy.categories?.[category] === true)
