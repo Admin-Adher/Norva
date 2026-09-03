@@ -18,12 +18,12 @@ RUN python3 scripts/generate-pgs-seed.py \
 
 FROM node:22-bookworm-slim
 
-ARG MEDIA_LAB_RUNNER_SOURCE_SHA=unversioned
-LABEL norva.media-lab-runner.source-sha256=${MEDIA_LAB_RUNNER_SOURCE_SHA}
-
 RUN apt-get update \
     && apt-get install -y --no-install-recommends chromium ca-certificates \
     && rm -rf /var/lib/apt/lists/*
+
+ARG MEDIA_LAB_RUNNER_SOURCE_SHA=unversioned
+LABEL norva.media-lab-runner.source-sha256=${MEDIA_LAB_RUNNER_SOURCE_SHA}
 
 WORKDIR /app
 COPY services/media-lab-runner/package*.json ./

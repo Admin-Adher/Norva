@@ -6,7 +6,6 @@ readonly ENV_FILE="${SCRIPT_DIR}/.env.media-lab"
 readonly COMPOSE_FILE="${SCRIPT_DIR}/docker-compose.media-lab.yml"
 readonly SOURCE_MARKER="${SCRIPT_DIR}/media-lab-runner-source.sha256"
 readonly PRIMARY_CONTAINER='norva-media-gateway'
-readonly PRIMARY_IMAGE='norva-media-gateway:vaapi-04505a4b21d0'
 readonly LAB_GATEWAY_CONTAINER='norva-media-lab-gateway'
 readonly LAB_RUNNER_CONTAINER='norva-media-lab-runner'
 
@@ -25,7 +24,15 @@ if [[ "${requested_case}" != 'all' && ! "${requested_case}" =~ ^(h264-closed-aac
   die 'fixture-id'
 fi
 
-[[ "$(docker inspect "${PRIMARY_CONTAINER}" --format '{{.Config.Image}}')" == "${PRIMARY_IMAGE}" ]] || die 'primary-image'
+PRIMARY_IMAGE="$(docker inspect "${PRIMARY_CONTAINER}" --format '{{.Config.Image}}')"
+PRIMARY_IMAGE_ID="$(docker inspect "${PRIMARY_CONTAINER}" --format '{{.Image}}')"
+PRIMARY_RESTARTS="$(docker inspect "${PRIMARY_CONTAINER}" --format '{{.RestartCount}}')"
+PRIMARY_OOM="$(docker inspect "${PRIMARY_CONTAINER}" --format '{{.State.OOMKilled}}')"
+readonly PRIMARY_IMAGE PRIMARY_IMAGE_ID PRIMARY_RESTARTS PRIMARY_OOM
+[[ "${PRIMARY_IMAGE}" =~ ^norva-media-gateway:vaapi-[a-z0-9][a-z0-9._-]{5,95}$ ]] || die 'primary-image'
+[[ "${PRIMARY_IMAGE_ID}" =~ ^sha256:[0-9a-f]{64}$ ]] || die 'primary-image-id'
+[[ "${PRIMARY_RESTARTS}" =~ ^[0-9]+$ ]] || die 'primary-restarts-value'
+[[ "${PRIMARY_OOM}" == 'false' ]] || die 'primary-oom-value'
 [[ "$(docker inspect "${PRIMARY_CONTAINER}" --format '{{.State.Health.Status}}')" == 'healthy' ]] || die 'primary-health'
 for container in "${LAB_GATEWAY_CONTAINER}" "${LAB_RUNNER_CONTAINER}"; do
   [[ "$(docker inspect "${container}" --format '{{.State.Health.Status}}')" == 'healthy' ]] || die "${container}-health"
@@ -34,6 +41,8 @@ for container in "${LAB_GATEWAY_CONTAINER}" "${LAB_RUNNER_CONTAINER}"; do
 done
 [[ "$(docker inspect "${LAB_RUNNER_CONTAINER}" --format '{{.Config.Image}}')" == "${runner_image}" ]] || die 'runner-image'
 [[ "$(docker image inspect "${runner_image}" --format '{{index .Config.Labels "norva.media-lab-runner.source-sha256"}}')" == "${runner_source_sha}" ]] || die 'runner-image-label'
+[[ "$(docker inspect "${LAB_GATEWAY_CONTAINER}" --format '{{.Config.Image}}')" == "${PRIMARY_IMAGE}" ]] || die 'lab-gateway-image'
+[[ "$(docker inspect "${LAB_GATEWAY_CONTAINER}" --format '{{.Image}}')" == "${PRIMARY_IMAGE_ID}" ]] || die 'lab-gateway-image-id'
 
 printf '===PRIVATE_MEDIA_LAB_%s_START===\n' "${requested_case^^}"
 docker exec "${LAB_RUNNER_CONTAINER}" node /app/scripts/run-private-case.js "${requested_case}"
@@ -43,11 +52,15 @@ docker exec "${LAB_RUNNER_CONTAINER}" node -e \
 docker exec "${LAB_GATEWAY_CONTAINER}" node -e \
   "fetch('http://127.0.0.1:8080/health').then(async r=>{const h=await r.json();const ok=r.ok&&h.ok===true&&h.activeSessions===0&&h.videoEncoderCapacity?.active===0&&h.vodInputPump?.active===0&&h.rawPumpCount===0&&h.viewerSessionStartupLockCount===0&&h.mkvCompleteHlsCache?.stats?.activeLeases===0;process.exit(ok?0:1)}).catch(()=>process.exit(1))"
 
-for container in "${LAB_GATEWAY_CONTAINER}" "${LAB_RUNNER_CONTAINER}" "${PRIMARY_CONTAINER}"; do
+for container in "${LAB_GATEWAY_CONTAINER}" "${LAB_RUNNER_CONTAINER}"; do
   [[ "$(docker inspect "${container}" --format '{{.State.Health.Status}}')" == 'healthy' ]] || die "${container}-post-health"
   [[ "$(docker inspect "${container}" --format '{{.RestartCount}}')" == '0' ]] || die "${container}-post-restarts"
   [[ "$(docker inspect "${container}" --format '{{.State.OOMKilled}}')" == 'false' ]] || die "${container}-post-oom"
 done
+[[ "$(docker inspect "${PRIMARY_CONTAINER}" --format '{{.Config.Image}}')" == "${PRIMARY_IMAGE}" ]] || die 'primary-post-image'
+[[ "$(docker inspect "${PRIMARY_CONTAINER}" --format '{{.Image}}')" == "${PRIMARY_IMAGE_ID}" ]] || die 'primary-post-image-id'
+[[ "$(docker inspect "${PRIMARY_CONTAINER}" --format '{{.RestartCount}}')" == "${PRIMARY_RESTARTS}" ]] || die 'primary-post-restarts'
+[[ "$(docker inspect "${PRIMARY_CONTAINER}" --format '{{.State.OOMKilled}}')" == "${PRIMARY_OOM}" ]] || die 'primary-post-oom'
 
 printf '===PRIVATE_MEDIA_LAB_POST_STATE===\n'
 docker stats --no-stream --format 'name={{.Name}} cpu={{.CPUPerc}} mem={{.MemUsage}} pids={{.PIDs}}' \

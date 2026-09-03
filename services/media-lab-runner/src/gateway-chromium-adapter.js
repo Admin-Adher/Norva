@@ -191,11 +191,37 @@ class ChromiumHlsPlaybackHarness {
                 let firstPlaying = false;
                 let seeking = false;
                 let waitingAt = null;
+                let waitingMediaTime = null;
                 let rebufferCount = 0;
                 let rebufferMs = 0;
                 const minimumRebufferMs = 100;
                 let maximumBufferedAhead = 0;
                 let audioObserved = false;
+                const waitForRenderedFrameAtOrAfter = async (minimumMediaTime, code) => {
+                    if (typeof video.requestVideoFrameCallback !== 'function') {
+                        await waitUntil(
+                            () => video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA
+                                && video.currentTime >= minimumMediaTime,
+                            code,
+                        );
+                        return;
+                    }
+                    await new Promise((resolve, reject) => {
+                        const timer = setTimeout(
+                            () => reject(new Error(code)),
+                            Math.min(deadlineMs, 8_000),
+                        );
+                        const observe = (_now, metadata) => {
+                            if (Number(metadata?.mediaTime) >= minimumMediaTime) {
+                                clearTimeout(timer);
+                                resolve();
+                                return;
+                            }
+                            video.requestVideoFrameCallback(observe);
+                        };
+                        video.requestVideoFrameCallback(observe);
+                    });
+                };
                 hls.on(HlsCtor.Events.ERROR, (_event, data) => {
                     if (data?.fatal) fatalError = String(data.type || 'fatal');
                 });
@@ -215,21 +241,28 @@ class ChromiumHlsPlaybackHarness {
                 const finishWaiting = () => {
                     if (waitingAt === null) return;
                     const durationMs = performance.now() - waitingAt;
-                    if (!seeking && !video.ended && durationMs >= minimumRebufferMs) {
+                    const mediaAdvanceMs = waitingMediaTime === null
+                        ? 0
+                        : Math.max(0, (video.currentTime - waitingMediaTime) * 1_000);
+                    const stalledMs = Math.max(0, durationMs - mediaAdvanceMs);
+                    if (!seeking && !video.ended && stalledMs >= minimumRebufferMs) {
                         rebufferCount += 1;
-                        rebufferMs += durationMs;
+                        rebufferMs += stalledMs;
                     }
                     waitingAt = null;
+                    waitingMediaTime = null;
                 };
                 video.addEventListener('waiting', () => {
                     if (!firstPlaying || seeking || waitingAt !== null || video.paused || video.ended
                         || video.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) return;
                     waitingAt = performance.now();
+                    waitingMediaTime = video.currentTime;
                 });
                 video.addEventListener('stalled', () => {
                     if (!firstPlaying || seeking || waitingAt !== null || video.paused || video.ended
                         || video.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) return;
                     waitingAt = performance.now();
+                    waitingMediaTime = video.currentTime;
                 });
                 video.addEventListener('playing', () => {
                     firstPlaying = true;
@@ -285,10 +318,18 @@ class ChromiumHlsPlaybackHarness {
                         const target = Math.min(duration - 0.35, Math.max(0.55, duration * 0.55));
                         seeking = true;
                         waitingAt = null;
+                        waitingMediaTime = null;
                         try {
                             video.currentTime = target;
                             await waitUntil(() => !video.seeking && Math.abs(video.currentTime - target) < 0.4, 'SEEK_TIMEOUT');
+                            // `seeked` and `currentTime` can advance before the
+                            // decoder has presented the first frame at the new
+                            // position. Keep seek recovery outside continuous
+                            // playback rebuffer accounting until that frame is
+                            // actually rendered, then require forward progress.
+                            await waitForRenderedFrameAtOrAfter(Math.max(0, target - 0.4), 'SEEK_FRAME_TIMEOUT');
                             const advancedFrom = video.currentTime;
+                            seeking = false;
                             await waitUntil(() => video.currentTime >= advancedFrom + 0.1 || video.ended, 'SEEK_PLAYBACK_TIMEOUT');
                             seekPassed = true;
                         } finally {

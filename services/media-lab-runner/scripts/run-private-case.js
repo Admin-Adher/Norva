@@ -30,6 +30,37 @@ function fixtureById(id) {
     return FIXTURES.find((fixture) => fixture.id === id) || null;
 }
 
+function failureDiagnostic(result, fixture) {
+    const safeToken = (value) => (
+        typeof value === 'string' && value.length <= 64 && /^[a-z0-9][a-z0-9._-]*$/.test(value)
+            ? value
+            : null
+    );
+    const safeMetric = (value, maximum = 600_000) => (
+        typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= maximum
+            ? Math.round(value * 1_000) / 1_000
+            : null
+    );
+    return Object.freeze({
+        status: safeToken(result?.status),
+        pipeline: safeToken(result?.pipeline),
+        reason: safeToken(result?.reason),
+        expectedPipeline: safeToken(fixture?.expected?.pipeline),
+        expectedReason: safeToken(fixture?.expected?.reason),
+        ttffMs: safeMetric(result?.ttffMs),
+        providerGets: safeMetric(result?.providerGets, 32),
+        maximumConcurrentProviderGets: safeMetric(result?.maximumConcurrentProviderGets, 32),
+        ffmpegSpawns: safeMetric(result?.ffmpegSpawns, 8),
+        rebufferCount: safeMetric(result?.rebufferCount, 1_000),
+        rebufferMs: safeMetric(result?.rebufferMs),
+        bufferedAheadSeconds: safeMetric(result?.bufferedAheadSeconds, 3_600),
+        browserBufferRateX: safeMetric(result?.browserBufferRateX, 1_000),
+        seekPassed: result?.seekPassed === true,
+        audioPassed: result?.audioPassed === true,
+        cleanupPassed: result?.cleanupPassed === true,
+    });
+}
+
 async function boundedJson(response) {
     const declared = Number(response.headers?.get?.('content-length'));
     if (Number.isFinite(declared) && declared > MAX_RESPONSE_BYTES) {
@@ -103,7 +134,9 @@ async function runPrivateCase({
         if (state.fixtureId !== fixtureId || result?.protocol !== PROTOCOL || result?.status !== 'pass'
             || result?.pipeline !== fixture.expected.pipeline || result?.reason !== fixture.expected.reason
             || result?.cleanupPassed !== true) {
-            throw new Error('MEDIA_LAB_PRIVATE_CASE_FAILED');
+            const error = new Error('MEDIA_LAB_PRIVATE_CASE_FAILED');
+            error.diagnostic = failureDiagnostic(result, fixture);
+            throw error;
         }
         return Object.freeze({ fixtureId, result: Object.freeze({ ...result }) });
     } finally {
@@ -151,7 +184,10 @@ if (require.main === module) {
         const code = /^MEDIA_LAB_[A-Z0-9_]+$/.test(String(error?.message || ''))
             ? error.message
             : 'MEDIA_LAB_PRIVATE_FAILED';
-        process.stderr.write(`MEDIA_LAB_CASE_FAIL ${code}\n`);
+        const diagnostic = error?.diagnostic && typeof error.diagnostic === 'object'
+            ? ` ${JSON.stringify(error.diagnostic)}`
+            : '';
+        process.stderr.write(`MEDIA_LAB_CASE_FAIL ${code}${diagnostic}\n`);
         process.exitCode = 1;
     });
 }
@@ -162,4 +198,5 @@ module.exports = Object.freeze({
     strictOrigin,
     strictToken,
     boundedJson,
+    failureDiagnostic,
 });

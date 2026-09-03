@@ -9,8 +9,6 @@ readonly COMPOSE_FILE="${SCRIPT_DIR}/docker-compose.media-lab.yml"
 readonly ENV_FILE="${SCRIPT_DIR}/.env.media-lab"
 readonly SOURCE_MARKER="${SCRIPT_DIR}/media-lab-runner-source.sha256"
 readonly PRIMARY_CONTAINER='norva-media-gateway'
-readonly PRIMARY_IMAGE='norva-media-gateway:vaapi-04505a4b21d0'
-readonly PRIMARY_IMAGE_ID='sha256:21496b9b0ea8f2968aaeba58f6ce28746eb720189f355780397409467fdca4f1'
 readonly LAB_GATEWAY_CONTAINER='norva-media-lab-gateway'
 readonly LAB_RUNNER_CONTAINER='norva-media-lab-runner'
 readonly LAB_NETWORK='norva_default'
@@ -58,7 +56,7 @@ runner_revision="${runner_source_sha:0:12}"
 runner_image="norva-media-lab-runner:${runner_revision}"
 
 CURRENT_GATE='host-prerequisites'
-for command_name in docker openssl sha256sum getent sudo; do
+for command_name in docker openssl sha256sum getent; do
   command -v "${command_name}" >/dev/null 2>&1 || die "missing-${command_name}"
 done
 docker compose version >/dev/null 2>&1 || die 'docker-compose'
@@ -68,18 +66,35 @@ render_gid="$(getent group render | awk -F: 'NR==1 {print $3}')"
 docker network inspect "${LAB_NETWORK}" >/dev/null 2>&1 || die 'docker-network'
 
 CURRENT_GATE='primary-gateway-invariant'
-[[ "$(docker inspect "${PRIMARY_CONTAINER}" --format '{{.Config.Image}}')" == "${PRIMARY_IMAGE}" ]] || die 'primary-image-tag'
-[[ "$(docker inspect "${PRIMARY_CONTAINER}" --format '{{.Image}}')" == "${PRIMARY_IMAGE_ID}" ]] || die 'primary-image-id'
+PRIMARY_IMAGE="$(docker inspect "${PRIMARY_CONTAINER}" --format '{{.Config.Image}}')"
+PRIMARY_IMAGE_ID="$(docker inspect "${PRIMARY_CONTAINER}" --format '{{.Image}}')"
+PRIMARY_RESTARTS="$(docker inspect "${PRIMARY_CONTAINER}" --format '{{.RestartCount}}')"
+PRIMARY_OOM="$(docker inspect "${PRIMARY_CONTAINER}" --format '{{.State.OOMKilled}}')"
+PRIMARY_GATEWAY_VERSION="$(docker exec "${PRIMARY_CONTAINER}" node -e \
+  "fetch('http://127.0.0.1:8080/health').then(async r=>{const h=await r.json();if(!r.ok||h.ok!==true||!Number.isInteger(h.version))process.exit(1);process.stdout.write(String(h.version))}).catch(()=>process.exit(1))")"
+readonly PRIMARY_IMAGE PRIMARY_IMAGE_ID PRIMARY_RESTARTS PRIMARY_OOM PRIMARY_GATEWAY_VERSION
+[[ "${PRIMARY_IMAGE}" =~ ^norva-media-gateway:vaapi-[a-z0-9][a-z0-9._-]{5,95}$ ]] || die 'primary-image-tag'
+[[ "${PRIMARY_IMAGE_ID}" =~ ^sha256:[0-9a-f]{64}$ ]] || die 'primary-image-id'
+[[ "${PRIMARY_RESTARTS}" =~ ^[0-9]+$ ]] || die 'primary-restarts-value'
+[[ "${PRIMARY_OOM}" == 'false' ]] || die 'primary-oom-value'
+[[ "${PRIMARY_GATEWAY_VERSION}" =~ ^[0-9]+$ ]] || die 'primary-version'
 [[ "$(docker inspect "${PRIMARY_CONTAINER}" --format '{{.State.Health.Status}}')" == 'healthy' ]] || die 'primary-health'
-[[ "$(docker inspect "${PRIMARY_CONTAINER}" --format '{{.RestartCount}}')" == '0' ]] || die 'primary-restarts'
-[[ "$(docker inspect "${PRIMARY_CONTAINER}" --format '{{.State.OOMKilled}}')" == 'false' ]] || die 'primary-oom'
 
 CURRENT_GATE='private-runtime-directories'
 runtime_uid="$(id -u)"
 runtime_gid="$(id -g)"
-sudo install -d -m 0750 -o "${runtime_uid}" -g "${runtime_gid}" /srv/norva-media-lab
-sudo install -d -m 0750 -o "${runtime_uid}" -g "${runtime_gid}" /srv/norva-media-lab/output
-sudo install -d -m 0750 -o "${runtime_uid}" -g "${runtime_gid}" /srv/norva-media-lab/cache
+install_private_dir() {
+  local target="$1"
+  if install -d -m 0750 -o "${runtime_uid}" -g "${runtime_gid}" "${target}" 2>/dev/null; then
+    return 0
+  fi
+  command -v sudo >/dev/null 2>&1 || die "directory-owner-${target##*/}"
+  sudo -n install -d -m 0750 -o "${runtime_uid}" -g "${runtime_gid}" "${target}" \
+    || die "directory-owner-${target##*/}"
+}
+install_private_dir /srv/norva-media-lab
+install_private_dir /srv/norva-media-lab/output
+install_private_dir /srv/norva-media-lab/cache
 
 CURRENT_GATE='private-environment'
 if [[ ! -f "${ENV_FILE}" ]]; then
@@ -87,6 +102,7 @@ if [[ ! -f "${ENV_FILE}" ]]; then
   gateway_token="$(openssl rand -hex 32)"
   fast_start_key="$(openssl rand -hex 32)"
   cache_key="$(openssl rand -hex 32)"
+  cache_namespace="${runner_revision}-${cache_key:0:12}"
   cat > "${ENV_FILE}" <<EOF
 MEDIA_LAB_UID=${runtime_uid}
 MEDIA_LAB_GID=${runtime_gid}
@@ -102,7 +118,7 @@ MEDIA_LAB_RUNNER_CPUS=2.0
 MEDIA_LAB_RUNNER_MEMORY_LIMIT=3g
 MEDIA_LAB_RUNNER_MEMORY_RESERVATION=512m
 MEDIA_LAB_GATEWAY_OUTPUT_DIR=/srv/norva-media-lab/output
-MEDIA_LAB_GATEWAY_CACHE_DIR=/srv/norva-media-lab/cache
+MEDIA_LAB_GATEWAY_CACHE_DIR=/srv/norva-media-lab/cache/${cache_namespace}
 MEDIA_LAB_RUNNER_TOKEN=${runner_token}
 MEDIA_LAB_GATEWAY_TOKEN=${gateway_token}
 MEDIA_LAB_FAST_START_HMAC_KEY=${fast_start_key}
@@ -118,7 +134,7 @@ MEDIA_LAB_RUN_TIMEOUT_MS=600000
 MEDIA_LAB_GATEWAY_SESSION_TIMEOUT_MS=180000
 MEDIA_LAB_BROWSER_TIMEOUT_MS=60000
 EOF
-  unset runner_token gateway_token fast_start_key cache_key
+  unset runner_token gateway_token fast_start_key cache_key cache_namespace
 fi
 chmod 0600 "${ENV_FILE}"
 [[ "$(stat -c '%a' "${ENV_FILE}")" == '600' ]] || die 'env-mode'
@@ -133,6 +149,10 @@ for secret_name in MEDIA_LAB_RUNNER_TOKEN MEDIA_LAB_GATEWAY_TOKEN MEDIA_LAB_FAST
   [[ "${secret_value}" =~ ^[0-9a-f]{64}$ ]] || die "env-${secret_name,,}"
 done
 unset secret_value
+cache_directory="$(sed -n 's/^MEDIA_LAB_GATEWAY_CACHE_DIR=//p' "${ENV_FILE}")"
+[[ "${cache_directory}" =~ ^/srv/norva-media-lab/cache/[0-9a-f]{12}-[0-9a-f]{12}$ ]] \
+  || die 'env-cache-directory'
+install_private_dir "${cache_directory}"
 
 CURRENT_GATE='compose-config'
 docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" config -q
@@ -160,18 +180,22 @@ for container in "${LAB_GATEWAY_CONTAINER}" "${LAB_RUNNER_CONTAINER}"; do
 done
 [[ "$(docker inspect "${LAB_RUNNER_CONTAINER}" --format '{{.Config.Image}}')" == "${runner_image}" ]] || die 'runner-container-image'
 [[ "$(docker inspect "${LAB_GATEWAY_CONTAINER}" --format '{{.Config.Image}}')" == "${PRIMARY_IMAGE}" ]] || die 'lab-gateway-container-image'
+[[ "$(docker inspect "${LAB_GATEWAY_CONTAINER}" --format '{{.Image}}')" == "${PRIMARY_IMAGE_ID}" ]] || die 'lab-gateway-container-image-id'
 
 CURRENT_GATE='isolated-health'
 docker exec "${LAB_RUNNER_CONTAINER}" node -e \
   "fetch('http://127.0.0.1:8093/health',{headers:{Authorization:'Bearer '+process.env.MEDIA_LAB_RUNNER_TOKEN}}).then(async r=>{const h=await r.json();if(!r.ok||h.ok!==true||h.protocol!==1||h.busy!==false||h.physicalAdapterReady!==true)process.exit(1);process.stdout.write(JSON.stringify(h))}).catch(()=>process.exit(1))"
 printf '\n'
 docker exec "${LAB_GATEWAY_CONTAINER}" node -e \
-  "fetch('http://127.0.0.1:8080/health').then(async r=>{const h=await r.json();if(!r.ok||h.ok!==true||h.version!==106||h.activeSessions!==0||h.videoEncoder?.backend!=='vaapi'||h.videoEncoder?.ready!==true||h.videoEncoderCapacity?.active!==0||h.videoEncoderCapacity?.maxActive!==1||h.mkvCompleteHlsCache?.enabled!==true||h.mkvCompleteHlsCache?.genericMultiAudio!==true)process.exit(1);process.stdout.write(JSON.stringify({version:h.version,activeSessions:h.activeSessions,encoder:h.videoEncoder.backend,maxActive:h.videoEncoderCapacity.maxActive,cache:h.mkvCompleteHlsCache.enabled,multiAudioCache:h.mkvCompleteHlsCache.genericMultiAudio}))}).catch(()=>process.exit(1))"
+  "fetch('http://127.0.0.1:8080/health').then(async r=>{const h=await r.json();if(!r.ok||h.ok!==true||h.version!==${PRIMARY_GATEWAY_VERSION}||h.activeSessions!==0||h.videoEncoder?.backend!=='vaapi'||h.videoEncoder?.ready!==true||h.videoEncoderCapacity?.active!==0||h.videoEncoderCapacity?.maxActive!==1||h.mkvCompleteHlsCache?.enabled!==true||h.mkvCompleteHlsCache?.genericMultiAudio!==true)process.exit(1);process.stdout.write(JSON.stringify({version:h.version,activeSessions:h.activeSessions,encoder:h.videoEncoder.backend,maxActive:h.videoEncoderCapacity.maxActive,cache:h.mkvCompleteHlsCache.enabled,multiAudioCache:h.mkvCompleteHlsCache.genericMultiAudio}))}).catch(()=>process.exit(1))"
 printf '\n'
 
 CURRENT_GATE='final-primary-invariant'
 [[ "$(docker inspect "${PRIMARY_CONTAINER}" --format '{{.Config.Image}}')" == "${PRIMARY_IMAGE}" ]] || die 'primary-drift-image'
+[[ "$(docker inspect "${PRIMARY_CONTAINER}" --format '{{.Image}}')" == "${PRIMARY_IMAGE_ID}" ]] || die 'primary-drift-image-id'
 [[ "$(docker inspect "${PRIMARY_CONTAINER}" --format '{{.State.Health.Status}}')" == 'healthy' ]] || die 'primary-drift-health'
+[[ "$(docker inspect "${PRIMARY_CONTAINER}" --format '{{.RestartCount}}')" == "${PRIMARY_RESTARTS}" ]] || die 'primary-drift-restarts'
+[[ "$(docker inspect "${PRIMARY_CONTAINER}" --format '{{.State.OOMKilled}}')" == "${PRIMARY_OOM}" ]] || die 'primary-drift-oom'
 
 STARTED_THIS_RUN='false'
 printf '===PRIVATE_MEDIA_LAB_PREPARE_OK===\n'

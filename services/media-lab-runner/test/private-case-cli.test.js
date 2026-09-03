@@ -81,6 +81,27 @@ test('private case CLI fails closed on a semantic mismatch and still deletes sta
             methods.push(options.method);
             return states.shift();
         },
-    }), /MEDIA_LAB_PRIVATE_CASE_FAILED/);
+    }), (error) => {
+        assert.match(error.message, /MEDIA_LAB_PRIVATE_CASE_FAILED/);
+        assert.deepEqual(error.diagnostic, {
+            status: 'pass',
+            pipeline: 'video-copy-audio-copy',
+            reason: 'video-codec',
+            expectedPipeline: 'video-transcode',
+            expectedReason: 'video-codec',
+            ttffMs: null,
+            providerGets: null,
+            maximumConcurrentProviderGets: null,
+            ffmpegSpawns: null,
+            rebufferCount: null,
+            rebufferMs: null,
+            bufferedAheadSeconds: null,
+            browserBufferRateX: null,
+            seekPassed: false,
+            audioPassed: false,
+            cleanupPassed: true,
+        });
+        return true;
+    });
     assert.deepEqual(methods, ['POST', 'DELETE']);
 });
