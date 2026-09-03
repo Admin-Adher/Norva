@@ -246,6 +246,7 @@ if command -v docker >/dev/null 2>&1 && [[ -f "$COMPOSE" ]]; then
     local source_sync_path="/home/deno/functions/norva-source-sync/index.ts"
     local auth_challenge_path="/home/deno/functions/norva-auth-challenge/index.ts"
     local database_conflict_path="/home/deno/functions/_shared/database-conflict.ts"
+    local live_catalog_path="/home/deno/functions/_shared/live-catalog.ts"
     local live_materialization_path="/home/deno/functions/_shared/live-materialization.ts"
     local expected_playback_digest
     local expected_main_digest
@@ -256,6 +257,7 @@ if command -v docker >/dev/null 2>&1 && [[ -f "$COMPOSE" ]]; then
     local expected_source_sync_digest
     local expected_auth_challenge_digest
     local expected_database_conflict_digest
+    local expected_live_catalog_digest
     local expected_live_materialization_digest
     local observed_playback_digest
     local observed_main_digest
@@ -266,6 +268,7 @@ if command -v docker >/dev/null 2>&1 && [[ -f "$COMPOSE" ]]; then
     local observed_source_sync_digest
     local observed_auth_challenge_digest
     local observed_database_conflict_digest
+    local observed_live_catalog_digest
     local observed_live_materialization_digest
     local playback_health
     local cloud_health
@@ -282,6 +285,7 @@ if command -v docker >/dev/null 2>&1 && [[ -f "$COMPOSE" ]]; then
     expected_source_sync_digest="$(sha256sum "$FUNCS_DIR/norva-source-sync/index.ts" | awk '{print $1}')"
     expected_auth_challenge_digest="$(sha256sum "$FUNCS_DIR/norva-auth-challenge/index.ts" | awk '{print $1}')"
     expected_database_conflict_digest="$(sha256sum "$FUNCS_DIR/_shared/database-conflict.ts" | awk '{print $1}')"
+    expected_live_catalog_digest="$(sha256sum "$FUNCS_DIR/_shared/live-catalog.ts" | awk '{print $1}')"
     expected_live_materialization_digest="$(sha256sum "$FUNCS_DIR/_shared/live-materialization.ts" | awk '{print $1}')"
     observed_playback_digest="$(file_digest_in_service "$service" "$playback_path")"
     observed_main_digest="$(file_digest_in_service "$service" "$main_path")"
@@ -292,6 +296,7 @@ if command -v docker >/dev/null 2>&1 && [[ -f "$COMPOSE" ]]; then
     observed_source_sync_digest="$(file_digest_in_service "$service" "$source_sync_path")"
     observed_auth_challenge_digest="$(file_digest_in_service "$service" "$auth_challenge_path")"
     observed_database_conflict_digest="$(file_digest_in_service "$service" "$database_conflict_path")"
+    observed_live_catalog_digest="$(file_digest_in_service "$service" "$live_catalog_path")"
     observed_live_materialization_digest="$(file_digest_in_service "$service" "$live_materialization_path")"
     [[ "$observed_playback_digest" == "$expected_playback_digest" ]] || {
       echo "ERROR: $service norva-playback source digest mismatch" >&2
@@ -327,6 +332,10 @@ if command -v docker >/dev/null 2>&1 && [[ -f "$COMPOSE" ]]; then
     }
     [[ "$observed_database_conflict_digest" == "$expected_database_conflict_digest" ]] || {
       echo "ERROR: $service shared database-conflict source digest mismatch" >&2
+      exit 1
+    }
+    [[ "$observed_live_catalog_digest" == "$expected_live_catalog_digest" ]] || {
+      echo "ERROR: $service shared live-catalog source digest mismatch" >&2
       exit 1
     }
     [[ "$observed_live_materialization_digest" == "$expected_live_materialization_digest" ]] || {

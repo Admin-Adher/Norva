@@ -84,6 +84,7 @@ test('every Edge replica must prove the M3U finalization protocol', () => {
   assert.match(deploy, /EXPECTED_M3U_COMPLETE_LIVE_VARIANTS_PROTOCOL=1/);
   assert.match(deploy, /m3uFinalizeResumeProtocol/);
   assert.match(deploy, /m3uCompleteLiveVariantsProtocol/);
+  assert.match(deploy, /shared live-catalog source digest mismatch/);
 });
 
 test('variant repair requeues only READY M3U catalogues with a concrete-stream deficit', () => {
