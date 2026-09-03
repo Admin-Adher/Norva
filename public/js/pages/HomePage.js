@@ -1185,12 +1185,12 @@ class HomePage {
             <section class="norva-setup-gate norva-setup-connect" data-setup-state="not_configured" data-paired-screen="false">
                 <div class="norva-setup-connect-card">
                     <div class="norva-setup-kicker">One step to watch</div>
-                    <div class="norva-setup-flow-progress" aria-label="Setup progress">
+                    <div class="norva-setup-flow-progress" data-setup-flow-progress data-setup-flow-steps="2" aria-label="Setup progress, 2 steps">
                         <span class="is-current" data-setup-flow-marker="connection"><i>1</i><b>Connect</b></span>
                         <span class="norva-setup-flow-line"></span>
-                        <span data-setup-flow-marker="access"><i>2</i><b>Access</b></span>
-                        <span class="norva-setup-flow-line"></span>
-                        <span data-setup-flow-marker="finish"><i>3</i><b>Finish</b></span>
+                        <span data-setup-flow-marker="access" data-setup-flow-access-only hidden><i>2</i><b>Access</b></span>
+                        <span class="norva-setup-flow-line" data-setup-flow-access-only hidden></span>
+                        <span data-setup-flow-marker="finish"><i data-setup-flow-finish-index>2</i><b>Finish</b></span>
                     </div>
                     <h1 data-setup-flow-title>Paste your TV service link</h1>
                     <p data-setup-flow-description>We’ll organize your catalog. Nothing else.</p>
@@ -1402,6 +1402,9 @@ class HomePage {
         const modeTabs = Array.from(container.querySelectorAll('[data-setup-mode]'));
         const modePanels = Array.from(container.querySelectorAll('[data-setup-panel]'));
         const accessTerms = form?.querySelector('[data-provider-access-terms]');
+        const flowProgress = container.querySelector('[data-setup-flow-progress]');
+        const accessOnlyProgressItems = Array.from(container.querySelectorAll('[data-setup-flow-access-only]'));
+        const finishProgressIndex = container.querySelector('[data-setup-flow-finish-index]');
         const flowTitle = container.querySelector('[data-setup-flow-title]');
         const flowDescription = container.querySelector('[data-setup-flow-description]');
         const manager = this.app?.sourceManager || window.app?.sourceManager;
@@ -1492,8 +1495,19 @@ class HomePage {
             return feedback;
         };
         const selectedType = () => form.dataset.setupConnectionType === 'xtream' ? 'xtream' : 'm3u';
+        const hasAccessStep = () => selectedType() === 'xtream' && Boolean(accessTerms);
         const activeUrlInput = () => selectedType() === 'xtream' ? serverInput : m3uInput;
         const connectionSubmitLabel = () => selectedType() === 'xtream' ? 'Connect source' : 'Check playlist';
+        const updateFlowTopology = () => {
+            const accessAvailable = hasAccessStep();
+            accessOnlyProgressItems.forEach((item) => { item.hidden = !accessAvailable; });
+            if (finishProgressIndex) finishProgressIndex.textContent = accessAvailable ? '3' : '2';
+            if (flowProgress) {
+                const totalSteps = accessAvailable ? '3' : '2';
+                flowProgress.dataset.setupFlowSteps = totalSteps;
+                flowProgress.setAttribute('aria-label', `Setup progress, ${totalSteps} steps`);
+            }
+        };
         const updateSubmitVisibility = () => {
             const hidden = form.dataset.setupFlowStep === 'access' || form.dataset.setupAssistanceView !== 'connection';
             submit.hidden = hidden;
@@ -1520,6 +1534,7 @@ class HomePage {
                 tab.tabIndex = selected ? 0 : -1;
             });
             modePanels.forEach((panel) => { panel.hidden = panel.dataset.setupPanel !== mode; });
+            updateFlowTopology();
             clearErrors();
             if (!submit.disabled) submit.textContent = connectionSubmitLabel();
         };

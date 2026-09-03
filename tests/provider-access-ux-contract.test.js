@@ -58,6 +58,17 @@ test('onboarding collects an optional duration or explicit dates plus reminder o
   assert.doesNotMatch(sourceManager, /API\.(?:notifications|push).*reminder|enqueue.*reminder/i);
 });
 
+test('onboarding progress only advertises the Access step when it is available', () => {
+  assert.match(home, /data-setup-flow-progress data-setup-flow-steps="2" aria-label="Setup progress, 2 steps"/);
+  assert.match(home, /data-setup-flow-marker="access" data-setup-flow-access-only hidden/);
+  assert.match(home, /data-setup-flow-finish-index>2</);
+  assert.match(home, /const hasAccessStep = \(\) => selectedType\(\) === 'xtream' && Boolean\(accessTerms\)/);
+  assert.match(home, /accessOnlyProgressItems\.forEach\(\(item\) => \{ item\.hidden = !accessAvailable; \}\)/);
+  assert.match(home, /finishProgressIndex\.textContent = accessAvailable \? '3' : '2'/);
+  assert.match(home, /flowProgress\.setAttribute\('aria-label', `Setup progress, \$\{totalSteps\} steps`\)/);
+  assert.match(home, /modePanels\.forEach[\s\S]{0,140}updateFlowTopology\(\)/);
+});
+
 test('Add TV provider makes connection step one and access choice step two', () => {
   assert.match(sourceManager, /data-source-provider-onboarding/);
   assert.match(sourceManager, /data-source-connection-step[\s\S]{0,900}Step 1 of \$\{initialTotal\}[\s\S]{0,900}Add your TV provider/);
@@ -187,5 +198,5 @@ test('all changed Provider Access UI assets are cache-busted', () => {
   assert.match(shell, /api\.js\?v=93/);
   assert.match(shell, /sourceHealth\.js\?v=6c0eefcb4f/);
   assert.match(shell, /SourceManager\.js\?v=575d34510a/);
-  assert.match(shell, /HomePage\.js\?v=b98a873483/);
+  assert.match(shell, /HomePage\.js\?v=d9eb6f48fa/);
 });
