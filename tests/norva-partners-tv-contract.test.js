@@ -140,6 +140,7 @@ test('paired TV uses the isolated device API with strict relay envelopes', async
     device: true,
     responder,
   });
+  cloud.catalogVisibility.invalidate('v2.10.26826');
 
   const availability = await cloud.partners.device.availability();
   const created = await cloud.partners.device.createRelay({
@@ -156,6 +157,7 @@ test('paired TV uses the isolated device API with strict relay envelopes', async
     requests[0].url,
     'https://api.norva.tv/functions/v1/norva-partners-device/availability',
   );
+  assert.equal(requests[0].options.cache, 'no-store');
   for (const request of requests) {
     assert.equal(request.options.headers.Authorization, `Bearer ${deviceToken}`);
     assert.equal(request.options.headers['x-norva-profile-id'], undefined);

@@ -1090,6 +1090,7 @@
         // Only user-session calls (no explicit token) get the refresh-and-retry.
         // Device tokens ('' / device token) keep their own invalidation path.
         const usingUserToken = options.token === undefined;
+        const usesCatalogVisibility = options.catalogVisibility !== false;
         const headers = {
             'Content-Type': 'application/json',
             ...(options.headers || {})
@@ -1112,12 +1113,18 @@
             // Once an epoch is known, make it part of the browser-cache URL. On
             // the first authenticated read there is no trustworthy generation
             // yet, so bypass the HTTP cache and learn it from the server.
-            const requestPath = authenticatedGet ? visibilityVersionedPath(path) : path;
+            const requestPath = authenticatedGet && usesCatalogVisibility
+                ? visibilityVersionedPath(path)
+                : path;
             return fetch(`${baseUrl}${requestPath}`, {
             method,
             headers,
             body: body === undefined || body === null ? undefined : JSON.stringify(body),
-            ...(authenticatedGet && (!_visibilityEpoch || options._visibilityForceNoStore)
+            ...(authenticatedGet && (
+                !usesCatalogVisibility
+                || !_visibilityEpoch
+                || options._visibilityForceNoStore
+            )
                 ? { cache: 'no-store' }
                 : {}),
             ...(options.signal ? { signal: options.signal } : {}),
@@ -1152,7 +1159,10 @@
 
         const responseVisibilityEpoch = visibilityEpochFromResponse(response)
             || visibilityEpochFromPayload(payload);
-        if (token && responseVisibilityEpoch && isOlderVisibilityEpoch(responseVisibilityEpoch, _visibilityEpoch)) {
+        if (usesCatalogVisibility
+            && token
+            && responseVisibilityEpoch
+            && isOlderVisibilityEpoch(responseVisibilityEpoch, _visibilityEpoch)) {
             // A private HTTP-cache entry or an already in-flight request from the
             // previous generation must never be handed to a caller after another
             // response has advanced the account epoch. Retry once against the
@@ -1173,13 +1183,14 @@
         // Visibility is a server-owned generation. Remember it before any caller
         // can consult an in-memory cache; a response header is accepted for routes
         // whose legacy JSON body cannot yet carry metadata.
-        observeVisibilityEpoch(payload, response);
+        if (usesCatalogVisibility) observeVisibilityEpoch(payload, response);
 
         const visibilityErrorCode = payload && typeof payload === 'object'
             ? String(payload?.details?.code || payload?.code || '')
             : '';
         if (
-            token
+            usesCatalogVisibility
+            && token
             && method === 'GET'
             && response.status === 409
             && visibilityErrorCode === 'CATALOG_VISIBILITY_EPOCH_CHANGED'
@@ -3530,6 +3541,16 @@
         return key;
     }
 
+    function partnersApiRequest(method, path, body, options = {}) {
+        return requestToBase(partnersBase(), method, path, body, {
+            ...options,
+            skipProfile: true,
+            // The Partners contract rejects unknown query parameters. Catalogue
+            // visibility epochs do not describe financial programme state.
+            catalogVisibility: false
+        });
+    }
+
     async function partnersPost(path, body, idempotencyKey, validator, externalSignal) {
         partnersRequireUserSession();
         const safeIdempotencyKey = partnersIdempotencyKey(idempotencyKey);
@@ -3544,13 +3565,11 @@
         }, 20000);
         let payload;
         try {
-            payload = await requestToBase(
-                partnersBase(),
+            payload = await partnersApiRequest(
                 'POST',
                 path,
                 body,
                 {
-                    skipProfile: true,
                     signal: controller.signal,
                     headers: { 'Idempotency-Key': safeIdempotencyKey }
                 }
@@ -3581,12 +3600,11 @@
         }, 20000);
         let payload;
         try {
-            payload = await requestToBase(
-                partnersBase(),
+            payload = await partnersApiRequest(
                 'POST',
                 path,
                 body,
-                { skipProfile: true, signal: controller.signal }
+                { signal: controller.signal }
             );
         } catch (error) {
             if (error?.name === 'AbortError') {
@@ -3605,12 +3623,11 @@
         partnersRequireUserSession();
         let payload;
         try {
-            payload = await requestToBase(
-                partnersBase(),
+            payload = await partnersApiRequest(
                 'GET',
                 path,
                 null,
-                { signal, skipProfile: true }
+                { signal }
             );
         } catch (error) {
             if (error?.name === 'AbortError') throw error;
@@ -3664,12 +3681,11 @@
         }, 20000);
         let payload;
         try {
-            payload = await requestToBase(
-                partnersBase(),
+            payload = await partnersApiRequest(
                 'GET',
                 path,
                 null,
-                { signal: controller.signal, skipProfile: true }
+                { signal: controller.signal }
             );
         } catch (error) {
             if (error?.name === 'AbortError') {
@@ -3705,6 +3721,7 @@
                     token: getDeviceToken(),
                     signal,
                     skipProfile: true,
+                    catalogVisibility: false,
                     headers
                 }
             );
@@ -3736,12 +3753,11 @@
         });
         let payload;
         try {
-            payload = await requestToBase(
-                partnersBase(),
+            payload = await partnersApiRequest(
                 'GET',
                 `/bootstrap${suffix}`,
                 null,
-                { signal, skipProfile: true }
+                { signal }
             );
         } catch (error) {
             if (error?.name === 'AbortError') throw error;
@@ -3757,12 +3773,11 @@
         partnersRequireUserSession();
         let payload;
         try {
-            payload = await requestToBase(
-                partnersBase(),
+            payload = await partnersApiRequest(
                 'GET',
                 '/access-request',
                 null,
-                { signal, skipProfile: true }
+                { signal }
             );
         } catch (error) {
             if (error?.name === 'AbortError') throw error;
@@ -4007,12 +4022,11 @@
         partnersRequireUserSession();
         let payload;
         try {
-            payload = await requestToBase(
-                partnersBase(),
+            payload = await partnersApiRequest(
                 'GET',
                 '/payout-profile',
                 null,
-                { signal, skipProfile: true }
+                { signal }
             );
         } catch (error) {
             if (error?.name === 'AbortError') throw error;
@@ -4166,8 +4180,7 @@
         }
         let payload;
         try {
-            payload = await requestToBase(
-                partnersBase(),
+            payload = await partnersApiRequest(
                 'GET',
                 `/dashboard${query({
                     limit: safeLimit,
@@ -4175,7 +4188,7 @@
                     cursor: safeCursor || undefined
                 })}`,
                 null,
-                { signal, skipProfile: true }
+                { signal }
             );
         } catch (error) {
             if (error?.name === 'AbortError') throw error;
@@ -4197,15 +4210,14 @@
         }
         let payload;
         try {
-            payload = await requestToBase(
-                partnersBase(),
+            payload = await partnersApiRequest(
                 'GET',
                 `/referrals${query({
                     limit: safeLimit,
                     cursor: safeCursor || undefined
                 })}`,
                 null,
-                { signal, skipProfile: true }
+                { signal }
             );
         } catch (error) {
             if (error?.name === 'AbortError') throw error;

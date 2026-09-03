@@ -218,6 +218,7 @@ function loadCloudApi(payload) {
 
 test('Partners bootstrap uses the exact account-scoped GET without profile leakage', async () => {
   const { cloud, requests } = loadCloudApi(validEnvelope());
+  cloud.catalogVisibility.invalidate('v2.10.26826');
   const controller = new AbortController();
   const result = await cloud.partners.bootstrap({
     countryCode: 'fr',
@@ -232,6 +233,7 @@ test('Partners bootstrap uses the exact account-scoped GET without profile leaka
   );
   assert.equal(requests[0].options.method, 'GET');
   assert.equal(requests[0].options.body, undefined);
+  assert.equal(requests[0].options.cache, 'no-store');
   assert.equal(requests[0].options.signal, controller.signal);
   assert.equal(requests[0].options.headers.Authorization, 'Bearer user-access-token');
   assert.equal(requests[0].options.headers['x-norva-profile-id'], undefined);
@@ -261,6 +263,7 @@ test('Partners user actions use exact routes, idempotency and validated server-i
     throw new Error(`unexpected request ${url}`);
   };
   const { cloud, requests } = loadCloudApi(responder);
+  cloud.catalogVisibility.invalidate('v2.10.26826');
   const applyKey = 'norva.application.1234567890abcdef';
   const termsKey = 'norva.terms.1234567890abcdef';
   const linkKey = 'norva.link.1234567890abcdef';
@@ -305,6 +308,7 @@ test('Partners user actions use exact routes, idempotency and validated server-i
     'https://api.norva.tv/functions/v1/norva-partners/dashboard?limit=25&status=all',
   );
   assert.equal(requests[3].options.method, 'GET');
+  assert.equal(requests[3].options.cache, 'no-store');
   assert.equal(requests[3].options.headers['x-norva-profile-id'], undefined);
 });
 
@@ -2509,7 +2513,7 @@ test('Partners route participates in bounded native continuity without storing p
     /\.partners-shell[\s\S]{0,500}scroll-padding-block:[^;]*var\(--bottom-nav-h\)/,
   );
   assert.match(htmlSource, /main\.css\?v=71854078d1/);
-  assert.match(htmlSource, /cloudApi\.js\?v=72/);
+  assert.match(htmlSource, /cloudApi\.js\?v=73/);
   assert.match(htmlSource, /standalone\.js\?v=12/);
   assert.match(htmlSource, /Settings\.js\?v=5241073432/);
   assert.match(htmlSource, /PartnersPage\.js\?v=10/);
