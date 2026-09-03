@@ -53,6 +53,7 @@ test('the live repair is bounded to every affected Gateway RPC and fails closed 
   }
   assert.match(repair, /pg_catalog\.to_regprocedure\(v_signature\)/);
   assert.match(repair, /pg_catalog\.pg_get_functiondef\(v_function\)/);
+  assert.match(repair, /pg_catalog\.strpos\(v_definition, v_needle \|\| '::text'\)/);
   assert.match(repair, /v_needle \|\| '::text'/);
   assert.match(repair, /required media cache Gateway RPC is missing/);
   assert.match(repair, /media cache Gateway RPC comparison drifted/);

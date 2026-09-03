@@ -28,10 +28,10 @@ begin
     end if;
 
     v_definition := pg_catalog.pg_get_functiondef(v_function);
-    if pg_catalog.position((v_needle || '::text') in v_definition) > 0 then
+    if pg_catalog.strpos(v_definition, v_needle || '::text') > 0 then
       continue;
     end if;
-    if pg_catalog.position(v_needle in v_definition) = 0 then
+    if pg_catalog.strpos(v_definition, v_needle) = 0 then
       raise exception 'media cache Gateway RPC comparison drifted: %', v_signature;
     end if;
 
@@ -42,8 +42,9 @@ begin
     );
     execute v_repaired;
 
-    if pg_catalog.position(
-      (v_needle || '::text') in pg_catalog.pg_get_functiondef(v_function)
+    if pg_catalog.strpos(
+      pg_catalog.pg_get_functiondef(v_function),
+      v_needle || '::text'
     ) = 0 then
       raise exception 'media cache Gateway RPC cast repair failed: %', v_signature;
     end if;
