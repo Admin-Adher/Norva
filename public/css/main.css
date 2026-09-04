@@ -4433,6 +4433,59 @@ video::cue {
   min-width: 0;
 }
 
+.source-add-modal {
+  align-items: center;
+}
+
+.source-add-modal .modal-content {
+  width: min(620px, calc(100vw - 32px));
+  max-width: 620px;
+  height: auto;
+  max-height: calc(100dvh - 32px);
+  border-color: color-mix(in srgb, var(--color-accent) 18%, var(--color-border));
+}
+
+.source-add-modal .modal-body {
+  flex: 0 1 auto;
+  padding: var(--space-lg);
+}
+
+.source-add-modal .source-add-shell {
+  gap: var(--space-lg);
+}
+
+.source-add-modal .source-format-switcher {
+  padding: var(--space-md);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--color-bg-tertiary) 82%, transparent);
+}
+
+.source-add-modal .source-format-tabs .setup-mode-tab {
+  display: grid;
+  place-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.source-add-modal .modal-footer {
+  align-items: center;
+  flex-wrap: nowrap;
+  background: color-mix(in srgb, var(--color-bg-secondary) 96%, transparent);
+}
+
+.source-add-modal .modal-footer .btn {
+  min-width: 0;
+  min-height: 52px;
+  flex: 1 1 0;
+  justify-content: center;
+  text-align: center;
+}
+
+.source-add-modal .modal-footer .btn-primary {
+  flex-grow: 1.35;
+}
+
 .source-format-switcher-title {
   color: var(--color-text-primary);
   font-size: 0.9rem;
@@ -22474,6 +22527,7 @@ html:not(.tv-mode) .home-state-inline {
 
 .modal-footer .btn {
   min-height: 44px;
+  justify-content: center;
 }
 
 .partners-country-code-action {

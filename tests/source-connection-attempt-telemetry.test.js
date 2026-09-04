@@ -129,6 +129,8 @@ test('browser-side classifier emits only a root domain, host hash and bounded sh
   assert.equal(feedback.call(context, 'restream.re', 'm3u').state, 'neutral');
   assert.equal(feedback.call(context, 'https://panel.test/get.php?token=private', 'm3u').state, 'ready');
   assert.equal(feedback.call(context, 'https://jiotv.com/login.html', 'm3u').state, 'invalid');
+  assert.equal(feedback.call(context, 'nooor', 'xtream').state, 'invalid');
+  assert.equal(feedback.call(context, 'https://nooor', 'xtream').state, 'invalid');
   assert.equal(feedback.call(context, 'https://panel.test', 'xtream').state, 'ready');
 
   const diagnostic = await context.sourceAttemptDiagnostic.call(context, {

@@ -92,6 +92,12 @@ test('Settings add-source modal explains M3U versus Xtream before credentials', 
   assert.match(sourceManager, /server address with a username and password/);
   assert.match(sourceManager, /ArrowLeft[\s\S]*ArrowRight[\s\S]*Home[\s\S]*End/);
   assert.match(sourceManager, /title\.textContent = \['m3u', 'xtream'\]\.includes\(type\) \? 'Add TV service'/);
+  assert.match(sourceManager, /getSourceForm\(type, \{\}, \{ includeIntro: !formatSwitcher \}\)/);
+  assert.match(sourceManager, /sourceInputFeedback\(urlInput\.value, 'xtream'\)/);
+  assert.match(sourceManager, /modal\.classList\.toggle\('source-add-modal', Boolean\(formatSwitcher\)\)/);
+  assert.match(css, /\.modal-footer \.btn\s*\{[\s\S]{0,100}justify-content:\s*center/);
+  assert.match(css, /\.source-add-modal \.modal-content\s*\{[\s\S]{0,220}height:\s*auto/);
+  assert.match(css, /\.source-add-modal \.modal-footer \.btn\s*\{[\s\S]{0,180}justify-content:\s*center/);
   assert.match(css, /\.source-format-switcher-title\s*\{[\s\S]{0,180}color:\s*var\(--color-text-primary\)/);
 });
 

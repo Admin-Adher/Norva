@@ -98,6 +98,7 @@ class SourceManager {
         const flight = new Promise((resolve) => { resolveFlight = resolve; });
         this.warningModalFlight = flight;
         try {
+            modal.classList.remove('source-add-modal');
             modalTitle.textContent = title;
 
             modalBody.innerHTML = `
@@ -648,9 +649,11 @@ class SourceManager {
         footer.hidden = false;
 
         const formatSwitcher = this.sourceFormatSwitcher(type);
+        modal.classList.toggle('source-add-modal', Boolean(formatSwitcher));
+        const sourceForm = this.getSourceForm(type, {}, { includeIntro: !formatSwitcher });
         body.innerHTML = formatSwitcher
-            ? `<div class="source-add-shell">${formatSwitcher}<div class="source-format-panel" id="source-modal-connection-panel" role="tabpanel" aria-labelledby="source-format-${type}">${this.getSourceForm(type)}</div></div>`
-            : this.getSourceForm(type);
+            ? `<div class="source-add-shell">${formatSwitcher}<div class="source-format-panel" id="source-modal-connection-panel" role="tabpanel" aria-labelledby="source-format-${type}">${sourceForm}</div></div>`
+            : sourceForm;
 
         footer.innerHTML = `
       <button class="btn btn-secondary" id="modal-cancel">Cancel</button>
@@ -663,6 +666,7 @@ class SourceManager {
         // Event listeners
         const closeModal = () => {
             modal.classList.remove('active');
+            modal.classList.remove('source-add-modal');
             delete modal.dataset.providerConnectTracked;
         };
         modal.querySelector('.modal-close').onclick = closeModal;
@@ -729,6 +733,7 @@ class SourceManager {
             title.textContent = type === 'xtream' && intentTitles[intent]
                 ? intentTitles[intent]
                 : (titles[type] || 'Edit provider');
+            modal.classList.remove('source-add-modal');
             modal.classList.remove('provider-access-wizard-modal');
             footer.hidden = false;
             body.innerHTML = `${type === 'xtream' && intentCopy[intent] ? `
@@ -1547,7 +1552,7 @@ class SourceManager {
         return { startedOn, expiresOn, termValue: null, termUnit: null, remindersEnabled };
     }
 
-    getSourceForm(type, source = {}) {
+    getSourceForm(type, source = {}, { includeIntro = true } = {}) {
         const intros = {
             xtream: 'Paste the complete link from your TV service, or enter the server URL, username and password separately.',
             m3u: 'Use this when your TV service gives you a playlist link ending in .m3u or .m3u8.',
@@ -1559,9 +1564,9 @@ class SourceManager {
         const accessFields = type === 'xtream' && !isExisting
             ? this.getProviderAccessTermsFields({ prefix: 'source-access-onboarding', onboarding: true, deferred: true, stepOffset: 1 })
             : '';
-        const introField = `
+        const introField = includeIntro ? `
       <p class="source-form-intro">${this.escapeHtml(intros[type] || 'Connect a TV service to Norva.')}</p>
-    `;
+    ` : '';
         const nameField = `
       <div class="form-group">
         <label for="source-name">Service name <span class="label-optional">(optional)</span></label>
@@ -1735,6 +1740,16 @@ class SourceManager {
             };
             const showSourceAccessStep = () => {
                 clearConnectionError();
+                const feedback = this.sourceInputFeedback(urlInput.value, 'xtream');
+                if (feedback.state === 'invalid') {
+                    urlInput.setAttribute('aria-invalid', 'true');
+                    if (connectionError) {
+                        connectionError.textContent = feedback.message;
+                        connectionError.hidden = false;
+                    }
+                    urlInput.focus({ preventScroll: true });
+                    return;
+                }
                 applyParsedLink(false);
                 try {
                     this.buildSourceConnection({
@@ -1896,12 +1911,15 @@ class SourceManager {
                     : 'This looks like a web page. Enter the Xtream server address supplied by your provider.'
             };
         }
-        const rootLooksLikeAddress = /^https?:\/\//i.test(value) || /[.:]/.test(value.split(/[/?#]/, 1)[0]);
-        if (sourceType === 'm3u' && pathShape === 'root' && !value.includes('?') && !rootLooksLikeAddress) {
+        const rootHost = value.replace(/^https?:\/\//i, '').split(/[/?#]/, 1)[0];
+        const rootLooksLikeAddress = /[.:]/.test(rootHost);
+        if (pathShape === 'root' && !value.includes('?') && !rootLooksLikeAddress) {
             return {
                 state: 'invalid',
                 pathShape,
-                message: 'This looks like a name, not a link. Paste the complete M3U URL from your provider.'
+                message: sourceType === 'm3u'
+                    ? 'This looks like a name, not a link. Paste the complete M3U URL from your provider.'
+                    : 'This looks like a name, not a server address. Enter the complete Xtream server URL from your provider.'
             };
         }
 
@@ -2788,6 +2806,7 @@ class SourceManager {
         let current = initialSource;
         const modalHygieneAvailable = Boolean(window.NorvaModal?.installHygiene);
         const previouslyFocused = document.activeElement;
+        modal.classList.remove('source-add-modal');
 
         const closeToSettings = async () => {
             if (closing) return;
@@ -3169,6 +3188,7 @@ class SourceManager {
         const token = this.providerAccessViewToken;
         title.textContent = titleText;
         body.innerHTML = bodyHtml;
+        modal.classList.remove('source-add-modal');
         modal.classList.remove('provider-access-wizard-modal');
         footer.hidden = false;
         footer.innerHTML = '<button class="btn btn-secondary" type="button" data-provider-close>Close</button>';
