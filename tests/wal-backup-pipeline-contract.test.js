@@ -164,6 +164,7 @@ esac
   writeExecutable(path.join(fx.mockBin, 'df'), `#!/usr/bin/env bash
 case "$*" in
   *'--output=avail'*) printf 'Avail\\n100000000000\\n' ;;
+  *'--output=used'*) printf 'Used\\n1000000000\\n' ;;
   *'--output=pcent'*) printf 'Use%%\\n10%%\\n' ;;
   *) exit 2 ;;
 esac

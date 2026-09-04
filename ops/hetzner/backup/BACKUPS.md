@@ -87,6 +87,7 @@ sudo journalctl -u norva-basebackup.service -n 20 --no-pager
 | GC des clones de preuve jetables | toutes les 6 h | `norva-proof-gc` |
 | Veille capacité + débit WAL | toutes les 6 h | `norva-capacity-check` |
 | GC Docker borné | 01:35 UTC | `norva-docker-gc` |
+| GC des déploiements/candidats inactifs | 02:05 UTC | `norva-deployment-gc` |
 | Réindexation | 1er du mois, 01:00 UTC | `norva-reindex` |
 
 - État : `systemctl list-timers 'norva-*'` · logs : `journalctl -u <unité> -n 30`.
@@ -134,12 +135,24 @@ sudo journalctl -u norva-basebackup.service -n 20 --no-pager
   aucune session SQL cliente et les chemins canoniques sous
   `/var/lib/norva-phase3-proof` avant de supprimer. Il ne touche jamais à
   `/var/lib/norva/db`, aux sources ou aux rapports.
-- **GC Docker borné.** `docker-gc.sh` maintient BuildKit sous 12 GB avec 8 GB
-  réservés et vise au moins 120 GB libres. Pour les images média/Whisper non
-  référencées, il conserve deux images de rollback et une grâce de sept jours;
-  les images utilisées par un conteneur ou portant `norva.retention=protected`
-  sont exclues. Le mode par défaut des deux scripts GC est `--dry-run`;
-  systemd est le seul appelant configuré avec `--apply`.
+- **GC Docker borné.** `docker-gc.sh` applique d'abord la limite BuildKit de
+  12 GB avec 8 GB réservés, puis traite séparément la réserve de 120 GB libres.
+  Le passage échoue explicitement si le cache reste au-dessus de 12 GB. Pour
+  les images média non référencées, il conserve deux images de rollback et une
+  grâce de 48 h; Whisper reste à sept jours. Les images utilisées par un
+  conteneur ou portant `norva.retention=protected` sont exclues.
+  Cette séparation évite qu'une réserve disque déjà satisfaite transforme la
+  limitation BuildKit en no-op silencieux.
+- **GC des sources de déploiement.** `deployment-gc.sh` ne considère que les
+  répertoires de premier niveau sous `norva-deployments`,
+  `norva-media-deployments` et `norva-candidates`. Il conserve les deux plus
+  récents de chaque racine, applique 7 jours aux déploiements et 72 h aux
+  candidats, puis exclut tout chemin monté, toute source de bind Docker, tout
+  worktree Git modifié, les noms `backup`/`proof`/`evidence` et tout répertoire
+  portant `.norva-retain`. Un worktree
+  Git est retiré avec `git worktree remove`, jamais par suppression aveugle.
+  Le mode par défaut des trois scripts GC est `--dry-run`; systemd est le seul
+  appelant configuré avec `--apply`.
 - **Surveillance sans privilèges.** `storage-watch.sh` contrôle toutes les six
   heures le disque, les preuves, BuildKit et les images récupérables. Il peut
   être lancé par le cron de l'opérateur quand l'installation des unités
@@ -149,7 +162,10 @@ sudo journalctl -u norva-basebackup.service -n 20 --no-pager
   `/etc/norva-backup.env` : débit de WAL (GiB/jour, calculé sur le delta de
   `pg_current_wal_lsn()` depuis la veille), coût par utilisateur porteur de
   catalogue, place disque face aux 2x que réclame le staging du base backup,
-  taille des preuves jetables, cache BuildKit et images Docker récupérables.
+  taille des preuves jetables, cache BuildKit, images Docker récupérables,
+  croissance quotidienne du disque et variation du préfixe WAL sur R2. Cette
+  dernière mesure fait un inventaire borné du préfixe avec `rclone --fast-list`
+  afin de détecter aussi une rétention distante bloquée.
   Dépassement → message Telegram (même bot que Netdata, identifiants lus dans le
   `.env` de la stack) **et** sortie non nulle, donc unité en `failed`. Le premier
   run ne fait qu'amorcer son fichier d'état et reste muet.

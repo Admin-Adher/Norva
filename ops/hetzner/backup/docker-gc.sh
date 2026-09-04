@@ -17,10 +17,11 @@ LOCK_FILE="${DOCKER_GC_LOCK_FILE:-/run/lock/norva-docker-gc.lock}"
 MAX_CACHE_SPACE="${DOCKER_GC_MAX_CACHE_SPACE:-12GB}"
 RESERVED_CACHE_SPACE="${DOCKER_GC_RESERVED_CACHE_SPACE:-8GB}"
 MIN_FREE_SPACE="${DOCKER_GC_MIN_FREE_SPACE:-120GB}"
-IMAGE_MIN_AGE_HOURS="${DOCKER_GC_IMAGE_MIN_AGE_HOURS:-168}"
+MEDIA_IMAGE_MIN_AGE_HOURS="${DOCKER_GC_MEDIA_IMAGE_MIN_AGE_HOURS:-48}"
+WHISPER_IMAGE_MIN_AGE_HOURS="${DOCKER_GC_WHISPER_IMAGE_MIN_AGE_HOURS:-168}"
 ROLLBACK_IMAGES_PER_FAMILY="${DOCKER_GC_ROLLBACK_IMAGES_PER_FAMILY:-2}"
 
-case "$IMAGE_MIN_AGE_HOURS:$ROLLBACK_IMAGES_PER_FAMILY" in
+case "$MEDIA_IMAGE_MIN_AGE_HOURS:$WHISPER_IMAGE_MIN_AGE_HOURS:$ROLLBACK_IMAGES_PER_FAMILY" in
   *[!0-9:]*|:*|*:) echo "DOCKER_GC_REFUSED: numeric settings are invalid" >&2; exit 64 ;;
 esac
 
@@ -32,17 +33,43 @@ flock -n 9 || { echo "DOCKER_GC_SKIPPED: another run owns $LOCK_FILE"; exit 0; }
 
 log() { printf '[%s] %s\n' "$(date -u +%FT%TZ)" "$*"; }
 
+metric_to_bytes() {
+  local value="${1/B/}"
+  numfmt --from=si "$value"
+}
+
+build_cache_bytes() {
+  local value
+  value="$(docker system df --format '{{.Type}}|{{.Size}}' | awk -F '|' '$1=="Build Cache"{print $2}')"
+  metric_to_bytes "${value:-0B}"
+}
+
+free_bytes() {
+  df --output=avail -B1 / | tail -1 | tr -d ' '
+}
+
 log "docker usage before"
 docker system df
 
 if [ "$MODE" = dry-run ]; then
-  log "DRY_RUN build cache policy max=$MAX_CACHE_SPACE reserved=$RESERVED_CACHE_SPACE min-free=$MIN_FREE_SPACE"
+  log "DRY_RUN build cache budget max=$MAX_CACHE_SPACE reserved=$RESERVED_CACHE_SPACE"
+  log "DRY_RUN emergency free-space target=$MIN_FREE_SPACE (separate pass, only when needed)"
   docker buildx du | tail -n 6 || true
 else
+  # A single policy carrying both --max-used-space and --min-free-space can be
+  # a no-op while the filesystem is above the free-space target. Enforce the
+  # cache budget first, then run the emergency free-space policy only when the
+  # host is actually below its reserve.
   docker buildx prune --all --force \
     --max-used-space "$MAX_CACHE_SPACE" \
-    --reserved-space "$RESERVED_CACHE_SPACE" \
-    --min-free-space "$MIN_FREE_SPACE"
+    --reserved-space "$RESERVED_CACHE_SPACE"
+
+  if [ "$(free_bytes)" -lt "$(metric_to_bytes "$MIN_FREE_SPACE")" ]; then
+    log "free space below $MIN_FREE_SPACE; running the separate emergency policy"
+    docker buildx prune --all --force \
+      --min-free-space "$MIN_FREE_SPACE" \
+      --reserved-space "$RESERVED_CACHE_SPACE"
+  fi
 fi
 
 declare -A used_ids=()
@@ -54,7 +81,7 @@ while IFS= read -r container; do
 done < <(docker ps -aq)
 
 prune_family() {
-  local pattern="$1" kept=0
+  local pattern="$1" min_age_hours="$2" kept=0
   local created_epoch image_id tag protected age_hours
   while IFS='|' read -r created_epoch image_id tag; do
     [ -n "$image_id" ] || continue
@@ -75,7 +102,7 @@ prune_family() {
       continue
     fi
     age_hours=$(( ($(date -u +%s)-created_epoch) / 3600 ))
-    if [ "$age_hours" -lt "$IMAGE_MIN_AGE_HOURS" ]; then
+    if [ "$age_hours" -lt "$min_age_hours" ]; then
       log "KEEP recent image $tag age=${age_hours}h"
       continue
     fi
@@ -98,17 +125,31 @@ prune_family() {
   )
 }
 
-prune_family 'norva-media-gateway:vaapi-*'
+prune_family 'norva-media-gateway:vaapi-*' "$MEDIA_IMAGE_MIN_AGE_HOURS"
 seen_ids=()
-prune_family 'norva-whisper-bench:*'
+prune_family 'norva-whisper-bench:*' "$WHISPER_IMAGE_MIN_AGE_HOURS"
 
-# Dangling layers older than the same grace period are never rollback targets.
+# Dangling layers older than the shorter media grace are never rollback targets.
 if [ "$MODE" = dry-run ]; then
-  log "DRY_RUN dangling image prune until=${IMAGE_MIN_AGE_HOURS}h"
+  log "DRY_RUN dangling image prune until=${MEDIA_IMAGE_MIN_AGE_HOURS}h"
 else
-  docker image prune --force --filter "until=${IMAGE_MIN_AGE_HOURS}h"
+  docker image prune --force --filter "until=${MEDIA_IMAGE_MIN_AGE_HOURS}h"
 fi
 
 log "docker usage after"
 docker system df
+
+CACHE_BYTES_AFTER="$(build_cache_bytes)"
+MAX_CACHE_BYTES="$(metric_to_bytes "$MAX_CACHE_SPACE")"
+CACHE_AFTER_GB="$(awk -v b="$CACHE_BYTES_AFTER" 'BEGIN{printf "%.2f", b/1000000000}')"
+if [ "$CACHE_BYTES_AFTER" -gt "$MAX_CACHE_BYTES" ]; then
+  if [ "$MODE" = dry-run ]; then
+    log "DRY_RUN post-check would fail: cache=${CACHE_AFTER_GB}GB max=$MAX_CACHE_SPACE"
+  else
+    echo "DOCKER_GC_LIMIT_NOT_MET: cache=${CACHE_AFTER_GB}GB max=$MAX_CACHE_SPACE" >&2
+    exit 1
+  fi
+else
+  log "build cache post-check OK: cache=${CACHE_AFTER_GB}GB max=$MAX_CACHE_SPACE"
+fi
 log "DOCKER_GC_OK mode=$MODE"

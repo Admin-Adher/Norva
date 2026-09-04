@@ -39,6 +39,8 @@ DISK_WARN_PCT="${CAPACITY_DISK_WARN_PCT:-70}"
 PROOF_WARN_GIB="${CAPACITY_PROOF_WARN_GIB:-25}"
 BUILD_CACHE_WARN_GIB="${CAPACITY_BUILD_CACHE_WARN_GIB:-20}"
 IMAGE_RECLAIMABLE_WARN_GIB="${CAPACITY_IMAGE_RECLAIMABLE_WARN_GIB:-15}"
+DISK_GROWTH_WARN_GIB_DAY="${CAPACITY_DISK_GROWTH_WARN_GIB_DAY:-15}"
+R2_WAL_GROWTH_WARN_GIB_DAY="${CAPACITY_R2_WAL_GROWTH_WARN_GIB_DAY:-15}"
 PROOF_ROOT="${PROOF_GC_ROOT:-/var/lib/norva-phase3-proof}"
 
 q() { docker exec "$DB_CONTAINER" psql -U postgres -Atc "$1"; }
@@ -66,6 +68,7 @@ telegram() {
 
 NOW_EPOCH="$(date -u +%s)"
 NOW_LSN="$(q 'select pg_current_wal_lsn();')"
+ELAPSED=0
 
 # ---- 1. WAL rate ------------------------------------------------------------
 WAL_LINE="rate: no baseline yet (first run)"
@@ -87,8 +90,6 @@ if [ -r "$STATE" ]; then
     SEED=0
   fi
 fi
-[ "$SEED" -eq 1 ] && printf 'PREV_LSN=%s\nPREV_EPOCH=%s\n' "$NOW_LSN" "$NOW_EPOCH" > "$STATE"
-
 # ---- 2. size per catalogue-bearing user -------------------------------------
 DB_BYTES="$(q "select pg_database_size('postgres');")"
 USERS="$(q 'select greatest(count(distinct user_id),1) from public.cloud_titles;')"
@@ -100,17 +101,68 @@ BYTES_PER_TITLE="$(awk -v b="$CLOUD_BYTES" -v t="$TITLES" 'BEGIN{printf "%.0f", 
 
 # ---- 3. disk headroom for the base backup staging ---------------------------
 AVAIL_BYTES="$(df --output=avail -B1 / | tail -1 | tr -d ' ')"
+USED_BYTES="$(df --output=used -B1 / | tail -1 | tr -d ' ')"
 USE_PCT="$(df --output=pcent / | tail -1 | tr -dc '0-9')"
 NEEDED_BYTES=$((DB_BYTES * 2))
 AVAIL_GIB="$(awk -v b="$AVAIL_BYTES" 'BEGIN{printf "%.1f", b/1073741824}')"
 NEEDED_GIB="$(awk -v b="$NEEDED_BYTES" 'BEGIN{printf "%.1f", b/1073741824}')"
+DISK_GROWTH_GIB_DAY=""
+if [ "$ELAPSED" -ge 3600 ] && [ -n "${PREV_USED_BYTES:-}" ]; then
+  DISK_DELTA_BYTES=$((USED_BYTES - PREV_USED_BYTES))
+  DISK_GROWTH_GIB_DAY="$(awk -v b="$DISK_DELTA_BYTES" -v s="$ELAPSED" 'BEGIN{printf "%.2f", b/1073741824*86400/s}')"
+fi
+
+# ---- 4. R2 WAL footprint -----------------------------------------------------
+# Measure the remote prefix itself: generation rate alone cannot reveal a
+# retention failure. --fast-list performs one bounded prefix inventory.
+R2_WAL_BYTES=""
+R2_WAL_COUNT=""
+R2_WAL_GROWTH_GIB_DAY=""
+if R2_WAL_JSON="$(rclone size "r2:${R2_BUCKET}/${R2_PREFIX_WAL%/}" --json --fast-list 2>/dev/null)"; then
+  R2_WAL_BYTES="$(sed -n 's/.*"bytes"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' <<<"$R2_WAL_JSON")"
+  R2_WAL_COUNT="$(sed -n 's/.*"count"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' <<<"$R2_WAL_JSON")"
+  R2_ELAPSED=$((NOW_EPOCH - ${PREV_R2_WAL_EPOCH:-${PREV_EPOCH:-$NOW_EPOCH}}))
+  if [ "$R2_ELAPSED" -ge 3600 ] && [ -n "$R2_WAL_BYTES" ] && [ -n "${PREV_R2_WAL_BYTES:-}" ]; then
+    R2_WAL_DELTA_BYTES=$((R2_WAL_BYTES - PREV_R2_WAL_BYTES))
+    R2_WAL_GROWTH_GIB_DAY="$(awk -v b="$R2_WAL_DELTA_BYTES" -v s="$R2_ELAPSED" 'BEGIN{printf "%.2f", b/1073741824*86400/s}')"
+  fi
+fi
+
+# Update the combined baseline atomically only after all measurements. Existing
+# two-field state files remain compatible and simply seed the new metrics once.
+if [ "$SEED" -eq 1 ]; then
+  state_tmp="${STATE}.tmp.$$"
+  umask 077
+  {
+    printf 'PREV_LSN=%s\nPREV_EPOCH=%s\n' "$NOW_LSN" "$NOW_EPOCH"
+    printf 'PREV_USED_BYTES=%s\n' "$USED_BYTES"
+    if [ -n "$R2_WAL_BYTES" ]; then
+      printf 'PREV_R2_WAL_BYTES=%s\nPREV_R2_WAL_EPOCH=%s\n' "$R2_WAL_BYTES" "$NOW_EPOCH"
+    elif [ -n "${PREV_R2_WAL_BYTES:-}" ]; then
+      printf 'PREV_R2_WAL_BYTES=%s\nPREV_R2_WAL_EPOCH=%s\n' \
+        "$PREV_R2_WAL_BYTES" "${PREV_R2_WAL_EPOCH:-${PREV_EPOCH:-$NOW_EPOCH}}"
+    fi
+  } > "$state_tmp"
+  mv -f "$state_tmp" "$STATE"
+fi
 
 log "WAL $WAL_LINE"
 log "db ${DB_GIB} GiB · ${USERS} users avec catalogue · ${PER_USER_MIB} MiB/user"
 log "catalogue ${TITLES} titres · ${BYTES_PER_TITLE} o/titre (seuil ${TITLE_WARN_BYTES})"
 log "disk ${USE_PCT}% used · ${AVAIL_GIB} GiB free · base backup needs ${NEEDED_GIB} GiB"
+if [ -n "$DISK_GROWTH_GIB_DAY" ]; then
+  log "disk growth ${DISK_GROWTH_GIB_DAY} GiB/day (seuil ${DISK_GROWTH_WARN_GIB_DAY})"
+else
+  log "disk growth: no baseline yet"
+fi
+if [ -n "$R2_WAL_BYTES" ]; then
+  R2_WAL_GIB="$(awk -v b="$R2_WAL_BYTES" 'BEGIN{printf "%.2f", b/1073741824}')"
+  log "R2 WAL ${R2_WAL_GIB} GiB · ${R2_WAL_COUNT:-?} objets · growth ${R2_WAL_GROWTH_GIB_DAY:-no baseline} GiB/day (seuil ${R2_WAL_GROWTH_WARN_GIB_DAY})"
+else
+  log "WARN: R2 WAL size unavailable"
+fi
 
-# ---- 4. disposable proof and Docker growth ---------------------------------
+# ---- 5. disposable proof and Docker growth ---------------------------------
 # These are independent of PostgreSQL growth and were the source of the
 # 2026-08-31 disk incident. Alert on the producer, before aggregate disk usage
 # becomes critical.
@@ -126,7 +178,7 @@ IMAGE_RECLAIMABLE_GIB="$(awk -v b="$IMAGE_RECLAIMABLE_BYTES" 'BEGIN{printf "%.1f
 log "temp proof ${PROOF_GIB} GiB (seuil ${PROOF_WARN_GIB}) · build cache ${BUILD_CACHE_GIB} GiB (seuil ${BUILD_CACHE_WARN_GIB}) · images recuperables ${IMAGE_RECLAIMABLE_GIB} GiB (seuil ${IMAGE_RECLAIMABLE_WARN_GIB})"
 
 
-# ---- 5. the other backup units: failed, or silently not running --------------
+# ---- 6. the other backup units: failed, or silently not running --------------
 # Nothing watched these until now. wal-sync.sh has exited non-zero "so systemd
 # marks the unit failed (visible in monitoring)" since day one, but nothing was
 # actually looking: Netdata's go.d here has no systemdunits collector, and adding
@@ -139,6 +191,9 @@ if systemctl cat norva-proof-gc.service >/dev/null 2>&1; then
 fi
 if systemctl cat norva-docker-gc.service >/dev/null 2>&1; then
   case " $UNIT_CHECKS " in *" norva-docker-gc:"*) ;; *) UNIT_CHECKS="$UNIT_CHECKS norva-docker-gc:36" ;; esac
+fi
+if systemctl cat norva-deployment-gc.service >/dev/null 2>&1; then
+  case " $UNIT_CHECKS " in *" norva-deployment-gc:"*) ;; *) UNIT_CHECKS="$UNIT_CHECKS norva-deployment-gc:36" ;; esac
 fi
 UNIT_PROBLEMS=""
 for spec in $UNIT_CHECKS; do
@@ -191,6 +246,12 @@ log "unites:${UNIT_PROBLEMS:- toutes OK}"
 ALERTS=()
 if [ -n "$WAL_GIB_DAY" ] && awk -v v="$WAL_GIB_DAY" -v t="$WAL_WARN_GIB" 'BEGIN{exit !(v>t)}'; then
   ALERTS+=("WAL ${WAL_GIB_DAY} GiB/jour depasse le seuil de ${WAL_WARN_GIB}. Verifier checkpoint_timeout, pg_stat_checkpointer et wal_fpi dans pg_stat_statements avant de toucher a KEEP_WAL_DAYS.")
+fi
+if [ -n "$DISK_GROWTH_GIB_DAY" ] && awk -v v="$DISK_GROWTH_GIB_DAY" -v t="$DISK_GROWTH_WARN_GIB_DAY" 'BEGIN{exit !(v>t)}'; then
+  ALERTS+=("Croissance disque ${DISK_GROWTH_GIB_DAY} GiB/jour depasse le seuil de ${DISK_GROWTH_WARN_GIB_DAY}. Examiner BuildKit, images et worktrees avant nettoyage.")
+fi
+if [ -n "$R2_WAL_GROWTH_GIB_DAY" ] && awk -v v="$R2_WAL_GROWTH_GIB_DAY" -v t="$R2_WAL_GROWTH_WARN_GIB_DAY" 'BEGIN{exit !(v>t)}'; then
+  ALERTS+=("Croissance du prefixe WAL R2 ${R2_WAL_GROWTH_GIB_DAY} GiB/jour depasse le seuil de ${R2_WAL_GROWTH_WARN_GIB_DAY}. Verifier le debit WAL et le dernier norva-wal-prune-r2.")
 fi
 if [ "$BYTES_PER_TITLE" -gt "$TITLE_WARN_BYTES" ]; then
   ALERTS+=("Cout ${BYTES_PER_TITLE} octets par titre (seuil ${TITLE_WARN_BYTES}). Croissance anormale possible — mesurer pgstattuple/pgstatindex avant REINDEX TABLE CONCURRENTLY sur cloud_titles, cloud_media_items et cloud_title_variants.")

@@ -188,6 +188,32 @@ Persistent=true
 WantedBy=timers.target
 EOF
 
+write_unit norva-deployment-gc.service <<EOF
+[Unit]
+Description=Norva inactive deployment and candidate GC
+After=docker.service
+Requires=docker.service
+[Service]
+Type=oneshot
+User=adrien
+Group=adrien
+EnvironmentFile=-/etc/norva-gc.env
+ExecStart=/usr/bin/bash $HERE/deployment-gc.sh --apply
+Nice=15
+IOSchedulingClass=idle
+EOF
+
+write_unit norva-deployment-gc.timer <<'EOF'
+[Unit]
+Description=Daily Norva inactive deployment and candidate GC
+[Timer]
+OnCalendar=*-*-* 02:05:00 UTC
+RandomizedDelaySec=600
+Persistent=true
+[Install]
+WantedBy=timers.target
+EOF
+
 write_unit norva-reindex.service <<EOF
 [Unit]
 Description=Norva monthly index bloat reclaim
@@ -212,6 +238,6 @@ EOF
 
 echo ">> enabling timers"
 systemctl daemon-reload
-systemctl enable --now norva-backup-nightly.timer norva-wal-sync.timer norva-basebackup.timer norva-wal-prune-r2.timer norva-capacity-check.timer norva-proof-gc.timer norva-docker-gc.timer norva-reindex.timer
+systemctl enable --now norva-backup-nightly.timer norva-wal-sync.timer norva-basebackup.timer norva-wal-prune-r2.timer norva-capacity-check.timer norva-proof-gc.timer norva-docker-gc.timer norva-deployment-gc.timer norva-reindex.timer
 systemctl list-timers 'norva-*' --no-pager
 echo ">> done. Manual runs: systemctl start norva-backup-nightly.service (etc.)"
