@@ -84,6 +84,17 @@ test('Add TV provider makes connection step one and access choice step two', () 
   assert.match(css, /\.provider-access-wizard-modal \.source-provider-onboarding > \.provider-access-terms\s*\{[\s\S]{0,280}border:\s*0;[\s\S]{0,100}background:\s*transparent;[\s\S]{0,80}box-shadow:\s*none/);
 });
 
+test('Settings add-source modal explains M3U versus Xtream before credentials', () => {
+  assert.match(sourceManager, /What did your provider give you\?/);
+  assert.match(sourceManager, /data-source-format="m3u"[^>]*>M3U link<\/button>/);
+  assert.match(sourceManager, /data-source-format="xtream"[^>]*>Xtream login<\/button>/);
+  assert.match(sourceManager, /one complete playlist URL[\s\S]{0,100}get\.php[\s\S]{0,100}\.m3u8/);
+  assert.match(sourceManager, /server address with a username and password/);
+  assert.match(sourceManager, /ArrowLeft[\s\S]*ArrowRight[\s\S]*Home[\s\S]*End/);
+  assert.match(sourceManager, /title\.textContent = \['m3u', 'xtream'\]\.includes\(type\) \? 'Add TV service'/);
+  assert.match(css, /\.source-format-switcher-title\s*\{[\s\S]{0,180}color:\s*var\(--color-text-primary\)/);
+});
+
 test('Settings provider label cannot inherit personal account autofill', () => {
   assert.match(sourceManager, /id="source-name"[^>]*name="provider-display-name"/);
   assert.match(sourceManager, /id="source-name"[^>]*autocomplete="off"/);

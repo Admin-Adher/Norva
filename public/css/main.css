@@ -4426,6 +4426,30 @@ video::cue {
   line-height: 1.5;
 }
 
+.source-add-shell,
+.source-format-switcher {
+  display: grid;
+  gap: var(--space-md);
+  min-width: 0;
+}
+
+.source-format-switcher-title {
+  color: var(--color-text-primary);
+  font-size: 0.9rem;
+  line-height: 1.35;
+}
+
+.source-format-switcher-copy {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.source-format-panel {
+  min-width: 0;
+}
+
 .source-saved-connection {
   margin-bottom: var(--space-md);
   padding: var(--space-md);
@@ -5657,6 +5681,19 @@ button.provider-access-calendar-day {
   scroll-padding-block-end: max(var(--space-md), var(--safe-area-inset-bottom));
 }
 
+.provider-access-wizard-modal .source-add-shell,
+.provider-access-wizard-modal .source-format-panel {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.provider-access-wizard-modal .source-format-switcher {
+  flex: 0 0 auto;
+  padding: var(--space-lg) var(--space-lg) 0;
+}
+
 .provider-access-wizard-modal .provider-access-panel {
   display: flex;
   min-width: 0;
@@ -6037,6 +6074,10 @@ button.provider-access-calendar-day {
   .provider-access-wizard-modal .source-provider-onboarding > .provider-access-terms {
     margin: 0;
     padding: var(--space-md);
+  }
+
+  .provider-access-wizard-modal .source-format-switcher {
+    padding: var(--space-md) var(--space-md) 0;
   }
 
   .source-provider-connection .provider-access-wizard-actions {

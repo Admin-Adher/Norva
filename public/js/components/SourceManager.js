@@ -580,23 +580,77 @@ class SourceManager {
     /**
      * Show add source modal
      */
-    showAddModal(type) {
-        if (type === 'xtream') {
-            this.trackProduct('provider_connect_started', {
-                source: 'settings', journey: 'provider_onboarding', step: 'provider_connect', state: 'started'
+    sourceFormatSwitcher(type) {
+        if (!['m3u', 'xtream'].includes(type)) return '';
+        const help = type === 'm3u'
+            ? 'Choose this when you received one complete playlist URL, often containing get.php or ending in .m3u or .m3u8.'
+            : 'Choose this when you received a server address with a username and password.';
+        return `
+          <section class="source-format-switcher" aria-labelledby="source-format-switcher-title">
+            <strong class="source-format-switcher-title" id="source-format-switcher-title">What did your provider give you?</strong>
+            <div class="setup-mode-tabs source-format-tabs" role="tablist" aria-labelledby="source-format-switcher-title" data-source-format-tabs>
+              <button class="setup-mode-tab" id="source-format-m3u" type="button" role="tab" aria-selected="${type === 'm3u'}" aria-controls="source-modal-connection-panel" data-source-format="m3u"${type === 'm3u' ? '' : ' tabindex="-1"'}>M3U link</button>
+              <button class="setup-mode-tab" id="source-format-xtream" type="button" role="tab" aria-selected="${type === 'xtream'}" aria-controls="source-modal-connection-panel" data-source-format="xtream"${type === 'xtream' ? '' : ' tabindex="-1"'}>Xtream login</button>
+            </div>
+            <p class="source-format-switcher-copy">${this.escapeHtml(help)}</p>
+          </section>
+        `;
+    }
+
+    bindSourceFormatSwitcher(type, { focusSelected = false } = {}) {
+        const modal = document.getElementById('modal');
+        const tabs = Array.from(modal?.querySelectorAll('[data-source-format]') || []);
+        if (!tabs.length) return null;
+        const selected = tabs.find((tab) => tab.dataset.sourceFormat === type) || tabs[0];
+        const activate = (tab) => {
+            const nextType = tab?.dataset?.sourceFormat;
+            if (!['m3u', 'xtream'].includes(nextType)) return;
+            if (nextType === type) {
+                tab.focus({ preventScroll: true });
+                return;
+            }
+            this.showAddModal(nextType, { focusFormat: true });
+        };
+        tabs.forEach((tab, index) => {
+            tab.addEventListener('click', () => activate(tab));
+            tab.addEventListener('keydown', (event) => {
+                let targetIndex = null;
+                if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') targetIndex = (index - 1 + tabs.length) % tabs.length;
+                if (event.key === 'ArrowRight' || event.key === 'ArrowDown') targetIndex = (index + 1) % tabs.length;
+                if (event.key === 'Home') targetIndex = 0;
+                if (event.key === 'End') targetIndex = tabs.length - 1;
+                if (targetIndex === null) return;
+                event.preventDefault();
+                activate(tabs[targetIndex]);
             });
-        }
+        });
+        if (focusSelected) requestAnimationFrame(() => selected.focus({ preventScroll: true }));
+        return selected;
+    }
+
+    showAddModal(type, { focusFormat = false } = {}) {
         const modal = document.getElementById('modal');
         const title = document.getElementById('modal-title');
         const body = document.getElementById('modal-body');
         const footer = document.getElementById('modal-footer');
 
+        if (!modal.classList.contains('active')) delete modal.dataset.providerConnectTracked;
+        if (type === 'xtream' && modal.dataset.providerConnectTracked !== 'true') {
+            this.trackProduct('provider_connect_started', {
+                source: 'settings', journey: 'provider_onboarding', step: 'provider_connect', state: 'started'
+            });
+            modal.dataset.providerConnectTracked = 'true';
+        }
+
         const titles = { xtream: 'Add TV provider', m3u: 'Add playlist link', epg: 'Add TV guide' };
-        title.textContent = titles[type];
+        title.textContent = ['m3u', 'xtream'].includes(type) ? 'Add TV service' : titles[type];
         modal.classList.remove('provider-access-wizard-modal');
         footer.hidden = false;
 
-        body.innerHTML = this.getSourceForm(type);
+        const formatSwitcher = this.sourceFormatSwitcher(type);
+        body.innerHTML = formatSwitcher
+            ? `<div class="source-add-shell">${formatSwitcher}<div class="source-format-panel" id="source-modal-connection-panel" role="tabpanel" aria-labelledby="source-format-${type}">${this.getSourceForm(type)}</div></div>`
+            : this.getSourceForm(type);
 
         footer.innerHTML = `
       <button class="btn btn-secondary" id="modal-cancel">Cancel</button>
@@ -607,14 +661,19 @@ class SourceManager {
         if (window.NorvaModal?.installHygiene) NorvaModal.installHygiene(modal);
 
         // Event listeners
-        modal.querySelector('.modal-close').onclick = () => modal.classList.remove('active');
-        document.getElementById('modal-cancel').onclick = () => modal.classList.remove('active');
+        const closeModal = () => {
+            modal.classList.remove('active');
+            delete modal.dataset.providerConnectTracked;
+        };
+        modal.querySelector('.modal-close').onclick = closeModal;
+        document.getElementById('modal-cancel').onclick = closeModal;
         document.getElementById('modal-save').onclick = (e) => {
             const btn = e.currentTarget;
             if (btn.disabled) return;               // guard against a double-press creating duplicate sources
             btn.disabled = true;
             Promise.resolve(this.saveNewSource(type)).finally(() => { btn.disabled = false; });
         };
+        this.bindSourceFormatSwitcher(type, { focusSelected: focusFormat });
         const accessWizard = this.bindSourceForm(type);
         if (accessWizard?.fieldset) {
             modal.classList.add('provider-access-wizard-modal');
@@ -629,7 +688,7 @@ class SourceManager {
             accessWizard.fieldset.addEventListener('norva:provider-access-complete', () => {
                 document.getElementById('modal-save')?.click();
             });
-            body.querySelector('[data-source-onboarding-cancel]')?.addEventListener('click', () => modal.classList.remove('active'));
+            body.querySelector('[data-source-onboarding-cancel]')?.addEventListener('click', closeModal);
         }
     }
 
