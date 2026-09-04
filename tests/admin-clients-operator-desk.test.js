@@ -74,6 +74,29 @@ function loadAdminPage(documentOverride) {
   return window.AdminPage;
 }
 
+test('Source ranges accept inclusive bounds and reject invalid values', () => {
+  const AdminPage = loadAdminPage();
+  for (const [min,max,result] of [['1','','range:1:'],['2','5','range:2:5'],['1','1','range:1:1'],['','0','range::0'],['','',''],['02','5','range:2:5'],['5','2',null],['-1','',null],['1.5','',null],['1e2','',null],['1000000','',null]]) {
+    assert.equal(AdminPage.sourceRange(min,max),result);
+  }
+});
+
+test('Source labels explain open and exact bounds', () => {
+  const AdminPage = loadAdminPage();
+  const page = Object.create(AdminPage.prototype);
+  for (const [value,label] of [['range:1:','≥ 1'],['range::5','≤ 5'],['range:2:5','2–5'],['range:1:1','= 1'],['0','= 0']]) {
+    page._users={sourceBucket:value}; assert.equal(page._sourceFilterLabel(),label);
+  }
+});
+
+test('Invalid custom ranges preserve the last applied query', () => {
+  const min=fakeElement(),max=fakeElement(),error=fakeElement(); min.value='5';max.value='2';
+  const AdminPage=loadAdminPage({getElementById(id){return {'admin-source-min':min,'admin-source-max':max,'admin-source-error':error}[id] || null;}});
+  const page=Object.create(AdminPage.prototype); page._users={sourceBucket:'range:1:',page:2};
+  page._loadUsers=()=>assert.fail('invalid ranges must not query'); page._applySourceRange();
+  assert.equal(page._users.sourceBucket,'range:1:'); assert.match(error.textContent,/dernier filtre valide/);
+});
+
 test('Clients page renders the approved operator desk without list charts', () => {
   const view = fakeElement();
   const elements = Object.fromEntries([

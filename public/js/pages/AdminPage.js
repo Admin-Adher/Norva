@@ -935,7 +935,28 @@ class AdminPage {
 #page-admin .client-console-page .client-advanced summary,#page-admin .client-console-page .client-export{min-height:48px;gap:8px;background:transparent;color:var(--color-text-secondary);border-color:var(--color-border);border-radius:10px;}
 #page-admin .client-console-page .client-advanced summary>img{width:17px;height:17px;opacity:.8;}
 #page-admin .client-console-page .client-advanced[open] summary{background:color-mix(in srgb,var(--color-accent) 12%,transparent);border-color:var(--color-accent);color:var(--color-text-primary);}
-#page-admin .client-console-page .client-advanced-panel{background:var(--color-bg-secondary);border-color:var(--color-border);padding:16px;gap:16px;}
+#page-admin .client-console-page .client-advanced-panel{background:var(--color-bg-secondary);border-color:var(--color-border);padding:24px;gap:24px;width:640px;max-width:calc(100vw - 48px);max-height:70vh;overflow-y:auto;grid-template-columns:minmax(0,1fr);}
+#page-admin .client-source-filters{border:0;padding:0;margin:0;min-width:0;}
+#page-admin .client-source-filters legend{font-size:16px;font-weight:700;color:var(--color-text-primary);}
+#page-admin .client-source-filters p,#page-admin .client-country-filter p{font-size:12px;line-height:1.5;color:var(--color-text-secondary);margin:8px 0;}
+#page-admin .client-source-presets{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:16px;}
+#page-admin .client-source-presets button{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:48px;padding:12px;border:1px solid var(--color-border);border-radius:10px;background:var(--color-bg-primary);color:var(--color-text-primary);font:inherit;font-size:13px;text-align:left;cursor:pointer;}
+#page-admin .client-source-presets button b{color:var(--color-text-secondary);font-variant-numeric:tabular-nums;}
+#page-admin .client-source-presets button[aria-pressed=true]{border-color:var(--color-accent);background:color-mix(in srgb,var(--color-accent) 15%,var(--color-bg-primary));box-shadow:inset 3px 0 var(--color-accent);}
+#page-admin .client-source-presets button:hover,#page-admin .client-refine-footer button:hover{border-color:var(--color-accent);}
+#page-admin .client-source-presets button:active{opacity:.8;}
+#page-admin .client-source-range{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-top:16px;}
+#page-admin .client-source-range[hidden]{display:none;}
+#page-admin .client-source-range label{display:grid;gap:8px;font-size:13px;min-width:0;}
+#page-admin .client-source-range p{grid-column:1/-1;margin:0;}
+#page-admin .client-source-range input,#page-admin .client-country-filter input{width:100%;min-width:0;min-height:48px;padding:12px;border:1px solid var(--color-border);border-radius:10px;background:var(--color-bg-primary);color:var(--color-text-primary);font:inherit;font-size:14px;}
+#page-admin .client-source-range input[aria-invalid=true]{border-color:var(--color-accent);outline:2px solid var(--color-accent);}
+#page-admin .client-country-filter{display:grid;gap:12px;}
+#page-admin .client-console-page .client-secondary-filters{border-top:1px solid var(--color-border);padding-top:8px;}
+#page-admin .client-console-page .client-secondary-filters summary{display:flex;justify-content:space-between;grid-column:auto;grid-row:auto;min-height:48px;padding:8px 0;border:0;box-shadow:none;background:transparent;color:var(--color-text-secondary);font-size:13px;}
+#page-admin .client-secondary-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;padding-top:8px;}
+#page-admin .client-refine-footer{display:flex;gap:16px;align-items:center;justify-content:space-between;font-size:12px;color:var(--color-text-secondary);}
+#page-admin .client-refine-footer button{min-height:44px;padding:8px 12px;border:1px solid var(--color-border);border-radius:10px;background:transparent;color:var(--color-text-primary);font:inherit;cursor:pointer;}
 #page-admin .client-console-page .client-filter-count{margin-left:0;background:var(--color-accent);color:var(--color-text-primary);}
 #page-admin .client-active-filters{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:8px 12px 12px;border-top:1px solid var(--color-border);}
 #page-admin .client-active-filters[hidden]{display:none;}
@@ -964,7 +985,11 @@ class AdminPage {
   #page-admin .client-console-page .client-advanced{display:contents;}
   #page-admin .client-console-page .client-advanced::details-content{display:contents;}
   #page-admin .client-console-page .client-advanced summary{grid-column:2;grid-row:1;}
-  #page-admin .client-console-page .client-advanced-panel{position:static;grid-column:1/-1;grid-row:4;width:auto;grid-template-columns:1fr;box-shadow:none;}
+  #page-admin .client-console-page .client-advanced-panel{position:static;grid-column:1/-1;grid-row:5;width:100%;max-width:100%;max-height:none;overflow:visible;padding:16px;grid-template-columns:1fr;box-shadow:none;}
+  #page-admin .client-console-page .client-view-control{grid-column:1/-1;}
+  #page-admin .client-console-page .client-advanced>summary{grid-row:4;grid-column:1/-1;}
+  #page-admin .client-source-presets,#page-admin .client-secondary-grid{grid-template-columns:minmax(0,1fr);}
+  #page-admin .client-refine-footer{flex-wrap:wrap;}
   #page-admin .client-console-page .client-active-label{flex-basis:100%;}
   #page-admin .client-console-page .client-view-control select{font-size:12px;}
 }
@@ -7091,10 +7116,25 @@ class AdminPage {
                 <details class="client-advanced">
                   <summary><img src="/img/icons/norva-settings.svg" alt="" />Affiner <span class="client-filter-count" id="admin-users-filter-count" hidden></span></summary>
                   <div class="client-advanced-panel">
+                    <fieldset class="client-source-filters"><legend>Nombre de sources</legend><p>Repérer les comptes sans source ou déjà équipés. Compteurs sur tous les clients.</p>
+                      <div id="admin-source-presets" class="client-source-presets" role="group" aria-label="Raccourcis du nombre de sources"></div>
+                      <div id="admin-source-range" class="client-source-range" hidden>
+                        <label>Minimum<input id="admin-source-min" type="number" min="0" max="999999" step="1" inputmode="numeric" placeholder="0" aria-describedby="admin-source-error" /></label>
+                        <label>Maximum<input id="admin-source-max" type="number" min="0" max="999999" step="1" inputmode="numeric" placeholder="Sans limite" aria-describedby="admin-source-error" /></label>
+                        <p id="admin-source-error" role="status">Laisser une borne vide pour ne pas la limiter.</p>
+                      </div>
+                      <select id="admin-users-sources" hidden aria-label="Filtre sources"></select>
+                    </fieldset>
+                    <section class="client-country-filter" aria-label="Pays utilisateur">
+                      <label class="client-filter-field">Rechercher un pays utilisateur<input id="admin-country-search" type="search" placeholder="France, Inde, Bangladesh…" autocomplete="off" /></label>
+                      <label class="client-filter-field">Pays utilisateur à l’inscription<select id="admin-users-signup-country"><option value="">Tous les pays utilisateur</option><option value="??">Non détecté</option></select></label>
+                      <p id="admin-country-search-status" role="status"></p>
+                    </section>
+                    <details class="client-secondary-filters"><summary>Autres critères <span id="admin-secondary-count"></span></summary><div class="client-secondary-grid">
                     <label class="client-filter-field">Pays de paiement<select id="admin-users-country" title="Storefront Play/App Store ou pays d’émission de la carte"><option value="">Tous les pays de paiement</option><option value="??">Pays paiement inconnu</option></select></label>
-                    <label class="client-filter-field">Pays utilisateur à l’inscription<select id="admin-users-signup-country" title="Estimation réseau approximative fournie au moment de l’inscription"><option value="">Tous les pays utilisateur</option><option value="??">Pays utilisateur non détecté</option></select></label>
-                    <label class="client-filter-field">Nombre de sources<select id="admin-users-sources"><option value="">Tous les nombres de sources</option><option value="0">Aucune source</option><option value="1">1 source</option><option value="2_3">2 à 3 sources</option><option value="4_plus">4 sources et plus</option></select></label>
                     <label class="client-filter-field">Segment<select id="admin-users-tag"><option value="">Tous les segments</option></select></label>
+                    </div></details>
+                    <div class="client-refine-footer"><span>Résultats actualisés automatiquement</span><button type="button" data-client-clear-filters>Réinitialiser</button></div>
                     <p class="client-filter-note">Le pays utilisateur est une estimation réseau prise à l’inscription, jamais une position actuelle. Il reste distinct du pays de paiement.</p>
                   </div>
                 </details>
@@ -7178,6 +7218,29 @@ class AdminPage {
                 this._syncClientFilterSummary(); this._loadUsers();
             });
         }
+        document.getElementById('admin-source-presets')?.addEventListener('click', event => {
+            const button = event.target.closest('[data-source-preset]');
+            if (!button) return;
+            clearTimeout(this._sourceRangeTimer);
+            this._sourceCustom = button.dataset.sourcePreset === 'custom';
+            if (!this._sourceCustom) {
+                this._users.sourceBucket = button.dataset.sourcePreset;
+                this._users.page = 0;
+                this._syncClientFilterSummary(); this._loadUsers();
+            }
+            this._syncSourcePresets(true);
+            if (this._sourceCustom) document.getElementById('admin-source-min')?.focus();
+        });
+        ['admin-source-min', 'admin-source-max'].forEach(id => document.getElementById(id)?.addEventListener('input', () => {
+            clearTimeout(this._sourceRangeTimer);
+            this._sourceRangeTimer = setTimeout(() => {
+                if (this._route !== 'clients') return;
+                this._applySourceRange();
+            }, 400);
+        }));
+        document.getElementById('admin-country-search')?.addEventListener('input', () =>
+            this._fillSignupCountryOptions(document.getElementById('admin-users-signup-country')));
+        this._syncSourcePresets(true);
         const tagSel = document.getElementById('admin-users-tag');
         if (tagSel) {
             this._fillTagOptions(tagSel);
@@ -7398,17 +7461,19 @@ class AdminPage {
         if (!sel) return;
         const cur = this._users.signupCountry || '';
         const list = Array.isArray(this._signupCountries) ? this._signupCountries : [];
-        const flagTxt = (cc) => {
-            const value = String(cc || '').toUpperCase();
-            return /^[A-Z]{2}$/.test(value)
-                ? String.fromCodePoint(...[...value].map(c => 0x1F1A5 + c.charCodeAt(0))) + ' ' + value
-                : value;
-        };
+        const normalize = text => String(text).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+        const query = normalize(document.getElementById('admin-country-search')?.value || '').trim();
+        const name = cc => { try { return new Intl.DisplayNames(['fr'], { type: 'region' }).of(cc) || cc; } catch (_) { return cc; } };
+        const matches = list.filter(c => normalize(`${name(c.country_code)} ${c.country_code}`).includes(query));
+        // Keep the current country selectable while searching; typing is not a filter change.
+        const visible = list.filter(c => matches.includes(c) || c.country_code === cur);
         sel.innerHTML = '<option value="">Tous les pays utilisateur</option>' +
-            list.map(c => `<option value="${AdminPage.esc(c.country_code)}">${AdminPage.esc(flagTxt(c.country_code))} (${AdminPage.n(c.n)})</option>`).join('') +
+            visible.map(c => `<option value="${AdminPage.esc(c.country_code)}">${AdminPage.esc(name(c.country_code))} · ${AdminPage.n(c.n)}</option>`).join('') +
             `<option value="??">Pays utilisateur non détecté (${AdminPage.n(this._signupCountryMissing || 0)})</option>`;
         sel.value = cur;
         if (list.length && sel.value !== cur) { sel.value = ''; this._users.signupCountry = ''; }
+        const status = document.getElementById('admin-country-search-status');
+        if (status) status.textContent = query ? `${matches.length} pays correspondant${matches.length > 1 ? 's' : ''}${cur ? ' · sélection actuelle conservée' : ''}` : 'Estimation à l’inscription, distincte du pays de paiement.';
     }
 
     _fillSourceBucketOptions(sel) {
@@ -7424,7 +7489,65 @@ class AdminPage {
         sel.value = cur;
     }
 
+    static sourceRange(min, max) {
+        if (![min, max].every(value => value === '' || /^\d{1,6}$/.test(value))) return null;
+        if (min !== '' && max !== '' && Number(min) > Number(max)) return null;
+        return min === '' && max === '' ? '' : `range:${min === '' ? '' : Number(min)}:${max === '' ? '' : Number(max)}`;
+    }
+
+    _applySourceRange() {
+        const min = document.getElementById('admin-source-min');
+        const max = document.getElementById('admin-source-max');
+        if (!min || !max) return;
+        const filter = min.validity?.badInput || max.validity?.badInput ? null : AdminPage.sourceRange(min.value, max.value);
+        const error = document.getElementById('admin-source-error');
+        min.setAttribute('aria-invalid', String(filter === null)); max.setAttribute('aria-invalid', String(filter === null));
+        if (error) error.textContent = filter === null ? 'Saisir des entiers positifs ou zéro, minimum ≤ maximum. Le dernier filtre valide reste appliqué.' : 'Laisser une borne vide pour ne pas la limiter.';
+        if (filter === null || filter === this._users.sourceBucket) return;
+        this._users.sourceBucket = filter; this._users.page = 0;
+        this._syncClientFilterSummary(); this._loadUsers();
+    }
+
+    _sourceFilterLabel() {
+        const value = this._users.sourceBucket || '';
+        const legacy = { '0': '= 0', '1': '= 1', '2_3': '2–3', '4_plus': '≥ 4' };
+        if (legacy[value]) return legacy[value];
+        const match = /^range:(\d*):(\d*)$/.exec(value);
+        if (!match) return 'Tous';
+        const [, min, max] = match;
+        return min !== '' && min === max ? `= ${min}` : min === '' ? `≤ ${max}` : max === '' ? `≥ ${min}` : `${min}–${max}`;
+    }
+
+    _syncSourcePresets(syncInputs = false) {
+        const group = document.getElementById('admin-source-presets');
+        if (!group) return;
+        const presets = [['', 'Tous'], ['0', 'Sans source'], ['range:1:', 'Avec source · 1+'], ['range:2:', 'Plusieurs · 2+'], ['custom', 'Personnalisé']];
+        const c = this._sourceBucketCounts;
+        const sum = keys => c && keys.every(key => c[key] != null) ? keys.reduce((n,key) => n + Number(c[key]), 0) : null;
+        const counts = { '': sum(['0','1','2_3','4_plus']), '0': c?.['0'], 'range:1:': sum(['1','2_3','4_plus']), 'range:2:': sum(['2_3','4_plus']) };
+        if (!group.children.length) group.innerHTML = presets.map(([value,label]) => `<button type="button" data-source-preset="${value}" aria-pressed="false"><span>${label}</span><b></b></button>`).join('');
+        const current = this._users.sourceBucket || '';
+        const custom = this._sourceCustom || !presets.some(([value]) => value === current);
+        group.querySelectorAll('[data-source-preset]').forEach(button => {
+            const key = button.dataset.sourcePreset;
+            button.setAttribute('aria-pressed', String(custom ? key === 'custom' : key === current));
+            button.querySelector('b').textContent = key === 'custom' ? '' : counts[key] == null ? '—' : AdminPage.n(counts[key]);
+        });
+        const range = document.getElementById('admin-source-range'); if (range) range.hidden = !custom;
+        if (syncInputs) {
+            const raw = { '0': ['0','0'], '1': ['1','1'], '2_3': ['2','3'], '4_plus': ['4',''] }[current] || (current.startsWith('range:') ? current.split(':').slice(1) : ['','']);
+            const min = document.getElementById('admin-source-min'), max = document.getElementById('admin-source-max');
+            if (min) { min.value = raw[0]; min.setAttribute('aria-invalid', 'false'); }
+            if (max) { max.value = raw[1]; max.setAttribute('aria-invalid', 'false'); }
+            const error = document.getElementById('admin-source-error');
+            if (error) error.textContent = 'Laisser une borne vide pour ne pas la limiter.';
+        }
+        const secondary = document.getElementById('admin-secondary-count');
+        if (secondary) { const n = Number(!!this._users.country) + Number(!!this._users.tagId); secondary.textContent = n ? `${n} actif${n > 1 ? 's' : ''}` : ''; }
+    }
+
     _syncClientFilterSummary() {
+        this._syncSourcePresets();
         const badge = document.getElementById('admin-users-filter-count');
         if (!badge || !this._users) return;
         const count = ['country', 'signupCountry', 'sourceBucket', 'tagId']
@@ -7438,9 +7561,8 @@ class AdminPage {
             if (code === '??') return 'Non détecté';
             try { return new Intl.DisplayNames(['fr'], { type: 'region' }).of(code) || code; } catch (_) { return code; }
         };
-        const sources = { '0': 'Aucune', '1': '1', '2_3': '2–3', '4_plus': '4 et plus' };
         const filters = [
-            ['sourceBucket', 'Sources', sources[this._users.sourceBucket]],
+            ['sourceBucket', 'Sources', this._sourceFilterLabel()],
             ['signupCountry', 'Inscription', countryLabel(this._users.signupCountry)],
             ['country', 'Paiement', countryLabel(this._users.country)],
             ['tagId', 'Segment', (this._allTags || []).find(tag => tag.id === this._users.tagId)?.label || 'Sélectionné']
@@ -7453,6 +7575,7 @@ class AdminPage {
         const controls = { sourceBucket: 'admin-users-sources', signupCountry: 'admin-users-signup-country', country: 'admin-users-country', tagId: 'admin-users-tag' };
         if (!Object.hasOwn(controls, key)) return;
         this._users[key] = ''; this._users.page = 0;
+        if (key === 'sourceBucket') { clearTimeout(this._sourceRangeTimer); this._sourceCustom = false; }
         const control = document.getElementById(controls[key]);
         if (control) control.value = '';
         this._syncClientFilterSummary();
@@ -7869,6 +7992,8 @@ class AdminPage {
     }
 
     _clearClientFilters() {
+        clearTimeout(this._sourceRangeTimer); this._sourceCustom = false;
+        const countrySearch = document.getElementById('admin-country-search'); if (countrySearch) countrySearch.value = '';
         Object.assign(this._users, {
             page: 0, search: '', tagId: '', billing: '', country: '', signupCountry: '', sourceBucket: ''
         });
