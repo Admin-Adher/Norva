@@ -356,7 +356,7 @@ function parseWhisperBatchLid(output, expectedCount) {
     return matches.length === count ? matches : null;
 }
 
-function buildWhisperBatchArgs({ model, wavPaths, outputPrefixes, threads }) {
+function buildWhisperBatchArgs({ model, wavPaths, outputPrefixes, threads, vadModel = null }) {
     if (!Array.isArray(wavPaths) || wavPaths.length === 0) {
         throw new Error('strict LID batch requires at least one WAV');
     }
@@ -368,6 +368,7 @@ function buildWhisperBatchArgs({ model, wavPaths, outputPrefixes, threads }) {
     args.push('-l', 'auto', '-nt', '-otxt');
     for (const outputPrefix of outputPrefixes) args.push('-of', String(outputPrefix));
     args.push('-t', String(threads));
+    if (vadModel) args.push('--vad', '-vm', String(vadModel));
     return args;
 }
 
@@ -390,6 +391,7 @@ function runWhisperBatchProcess({
     model,
     wavPaths,
     threads,
+    vadModel = null,
     timeoutMs,
     abortSignal = null,
     spawnImpl = spawn,
@@ -423,7 +425,7 @@ function runWhisperBatchProcess({
 
         let args;
         try {
-            args = buildWhisperBatchArgs({ model, wavPaths: inputs, outputPrefixes: prefixes, threads });
+            args = buildWhisperBatchArgs({ model, wavPaths: inputs, outputPrefixes: prefixes, threads, vadModel });
         } catch (error) {
             resolve(failure({ error: String(error?.message || error) }));
             return;

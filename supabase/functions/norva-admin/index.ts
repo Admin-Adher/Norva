@@ -14,6 +14,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { sendTelegram, tgEscape } from "../_shared/telegram.ts";
 import { dispatchOpsNotifications } from '../_shared/ops-notifications.ts';
+import { strictLidHealth } from '../_shared/strict-lid-health.mjs';
 import { sendFcmPush, fcmConfigured } from "../_shared/fcm.ts";
 import { classifyOpsSourceError, SILENT_OPS_SOURCE_ERROR_KINDS } from "../_shared/source-sync-error.mjs";
 
@@ -231,6 +232,34 @@ async function ping(url: string): Promise<JsonRecord> {
   }
 }
 
+async function readStrictLidRuntimeHealth(gateway: string): Promise<JsonRecord> {
+  const [db, health] = await Promise.all([
+    Promise.resolve(admin.rpc('strict_lid_runtime_health')).then(({ data, error }) => error ? null : data).catch(() => null),
+    (async () => {
+      if (!gateway) return null;
+      try {
+        const response = await fetch(`${gateway.replace(/\/+$/, '')}/health`, { signal: AbortSignal.timeout(4500) });
+        if (!response.ok) { await response.body?.cancel(); return null; }
+        const reader = response.body?.getReader();
+        if (!reader) return null;
+        let text = ''; let bytes = 0;
+        const decoder = new TextDecoder();
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            bytes += value.byteLength;
+            if (bytes > 131072) return null;
+            text += decoder.decode(value, { stream: true });
+          }
+          return JSON.parse(text + decoder.decode());
+        } finally { await reader.cancel().catch(() => {}); }
+      } catch (_) { return null; }
+    })(),
+  ]);
+  return strictLidHealth(db, health);
+}
+
 type LidCascadeLeaseState = "active" | "expiring" | "expired" | "conflict" | "inactive";
 
 async function readLidCascadeLeaseHealth(): Promise<JsonRecord> {
@@ -398,16 +427,21 @@ async function runOpsAlertSweep(): Promise<JsonRecord> {
   // 2) Live infra pings — including Revolut (the payment API: any HTTP response = reachable).
   const { gateway, relay } = await resolveInfraUrls();
   const revolutApiBase = (Deno.env.get("REVOLUT_API_BASE") ?? "https://sandbox-merchant.revolut.com").replace(/\/+$/, "");
-  const [gw, rl, st, lidCascade, partnersOps] = await Promise.all([
+  const [gw, rl, st, lidCascade, partnersOps, lidRuntime] = await Promise.all([
     gateway ? ping(gateway) : Promise.resolve(null),
     relay ? ping(relay) : Promise.resolve(null),
     ping(revolutApiBase),
     readLidCascadeLeaseHealth(),
     readPartnersOpsSnapshot(),
+    readStrictLidRuntimeHealth(gateway),
   ]);
 
   // 3) Conditions → stable keys. `detail` goes into the email body.
   const problems: { key: string; detail: string }[] = [];
+  if (lidRuntime.state !== 'ready') problems.push({
+    key: 'lid_runtime_degraded',
+    detail: `Pipeline LID strict dégradé : ${(lidRuntime.reasons as string[]).join(', ')}. Aucun verdict faible n'est publié; priorité lecteur conservée.`,
+  });
   const {data:trialDeliveryHealth,error:trialDeliveryError} = await admin.rpc('trial_telegram_delivery_health');
   if (trialDeliveryError) problems.push({key:'growth_telegram_health_unavailable',detail:'Supervision des notifications de début d’essai indisponible'});
   else if (Number(trialDeliveryHealth?.dead_letter)>0 || Number(trialDeliveryHealth?.oldest_pending_seconds)>900) {
@@ -506,7 +540,7 @@ async function runOpsAlertSweep(): Promise<JsonRecord> {
 
   // Independent acknowledgements per category/channel, including recoveries.
   const delivery = await dispatchOpsNotifications(admin, problems, OPS_EMAIL);
-  return { problems, ...delivery, snapshotAgeMin: Number.isFinite(snapshotAgeMin) ? snapshotAgeMin : null };
+  return { problems, ...delivery, lid_runtime: lidRuntime, snapshotAgeMin: Number.isFinite(snapshotAgeMin) ? snapshotAgeMin : null };
 }
 
 // ── Weekly business digest (pg_cron → /weekly-digest, Monday 07:00) ────────────────────────────
@@ -815,12 +849,13 @@ Deno.serve(async (req) => {
       const revolutKey = Deno.env.get("REVOLUT_SECRET_KEY") ?? "";
       const revolutApiBase = (Deno.env.get("REVOLUT_API_BASE") ?? "https://sandbox-merchant.revolut.com").replace(/\/+$/, "");
       const revolutSandbox = /sandbox/i.test(revolutApiBase);
-      const [gw, rl, revolutPing, resendPing, lidCascade] = await Promise.all([
+      const [gw, rl, revolutPing, resendPing, lidCascade, lidRuntime] = await Promise.all([
         gateway ? ping(gateway) : Promise.resolve({ configured: false } as JsonRecord),
         relay ? ping(relay) : Promise.resolve({ configured: false } as JsonRecord),
         ping(revolutApiBase),
         ping("https://api.resend.com"),
         readLidCascadeLeaseHealth(),
+        readStrictLidRuntimeHealth(gateway),
       ]);
       const billing = {
         revolut_mode: revolutSandbox ? "sandbox" : "prod",
@@ -841,6 +876,7 @@ Deno.serve(async (req) => {
         relay: { configured: Boolean(relay), ...rl },
         billing,
         lid_cascade: lidCascade,
+        lid_runtime: lidRuntime,
       });
     }
 
