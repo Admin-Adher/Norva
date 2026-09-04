@@ -306,6 +306,15 @@ begin
     raise exception 'lifecycle readiness: reviewed step configuration drifted';
   end if;
 
+  if position(
+    'extensions.digest(x.actor_id::text, ''sha256'')'
+    in pg_get_functiondef(
+      'public.admin_behavioral_lifecycle_overview(integer)'::regprocedure
+    )
+  ) = 0 then
+    raise exception 'lifecycle readiness: admin overview digest schema is unsafe';
+  end if;
+
   if exists (select 1 from public.behavioral_lifecycle_experiment_versions)
      or exists (select 1 from public.behavioral_lifecycle_outbox)
      or exists (select 1 from public.behavioral_lifecycle_delivery_events)

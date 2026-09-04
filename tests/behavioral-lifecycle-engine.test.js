@@ -12,6 +12,7 @@ const root = path.join(__dirname, '..');
 const read = (...parts) => fs.readFileSync(path.join(root, ...parts), 'utf8').replace(/\r\n/g, '\n');
 const migration = read('supabase', 'migrations', '20260903180000_behavioral_lifecycle_engine_v1.sql');
 const hardeningMigration = read('supabase', 'migrations', '20260904090000_behavioral_lifecycle_import_readiness_append_only.sql');
+const overviewDigestMigration = read('supabase', 'migrations', '20260904100000_behavioral_lifecycle_admin_overview_digest_schema.sql');
 const lifecycle = read('supabase', 'functions', 'norva-lifecycle', 'index.ts');
 const cloud = read('supabase', 'functions', 'norva-cloud', 'index.ts');
 const norvaAdmin = read('supabase', 'functions', 'norva-admin', 'index.ts');
@@ -137,6 +138,9 @@ test('pre-activation readiness gate is read-only and proves the reviewed dormant
   assert.equal(expectedHardeningDigest, actualHardeningDigest);
   assert.match(hardeningMigration, /revoke all on table public\.behavioral_lifecycle_import_readiness\s+from service_role/i);
   assert.match(hardeningMigration, /grant select, insert on table public\.behavioral_lifecycle_import_readiness\s+to service_role/i);
+  assert.match(overviewDigestMigration, /extensions\.digest\(x\.actor_id::text, ''sha256''\)/i);
+  assert.match(overviewDigestMigration, /notify pgrst, 'reload schema'/i);
+  assert.match(overviewDigestMigration, /grant execute on function public\.admin_behavioral_lifecycle_overview\(integer\)\s+to authenticated, service_role/i);
   assert.match(gateScript, /tr -d '\\r'/);
   assert.match(gateScript, /default_transaction_read_only=on/);
   assert.match(gateScript, /if \[\[ -n "\$\{PGDATABASE:-\}" \]\]/);
@@ -156,6 +160,7 @@ test('pre-activation readiness gate is read-only and proves the reviewed dormant
   assert.match(gateSql, /expected exactly eleven reviewed steps/);
   assert.match(gateSql, /pre-activation message or experiment backlog is not empty/);
   assert.match(gateSql, /import attestation is not append-only/);
+  assert.match(gateSql, /admin overview digest schema is unsafe/);
   assert.doesNotMatch(
     gateSql,
     /\b(insert|update|delete|truncate|alter|create|drop)\s+(into\s+|from\s+|table\s+|function\s+|trigger\s+)?public\./i,
