@@ -1995,6 +1995,9 @@
                 });
                 if (!challenge?.challengeId) throw new Error('email_challenge_missing');
                 pendingOtpChallengeId = challenge.challengeId;
+                // The coarse edge location is not placed in Auth metadata. Keep it
+                // only in this tab until the verified, fresh account can claim it.
+                persistSignupAttribution(attribution);
             } catch (error) {
                 trackAuth('journey_error', 'email_otp', 'error', authFailureFamily(error));
                 setStatus('error', error?.status === 422

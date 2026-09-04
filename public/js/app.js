@@ -4247,7 +4247,7 @@ class App {
                 // rewrite it. Keep this value equal to the first 10 characters of the
                 // file's canonical-LF SHA-256; the contract test fails if they drift apart.
                 // Using the content hash here also gives the immutable CDN cache a new URL.
-                s.src = '/js/pages/AdminPage.js?v=b6a3124667';
+                s.src = '/js/pages/AdminPage.js?v=55e92c921f';
                 s.onload = () => resolve();
                 s.onerror = () => { this._adminPageLoading = null; reject(new Error('AdminPage.js failed to load')); };
                 document.head.appendChild(s);

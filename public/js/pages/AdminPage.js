@@ -42,7 +42,7 @@ class AdminPage {
         // Clients list is LIVE/paginated (not part of the cached snapshot). Its own state.
         this._users = {
             page: 0, limit: 25, search: '', sort: 'created_desc', tagId: '', billing: '',
-            country: '', total: 0, selectedId: '', inspectorOpen: false
+            country: '', signupCountry: '', sourceBucket: '', total: 0, selectedId: '', inspectorOpen: false
         };
         this._usersRows = [];
         this._allTags = [];
@@ -783,6 +783,8 @@ class AdminPage {
 #page-admin .client-advanced summary::-webkit-details-marker{display:none;}
 #page-admin .client-advanced summary:hover,#page-admin .client-export:hover,#page-admin .client-load-error button:hover,#page-admin .client-empty button:hover{border-color:rgba(91,124,250,.55);color:var(--adm-tx);}
 #page-admin .client-advanced[open] summary{border-color:rgba(91,124,250,.55);color:var(--adm-tx);}
+#page-admin .client-filter-count{display:inline-grid;place-items:center;min-width:20px;height:20px;margin-left:7px;padding:0 6px;border-radius:999px;background:var(--adm-blue);color:#fff;font-size:10px;font-variant-numeric:tabular-nums;}
+#page-admin .client-filter-count[hidden]{display:none;}
 #page-admin .client-advanced-panel{position:absolute;z-index:30;top:calc(100% + 7px);right:0;width:min(520px,calc(100vw - 110px));display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;padding:12px;border:1px solid var(--adm-line);border-radius:10px;background:var(--adm-card1);box-shadow:0 18px 48px rgba(0,0,0,.48);}
 #page-admin .client-filter-field{display:grid;gap:6px;color:var(--adm-tx3);font-size:10.5px;font-weight:700;}
 #page-admin .client-filter-note{grid-column:1/-1;margin:0;color:var(--adm-tx3);font-size:10.5px;line-height:1.45;}
@@ -7035,11 +7037,13 @@ class AdminPage {
                   <option value="email_asc">Email A→Z</option>
                 </select>
                 <details class="client-advanced">
-                  <summary>Filtres</summary>
+                  <summary>Filtres <span class="client-filter-count" id="admin-users-filter-count" hidden></span></summary>
                   <div class="client-advanced-panel">
                     <label class="client-filter-field">Pays de paiement<select id="admin-users-country" title="Storefront Play/App Store ou pays d’émission de la carte"><option value="">Tous les pays de paiement</option><option value="??">Pays paiement inconnu</option></select></label>
+                    <label class="client-filter-field">Pays utilisateur à l’inscription<select id="admin-users-signup-country" title="Estimation réseau approximative fournie au moment de l’inscription"><option value="">Tous les pays utilisateur</option><option value="??">Pays utilisateur non détecté</option></select></label>
+                    <label class="client-filter-field">Nombre de sources<select id="admin-users-sources"><option value="">Tous les nombres de sources</option><option value="0">Aucune source</option><option value="1">1 source</option><option value="2_3">2 à 3 sources</option><option value="4_plus">4 sources et plus</option></select></label>
                     <label class="client-filter-field">Segment<select id="admin-users-tag"><option value="">Tous les segments</option></select></label>
-                    <p class="client-filter-note">Le pays correspond au signal de paiement disponible, pas à la position actuelle de la personne.</p>
+                    <p class="client-filter-note">Le pays utilisateur est une estimation réseau prise à l’inscription, jamais une position actuelle. Il reste distinct du pays de paiement.</p>
                   </div>
                 </details>
                 <button class="client-export" id="admin-users-csv" type="button" title="Exporter la vue filtrée en CSV (10 000 lignes maximum)">Exporter CSV</button>
@@ -7084,13 +7088,36 @@ class AdminPage {
         const ctrySel = document.getElementById('admin-users-country');
         if (ctrySel) {
             this._fillCountryOptions(ctrySel);
-            ctrySel.addEventListener('change', () => { this._users.country = ctrySel.value; this._users.page = 0; this._loadUsers(); });
+            ctrySel.addEventListener('change', () => {
+                this._users.country = ctrySel.value; this._users.page = 0;
+                this._syncClientFilterSummary(); this._loadUsers();
+            });
+        }
+        const signupCountrySel = document.getElementById('admin-users-signup-country');
+        if (signupCountrySel) {
+            this._fillSignupCountryOptions(signupCountrySel);
+            signupCountrySel.addEventListener('change', () => {
+                this._users.signupCountry = signupCountrySel.value; this._users.page = 0;
+                this._syncClientFilterSummary(); this._loadUsers();
+            });
+        }
+        const sourceSel = document.getElementById('admin-users-sources');
+        if (sourceSel) {
+            this._fillSourceBucketOptions(sourceSel);
+            sourceSel.addEventListener('change', () => {
+                this._users.sourceBucket = sourceSel.value; this._users.page = 0;
+                this._syncClientFilterSummary(); this._loadUsers();
+            });
         }
         const tagSel = document.getElementById('admin-users-tag');
         if (tagSel) {
             this._fillTagOptions(tagSel);
-            tagSel.addEventListener('change', () => { this._users.tagId = tagSel.value; this._users.page = 0; this._loadUsers(); });
+            tagSel.addEventListener('change', () => {
+                this._users.tagId = tagSel.value; this._users.page = 0;
+                this._syncClientFilterSummary(); this._loadUsers();
+            });
         }
+        this._syncClientFilterSummary();
         const csvBtn = document.getElementById('admin-users-csv');
         if (csvBtn) csvBtn.addEventListener('click', () => this._exportUsersCsv(csvBtn));
         const prev = document.getElementById('admin-users-prev');
@@ -7178,18 +7205,36 @@ class AdminPage {
                 res = await this._rpc('admin_users_page', {
                     p_limit: s.limit, p_offset: s.page * s.limit, p_search: s.search || null,
                     p_sort: s.sort, p_tag_id: s.tagId || null, p_billing_status: s.billing || null,
-                    p_country: s.country || null
+                    p_country: s.country || null, p_source_bucket: s.sourceBucket || null,
+                    p_signup_country: s.signupCountry || null
                 });
             } catch (e) {
-                // PGRST202 = la DB n'a pas encore admin_users_page(p_country) — migration
-                // 20260717120000 pas appliquée, ou cache de schéma PostgREST à recharger
-                // (NOTIFY pgrst, 'reload schema'). Dégrader : liste sans le filtre pays.
+                // PGRST202 = la DB n'a pas encore la signature étendue. Dégrader sans
+                // prétendre qu'un filtre sources/localisation a été appliqué.
                 if (!String((e && e.message) || '').includes('PGRST202')) throw e;
-                if (s.country) { s.country = ''; const cs = document.getElementById('admin-users-country'); if (cs) cs.value = ''; }
-                res = await this._rpc('admin_users_page', {
-                    p_limit: s.limit, p_offset: s.page * s.limit, p_search: s.search || null,
-                    p_sort: s.sort, p_tag_id: s.tagId || null, p_billing_status: s.billing || null
-                });
+                s.sourceBucket = ''; s.signupCountry = '';
+                const ss = document.getElementById('admin-users-sources'); if (ss) ss.value = '';
+                const sc = document.getElementById('admin-users-signup-country'); if (sc) sc.value = '';
+                this._syncClientFilterSummary();
+                try {
+                    res = await this._rpc('admin_users_page', {
+                        p_limit: s.limit, p_offset: s.page * s.limit, p_search: s.search || null,
+                        p_sort: s.sort, p_tag_id: s.tagId || null, p_billing_status: s.billing || null,
+                        p_country: s.country || null
+                    });
+                } catch (legacyError) {
+                    // Dernier filet pour une base antérieure au filtre pays de paiement.
+                    if (!String((legacyError && legacyError.message) || '').includes('PGRST202')) throw legacyError;
+                    if (s.country) {
+                        s.country = '';
+                        const cs = document.getElementById('admin-users-country'); if (cs) cs.value = '';
+                        this._syncClientFilterSummary();
+                    }
+                    res = await this._rpc('admin_users_page', {
+                        p_limit: s.limit, p_offset: s.page * s.limit, p_search: s.search || null,
+                        p_sort: s.sort, p_tag_id: s.tagId || null, p_billing_status: s.billing || null
+                    });
+                }
             }
             if (seq !== this._usersSeq) return; // superseded by a newer load
             const rows = (res && Array.isArray(res.rows)) ? res.rows : [];
@@ -7215,6 +7260,15 @@ class AdminPage {
             s.total = Number(res && res.total) || 0;
             if (res && Array.isArray(res.all_tags)) { this._allTags = res.all_tags; this._fillTagOptions(document.getElementById('admin-users-tag')); }
             if (res && Array.isArray(res.countries)) { this._countries = res.countries; this._fillCountryOptions(document.getElementById('admin-users-country')); }
+            if (res && Array.isArray(res.signup_countries)) {
+                this._signupCountries = res.signup_countries;
+                this._signupCountryMissing = Number(res.signup_country_missing) || 0;
+                this._fillSignupCountryOptions(document.getElementById('admin-users-signup-country'));
+            }
+            if (res && res.source_buckets && typeof res.source_buckets === 'object') {
+                this._sourceBucketCounts = res.source_buckets;
+                this._fillSourceBucketOptions(document.getElementById('admin-users-sources'));
+            }
             this._usersRows = rows;
             this._usersAttributionError = attributionError;
             this._renderUsers(rows, attributionError);
@@ -7222,7 +7276,9 @@ class AdminPage {
             this._renderBulkBar();
             // Saved-view counters describe the full view. A search, country or segment is an
             // intersection shown by the pager and must not replace that global counter.
-            if (!s.search && !s.tagId && !s.country) this._setClientViewCount(s.billing || 'all', s.total);
+            if (!s.search && !s.tagId && !s.country && !s.signupCountry && !s.sourceBucket) {
+                this._setClientViewCount(s.billing || 'all', s.total);
+            }
             const from = s.total === 0 ? 0 : s.page * s.limit + 1;
             const to = Math.min(s.total, (s.page + 1) * s.limit);
             if (range) range.textContent = `${AdminPage.n(from)}–${AdminPage.n(to)} sur ${AdminPage.n(s.total)}`;
@@ -7264,6 +7320,46 @@ class AdminPage {
         sel.value = cur;
         // A stale saved filter (country no longer present) must not silently stick.
         if (sel.value !== cur) { sel.value = ''; this._users.country = ''; }
+    }
+
+    _fillSignupCountryOptions(sel) {
+        if (!sel) return;
+        const cur = this._users.signupCountry || '';
+        const list = Array.isArray(this._signupCountries) ? this._signupCountries : [];
+        const flagTxt = (cc) => {
+            const value = String(cc || '').toUpperCase();
+            return /^[A-Z]{2}$/.test(value)
+                ? String.fromCodePoint(...[...value].map(c => 0x1F1A5 + c.charCodeAt(0))) + ' ' + value
+                : value;
+        };
+        sel.innerHTML = '<option value="">Tous les pays utilisateur</option>' +
+            list.map(c => `<option value="${AdminPage.esc(c.country_code)}">${AdminPage.esc(flagTxt(c.country_code))} (${AdminPage.n(c.n)})</option>`).join('') +
+            `<option value="??">Pays utilisateur non détecté (${AdminPage.n(this._signupCountryMissing || 0)})</option>`;
+        sel.value = cur;
+        if (list.length && sel.value !== cur) { sel.value = ''; this._users.signupCountry = ''; }
+    }
+
+    _fillSourceBucketOptions(sel) {
+        if (!sel) return;
+        const cur = this._users.sourceBucket || '';
+        const counts = this._sourceBucketCounts || {};
+        const withCount = (label, key) => counts[key] == null ? label : `${label} (${AdminPage.n(counts[key])})`;
+        sel.innerHTML = '<option value="">Tous les nombres de sources</option>' +
+            `<option value="0">${AdminPage.esc(withCount('Aucune source', '0'))}</option>` +
+            `<option value="1">${AdminPage.esc(withCount('1 source', '1'))}</option>` +
+            `<option value="2_3">${AdminPage.esc(withCount('2 à 3 sources', '2_3'))}</option>` +
+            `<option value="4_plus">${AdminPage.esc(withCount('4 sources et plus', '4_plus'))}</option>`;
+        sel.value = cur;
+    }
+
+    _syncClientFilterSummary() {
+        const badge = document.getElementById('admin-users-filter-count');
+        if (!badge || !this._users) return;
+        const count = ['country', 'signupCountry', 'sourceBucket', 'tagId']
+            .reduce((total, key) => total + (this._users[key] ? 1 : 0), 0);
+        badge.hidden = count === 0;
+        badge.textContent = count ? String(count) : '';
+        badge.setAttribute('aria-label', count ? `${count} filtre${count > 1 ? 's' : ''} actif${count > 1 ? 's' : ''}` : '');
     }
 
     _setClientViewCount(key, value) {
@@ -7359,6 +7455,16 @@ class AdminPage {
         return [AdminPage.signupPlatformLabel(a.signup_platform), AdminPage.signupSurfaceLabel(a.signup_surface)].filter(Boolean).join(' · ');
     }
 
+    _clientSignupLocationStatus(attribution) {
+        const a = attribution || {};
+        if (a.capture_stage === 'unavailable') return 'Signal momentanément indisponible';
+        if (a.capture_stage === 'historical_backfill') return 'Non capturée (compte antérieur au suivi)';
+        if (a.capture_stage === 'pending' || a.capture_stage === 'signup_request') {
+            return 'Non détectée à la fin de l’inscription';
+        }
+        return 'Non détectée';
+    }
+
     _renderUsers(rows, attributionError = null) {
         const el = document.getElementById('admin-users');
         if (!el) return;
@@ -7419,6 +7525,10 @@ class AdminPage {
         const driver = row.is_driver ? '<span class="badge blue">Pilote</span>' : '';
         const subscription = row.billing_status ? AdminPage.billingBadge(row.billing_status, row.plan_code) : '<span class="badge gray">Sans abonnement</span>';
         const countrySource = row.country_source === 'card' ? 'Émission de la carte' : row.country_source === 'store' ? 'Storefront mobile' : 'Signal indisponible';
+        const signupLocation = AdminPage.signupLocationText(row.signup_attribution);
+        const signupLocationDetail = signupLocation
+            ? `${AdminPage.esc(signupLocation)}<br><span class="client-meta">${AdminPage.esc(AdminPage.signupLocationPrecision(row.signup_attribution))}</span>`
+            : `<span class="client-meta">${AdminPage.esc(this._clientSignupLocationStatus(row.signup_attribution))}</span>`;
         const uid = String(row.user_id || '');
         const isSelf = uid && uid === this._meId();
         const accountControls = isSelf
@@ -7451,6 +7561,7 @@ class AdminPage {
               <div class="client-inspector-fact"><dt>Abonnement</dt><dd>${AdminPage.esc(billing.label)} · ${AdminPage.esc(billing.detail)}</dd></div>
               <div class="client-inspector-fact"><dt>Sources</dt><dd>${AdminPage.n(sourceCount)}</dd></div>
               <div class="client-inspector-fact"><dt>Origine d’inscription</dt><dd>${AdminPage.esc(this._clientOriginSummary(row.signup_attribution))}</dd></div>
+              <div class="client-inspector-fact"><dt>Localisation à l’inscription</dt><dd>${signupLocationDetail}</dd></div>
               <div class="client-inspector-fact"><dt>Pays de paiement</dt><dd>${AdminPage.flag(row.country_code)}<br><span class="client-meta">${AdminPage.esc(countrySource)}</span></dd></div>
             </dl>
             <div class="client-next-block ${priority.tone}"><strong>Action potentielle</strong><p>${AdminPage.esc(priority.action)}</p></div>
@@ -7648,11 +7759,16 @@ class AdminPage {
     }
 
     _clearClientFilters() {
-        Object.assign(this._users, { page: 0, search: '', tagId: '', billing: '', country: '' });
+        Object.assign(this._users, {
+            page: 0, search: '', tagId: '', billing: '', country: '', signupCountry: '', sourceBucket: ''
+        });
         const search = document.getElementById('admin-users-search'); if (search) search.value = '';
         const country = document.getElementById('admin-users-country'); if (country) country.value = '';
+        const signupCountry = document.getElementById('admin-users-signup-country'); if (signupCountry) signupCountry.value = '';
+        const sources = document.getElementById('admin-users-sources'); if (sources) sources.value = '';
         const tag = document.getElementById('admin-users-tag'); if (tag) tag.value = '';
         this._syncQuickViews();
+        this._syncClientFilterSummary();
         this._loadUsers();
     }
 
@@ -7712,16 +7828,32 @@ class AdminPage {
                     p_search: this._users.search || null,
                     p_tag_id: this._users.tagId || null,
                     p_billing_status: this._users.billing || null,
-                    p_country: this._users.country || null
+                    p_country: this._users.country || null,
+                    p_source_bucket: this._users.sourceBucket || null,
+                    p_signup_country: this._users.signupCountry || null
                 });
             } catch (e) {
-                // Même fallback pré-migration que _loadUsers (PGRST202 → sans p_country).
+                // Même fallback pré-migration que _loadUsers : l'export ne doit jamais
+                // prétendre appliquer un filtre absent côté serveur.
                 if (!String((e && e.message) || '').includes('PGRST202')) throw e;
-                rows = await this._rpc('admin_users_export', {
-                    p_search: this._users.search || null,
-                    p_tag_id: this._users.tagId || null,
-                    p_billing_status: this._users.billing || null
-                });
+                if (this._users.sourceBucket || this._users.signupCountry) {
+                    throw new Error('Export indisponible : les filtres sources/localisation ne sont pas encore actifs côté serveur.');
+                }
+                try {
+                    rows = await this._rpc('admin_users_export', {
+                        p_search: this._users.search || null,
+                        p_tag_id: this._users.tagId || null,
+                        p_billing_status: this._users.billing || null,
+                        p_country: this._users.country || null
+                    });
+                } catch (legacyError) {
+                    if (!String((legacyError && legacyError.message) || '').includes('PGRST202')) throw legacyError;
+                    rows = await this._rpc('admin_users_export', {
+                        p_search: this._users.search || null,
+                        p_tag_id: this._users.tagId || null,
+                        p_billing_status: this._users.billing || null
+                    });
+                }
             }
             const list = Array.isArray(rows) ? rows : [];
             const attribution = list.length
