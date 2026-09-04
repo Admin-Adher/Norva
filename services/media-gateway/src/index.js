@@ -13,6 +13,8 @@ const express = require('express');
 const { Agent, request: undiciRequest } = require('undici');
 const { createProviderProxyAgent } = require('./providerProxyAgent');
 const { parseWhisperLid, runWhisperDetectOnly } = require('./whisper-lid');
+const { createStrictLidInference } = require('./strict-lid-inference');
+const strictLidInference = createStrictLidInference();
 const {
     buildStrictLidExtractionObservability,
     buildStrictLidUnverifiedObservability,
@@ -2291,7 +2293,7 @@ const MAX_CACHEABLE_EXACT_SUBTITLE_HLS_RENDITIONS = Math.min(
     MAX_EXACT_SUBTITLE_HLS_RENDITIONS,
     clampInt(process.env.MAX_CACHEABLE_EXACT_SUBTITLE_HLS_RENDITIONS, 8, 1, 32),
 );
-const GATEWAY_VERSION = 165;
+const GATEWAY_VERSION = 166;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -2924,6 +2926,7 @@ app.get('/health', (req, res) => {
         strictLidProviderDrainProtocol: 1,
         strictLidWeakFallbackProtocol: 1,
         strictLidBatchProtocol: 1,
+        strictLidInference: strictLidInference.health(),
         strictLidActivityKindProtocol: 1,
         strictLidCjkEvidenceProtocol: 1,
         strictLidTranscriptDiversityProtocol: 1,
@@ -8563,18 +8566,24 @@ async function runStrictWhisperBatch(wavPaths, options = {}) {
     whisperInferenceActive += 1;
     let backgroundRegistration = null;
     try {
-        const value = await runWhisperBatchProcess({
+        const value = await strictLidInference.run({
             bin: WHISPER_BIN,
             model: WHISPER_MODEL,
             wavPaths,
             threads: WHISPER_THREADS,
+            vadModel: WHISPER_VAD_RUNTIME_VERIFIED ? WHISPER_VAD_MODEL : null,
             timeoutMs: Math.max(1, Number(options.timeoutMs) || 1),
             abortSignal: options.abortSignal || null,
             onSpawn: (child) => {
                 if (!preemptibleBackground) return;
                 backgroundRegistration = registerPreemptibleBackgroundWhisper(backgroundKey, child);
             },
-            isPreempted: () => backgroundRegistration?.preempted === true,
+            isPreempted: () => backgroundRegistration?.preempted === true ||
+                (preemptibleBackground && viewerPlaybackActiveLocally()),
+        }, async (batchOptions) => {
+            // Each child registration is released before a fallback starts.
+            try { return await runWhisperBatchProcess(batchOptions); }
+            finally { backgroundRegistration?.release?.(); }
         });
         if (backgroundRegistration?.preempted === true) {
             return {

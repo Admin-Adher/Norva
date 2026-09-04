@@ -1,5 +1,9 @@
 # LID canary: expiry incident and bounded restoration
 
+> Historical restoration only. Subsequent deep audit identified the September 1
+> strict publication fence. Superseded by the permanent strict pipeline repair;
+> do NOT renew this retired cascade or use its isolated timings as pipeline proof.
+
 Verified 2026-09-04, 20:42 UTC. Operator request: investigate deeply and correct the
 expired LID fast path while preserving smooth playback. This was a configuration
 repair using existing RPCs, not an application/worker redeployment.
