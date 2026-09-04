@@ -142,7 +142,10 @@ sudo journalctl -u norva-basebackup.service -n 20 --no-pager
   grâce de 48 h; Whisper reste à sept jours. Les images utilisées par un
   conteneur ou portant `norva.retention=protected` sont exclues.
   Cette séparation évite qu'une réserve disque déjà satisfaite transforme la
-  limitation BuildKit en no-op silencieux.
+  limitation BuildKit en no-op silencieux. La politique est réappliquée après
+  la suppression des images et jusqu'à six passes, car BuildKit libère parfois
+  ses couches en cascade; elle s'arrête immédiatement si aucune passe ne
+  progresse.
 - **GC des sources de déploiement.** `deployment-gc.sh` ne considère que les
   répertoires de premier niveau sous `norva-deployments`,
   `norva-media-deployments` et `norva-candidates`. Il conserve les deux plus

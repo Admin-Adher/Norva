@@ -48,6 +48,8 @@ test('Docker GC separates cache budget and free-space passes and verifies its po
     /--max-used-space "\$MAX_CACHE_SPACE"[\s\S]{0,160}--min-free-space "\$MIN_FREE_SPACE"/
   );
   assert.match(dockerGc, /DOCKER_GC_LIMIT_NOT_MET/);
+  assert.match(dockerGc, /DOCKER_GC_CACHE_PRUNE_MAX_PASSES:-6/);
+  assert.match(dockerGc, /build cache budget made no progress/);
   assert.match(dockerGc, /DOCKER_GC_MEDIA_IMAGE_MIN_AGE_HOURS:-48/);
   assert.match(dockerGc, /ROLLBACK_IMAGES_PER_FAMILY:-2/);
 });

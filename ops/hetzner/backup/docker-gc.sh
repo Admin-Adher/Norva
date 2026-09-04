@@ -20,8 +20,9 @@ MIN_FREE_SPACE="${DOCKER_GC_MIN_FREE_SPACE:-120GB}"
 MEDIA_IMAGE_MIN_AGE_HOURS="${DOCKER_GC_MEDIA_IMAGE_MIN_AGE_HOURS:-48}"
 WHISPER_IMAGE_MIN_AGE_HOURS="${DOCKER_GC_WHISPER_IMAGE_MIN_AGE_HOURS:-168}"
 ROLLBACK_IMAGES_PER_FAMILY="${DOCKER_GC_ROLLBACK_IMAGES_PER_FAMILY:-2}"
+CACHE_PRUNE_MAX_PASSES="${DOCKER_GC_CACHE_PRUNE_MAX_PASSES:-6}"
 
-case "$MEDIA_IMAGE_MIN_AGE_HOURS:$WHISPER_IMAGE_MIN_AGE_HOURS:$ROLLBACK_IMAGES_PER_FAMILY" in
+case "$MEDIA_IMAGE_MIN_AGE_HOURS:$WHISPER_IMAGE_MIN_AGE_HOURS:$ROLLBACK_IMAGES_PER_FAMILY:$CACHE_PRUNE_MAX_PASSES" in
   *[!0-9:]*|:*|*:) echo "DOCKER_GC_REFUSED: numeric settings are invalid" >&2; exit 64 ;;
 esac
 
@@ -48,6 +49,21 @@ free_bytes() {
   df --output=avail -B1 / | tail -1 | tr -d ' '
 }
 
+enforce_cache_budget() {
+  local pass before after max_bytes
+  max_bytes="$(metric_to_bytes "$MAX_CACHE_SPACE")"
+  for ((pass=1; pass<=CACHE_PRUNE_MAX_PASSES; pass++)); do
+    before="$(build_cache_bytes)"
+    [ "$before" -gt "$max_bytes" ] || return 0
+    docker buildx prune --all --force \
+      --max-used-space "$MAX_CACHE_SPACE" \
+      --reserved-space "$RESERVED_CACHE_SPACE"
+    after="$(build_cache_bytes)"
+    log "build cache budget pass $pass/$CACHE_PRUNE_MAX_PASSES: before=$before after=$after max=$max_bytes"
+    [ "$after" -lt "$before" ] || { log "build cache budget made no progress"; return 0; }
+  done
+}
+
 log "docker usage before"
 docker system df
 
@@ -60,9 +76,7 @@ else
   # a no-op while the filesystem is above the free-space target. Enforce the
   # cache budget first, then run the emergency free-space policy only when the
   # host is actually below its reserve.
-  docker buildx prune --all --force \
-    --max-used-space "$MAX_CACHE_SPACE" \
-    --reserved-space "$RESERVED_CACHE_SPACE"
+  enforce_cache_budget
 
   if [ "$(free_bytes)" -lt "$(metric_to_bytes "$MIN_FREE_SPACE")" ]; then
     log "free space below $MIN_FREE_SPACE; running the separate emergency policy"
@@ -135,6 +149,10 @@ if [ "$MODE" = dry-run ]; then
 else
   docker image prune --force --filter "until=${MEDIA_IMAGE_MIN_AGE_HOURS}h"
 fi
+
+# Removing image references can make another layer of BuildKit records
+# reclaimable. Iterate the bounded budget policy again after image cleanup.
+[ "$MODE" = dry-run ] || enforce_cache_budget
 
 log "docker usage after"
 docker system df
