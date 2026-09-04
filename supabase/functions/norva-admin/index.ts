@@ -234,7 +234,7 @@ async function ping(url: string): Promise<JsonRecord> {
 
 async function readStrictLidRuntimeHealth(gateway: string): Promise<JsonRecord> {
   const [db, health] = await Promise.all([
-    admin.rpc('strict_lid_runtime_health').then(({ data, error }) => error ? null : data).catch(() => null),
+    Promise.resolve(admin.rpc('strict_lid_runtime_health')).then(({ data, error }) => error ? null : data).catch(() => null),
     (async () => {
       if (!gateway) return null;
       try {
