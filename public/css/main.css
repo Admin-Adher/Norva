@@ -4433,7 +4433,7 @@ video::cue {
   min-width: 0;
 }
 
-.source-add-modal {
+.modal.source-add-modal {
   align-items: center;
 }
 
