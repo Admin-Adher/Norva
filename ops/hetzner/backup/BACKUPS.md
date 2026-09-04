@@ -145,7 +145,9 @@ sudo journalctl -u norva-basebackup.service -n 20 --no-pager
   limitation BuildKit en no-op silencieux. La politique est réappliquée après
   la suppression des images et jusqu'à six passes, car BuildKit libère parfois
   ses couches en cascade; elle s'arrête immédiatement si aucune passe ne
-  progresse.
+  progresse. Si des enregistrements récupérables restent néanmoins au-dessus
+  de 12 GB, un unique rattrapage toujours borné à 4 GB avec 2 GB réservés est
+  exécuté; aucun prune BuildKit non borné n'est utilisé.
 - **GC des sources de déploiement.** `deployment-gc.sh` ne considère que les
   répertoires de premier niveau sous `norva-deployments`,
   `norva-media-deployments` et `norva-candidates`. Il conserve les deux plus

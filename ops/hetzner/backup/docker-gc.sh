@@ -16,6 +16,8 @@ done
 LOCK_FILE="${DOCKER_GC_LOCK_FILE:-/run/lock/norva-docker-gc.lock}"
 MAX_CACHE_SPACE="${DOCKER_GC_MAX_CACHE_SPACE:-12GB}"
 RESERVED_CACHE_SPACE="${DOCKER_GC_RESERVED_CACHE_SPACE:-8GB}"
+RECOVERY_MAX_CACHE_SPACE="${DOCKER_GC_RECOVERY_MAX_CACHE_SPACE:-4GB}"
+RECOVERY_RESERVED_CACHE_SPACE="${DOCKER_GC_RECOVERY_RESERVED_CACHE_SPACE:-2GB}"
 MIN_FREE_SPACE="${DOCKER_GC_MIN_FREE_SPACE:-120GB}"
 MEDIA_IMAGE_MIN_AGE_HOURS="${DOCKER_GC_MEDIA_IMAGE_MIN_AGE_HOURS:-48}"
 WHISPER_IMAGE_MIN_AGE_HOURS="${DOCKER_GC_WHISPER_IMAGE_MIN_AGE_HOURS:-168}"
@@ -62,6 +64,21 @@ enforce_cache_budget() {
     log "build cache budget pass $pass/$CACHE_PRUNE_MAX_PASSES: before=$before after=$after max=$max_bytes"
     [ "$after" -lt "$before" ] || { log "build cache budget made no progress"; return 0; }
   done
+}
+
+recover_cache_budget_if_stuck() {
+  local current max_bytes
+  current="$(build_cache_bytes)"
+  max_bytes="$(metric_to_bytes "$MAX_CACHE_SPACE")"
+  [ "$current" -gt "$max_bytes" ] || return 0
+
+  # BuildKit can leave reclaimable records above the normal budget while a
+  # max=12GB/reserved=8GB pass reports no progress. A final bounded recovery
+  # target is deliberately separate and never uses an unbounded prune.
+  log "build cache remains above $MAX_CACHE_SPACE; running bounded recovery max=$RECOVERY_MAX_CACHE_SPACE reserved=$RECOVERY_RESERVED_CACHE_SPACE"
+  docker buildx prune --all --force \
+    --max-used-space "$RECOVERY_MAX_CACHE_SPACE" \
+    --reserved-space "$RECOVERY_RESERVED_CACHE_SPACE"
 }
 
 log "docker usage before"
@@ -152,7 +169,10 @@ fi
 
 # Removing image references can make another layer of BuildKit records
 # reclaimable. Iterate the bounded budget policy again after image cleanup.
-[ "$MODE" = dry-run ] || enforce_cache_budget
+if [ "$MODE" != dry-run ]; then
+  enforce_cache_budget
+  recover_cache_budget_if_stuck
+fi
 
 log "docker usage after"
 docker system df
