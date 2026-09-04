@@ -917,6 +917,63 @@ class AdminPage {
   #page-admin .client-meta{max-width:185px;}
   #page-admin .client-desk-row{grid-template-columns:minmax(0,1fr) minmax(96px,.48fr);}
 }
+/* Approved Console A with the compact activity signals from B. */
+#page-admin .client-console-page .client-summary{margin:0;padding:16px 20px;gap:24px;border:0;border-bottom:1px solid var(--color-border);border-radius:0;background:transparent;}
+#page-admin .client-console-page .client-summary-item{display:flex;align-items:baseline;gap:10px;padding:0;border:0;flex-wrap:wrap;}
+#page-admin .client-console-page .client-summary-label{color:var(--color-text-secondary);font-size:11px;font-weight:500;letter-spacing:0;text-transform:none;}
+#page-admin .client-console-page .client-summary-value{order:-1;margin:0;font-size:20px;letter-spacing:-.03em;}
+#page-admin .client-console-page .client-desk-toolbar{display:grid;grid-template-columns:minmax(185px,220px) minmax(180px,1fr) auto auto auto;align-items:center;padding:12px;gap:8px;border:0;}
+#page-admin .client-console-page .client-search{min-width:0;max-width:none;width:100%;}
+#page-admin .client-console-page .client-search input{min-height:52px;border-radius:10px;background:var(--color-bg-primary);}
+#page-admin .client-view-control{display:grid;position:relative;grid-template-columns:32px minmax(0,1fr);grid-template-rows:auto auto;align-items:center;column-gap:10px;min-width:0;height:56px;padding:8px 10px;border:1px solid var(--color-border);border-radius:10px;background:var(--color-bg-tertiary);}
+#page-admin .client-view-control>img{grid-row:1/3;width:24px;height:24px;opacity:.85;}
+#page-admin .client-view-control>span{align-self:start;font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:var(--color-text-secondary);pointer-events:none;}
+#page-admin .client-view-control select{position:absolute;inset:0;min-width:0;width:100%;height:100%;min-height:48px;padding:19px 24px 4px 52px;border:0;border-radius:10px;background:transparent;color:var(--color-text-primary);font:inherit;font-size:12px;font-weight:700;cursor:pointer;}
+#page-admin .client-view-control select option{background:var(--color-bg-tertiary);color:var(--color-text-primary);}
+#page-admin .client-console-page .client-desk-sort{min-height:48px;min-width:138px;font-size:12px;background:transparent;}
+#page-admin .client-console-page .client-advanced{margin:0;}
+#page-admin .client-console-page .client-advanced summary,#page-admin .client-console-page .client-export{min-height:48px;gap:8px;background:transparent;color:var(--color-text-secondary);border-color:var(--color-border);border-radius:10px;}
+#page-admin .client-console-page .client-advanced summary>img{width:17px;height:17px;opacity:.8;}
+#page-admin .client-console-page .client-advanced[open] summary{background:color-mix(in srgb,var(--color-accent) 12%,transparent);border-color:var(--color-accent);color:var(--color-text-primary);}
+#page-admin .client-console-page .client-advanced-panel{background:var(--color-bg-secondary);border-color:var(--color-border);padding:16px;gap:16px;}
+#page-admin .client-console-page .client-filter-count{margin-left:0;background:var(--color-accent);color:var(--color-text-primary);}
+#page-admin .client-active-filters{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:8px 12px 12px;border-top:1px solid var(--color-border);}
+#page-admin .client-active-filters[hidden]{display:none;}
+#page-admin .client-active-label{margin-right:4px;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--color-text-secondary);}
+#page-admin .client-filter-token{display:inline-flex;align-items:center;gap:6px;min-height:44px;max-width:100%;padding:0 12px;border:1px solid color-mix(in srgb,var(--color-accent) 45%,var(--color-border));border-radius:10px;background:color-mix(in srgb,var(--color-accent) 9%,transparent);color:var(--color-text-secondary);font:inherit;font-size:11px;cursor:pointer;}
+#page-admin .client-filter-token strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--color-text-primary);font-weight:650;}
+#page-admin .client-filter-token img{width:12px;height:12px;flex-shrink:0;}
+#page-admin .client-clear-filters{min-height:44px;padding:0 8px;border:0;background:transparent;color:var(--color-text-secondary);font:inherit;font-size:11px;cursor:pointer;}
+#page-admin .client-console-page :is(button,summary,select,input):focus-visible{outline:2px solid var(--color-accent);outline-offset:3px;}
+#page-admin .client-view-control:focus-within{outline:2px solid var(--color-accent);outline-offset:2px;}
+#page-admin .client-console-page .client-desk-workspace{border-top:1px solid var(--color-border);}
+@media(max-width:1100px){
+  #page-admin .client-console-page .client-desk-toolbar{grid-template-columns:minmax(180px,1fr) auto auto;}
+  #page-admin .client-console-page .client-search{grid-column:1/-1;grid-row:2;}
+  #page-admin .client-console-page .client-desk-sort{grid-column:2;grid-row:1;}
+  #page-admin .client-console-page .client-export{grid-column:3;grid-row:2;}
+  #page-admin .client-console-page .client-search{grid-column:1/3;}
+}
+@media(max-width:600px){
+  #page-admin .client-console-page .client-summary{grid-template-columns:repeat(2,minmax(0,1fr));padding:16px;gap:16px;}
+  #page-admin .client-console-page .client-summary-item{border:0;gap:6px;}
+  #page-admin .client-console-page .client-desk-toolbar{grid-template-columns:minmax(0,1fr) auto;align-items:start;}
+  #page-admin .client-console-page .client-search{grid-row:2;grid-column:1/-1;}
+  #page-admin .client-console-page .client-desk-sort{grid-row:3;grid-column:1;min-width:0;width:100%;}
+  #page-admin .client-console-page .client-export{grid-row:3;grid-column:2;}
+  #page-admin .client-console-page .client-advanced{display:contents;}
+  #page-admin .client-console-page .client-advanced::details-content{display:contents;}
+  #page-admin .client-console-page .client-advanced summary{grid-column:2;grid-row:1;}
+  #page-admin .client-console-page .client-advanced-panel{position:static;grid-column:1/-1;grid-row:4;width:auto;grid-template-columns:1fr;box-shadow:none;}
+  #page-admin .client-console-page .client-active-label{flex-basis:100%;}
+  #page-admin .client-console-page .client-view-control select{font-size:12px;}
+}
+@supports not selector(details::details-content){
+  @media(max-width:600px){
+    #page-admin .client-console-page .client-advanced{display:block;grid-column:1/-1;grid-row:4;}
+    #page-admin .client-console-page .client-advanced-panel{margin-top:8px;}
+  }
+}
 @media(prefers-reduced-motion:reduce){
   #page-admin .client-summary-skeleton,#page-admin .client-skeleton-row{animation:none;}
   #page-admin .client-inspector-backdrop,#page-admin .client-desk-inspector{transition:none;}
@@ -7009,9 +7066,9 @@ class AdminPage {
             ['past_due', 'Paiement à vérifier'], ['cancel_pending', 'Annulation prévue'],
             ['expired', 'Expirés'], ['free', 'Sans abonnement']
         ];
-        const summarySkeleton = ['Clients', 'Actifs sur 7 j', 'En essai', 'Paiement à vérifier']
+        const summarySkeleton = ['Clients', 'Actifs sur 7 j', 'Avec source', 'Paiement à vérifier']
             .map(label => `<div class="client-summary-item"><span class="client-summary-label">${label}</span><span class="client-summary-skeleton" aria-hidden="true"></span></div>`).join('');
-        v.innerHTML = `<div class="crm-page client-desk-page">
+        v.innerHTML = `<div class="crm-page client-desk-page client-console-page">
             <header class="crm-head client-desk-head">
               <div class="crm-head-ic" aria-hidden="true"><img src="/img/icons/norva-account.svg" alt="" /></div>
               <div class="crm-head-tx">
@@ -7020,15 +7077,10 @@ class AdminPage {
                 <div class="client-desk-head-note">Signaux indicatifs · aucune action automatique depuis cette liste</div>
               </div>
             </header>
-            <section id="admin-clients-summary" class="client-summary" aria-label="Synthèse clients" aria-busy="true">${summarySkeleton}</section>
             <section class="client-desk-shell" aria-label="Poste de travail clients">
-              <div class="client-savedbar">
-                <span class="client-savedbar-label">Vues enregistrées</span>
-                <div class="client-savedviews" id="admin-users-qv" role="tablist" aria-label="Vues enregistrées des clients">
-                  ${views.map(([val, label]) => `<button class="client-saved-view" type="button" data-billing="${val}" role="tab" aria-controls="admin-users" aria-selected="false">${label}<b data-client-view-count="${val || 'all'}">—</b></button>`).join('')}
-                </div>
-              </div>
+              <section id="admin-clients-summary" class="client-summary" aria-label="Activité de tous les clients" aria-busy="true">${summarySkeleton}</section>
               <div class="client-desk-toolbar">
+                <label class="client-view-control"><img src="/img/icons/norva-account.svg" alt="" /><span>Vue actuelle</span><select id="admin-users-view" aria-label="Vues enregistrées des clients" aria-controls="admin-users">${views.map(([val, label]) => `<option value="${val}" data-client-view-count="${val || 'all'}" data-view-label="${label}">${label}</option>`).join('')}</select></label>
                 <label class="client-search"><span>Rechercher un client</span><input id="admin-users-search" type="search" placeholder="Rechercher par email…" autocomplete="off" value="${AdminPage.esc(this._users.search)}" title="L’email peut être partiel. Un identifiant de compte doit être saisi en entier." /></label>
                 <select class="client-desk-sort" id="admin-users-sort" aria-label="Trier les clients">
                   <option value="created_desc">Plus récents</option>
@@ -7037,7 +7089,7 @@ class AdminPage {
                   <option value="email_asc">Email A→Z</option>
                 </select>
                 <details class="client-advanced">
-                  <summary>Filtres <span class="client-filter-count" id="admin-users-filter-count" hidden></span></summary>
+                  <summary><img src="/img/icons/norva-settings.svg" alt="" />Affiner <span class="client-filter-count" id="admin-users-filter-count" hidden></span></summary>
                   <div class="client-advanced-panel">
                     <label class="client-filter-field">Pays de paiement<select id="admin-users-country" title="Storefront Play/App Store ou pays d’émission de la carte"><option value="">Tous les pays de paiement</option><option value="??">Pays paiement inconnu</option></select></label>
                     <label class="client-filter-field">Pays utilisateur à l’inscription<select id="admin-users-signup-country" title="Estimation réseau approximative fournie au moment de l’inscription"><option value="">Tous les pays utilisateur</option><option value="??">Pays utilisateur non détecté</option></select></label>
@@ -7048,6 +7100,7 @@ class AdminPage {
                 </details>
                 <button class="client-export" id="admin-users-csv" type="button" title="Exporter la vue filtrée en CSV (10 000 lignes maximum)">Exporter CSV</button>
               </div>
+              <div class="client-active-filters" id="admin-users-active-filters" aria-label="Filtres actifs" hidden></div>
               <div id="admin-users-bulk"></div>
               <div class="client-desk-workspace">
                 <div class="client-desk-list-pane">
@@ -7079,11 +7132,27 @@ class AdminPage {
             this._users.sort = sortSel.value; this._users.page = 0; this._loadUsers();
         });
         // Saved views map directly to server-side billing filters, so counts and pagination remain exhaustive.
-        document.querySelectorAll('#admin-users-qv .client-saved-view').forEach(chip => chip.addEventListener('click', () => {
-            this._users.billing = chip.dataset.billing || '';
+        const viewSelect = document.getElementById('admin-users-view');
+        if (viewSelect) viewSelect.addEventListener('change', () => {
+            this._users.billing = viewSelect.value || '';
             this._users.page = 0;
             this._loadUsers(); this._syncQuickViews();
-        }));
+        });
+        const advanced = v.querySelector('.client-advanced');
+        v.querySelector('.client-desk-toolbar')?.addEventListener('keydown', event => {
+            if (event.key === 'Escape' && advanced?.open) {
+                event.preventDefault(); event.stopPropagation();
+                advanced.open = false; advanced.querySelector('summary')?.focus();
+            }
+            if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+                event.preventDefault(); usearch?.focus();
+            }
+        });
+        const activeFilters = document.getElementById('admin-users-active-filters');
+        activeFilters?.addEventListener('click', event => {
+            const token = event.target.closest('[data-client-remove-filter]');
+            if (token) this._removeClientFilter(token.dataset.clientRemoveFilter);
+        });
         this._syncQuickViews();
         const ctrySel = document.getElementById('admin-users-country');
         if (ctrySel) {
@@ -7161,11 +7230,12 @@ class AdminPage {
             const items = [
                 ['Clients', overview && overview.users_total, ''],
                 ['Actifs sur 7 j', overview && overview.users_active_7d, ''],
-                ['En essai', overview && overview.billing_trialing, ''],
+                ['Avec source', null, 'client-source-signal'],
                 ['Paiement à vérifier', pastDue, pastDue > 0 ? 'is-alert' : '']
             ];
             el.innerHTML = items.map(([label, value, cls]) => `<div class="client-summary-item ${cls}"><span class="client-summary-label">${AdminPage.esc(label)}</span><strong class="client-summary-value">${AdminPage.n(value)}</strong></div>`).join('');
             el.setAttribute('aria-busy', 'false');
+            this._syncClientSourceSignal();
             const counts = {
                 all: overview && overview.users_total,
                 active: overview && overview.billing_active,
@@ -7177,7 +7247,7 @@ class AdminPage {
         } catch (error) {
             console.warn('Admin clients summary unavailable', error);
             if ((this._nav || 0) !== seq || this._route !== 'clients') return;
-            el.innerHTML = ['Clients', 'Actifs sur 7 j', 'En essai', 'Paiement à vérifier']
+            el.innerHTML = ['Clients', 'Actifs sur 7 j', 'Avec source', 'Paiement à vérifier']
                 .map(label => `<div class="client-summary-item"><span class="client-summary-label">${label}</span><strong class="client-summary-value">—</strong></div>`).join('');
             el.setAttribute('aria-busy', 'false');
             el.title = 'Synthèse momentanément indisponible';
@@ -7268,7 +7338,9 @@ class AdminPage {
             if (res && res.source_buckets && typeof res.source_buckets === 'object') {
                 this._sourceBucketCounts = res.source_buckets;
                 this._fillSourceBucketOptions(document.getElementById('admin-users-sources'));
+                this._syncClientSourceSignal();
             }
+            this._syncClientFilterSummary();
             this._usersRows = rows;
             this._usersAttributionError = attributionError;
             this._renderUsers(rows, attributionError);
@@ -7360,17 +7432,55 @@ class AdminPage {
         badge.hidden = count === 0;
         badge.textContent = count ? String(count) : '';
         badge.setAttribute('aria-label', count ? `${count} filtre${count > 1 ? 's' : ''} actif${count > 1 ? 's' : ''}` : '');
+        const strip = document.getElementById('admin-users-active-filters');
+        if (!strip) return;
+        const countryLabel = code => {
+            if (code === '??') return 'Non détecté';
+            try { return new Intl.DisplayNames(['fr'], { type: 'region' }).of(code) || code; } catch (_) { return code; }
+        };
+        const sources = { '0': 'Aucune', '1': '1', '2_3': '2–3', '4_plus': '4 et plus' };
+        const filters = [
+            ['sourceBucket', 'Sources', sources[this._users.sourceBucket]],
+            ['signupCountry', 'Inscription', countryLabel(this._users.signupCountry)],
+            ['country', 'Paiement', countryLabel(this._users.country)],
+            ['tagId', 'Segment', (this._allTags || []).find(tag => tag.id === this._users.tagId)?.label || 'Sélectionné']
+        ].filter(([key]) => this._users[key]);
+        strip.hidden = filters.length === 0;
+        strip.innerHTML = `<span class="client-active-label">Filtres actifs</span>${filters.map(([key, label, value]) => `<button type="button" class="client-filter-token" data-client-remove-filter="${key}" aria-label="${AdminPage.esc(`Retirer le filtre ${label} : ${value}`)}">${label}<strong>${AdminPage.esc(value)}</strong><img src="/img/icons/norva-close-simple.svg" alt="" /></button>`).join('')}<button type="button" class="client-clear-filters" data-client-clear-filters>Tout effacer</button>`;
+    }
+
+    _removeClientFilter(key) {
+        const controls = { sourceBucket: 'admin-users-sources', signupCountry: 'admin-users-signup-country', country: 'admin-users-country', tagId: 'admin-users-tag' };
+        if (!Object.hasOwn(controls, key)) return;
+        this._users[key] = ''; this._users.page = 0;
+        const control = document.getElementById(controls[key]);
+        if (control) control.value = '';
+        this._syncClientFilterSummary();
+        document.querySelector('.client-advanced summary')?.focus();
+        this._loadUsers();
+    }
+
+    _syncClientSourceSignal() {
+        const counts = this._sourceBucketCounts;
+        const el = document.querySelector('.client-source-signal .client-summary-value');
+        if (!el) return;
+        const keys = ['1', '2_3', '4_plus'];
+        el.textContent = counts && keys.every(key => counts[key] != null && Number.isFinite(Number(counts[key])))
+            ? AdminPage.n(keys.reduce((sum, key) => sum + Number(counts[key]), 0)) : '—';
     }
 
     _setClientViewCount(key, value) {
         if (value == null || !Number.isFinite(Number(value))) return;
         const el = document.querySelector(`[data-client-view-count="${key || 'all'}"]`);
-        if (el) el.textContent = AdminPage.n(value);
+        if (el) el.textContent = el.dataset?.viewLabel
+            ? `${el.dataset.viewLabel} · ${AdminPage.n(value)}` : AdminPage.n(value);
     }
 
     // Highlight the saved view matching the active server-side billing filter.
     _syncQuickViews() {
         const cur = this._users.billing || '';
+        const select = document.getElementById('admin-users-view');
+        if (select) select.value = cur;
         document.querySelectorAll('#admin-users-qv .client-saved-view').forEach(c => {
             const selected = (c.dataset.billing || '') === cur;
             c.setAttribute('aria-selected', selected ? 'true' : 'false');

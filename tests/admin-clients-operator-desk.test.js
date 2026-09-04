@@ -106,6 +106,10 @@ test('Clients page renders the approved operator desk without list charts', () =
 
   assert.match(view.innerHTML, /client-desk-workspace/);
   assert.match(view.innerHTML, /Vues enregistrées/);
+  assert.match(view.innerHTML, /id="admin-users-view"/);
+  assert.match(view.innerHTML, /client-console-page/);
+  assert.match(view.innerHTML, /id="admin-users-active-filters"/);
+  assert.doesNotMatch(view.innerHTML, /class="client-savedbar"/);
   assert.match(view.innerHTML, /id="client-desk-inspector"/);
   assert.match(view.innerHTML, /aucune action automatique/);
   assert.doesNotMatch(view.innerHTML, /admin-clients-charts|admin-clients-kpis|admin-users-billing/);
@@ -241,6 +245,41 @@ test('Client inspector exposes unban instead of ban for an already banned accoun
   assert.match(inspector.innerHTML, /data-client-account-action="unban"/);
   assert.match(inspector.innerHTML, /Lever le bannissement/);
   assert.doesNotMatch(inspector.innerHTML, />Bannir le client</);
+});
+
+test('Removing one console filter preserves other dimensions and restarts pagination', () => {
+  const control = fakeElement();
+  const page = Object.create(loadAdminPage({
+    getElementById() { return control; }, querySelector() { return null; }, querySelectorAll() { return []; }
+  }).prototype);
+  let loads = 0;
+  Object.assign(page, {
+    _users: { page: 4, sourceBucket: '2_3', signupCountry: 'IN', billing: 'active', search: 'client' },
+    _syncClientFilterSummary() {}, _loadUsers() { loads++; }
+  });
+  page._removeClientFilter('sourceBucket');
+  assert.equal(page._users.page, 0);
+  assert.equal(page._users.sourceBucket, '');
+  assert.equal(page._users.signupCountry, 'IN');
+  assert.equal(page._users.billing, 'active');
+  assert.equal(page._users.search, 'client');
+  assert.equal(loads, 1);
+  page._removeClientFilter('__proto__');
+  assert.equal(loads, 1);
+});
+
+test('Source signal sums global buckets and never presents unavailable counts as zero', () => {
+  const signal = fakeElement();
+  const page = Object.create(loadAdminPage({ querySelector() { return signal; } }).prototype);
+  page._sourceBucketCounts = { '0': 263, '1': 5, '2_3': 3, '4_plus': 1 };
+  page._syncClientSourceSignal();
+  assert.equal(signal.textContent, '9');
+  page._sourceBucketCounts = {};
+  page._syncClientSourceSignal();
+  assert.equal(signal.textContent, '—');
+  page._sourceBucketCounts = { '1': 0, '2_3': 0, '4_plus': 0 };
+  page._syncClientSourceSignal();
+  assert.equal(signal.textContent, '0');
 });
 
 test('Mobile client inspector contract includes focus isolation and Back handling', () => {
