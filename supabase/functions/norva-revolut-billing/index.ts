@@ -30,7 +30,8 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { latestPaywallAttribution, type PaywallAttribution } from "../_shared/paywall-experiments.ts";
 import { renderReceipt } from "../_shared/lifecycle-email.ts";
-import { sendTelegram, tgEscape } from "../_shared/telegram.ts";
+import { sendTelegram as sendDomainTelegram, tgEscape, maskedEmail } from "../_shared/telegram.ts";
+const sendTelegram = (text: string) => sendDomainTelegram(text, 'finance');
 import {
   ingestPartnerFinancialFact,
   resolveRevolutPartnerObservation,
@@ -477,7 +478,7 @@ async function userEmail(db: SupabaseClient, userId: string): Promise<string> {
 async function pingConversion(db: SupabaseClient, userId: string, planLabel: string, amountCents: number, period: string): Promise<void> {
   try {
     if (await isInternal(db, userId)) return;
-    const email = await userEmail(db, userId);
+    const email = maskedEmail(await userEmail(db, userId));
     await sendTelegram(
       `🎉 <b>Nouvelle conversion Norva</b>\n${tgEscape(email)}\n${tgEscape(planLabel)} · ${tgEscape(period)}\n💶 <b>$${(amountCents / 100).toFixed(2)}</b> encaissés (1ᵉʳ prélèvement)`,
     );
@@ -488,7 +489,7 @@ async function pingConversion(db: SupabaseClient, userId: string, planLabel: str
 async function pingChargeFailed(db: SupabaseClient, userId: string, planLabel: string, kind: "first_charge" | "renewal"): Promise<void> {
   try {
     if (await isInternal(db, userId)) return;
-    const email = await userEmail(db, userId);
+    const email = maskedEmail(await userEmail(db, userId));
     await sendTelegram(
       `💳 <b>Échec de paiement Norva</b>\n${tgEscape(email)}\n${tgEscape(planLabel)} · ${kind === "first_charge" ? "conversion trial" : "renouvellement"}\n→ passé en <b>past_due</b>, dunning enclenché.`,
     );
@@ -1151,7 +1152,7 @@ async function chargeUser(
         if (retryAttempt) {
           try {
             if (!(await isInternal(db, row.user_id))) {
-              const email = await userEmail(db, row.user_id);
+              const email = maskedEmail(await userEmail(db, row.user_id));
               await sendTelegram(`💚 <b>Paiement récupéré</b> (relance auto n°${retryAttempt})\n${tgEscape(email)}\n${tgEscape(label)} · ${cadence} · $${(billedAmount / 100).toFixed(2)}`);
             }
           } catch (_) { /* best-effort */ }

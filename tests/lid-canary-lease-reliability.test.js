@@ -165,11 +165,8 @@ test('admin health and ops sweep expose only sanitized lease state and alert bef
     'lid_cascade_conflict',
   ]) assert.ok(admin.includes(`key: "${alert}"`), `missing ops alert ${alert}`);
   assert.match(admin, /remainingHours/);
-  assert.match(admin, /lidIncidentActive/);
-  assert.match(
-    admin,
-    /if \(lidIncidentActive && k\.startsWith\("lid_cascade_"\)\) return false;/,
-  );
+  const dispatcher = fs.readFileSync(path.join(root, 'supabase/functions/_shared/ops-notifications.ts'), 'utf8');
+  assert.ok(dispatcher.includes("lidActive && s.key.startsWith('lid_cascade_')"));
   assert.match(admin, /lid_cascade: lidCascade/);
   assert.match(
     admin,

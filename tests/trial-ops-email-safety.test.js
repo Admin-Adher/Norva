@@ -63,7 +63,7 @@ test('DB trial reminder finalizes J-3/J-1 delivery and shared marker only after 
 test('ops email is explicit, singular, validated and never discovered from Auth/Admin', () => {
   assert.match(admin, /Deno\.env\.get\("NORVA_OPS_EMAIL"\)/);
   assert.match(admin, /\^\[\^\\s@\]\+@\[\^\\s@\]\+\\\.\[\^\\s@\]\+\$/);
-  assert.match(admin, /const recipients = OPS_EMAIL \? \[OPS_EMAIL\] : \[\]/);
+  assert.match(admin, /dispatchOpsNotifications\(admin, problems, OPS_EMAIL\)/);
   assert.doesNotMatch(admin, /admin_alert_recipients/);
   assert.match(retireRecipientMigration, /drop function if exists public\.admin_alert_recipients\(\)/i);
   assert.match(compose, /NORVA_OPS_EMAIL:\s*\$\{NORVA_OPS_EMAIL:-\}/);
@@ -82,42 +82,23 @@ test('source-error Telegram ignores expired, busy and inactive accounts', () => 
   assert.doesNotMatch(admin, /if \(Number\(ov\.sources_error\) > 0\) problems\.push/);
 });
 
-test('flappy source counters do not delete alert state on a 15-minute heal', () => {
-  assert.match(admin, /const FLAPPY_ALERT_KEYS = new Set\(\["sources_error", "sources_incomplete"\]\)/);
-  assert.match(admin, /FLAPPY_ALERT_KEYS\.has\(k\) && \(state\.get\(k\) \?\? 0\) > Date\.now\(\) - ALERT_COOLDOWN_MS/);
+test('category dispatcher preserves flap cooldowns and isolates acknowledgements', () => {
+  const dispatcher = read('supabase/functions/_shared/ops-notifications.ts');
+  assert.match(dispatcher, /COOLDOWN = 6 \* 60 \* 60 \* 1000/);
+  assert.ok(dispatcher.includes("['sources_error','sources_incomplete'].includes(s.key)"));
+  assert.ok(dispatcher.includes("s.channel===channel"));
+  assert.ok(dispatcher.includes("s.category===category"));
+  assert.ok(dispatcher.includes("if(accepted) {"));
+  assert.ok(dispatcher.includes("delete().eq('category',category).eq('channel',channel)"));
+  assert.ok(dispatcher.includes("ops_notification_ack_failed"));
 });
 
-test('ops notifications stay aggregated with Telegram fallback and six-hour cooldown', () => {
-  assert.match(admin, /const ALERT_COOLDOWN_MS = 6 \* 3600 \* 1000/);
-  assert.match(admin, /toAlert\.map\(\(p\) => `• \$\{tgEscape\(p\.detail\)\}`\)\.join\("\\n"\)/);
-  assert.match(admin, /const tgOk = await sendTelegram/);
-  assert.match(admin, /if \(resendKey && recipients\.length\)/);
-  assert.match(admin, /email_configured: Boolean\(OPS_EMAIL\)/);
-  assert.doesNotMatch(admin, /for \(const p of toAlert\)[\s\S]{0,500}api\.resend\.com\/emails/);
-});
-
-test('ops recovery state is acknowledged only after a confirmed notification channel', () => {
-  const healedAt = admin.indexOf('if (healed.length)');
-  const recoverySendAt = admin.indexOf('const recoveryTelegramOk = await sendTelegram', healedAt);
-  const clearAt = admin.indexOf('admin.from("admin_alert_state").delete().in("key", healed)', healedAt);
-  assert.ok(healedAt >= 0 && recoverySendAt > healedAt && clearAt > recoverySendAt);
-  assert.match(admin, /if \(recoveryTelegramOk\) \{[\s\S]*recoveryDelivered = true/);
-  assert.match(admin, /recoveryResponse\.ok && typeof recoveryPayload\.id === "string" && recoveryPayload\.id/);
-  assert.match(admin, /if \(recoveryDelivered\) \{[\s\S]*admin\.from\("admin_alert_state"\)\.delete\(\)\.in\("key", healed\)/);
-  assert.match(admin, /recovery_pending: healed\.length > 0 && !recoveryStateCleared/);
-});
-
-test('ops emails use a bounded and observable Resend transport', () => {
-  assert.match(admin, /const htmlEscape = \(/);
-  assert.match(admin, /htmlEscape\(p\.detail\)/);
-  assert.match(admin, /htmlEscape\(stateDetails\.get\(k\) \?\? k\)/);
-  assert.match(admin, /"User-Agent": "Norva-Ops-Email\/2\.0"/);
-  assert.match(admin, /"Idempotency-Key": `norva-ops-alert-/);
-  assert.match(admin, /"Idempotency-Key": `norva-ops-recovery-/);
-  assert.match(admin, /reply_to: OPS_EMAIL/);
-  assert.match(admin, /\{ name: "category", value: "operational" \}/);
-  assert.match(admin, /\{ name: "flow", value: "ops_health_alert" \}/);
-  assert.match(admin, /\{ name: "flow", value: "ops_health_recovery" \}/);
-  assert.ok((admin.match(/signal: AbortSignal\.timeout\(8_000\)/g) || []).length >= 2);
-  assert.match(admin, /res\.ok && typeof payload\.id === "string" && payload\.id/);
+test('ops email uses the explicit address, bounded transport and provider acknowledgement', () => {
+  const dispatcher = read('supabase/functions/_shared/ops-notifications.ts');
+  assert.ok(dispatcher.includes("to:[opsEmail],reply_to:opsEmail"));
+  assert.ok(dispatcher.includes("AbortSignal.timeout(8000)"));
+  assert.ok(dispatcher.includes("'Idempotency-Key'"));
+  assert.ok(dispatcher.includes("response.ok && typeof body.id==='string'"));
+  assert.ok(dispatcher.includes("'ops_health_recovery':'ops_health_alert'"));
+  assert.doesNotMatch(dispatcher, /auth\.admin|admin_alert_recipients/);
 });

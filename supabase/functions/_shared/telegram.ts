@@ -6,6 +6,9 @@
 // business write it decorates (ticket stored first, alert sweep completes, etc.).
 
 /** Escape user-provided text for Telegram HTML parse mode. Slice BEFORE escaping. */
+import { telegramCredentials, telegramMessageChunks } from './telegram-routing.mjs';
+export type TelegramCategory = 'infrastructure' | 'catalogue' | 'finance' | 'partners' | 'support' | 'growth';
+
 export function tgEscape(s: string): string {
   return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
@@ -36,13 +39,13 @@ export interface TelegramInlineKeyboardButton {
 }
 
 export interface TelegramSendOptions {
+  category?: TelegramCategory;
   protectContent?: boolean;
   inlineKeyboard?: TelegramInlineKeyboardButton[][];
 }
 
-export function telegramConfigured(): boolean {
-  const token = Deno.env.get("TELEGRAM_BOT_TOKEN") ?? "";
-  const chatId = Deno.env.get("TELEGRAM_CHAT_ID") ?? "";
+export function telegramConfigured(category: TelegramCategory = 'infrastructure'): boolean {
+  const { token, chatId } = telegramCredentials(Deno.env, category);
   return Boolean(token && chatId);
 }
 
@@ -51,8 +54,7 @@ export async function sendTelegramDetailed(
   text: string,
   options: TelegramSendOptions = {},
 ): Promise<TelegramSendResult> {
-  const token = Deno.env.get("TELEGRAM_BOT_TOKEN") ?? "";
-  const chatId = Deno.env.get("TELEGRAM_CHAT_ID") ?? "";
+  const { token, chatId } = telegramCredentials(Deno.env, options.category);
   if (!token || !chatId || !text) {
     return {
       accepted: false,
@@ -66,14 +68,15 @@ export async function sendTelegramDetailed(
     const replyMarkup = options.inlineKeyboard?.length
       ? { inline_keyboard: options.inlineKeyboard }
       : undefined;
+    let finalResult: TelegramSendResult | null = null;
+    for (const chunk of telegramMessageChunks(text)) {
     const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      // 4096 = Telegram hard cap per message; truncate rather than 400.
+      // Chunks stay below Telegram's 4096-character limit without losing content.
       body: JSON.stringify({
         chat_id: chatId,
-        text: text.slice(0, 4000),
-        parse_mode: "HTML",
+        ...chunk,
         link_preview_options: { is_disabled: true },
         ...(options.protectContent === true ? { protect_content: true } : {}),
         ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
@@ -105,13 +108,16 @@ export async function sendTelegramDetailed(
       ? Math.min(21600, Math.max(0, Math.ceil(rawRetryAfter)))
       : null;
     const accepted = res.ok && payload.ok === true && messageId !== null;
-    return {
+    finalResult = {
       accepted,
       status: res.status,
       messageId,
       retryAfterSeconds,
       error: accepted ? "" : `telegram_http_${res.status}`,
     };
+    if (!accepted) return finalResult;
+    }
+    return finalResult!;
   } catch (error) {
     const timeout = error instanceof DOMException && error.name === "TimeoutError";
     return {
@@ -124,6 +130,6 @@ export async function sendTelegramDetailed(
   }
 }
 
-export async function sendTelegram(text: string): Promise<boolean> {
-  return (await sendTelegramDetailed(text)).accepted;
+export async function sendTelegram(text: string, category: TelegramCategory = 'infrastructure'): Promise<boolean> {
+  return (await sendTelegramDetailed(text, {category})).accepted;
 }

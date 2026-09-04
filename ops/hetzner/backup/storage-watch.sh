@@ -32,16 +32,10 @@ proof_bytes() {
 }
 
 telegram() {
-  local env_file="$NORVA_OPS_DIR/.env" token chat
-  [ -r "$env_file" ] || { log "WARN Telegram env is unreadable"; return 0; }
-  token="$(grep -E '^TELEGRAM_BOT_TOKEN=' "$env_file" | head -1 | cut -d= -f2- | tr -d '"'"'"'')"
-  chat="$(grep -E '^TELEGRAM_CHAT_ID=' "$env_file" | head -1 | cut -d= -f2- | tr -d '"'"'"'')"
-  [ -n "$token" ] && [ -n "$chat" ] || { log "WARN Telegram credentials are absent"; return 0; }
-  curl -sS -m 20 -o /dev/null \
-    --data-urlencode "chat_id=$chat" \
-    --data-urlencode "text=$1" \
-    "https://api.telegram.org/bot${token}/sendMessage" \
-    || log "WARN Telegram send failed"
+  local sender_dir
+  sender_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  printf '%s' "$1" | python3 "$sender_dir/telegram-send.py" "$NORVA_OPS_DIR/.env" "${TELEGRAM_RECEIPT_DIR:-/var/lib/norva}/storage-watch.sh.telegram.json" \
+    || log "WARN Telegram infrastructure delivery failed; receipt retained for retry"
 }
 
 USE_PCT="$(df --output=pcent / | tail -1 | tr -dc '0-9')"

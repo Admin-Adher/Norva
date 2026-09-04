@@ -20,7 +20,8 @@
 // inbox. We never discover recipients from admins/internal accounts.
 
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { sendTelegram, tgEscape } from "../_shared/telegram.ts";
+import { sendTelegram as sendDomainTelegram, tgEscape, maskedEmail } from "../_shared/telegram.ts";
+const sendTelegram = (text: string) => sendDomainTelegram(text, 'support');
 
 type JsonRecord = Record<string, unknown>;
 
@@ -143,7 +144,7 @@ function supportTags(direction: SupportMailDirection): FrozenSupportEmail["tags"
 
 function supportInboxEmail(kind: "new" | "reply", userEmail: string, subject: string, body: string): FrozenSupportEmail {
   const heading = kind === "new" ? "Nouveau ticket support" : "Réponse client sur un ticket";
-  const safeEmail = cleanEmail(userEmail) ?? "Adresse client indisponible";
+  const safeEmail = maskedEmail(cleanEmail(userEmail) ?? '');
   const safeSubject = cleanSubject(subject);
   const html = shell(heading,
     `<b style="color:#cdd6e6">Ticket #{{ticket_ref}}</b><br><b style="color:#cdd6e6">${esc(safeEmail)}</b> — « ${esc(safeSubject)} »<br><br>
