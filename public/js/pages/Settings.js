@@ -157,7 +157,10 @@ class SettingsPage {
             if (!available) tab.tabIndex = -1;
             if (tab.dataset.tab === 'player') {
                 const label = tab.querySelector('span');
-                if (label) label.textContent = 'Playback';
+                if (label) {
+                    label.setAttribute('data-i18n', 'ui_playback');
+                    label.textContent = window.NorvaI18n?.t('ui_playback') || 'Playback';
+                }
             }
         });
         const advanced = document.getElementById('settings-advanced-toggle');
@@ -171,7 +174,7 @@ class SettingsPage {
         const tabList = document.querySelector('#page-settings .settings-container > .tabs');
         if (tabList) {
             tabList.setAttribute('role', 'tablist');
-            tabList.setAttribute('aria-label', 'Settings sections');
+            tabList.setAttribute('aria-label', window.NorvaI18n?.t('ui_settings_sections') || 'Settings sections');
             tabList.setAttribute('aria-orientation', isTvSettingsShell() || window.matchMedia('(min-width: 769px)').matches
                 ? 'vertical'
                 : 'horizontal');
@@ -199,8 +202,9 @@ class SettingsPage {
         // uses the vertical rail graph in tvNavigation.js.
         const tabKeys = ['ArrowLeft', 'ArrowRight', 'Home', 'End'];
         const vertical = currentTab.closest('[role="tablist"]')?.getAttribute('aria-orientation') === 'vertical';
-        const previousKey = vertical ? 'ArrowUp' : 'ArrowLeft';
-        const nextKey = vertical ? 'ArrowDown' : 'ArrowRight';
+        const rtl = document.documentElement?.dir === 'rtl';
+        const previousKey = vertical ? 'ArrowUp' : (rtl ? 'ArrowRight' : 'ArrowLeft');
+        const nextKey = vertical ? 'ArrowDown' : (rtl ? 'ArrowLeft' : 'ArrowRight');
         if (!(vertical ? [previousKey, nextKey, 'Home', 'End'] : tabKeys).includes(event.key)) return;
         const available = [...this.tabs].filter((tab) => !tab.disabled
             && !tab.hidden

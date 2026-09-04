@@ -32,6 +32,10 @@ android {
         main {
             assets.srcDirs = ["src/main/assets"]
             java.srcDir "../../android-common/src/main/java"
+            res.srcDir "../../android-common/src/main/res"
+        }
+        androidTest {
+            java.srcDir "../../android-common/src/androidTest/java"
         }
         test {
             java.srcDir "../../android-common/src/test/java"

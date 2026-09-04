@@ -13,6 +13,7 @@
         android:required="false" />
 
     <application
+        android:localeConfig="@xml/norva_locales"
         android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="false"

@@ -53,7 +53,12 @@ function hasSensitiveDiditParams(url) {
 
 function canCacheRequest(request) {
   try {
-    return new URL(request.url).search === '';
+    const url = new URL(request.url);
+    if (url.search === '') return true;
+    // Cache exact public locale assets without accepting other query parameters.
+    return url.origin === self.location.origin
+      && ['/js/i18n.js', '/css/i18n.css'].includes(url.pathname)
+      && /^\?v=[a-f0-9]{10}$/.test(url.search);
   } catch (_) {
     return false;
   }

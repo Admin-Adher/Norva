@@ -99,6 +99,12 @@ import java.util.concurrent.Executors;
 @OptIn(markerClass = UnstableApi.class)
 public class PlayerActivity extends Activity {
 
+    @Override
+    protected void attachBaseContext(android.content.Context base) {
+        super.attachBaseContext(tv.norva.i18n.UiLanguage.wrap(base));
+    }
+
+
     public static final String EXTRA_URL = "url";
     public static final String EXTRA_TITLE = "title";
     public static final String EXTRA_SOURCE_ID = "sourceId";

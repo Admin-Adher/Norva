@@ -28,6 +28,7 @@
             if (!this.root) return this;
             this.root.dataset.navigationProjection = this.projection;
             this.root.innerHTML = this.model.renderProjection(this.projection, { currentPage });
+            globalThis.NorvaI18n?.translate(this.root);
             return this;
         }
 

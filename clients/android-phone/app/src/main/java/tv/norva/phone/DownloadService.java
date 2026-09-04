@@ -45,6 +45,12 @@ import javax.crypto.Cipher;
  */
 public final class DownloadService extends Service {
 
+    @Override
+    protected void attachBaseContext(android.content.Context base) {
+        super.attachBaseContext(tv.norva.i18n.UiLanguage.wrap(base));
+    }
+
+
     static final String ACTION_ENQUEUE = "tv.norva.phone.ENQUEUE";
     static final String EXTRA_ID = "id";
     static final String PREFS = "norva_downloads_prefs";

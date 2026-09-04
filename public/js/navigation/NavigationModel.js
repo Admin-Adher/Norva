@@ -21,6 +21,7 @@
     const DEFAULT_ROUTES = Object.freeze([
         {
             key: 'home',
+            i18nKey: 'ui_home',
             label: 'Home',
             ariaLabel: 'Home',
             gate: 'always',
@@ -33,6 +34,7 @@
         },
         {
             key: 'live',
+            i18nKey: 'ui_live',
             label: 'Live TV',
             ariaLabel: 'Live TV',
             gate: 'catalog',
@@ -46,6 +48,7 @@
         },
         {
             key: 'movies',
+            i18nKey: 'ui_movies',
             label: 'Movies',
             ariaLabel: 'Movies',
             gate: 'catalog',
@@ -59,6 +62,7 @@
         },
         {
             key: 'series',
+            i18nKey: 'ui_series',
             label: 'Series',
             ariaLabel: 'Series',
             gate: 'catalog',
@@ -72,6 +76,7 @@
         },
         {
             key: 'settings',
+            i18nKey: 'ui_settings',
             label: 'Settings',
             ariaLabel: 'Settings',
             gate: 'always',
@@ -108,6 +113,7 @@
     const DEFAULT_ACTIONS = Object.freeze([
         {
             key: 'search',
+            i18nKey: 'ui_search',
             label: 'Search',
             ariaLabel: 'Search',
             gate: 'vod-catalog',
@@ -118,6 +124,7 @@
         },
         {
             key: 'downloads',
+            i18nKey: 'ui_downloads',
             label: 'Downloads',
             ariaLabel: 'Downloads',
             gate: 'vod-catalog-or-local',
@@ -139,6 +146,7 @@
         },
         {
             key: 'logout',
+            i18nKey: 'ui_sign_out',
             label: 'Log out',
             ariaLabel: 'Log out',
             gate: 'authenticated',
@@ -353,11 +361,13 @@
             attributes.push(`data-nav-gate="${escapeAttribute(entry.gate)}"`);
             attributes.push(`class="${classes.join(' ')}"`);
             attributes.push(`aria-label="${escapeAttribute(entry.ariaLabel)}"`);
+            if (entry.i18nKey) attributes.push(`data-i18n-aria-label="${escapeAttribute(entry.i18nKey)}"`);
             if (isCurrent) attributes.push('aria-current="page"');
             if (isHidden) attributes.push('hidden', 'aria-hidden="true"', 'tabindex="-1"');
             if (isHidden && entry.gate !== 'catalog') attributes.push('style="display:none"');
 
-            return `<a ${attributes.join(' ')}>${this.renderIcon(entry.icon, item)}<span>${escapeText(entry.label)}</span></a>`;
+            const labelAttributes = entry.i18nKey ? ` data-i18n="${escapeAttribute(entry.i18nKey)}"` : '';
+            return `<a ${attributes.join(' ')}>${this.renderIcon(entry.icon, item)}<span${labelAttributes}>${escapeText(entry.label)}</span></a>`;
         }
 
         renderIcon(icon, item) {

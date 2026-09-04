@@ -1,0 +1,12 @@
+[
+  { "code": "en", "name": "English", "android": "values", "dir": "ltr" },
+  { "code": "fr", "name": "Français", "android": "values-fr", "dir": "ltr" },
+  { "code": "pt-BR", "name": "Português (Brasil)", "android": "values-pt-rBR", "dir": "ltr" },
+  { "code": "es", "name": "Español", "android": "values-es", "dir": "ltr" },
+  { "code": "hi", "name": "हिन्दी", "android": "values-hi", "dir": "ltr" },
+  { "code": "tr", "name": "Türkçe", "android": "values-tr", "dir": "ltr" },
+  { "code": "bn", "name": "বাংলা", "android": "values-bn", "dir": "ltr" },
+  { "code": "ar", "name": "العربية", "android": "values-ar", "dir": "rtl" },
+  { "code": "id", "name": "Bahasa Indonesia", "android": "values-in", "dir": "ltr" },
+  { "code": "fil", "name": "Filipino", "android": "values-b+fil", "dir": "ltr" }
+]

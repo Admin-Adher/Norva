@@ -17,6 +17,12 @@ import com.revenuecat.purchases.PurchasesConfiguration;
 public class NorvaApplication extends Application {
 
     @Override
+    protected void attachBaseContext(android.content.Context base) {
+        super.attachBaseContext(tv.norva.i18n.UiLanguage.wrap(base));
+    }
+
+
+    @Override
     public void onCreate() {
         super.onCreate();
         String apiKey = BuildConfig.REVENUECAT_API_KEY;

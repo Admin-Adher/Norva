@@ -95,6 +95,12 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 public class MainActivity extends Activity {
 
+    @Override
+    protected void attachBaseContext(android.content.Context base) {
+        super.attachBaseContext(tv.norva.i18n.UiLanguage.wrap(base));
+    }
+
+
     private static final String PREFS          = "norva_mobile";
     private static final String PREF_SERVER_URL = "serverUrl";
     private static final String PREF_MODE       = "mode"; // "cloud" | "server"
@@ -1033,7 +1039,7 @@ public class MainActivity extends Activity {
 
         // Subtitle
         TextView sub = new TextView(this);
-        sub.setText("Watch and manage Norva");
+        sub.setText(R.string.ui_watch_manage);
         sub.setTextColor(Color.parseColor("#71717a"));
         sub.setTextSize(14);
         sub.setGravity(Gravity.CENTER);
@@ -1041,7 +1047,7 @@ public class MainActivity extends Activity {
         setupPanel.addView(sub);
 
         Button accountBtn = new Button(this);
-        accountBtn.setText("Norva Account");
+        accountBtn.setText(R.string.ui_norva_account);
         accountBtn.setTextColor(Color.WHITE);
         accountBtn.setBackgroundColor(Color.parseColor("#3B82F6"));
         accountBtn.setOnClickListener(v -> {
@@ -1056,7 +1062,7 @@ public class MainActivity extends Activity {
         setupPanel.addView(accountBtn, accountBtnLp);
 
         Button advancedToggle = new Button(this);
-        advancedToggle.setText("Advanced setup");
+        advancedToggle.setText(R.string.ui_advanced_setup);
         advancedToggle.setTextColor(Color.WHITE);
         advancedToggle.setBackgroundColor(Color.parseColor("#272d3a"));
         advancedToggle.setOnClickListener(v -> {
@@ -1079,7 +1085,7 @@ public class MainActivity extends Activity {
 
         // Hint
         TextView hint = new TextView(this);
-        hint.setText("Advanced local connector");
+        hint.setText(R.string.ui_local_connector);
         hint.setTextColor(Color.parseColor("#a1a1aa"));
         hint.setTextSize(15);
         hint.setPadding(0, 0, 0, dp(10));
@@ -1105,13 +1111,13 @@ public class MainActivity extends Activity {
 
         // Connect button
         Button connectBtn = new Button(this);
-        connectBtn.setText("Connect local connector");
+        connectBtn.setText(R.string.ui_connect_local);
         connectBtn.setTextColor(Color.WHITE);
         connectBtn.setBackgroundColor(Color.parseColor("#3B82F6"));
         connectBtn.setOnClickListener(v -> {
             String url = urlInput.getText().toString().trim();
             if (url.isEmpty() || url.equals("http://")) {
-                statusText.setText("Enter a valid URL");
+                statusText.setText(R.string.ui_valid_url);
                 return;
             }
             if (!url.startsWith("http")) url = "http://" + url;
@@ -1148,6 +1154,7 @@ public class MainActivity extends Activity {
     private void connectInternal(String url) {
         lastLoadedUrl = url;
         configureWebSecurity(url);
+        webView.addJavascriptInterface(new tv.norva.i18n.UiLanguageBridge(this), "NorvaLocaleNative");
         setupPanel.setVisibility(View.GONE);
         if (errorPanel != null) errorPanel.setVisibility(View.GONE);
         showSplash();
@@ -1243,7 +1250,7 @@ public class MainActivity extends Activity {
             intent.addCategory(Intent.CATEGORY_BROWSABLE);
             startActivity(intent);
         } catch (Exception ignored) {
-            Toast.makeText(this, "No app can open this link", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, getString(R.string.ui_no_link_app), Toast.LENGTH_SHORT).show();
         }
     }
 
@@ -3095,7 +3102,7 @@ public class MainActivity extends Activity {
         errorPanel.setPadding(pad, pad, pad, pad);
 
         TextView title = new TextView(this);
-        title.setText("Can't reach Norva");
+        title.setText(R.string.ui_cannot_reach);
         title.setTextColor(Color.WHITE);
         title.setTextSize(22);
         title.setGravity(Gravity.CENTER);
@@ -3103,7 +3110,7 @@ public class MainActivity extends Activity {
         errorPanel.addView(title);
 
         errorText = new TextView(this);
-        errorText.setText("Please check your internet connection and try again.");
+        errorText.setText(R.string.ui_check_connection);
         errorText.setTextColor(Color.parseColor("#a1a1aa"));
         errorText.setTextSize(15);
         errorText.setGravity(Gravity.CENTER);
@@ -3111,7 +3118,7 @@ public class MainActivity extends Activity {
         errorPanel.addView(errorText);
 
         Button retryBtn = new Button(this);
-        retryBtn.setText("Retry");
+        retryBtn.setText(R.string.ui_retry);
         retryBtn.setTextColor(Color.WHITE);
         retryBtn.setBackgroundColor(Color.parseColor("#3B82F6"));
         retryBtn.setOnClickListener(v -> {
@@ -3135,7 +3142,7 @@ public class MainActivity extends Activity {
         errorPanel.addView(retryBtn, retryLp);
 
         Button downloadsBtn = new Button(this);
-        downloadsBtn.setText("Downloads");
+        downloadsBtn.setText(R.string.ui_downloads);
         downloadsBtn.setTextColor(Color.WHITE);
         downloadsBtn.setBackgroundColor(Color.parseColor("#272d3a"));
         downloadsBtn.setOnClickListener(v ->
@@ -3146,7 +3153,7 @@ public class MainActivity extends Activity {
         errorPanel.addView(downloadsBtn, downloadsLp);
 
         Button setupBtn = new Button(this);
-        setupBtn.setText("Advanced setup");
+        setupBtn.setText(R.string.ui_advanced_setup);
         setupBtn.setTextColor(Color.WHITE);
         setupBtn.setBackgroundColor(Color.parseColor("#272d3a"));
         setupBtn.setOnClickListener(v -> {
@@ -3168,7 +3175,7 @@ public class MainActivity extends Activity {
         webView.setVisibility(View.GONE);
         setupPanel.setVisibility(View.GONE);
         if (errorText != null) {
-            errorText.setText("Please check your internet connection and try again.");
+            errorText.setText(R.string.ui_check_connection);
         }
         if (errorPanel != null) {
             errorPanel.bringToFront();

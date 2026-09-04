@@ -59,6 +59,12 @@ import tv.norva.analytics.NativeClarity;
  */
 public final class DownloadsActivity extends Activity {
 
+    @Override
+    protected void attachBaseContext(android.content.Context base) {
+        super.attachBaseContext(tv.norva.i18n.UiLanguage.wrap(base));
+    }
+
+
     private static final int BG = Color.parseColor("#080B12");
     private static final int CARD = Color.parseColor("#12121A");
     private static final int CARD_BORDER = Color.parseColor("#27272A");

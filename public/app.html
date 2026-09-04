@@ -3,6 +3,7 @@
 
 <head>
   <meta charset="UTF-8">
+  <script src="/js/i18n.js?v=98db8b2d77"></script>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -19,6 +20,7 @@
   <link rel="dns-prefetch" href="https://image.tmdb.org">
   <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
   <link rel="stylesheet" href="/css/main.css?v=71854078d1">
+  <link rel="stylesheet" href="/css/i18n.css?v=f5088d2182">
   <link id="premium-profile-style" rel="stylesheet" href="/css/profiles-premium.css?v=2" media="not all">
   <script>
     if (!/NorvaTV-AndroidTV/i.test(navigator.userAgent || '') && !/[?&]tv=1\b/.test(window.location.search || '')) {
@@ -149,7 +151,7 @@
   <div id="app">
     <!-- Navigation -->
     <nav class="navbar" aria-label="Primary navigation">
-      <div class="navbar-brand" id="navbar-brand-home" role="button" tabindex="0" aria-label="Go to Home">
+      <div class="navbar-brand" id="navbar-brand-home" role="button" tabindex="0" aria-label="Go to Home" data-i18n-aria-label="ui_go_home">
         <span class="logo"><img src="/img/norva-app-icon.png" alt="Norva"></span>
         <span class="brand-text">Norva</span>
       </div>
@@ -460,7 +462,7 @@
       <div id="page-movies" class="page">
         <div class="movies-header">
           <div class="movies-heading">
-            <h2>Movies</h2>
+            <h2 data-i18n="ui_movies">Movies</h2>
             <p class="movies-subtitle">Your movies from every connected source, in one catalog.</p>
           </div>
           <div class="movies-controls">
@@ -576,7 +578,7 @@
           <section class="movie-detail-hero" id="movie-detail-hero">
             <button class="movie-back-btn" type="button" aria-label="Back">
               <svg class="back-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
-              <span class="back-label">Movies</span>
+              <span class="back-label" data-i18n="ui_movies">Movies</span>
             </button>
             <div class="movie-detail-hero-content">
               <img id="movie-detail-poster" src="" alt="" class="movie-detail-poster">
@@ -641,7 +643,7 @@
       <div id="page-series" class="page">
         <div class="series-header">
           <div class="series-heading">
-            <h2>Series</h2>
+            <h2 data-i18n="ui_series">Series</h2>
             <p class="series-subtitle">Pick up where you left off — every series from your sources, in one place.</p>
           </div>
           <div class="series-controls">
@@ -757,7 +759,7 @@
             <section class="series-detail-hero" id="series-detail-hero">
               <button class="series-back-btn" type="button" aria-label="Back">
                 <svg class="back-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
-                <span class="back-label">Series</span>
+                <span class="back-label" data-i18n="ui_series">Series</span>
               </button>
               <div class="series-detail-hero-content">
                 <img id="series-poster" src="" alt="" class="series-detail-poster">
@@ -823,21 +825,21 @@
       <!-- Settings Page -->
       <div id="page-settings" class="page">
         <div class="settings-container">
-          <h2 class="settings-rail-title">Settings</h2>
+          <h2 class="settings-rail-title" data-i18n="ui_settings">Settings</h2>
 
           <!-- Tabs -->
-          <div class="tabs" role="tablist" aria-label="Settings sections">
+          <div class="tabs" role="tablist" aria-label="Settings sections" data-i18n-aria-label="ui_settings_sections">
             <button class="tab active" data-tab="account" role="tab" aria-selected="true">
               <img class="settings-tab-icon" src="/img/icons/norva-account.svg?v=sharp-core-1" alt="" aria-hidden="true">
-              <span>Account</span>
+              <span data-i18n="ui_account">Account</span>
             </button>
             <button class="tab" data-tab="screens" id="screens-tab" role="tab" aria-selected="false" style="display:none;">
               <img class="settings-tab-icon" src="/img/icons/norva-devices.svg?v=sharp-core-1" alt="" aria-hidden="true">
-              <span>Devices</span>
+              <span data-i18n="ui_devices">Devices</span>
             </button>
             <button class="tab" data-tab="player" role="tab" aria-selected="false">
               <img class="settings-tab-icon" src="/img/icons/norva-movies.svg?v=sharp-core-1" alt="" aria-hidden="true">
-              <span>Playback &amp; Discovery</span>
+              <span data-i18n="ui_playback_discovery">Playback &amp; Discovery</span>
             </button>
             <button class="tab" data-tab="sources" role="tab" aria-selected="false">
               <img class="settings-tab-icon" src="/img/icons/norva-live-tv.svg?v=sharp-core-1" alt="" aria-hidden="true">
@@ -864,8 +866,19 @@
           <!-- Account Tab -->
           <div id="tab-account" class="tab-content active">
             <header class="settings-panel-header">
-              <h2>Account</h2>
+              <h2 data-i18n="ui_account">Account</h2>
             </header>
+
+            <div class="settings-section settings-language-section">
+              <div class="setting-item">
+                <div class="setting-info">
+                  <label class="setting-label" for="setting-ui-language" data-i18n="ui_language">Interface language</label>
+                  <span class="setting-hint" id="ui-language-hint" data-i18n="ui_language_hint">Applies to this device. Audio and subtitles keep their own settings.</span>
+                </div>
+                <select id="setting-ui-language" data-ui-language-select aria-describedby="ui-language-hint"></select>
+              </div>
+              <p id="ui-language-status" class="setting-hint" role="status" aria-live="polite" aria-atomic="true"></p>
+            </div>
 
             <div id="settings-service-health" aria-live="polite" aria-atomic="true"></div>
 
@@ -1075,7 +1088,7 @@
           <!-- Player Tab -->
           <div id="tab-player" class="tab-content">
             <header class="settings-panel-header">
-              <h2>Playback &amp; Discovery</h2>
+              <h2 data-i18n="ui_playback_discovery">Playback &amp; Discovery</h2>
               <p>Choose how Norva plays and recommends your content.</p>
             </header>
             <div class="tc-intro">

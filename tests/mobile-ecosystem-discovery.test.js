@@ -83,7 +83,7 @@ test('devices and pairing are permanent cloud-account destinations, not an Advan
   const appJs = read('public/js/app.js');
   const devicesModule = read('public/js/components/DevicesScreensModule.js');
   const devicesIcon = read('public/img/icons/norva-devices.svg');
-  assert.match(appHtml, /class="tab" data-tab="screens" id="screens-tab"[^>]*>[\s\S]*?<span>Devices<\/span>[\s\S]*?<\/button>/);
+  assert.match(appHtml, /class="tab" data-tab="screens" id="screens-tab"[^>]*>[\s\S]*?<span data-i18n="ui_devices">Devices<\/span>[\s\S]*?<\/button>/);
   assert.match(appHtml, /data-tab="screens"[\s\S]*?src="\/img\/icons\/norva-devices\.svg\?v=sharp-core-1"/);
   assert.match(devicesIcon, /linearGradient id="norva-devices-g"/);
   assert.match(devicesIcon, /stop-color="#6ff3ff"/);

@@ -64,6 +64,12 @@ import java.util.UUID;
  */
 public class MainActivity extends Activity {
 
+    @Override
+    protected void attachBaseContext(android.content.Context base) {
+        super.attachBaseContext(tv.norva.i18n.UiLanguage.wrap(base));
+    }
+
+
     private static final String PREFS = "norva";
     private static final String PREF_SERVER_URL = "serverUrl";
     private static final String PREF_MODE = "mode"; // "cloud" | "server" | "standalone"
@@ -911,14 +917,14 @@ public class MainActivity extends Activity {
         setupPanel.addView(hint);
 
         TextView cloudHint = new TextView(this);
-        cloudHint.setText("Recommended");
+        cloudHint.setText(R.string.ui_recommended);
         cloudHint.setTextColor(Color.parseColor("#a1a1aa"));
         cloudHint.setTextSize(15);
         cloudHint.setPadding(0, 0, 0, dp(10));
         setupPanel.addView(cloudHint, new LinearLayout.LayoutParams(dp(560), LinearLayout.LayoutParams.WRAP_CONTENT));
 
         Button cloudBtn = new Button(this);
-        cloudBtn.setText("Connect this TV");
+        cloudBtn.setText(R.string.ui_connect_tv);
         cloudBtn.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -929,7 +935,7 @@ public class MainActivity extends Activity {
         setupPanel.addView(cloudBtn, new LinearLayout.LayoutParams(dp(320), LinearLayout.LayoutParams.WRAP_CONTENT));
 
         Button advancedToggle = new Button(this);
-        advancedToggle.setText("Advanced setup");
+        advancedToggle.setText(R.string.ui_advanced_setup);
         advancedToggle.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -949,7 +955,7 @@ public class MainActivity extends Activity {
         setupPanel.addView(advancedPanel, new LinearLayout.LayoutParams(dp(580), LinearLayout.LayoutParams.WRAP_CONTENT));
 
         TextView localLabel = new TextView(this);
-        localLabel.setText("Advanced local connector");
+        localLabel.setText(R.string.ui_local_connector);
         localLabel.setTextColor(Color.parseColor("#71717a"));
         localLabel.setTextSize(15);
         localLabel.setPadding(0, dp(28), 0, dp(8));
@@ -965,7 +971,7 @@ public class MainActivity extends Activity {
         advancedPanel.addView(urlInput, new LinearLayout.LayoutParams(dp(520), LinearLayout.LayoutParams.WRAP_CONTENT));
 
         Button connectBtn = new Button(this);
-        connectBtn.setText("Connect local connector");
+        connectBtn.setText(R.string.ui_connect_local);
         connectBtn.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -984,7 +990,7 @@ public class MainActivity extends Activity {
 
         // --- Standalone mode (no PC required) ---
         TextView orLabel = new TextView(this);
-        orLabel.setText("- or -");
+        orLabel.setText(R.string.ui_or);
         orLabel.setTextColor(Color.parseColor("#71717a"));
         orLabel.setTextSize(15);
         orLabel.setPadding(0, dp(28), 0, dp(8));
@@ -998,7 +1004,7 @@ public class MainActivity extends Activity {
         advancedPanel.addView(standaloneHint, new LinearLayout.LayoutParams(dp(560), LinearLayout.LayoutParams.WRAP_CONTENT));
 
         Button standaloneBtn = new Button(this);
-        standaloneBtn.setText("Use standalone mode");
+        standaloneBtn.setText(R.string.ui_standalone);
         standaloneBtn.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -1056,6 +1062,7 @@ public class MainActivity extends Activity {
     private void connectInternal(String url) {
         lastLoadedUrl = url;
         configureWebSecurity(url);
+        webView.addJavascriptInterface(new tv.norva.i18n.UiLanguageBridge(this), "NorvaLocaleNative");
         setupPanel.setVisibility(View.GONE);
         if (errorPanel != null) errorPanel.setVisibility(View.GONE);
         showSplash();
@@ -1195,7 +1202,7 @@ public class MainActivity extends Activity {
             intent.addCategory(android.content.Intent.CATEGORY_BROWSABLE);
             startActivity(intent);
         } catch (Exception ignored) {
-            android.widget.Toast.makeText(this, "No app can open this link",
+            android.widget.Toast.makeText(this, getString(R.string.ui_no_link_app),
                     android.widget.Toast.LENGTH_SHORT).show();
         }
     }
@@ -2124,7 +2131,7 @@ public class MainActivity extends Activity {
         errorPanel.setPadding(pad, pad, pad, pad);
 
         TextView title = new TextView(this);
-        title.setText("Can't reach Norva");
+        title.setText(R.string.ui_cannot_reach);
         title.setTextColor(Color.WHITE);
         title.setTextSize(26);
         title.setGravity(android.view.Gravity.CENTER);
@@ -2132,7 +2139,7 @@ public class MainActivity extends Activity {
         errorPanel.addView(title);
 
         errorText = new TextView(this);
-        errorText.setText("Please check your internet connection and try again.");
+        errorText.setText(R.string.ui_check_connection);
         errorText.setTextColor(Color.parseColor("#a1a1aa"));
         errorText.setTextSize(16);
         errorText.setGravity(android.view.Gravity.CENTER);
@@ -2140,7 +2147,7 @@ public class MainActivity extends Activity {
         errorPanel.addView(errorText);
 
         errorRetryBtn = new Button(this);
-        errorRetryBtn.setText("Retry");
+        errorRetryBtn.setText(R.string.ui_retry);
         errorRetryBtn.setTextColor(Color.WHITE);
         errorRetryBtn.setBackgroundColor(Color.parseColor("#3B82F6"));
         errorRetryBtn.setOnClickListener(v -> {

@@ -17,6 +17,8 @@
     <uses-feature android:name="android.hardware.camera.front" android:required="false"/>
 
     <application
+        android:supportsRtl="true"
+        android:localeConfig="@xml/norva_locales"
         android:name=".NorvaApplication"
         android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules"

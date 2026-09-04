@@ -43,11 +43,13 @@ android {
     sourceSets {
         main {
             java.srcDir "../../android-common/src/main/java"
+            res.srcDir "../../android-common/src/main/res"
         }
         test {
             java.srcDir "../../android-common/src/test/java"
         }
         androidTest {
+            java.srcDir "../../android-common/src/androidTest/java"
             assets.srcDir "../../../public/webengine/media"
         }
     }

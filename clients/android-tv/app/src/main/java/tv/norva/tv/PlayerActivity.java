@@ -79,6 +79,12 @@ import java.util.UUID;
 @OptIn(markerClass = UnstableApi.class)
 public class PlayerActivity extends Activity {
 
+    @Override
+    protected void attachBaseContext(android.content.Context base) {
+        super.attachBaseContext(tv.norva.i18n.UiLanguage.wrap(base));
+    }
+
+
     private static final String TAG = "NorvaPlayer";
 
     public static final String EXTRA_URL = "url";

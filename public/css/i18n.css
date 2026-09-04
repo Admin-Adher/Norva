@@ -1,0 +1,41 @@
+/* Language controls reuse Norva's semantic tokens and existing settings rhythm. */
+.settings-language-section .setting-item { gap: 16px; }
+.settings-language-section .setting-info { min-width: 0; }
+.settings-language-section .setting-hint { overflow-wrap: anywhere; font-size: 14px; line-height: 1.5; }
+.settings-language-section .setting-label { font-size: 16px; line-height: 1.5; }
+[data-ui-language-select] {
+  min-height: 48px;
+  max-width: 100%;
+  min-width: 0;
+  padding: 10px 16px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-bg-secondary);
+  color: var(--color-text-primary);
+  font-family: inherit;
+  font-size: 16px;
+  line-height: 1.5;
+}
+[data-ui-language-select]:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 4px;
+}
+#ui-language-status:empty { display: none; }
+html[lang="ar"] body,
+html[lang="hi"] body,
+html[lang="bn"] body {
+  font-family: Inter, "Noto Sans Arabic", "Noto Sans Devanagari", "Noto Sans Bengali", system-ui, sans-serif;
+}
+html[dir="rtl"] .settings-language-section { text-align: start; }
+html[dir="rtl"] .settings-language-section select { direction: rtl; }
+/* Identifiers, addresses and media time controls keep their physical direction. */
+html[dir="rtl"] input[type="url"],
+html[dir="rtl"] input[type="email"],
+html[dir="rtl"] input[type="tel"],
+html[dir="rtl"] input[type="range"] { direction: ltr; }
+@media (max-width: 600px) {
+  .settings-language-section .setting-item { flex-wrap: wrap; }
+  .settings-language-section select { width: 100%; }
+}
+html.tv-mode #page-settings .settings-language-section { display: block; }
+html.tv-mode #page-settings .settings-language-section select { min-height: 48px; font-size: 18px; }
