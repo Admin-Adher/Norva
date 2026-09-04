@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#05080f">
+  <title>Playback Position vs Completion State | Norva Blog</title>
+  <meta name="description" content="Learn how playback position differs from completion state, why thresholds and credits matter, how syncing can conflict, and how to test each value separately.">
+  <link rel="canonical" href="https://norva.tv/blog/playback-position-vs-completion-state/">
+  <meta name="robots" content="index,follow">
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/css/blog.css?v=1">
+  <meta property="og:type" content="article">
+  <meta property="og:site_name" content="Norva">
+  <meta property="og:title" content="Playback Position vs Completion State | Norva Blog">
+  <meta property="og:description" content="Learn how playback position differs from completion state, why thresholds and credits matter, how syncing can conflict, and how to test each value separately.">
+  <meta property="og:url" content="https://norva.tv/blog/playback-position-vs-completion-state/">
+  <meta property="og:image" content="https://norva.tv/img/devices/norva-device-tv.webp">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Playback Position vs Completion State | Norva Blog">
+  <meta name="twitter:description" content="Learn how playback position differs from completion state, why thresholds and credits matter, how syncing can conflict, and how to test each value separately.">
+  <meta name="twitter:image" content="https://norva.tv/img/devices/norva-device-tv.webp">
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "headline": "Playback Position vs. Completion State: What Changes?",
+  "description": "Learn how playback position differs from completion state, why thresholds and credits matter, how syncing can conflict, and how to test each value separately.",
+  "inLanguage": "en",
+  "datePublished": "2026-09-04T20:00:00+02:00",
+  "dateModified": "2026-09-04T20:00:00+02:00",
+  "author": {
+    "@type": "Organization",
+    "name": "Norva"
+  },
+  "publisher": {
+    "@type": "Organization",
+    "name": "Norva",
+    "logo": {
+      "@type": "ImageObject",
+      "url": "https://norva.tv/img/norva-app-icon-96.png"
+    }
+  },
+  "image": [
+    "https://norva.tv/img/devices/norva-device-tv.webp"
+  ],
+  "mainEntityOfPage": {
+    "@type": "WebPage",
+    "@id": "https://norva.tv/blog/playback-position-vs-completion-state/"
+  }
+}
+  </script>
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    {
+      "@type": "ListItem",
+      "position": 1,
+      "name": "Home",
+      "item": "https://norva.tv/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 2,
+      "name": "Blog",
+      "item": "https://norva.tv/blog/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 3,
+      "name": "Playback Position vs. Completion State: What Changes?",
+      "item": "https://norva.tv/blog/playback-position-vs-completion-state/"
+    }
+  ]
+}
+  </script>
+  <script src="/js/marketing-config.js?v=1"></script>
+  <script defer src="/js/marketing.js?v=1"></script>
+  <script defer src="/js/consent-banner.js?v=1"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="blog-nav">
+    <a class="brand" href="/" aria-label="Norva home">
+      <img src="/img/norva-app-icon-96.png" width="34" height="34" alt="" decoding="async">
+      <span>Norva</span>
+    </a>
+    <nav class="nav-right" aria-label="Primary">
+      <a href="/blog/">Blog</a>
+      <a class="hide-sm" href="/#how-it-works">How it works</a>
+      <a class="cta" href="/account.html?returnTo=%2Fapp%23home" data-cta="blog-nav" data-auth-action>Start free trial</a>
+    </nav>
+  </header>
+  <main id="main-content">
+    <nav class="breadcrumb" aria-label="Breadcrumb"><a href="/">Home</a><span class="sep">›</span><a href="/blog/">Blog</a><span class="sep">›</span><span aria-current="page">Playback Position vs. Completion State: What Changes?</span></nav>
+    <article>
+      <div class="article-meta">
+        <span class="tag">Media Player Glossary &amp; Concepts</span>
+        <span>By Norva Editorial Team</span>
+        <span class="dot">·</span>
+        <time datetime="2026-09-04T20:00:00+02:00">4 September 2026</time>
+        <span class="dot">·</span>
+        <span>7 min read</span>
+      </div>
+      <h1>Playback Position vs. Completion State: What Changes?</h1>
+      <p class="lede">Playback position is a timeline value; completion is a classification that may use thresholds, duration, credits, explicit actions, or current product rules.</p>
+      <nav class="toc" aria-label="On this page">
+      <strong>On this page</strong>
+      <ul><li><a href="#playback-position-is-a-timeline-value">Playback position is a timeline value</a></li><li><a href="#completion-is-a-classification">Completion is a classification</a></li><li><a href="#why-the-values-can-diverge">Why the values can diverge</a></li><li><a href="#resume-behavior-is-a-third-question">Resume behavior is a third question</a></li><li><a href="#synchronization-can-affect-each-state-differently">Synchronization can affect each state differently</a></li><li><a href="#test-position-without-reaching-completion">Test position without reaching completion</a></li><li><a href="#test-completion-without-assuming-the-rule">Test completion without assuming the rule</a></li><li><a href="#audit-conflicts-separately">Audit conflicts separately</a></li><li><a href="#original-evidence-state-transition-table">Original evidence: state-transition table</a></li><li><a href="#common-conceptual-mistakes">Common conceptual mistakes</a></li><li><a href="#frequently-asked-questions">Frequently asked questions</a></li><li><a href="#your-next-step">Your next step</a></li><li><a href="#sources">Sources</a></li></ul>
+    </nav>
+      <blockquote><strong>In short:</strong> Playback position answers "where on the timeline?" Completion state answers "how should this item be classified?" A player may calculate completion from position, duration, credits, explicit user actions, or product-specific thresholds. The two values can change together, but they should be recorded and tested separately.</blockquote>
+<p>Confusing these concepts leads to reports such as "my progress disappeared" when an item was intentionally moved from Continue Watching to a completed state. The underlying position may still exist, may be reset, or may be handled differently by the current product.</p>
+<p>The <a href="/blog/media-player-glossary/">media player glossary</a> places both terms within the wider state model.</p>
+<h2 id="playback-position-is-a-timeline-value">Playback position is a timeline value</h2>
+<p>In web media, the current playback time is represented on the media timeline. A user can move that value by playing, seeking, or restarting. The player may save a rounded or periodic position rather than every rendered frame.</p>
+<p>A displayed progress bar is an approximation. Its visible width can differ from the saved numeric value, especially on a short item or small screen.</p>
+<h2 id="completion-is-a-classification">Completion is a classification</h2>
+<p>Completion typically indicates that the player or user considers the item watched. The classification may use a threshold near the end, known credits, duration, an explicit action, or another rule. The exact rule is product-specific and can change.</p>
+<p>Do not invent a Norva percentage threshold. Consult current official guidance and record observed behavior with the tested item and version.</p>
+<h2 id="why-the-values-can-diverge">Why the values can diverge</h2>
+<p>An item can have a position near the end but remain "in progress" if the completion rule has not been met. It can be marked completed while a technical position remains before the final frame. Replaying a completed item may create a new position without immediately removing its completion classification.</p>
+<p>Short clips, live-like media, credits, trailers, and items with unusual duration metadata can make a simple percentage rule unreliable.</p>
+<h2 id="resume-behavior-is-a-third-question">Resume behavior is a third question</h2>
+<p>The resume point is the position the player offers or uses when the item opens again. It may be derived from the saved position, adjusted to avoid replaying a few seconds, or omitted after completion. This behavior should not be assumed from the completion badge alone.</p>
+<p>See resume point versus bookmark for another important state boundary.</p>
+<h2 id="synchronization-can-affect-each-state-differently">Synchronization can affect each state differently</h2>
+<p>Across supported screens, a position update and completion update may be separate records or events. A stale screen could show the correct completion badge but an old progress bar, or the reverse. Record both before refreshing.</p>
+<p>Norva can keep viewing progress across supported devices under the same account, but exact behavior still depends on current implementation, media identity, profile, source, device, and connectivity.</p>
+<h2 id="test-position-without-reaching-completion">Test position without reaching completion</h2>
+<p>Choose a known item and stop at a distinctive middle position. Exit normally, reopen on the same screen, and record the displayed and actual resume points. Then inspect the item's completion classification.</p>
+<p>Repeat on a secondary supported screen if continuity matters. Keep account, profile, source, item, and version fixed.</p>
+<h2 id="test-completion-without-assuming-the-rule">Test completion without assuming the rule</h2>
+<p>Use an item whose duration is understood and play through the relevant ending under normal use. Record when the visible classification changes, but do not generalize the observed point. Reopen the item and record whether it restarts, resumes, or offers a choice.</p>
+<p>If the interface offers an explicit watched or unwatched control, test it separately from natural playback.</p>
+<h2 id="audit-conflicts-separately">Audit conflicts separately</h2>
+<p>The playback-progress integrity audit provides a bidirectional ledger. Add completion as its own column rather than interpreting it from the position. Preserve evidence before clearing history or changing versions.</p>
+<h2 id="original-evidence-state-transition-table">Original evidence: state-transition table</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>Scenario</th><th>Position</th><th>Duration context</th><th>Completion state</th><th>Resume behavior</th><th>Evidence needed</th></tr></thead>
+<tbody><tr><td>Never started</td><td>None or start</td><td>Known</td><td>Not started</td><td>Start</td><td>Item and profile</td></tr><tr><td>Mid-playback exit</td><td>Middle</td><td>Known</td><td>In progress</td><td>Resume</td><td>Displayed and actual time</td></tr><tr><td>Near end</td><td>Late</td><td>Known</td><td>Product-dependent</td><td>Resume or restart</td><td>Observed rule only</td></tr><tr><td>Credits</td><td>Late</td><td>Credits present</td><td>Product-dependent</td><td>Product-dependent</td><td>Timeline cue</td></tr><tr><td>Replay completed item</td><td>New early position</td><td>Known</td><td>May remain completed</td><td>Product-dependent</td><td>Before and after state</td></tr><tr><td>Explicit state action</td><td>Any</td><td>Known</td><td>User-selected</td><td>Product-dependent</td><td>Action and verification</td></tr></tbody>
+</table></div>
+<h2 id="common-conceptual-mistakes">Common conceptual mistakes</h2>
+<ul><li>Treating a progress-bar width as the saved position.</li><li>Assuming one universal completion percentage.</li><li>Inferring resume behavior from a completion badge.</li><li>Comparing different profiles or media versions.</li><li>Refreshing before recording conflicting states.</li><li>Clearing history before preserving evidence.</li></ul>
+<h2 id="frequently-asked-questions">Frequently asked questions</h2>
+<h3 id="is-100-percent-playback-required-for-completion">Is 100 percent playback required for completion?</h3>
+<p>Not necessarily. Completion rules are product-specific and may account for credits, duration, thresholds, or explicit actions. Verify current behavior rather than assuming.</p>
+<h3 id="can-a-completed-item-retain-a-playback-position">Can a completed item retain a playback position?</h3>
+<p>It can, depending on the state model. Position, completion, and resume behavior should be inspected separately.</p>
+<h3 id="why-might-two-screens-show-different-states">Why might two screens show different states?</h3>
+<p>They may have stale views, different profiles or versions, or independently updated state. Record all identities and both position and completion before troubleshooting.</p>
+<h2 id="your-next-step">Your next step</h2>
+<p><a href="https://norva.tv/support" target="_blank" rel="noopener">Review Norva Support</a></p>
+<h2 id="sources">Sources</h2>
+<ul><li><a href="https://norva.tv/#features" target="_blank" rel="noopener">Norva features</a></li><li><a href="https://norva.tv/support" target="_blank" rel="noopener">Norva support</a></li><li><a href="https://html.spec.whatwg.org/multipage/media.html" target="_blank" rel="noopener">WHATWG HTML media elements</a></li></ul>
+      <section class="article-cta">
+      <a class="btn" href="https://norva.tv/support" data-cta="blog-article">Review Norva Support</a>
+    </section>
+      <section class="sources">
+      <h2>Sources</h2>
+      <ul><li><a href="https://norva.tv/#features" target="_blank" rel="noopener">https://norva.tv/#features</a></li><li><a href="https://norva.tv/support" target="_blank" rel="noopener">https://norva.tv/support</a></li><li><a href="https://html.spec.whatwg.org/multipage/media.html" target="_blank" rel="noopener">https://html.spec.whatwg.org/multipage/media.html</a></li></ul>
+    </section>
+      <section class="related">
+      <h2>Related reading</h2>
+      <div class="related-grid">
+        <a class="card" href="/blog/media-player-glossary/">
+          <span class="tag">Media Player Glossary &amp; Concepts</span>
+          <div class="card-title">The Complete Glossary of Media Player Terms</div>
+          <p>A practical glossary separates the media, catalog, playback, synchronization, format, storage, security, device, and subscription concepts users encounter.</p>
+        </a>
+      </div>
+    </section>
+    </article>
+  </main>
+  <footer class="blog-footer">
+    <div class="foot-inner">
+      <nav class="foot-links" aria-label="Footer">
+        <a href="/">Home</a>
+        <a href="/blog/">Blog</a>
+        <a href="/#features">Benefits</a>
+        <a href="/#pricing">Pricing</a>
+        <a href="/support.html?returnTo=%2Fblog%2F">Support</a>
+        <a href="/terms.html">Terms</a>
+        <a href="/privacy.html">Privacy</a>
+        <a href="/mentions-legales.html">Legal notice</a>
+      </nav>
+      <p class="disclaimer">&copy; 2026 Norva. Norva is a media player and organiser. It does not provide media. Use requires a compatible source you own or are authorised to access.</p>
+    </div>
+  </footer>
+</body>
+</html>
