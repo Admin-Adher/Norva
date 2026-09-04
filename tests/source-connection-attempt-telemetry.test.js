@@ -133,6 +133,12 @@ test('browser-side classifier emits only a root domain, host hash and bounded sh
   assert.equal(feedback.call(context, 'https://nooor', 'xtream').state, 'invalid');
   assert.equal(feedback.call(context, 'https://panel.test', 'xtream').state, 'ready');
 
+  const parseXtream = context.parseXtreamLink;
+  assert.equal(parseXtream.call(context, 'nooor'), null);
+  assert.equal(parseXtream.call(context, 'https://nooor'), null);
+  assert.equal(parseXtream.call(context, 'http://provider:8080').serverUrl, 'http://provider:8080');
+  assert.equal(parseXtream.call(context, 'https://panel.test').serverUrl, 'https://panel.test');
+
   const diagnostic = await context.sourceAttemptDiagnostic.call(context, {
     type: 'xtream',
     url: 'https://alice:secret@panel.customer.example.co.in/get.php?username=alice&password=secret',

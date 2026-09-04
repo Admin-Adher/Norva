@@ -1817,6 +1817,7 @@ class SourceManager {
         } catch (_) {
             return null;
         }
+        if (!/[.:]/.test(url.host)) return null;
 
         const queryUsername = url.searchParams.get('username') || url.searchParams.get('user') || '';
         const queryPassword = url.searchParams.get('password') || url.searchParams.get('pass') || '';
