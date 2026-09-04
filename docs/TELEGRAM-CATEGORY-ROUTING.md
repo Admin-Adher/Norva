@@ -21,6 +21,8 @@ For each uppercase category set both `TELEGRAM_<CATEGORY>_BOT_TOKEN` and `TELEGR
 
 Netdata's `TELEGRAM_BOT_TOKEN` and default recipient must point to Infrastructure. Preserve its roles and silent alarms; do not enable every alarm. Host watchdogs read the dedicated Infrastructure pair with the same strict fallback rules. Deploy `telegram-send.py` beside the **installed** capacity script, not only into the Git checkout. Storage-watch remains uninstalled unless separately requested.
 
+`NETDATA_HEALTH_NOTIFY_FILE` optionally points to a private mode-0600 notification config. A scoped Compose override can replace only this bind mount on an existing deployment; preserve the original root-owned config for rollback. Recreate only Netdata and compare all other settings and alarm roles before/after.
+
 Never commit credentials or print Compose's rendered environment. Preserve mode-0600 backups. Validate each token using `getMe`, require an explicit `/start` in the founder's private chat, then test receipt before switching production senders.
 
 ## Trial-start contract

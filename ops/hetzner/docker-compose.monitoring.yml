@@ -55,7 +55,7 @@ services:
       # notify config MUST be bind-mounted to survive container recreation.
       # Generate it before `up` (see MONITORING.md § Notifications), else Docker
       # would create an empty dir at the source path.
-      - /etc/norva-netdata/health_alarm_notify.conf:/etc/netdata/health_alarm_notify.conf:ro
+      - ${NETDATA_HEALTH_NOTIFY_FILE:-/etc/norva-netdata/health_alarm_notify.conf}:/etc/netdata/health_alarm_notify.conf:ro
       # --- persistent metrics db + registry -----------------------------------
       - netdata-lib:/var/lib/netdata
       - netdata-cache:/var/cache/netdata
