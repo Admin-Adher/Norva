@@ -40,6 +40,21 @@
     <string name="ui_watch_manage" formatted="false">Assista e gerencie a Norva</string>
     <string name="ui_connect_tv" formatted="false">Conectar esta TV</string>
     <string name="ui_recommended" formatted="false">Recomendado</string>
-    <string name="ui_or" formatted="false">- ou -</string>
+    <string name="ui_or" formatted="false">ou</string>
     <string name="ui_standalone" formatted="false">Usar o modo independente</string>
+    <string name="ui_hub_sign_in" formatted="false">Entre neste hub Norva</string>
+    <string name="ui_admin_create" formatted="false">Crie sua conta de administrador Norva</string>
+    <string name="ui_admin_first" formatted="false">Crie a primeira conta de administrador Norva deste hub.</string>
+    <string name="ui_account_name" formatted="false">Nome da conta</string>
+    <string name="ui_account_name_enter" formatted="false">Digite o nome da sua conta</string>
+    <string name="ui_password" formatted="false">Senha</string>
+    <string name="ui_password_enter" formatted="false">Digite sua senha</string>
+    <string name="ui_password_minimum" formatted="false">Mínimo de 6 caracteres</string>
+    <string name="ui_sign_in" formatted="false">Entrar</string>
+    <string name="ui_create_account" formatted="false">Criar conta</string>
+    <string name="ui_sso_continue" formatted="false">Continuar com SSO</string>
+    <string name="ui_cloud_account_prompt" formatted="false">Procurando sua conta Norva Cloud?</string>
+    <string name="ui_cloud_sign_in" formatted="false">Entrar no Norva Cloud</string>
+    <string name="ui_please_wait" formatted="false">Aguarde…</string>
+    <string name="ui_sign_in_failed" formatted="false">Não foi possível entrar. Verifique seus dados e tente novamente.</string>
 </resources>

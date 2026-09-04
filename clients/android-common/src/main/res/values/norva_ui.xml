@@ -40,6 +40,21 @@
     <string name="ui_watch_manage" formatted="false">Watch and manage Norva</string>
     <string name="ui_connect_tv" formatted="false">Connect this TV</string>
     <string name="ui_recommended" formatted="false">Recommended</string>
-    <string name="ui_or" formatted="false">- or -</string>
+    <string name="ui_or" formatted="false">or</string>
     <string name="ui_standalone" formatted="false">Use standalone mode</string>
+    <string name="ui_hub_sign_in" formatted="false">Sign in to this Norva hub</string>
+    <string name="ui_admin_create" formatted="false">Create your Norva administrator account</string>
+    <string name="ui_admin_first" formatted="false">Create the first Norva administrator account for this hub.</string>
+    <string name="ui_account_name" formatted="false">Account name</string>
+    <string name="ui_account_name_enter" formatted="false">Enter your account name</string>
+    <string name="ui_password" formatted="false">Password</string>
+    <string name="ui_password_enter" formatted="false">Enter your password</string>
+    <string name="ui_password_minimum" formatted="false">Minimum 6 characters</string>
+    <string name="ui_sign_in" formatted="false">Sign in</string>
+    <string name="ui_create_account" formatted="false">Create account</string>
+    <string name="ui_sso_continue" formatted="false">Continue with SSO</string>
+    <string name="ui_cloud_account_prompt" formatted="false">Looking for your Norva Cloud account?</string>
+    <string name="ui_cloud_sign_in" formatted="false">Sign in on Norva Cloud</string>
+    <string name="ui_please_wait" formatted="false">Please wait...</string>
+    <string name="ui_sign_in_failed" formatted="false">Sign-in could not be completed. Check your details and try again.</string>
 </resources>

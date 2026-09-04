@@ -21,6 +21,9 @@ jobs:
       - name: Install test dependencies
         run: npm ci --ignore-scripts
 
+      - name: Verify generated locale assets
+        run: npm run i18n:check
+
       - name: Run regression suite
         run: npm test
 

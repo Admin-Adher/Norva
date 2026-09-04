@@ -12,7 +12,7 @@ used to force an interface language.
   APKs expose Android's system languages and per-app preference. Unsupported
   languages fall back to English. `pt-*` maps to Brazilian Portuguese, `tl` to
   Filipino and the legacy Android `in` code to Indonesian.
-- Forty-one shared messages translated into all ten languages in
+- Fifty-six shared messages translated into all ten languages in
   `messages.json`, ordered by `locales.json`. These are actual translations,
   not English placeholder copies counted as coverage.
 - Deterministic web i18next bundle, shared Android XML resources, explicit
@@ -57,8 +57,8 @@ for authenticated application or native playback validation.
 1. Review the inventory, centralize all owned UI copy, translate it into all ten
    languages, including native player/download resources, accessibility strings,
    notifications, dialogs, recovery, account, authentication and subscription.
-2. Extend to the independent web entry points; they currently do not load this
-   runtime. Integrate initial-language boot into every owned interface.
+2. Extend to the remaining independent web entry points. Hub login now loads the
+   runtime; account, subscription and other entry points still need migration.
 3. Introduce plural resources and Android formatting conversion for parameterized
    messages as they are migrated. Never concatenate translated sentence fragments.
 4. Convert physical layout constraints to logical ones and validate TV D-pad
@@ -103,3 +103,29 @@ validation above refers to the initial implementation, before this main integrat
 This foundation still does not provide complete interface translation.
 
 Full Node regression: 3,544 passed, 8 skipped, zero failures (3,552 tests).
+
+## Published foundation and next increment
+
+- Foundation `db1eb26e` was pushed to main. Cloudflare run `33927618571` succeeded;
+  `/app` serves JS hash `98db8b2d77` and CSS hash `f5088d2182`, both verified by SHA-256.
+- Initial Android CI run `33927618730` failed lint: two missing API annotations
+  plus 99 phone / 103 TV legacy resources missing the eight newly added locales.
+  The API-24 helper is now annotated; all callers already guard the Android version.
+- `app/lint-i18n-baseline.xml` on each Android client records ONLY those exact known
+  `MissingTranslation` findings. Native legacy text still falls back to English.
+  This baseline permits the deliberately partial foundation APK build; it is NOT
+  evidence of complete translation and must not be regenerated to accept new gaps.
+  Remove its entries as each resource is translated. All other lint errors and
+  newly missing resources remain blocking. Complete release requires an empty baseline.
+- The next increment contains 56 shared messages, including Hub login, setup,
+  request pending and recoverable failure states. Error parameters display a
+  translated safe message instead of raw URL text. No authentication endpoint changed.
+- Browser checks cover the Hub form in ten locales at 390px and 1280px, plus changing
+  language during a pending setup request and a failed response. No horizontal
+  overflow or stale marked labels; private error detail stays hidden. Marketing
+  and consent scripts were stubbed: their copy is still outside this migrated form.
+- `npm run i18n:check` verifies generated translations and asset references without
+  modifying files. Web deployment and the Build verification job now enforce it.
+  This is a reproducibility gate, separate from the still-failing full-coverage audit.
+
+Follow-up local validation: 3,544 Node tests passed, 8 skipped. Both clients passed JVM tests, lint with the documented baseline, and debug APK assembly. All 175 tracked source files recorded before isolation remain byte-for-byte unchanged.

@@ -40,6 +40,21 @@
     <string name="ui_watch_manage" formatted="false">Norva देखें और प्रबंधित करें</string>
     <string name="ui_connect_tv" formatted="false">इस टीवी को कनेक्ट करें</string>
     <string name="ui_recommended" formatted="false">सुझाया गया</string>
-    <string name="ui_or" formatted="false">- या -</string>
+    <string name="ui_or" formatted="false">या</string>
     <string name="ui_standalone" formatted="false">स्वतंत्र मोड इस्तेमाल करें</string>
+    <string name="ui_hub_sign_in" formatted="false">इस Norva हब में साइन इन करें</string>
+    <string name="ui_admin_create" formatted="false">अपना Norva एडमिन खाता बनाएँ</string>
+    <string name="ui_admin_first" formatted="false">इस हब के लिए पहला Norva एडमिन खाता बनाएँ।</string>
+    <string name="ui_account_name" formatted="false">खाते का नाम</string>
+    <string name="ui_account_name_enter" formatted="false">अपने खाते का नाम दर्ज करें</string>
+    <string name="ui_password" formatted="false">पासवर्ड</string>
+    <string name="ui_password_enter" formatted="false">अपना पासवर्ड दर्ज करें</string>
+    <string name="ui_password_minimum" formatted="false">कम से कम 6 अक्षर</string>
+    <string name="ui_sign_in" formatted="false">साइन इन करें</string>
+    <string name="ui_create_account" formatted="false">खाता बनाएँ</string>
+    <string name="ui_sso_continue" formatted="false">SSO से जारी रखें</string>
+    <string name="ui_cloud_account_prompt" formatted="false">अपना Norva Cloud खाता खोज रहे हैं?</string>
+    <string name="ui_cloud_sign_in" formatted="false">Norva Cloud में साइन इन करें</string>
+    <string name="ui_please_wait" formatted="false">कृपया प्रतीक्षा करें…</string>
+    <string name="ui_sign_in_failed" formatted="false">साइन इन नहीं हो सका। अपनी जानकारी जाँचें और फिर से कोशिश करें।</string>
 </resources>

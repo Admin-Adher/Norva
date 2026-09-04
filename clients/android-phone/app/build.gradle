@@ -12,6 +12,10 @@ def releaseKeystorePath = System.getenv("ANDROID_KEYSTORE_FILE")
 def hasReleaseKeystore = releaseKeystorePath != null && new File(releaseKeystorePath).exists()
 
 android {
+    lint {
+        // Known legacy translations only; every other lint error remains blocking.
+        baseline = file("lint-i18n-baseline.xml")
+    }
     namespace "tv.norva.phone"
     compileSdk 36
 

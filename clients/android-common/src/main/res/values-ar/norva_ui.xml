@@ -40,6 +40,21 @@
     <string name="ui_watch_manage" formatted="false">شاهد وأدِر Norva</string>
     <string name="ui_connect_tv" formatted="false">توصيل هذا التلفزيون</string>
     <string name="ui_recommended" formatted="false">موصى به</string>
-    <string name="ui_or" formatted="false">- أو -</string>
+    <string name="ui_or" formatted="false">أو</string>
     <string name="ui_standalone" formatted="false">استخدام الوضع المستقل</string>
+    <string name="ui_hub_sign_in" formatted="false">سجّل الدخول إلى مركز Norva هذا</string>
+    <string name="ui_admin_create" formatted="false">أنشئ حساب مسؤول Norva</string>
+    <string name="ui_admin_first" formatted="false">أنشئ أول حساب مسؤول Norva لهذا المركز.</string>
+    <string name="ui_account_name" formatted="false">اسم الحساب</string>
+    <string name="ui_account_name_enter" formatted="false">أدخل اسم حسابك</string>
+    <string name="ui_password" formatted="false">كلمة المرور</string>
+    <string name="ui_password_enter" formatted="false">أدخل كلمة المرور</string>
+    <string name="ui_password_minimum" formatted="false">6 أحرف على الأقل</string>
+    <string name="ui_sign_in" formatted="false">تسجيل الدخول</string>
+    <string name="ui_create_account" formatted="false">إنشاء حساب</string>
+    <string name="ui_sso_continue" formatted="false">المتابعة بتسجيل الدخول الموحد</string>
+    <string name="ui_cloud_account_prompt" formatted="false">هل تبحث عن حسابك في Norva Cloud؟</string>
+    <string name="ui_cloud_sign_in" formatted="false">تسجيل الدخول إلى Norva Cloud</string>
+    <string name="ui_please_wait" formatted="false">يرجى الانتظار…</string>
+    <string name="ui_sign_in_failed" formatted="false">تعذّر تسجيل الدخول. تحقّق من بياناتك وحاول مجددًا.</string>
 </resources>

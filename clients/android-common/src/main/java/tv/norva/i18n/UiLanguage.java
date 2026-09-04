@@ -42,6 +42,7 @@ public final class UiLanguage {
         return new String[] { system.locale.toLanguageTag() };
     }
 
+    @androidx.annotation.RequiresApi(24)
     private static String[] tags(LocaleList list) {
         String[] tags = new String[list.size()];
         for (int i = 0; i < tags.length; i++) tags[i] = list.get(i).toLanguageTag();

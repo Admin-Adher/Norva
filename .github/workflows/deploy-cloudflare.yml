@@ -27,6 +27,9 @@ jobs:
 
       # This workflow deploys independently from Build, so it must enforce the
       # regression suite itself rather than assume another workflow will block it.
+      - name: Verify generated locale assets
+        run: npm run i18n:check
+
       - name: Run regression suite
         run: npm test
 

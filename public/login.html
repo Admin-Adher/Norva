@@ -4,9 +4,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <script src="/js/i18n.js?v=64327fa433"></script>
     <title>Norva Account</title>
     <link rel="icon" type="image/png" href="/favicon.png">
     <link rel="stylesheet" href="css/main.css">
+    <link rel="stylesheet" href="/css/i18n.css?v=f5088d2182">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
         body {
@@ -201,32 +203,32 @@
             <div class="login-logo">
                 <img class="logo-icon" src="/img/norva-app-icon.png" alt="Norva">
                 <h1>Norva Hub</h1>
-                <p id="login-subtitle">Sign in to this Norva hub</p>
+                <p id="login-subtitle" data-i18n="ui_hub_sign_in">Sign in to this Norva hub</p>
             </div>
 
-            <div class="error-message" id="error-message"></div>
-            <div class="setup-message" id="setup-message">
+            <div class="error-message" id="error-message" role="alert"></div>
+            <div class="setup-message" id="setup-message" data-i18n="ui_admin_first">
                 Create the first Norva administrator account for this hub.
             </div>
 
             <form id="login-form">
                 <div class="form-group">
-                    <label for="username">Account name</label>
+                    <label for="username" data-i18n="ui_account_name">Account name</label>
                     <input type="text" id="username" name="username" required autocomplete="username"
-                        placeholder="Enter your account name">
+                        placeholder="Enter your account name" data-i18n-placeholder="ui_account_name_enter">
                 </div>
 
                 <div class="form-group">
-                    <label for="password">Password</label>
+                    <label for="password" data-i18n="ui_password">Password</label>
                     <input type="password" id="password" name="password" required autocomplete="current-password"
-                        minlength="6" placeholder="Enter your password">
+                        minlength="6" placeholder="Enter your password" data-i18n-placeholder="ui_password_enter">
                 </div>
 
-                <button type="submit" class="btn-login" id="submit-btn">Sign in</button>
+                <button type="submit" class="btn-login" id="submit-btn" data-i18n="ui_sign_in">Sign in</button>
             </form>
 
             <div class="sso-divider" style="text-align: center; margin: 20px 0; position: relative;">
-                <span
+                <span data-i18n="ui_or"
                     style="background: var(--color-bg-secondary); padding: 0 10px; color: var(--color-text-secondary); font-size: 14px; position: relative; z-index: 1;">or</span>
                 <div
                     style="position: absolute; top: 50%; left: 0; right: 0; height: 1px; background: var(--color-border); z-index: 0;">
@@ -240,11 +242,11 @@
                     <path
                         d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm-2 16l-4-4 1.41-1.41L10 14.17l6.59-6.59L18 9l-8 8z" />
                 </svg>
-                Continue with SSO
+                <span data-i18n="ui_sso_continue">Continue with SSO</span>
             </button>
 
-            <p class="cloud-account">Looking for your Norva Cloud account?
-                <a id="cloud-account-link" href="/account.html">Sign in on Norva Cloud</a>
+            <p class="cloud-account"><span data-i18n="ui_cloud_account_prompt">Looking for your Norva Cloud account?</span>
+                <a id="cloud-account-link" data-i18n="ui_cloud_sign_in" href="/account.html">Sign in on Norva Cloud</a>
             </p>
 
             <style>
@@ -260,6 +262,14 @@
 
     <script>
       if (!window.__norvaCloudLoginRedirect) {
+        // Keep each state linked to its message so language changes during a request
+        // cannot restore a stale label. English remains usable if the bundle fails.
+        function setMessage(element, key, fallback, attribute) {
+            element.setAttribute(attribute ? 'data-i18n-' + attribute : 'data-i18n', key);
+            const value = window.NorvaI18n ? window.NorvaI18n.t(key) : fallback;
+            if (attribute) element.setAttribute(attribute, value);
+            else element.textContent = value;
+        }
         document.getElementById('cloud-account-link').href = '/account.html?returnTo='
           + encodeURIComponent(window.__norvaLoginReturnTo || '/');
 
@@ -273,7 +283,7 @@
         const error = urlParams.get('error');
         if (error) {
             const errorMessage = document.getElementById('error-message');
-            errorMessage.textContent = error;
+            setMessage(errorMessage, 'ui_sign_in_failed', 'Sign-in could not be completed. Check your details and try again.');
             errorMessage.classList.add('show');
             // Clean URL
             window.history.replaceState({}, document.title, window.location.pathname);
@@ -289,10 +299,10 @@
 
                 if (data.setupRequired) {
                     isSetupMode = true;
-                    document.getElementById('login-subtitle').textContent = 'Create your Norva administrator account';
-                    document.getElementById('submit-btn').textContent = 'Create account';
+                    setMessage(document.getElementById('login-subtitle'), 'ui_admin_create', 'Create your Norva administrator account');
+                    setMessage(document.getElementById('submit-btn'), 'ui_create_account', 'Create account');
                     document.getElementById('setup-message').classList.add('show');
-                    document.getElementById('password').placeholder = 'Minimum 6 characters';
+                    setMessage(document.getElementById('password'), 'ui_password_minimum', 'Minimum 6 characters', 'placeholder');
                     // Hide SSO in setup mode
                     document.querySelector('.sso-divider').style.display = 'none';
                     document.getElementById('btn-sso-login').style.display = 'none';
@@ -313,11 +323,12 @@
 
             // Clear previous errors
             errorMessage.classList.remove('show');
+            errorMessage.removeAttribute('data-i18n');
             errorMessage.textContent = '';
 
             // Disable button
             submitBtn.disabled = true;
-            submitBtn.textContent = 'Please wait...';
+            setMessage(submitBtn, 'ui_please_wait', 'Please wait...');
 
             try {
                 const endpoint = isSetupMode ? '/api/auth/setup' : '/api/auth/login';
@@ -343,10 +354,10 @@
                 window.location.replace(window.__norvaLoginReturnTo || '/');
 
             } catch (err) {
-                errorMessage.textContent = 'Sign-in could not be completed. Check your details and try again.';
+                setMessage(errorMessage, 'ui_sign_in_failed', 'Sign-in could not be completed. Check your details and try again.');
                 errorMessage.classList.add('show');
                 submitBtn.disabled = false;
-                submitBtn.textContent = isSetupMode ? 'Create account' : 'Sign in';
+                setMessage(submitBtn, isSetupMode ? 'ui_create_account' : 'ui_sign_in', isSetupMode ? 'Create account' : 'Sign in');
             }
         });
 

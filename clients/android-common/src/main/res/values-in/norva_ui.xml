@@ -40,6 +40,21 @@
     <string name="ui_watch_manage" formatted="false">Tonton dan kelola Norva</string>
     <string name="ui_connect_tv" formatted="false">Hubungkan TV ini</string>
     <string name="ui_recommended" formatted="false">Direkomendasikan</string>
-    <string name="ui_or" formatted="false">- atau -</string>
+    <string name="ui_or" formatted="false">atau</string>
     <string name="ui_standalone" formatted="false">Gunakan mode mandiri</string>
+    <string name="ui_hub_sign_in" formatted="false">Masuk ke hub Norva ini</string>
+    <string name="ui_admin_create" formatted="false">Buat akun administrator Norva Anda</string>
+    <string name="ui_admin_first" formatted="false">Buat akun administrator Norva pertama untuk hub ini.</string>
+    <string name="ui_account_name" formatted="false">Nama akun</string>
+    <string name="ui_account_name_enter" formatted="false">Masukkan nama akun Anda</string>
+    <string name="ui_password" formatted="false">Kata sandi</string>
+    <string name="ui_password_enter" formatted="false">Masukkan kata sandi Anda</string>
+    <string name="ui_password_minimum" formatted="false">Minimal 6 karakter</string>
+    <string name="ui_sign_in" formatted="false">Masuk</string>
+    <string name="ui_create_account" formatted="false">Buat akun</string>
+    <string name="ui_sso_continue" formatted="false">Lanjutkan dengan SSO</string>
+    <string name="ui_cloud_account_prompt" formatted="false">Mencari akun Norva Cloud Anda?</string>
+    <string name="ui_cloud_sign_in" formatted="false">Masuk ke Norva Cloud</string>
+    <string name="ui_please_wait" formatted="false">Harap tunggu…</string>
+    <string name="ui_sign_in_failed" formatted="false">Tidak dapat masuk. Periksa data Anda dan coba lagi.</string>
 </resources>

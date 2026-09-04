@@ -40,6 +40,21 @@
     <string name="ui_watch_manage" formatted="false">Manood at pamahalaan ang Norva</string>
     <string name="ui_connect_tv" formatted="false">Ikonekta ang TV na ito</string>
     <string name="ui_recommended" formatted="false">Inirerekomenda</string>
-    <string name="ui_or" formatted="false">- o -</string>
+    <string name="ui_or" formatted="false">o</string>
     <string name="ui_standalone" formatted="false">Gamitin ang standalone mode</string>
+    <string name="ui_hub_sign_in" formatted="false">Mag-sign in sa Norva hub na ito</string>
+    <string name="ui_admin_create" formatted="false">Gumawa ng iyong Norva administrator account</string>
+    <string name="ui_admin_first" formatted="false">Gumawa ng unang Norva administrator account para sa hub na ito.</string>
+    <string name="ui_account_name" formatted="false">Pangalan ng account</string>
+    <string name="ui_account_name_enter" formatted="false">Ilagay ang pangalan ng iyong account</string>
+    <string name="ui_password" formatted="false">Password</string>
+    <string name="ui_password_enter" formatted="false">Ilagay ang iyong password</string>
+    <string name="ui_password_minimum" formatted="false">Hindi bababa sa 6 na character</string>
+    <string name="ui_sign_in" formatted="false">Mag-sign in</string>
+    <string name="ui_create_account" formatted="false">Gumawa ng account</string>
+    <string name="ui_sso_continue" formatted="false">Magpatuloy gamit ang SSO</string>
+    <string name="ui_cloud_account_prompt" formatted="false">Hinahanap mo ba ang iyong Norva Cloud account?</string>
+    <string name="ui_cloud_sign_in" formatted="false">Mag-sign in sa Norva Cloud</string>
+    <string name="ui_please_wait" formatted="false">Sandali lang…</string>
+    <string name="ui_sign_in_failed" formatted="false">Hindi makapag-sign in. Suriin ang iyong mga detalye at subukan muli.</string>
 </resources>

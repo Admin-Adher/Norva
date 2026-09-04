@@ -40,6 +40,21 @@
     <string name="ui_watch_manage" formatted="false">Norva’yı izleyin ve yönetin</string>
     <string name="ui_connect_tv" formatted="false">Bu TV’yi bağla</string>
     <string name="ui_recommended" formatted="false">Önerilen</string>
-    <string name="ui_or" formatted="false">- veya -</string>
+    <string name="ui_or" formatted="false">veya</string>
     <string name="ui_standalone" formatted="false">Bağımsız modu kullan</string>
+    <string name="ui_hub_sign_in" formatted="false">Bu Norva merkezinde oturum açın</string>
+    <string name="ui_admin_create" formatted="false">Norva yönetici hesabınızı oluşturun</string>
+    <string name="ui_admin_first" formatted="false">Bu merkez için ilk Norva yönetici hesabını oluşturun.</string>
+    <string name="ui_account_name" formatted="false">Hesap adı</string>
+    <string name="ui_account_name_enter" formatted="false">Hesap adınızı girin</string>
+    <string name="ui_password" formatted="false">Şifre</string>
+    <string name="ui_password_enter" formatted="false">Şifrenizi girin</string>
+    <string name="ui_password_minimum" formatted="false">En az 6 karakter</string>
+    <string name="ui_sign_in" formatted="false">Oturum aç</string>
+    <string name="ui_create_account" formatted="false">Hesap oluştur</string>
+    <string name="ui_sso_continue" formatted="false">SSO ile devam et</string>
+    <string name="ui_cloud_account_prompt" formatted="false">Norva Cloud hesabınızı mı arıyorsunuz?</string>
+    <string name="ui_cloud_sign_in" formatted="false">Norva Cloud üzerinde oturum aç</string>
+    <string name="ui_please_wait" formatted="false">Lütfen bekleyin…</string>
+    <string name="ui_sign_in_failed" formatted="false">Oturum açılamadı. Bilgilerinizi kontrol edip tekrar deneyin.</string>
 </resources>
