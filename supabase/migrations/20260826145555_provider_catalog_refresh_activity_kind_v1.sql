@@ -3,6 +3,8 @@ begin;
 -- The activity ledger stores one current holder per provider account. A
 -- catalogue page is weaker than playback and foreground validation: a later
 -- reporter tick from the same refresh must never downgrade either holder.
+-- Keep this precedence inside the conflict update so concurrent reporters
+-- cannot create a read-then-write race between activity kinds.
 create or replace function public.provider_account_touch_many(p_keys text[], p_kind text)
 returns void
 language sql
