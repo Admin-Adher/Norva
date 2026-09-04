@@ -166,6 +166,7 @@ test('Provider Access controls use Norva tokens and remain touch, mobile and mot
   );
   assert.match(css, /\.provider-access-path\s*\{[\s\S]*min-height:\s*54px/);
   assert.match(css, /\.provider-access-actions \.btn,[\s\S]*min-height:\s*44px/);
+  assert.match(css, /\.provider-access-wizard-actions \.btn\s*\{[\s\S]{0,120}justify-content:\s*center/);
   assert.match(css, /@media \(max-width: 640px\)[\s\S]*provider-access-field-row[\s\S]*grid-template-columns:\s*1fr/);
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)[\s\S]*animation:\s*none/);
   assert.doesNotMatch(providerCss, /#[0-9a-f]{3,8}/i);

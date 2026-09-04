@@ -4825,6 +4825,7 @@ video::cue {
 
 .provider-access-wizard-actions .btn {
   min-height: 48px;
+  justify-content: center;
 }
 
 .provider-access-wizard-actions .btn-primary {
