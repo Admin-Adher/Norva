@@ -1,7 +1,7 @@
 """Scoped operator deployment, never an unattended updater. Secrets stay on host."""
 import hashlib,json,os,pathlib,shutil,subprocess,sys,time,urllib.request
 os.umask(0o077)
-root=pathlib.Path('/home/adrien/.norva/strict-lid-permanent-20260904-r2')
+root=pathlib.Path('/home/adrien/.norva/strict-lid-permanent-20260904-r3')
 src=root/'candidate'
 def run(args,data=None):
  p=subprocess.run(args,input=data,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
@@ -34,16 +34,17 @@ if phase=='stage':
  shutil.copytree(previous,root/'functions',dirs_exist_ok=True)
  for rel in ['norva-admin/index.ts','_shared/strict-lid-health.mjs']:
   shutil.copyfile(src/'supabase/functions'/rel,root/'functions'/rel)
- image='norva-media-gateway:strict-lid-20260904-r2'
+  (root/'functions'/rel).chmod(0o644)
+ image='norva-media-gateway:strict-lid-20260904-r3'
  build=root/'gateway-build';build.mkdir(exist_ok=True)
  for name in ['index.js','strict-lid-batch.js','strict-lid-inference.js']:
   shutil.copyfile(src/'services/media-gateway/src'/name,build/name)
  # Build only the reviewed JS delta on the exact already-running image.
- (build/'Dockerfile').write_text('ARG BASE_IMAGE\nFROM ${BASE_IMAGE}\nCOPY index.js strict-lid-batch.js strict-lid-inference.js /app/src/\n')
+ (build/'Dockerfile').write_text('ARG BASE_IMAGE\nFROM ${BASE_IMAGE}\nCOPY --chmod=0644 index.js strict-lid-batch.js strict-lid-inference.js /app/src/\n')
  run(['docker','tag',gw['Image'],'norva-strict-lid-base:fac9d36b'])
  run(['docker','build','--build-arg','BASE_IMAGE=norva-strict-lid-base:fac9d36b','-t',image,str(build)])
  for name in ['index.js','strict-lid-batch.js','strict-lid-inference.js']:
-  run(['docker','run','--rm','--network','none','--entrypoint','node',image,'--check','/app/src/'+name])
+  run(['docker','run','--rm','--network','none','--user',gw['Config']['User'] or '0','--entrypoint','node',image,'--check','/app/src/'+name])
  plan={'oldImage':gw['Image'],'oldFunctions':previous,'image':image,'gatewayId':gw['Id'],'edgeIds':{n:inspect(n)['Id'] for n in ['norva-edge-functions','norva-edge-functions-2']}}
  for kind,c,change in [('gateway',gw,{'gateway':{'image':image}}),('edge',edge,{'functions':{'volumes':[str(root/'functions')+':/home/deno/functions:ro']},'functions2':{'volumes':[str(root/'functions')+':/home/deno/functions:ro']}})]:
   base=command(c);override=root/(kind+'-override.json');override.write_text(json.dumps({'services':change}))
@@ -78,7 +79,10 @@ elif phase in ['gateway','functions','functions2']:
  assert sorted(after['Config']['Env'])==sorted(before['Config']['Env']),'Environment drift'
  for key in ['Binds','PortBindings','Memory','NanoCpus','Devices','GroupAdd','SecurityOpt','CapDrop']:
   if key=='Binds' and phase!='gateway':continue
-  assert after['HostConfig'].get(key)==before['HostConfig'].get(key),'Host setting drift:'+key
+  left=after['HostConfig'].get(key);right=before['HostConfig'].get(key)
+  if isinstance(left,list) and isinstance(right,list):
+   left=sorted(left,key=lambda v:json.dumps(v,sort_keys=True));right=sorted(right,key=lambda v:json.dumps(v,sort_keys=True))
+  assert left==right,'Host setting drift:'+key
  for attempt in range(20):
   try:
    h=health(name,'/health' if phase=='gateway' else '/norva-playback/health')
