@@ -23,6 +23,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 HETZNER_DIR="$REPO_ROOT/ops/hetzner"
 ENV_FILE="$HETZNER_DIR/.env"
+if grep -q '^TELEGRAM_CATEGORY_ROUTING_STRICT=1' "$ENV_FILE"; then
+  printf 'REFUSED: category routing is active. Rotate only the selected category; see docs/TELEGRAM-CATEGORY-ROUTING.md. The legacy shared-token rotation must not overwrite six routes.\n' >&2
+  exit 64
+fi
 SUPABASE_COMPOSE="$HETZNER_DIR/docker-compose.supabase.yml"
 MONITORING_COMPOSE="$HETZNER_DIR/docker-compose.monitoring.yml"
 NETDATA_NOTIFY_FILE="/etc/norva-netdata/health_alarm_notify.conf"

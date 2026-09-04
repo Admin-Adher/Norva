@@ -140,11 +140,11 @@ test('Telegram transport returns proof and safe retry metadata without raw diagn
   assert.match(telegram, /AbortSignal\.timeout\(6000\)/);
   assert.match(telegram, /telegram_transport_timeout/);
   assert.doesNotMatch(telegram, /description|rawResponse|responseText/);
-  assert.match(telegram, /return \(await sendTelegramDetailed\(text\)\)\.accepted/);
+  assert.match(telegram, /return \(await sendTelegramDetailed\(text, \{category\}\)\)\.accepted/);
 });
 
 test('worker self-authenticates, stays idle without Telegram secrets, and is scheduled', () => {
-  assert.match(worker, /telegramConfigured\(\)/);
+  assert.match(worker, /telegramConfigured\('growth'\)/);
   assert.match(worker, /configured: false/);
   assert.match(worker, /admin\.rpc\("norva_verify_cron_secret"/);
   assert.match(worker, /authorized !== true/);

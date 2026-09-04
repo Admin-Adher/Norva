@@ -191,8 +191,8 @@ test('shared Telegram calls remain source-compatible without options', () => {
     telegram,
     /export async function sendTelegramDetailed\(\s*text: string,\s*options: TelegramSendOptions = \{\}/,
   );
-  assert.match(telegram, /export async function sendTelegram\(text: string\): Promise<boolean>/);
-  assert.match(telegram, /sendTelegramDetailed\(text\)/);
+  assert.match(telegram, /export async function sendTelegram\(text: string, category: TelegramCategory = 'infrastructure'\): Promise<boolean>/);
+  assert.match(telegram, /sendTelegramDetailed\(text, \{category\}\)/);
 });
 
 test('database scheduling gives enrichment 60-120 seconds and wakes complete attribution', () => {

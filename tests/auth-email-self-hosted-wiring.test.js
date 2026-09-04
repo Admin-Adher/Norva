@@ -85,7 +85,7 @@ test('the Edge verifier accepts GoTrue pipe-delimited rotation secrets', () => {
 test('every AUTH_EMAIL_FROM Edge fallback uses the reachable canonical support identity', () => {
   for (const relative of [
     'supabase/functions/norva-auth-email/index.ts',
-    'supabase/functions/norva-admin/index.ts',
+    'supabase/functions/_shared/ops-notifications.ts',
     'supabase/functions/norva-account-delete/index.ts',
     'supabase/functions/norva-revolut-billing/index.ts',
   ]) {

@@ -13,6 +13,7 @@
 //   /user/:id/refund     { pi_id }   → merchant-initiated Revolut refund of a captured charge
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { sendTelegram, tgEscape } from "../_shared/telegram.ts";
+import { dispatchOpsNotifications } from '../_shared/ops-notifications.ts';
 import { sendFcmPush, fcmConfigured } from "../_shared/fcm.ts";
 import { classifyOpsSourceError, SILENT_OPS_SOURCE_ERROR_KINDS } from "../_shared/source-sync-error.mjs";
 
@@ -282,8 +283,6 @@ async function readLidCascadeLeaseHealth(): Promise<JsonRecord> {
 // Hard-down keys (gateway, crons…) still delete on heal so a new outage alerts immediately.
 // Flappy counters (sources_error / sources_incomplete) keep their row until the 6h cooldown
 // expires, otherwise a 15-min sync blip sends alert → résolu → alert in a loop.
-const ALERT_COOLDOWN_MS = 6 * 3600 * 1000;
-const FLAPPY_ALERT_KEYS = new Set(["sources_error", "sources_incomplete"]);
 const SOURCE_ERROR_INACTIVE_MS = 14 * 24 * 3600 * 1000;
 
 function sourceErrorText(source: JsonRecord): string {
@@ -409,6 +408,11 @@ async function runOpsAlertSweep(): Promise<JsonRecord> {
 
   // 3) Conditions → stable keys. `detail` goes into the email body.
   const problems: { key: string; detail: string }[] = [];
+  const {data:trialDeliveryHealth,error:trialDeliveryError} = await admin.rpc('trial_telegram_delivery_health');
+  if (trialDeliveryError) problems.push({key:'growth_telegram_health_unavailable',detail:'Supervision des notifications de début d’essai indisponible'});
+  else if (Number(trialDeliveryHealth?.dead_letter)>0 || Number(trialDeliveryHealth?.oldest_pending_seconds)>900) {
+    problems.push({key:'growth_telegram_delivery',detail:`Notifications d’essai : ${Number(trialDeliveryHealth?.dead_letter ?? 0)} en échec terminal, ${Number(trialDeliveryHealth?.pending ?? 0)} en attente`});
+  }
   if (snapshotAgeMin > 20) problems.push({ key: "snapshot_stale", detail: `Snapshot admin non rafraîchi depuis ${snapshotAgeMin} min (cron admin-dashboard-refresh en panne ?)` });
   const opsSourceErrors = await collectOpsSourceErrors();
   if (opsSourceErrors) problems.push({ key: "sources_error", detail: opsSourceErrors.detail });
@@ -419,14 +423,13 @@ async function runOpsAlertSweep(): Promise<JsonRecord> {
   // aged out of the 24h window. The per-job last_status is already in the snapshot's cron blob.
   const crons = Array.isArray(cache?.cron) ? (cache!.cron as JsonRecord[]) : [];
   const failingNow = crons.filter((c) => c.active !== false && String(c.last_status ?? "") === "failed");
-  if (failingNow.length) problems.push({ key: "cron_fails", detail: `${failingNow.length} cron(s) actuellement en échec (dernier run failed) : ${failingNow.map((c) => c.jobname).join(", ")}` });
+  for (const cron of failingNow) problems.push({key:`cron:${String(cron.jobname)}`, detail:`Cron ${String(cron.jobname)} actuellement en échec (dernier run failed)`});
   if (gw && gw.ok !== true) problems.push({ key: "gateway_down", detail: `Gateway injoignable (${String(gw.error ?? "timeout")})` });
   if (rl && rl.ok !== true) problems.push({ key: "relay_down", detail: `Relay injoignable (${String(rl.error ?? "timeout")})` });
   // Billing crons: same last-run-failed semantics, matched by name (jobname-agnostic to the
   // Stancer→Revolut rename — the old billing_cron_fails_24h counter still filtered the retired
   // 'norva-stancer-billing' jobname, so Revolut billing failures were invisible to alerting).
-  const billingFailing = failingNow.filter((c) => /revolut-billing|stancer-billing|lifecycle/.test(String(c.jobname ?? "")));
-  if (billingFailing.length) problems.push({ key: "billing_cron_fails", detail: `Cron BILLING actuellement en échec : ${billingFailing.map((c) => c.jobname).join(", ")} — le moteur de revenu est peut-être en panne` });
+  // Per-job keys above route billing errors once, to Finance.
   if (Number(ov.billing_past_due) >= 3) problems.push({ key: "billing_past_due", detail: `${ov.billing_past_due} abonnement(s) en échec de paiement (past_due/grace) simultanés` });
   if (st && st.ok !== true) problems.push({ key: "revolut_down", detail: `API Revolut injoignable (${String(st.error ?? "timeout")}) — les paiements ne passent plus` });
   if (Number(ov.support_stale_24h) > 0) problems.push({ key: "support_stale", detail: `${ov.support_stale_24h} ticket(s) support sans réponse depuis plus de 24 h` });
@@ -501,173 +504,9 @@ async function runOpsAlertSweep(): Promise<JsonRecord> {
     problems.push({ key: "vat_fx_pending", detail: `TVA — trimestre ${ov.vat_fx_pending} clos avec des ventes UE : figez le taux BCE dans l'onglet TVA pour finaliser la déclaration OSS (2 min).${fxSugg}` });
   }
 
-  // 4) Cooldown state: alert only keys not alerted within the window. Resolved
-  // keys remain durable until at least one recovery channel acknowledges them;
-  // otherwise a transient Telegram/Resend outage would erase the only retry state.
-  // `details` is read too so the recovery notice can say WHAT was resolved.
-  const { data: stateRows } = await admin.from("admin_alert_state").select("key, last_alerted_at, details");
-  const state = new Map<string, number>();
-  const stateDetails = new Map<string, string>();
-  for (const r of (stateRows ?? []) as JsonRecord[]) {
-    state.set(String(r.key), new Date(String(r.last_alerted_at)).getTime());
-    if (r.details) stateDetails.set(String(r.key), String(r.details));
-  }
-  const activeKeys = new Set(problems.map((p) => p.key));
-  const lidIncidentActive = problems.some((p) => p.key.startsWith("lid_cascade_"));
-  const healed = [...state.keys()].filter((k) => {
-    if (activeKeys.has(k)) return false;
-    if (lidIncidentActive && k.startsWith("lid_cascade_")) return false;
-    if (FLAPPY_ALERT_KEYS.has(k) && (state.get(k) ?? 0) > Date.now() - ALERT_COOLDOWN_MS) {
-      return false;
-    }
-    return true;
-  });
-  const toAlert = problems.filter((p) => (state.get(p.key) ?? 0) < Date.now() - ALERT_COOLDOWN_MS);
-
-  // 5) Notify — one digest per sweep, Telegram first, plus the one explicitly
-  // configured ops mailbox. Product/admin Auth addresses are never recipients.
-  // The 6h per-key cooldown is updated when EITHER channel delivered, so a
-  // Resend outage cannot turn Telegram into a 15-minute spam loop (and vice versa).
-  const resendKey = Deno.env.get("RESEND_API_KEY") ?? "";
-  const from = Deno.env.get("AUTH_EMAIL_FROM") ?? "Norva <support@norva.tv>";
-  const recipients = OPS_EMAIL ? [OPS_EMAIL] : [];
-
-  let emailed: string[] = [];
-  if (toAlert.length) {
-    let delivered = false;
-    const tgOk = await sendTelegram(
-      `⚠️ <b>Norva Ops — ${toAlert.length} alerte${toAlert.length > 1 ? "s" : ""}</b>\n` +
-      toAlert.map((p) => `• ${tgEscape(p.detail)}`).join("\n"),
-    );
-    if (tgOk) delivered = true;
-    if (resendKey && recipients.length) {
-      const items = toAlert.map((p) => `<li style="margin:6px 0;color:#e8e8ee">${htmlEscape(p.detail)}</li>`).join("");
-      const text = `Norva Ops — ${toAlert.length} active alert${toAlert.length > 1 ? "s" : ""}\n\n` +
-        toAlert.map((p) => `- ${p.detail}`).join("\n") +
-        "\n\nOpen the operations console: https://norva.tv/app.html";
-      const alertBucket = Math.floor(Date.now() / ALERT_COOLDOWN_MS);
-      const html = `<body style="margin:0;padding:24px;background:#0a0c11;font-family:Arial,sans-serif">
-        <div style="max-width:520px;margin:0 auto;background:#11151d;border:1px solid #1f2733;border-radius:14px;padding:22px 26px">
-          <h2 style="margin:0 0 6px;color:#ff6b6b;font-size:18px">⚠️ Norva Ops — ${toAlert.length} alerte${toAlert.length > 1 ? "s" : ""}</h2>
-          <p style="margin:0 0 14px;color:#9aa4b2;font-size:13px">Sweep automatique (15 min). Prochain rappel de ces alertes dans 6 h si non résolues.</p>
-          <ul style="margin:0 0 16px;padding-left:20px;font-size:14px">${items}</ul>
-          <a href="https://norva.tv/app.html" style="display:inline-block;background:#5b7cfa;color:#fff;font-weight:700;font-size:13px;text-decoration:none;padding:10px 20px;border-radius:9px">Ouvrir le CRM</a>
-        </div></body>`;
-      try {
-        const res = await fetch("https://api.resend.com/emails", {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${resendKey}`,
-            "Content-Type": "application/json",
-            "User-Agent": "Norva-Ops-Email/2.0",
-            "Idempotency-Key": `norva-ops-alert-${alertBucket}-${toAlert.map((p) => p.key).sort().join("-")}`.slice(0, 240),
-          },
-          body: JSON.stringify({
-            from,
-            to: recipients,
-            reply_to: OPS_EMAIL,
-            subject: `⚠️ Norva Ops — ${toAlert.map((p) => p.key).join(", ")}`,
-            html,
-            text,
-            tags: [
-              { name: "app", value: "norva" },
-              { name: "category", value: "operational" },
-              { name: "flow", value: "ops_health_alert" },
-            ],
-          }),
-          signal: AbortSignal.timeout(8_000),
-        });
-        const payload = await res.json().catch(() => ({})) as JsonRecord;
-        if (res.ok && typeof payload.id === "string" && payload.id) {
-          emailed = recipients;
-          delivered = true;
-        }
-      } catch (_) { /* email failure → maybe telegram delivered; state update decided below */ }
-    }
-    if (delivered) {
-      const now = new Date().toISOString();
-      await admin.from("admin_alert_state").upsert(
-        toAlert.map((p) => ({ key: p.key, last_alerted_at: now, details: p.detail })),
-        { onConflict: "key" },
-      );
-    }
-  }
-
-  // 6) Recovery notice. Keep the incident rows until Telegram or Resend confirms
-  // acceptance. If both fail, the next sweep retries instead of losing recovery.
-  let recoveryDelivered = false;
-  let recoveryStateCleared = false;
-  const recoveryChannels: string[] = [];
-  if (healed.length) {
-    const lines = healed.map((k) => `• ${tgEscape(stateDetails.get(k) ?? k)}`).join("\n");
-    const recoveryTelegramOk = await sendTelegram(`✅ <b>Norva Ops — résolu</b>\n${lines}`);
-    if (recoveryTelegramOk) {
-      recoveryDelivered = true;
-      recoveryChannels.push("telegram");
-    }
-    if (resendKey && recipients.length) {
-      const items = healed.map((k) => `<li style="margin:6px 0;color:#d9f2e3">${htmlEscape(stateDetails.get(k) ?? k)}</li>`).join("");
-      const text = "Norva Ops — incident resolved\n\n" +
-        healed.map((k) => `- ${stateDetails.get(k) ?? k}`).join("\n");
-      const recoveryBucket = Math.floor(Date.now() / ALERT_COOLDOWN_MS);
-      const html = `<body style="margin:0;padding:24px;background:#0a0c11;font-family:Arial,sans-serif">
-        <div style="max-width:520px;margin:0 auto;background:#101913;border:1px solid #1f3327;border-radius:14px;padding:22px 26px">
-          <h2 style="margin:0 0 6px;color:#4ade80;font-size:18px">✅ Norva Ops — résolu</h2>
-          <p style="margin:0 0 14px;color:#9aa4b2;font-size:13px">Ces alertes ne sont plus actives (vérifié par le sweep 15 min).</p>
-          <ul style="margin:0 0 16px;padding-left:20px;font-size:14px">${items}</ul>
-        </div></body>`;
-      try {
-        const recoveryResponse = await fetch("https://api.resend.com/emails", {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${resendKey}`,
-            "Content-Type": "application/json",
-            "User-Agent": "Norva-Ops-Email/2.0",
-            "Idempotency-Key": `norva-ops-recovery-${recoveryBucket}-${healed.slice().sort().join("-")}`.slice(0, 240),
-          },
-          body: JSON.stringify({
-            from,
-            to: recipients,
-            reply_to: OPS_EMAIL,
-            subject: `✅ Norva Ops — résolu: ${healed.join(", ")}`,
-            html,
-            text,
-            tags: [
-              { name: "app", value: "norva" },
-              { name: "category", value: "operational" },
-              { name: "flow", value: "ops_health_recovery" },
-            ],
-          }),
-          signal: AbortSignal.timeout(8_000),
-        });
-        const recoveryPayload = await recoveryResponse.json().catch(() => ({})) as JsonRecord;
-        if (recoveryResponse.ok && typeof recoveryPayload.id === "string" && recoveryPayload.id) {
-          recoveryDelivered = true;
-          recoveryChannels.push("email");
-        }
-      } catch (_) { /* best-effort */ }
-    }
-    if (recoveryDelivered) {
-      const { error: clearError } = await admin.from("admin_alert_state").delete().in("key", healed);
-      if (clearError) {
-        // Preserve the rows when acknowledgement persistence fails. The next
-        // sweep retries with the same six-hour Resend idempotency bucket.
-        console.error("[norva-admin] recovery state clear failed", clearError.message);
-      } else {
-        recoveryStateCleared = true;
-      }
-    }
-  }
-
-  return {
-    checked: ["snapshot_stale", "sources_error", "sources_incomplete", "cron_fails", "gateway_down", "relay_down", "billing_cron_fails", "billing_past_due", "revolut_down", "support_stale", "partners_monitoring", "lid_cascade_expired", "lid_cascade_expiring", "lid_cascade_conflict", "vat_threshold", "vat_fx_pending"],
-    problems, alerted: toAlert.map((p) => p.key), healed, emailed,
-    recovery_delivered: recoveryDelivered,
-    recovery_channels: recoveryChannels,
-    recovery_pending: healed.length > 0 && !recoveryStateCleared,
-    email_configured: Boolean(OPS_EMAIL),
-    snapshotAgeMin: Number.isFinite(snapshotAgeMin) ? snapshotAgeMin : null,
-  };
+  // Independent acknowledgements per category/channel, including recoveries.
+  const delivery = await dispatchOpsNotifications(admin, problems, OPS_EMAIL);
+  return { problems, ...delivery, snapshotAgeMin: Number.isFinite(snapshotAgeMin) ? snapshotAgeMin : null };
 }
 
 // ── Weekly business digest (pg_cron → /weekly-digest, Monday 07:00) ────────────────────────────
@@ -705,7 +544,7 @@ async function sendWeeklyDigest(): Promise<JsonRecord> {
     if (ov.vat_fx_pending) parts.push(`• ⏳ Trimestre ${ov.vat_fx_pending} clos : figez le taux BCE pour déclarer`);
   }
 
-  const sent = await sendTelegram(parts.join("\n"));
+  const sent = await sendTelegram(parts.join("\n"), 'growth');
   return { ok: true, sent, mrr_cents: mrr };
 }
 
@@ -873,7 +712,7 @@ Deno.serve(async (req) => {
           });
           try {
             await sendTelegram(
-              `📅 <b>Push programmé envoyé</b> (${tgEscape(audience)})\n${tgEscape(title)}\n${delivery.sent} envoyé(s) · ${delivery.fail} échec(s) · ${delivery.dead} token(s) mort(s) purgé(s)`,
+              `📅 <b>Push programmé — ${delivery.sent === 0 ? 'aucun envoi réussi' : delivery.fail > 0 ? 'partiel' : 'envoyé'}</b> (${tgEscape(audience)})\n${tgEscape(title)}\n${delivery.sent} envoyé(s) · ${delivery.fail} échec(s) · ${delivery.dead} token(s) mort(s) purgé(s)`, 'growth',
             );
           } catch (_) {
             // Best-effort : Telegram n'est pas dans le chemin critique FCM.
@@ -1053,7 +892,7 @@ Deno.serve(async (req) => {
         });
       } catch (_) { /* le log ne doit pas faire échouer un envoi réussi */ }
       try {
-        await sendTelegram(`📣 <b>Push marketing envoyé</b> (${audience})\n${tgEscape(title)}\n${delivery.sent} envoyé(s) · ${delivery.fail} échec(s) · ${delivery.dead} token(s) mort(s) purgé(s)`);
+        await sendTelegram(`📣 <b>Push marketing — ${delivery.sent === 0 ? 'aucun envoi réussi' : delivery.fail > 0 ? 'partiel' : 'envoyé'}</b> (${tgEscape(audience)})\n${tgEscape(title)}\n${delivery.sent} envoyé(s) · ${delivery.fail} échec(s) · ${delivery.dead} token(s) mort(s) purgé(s)`, 'growth');
       } catch (_) { /* best-effort */ }
       return json(req, { ok: true, ...delivery, audience });
     }

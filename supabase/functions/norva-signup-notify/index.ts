@@ -6,6 +6,7 @@
 // numbers, raw metadata or arbitrary profile fields.
 
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { drainTrialTelegram } from '../_shared/trial-telegram.ts';
 import {
   maskedEmail,
   sendTelegramDetailed,
@@ -206,7 +207,7 @@ async function health(): Promise<unknown> {
 }
 
 async function drain(): Promise<Record<string, unknown>> {
-  if (!telegramConfigured()) {
+  if (!telegramConfigured('growth')) {
     return {
       configured: false,
       claimed: 0,
@@ -240,6 +241,7 @@ async function drain(): Promise<Record<string, unknown>> {
     const claim = claims[index];
     const notification = signupMessage(claim);
     const sent = await sendTelegramDetailed(notification.text, {
+      category: 'growth',
       protectContent: true,
       inlineKeyboard: [[{
         text: "Ouvrir la fiche client",
@@ -303,10 +305,11 @@ async function drain(): Promise<Record<string, unknown>> {
 }
 
 Deno.serve(async (req) => {
+  const path = new URL(req.url).pathname.replace(/^.*\/norva-signup-notify/, "") || "/";
+  if (req.method === 'GET' && path === '/health') return json({ok:true,version:2,categoryRoutingProtocol:1,trialNotificationProtocol:1});
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
   if (!SUPABASE_URL || !SERVICE_KEY) return json({ error: "Service not configured" }, 500);
 
-  const path = new URL(req.url).pathname.replace(/^.*\/norva-signup-notify/, "") || "/";
   if (path !== "/cron/drain") return json({ error: "Not found" }, 404);
 
   const token = (req.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "");
@@ -316,7 +319,9 @@ Deno.serve(async (req) => {
   if (authError || authorized !== true) return json({ error: "Unauthorized" }, 403);
 
   try {
-    return json({ ok: true, ...(await drain()) });
+    const signup = await drain();
+    const trials = await drainTrialTelegram(admin);
+    return json({ ok: true, ...signup, trials });
   } catch (error) {
     console.error(
       "[norva-signup-notify] drain failed",

@@ -52,18 +52,10 @@ metric_to_bytes() {
 }
 
 telegram() {
-  local token chat env_file="$NORVA_OPS_DIR/.env"
-  token="$(grep -E '^TELEGRAM_BOT_TOKEN=' "$env_file" | head -1 | cut -d= -f2- | tr -d '"'"'"'')"
-  chat="$(grep -E '^TELEGRAM_CHAT_ID=' "$env_file" | head -1 | cut -d= -f2- | tr -d '"'"'"'')"
-  if [ -z "$token" ] || [ -z "$chat" ]; then
-    log "WARN: TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID absent from $env_file — alert not sent"
-    return 0
-  fi
-  curl -sS -m 20 -o /dev/null \
-    --data-urlencode "chat_id=$chat" \
-    --data-urlencode "text=$1" \
-    "https://api.telegram.org/bot${token}/sendMessage" \
-    || log "WARN: Telegram send failed (alert still non-zero for systemd)"
+  local sender_dir
+  sender_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  printf '%s' "$1" | python3 "$sender_dir/telegram-send.py" "$NORVA_OPS_DIR/.env" "${TELEGRAM_RECEIPT_DIR:-/var/lib/norva}/capacity-check.sh.telegram.json" \
+    || log "WARN Telegram infrastructure delivery failed; receipt retained for retry"
 }
 
 NOW_EPOCH="$(date -u +%s)"

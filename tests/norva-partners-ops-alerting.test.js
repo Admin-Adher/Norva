@@ -25,7 +25,7 @@ test('Partners incidents use stable cooldown keys without forwarding private pay
   assert.match(admin, /key: "partners_monitoring_unavailable"/);
   assert.match(admin, /key: `partners_\$\{alert\.code\}`/);
   assert.match(admin, /detail: `Norva Partners · \$\{alert\.code\} · \$\{alert\.count\} observation/);
-  assert.match(admin, /"partners_monitoring"/);
+  assert.match(admin, /dispatchOpsNotifications\(admin, problems, OPS_EMAIL\)/);
   assert.doesNotMatch(
     admin.slice(
       admin.indexOf('async function readPartnersOpsSnapshot'),
