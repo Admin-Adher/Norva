@@ -69,3 +69,26 @@ restored; NEVER revive retired flags or bypass strict certification to make an
 alert green. Close the material batch with the existing observation CAS,
 keeping rev16/20% and a full fresh window. The paused Codex automation must not
 be silently reenabled.
+
+## Production verification, September 4
+
+PR #328 merged as `531de0532f00c26e244636fdf226573115462379`.
+Gateway v166 uses `norva-media-gateway:strict-lid-20260904-r3`;
+both Edge replicas report permanent strict readiness and the Ops sweep has no
+active problems. The original incident remains quarantined at attempt 135.
+
+An initial image failed with EACCES because the private staging umask produced
+0600 JavaScript files. It was rolled back immediately to v165, then rebuilt with
+explicit COPY --chmod=0644. Runtime checks must use the deployed non-root user,
+not Docker's default root. Edge helper files also need explicit read permissions.
+The packaging script now enforces this and compares mount lists independent of
+ordering. The final image is healthy with zero restarts and original environment,
+models, GPU mapping, resource limits, volumes and ports preserved. The ordinary
+Ops sweep delivered and acknowledged the gateway recovery.
+
+Internal tests on the deployed modules (no provider connection or publication):
+VAD speech 1445ms; forced missing-VAD fallback 1683ms; four ordered inputs 4799ms.
+Actual process abort: one child spawned, one closed, no fallback. These checks
+use separate inference instances; their injected failures do not alter the live
+supervisor counters. The four duplicated test fixtures are NOT diversity proof.
+There is still no measured significant VAD gain on silent-padded speech.
