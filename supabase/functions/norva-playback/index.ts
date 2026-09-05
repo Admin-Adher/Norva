@@ -1,6 +1,5 @@
 import { resolveDiscoveryTarget } from "../_shared/discovery-sources.mjs";
 import { resolveSelectionLiveDelivery, shouldUseSelectionLiveDirect } from "../_shared/selection-live-delivery.mjs";
-import { resolveSelectionLiveRendition } from "../_shared/selection-live-rendition.mjs";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { getEntitlementDecision, getEntitlementRuntime, limitNumber } from "../_shared/entitlements.ts";
@@ -2129,12 +2128,6 @@ async function createPlaybackSessionCore(
       userId,
       db,
       requestedPlaybackHint,
-      {
-        clientMode: choosePlaybackMode(requestedMode, body),
-        body,
-        clientMetadata,
-        playbackHint: requestedPlaybackHint,
-      },
     );
   await assertActiveCatalogGenerationCurrent(db, sourceId, userId, playbackGeneration);
   const targetUrl = resolved.targetUrl;
@@ -6668,7 +6661,6 @@ async function resolvePlaybackTarget(
   userId: string,
   db: SupabaseClient,
   requestHint: JsonRecord = {},
-  selectionRenditionRequest: JsonRecord | null = null,
 ) {
   // Phase 2 dedup: when the read flag is on, resolve playback_hint/metadata from
   // the provider-global catalog_media_items (keyed by server_host) instead of the
@@ -6838,18 +6830,9 @@ async function resolvePlaybackTarget(
     // encode a provider account identity. Scope their breaker/claim key to the
     // authenticated owner and owned source instead of deriving a global key
     // from an opaque catalogue URL.
-    let targetUrl = await resolveDiscoveryTarget({
+    const targetUrl = await resolveDiscoveryTarget({
       sourceId, userId, metadata: ownedMetadata, targetUrl: hint.targetUrl,
     }).catch(() => { throw new HttpError(502, "Selection programme is temporarily unavailable"); });
-    // Only normal session creation supplies this context. The helper verifies
-    // the owned Selection row and two reviewed masters; other resolvers, VOD,
-    // personal providers, native/explicit modes and Xumo remain unchanged.
-    if (selectionRenditionRequest) {
-      targetUrl = await resolveSelectionLiveRendition({
-        sourceId, userId, itemType, itemId, ownedItem, targetUrl,
-        request: selectionRenditionRequest,
-      });
-    }
     const selectionLiveDelivery = await resolveSelectionLiveDelivery({
       sourceId, userId, itemType, itemId, ownedItem, targetUrl,
     });
