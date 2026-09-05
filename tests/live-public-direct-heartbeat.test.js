@@ -50,6 +50,26 @@ function harness(heartbeat = async () => ({})) {
   return { player, window, calls, timers, errors, releases, events, advance, context };
 }
 
+function prepareStartup(h) {
+  Object.assign(h.player, {
+    settings: {}, _showChannelSplash() {}, applyQualityGroup() {}, updateTranscodeStatus() {},
+    _sendLiveEvent() {}, shouldAutoFallbackVariants: () => false, _hasLocalTranscoder: () => false,
+    getHlsConfig: () => ({}), updateNowPlaying() {}, showNowPlayingOverlay() {}, fetchEpgData() {},
+    handlePlaybackError: () => assert.fail('unexpected startup error'),
+  });
+  return () => {
+    class Hls {
+      static isSupported() { return true; }
+      static Events = { MANIFEST_PARSED: 'manifest', ERROR: 'error', FRAG_CHANGED: 'fragment' };
+      loadSource(url) { h.events.push(['source', url]); }
+      attachMedia() { h.events.push('attach'); }
+      on() {}
+      destroy() { h.events.push('destroy'); }
+    }
+    h.context.Hls = Hls;
+  };
+}
+
 test('only a matching server-marked public direct session starts the monitor', async () => {
   const h = harness();
   for (const value of [null, { mode: 'direct', transport: 'public-hls-direct', sessionId: 'a' },
@@ -175,6 +195,40 @@ test('missing heartbeat capability aborts startup before media can be attached a
   assert.equal(h.player._playRequestSeq, 2);
   assert.equal(h.player.video.src, '', 'startup must not attach the URL after its guard stopped it');
   assert.equal(h.timers.size, 0);
+});
+
+for (const phase of ['ensureHls', 'watch.stop']) {
+  test(`external teardown cancels startup awaiting ${phase} without reattaching a public stream`, async () => {
+    for (const action of ['stop', 'prepareLiveSwitch']) {
+      const h = harness(), pending = deferred(), entered = deferred();
+      const installHls = prepareStartup(h);
+      const wait = () => { entered.resolve(); return pending.promise; };
+      if (phase === 'ensureHls') h.window.ensureHls = wait;
+      else h.window.app = { pages: { watch: { stop: wait } } };
+      const starting = h.player.play({ cloudPlaybackSessionId: 'b' }, 'https://example.test/b.m3u8', payload('b'));
+      await entered.promise;
+      await h.player[action]();
+      installHls(); pending.resolve(true);
+      await starting;
+      assert.equal(h.events.includes('attach'), false, action);
+      assert.equal(h.events.some(event => Array.isArray(event) && event[0] === 'source'), false, action);
+      assert.equal(h.calls.length, 0, action);
+      assert.equal(h.errors.length, 0, action);
+      assert.equal(h.timers.size, 0, action);
+      assert.ok(h.releases.includes('b'), 'the canceled source session is released');
+    }
+  });
+}
+
+test('internal predecessor teardown preserves a valid startup and starts its public monitor', async () => {
+  const h = harness();
+  prepareStartup(h)();
+  await h.player.play({ cloudPlaybackSessionId: 'b' }, 'https://example.test/b.m3u8', payload('b'));
+  assert.equal(h.events.includes('attach'), true);
+  assert.deepEqual(h.calls.map(call => call.id), ['b']);
+  assert.equal(h.errors.length, 0);
+  assert.equal(h.player._playRequestSeq, 2);
+  await h.player.stop();
 });
 
 test('terminal playback errors cancel the monitor while an outgoing stale overlay cannot cancel its replacement', async () => {

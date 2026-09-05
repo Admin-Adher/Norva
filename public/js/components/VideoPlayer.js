@@ -1429,8 +1429,7 @@ class VideoPlayer {
             && !this.isStalePlayRequest(requestSeq);
         const terminate = () => {
             if (!isCurrent()) return;
-            // Invalidate delayed startup work before synchronously clearing media.
-            ++this._playRequestSeq;
+            // stop() invalidates delayed startup work before clearing media.
             this.stopPublicHlsDirectSessionGuard();
             void this.stop();
             this.showError((globalThis.NorvaI18n?.t("ui_web_fb8c8c2687f1", { defaultValue: "Failed to play channel" }) ?? 'Failed to play channel'));
@@ -1604,6 +1603,7 @@ class VideoPlayer {
 
             // Stop current playback
             await this.stop({
+                preservePlayRequest: true,
                 preserveVariantFallback: channel?._norvaVariantFallbackOperationSeq === this._variantFallbackOperationSeq
             });
             if (this.isStalePlayRequest(requestSeq)) {
@@ -3242,6 +3242,9 @@ class VideoPlayer {
      * Stop playback
      */
     stop(options = {}) {
+        // External teardown also cancels startup suspended in an awaited step.
+        // Only _playInternal may preserve the request while clearing its predecessor.
+        if (!options.preservePlayRequest) ++this._playRequestSeq;
         this.stopPublicHlsDirectSessionGuard();
         if (!options.preserveVariantFallback) {
             ++this._variantFallbackOperationSeq;
@@ -3303,6 +3306,7 @@ class VideoPlayer {
     // leaving the channel broken until a page refresh. Killing the old player and
     // releasing its session BEFORE creating the new one removes that race.
     async prepareLiveSwitch(options = {}) {
+        ++this._playRequestSeq;
         this.stopPublicHlsDirectSessionGuard();
         if (!options.preserveVariantFallback) {
             ++this._variantFallbackOperationSeq;
