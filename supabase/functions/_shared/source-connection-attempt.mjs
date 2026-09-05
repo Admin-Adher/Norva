@@ -34,11 +34,23 @@ const MULTI_LABEL_PUBLIC_SUFFIXES = new Set([
 
 function parseHttpCandidate(raw) {
   const value = String(raw ?? "").trim();
-  if (!value) return null;
+  if (!value || /[\s\u0000-\u001f\u007f\\]/u.test(value)) return null;
   try {
-    const candidate = /^[a-z][a-z0-9+.-]*:\/\//i.test(value) ? value : `http://${value}`;
+    const explicitScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(value);
+    // Without an explicit scheme, user@host is an email/application login, not
+    // evidence of a provider URL. Explicit HTTP userinfo remains redactable.
+    if (!explicitScheme && value.split(/[/?#]/, 1)[0].includes("@")) return null;
+    const candidate = explicitScheme ? value : `http://${value}`;
     const parsed = new URL(candidate);
     if (!["http:", "https:"].includes(parsed.protocol) || !parsed.hostname) return null;
+    const hostname = normalizeHostname(parsed.hostname);
+    if (!isSourceAttemptHostname(hostname)) return null;
+    // WHATWG URL accepts numeric usernames such as "12345" as IPv4, and
+    // rewrites abbreviated/octal/hex hosts. Do not turn these into diagnostics.
+    const authority = candidate.slice(candidate.indexOf("://") + 3).split(/[/?#]/, 1)[0];
+    const hostPort = authority.slice(authority.lastIndexOf("@") + 1);
+    const rawHost = hostPort.startsWith("[") ? hostPort.slice(0, hostPort.indexOf("]") + 1) : hostPort.split(":", 1)[0];
+    if (isIpv4(hostname) && !isIpv4(rawHost.replace(/\.$/, ""))) return null;
     return parsed;
   } catch {
     return null;
@@ -48,7 +60,7 @@ function parseHttpCandidate(raw) {
 function isIpv4(hostname) {
   const parts = hostname.split(".");
   return parts.length === 4 && parts.every((part) => {
-    if (!/^\d{1,3}$/.test(part)) return false;
+    if (!/^(?:0|[1-9]\d{0,2})$/.test(part)) return false;
     const number = Number(part);
     return number >= 0 && number <= 255;
   });
@@ -56,6 +68,22 @@ function isIpv4(hostname) {
 
 function normalizeHostname(hostname) {
   return String(hostname ?? "").trim().toLowerCase().replace(/^\[|\]$/g, "").replace(/\.$/, "");
+}
+
+function isSourceAttemptHostname(hostname) {
+  if (!hostname || hostname.length > 253) return false;
+  if (isIpv4(hostname)) return true;
+  if (hostname.includes(":")) {
+    if (!/^[0-9a-f:.]+$/.test(hostname)) return false;
+    try {
+      // Validate IPv6 structurally; a colon alone is not an IP address.
+      return new URL(`http://[${hostname}]/`).hostname.startsWith("[");
+    } catch { return false; }
+  }
+  const labels = hostname.split(".");
+  return labels.length >= 2
+    && labels.every((label) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label))
+    && /[a-z]/.test(labels.at(-1));
 }
 
 export function normalizeSourceAttemptType(value) {
@@ -90,7 +118,7 @@ export function classifySourceAttemptPath(rawUrl) {
 
 export function normalizedSourceAttemptDomain(hostname) {
   const normalized = normalizeHostname(hostname);
-  if (!normalized) return null;
+  if (!isSourceAttemptHostname(normalized)) return null;
   if (isIpv4(normalized) || normalized.includes(":")) return "ip-address";
   if (normalized === "localhost" || normalized.endsWith(".local")) return "local-address";
 

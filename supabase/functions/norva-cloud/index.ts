@@ -1613,11 +1613,13 @@ async function recordClientSourceConnectionAttempt(req: Request, userId: string,
   }
   if (!admitClientSourceAttempt(userId)) return { accepted: true };
 
+  const domainNormalized = ["ip-address", "local-address"].includes(rawDomain)
+    ? rawDomain : normalizedSourceAttemptDomain(rawDomain);
   const attempt = {
     sourceType,
-    domainNormalized: rawDomain ? normalizedSourceAttemptDomain(rawDomain) : null,
-    hostHash: hostHash || null,
-    pathShape,
+    domainNormalized,
+    hostHash: domainNormalized ? hostHash || null : null,
+    pathShape: domainNormalized ? pathShape : "invalid",
   };
   const clientContext = sourceAttemptClientContext(req.headers.get("user-agent"));
   scheduleSourceConnectionAttempt(
